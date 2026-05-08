@@ -127,7 +127,14 @@ providers:
 
   - name: ollama-local
     type: ollama
-    base_url: http://ollama:11434
+    # Default reaches the in-Compose ollama service (pulled in by
+    # `docker compose --profile local up`). Operators running Ollama
+    # on the host instead set OLLAMA_BASE_URL=http://host.docker.internal:11434
+    # in their .env. Per PRD §1.5.1 / §6.1 Ollama is the Mode-2 (fully
+    # local, air-gap-capable) backbone — Tier 1 by every authoritative
+    # reference (PRD §1.5.2: "Local-only inference (air-gap-capable)").
+    # See B6 partial in M1-PROGRESS for the adapter that wires this up.
+    base_url: ${OLLAMA_BASE_URL:-http://ollama:11434}
     api_key_env: ''  # Ollama doesn't require an API key
     tier: 1  # Fully local; no data leaves the deployment
     models:
@@ -185,6 +192,23 @@ model_aliases:
       model: llama3.1:70b
     fallback: []  # No fallback for local — Tier 1 must stay Tier 1
 
+  # Mode-2 friendly aliases (B6 partial). Skills and the chat UI ask
+  # for these by name when the operator wants the response to come from
+  # the air-gapped local model. Both stay Tier 1 — the fallback list is
+  # empty so a missing local provider surfaces as a clean 503 rather
+  # than silently degrading to a cloud Tier 4 path.
+  local-fast:
+    primary:
+      provider: ollama-local
+      model: llama3.1:8b
+    fallback: []
+
+  local-thinking:
+    primary:
+      provider: ollama-local
+      model: llama3.1:70b
+    fallback: []
+
   # The 'embedding' alias is the alias the backend's KB layer (C6)
   # asks the gateway to dispatch. Per ADR 0008 the default points at
   # OpenAI's text-embedding-3-small (1536-dim — matches the
@@ -230,11 +254,20 @@ inference_tiers:
     bedrock: 3           # routes through customer AWS account
     azure_openai: 3      # routes through customer Azure tenant
     cohere: 4
-    ollama: 1            # fully local
+    ollama: 1            # fully local — Mode 2 (air-gap-capable)
     vllm: 1              # fully local
     openai_compatible: 1 # local inference servers (vLLM, llama.cpp wrappers)
   # overrides:
   #   anthropic-prod/claude-opus-4-7: 3  # if operator has a ZDR addendum
+  #
+  # Tier-1 placement for the Mode-2 aliases is inherited from
+  # ``defaults.ollama: 1`` above — no override needed. The PRD §1.5.2
+  # framing for Tier 1 ("Local-only inference (air-gap-capable). No
+  # outbound network is required. Customer data, prompts, and model
+  # outputs never leave the deployment.") is what every Ollama-routed
+  # request lands at; the routing-log row carries
+  # ``routed_inference_tier=1`` and the chat UI surfaces the tier
+  # badge accordingly.
 
 # ============================================================
 # TIER POLICY — what the deployment allows
@@ -357,6 +390,18 @@ cost_tracking:
       output_per_mtok: 0.60
     'ollama-local/llama3.1:70b':
       input_per_mtok: 0.0  # Local; no per-token cost
+      output_per_mtok: 0.0
+    'ollama-local/llama3.1:8b':
+      input_per_mtok: 0.0
+      output_per_mtok: 0.0
+    'ollama-local/llama3.1':
+      input_per_mtok: 0.0
+      output_per_mtok: 0.0
+    'ollama-local/mistral-large':
+      input_per_mtok: 0.0
+      output_per_mtok: 0.0
+    'ollama-local/qwen2.5:72b':
+      input_per_mtok: 0.0
       output_per_mtok: 0.0
     # Embedding rates — OpenAI text-embedding-3-* charges only on
     # input tokens; output_per_mtok is 0 (no generation). The
