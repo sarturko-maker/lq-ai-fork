@@ -338,7 +338,21 @@ You configured `allowed_tiers_global` to disallow Tier 4 in setup item 2; either
 
 ### "I want to use Mode 2 (local Ollama) instead"
 
-Replace `docker compose up -d` with `docker compose --profile local up -d`. The local profile pulls Ollama (a few GB, slower than Mode 1's first run) and configures the gateway to route to local-only models. The starter skills run on Llama 3.1 70B locally; expect higher latency than cloud and somewhat different calibration nuance. Mode 2 is the air-gap-capable mode; once images are pulled, the deployment runs without internet.
+Replace `docker compose up -d` with `docker compose --profile local up -d`. The local profile starts an `ollama` container alongside the rest of the stack; pull a model into it once with `docker compose exec ollama ollama pull llama3.1:8b` (a few GB) before the first inference call. The gateway-side wiring is automatic — `gateway.yaml.example` ships with `local-fast` (Llama 3.1 8B) and `local-thinking` (Llama 3.1 70B) aliases that route to the local Ollama service at `http://ollama:11434`.
+
+To exercise the local path with `curl`:
+
+```bash
+# After the stack is up, the local-fast alias dispatches to Ollama at Tier 1.
+curl -X POST http://localhost:8001/v1/chat/completions \
+  -H "X-LQ-AI-Gateway-Key: ${LQ_AI_GATEWAY_KEY}" \
+  -H "content-type: application/json" \
+  -d '{"model": "local-fast", "messages": [{"role": "user", "content": "hello"}]}'
+```
+
+Operators running Ollama on the host (rather than in the Compose stack) set `OLLAMA_BASE_URL=http://host.docker.internal:11434` in their `.env` and skip `--profile local` when running compose. Mode 2 is the air-gap-capable mode; once images are pulled and models are downloaded, the deployment runs without internet.
+
+The starter skills run against the local model with calibration nuance that differs from the cloud Tier 4 path — expect different (typically slightly less polished) output than Claude / GPT-4. Refer to PRD §1.5.2 for the tier semantics.
 
 ### "I see the OpenWebUI shell at `/`, not the LQ.AI shell"
 

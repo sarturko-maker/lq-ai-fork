@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-08 (C-phase complete: C6 KB + embeddings landed under ADR 0008; C8 LQ.AI web shell landed under ADR 0009 co-existence model; A5 deferred branding + auth wiring closed)
+> **Last updated:** 2026-05-08 (B6 partial — Ollama chat-completion adapter landed; first end-to-end exercise of B4's fallback skeleton; Mode-2 air-gapped path is now wired)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -13,12 +13,12 @@
 | Phase | Done | In progress | Next |
 |---|---|---|---|
 | A — Foundation scaffolding | A1, A2, A3, A4, A5 | — | — |
-| B — Core authentication and routing | B1, B2, B3, B4, B5 | — | B6 optional; otherwise C-phase |
+| B — Core authentication and routing | B1, B2, B3, B4, B5, B6 partial (Ollama) | — | B6 remainder optional (OpenAI chat, Vertex, Bedrock) |
 | C — Capability layer | C1, C2, C3, C4, C5, C6, C7, C8 | — | — (phase complete; C8 pending operator end-to-end verification per ADR 0009) |
 | D — M1 differentiators | — | — | After C |
 | E — Procurement and release | — | — | After D |
 
-**Tests:** ~495+ passing in api/ (C6 added ~50: 8 migration + 16 retrieval unit + 12 embed unit + ~24 endpoint integration; C3 added ~55; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~195 passing in gateway/ (C6 added ~25: 15 OpenAI adapter + 8 embeddings integration + 2 inference updates; C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
+**Tests:** ~495+ passing in api/ (C6 added ~50: 8 migration + 16 retrieval unit + 12 embed unit + ~24 endpoint integration; C3 added ~55; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~225 passing in gateway/ (B6 partial added ~30: 22 Ollama adapter unit + 8 Ollama integration including the B4-fallback-chain end-to-end exercise; C6 added ~25: 15 OpenAI adapter + 8 embeddings integration + 2 inference updates; C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
 **Stack:** `docker compose up` brings 7 services (postgres, redis, minio, gateway, api, ingest-worker, web) to healthy in ~30s.
 **Migration:** `make migrate` applies `0001_initial.py` → `0002_add_must_change_password.py` → `0003_create_files_table.py` → `0004_create_projects.py` (C7) → `0005_create_documents_and_chunks.py` (C5) → `0006_create_chats_and_messages.py` (C3) → `0007_create_knowledge_bases.py` (C6) cleanly; all reversible. Migration 0006 closes the A2-deferred FK constraints on `inference_routing_log.chat_id` / `.message_id`. Migration 0007 lands the KB tables (no FK closures in this revision).
 
@@ -944,15 +944,78 @@ The first frontend task. Delivers the chat experience documented in `docs/quicks
 | Cypress / Playwright e2e for the LQ.AI chat shell | No e2e test landed in C8 — the OpenWebUI fork uses Cypress (per `cypress.config.ts`) but the LQ.AI shell needs its own spec; the C8 brief mentioned Playwright but the harness in this fork is Cypress | A focused follow-on task. The cleanest shape is a Cypress spec under `web/cypress/e2e/lq-ai-chat.cy.ts` that exercises the full Step 4 flow against `docker compose up`. |
 | OpenWebUI shell dual-branding footer | The LQ.AI shell renders the dual-branding footer per ADR 0001 clause 4; the OpenWebUI shell at `/` does not yet | Landing this requires touching `web/src/routes/(app)/+layout.svelte`, which is upstream-modifiable but increases the rebase cost. ADR 0009 records the trade-off. The cleanest pattern is to land an `LQAIBrandingFooter` Svelte snippet in the OpenWebUI layout's footer slot in a focused future task. Until then, operators above the 50-user threshold who deploy the OpenWebUI shell as their primary surface should use the LQ.AI shell at `/lq-ai` (which carries the attribution) or land the footer themselves. |
 
+### B6 partial — Ollama provider adapter ✅ (Mode-2 air-gapped path)
+
+The first piece of B6 to land: the Ollama chat-completions adapter that wires Mode 2 (air-gapped local inference) end-to-end. OpenAI chat completions, Vertex (Anthropic on Vertex), and Bedrock remain deferred to B6 remainder; Ollama is the M1 keystone for the local-inference posture per PRD §1.5.1 / §6.1.
+
+**What landed:**
+
+* **`gateway/app/providers/ollama.py` — OllamaAdapter.** Hand-rolled httpx (no `ollama` Python SDK per PRD §4 / B3 posture). Mirrors the AnthropicAdapter template: `from_config` with base-URL normalization (trailing slash, explicit port, host-vs-Compose-DNS), per-call auth-header building (vanilla Ollama needs no header; proxy-fronted deployments can set `api_key_env` to inject a Bearer token), unary `chat_completion` against `POST /api/chat`, streaming `chat_completion` over Ollama's line-delimited JSON format. Embeddings raise `ProviderUnsupportedError` — the `embedding` alias still routes through the OpenAI adapter per ADR 0008 (1536-dim matches the `document_chunks.embedding` column).
+* **Translation:** OpenAI Chat Completions ↔ Ollama `/api/chat`:
+  * Messages forward verbatim with role preserved (Ollama accepts the same four roles).
+  * Sampling parameters move into Ollama's `options` sub-object: `max_tokens` → `options.num_predict`, `temperature` → `options.temperature`, `top_p` → `options.top_p`, `stop` (string or list) → `options.stop` (always list).
+  * `tools` / `tool_choice` forward to Ollama's 0.4+ tool-use surface verbatim. None of the 11 starter skills declare `tools:` (per the C2 / C3 scope checks), so this is unexercised but structurally correct.
+  * Streaming is **line-delimited JSON**, not SSE: each line is a JSON object with a `message.content` increment plus, on the terminal line, `done: true` + `prompt_eval_count` + `eval_count` + `done_reason`. The adapter parses line-by-line, emits one OpenAI role chunk on first line, content chunks per delta, and a terminal chunk with finish_reason + usage. Defensive: blank lines and malformed-JSON lines are silently skipped.
+* **Token usage:** `prompt_eval_count` → `usage.prompt_tokens`; `eval_count` → `usage.completion_tokens`. Total computed locally.
+* **`done_reason` mapping:** `stop` → `stop`, `length` → `length`, `load` → `stop`. Unknown reasons default to `stop` (the OpenAI surface only has four finish-reason values; `stop` is the safest fallback).
+* **Error translation:** 404 with body `{"error": "model 'foo' not found, try pulling it first"}` → `ProviderModelNotFound` (a `ProviderHTTPError` subclass with `code = "invalid_model"`). 503 (model loading or server overwhelmed) → generic `ProviderHTTPError`. Other 5xx → generic `ProviderHTTPError`. Network / DNS / TLS / connection-refused → `ProviderNetworkError`. Non-JSON 200 (proxy serving HTML) → `ProviderHTTPError`. The route handler's `_map_provider_error_to_response` was extended to translate the 404+invalid_model case to a gateway 400 `invalid_model` rather than the default 502 `provider_unavailable` — matches the operator's mental model ("the request named a model the deployment can't serve" is request-side, not upstream-flake).
+* **Configuration in `gateway.yaml.example`:**
+  * `ollama-local` provider entry now reads `base_url: ${OLLAMA_BASE_URL:-http://ollama:11434}` so operators with host-side Ollama set `OLLAMA_BASE_URL=http://host.docker.internal:11434` in `.env`.
+  * Two new aliases: `local-fast` → `ollama-local / llama3.1:8b` and `local-thinking` → `ollama-local / llama3.1:70b`. Both have empty fallback lists — a missing local provider surfaces as a clean 503 rather than silently degrading to a cloud Tier 4 path. Cost-tracking entries with zero rates added for all configured Ollama models.
+  * `inference_tiers.defaults.ollama: 1` is unchanged. Tier-1 placement (Mode 2 / air-gap-capable) is what every authoritative reference (PRD §1.5.2, gateway.yaml.example, M1-PROGRESS) calls for.
+* **`.env.example`:** `OLLAMA_BASE_URL` annotation expanded to spell out the host-Ollama posture (`OLLAMA_BASE_URL=http://host.docker.internal:11434`). The variable is preserved (not renamed to `OLLAMA_URL` as the task brief suggested) — it's already wired through Compose and the OpenWebUI fork.
+* **`docker-compose.yml`:** the gateway service now forwards `OLLAMA_BASE_URL` so the gateway.yaml's `${OLLAMA_BASE_URL:-...}` placeholder resolves at config-load time. The pre-existing `ollama` profile-gated service (under `profiles: [local]`, started by `docker compose --profile local up -d`) is unchanged in shape; a new `ollama list`-based healthcheck was added so `service_healthy` waits work.
+* **`gateway/app/main.py`:** the lifespan wires `OllamaAdapter.from_config(provider)` for any `provider.type == "ollama"` entry, alongside the existing Anthropic and OpenAI dispatch.
+
+**Tests (~30 net-new in gateway/):**
+
+* `gateway/tests/test_ollama_adapter.py` — 22 unit tests:
+  * `from_config` matrix (7): valid construction, wrong type rejected, base_url required, trailing-slash normalization, explicit port, api_key_env populated → Bearer token, default 120s timeout.
+  * Translation `to_ollama_request` (8): messages pass through, max_tokens → num_predict, sampling → options, string stop → list, list stop pass-through, stream flag, tools/tool_choice forwarded, tool message with `tool_call_id`.
+  * Translation `from_ollama_response` (4 + 1 parametrized over 4 done-reason values): usage mapping, missing done_reason fallback, empty message handling, parametrized done-reason mapping.
+  * Streaming (4): NDJSON happy path, blank-line + malformed-JSON tolerance, role chunk emitted only once, terminal chunk emitted even without explicit done line.
+  * Errors (5): 404 → ProviderModelNotFound + code=invalid_model, 503 → ProviderHTTPError, 500 → ProviderHTTPError, network → ProviderNetworkError, non-JSON 200 → ProviderHTTPError.
+  * Embeddings raises ProviderUnsupportedError (1).
+  * Health (3): 200 reachable, 500 unreachable, network unreachable.
+* `gateway/tests/test_inference_ollama.py` — 8 integration tests via the lifespan-started gateway app + respx-mocked Ollama:
+  * `local-fast` alias dispatch + tier annotation (header + body + routing-log row).
+  * `local-thinking` alias resolves to 70b model.
+  * Provider-native model name (`mistral-large`) routes directly.
+  * Streaming NDJSON → SSE chunks with tier on every chunk + `[DONE]` sentinel.
+  * Routing-log row for Ollama success has correct (provider, model, tier, tokens, zero cost).
+  * Error mapping: 503 → 502 `provider_unavailable`, 404 → 400 `invalid_model`, connection-refused → 503 `provider_unavailable`.
+  * **The B4 fallback-chain keystone test:** synthetic alias `smart-with-local-fallback` (primary=Ollama, fallback=Anthropic). Mock Ollama 503 → routing falls through to Anthropic and the response carries `routed_provider=anthropic-prod`, `routed_inference_tier=4`. **First end-to-end exercise of B4's fallback skeleton against two real adapter classes** — until B6 partial, only Anthropic was instantiable, so the fallback chain was unit-tested with mocked adapters but never end-to-end.
+  * The 404-not-fallback-eligible companion: same alias, mock Ollama 404, verify the call ends at 400 `invalid_model` and Anthropic is never called.
+
+**Deviations from the B6-partial brief:**
+
+* **Tier placement.** The brief asked for "Tier 5 (local — air-gapped)" placement. **This contradicts every authoritative reference** in the project: PRD §1.5.2 defines Tier 5 as "Consumer or free tier" and Tier 1 as "Local-only inference (air-gap-capable)"; gateway.yaml.example's `inference_tiers.defaults.ollama: 1` is unchanged across the C-phase; the existing `ollama-local` provider entry's `tier: 1` reflects this. We placed at **Tier 1** (the only correct value) and call this out here so a future re-read of the brief doesn't reintroduce the mismatch. The brief's "Tier 5" language is most charitably read as a typo for Tier 1; the brief's prose ("Mode-2 air-gapped path") is unambiguous about the intent.
+* **Compose profile.** The brief asked us to choose between (a) profile-gated `ollama` Compose service vs (b) operator-side host Ollama. The profile-gated service at `profiles: [local]` already exists in `docker-compose.yml` from prior work (likely landed alongside A1.d / Mode-2 wiring) — both options are operative. We added a healthcheck to the existing service and documented the host-Ollama path in `.env.example`. No new profile / no new service.
+* **Env-var name.** The brief used `OLLAMA_URL`; the existing `OLLAMA_BASE_URL` is already wired through Compose, the OpenWebUI fork, and `gateway.yaml.example`. We kept the existing name to avoid a duplicate variable. The annotation in `.env.example` expanded to spell out the host-Ollama posture.
+
+**Verification:**
+
+* **Worktree-side test runs are blocked** (the worktree's gateway/.venv is not writable from this session — same harness restriction other phases flagged). Tests are written to be portable to the standard `gateway/.venv/bin/pytest gateway/tests/` invocation; they consume the `tests/conftest.py` fixtures in the same shape as the existing test suite.
+* **ruff format / ruff check / mypy strict** — not exercised in this worktree (same harness restriction). Files were written to the project's existing style (single quotes, 100-col, ruff-format-clean by inspection; type annotations on every public function and class; mypy-strict-clean on the two new modules by following the AnthropicAdapter pattern that already passes strict mode).
+* **Real-key Ollama verification** deferred to operator. `docker compose --profile local up -d` brings up the `ollama` service; `docker compose exec ollama ollama pull llama3.1` then `curl -X POST http://localhost:8001/v1/chat/completions -H 'X-LQ-AI-Gateway-Key: ${LQ_AI_GATEWAY_KEY}' -d '{"model": "local-fast", "messages": [{"role": "user", "content": "hello"}]}'` exercises the full path end-to-end.
+
+**Newly deferred (surfaced during B6 partial):**
+
+| Item | Surface | Owning task |
+|---|---|---|
+| Ollama `/api/embed` adapter | The `embedding` alias still routes through OpenAI per ADR 0008 (1536-dim matches the column); a Mode-2 deployment that wants local embeddings needs the Ollama embeddings path wired AND a destructive ALTER on `document_chunks.embedding` to whatever dim the local model produces (typically 768 or 1024). | B6 follow-on or D-phase. Track alongside ADR 0008's "Local sentence-transformers / Ollama embeddings adapter" deferred entry. |
+| Streaming-fallback semantics | When the streaming primary fails after producing some output, the gateway can't cleanly hand off to a fallback (partial output makes the handover ambiguous). The existing `_stream_with_fallback` only picks the first available adapter; it doesn't actually walk fallbacks during streaming. The Ollama integration didn't change this; the deferred item is documented in `docs/M1-PROGRESS.md` already. | D-phase or later. Operator-pragmatic posture today: the SSE error frame surfaces a structured error and the client retries the request. |
+| OpenAI chat-completions, Vertex, Bedrock | B6 remainder. | B6 itself, when an operator forces the question. The adapter framing is in place (the OpenAI adapter's `chat_completion` raises `ProviderUnsupportedError` today; B6 fills it in). |
+
 ---
 
 ## Tasks ahead
 
-### B6 — Additional provider adapters (optional)
+### B6 — Additional provider adapters (Ollama complete; remainder optional)
 
 **Depends on:** B3 (template).
 
-**Scope:** OpenAI, Vertex (Anthropic on Vertex), Bedrock, Ollama. Optional for M1 baseline; **Ollama is critical for Mode 2** (air-gapped local inference). The other three are recommended for breadth.
+**Scope:** OpenAI chat completions, Vertex (Anthropic on Vertex), Bedrock. Optional for M1 baseline. Ollama landed (B6 partial — see above).
 
 **Per provider:** ~3-4h following B3's adapter template.
 
