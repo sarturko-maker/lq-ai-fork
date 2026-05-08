@@ -30,34 +30,37 @@ app = FastAPI(
 
 @app.get("/health")
 async def health() -> JSONResponse:
-    """Liveness probe.
+    """Liveness probe — returns 200 as soon as the process is serving requests.
 
-    Returns 503 until Task A3 (Inference Gateway minimal scaffold) wires up
-    config loading and basic routing.
+    Per K8s liveness convention: this answers "is the process alive?" and is
+    independent of whether the gateway config has loaded or providers are
+    reachable. Used by docker-compose healthchecks and orchestration platforms.
     """
     return JSONResponse(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        status_code=status.HTTP_200_OK,
         content={
-            "status": "not_implemented",
+            "status": "alive",
             "service": SERVICE_NAME,
             "version": __version__,
-            "next_task": "A3 — Inference Gateway minimal scaffold",
         },
     )
 
 
 @app.get("/ready")
 async def ready() -> JSONResponse:
-    """Readiness probe (checks gateway.yaml load + provider reachability).
+    """Readiness probe — returns 200 when gateway can serve real inference traffic.
 
-    Returns 503 until Task A3 implements config validation.
+    Per K8s readiness convention: returns 503 until Task A3 lands gateway.yaml
+    loading and validation, after which it returns 200 once the config parses
+    and at least one provider is reachable.
     """
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
-            "status": "not_implemented",
+            "status": "not_ready",
             "service": SERVICE_NAME,
             "version": __version__,
+            "reason": "scaffold_only",
             "next_task": "A3 — Inference Gateway minimal scaffold (gateway.yaml load + validation)",
         },
     )

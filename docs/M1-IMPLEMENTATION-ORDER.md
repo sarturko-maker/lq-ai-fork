@@ -22,7 +22,7 @@ Lays the substrate. By the end of Phase A, the repository has running services t
 
 **Output:** `docker compose up` starts all services; all six containers report ready; `make install` installs Python and Node dependencies; OpenWebUI fork builds and serves its default UI; `.env.example` is complete enough that a new contributor could fill it in and run.
 
-**Verification:** `docker compose ps` shows all 6 services running and healthy; `curl http://localhost:8000/health` and `:8001/health` return 503 with descriptive bodies; `curl http://localhost:3000` returns the OpenWebUI default page; every env var in `.env.example` is referenced by exactly one service.
+**Verification:** `docker compose ps` shows all 6 services running and healthy; `curl http://localhost:8000/health` and `:8001/health` return **200** with a structured `{"status": "alive", ...}` body (K8s liveness convention — the process is up; readiness via `/ready` returns 503 until A3/A4 wire dependencies); `curl http://localhost:3000` returns the OpenWebUI default page; every env var in `.env.example` is referenced by exactly one service.
 
 **Effort:** 8–10 hours. The estimate was originally 4–6h; expanded during M1 planning when the breadth (six services, three OpenAPI surfaces, OpenWebUI fork build, complete env-var inventory) was assessed end-to-end. If the OpenWebUI fork build fights back, this can split into A1a (Compose + Python services) and A1b (web fork + env-var inventory).
 

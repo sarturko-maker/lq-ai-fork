@@ -13,25 +13,27 @@ from app.main import app
 
 
 @pytest.mark.unit
-async def test_health_returns_503_with_structured_body() -> None:
+async def test_health_returns_200_alive() -> None:
+    """Liveness: process is alive regardless of dependency state."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/health")
 
-    assert response.status_code == 503
+    assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "not_implemented"
+    assert body["status"] == "alive"
     assert body["service"] == "inhouse-ai-api"
-    assert "next_task" in body
 
 
 @pytest.mark.unit
-async def test_ready_returns_503_with_structured_body() -> None:
+async def test_ready_returns_503_until_dependencies_wired() -> None:
+    """Readiness: scaffold-only state returns 503; A4 will flip this to 200."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/ready")
 
     assert response.status_code == 503
     body = response.json()
-    assert body["status"] == "not_implemented"
+    assert body["status"] == "not_ready"
     assert body["service"] == "inhouse-ai-api"
+    assert body["reason"] == "scaffold_only"

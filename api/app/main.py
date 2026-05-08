@@ -28,33 +28,37 @@ app = FastAPI(
 
 @app.get("/health")
 async def health() -> JSONResponse:
-    """Liveness probe.
+    """Liveness probe — returns 200 as soon as the process is serving requests.
 
-    Returns 503 until Task A4 (Backend minimal scaffold) wires up dependencies.
+    Per K8s liveness convention: this answers "is the process alive?" and is
+    independent of whether downstream dependencies are reachable. Used by
+    docker-compose healthchecks and orchestration platforms.
     """
     return JSONResponse(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        status_code=status.HTTP_200_OK,
         content={
-            "status": "not_implemented",
+            "status": "alive",
             "service": SERVICE_NAME,
             "version": __version__,
-            "next_task": "A4 — Backend minimal scaffold",
         },
     )
 
 
 @app.get("/ready")
 async def ready() -> JSONResponse:
-    """Readiness probe (checks downstream dependencies).
+    """Readiness probe — returns 200 when the service can serve real traffic.
 
-    Returns 503 until Task A4 wires up Postgres / Redis / MinIO connections.
+    Per K8s readiness convention: this answers "can I serve user requests?"
+    Returns 503 with a structured "not ready" body until Task A4 (Backend
+    minimal scaffold) wires up Postgres, Redis, and MinIO connections.
     """
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
-            "status": "not_implemented",
+            "status": "not_ready",
             "service": SERVICE_NAME,
             "version": __version__,
+            "reason": "scaffold_only",
             "next_task": "A4 — Backend minimal scaffold (DB/Redis/MinIO connections)",
         },
     )
