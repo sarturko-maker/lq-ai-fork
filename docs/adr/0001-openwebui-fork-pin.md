@@ -1,0 +1,77 @@
+# ADR 0001 — OpenWebUI fork pin and refresh strategy
+
+**Status:** Accepted (2026-05-07)
+**Decision-makers:** Kevin Keller (initial maintainer)
+**Affected components:** `web/`
+
+---
+
+## Context
+
+InHouse AI's web client (`web/`) is a fork of [OpenWebUI](https://github.com/open-webui/open-webui), per [PRD §2.2](../PRD.md#22-technology-decisions-and-rationale). OpenWebUI is a SvelteKit application with an active release cadence (multiple minor releases per quarter, frequent patches). At the time M1 implementation begins, we need to pick a specific upstream version to fork from, document the refresh procedure, and set expectations for keeping our fork current.
+
+Considerations:
+
+- **Reproducibility.** Anyone building from a tagged InHouse AI release should land on the same `web/` substrate. Tracking a moving branch (`main`) defeats this.
+- **SBOM stability.** The supply-chain transparency commitments in [PRD §7.8](../PRD.md#78-release-cadence-and-supply-chain-transparency) require knowing exactly which upstream code is in our build. A pinned tag is the cleanest answer.
+- **Rebase cost.** Each upstream rebase introduces some merge cost as our customizations (branding, tier-badge UI, skill inspector, etc.) move forward against upstream changes.
+- **Security currency.** Falling more than 6 months behind upstream creates security and compatibility risk.
+- **License.** OpenWebUI's license is BSD-3-Clause-modified with a branding clause; we comply with their branding requirements and document the relationship per [PRD §2.2 and §7.2](../PRD.md#72-license).
+
+## Decision
+
+**Pin `web/` to OpenWebUI `v0.9.2`** (released 2026-04-24).
+
+**Why this version:**
+
+- Latest non-prerelease tag at the time of forking.
+- Patches the dependency-install issues (`aiosqlite`, `asyncpg`) from v0.9.0.
+- v0.9.x brings features (desktop app, scheduled automations, calendar workspace, task management) that don't conflict with InHouse AI's roadmap — their generic task management is orthogonal to legal-matter Projects (PRD §3.11), and their workspace calendar is not the M5+ Today View (PRD §8.5).
+
+**Refresh cadence:**
+
+- Quarterly rebase against the latest upstream stable tag, or earlier if an upstream security fix lands that affects us.
+- Rebase work happens in a `vendor/openwebui-upstream` branch; the rebase result lands in `main` as a single PR titled `chore(web): rebase OpenWebUI fork to vX.Y.Z` with a body listing every upstream commit included and any of our patches that needed rework.
+- Rebase PRs require two maintainer approvals because the merge cost is real and the integration surface is large.
+
+**How customizations are organized:**
+
+- All InHouse AI customizations to `web/` live as patches on top of the pinned tag.
+- Branding changes (logo, color palette, footer) are isolated in dedicated files where possible.
+- Functional additions (tier badge, skill inspector, project sidebar, etc.) follow the OpenWebUI component patterns and live in clearly-named directories: `web/src/lib/inhouse-ai/`.
+- Patches that should ideally land upstream (bug fixes, generic UX improvements) are flagged in a top-of-file comment as "candidate for upstream PR."
+
+**License posture:**
+
+- We comply with OpenWebUI's branding requirements. The README and the deployment docs explicitly credit OpenWebUI as the upstream.
+- OpenWebUI's license is preserved in `web/LICENSE` alongside our Apache 2.0 `LICENSE` at the repo root, with a clear note explaining the dual-license structure.
+
+## Consequences
+
+**Positive:**
+
+- Reproducible builds; SBOM is stable per release.
+- Customizations are auditable — anyone can diff `web/` against the upstream `v0.9.2` tag and see exactly what we changed.
+- Quarterly rebase rhythm keeps us close enough to upstream that security fixes apply cleanly.
+
+**Negative:**
+
+- Upstream features released between rebases are unavailable to InHouse AI users until the next rebase lands.
+- A rebase that conflicts with our customizations costs real merge work; the maintainer doing the rebase needs context on every active customization.
+
+**Mitigations:**
+
+- Customizations are isolated where possible (separate files / directories) to minimize rebase conflicts.
+- The rebase PR template requires testing against the M1 quickstart end-to-end before merge.
+
+---
+
+## Operational notes
+
+**At fork time (Task A1):** clone OpenWebUI at `v0.9.2`, copy into `web/`, remove `.git`, re-init under our repo. Do **not** add OpenWebUI as a git submodule — submodules complicate the patch-on-top model and are a known friction point for contributors.
+
+**Tracking upstream changes:** maintainers subscribe to the OpenWebUI release feed and the security advisories feed. New CVEs in our pinned version trigger an out-of-cadence rebase if the fix is non-trivial to backport.
+
+---
+
+*Superseding this ADR requires an explicit follow-on ADR. Updating the pinned version (e.g., v0.9.2 → v0.10.0 at the next quarterly rebase) is an in-place edit to this document — record the new version, the date, and a one-line rationale in a "Revisions" section at the bottom.*
