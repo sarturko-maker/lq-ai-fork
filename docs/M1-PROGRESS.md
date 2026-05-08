@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-08 (B2 landed; B4 in flight in parallel worktree)
+> **Last updated:** 2026-05-08 (session 3 close; B2 + B4 both landed in parallel worktrees and merged into main)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -13,12 +13,12 @@
 | Phase | Done | In progress | Next |
 |---|---|---|---|
 | A — Foundation scaffolding | A1, A2, A3, A4 | A5 (partial — env-var branding only) | — |
-| B — Core authentication and routing | B1, B2, B3 | B4 (parallel worktree) | B5 after B4; B6 optional |
+| B — Core authentication and routing | B1, B2, B3, B4 | — | **B5 next**; B6 optional |
 | C — Capability layer | — | — | After B5 |
 | D — M1 differentiators | — | — | After C |
 | E — Procurement and release | — | — | After D |
 
-**Tests:** 101 passing in api/ (B2 added 22 tests: 16 admin-bootstrap + 5 CLI + 1 inherited gate test); 57 passing in gateway/ (1 skipped pending ANTHROPIC_API_KEY).
+**Tests:** 101 passing in api/ (B2 added 22: 16 admin-bootstrap + 5 CLI + 1 inherited gate test); 103 passing in gateway/ (B4 added 46; 1 skipped pending ANTHROPIC_API_KEY; +1 DB-backed integration test runs only when DATABASE_URL is set).
 **Stack:** `docker compose up` brings 6 services (postgres, redis, minio, gateway, api, web) to healthy in ~30s.
 **Migration:** `make migrate` applies `0001_initial.py` and `0002_add_must_change_password.py` cleanly; both reversible.
 
@@ -85,21 +85,28 @@ ProviderAdapter abstract base + Pydantic OpenAI schema (with LQ.AI extensions: r
 
 End-to-end verification: 503 `provider_unavailable` confirmed when no key is set; real-key verification deferred to operator.
 
+### B4 — Gateway router + alias resolution + tier derivation ✅
+
+Real router in `gateway/app/router.py` replaces B3's "Anthropic-only" temp logic. Pulls together:
+
+- **Alias resolution** — single- and multi-level chains; the resolved-target list (primary + fallbacks) is built once per request.
+- **Tier derivation** — `inference_tiers.overrides["<provider>/<model>"]` → `inference_tiers.overrides["<provider>"]` → `inference_tiers.defaults["<provider_type>"]` → provider entry's own `tier:`. New `inference_tiers:` block in `gateway.yaml.example` (optional; provider's `tier:` is the fallback so the prior config still works).
+- **Cycle detection at config load** — alias chains are walked from each starting alias and rejected at startup with a clear chain-listing error. `MAX_ALIAS_DEPTH = 8`.
+- **Adapter dispatch via registry** — `app.state.adapters` keyed by provider name. New adapters in B6 register themselves; the router doesn't care.
+- **Fallback chain skeleton** — fallback-eligible errors (network, 5xx, 429) walk the alias's `fallback:` list. Auth errors and 4xx-non-429 surface immediately. Unit-tested with mocked adapters; real activation when B6 lands more providers.
+- **`inference_routing_log` writer** — `app/routing_log.py` with three implementations: `SQLRoutingLogWriter` (the real one, async via SQLAlchemy + asyncpg), `NullRoutingLogWriter` (no-op when `DATABASE_URL` is unset; gateway must not refuse traffic over an unreachable audit log), `RecordingRoutingLogWriter` (in-memory, used by tests). Writers never raise out of `write()`.
+- **Tier surface (decision)** — surfaced **both** in the response body's `routed_inference_tier` field (B3 already documented this on the schema) **and** in the `X-LQ-AI-Routed-Inference-Tier` header. Streaming preserves the body field on every chunk envelope. Documented in `docs/api/gateway-openapi.yaml` and `docs/PRD.md` §4.4.1.
+- **Cost estimate** — populated from `cost_tracking.rates["<provider>/<model>"]` when configured; left NULL otherwise (per CLAUDE.md: don't invent prices).
+
+Gateway now opens a DATABASE_URL connection on startup (separate engine from `api/`'s, sized for short-row insert workload). `docker-compose.yml` updated to pass DATABASE_URL to the gateway service.
+
+46 new tests across unit + integration (alias resolution, tier derivation matrix, cycle rejection, fallback eligibility, router fake-adapter dispatch, routing-log row construction + bind params, response-surface header+body, streaming tier, unresolved-model audit row, real-DB write smoke).
+
+End-to-end verification: real-DB row write confirmed (`docker exec` + `gateway/.venv/bin/python` against `lq-ai-postgres-1`). Real-key Anthropic verification deferred to operator (no ANTHROPIC_API_KEY available in this session).
+
 ---
 
 ## Tasks ahead
-
-### B4 — Gateway router + alias resolution + tier derivation (parallel with B2, ~5-7h)
-
-**Depends on:** B3 (adapter template).
-
-**Scope (per the M1-IMPLEMENTATION-ORDER amended in session 1):**
-- Replace B3's "Anthropic-only" routing with the real router that resolves model aliases (`smart` → `claude-opus-4-7`) and dispatches to the right adapter
-- **Tier derivation lives here, not in D1.** Annotate every routed request with `routed_inference_tier` (1-5) derived from the resolved provider/model + gateway.yaml's `inference_tiers.defaults` block. Include the tier in response metadata (header or body field) so the backend doesn't re-derive. Write to every `inference_routing_log` row.
-- Per-skill / per-Project tier-floor enforcement (refusing requests below a declared minimum with HTTP 403 and `tier_below_minimum` error code) is **split out to D1** — that lives there because it's the application of the data, not the data path itself.
-- Fallback chain skeleton (provider A fails → try B); not exercised until B6 lands additional providers, but the structure should be in place.
-
-**Why tier derivation lives here, not D1:** the data path runs through this task and B5. Doing tier derivation later means backfilling through gateway → backend → DB → UI. Doing it here keeps the audit log and message rows correct from the first inference call.
 
 ### B5 — Backend ↔ Gateway integration (~4-6h)
 
@@ -131,14 +138,6 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 | Item | Disposition |
 |---|---|
 | `lq_ai.cli reset-admin-password` CLI | **Landed in B2 as `python -m app.cli reset-admin-password`.** The package is named `app`, not `lq_ai`, in this codebase; quickstart.md:325 was updated to the correct invocation. Argparse-based, ~150 LOC, 5 integration tests. A `[project.scripts]` console-script entry was considered but pulled because the current Dockerfile installs only the package metadata (the `app/` source tree is `COPY`'d in afterward); the console script would resolve `app.cli:main` against an empty wheel and fail. `python -m app.cli` works correctly because the API container's WORKDIR is `/app`. Reintroduce the console script when the Dockerfile installs the real wheel. |
-
-### Deferred to **B4** (gateway router + tier derivation)
-
-| Item | Surface | Notes |
-|---|---|---|
-| Replace B3's Anthropic-only routing | `gateway/app/api/inference.py` has a comment marking the temp routing | B3 documented this inline. B4's first move is replacing the routing logic. |
-| `inference_routing_log` writer | `gateway/app/api/inference.py` (currently doesn't write to the log) | The Tier-Derivation choke point is the right place to write. Schema is already in place from A2. |
-| Fallback chain on provider failure | gateway.yaml.example has `fallback:` blocks; not yet exercised | Skeleton in B4; real activation when B6 lands more providers. |
 
 ### Deferred to **B5** (backend ↔ gateway integration)
 
@@ -260,12 +259,14 @@ When you resume:
 1. **Check git status is clean** and you're at HEAD of origin/main:
    ```bash
    git status   # expect: "nothing to commit, working tree clean"
-   git log -1 --oneline   # expect the most recent merge / progress commit
+   git log -1 --oneline   # expect the B4 progress-doc commit (or the merge commit)
    ```
 2. **Read this doc top to bottom** to recover state.
-3. **B2 is done.** B4 should be in flight in a sibling worktree — merge it back, verify, then proceed to B5.
-4. **B5** is the next solo task: it ties the backend chat path (currently a 501 stub gated behind `ActiveUser`) to the gateway's now-real router and adapter. It's a sequence: backend chat handler → `GatewayClient.chat_completion(...)` → gateway `/v1/chat/completions` → AnthropicAdapter → response back through the layers.
-5. **B6 is optional** for M1 baseline — recommended order is OpenAI first (largest user base), then Ollama (Mode 2 unlock), then Vertex/Bedrock.
+3. **B2 + B4 are both done and merged.** Next solo task is **B5 — Backend ↔ Gateway integration**: it ties the backend chat path (currently a 501 stub gated behind `ActiveUser`) to the gateway's now-real router and adapter. Sequence: backend chat handler → `GatewayClient.chat_completion(...)` → gateway `/v1/chat/completions` → AnthropicAdapter → response back through both layers. B5 is also where the cross-cutting `lq_ai.errors` exception hierarchy lands (CONTRIBUTING.md references it; it doesn't exist yet — see deferred items).
+4. **After B5 lands**, the C-phase (capability layer: skills, chats, files, KB) is unblocked.
+5. **B6 is optional** for M1 baseline — recommended order is OpenAI first (largest user base), then Ollama (Mode 2 unlock), then Vertex/Bedrock. Ollama specifically is the Mode 2 (air-gapped local inference) unlock.
+
+That's it — clean continuation.
 
 ---
 

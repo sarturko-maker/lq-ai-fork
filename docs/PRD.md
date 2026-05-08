@@ -1184,6 +1184,49 @@ anonymization:
   llm_fallback_alias: "fast"  # used for ambiguous spans when ner_backend is "hybrid"
 ```
 
+#### 4.4.1 Tier derivation and surface (B4)
+
+Tier derivation runs in the Router (per §4.3 architecture diagram) for
+every routed chat-completion request. The derived tier is exposed on
+three surfaces, populated atomically:
+
+1. **HTTP response header** `X-LQ-AI-Routed-Inference-Tier: <1-5>` —
+   header-only consumers (HTTP-tracing proxies, front-end
+   instrumentation) read this without parsing the body. The provider
+   name is mirrored at `X-LQ-AI-Routed-Provider` for the same audience.
+2. **Response body extension field** `routed_inference_tier` — the
+   default surface for backend code that's already deserializing the
+   OpenAI-shaped response. For streaming responses, every
+   `chat.completion.chunk` envelope also carries the field (and
+   `routed_provider`) so a consumer that only sees the tail of the
+   stream still gets the tier.
+3. **`inference_routing_log` audit row** — the persisted audit trail
+   per §5.3. One row per routed request (successful or failed). On
+   failure the row still carries the tier (the Tier-Derivation choke
+   point invariant) plus a `refusal_reason` capturing the upstream
+   error code; this lets operators analyze tier distribution
+   independent of success/failure.
+
+Resolution order for tier derivation, first match wins:
+
+1. `inference_tiers.overrides["<provider_name>/<model>"]` — most specific.
+2. `inference_tiers.overrides["<provider_name>"]` — provider-wide override.
+3. `inference_tiers.defaults["<provider_type>"]` — per-type default
+   (anthropic, openai, vertex, ...).
+4. The provider entry's own `tier:` field — the simplest configuration.
+
+The `inference_tiers` block is optional. With it omitted, every routed
+request takes its tier from the provider entry's `tier:` field.
+
+**Fallback chain semantics (B4 skeleton):** when the primary provider
+fails with a fallback-eligible error (network failure, upstream 5xx,
+or upstream 429), the router walks the alias's configured `fallback`
+list in declaration order. Auth errors and 4xx (non-429) are *not*
+fallback-eligible — they surface immediately so a misconfigured key
+or a malformed request doesn't waste the fallback budget. With only
+the Anthropic adapter shipped, the fallback path is dead code in
+production today; B6 activates it by adding more adapters.
+
 ### 4.5 OpenAPI Surface
 
 OpenAI-compatible (so OpenWebUI and any OpenAI-SDK-using client just works):

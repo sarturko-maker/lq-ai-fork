@@ -48,11 +48,24 @@ paths:
       description: |
         Accepts requests in OpenAI Chat Completions format. The gateway:
         - Resolves the model alias (e.g., 'smart' → claude-opus-4-7)
-        - Determines the routed inference tier
-        - Refuses if below the request's minimum_inference_tier
+        - Determines the routed inference tier (B4)
+        - Refuses if below the request's minimum_inference_tier (D1; B4 only annotates)
         - Applies anonymization (if enabled, M2)
         - Routes to the appropriate provider
+        - On a fallback-eligible primary failure, walks the alias's
+          fallback chain (B4 skeleton; full activation when more
+          providers ship in B6)
         - Tracks cost and telemetry
+
+        Per PRD §4.4, the routed Inference Tier is surfaced two ways
+        on the response:
+          1. The `routed_inference_tier` field in the JSON body (or in
+             every streaming chunk's envelope for `stream: true`).
+          2. The `X-LQ-AI-Routed-Inference-Tier` header (1-5), so
+             header-only consumers (proxies, instrumentation) don't
+             need to parse the body.
+        The provider name is mirrored at `routed_provider` (body) and
+        `X-LQ-AI-Routed-Provider` (header).
       requestBody:
         required: true
         content:
@@ -62,18 +75,47 @@ paths:
       responses:
         '200':
           description: Completion (or stream)
+          headers:
+            X-LQ-AI-Routed-Inference-Tier:
+              description: |
+                The Inference Tier (1-5) that this request was routed at,
+                derived per PRD §1.5.2 / §3.13. Mirrors the
+                `routed_inference_tier` field in the response body.
+              schema: {type: integer, enum: [1, 2, 3, 4, 5]}
+              required: true
+            X-LQ-AI-Routed-Provider:
+              description: |
+                The configured provider name that handled the request.
+                Mirrors `routed_provider` in the response body.
+              schema: {type: string}
+              required: true
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ChatCompletionResponse'}
             text/event-stream:
-              schema: {type: string, description: "SSE stream of OpenAI-format chunks"}
+              schema: {type: string, description: "SSE stream of OpenAI-format chunks; each chunk carries routed_inference_tier and routed_provider"}
+        '400':
+          description: Invalid request (bad JSON, schema violation, or invalid_model)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
         '403':
-          description: Refused — inference tier below request minimum, or provider not allowed
+          description: Refused — inference tier below request minimum, or provider not allowed (D1)
           content:
             application/json:
               schema: {$ref: '#/components/schemas/GatewayError'}
         '429':
           description: Rate limit exceeded
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+        '502':
+          description: Upstream provider error (auth, 4xx, or 5xx after fallback)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+        '503':
+          description: No adapter available (provider credential not configured) or network error
           content:
             application/json:
               schema: {$ref: '#/components/schemas/GatewayError'}

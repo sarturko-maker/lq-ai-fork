@@ -128,7 +128,7 @@ Users can sign in. The backend can route inference requests through the gateway 
 
 **Effort:** 6–8 hours.
 
-### Task B4 — Gateway router + alias resolution + tier derivation
+### Task B4 — Gateway router + alias resolution + tier derivation ✅ Done (2026-05-07)
 
 **Scope:** Implement model alias resolution (`smart` → `claude-opus-4-7`), provider routing, and basic fallback chain. Reads `gateway.yaml`. For M1 baseline, single Anthropic provider; fallback structure in place but not exercised until B6. **Tier derivation is built into routing**: every routed request is annotated with `routed_inference_tier` (1–5) derived from the resolved provider/model and the gateway's `inference_tiers.defaults` block. The tier value is included in the response metadata (so the backend and UI can read it without re-deriving) and written to every `inference_routing_log` row. Per-skill / per-Project tier-floor enforcement (refusing requests below a declared minimum with HTTP 403 and `tier_below_minimum` error code) is split out to D1 — but the derivation itself lands here, where the data path is being built.
 
