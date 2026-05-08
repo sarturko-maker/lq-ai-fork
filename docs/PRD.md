@@ -1583,6 +1583,8 @@ Milestone-based delivery. Each milestone is a public release.
 
 **Code & Supply-Chain Transparency deliverables (M1, per §7.8 and §1.8).** Documented above in §7.8: SBOM in CI, signed container images, SLSA-3 build provenance, public threat model, dependency security scanning.
 
+**Not in M1, despite earlier drafts:** the MCP-client subsystem architectural slot. Originally targeted for M1; moved to M2 during M1 planning. M2 is the natural landing spot — it overlaps with the Citation Engine and Anonymization Layer work, which is when the gateway/backend extensibility surfaces are already being shaped.
+
 **Starter skills shipped in M1:**
 1. NDA Review (mutual + unilateral variants)
 2. MSA Review — SaaS
@@ -1595,7 +1597,7 @@ Milestone-based delivery. Each milestone is a public release.
 9. Enhance Prompt (the prompt-rewriter)
 10. Skill Creator (meta-skill for building skills via conversation)
 
-**MCP-client subsystem (architectural slot, M1 or M2).** A pluggable MCP-client module is added to the FastAPI backend — even though no MCP servers ship and no connectors land in M1–M4. The cost is ~2 weeks of architectural work and documentation; the value is that the M5+ Forward-Looking Roadmap (§8.5) does not require retrofitting MCP into a v1 architecture that did not anticipate it. Per §8.5 / I.5.
+**MCP-client subsystem (architectural slot, M2).** A pluggable MCP-client module lands in the FastAPI backend in M2 — even though no MCP servers ship and no connectors land in M1–M4. The cost is ~2 weeks of architectural work and documentation; the value is that the M5+ Forward-Looking Roadmap (§8.5) does not require retrofitting MCP into a v1 architecture that did not anticipate it. **Originally targeted for M1; deferred to M2 during M1 planning** — M1 is already fully scoped at ~210 hours with the things that ship in the quickstart, and the architectural slot is small enough that landing it during M2 alongside the Citation Engine work creates no retrofit risk. Per §8.5 / I.5.
 
 **Acceptance criteria:** A new operator can `docker compose up`, sign in, optionally create an Organization Profile and a Project, attach the NDA Review skill, upload an NDA, get a useful review with citations to the right tier-aware provider, and search prior chats — all within 15 minutes of starting from `git clone`.
 
@@ -1614,6 +1616,7 @@ Milestone-based delivery. Each milestone is a public release.
 - Research feature (web search + legal source connectors: CourtListener, GovInfo, Federal Register, EUR-Lex, SEC EDGAR).
 - Multi-Model Ensemble Verification (configurable, off by default except for Citation Engine verification).
 - **Anonymization Layer** in the Inference Gateway (per §4.7). Hybrid spaCy + small-LLM NER backend; configurable entity types and custom regex patterns; rehydration in responses and citations; fail-closed when required and tier > 2.
+- **MCP-client subsystem (architectural slot).** Pluggable MCP-client module in the FastAPI backend; no MCP servers ship and no connectors land in M2–M4. The slot exists so the M5+ Forward-Looking Roadmap (§8.5) can extend without retrofitting. Originally targeted for M1; deferred to M2 during M1 planning to keep the M1 scope focused on what ships in the quickstart.
 
 ### M3 — Playbooks, Word Add-In, Tabular Review, and Slack/Teams (~8 weeks after M2)
 

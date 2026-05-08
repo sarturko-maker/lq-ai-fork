@@ -36,7 +36,7 @@ flowchart TB
             autonomous["<b>Autonomous Layer</b><br/>Pipelines · cron ·<br/>watches · per-user<br/>memory<br/><i>M4</i>"]
         end
 
-        mcp["<b>MCP-Client Subsystem</b><br/>integration substrate;<br/>architectural slot opened in M1-M2<br/>even though no connectors ship until M5+<br/><i>M1-M2 slot</i>"]
+        mcp["<b>MCP-Client Subsystem</b><br/>integration substrate;<br/>architectural slot opened in M2<br/>even though no connectors ship until M5+<br/><i>M2 slot</i>"]
         signal["<b>Signal Aggregation Service</b><br/>workspace events<br/>via MCP<br/><i>M5+ forward-looking</i>"]:::forwardLooking
     end
 
@@ -211,7 +211,8 @@ The diagram is the M1–M4 target architecture; the milestone-by-milestone break
 - MFA-mandatory option and session-timeout defaults.
 - Compliance Alignment Pack documentation (`docs/compliance/`).
 - Code & Supply-Chain Transparency artifacts (SBOM, signed images, SLSA-3 build provenance, public threat model).
-- **MCP-Client Subsystem architectural slot opened.**
+
+**Not in M1 (deferred to M2):** MCP-Client Subsystem architectural slot — moved to M2 during M1 planning to keep the M1 scope focused on quickstart-shipping capabilities.
 
 **Storage and providers** stand up in M1; both deployment modes (Mode 1 cloud, Mode 2 local) are operational.
 
@@ -222,6 +223,7 @@ The diagram is the M1–M4 target architecture; the milestone-by-milestone break
 - Side-panel PDF.js viewer with bbox highlighting.
 - Multi-Model Ensemble Verification (configurable; the privacy posture surfaced as the *minimum* tier across the ensemble).
 - **Anonymization Layer in the Inference Gateway** — pre/post middleware pseudonymizing sensitive entities before the model call and rehydrating in responses and citations. Pre/post stages bracket the Provider Adapters in the gateway pipeline.
+- **MCP-Client Subsystem architectural slot** — moved here from M1 during M1 planning. Pluggable MCP-client in the FastAPI backend; no MCP servers ship and no connectors land in M2–M4.
 
 ### M3 — Playbooks, Word Add-In, Tabular Review, Slack/Teams
 
