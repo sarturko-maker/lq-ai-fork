@@ -46,6 +46,11 @@ dependencies = [
     # Used by LoginRequest to reject obviously-malformed addresses before
     # we hit the database. Tiny dep; pulls dnspython transitively.
     "email-validator>=2.0,<3",
+    # C1 — skill loader. Reads YAML frontmatter from each SKILL.md.
+    # Same library/version range the gateway already uses for gateway.yaml,
+    # so no new SBOM family is introduced (see ADR 0004 for the locus
+    # decision and CLAUDE.md's bar on new dependencies).
+    "pyyaml>=6.0,<7",
 ]
 
 [project.optional-dependencies]
@@ -60,6 +65,9 @@ dev = [
     # gateway/'s dev deps for the AnthropicAdapter — same library, same
     # pattern, no new SBOM family.
     "respx>=0.21",
+    # types-PyYAML — mypy stubs for the C1 skill loader's pyyaml import.
+    # Same pin family the gateway already uses.
+    "types-PyYAML>=6.0",
 ]
 
 # Note: a `[project.scripts]` console-script entry was considered for
