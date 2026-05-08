@@ -124,6 +124,25 @@ paths:
     post:
       tags: [inference]
       summary: OpenAI-compatible embeddings
+      description: |
+        Computes vector embeddings for one or more strings against the
+        embedding model resolved from `model`. `model` may be either a
+        configured alias (e.g., `embedding`) or a provider-native model
+        name (e.g., `text-embedding-3-small`); the router resolves
+        either using the same alias chain as `/v1/chat/completions`.
+
+        The response carries the standard OpenAI shape plus the LQ.AI
+        extensions `routed_inference_tier` and `routed_provider`. The
+        same tier annotation is also delivered in the
+        `X-LQ-AI-Routed-Inference-Tier` response header. One row is
+        written to `inference_routing_log` per call (success or
+        failure) so the audit log captures embedding workload alongside
+        chat completions.
+
+        Anthropic does not provide an embeddings endpoint; an
+        Anthropic-routed alias triggers the gateway's fallback walk
+        until a provider that supports embeddings (typically OpenAI
+        per ADR 0008) is found.
       requestBody:
         required: true
         content:
@@ -132,26 +151,59 @@ paths:
               type: object
               required: [model, input]
               properties:
-                model: {type: string}
+                model: {type: string, description: "Alias or provider-native model name"}
                 input:
+                  description: "Either a single string or an array of strings"
                   oneOf:
                     - {type: string}
                     - {type: array, items: {type: string}}
+                encoding_format:
+                  type: string
+                  enum: [float, base64]
+                  description: "Default float; base64 is bandwidth-optimization."
+                dimensions:
+                  type: integer
+                  minimum: 1
+                  description: |
+                    Optional reduced output dimension for OpenAI's
+                    text-embedding-3-* models. The KB indexing path
+                    in api/ omits this and uses the model's native
+                    dim (1536 for text-embedding-3-small/-large).
+                user:
+                  type: string
+                  description: "Optional end-user identifier (passed through to providers that accept it)."
       responses:
         '200':
           description: Embeddings
+          headers:
+            X-LQ-AI-Routed-Inference-Tier:
+              schema: {type: integer, enum: [1,2,3,4,5]}
+              description: "Same value as the response body's `routed_inference_tier`."
+            X-LQ-AI-Routed-Provider:
+              schema: {type: string}
+              description: "The provider name that produced the embeddings."
           content:
             application/json:
               schema:
                 type: object
                 required: [data, model, usage]
                 properties:
+                  object:
+                    type: string
+                    enum: [list]
                   data:
                     type: array
                     items:
                       type: object
+                      required: [embedding, index]
                       properties:
-                        embedding: {type: array, items: {type: number}}
+                        object:
+                          type: string
+                          enum: [embedding]
+                        embedding:
+                          type: array
+                          items: {type: number}
+                          description: "Floats; length matches the model's embedding dimension (1536 for text-embedding-3-small)."
                         index: {type: integer}
                   model: {type: string}
                   usage:
@@ -159,6 +211,38 @@ paths:
                     properties:
                       prompt_tokens: {type: integer}
                       total_tokens: {type: integer}
+                  routed_inference_tier:
+                    type: integer
+                    enum: [1, 2, 3, 4, 5]
+                    description: "Derived tier per PRD §1.5.2; same as the X-LQ-AI-Routed-Inference-Tier header."
+                  routed_provider:
+                    type: string
+                    description: "Provider name that handled the request (post-fallback)."
+        '400':
+          description: Invalid model or malformed request body.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+        '401':
+          description: Gateway-key auth failed (operator misconfiguration).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+        '429':
+          description: Upstream provider rate-limited the call.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+        '502':
+          description: Upstream provider error after fallback exhausted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+        '503':
+          description: No adapter available for any provider that supports embeddings.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
 
   # ----------- HEALTH (PRD §4.3 — liveness/readiness) -----------
   /health:

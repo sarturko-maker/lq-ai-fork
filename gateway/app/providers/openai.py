@@ -312,13 +312,10 @@ def _from_openai_embeddings_response(
     OpenAI's body shape::
 
         {
-          "object": "list",
-          "data": [
-            {"object": "embedding", "embedding": [0.1, 0.2, ...], "index": 0},
-            ...
-          ],
-          "model": "text-embedding-3-small",
-          "usage": {"prompt_tokens": 5, "total_tokens": 5}
+            "object": "list",
+            "data": [{"object": "embedding", "embedding": [0.1, 0.2, ...], "index": 0}, ...],
+            "model": "text-embedding-3-small",
+            "usage": {"prompt_tokens": 5, "total_tokens": 5},
         }
 
     We accept the response verbatim into our pydantic models. Defensive

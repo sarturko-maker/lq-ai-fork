@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Final
@@ -63,6 +64,9 @@ from app.providers import (
     ChatCompletionMessage,
     ChatCompletionRequest,
     ChatCompletionResponse,
+    ChatCompletionUsage,
+    EmbeddingsRequest,
+    EmbeddingsResponse,
     ProviderAdapter,
     ProviderAdapterError,
     ProviderAuthError,
@@ -456,17 +460,178 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
     )
 
 
-@router.post("/embeddings")
+@router.post("/embeddings", response_model=None)
 async def embeddings(request: Request) -> JSONResponse:
-    """OpenAI-compatible embeddings — B4 still 501 (lands with B6)."""
+    """OpenAI-compatible embeddings (C6).
 
-    return _not_implemented(
+    Body: ``{model, input, encoding_format?, dimensions?, user?}`` per
+    OpenAI's contract. ``model`` may be either an alias (e.g.,
+    ``embedding``) or a provider-native model name; B4's router resolves
+    either to a (provider, model) target. The adapter selected by the
+    target runs the embeddings call; success returns the OpenAI-shaped
+    body annotated with ``routed_inference_tier``.
+
+    The route writes one row to ``inference_routing_log`` per call so
+    the audit log captures the embedding workload alongside chat
+    completions. Failures translate through the same error envelope as
+    chat completions per ADR 0003.
+    """
+
+    try:
+        raw = await request.json()
+    except json.JSONDecodeError:
+        return _gateway_error(
+            code="invalid_request",
+            message="Request body is not valid JSON",
+            http_status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not isinstance(raw, dict):
+        return _gateway_error(
+            code="invalid_request",
+            message="Request body must be a JSON object",
+            http_status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        embeddings_request = EmbeddingsRequest.model_validate(raw)
+    except ValidationError as exc:
+        return _gateway_error(
+            code="invalid_request",
+            message="Embeddings request failed schema validation",
+            http_status=status.HTTP_400_BAD_REQUEST,
+            details={"errors": exc.errors()},
+        )
+
+    config = _config(request)
+    gw_router = _router(request)
+    log_writer = _routing_log(request)
+    request_id = synthesize_request_id(_request_id_header(request))
+
+    # --- Resolution (no upstream call yet) ---------------------------------
+    try:
+        candidates = gw_router.resolve(embeddings_request.model)
+    except ModelResolutionError as exc:
+        await _write_unresolved_embeddings(
+            log_writer,
+            embeddings_request=embeddings_request,
+            request_id=request_id,
+            message=str(exc),
+        )
+        return _gateway_error(
+            code="invalid_model",
+            message=str(exc),
+            http_status=status.HTTP_400_BAD_REQUEST,
+            details={"requested_model": embeddings_request.model},
+        )
+
+    # --- Adapter dispatch (with the same fallback eligibility as chat) -----
+    adapter_registry = _adapters(request)
+    last_error: ProviderAdapterError | None = None
+    last_error_target: ResolvedTarget | None = None
+    last_error_latency_ms = 0
+    fallbacks_tried: list[str] = []
+
+    for target in candidates:
+        adapter = adapter_registry.get(target.provider.name)
+        if adapter is None:
+            logger.warning(
+                "no adapter for embeddings provider %r (%s); trying next candidate",
+                target.provider.name,
+                target.role,
+            )
+            fallbacks_tried.append(target.provider.name)
+            continue
+
+        start = time.monotonic()
+        try:
+            result = await adapter.embeddings(
+                embeddings_request,
+                model=target.native_model,
+            )
+        except ProviderAdapterError as exc:
+            latency_ms = int((time.monotonic() - start) * 1000)
+            logger.info(
+                "embeddings provider %r failed (%s) after %dms: %s",
+                target.provider.name,
+                type(exc).__name__,
+                latency_ms,
+                exc.message,
+            )
+            last_error = exc
+            last_error_target = target
+            last_error_latency_ms = latency_ms
+            fallbacks_tried.append(target.provider.name)
+            # ProviderUnsupportedError on embeddings (e.g., Anthropic) is
+            # NOT fallback-eligible per the chat path, but for embeddings
+            # it actually IS — the next candidate may be a different
+            # provider type that supports embeddings. We override the
+            # default chat-side rule here.
+            if isinstance(exc, ProviderUnsupportedError):
+                continue
+            from app.router import is_fallback_eligible
+
+            if is_fallback_eligible(exc):
+                continue
+            await _write_embeddings_failure(
+                log_writer,
+                embeddings_request=embeddings_request,
+                target=target,
+                request_id=request_id,
+                error=exc,
+                latency_ms=latency_ms,
+            )
+            return _map_provider_error_to_response(exc)
+
+        # Success: stamp tier on body, write log, return.
+        latency_ms = int((time.monotonic() - start) * 1000)
+        annotated = _annotate_embeddings_response(result, target=target, config=config)
+        await _write_embeddings_success(
+            log_writer,
+            embeddings_request=embeddings_request,
+            target=target,
+            request_id=request_id,
+            response=annotated,
+            latency_ms=latency_ms,
+            config=config,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=annotated.model_dump(mode="json", exclude_none=True),
+            headers={
+                TIER_HEADER: str(target.routed_inference_tier),
+                PROVIDER_HEADER: target.provider.name,
+            },
+        )
+
+    # All candidates failed (no adapter or non-fallback-eligible exhausted).
+    if last_error is not None and last_error_target is not None:
+        await _write_embeddings_failure(
+            log_writer,
+            embeddings_request=embeddings_request,
+            target=last_error_target,
+            request_id=request_id,
+            error=last_error,
+            latency_ms=last_error_latency_ms,
+        )
+        return _map_provider_error_to_response(last_error)
+
+    # Nothing was even tried.
+    primary = candidates[0]
+    await _write_embeddings_unavailable(
+        log_writer,
+        embeddings_request=embeddings_request,
+        target=primary,
+        request_id=request_id,
+        message="no adapter available",
+    )
+    return _gateway_error(
+        code="provider_unavailable",
         message=(
-            "Embeddings are not yet implemented. Anthropic (B3) has no "
-            "first-party embeddings endpoint; the OpenAI adapter (B6) lands "
-            "the embeddings path."
+            f"No adapter available to handle embeddings for model "
+            f"{embeddings_request.model!r}; check that the provider's credential "
+            "env var is set"
         ),
-        next_task="B6 — OpenAI provider adapter (embeddings)",
+        http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        details={"provider": primary.provider.name},
     )
 
 
@@ -861,3 +1026,147 @@ def _request_id_header(request: Request) -> str | None:
         if header:
             return header
     return None
+
+
+# --- Embeddings helpers (C6) -------------------------------------------------
+
+
+def _annotate_embeddings_response(
+    response: EmbeddingsResponse,
+    *,
+    target: ResolvedTarget,
+    config: GatewayConfig,
+) -> EmbeddingsResponse:
+    """Stamp tier annotation onto an embeddings response.
+
+    The :class:`EmbeddingsResponse` model has ``extra='allow'``, so
+    extension fields round-trip through ``model_dump`` even though
+    they aren't first-class attributes. Centralized so the embeddings
+    path matches the chat-completions annotation contract.
+    """
+
+    # extra="allow" stores unknown attributes in __pydantic_extra__ which
+    # model_dump() merges back into the serialized output. Initialize the
+    # dict first so we can assign idempotently.
+    if response.__pydantic_extra__ is None:
+        response.__pydantic_extra__ = {}
+    response.__pydantic_extra__["routed_provider"] = target.provider.name
+    response.__pydantic_extra__["routed_inference_tier"] = target.routed_inference_tier
+    return response
+
+
+async def _write_embeddings_success(
+    writer: RoutingLogWriter,
+    *,
+    embeddings_request: EmbeddingsRequest,
+    target: ResolvedTarget,
+    request_id: str,
+    response: EmbeddingsResponse,
+    latency_ms: int,
+    config: GatewayConfig,
+) -> None:
+    """Write a routing-log row for a successful embeddings call.
+
+    Embeddings have ``tokens_in`` (the prompt tokens) but no
+    ``tokens_out`` — embeddings don't generate text. We leave
+    ``tokens_out`` as None so the audit row is honest about the shape.
+
+    Cost estimation reuses the same per-(provider, model) rates from
+    ``cost_tracking.rates``; for embedding models the ``output_per_mtok``
+    rate should be 0 (most providers don't charge for output on
+    embeddings) — operators set this in ``gateway.yaml``.
+    """
+
+    cost = estimate_cost(
+        provider_name=target.provider.name,
+        native_model=target.native_model,
+        usage=ChatCompletionUsage(
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=0,
+            total_tokens=response.usage.total_tokens,
+        ),
+        rates=config.cost_tracking.rates,
+    )
+    await writer.write(
+        InferenceRoutingLogRow(
+            requested_model=embeddings_request.model,
+            routed_provider=target.provider.name,
+            routed_model=target.native_model,
+            routed_inference_tier=target.routed_inference_tier,
+            tokens_in=response.usage.prompt_tokens,
+            tokens_out=None,
+            cost_estimate=cost,
+            latency_ms=latency_ms,
+            request_id=request_id,
+        )
+    )
+
+
+async def _write_embeddings_failure(
+    writer: RoutingLogWriter,
+    *,
+    embeddings_request: EmbeddingsRequest,
+    target: ResolvedTarget,
+    request_id: str,
+    error: ProviderAdapterError,
+    latency_ms: int,
+) -> None:
+    """Write a routing-log row for an embeddings call that failed at upstream."""
+
+    await writer.write(
+        InferenceRoutingLogRow(
+            requested_model=embeddings_request.model,
+            routed_provider=target.provider.name,
+            routed_model=target.native_model,
+            routed_inference_tier=target.routed_inference_tier,
+            latency_ms=latency_ms,
+            refused=False,
+            refusal_reason=f"upstream_error:{error.code}",
+            request_id=request_id,
+        )
+    )
+
+
+async def _write_embeddings_unavailable(
+    writer: RoutingLogWriter,
+    *,
+    embeddings_request: EmbeddingsRequest,
+    target: ResolvedTarget,
+    request_id: str,
+    message: str,
+) -> None:
+    """Write a routing-log row when embeddings had no adapter to dispatch to."""
+
+    await writer.write(
+        InferenceRoutingLogRow(
+            requested_model=embeddings_request.model,
+            routed_provider=target.provider.name,
+            routed_model=target.native_model,
+            routed_inference_tier=target.routed_inference_tier,
+            refused=False,
+            refusal_reason=f"adapter_unavailable:{message}",
+            request_id=request_id,
+        )
+    )
+
+
+async def _write_unresolved_embeddings(
+    writer: RoutingLogWriter,
+    *,
+    embeddings_request: EmbeddingsRequest,
+    request_id: str,
+    message: str,
+) -> None:
+    """Write a routing-log row when the embeddings model didn't resolve."""
+
+    await writer.write(
+        InferenceRoutingLogRow(
+            requested_model=embeddings_request.model,
+            routed_provider="<unresolved>",
+            routed_model="<unresolved>",
+            routed_inference_tier=1,
+            refused=True,
+            refusal_reason=f"invalid_model:{message}",
+            request_id=request_id,
+        )
+    )
