@@ -16,15 +16,15 @@ Lays the substrate. By the end of Phase A, the repository has running services t
 
 ### Task A1 — Repository scaffold
 
-**Scope:** Create `api/`, `gateway/`, `web/` subdirectories with empty Python packages and OpenWebUI fork stub. `docker-compose.yml` at repo root with services for postgres (with pgvector), redis, minio, api, gateway, web. `.env.example` with all environment variables documented. `Makefile` (or `justfile`) with conventional targets: `install`, `test`, `lint`, `format`, `migrate`, `run-dev`, `clean`.
+**Scope:** Create `api/`, `gateway/`, `web/` subdirectories with empty Python packages and OpenWebUI fork stub. `docker-compose.yml` at repo root with services for postgres (with pgvector), redis, minio, api, gateway, web. `.env.example` with **every** environment variable that any of the three services reads, documented inline (purpose, default, required-vs-optional). `Makefile` (or `justfile`) with conventional targets: `install`, `test`, `lint`, `format`, `migrate`, `run-dev`, `clean`. Health endpoints (`/health`, `/ready`) on all three application services returning 503 with structured "not implemented" body. Pin OpenWebUI fork at the version chosen in `docs/adr/0001-openwebui-fork-pin.md` and check the fork builds in Docker (no customization yet — just confirm the upstream build works inside our Compose).
 
 **Dependencies:** None. This is the first task.
 
-**Output:** `docker compose up` starts all services (which return 503 because they're empty); `make install` installs Python and Node dependencies; the project root has the documented structure from this thread.
+**Output:** `docker compose up` starts all services; all six containers report ready; `make install` installs Python and Node dependencies; OpenWebUI fork builds and serves its default UI; `.env.example` is complete enough that a new contributor could fill it in and run.
 
-**Verification:** `docker compose ps` shows all 6 services running; `curl http://localhost:8000/health` returns 503 with a "not implemented" body; `curl http://localhost:8001/health` similar.
+**Verification:** `docker compose ps` shows all 6 services running and healthy; `curl http://localhost:8000/health` and `:8001/health` return 503 with descriptive bodies; `curl http://localhost:3000` returns the OpenWebUI default page; every env var in `.env.example` is referenced by exactly one service.
 
-**Effort:** 4–6 hours.
+**Effort:** 8–10 hours. The estimate was originally 4–6h; expanded during M1 planning when the breadth (six services, three OpenAPI surfaces, OpenWebUI fork build, complete env-var inventory) was assessed end-to-end. If the OpenWebUI fork build fights back, this can split into A1a (Compose + Python services) and A1b (web fork + env-var inventory).
 
 ### Task A2 — Database migration scaffolding
 
@@ -116,17 +116,19 @@ Users can sign in. The backend can route inference requests through the gateway 
 
 **Effort:** 6–8 hours.
 
-### Task B4 — Gateway router + alias resolution
+### Task B4 — Gateway router + alias resolution + tier derivation
 
-**Scope:** Implement model alias resolution (`smart` → `claude-opus-4-7`), provider routing, and basic fallback chain. Reads `gateway.yaml`. For M1 baseline, single Anthropic provider; fallback structure in place but not exercised until B6.
+**Scope:** Implement model alias resolution (`smart` → `claude-opus-4-7`), provider routing, and basic fallback chain. Reads `gateway.yaml`. For M1 baseline, single Anthropic provider; fallback structure in place but not exercised until B6. **Tier derivation is built into routing**: every routed request is annotated with `routed_inference_tier` (1–5) derived from the resolved provider/model and the gateway's `inference_tiers.defaults` block. The tier value is included in the response metadata (so the backend and UI can read it without re-deriving) and written to every `inference_routing_log` row. Per-skill / per-Project tier-floor enforcement (refusing requests below a declared minimum with HTTP 403 and `tier_below_minimum` error code) is split out to D1 — but the derivation itself lands here, where the data path is being built.
 
 **Dependencies:** B3.
 
-**Output:** Gateway resolves aliases per `gateway.yaml`; routes correctly; logs routing decisions to `inference_routing_log`.
+**Output:** Gateway resolves aliases per `gateway.yaml`; routes correctly; logs routing decisions to `inference_routing_log` **with `routed_inference_tier` populated**; response metadata includes the tier so downstream consumers don't re-derive.
 
-**Verification:** Request with model `smart` lands at the configured Anthropic model; routing log entry created.
+**Verification:** Request with model `smart` lands at the configured Anthropic model; routing log entry created with the expected tier; the gateway's HTTP response includes `routed_inference_tier` in a documented header or response metadata field.
 
-**Effort:** 4–6 hours.
+**Effort:** 5–7 hours. Originally 4–6h; +1h for tier derivation lifted from D1.
+
+**Why tier derivation lives here, not in D1:** the data path runs through B4 (and B5 right after). If tier derivation lands in D1 after the path is built, it backfills through gateway → backend → DB → UI. Doing it here keeps the audit log and message rows correct from the first inference call. D1 then narrows to the refusal logic and 403 handling — which is genuinely a separate concern.
 
 ### Task B5 — Backend ↔ Gateway integration
 
@@ -208,13 +210,15 @@ The substantive features. Skills load, chats persist, files upload, knowledge ba
 
 ### Task C5 — Document pipeline (basic)
 
-**Scope:** Document Pipeline Service that processes files: Docling for PDFs, PyMuPDF for backup, character-level offsets preserved. Async worker via Redis queue. Updates `documents` table on success. **No OCR yet** (M2). **No citation engine yet** (M2 — basic chunks only).
+**Scope:** Document Pipeline Service that processes files: Docling for PDFs, PyMuPDF for backup, **character-precise offsets preserved on every chunk**. Async worker via Redis queue. Updates `documents` table on success. **No OCR yet** (M2). **No citation verification yet** (M2 — basic chunks only).
+
+**Character-fidelity requirement (load-bearing for M2):** even though M1 does not yet verify citations, `document_chunks.char_offset_start` and `char_offset_end` must be character-precise against the original document text. The M2 Citation Engine's deterministic substring verification depends on these offsets being correct from the first ingestion — re-ingesting the M1 corpus to fix offset drift is expensive and avoidable. PyMuPDF gives byte-precise offsets; Docling's structured output is reconciled against PyMuPDF's character stream during chunking. Add a unit test that picks a random chunk, slices the original text by `[char_offset_start:char_offset_end]`, and asserts byte-equality against `chunk.content`.
 
 **Dependencies:** C4.
 
-**Output:** Uploaded PDF is parsed; chunks created; embeddings generated; `documents` and `document_chunks` populated.
+**Output:** Uploaded PDF is parsed; chunks created; embeddings generated; `documents` and `document_chunks` populated; offset-fidelity test passes against a representative document corpus.
 
-**Verification:** Upload a PDF; wait for `ingestion_status: ready`; query `document_chunks` and confirm content is present and offsets are valid.
+**Verification:** Upload a PDF; wait for `ingestion_status: ready`; query `document_chunks` and confirm content is present, offsets are character-precise (assertion above), and embeddings are non-null.
 
 **Effort:** 10–14 hours.
 
@@ -260,17 +264,19 @@ The substantive features. Skills load, chats persist, files upload, knowledge ba
 
 The features that make this InHouse AI rather than just another chat-with-LLMs app: tier awareness, audit log fields, organization profile, MFA, per-user delete.
 
-### Task D1 — Tier Derivation in gateway
+### Task D1 — Tier-floor enforcement (refusals)
 
-**Scope:** Per PRD §4.4, the gateway annotates every routed request with `routed_inference_tier`. Refuses requests below `minimum_inference_tier` (from request, skill, or project). Returns 403 with structured error code `tier_below_minimum`.
+**Scope:** Per PRD §4.4, the gateway refuses requests below `minimum_inference_tier` (declared on the skill, on the Project, or on the request itself). Returns HTTP 403 with structured error code `tier_below_minimum` and a body explaining which floor was violated. Backend surfaces the refusal as a user-visible error (not a generic 500). Refusals land in `inference_routing_log` with `refused: true` and `refusal_reason: 'tier_below_minimum'`.
 
-**Dependencies:** B4.
+**Tier *derivation* itself moved to B4** during M1 planning — it's part of the routing data path, not a downstream concern. D1 is now narrowly the refusal-and-403 logic.
 
-**Output:** `routed_inference_tier` is set on every `inference_routing_log` entry; refused requests are logged with `refused: true`.
+**Dependencies:** B4 (derivation), C7 (Projects, for project-level minimum_inference_tier).
 
-**Verification:** Request with `minimum_inference_tier: 1` against Tier 4 provider returns 403 with descriptive error.
+**Output:** Refusals work correctly across all three sources of a tier floor (skill frontmatter, Project setting, request override). The 403 body is structured and stable.
 
-**Effort:** 4–6 hours.
+**Verification:** (a) Request with `minimum_inference_tier: 1` against Tier 4 provider returns 403 with descriptive error. (b) Skill with `minimum_inference_tier: 2` attached to a chat routed at Tier 4 → 403. (c) Project with `minimum_inference_tier: 3` containing a chat routed at Tier 4 → 403. (d) Audit log shows the refusal with the correct `refusal_reason`.
+
+**Effort:** 3–4 hours. Reduced from 4–6h since derivation is no longer scoped here.
 
 ### Task D2 — Inference Tier Awareness UI
 
@@ -452,14 +458,14 @@ The artifacts that make M1 launch-ready beyond just "the code works."
 
 | Phase | Tasks | Effort |
 |---|---|---|
-| **A — Foundation scaffolding** | 5 | ~24 hours |
-| **B — Authentication and routing** | 6 | ~30 hours |
+| **A — Foundation scaffolding** | 5 | ~28 hours (A1 expanded from 4–6h to 8–10h) |
+| **B — Authentication and routing** | 6 | ~31 hours (B4 +1h for tier derivation) |
 | **C — Capability layer** | 8 | ~70 hours |
-| **D — M1 differentiators** | 7 | ~36 hours |
+| **D — M1 differentiators** | 7 | ~34 hours (D1 reduced; derivation moved to B4) |
 | **E — Procurement and release** | 8 | ~50 hours |
-| **Total** | 34 | ~210 hours |
+| **Total** | 34 | ~213 hours |
 
-210 hours is a focused 6-week build for a single contributor working full-time, or 8–10 weeks for someone working part-time with parallelization on UI work (Task C8 specifically benefits from a frontend-specialized contributor).
+~213 hours is a focused 6-week build for a single contributor working full-time, or 8–10 weeks for someone working part-time with parallelization on UI work (Task C8 specifically benefits from a frontend-specialized contributor). First-time-through-this-architecture friction usually warrants a 1.3–1.5× contingency on the per-task estimates.
 
 ---
 
