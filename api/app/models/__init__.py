@@ -11,6 +11,7 @@ declarative base, so Alembic's autogenerate (when used) sees them.
 from __future__ import annotations
 
 from app.models.audit import AuditLog
+from app.models.chat import Chat, Message
 from app.models.document import Document, DocumentChunk
 from app.models.file import File
 from app.models.inference import InferenceRoutingLog
@@ -19,10 +20,12 @@ from app.models.user import User, UserSession
 
 __all__ = [
     "AuditLog",
+    "Chat",
     "Document",
     "DocumentChunk",
     "File",
     "InferenceRoutingLog",
+    "Message",
     "Project",
     "ProjectFile",
     "ProjectSkill",
