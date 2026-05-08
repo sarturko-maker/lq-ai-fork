@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-08 (session 3 close; B2 + B4 both landed in parallel worktrees and merged into main)
+> **Last updated:** 2026-05-08 (session 4 close; B5 landed)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -13,12 +13,12 @@
 | Phase | Done | In progress | Next |
 |---|---|---|---|
 | A — Foundation scaffolding | A1, A2, A3, A4 | A5 (partial — env-var branding only) | — |
-| B — Core authentication and routing | B1, B2, B3, B4 | — | **B5 next**; B6 optional |
-| C — Capability layer | — | — | After B5 |
+| B — Core authentication and routing | B1, B2, B3, B4, B5 | — | B6 optional; otherwise C-phase |
+| C — Capability layer | — | — | **C-phase next** (skills, chats, files, KB) |
 | D — M1 differentiators | — | — | After C |
 | E — Procurement and release | — | — | After D |
 
-**Tests:** 101 passing in api/ (B2 added 22: 16 admin-bootstrap + 5 CLI + 1 inherited gate test); 103 passing in gateway/ (B4 added 46; 1 skipped pending ANTHROPIC_API_KEY; +1 DB-backed integration test runs only when DATABASE_URL is set).
+**Tests:** 170 passing in api/ (B5 added 75: 23 errors-hierarchy + 27 GatewayClient + 20 chat-endpoint integration + 5 inherited adjustments to existing tests); 118 passing in gateway/ (B5 added 14 errors-hierarchy + 1 inherited; 1 skipped pending ANTHROPIC_API_KEY; the DB-backed routing-log integration test now runs and passes when migrations have been applied); 5 cross-subsystem conformance tests under `tests/` (B5).
 **Stack:** `docker compose up` brings 6 services (postgres, redis, minio, gateway, api, web) to healthy in ~30s.
 **Migration:** `make migrate` applies `0001_initial.py` and `0002_add_must_change_password.py` cleanly; both reversible.
 
@@ -85,6 +85,56 @@ ProviderAdapter abstract base + Pydantic OpenAI schema (with LQ.AI extensions: r
 
 End-to-end verification: 503 `provider_unavailable` confirmed when no key is set; real-key verification deferred to operator.
 
+### B5 — Backend ↔ Gateway integration ✅
+
+End-to-end inference path: backend chat endpoint → `GatewayClient.chat_completion()` → gateway `/v1/chat/completions` → AnthropicAdapter → response back through both layers, with the gateway's `routed_inference_tier` surfaced through to the API caller and a structured error envelope on every failure mode. Bundled with the `lq_ai.errors` exception hierarchy that was deferred to this task.
+
+**1. `lq_ai.errors` exception hierarchy (with ADR).** [`docs/adr/0003-error-handling.md`](adr/0003-error-handling.md) records the architectural choice: rather than a shared Python module that both `api/` and `gateway/` import from (would violate CLAUDE.md's hard rule on subsystem isolation), each subsystem owns its own typed `LQAIError` hierarchy under `app/errors.py`. The cross-subsystem contract is the **error-code enum** in the OpenAPI sketches plus a conformance test under `tests/test_error_code_contract.py` that asserts both sides stay in sync.
+
+* `api/app/errors.py` — `LQAIError` base + 12 subclasses (Unauthorized, Forbidden, NotFound, ValidationError, RateLimited, InternalError, PasswordChangeRequired, GatewayUnreachable, GatewayTimeout, GatewayInvalidResponse, ProviderUnavailable, TierBelowMinimum, InvalidModel). Renders `{"detail": {"code", "message", "details"}}` to match FastAPI's native `HTTPException` shape and the existing B2 forced-password-change pattern. New `Error` schema added to `docs/api/backend-openapi.yaml` (was missing — gap noted in ADR 0003).
+* `gateway/app/errors.py` — `LQAIError` base + 9 subclasses keyed to the existing `GatewayError.code` enum. Renders `{"error": {"code", "message", "details"}}` per `docs/api/gateway-openapi.yaml`. The pre-existing `ProviderAdapterError` hierarchy is unchanged; it continues to drive adapter-internal errors and is mapped at the route boundary.
+* FastAPI exception handlers in both subsystems' `main.py` translate `LQAIError` instances to the canonical envelope.
+* `api/app/api/dependencies.py`'s forced-password-change gate now raises `PasswordChangeRequired` instead of a hand-rolled `HTTPException` detail dict (existing test still passes — wire shape preserved). CONTRIBUTING.md's "Exceptions" bullet now points at the real `app.errors` modules and ADR 0003.
+
+**2. Real `GatewayClient` chat-completion (and embeddings stub).** A4 had `health_check()` only; B5 builds out:
+
+* `chat_completion(request, request_id=None) -> ChatCompletionResponse` — non-streaming POST. Surfaces the gateway's tier annotation (with header backfill if the body somehow lacks it).
+* `chat_completion_stream(request, request_id=None) -> AsyncIterator[ChatCompletionChunk]` — parses OpenAI-format SSE frames (`data: <json>` blocks terminated by `data: [DONE]`). Mid-stream error frames map to the right `LQAIError` subclass and raise.
+* `embeddings(model, input_, request_id=None)` — thin client over the gateway's still-501 `/v1/embeddings`. Lands a stable signature for the future KB / RAG layer.
+* Error translation per ADR 0003: timeout → `GatewayTimeout` (504); network/DNS/TLS → `GatewayUnreachable` (503); gateway 5xx (no structured body) → `GatewayUnreachable`; gateway 401 (bad gateway-key header) → `GatewayUnreachable` plus a WARNING log naming the misconfiguration (the user must not see "wrong gateway key"); gateway 4xx with a `GatewayError` envelope → mapped via `app.errors.map_gateway_error_code`; malformed body → `GatewayInvalidResponse` (502).
+* `api/app/schemas/gateway.py` mirrors the gateway's OpenAI-compatible request/response shapes. Per CLAUDE.md, the api/ side cannot import from `gateway/`; the two subsystems each own their definitions, kept in sync against `docs/api/gateway-openapi.yaml`.
+* Single `httpx.AsyncClient` pooled across calls (per CLAUDE.md "reuse the same client").
+* `respx>=0.21` added to `api/`'s dev deps (already used the same way in `gateway/` — same library, no new SBOM family).
+
+**3. Backend chat endpoint (stateless pass-through).** `POST /api/v1/chats/{chat_id}/messages` — A4 had this as a 501 stub; B5 wires it through to the gateway:
+
+* Auth gate (`ActiveUser`): bearer token + cleared `must_change_password`.
+* Request body validates as `MessageCreate`; `chat_id` validates as a UUID.
+* Translates to a single-turn `ChatCompletionRequest` (the `content` becomes one `user` message). C3 will pull prior messages from the DB to build full conversation context; until then the gateway sees a single-turn request.
+* Calls `GatewayClient.chat_completion()` (non-streaming) or `chat_completion_stream()` (streaming). Streaming emits the OpenAPI sketch's `MessageStreamEvent` shapes: `delta` events while chunks arrive, a `complete` event on clean end, or an `Error` envelope frame if the stream ends in failure.
+* Surfaces `routed_inference_tier` and `routed_provider` in the response body and in the `X-LQ-AI-Routed-Inference-Tier` / `X-LQ-AI-Routed-Provider` headers.
+* Forwards `X-Request-Id` to the gateway so audit rows correlate.
+* Persistence: **none yet** — the `chats` and `messages` tables don't exist (C3 adds them). The response body carries `stateless_passthrough: true` so clients can detect the transitional state.
+* Routing-log writes: **the gateway is the canonical writer (B4)**; the backend does **not** double-write. There's an integration test that asserts the row count doesn't change during a backend chat call.
+* `docs/api/backend-openapi.yaml`: documents the dual response shape (JSON or SSE), the structured 4xx/5xx responses, and the tier-related response headers. Adds `MessagePostResponse` schema for the non-streaming JSON body. Adds the `stream` field to `MessageCreate` (was missing). Adds the `Error` variant to `MessageStreamEvent`'s `oneOf` so SSE error frames are part of the contract.
+
+**4. Tests (75 net-new across the build, plus 5 cross-subsystem):**
+
+* `api/tests/test_errors.py` — 23 unit tests pinning the envelope shape, the per-subclass HTTP status, the FastAPI handler round-trip, and the gateway-code → backend-class map.
+* `api/tests/test_gateway_client.py` — 27 unit tests against a respx-mocked gateway covering the full matrix (success path, auth/network/timeout/4xx/5xx error translation, schema-violation detection, streaming happy path / mid-stream errors / pre-frame errors / malformed chunks, embeddings 501, header forwarding).
+* `api/tests/test_chats_send_message.py` — 20 integration tests (DB-backed) exercising the chat endpoint end-to-end: auth and gate, validation, happy path, full error matrix, streaming variants, no-double-write regression, and the still-501 stubs.
+* `api/tests/test_endpoints.py` — adds `POST /api/v1/chats/{chat_id}/messages` to `IMPLEMENTED_ROUTES` so the 501 scaffold-test no longer asserts on it.
+* `gateway/tests/test_errors.py` — 14 unit tests for the gateway-side hierarchy.
+* `tests/test_error_code_contract.py` (cross-subsystem, brand-new dir) — 5 conformance tests that import both subsystems' `app.errors` modules and verify the codes/shapes stay in sync. Lives under the cross-cutting `tests/` directory per CLAUDE.md (the only place imports from both subsystems are allowed). Has its own `pyproject.toml` registering pytest markers.
+
+**5. End-to-end verification on the running stack:**
+
+1. ✅ `docker compose down -v && up -d && make migrate` — all 6 services healthy in ~30s; migrations apply cleanly.
+2. ✅ Get the first-run admin password from the API logs; `POST /auth/login` → 200 with `must_change_password: true`; `POST /auth/change-password` → 204; relogin with the new password → 200 with `must_change_password: false`.
+3. ⏭️ Real-key Anthropic verification deferred to operator (no `ANTHROPIC_API_KEY` available in this session). Covered by the respx-mocked stack-level integration tests.
+4. ⏭️ Bad gateway-key verification flagged: **the gateway does not enforce X-LQ-AI-Gateway-Key auth yet**. The OpenAPI sketch documents it and the backend client always sends it, but no gateway-side middleware checks it. Not in B5 scope. Surfaced as a deferred-items entry below; the backend's translation logic for the gateway-401 case is unit-tested via respx and is in place when the middleware lands.
+5. ✅ No `ANTHROPIC_API_KEY` set on the gateway → backend returns HTTP 502 with `{"detail": {"code": "provider_unavailable", "message": "Anthropic provider 'anthropic-prod' is configured but no adapter was instantiated; check that the credential environment variable referenced by 'api_key_env' is set", "details": {"provider": "anthropic-prod", "gateway_code": "provider_unavailable"}}}`. Confirms the gateway's structured `provider_unavailable` envelope propagates through the backend with the right code, the right HTTP status, and the operator-facing detail preserved.
+
 ### B4 — Gateway router + alias resolution + tier derivation ✅
 
 Real router in `gateway/app/router.py` replaces B3's "Anthropic-only" temp logic. Pulls together:
@@ -108,17 +158,6 @@ End-to-end verification: real-DB row write confirmed (`docker exec` + `gateway/.
 
 ## Tasks ahead
 
-### B5 — Backend ↔ Gateway integration (~4-6h)
-
-**Depends on:** A4 (gateway client stub), B4 (real routing).
-
-**Scope:** Backend has a gateway client that calls the gateway with the gateway API key. Backend chat endpoint stub now calls through the gateway and returns the response. End-to-end inference path: backend → gateway → Anthropic → response.
-
-**Notes:**
-- A4 already drafted `api/app/clients/gateway.py` with a `GatewayClient` skeleton + `health_check()` method. B5 fleshes out the actual call methods (chat_completion, embeddings).
-- Persistence of inference_routing_log entries: B4 writes them gateway-side; B5 needs to ensure the backend doesn't double-write. Probably the gateway is the canonical writer.
-- This is also where the `lq_ai.errors` package would naturally land (cross-cutting backend↔gateway error semantics) — see deferred items.
-
 ### B6 — Additional provider adapters (optional)
 
 **Depends on:** B3 (template).
@@ -139,12 +178,18 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 |---|---|
 | `lq_ai.cli reset-admin-password` CLI | **Landed in B2 as `python -m app.cli reset-admin-password`.** The package is named `app`, not `lq_ai`, in this codebase; quickstart.md:325 was updated to the correct invocation. Argparse-based, ~150 LOC, 5 integration tests. A `[project.scripts]` console-script entry was considered but pulled because the current Dockerfile installs only the package metadata (the `app/` source tree is `COPY`'d in afterward); the console script would resolve `app.cli:main` against an empty wheel and fail. `python -m app.cli` works correctly because the API container's WORKDIR is `/app`. Reintroduce the console script when the Dockerfile installs the real wheel. |
 
-### Deferred to **B5** (backend ↔ gateway integration)
+### ~~Deferred to B5~~ — landed in B5
 
-| Item | Surface | Notes |
+| Item | Disposition |
+|---|---|
+| `lq_ai.errors` exception hierarchy | **Landed in B5.** ADR 0003 records the architectural decision: parallel hierarchies in `api/app/errors.py` and `gateway/app/errors.py` rather than a shared Python module (would violate CLAUDE.md's hard rule on subsystem isolation). The contract is the error-code enum in the OpenAPI sketches; a cross-subsystem conformance test under `tests/test_error_code_contract.py` keeps the two sides in sync. CONTRIBUTING.md's "Exceptions" bullet now points at the real modules. |
+| Real `GatewayClient` chat_completion / embeddings methods | **Landed in B5.** Non-streaming + streaming chat-completion + embeddings stub. Full error-translation matrix per ADR 0003 (timeout / network / 5xx / 4xx with envelope / 401 special-case). 27 unit tests against a respx-mocked gateway. |
+
+### Newly deferred (surfaced during B5)
+
+| Item | Surface | Owning task |
 |---|---|---|
-| `lq_ai.errors` exception hierarchy | CONTRIBUTING.md references it; doesn't exist yet | Both B1 and B3 noted it. B5 is where backend↔gateway error semantics need to align — natural landing spot. Cross-cutting; lives in a shared module that both `api/` and `gateway/` import from. |
-| Real `GatewayClient` chat_completion / embeddings methods | A4's stub in `api/app/clients/gateway.py` | A4 only built health_check(); B5 builds the rest. |
+| Gateway-side `X-LQ-AI-Gateway-Key` auth middleware | `docs/api/gateway-openapi.yaml` documents it as a security scheme; `api/app/clients/gateway.py` always sends it; **the gateway has no middleware checking it** | The backend's translation logic for a gateway-401 case is unit-tested via respx and the right behavior (503 + WARNING log; user does NOT see "wrong gateway key") is in place. The middleware itself is operator-scope hardening — most natural in **D-phase** alongside other gateway hardening (rate limiting, request signing). Could land earlier if a procurement-evaluator deployment forces the question. Until then, **the gateway is trust-on-first-network**: any caller that can reach the gateway port can call `/v1/chat/completions`. Operators must front the gateway with network-level isolation (Compose default network; K8s Service). |
 
 ### Deferred to **C3** (chat service + message persistence)
 
@@ -259,11 +304,11 @@ When you resume:
 1. **Check git status is clean** and you're at HEAD of origin/main:
    ```bash
    git status   # expect: "nothing to commit, working tree clean"
-   git log -1 --oneline   # expect the B4 progress-doc commit (or the merge commit)
+   git log -1 --oneline   # expect the B5 progress-doc commit (or the merge commit)
    ```
 2. **Read this doc top to bottom** to recover state.
-3. **B2 + B4 are both done and merged.** Next solo task is **B5 — Backend ↔ Gateway integration**: it ties the backend chat path (currently a 501 stub gated behind `ActiveUser`) to the gateway's now-real router and adapter. Sequence: backend chat handler → `GatewayClient.chat_completion(...)` → gateway `/v1/chat/completions` → AnthropicAdapter → response back through both layers. B5 is also where the cross-cutting `lq_ai.errors` exception hierarchy lands (CONTRIBUTING.md references it; it doesn't exist yet — see deferred items).
-4. **After B5 lands**, the C-phase (capability layer: skills, chats, files, KB) is unblocked.
+3. **B5 is done and merged.** The B-phase is complete (B6 is optional). The end-to-end inference path is wired: backend chat handler → `GatewayClient.chat_completion(...)` → gateway `/v1/chat/completions` → AnthropicAdapter → response back through both layers. The cross-cutting `lq_ai.errors` hierarchy is in place (ADR 0003).
+4. **C-phase is unblocked.** Next is the capability layer: skills loading (C1), skill execution (C2), chat persistence (C3), files (C4), document pipeline / citations (C5), KB (C6), audit log (C7). Recommended order is roughly C1 → C3 → C2 → C4 → C5 → C6 → C7; C3 is high-value early because it removes the "stateless pass-through" caveat from B5.
 5. **B6 is optional** for M1 baseline — recommended order is OpenAI first (largest user base), then Ollama (Mode 2 unlock), then Vertex/Bedrock. Ollama specifically is the Mode 2 (air-gapped local inference) unlock.
 
 That's it — clean continuation.
