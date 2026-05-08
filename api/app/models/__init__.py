@@ -13,12 +13,16 @@ from __future__ import annotations
 from app.models.audit import AuditLog
 from app.models.file import File
 from app.models.inference import InferenceRoutingLog
+from app.models.project import Project, ProjectFile, ProjectSkill
 from app.models.user import User, UserSession
 
 __all__ = [
     "AuditLog",
     "File",
     "InferenceRoutingLog",
+    "Project",
+    "ProjectFile",
+    "ProjectSkill",
     "User",
     "UserSession",
 ]
