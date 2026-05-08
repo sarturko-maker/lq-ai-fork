@@ -35,6 +35,8 @@ tags:
     description: OpenAI-compatible inference endpoints
   - name: admin
     description: Gateway configuration and operations
+  - name: health
+    description: Liveness and readiness probes
 
 paths:
 
@@ -116,68 +118,102 @@ paths:
                       prompt_tokens: {type: integer}
                       total_tokens: {type: integer}
 
-  # ----------- ADMIN -----------
-  /admin/health:
+  # ----------- HEALTH (PRD §4.3 — liveness/readiness) -----------
+  /health:
     get:
-      tags: [admin]
-      summary: Gateway health
+      tags: [health]
+      summary: Liveness probe
+      description: |
+        Returns 200 as soon as the process is serving requests. Independent of
+        downstream provider reachability or gateway.yaml validity. Used by
+        docker-compose / Kubernetes liveness probes.
       security: []
       responses:
         '200':
-          description: Healthy
+          description: Alive
           content:
             application/json:
               schema:
                 type: object
+                required: [status, service]
                 properties:
-                  status: {type: string, enum: [ok]}
+                  status: {type: string, enum: [alive]}
+                  service: {type: string}
                   version: {type: string}
-                  providers: {type: array, items: {type: string}}
 
-  /admin/providers:
+  /ready:
     get:
-      tags: [admin]
-      summary: List configured providers and their status
+      tags: [health]
+      summary: Readiness probe
+      description: |
+        Returns 200 once gateway.yaml has loaded and validated. Returns 503
+        otherwise. Used to decide whether to route traffic.
+      security: []
       responses:
         '200':
-          description: Providers
+          description: Ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [ready]}
+                  providers: {type: integer, description: "configured provider count"}
+                  aliases: {type: integer, description: "model alias count"}
+        '503':
+          description: Not ready (config not loaded or invalid)
+
+  # ----------- TIER (PRD §3.13 — backend reads this for the tier badge) -----------
+  /v1/inference/current-tier:
+    get:
+      tags: [inference]
+      summary: Resolve the routed inference tier for a (provider, model)
+      description: |
+        Returns the derived tier (1-5) that a request would receive given the
+        operator's gateway.yaml. The backend calls this to populate the tier
+        badge in the chat UI per PRD §3.13. Unimplemented in M1 (lands in B4).
+      parameters:
+        - name: provider
+          in: query
+          required: true
+          schema: {type: string}
+        - name: model
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Tier resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [routed_inference_tier, provider, model]
+                properties:
+                  routed_inference_tier: {type: integer, enum: [1,2,3,4,5]}
+                  provider: {type: string}
+                  model: {type: string}
+                  explanation: {type: string, description: "human-readable rationale"}
+
+  # ----------- ADMIN (PRD §4.5) -----------
+  /admin/v1/providers/health:
+    get:
+      tags: [admin]
+      summary: Per-provider health
+      responses:
+        '200':
+          description: Provider statuses
           content:
             application/json:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/ProviderStatus'}
 
-  /admin/inference-tiers:
+  /admin/v1/usage:
     get:
       tags: [admin]
-      summary: Get tier configuration (provider/model → tier mapping)
-      responses:
-        '200':
-          description: Tier config
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/InferenceTierConfig'}
-    put:
-      tags: [admin]
-      summary: Update tier configuration
-      description: |
-        Admin-only. Audited. Updates take effect for new requests immediately.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/InferenceTierConfig'}
-      responses:
-        '200':
-          description: Updated
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/InferenceTierConfig'}
-
-  /admin/cost:
-    get:
-      tags: [admin]
-      summary: Cost summary (date-range filterable)
+      summary: Per-key, per-model usage and cost
       parameters:
         - name: from
           in: query
@@ -192,7 +228,7 @@ paths:
             enum: [provider, model, tier, user, project]
       responses:
         '200':
-          description: Cost summary
+          description: Usage summary
           content:
             application/json:
               schema:
@@ -211,6 +247,91 @@ paths:
                         tokens_in: {type: integer}
                         tokens_out: {type: integer}
                         request_count: {type: integer}
+
+  /admin/v1/tier-config:
+    get:
+      tags: [admin]
+      summary: Get current Inference Tier configuration
+      description: |
+        Returns the loaded tier_policy block from gateway.yaml — defaults,
+        allowed tiers globally and per-group, warn / refuse settings.
+      responses:
+        '200':
+          description: Tier configuration
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InferenceTierConfig'}
+    patch:
+      tags: [admin]
+      summary: Partial update to tier configuration
+      description: |
+        Admin-only. Audited. Updates take effect for new requests immediately.
+        Partial-update semantics — fields omitted from the request body are
+        left unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/InferenceTierConfig'}
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/InferenceTierConfig'}
+
+  /admin/v1/anonymization-config:
+    get:
+      tags: [admin]
+      summary: Get current anonymization configuration (M2)
+      responses:
+        '200':
+          description: Anonymization configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    patch:
+      tags: [admin]
+      summary: Partial update to anonymization configuration (M2)
+      description: |
+        Admin-only. Audited. Updates take effect for new requests immediately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Updated
+
+  /admin/v1/config/reload:
+    post:
+      tags: [admin]
+      summary: Reload gateway.yaml without restarting the service
+      description: |
+        Admin-only. Re-reads the config file from disk and atomically swaps
+        in the new state. If the new config is invalid, the call fails with
+        400 and the existing config is preserved.
+      responses:
+        '200':
+          description: Reloaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers: {type: integer}
+                  aliases: {type: integer}
+                  reloaded_at: {type: string, format: date-time}
+        '400':
+          description: New config invalid; existing config preserved
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
 
 components:
   securitySchemes:
