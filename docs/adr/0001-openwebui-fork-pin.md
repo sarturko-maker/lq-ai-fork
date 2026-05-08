@@ -45,6 +45,7 @@ Considerations:
 
 - We comply with OpenWebUI's branding requirements. The README and the deployment docs explicitly credit OpenWebUI as the upstream.
 - OpenWebUI's license is preserved in `web/LICENSE` alongside our Apache 2.0 `LICENSE` at the repo root, with a clear note explaining the dual-license structure.
+- **Branding clause (significant, surfaced during A1.d import).** OpenWebUI's license clause 4 prohibits altering, removing, obscuring, or replacing "Open WebUI" branding (name, logo, visual / textual / symbolic identifiers) in any deployment or distribution, with three carve-outs: (i) deployments with ≤50 end users in any rolling 30-day period, (ii) specific prior written permission from the copyright holder, or (iii) a duly executed enterprise license. **What this means for us:** Task A5 ("Apply InHouse AI branding") cannot strip OpenWebUI's branding out of the UI for deployments above the 50-user threshold. The right pattern is **dual-branding**: an InHouse AI banner / footer / chrome added alongside (not replacing) OpenWebUI's identifiers. For larger-deployment operators who want full re-branding, the README must direct them to OpenWebUI for an enterprise license. This is operator-side compliance, not a maintainer-side blocker — but A5 needs to be explicit about it, and our deployment docs need a "Branding obligations" subsection.
 
 ## Consequences
 

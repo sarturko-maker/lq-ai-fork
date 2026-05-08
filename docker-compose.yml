@@ -161,10 +161,10 @@ services:
       retries: 10
 
   web:
-    # Build context lands when OpenWebUI fork is imported in A1.d.
-    # Until then, the web service is profile-gated so default `docker compose up`
-    # brings up the other 5 services without erroring on a missing build context.
-    profiles: ["web"]
+    # OpenWebUI fork imported at v0.9.2 per ADR 0001 (Task A1.d).
+    # Customizations land progressively: A5 (branding + delegated-auth wiring),
+    # D2 (tier badge), and others. The container builds upstream-as-is in M1's
+    # initial state.
     build:
       context: ./web
       dockerfile: Dockerfile
