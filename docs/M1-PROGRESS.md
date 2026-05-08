@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-08 (session 5; C1 + C4 both landed in parallel worktrees and merged into main)
+> **Last updated:** 2026-05-08 (session 6; C7 landed in a parallel worktree alongside C2 + C5)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -14,13 +14,13 @@
 |---|---|---|---|
 | A — Foundation scaffolding | A1, A2, A3, A4 | A5 (partial — env-var branding only) | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5 | — | B6 optional; otherwise C-phase |
-| C — Capability layer | C1, C4 | — | C2 (prompt assembly), C3 (chats), C5 (doc pipeline), C6 (KB), C7 (projects), C8 (web UI) |
+| C — Capability layer | C1, C4, C7 | — | C2 (prompt assembly), C3 (chats), C5 (doc pipeline), C6 (KB), C8 (web UI) |
 | D — M1 differentiators | — | — | After C |
 | E — Procurement and release | — | — | After D |
 
-**Tests:** ~250 passing in api/ (C1 added 37: 24 loader/registry/schema unit + 12 endpoint integration + 1 SIGHUP subprocess; C4 added 43+: 14 storage-streaming unit + 22 file-endpoint integration + 7 helper unit + 4 migration + 1 errors-hierarchy parametrize entry; on top of B5's 170-line baseline); 118 passing in gateway/ (unchanged this wave — C1 is api/-only per ADR 0004; C4 doesn't touch gateway; 1 skipped pending ANTHROPIC_API_KEY); 5 cross-subsystem conformance tests under `tests/` (B5; unaffected by C1/C4 since `payload_too_large` is backend-only and skill loading doesn't cross the gateway boundary).
+**Tests:** ~325+ passing in api/ (C7 added 75: 27 schema/slug unit + 42 endpoint integration + 6 migration + 1 errors-hierarchy parametrize entry; C4 added 43; C1 added 37; on top of B5's 170-line baseline); 118 passing in gateway/ (unchanged this wave — C7 is api/-only; 1 skipped pending ANTHROPIC_API_KEY); 5 cross-subsystem conformance tests under `tests/` (B5; unaffected by C7 since `conflict` is backend-only).
 **Stack:** `docker compose up` brings 6 services (postgres, redis, minio, gateway, api, web) to healthy in ~30s.
-**Migration:** `make migrate` applies `0001_initial.py`, `0002_add_must_change_password.py`, and `0003_create_files_table.py` cleanly; all reversible.
+**Migration:** `make migrate` applies `0001_initial.py`, `0002_add_must_change_password.py`, `0003_create_files_table.py`, and `0004_create_projects.py` cleanly; all reversible.
 
 ---
 
@@ -292,6 +292,134 @@ download via curl, byte-compare) is the next-session operator
 verification step. The mocked-MinIO bytes-fidelity test enforces the
 contract automatically on every CI run.
 
+### C7 — Project service ✅
+
+`/api/v1/projects` CRUD endpoints + file/skill attachment endpoints +
+free-form `context_md` document + the `privileged`/`minimum_inference_tier`
+constraint enforced at three layers (Pydantic schema, PATCH handler
+merge-state validation, and the DB CHECK constraint). New migration
+`0004_create_projects.py` lands `projects`, `project_files`, and
+`project_skills` tables, plus closes the C4-deferred FK constraint
+on `files.project_id` (`fk_files_project_id REFERENCES projects(id)
+ON DELETE SET NULL`).
+
+**Migration `0004_create_projects.py`** — `projects` table with
+`owner_id` (FK→users, ON DELETE RESTRICT), `name`, `slug`, `description`,
+`context_md`, `privileged` (bool, default false), `minimum_inference_tier`
+(SMALLINT, nullable), `archived_at` (soft-delete column;
+NULL means active). CHECK constraints: tier-range (NULL or 1-5),
+privileged-implies-tier, name length (1-200), slug length (1-80).
+Partial UNIQUE index on `(owner_id, slug) WHERE archived_at IS NULL`
+so archived slugs free up for reuse. Partial listing index on
+`(owner_id, created_at DESC) WHERE archived_at IS NULL`. Reuses the
+A1 `set_updated_at()` trigger function for `updated_at` maintenance.
+
+`project_files` (composite-PK join, ON DELETE CASCADE on both ends)
+and `project_skills` (composite-PK join, `skill_name` is *text* not a
+FK because skills are filesystem-canonical per ADR 0004). Indexes for
+the inverse-lookup queries: `(file_id)` on `project_files`,
+`(skill_name)` on `project_skills`.
+
+**Endpoints landed:**
+
+* `POST /api/v1/projects` — create. Slug is generated from name when
+  omitted; collisions resolve with a numeric suffix (`-2`, `-3`, …).
+  Privileged-without-tier returns 422 (Pydantic-driven; the schema's
+  `model_validator` enforces the rule at the API boundary).
+* `GET /api/v1/projects?archived=true|false` — list (default excludes
+  archived; `archived=true` returns archived only).
+* `GET /api/v1/projects/{id}` — fetch single, with `attached_file_ids`
+  and `attached_skill_names` populated from the join tables. Archived
+  projects are visible via direct GET (the listing default excludes
+  them) so a client can render an archived-detail page.
+* `PATCH /api/v1/projects/{id}` — partial update with the
+  `exclude_unset` pattern that distinguishes "field absent" from
+  "explicit null." The privileged-tier rule is re-checked against the
+  *merged* state (the DB CHECK is the safety net).
+* `DELETE /api/v1/projects/{id}` — soft-delete (sets `archived_at`).
+  Idempotent: a second DELETE on an already-archived project returns
+  404.
+* `POST/DELETE /api/v1/projects/{id}/files` and
+  `POST/DELETE /api/v1/projects/{id}/skills` — attachment endpoints.
+  Cross-user files/projects → 404; unknown skills → 404; already-
+  attached → 409. Skills are validated against the in-memory registry
+  before insert.
+
+**Per-user isolation.** Projects are scoped to `owner_id`; cross-user
+access returns 404 (not 403), matching C4's posture. File attachment
+requires the user to own *both* the project AND the file; skill
+attachment is registry-wide so any authenticated user may attach any
+registered skill.
+
+**`Conflict` exception class added.** `app.errors.Conflict` (HTTP 409,
+code `conflict`) for slug collisions and idempotency-violating
+attachments. Backend-only code; does not cross the gateway boundary,
+so the cross-subsystem contract test is unaffected.
+
+**Closed C4 deferred items:**
+
+1. **`files.project_id` FK constraint.** Migration 0004's ALTER TABLE
+   adds `fk_files_project_id REFERENCES projects(id) ON DELETE SET
+   NULL`. SET NULL rather than CASCADE because a file is independently
+   owned and may be in other projects via the `project_files` join.
+2. **Multipart `project_id` form field on POST /api/v1/files.** The
+   C4 handler now accepts the field, validates it against the caller's
+   active projects, and persists `files.project_id`. Bogus,
+   cross-user, or invalid-UUID `project_id` returns 422 *before* any
+   bytes touch MinIO.
+
+**Tests (75 net-new in api/, plus 6 migration tests + 1 errors entry):**
+
+* `api/tests/test_projects_unit.py` — 27 unit tests on
+  `slugify`, `ProjectCreateRequest` (privileged-tier rule, context-md
+  byte cap, slug pattern, extra-fields rejection), and
+  `ProjectUpdateRequest` (partial-update semantics, no privileged
+  rule on PATCH).
+* `api/tests/test_projects_endpoints.py` — 42 integration tests
+  covering the full handler matrix: auth gates, CRUD round-trip,
+  per-user isolation (404 cross-user), the privileged constraint at
+  schema and PATCH-merge layers, slug collision suffixing,
+  archive/unarchive via PATCH, file/skill attachment (happy path,
+  unknown, cross-user, already-attached, detach, idempotent), context
+  cap, and the C7 verification contract end-to-end.
+* `api/tests/test_migrations.py` — extended with 6 new tests:
+  `projects` + `project_files` + `project_skills` table existence,
+  expected indexes (including the partial slug-uniqueness index),
+  the `fk_files_project_id` constraint existence, the
+  privileged-implies-tier CHECK firing, the tier-range CHECK firing,
+  and the ON DELETE SET NULL behavior of `files.project_id`.
+* `api/tests/test_errors.py` — extended with the `Conflict` case in
+  the parametrized status/code matrix.
+* `api/tests/test_endpoints.py` — projects routes added to
+  `IMPLEMENTED_ROUTES`. The route-inventory lower-bound was loosened
+  from 29 to 15 to reflect that wave-2 tasks are migrating routes
+  from the 501-stub set into real implementations.
+* `api/tests/test_openapi.py` — `EXPECTED_PATHS` updated with the two
+  new detach paths; the count assertion bumped to 33.
+* `api/tests/test_admin_bootstrap.py` — the gate-cleared probe
+  switched from `/api/v1/projects` (now real) to
+  `/api/v1/knowledge-bases` (still 501).
+
+**Drift flagged.** `docs/api/backend-openapi.yaml`: the `/projects`
+family now documents real shapes (status codes, response envelopes,
+the privileged constraint behavior, the `archived` filter on GET,
+the `archived` flag on PATCH), the new detach endpoints
+(`/projects/{id}/files/{file_id}` and `/projects/{id}/skills/{skill_name}`),
+the `Project`/`ProjectCreate`/`ProjectUpdate` schema shapes (slug,
+context_md, attached_file_ids, attached_skill_names, archived_at),
+and the `conflict` code added to the `Error.detail.code` enum.
+`docs/db-schema.md`: the `projects` schema doc updated to match what
+0004 lands (gen_random_uuid, slug column, archived_at, the join
+tables renamed to `project_files`/`project_skills` matching the
+migration), plus a section for the C4-deferred FK closure.
+
+End-to-end verification: stack-level operator smoke
+(`docker compose up -d`, login, `POST /api/v1/projects`, attach a
+skill, attach a file, `GET` and verify round-trip, `POST` again with
+`privileged=true` without tier and confirm 422) is the next-session
+operator verification step. The 48-test integration suite enforces
+the contract automatically on every CI run that has DATABASE_URL set.
+
 ---
 
 ## Tasks ahead
@@ -342,8 +470,8 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 | Item | Surface | Owning task |
 |---|---|---|
 | MinIO-bytes GC for soft-deleted files | C4's `DELETE /api/v1/files/{id}` flips `deleted_at` and leaves the bytes; ADR 0005 documents the rationale | **D6 (per-user export+delete)** owns the user-driven hard-delete path. Operators who care about storage cost before D6 ships need a manual cleanup tool. Filed as a candidate **DE-XXX** in PRD §9 next time we update the deferred-enhancements list — the natural shape is a CLI subcommand under `python -m app.cli` that hard-deletes `files` rows + objects past a retention window. |
-| `project_id` FK constraint on `files.project_id` | Migration 0003 leaves the column nullable without an FK constraint because `projects` doesn't exist yet (C7) | **C7** ALTERs the table to add `fk_files_project_id REFERENCES projects(id) ON DELETE SET NULL`. Same pattern A2 used for `inference_routing_log.chat_id` / `.message_id`. |
-| Multipart `project_id` form field on `POST /api/v1/files` | The OpenAPI sketch's multipart body declares the field; the C4 handler accepts it (FastAPI parses it as part of the form) but **does not persist it** | **C7** wires the project-attachment path. The OpenAPI sketch is honest about it: the field is in the body schema and silently ignored until C7 lands. |
+| ~~`project_id` FK constraint on `files.project_id`~~ | ~~Migration 0003 leaves the column nullable without an FK constraint~~ | **Landed in C7.** Migration 0004's ALTER TABLE adds `fk_files_project_id REFERENCES projects(id) ON DELETE SET NULL`. Migration test pins both the constraint existence and the SET NULL behavior. |
+| ~~Multipart `project_id` form field on `POST /api/v1/files`~~ | ~~The handler accepted but did not persist the field~~ | **Landed in C7.** The C4 handler now declares `project_id` as a `Form` parameter, validates it against the caller's active projects (rejecting bogus / cross-user / invalid-UUID values with 422 before any bytes touch MinIO), and persists `files.project_id`. 4 new integration tests cover persistence, unknown id, cross-user id, and invalid-UUID id. |
 | `forceful=true` immediate hard-delete on `DELETE /api/v1/files/{id}` | Considered in ADR 0005; not in C4 scope | Out of M1; will be reconsidered in D-phase if operator feedback reveals demand. Until then, the only hard-delete path is D6. |
 
 ### Deferred to **C3** (chat service + message persistence)
@@ -459,11 +587,11 @@ When you resume:
 1. **Check git status is clean** and you're at HEAD of origin/main:
    ```bash
    git status   # expect: "nothing to commit, working tree clean"
-   git log -1 --oneline   # expect the C4 progress-doc commit (or the merge commit)
+   git log -1 --oneline   # expect the C7 progress-doc commit (or the merge commit)
    ```
 2. **Read this doc top to bottom** to recover state.
-3. **C-phase wave-1 is done.** B-phase complete (B6 optional). C1 (skill loader, backend-side per ADR 0004) and C4 (file upload + MinIO, soft-delete + bare-UUID key per ADR 0005) both landed. End-to-end inference path is wired (B5); skills are loaded into a backend in-memory registry with SIGHUP-driven atomic-swap reload; file upload/metadata/download/soft-delete is end-to-end against MinIO with streaming I/O, SHA-256 content addressing, and a 100 MB cap. The cross-cutting `lq_ai.errors` hierarchy is in place (ADR 0003).
-4. **C-phase wave-2 unblocked.** Remaining tasks: C2 (prompt assembly — gateway-side; reads skill content from backend over HTTP per ADR 0004), C3 (chat persistence — removes the "stateless pass-through" caveat from B5), C5 (document pipeline + character-precise offsets — depends on C4, now unblocked; load-bearing for M2 citation engine), C6 (KB hybrid retrieval — depends on C5), C7 (project service — depends on C1 + C4, both in), C8 (web UI chat — depends on C3). Wave-2 parallel candidates: C2 ∥ C5 ∥ C7. C3 is the keystone task and runs after C2.
+3. **C-phase wave-2 partially landed.** C7 (Projects) is done, alongside C1 + C4 from wave-1. The matter-scoped resource model is in place: projects, file/skill attachments, free-form context, the privileged constraint enforced at three layers, slug uniqueness with collision suffixing. The C4 deferred items (`files.project_id` FK + multipart `project_id` form field) are closed. End-to-end inference path is wired (B5); skills are loaded into a backend in-memory registry with SIGHUP-driven atomic-swap reload; file upload/metadata/download/soft-delete is end-to-end against MinIO with streaming I/O, SHA-256 content addressing, and a 100 MB cap. The cross-cutting `lq_ai.errors` hierarchy is in place (ADR 0003).
+4. **Remaining C-phase wave-2 tasks.** C2 (prompt assembly — gateway-side; reads skill content from backend over HTTP per ADR 0004), C3 (chat persistence — removes the "stateless pass-through" caveat from B5; also closes the deferred FK on `inference_routing_log.chat_id`/`message_id`), C5 (document pipeline + character-precise offsets — depends on C4, load-bearing for M2 citation engine), C6 (KB hybrid retrieval — depends on C5), C8 (web UI chat — depends on C3). C3 is the keystone task and runs after C2 and C5 land.
 5. **B6 is optional** for M1 baseline — recommended order is OpenAI first (largest user base), then Ollama (Mode 2 unlock), then Vertex/Bedrock. Ollama specifically is the Mode 2 (air-gapped local inference) unlock.
 
 That's it — clean continuation.

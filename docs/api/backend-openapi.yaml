@@ -243,30 +243,35 @@ paths:
   /api/v1/projects:
     get:
       tags: [projects]
-      summary: List the user's projects
+      summary: List the caller's projects
+      description: |
+        Returns the caller's active projects by default. ``archived=true``
+        returns archived projects only; ``archived=false`` is equivalent
+        to omitting the parameter (active only). Per-user isolation:
+        only the caller's own projects are returned.
       parameters:
-        - name: cursor
+        - name: archived
           in: query
-          schema: {type: string}
-        - name: limit
-          in: query
-          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+          required: false
+          schema: {type: boolean}
+          description: "When true, return only archived projects."
       responses:
         '200':
-          description: Paginated list of projects
+          description: List of projects (active or archived per the filter).
           content:
             application/json:
               schema:
-                type: object
-                required: [items, next_cursor]
-                properties:
-                  items:
-                    type: array
-                    items: {$ref: '#/components/schemas/Project'}
-                  next_cursor: {type: string, nullable: true}
+                type: array
+                items: {$ref: '#/components/schemas/Project'}
     post:
       tags: [projects]
       summary: Create a project
+      description: |
+        Creates a project owned by the caller. ``slug`` is generated
+        from ``name`` if omitted; collisions with the caller's existing
+        active projects resolve with a numeric suffix (``-2``, ``-3``,
+        ...). Setting ``privileged=true`` requires
+        ``minimum_inference_tier`` to be set; missing-tier returns 422.
       requestBody:
         required: true
         content:
@@ -280,6 +285,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Project'
+        '409':
+          description: Slug collision under concurrent create
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422':
+          description: Schema validation failure (e.g., privileged-without-tier)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/projects/{project_id}:
     parameters:
@@ -289,14 +304,34 @@ paths:
         schema: {type: string, format: uuid}
     get:
       tags: [projects]
+      summary: Fetch a single project
+      description: |
+        Returns the canonical ``Project`` shape with ``attached_file_ids``
+        and ``attached_skill_names`` populated from the join tables.
+        Archived projects are visible via direct GET so the client can
+        render an archived-detail page; the list endpoint excludes them
+        by default.
       responses:
         '200':
           description: Project
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Project'}
+        '404':
+          description: Not found (or owned by another user)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
     patch:
       tags: [projects]
+      summary: Partial update of a project
+      description: |
+        Applies only the fields the caller sets. The
+        ``privileged``↔``minimum_inference_tier`` rule is re-checked
+        against the *merged* state — setting either alone in a way that
+        would leave the project privileged-but-tierless returns 400.
+        ``archived: true`` archives the project (equivalent to DELETE);
+        ``archived: false`` unarchives it.
       requestBody:
         required: true
         content:
@@ -308,10 +343,30 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Project'}
+        '400':
+          description: Cross-field rule violation (e.g., privileged-without-tier)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Not found (or owned by another user)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
     delete:
       tags: [projects]
+      summary: Soft-delete (archive) a project
+      description: |
+        Sets ``archived_at`` on the row. Hard-delete is owned by D6.
+        Idempotent: a second DELETE on an already-archived project
+        returns 404.
       responses:
-        '204': {description: Project deleted (soft)}
+        '204': {description: Project archived}
+        '404':
+          description: Not found, or already archived
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/projects/{project_id}/skills:
     parameters:
@@ -322,6 +377,11 @@ paths:
     post:
       tags: [projects]
       summary: Attach a skill to the project
+      description: |
+        Attaches a registry-known skill to the project by name. The
+        skill must exist in the in-memory skill registry (C1); unknown
+        names return 404. Re-attaching an already-attached skill
+        returns 409.
       requestBody:
         required: true
         content:
@@ -330,10 +390,45 @@ paths:
               type: object
               required: [skill_name]
               properties:
-                skill_name: {type: string}
-                skill_version: {type: string, description: "Defaults to latest"}
+                skill_name: {type: string, minLength: 1, maxLength: 200}
       responses:
         '204': {description: Attached}
+        '404':
+          description: Project or skill not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Skill already attached
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/projects/{project_id}/skills/{skill_name}:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: skill_name
+        in: path
+        required: true
+        schema: {type: string}
+    delete:
+      tags: [projects]
+      summary: Detach a skill from the project
+      description: |
+        Removes the project↔skill join row. The skill itself is
+        registry-canonical and untouched. Detaching a skill that is
+        not attached returns 404 (idempotency-violating; clients
+        should treat 204 and 404 as terminal success states).
+      responses:
+        '204': {description: Detached}
+        '404':
+          description: Project or attachment not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/projects/{project_id}/files:
     parameters:
@@ -344,6 +439,10 @@ paths:
     post:
       tags: [projects]
       summary: Attach an uploaded file to the project
+      description: |
+        Attaches an uploaded file to the project. The caller must own
+        both the project and the file (cross-user → 404 on either).
+        Re-attaching an already-attached file returns 409.
       requestBody:
         required: true
         content:
@@ -355,6 +454,42 @@ paths:
                 file_id: {type: string, format: uuid}
       responses:
         '204': {description: Attached}
+        '404':
+          description: Project or file not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: File already attached
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/projects/{project_id}/files/{file_id}:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: file_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    delete:
+      tags: [projects]
+      summary: Detach a file from the project
+      description: |
+        Removes the project↔file join row. The file row itself is
+        untouched (use ``DELETE /api/v1/files/{file_id}`` to soft-
+        delete the file). Detaching a file that is not attached
+        returns 404.
+      responses:
+        '204': {description: Detached}
+        '404':
+          description: Project or attachment not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   # ----------- CHATS -----------
   /api/v1/chats:
@@ -1158,46 +1293,94 @@ components:
 
     Project:
       type: object
-      required: [id, name, owner_id, privileged, created_at]
+      required: [id, name, slug, owner_id, privileged, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
-        name: {type: string}
-        description: {type: string, nullable: true}
-        context: {type: string, nullable: true, description: "Free-form markdown context document"}
+        name: {type: string, minLength: 1, maxLength: 200}
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          description: |
+            URL-friendly identifier; unique-per-owner within the active set
+            (an archived project's slug can be reused). Generated from
+            `name` on create when not supplied; collisions resolve with a
+            numeric suffix (`-2`, `-3`, ...).
+        description: {type: string, nullable: true, maxLength: 1000}
+        context_md:
+          type: string
+          nullable: true
+          description: |
+            Free-form Markdown context document for the matter. Capped at
+            100 KiB (UTF-8 bytes); exceeding the cap returns 422.
         owner_id: {type: string, format: uuid}
         privileged:
           type: boolean
           description: |
             When true, every chat in this project is marked privileged in the audit log
             and the routed inference tier is forced to be at least minimum_inference_tier.
+            Setting `privileged=true` requires `minimum_inference_tier` to be set;
+            attempts to set one without the other return 422 (POST) or 400 (PATCH).
         minimum_inference_tier:
           type: integer
           enum: [1,2,3,4,5]
           nullable: true
           description: "When set, requests below this tier are refused"
-        attached_skills: {type: array, items: {type: string}}
-        attached_files: {type: array, items: {type: string, format: uuid}}
+        attached_skill_names:
+          type: array
+          items: {type: string}
+          description: "Skills attached to this project, ordered by attachment time"
+        attached_file_ids:
+          type: array
+          items: {type: string, format: uuid}
+          description: "Files attached to this project, ordered by attachment time"
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: "When set, the project is soft-deleted (archived); excluded from default list"
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
 
     ProjectCreate:
       type: object
+      additionalProperties: false
       required: [name]
       properties:
-        name: {type: string}
-        description: {type: string}
-        context: {type: string}
+        name: {type: string, minLength: 1, maxLength: 200}
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          description: "Optional; defaults to slugified `name` with collision suffixes."
+        description: {type: string, maxLength: 1000}
+        context_md: {type: string, description: "Free-form Markdown context document; max 100 KiB."}
         privileged: {type: boolean, default: false}
         minimum_inference_tier: {type: integer, enum: [1,2,3,4,5]}
 
     ProjectUpdate:
       type: object
+      additionalProperties: false
       properties:
-        name: {type: string}
-        description: {type: string}
-        context: {type: string}
+        name: {type: string, minLength: 1, maxLength: 200}
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        description: {type: string, maxLength: 1000}
+        context_md: {type: string, description: "Free-form Markdown context document; max 100 KiB."}
         privileged: {type: boolean}
         minimum_inference_tier: {type: integer, enum: [1,2,3,4,5], nullable: true}
+        archived:
+          type: boolean
+          description: |
+            When true, archive (soft-delete) the project; when false,
+            unarchive a previously-archived project. The dedicated
+            `DELETE /api/v1/projects/{id}` endpoint is the destructive
+            equivalent of `PATCH {archived: true}`.
 
     Chat:
       type: object
@@ -1532,7 +1715,7 @@ components:
               description: |
                 Stable error code. Backend-only codes:
                 `password_change_required`, `payload_too_large`,
-                `unauthorized`, `forbidden`, `not_found`,
+                `conflict`, `unauthorized`, `forbidden`, `not_found`,
                 `validation_error`, `rate_limited`, `internal_error`.
                 Backend↔gateway crossing codes (propagated from gateway
                 responses):
@@ -1542,6 +1725,7 @@ components:
               enum:
                 - password_change_required
                 - payload_too_large
+                - conflict
                 - unauthorized
                 - forbidden
                 - not_found

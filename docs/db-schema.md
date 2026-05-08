@@ -79,49 +79,106 @@ CREATE INDEX idx_user_sessions_expires ON user_sessions(expires_at);
 
 ### `projects`
 
+Landed in migration `0004_create_projects.py` (Task C7). The migration
+ships what's runnable today; the doc-aspirational `uuid_generate_v7()`
+default is replaced with `gen_random_uuid()` (UUIDv4, via the pgcrypto
+extension enabled in 0001) until the project takes on the
+`pg_uuidv7` extension dependency.
+
+Soft-delete uses `archived_at` (not `deleted_at`) to match the PRD §3.11
+language ("archive a Project when the matter closes; it is searchable
+but does not clutter the active list"). The semantics are equivalent;
+the column-name choice keeps the user-facing concept grounded.
+
 ```sql
 CREATE TABLE projects (
-    id                       UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
-    name                     TEXT NOT NULL,
-    description              TEXT,
-    context                  TEXT,  -- free-form markdown
+    id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id                 UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    name                     TEXT NOT NULL,
+    slug                     TEXT NOT NULL,  -- URL-friendly identifier; unique-per-owner-active
+    description              TEXT,
+    context_md               TEXT,  -- free-form markdown
     privileged               BOOLEAN NOT NULL DEFAULT FALSE,
-    minimum_inference_tier   SMALLINT CHECK (minimum_inference_tier BETWEEN 1 AND 5),
+    minimum_inference_tier   SMALLINT,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at               TIMESTAMPTZ,
-    CONSTRAINT chk_privileged_implies_tier CHECK (
-        NOT privileged OR minimum_inference_tier IS NOT NULL
+    archived_at              TIMESTAMPTZ,  -- soft-delete; NULL means active
+    CONSTRAINT chk_projects_tier_range CHECK (
+        minimum_inference_tier IS NULL OR (minimum_inference_tier BETWEEN 1 AND 5)
+    ),
+    CONSTRAINT chk_projects_privileged_implies_tier CHECK (
+        (privileged = false) OR (minimum_inference_tier IS NOT NULL)
+    ),
+    CONSTRAINT chk_projects_name_len CHECK (
+        char_length(name) > 0 AND char_length(name) <= 200
+    ),
+    CONSTRAINT chk_projects_slug_len CHECK (
+        char_length(slug) > 0 AND char_length(slug) <= 80
     )
 );
 
-CREATE INDEX idx_projects_owner_active ON projects(owner_id) WHERE deleted_at IS NULL;
-CREATE INDEX idx_projects_privileged ON projects(privileged) WHERE privileged = TRUE AND deleted_at IS NULL;
+CREATE INDEX idx_projects_owner_active
+    ON projects (owner_id, created_at DESC)
+    WHERE archived_at IS NULL;
+
+-- Slug uniqueness scoped to (owner, active). Archived projects free
+-- their slug so a user can reuse it on a new active project.
+CREATE UNIQUE INDEX idx_projects_slug_owner_active
+    ON projects (owner_id, slug)
+    WHERE archived_at IS NULL;
+
+CREATE TRIGGER trg_projects_set_updated_at
+    BEFORE UPDATE ON projects
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();
 ```
 
-### `project_attached_skills` and `project_attached_files`
+### `project_files` and `project_skills`
 
-Many-to-many join tables. A project can have multiple skills attached and multiple files attached.
+Many-to-many join tables. A project can have multiple skills attached
+and multiple files attached. `skill_name` is **text, not a FK** —
+skills are filesystem-canonical per ADR 0004; there is no `skills`
+SQL table.
 
 ```sql
-CREATE TABLE project_attached_skills (
-    project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    skill_name   TEXT NOT NULL,
-    skill_version TEXT,  -- NULL means latest
-    attached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (project_id, skill_name)
-);
-
-CREATE TABLE project_attached_files (
+CREATE TABLE project_files (
     project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     file_id      UUID NOT NULL REFERENCES files(id) ON DELETE CASCADE,
     attached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (project_id, file_id)
 );
 
-CREATE INDEX idx_project_attached_files_file ON project_attached_files(file_id);
+CREATE INDEX idx_project_files_file ON project_files (file_id);
+
+CREATE TABLE project_skills (
+    project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    skill_name   TEXT NOT NULL,
+    attached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, skill_name),
+    CONSTRAINT chk_project_skills_name_len CHECK (
+        char_length(skill_name) > 0 AND char_length(skill_name) <= 200
+    )
+);
+
+CREATE INDEX idx_project_skills_skill ON project_skills (skill_name);
 ```
+
+### `files.project_id` FK constraint (closed C4 deferred)
+
+Migration 0003 (Task C4) added `files.project_id` as a nullable
+column without an FK constraint because `projects` did not exist yet.
+Migration 0004 closes that deferred item:
+
+```sql
+ALTER TABLE files
+    ADD CONSTRAINT fk_files_project_id
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL;
+```
+
+`ON DELETE SET NULL` rather than `CASCADE` because the file is
+independently owned by its `owner_id` and may be in other projects via
+the `project_files` join (the `files.project_id` column is the file's
+*primary* project; the join table is the many-to-many relation).
 
 ---
 
