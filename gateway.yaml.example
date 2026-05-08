@@ -185,6 +185,14 @@ model_aliases:
       model: llama3.1:70b
     fallback: []  # No fallback for local — Tier 1 must stay Tier 1
 
+  # The 'embedding' alias is the alias the backend's KB layer (C6)
+  # asks the gateway to dispatch. Per ADR 0008 the default points at
+  # OpenAI's text-embedding-3-small (1536-dim — matches the
+  # document_chunks.embedding column type). Operators who don't run
+  # OpenAI can repoint at a different provider when its adapter
+  # lands (e.g., a future Voyage adapter) without changing any
+  # application code; the dimension constraint must match the column
+  # type or the operator runs an ALTER migration to swap the column.
   embedding:
     primary:
       provider: openai-prod
@@ -349,6 +357,15 @@ cost_tracking:
       output_per_mtok: 0.60
     'ollama-local/llama3.1:70b':
       input_per_mtok: 0.0  # Local; no per-token cost
+      output_per_mtok: 0.0
+    # Embedding rates — OpenAI text-embedding-3-* charges only on
+    # input tokens; output_per_mtok is 0 (no generation). The
+    # embeddings success-row writer in the gateway uses these.
+    'openai-prod/text-embedding-3-small':
+      input_per_mtok: 0.02
+      output_per_mtok: 0.0
+    'openai-prod/text-embedding-3-large':
+      input_per_mtok: 0.13
       output_per_mtok: 0.0
 
   # Optional: budget alerts

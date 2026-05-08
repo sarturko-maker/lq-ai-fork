@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-08 (C3 keystone landed in worktree; chat persistence end-to-end with SSE streaming; A2-deferred FKs closed)
+> **Last updated:** 2026-05-08 (C6 landed in worktree; KB CRUD + hybrid retrieval; OpenAI embeddings adapter; embedding-on-write/read backfill; ADR 0008)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -14,13 +14,13 @@
 |---|---|---|---|
 | A — Foundation scaffolding | A1, A2, A3, A4 | A5 (partial — env-var branding only) | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5 | — | B6 optional; otherwise C-phase |
-| C — Capability layer | C1, C2, C3, C4, C5, C7 | — | C6 (KB), C8 (web UI) |
+| C — Capability layer | C1, C2, C3, C4, C5, C6, C7 | — | C8 (web UI) |
 | D — M1 differentiators | — | — | After C |
 | E — Procurement and release | — | — | After D |
 
-**Tests:** ~445+ passing in api/ (C3 added ~55: 26 chat-schema unit + 23 endpoint integration + 6 migration; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~170 passing in gateway/ (C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
+**Tests:** ~495+ passing in api/ (C6 added ~50: 8 migration + 16 retrieval unit + 12 embed unit + ~24 endpoint integration; C3 added ~55; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~195 passing in gateway/ (C6 added ~25: 15 OpenAI adapter + 8 embeddings integration + 2 inference updates; C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
 **Stack:** `docker compose up` brings 7 services (postgres, redis, minio, gateway, api, ingest-worker, web) to healthy in ~30s.
-**Migration:** `make migrate` applies `0001_initial.py` → `0002_add_must_change_password.py` → `0003_create_files_table.py` → `0004_create_projects.py` (C7) → `0005_create_documents_and_chunks.py` (C5) → `0006_create_chats_and_messages.py` (C3) cleanly; all reversible. Migration 0006 closes the A2-deferred FK constraints on `inference_routing_log.chat_id` / `.message_id`.
+**Migration:** `make migrate` applies `0001_initial.py` → `0002_add_must_change_password.py` → `0003_create_files_table.py` → `0004_create_projects.py` (C7) → `0005_create_documents_and_chunks.py` (C5) → `0006_create_chats_and_messages.py` (C3) → `0007_create_knowledge_bases.py` (C6) cleanly; all reversible. Migration 0006 closes the A2-deferred FK constraints on `inference_routing_log.chat_id` / `.message_id`. Migration 0007 lands the KB tables (no FK closures in this revision).
 
 ---
 
@@ -690,6 +690,207 @@ skills declare `tools:` in their frontmatter; stays deferred.
 plus 5 routing-log call-site updates total ~30 LOC; small enough to
 land in C3 (no follow-up needed).
 
+### C6 — Knowledge Service: hybrid retrieval + embedding generation ✅
+
+The KB CRUD surface, hybrid (vector + FTS) retrieval, and the
+embedding-generation work that C5 deferred per ADR 0006 §3 — all
+landed in this task. Closes the C5/C6-deferred embedding-generation
+and per-chunk-token-count items.
+
+**ADR 0008 — embedding model decision.** Records the choice of
+**OpenAI `text-embedding-3-small` (1536-dim) via a new gateway-side
+OpenAIAdapter**. Rationale: 1536-dim matches the C5-chosen
+`vector(1536)` column (no destructive ALTER); the operator base for
+OpenAI is the largest of the candidate providers; the adapter
+framing is the foundation for B6's eventual chat-completion adapter
+(partial-B6 closure as a side effect). Voyage AI / local
+sentence-transformers / Ollama embeddings are documented as
+deferred-enhancement paths in the ADR; the `embedding` alias in
+`gateway.yaml.example` is the swap point — operators can repoint
+without changing application code (subject to dimension matching).
+Min-max + linear-combine for hybrid scoring; `ivfflat` retained.
+
+**What landed:**
+
+* **`gateway/app/providers/openai.py` — OpenAIAdapter.** Hand-rolled
+  httpx (no `openai` SDK per PRD §4 / B3 posture). Embeddings path
+  is fully implemented; chat completions raise
+  `ProviderUnsupportedError` until B6. Accepts both
+  `provider.type='openai'` (cloud, requires `OPENAI_API_KEY`) and
+  `'openai_compatible'` (vLLM/llama-cpp local, no key required).
+  `Authorization: Bearer <key>` for cloud; header omitted for
+  keyless local servers (some reject empty `Authorization`
+  outright). Error translation matrix mirrors AnthropicAdapter:
+  401/403 → `ProviderAuthError`; 5xx/4xx → `ProviderHTTPError` with
+  upstream_status; network → `ProviderNetworkError`.
+
+* **Gateway `/v1/embeddings` real handler.** Replaces the A3 501 stub.
+  Resolves the model through B4's router; dispatches via the adapter
+  registry; surfaces `routed_inference_tier` + `routed_provider`
+  in the response body and the `X-LQ-AI-Routed-Inference-Tier` /
+  `X-LQ-AI-Routed-Provider` headers. Writes one row to
+  `inference_routing_log` per call (success or failure) — embeddings
+  audit alongside chat completions.
+  `ProviderUnsupportedError` is **fallback-eligible** on the
+  embeddings path (overriding the chat default) so an
+  Anthropic-routed alias falls through to the next embedding-capable
+  provider. The `embedding` alias's fallback list is empty in the
+  example config — operators with no OPENAI_API_KEY see a clean 503.
+
+* **Migration 0007 — `knowledge_bases` + `knowledge_base_files`.**
+  `hybrid_alpha REAL NOT NULL DEFAULT 0.5` with a `CHECK [0, 1]`.
+  Partial listing index `(owner_id, created_at DESC) WHERE archived_at IS NULL`.
+  Inverse `(file_id)` index on the join. Reuses A1's
+  `set_updated_at()` trigger. Reversible.
+
+* **`api/app/models/knowledge.py`** — ORM models + the same CHECK
+  constraints declarative (defense-in-depth). `owner_id ON DELETE
+  RESTRICT` (audit integrity); `project_id ON DELETE SET NULL`
+  (KBs outlive their projects).
+
+* **`api/app/api/knowledge_bases.py` — CRUD + attach + query.** All
+  endpoints inherit auth + must-change-password gate from
+  `app.api.__init__`. Per-user 404 isolation (matches C4/C7/chats).
+  Attach handler enforces `ingestion_status='ready'` → 422 if not.
+  Already-attached file → 409 (idempotency-violating POST). On
+  successful attach the handler enqueues an embed job for any
+  chunks with NULL embeddings; failures are non-fatal (embed-on-read
+  covers the gap at query time).
+
+* **`api/app/knowledge/embed.py` — embedding generation.**
+  `request_embedding_vector` (single-vector, used by query path),
+  `request_embedding_vectors` (batched, used by worker), and
+  `embed_chunks_for_file` (worker entry point). Token counting via
+  `tiktoken`'s `cl100k_base` BPE — populates
+  `document_chunks.tokens` alongside the embedding. Batches default
+  to 64 chunks per call with a 60K-char soft cap. Idempotent: only
+  chunks with NULL embeddings are submitted. Persists vectors via
+  raw SQL (`CAST(:vec AS vector)`) since pgvector's `vector` type
+  isn't first-class in SQLAlchemy core.
+
+* **`api/app/knowledge/retrieval.py` — hybrid_search.** Pure-SQL
+  pgvector cosine + Postgres FTS via `plainto_tsquery('english', :q)`,
+  each side overshooting `top_k * 4`. Min-max-normalizes per ADR 0008,
+  linearly combines, returns top-`k` by combined score. Filters to
+  chunks whose owning file is attached to the KB AND
+  `ingestion_status='ready'` AND not soft-deleted. Per-user
+  isolation upstream by the handler.
+
+* **`api/app/workers/document_pipeline.py` — embed_chunks_for_file_job.**
+  New arq job. The ingest-completion hook now also enqueues the
+  embed job so post-C6 chunks land in the vector index without a
+  manual trigger. Failures bubble to arq's retry mechanism.
+
+* **`tiktoken>=0.7,<1` added to `api/`'s runtime deps** (BSD-3, no
+  transitive deps beyond `regex`). Justified in ADR 0008 §"Tokenizer".
+  No new gateway-side deps.
+
+* **Documentation:** OpenAPI sketch updated (real shapes, all error
+  paths, new headers); db-schema.md updated (KB table + the hybrid-
+  score formula); gateway.yaml.example updated (embedding alias
+  documentation refresh + cost rates for `text-embedding-3-small/-large`);
+  ADR 0008.
+
+**Tests (≥75 net-new):**
+
+* **api/ side (~50 net-new across 4 files):**
+  * `api/tests/test_knowledge_migration.py` — 8 tests: table
+    existence, indexes, hybrid_alpha CHECK including boundary
+    0/1, name CHECK, CASCADE on KB-delete, updated_at trigger,
+    owner RESTRICT.
+  * `api/tests/test_knowledge_retrieval_unit.py` — 16 unit tests:
+    the score-combination math (min-max normalize across empty /
+    single-entry / uniform / typical / negative-outlier inputs;
+    alpha extremes 0/0.5/1; missing-side behavior; ordering
+    preservation), KBQueryRequest / KnowledgeBaseCreateRequest
+    validation (alpha bounds, top_k cap, name required).
+  * `api/tests/test_knowledge_embed_unit.py` — 12 unit tests
+    against a respx-mocked GatewayClient: tiktoken token counts,
+    pgvector textual format, batch packing (size + char caps),
+    request_embedding_vector + request_embedding_vectors happy
+    path / empty-data error / count-mismatch error /
+    sort-by-index / empty-input short-circuit.
+  * `api/tests/test_knowledge_endpoints.py` — 24 integration
+    tests: auth gate, CRUD round-trip, alpha bounds, project_id
+    validation, per-user 404 isolation (cross-user list/get/
+    attach/file-from-other-user), archive/unarchive, soft-delete
+    idempotency, file attach (ready/not-ready/cross-user/
+    duplicate/cross-KB), detach (success/404).
+
+* **gateway/ side (~25 net-new across 2 files + 1 update):**
+  * `gateway/tests/test_openai_adapter.py` — 15 unit tests:
+    `from_config` matrix (cloud requires key, local is optional,
+    wrong type rejected), embeddings happy path / batch /
+    `dimensions` passthrough / 401 / 500 / network, Authorization
+    header presence / absence, chat-completion stub raises,
+    health_check 200 / 401.
+  * `gateway/tests/test_inference_embeddings.py` — 8 integration
+    tests with a lifespan-started gateway app + respx-mocked
+    OpenAI: alias dispatch, batch input, 500 → 502, 429 → 429,
+    401 → 502, invalid_model → 400, missing_input → 400,
+    Anthropic alias fallback behavior.
+  * `gateway/tests/test_inference.py` — updated: 501 stub
+    assertions replaced with the real-handler contracts (503
+    when no key, 400 invalid_model / invalid_request).
+
+* **Updated existing tests:** `test_openapi.py` now expects 36
+  paths and the new KB routes (`/files`, `/files/{file_id}`,
+  `/query`); `test_endpoints.py` lists the 8 new C6 KB routes in
+  IMPLEMENTED_ROUTES; `test_admin_bootstrap.py` swapped its still-
+  stub probe from `/knowledge-bases` (now real) to
+  `/saved-prompts`.
+
+**Closes deferred items (per docs/M1-PROGRESS.md "Newly deferred (surfaced during C5)"):**
+
+* **Embedding generation for `document_chunks`** — closed via the
+  worker's `embed_chunks_for_file_job` + the query handler's
+  embed-on-read fallback.
+* **Gateway `/v1/embeddings` endpoint implementation** — closed
+  with the OpenAIAdapter + handler.
+* **Per-chunk token count** — closed via tiktoken's
+  `cl100k_base` populating `document_chunks.tokens` alongside the
+  embedding.
+
+**Newly deferred (surfaced during C6):**
+
+* **Voyage AI embedding adapter** — preserved as a deferred
+  enhancement in ADR 0008. Lands when an operator forces the
+  question (Voyage's `voyage-law-2` is the strongest known legal-
+  domain embedder; 1024-dim, would require a destructive ALTER on
+  the `vector(1536)` column).
+* **Local sentence-transformers / Ollama embeddings adapter** —
+  also documented as a deferred-enhancement path. Both can land
+  via the alias indirection without changing application code,
+  subject to dimension matching.
+* **Streaming embeddings (large-input batching beyond 64)** —
+  current implementation pre-batches at 64 chunks / 60K chars.
+  At M1 scale this is ample; if a deployment ingests very large
+  corpora the batch sizing might need a tunable.
+* **Embed-job de-duplication** — multiple KB attach calls for the
+  same file enqueue multiple embed jobs; the underlying job is
+  idempotent (filters on `embedding IS NULL`) so the duplicates
+  no-op, but a dedupe key would save a few wasted DB scans.
+  Out-of-scope for C6.
+* **Gateway-side embeddings cost annotation under cost_estimate**
+  works correctly now; the embedding cost rates in
+  `gateway.yaml.example` are the published 2026 rates (small=$0.02 /
+  large=$0.13 per million tokens). When OpenAI updates pricing,
+  operators update the rates.
+
+**End-to-end verification (DB-required):** the worker enqueues
+the embed job after a successful ingest; backfill writes
+embeddings for all chunks of a file; KB query returns ranked
+chunks with both vector and FTS scores. Real-key OpenAI verification
+deferred to operator (no `OPENAI_API_KEY` available in this session);
+covered by respx-mocked stack-level integration tests on both sides.
+
+**Gateway-side change scope check.** OpenAIAdapter is ~280 LOC,
+embeddings handler is ~140 LOC including helpers, routing-log
+writers reuse the chat patterns. New paths are auto-routed to
+security review per CODEOWNERS — the embeddings handler mirrors
+the chat handler's security posture (gateway-key auth, no key
+leakage in errors, no PII in logs).
+
 ---
 
 ## Tasks ahead
@@ -748,12 +949,22 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 
 | Item | Surface | Owning task |
 |---|---|---|
-| Embedding generation for `document_chunks` | C5 writes `embedding=NULL` for every chunk per ADR 0006 §3; the column type is `vector(1536)` and the ivfflat index is in place | **C6 (KB hybrid retrieval)** absorbs the embedding-generation work. C6 already needs the gateway's `/v1/embeddings` to actually work (it's the retrieval-side call); landing it once for both ingestion and retrieval is more efficient than landing it twice. The M1-IMPLEMENTATION-ORDER C6 spec should be updated to reflect this absorption (small, additive — the retrieval flow naturally calls embed-on-write for any chunks where `embedding IS NULL`). |
-| Gateway `/v1/embeddings` endpoint implementation | B5 left it as a 501 stub returning `not_implemented`; `GatewayClient.embeddings()` already has the right shape | **C6** lands the real implementation. Per CLAUDE.md the embedding call must go through the gateway (it's a provider call); C6 is the right place because it's the consumer. B6 (additional provider adapters) is a separate concern. |
+| ~~Embedding generation for `document_chunks`~~ | ~~C5 writes `embedding=NULL` for every chunk per ADR 0006 §3~~ | **Landed in C6.** ADR 0008 picks OpenAI `text-embedding-3-small` (1536-dim — matches the C5 column). The worker's new `embed_chunks_for_file_job` walks `embedding IS NULL` chunks in 64-row batches and persists vectors via `CAST(:vec AS vector)`. Triggered by KB-attach and by the ingest-completion hook (so post-C6 chunks land in the index without manual triggers). The query handler also covers any unembedded chunks lazily via embed-on-read. |
+| ~~Gateway `/v1/embeddings` endpoint implementation~~ | ~~B5 left it as a 501 stub~~ | **Landed in C6.** Real handler routes through B4's router, dispatches via the new OpenAIAdapter, annotates tier + provider on the response, writes the routing-log row. ProviderUnsupportedError is fallback-eligible on this path so an Anthropic-routed alias falls through. |
 | OCR for image-only PDFs | C5 marks scanned/image PDFs as `failed` because PyMuPDF returns empty text; per the brief OCR is M2 | **M2** Document Pipeline expansion. Mistral OCR API for cloud, PaddleOCR-VL for air-gapped. PRD §3 and §6.1 have the design. |
 | DOCX/RTF/TXT parser support | C5 marks non-PDF MIMEs as `failed` with `unsupported_type`; M1 is PDF-only per the brief | **M2**. The parser cascade in `app/pipeline/parsers.py` is structured to accept additional adapters; the dispatch is by MIME type. New adapters need to produce a canonical character stream + page spans (or chapter spans / section spans for DOCX) that satisfy the offset-fidelity invariant. |
-| Per-chunk token count | C5 writes `tokens=NULL` (column nullable); per ADR 0006 token counts are computed alongside embeddings, which means C6 owns this | **C6** (alongside embeddings). The tokenizer choice is coupled to the embedding model choice (most providers tokenize via tiktoken or a model-specific BPE). C6's embedding-model decision drives the tokenizer. |
+| ~~Per-chunk token count~~ | ~~C5 writes `tokens=NULL` (column nullable); per ADR 0006 token counts are computed alongside embeddings~~ | **Landed in C6.** `tiktoken`'s `cl100k_base` BPE populates `document_chunks.tokens` during the embed-on-write path. ADR 0008 records the tokenizer choice; the dep is small (BSD-3, no transitive deps beyond `regex`). |
 | Operator re-ingest CLI | A future `python -m app.cli reingest --file <id>` (or `--all-failed`) for operator-driven re-ingestion of files | Not strictly needed for M1 — operators can `UPDATE files SET ingestion_status='pending' WHERE ...` against the database directly, and the worker's startup sweep picks it up on the next worker restart. The CLI affordance is convenience-only; deferred to **D-phase** or later as operator-side experience guides demand. |
+
+### Newly deferred (surfaced during C6)
+
+| Item | Surface | Owning task |
+|---|---|---|
+| Voyage AI embedding adapter | ADR 0008 documents Voyage's `voyage-law-2` as the strongest known legal-domain embedder; rejected for M1 because Voyage's operator base is smaller than OpenAI's and `voyage-law-2` is 1024-dim (would require destructive ALTER on `vector(1536)`) | Track as DE-XXX in PRD §9 next time we update the deferred-enhancements list. The `embedding` alias in `gateway.yaml.example` is the swap point — no application code changes needed when the adapter lands. Lands when an operator forces the question. |
+| Local sentence-transformers / Ollama embeddings adapter | ADR 0008 documents the path; Ollama is the natural Mode 2 (air-gapped) embedding choice | Track alongside B6's Ollama adapter work. The alias indirection means application code is unaffected. |
+| Embed-job de-duplication | Multiple KB-attach calls for the same file enqueue multiple embed jobs; the underlying job is idempotent (filters on `embedding IS NULL`) but the duplicates do a wasted DB scan | Optimize when worker volume justifies. Out-of-scope for C6 — the cost is one EXISTS query per duplicate enqueue, ~ms. |
+| Streaming embedding requests for very large batches | Current path pre-batches at 64 chunks / 60K chars; ample at M1 scale | If a deployment ingests very large corpora and operator feedback shows latency pressure, expose batch sizing as a tunable. |
+| Cost-rates ZDR variants for OpenAI embeddings | `openai-prod/text-embedding-3-small` rates default to standard public pricing | Operators with ZDR contracts override the rates in their own `gateway.yaml`. The path supports it; documenting the operator-side override could go in the quickstart. |
 
 ### ~~Deferred to C3~~ — landed in C3
 
@@ -869,12 +1080,12 @@ When you resume:
 1. **Check git status is clean** and you're at HEAD of origin/main:
    ```bash
    git status   # expect: "nothing to commit, working tree clean"
-   git log -1 --oneline   # expect the C7 progress-doc commit (or the merge commit)
+   git log -1 --oneline   # expect the C6 progress-doc commit (or the merge commit)
    ```
 2. **Read this doc top to bottom** to recover state.
-3. **C-phase wave-2 partially landed.** C7 (Projects) is done, alongside C1 + C4 from wave-1. The matter-scoped resource model is in place: projects, file/skill attachments, free-form context, the privileged constraint enforced at three layers, slug uniqueness with collision suffixing. The C4 deferred items (`files.project_id` FK + multipart `project_id` form field) are closed. End-to-end inference path is wired (B5); skills are loaded into a backend in-memory registry with SIGHUP-driven atomic-swap reload; file upload/metadata/download/soft-delete is end-to-end against MinIO with streaming I/O, SHA-256 content addressing, and a 100 MB cap. The cross-cutting `lq_ai.errors` hierarchy is in place (ADR 0003).
-4. **Remaining C-phase wave-2 tasks.** C2 (prompt assembly — gateway-side; reads skill content from backend over HTTP per ADR 0004), C3 (chat persistence — removes the "stateless pass-through" caveat from B5; also closes the deferred FK on `inference_routing_log.chat_id`/`message_id`), C5 (document pipeline + character-precise offsets — depends on C4, load-bearing for M2 citation engine), C6 (KB hybrid retrieval — depends on C5), C8 (web UI chat — depends on C3). C3 is the keystone task and runs after C2 and C5 land.
-5. **B6 is optional** for M1 baseline — recommended order is OpenAI first (largest user base), then Ollama (Mode 2 unlock), then Vertex/Bedrock. Ollama specifically is the Mode 2 (air-gapped local inference) unlock.
+3. **C-phase wave-2 fully landed except C8.** C6 (Knowledge Service) is done — KB CRUD + hybrid retrieval + embedding-on-write/read backfill. ADR 0008 records the embedding-model decision (OpenAI `text-embedding-3-small`, 1536-dim — matches the C5 column). The OpenAIAdapter is partial-B6 (embeddings only; chat completions stubbed). All C5/C6 deferred items closed: embedding generation, gateway `/v1/embeddings`, per-chunk token counts.
+4. **Remaining task: C8** (web UI chat — depends on C3). The C8 agent is running in parallel in `web/`.
+5. **B6 is optional** for M1 baseline — partially closed by C6's OpenAIAdapter framing. Remaining work: OpenAI chat completions translation (~thin pass-through since OpenAI is the wire format the gateway already speaks), Vertex (Anthropic on Vertex), Bedrock, Ollama. Ollama specifically is the Mode 2 (air-gapped local inference) unlock.
 
 That's it — clean continuation.
 
