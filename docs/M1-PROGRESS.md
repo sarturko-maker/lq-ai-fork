@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-08 (session 6 close; C2 + C5 + C7 all landed in parallel worktrees and merged)
+> **Last updated:** 2026-05-08 (C3 keystone landed in worktree; chat persistence end-to-end with SSE streaming; A2-deferred FKs closed)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -14,13 +14,13 @@
 |---|---|---|---|
 | A — Foundation scaffolding | A1, A2, A3, A4 | A5 (partial — env-var branding only) | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5 | — | B6 optional; otherwise C-phase |
-| C — Capability layer | C1, C2, C4, C5, C7 | — | C3 (chats), C6 (KB), C8 (web UI) |
+| C — Capability layer | C1, C2, C3, C4, C5, C7 | — | C6 (KB), C8 (web UI) |
 | D — M1 differentiators | — | — | After C |
 | E — Procurement and release | — | — | After D |
 
-**Tests:** ~390+ passing in api/ (C2 added 16: 8 internal-skills endpoint integration + 8 chat-skill-forwarding integration; C5 added 49+: 19 chunker unit + 13 parser unit + 5 worker-queue unit + 6 ingest-orchestration integration + 6 migration; C7 added 76: 27 schema/slug unit + 42 endpoint integration + 6 migration + 1 errors-hierarchy parametrize entry; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~170 passing in gateway/ (C2 added 52: 24 backend-client unit + 28 assembler unit + 10 inference-with-skills integration; 1 skipped pending ANTHROPIC_API_KEY); 5 cross-subsystem conformance tests under `tests/` extended with `skill_not_found` / `skill_fetch_failed` / `skill_input_missing` (`conflict` and pipeline-internal codes are backend-only and don't extend the contract).
-**Stack:** `docker compose up` brings 7 services (postgres, redis, minio, gateway, api, ingest-worker, web) to healthy in ~30s. (C5 added the `ingest-worker` service.)
-**Migration:** `make migrate` applies `0001_initial.py` → `0002_add_must_change_password.py` → `0003_create_files_table.py` → `0004_create_projects.py` (C7) → `0005_create_documents_and_chunks.py` (C5) cleanly; all reversible. Migration 0005 enables the pgvector extension.
+**Tests:** ~445+ passing in api/ (C3 added ~55: 26 chat-schema unit + 23 endpoint integration + 6 migration; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~170 passing in gateway/ (C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
+**Stack:** `docker compose up` brings 7 services (postgres, redis, minio, gateway, api, ingest-worker, web) to healthy in ~30s.
+**Migration:** `make migrate` applies `0001_initial.py` → `0002_add_must_change_password.py` → `0003_create_files_table.py` → `0004_create_projects.py` (C7) → `0005_create_documents_and_chunks.py` (C5) → `0006_create_chats_and_messages.py` (C3) cleanly; all reversible. Migration 0006 closes the A2-deferred FK constraints on `inference_routing_log.chat_id` / `.message_id`.
 
 ---
 
@@ -578,6 +578,118 @@ CI run.
   avoid SQLAlchemy declarative's `Base.metadata` reserved name
   conflict. Functionally equivalent.
 
+### C3 — Chat service + message persistence ✅
+
+The C-phase keystone. Removes B5's "stateless pass-through" caveat:
+the backend now persists both sides of every chat exchange, the
+gateway's routing log row joins to the persisted message row by id,
+and SSE streaming surfaces the LQ.AI extension fields per ADR 0007.
+
+**Migration `0006_create_chats_and_messages.py`.** Two new tables:
+
+* `chats` — `owner_id` (FK→users, ON DELETE RESTRICT for audit
+  integrity), `project_id` (FK→projects, ON DELETE SET NULL — chats
+  outlive their projects), `title` NOT NULL with default `'New chat'`
+  (auto-renamed by the API on first user message), `archived_at`
+  soft-delete column, partial listing index on `(owner_id, created_at
+  DESC) WHERE archived_at IS NULL`, partial project-active index.
+* `messages` — `role` CHECK in `{user, assistant, system, tool}`,
+  `applied_skills` TEXT[] (denormalized per ADR 0007),
+  `routed_inference_tier` / `routed_provider` / `routed_model` /
+  `prompt_tokens` / `completion_tokens` / `cost_estimate_micros`
+  (BIGINT — integer USD micros to avoid float drift), `error_code`
+  text column for mid-stream failure persistence, `citations` JSONB
+  default `'[]'` (M2 populates), ordered retrieval index on
+  `(chat_id, created_at)`.
+* **Closes A2's deferred FKs** on `inference_routing_log.chat_id` /
+  `.message_id` with ON DELETE SET NULL — audit history survives the
+  deletion of underlying chats/messages.
+
+**Endpoints (`POST /chats`, `GET /chats`, `GET /chats/{id}`,
+`PATCH /chats/{id}`, `DELETE /chats/{id}`,
+`GET /chats/{id}/messages`, `POST /chats/{id}/messages`,
+`GET /chats/{id}/messages/{msg_id}/citations`):**
+
+* Cursor-paginated list endpoints with `(created_at, id)` keyset
+  cursor (URL-safe base64-encoded JSON).
+* Per-user isolation 404 (matches C4 / C7 posture).
+* `archived` query param on list filters; `archived` PATCH flag
+  toggles `archived_at`; DELETE is soft-delete only.
+* `project_id` query filter for project-scoped listing.
+
+**The keystone POST /messages flow:**
+
+1. Persist the user message row (unconditional — even if dispatch
+   later fails, the user did say something and the audit must reflect
+   that).
+2. Auto-rename the chat from the first 80 chars of the first user
+   message if its title is still `'New chat'`. One-shot — never
+   overwrites a user-set title; subsequent messages do NOT rename.
+3. Generate the assistant message UUID before dispatch.
+4. Forward to the gateway. The request envelope gains
+   `lq_ai_chat_id` and `lq_ai_message_id` so the routing log row
+   can correlate. The C2 `lq_ai_skills` / `lq_ai_skill_inputs`
+   plumbing is unchanged.
+5. **Streaming:** opening `start` SSE frame carries the message id;
+   each `delta` frame carries `lq_ai_message_id`,
+   `routed_inference_tier`, and `applied_skills` per ADR 0007.
+   Persist the assistant row at end-of-stream (one row per
+   exchange).
+6. **Streaming-failure-mid-stream:** persist a partial assistant row
+   with whatever content was received and `error_code` populated;
+   emit the canonical Error envelope as a final SSE frame; HTTP
+   stays 200 (SSE convention).
+7. **Non-streaming:** persist the assistant row from the gateway's
+   complete response.
+8. **Backend never writes `inference_routing_log`** — the gateway is
+   the canonical writer (B4); the gateway now stamps the
+   `chat_id` / `message_id` columns from the request envelope.
+
+**Inline-documented decisions** (no ADR — match the C3-brief
+recommendations):
+
+* Cost stored as integer USD micros (BIGINT) to avoid float drift.
+  `usd_to_micros` / `micros_to_usd` translate at the wire boundary.
+* Streaming-failure persistence: partial row with `error_code`
+  populated (best for audit / resumption).
+* `applied_skills` denormalized text[] per ADR 0007.
+* Auto-rename is the simple "first 80 chars" form; LLM-driven
+  titling is a deferred enhancement.
+
+**Tests (~55 net-new in api/):**
+
+* `api/tests/test_chats_unit.py` — 26 unit tests: cost-micros
+  round-trip + edge cases (None, zero, negative, large, fractional
+  micros), `derive_chat_title` (whitespace/CRLF/ellipsis), cursor
+  encode/decode + malformed-input rejection, `message_to_response`
+  conversion smoke.
+* `api/tests/test_chats_endpoints.py` — 23 integration tests: CRUD
+  round-trip, per-user isolation, list pagination over five rows,
+  archive/unarchive PATCH, project_id filter, malformed cursor 400,
+  POST /messages persistence + auto-rename + no-overwrite-on-second-
+  message, `lq_ai_message_id` correlation, streaming happy path,
+  the canonical streaming-mid-stream-failure test (partial row +
+  error_code persisted), non-streaming gateway-failure leaves user
+  row only, skill attachment captured on user message, cascade
+  delete.
+* `api/tests/test_chats_send_message.py` — rewritten 19 tests now
+  use a fixture-created `Chat`; new test for cross-user 404.
+* `api/tests/test_migrations.py` — 6 new tests: chats + messages
+  exist, the three new indexes, role CHECK fires, CASCADE chat→
+  messages, `inference_routing_log.chat_id` SET NULL on chat delete
+  (closes A2), `.message_id` SET NULL on message delete, applied_skills
+  default empty array.
+
+**Closes deferred items.** A2's `inference_routing_log.chat_id` /
+`.message_id` FKs (closed in migration 0006). B5's "stateless
+pass-through" caveat (closed by definition). C-phase tool-call
+translation deferred-item: **re-confirmed** none of the 11 starter
+skills declare `tools:` in their frontmatter; stays deferred.
+
+**Gateway-side change scope check.** The `_correlation_ids` helper
+plus 5 routing-log call-site updates total ~30 LOC; small enough to
+land in C3 (no follow-up needed).
+
 ---
 
 ## Tasks ahead
@@ -643,17 +755,18 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 | Per-chunk token count | C5 writes `tokens=NULL` (column nullable); per ADR 0006 token counts are computed alongside embeddings, which means C6 owns this | **C6** (alongside embeddings). The tokenizer choice is coupled to the embedding model choice (most providers tokenize via tiktoken or a model-specific BPE). C6's embedding-model decision drives the tokenizer. |
 | Operator re-ingest CLI | A future `python -m app.cli reingest --file <id>` (or `--all-failed`) for operator-driven re-ingestion of files | Not strictly needed for M1 — operators can `UPDATE files SET ingestion_status='pending' WHERE ...` against the database directly, and the worker's startup sweep picks it up on the next worker restart. The CLI affordance is convenience-only; deferred to **D-phase** or later as operator-side experience guides demand. |
 
-### Deferred to **C3** (chat service + message persistence)
+### ~~Deferred to C3~~ — landed in C3
 
-| Item | Surface | Notes |
-|---|---|---|
-| FK constraints on `inference_routing_log.chat_id` and `.message_id` | A2's `0001_initial.py` notes this | The columns are nullable UUIDs without FKs in 0001; a future migration ALTERs to add the FK constraints once `chats` and `messages` tables exist (which is C3). |
+| Item | Disposition |
+|---|---|
+| ~~FK constraints on `inference_routing_log.chat_id` and `.message_id`~~ | **Landed in C3.** Migration 0006's ALTER TABLE adds `fk_inference_routing_log_chat_id REFERENCES chats(id) ON DELETE SET NULL` and the parallel constraint for `message_id`. Two migration tests pin the SET NULL behavior (audit history survives deletion of the underlying chat / message). The gateway's `_correlation_ids` helper extracts the ids from the request envelope's `lq_ai_chat_id` / `lq_ai_message_id` fields and stamps them on every `inference_routing_log` row write (5 sites updated). |
+| ~~B5 stateless pass-through caveat~~ | **Closed in C3.** The chat endpoint persists both sides of every exchange; the `stateless_passthrough: true` marker is gone from the response shape. The OpenAPI sketch updated to match. |
 
 ### Deferred to **C-phase (skill execution generally)**
 
 | Item | Surface | Notes |
 |---|---|---|
-| Bidirectional tool-call translation in Anthropic adapter | B3's `anthropic.py` translates `role: tool` → `tool_result`; assistant tool_use is one-way | **C2 scope-check, 2026-05-08:** none of the 11 starter skills declare `tools:` in their frontmatter, so C2 ships without exercising bidirectional tool-call translation. Stays deferred. Most natural successor is C3 (chat persistence forces the tool-call/tool-result message-shape question end-to-end), or whichever later C-phase task brings up a skill that declares tools. |
+| Bidirectional tool-call translation in Anthropic adapter | B3's `anthropic.py` translates `role: tool` → `tool_result`; assistant tool_use is one-way | **C3 scope-check, 2026-05-08 (re-confirmed):** none of the 11 starter skills declare `tools:` in their frontmatter; C3 ships without exercising bidirectional tool-call translation. Stays deferred. Most natural successor is whichever later task brings up a skill that declares tools. |
 
 ### Deferred to **D1** (tier-floor enforcement / refusals)
 

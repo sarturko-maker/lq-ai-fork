@@ -445,6 +445,24 @@ components:
             collide. Required inputs that the skill's frontmatter
             declares but the bindings don't provide cause the gateway
             to refuse with `code=skill_input_missing` (HTTP 400).
+        # C3 — chat / message identity for routing-log correlation.
+        lq_ai_chat_id:
+          type: string
+          format: uuid
+          description: |
+            UUID of the persisted chat (Task C3). The gateway writes it
+            into `inference_routing_log.chat_id`. Distinct from the
+            pre-existing `chat_id` field (B3-era audit-log tag);
+            `lq_ai_chat_id` takes precedence when both are present and
+            is the canonical surface after C3.
+        lq_ai_message_id:
+          type: string
+          format: uuid
+          description: |
+            UUID of the assistant message (Task C3). The backend
+            generates it before dispatch and forwards it; the gateway
+            writes it into `inference_routing_log.message_id` so the
+            audit-log row joins to the persisted message row by `id`.
 
     ChatCompletionResponse:
       type: object

@@ -495,17 +495,23 @@ paths:
   /api/v1/chats:
     get:
       tags: [chats]
-      summary: List chats; optionally filter by project
+      summary: List the caller's chats (cursor-paginated)
       parameters:
         - name: project_id
           in: query
           schema: {type: string, format: uuid}
+          description: "Filter to chats inside a specific project."
+        - name: archived
+          in: query
+          schema: {type: boolean}
+          description: "When true, return archived chats only. Default excludes archived."
         - name: cursor
           in: query
           schema: {type: string}
+          description: "Opaque cursor from a previous page's `next_cursor`."
         - name: limit
           in: query
-          schema: {type: integer, default: 20}
+          schema: {type: integer, default: 20, minimum: 1, maximum: 100}
       responses:
         '200':
           description: Paginated chats
@@ -542,33 +548,47 @@ paths:
         schema: {type: string, format: uuid}
     get:
       tags: [chats]
+      summary: Fetch a single chat (archived rows are visible)
       responses:
         '200':
           description: Chat
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Chat'}
+        '404':
+          description: Chat does not exist or is owned by a different user
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
     patch:
       tags: [chats]
+      summary: Partial update of a chat (title or archived flag)
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              properties:
-                title: {type: string}
-                attached_skills: {type: array, items: {type: string}}
+            schema: {$ref: '#/components/schemas/ChatUpdate'}
       responses:
         '200':
           description: Chat updated
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Chat'}
+        '404':
+          description: Chat does not exist or is owned by a different user
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
     delete:
       tags: [chats]
+      summary: Soft-delete the chat (sets `archived_at`)
       responses:
-        '204': {description: Chat deleted}
+        '204': {description: Chat archived}
+        '404':
+          description: Chat already archived or does not exist
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/chats/{chat_id}/messages:
     parameters:
@@ -578,15 +598,28 @@ paths:
         schema: {type: string, format: uuid}
     get:
       tags: [messages]
-      summary: List messages in chat
+      summary: List messages in chat (cursor-paginated, oldest-first)
+      parameters:
+        - name: cursor
+          in: query
+          schema: {type: string}
+          description: "Opaque cursor from a previous page's `next_cursor`."
+        - name: limit
+          in: query
+          schema: {type: integer, default: 20, minimum: 1, maximum: 100}
       responses:
         '200':
-          description: Messages
+          description: Paginated messages
           content:
             application/json:
               schema:
-                type: array
-                items: {$ref: '#/components/schemas/Message'}
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Message'}
+                  next_cursor: {type: string, nullable: true}
     post:
       tags: [messages]
       summary: Post a user message and get the model response
@@ -594,21 +627,30 @@ paths:
         Posts a user message and returns the assistant response. The
         request's `stream` field selects between two response shapes:
 
-        * `stream: false` (default) → JSON response with the assistant
-          message, the routed Inference Tier, and routing metadata.
-        * `stream: true` → Server-Sent Events stream; each event is a
-          JSON delta following the OpenAI streaming format. The final
-          event is a `complete` event with the synthesized message and
-          citations; mid-stream errors come through as a final event
-          carrying the canonical `Error` envelope.
+        * `stream: false` (default) → JSON response with the persisted
+          assistant message, the routed Inference Tier, and routing
+          metadata.
+        * `stream: true` → Server-Sent Events stream:
+            1. The opening `start` frame carries `lq_ai_message_id`
+               (the persisted assistant message id) so clients can
+               poll the row later.
+            2. Each `delta` frame carries `lq_ai_message_id`,
+               `routed_inference_tier`, and `applied_skills` per
+               ADR 0007.
+            3. The terminal `complete` frame (success) or `Error`
+               envelope (mid-stream failure) precedes the OpenAI-style
+               `data: [DONE]` line.
 
-        **B5 stateless pass-through.** Until C3 lands chat persistence,
-        this endpoint translates the request into a single-turn gateway
-        call and returns the response. Nothing is persisted on the
-        backend side; the gateway-side `inference_routing_log` row IS
-        written (B4 owns that audit trail). The response includes a
-        `stateless_passthrough: true` marker so clients can detect the
-        transitional state. Citations are an empty array until C5.
+        **C3 persistence.** The backend writes the user message row
+        first (unconditionally), generates the assistant message UUID,
+        forwards it to the gateway as `lq_ai_message_id` so the
+        gateway's `inference_routing_log` row carries the same id, and
+        persists the assistant row at end-of-stream (or end of the
+        non-streaming response). On streaming failure the assistant
+        row is persisted with whatever content was received and
+        `error_code` populated for audit.
+
+        Citations are an empty array until M2's citation engine ships.
 
         The response also surfaces the routed Inference Tier in the
         `X-LQ-AI-Routed-Inference-Tier` HTTP header (header-only
@@ -1448,25 +1490,48 @@ components:
 
     Chat:
       type: object
-      required: [id, owner_id, created_at]
+      required: [id, owner_id, title, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
-        title: {type: string, nullable: true}
+        title:
+          type: string
+          description: |
+            Chat title. Defaults to "New chat"; auto-renamed to the
+            first 80 chars of the first user message on first POST
+            /messages. Never overwrites a user-set title (one-shot).
         owner_id: {type: string, format: uuid}
         project_id: {type: string, format: uuid, nullable: true}
-        attached_skills: {type: array, items: {type: string}}
-        attached_files: {type: array, items: {type: string, format: uuid}}
-        message_count: {type: integer}
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Soft-delete timestamp. NULL means active."
+        message_count:
+          type: integer
+          description: "Count of persisted messages in this chat."
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
 
     ChatCreate:
       type: object
       properties:
-        title: {type: string}
+        title:
+          type: string
+          maxLength: 200
+          description: |
+            Defaults to "New chat" when omitted. The chat will be
+            auto-renamed from the first user message; supplying a
+            non-default title here suppresses auto-rename.
         project_id: {type: string, format: uuid, nullable: true}
-        attached_skills: {type: array, items: {type: string}}
-        attached_files: {type: array, items: {type: string, format: uuid}}
+
+    ChatUpdate:
+      type: object
+      description: "PATCH body for /api/v1/chats/{chat_id}; partial update."
+      properties:
+        title: {type: string, maxLength: 200}
+        archived:
+          type: boolean
+          description: "Set true to archive (soft-delete); false to unarchive."
 
     Message:
       type: object
@@ -1476,16 +1541,45 @@ components:
         chat_id: {type: string, format: uuid}
         role: {type: string, enum: [user, assistant, system, tool]}
         content: {type: string}
-        model: {type: string, nullable: true}
-        provider: {type: string, nullable: true}
+        applied_skills:
+          type: array
+          items: {type: string}
+          description: |
+            C2 / ADR 0007: skills the gateway applied for this message
+            exchange. Captured on user messages from the request body
+            and on assistant messages from the gateway response.
         routed_inference_tier:
           type: integer
           enum: [1,2,3,4,5]
           nullable: true
-          description: "Tier the request was routed against (set by gateway)"
-        tokens_in: {type: integer, nullable: true}
-        tokens_out: {type: integer, nullable: true}
-        cost_estimate: {type: number, nullable: true}
+          description: "Tier the request was routed against (set by gateway). NULL on user messages."
+        routed_provider:
+          type: string
+          nullable: true
+          description: "Provider that handled the request (assistant only)."
+        routed_model:
+          type: string
+          nullable: true
+          description: "Native provider model name (assistant only)."
+        prompt_tokens: {type: integer, nullable: true}
+        completion_tokens: {type: integer, nullable: true}
+        cost_estimate:
+          type: number
+          nullable: true
+          description: |
+            USD cost estimate. The DB stores integer USD micros
+            (1e-6 USD); the wire field is the floating-point USD value.
+        error_code:
+          type: string
+          nullable: true
+          description: |
+            Populated when the assistant message failed mid-stream or
+            the gateway raised. Carries the canonical Error code
+            (e.g., `provider_unavailable`, `gateway_timeout`).
+        citations:
+          type: array
+          items: {$ref: '#/components/schemas/Citation'}
+          description: "M2 populates this; M1 stores []."
         created_at: {type: string, format: date-time}
 
     MessageCreate:
@@ -1528,15 +1622,17 @@ components:
       description: |
         Non-streaming response for `POST /api/v1/chats/{chat_id}/messages`.
         The `routed_inference_tier`, `routed_provider`, and `cost_estimate`
-        come from the gateway (B4). `stateless_passthrough` is true while
-        chat persistence is deferred (B5 → C3). `applied_skills` lists
-        the skills that were assembled into the prompt (C2).
+        come from the gateway (B4). `applied_skills` lists the skills
+        that were assembled into the prompt (C2). After C3 the backend
+        also persists both the user and assistant message rows; the
+        `message.id` carried here resolves to the persisted assistant
+        row.
       properties:
         message: {$ref: '#/components/schemas/Message'}
         citations:
           type: array
           items: {$ref: '#/components/schemas/Citation'}
-          description: "Empty until C5 (document pipeline)."
+          description: "Empty until M2 (citation engine)."
         routed_inference_tier:
           type: integer
           enum: [1,2,3,4,5]
@@ -1556,35 +1652,63 @@ components:
           description: |
             C2: skills that were successfully assembled into the prompt
             for this request. Empty when no skills were attached.
-        stateless_passthrough:
-          type: boolean
-          description: |
-            True while B5 is in effect — backend does not persist chats or
-            messages yet (C3 will). Set false once C3 lands.
 
     MessageStreamEvent:
       oneOf:
+        - $ref: '#/components/schemas/MessageStart'
         - $ref: '#/components/schemas/MessageDelta'
         - $ref: '#/components/schemas/MessageComplete'
         - $ref: '#/components/schemas/Error'
       description: |
-        Frames emitted on the SSE stream. Most frames are deltas;
-        the final frame is either a `complete` event (success) or
-        an `Error` envelope (the stream ended in failure). The latter
-        carries the same shape as a non-streaming error response.
+        Frames emitted on the SSE stream. The first frame is a `start`
+        event carrying the persisted assistant message id (so clients
+        can poll the row later). Subsequent frames are `delta` events,
+        each tagged with the `lq_ai_message_id`, the
+        `routed_inference_tier`, and `applied_skills`. The final frame
+        is either a `complete` event (success) or an `Error` envelope
+        (the stream ended in failure; the assistant row is persisted
+        with `error_code` populated for audit). Termination is
+        signalled by the OpenAI-style `data: [DONE]` line.
+
+    MessageStart:
+      type: object
+      required: [type, lq_ai_message_id, chat_id]
+      description: |
+        Opening frame on the SSE stream. Carries the assistant message
+        id the backend generated *before* dispatch; the persisted row
+        will eventually carry this same id, so the client can fetch the
+        row later via `GET /chats/{id}/messages`.
+      properties:
+        type: {type: string, enum: [start]}
+        lq_ai_message_id: {type: string, format: uuid}
+        chat_id: {type: string, format: uuid}
 
     MessageDelta:
       type: object
-      required: [type, delta]
+      required: [type, delta, lq_ai_message_id]
       properties:
         type: {type: string, enum: [delta]}
         delta: {type: string}
+        lq_ai_message_id:
+          type: string
+          format: uuid
+          description: "C3: the persisted assistant message id (stable across all frames)."
+        routed_inference_tier:
+          type: integer
+          enum: [1,2,3,4,5]
+          nullable: true
+          description: "B4: routed tier surfaced on every chunk."
+        applied_skills:
+          type: array
+          items: {type: string}
+          description: "C2: skills assembled into the prompt."
 
     MessageComplete:
       type: object
-      required: [type, message]
+      required: [type, message, lq_ai_message_id]
       properties:
         type: {type: string, enum: [complete]}
+        lq_ai_message_id: {type: string, format: uuid}
         message: {$ref: '#/components/schemas/Message'}
         citations:
           type: array
@@ -1595,6 +1719,13 @@ components:
           description: |
             C2: skills that were successfully assembled into the prompt
             for this request. Empty when no skills were attached.
+        routed_inference_tier:
+          type: integer
+          enum: [1,2,3,4,5]
+          nullable: true
+        routed_provider:
+          type: string
+          nullable: true
 
     Citation:
       type: object

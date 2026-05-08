@@ -184,64 +184,136 @@ the `project_files` join (the `files.project_id` column is the file's
 
 ## Chats and messages
 
+> **Implementation notes (Task C3, migration 0006).** The shapes below
+> are what migration `0006_create_chats_and_messages.py` actually
+> creates. They diverge from the PRD-era sketch in three places that
+> were resolved during C3 — recording them here so the doc and the
+> migration stay in lockstep:
+>
+> 1. **Soft-delete column is `archived_at`, not `deleted_at`.** Matches
+>    C7's projects soft-delete posture (we don't conflate "user
+>    archived this" with "this is scheduled for hard-delete"; D6 owns
+>    the latter).
+> 2. **`title` is NOT NULL with default `'New chat'`.** The API
+>    auto-renames the chat from the first user message's first 80
+>    chars on the first `POST /messages`; the default is what stands
+>    if the user never sends a message.
+> 3. **`messages.cost_estimate_micros` is BIGINT (USD micros)**, not
+>    `NUMERIC(10,4)`. Storing as integer micros avoids float
+>    round-trip drift in the audit log. Conversion factor is `1 micro
+>    = 1e-6 USD`; the API's `usd_to_micros` / `micros_to_usd` helpers
+>    in `app/schemas/chats.py` translate.
+> 4. **`messages.applied_skills` is `text[]`** (denormalized per ADR
+>    0007), not a join table. Skills are filesystem-canonical (no SQL
+>    `skills` table to FK to), and audit reads are write-light.
+> 5. **`messages.error_code`** is a new column persisted when an
+>    assistant message fails mid-stream or the gateway raises. Carries
+>    the canonical `app.errors` code (e.g., `provider_unavailable`).
+> 6. **`messages.citations`** is `JSONB` with default `'[]'`. M1 stores
+>    the empty list; M2's citation engine populates the structured
+>    shape. The separate `message_citations` table (still listed below)
+>    is a pre-existing PRD sketch that may or may not survive the M2
+>    citation work — C3 doesn't create it.
+
 ### `chats`
 
 ```sql
 CREATE TABLE chats (
-    id          UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
-    title       TEXT,
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id    UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     project_id  UUID REFERENCES projects(id) ON DELETE SET NULL,
+    title       TEXT NOT NULL DEFAULT 'New chat'
+                  CHECK (char_length(title) > 0 AND char_length(title) <= 200),
+    archived_at TIMESTAMPTZ,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at  TIMESTAMPTZ
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_chats_owner_active ON chats(owner_id, updated_at DESC) WHERE deleted_at IS NULL;
-CREATE INDEX idx_chats_project ON chats(project_id) WHERE project_id IS NOT NULL AND deleted_at IS NULL;
+CREATE INDEX idx_chats_owner_active ON chats(owner_id, created_at DESC)
+    WHERE archived_at IS NULL;
+CREATE INDEX idx_chats_project_active ON chats(project_id)
+    WHERE project_id IS NOT NULL AND archived_at IS NULL;
+
+-- updated_at maintenance via the set_updated_at() trigger from migration 0001.
+CREATE TRIGGER trg_chats_set_updated_at
+    BEFORE UPDATE ON chats FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 ```
 
 ### `chat_attached_skills` and `chat_attached_files`
 
-```sql
-CREATE TABLE chat_attached_skills (
-    chat_id      UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    skill_name   TEXT NOT NULL,
-    skill_version TEXT,
-    skill_inputs JSONB,  -- per-skill input values
-    attached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (chat_id, skill_name)
-);
+> **Status (M1).** Not implemented yet. The C3 implementation captures
+> per-message `applied_skills` directly on the `messages` row — see
+> below — which is sufficient for the M1 audit-log requirement. Chat-
+> level (rather than per-message) attachment surfaces would land in a
+> later task if the UI needs them; the schema below is preserved as a
+> forward-looking sketch.
 
-CREATE TABLE chat_attached_files (
-    chat_id      UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    file_id      UUID NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-    attached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (chat_id, file_id)
-);
+```sql
+-- Forward-looking; not in M1.
+-- CREATE TABLE chat_attached_skills (
+--     chat_id      UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+--     skill_name   TEXT NOT NULL,
+--     skill_version TEXT,
+--     skill_inputs JSONB,
+--     attached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+--     PRIMARY KEY (chat_id, skill_name)
+-- );
+-- CREATE TABLE chat_attached_files (
+--     chat_id      UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+--     file_id      UUID NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+--     attached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+--     PRIMARY KEY (chat_id, file_id)
+-- );
 ```
 
 ### `messages`
 
 ```sql
 CREATE TABLE messages (
-    id                       UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
+    id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     chat_id                  UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     role                     TEXT NOT NULL CHECK (role IN ('user','assistant','system','tool')),
     content                  TEXT NOT NULL,
-    model                    TEXT,
-    provider                 TEXT,
-    routed_inference_tier    SMALLINT CHECK (routed_inference_tier BETWEEN 1 AND 5),
-    tokens_in                INTEGER,
-    tokens_out               INTEGER,
-    cost_estimate            NUMERIC(10,4),
-    latency_ms               INTEGER,
-    error                    TEXT,
+    -- Per ADR 0007: skills the gateway applied for THIS exchange.
+    -- Denormalized text array; skills are filesystem-canonical.
+    applied_skills           TEXT[] NOT NULL DEFAULT '{}'::text[],
+    -- Routing metadata (assistant messages only; NULL for user/system/tool).
+    routed_inference_tier    SMALLINT CHECK (routed_inference_tier IS NULL
+                                             OR (routed_inference_tier BETWEEN 1 AND 5)),
+    routed_provider          TEXT,
+    routed_model             TEXT,
+    prompt_tokens            INTEGER CHECK (prompt_tokens IS NULL OR prompt_tokens >= 0),
+    completion_tokens        INTEGER CHECK (completion_tokens IS NULL OR completion_tokens >= 0),
+    -- Cost stored as integer USD micros (1 micro = 1e-6 USD) to avoid
+    -- float-precision drift in the audit trail. Wire shape converts
+    -- back to a USD float for client friendliness.
+    cost_estimate_micros     BIGINT,
+    -- Populated when the assistant message failed mid-stream or the
+    -- gateway raised an LQAIError. Carries the canonical lq_ai.errors
+    -- code (e.g., 'provider_unavailable', 'gateway_timeout'). NULL on
+    -- success.
+    error_code               TEXT,
+    -- M2's citation engine populates this. C3 stores [].
+    citations                JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_messages_chat ON messages(chat_id, created_at);
-CREATE INDEX idx_messages_routed_tier ON messages(routed_inference_tier, created_at);
+CREATE INDEX idx_messages_chat_created ON messages(chat_id, created_at);
+```
+
+### `inference_routing_log` FK closure (Task C3)
+
+Migration 0006 also closes the A2-deferred FK constraints on the
+`inference_routing_log.chat_id` and `inference_routing_log.message_id`
+columns. Both `ON DELETE SET NULL` so audit history survives the
+deletion of the underlying chat or message.
+
+```sql
+ALTER TABLE inference_routing_log
+    ADD CONSTRAINT fk_inference_routing_log_chat_id
+        FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE SET NULL,
+    ADD CONSTRAINT fk_inference_routing_log_message_id
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL;
 ```
 
 ### `message_citations`
