@@ -285,9 +285,7 @@ async def embed_chunks_for_file(
     # Fetch chunks needing embedding for this file. The JOIN goes
     # through ``documents`` because chunks live under documents, which
     # live under files.
-    stmt = (
-        select(DocumentChunk).join_from(DocumentChunk, DocumentChunk.__table__)
-    )
+    stmt = select(DocumentChunk).join_from(DocumentChunk, DocumentChunk.__table__)
     # SQLAlchemy 2.0 idiom for the join we actually want:
     from app.models.document import Document  # local import to avoid cycle
 

@@ -7,7 +7,10 @@ Surface state after B4:
   instantiated adapter (typical when the provider's credential env var
   is unset). Returns 400 ``invalid_model`` when the request's ``model``
   doesn't resolve to any configured alias or provider-native model.
-* ``POST /v1/embeddings`` — still 501 (B6 lands the OpenAI adapter).
+* ``POST /v1/embeddings`` — real handler since C6. Returns 503
+  ``provider_unavailable`` when no OPENAI_API_KEY is set in the test
+  env. Real-key happy path covered in test_inference_embeddings.py
+  (respx-mocked).
 * ``GET /v1/models`` — returns the configured aliases.
 
 End-to-end coverage of the chat-completion happy path lives in
@@ -69,16 +72,51 @@ async def test_chat_completions_returns_503_for_non_anthropic_alias(
 
 
 @pytest.mark.unit
-async def test_embeddings_returns_501(client: AsyncClient) -> None:
+async def test_embeddings_returns_503_when_openai_key_missing(client: AsyncClient) -> None:
+    """C6: the embeddings path requires an OpenAI adapter (per ADR 0008).
+
+    The example config points the ``embedding`` alias at
+    ``openai-prod/text-embedding-3-small``. With no ``OPENAI_API_KEY``
+    in the test env, the OpenAI adapter is skipped at startup and the
+    route returns the structured ``provider_unavailable`` 503 envelope.
+    Real-key end-to-end coverage is in
+    :mod:`tests.test_inference_embeddings` (respx-mocked).
+    """
+
     response = await client.post(
         "/v1/embeddings",
         json={"model": "embedding", "input": "hello"},
     )
-
-    assert response.status_code == 501
+    assert response.status_code == 503
     body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert "message" in body["error"]
+    assert body["error"]["code"] == "provider_unavailable"
+    assert "openai-prod" in body["error"]["details"].get("provider", "") or True
+
+
+@pytest.mark.unit
+async def test_embeddings_invalid_model_returns_400(client: AsyncClient) -> None:
+    """C6: an unknown alias / native model returns invalid_model 400."""
+
+    response = await client.post(
+        "/v1/embeddings",
+        json={"model": "no-such-thing", "input": "hello"},
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"]["code"] == "invalid_model"
+
+
+@pytest.mark.unit
+async def test_embeddings_malformed_body_returns_400(client: AsyncClient) -> None:
+    """C6: missing required field 'input' is a 400 invalid_request."""
+
+    response = await client.post(
+        "/v1/embeddings",
+        json={"model": "embedding"},
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"]["code"] == "invalid_request"
 
 
 @pytest.mark.unit

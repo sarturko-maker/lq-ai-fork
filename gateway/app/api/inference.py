@@ -1,4 +1,4 @@
-"""OpenAI-compatible inference endpoints (B4 router landed).
+"""OpenAI-compatible inference endpoints (B4 router + C6 embeddings).
 
 Surface:
 
@@ -8,8 +8,13 @@ Surface:
   ``routed_provider``. The HTTP response also carries the tier in a
   dedicated header (:data:`TIER_HEADER`) so header-only consumers
   (proxies, instrumentation) don't need to parse the body.
-* ``POST /v1/embeddings`` — 501 stub. Embeddings adapter lands later;
-  Anthropic has no embeddings endpoint.
+* ``POST /v1/embeddings`` — real handler (C6, per ADR 0008). Resolves
+  the model through B4's router, dispatches to whichever adapter
+  supports embeddings (currently :class:`OpenAIAdapter`), annotates
+  tier + provider on the response, writes the routing-log row.
+  ``ProviderUnsupportedError`` is fallback-eligible on this path
+  (overriding the chat default) so an Anthropic-routed alias falls
+  through to the next embedding-capable provider.
 * ``GET  /v1/models`` — returns the configured ``model_aliases`` from
   ``gateway.yaml``.
 

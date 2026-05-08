@@ -367,9 +367,11 @@ async def test_full_first_run_flow(
 
     # 6) Previously-gated endpoints are reachable (they still return 501 stubs,
     #    but the gate no longer 403s — confirming the flag actually cleared).
-    #    Pick a still-stub endpoint; /api/v1/projects became real in C7.
+    #    Pick a still-stub endpoint; /api/v1/projects became real in C7,
+    #    /api/v1/knowledge-bases became real in C6. /saved-prompts is still a
+    #    501 stub at this point.
     open_resp = await client.get(
-        "/api/v1/knowledge-bases",
+        "/api/v1/saved-prompts",
         headers={"Authorization": f"Bearer {second_login['access_token']}"},
     )
     assert open_resp.status_code == 501

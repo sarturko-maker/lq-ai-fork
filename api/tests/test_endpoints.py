@@ -114,6 +114,15 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("DELETE", "/api/v1/projects/{project_id}/files/{file_id}"),
     ("POST", "/api/v1/projects/{project_id}/skills"),
     ("DELETE", "/api/v1/projects/{project_id}/skills/{skill_name}"),
+    # C6 — Knowledge bases
+    ("POST", "/api/v1/knowledge-bases"),
+    ("GET", "/api/v1/knowledge-bases"),
+    ("GET", "/api/v1/knowledge-bases/{kb_id}"),
+    ("PATCH", "/api/v1/knowledge-bases/{kb_id}"),
+    ("DELETE", "/api/v1/knowledge-bases/{kb_id}"),
+    ("POST", "/api/v1/knowledge-bases/{kb_id}/files"),
+    ("DELETE", "/api/v1/knowledge-bases/{kb_id}/files/{file_id}"),
+    ("POST", "/api/v1/knowledge-bases/{kb_id}/query"),
 }
 
 
