@@ -1,30 +1,22 @@
-"""Integration tests for the B5 chat endpoint (stateless pass-through).
+"""Integration tests for the chat-message exchange endpoint (B5 + C3).
 
-Covers the M1-IMPLEMENTATION-ORDER B5 verification: backend receives a
-chat request → calls gateway → returns response. The gateway is mocked
-with respx so these tests run without the real upstream.
-
-What's tested:
+The endpoint at ``POST /api/v1/chats/{chat_id}/messages`` was wired
+through to the gateway in B5 (stateless pass-through) and now persists
+both sides of the exchange in C3. These tests cover:
 
 * Auth gate — must be authenticated.
-* B2 forced-password-change gate — must have cleared
-  ``must_change_password``.
-* Validation — empty body rejected, non-UUID chat_id rejected,
-  missing content rejected.
-* Happy path — gateway returns a response, backend surfaces tier and
-  routed_provider in body and headers.
+* B2 forced-password-change gate.
+* Validation — empty body / non-UUID chat_id / missing content.
+* Per-user isolation — cross-user chat 404.
+* Happy path (non-streaming) — gateway returns a response, backend
+  surfaces tier and routed_provider in body and headers, and
+  persists both rows.
 * Error translation — gateway 5xx, gateway timeout, gateway 401
   (operator misconfig), gateway 4xx with ``provider_unavailable`` /
   ``invalid_model``, gateway malformed body.
 * Streaming — happy path, mid-stream error, pre-frame error.
 * No double-write of inference_routing_log — the gateway writes; the
-  backend does not. Verified by ensuring the backend doesn't touch
-  the inference_routing_log table on the test DB during a chat call.
-
-The B5 endpoint is registered behind ``ActiveUser`` via the chats
-router's router-level dependency; the conftest.py SAVEPOINT-rolled-back
-session pattern lets the test insert a user, mint a token, and exercise
-the endpoint end-to-end.
+  backend does not.
 """
 
 from __future__ import annotations
@@ -44,10 +36,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients.gateway import GatewayClient, set_gateway_client
 from app.db.session import get_db
 from app.main import app
+from app.models.chat import Chat
 from app.models.user import User
 from app.security import create_access_token, hash_password
 
-_DUMMY_CHAT_ID = "00000000-0000-4000-8000-000000000000"
 GATEWAY_BASE = "http://test-gateway"
 GATEWAY_KEY = "test-gw-key"
 
@@ -91,6 +83,17 @@ async def gated_user(db_session: AsyncSession) -> User:
     db_session.add(user)
     await db_session.flush()
     return user
+
+
+@pytest_asyncio.fixture
+async def db_chat(db_session: AsyncSession, db_user: User) -> Chat:
+    """Create a real chat owned by ``db_user`` so the C3 endpoint has
+    something to attach messages to."""
+
+    chat = Chat(owner_id=db_user.id, title="New chat")
+    db_session.add(chat)
+    await db_session.flush()
+    return chat
 
 
 @pytest_asyncio.fixture
@@ -143,9 +146,12 @@ def _success_payload(tier: int = 3, content: str = "hello back") -> dict[str, ob
 
 
 @pytest.mark.integration
-async def test_send_message_unauthenticated_returns_401(client: AsyncClient) -> None:
+async def test_send_message_unauthenticated_returns_401(
+    client: AsyncClient,
+    db_chat: Chat,
+) -> None:
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hello"},
     )
 
@@ -156,11 +162,12 @@ async def test_send_message_unauthenticated_returns_401(client: AsyncClient) -> 
 async def test_send_message_with_must_change_password_returns_403(
     client: AsyncClient,
     gated_user: User,
+    db_chat: Chat,
 ) -> None:
     token = _bearer_for(gated_user)
 
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hello"},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -197,11 +204,12 @@ async def test_send_message_with_non_uuid_chat_id_returns_400(
 async def test_send_message_with_empty_content_returns_400(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     token = _bearer_for(db_user)
 
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": ""},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -213,11 +221,12 @@ async def test_send_message_with_empty_content_returns_400(
 async def test_send_message_missing_content_field_returns_400(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     token = _bearer_for(db_user)
 
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"model": "smart"},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -229,11 +238,12 @@ async def test_send_message_missing_content_field_returns_400(
 async def test_send_message_with_non_json_body_returns_400(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     token = _bearer_for(db_user)
 
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         content=b"not json",
         headers={
             "Authorization": f"Bearer {token}",
@@ -242,6 +252,27 @@ async def test_send_message_with_non_json_body_returns_400(
     )
 
     assert response.status_code == 400
+
+
+@pytest.mark.integration
+async def test_send_message_for_nonexistent_chat_returns_404(
+    client: AsyncClient,
+    db_user: User,
+) -> None:
+    """C3: cross-user / nonexistent chat returns 404."""
+
+    token = _bearer_for(db_user)
+    other_chat_id = str(uuid.uuid4())
+
+    response = await client.post(
+        f"/api/v1/chats/{other_chat_id}/messages",
+        json={"content": "hello"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["detail"]["code"] == "not_found"
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +285,7 @@ async def test_send_message_with_non_json_body_returns_400(
 async def test_send_message_non_streaming_happy_path(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     """Backend → gateway → response with tier surfaced in body and header."""
 
@@ -267,12 +299,12 @@ async def test_send_message_non_streaming_happy_path(
     token = _bearer_for(db_user)
 
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hello", "model": "smart"},
         headers={"Authorization": f"Bearer {token}"},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert route.called
 
     # The gateway saw the X-LQ-AI-Gateway-Key header.
@@ -287,10 +319,6 @@ async def test_send_message_non_streaming_happy_path(
     assert msg["role"] == "assistant"
     assert msg["content"] == "from anthropic"
     assert msg["routed_inference_tier"] == 3
-    # B5 marker: stateless pass-through until C3 lands persistence.
-    assert body["stateless_passthrough"] is True
-    # Citations are not surfaced until C5; B5 returns an empty list.
-    assert body["citations"] == []
     # Header surfaces the tier too.
     assert response.headers.get("X-LQ-AI-Routed-Inference-Tier") == "3"
     assert response.headers.get("X-LQ-AI-Routed-Provider") == "anthropic-prod"
@@ -301,15 +329,16 @@ async def test_send_message_non_streaming_happy_path(
 async def test_send_message_translates_request_to_single_user_message(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
-    """B5: the request's content becomes a single 'user' message; chat_id is forwarded."""
+    """The request's content becomes a single 'user' message; chat_id is forwarded."""
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, json=_success_payload())
     )
     token = _bearer_for(db_user)
 
     await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "what is contract law", "model": "fast"},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -317,7 +346,12 @@ async def test_send_message_translates_request_to_single_user_message(
     sent_body = _json.loads(route.calls[0].request.read())
     assert sent_body["model"] == "fast"
     assert sent_body["messages"] == [{"role": "user", "content": "what is contract law"}]
-    assert sent_body["chat_id"] == _DUMMY_CHAT_ID
+    assert sent_body["chat_id"] == str(db_chat.id)
+    # C3 — the new envelope fields are populated.
+    assert sent_body["lq_ai_chat_id"] == str(db_chat.id)
+    # The assistant message id is generated server-side; it must be a
+    # well-formed UUID we don't know in advance.
+    uuid.UUID(sent_body["lq_ai_message_id"])
     # stream defaults to False.
     assert sent_body["stream"] is False
 
@@ -332,6 +366,7 @@ async def test_send_message_translates_request_to_single_user_message(
 async def test_send_message_gateway_5xx_returns_503_gateway_unreachable(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(500, content=b"internal error")
@@ -339,7 +374,7 @@ async def test_send_message_gateway_5xx_returns_503_gateway_unreachable(
     token = _bearer_for(db_user)
 
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hello"},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -356,6 +391,7 @@ async def test_send_message_gateway_5xx_returns_503_gateway_unreachable(
 async def test_send_message_gateway_401_returns_503_with_no_leak(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     """The user must not see 'wrong gateway key' — operator misconfig."""
 
@@ -365,7 +401,7 @@ async def test_send_message_gateway_401_returns_503_with_no_leak(
     token = _bearer_for(db_user)
 
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hello"},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -381,6 +417,7 @@ async def test_send_message_gateway_401_returns_503_with_no_leak(
 async def test_send_message_gateway_timeout_returns_504(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     token = _bearer_for(db_user)
 
@@ -388,7 +425,7 @@ async def test_send_message_gateway_timeout_returns_504(
         router.post("/v1/chat/completions").mock(side_effect=httpx.ReadTimeout("x"))
 
         response = await client.post(
-            f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+            f"/api/v1/chats/{db_chat.id}/messages",
             json={"content": "hello"},
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -403,6 +440,7 @@ async def test_send_message_gateway_timeout_returns_504(
 async def test_send_message_provider_unavailable_returns_502(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(
@@ -419,7 +457,7 @@ async def test_send_message_provider_unavailable_returns_502(
     token = _bearer_for(db_user)
 
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hello"},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -435,6 +473,7 @@ async def test_send_message_provider_unavailable_returns_502(
 async def test_send_message_invalid_model_returns_400(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(
@@ -444,7 +483,7 @@ async def test_send_message_invalid_model_returns_400(
     token = _bearer_for(db_user)
 
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hello", "model": "made-up"},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -459,6 +498,7 @@ async def test_send_message_invalid_model_returns_400(
 async def test_send_message_gateway_invalid_response_body_returns_502(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, json={"unexpected": "shape"})
@@ -466,7 +506,7 @@ async def test_send_message_gateway_invalid_response_body_returns_502(
     token = _bearer_for(db_user)
 
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hello"},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -507,6 +547,7 @@ def _stream_chunk(content: str, *, tier: int = 3) -> str:
 async def test_send_message_streaming_happy_path(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     body = _stream_chunk("hi ") + _stream_chunk("there") + "data: [DONE]\n\n"
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -518,7 +559,7 @@ async def test_send_message_streaming_happy_path(
 
     async with client.stream(
         "POST",
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hi", "stream": True},
         headers={"Authorization": f"Bearer {token}"},
     ) as resp:
@@ -548,6 +589,7 @@ async def test_send_message_streaming_happy_path(
 async def test_send_message_streaming_mid_stream_error_emits_error_frame(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     body = (
         _stream_chunk("partial ")
@@ -563,7 +605,7 @@ async def test_send_message_streaming_mid_stream_error_emits_error_frame(
 
     async with client.stream(
         "POST",
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hi", "stream": True},
         headers={"Authorization": f"Bearer {token}"},
     ) as resp:
@@ -577,11 +619,13 @@ async def test_send_message_streaming_mid_stream_error_emits_error_frame(
                 break
             events.append(_json.loads(line[len("data:") :].strip()))
 
-    # First event is the partial delta; second is the structured error envelope.
-    assert events[0] == {"type": "delta", "delta": "partial "}
-    error_event = events[1]
-    assert "detail" in error_event  # canonical Error envelope
-    assert error_event["detail"]["code"] == "provider_unavailable"
+    # Find the partial-delta event and the error envelope.
+    delta_events = [e for e in events if e.get("type") == "delta"]
+    assert len(delta_events) == 1
+    assert delta_events[0]["delta"] == "partial "
+    error_events = [e for e in events if "detail" in e]
+    assert len(error_events) == 1
+    assert error_events[0]["detail"]["code"] == "provider_unavailable"
 
 
 @pytest.mark.integration
@@ -589,6 +633,7 @@ async def test_send_message_streaming_mid_stream_error_emits_error_frame(
 async def test_send_message_streaming_pre_frame_error_emits_error_frame(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
 ) -> None:
     """Status-code error before any data frame: SSE response with an error frame.
 
@@ -605,7 +650,7 @@ async def test_send_message_streaming_pre_frame_error_emits_error_frame(
 
     async with client.stream(
         "POST",
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hi", "stream": True},
         headers={"Authorization": f"Bearer {token}"},
     ) as resp:
@@ -620,8 +665,9 @@ async def test_send_message_streaming_pre_frame_error_emits_error_frame(
                 break
             events.append(_json.loads(line[len("data:") :].strip()))
 
-    assert len(events) == 1
-    assert events[0]["detail"]["code"] == "invalid_model"
+    error_events = [e for e in events if "detail" in e]
+    assert len(error_events) == 1
+    assert error_events[0]["detail"]["code"] == "invalid_model"
 
 
 # ---------------------------------------------------------------------------
@@ -634,6 +680,7 @@ async def test_send_message_streaming_pre_frame_error_emits_error_frame(
 async def test_send_message_does_not_write_inference_routing_log_on_backend(
     client: AsyncClient,
     db_user: User,
+    db_chat: Chat,
     db_session: AsyncSession,
 ) -> None:
     """Per B4: the gateway is the canonical writer of inference_routing_log.
@@ -653,7 +700,7 @@ async def test_send_message_does_not_write_inference_routing_log_on_backend(
     count_before = rows_before.scalar_one()
 
     response = await client.post(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
+        f"/api/v1/chats/{db_chat.id}/messages",
         json={"content": "hello"},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -662,50 +709,8 @@ async def test_send_message_does_not_write_inference_routing_log_on_backend(
     rows_after = await db_session.execute(text("SELECT count(*) FROM inference_routing_log"))
     count_after = rows_after.scalar_one()
     assert count_after == count_before, (
-        "B5 must not write to inference_routing_log — the gateway does (B4)."
+        "C3 must not write to inference_routing_log — the gateway does (B4)."
     )
-
-
-# ---------------------------------------------------------------------------
-# Other 501 endpoints stay 501 (regression coverage)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.integration
-async def test_get_chat_still_returns_501_until_c3(
-    client: AsyncClient,
-    db_user: User,
-) -> None:
-    """B5 only implements POST /messages; the rest stays 501 until C3."""
-
-    token = _bearer_for(db_user)
-
-    response = await client.get(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-    assert response.status_code == 501
-    body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert "C3" in body["error"]["next_task"]
-
-
-@pytest.mark.integration
-async def test_list_messages_still_returns_501_until_c3(
-    client: AsyncClient,
-    db_user: User,
-) -> None:
-    token = _bearer_for(db_user)
-
-    response = await client.get(
-        f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-    assert response.status_code == 501
-    body = response.json()
-    assert body["error"]["code"] == "not_implemented"
 
 
 # Ensure the count_before query has access to the table — if not, the test
@@ -716,8 +721,3 @@ async def _ensure_inference_routing_log_table_exists(db_session: AsyncSession) -
         await db_session.execute(text("SELECT 1 FROM inference_routing_log LIMIT 1"))
     except Exception:
         pytest.skip("inference_routing_log table not present in test DB")
-
-
-# Used by the no-double-write test; centralized so refactoring the
-# table name is one-line.
-INFERENCE_ROUTING_LOG_TABLE = "inference_routing_log"

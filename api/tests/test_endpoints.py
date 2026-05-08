@@ -85,8 +85,15 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/users/me"),
     # B2 — first-run admin + forced password change
     ("POST", "/api/v1/auth/change-password"),
-    # B5 — backend chat endpoint wired through gateway (stateless pass-through)
+    # B5 + C3 — backend chats + messages with persistence; SSE streaming.
+    ("POST", "/api/v1/chats"),
+    ("GET", "/api/v1/chats"),
+    ("GET", "/api/v1/chats/{chat_id}"),
+    ("PATCH", "/api/v1/chats/{chat_id}"),
+    ("DELETE", "/api/v1/chats/{chat_id}"),
+    ("GET", "/api/v1/chats/{chat_id}/messages"),
     ("POST", "/api/v1/chats/{chat_id}/messages"),
+    ("GET", "/api/v1/chats/{chat_id}/messages/{message_id}/citations"),
     # C1 — Skill Service: filesystem loading
     ("GET", "/api/v1/skills"),
     ("GET", "/api/v1/skills/{skill_name}"),

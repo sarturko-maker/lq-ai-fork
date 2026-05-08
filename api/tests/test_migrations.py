@@ -589,3 +589,248 @@ async def test_documents_cascade_delete_via_file(db_session: AsyncSession) -> No
         {"id": doc.id},
     )
     assert chunks_remaining.scalar_one() == 0
+
+
+# ---------------------------------------------------------------------------
+# Task C3 — chats + messages migration (0006)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_chats_and_messages_tables_exist(db_session: AsyncSession) -> None:
+    """C3: ``chats`` and ``messages`` tables exist after migration 0006."""
+
+    expected = {"chats", "messages"}
+    result = await db_session.execute(
+        text(
+            "SELECT tablename FROM pg_tables "
+            "WHERE schemaname = 'public' AND tablename = ANY(:names)"
+        ),
+        {"names": list(expected)},
+    )
+    found = {row[0] for row in result.fetchall()}
+    assert found == expected
+
+
+@pytest.mark.integration
+async def test_chats_indexes_exist(db_session: AsyncSession) -> None:
+    """C3: the active-listing and project-active partial indexes exist
+    plus the ordered messages index."""
+
+    expected = {
+        "idx_chats_owner_active",
+        "idx_chats_project_active",
+        "idx_messages_chat_created",
+    }
+    result = await db_session.execute(
+        text(
+            "SELECT indexname FROM pg_indexes "
+            "WHERE schemaname = 'public' AND indexname = ANY(:names)"
+        ),
+        {"names": list(expected)},
+    )
+    found = {row[0] for row in result.fetchall()}
+    assert found == expected
+
+
+@pytest.mark.integration
+async def test_messages_role_check_fires(db_session: AsyncSession) -> None:
+    """C3: inserting a message with a bogus role violates the CHECK."""
+
+    from app.models.chat import Chat
+    from app.models.user import User
+
+    user = User(
+        email=f"role-check-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="hash",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    chat = Chat(owner_id=user.id, title="x")
+    db_session.add(chat)
+    await db_session.flush()
+
+    with pytest.raises(Exception):  # noqa: B017
+        await db_session.execute(
+            text("INSERT INTO messages (chat_id, role, content) VALUES (:cid, 'bogus_role', 'x')"),
+            {"cid": chat.id},
+        )
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_messages_cascade_delete_on_chat(db_session: AsyncSession) -> None:
+    """C3: deleting a chat cascades to its messages."""
+
+    from app.models.chat import Chat
+    from app.models.user import User
+
+    user = User(
+        email=f"cascade-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="hash",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    chat = Chat(owner_id=user.id, title="x")
+    db_session.add(chat)
+    await db_session.flush()
+    chat_id = chat.id
+
+    await db_session.execute(
+        text(
+            "INSERT INTO messages (chat_id, role, content) "
+            "VALUES (:cid, 'user', 'a'), (:cid, 'assistant', 'b')"
+        ),
+        {"cid": chat_id},
+    )
+    await db_session.flush()
+
+    # Hard-delete the chat.
+    await db_session.execute(text("DELETE FROM chats WHERE id = :cid"), {"cid": chat_id})
+    await db_session.flush()
+
+    rows = await db_session.execute(
+        text("SELECT count(*) FROM messages WHERE chat_id = :cid"),
+        {"cid": chat_id},
+    )
+    assert rows.scalar_one() == 0
+
+
+@pytest.mark.integration
+async def test_inference_routing_log_chat_id_fk_set_null_on_chat_delete(
+    db_session: AsyncSession,
+) -> None:
+    """C3 closes A2: deleting a chat sets the routing-log row's
+    ``chat_id`` to NULL rather than expunging the audit history."""
+
+    from app.models.chat import Chat
+    from app.models.user import User
+
+    user = User(
+        email=f"rl-fk-chat-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="hash",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    chat = Chat(owner_id=user.id, title="x")
+    db_session.add(chat)
+    await db_session.flush()
+    chat_id = chat.id
+
+    # Insert a routing-log row referencing the chat.
+    await db_session.execute(
+        text(
+            "INSERT INTO inference_routing_log "
+            "(chat_id, routed_provider, routed_model, routed_inference_tier) "
+            "VALUES (:cid, 'p', 'm', 3)"
+        ),
+        {"cid": chat_id},
+    )
+    await db_session.flush()
+
+    # Delete the chat.
+    await db_session.execute(text("DELETE FROM chats WHERE id = :cid"), {"cid": chat_id})
+    await db_session.flush()
+
+    # The routing-log row survives with chat_id set to NULL.
+    rows = await db_session.execute(
+        text(
+            "SELECT chat_id FROM inference_routing_log "
+            "WHERE routed_provider = 'p' AND routed_model = 'm'"
+        )
+    )
+    found = rows.all()
+    assert len(found) == 1
+    assert found[0][0] is None
+
+
+@pytest.mark.integration
+async def test_inference_routing_log_message_id_fk_set_null_on_message_delete(
+    db_session: AsyncSession,
+) -> None:
+    """C3 closes A2: deleting a message sets the routing-log row's
+    ``message_id`` to NULL rather than expunging the audit history."""
+
+    from app.models.chat import Chat
+    from app.models.user import User
+
+    user = User(
+        email=f"rl-fk-msg-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="hash",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    chat = Chat(owner_id=user.id, title="x")
+    db_session.add(chat)
+    await db_session.flush()
+
+    msg_id = uuid.uuid4()
+    await db_session.execute(
+        text(
+            "INSERT INTO messages (id, chat_id, role, content) "
+            "VALUES (:mid, :cid, 'assistant', 'x')"
+        ),
+        {"mid": msg_id, "cid": chat.id},
+    )
+    await db_session.flush()
+
+    # Insert a routing-log row referencing the message.
+    await db_session.execute(
+        text(
+            "INSERT INTO inference_routing_log "
+            "(message_id, routed_provider, routed_model, routed_inference_tier) "
+            "VALUES (:mid, 'q', 'n', 3)"
+        ),
+        {"mid": msg_id},
+    )
+    await db_session.flush()
+
+    # Delete the message.
+    await db_session.execute(text("DELETE FROM messages WHERE id = :mid"), {"mid": msg_id})
+    await db_session.flush()
+
+    # The routing-log row survives with message_id set to NULL.
+    rows = await db_session.execute(
+        text(
+            "SELECT message_id FROM inference_routing_log "
+            "WHERE routed_provider = 'q' AND routed_model = 'n'"
+        )
+    )
+    found = rows.all()
+    assert len(found) == 1
+    assert found[0][0] is None
+
+
+@pytest.mark.integration
+async def test_messages_applied_skills_default_empty_array(db_session: AsyncSession) -> None:
+    """C3: ``applied_skills`` defaults to an empty text[] when omitted."""
+
+    from app.models.chat import Chat
+    from app.models.user import User
+
+    user = User(
+        email=f"applied-skills-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="hash",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    chat = Chat(owner_id=user.id, title="x")
+    db_session.add(chat)
+    await db_session.flush()
+
+    # Insert via raw SQL omitting applied_skills.
+    msg_id = uuid.uuid4()
+    await db_session.execute(
+        text("INSERT INTO messages (id, chat_id, role, content) VALUES (:mid, :cid, 'user', 'hi')"),
+        {"mid": msg_id, "cid": chat.id},
+    )
+    await db_session.flush()
+
+    rows = await db_session.execute(
+        text("SELECT applied_skills FROM messages WHERE id = :mid"),
+        {"mid": msg_id},
+    )
+    value = rows.scalar_one()
+    # Postgres returns the text[] as a Python list.
+    assert value == []
