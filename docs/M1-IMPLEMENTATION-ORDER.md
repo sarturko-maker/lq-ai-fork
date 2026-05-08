@@ -234,17 +234,17 @@ The substantive features. Skills load, chats persist, files upload, knowledge ba
 
 **Effort:** 10–14 hours.
 
-### Task C6 — Knowledge Service: hybrid retrieval
+### Task C6 — Knowledge Service: hybrid retrieval + embedding generation
 
-**Scope:** `/api/v1/knowledge-bases` CRUD. Hybrid retrieval combining pgvector cosine similarity and Postgres FTS. Configurable `hybrid_alpha` parameter (0=vector, 1=FTS).
+**Scope:** `/api/v1/knowledge-bases` CRUD. Hybrid retrieval combining pgvector cosine similarity and Postgres FTS. Configurable `hybrid_alpha` parameter (0=vector, 1=FTS). **Also absorbs the embedding-generation work that C5 deferred** (per ADR 0006 §3): land a real `/v1/embeddings` implementation on the gateway, pick an embedding model, and embed-on-write any `document_chunks` rows where `embedding IS NULL` (either eagerly via the ingest worker once the gateway endpoint is real, or lazily on first retrieval). Token-count derivation (`document_chunks.tokens`) lives here too — the tokenizer choice is coupled to the embedding-model choice.
 
 **Dependencies:** C5.
 
-**Output:** Files added to a KB are searchable; queries return relevant chunks with scores.
+**Output:** Files added to a KB are searchable; queries return relevant chunks with scores. Backfill any pre-C6 chunks (which C5 wrote with `embedding=NULL`).
 
-**Verification:** Add 5 files to a KB; query for content; verify expected chunks appear in top results.
+**Verification:** Add 5 files to a KB; query for content; verify expected chunks appear in top results. After backfill, no `document_chunks` rows have `embedding IS NULL`.
 
-**Effort:** 6–8 hours.
+**Effort:** 8–10 hours (originally 6–8h; +2h for the embedding-generation scope absorbed from C5 per ADR 0006 §3).
 
 ### Task C7 — Project service
 
