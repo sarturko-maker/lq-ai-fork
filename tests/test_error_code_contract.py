@@ -108,6 +108,10 @@ EXPECTED_CROSSING_CODES: set[str] = {
     "anonymization_failed",
     "not_implemented",
     "tier_disallowed_globally",
+    # C2 — skill prompt assembly
+    "skill_not_found",
+    "skill_fetch_failed",
+    "skill_input_missing",
 }
 
 

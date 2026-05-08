@@ -76,6 +76,14 @@ CODE_PROVIDER_UNAVAILABLE = "provider_unavailable"
 CODE_TIER_BELOW_MINIMUM = "tier_below_minimum"
 CODE_INVALID_MODEL = "invalid_model"
 
+# C2 — skill prompt-assembly failure modes. The gateway raises these
+# during prompt assembly; the backend's GatewayClient maps them via
+# map_gateway_error_code to the corresponding backend exception class
+# below.
+CODE_SKILL_NOT_FOUND = "skill_not_found"
+CODE_SKILL_FETCH_FAILED = "skill_fetch_failed"
+CODE_SKILL_INPUT_MISSING = "skill_input_missing"
+
 
 # --- Base class --------------------------------------------------------------
 
@@ -312,6 +320,43 @@ class InvalidModel(LQAIError):
     http_status = status.HTTP_400_BAD_REQUEST
 
 
+class SkillNotFound(LQAIError):
+    """The gateway reported that an attached skill is not in the registry — 404.
+
+    Pass-through of the gateway's ``skill_not_found`` (C2). Distinct
+    from a generic NotFound so callers can branch on "the chat had a
+    skill attached that doesn't exist" without parsing details.
+    """
+
+    code = CODE_SKILL_NOT_FOUND
+    http_status = status.HTTP_404_NOT_FOUND
+
+
+class SkillFetchFailed(LQAIError):
+    """The gateway could not fetch a skill from the backend (operational) — 502.
+
+    Pass-through of the gateway's ``skill_fetch_failed`` (C2). Indicates
+    a transport / timeout / 5xx between the gateway and the backend's
+    internal-skills endpoint, OR a malformed response. Cleared by
+    addressing the underlying problem on the backend side.
+    """
+
+    code = CODE_SKILL_FETCH_FAILED
+    http_status = status.HTTP_502_BAD_GATEWAY
+
+
+class SkillInputMissing(LQAIError):
+    """A required skill input was not supplied — 400.
+
+    Pass-through of the gateway's ``skill_input_missing`` (C2). The
+    ``details.missing`` list names the unbound required inputs so the
+    UI can prompt the user.
+    """
+
+    code = CODE_SKILL_INPUT_MISSING
+    http_status = status.HTTP_400_BAD_REQUEST
+
+
 # --- Code → exception class registry -----------------------------------------
 # Used by the gateway-response translator (in app.clients.gateway) to map
 # a structured gateway error envelope into the right LQAIError subclass.
@@ -326,6 +371,9 @@ _GATEWAY_CODE_MAP: dict[str, type[LQAIError]] = {
     "invalid_model": InvalidModel,
     "invalid_request": ValidationError,
     "not_implemented": InternalError,
+    "skill_not_found": SkillNotFound,
+    "skill_fetch_failed": SkillFetchFailed,
+    "skill_input_missing": SkillInputMissing,
 }
 
 
@@ -355,6 +403,9 @@ __all__ = [
     "CODE_PAYLOAD_TOO_LARGE",
     "CODE_PROVIDER_UNAVAILABLE",
     "CODE_RATE_LIMITED",
+    "CODE_SKILL_FETCH_FAILED",
+    "CODE_SKILL_INPUT_MISSING",
+    "CODE_SKILL_NOT_FOUND",
     "CODE_TIER_BELOW_MINIMUM",
     "CODE_UNAUTHORIZED",
     "CODE_VALIDATION_ERROR",
@@ -371,6 +422,9 @@ __all__ = [
     "PayloadTooLarge",
     "ProviderUnavailable",
     "RateLimited",
+    "SkillFetchFailed",
+    "SkillInputMissing",
+    "SkillNotFound",
     "TierBelowMinimum",
     "Unauthorized",
     "ValidationError",

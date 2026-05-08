@@ -47,6 +47,14 @@ CODE_INVALID_REQUEST = "invalid_request"
 CODE_NOT_IMPLEMENTED = "not_implemented"
 CODE_RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
 
+# C2 — skill prompt assembly. Raised by the backend HTTP client and the
+# prompt assembler. ``skill_not_found`` and ``skill_fetch_failed`` cross
+# into the backend's chat endpoint as 404 / 502 respectively (the
+# backend's GatewayClient maps them via app.errors.map_gateway_error_code).
+CODE_SKILL_NOT_FOUND = "skill_not_found"
+CODE_SKILL_FETCH_FAILED = "skill_fetch_failed"
+CODE_SKILL_INPUT_MISSING = "skill_input_missing"
+
 # Codes that cross to the backend (also declared in api/app/errors.py).
 CODE_TIER_BELOW_MINIMUM = "tier_below_minimum"
 CODE_PROVIDER_UNAVAILABLE = "provider_unavailable"
@@ -180,6 +188,49 @@ class Unauthorized(LQAIError):
     http_status: ClassVar[int] = status.HTTP_502_BAD_GATEWAY
 
 
+# --- C2 (skill prompt assembly) ----------------------------------------------
+
+
+class SkillNotFound(LQAIError):
+    """The named skill is not in the backend's registry (HTTP 404 from the
+    backend's internal-skills endpoint).
+
+    Surfaces as 404 to the chat-completion caller. The backend's
+    GatewayClient maps the same code to a backend NotFound (404) so the
+    user sees a clean "skill not found" rather than a wrapped 502.
+    """
+
+    code: ClassVar[str] = CODE_SKILL_NOT_FOUND
+    http_status: ClassVar[int] = status.HTTP_404_NOT_FOUND
+
+
+class SkillFetchFailed(LQAIError):
+    """The gateway could not fetch a skill from the backend (transport,
+    timeout, 5xx, malformed body, etc.).
+
+    Distinct from SkillNotFound — this is the operational failure mode,
+    not the "skill doesn't exist" mode. Surfaces as 502 because the
+    skill content is part of the assembled prompt; we cannot dispatch
+    to the model without it.
+    """
+
+    code: ClassVar[str] = CODE_SKILL_FETCH_FAILED
+    http_status: ClassVar[int] = status.HTTP_502_BAD_GATEWAY
+
+
+class SkillInputMissing(LQAIError):
+    """A required skill input was not supplied in the request.
+
+    Raised by the prompt assembler when a skill's ``inputs.required``
+    list contains a name that the request's ``lq_ai_skill_inputs`` did
+    not bind. Surfaces as 400 with the missing field names in
+    ``details.missing``.
+    """
+
+    code: ClassVar[str] = CODE_SKILL_INPUT_MISSING
+    http_status: ClassVar[int] = status.HTTP_400_BAD_REQUEST
+
+
 # --- Public re-exports -------------------------------------------------------
 __all__ = [
     "CODE_ANONYMIZATION_FAILED",
@@ -188,6 +239,9 @@ __all__ = [
     "CODE_NOT_IMPLEMENTED",
     "CODE_PROVIDER_UNAVAILABLE",
     "CODE_RATE_LIMIT_EXCEEDED",
+    "CODE_SKILL_FETCH_FAILED",
+    "CODE_SKILL_INPUT_MISSING",
+    "CODE_SKILL_NOT_FOUND",
     "CODE_TIER_BELOW_MINIMUM",
     "CODE_TIER_DISALLOWED_GLOBALLY",
     "CODE_UNAUTHORIZED",
@@ -198,6 +252,9 @@ __all__ = [
     "NotImplemented_",
     "ProviderUnavailable",
     "RateLimitExceeded",
+    "SkillFetchFailed",
+    "SkillInputMissing",
+    "SkillNotFound",
     "TierBelowMinimum",
     "TierDisallowedGlobally",
     "Unauthorized",

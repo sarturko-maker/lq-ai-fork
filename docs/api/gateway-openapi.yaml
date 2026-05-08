@@ -484,6 +484,10 @@ components:
                 - invalid_request
                 - not_implemented
                 - unauthorized
+                # Skill prompt assembly (C2)
+                - skill_not_found
+                - skill_fetch_failed
+                - skill_input_missing
             message: {type: string}
             details: {type: object, additionalProperties: true}
 
