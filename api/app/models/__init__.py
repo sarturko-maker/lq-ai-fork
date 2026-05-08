@@ -15,6 +15,7 @@ from app.models.chat import Chat, Message
 from app.models.document import Document, DocumentChunk
 from app.models.file import File
 from app.models.inference import InferenceRoutingLog
+from app.models.knowledge import KnowledgeBase, KnowledgeBaseFile
 from app.models.project import Project, ProjectFile, ProjectSkill
 from app.models.user import User, UserSession
 
@@ -25,6 +26,8 @@ __all__ = [
     "DocumentChunk",
     "File",
     "InferenceRoutingLog",
+    "KnowledgeBase",
+    "KnowledgeBaseFile",
     "Message",
     "Project",
     "ProjectFile",
