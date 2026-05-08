@@ -1,7 +1,7 @@
 ---
 name: vendor-privacy-policy-first-pass
 description: Use when the user has a vendor's published privacy policy (URL, PDF, or pasted text) and wants a fast triage assessment to decide whether deeper diligence is warranted. Produces a short structured report covering what the policy says about key data practices (collection, use, sharing, retention, transfers, rights) plus identification of red flags that warrant escalation to deeper review. Explicitly a first pass, not a full privacy assessment, DPA negotiation, or compliance certification.
-inhouse:
+lq_ai:
   title: Vendor Privacy Policy First Pass
   version: 1.0.0
   author: LegalQuants

@@ -1,6 +1,6 @@
 # Skill-Authoring Guide
 
-This guide documents the conventions for authoring high-quality skills in InHouse AI. It is a working document — the conventions are derived from the patterns established in the M1 starter skills, and they will refine as the skill library grows. Contributions to this guide via PR are welcome.
+This guide documents the conventions for authoring high-quality skills in LQ.AI. It is a working document — the conventions are derived from the patterns established in the M1 starter skills, and they will refine as the skill library grows. Contributions to this guide via PR are welcome.
 
 The audience is anyone authoring a skill containing legal substance: practicing attorneys, legal-ops practitioners, or engineers pairing with attorneys. Engineers contributing pure technical-utility skills should read but not necessarily follow every convention here — many are calibrated to the legal-substance use case.
 
@@ -38,7 +38,7 @@ Every skill's `SKILL.md` starts with YAML frontmatter. The fields:
 ---
 name: my-skill-name
 description: One-sentence description of when this skill should be applied.
-inhouse:
+lq_ai:
   title: My Skill Title
   version: 1.0.0
   author: <Your name or LegalQuants>
@@ -68,26 +68,26 @@ inhouse:
 
 - **`name`** — kebab-case, globally unique within the skill library. Used as the folder name and the skill's identifier. Match the folder name exactly.
 - **`description`** — one sentence. Used by the application and by the model itself to decide when the skill applies. Should be specific enough to differentiate from similar skills (e.g., "Reviews mutual or unilateral NDAs for unusual provisions" not just "Reviews NDAs").
-- **`inhouse.title`** — human-readable display name. Used in the UI.
-- **`inhouse.version`** — semver. `1.0.0` for first stable release.
-- **`inhouse.author`** — your name (or a co-authoring pair, separated by " and "), or "LegalQuants" for skills authored by the project team.
-- **`inhouse.tags`** — array of tags for skill discovery. See the [tag conventions](#tag-conventions) section below.
-- **`inhouse.jurisdiction`** — what jurisdiction the skill is calibrated to.
+- **`lq_ai.title`** — human-readable display name. Used in the UI.
+- **`lq_ai.version`** — semver. `1.0.0` for first stable release.
+- **`lq_ai.author`** — your name (or a co-authoring pair, separated by " and "), or "LegalQuants" for skills authored by the project team.
+- **`lq_ai.tags`** — array of tags for skill discovery. See the [tag conventions](#tag-conventions) section below.
+- **`lq_ai.jurisdiction`** — what jurisdiction the skill is calibrated to.
   - `us` — US-law-focused.
   - `eu` — EU-focused.
   - `regime-aware` — the skill takes a `regulatory_regime` input or similar to handle multiple regimes.
   - `global` — explicitly jurisdiction-agnostic (rare; most skills are at minimum US-law-defaults).
   - `other` — for specific jurisdictions (Brazil, India, etc.); spell out in skill body.
-- **`inhouse.trigger_examples`** — at least three example prompts that should trigger this skill. The application uses these for skill matching; the model uses them to disambiguate between skills.
-- **`inhouse.inputs`** — required and optional inputs (see [Input design](#input-design) below).
-- **`inhouse.output_format`** — `report` (default markdown), `table` (structured grid for Tabular Review), `issues_list` (structured JSON for issue-tracker piping), or `redline` (Word tracked-changes mode).
+- **`lq_ai.trigger_examples`** — at least three example prompts that should trigger this skill. The application uses these for skill matching; the model uses them to disambiguate between skills.
+- **`lq_ai.inputs`** — required and optional inputs (see [Input design](#input-design) below).
+- **`lq_ai.output_format`** — `report` (default markdown), `table` (structured grid for Tabular Review), `issues_list` (structured JSON for issue-tracker piping), or `redline` (Word tracked-changes mode).
 
 ### Optional fields
 
-- **`inhouse.minimum_inference_tier`** — refuses to run if the chat's routed Inference Tier is below this. Use for skills that handle particularly sensitive content; default is no minimum.
-- **`inhouse.use_organization_profile`** — defaults to `true`. Set to `false` only for skills that should run independent of organization-specific context (rare).
-- **`inhouse.is_organization_profile`** — set to `true` only for the singleton Organization Profile skill. Every other skill leaves this `false` or omits it.
-- **`inhouse.self_improvement`** — defaults to `false` for v1.0.0 skills. Self-improvement is a deferred enhancement; v1.0.0 skills are stable artifacts under semver, not learning systems.
+- **`lq_ai.minimum_inference_tier`** — refuses to run if the chat's routed Inference Tier is below this. Use for skills that handle particularly sensitive content; default is no minimum.
+- **`lq_ai.use_organization_profile`** — defaults to `true`. Set to `false` only for skills that should run independent of organization-specific context (rare).
+- **`lq_ai.is_organization_profile`** — set to `true` only for the singleton Organization Profile skill. Every other skill leaves this `false` or omits it.
+- **`lq_ai.self_improvement`** — defaults to `false` for v1.0.0 skills. Self-improvement is a deferred enhancement; v1.0.0 skills are stable artifacts under semver, not learning systems.
 
 ### Tag conventions
 
@@ -389,7 +389,7 @@ Tracked-changes output for Word documents. Used by skills that produce direct re
 
 ## Self-improvement (deferred)
 
-The frontmatter field `inhouse.self_improvement` defaults to `false` for v1.0.0 skills. Self-improvement — skills that ask the user for feedback after execution and update themselves — is a deferred enhancement. The reasoning:
+The frontmatter field `lq_ai.self_improvement` defaults to `false` for v1.0.0 skills. Self-improvement — skills that ask the user for feedback after execution and update themselves — is a deferred enhancement. The reasoning:
 
 - v1.0.0 skills are stable artifacts under semver. Users rely on them; they should not change unexpectedly.
 - Self-improvement requires audit trails and review processes that don't exist in v1.
@@ -416,7 +416,7 @@ Skill chaining is a power-user feature; most skills should work well alone and n
 
 ## Versioning
 
-Skills carry semver in `inhouse.version`:
+Skills carry semver in `lq_ai.version`:
 
 - **`1.0.0`** — first stable release.
 - **`1.0.x`** — patch updates: typo fixes, reference material updates, additional examples, expanded edge cases.
@@ -431,7 +431,7 @@ Bump versions per the conventions when you update a skill. Update the `version` 
 
 Before submitting a skill PR, verify:
 
-- [ ] `SKILL.md` has complete frontmatter (every applicable `inhouse:` field).
+- [ ] `SKILL.md` has complete frontmatter (every applicable `lq_ai:` field).
 - [ ] `name` matches the folder name.
 - [ ] `version` is `1.0.0` (or appropriately incremented for an update).
 - [ ] `description` is one sentence and specific enough to differentiate from similar skills.

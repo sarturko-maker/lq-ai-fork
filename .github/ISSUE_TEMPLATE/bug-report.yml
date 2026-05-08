@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug to help us improve InHouse AI
+description: Report a bug to help us improve LQ.AI
 title: "[Bug] "
 labels: ["bug", "needs-triage"]
 body:
@@ -8,9 +8,9 @@ body:
       value: |
         Thanks for taking the time to file a bug report. The more specific the report, the faster we can investigate.
 
-        **Before submitting:** please search [existing issues](https://github.com/legalquants/inhouse-ai/issues) to avoid duplicates.
+        **Before submitting:** please search [existing issues](https://github.com/legalquants/lq-ai/issues) to avoid duplicates.
 
-        **Security-sensitive issues:** do **not** file as a public bug report. Use [Security Advisories](https://github.com/legalquants/inhouse-ai/security/advisories/new) or email security@legalquants.com per [SECURITY.md](../SECURITY.md).
+        **Security-sensitive issues:** do **not** file as a public bug report. Use [Security Advisories](https://github.com/legalquants/lq-ai/security/advisories/new) or email security@legalquants.com per [SECURITY.md](../SECURITY.md).
 
   - type: checkboxes
     id: prerequisites
@@ -54,8 +54,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: InHouse AI version
-      description: Output of `inhouse-ai --version` or the commit SHA you're running.
+      label: LQ.AI version
+      description: Output of `lq-ai --version` or the commit SHA you're running.
       placeholder: e.g., v0.5.0 or commit abc123
     validations:
       required: true

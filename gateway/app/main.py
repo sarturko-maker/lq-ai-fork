@@ -1,4 +1,4 @@
-"""InHouse AI Inference Gateway entrypoint.
+"""LQ.AI Inference Gateway entrypoint.
 
 This is the M1-Task-A1 scaffold: a minimal FastAPI service that returns 503 from
 its health endpoints and 501 from inference endpoints. Implementation lands in
@@ -12,14 +12,14 @@ from fastapi.responses import JSONResponse
 
 from app import __version__
 
-SERVICE_NAME = "inhouse-ai-gateway"
+SERVICE_NAME = "lq-ai-gateway"
 
 app = FastAPI(
-    title="InHouse AI Inference Gateway",
+    title="LQ.AI Inference Gateway",
     version=__version__,
     description=(
         "OpenAI-compatible inference gateway and security boundary for the "
-        "InHouse AI platform. The gateway annotates every routed request with "
+        "LQ.AI platform. The gateway annotates every routed request with "
         "its derived Inference Tier (1-5) per PRD §3.13 / §1.5.2 and refuses "
         "requests below a declared minimum. M1 implementation lands progressively "
         "per docs/M1-IMPLEMENTATION-ORDER.md; until then, all endpoints return "

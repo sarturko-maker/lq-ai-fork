@@ -1,4 +1,4 @@
-# InHouse AI — development docker-compose
+# LQ.AI — development docker-compose
 #
 # Default profile (no --profile flag): Mode 1 (cloud LLM keys via Inference Gateway).
 # Local-inference profile (--profile local): adds ollama and paddleocr containers.
@@ -7,14 +7,14 @@
 #
 # Quick start:
 #   cp .env.example .env
-#   # edit .env — set INHOUSE_AI_GATEWAY_KEY, JWT_SECRET, POSTGRES_PASSWORD,
+#   # edit .env — set LQ_AI_GATEWAY_KEY, JWT_SECRET, POSTGRES_PASSWORD,
 #   # MINIO_ROOT_PASSWORD, and at least one provider API key
 #   docker compose up -d
 #
 # Air-gapped / Mode 2:
 #   docker compose --profile local up -d
 
-name: inhouse-ai
+name: lq-ai
 
 services:
   # ============================================================
@@ -25,8 +25,8 @@ services:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-inhouse_ai}
-      POSTGRES_USER: ${POSTGRES_USER:-inhouse_ai}
+      POSTGRES_DB: ${POSTGRES_DB:-lq_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-lq_ai}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -34,7 +34,7 @@ services:
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     healthcheck:
       test:
-        ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-inhouse_ai} -d $${POSTGRES_DB:-inhouse_ai}"]
+        ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-lq_ai} -d $${POSTGRES_DB:-lq_ai}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -58,7 +58,7 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-inhouse_ai}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-lq_ai}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
     volumes:
       - miniodata:/data
@@ -85,7 +85,7 @@ services:
         condition: service_healthy
     environment:
       # Auth — backend → gateway
-      INHOUSE_AI_GATEWAY_KEY: ${INHOUSE_AI_GATEWAY_KEY:?INHOUSE_AI_GATEWAY_KEY is required}
+      LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
       # Provider keys (any of these may be unset; gateway.yaml picks which to use)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -102,7 +102,7 @@ services:
       LANGFUSE_HOST: ${LANGFUSE_HOST:-}
       # Operational
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      INHOUSE_AI_DEV_MODE: ${INHOUSE_AI_DEV_MODE:-false}
+      LQ_AI_DEV_MODE: ${LQ_AI_DEV_MODE:-false}
     # gateway.yaml lands when Task A3 implements config loading; for now the
     # scaffold service starts without it and /ready returns 503.
     # volumes:
@@ -132,18 +132,18 @@ services:
         condition: service_healthy
     environment:
       # Database
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-inhouse_ai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-inhouse_ai}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-lq_ai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lq_ai}}
       # Cache and queue
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       # Object storage
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-${MINIO_ROOT_USER:-inhouse_ai}}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-${MINIO_ROOT_USER:-lq_ai}}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
-      S3_BUCKET: ${S3_BUCKET:-inhouse-ai-files}
+      S3_BUCKET: ${S3_BUCKET:-lq-ai-files}
       S3_REGION: ${S3_REGION:-us-east-1}
       # Inference Gateway
-      INHOUSE_AI_GATEWAY_URL: ${INHOUSE_AI_GATEWAY_URL:-http://gateway:8001}
-      INHOUSE_AI_GATEWAY_KEY: ${INHOUSE_AI_GATEWAY_KEY:?INHOUSE_AI_GATEWAY_KEY is required}
+      LQ_AI_GATEWAY_URL: ${LQ_AI_GATEWAY_URL:-http://gateway:8001}
+      LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
       # JWT (auth — per ADR 0002 the backend owns auth)
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_ACCESS_TOKEN_TTL_SECONDS: ${JWT_ACCESS_TOKEN_TTL_SECONDS:-900}
@@ -152,7 +152,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       # Operational
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      INHOUSE_AI_DEV_MODE: ${INHOUSE_AI_DEV_MODE:-false}
+      LQ_AI_DEV_MODE: ${LQ_AI_DEV_MODE:-false}
     ports:
       - "${API_HOST_PORT:-8000}:8000"
     healthcheck:
@@ -175,9 +175,9 @@ services:
         condition: service_healthy
     environment:
       # Backend delegation (per ADR 0002 — backend owns auth)
-      INHOUSE_AI_API_URL: ${INHOUSE_AI_API_URL:-http://api:8000}
+      LQ_AI_API_URL: ${LQ_AI_API_URL:-http://api:8000}
       WEBUI_AUTH: ${WEBUI_AUTH:-false}
-      WEBUI_NAME: ${WEBUI_NAME:-InHouse AI}
+      WEBUI_NAME: ${WEBUI_NAME:-LQ.AI}
       WEBUI_URL: ${WEBUI_URL:-http://localhost:3000}
       # OpenWebUI's full env-var surface (DATABASE_URL, OLLAMA_BASE_URL,
       # ENABLE_*, etc.) lands when Task A1.d imports the fork and we know

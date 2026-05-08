@@ -1,6 +1,6 @@
-# InHouse AI Backend API
+# LQ.AI Backend API
 
-FastAPI service implementing the InHouse AI backend OpenAPI surface (`docs/api/backend-openapi.yaml`).
+FastAPI service implementing the LQ.AI backend OpenAPI surface (`docs/api/backend-openapi.yaml`).
 
 ## Quick start
 

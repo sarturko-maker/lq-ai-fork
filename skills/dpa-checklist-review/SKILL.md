@@ -1,7 +1,7 @@
 ---
 name: dpa-checklist-review
 description: Use when the user provides a Data Processing Agreement, Data Processing Addendum, or HIPAA Business Associate Agreement and asks whether it contains the terms required under the applicable data-protection regime. Produces a structured checklist scoring each required term as present, partial, missing, or unclear, with clause references and recommended language for any gaps. Supports GDPR Article 28, US state privacy laws (CCPA/CPRA, VCDPA, CPA, CTDPA, and similar), HIPAA BAAs, and general commercial DPAs without a specified regime.
-inhouse:
+lq_ai:
   title: DPA Checklist Review
   version: 1.0.0
   author: LegalQuants

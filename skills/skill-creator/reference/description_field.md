@@ -4,7 +4,7 @@ The frontmatter `description` field is the single most important line in a skill
 
 ## What the description field is for
 
-When a user opens a chat, InHouse AI loads available skills' descriptions into the model's context. The model reads the descriptions and decides which skills are relevant. If a skill's description doesn't clearly say *when* to apply the skill, the model won't trigger it — even if the skill itself would be perfect for the task.
+When a user opens a chat, LQ.AI loads available skills' descriptions into the model's context. The model reads the descriptions and decides which skills are relevant. If a skill's description doesn't clearly say *when* to apply the skill, the model won't trigger it — even if the skill itself would be perfect for the task.
 
 ## The "Use when..." pattern
 

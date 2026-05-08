@@ -18,7 +18,7 @@ async def test_health_returns_200_alive() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "alive"
-    assert body["service"] == "inhouse-ai-gateway"
+    assert body["service"] == "lq-ai-gateway"
 
 
 @pytest.mark.unit
@@ -31,5 +31,5 @@ async def test_ready_returns_503_until_config_loaded() -> None:
     assert response.status_code == 503
     body = response.json()
     assert body["status"] == "not_ready"
-    assert body["service"] == "inhouse-ai-gateway"
+    assert body["service"] == "lq-ai-gateway"
     assert body["reason"] == "scaffold_only"

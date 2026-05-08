@@ -1,4 +1,4 @@
-# InHouse AI — top-level Makefile
+# LQ.AI — top-level Makefile
 #
 # Conventional targets per CONTRIBUTING.md and M1-IMPLEMENTATION-ORDER A1:
 #   install   — install Python and Node dev dependencies
@@ -22,7 +22,7 @@ RESET := \033[0m
 
 .PHONY: help
 help:
-	@printf '\n  %bInHouse AI — Make targets%b\n\n' '$(BLUE)' '$(RESET)'
+	@printf '\n  %bLQ.AI — Make targets%b\n\n' '$(BLUE)' '$(RESET)'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[34m%-18s\033[0m %s\n", $$1, $$2}'
 	@printf '\n'

@@ -98,6 +98,6 @@ preview_to_user: |
 
 ## A note on this pattern
 
-This pattern — "Enhance Prompt fills missing skill inputs" — is a core integration point between Enhance Prompt and the rest of the InHouse AI skill ecosystem. Skills declare required and optional inputs in their frontmatter. Enhance Prompt reads those declarations from `attached_skills` and surfaces the missing required inputs to the user in a structured way before the prompt is submitted.
+This pattern — "Enhance Prompt fills missing skill inputs" — is a core integration point between Enhance Prompt and the rest of the LQ.AI skill ecosystem. Skills declare required and optional inputs in their frontmatter. Enhance Prompt reads those declarations from `attached_skills` and surfaces the missing required inputs to the user in a structured way before the prompt is submitted.
 
-The result: skills with structured inputs become easier to use, because the application surfaces the inputs as form-like fields rather than waiting for the model to ask. This is one of the reasons the InHouse AI extension under `inhouse:` in skill frontmatter exists — to enable exactly this kind of structured cooperation between skills.
+The result: skills with structured inputs become easier to use, because the application surfaces the inputs as form-like fields rather than waiting for the model to ask. This is one of the reasons the LQ.AI extension under `lq_ai:` in skill frontmatter exists — to enable exactly this kind of structured cooperation between skills.

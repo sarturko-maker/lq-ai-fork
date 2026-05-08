@@ -64,13 +64,13 @@ Lays the substrate. By the end of Phase A, the repository has running services t
 
 ### Task A5 — Web shell scaffold (OpenWebUI fork) [parallel with A2, A3, A4]
 
-**Scope:** Fork OpenWebUI to `web/`. Apply InHouse AI branding (logo placeholder, color scheme, footer). Configure to point at the InHouse AI backend instead of OpenWebUI's default. Build runs in Docker via `docker compose`.
+**Scope:** Fork OpenWebUI to `web/`. Apply LQ.AI branding (logo placeholder, color scheme, footer). Configure to point at the LQ.AI backend instead of OpenWebUI's default. Build runs in Docker via `docker compose`.
 
 **Dependencies:** A1.
 
-**Output:** Web app loads at `http://localhost:3000`, displays the login screen, has InHouse AI branding.
+**Output:** Web app loads at `http://localhost:3000`, displays the login screen, has LQ.AI branding.
 
-**Verification:** Visiting localhost:3000 shows the InHouse AI-branded login.
+**Verification:** Visiting localhost:3000 shows the LQ.AI-branded login.
 
 **Effort:** 6–8 hours (most time on getting OpenWebUI fork building cleanly).
 
@@ -248,7 +248,7 @@ The substantive features. Skills load, chats persist, files upload, knowledge ba
 
 ### Task C8 — Web UI: chat experience [parallel from C3 onward]
 
-**Scope:** OpenWebUI fork customized for InHouse AI: chat sidebar, attached-files panel, skill picker, streaming message display, markdown rendering. Inherit Project context when chat is in a project.
+**Scope:** OpenWebUI fork customized for LQ.AI: chat sidebar, attached-files panel, skill picker, streaming message display, markdown rendering. Inherit Project context when chat is in a project.
 
 **Dependencies:** C3.
 
@@ -262,7 +262,7 @@ The substantive features. Skills load, chats persist, files upload, knowledge ba
 
 ## Phase D — M1 differentiators (Week 5)
 
-The features that make this InHouse AI rather than just another chat-with-LLMs app: tier awareness, audit log fields, organization profile, MFA, per-user delete.
+The features that make this LQ.AI rather than just another chat-with-LLMs app: tier awareness, audit log fields, organization profile, MFA, per-user delete.
 
 ### Task D1 — Tier-floor enforcement (refusals)
 
@@ -442,7 +442,7 @@ The artifacts that make M1 launch-ready beyond just "the code works."
 
 ### Task E8 — Helm chart for Kubernetes
 
-**Scope:** Initial Helm chart at `deploy/helm/inhouse-ai/`. Templates for each service. Configurable via `values.yaml`. Documented in the deployment cookbook.
+**Scope:** Initial Helm chart at `deploy/helm/lq-ai/`. Templates for each service. Configurable via `values.yaml`. Documented in the deployment cookbook.
 
 **Dependencies:** All of Phase C and D.
 

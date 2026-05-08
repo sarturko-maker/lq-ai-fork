@@ -1,3 +1,3 @@
-"""InHouse AI backend API service."""
+"""LQ.AI backend API service."""
 
 __version__ = "0.1.0"

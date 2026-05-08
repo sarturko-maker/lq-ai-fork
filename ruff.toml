@@ -1,4 +1,4 @@
-# InHouse AI — top-level ruff configuration
+# LQ.AI — top-level ruff configuration
 #
 # Applies to api/, gateway/, scripts/. Per CONTRIBUTING.md:
 #   - ruff format is Black-compatible

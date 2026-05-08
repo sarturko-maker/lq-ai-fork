@@ -1,6 +1,6 @@
-# Contributing Skills to InHouse AI
+# Contributing Skills to LQ.AI
 
-Skills are the canonical artifact of value in this project. **When the project produces a wrong answer, the answer to "why" is almost always in a `SKILL.md` somewhere. Improving InHouse AI is mostly improving skills.**
+Skills are the canonical artifact of value in this project. **When the project produces a wrong answer, the answer to "why" is almost always in a `SKILL.md` somewhere. Improving LQ.AI is mostly improving skills.**
 
 This document covers contributions of **skills containing legal substance** — the everyday work-product skills like NDA Review, MSA Review, DPA Checklist Review, and the dozens of related skills the deferred-enhancements list catalogs. The contribution path for skills is meaningfully different from the engineering contribution path because skills carry legal substance: the patterns they encode, the severity calibrations they apply, and the recommended language they suggest will affect real legal work in real organizations. The bar is correspondingly higher.
 
@@ -10,7 +10,7 @@ For **engineering contributions** (code, infrastructure, deployment recipes, gen
 
 ## Why skill contribution has a higher bar
 
-InHouse AI is open source for the same reason a black-box statute would be unsuited to law: **the tools that shape a lawyer's judgment should be accountable to clients, courts, regulators, and ethics boards**. A skill that produces a wrong answer should be readable, debuggable, and forkable by the lawyer who relies on it. A skill that codifies a position should be reviewable by the team that signs off on it.
+LQ.AI is open source for the same reason a black-box statute would be unsuited to law: **the tools that shape a lawyer's judgment should be accountable to clients, courts, regulators, and ethics boards**. A skill that produces a wrong answer should be readable, debuggable, and forkable by the lawyer who relies on it. A skill that codifies a position should be reviewable by the team that signs off on it.
 
 That accountability has a flip side. Because skills are open source and used in real practice, contributing a skill means contributing legal substance to a community of practitioners who may rely on it. The contribution norms below — attestation, practicing-attorney review, conservative posture — exist to keep the bar high enough that the project is fitness-for-purpose for the work it claims to do.
 
@@ -37,7 +37,7 @@ my-skill/
 ---
 name: my-skill-name
 description: One sentence describing when this skill should be applied.
-inhouse:
+lq_ai:
   title: My Skill Title
   version: 1.0.0
   author: <Your name or LegalQuants>
@@ -145,7 +145,7 @@ mkdir -p skills/my-skill/reference skills/my-skill/examples
 
 **Required elements:**
 
-- `SKILL.md` with complete frontmatter (every `inhouse:` field that applies; do not omit fields with the assumption that they'll default).
+- `SKILL.md` with complete frontmatter (every `lq_ai:` field that applies; do not omit fields with the assumption that they'll default).
 - The body of `SKILL.md` covering: when this skill applies, when not to apply, inputs, workflow, output format, edge cases and refusals, what this skill does not do.
 - **At least one worked example** in `examples/` showing the skill applied end-to-end on a representative input, with the resulting output. For skills with perspective branching or regime selection, multiple examples are strongly preferred (one per perspective / regime).
 - **Reference files** in `reference/` for any operational checklists, severity rubrics, or substantive content the skill draws on. The pattern from the contract-review skills — separate `reference/severity_rubric.md`, `reference/report_structure.md`, etc. — is a good model for review skills, less applicable to extraction or transformation skills.
@@ -205,7 +205,7 @@ After approval, the skill is merged. The merge commit:
 
 ## Versioning skills
 
-Skills carry semver version numbers in `inhouse.version`. The conventions:
+Skills carry semver version numbers in `lq_ai.version`. The conventions:
 
 - **`1.0.0`** — first stable release of a skill. Reviewed, attested, ready for production use.
 - **`1.0.x`** — patch updates that don't change skill behavior materially: typo fixes, reference material updates, additional examples, expanded edge-case handling.

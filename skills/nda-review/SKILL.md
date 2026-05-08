@@ -1,7 +1,7 @@
 ---
 name: nda-review
 description: Use when the user uploads or pastes a non-disclosure agreement and asks for review, redline, risk assessment, or a recommendation on whether to sign. Identifies missing standard protections, one-sided or unusual provisions, and operational issues; produces a structured report with severity ratings and citations to specific clauses, calibrated to the user's perspective (discloser, recipient, or mutual).
-inhouse:
+lq_ai:
   title: NDA Review
   version: 1.0.1
   author: LegalQuants

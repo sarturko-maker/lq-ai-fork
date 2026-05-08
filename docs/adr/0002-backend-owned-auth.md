@@ -25,9 +25,9 @@ During M1 planning, several factors made Option B the simpler architecture in pr
 
 ## Decision
 
-**The InHouse AI FastAPI backend owns authentication.** All clients (the OpenWebUI fork, the Word add-in, and any future surface) authenticate via the backend's auth endpoints.
+**The LQ.AI FastAPI backend owns authentication.** All clients (the OpenWebUI fork, the Word add-in, and any future surface) authenticate via the backend's auth endpoints.
 
-**Identity store.** The `users`, `user_sessions`, and related tables in the InHouse AI Postgres database (per [`docs/db-schema.md`](../db-schema.md)) are the canonical identity store. There is no parallel OpenWebUI auth database.
+**Identity store.** The `users`, `user_sessions`, and related tables in the LQ.AI Postgres database (per [`docs/db-schema.md`](../db-schema.md)) are the canonical identity store. There is no parallel OpenWebUI auth database.
 
 **Session model.** Short-lived JWT access tokens (~15 min) plus refresh tokens (default 7 days, hashed at rest in `user_sessions`). Refresh tokens rotate on use. Programmatic clients use scoped API tokens.
 
@@ -54,7 +54,7 @@ During M1 planning, several factors made Option B the simpler architecture in pr
 **Mitigations:**
 
 - The OAuth/SAML/LDAP/SCIM surface in the backend is documented in the OpenAPI sketch (PRD decision-routing #2) so the implementation is anchored, not improvised.
-- The OpenWebUI fork's auth-delegation glue is a small isolated module under `web/src/lib/inhouse-ai/auth/` (per ADR 0001's customization-organization principle), making it easy to verify after rebases.
+- The OpenWebUI fork's auth-delegation glue is a small isolated module under `web/src/lib/lq-ai/auth/` (per ADR 0001's customization-organization principle), making it easy to verify after rebases.
 - Operators with complex IdP needs can front the deployment with Authentik or Keycloak via reverse proxy — the backend trusts the proxy's authenticated headers (per the PRD §5.1 reverse-proxy recipe).
 
 ---

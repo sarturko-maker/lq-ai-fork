@@ -1,4 +1,4 @@
-# InHouse AI — Acceptance Testing Framework
+# LQ.AI — Acceptance Testing Framework
 
 This document establishes the framework for acceptance testing skills before public release. It is the meta-document that the per-skill test plans (in each `skills/<skill-name>/test-plan.md`) follow. The audience is anyone running acceptance testing on the M1 starter skills, anyone authoring new skills who needs to draft a test plan, and reviewers verifying that skill behavior is calibrated correctly before merge.
 
@@ -233,7 +233,7 @@ Issues block the skill version's release until resolved. Resolved-and-re-tested 
 Acceptance testing runs at three points:
 
 1. **Pre-release of a skill version.** Every new or updated skill goes through acceptance testing before the version ships. The skill author runs structural checks; a reviewing attorney runs calibration evaluation; the conservative-posture check is part of the substantive review process documented in [`skills/CONTRIBUTING.md`](../skills/CONTRIBUTING.md).
-2. **Pre-release of a project version.** Before each minor release of InHouse AI (every 6–8 weeks), all M1 starter skills are re-run against the test corpus. Regressions surface as failures and block release.
+2. **Pre-release of a project version.** Before each minor release of LQ.AI (every 6–8 weeks), all M1 starter skills are re-run against the test corpus. Regressions surface as failures and block release.
 3. **Ad-hoc when issues are reported.** When a community user reports a substantive issue with a skill, the relevant scenario is added to the test corpus and re-run. New scenarios that surface from real-world reports become permanent additions to the test plan.
 
 ---
@@ -245,8 +245,8 @@ Acceptance testing can be run manually (a tester runs each scenario, captures ou
 For scripted runs, the convention:
 
 ```bash
-# From the project root, against a configured InHouse AI deployment
-inhouse-test acceptance \
+# From the project root, against a configured LQ.AI deployment
+lq-test acceptance \
   --skill nda-review \
   --skill-version 1.0.1 \
   --corpus ./test-corpus/nda-review/ \
@@ -261,7 +261,7 @@ The runner produces:
 
 Manual runs follow the same output structure but require the tester to construct the result files by hand.
 
-The `inhouse-test` CLI is on the deferred-enhancements list (DE-### TBD); for v1, manual runs are the baseline. The framework documents what scripted runs would look like to anchor future work.
+The `lq-test` CLI is on the deferred-enhancements list (DE-### TBD); for v1, manual runs are the baseline. The framework documents what scripted runs would look like to anchor future work.
 
 ---
 

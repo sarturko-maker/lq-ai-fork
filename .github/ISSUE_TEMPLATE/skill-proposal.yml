@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for proposing a skill. Skills are the canonical artifact of value in InHouse AI; substantive contributions are credited and meaningful.
+        Thanks for proposing a skill. Skills are the canonical artifact of value in LQ.AI; substantive contributions are credited and meaningful.
 
         **Before submitting:**
         - Read [`skills/CONTRIBUTING.md`](../skills/CONTRIBUTING.md) for the contribution process.

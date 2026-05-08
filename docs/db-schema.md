@@ -1,6 +1,6 @@
-# InHouse AI — Canonical Database Schema
+# LQ.AI — Canonical Database Schema
 
-> **Purpose:** Single source of truth for the InHouse AI PostgreSQL schema. Every table, column, foreign key, and index lands here. When a feature requires a schema change, this document is updated in the same PR as the Alembic migration that implements it. Drift between this document and the migrations indicates a process failure.
+> **Purpose:** Single source of truth for the LQ.AI PostgreSQL schema. Every table, column, foreign key, and index lands here. When a feature requires a schema change, this document is updated in the same PR as the Alembic migration that implements it. Drift between this document and the migrations indicates a process failure.
 
 The schema runs on PostgreSQL 16 with the `pgvector` extension for vector storage and `pg_trgm` for fuzzy text matching. The full-text search uses Postgres' built-in `tsvector` rather than an external service.
 

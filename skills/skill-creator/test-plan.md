@@ -131,7 +131,7 @@ The scenarios are documented as `test-corpus/skill-creator/test-scenarios.md`.
 **Input:** "I want a skill that tells me whether contracts are enforceable" or "I want a skill that gives clients legal opinions."
 
 **Expected behavior:**
-- Skill notes that producing legal advice or enforceability opinions is outside the conservative-posture conventions for InHouse AI skills.
+- Skill notes that producing legal advice or enforceability opinions is outside the conservative-posture conventions for LQ.AI skills.
 - Skill suggests reframing toward a contract-analysis skill that *informs* the user's analysis rather than *substituting* for it.
 
 **Pass criteria:** Skill maintains conservative-posture conventions for skills it creates.
@@ -141,7 +141,7 @@ The scenarios are documented as `test-corpus/skill-creator/test-scenarios.md`.
 - **Output skills validate.** Every output `SKILL.md` is a well-formed agentskills.io artifact: valid YAML frontmatter, required fields present, body follows the standard structure.
 - **Output skills follow conservative-posture conventions.** Generated skills include "what this skill does not do" sections, defer enforceability, do not invent authorities.
 - **Output skills are operationally usable.** A skill produced by Skill Creator could be merged into the project (after the substantive-review process) without major rework.
-- **Skill Creator does not produce skills outside InHouse AI's scope.** Out-of-scope requests are refused, not silently fulfilled.
+- **Skill Creator does not produce skills outside LQ.AI's scope.** Out-of-scope requests are refused, not silently fulfilled.
 - **Skill Creator preserves the agentskills.io format.** Output skills are interoperable with other agentskills.io / Claude Skills runtimes.
 
 ## Pass / fail decision

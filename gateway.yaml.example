@@ -1,5 +1,5 @@
 # ============================================================
-# InHouse AI — Inference Gateway Configuration
+# LQ.AI — Inference Gateway Configuration
 # ============================================================
 # This file configures the Inference Gateway: which providers
 # are available, which models map to which provider, what tier
@@ -29,8 +29,8 @@ server:
 # (the backend service identifies itself with this key)
 gateway_auth:
   enabled: true
-  api_key_env: INHOUSE_AI_GATEWAY_KEY
-  # Backend services must include X-Inhouse-AI-Gateway-Key header
+  api_key_env: LQ_AI_GATEWAY_KEY
+  # Backend services must include X-LQ-AI-Gateway-Key header
 
 # ============================================================
 # PROVIDERS — what LLM endpoints the gateway can reach
@@ -313,8 +313,8 @@ telemetry:
   opentelemetry:
     enabled: ${OTEL_ENABLED:-false}
     endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
-    service_name: inhouse-ai-gateway
-    service_version: ${INHOUSE_AI_VERSION}
+    service_name: lq-ai-gateway
+    service_version: ${LQ_AI_VERSION}
     # The gateway emits traces for: every inference request
     # (with provider, model, tier, latency, cost), every
     # refusal (with reason), every fallback (with both
@@ -362,10 +362,10 @@ request_validation:
 # DEVELOPMENT-MODE OVERRIDES
 # ============================================================
 # When running in dev mode, relax some safety checks.
-# Set INHOUSE_AI_DEV_MODE=true to enable.
+# Set LQ_AI_DEV_MODE=true to enable.
 
 dev_mode:
-  enabled: ${INHOUSE_AI_DEV_MODE:-false}
+  enabled: ${LQ_AI_DEV_MODE:-false}
   bypass_rate_limits: false  # Even in dev, keep rate limits
   log_full_prompts: false    # PII concerns even in dev
   allow_tier_5: false        # Tier 5 stays disallowed

@@ -1,4 +1,4 @@
-"""InHouse AI backend API entrypoint.
+"""LQ.AI backend API entrypoint.
 
 This is the M1-Task-A1 scaffold: a minimal FastAPI service that returns 503 from
 its health endpoints. Implementation lands in subsequent tasks per
@@ -12,13 +12,13 @@ from fastapi.responses import JSONResponse
 
 from app import __version__
 
-SERVICE_NAME = "inhouse-ai-api"
+SERVICE_NAME = "lq-ai-api"
 
 app = FastAPI(
-    title="InHouse AI Backend API",
+    title="LQ.AI Backend API",
     version=__version__,
     description=(
-        "Backend API for the InHouse AI platform. The full surface is specified "
+        "Backend API for the LQ.AI platform. The full surface is specified "
         "in docs/api/backend-openapi.yaml. M1 implementation lands progressively "
         "per docs/M1-IMPLEMENTATION-ORDER.md; until then, all endpoints return 501 "
         "or 503 with a structured 'not implemented' body."

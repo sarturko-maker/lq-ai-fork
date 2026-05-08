@@ -1,7 +1,7 @@
 ---
 name: action-items-from-client-alert
 description: Use when the user provides a client alert, regulatory bulletin, law firm memo, or similar legal update and wants the time-sensitive action items, deadlines, and obligations extracted into a checklist organized by deadline. Distinguishes mandatory action items (effective dates of new requirements) from recommended action items (best practices) and informational items (context only). Produces a brief context summary plus deadline-organized checklist with citations to the source alert.
-inhouse:
+lq_ai:
   title: Action Items from Client Alert
   version: 1.0.0
   author: LegalQuants

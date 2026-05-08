@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: InHouse AI Backend API
+  title: LQ.AI Backend API
   version: 0.1.0
   description: |
-    Canonical API specification for the InHouse AI backend (FastAPI service).
+    Canonical API specification for the LQ.AI backend (FastAPI service).
     
     This is a **sketch** — it covers the endpoints, request/response shapes, and
     schemas needed to anchor implementation. Expect refinement during M1 build.
@@ -22,8 +22,8 @@ info:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
   contact:
-    name: InHouse AI
-    url: https://github.com/legalquants/inhouse-ai
+    name: LQ.AI
+    url: https://github.com/legalquants/lq-ai
 
 servers:
   - url: http://localhost:8000

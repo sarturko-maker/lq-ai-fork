@@ -2,7 +2,7 @@
 
 > **Status:** Stub at v1 launch. The Compliance Alignment Pack is a documented commitment in [PRD §1.8 Security Posture](../PRD.md#18-security-posture) and lands in M1–M2; this README documents the scope and provides operator-usable orientation in the interim.
 
-The Compliance Alignment Pack is a set of documents mapping InHouse AI's design, architecture, and operational posture to the controls of major compliance frameworks. It is **not a certification** — InHouse AI is open-source software the operator deploys and operates; the operator's deployment is what gets certified, not the project itself. The Pack is the project's contribution to the operator's certification work: pre-mapped control responses with citations to PRD sections, code modules, and documentation, so the operator's compliance team has a substantive starting point rather than a blank questionnaire.
+The Compliance Alignment Pack is a set of documents mapping LQ.AI's design, architecture, and operational posture to the controls of major compliance frameworks. It is **not a certification** — LQ.AI is open-source software the operator deploys and operates; the operator's deployment is what gets certified, not the project itself. The Pack is the project's contribution to the operator's certification work: pre-mapped control responses with citations to PRD sections, code modules, and documentation, so the operator's compliance team has a substantive starting point rather than a blank questionnaire.
 
 ## Frameworks covered
 
@@ -15,7 +15,7 @@ The Compliance Alignment Pack is a set of documents mapping InHouse AI's design,
 | **HIPAA** — Security Rule and Privacy Rule | Stub | `hipaa-alignment.md` (M2) |
 | **FedRAMP Moderate** | Stub | `fedramp-alignment.md` (M2) |
 
-Each document follows a consistent format: control reference, applicability to InHouse AI deployments, the project's design or operational response, and pointers to the relevant PRD sections, code modules, or operational guidance.
+Each document follows a consistent format: control reference, applicability to LQ.AI deployments, the project's design or operational response, and pointers to the relevant PRD sections, code modules, or operational guidance.
 
 ## Format
 
@@ -35,7 +35,7 @@ the operator's responsibility.
 For each control in the framework:
 
 - Control ID and short description
-- Applicability to InHouse AI deployments
+- Applicability to LQ.AI deployments
 - Project response (design, code, operational practice)
 - Operator responsibility (what the operator must do to satisfy this control)
 - References (PRD sections, code modules, docs)

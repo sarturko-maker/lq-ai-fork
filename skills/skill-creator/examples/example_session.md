@@ -90,7 +90,7 @@ Look right?
 name: board-minutes-generator
 description: Use when the user provides meeting notes from a board meeting and asks for formal minutes. Produces Delaware-format corporate board minutes from notes and an agenda, distinguishing formal resolutions (with vote tallies) from consensus agreements, capturing action items with owners, and excluding editorializing or off-the-record content.
 
-inhouse:
+lq_ai:
   title: Board Minutes Generator
   version: 1.0.0
   author: <user>

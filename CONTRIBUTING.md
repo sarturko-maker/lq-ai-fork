@@ -1,4 +1,4 @@
-# Contributing to InHouse AI
+# Contributing to LQ.AI
 
 Thanks for your interest in contributing. This document covers contributions to **code, infrastructure, deployment recipes, and general project documentation**. Skills containing legal substance follow a different process documented in [`skills/CONTRIBUTING.md`](skills/CONTRIBUTING.md) — that path includes attestation requirements and practicing-attorney review that don't apply to engineering work.
 
@@ -7,8 +7,8 @@ Thanks for your interest in contributing. This document covers contributions to 
 ## Quick start
 
 ```bash
-git clone https://github.com/legalquants/inhouse-ai.git
-cd inhouse-ai
+git clone https://github.com/legalquants/lq-ai.git
+cd lq-ai
 cp .env.example .env
 # Edit .env with at least one LLM provider API key (or use local profile)
 docker compose up -d              # Mode 1
@@ -90,7 +90,7 @@ Squash-and-merge is the default; merge commits are reserved for cases where the 
 
 ## Sign-off (Developer Certificate of Origin)
 
-InHouse AI uses the [Developer Certificate of Origin (DCO)](https://developercertificate.org/) — not a CLA. The DCO is a lightweight assertion that you have the right to contribute the work under the project's Apache 2.0 license. Industry standard, sufficient legal cover, no separate paperwork.
+LQ.AI uses the [Developer Certificate of Origin (DCO)](https://developercertificate.org/) — not a CLA. The DCO is a lightweight assertion that you have the right to contribute the work under the project's Apache 2.0 license. Industry standard, sufficient legal cover, no separate paperwork.
 
 Every commit must be signed off:
 
@@ -126,7 +126,7 @@ git rebase --signoff main                 # all commits since main diverged
 - **Imports:** sorted by `ruff` (isort-compatible). Standard library first, then third-party, then local.
 - **Docstrings:** required on public modules, classes, and functions in the gateway and backend. Format: triple-quoted, summary line, blank line, detail. Descriptive variable names reduce the need for inline comments.
 - **Async:** prefer `async def` for I/O-bound functions; use `httpx.AsyncClient` rather than `requests`. Sync helpers are fine for CPU-bound or test code.
-- **Exceptions:** use the project's `inhouse_ai.errors` exception hierarchy; do not raise bare `Exception`.
+- **Exceptions:** use the project's `lq_ai.errors` exception hierarchy; do not raise bare `Exception`.
 
 ### JavaScript / TypeScript (`web/`)
 
@@ -279,7 +279,7 @@ Reports of unacceptable behavior go to conduct@legalquants.com. Reports are conf
 
 ## License
 
-By contributing to InHouse AI, you agree that your contributions will be licensed under the project's [Apache License 2.0](LICENSE). The DCO sign-off (above) is your assertion that you have the right to contribute the work under that license.
+By contributing to LQ.AI, you agree that your contributions will be licensed under the project's [Apache License 2.0](LICENSE). The DCO sign-off (above) is your assertion that you have the right to contribute the work under that license.
 
 ---
 

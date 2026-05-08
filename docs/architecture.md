@@ -1,4 +1,4 @@
-# InHouse AI — System Architecture
+# LQ.AI — System Architecture
 
 > **Visual companion to [PRD v0.2](PRD.md).** This document renders the v1 architecture as a Mermaid diagram and walks through the architectural choices for contributors and procurement evaluators. The diagram below covers the full M1–M4 target architecture with M5+ forward-looking elements drawn as dashed slots; what runs at the M1 baseline is a strict subset, called out in the milestone breakdown further down.
 
@@ -22,7 +22,7 @@ flowchart TB
     %% =========================================
     %%   BACKEND (FastAPI)
     %% =========================================
-    subgraph BACKEND["🧠 InHouse AI Backend (FastAPI)"]
+    subgraph BACKEND["🧠 LQ.AI Backend (FastAPI)"]
         direction TB
         api["<b>OpenAPI 3.1 Surface</b><br/>Authn/Authz · RBAC · MFA option<br/>Privilege-aware Audit Log<br/><i>M1</i>"]
 
@@ -187,7 +187,7 @@ The architecture is shaped by three commitments:
 
 **Self-hosted, with the customer's keys, in the customer's environment.** Storage (Postgres + Redis + MinIO/S3) lives entirely in the operator's environment; the application services run alongside; the only data that potentially leaves the operator's environment is the inference call to the configured provider. There is no LegalQuants-side SaaS holding customer data — by design, no telemetry is emitted by default, and what telemetry the operator opts into contains no content. (See [PRD §5.7 No Telemetry by Default](PRD.md#57-no-telemetry-by-default).)
 
-**The Inference Gateway is the security boundary.** It is the single component holding privileged provider API keys and the only egress path for customer prompts. We build it in-house in ~3,000 lines of focused Python rather than adopting LiteLLM (whose security history includes proxy auth bypasses and SSRF in document loaders) — for an open-source project where users may run with our defaults, that surface area is unacceptable. Every request passes through Auth → Router → Rate Limit → Tier Derivation → Anonymization (M2) → Provider Adapters → Cost Tracker → Telemetry, and is annotated with the derived Inference Tier (1–5) before leaving. Skills and Projects can refuse to run below their declared minimum tier. (See [PRD §4 The InHouse AI Inference Gateway](PRD.md#4-the-inhouse-ai-inference-gateway) and [§4.7 Anonymization Layer](PRD.md#47-anonymization-layer-m2).)
+**The Inference Gateway is the security boundary.** It is the single component holding privileged provider API keys and the only egress path for customer prompts. We build it in-house in ~3,000 lines of focused Python rather than adopting LiteLLM (whose security history includes proxy auth bypasses and SSRF in document loaders) — for an open-source project where users may run with our defaults, that surface area is unacceptable. Every request passes through Auth → Router → Rate Limit → Tier Derivation → Anonymization (M2) → Provider Adapters → Cost Tracker → Telemetry, and is annotated with the derived Inference Tier (1–5) before leaving. Skills and Projects can refuse to run below their declared minimum tier. (See [PRD §4 The LQ.AI Inference Gateway](PRD.md#4-the-lq-ai-inference-gateway) and [§4.7 Anonymization Layer](PRD.md#47-anonymization-layer-m2).)
 
 **The architectural slot for M5+ is opened in M1–M2.** The MCP-Client Subsystem (per [PRD §8 M1 deliverables](PRD.md#m1--foundation-6-weeks)) is committed in the v1 architecture even though no connectors ship before M5+. The cost is small (~2 weeks of architectural work and documentation); the value is significant (the M5+ Forward-Looking Workflow Intelligence direction does not require retrofitting MCP into a v1 architecture that did not anticipate it; community contributors can plug in MCP servers — for email, calendar, task systems, document stores, CRM — without core changes). The Signal Aggregation Service is shown as a forward-looking dashed component because it is the next layer above the MCP-Client substrate; it lands at M5 in the forward-looking roadmap.
 
@@ -231,7 +231,7 @@ The diagram is the M1–M4 target architecture; the milestone-by-milestone break
 - Playbook Service with LangGraph executor and the Easy Playbook auto-generation wizard.
 - Word Add-In with Inference Tier badge in the task pane.
 - Tabular Review surface and `output_format: table` skill mode.
-- Slack/Teams Light Intake Bridge (optional, profile-gated; OAuth-installed bot for `/inhouse` slash commands).
+- Slack/Teams Light Intake Bridge (optional, profile-gated; OAuth-installed bot for `/lq` slash commands).
 
 ### M4 — Autonomous Layer and Contract Repository
 
@@ -309,7 +309,7 @@ The pipeline is what makes the Inference Tier model operationally real. **The Ti
 
 The Anonymization stages bracket the provider adapter; pseudonyms exist in the mapping table for the duration of the request (in process memory only — never persisted) and are rehydrated on the way back so the Citation Engine sees the original text for verification. Privilege-flagged Projects disable anonymization by default — for privileged content, the operator is better served by Tier 1 (local inference, no third-party touch) than by an anonymization layer that adds processing steps complicating a privilege analysis.
 
-For the full gateway specification including the configuration YAML and the OpenAPI surface, see [PRD §4](PRD.md#4-the-inhouse-ai-inference-gateway).
+For the full gateway specification including the configuration YAML and the OpenAPI surface, see [PRD §4](PRD.md#4-the-lq-ai-inference-gateway).
 
 ---
 
@@ -353,7 +353,7 @@ A few elements are intentionally omitted from the main diagram for readability; 
 
 ## Pointers
 
-- **Full architectural specification:** [PRD §2 Architecture](PRD.md#2-architecture) and [§4 The InHouse AI Inference Gateway](PRD.md#4-the-inhouse-ai-inference-gateway).
+- **Full architectural specification:** [PRD §2 Architecture](PRD.md#2-architecture) and [§4 The LQ.AI Inference Gateway](PRD.md#4-the-lq-ai-inference-gateway).
 - **Capability specifications:** [PRD §3](PRD.md#3-capability-specifications) for each of the §3.1–§3.16 capabilities shown in the diagram.
 - **Security posture and procurement responses:** [PRD §1.8 Security Posture](PRD.md#18-security-posture) and [Appendix E Pre-Empted Procurement Objections](PRD.md#appendix-e--pre-empted-procurement-objections).
 - **Deployment recipes and topology:** [PRD §6 Deployment](PRD.md#6-deployment).

@@ -1,5 +1,5 @@
 # ============================================================
-# InHouse AI — .gitignore
+# LQ.AI — .gitignore
 # ============================================================
 # Conventions:
 #   - Keep this file at the repo root.
@@ -162,7 +162,7 @@ minio-data/
 # bodies pasted into Issues UI) lives in a separate local
 # folder per FILE-MANIFEST.md. These ignore patterns are
 # defense-in-depth in case content gets accidentally copied.
-inhouse-ai-launch/
+lq-ai-launch/
 launch-staging/
 linkedin-*.md
 issues-staging/

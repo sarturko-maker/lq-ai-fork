@@ -8,7 +8,7 @@ To report a vulnerability:
 
 - **Email:** security@legalquants.com
 - **GPG key:** Available at [URL TBD — published before v1 release]
-- **GitHub Security Advisory:** Alternatively, you can report privately through GitHub's [Security Advisories](https://github.com/legalquants/inhouse-ai/security/advisories/new) feature.
+- **GitHub Security Advisory:** Alternatively, you can report privately through GitHub's [Security Advisories](https://github.com/legalquants/lq-ai/security/advisories/new) feature.
 
 Please include:
 
@@ -32,7 +32,7 @@ For vulnerabilities being actively exploited in the wild, we accelerate; please 
 
 ## Coordinated disclosure
 
-InHouse AI follows coordinated disclosure: we ask reporters to give us reasonable time to develop and ship a fix before public disclosure. We will work with you to set a disclosure date that balances user safety with researcher interests.
+LQ.AI follows coordinated disclosure: we ask reporters to give us reasonable time to develop and ship a fix before public disclosure. We will work with you to set a disclosure date that balances user safety with researcher interests.
 
 After a fix ships, we publish:
 
@@ -44,7 +44,7 @@ After a fix ships, we publish:
 
 **In scope** for security disclosures:
 
-- The InHouse AI codebase: `api/`, `gateway/`, `web/`, `scripts/`.
+- The LQ.AI codebase: `api/`, `gateway/`, `web/`, `scripts/`.
 - Official deployment artifacts: `docker-compose.yml`, Helm charts, container images we publish.
 - Cryptographic implementations and key handling.
 - Authentication, authorization, session management, and audit logging.

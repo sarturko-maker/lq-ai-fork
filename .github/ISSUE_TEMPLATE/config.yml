@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/legalquants/inhouse-ai/security/advisories/new
+    url: https://github.com/legalquants/lq-ai/security/advisories/new
     about: Do NOT file security vulnerabilities as public issues. Use GitHub Security Advisories or email security@legalquants.com per SECURITY.md.
   - name: Discord community
-    url: https://discord.gg/inhouse-ai
+    url: https://discord.gg/lq-ai
     about: Real-time community Q&A, skill-author discussion, contributor coordination.
   - name: GitHub Discussions
-    url: https://github.com/legalquants/inhouse-ai/discussions
+    url: https://github.com/legalquants/lq-ai/discussions
     about: Questions, ideas, and longer-form community conversation.

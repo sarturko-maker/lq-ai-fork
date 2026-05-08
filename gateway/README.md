@@ -1,6 +1,6 @@
-# InHouse AI Inference Gateway
+# LQ.AI Inference Gateway
 
-Per [PRD §4](../docs/PRD.md#4-the-inhouse-ai-inference-gateway), the gateway is the security boundary — the only component holding privileged provider API keys, and the only egress path for customer prompts.
+Per [PRD §4](../docs/PRD.md#4-the-lq-ai-inference-gateway), the gateway is the security boundary — the only component holding privileged provider API keys, and the only egress path for customer prompts.
 
 OpenAI-compatible surface (`/v1/chat/completions`, `/v1/embeddings`) plus admin endpoints under `/admin/v1`.
 

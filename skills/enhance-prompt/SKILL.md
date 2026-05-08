@@ -1,7 +1,7 @@
 ---
 name: enhance-prompt
 description: Use when the user has typed a short or vague prompt and the system is configured to expand prompts before submission, or when the user explicitly invokes "Enhance Prompt" or asks the system to "improve this prompt before sending." Rewrites the user's input into a structured legal prompt with role, jurisdiction, task, constraints, and output format made explicit, and returns the expansion alongside a brief reasoning section so the user can review, edit, or skip before the expanded prompt is submitted to the model.
-inhouse:
+lq_ai:
   title: Enhance Prompt
   version: 1.0.0
   author: LegalQuants

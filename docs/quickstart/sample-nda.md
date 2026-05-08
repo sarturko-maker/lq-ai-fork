@@ -1,6 +1,6 @@
 # MUTUAL NON-DISCLOSURE AGREEMENT
 
-> **DEMONSTRATION SAMPLE** — for use with the InHouse AI quickstart only. This is a synthetic agreement drafted to surface specific issues for the NDA Review skill to demonstrate. It is not legal advice, does not represent any actual agreement, and should not be used in any actual transaction. Party names are fictitious. The drafting choices in this sample are deliberately imperfect to exercise the skill — do not adopt this language in your own templates.
+> **DEMONSTRATION SAMPLE** — for use with the LQ.AI quickstart only. This is a synthetic agreement drafted to surface specific issues for the NDA Review skill to demonstrate. It is not legal advice, does not represent any actual agreement, and should not be used in any actual transaction. Party names are fictitious. The drafting choices in this sample are deliberately imperfect to exercise the skill — do not adopt this language in your own templates.
 
 ---
 

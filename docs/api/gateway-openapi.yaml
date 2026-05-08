@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: InHouse AI Inference Gateway
+  title: LQ.AI Inference Gateway
   version: 0.1.0
   description: |
     The Inference Gateway is the security boundary for outbound LLM requests.
@@ -217,7 +217,7 @@ components:
     apiKeyAuth:
       type: apiKey
       in: header
-      name: X-Inhouse-AI-Gateway-Key
+      name: X-LQ-AI-Gateway-Key
 
   schemas:
     ChatCompletionRequest:
@@ -237,7 +237,7 @@ components:
         temperature: {type: number, minimum: 0, maximum: 2}
         top_p: {type: number}
         stream: {type: boolean, default: false}
-        # Inhouse AI extensions
+        # LQ.AI extensions
         minimum_inference_tier:
           type: integer
           enum: [1,2,3,4,5]
@@ -284,7 +284,7 @@ components:
             prompt_tokens: {type: integer}
             completion_tokens: {type: integer}
             total_tokens: {type: integer}
-        # Inhouse AI extensions
+        # LQ.AI extensions
         routed_inference_tier:
           type: integer
           enum: [1,2,3,4,5]

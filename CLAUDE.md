@@ -1,6 +1,6 @@
 # Orientation for Claude Code (and other coding assistants)
 
-> **Purpose:** Ground orientation for any agentic coding assistant working on the InHouse AI codebase. Read this first; it points at the right reference for any decision and lays out the project's standards in one place.
+> **Purpose:** Ground orientation for any agentic coding assistant working on the LQ.AI codebase. Read this first; it points at the right reference for any decision and lays out the project's standards in one place.
 >
 > **Audience:** Claude Code, Cursor, Aider, or any human or agent making implementation decisions. Read in full before the first contribution; refer back as needed.
 
@@ -8,7 +8,7 @@
 
 ## What this project is
 
-InHouse AI is an open-source AI platform for in-house legal teams. Self-hosted; bring-your-own-keys; runs in the operator's environment. Skills are open-source work product, not closed prompts. The Inference Gateway is the security boundary — the only component holding privileged provider API keys.
+LQ.AI is an open-source AI platform for in-house legal teams. Self-hosted; bring-your-own-keys; runs in the operator's environment. Skills are open-source work product, not closed prompts. The Inference Gateway is the security boundary — the only component holding privileged provider API keys.
 
 The project's reason for existing — and its central design constraint — is **transparency**. Every artifact that shapes the user experience is visible work product. A skill that produces a wrong answer should be readable, debuggable, and forkable by the user who relies on it. This is not a marketing principle; it is an architectural commitment that affects every implementation decision.
 
@@ -40,7 +40,7 @@ This is more friction than letting an agent decide independently, and that frict
 ## What the codebase looks like
 
 ```
-inhouse-ai/
+lq-ai/
 │
 ├── api/                # FastAPI backend service (Python)
 ├── gateway/            # Inference Gateway service (Python)
@@ -72,7 +72,7 @@ Each subsystem (`api/`, `gateway/`, `web/`) is a self-contained service. They ta
 - **Type checker:** `mypy` strict mode for `gateway/`; standard mode for `api/`.
 - **Type annotations:** required on all public functions and class methods.
 - **Async:** prefer `async def` for I/O-bound code; use `httpx.AsyncClient`, not `requests`.
-- **Exceptions:** use the `inhouse_ai.errors` exception hierarchy; do not raise bare `Exception`.
+- **Exceptions:** use the `lq_ai.errors` exception hierarchy; do not raise bare `Exception`.
 
 ### JavaScript / TypeScript (`web/`)
 
@@ -207,7 +207,7 @@ When you need to find something quickly:
 |---|---|
 | Project description | [README.md](README.md) |
 | Capability specifications | [docs/PRD.md §3](docs/PRD.md#3-capability-specifications) |
-| Inference Gateway internals | [docs/PRD.md §4](docs/PRD.md#4-the-inhouse-ai-inference-gateway) |
+| Inference Gateway internals | [docs/PRD.md §4](docs/PRD.md#4-the-lq-ai-inference-gateway) |
 | Architecture overview | [docs/architecture.md](docs/architecture.md) |
 | API endpoints | [docs/api/backend-openapi.yaml](docs/api/backend-openapi.yaml) |
 | Database tables | [docs/db-schema.md](docs/db-schema.md) |

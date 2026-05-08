@@ -1,7 +1,7 @@
 ---
 name: contract-qa
 description: Use when the user has a contract loaded and asks a specific question about it — what a clause means, where something is addressed, whether a term is unusual, how a provision compares to standard practice, or what would happen in a specified scenario under the contract. Produces an answer calibrated to the question's shape (direct answer for fact lookups, paragraph with context for "is this unusual" questions, structured findings for multi-issue questions), with verbatim citations to specific clauses. Does not perform full reviews — for that, use the appropriate review skill (NDA Review, DPA Checklist Review, MSA Review, etc.).
-inhouse:
+lq_ai:
   title: Contract QA
   version: 1.0.0
   author: LegalQuants

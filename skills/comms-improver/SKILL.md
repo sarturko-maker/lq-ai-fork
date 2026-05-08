@@ -1,7 +1,7 @@
 ---
 name: comms-improver
 description: Use when the user has a piece of legal-jargon-heavy text and wants it rewritten in plain language for a specified non-legal audience. Common scenarios — email to a business stakeholder, legal disclaimer for a customer-facing page, memo for a non-legal audience, explanation of a contract clause for a deal team, summary of a regulatory development for an executive briefing. Produces the rewritten text plus a brief explanation of what was changed and why, including any preservation-of-meaning concerns where the rewrite required interpretation. Does not draft from scratch; the input is text that exists.
-inhouse:
+lq_ai:
   title: Comms Improver
   version: 1.0.0
   author: LegalQuants

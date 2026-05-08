@@ -1,6 +1,6 @@
-# InHouse AI — Product Requirements Document
+# LQ.AI — Product Requirements Document
 
-**Project:** InHouse AI
+**Project:** LQ.AI
 **Stewarded by:** LegalQuants
 **License:** Apache 2.0
 **PRD Version:** 0.2 (Competitive Research and Security Posture Absorption)
@@ -17,7 +17,7 @@
 1. [Product Overview](#1-product-overview) (§1.1 Vision · §1.2 Positioning · §1.3 Transparency · §1.4 Target Users · §1.5 Deployment Modes and the Inference Choice Spectrum · §1.6 Out of Scope · §1.7 Success Criteria · §1.8 Security Posture)
 2. [Architecture](#2-architecture)
 3. [Capability Specifications](#3-capability-specifications) (§3.1–3.10 plus new §3.11 Projects · §3.12 Organization Profile · §3.13 Inference Tier Awareness · §3.14 Tabular / Multi-Document Review · §3.15 Slack/Teams Light Intake Bridge · §3.16 Contract Repository — Auto-Relationship Detection)
-4. [The InHouse AI Inference Gateway](#4-the-inhouse-ai-inference-gateway) (now includes Anonymization Layer middleware)
+4. [The LQ.AI Inference Gateway](#4-the-lq-ai-inference-gateway) (now includes Anonymization Layer middleware)
 5. [Cross-Cutting Concerns](#5-cross-cutting-concerns)
 6. [Deployment](#6-deployment)
 7. [Open Source Posture](#7-open-source-posture)
@@ -31,37 +31,37 @@
 
 ### 1.1 Vision
 
-InHouse AI is an open-source AI platform purpose-built for in-house legal teams. It delivers the core capabilities of commercial in-house legal AI products — fast, accurate contract drafting and review, verifiable citations, reusable workflow skills, playbook-driven contract analysis, and a Microsoft Word integration — as a fully self-hostable system that runs on a laptop, an internal server, or a cloud VM.
+LQ.AI is an open-source AI platform purpose-built for in-house legal teams. It delivers the core capabilities of commercial in-house legal AI products — fast, accurate contract drafting and review, verifiable citations, reusable workflow skills, playbook-driven contract analysis, and a Microsoft Word integration — as a fully self-hostable system that runs on a laptop, an internal server, or a cloud VM.
 
-The project's reason for existing is simple: in-house legal teams should not have to choose between AI assistance and data sovereignty. Every other capable tool in this category is a closed-source SaaS that requires sending privileged information to a third-party vendor. InHouse AI runs in the customer's environment, with the customer's keys, against the customer's choice of model — including fully air-gapped deployments using local inference.
+The project's reason for existing is simple: in-house legal teams should not have to choose between AI assistance and data sovereignty. Every other capable tool in this category is a closed-source SaaS that requires sending privileged information to a third-party vendor. LQ.AI runs in the customer's environment, with the customer's keys, against the customer's choice of model — including fully air-gapped deployments using local inference.
 
-The longer-term ambition extends beyond the core capability set. Over time, InHouse AI is intended to evolve from a tool the user reaches for into a workflow-aware context layer that integrates with the email, calendar, task systems, and document stores the user already lives in — surfacing the right matter at the right moment, with rationale, with one-click actions, with full transparency about what the system is doing on the user's behalf. That evolution is forward-looking and out of scope for v1; the M5+ Forward-Looking Roadmap (§8.5) names the trajectory so that v1 architectural choices leave room for it rather than painting the project into a corner.
+The longer-term ambition extends beyond the core capability set. Over time, LQ.AI is intended to evolve from a tool the user reaches for into a workflow-aware context layer that integrates with the email, calendar, task systems, and document stores the user already lives in — surfacing the right matter at the right moment, with rationale, with one-click actions, with full transparency about what the system is doing on the user's behalf. That evolution is forward-looking and out of scope for v1; the M5+ Forward-Looking Roadmap (§8.5) names the trajectory so that v1 architectural choices leave room for it rather than painting the project into a corner.
 
 ### 1.2 Positioning
 
-> **InHouse AI** — open-source AI for in-house legal teams. Bring your own keys, run it where you want, own your data.
+> **LQ.AI** — open-source AI for in-house legal teams. Bring your own keys, run it where you want, own your data.
 
 The product positions against three categories:
 
-- **Commercial in-house legal AI:** the category is more crowded than a three-name list (GC.AI, Spellbook, Legora) suggests. Direct competitors include GC.AI, Ivo, Legalfly (Belgian, "legal operating system for corporates"), Spellbook, Legora, Harvey-for-in-house, Eudia, and ContractPodAi (rebranded Leah). Robin AI was a fourth-tier-product structure player but collapsed in late 2025; its features are documented for reference in the deferred-enhancement list. A separate adjacent category — in-house workflow / matter management — includes Streamline AI, Checkbox, LawVu, and Dazychain; the boundary with that category is addressed in §1.6. InHouse AI matches the analytical-AI core capability set, runs on the customer's infrastructure, costs nothing in license fees, and ships every shaping artifact as inspectable open source — a posture no closed-source competitor can match without abandoning their architectural assumptions.
-- **Generalist AI (ChatGPT, Claude, Microsoft Copilot, etc.):** InHouse AI is purpose-built for legal workflows, ships with a curated skill library for legal tasks, and produces verifiable citations. It also addresses the privilege-and-confidentiality concerns that have made generalist tools a liability for legal practice (per *U.S. v. Heppner*).
-- **Internal tools / DIY stacks:** InHouse AI is a turn-key alternative to building it yourself, with a coherent architecture, a maintained skill format, and a community.
+- **Commercial in-house legal AI:** the category is more crowded than a three-name list (GC.AI, Spellbook, Legora) suggests. Direct competitors include GC.AI, Ivo, Legalfly (Belgian, "legal operating system for corporates"), Spellbook, Legora, Harvey-for-in-house, Eudia, and ContractPodAi (rebranded Leah). Robin AI was a fourth-tier-product structure player but collapsed in late 2025; its features are documented for reference in the deferred-enhancement list. A separate adjacent category — in-house workflow / matter management — includes Streamline AI, Checkbox, LawVu, and Dazychain; the boundary with that category is addressed in §1.6. LQ.AI matches the analytical-AI core capability set, runs on the customer's infrastructure, costs nothing in license fees, and ships every shaping artifact as inspectable open source — a posture no closed-source competitor can match without abandoning their architectural assumptions.
+- **Generalist AI (ChatGPT, Claude, Microsoft Copilot, etc.):** LQ.AI is purpose-built for legal workflows, ships with a curated skill library for legal tasks, and produces verifiable citations. It also addresses the privilege-and-confidentiality concerns that have made generalist tools a liability for legal practice (per *U.S. v. Heppner*).
+- **Internal tools / DIY stacks:** LQ.AI is a turn-key alternative to building it yourself, with a coherent architecture, a maintained skill format, and a community.
 
-For procurement and security teams evaluating InHouse AI: the security-posture story is consolidated in §1.8 Security Posture, with detailed responses to common procurement objections in Appendix E (Pre-Empted Procurement Objections). The forward-looking trajectory toward workflow-aware context (§8.5) describes the project's longer-term differentiation beyond feature parity.
+For procurement and security teams evaluating LQ.AI: the security-posture story is consolidated in §1.8 Security Posture, with detailed responses to common procurement objections in Appendix E (Pre-Empted Procurement Objections). The forward-looking trajectory toward workflow-aware context (§8.5) describes the project's longer-term differentiation beyond feature parity.
 
 ### 1.3 Transparency as a Founding Principle
 
-InHouse AI's commercial competitors treat their prompt engineering as proprietary moat. The skills, playbooks, citation logic, and verification heuristics that shape what the user sees are hidden inside closed-source applications, presented as "AI" but functionally indistinguishable from "a system prompt the vendor refuses to show you." This is smoke and mirrors. Much of the time, the emperor has no clothes — what looks like advanced legal AI is a moderately well-tuned prompt that the vendor charges hundreds of dollars per seat per month to keep secret.
+LQ.AI's commercial competitors treat their prompt engineering as proprietary moat. The skills, playbooks, citation logic, and verification heuristics that shape what the user sees are hidden inside closed-source applications, presented as "AI" but functionally indistinguishable from "a system prompt the vendor refuses to show you." This is smoke and mirrors. Much of the time, the emperor has no clothes — what looks like advanced legal AI is a moderately well-tuned prompt that the vendor charges hundreds of dollars per seat per month to keep secret.
 
-InHouse AI inverts this. **Every artifact that shapes the user's experience is visible work product.** The skills are open source. The playbooks are open source. The citation engine's verification logic is open source. The Enhance Prompt rewriter is open source. The autonomous-agent instructions are open source. The Organization Profile (§3.12) — the org-wide voice, templates, and "what good looks like" reference that shapes every output — is open source. When a user clicks "view this skill" on any active skill, they see the actual SKILL.md and supporting files, formatted for human reading, with provenance and the ability to fork. There is no hidden layer between the user's prompt and the model's output that the user cannot inspect.
+LQ.AI inverts this. **Every artifact that shapes the user's experience is visible work product.** The skills are open source. The playbooks are open source. The citation engine's verification logic is open source. The Enhance Prompt rewriter is open source. The autonomous-agent instructions are open source. The Organization Profile (§3.12) — the org-wide voice, templates, and "what good looks like" reference that shapes every output — is open source. When a user clicks "view this skill" on any active skill, they see the actual SKILL.md and supporting files, formatted for human reading, with provenance and the ability to fork. There is no hidden layer between the user's prompt and the model's output that the user cannot inspect.
 
 This commitment shapes three concrete product decisions:
 
-1. **No proprietary "secret sauce" in the open-source release.** Optimizations that depend on undisclosed prompt engineering, undisclosed routing rules, or undisclosed verification heuristics are not part of InHouse AI. If we use a clever technique, the technique is in the repo, documented, and contributable.
+1. **No proprietary "secret sauce" in the open-source release.** Optimizations that depend on undisclosed prompt engineering, undisclosed routing rules, or undisclosed verification heuristics are not part of LQ.AI. If we use a clever technique, the technique is in the repo, documented, and contributable.
 2. **Skill inspectability is a first-class application feature** (§3.4), not a developer-debug affordance. Every active skill is one click away from being readable. Users learn the patterns, build trust through verification, and disagree-fork-replace when the skill is wrong.
-3. **The skills *are* the product.** The value of InHouse AI comes from the curation and authoring of skills — which the community can read, contribute to, and improve — not from hiding them behind a paywall. Skills written for InHouse AI work in any agentskills.io-compatible runtime; users are not locked in.
+3. **The skills *are* the product.** The value of LQ.AI comes from the curation and authoring of skills — which the community can read, contribute to, and improve — not from hiding them behind a paywall. Skills written for LQ.AI work in any agentskills.io-compatible runtime; users are not locked in.
 
-The position implied by all of this is uncomfortable for the rest of the legal-AI category, and that is intentional. Customers who have been paying significant per-seat fees for software whose only real innovation is a hidden system prompt are entitled to see what they have actually been buying. When the curtain is pulled back, some of those products will hold up. Many will not. InHouse AI's bet is that an open, transparent product built on community-curated skills is better than a closed, opaque product built on the assumption that the user cannot see what is happening — and that the resulting trust is worth more than the marketing.
+The position implied by all of this is uncomfortable for the rest of the legal-AI category, and that is intentional. Customers who have been paying significant per-seat fees for software whose only real innovation is a hidden system prompt are entitled to see what they have actually been buying. When the curtain is pulled back, some of those products will hold up. Many will not. LQ.AI's bet is that an open, transparent product built on community-curated skills is better than a closed, opaque product built on the assumption that the user cannot see what is happening — and that the resulting trust is worth more than the marketing.
 
 Practical implication for contributors and operators: treat skills as the canonical artifact. When something in the system produces a wrong answer, the answer to "why" is almost always in a SKILL.md somewhere. When the right answer is something we want the system to do consistently, the way to get there is to write or improve a skill. Skills are not configuration; they are the substance of the product.
 
@@ -69,21 +69,21 @@ Practical implication for contributors and operators: treat skills as the canoni
 
 **Primary user:** in-house counsel at organizations of any size, from solo General Counsel to enterprise legal departments. The product assumes legal training and aims to extend the user's capacity, not replace judgment.
 
-**Operator:** the person or team deploying InHouse AI within an organization. Could be the legal team itself (technical GC, legal-ops manager) or IT/SRE deploying on legal's behalf. The operator cares about deployment ergonomics, key management, audit trails, and integration with existing identity providers.
+**Operator:** the person or team deploying LQ.AI within an organization. Could be the legal team itself (technical GC, legal-ops manager) or IT/SRE deploying on legal's behalf. The operator cares about deployment ergonomics, key management, audit trails, and integration with existing identity providers.
 
 **Contributor:** the open-source community. Skill authors, playbook authors, plugin developers, and engineers extending the platform. The product must be friendly to contribution.
 
 ### 1.5 Deployment Modes and the Inference Choice Spectrum
 
-InHouse AI's deployment posture has two dimensions. The first dimension is the **deployment mode** — where the application itself runs and how inference is reached. The second dimension is the **Inference Choice Spectrum** — what kind of trust relationship the operator has with whichever party is actually running the model. The two dimensions are orthogonal: a single deployment mode can map to multiple tiers depending on what the operator configures inside the gateway.
+LQ.AI's deployment posture has two dimensions. The first dimension is the **deployment mode** — where the application itself runs and how inference is reached. The second dimension is the **Inference Choice Spectrum** — what kind of trust relationship the operator has with whichever party is actually running the model. The two dimensions are orthogonal: a single deployment mode can map to multiple tiers depending on what the operator configures inside the gateway.
 
 #### 1.5.1 Two deployment modes
 
 Both modes use the same Docker Compose deployment. The Inference Gateway routes to whichever providers are configured.
 
-**Mode 1: Self-hosted with cloud LLM keys.** The operator deploys InHouse AI on their infrastructure (laptop, server, or cloud VM) and configures it with API keys for one or more cloud LLM providers (Anthropic, OpenAI, Google, Cohere, Azure OpenAI, Bedrock). Inference happens at the cloud provider; the rest of the system stays in the operator's environment.
+**Mode 1: Self-hosted with cloud LLM keys.** The operator deploys LQ.AI on their infrastructure (laptop, server, or cloud VM) and configures it with API keys for one or more cloud LLM providers (Anthropic, OpenAI, Google, Cohere, Azure OpenAI, Bedrock). Inference happens at the cloud provider; the rest of the system stays in the operator's environment.
 
-**Mode 2: Self-hosted with local inference (air-gap-capable).** The operator deploys InHouse AI alongside Ollama (or any OpenAI-compatible local inference endpoint) and runs all inference locally. This mode supports fully air-gapped deployments with no outbound network traffic.
+**Mode 2: Self-hosted with local inference (air-gap-capable).** The operator deploys LQ.AI alongside Ollama (or any OpenAI-compatible local inference endpoint) and runs all inference locally. This mode supports fully air-gapped deployments with no outbound network traffic.
 
 #### 1.5.2 The Inference Choice Spectrum: five tiers
 
@@ -91,9 +91,9 @@ In practice, the security posture varies along a five-tier spectrum. The tiers a
 
 **Tier 1 — Local-only inference (air-gap-capable).** Inference runs on operator hardware via Ollama, vLLM, llama.cpp, or any OpenAI-compatible local endpoint. No outbound network is required. Customer data, prompts, and model outputs never leave the deployment. This is Mode 2. Suitable for the most sensitive work product (privileged communications, strategic-deal information, regulated-data deployments). The trade-off is performance: a model that fits on local hardware is, today, smaller and slower than the best cloud-hosted models.
 
-**Tier 2 — Customer-hosted cloud inference.** Inference runs on infrastructure the operator owns: vLLM/llama.cpp on the operator's VPC, AWS Bedrock under the operator's AWS account, Azure OpenAI under the operator's Azure tenant, or Google Vertex AI under the operator's GCP project. Customer data leaves the InHouse AI deployment but stays inside the operator's cloud account boundary. No third-party processor is introduced. This tier offers near-Tier-3 performance with stronger custody than direct API access because the operator's cloud-provider DPA covers the data flow.
+**Tier 2 — Customer-hosted cloud inference.** Inference runs on infrastructure the operator owns: vLLM/llama.cpp on the operator's VPC, AWS Bedrock under the operator's AWS account, Azure OpenAI under the operator's Azure tenant, or Google Vertex AI under the operator's GCP project. Customer data leaves the LQ.AI deployment but stays inside the operator's cloud account boundary. No third-party processor is introduced. This tier offers near-Tier-3 performance with stronger custody than direct API access because the operator's cloud-provider DPA covers the data flow.
 
-**Tier 3 — Enterprise managed inference with ZDR / no-training commitments.** Inference runs against a cloud provider's enterprise tier with explicit zero-data-retention or no-training contractual terms (Anthropic with a ZDR addendum, OpenAI Enterprise, Google Vertex AI, AWS Bedrock under Commercial Terms, Cohere Enterprise). The provider processes customer data per the enterprise DPA, does not use it for model training, and either does not retain it after the response is returned (ZDR) or retains it for a narrow safety/abuse window (commonly 7–30 days). This tier is what most pragmatic enterprise deployments use; this is where InHouse AI's posture matches what closed-source commercial in-house legal AI products provide today.
+**Tier 3 — Enterprise managed inference with ZDR / no-training commitments.** Inference runs against a cloud provider's enterprise tier with explicit zero-data-retention or no-training contractual terms (Anthropic with a ZDR addendum, OpenAI Enterprise, Google Vertex AI, AWS Bedrock under Commercial Terms, Cohere Enterprise). The provider processes customer data per the enterprise DPA, does not use it for model training, and either does not retain it after the response is returned (ZDR) or retains it for a narrow safety/abuse window (commonly 7–30 days). This tier is what most pragmatic enterprise deployments use; this is where LQ.AI's posture matches what closed-source commercial in-house legal AI products provide today.
 
 **Tier 4 — Standard cloud API under default commercial terms.** Inference runs against a cloud provider's standard commercial API without the enterprise ZDR addendum. The provider does not train on customer data (under standard commercial terms across major providers as of May 2026), but data is retained for the provider's default window (commonly 30 days, going to 7 days for some providers in late 2025/2026 changes). Suitable for many in-house deployments; less defensible for the most sensitive work product.
 
@@ -106,12 +106,12 @@ When customer data privacy is a requirement but Tier 1 / Tier 2 is impractical, 
 Explicitly not in scope for v1, to keep the initial release focused:
 
 - **Hosted SaaS offering.** No legalquants.com-hosted instance. Self-hosted only.
-- **Tucuxi cognitive-architecture integration** (Director RNN, Cognitive Compilation Engine, RSH framework, Wisdom Database/GUD). These remain proprietary to Tucuxi and are not part of the open-source InHouse AI release.
+- **Tucuxi cognitive-architecture integration** (Director RNN, Cognitive Compilation Engine, RSH framework, Wisdom Database/GUD). These remain proprietary to Tucuxi and are not part of the open-source LQ.AI release.
 - **Mobile applications.** Web UI is responsive, but no native iOS/Android apps.
 - **E-discovery or litigation-specific workflows.** Focus is in-house counsel work: contracts, policies, regulatory matters, advice. Litigation tools are a separate product category.
 - **Direct integrations with CLM systems** (Ironclad, Concord, etc.). Out of scope for v1; potential v2 work.
 - **Billing / time tracking.** Not a feature of in-house legal work.
-- **Full intake / triage / matter-management workflow** (request portal, SLAs, approvals, escalations, dashboards). InHouse AI is the analytical AI layer; Streamline AI and Checkbox occupy the operational-workflow layer. They are complementary; v1 stays on the analytical side. Light intake bridges (§3.x Slack/Teams Bridge in M3) are in scope; full operational workflow is not.
+- **Full intake / triage / matter-management workflow** (request portal, SLAs, approvals, escalations, dashboards). LQ.AI is the analytical AI layer; Streamline AI and Checkbox occupy the operational-workflow layer. They are complementary; v1 stays on the analytical side. Light intake bridges (§3.x Slack/Teams Bridge in M3) are in scope; full operational workflow is not.
 
 ### 1.7 Success Criteria for v1 (M1 Release)
 
@@ -125,13 +125,13 @@ Explicitly not in scope for v1, to keep the initial release focused:
 
 ### 1.8 Security Posture
 
-InHouse AI's security posture is structurally different from the closed-source commercial alternatives in the category. Three principles shape it.
+LQ.AI's security posture is structurally different from the closed-source commercial alternatives in the category. Three principles shape it.
 
-**The operator chooses the deployment's posture.** InHouse AI does not run a SaaS that holds your data on our infrastructure; you run it on yours. The most consequential security decisions — where the deployment lives, what inference provider it routes to, how the audit log is retained, who has access — are yours, and the application makes the implications of each decision explicit. A closed-source vendor's compliance posture is only as strong as the audit reports they will hand over and the contractual commitments they will sign. InHouse AI's compliance posture is verifiable in source.
+**The operator chooses the deployment's posture.** LQ.AI does not run a SaaS that holds your data on our infrastructure; you run it on yours. The most consequential security decisions — where the deployment lives, what inference provider it routes to, how the audit log is retained, who has access — are yours, and the application makes the implications of each decision explicit. A closed-source vendor's compliance posture is only as strong as the audit reports they will hand over and the contractual commitments they will sign. LQ.AI's compliance posture is verifiable in source.
 
 **The Inference Choice Spectrum is the central security trade-off.** Inference is where customer data leaves the deployment, if it does. The five-tier spectrum (§1.5.2) maps the choice across local-only inference (Tier 1), customer-hosted cloud inference (Tier 2), enterprise managed inference with ZDR / no-training commitments (Tier 3), standard cloud API (Tier 4), and consumer or free tier (Tier 5). Tier 3 is recommended for most pragmatic enterprise deployments and matches what closed-source commercial in-house legal AI products provide. Tier 1 is recommended for the most sensitive privileged work. The application surfaces the routed tier in the chat UI in real time (§3.13); Skills and Projects can require minimum tiers; deployments can disallow tiers globally; the audit log captures every routing decision.
 
-**Transparency replaces opacity.** Every artifact that shapes the user's experience is open source and inspectable: skills, playbooks, the Citation Engine's verification logic, the Enhance Prompt rewriter, autonomous-agent instructions, the Organization Profile (§3.12), the prioritization logic in any future workflow-context features. Every release ships with an SBOM (Software Bill of Materials), signed container images (Sigstore/cosign), SLSA-3 build provenance attestations, and a published threat model (`docs/security/threat-model.md`). Every framework an operator's auditor will ask about — SOC 2, ISO 27001, ISO 42001, GDPR, HIPAA, FedRAMP — has a corresponding alignment document (`docs/compliance/`) mapping our design choices to the framework's controls and identifying which controls are project-provided, operator-provided, or joint. Where InHouse AI does not yet match a specific commercial competitor's control, it is named on the public deferred-enhancements list (§9) with a roadmap rather than glossed over in marketing.
+**Transparency replaces opacity.** Every artifact that shapes the user's experience is open source and inspectable: skills, playbooks, the Citation Engine's verification logic, the Enhance Prompt rewriter, autonomous-agent instructions, the Organization Profile (§3.12), the prioritization logic in any future workflow-context features. Every release ships with an SBOM (Software Bill of Materials), signed container images (Sigstore/cosign), SLSA-3 build provenance attestations, and a published threat model (`docs/security/threat-model.md`). Every framework an operator's auditor will ask about — SOC 2, ISO 27001, ISO 42001, GDPR, HIPAA, FedRAMP — has a corresponding alignment document (`docs/compliance/`) mapping our design choices to the framework's controls and identifying which controls are project-provided, operator-provided, or joint. Where LQ.AI does not yet match a specific commercial competitor's control, it is named on the public deferred-enhancements list (§9) with a roadmap rather than glossed over in marketing.
 
 Procurement-defense materials, including a structured Pre-Empted Procurement Objections appendix (Appendix E) and the Compliance Alignment Pack (referenced above), are maintained in the repository and updated each release.
 
@@ -155,7 +155,7 @@ Detailed cross-cutting security and compliance concerns are covered in §5; depl
                    │  OpenAPI 3.1 over HTTPS      │
                    ▼                              ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                  InHouse AI Backend (FastAPI)                        │
+│                  LQ.AI Backend (FastAPI)                        │
 │                                                                      │
 │   Authn/Authz  │  Audit Log  │  RBAC  │  OpenAPI Surface              │
 └──────┬───────────────┬─────────────┬────────────┬───────────────┬────┘
@@ -197,7 +197,7 @@ OBSERVABILITY (optional):
 
 ### 2.2 Technology Decisions and Rationale
 
-**Application shell: OpenWebUI.** Chosen over LibreChat because: 9 vector DB backends, native SCIM 2.0, built-in OpenTelemetry, mature RBAC, Pipelines plugin framework (which we use for the autonomous agent layer in M4), Redis-backed multi-worker scaling, Google Drive/OneDrive integration. Branding clause is acceptable since InHouse AI is open-source itself; we follow OpenWebUI's branding requirements and document the relationship clearly. We fork at the latest stable version and pull updates regularly rather than diverging.
+**Application shell: OpenWebUI.** Chosen over LibreChat because: 9 vector DB backends, native SCIM 2.0, built-in OpenTelemetry, mature RBAC, Pipelines plugin framework (which we use for the autonomous agent layer in M4), Redis-backed multi-worker scaling, Google Drive/OneDrive integration. Branding clause is acceptable since LQ.AI is open-source itself; we follow OpenWebUI's branding requirements and document the relationship clearly. We fork at the latest stable version and pull updates regularly rather than diverging.
 
 **Backend: FastAPI.** OpenAPI 3.1 by construction, async-native, Pydantic models for request/response validation, excellent ecosystem. Aligns with operator expectations for a Python-backend AI product.
 
@@ -223,7 +223,7 @@ Single-tenant by deployment. There is no cross-tenant isolation problem because 
 - **Group scope:** shared with explicitly-named groups; group membership controlled by admin.
 - **Organization scope:** available to all users in the deployment.
 
-All scopes share the same database; access control is enforced at the API layer with explicit scope checks on every read/write. Operators who need stronger isolation between business units run multiple InHouse AI deployments.
+All scopes share the same database; access control is enforced at the API layer with explicit scope checks on every read/write. Operators who need stronger isolation between business units run multiple LQ.AI deployments.
 
 ### 2.4 Deployment Topology
 
@@ -232,9 +232,9 @@ All scopes share the same database; access control is enforced at the API layer 
 ```
 Operator's Environment
 ├── docker compose up
-│   ├── inhouse-ai-web (OpenWebUI fork, port 3000)
-│   ├── inhouse-ai-api (FastAPI, port 8000)
-│   ├── inhouse-ai-gateway (Inference Gateway, port 8001)
+│   ├── lq-ai-web (OpenWebUI fork, port 3000)
+│   ├── lq-ai-api (FastAPI, port 8000)
+│   ├── lq-ai-gateway (Inference Gateway, port 8001)
 │   ├── postgres (with pgvector)
 │   ├── redis
 │   └── minio (or S3-compatible)
@@ -249,9 +249,9 @@ Operator's Environment
 ```
 Operator's Environment
 ├── docker compose up (with --profile local)
-│   ├── inhouse-ai-web
-│   ├── inhouse-ai-api
-│   ├── inhouse-ai-gateway
+│   ├── lq-ai-web
+│   ├── lq-ai-api
+│   ├── lq-ai-gateway
 │   ├── ollama (with locally-pulled models)
 │   ├── postgres (with pgvector)
 │   ├── redis
@@ -492,14 +492,14 @@ inputs:
   optional:
     - jurisdiction
     - perspective  # "discloser"|"recipient"|"mutual"
-inhouse:
+lq_ai:
   output_format: report   # "report" | "table" | "issue_list" (table reserved for §3.14 Tabular Review)
   minimum_inference_tier: 2   # optional; if set, skill refuses to run below this tier (per §3.13)
   is_organization_profile: false   # optional; true marks this skill as the singleton Org Profile (per §3.12)
 ---
 ```
 
-The `inhouse:` namespace fields are the project-specific extensions to the agentskills.io standard frontmatter. Skills authored against the open standard work without them; the InHouse application uses them when present. See §3.13 for the inference-tier model and §3.14 for the tabular output mode.
+The `lq_ai:` namespace fields are the project-specific extensions to the agentskills.io standard frontmatter. Skills authored against the open standard work without them; the LQ.AI application uses them when present. See §3.13 for the inference-tier model and §3.14 for the tabular output mode.
 
 *Skill chaining.* When multiple skills are attached, their `SKILL.md` instructions are concatenated in the order attached, with clear delimiters. The model is instructed to apply all skills.
 
@@ -546,7 +546,7 @@ The output is a complete `SKILL.md` file plus optional supporting files.
 
 The corresponding API endpoint is `GET /api/v1/skills/{id}/contents`, which returns all files in the skill folder. Skills are not opaque artifacts; they are open-source work product the user can read, modify, and replace.
 
-**Skill-input-form pattern.** Skills declare their required and optional inputs in the `inhouse:` frontmatter namespace (see §3.4 skill format). When a skill is attached to a chat and required inputs are not yet provided, the application surfaces those inputs as a structured form-like prompt rather than letting the model ask for them in the response. This pattern is used by Enhance Prompt (§3.2) and by any other skill author who wants their skill to feel form-driven rather than purely conversational. The application:
+**Skill-input-form pattern.** Skills declare their required and optional inputs in the `lq_ai:` frontmatter namespace (see §3.4 skill format). When a skill is attached to a chat and required inputs are not yet provided, the application surfaces those inputs as a structured form-like prompt rather than letting the model ask for them in the response. This pattern is used by Enhance Prompt (§3.2) and by any other skill author who wants their skill to feel form-driven rather than purely conversational. The application:
 
 - Reads `inputs.required` and `inputs.optional` from the skill's frontmatter.
 - Identifies which required inputs have not been provided (via prior conversation, attached files, or explicit user input).
@@ -714,7 +714,7 @@ class Position(BaseModel):
 
 ### 3.8 Multi-Model Ensemble Verification
 
-**Description.** GC.AI markets "multi-model RAG (calls 5 different AI models)" as an accuracy feature. InHouse AI implements this as an *optional* ensemble step where multiple models are queried in parallel and their outputs are reconciled. Off by default (cost reasons); on for specific high-stakes operations like Playbook execution and Citation Engine verification.
+**Description.** GC.AI markets "multi-model RAG (calls 5 different AI models)" as an accuracy feature. LQ.AI implements this as an *optional* ensemble step where multiple models are queried in parallel and their outputs are reconciled. Off by default (cost reasons); on for specific high-stakes operations like Playbook execution and Citation Engine verification.
 
 **User stories.**
 - As an operator, I configure ensemble mode for the Citation Engine verification step.
@@ -742,17 +742,17 @@ class Position(BaseModel):
 
 ### 3.9 Word Add-In (M3)
 
-**Description.** Microsoft Office.js add-in that brings InHouse AI capabilities directly into Word. Users can run skills, execute Playbooks, get redlines, ask questions about the document, and act on the assistant's suggestions — all without leaving Word.
+**Description.** Microsoft Office.js add-in that brings LQ.AI capabilities directly into Word. Users can run skills, execute Playbooks, get redlines, ask questions about the document, and act on the assistant's suggestions — all without leaving Word.
 
 **User stories.**
-- As a user editing an MSA in Word, I open the InHouse AI pane and click "Apply MSA-SaaS Playbook"; the system reviews the document and applies tracked changes + comments.
+- As a user editing an MSA in Word, I open the LQ.AI pane and click "Apply MSA-SaaS Playbook"; the system reviews the document and applies tracked changes + comments.
 - As a user, I select a clause and ask "make this more favorable to us as the customer"; the redline appears as a tracked change.
 - As a user, I ask a question about the document and the answer appears in the side pane with citations to specific clauses.
 - As an admin, I distribute the add-in to my organization via the Microsoft 365 Admin Center.
 
 **Functional requirements.**
 - Word add-in (manifest XML + hosted JS bundle) communicates with the same FastAPI backend as the web app.
-- Add-in authenticates via OAuth with the InHouse AI deployment.
+- Add-in authenticates via OAuth with the LQ.AI deployment.
 - Supported Word clients: Desktop (Win/Mac), Word Online, Word for iPad.
 - Capabilities exposed in Word:
   - Chat against the open document
@@ -778,7 +778,7 @@ class Position(BaseModel):
 **Dependencies.** All backend capabilities. Office.js (Microsoft, free).
 
 **Open questions.**
-- Hosting of the add-in JS bundle: where does it live for self-hosted deployments? Options: (a) bundled with the InHouse AI deployment and served by it; (b) hosted on a LegalQuants-controlled CDN; (c) downloadable from GitHub releases. Recommend (a) — self-hosted deployment serves its own add-in, minimizing external dependencies.
+- Hosting of the add-in JS bundle: where does it live for self-hosted deployments? Options: (a) bundled with the LQ.AI deployment and served by it; (b) hosted on a LegalQuants-controlled CDN; (c) downloadable from GitHub releases. Recommend (a) — self-hosted deployment serves its own add-in, minimizing external dependencies.
 
 ### 3.10 Autonomous Layer (M4)
 
@@ -859,7 +859,7 @@ Persistent matter memory is the single most-cited capability across in-house use
 
 ### 3.12 Organization Profile (M1)
 
-**Description.** A singleton skill that captures the organization's voice, templates, and "what good looks like" reference, available as ambient context to every chat and skill execution in the deployment. The Organization Profile is implemented as a skill with `inhouse: { is_organization_profile: true }` frontmatter — same skill format as everything else, same inspectability, same fork-and-replace pattern, but treated as a singleton by the Skill Service. Single-instance per deployment; admin-edited; user-readable.
+**Description.** A singleton skill that captures the organization's voice, templates, and "what good looks like" reference, available as ambient context to every chat and skill execution in the deployment. The Organization Profile is implemented as a skill with `lq_ai: { is_organization_profile: true }` frontmatter — same skill format as everything else, same inspectability, same fork-and-replace pattern, but treated as a singleton by the Skill Service. Single-instance per deployment; admin-edited; user-readable.
 
 **Why a singleton skill (rather than a separate construct).** Treating the Organization Profile as a skill with special metadata preserves the architectural simplicity (one extensibility surface, not two) and the transparency principle (the Organization Profile is open source and inspectable like every other shaping artifact — see §1.3).
 
@@ -891,7 +891,7 @@ Persistent matter memory is the single most-cited capability across in-house use
 - I look at my chat header and see "Tier 3 — Anthropic Enterprise (ZDR)." I know what that means.
 - I have a privileged communication to draft. I look at the badge and see "Tier 4 — OpenAI standard." I downgrade my chat to the local Tier 1 model before continuing, or I cancel and use a Project that requires Tier 1–2.
 - I am an admin. I configure the deployment to refuse Tier 4–5 routing globally; users see a "Tier 4 not allowed by your administrator" message if they try.
-- I author a skill. I declare in the skill's frontmatter `inhouse: { minimum_inference_tier: 2 }`. The application refuses to run the skill if the routed tier is below 2 and shows the user why.
+- I author a skill. I declare in the skill's frontmatter `lq_ai: { minimum_inference_tier: 2 }`. The application refuses to run the skill if the routed tier is below 2 and shows the user why.
 
 **Functional requirements.**
 - A `Tier` enum (1–5) with rules for derivation from the routed provider/model and the gateway's configuration.
@@ -952,15 +952,15 @@ Persistent matter memory is the single most-cited capability across in-house use
 
 ### 3.15 Slack / Teams Light Intake Bridge (M3)
 
-**Description.** A Slack and Teams bot that supports two flows: (1) **forward as a chat** — a user `/inhouse` slash-command on a message thread creates an InHouse AI chat with the thread's content as initial context; (2) **quick ask** — `/inhouse ask "is this an MSA or an order form?"` runs a short skill (configurable via Org Profile) and replies in-thread. Replies render in the Slack/Teams thread; deeper engagement opens the web app. No matter management, no triage, no SLA tracking — that is the boundary with Streamline AI's category, which is explicitly out of scope per §1.6.
+**Description.** A Slack and Teams bot that supports two flows: (1) **forward as a chat** — a user `/lq` slash-command on a message thread creates an LQ.AI chat with the thread's content as initial context; (2) **quick ask** — `/lq ask "is this an MSA or an order form?"` runs a short skill (configurable via Org Profile) and replies in-thread. Replies render in the Slack/Teams thread; deeper engagement opens the web app. No matter management, no triage, no SLA tracking — that is the boundary with Streamline AI's category, which is explicitly out of scope per §1.6.
 
 In-house teams report (across the competitive research) that the majority of incoming requests arrive via Slack, Teams, or email — not via direct visits to the legal portal. A web-only product structurally underweights the channels users live in. A *light* Slack/Teams bridge — not full intake/triage like Streamline AI — closes this gap with bounded scope.
 
 **Functional requirements.**
 - OAuth-based install on the org's Slack or Teams.
 - Permission model: bot can only post in channels it is invited to; bot does not read silent channels.
-- Confidentiality: thread contents are stored in InHouse AI under the user's chat history, with the same RBAC as any other chat.
-- Bot configuration is in the InHouse AI admin UI, not in Slack.
+- Confidentiality: thread contents are stored in LQ.AI under the user's chat history, with the same RBAC as any other chat.
+- Bot configuration is in the LQ.AI admin UI, not in Slack.
 
 **Architectural fit.** Optional service in the Docker Compose (`slack-bridge`, `teams-bridge` with `--profile slack` etc.). Reuses Conversational Core, Auth/RBAC, Skill Service. No new core architecture.
 
@@ -984,13 +984,13 @@ In-house teams report (across the competitive research) that the majority of inc
 
 ---
 
-## 4. The InHouse AI Inference Gateway
+## 4. The LQ.AI Inference Gateway
 
 ### 4.1 Why We Build This
 
 Every other component in this stack is something we adopt from the OSS ecosystem. The Inference Gateway is the one component we build ourselves, for two reasons:
 
-1. **Security surface.** This is the component holding privileged API keys for cloud LLM providers. Operators deploying InHouse AI will trust it with significant credentials. The candidate alternative (LiteLLM) has a non-trivial vulnerability history including proxy auth bypasses and SSRF in document loaders. For an open-source project where users may run with our defaults, that surface is unacceptable.
+1. **Security surface.** This is the component holding privileged API keys for cloud LLM providers. Operators deploying LQ.AI will trust it with significant credentials. The candidate alternative (LiteLLM) has a non-trivial vulnerability history including proxy auth bypasses and SSRF in document loaders. For an open-source project where users may run with our defaults, that surface is unacceptable.
 2. **Scope match.** We need a focused subset of functionality — about 15% of LiteLLM's feature surface. Building it ourselves yields ~3,000 lines of code that is fully auditable, has zero supply-chain risk, and ships without features we don't need carrying maintenance burden.
 
 The Inference Gateway is a separate container, importable as a standalone service, with its own OpenAPI specification. Other open-source projects can use it independently.
@@ -1135,7 +1135,7 @@ routing:
 
 api_keys:
   # Operator-issued keys for clients of this gateway
-  - id: inhouse-ai-backend
+  - id: lq-ai-backend
     key_hash: <sha256 of the actual key>
     allowed_models: ["*"]
     rate_limit_override: null
@@ -1217,7 +1217,7 @@ Plus admin endpoints under `/admin/v1`:
 
 A pre-processing step in the Inference Gateway pipeline (per the architecture diagram in §4.3): configurable patterns and an entity-recognition pass identify sensitive spans, replace them with stable pseudonyms, send the anonymized text to the model, then post-process the response to rehydrate the pseudonyms. The mapping is held only in the deployment's process memory for the duration of the request and never persists.
 
-**Why include in v1.** Mode 2 (full local inference, Tier 1) is one answer to the data-sovereignty question; an anonymization-then-rehydrate layer for Mode 1 with Tier 3+ is the other answer, and it is what privacy-conscious enterprises that still want cloud-LLM quality reach for. Including it positions InHouse AI's Mode 1 at parity with privacy-first commercial tools without sacrificing the cloud-LLM choice. Legalfly built a defensible category position around this; the architectural placement is straightforward middleware in the Gateway.
+**Why include in v1.** Mode 2 (full local inference, Tier 1) is one answer to the data-sovereignty question; an anonymization-then-rehydrate layer for Mode 1 with Tier 3+ is the other answer, and it is what privacy-conscious enterprises that still want cloud-LLM quality reach for. Including it positions LQ.AI's Mode 1 at parity with privacy-first commercial tools without sacrificing the cloud-LLM choice. Legalfly built a defensible category position around this; the architectural placement is straightforward middleware in the Gateway.
 
 **Functional requirements.**
 - Configured per-skill, per-Project, or per-deployment via a flag (`anonymization: required | preferred | disabled`).
@@ -1249,7 +1249,7 @@ A pre-processing step in the Inference Gateway pipeline (per the architecture di
 
 ### 5.1 Authentication and Authorization
 
-The InHouse AI **backend (FastAPI) owns authentication**. The web client (the OpenWebUI fork) and the Word add-in are configured to delegate to the backend's auth surface rather than running OpenWebUI's built-in auth. There is one identity store, one session model, and one audit-log trail across all surfaces. (Earlier PRD drafts described "v1 uses OpenWebUI's built-in auth" — that direction was reversed during M1 planning when the OpenAPI surface and the backend's audit-log requirements made backend-owned auth the simpler architecture. The decision is recorded in `docs/adr/0002-backend-owned-auth.md`.)
+The LQ.AI **backend (FastAPI) owns authentication**. The web client (the OpenWebUI fork) and the Word add-in are configured to delegate to the backend's auth surface rather than running OpenWebUI's built-in auth. There is one identity store, one session model, and one audit-log trail across all surfaces. (Earlier PRD drafts described "v1 uses OpenWebUI's built-in auth" — that direction was reversed during M1 planning when the OpenAPI surface and the backend's audit-log requirements made backend-owned auth the simpler architecture. The decision is recorded in `docs/adr/0002-backend-owned-auth.md`.)
 
 **Identity and credentials.**
 - Local accounts with bcrypt-hashed passwords as the v1 baseline. Email and display name on every account.
@@ -1325,20 +1325,20 @@ Single `docker-compose.yml` with profiles for the two modes.
 # docker-compose.yml (excerpt)
 services:
   web:
-    image: legalquants/inhouse-ai-web:latest
+    image: legalquants/lq-ai-web:latest
     ports: ["3000:3000"]
     depends_on: [api]
     environment:
-      INHOUSE_AI_API_URL: http://api:8000
+      LQ_AI_API_URL: http://api:8000
 
   api:
-    image: legalquants/inhouse-ai-api:latest
+    image: legalquants/lq-ai-api:latest
     ports: ["8000:8000"]
     depends_on: [postgres, redis, gateway]
     env_file: .env
 
   gateway:
-    image: legalquants/inhouse-ai-gateway:latest
+    image: legalquants/lq-ai-gateway:latest
     ports: ["8001:8001"]
     volumes: ["./gateway.yaml:/etc/gateway.yaml:ro"]
     env_file: .env
@@ -1377,19 +1377,19 @@ services:
 
   # --- Slack / Teams Light Intake Bridge (M3); optional, off by default ---
   slack-bridge:
-    image: legalquants/inhouse-ai-slack-bridge:latest
+    image: legalquants/lq-ai-slack-bridge:latest
     profiles: ["slack"]
     depends_on: [api]
     env_file: .env.slack
-    # Configure Slack OAuth in the InHouse AI admin UI; this service exposes
+    # Configure Slack OAuth in the LQ.AI admin UI; this service exposes
     # only the Slack Events API endpoint for bot interactions.
 
   teams-bridge:
-    image: legalquants/inhouse-ai-teams-bridge:latest
+    image: legalquants/lq-ai-teams-bridge:latest
     profiles: ["teams"]
     depends_on: [api]
     env_file: .env.teams
-    # Configure Microsoft Teams app in the InHouse AI admin UI.
+    # Configure Microsoft Teams app in the LQ.AI admin UI.
 
 volumes:
   pgdata:
@@ -1401,8 +1401,8 @@ volumes:
 ### 6.2 First-Run Experience
 
 ```bash
-git clone https://github.com/legalquants/inhouse-ai.git
-cd inhouse-ai
+git clone https://github.com/legalquants/lq-ai.git
+cd lq-ai
 cp .env.example .env
 # Edit .env with at least one LLM provider API key (or use local profile)
 docker compose up -d              # Mode 1
@@ -1413,7 +1413,7 @@ docker compose --profile local up -d   # Mode 2
 After ~2 minutes (first run pulls images, runs migrations, seeds skills):
 
 ```
-✓ InHouse AI is ready at http://localhost:3000
+✓ LQ.AI is ready at http://localhost:3000
 ✓ First-run admin account: see logs for password
 ✓ API documentation: http://localhost:8000/docs
 ✓ Inference Gateway: http://localhost:8001/docs
@@ -1429,7 +1429,7 @@ Next steps shown in the web UI:
 
 ### 6.3 Production Deployment
 
-- **Helm chart** for Kubernetes: `helm install inhouse-ai legalquants/inhouse-ai -f values.yaml`.
+- **Helm chart** for Kubernetes: `helm install lq-ai legalquants/lq-ai -f values.yaml`.
 - **Reverse proxy recipes**: Caddy (simplest, automatic TLS), Traefik (production-grade), nginx.
 - **Reference architectures** documented: small (single-node Docker), medium (single-node K8s with HA Postgres), large (multi-node K8s with horizontal API scale, external Postgres).
 
@@ -1454,20 +1454,20 @@ Next steps shown in the web UI:
 
 ### 7.1 Project Philosophy
 
-InHouse AI is open source because the alternative — closed-source legal AI built on hidden prompt engineering — does not deserve the trust of the legal profession. Lawyers are licensed because their judgment is accountable to clients, courts, regulators, and ethics boards. The tools that shape that judgment should be accountable in kind. A skill that produces a wrong answer should be readable, debuggable, and forkable by the lawyer who relies on it. A playbook that codifies a position should be inspectable by the team that signed off on it. A citation engine that asserts verbatim quotes should be auditable by anyone who cares to check.
+LQ.AI is open source because the alternative — closed-source legal AI built on hidden prompt engineering — does not deserve the trust of the legal profession. Lawyers are licensed because their judgment is accountable to clients, courts, regulators, and ethics boards. The tools that shape that judgment should be accountable in kind. A skill that produces a wrong answer should be readable, debuggable, and forkable by the lawyer who relies on it. A playbook that codifies a position should be inspectable by the team that signed off on it. A citation engine that asserts verbatim quotes should be auditable by anyone who cares to check.
 
-Open source is therefore not a distribution choice. It is a fitness-for-purpose requirement. A closed-source legal AI is structurally unsuited to the work it claims to do, in the same way that a black-box statute would be unsuited to law. We did not build InHouse AI as an open-source project as a marketing posture; we built it open because we could not see how to do this work honestly any other way.
+Open source is therefore not a distribution choice. It is a fitness-for-purpose requirement. A closed-source legal AI is structurally unsuited to the work it claims to do, in the same way that a black-box statute would be unsuited to law. We did not build LQ.AI as an open-source project as a marketing posture; we built it open because we could not see how to do this work honestly any other way.
 
 This philosophy carries operational consequences worth naming explicitly:
 
 - **Substantive contributions are welcome and credited.** Skills, playbooks, jurisdictional adaptations, and verification heuristics contributed by practicing lawyers carry the same weight in the project as code contributed by engineers. Both are work product. Both deserve attribution.
 - **No "open core" gating.** Features useful to in-house legal teams are in the open-source release. We will not move features behind a paid offering as the project matures. (LegalQuants may build commercial *services* — hosted deployments, custom skill authoring, training, support — but the software itself stays whole.)
 - **Forks are encouraged, not resisted.** If a customer or a community wants to build a derivative product that incorporates their proprietary improvements, the Apache 2.0 license permits it. We treat that as ecosystem health, not competition.
-- **Skills are the canonical artifact of value.** When the project produces a wrong answer, the answer to "why" is almost always in a SKILL.md. Improving InHouse AI is mostly improving skills, which is mostly within reach of any practicing lawyer with a few hours and a clear view of what the right answer should have been.
+- **Skills are the canonical artifact of value.** When the project produces a wrong answer, the answer to "why" is almost always in a SKILL.md. Improving LQ.AI is mostly improving skills, which is mostly within reach of any practicing lawyer with a few hours and a clear view of what the right answer should have been.
 
 ### 7.2 License
 
-**Apache License 2.0** for the InHouse AI codebase.
+**Apache License 2.0** for the LQ.AI codebase.
 
 Rationale: patent-grant clause (important given LegalQuants' ecosystem), explicit trademark protection, enterprise-friendly, compatible with most other OSS licenses for ecosystem integration.
 
@@ -1477,15 +1477,15 @@ PyMuPDF (AGPL) is used server-side only and not redistributed as a library; the 
 
 ### 7.3 Trademark and Naming
 
-- **InHouse AI** is the project name, descriptive enough that strong trademark protection is unlikely.
+- **LQ.AI** is the project name, descriptive enough that strong trademark protection is unlikely.
 - **LegalQuants** is the protectable mark; remains LegalQuants' property.
-- Tagline: *"InHouse AI — open-source AI for in-house legal teams, by LegalQuants."*
+- Tagline: *"LQ.AI — open-source AI for in-house legal teams, by LegalQuants."*
 
 ### 7.4 Governance
 
 - **Initial model: BDFL.** Kevin Keller is the initial maintainer.
 - LegalQuants stewards the project (owns the GitHub org, controls trademark, employs maintainer).
-- Documented commitment to community contribution: "InHouse AI welcomes contributions from any in-house counsel, legal-ops practitioner, or engineer who wants to advance open legal AI."
+- Documented commitment to community contribution: "LQ.AI welcomes contributions from any in-house counsel, legal-ops practitioner, or engineer who wants to advance open legal AI."
 - Path to broader governance documented but not implemented in v1: as the project matures, consider transition to a maintainer team and formal governance (see CNCF or Apache Software Foundation models).
 
 ### 7.5 Contribution Model
@@ -1548,10 +1548,10 @@ Milestone-based delivery. Each milestone is a public release.
 
 ### M1 — Foundation (~6 weeks)
 
-**Theme:** Working open-source release that operators can deploy and use for everyday legal Q&A, with the matter-context substrate (Projects + Organization Profile) and procurement-defense apparatus that distinguish InHouse AI from a generic OSS chat-with-skills product.
+**Theme:** Working open-source release that operators can deploy and use for everyday legal Q&A, with the matter-context substrate (Projects + Organization Profile) and procurement-defense apparatus that distinguish LQ.AI from a generic OSS chat-with-skills product.
 
 **Deliverables:**
-- OpenWebUI fork with InHouse AI customization (logo, colors, default skills loaded).
+- OpenWebUI fork with LQ.AI customization (logo, colors, default skills loaded).
 - FastAPI backend with full OpenAPI 3.1 surface.
 - Inference Gateway (cloud + Ollama, fallback, rate limiting, cost tracking).
 - **Inference Tier derivation in the Gateway and Tier Awareness UI** (per §3.13 and §1.5.2). Tier badge in chat header and Word task pane; Skills/Projects can require minimum tiers; deployment can disallow tiers globally.
@@ -1566,7 +1566,7 @@ Milestone-based delivery. Each milestone is a public release.
 - **Per-user data export and deletion** (`POST /api/v1/users/{id}/export`, `DELETE /api/v1/users/{id}`) per §5.3 — GDPR Article 17 baseline.
 - **Work-product attribution metadata** on every model-generated artifact (per §3.3).
 - Enhance Prompt.
-- Skill Library framework (with `inhouse:` namespace including `minimum_inference_tier`, `output_format`, `is_organization_profile`).
+- Skill Library framework (with `lq_ai:` namespace including `minimum_inference_tier`, `output_format`, `is_organization_profile`).
 - 10 starter skills (drafted in parallel; see skill list below).
 - Docker Compose deployment for both modes.
 - Quickstart, configuration, and contribution documentation.
@@ -1574,11 +1574,11 @@ Milestone-based delivery. Each milestone is a public release.
 
 **Compliance Alignment Pack documentation deliverables (M1, per §1.8 and Appendix E).** The following documents ship in `docs/compliance/` with the M1 release; they are documentation deliverables, not code:
 
-- `docs/compliance/soc2-alignment.md` — SOC 2 Type II Trust Services Criteria mapped to InHouse AI design choices, identifying project-provided / operator-provided / joint controls (Customer Responsibility Matrix style).
-- `docs/compliance/iso-27001-alignment.md` — ISO 27001 Annex A controls mapped to InHouse AI design choices.
-- `docs/compliance/iso-42001-alignment.md` — ISO 42001 (AI management system) controls mapped to InHouse AI design (competitive parity with Legora and Legalfly).
+- `docs/compliance/soc2-alignment.md` — SOC 2 Type II Trust Services Criteria mapped to LQ.AI design choices, identifying project-provided / operator-provided / joint controls (Customer Responsibility Matrix style).
+- `docs/compliance/iso-27001-alignment.md` — ISO 27001 Annex A controls mapped to LQ.AI design choices.
+- `docs/compliance/iso-42001-alignment.md` — ISO 42001 (AI management system) controls mapped to LQ.AI design (competitive parity with Legora and Legalfly).
 - `docs/compliance/gdpr-readiness.md` — Article-by-article readiness analysis (Articles 6, 25, 28, 30, 32, 35, 15–22).
-- `docs/compliance/hipaa-readiness.md` — Walks the operator through deploying InHouse AI in a HIPAA-eligible configuration: BAA with the inference provider, Tier 1–3 only, Citation Engine PHI handling, audit logging guidance.
+- `docs/compliance/hipaa-readiness.md` — Walks the operator through deploying LQ.AI in a HIPAA-eligible configuration: BAA with the inference provider, Tier 1–3 only, Citation Engine PHI handling, audit logging guidance.
 - `docs/compliance/provider-compliance-matrix.md` — Per-provider table of compliance facts (ZDR availability, training-on-data policy, retention windows, certifications, data residency, government cloud). Updated each release. *This is the document users see when they click the tier badge in the UI.*
 
 **Code & Supply-Chain Transparency deliverables (M1, per §7.8 and §1.8).** Documented above in §7.8: SBOM in CI, signed container images, SLSA-3 build provenance, public threat model, dependency security scanning.
@@ -1636,7 +1636,7 @@ Milestone-based delivery. Each milestone is a public release.
   - **Inference Tier badge** in the task pane (per §3.13).
 - Enterprise sideload distribution package for the add-in.
 - **Tabular / Multi-Document Review** (per §3.14). New `output_format: table` skill mode; tabular UI surface; bulk operations; XLSX/CSV export; cost preview before execution.
-- **Slack / Teams Light Intake Bridge** (per §3.15). OAuth install on Slack and Teams; `/inhouse` slash command (forward-as-chat) and `/inhouse ask` quick-skill flows; bot configuration in InHouse AI admin UI.
+- **Slack / Teams Light Intake Bridge** (per §3.15). OAuth install on Slack and Teams; `/lq` slash command (forward-as-chat) and `/lq ask` quick-skill flows; bot configuration in LQ.AI admin UI.
 
 ### M4 — Autonomous Layer and Contract Repository (~8 weeks after M3)
 
@@ -1658,7 +1658,7 @@ Milestone-based delivery. Each milestone is a public release.
 
 > **Status: forward-looking.** This section names the project's longer-term ambition. It is not a v1–v4 commitment. The maintainer team's bandwidth is the M1–M4 critical path; M5+ is the right scope for a maturing community to contribute to, with the maintainer team coordinating direction. The architectural slots needed to support M5+ (the MCP-client subsystem; the autonomous-layer extensibility) are committed in M1–M4 so that this work is community-extensible rather than requiring core refactoring.
 
-The M5+ direction extends InHouse AI from a tool the user reaches for into a workflow-aware context layer. The core capability sketch: signal aggregation across email, calendar, task systems, and document stores; a Workspace Concierge that produces a ranked Today view with rationales; agent dispatch with human-in-the-loop guardrails; voice and ambient modes. Privacy and security implications are dominant — most of M5+ benefits from Tier 1 / Tier 2 inference and the Anonymization Layer; granular consent per signal source and per scope is a hard requirement. The full sketch is captured in §9 (Workflow Intelligence subsection).
+The M5+ direction extends LQ.AI from a tool the user reaches for into a workflow-aware context layer. The core capability sketch: signal aggregation across email, calendar, task systems, and document stores; a Workspace Concierge that produces a ranked Today view with rationales; agent dispatch with human-in-the-loop guardrails; voice and ambient modes. Privacy and security implications are dominant — most of M5+ benefits from Tier 1 / Tier 2 inference and the Anonymization Layer; granular consent per signal source and per scope is a hard requirement. The full sketch is captured in §9 (Workflow Intelligence subsection).
 
 **M5 — Workflow Intelligence Foundation (~10 weeks after M4).**
 - MCP-client subsystem operationalized; Signal Aggregation Service skeleton.
@@ -1724,7 +1724,7 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 - **Trademark License Review.**
 - **Open Source License Compatibility Checker** (which OSS licenses can coexist in this project given dependencies?).
 
-**Acceptance criteria:** Each candidate skill follows the established skill format, has frontmatter with all `inhouse:` fields, includes at least one worked example, and is reviewed by at least one practicing attorney before merge.
+**Acceptance criteria:** Each candidate skill follows the established skill format, has frontmatter with all `lq_ai:` fields, includes at least one worked example, and is reviewed by at least one practicing attorney before merge.
 
 #### DE-002 — Additional regimes for DPA Checklist Review
 
@@ -1810,7 +1810,7 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 **Context:** PRD §3.4 defines the skill-input-form pattern: when a skill is attached and required inputs are missing, the application surfaces them as form elements rather than letting the model ask conversationally. Enhance Prompt's third example demonstrates the pattern. The pattern is not yet implemented for skills generally — only specified.
 
 **Specific scope:**
-- Read `inhouse.inputs.required` and `inhouse.inputs.optional` from any attached skill's frontmatter.
+- Read `lq_ai.inputs.required` and `lq_ai.inputs.optional` from any attached skill's frontmatter.
 - Render single-select inputs as radio buttons or dropdowns, free-text as input fields, document inputs as file pickers.
 - When the user submits, populate the prompt with structured input values before the model call.
 
@@ -1899,7 +1899,7 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 
 **Priority:** P2 · **Effort:** L
 
-**Context:** Skills are the unit of value in InHouse AI. There is no current mechanism for measuring how well a skill performs against its intended use, comparing skill versions, or evaluating community contributions.
+**Context:** Skills are the unit of value in LQ.AI. There is no current mechanism for measuring how well a skill performs against its intended use, comparing skill versions, or evaluating community contributions.
 
 **Specific scope:**
 - Eval harness that runs a skill against a held-out set of representative inputs and grades outputs against expected behavior.
@@ -1914,7 +1914,7 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 
 **Context:** Many in-house teams' real workflow includes a law firm partner. Legora's Portal addresses this. The PRD's positioning is "open-source AI for in-house legal teams" — explicitly not firm-side — but the firm/in-house collaboration boundary is a real workflow.
 
-**Specific recommendation:** Treat as an open question for the project's future direction, not a v1 commitment. The simplest path is per-user external-collaborator licensing within an InHouse AI deployment (the firm's lawyer is granted scoped access to a Project, per §3.11). The harder path is a federation protocol between two InHouse AI deployments.
+**Specific recommendation:** Treat as an open question for the project's future direction, not a v1 commitment. The simplest path is per-user external-collaborator licensing within an LQ.AI deployment (the firm's lawyer is granted scoped access to a Project, per §3.11). The harder path is a federation protocol between two LQ.AI deployments.
 
 **Acceptance criteria:** Decision captured in a future PRD revision; no v1 implementation expected; community demand observed before commitment.
 
@@ -1922,7 +1922,7 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 
 **Priority:** P3 · **Effort:** M
 
-**Context:** Legora and Legalfly hold or are pursuing ISO 42001 certification (AI governance). For an open-source project, certification is the operator's responsibility, but *alignment* (publishing a mapping of how InHouse AI's design choices satisfy ISO 42001 controls) helps operators argue for adoption inside ISO-aligned organizations. The Compliance Alignment Pack (per §1.8 / M1) commits to shipping `docs/compliance/iso-42001-alignment.md`; this DE captures the ongoing maintenance and refinement of that document beyond M1.
+**Context:** Legora and Legalfly hold or are pursuing ISO 42001 certification (AI governance). For an open-source project, certification is the operator's responsibility, but *alignment* (publishing a mapping of how LQ.AI's design choices satisfy ISO 42001 controls) helps operators argue for adoption inside ISO-aligned organizations. The Compliance Alignment Pack (per §1.8 / M1) commits to shipping `docs/compliance/iso-42001-alignment.md`; this DE captures the ongoing maintenance and refinement of that document beyond M1.
 
 **Specific scope:** Maintain `docs/compliance/iso-42001-alignment.md` mapping each control to relevant PRD sections and configuration choices; update each release; reviewed by an information-security professional.
 
@@ -1936,7 +1936,7 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 
 **Context:** PRD §6.3 specifies a Helm chart for production K8s deployment. Reference docker-compose is in M1; Helm chart is a follow-on.
 
-**Acceptance criteria:** `helm install inhouse-ai legalquants/inhouse-ai -f values.yaml` produces a working deployment; HA Postgres reference architecture documented; horizontal API scaling tested.
+**Acceptance criteria:** `helm install lq-ai legalquants/lq-ai -f values.yaml` produces a working deployment; HA Postgres reference architecture documented; horizontal API scaling tested.
 
 #### DE-031 — Reverse proxy / TLS recipes
 
@@ -2064,7 +2064,7 @@ In v1, each contract-review skill carries its own copy of the shared infrastruct
 
 **Specific recommendation:** Probably a separate capability (or a sister project) rather than a core feature; obligation tracking is a fundamentally different shape of work (temporal, calendar-driven, notification-heavy) than analytical AI. The autonomous layer (§3.10) could host the underlying mechanism (cron schedules, watches) with a domain-specific UI on top.
 
-**Acceptance criteria:** Decision captured (in-scope for InHouse AI vs. sister project); if in-scope, reference implementation ships in a later milestone.
+**Acceptance criteria:** Decision captured (in-scope for LQ.AI vs. sister project); if in-scope, reference implementation ships in a later milestone.
 
 #### DE-082 — Regulatory Monitoring with Proactive Alerts
 
@@ -2090,7 +2090,7 @@ In v1, each contract-review skill carries its own copy of the shared infrastruct
 
 **Priority:** P3 · **Effort:** M
 
-**Context:** Forwarding `legal@company.com` emails into a system that creates structured chats is the front-door pattern most in-house teams actually adopt. Streamline AI builds this; an OSS InHouse AI without it leaves a real gap. Sister to the Slack/Teams Light Intake Bridge (§3.15).
+**Context:** Forwarding `legal@company.com` emails into a system that creates structured chats is the front-door pattern most in-house teams actually adopt. Streamline AI builds this; an OSS LQ.AI without it leaves a real gap. Sister to the Slack/Teams Light Intake Bridge (§3.15).
 
 **Specific scope:** A configured incoming email address (per deployment) that creates a chat from the email body, attaches any documents, and assigns to a configured user or group based on rules. Deliberately *not* full triage/SLA/approval workflow — that is Streamline AI's category (per §1.6).
 
@@ -2110,7 +2110,7 @@ In v1, each contract-review skill carries its own copy of the shared infrastruct
 
 **Priority:** P2 · **Effort:** S
 
-**Context:** Operators deploying InHouse AI inside an enterprise will face an internal procurement / security review. Commercial competitors ship pre-filled SIG, CAIQ, and security-questionnaire responses to short-cut this. For an open-source self-hosted product, the operator owns the answers, but a starter pack would dramatically lower the friction. The Compliance Alignment Pack (per §1.8 / M1) plus Pre-Empted Procurement Objections appendix (Appendix E) cover much of this; the Procurement-Readiness Pack adds the questionnaire templates.
+**Context:** Operators deploying LQ.AI inside an enterprise will face an internal procurement / security review. Commercial competitors ship pre-filled SIG, CAIQ, and security-questionnaire responses to short-cut this. For an open-source self-hosted product, the operator owns the answers, but a starter pack would dramatically lower the friction. The Compliance Alignment Pack (per §1.8 / M1) plus Pre-Empted Procurement Objections appendix (Appendix E) cover much of this; the Procurement-Readiness Pack adds the questionnaire templates.
 
 **Specific scope:** Templates in `docs/procurement/` covering: SIG Lite responses, CAIQ responses, security architecture summary, data-flow diagram, supported deployment topologies for various enterprise constraints, third-party dependencies and their licenses (already partially covered in Appendix B).
 
@@ -2122,7 +2122,7 @@ In v1, each contract-review skill carries its own copy of the shared infrastruct
 
 **Context:** PRD §1.6 lists "direct integrations with CLM systems (Ironclad, Concord, etc.)" as out of scope for v1.
 
-**Specific scope:** API integrations or MCP tool adapters for the major CLMs, allowing InHouse AI to read contracts from CLMs, post review reports back, and trigger workflow updates.
+**Specific scope:** API integrations or MCP tool adapters for the major CLMs, allowing LQ.AI to read contracts from CLMs, post review reports back, and trigger workflow updates.
 
 **Acceptance criteria:** At least one CLM integration shipped with documentation; pattern for adding others.
 
@@ -2132,7 +2132,7 @@ In v1, each contract-review skill carries its own copy of the shared infrastruct
 
 **Context:** PRD §1.6 lists e-discovery as out of scope. Some users will request it; structurally distinct from in-house work.
 
-**Recommendation:** Probably should remain a separate project rather than merging into InHouse AI. Track community demand and revisit if a fork or sister project is warranted.
+**Recommendation:** Probably should remain a separate project rather than merging into LQ.AI. Track community demand and revisit if a fork or sister project is warranted.
 
 #### DE-042 — Mobile applications
 
@@ -2247,7 +2247,7 @@ This subsection consolidates security and compliance enhancements deferred from 
 
 **Priority:** P1 · **Effort:** L
 
-**Context:** A GDPR Article 15 (access) or Article 17 (deletion) request from a data subject who is *referenced* in chats, files, or audit entries (rather than being an InHouse AI user) requires the operator to find and produce or delete that subject's data across resources. Per-user export/delete (in v1, §5.3) handles users; this DE handles the harder case.
+**Context:** A GDPR Article 15 (access) or Article 17 (deletion) request from a data subject who is *referenced* in chats, files, or audit entries (rather than being an LQ.AI user) requires the operator to find and produce or delete that subject's data across resources. Per-user export/delete (in v1, §5.3) handles users; this DE handles the harder case.
 
 **Specific scope:** Admin tool that takes an entity (name, email, identifier) and surfaces all resources mentioning that entity, with options to redact (replace with pseudonym), delete (remove the resources), or export (produce as a bundle).
 
@@ -2339,7 +2339,7 @@ This subsection captures the bounded items that operationalize the M5+ Forward-L
 
 Privacy and security implications dominate this entire subsection. Most items benefit from Tier 1 / Tier 2 inference (§1.5.2) and from the Anonymization Layer (§4.7); granular consent per signal source and per scope is a hard requirement, not an optional refinement. The §I.6 framing in the source recommendations (preserved here in spirit): "the privacy implications of workflow-aware context are the dominant constraint on the entire capability set; they cannot be appended as an afterthought; they have to be designed in from the start."
 
-#### DE-200 — MCP-client subsystem in the InHouse AI backend
+#### DE-200 — MCP-client subsystem in the LQ.AI backend
 
 **Priority:** P1 · **Effort:** M
 
@@ -2363,7 +2363,7 @@ Privacy and security implications dominate this entire subsection. Most items be
 
 **Priority:** P1 · **Effort:** M
 
-**Context:** First and most important signal source. Ideally implemented as a community-contributed MCP server consumed by InHouse AI rather than baked in.
+**Context:** First and most important signal source. Ideally implemented as a community-contributed MCP server consumed by LQ.AI rather than baked in.
 
 **Specific scope:** Reference MCP server for Gmail and Microsoft 365 (Exchange Online); read-only by default; granular permission scoping (specific labels/folders only); rate-limit-aware.
 
@@ -2383,9 +2383,9 @@ Privacy and security implications dominate this entire subsection. Most items be
 
 **Priority:** P1 · **Effort:** M each
 
-**Context:** Asana, Linear, Jira, GitHub Issues, Monday, ClickUp — each a separate MCP server. Many already exist in the Anthropic MCP ecosystem; the InHouse AI project can leverage rather than duplicate.
+**Context:** Asana, Linear, Jira, GitHub Issues, Monday, ClickUp — each a separate MCP server. Many already exist in the Anthropic MCP ecosystem; the LQ.AI project can leverage rather than duplicate.
 
-**Specific scope:** Documented procedure for connecting community-maintained MCP servers to InHouse AI; reference deployment recipes for the most common task systems.
+**Specific scope:** Documented procedure for connecting community-maintained MCP servers to LQ.AI; reference deployment recipes for the most common task systems.
 
 **Acceptance criteria:** Operator can configure at least three task systems via MCP; signals surface in Signal Aggregation Service.
 
@@ -2548,15 +2548,15 @@ This section is mutable across PRD versions; updates do not require a PRD versio
 
 - **agentskills.io format** — open standard for portable AI skills, compatible with Anthropic Claude Skills and Hermes Agent.
 - **Anonymization Layer** — Inference Gateway middleware (§4.7) that pseudonymizes sensitive entities before the model call and rehydrates them after; the privacy fallback for Tier 3+ inference.
-- **Citation Engine** — InHouse AI's character-fidelity citation pipeline.
+- **Citation Engine** — LQ.AI's character-fidelity citation pipeline.
 - **Citable Chunk** — atomic unit of indexed content with full positional metadata for citation.
-- **Compliance Alignment Pack** — `docs/compliance/` documents mapping InHouse AI's design choices to SOC 2, ISO 27001, ISO 42001, GDPR, HIPAA, FedRAMP controls; ships with M1 (§1.8 / §8 M1).
+- **Compliance Alignment Pack** — `docs/compliance/` documents mapping LQ.AI's design choices to SOC 2, ISO 27001, ISO 42001, GDPR, HIPAA, FedRAMP controls; ships with M1 (§1.8 / §8 M1).
 - **Easy Playbook** — auto-generation wizard that drafts a Playbook from prior agreements.
 - **Enhance Prompt** — front-running agent that rewrites user input into a structured legal prompt.
 - **Inference Choice Spectrum** — five-tier security spectrum (§1.5.2) from local-only (Tier 1) to consumer/free (Tier 5); the central organizing concept of §1.8.
 - **Inference Tier** — operator-and-skill-aware classification (1–5) of where customer data goes during inference; surfaced to the user in real time via the Tier badge (§3.13).
-- **InHouse AI** — this project.
-- **LegalQuants** — the organization stewarding InHouse AI.
+- **LQ.AI** — this project.
+- **LegalQuants** — the organization stewarding LQ.AI.
 - **MCP / MCP server** — Model Context Protocol; an open standard for connecting AI assistants to external systems. The MCP-client subsystem is the integration substrate for the M5+ workflow-intelligence direction (§8.5); the architectural slot is committed in M1–M2.
 - **Mode 1 / Mode 2** — self-hosted with cloud LLM keys / self-hosted with local inference.
 - **Organization Profile** — singleton skill at the deployment level (§3.12) capturing org-wide voice, jurisdiction, industry, and standard positions; prepended to skill prompts unless declined.
@@ -2575,7 +2575,7 @@ This section is mutable across PRD versions; updates do not require a PRD versio
 
 | Component | License | Usage |
 |---|---|---|
-| InHouse AI core (this repo) | Apache 2.0 | Project license |
+| LQ.AI core (this repo) | Apache 2.0 | Project license |
 | OpenWebUI fork (web) | OpenWebUI License | Customized, branding clause respected |
 | FastAPI | MIT | Backend framework |
 | LangGraph | MIT | Agent runtime |
@@ -2608,13 +2608,13 @@ This section is mutable across PRD versions; updates do not require a PRD versio
 
 The following deliverables are referenced by this PRD and should be produced as separate documents:
 
-1. **InHouse AI Inference Gateway Specification** — full technical spec for the gateway, suitable for an engineer to implement against.
-2. **InHouse AI OpenAPI Surface** — complete OpenAPI 3.1 YAML covering every endpoint in §3 and §4.
+1. **LQ.AI Inference Gateway Specification** — full technical spec for the gateway, suitable for an engineer to implement against.
+2. **LQ.AI OpenAPI Surface** — complete OpenAPI 3.1 YAML covering every endpoint in §3 and §4.
 3. **Skill-Authoring Guide** — how to write a high-quality skill in agentskills.io format.
 4. **Playbook-Authoring Guide** — how to write a Playbook.
 5. **Deployment Cookbook** — recipes for common production deployments (single-node Docker, K8s with HA Postgres, air-gapped, multi-region).
 6. **Skill Drafts (Track 2)** — actual content for the 10 starter skills shipped in M1.
-7. **Compliance Alignment Pack** (`docs/compliance/`, M1; per §1.8 and §8 M1 deliverables) — the document set mapping InHouse AI's design choices to SOC 2, ISO 27001, ISO 42001, GDPR, HIPAA, FedRAMP controls. Component documents: `soc2-alignment.md`, `iso-27001-alignment.md`, `iso-42001-alignment.md`, `gdpr-readiness.md`, `hipaa-readiness.md`, `provider-compliance-matrix.md`. FedRAMP and state-privacy alignment documents follow in v1.x or M2.
+7. **Compliance Alignment Pack** (`docs/compliance/`, M1; per §1.8 and §8 M1 deliverables) — the document set mapping LQ.AI's design choices to SOC 2, ISO 27001, ISO 42001, GDPR, HIPAA, FedRAMP controls. Component documents: `soc2-alignment.md`, `iso-27001-alignment.md`, `iso-42001-alignment.md`, `gdpr-readiness.md`, `hipaa-readiness.md`, `provider-compliance-matrix.md`. FedRAMP and state-privacy alignment documents follow in v1.x or M2.
 8. **Code & Supply-Chain Transparency Documentation** (`docs/security/`, M1; per §7.8) — `sbom.md` (SBOM generation and verification), `verifying-releases.md` (cosign signature verification commands), `build-provenance.md` (SLSA-3 attestations), `threat-model.md` (STRIDE-format threat model covering principal data flows), `dependency-security.md` (continuous SCA configuration).
 9. **Pre-Empted Procurement Objections** (Appendix E of this PRD; M1) — structured responses to 17 common procurement-team objections, intended to short-cut enterprise procurement review. Updated each release.
 10. **Skill-Authoring Guide — Designing Optional Inputs** (companion section of #3 above) — documents the pattern from DE-020: optional inputs that change analytical depth, not just report format.
@@ -2622,23 +2622,23 @@ The following deliverables are referenced by this PRD and should be produced as 
 
 ### Appendix E — Pre-Empted Procurement Objections
 
-This appendix addresses common objections an information-security or legal-operations team will raise during procurement review, paired with InHouse AI's response. Each response either points to an existing artifact (a Compliance Alignment Pack document, an SBOM, the source code), names a roadmap item where parity is being approached, or explains why the objection is misframed for an OSS self-hosted product. The point is to address every plausible objection in writing, in advance, in one place. Operators evaluating InHouse AI internally can adapt these responses to their organization's procurement vocabulary; the underlying answers are stable.
+This appendix addresses common objections an information-security or legal-operations team will raise during procurement review, paired with LQ.AI's response. Each response either points to an existing artifact (a Compliance Alignment Pack document, an SBOM, the source code), names a roadmap item where parity is being approached, or explains why the objection is misframed for an OSS self-hosted product. The point is to address every plausible objection in writing, in advance, in one place. Operators evaluating LQ.AI internally can adapt these responses to their organization's procurement vocabulary; the underlying answers are stable.
 
-#### Objection: "Is InHouse AI SOC 2 Type II certified?"
+#### Objection: "Is LQ.AI SOC 2 Type II certified?"
 
-**Response.** SOC 2 Type II is an attestation issued to an operating organization, not to a software product. InHouse AI is software you run; the operator (your organization, or a hosting provider you select) is the entity that would receive a SOC 2 attestation for its operating environment. We provide a SOC 2 alignment document (`docs/compliance/soc2-alignment.md`) that maps each Trust Services Criterion to InHouse AI's design choices and configuration options, identifying which controls are project-provided, operator-provided, or joint. An operator following the alignment document's recommendations and operating the deployment in a SOC 2-compliant environment can pursue SOC 2 Type II certification of *that* environment with significantly reduced documentation effort. Closed-source vendors who claim SOC 2 are certifying their own SaaS environment, which is a different question than whether the software is suitable for your environment.
+**Response.** SOC 2 Type II is an attestation issued to an operating organization, not to a software product. LQ.AI is software you run; the operator (your organization, or a hosting provider you select) is the entity that would receive a SOC 2 attestation for its operating environment. We provide a SOC 2 alignment document (`docs/compliance/soc2-alignment.md`) that maps each Trust Services Criterion to LQ.AI's design choices and configuration options, identifying which controls are project-provided, operator-provided, or joint. An operator following the alignment document's recommendations and operating the deployment in a SOC 2-compliant environment can pursue SOC 2 Type II certification of *that* environment with significantly reduced documentation effort. Closed-source vendors who claim SOC 2 are certifying their own SaaS environment, which is a different question than whether the software is suitable for your environment.
 
-#### Objection: "Has InHouse AI been pen-tested?"
+#### Objection: "Has LQ.AI been pen-tested?"
 
-**Response.** As an open-source project, the InHouse AI codebase is continuously reviewed by anyone who wants to read it, including the project's own maintainers, contributors, and any operator's security team before deployment. The project publishes a threat model (`docs/security/threat-model.md`) identifying trust boundaries and mitigations and runs SAST (CodeQL), dependency scanning (Trivy, Dependabot), and fuzzing (for the Inference Gateway's OpenAI compatibility) on every commit. Specific operating deployments are pen-tested by the operator or their chosen security firm against their specific configuration; the project welcomes and credits responsible disclosure of findings. The project does not commission and publish a single project-wide pen test because the result would not be representative of any specific operator's deployment configuration; instead, we ship the threat model and the tooling for the operator's pen-tester to use.
+**Response.** As an open-source project, the LQ.AI codebase is continuously reviewed by anyone who wants to read it, including the project's own maintainers, contributors, and any operator's security team before deployment. The project publishes a threat model (`docs/security/threat-model.md`) identifying trust boundaries and mitigations and runs SAST (CodeQL), dependency scanning (Trivy, Dependabot), and fuzzing (for the Inference Gateway's OpenAI compatibility) on every commit. Specific operating deployments are pen-tested by the operator or their chosen security firm against their specific configuration; the project welcomes and credits responsible disclosure of findings. The project does not commission and publish a single project-wide pen test because the result would not be representative of any specific operator's deployment configuration; instead, we ship the threat model and the tooling for the operator's pen-tester to use.
 
-#### Objection: "Where is InHouse AI's data residency?"
+#### Objection: "Where is LQ.AI's data residency?"
 
-**Response.** InHouse AI does not have a data residency, because InHouse AI does not have data. The operator chooses where to deploy InHouse AI; the data lives in the operator's environment (the Postgres database, MinIO/S3, audit log volumes the operator provisions). The only data that potentially leaves the operator's environment is the inference request to the configured cloud LLM provider, and the operator chooses that provider and the provider's region. The Provider Compliance Matrix (`docs/compliance/provider-compliance-matrix.md`) documents each supported provider's data-residency options. For an EU-only deployment, the operator deploys to EU infrastructure, configures the Inference Gateway to route only to EU-resident provider endpoints (Anthropic EU, AWS Bedrock eu-west-X, Azure OpenAI EU regions, Google Vertex AI EU regions), or runs Tier 1 / Tier 2 inference where no provider call leaves the operator's environment.
+**Response.** LQ.AI does not have a data residency, because LQ.AI does not have data. The operator chooses where to deploy LQ.AI; the data lives in the operator's environment (the Postgres database, MinIO/S3, audit log volumes the operator provisions). The only data that potentially leaves the operator's environment is the inference request to the configured cloud LLM provider, and the operator chooses that provider and the provider's region. The Provider Compliance Matrix (`docs/compliance/provider-compliance-matrix.md`) documents each supported provider's data-residency options. For an EU-only deployment, the operator deploys to EU infrastructure, configures the Inference Gateway to route only to EU-resident provider endpoints (Anthropic EU, AWS Bedrock eu-west-X, Azure OpenAI EU regions, Google Vertex AI EU regions), or runs Tier 1 / Tier 2 inference where no provider call leaves the operator's environment.
 
 #### Objection: "Does the AI provider train on our data?"
 
-**Response.** This is the operator's choice, not the project's. The Inference Tier model (§1.5.2 / §1.8) makes the consequences of the choice explicit. Tier 3 (enterprise managed inference with ZDR / no-training commitments) is the recommended tier for client-confidential work; under Tier 3, no major provider trains on customer data per their commercial terms (Anthropic Commercial Terms, OpenAI Enterprise / API Commercial Terms, AWS Bedrock, Azure OpenAI, Google Vertex AI). The application surfaces the routed tier in the chat UI in real time. Skills can require a minimum tier; deployments can disallow tiers globally. If the operator routes to Tier 5 (consumer endpoints, where some providers train by default), the application warns prominently. Closed-source competitors who offer the same enterprise providers are bound by the same provider terms; the difference is that with InHouse AI, the operator can verify the routing, choose the tier, and even run Tier 1 with no provider involvement.
+**Response.** This is the operator's choice, not the project's. The Inference Tier model (§1.5.2 / §1.8) makes the consequences of the choice explicit. Tier 3 (enterprise managed inference with ZDR / no-training commitments) is the recommended tier for client-confidential work; under Tier 3, no major provider trains on customer data per their commercial terms (Anthropic Commercial Terms, OpenAI Enterprise / API Commercial Terms, AWS Bedrock, Azure OpenAI, Google Vertex AI). The application surfaces the routed tier in the chat UI in real time. Skills can require a minimum tier; deployments can disallow tiers globally. If the operator routes to Tier 5 (consumer endpoints, where some providers train by default), the application warns prominently. Closed-source competitors who offer the same enterprise providers are bound by the same provider terms; the difference is that with LQ.AI, the operator can verify the routing, choose the tier, and even run Tier 1 with no provider involvement.
 
 #### Objection: "What happens to our prompts and outputs?"
 
@@ -2646,7 +2646,7 @@ This appendix addresses common objections an information-security or legal-opera
 
 #### Objection: "Is the AI model audited or certified?"
 
-**Response.** InHouse AI does not train or fine-tune its own foundation model; it uses configured cloud or local models. The model's safety and accuracy properties are inherited from the chosen provider (or, for local models, the model's authors). The project does not endorse a single model; it supports the major providers' models and any OpenAI-compatible local model. We document each major provider's model-evaluation evidence in the Provider Compliance Matrix. Where InHouse AI adds value over the bare model — through skills, playbooks, the Citation Engine, and ensemble verification — those mechanisms are open source and inspectable.
+**Response.** LQ.AI does not train or fine-tune its own foundation model; it uses configured cloud or local models. The model's safety and accuracy properties are inherited from the chosen provider (or, for local models, the model's authors). The project does not endorse a single model; it supports the major providers' models and any OpenAI-compatible local model. We document each major provider's model-evaluation evidence in the Provider Compliance Matrix. Where LQ.AI adds value over the bare model — through skills, playbooks, the Citation Engine, and ensemble verification — those mechanisms are open source and inspectable.
 
 #### Objection: "What is your software supply chain story?"
 
@@ -2656,7 +2656,7 @@ This appendix addresses common objections an information-security or legal-opera
 
 **Response.** Projects (§3.11) carry an optional `privileged: true` flag that forces a minimum inference tier (default Tier 2; configurable to Tier 1), disables anonymization (which adds processing steps that complicate privilege analysis), and marks every chat and audit-log entry in the Project as privileged. Audit logs include `privilege_marked` and `privilege_basis` fields (§5.3) that support filtering during e-discovery review. Work-product attribution metadata (§3.3) is stored on every model-generated artifact, establishing the chain of custody. The operator can configure the deployment to retain privileged entries on a different schedule than non-privileged entries (see DE-106). For the most sensitive privileged work, run the Project at Tier 1 (local inference) — the prompt never leaves the deployment, eliminating any third-party processor question.
 
-#### Objection: "Is InHouse AI HIPAA-eligible?"
+#### Objection: "Is LQ.AI HIPAA-eligible?"
 
 **Response.** A deployment can be configured to be HIPAA-eligible. The HIPAA readiness document (`docs/compliance/hipaa-readiness.md`) walks through the configuration: limit to Tier 1–3 inference; the operator signs a BAA with the chosen inference provider (Anthropic offers BAA on eligible APIs; OpenAI Enterprise supports BAA; AWS Bedrock under HIPAA-eligible services; Azure OpenAI under Azure's BAA); configure the Citation Engine and audit log per the document's PHI-handling guidance; the operator's organization receives the BAA from the provider directly. The project itself does not enter into BAAs because the project is software, not a service. This is the same structure HIPAA-aware OSS products use.
 
@@ -2670,11 +2670,11 @@ This appendix addresses common objections an information-security or legal-opera
 
 #### Objection: "Can we audit what the AI is actually doing?"
 
-**Response.** Yes. Every state-changing API call writes to the audit log (§5.3); every inference request through the Inference Gateway is traced with provider, model, tier, token counts, and cost; every skill that runs is inspectable in source via the Skill Library UI (§3.4); every prompt and response is stored in the chat history. OpenTelemetry instrumentation feeds traces, metrics, and logs to the operator's chosen sink (Grafana, Honeycomb, Datadog, etc.); Langfuse (optional) provides LLM-specific tracing. The audit log can be streamed to the operator's SIEM. Closed-source competitors typically expose audit logs of *user actions*; InHouse AI exposes the same plus the actual prompts, responses, skills, and routing decisions, because there is no proprietary layer to hide.
+**Response.** Yes. Every state-changing API call writes to the audit log (§5.3); every inference request through the Inference Gateway is traced with provider, model, tier, token counts, and cost; every skill that runs is inspectable in source via the Skill Library UI (§3.4); every prompt and response is stored in the chat history. OpenTelemetry instrumentation feeds traces, metrics, and logs to the operator's chosen sink (Grafana, Honeycomb, Datadog, etc.); Langfuse (optional) provides LLM-specific tracing. The audit log can be streamed to the operator's SIEM. Closed-source competitors typically expose audit logs of *user actions*; LQ.AI exposes the same plus the actual prompts, responses, skills, and routing decisions, because there is no proprietary layer to hide.
 
 #### Objection: "What about prompt injection from a malicious counterparty's document?"
 
-**Response.** This is the genuinely-hard problem in the AI-security space; no commercial competitor has a complete answer either. InHouse AI's defenses are: skill-prompt isolation conventions in the skill-authoring guide (delimited blocks instructing the model not to interpret document content as instructions); structured-output schemas that constrain what the model can produce (DE-111); ensemble verification (§3.8) for high-stakes operations; the prompt-injection pattern library (DE-110) once it ships; and the Citation Engine's verification step which would catch a successful injection that produced an unsupported citation. The honest answer is that a sophisticated injection might still affect outputs in ways the verification does not catch; the operator's defense is the human-in-the-loop review the legal profession already requires. We do not claim to be immune.
+**Response.** This is the genuinely-hard problem in the AI-security space; no commercial competitor has a complete answer either. LQ.AI's defenses are: skill-prompt isolation conventions in the skill-authoring guide (delimited blocks instructing the model not to interpret document content as instructions); structured-output schemas that constrain what the model can produce (DE-111); ensemble verification (§3.8) for high-stakes operations; the prompt-injection pattern library (DE-110) once it ships; and the Citation Engine's verification step which would catch a successful injection that produced an unsupported citation. The honest answer is that a sophisticated injection might still affect outputs in ways the verification does not catch; the operator's defense is the human-in-the-loop review the legal profession already requires. We do not claim to be immune.
 
 #### Objection: "How do we know the open-source code matches what's running?"
 
@@ -2694,6 +2694,6 @@ This appendix addresses common objections an information-security or legal-opera
 
 ---
 
-*End of InHouse AI PRD v0.2.*
+*End of LQ.AI PRD v0.2.*
 
 *Drafted by Kevin Keller for contribution to LegalQuants. Comments, corrections, and contributions welcomed via GitHub once the repository is published.*

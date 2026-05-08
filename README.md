@@ -1,4 +1,4 @@
-# InHouse AI
+# LQ.AI
 
 > **Open-source AI for in-house legal teams. Bring your own keys, run it where you want, own your data.**
 
@@ -6,9 +6,9 @@
 [![PRD](https://img.shields.io/badge/PRD-v0.2-green.svg)](docs/PRD.md)
 [![Status](https://img.shields.io/badge/Status-Pre--Release-orange.svg)](#project-status)
 
-InHouse AI is a self-hosted AI platform purpose-built for in-house legal teams. It delivers fast contract drafting and review, verifiable citations, reusable workflow skills, playbook-driven contract analysis, a Microsoft Word integration, and a curated library of starter skills for the everyday work in-house counsel actually do — running on a laptop, an internal server, or a cloud VM, against the customer's choice of model, with zero license fees.
+LQ.AI is a self-hosted AI platform purpose-built for in-house legal teams. It delivers fast contract drafting and review, verifiable citations, reusable workflow skills, playbook-driven contract analysis, a Microsoft Word integration, and a curated library of starter skills for the everyday work in-house counsel actually do — running on a laptop, an internal server, or a cloud VM, against the customer's choice of model, with zero license fees.
 
-The project's reason for existing is simple: **in-house legal teams should not have to choose between AI assistance and data sovereignty.** Every other capable tool in this category is a closed-source SaaS that requires sending privileged information to a third-party vendor. InHouse AI runs in your environment, with your keys, against your choice of model — including fully air-gapped deployments using local inference.
+The project's reason for existing is simple: **in-house legal teams should not have to choose between AI assistance and data sovereignty.** Every other capable tool in this category is a closed-source SaaS that requires sending privileged information to a third-party vendor. LQ.AI runs in your environment, with your keys, against your choice of model — including fully air-gapped deployments using local inference.
 
 ---
 
@@ -16,9 +16,9 @@ The project's reason for existing is simple: **in-house legal teams should not h
 
 Commercial in-house legal AI products treat their prompt engineering as proprietary moat. The skills, playbooks, citation logic, and verification heuristics that shape what the user sees are hidden inside closed-source applications, presented as "AI" but functionally indistinguishable from "a system prompt the vendor refuses to show you." Customers pay significant per-seat fees for software whose only real innovation is a hidden prompt — without any way to see, debug, or improve it.
 
-InHouse AI inverts this. **Every artifact that shapes the user's experience is visible work product.** The skills are open source. The playbooks are open source. The citation engine's verification logic is open source. The Enhance Prompt rewriter is open source. The Organization Profile that captures org-wide voice is open source. When a user clicks "view this skill" on any active skill, they see the actual `SKILL.md` and supporting files, formatted for human reading, with provenance and the ability to fork.
+LQ.AI inverts this. **Every artifact that shapes the user's experience is visible work product.** The skills are open source. The playbooks are open source. The citation engine's verification logic is open source. The Enhance Prompt rewriter is open source. The Organization Profile that captures org-wide voice is open source. When a user clicks "view this skill" on any active skill, they see the actual `SKILL.md` and supporting files, formatted for human reading, with provenance and the ability to fork.
 
-The position implied by all of this is uncomfortable for the rest of the legal-AI category, and that is intentional. Customers who have been paying for software whose only real innovation is a hidden system prompt are entitled to see what they have actually been buying. When the curtain is pulled back, some products will hold up. Many will not. InHouse AI's bet is that an open, transparent product built on community-curated skills is better than a closed, opaque product built on the assumption that the user cannot see what is happening — and that the resulting trust is worth more than the marketing.
+The position implied by all of this is uncomfortable for the rest of the legal-AI category, and that is intentional. Customers who have been paying for software whose only real innovation is a hidden system prompt are entitled to see what they have actually been buying. When the curtain is pulled back, some products will hold up. Many will not. LQ.AI's bet is that an open, transparent product built on community-curated skills is better than a closed, opaque product built on the assumption that the user cannot see what is happening — and that the resulting trust is worth more than the marketing.
 
 For more on this philosophy, see [PRD §1.3 Transparency as a Founding Principle](docs/PRD.md#13-transparency-as-a-founding-principle) and [§7.1 Project Philosophy](docs/PRD.md#71-project-philosophy).
 
@@ -26,7 +26,7 @@ For more on this philosophy, see [PRD §1.3 Transparency as a Founding Principle
 
 ## What it does
 
-InHouse AI ships with a curated set of capabilities calibrated to in-house counsel work. The capability set in v1 (M1–M4):
+LQ.AI ships with a curated set of capabilities calibrated to in-house counsel work. The capability set in v1 (M1–M4):
 
 **Conversational core with persistent history.** Multi-turn chat organized in a sidebar, with skills and files attached per chat. Search across all chat history. Streaming responses with markdown rendering. Export to Markdown, plain text, or DOCX.
 
@@ -46,11 +46,11 @@ InHouse AI ships with a curated set of capabilities calibrated to in-house couns
 
 **Playbooks (M3).** Codified legal positions for automated contract review. Easy Playbook auto-generation wizard drafts a Playbook from prior agreements. Four built-in playbooks ship in M3: Generic SaaS MSA, NDA, DPA (GDPR-aligned), Commercial MSA.
 
-**Word Add-In (M3).** Microsoft Office.js add-in that brings InHouse AI capabilities directly into Word. Run skills, execute Playbooks, get redlines as Word tracked changes, get comments as Word comments, and ask questions about the document with citations to specific clauses — without leaving Word.
+**Word Add-In (M3).** Microsoft Office.js add-in that brings LQ.AI capabilities directly into Word. Run skills, execute Playbooks, get redlines as Word tracked changes, get comments as Word comments, and ask questions about the document with citations to specific clauses — without leaving Word.
 
 **Tabular / Multi-Document Review (M3).** Structured grid output across N documents — bulk document analysis with citation-grounded cells. "Show me the term length, survival period, carveouts, and governing law for each of these 30 NDAs."
 
-**Slack / Teams Light Intake Bridge (M3).** A `/inhouse` slash command lets a Slack or Teams user forward a thread to an InHouse AI chat or run a quick skill in-thread. Light intake, deliberately not full triage/SLA/approvals — that is Streamline AI's category.
+**Slack / Teams Light Intake Bridge (M3).** A `/lq` slash command lets a Slack or Teams user forward a thread to an LQ.AI chat or run a quick skill in-thread. Light intake, deliberately not full triage/SLA/approvals — that is Streamline AI's category.
 
 **Anonymization Layer (M2).** Pre-processing step in the Inference Gateway that pseudonymizes sensitive entities before the model call and rehydrates them after. The privacy fallback for Tier 3+ inference when local (Tier 1) is impractical but you still want defensible privacy posture.
 
@@ -90,8 +90,8 @@ The next layer of skills is on the deferred-enhancement list and welcomes commun
 ## Quickstart
 
 ```bash
-git clone https://github.com/legalquants/inhouse-ai.git
-cd inhouse-ai
+git clone https://github.com/legalquants/lq-ai.git
+cd lq-ai
 cp .env.example .env
 # Edit .env with at least one LLM provider API key (or use local profile)
 docker compose up -d              # Mode 1 (cloud LLM keys)
@@ -102,7 +102,7 @@ docker compose --profile local up -d   # Mode 2 (Ollama, air-gap-capable)
 After ~2 minutes:
 
 ```
-✓ InHouse AI is ready at http://localhost:3000
+✓ LQ.AI is ready at http://localhost:3000
 ✓ First-run admin account: see logs for password
 ✓ API documentation: http://localhost:8000/docs
 ✓ Inference Gateway: http://localhost:8001/docs
@@ -121,7 +121,7 @@ For production deployment, see [PRD §6 Deployment](docs/PRD.md#6-deployment) �
 
 ## Architecture
 
-InHouse AI is a fork of [OpenWebUI](https://github.com/open-webui/open-webui) for the chat UI, plus a FastAPI backend, a custom-built Inference Gateway (~3,000 lines of Python that we own end-to-end for security reasons), [LangGraph](https://github.com/langchain-ai/langgraph) for stateful agent workflows, [Docling](https://github.com/DS4SD/docling) + [PyMuPDF](https://github.com/pymupdf/PyMuPDF) for document parsing with character-level offsets, and PostgreSQL with [pgvector](https://github.com/pgvector/pgvector) for unified storage of application data, vectors, and full-text indexes. Optional [Langfuse](https://github.com/langfuse/langfuse) for LLM-specific observability; OpenTelemetry throughout.
+LQ.AI is a fork of [OpenWebUI](https://github.com/open-webui/open-webui) for the chat UI, plus a FastAPI backend, a custom-built Inference Gateway (~3,000 lines of Python that we own end-to-end for security reasons), [LangGraph](https://github.com/langchain-ai/langgraph) for stateful agent workflows, [Docling](https://github.com/DS4SD/docling) + [PyMuPDF](https://github.com/pymupdf/PyMuPDF) for document parsing with character-level offsets, and PostgreSQL with [pgvector](https://github.com/pgvector/pgvector) for unified storage of application data, vectors, and full-text indexes. Optional [Langfuse](https://github.com/langfuse/langfuse) for LLM-specific observability; OpenTelemetry throughout.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -132,7 +132,7 @@ InHouse AI is a fork of [OpenWebUI](https://github.com/open-webui/open-webui) fo
                    │  OpenAPI 3.1 over HTTPS      │
                    ▼                              ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                  InHouse AI Backend (FastAPI)                        │
+│                  LQ.AI Backend (FastAPI)                        │
 │   Authn/Authz │ Audit Log │ RBAC │ Projects │ Org Profile │ ...      │
 └──────┬───────────────┬─────────────┬────────────┬────────────────────┘
        ▼               ▼             ▼            ▼
@@ -166,17 +166,17 @@ Two deployment modes, five inference tiers:
 - **Mode 1 — Self-hosted with cloud LLM keys.** Inference happens at the configured cloud provider; the rest of the system stays in your environment. Spans Tiers 2–5 depending on which provider/account you use.
 - **Mode 2 — Self-hosted with local inference.** Inference runs locally via Ollama, vLLM, llama.cpp, or any OpenAI-compatible local endpoint. Air-gap-capable. Tier 1 by definition.
 
-For more, see [PRD §1.5 Deployment Modes and the Inference Choice Spectrum](docs/PRD.md#15-deployment-modes-and-the-inference-choice-spectrum), [§2 Architecture](docs/PRD.md#2-architecture), and [§4 The InHouse AI Inference Gateway](docs/PRD.md#4-the-inhouse-ai-inference-gateway).
+For more, see [PRD §1.5 Deployment Modes and the Inference Choice Spectrum](docs/PRD.md#15-deployment-modes-and-the-inference-choice-spectrum), [§2 Architecture](docs/PRD.md#2-architecture), and [§4 The LQ.AI Inference Gateway](docs/PRD.md#4-the-lq-ai-inference-gateway).
 
 ---
 
 ## Security and procurement
 
-InHouse AI's security posture is structurally different from closed-source commercial alternatives. Three principles:
+LQ.AI's security posture is structurally different from closed-source commercial alternatives. Three principles:
 
-- **The operator chooses the deployment's posture.** InHouse AI does not run a SaaS that holds your data on our infrastructure; you run it on yours. The most consequential security decisions — where the deployment lives, what inference provider it routes to, how the audit log is retained, who has access — are yours, and the application makes the implications of each decision explicit.
+- **The operator chooses the deployment's posture.** LQ.AI does not run a SaaS that holds your data on our infrastructure; you run it on yours. The most consequential security decisions — where the deployment lives, what inference provider it routes to, how the audit log is retained, who has access — are yours, and the application makes the implications of each decision explicit.
 - **The Inference Choice Spectrum is the central security trade-off.** Inference is where customer data leaves the deployment, if it does. The five-tier spectrum maps the choice across local-only inference (Tier 1), customer-hosted cloud inference (Tier 2), enterprise managed inference with ZDR / no-training commitments (Tier 3), standard cloud API (Tier 4), and consumer or free tier (Tier 5). Tier 3 is recommended for most pragmatic enterprise deployments. Tier 1 is recommended for the most sensitive privileged work.
-- **Transparency replaces opacity.** Every release ships with an SBOM (Software Bill of Materials), signed container images (Sigstore/cosign), SLSA-3 build provenance attestations, a published threat model, and alignment documentation for SOC 2, ISO 27001, ISO 42001, GDPR, HIPAA, and FedRAMP — mapping our design choices to each framework's controls. Where InHouse AI does not yet match a specific commercial competitor's control, it is named on the public deferred-enhancements list with a roadmap.
+- **Transparency replaces opacity.** Every release ships with an SBOM (Software Bill of Materials), signed container images (Sigstore/cosign), SLSA-3 build provenance attestations, a published threat model, and alignment documentation for SOC 2, ISO 27001, ISO 42001, GDPR, HIPAA, and FedRAMP — mapping our design choices to each framework's controls. Where LQ.AI does not yet match a specific commercial competitor's control, it is named on the public deferred-enhancements list with a roadmap.
 
 For procurement reviews, see:
 
@@ -228,7 +228,7 @@ The full backlog is in [PRD §9 Deferred Enhancements](docs/PRD.md#9-deferred-en
 
 ## License
 
-[Apache License 2.0](LICENSE) for the InHouse AI codebase. The patent-grant clause is important given LegalQuants' broader ecosystem; the explicit trademark protection is enterprise-friendly; the license is compatible with most other OSS licenses for ecosystem integration.
+[Apache License 2.0](LICENSE) for the LQ.AI codebase. The patent-grant clause is important given LegalQuants' broader ecosystem; the explicit trademark protection is enterprise-friendly; the license is compatible with most other OSS licenses for ecosystem integration.
 
 The OpenWebUI fork (the `web` component) inherits OpenWebUI's license. We follow OpenWebUI's branding requirements and document the relationship clearly.
 
@@ -240,7 +240,7 @@ PyMuPDF (AGPL-3.0) is used server-side only and not redistributed as a library; 
 
 **Initial model: BDFL.** Kevin Keller is the initial maintainer. LegalQuants stewards the project: owns the GitHub org, controls the trademark, employs the maintainer.
 
-The project's commitment to community contribution: *"InHouse AI welcomes contributions from any in-house counsel, legal-ops practitioner, or engineer who wants to advance open legal AI."*
+The project's commitment to community contribution: *"LQ.AI welcomes contributions from any in-house counsel, legal-ops practitioner, or engineer who wants to advance open legal AI."*
 
 Path to broader governance is documented but not implemented in v1: as the project matures, transition to a maintainer team and formal governance (CNCF or Apache Software Foundation models). See [PRD §7.4 Governance](docs/PRD.md#74-governance).
 
@@ -273,7 +273,7 @@ For security disclosures, see [`SECURITY.md`](SECURITY.md). The disclosure proce
 
 ## Acknowledgments
 
-InHouse AI builds on substantial open-source work. The most consequential dependencies:
+LQ.AI builds on substantial open-source work. The most consequential dependencies:
 
 - [OpenWebUI](https://github.com/open-webui/open-webui) — chat UI shell.
 - [LangGraph](https://github.com/langchain-ai/langgraph) — agent runtime.
@@ -283,8 +283,8 @@ InHouse AI builds on substantial open-source work. The most consequential depend
 - [OpenTelemetry](https://opentelemetry.io/) — observability.
 - [Langfuse](https://github.com/langfuse/langfuse) — LLM-specific observability.
 
-Each is acknowledged in the [License Summary Matrix](docs/PRD.md#appendix-b--license-summary-matrix). Contributions from these ecosystems are how InHouse AI exists at all.
+Each is acknowledged in the [License Summary Matrix](docs/PRD.md#appendix-b--license-summary-matrix). Contributions from these ecosystems are how LQ.AI exists at all.
 
 ---
 
-*InHouse AI is authored by Kevin Keller and contributed to LegalQuants. Comments, corrections, and contributions welcomed via GitHub.*
+*LQ.AI is authored by Kevin Keller and contributed to LegalQuants. Comments, corrections, and contributions welcomed via GitHub.*

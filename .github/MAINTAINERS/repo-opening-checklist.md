@@ -1,6 +1,6 @@
 # Repo-Opening Checklist
 
-> **Purpose:** Operational sequence for taking the InHouse AI repository from private/staging to publicly open. Run through this checklist immediately before publishing; nothing here is hard, but the order matters and skipped steps are visible to the first wave of visitors.
+> **Purpose:** Operational sequence for taking the LQ.AI repository from private/staging to publicly open. Run through this checklist immediately before publishing; nothing here is hard, but the order matters and skipped steps are visible to the first wave of visitors.
 
 This is a one-time checklist, expected to take 2–4 hours of focused work to complete (not counting the time to actually source the test corpus or stand up the Discord server, which run in parallel).
 
@@ -38,7 +38,7 @@ The following structure must exist under root:
 
 - [ ] The `LICENSE` file contains the unmodified Apache 2.0 license text (from <https://www.apache.org/licenses/LICENSE-2.0.txt>).
 - [ ] A `NOTICE` file is present if the project incorporates code under licenses that require attribution beyond Apache 2.0 (e.g., MIT-licensed dependencies that require notice).
-- [ ] The copyright line at the top of source files reads `Copyright LegalQuants and InHouse AI contributors. Licensed under the Apache License, Version 2.0.` (or equivalent project-standard form).
+- [ ] The copyright line at the top of source files reads `Copyright LegalQuants and LQ.AI contributors. Licensed under the Apache License, Version 2.0.` (or equivalent project-standard form).
 - [ ] PyMuPDF AGPL boundary is documented in `docs/PRD.md` Appendix B and in any source files that interact with PyMuPDF directly.
 
 ### 1.3 Cross-reference audit
@@ -214,7 +214,7 @@ Run these in sequence on launch day.
 
 In GitHub Discussions:
 
-- [ ] Open a pinned post in `Announcements`: *"InHouse AI is now open source. What it is, what's shipped, and how to get involved."* — this is the same content as the LinkedIn announcement, adapted for an inside-baseball audience reading the GitHub Discussions tab. Cross-link to README, quickstart, PRD.
+- [ ] Open a pinned post in `Announcements`: *"LQ.AI is now open source. What it is, what's shipped, and how to get involved."* — this is the same content as the LinkedIn announcement, adapted for an inside-baseball audience reading the GitHub Discussions tab. Cross-link to README, quickstart, PRD.
 - [ ] Open a discussion in `Help` titled *"First-run gotchas: what tripped you up?"* — preempts and aggregates quickstart issues, makes the page friendlier.
 - [ ] Open a discussion in `Roadmap discussion` titled *"M1 status and the M5+ direction — what's coming and how to weigh in"* — pulls people into the strategic conversation.
 
@@ -279,7 +279,7 @@ The repo-opening checklist gets the project into the public square. What happens
 
 - **The first 90 days set the tone.** If the first 90 days are responsive, substantive, and welcoming, the project has the conditions for community to grow. If the first 90 days are erratic or quiet, the project has uphill work to recover.
 - **Skill contributions are the canonical artifact of value** (per [PRD §7.1](docs/PRD.md#71-project-philosophy)). The first community-contributed skill is a meaningful milestone — celebrate it visibly when it lands.
-- **The procurement-defense story compounds with deployments.** Each operator who deploys InHouse AI and shares their experience (anonymously or otherwise) becomes part of the procurement-defense corpus for the next operator. The Compliance Alignment Pack and Pre-Empted Procurement Objections appendix are the substrate; real deployments are the validation.
+- **The procurement-defense story compounds with deployments.** Each operator who deploys LQ.AI and shares their experience (anonymously or otherwise) becomes part of the procurement-defense corpus for the next operator. The Compliance Alignment Pack and Pre-Empted Procurement Objections appendix are the substrate; real deployments are the validation.
 - **Stay honest about what's shipped vs. what's planned.** The forward-looking M5+ roadmap is genuinely forward-looking; don't let marketing energy turn it into a delivery commitment. The "we're not promising this; we're naming it" framing in [§8.5](docs/PRD.md#m5m7--forward-looking-workflow-intelligence-community-driven-not-committed) is the right tone.
 
 ---

@@ -1,6 +1,6 @@
-# InHouse AI — Quickstart Walkthrough
+# LQ.AI — Quickstart Walkthrough
 
-> **Goal:** Take a new user from `git clone` through running their first skill against a sample document and reading the output critically — in about 20 minutes. By the end, you will have InHouse AI deployed on your machine, an Organization Profile reflecting your team, a Project for the matter at hand, and a citation-grounded NDA review you can read alongside the source document.
+> **Goal:** Take a new user from `git clone` through running their first skill against a sample document and reading the output critically — in about 20 minutes. By the end, you will have LQ.AI deployed on your machine, an Organization Profile reflecting your team, a Project for the matter at hand, and a citation-grounded NDA review you can read alongside the source document.
 
 This is the long-form quickstart. The README has the 5-line version; this document is the elaboration with explanation of what each step does and what the output means.
 
@@ -23,8 +23,8 @@ What you don't need: an internet connection during the demo (after the initial `
 ## Step 1 — Clone and run
 
 ```bash
-git clone https://github.com/legalquants/inhouse-ai.git
-cd inhouse-ai
+git clone https://github.com/legalquants/lq-ai.git
+cd lq-ai
 cp .env.example .env
 ```
 
@@ -38,7 +38,7 @@ ANTHROPIC_API_KEY=sk-ant-...your-key-here...
 # OPENAI_API_KEY=sk-...your-key-here...
 
 # Optional but recommended: pin to a specific model alias for reproducibility
-INHOUSE_AI_DEFAULT_MODEL=smart  # resolves to claude-opus-4-7 by default
+LQ_AI_DEFAULT_MODEL=smart  # resolves to claude-opus-4-7 by default
 ```
 
 Set at least one provider key. The starter skills are model-agnostic but were drafted and calibrated against Anthropic's Claude family; if you use a different provider, output will be similar in shape but may differ in calibration nuance.
@@ -54,7 +54,7 @@ First run pulls images (about 1.5 GB across 6 services — web, api, gateway, po
 When the stack is up, you should see something like this in the API container's logs:
 
 ```
-✓ InHouse AI is ready at http://localhost:3000
+✓ LQ.AI is ready at http://localhost:3000
 ✓ First-run admin account: see logs for password
 ✓ API documentation: http://localhost:8000/docs
 ✓ Inference Gateway: http://localhost:8001/docs
@@ -250,7 +250,7 @@ The PRD's [Inference Choice Spectrum (§1.5.2)](PRD.md#15-deployment-modes-and-t
 
 In about 20 minutes you have:
 
-- Deployed InHouse AI on your machine, with all data in your environment.
+- Deployed LQ.AI on your machine, with all data in your environment.
 - Created an Organization Profile that shapes every subsequent skill's output to your team's voice.
 - Created a Project scoping a matter (the Acme NDA review).
 - Run a citation-grounded NDA Review against a sample document.
@@ -291,7 +291,7 @@ These are public documents — no anonymization required for testing — and rep
 
 ### Read the PRD
 
-The [Product Requirements Document](PRD.md) is the canonical specification of what InHouse AI is and what every capability does. It's longer than this walkthrough by an order of magnitude, but the table of contents at the top lets you jump to the sections that matter. Particularly worth reading:
+The [Product Requirements Document](PRD.md) is the canonical specification of what LQ.AI is and what every capability does. It's longer than this walkthrough by an order of magnitude, but the table of contents at the top lets you jump to the sections that matter. Particularly worth reading:
 
 - [§1.3 Transparency as a Founding Principle](PRD.md#13-transparency-as-a-founding-principle) — the project's reason for existing.
 - [§1.5 Deployment Modes and the Inference Choice Spectrum](PRD.md#15-deployment-modes-and-the-inference-choice-spectrum) — the five-tier model.
@@ -302,7 +302,7 @@ The [Product Requirements Document](PRD.md) is the canonical specification of wh
 
 If your team's practice diverges from a starter skill (different severity calibration, different jurisdiction-specific conventions), fork the skill and contribute the variant back. The skill contribution path is documented in [`skills/CONTRIBUTING.md`](../skills/CONTRIBUTING.md); the engineering contribution path (for code, infrastructure, deployment recipes) is in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-The fastest way to make InHouse AI better for your practice is to fork a skill, fix the calibration, and propose the fix back. Each accepted skill contribution helps the next user with similar practice see better output without doing the same work.
+The fastest way to make LQ.AI better for your practice is to fork a skill, fix the calibration, and propose the fix back. Each accepted skill contribution helps the next user with similar practice see better output without doing the same work.
 
 ---
 
@@ -322,7 +322,7 @@ docker compose up -d
 docker compose logs api | grep "First-run admin password"
 ```
 
-For an established deployment, the admin password is reset via `docker compose exec api python -m inhouse_ai.cli reset-admin-password`.
+For an established deployment, the admin password is reset via `docker compose exec api python -m lq_ai.cli reset-admin-password`.
 
 ### Chat returns "no model configured"
 

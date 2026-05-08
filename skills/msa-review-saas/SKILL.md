@@ -1,7 +1,7 @@
 ---
 name: msa-review-saas
 description: Use when the user uploads or pastes a Software-as-a-Service Master Services Agreement (MSA), Master Subscription Agreement, SaaS Agreement, or Cloud Services Agreement and asks for review, redline, risk assessment, or recommendation on whether to sign. Conducts a structured review of MSA framework terms (liability, indemnification, IP, data protection, warranties, term and termination, payment, and others), calibrated to the user's perspective (vendor or customer), with severity-rated findings, redline language for material gaps, and clause-level citations. Optionally surfaces conflicts between the MSA and a provided Order Form or SOW.
-inhouse:
+lq_ai:
   title: MSA Review — SaaS
   version: 1.0.0
   author: LegalQuants

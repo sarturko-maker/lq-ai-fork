@@ -1,7 +1,7 @@
 ---
 name: msa-review-commercial-purchase
 description: Use when the user uploads or pastes a Master Purchase Agreement, Master Supply Agreement, Master Goods Agreement, or commercial purchase MSA covering the procurement of physical goods, equipment, components, or non-software services and asks for review, redline, risk assessment, or recommendation on whether to sign. Conducts a structured review of MSA framework terms (price and payment, delivery and acceptance, warranties, indemnification, liability, IP, term and termination, force majeure, supply continuity, and others), calibrated to the user's perspective (buyer or supplier), with severity-rated findings, redline language for material gaps, and clause-level citations.
-inhouse:
+lq_ai:
   title: MSA Review — Commercial Purchase
   version: 1.0.0
   author: LegalQuants

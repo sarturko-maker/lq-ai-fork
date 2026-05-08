@@ -2,7 +2,7 @@
 
 > **Status:** Stub at v1 launch. Substantive security artifacts (SBOM, threat model, signed releases, supply-chain transparency documentation) ship at M1 per [PRD §7.5 Code & Supply-Chain Transparency](../PRD.md#75-code--supply-chain-transparency-from-launch).
 
-This folder is the home for InHouse AI's security artifacts. The PRD documents the project's security posture in detail; this folder contains the operational artifacts that substantiate that posture.
+This folder is the home for LQ.AI's security artifacts. The PRD documents the project's security posture in detail; this folder contains the operational artifacts that substantiate that posture.
 
 ## What lands here
 
@@ -32,9 +32,9 @@ When a release ships, verify with cosign:
 
 ```bash
 cosign verify \
-  --certificate-identity-regexp "https://github.com/legalquants/inhouse-ai" \
+  --certificate-identity-regexp "https://github.com/legalquants/lq-ai" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/legalquants/inhouse-ai-api:vX.Y.Z
+  ghcr.io/legalquants/lq-ai-api:vX.Y.Z
 ```
 
 Detailed verification instructions land in `releases/README.md` at M1.
