@@ -81,11 +81,17 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
       # Auth — backend → gateway
       LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
+      # B4 — inference_routing_log writer (audit trail of every routed
+      # request). Optional: without DATABASE_URL the gateway logs a
+      # warning at startup and runs in NullRoutingLogWriter mode.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-lq_ai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lq_ai}}
       # Provider keys (any of these may be unset; gateway.yaml picks which to use)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

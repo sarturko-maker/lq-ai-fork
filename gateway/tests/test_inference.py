@@ -1,11 +1,12 @@
 """Tests for the OpenAI-compatible inference surface.
 
-Surface state after B3:
+Surface state after B4:
 
-* ``POST /v1/chat/completions`` — routes to Anthropic when the model
-  resolves there; returns a structured ``provider_unavailable`` 503 when
-  the credential isn't configured (the case in this fixture); returns
-  the A3-style 501 only for models that don't resolve to Anthropic.
+* ``POST /v1/chat/completions`` — routes through :class:`app.router.Router`.
+  Returns 503 ``provider_unavailable`` when the resolved provider has no
+  instantiated adapter (typical when the provider's credential env var
+  is unset). Returns 400 ``invalid_model`` when the request's ``model``
+  doesn't resolve to any configured alias or provider-native model.
 * ``POST /v1/embeddings`` — still 501 (B6 lands the OpenAI adapter).
 * ``GET /v1/models`` — returns the configured aliases.
 
@@ -46,25 +47,25 @@ async def test_chat_completions_returns_503_when_anthropic_key_missing(
 
 
 @pytest.mark.unit
-async def test_chat_completions_returns_501_for_non_anthropic_alias(
+async def test_chat_completions_returns_503_for_non_anthropic_alias(
     client: AsyncClient,
 ) -> None:
-    """Aliases that don't resolve to Anthropic still return 501 in B3.
+    """Aliases that resolve to a provider type with no adapter return 503.
 
     The ``embedding`` alias in ``gateway.yaml.example`` points at the
-    OpenAI provider; B6 lands the OpenAI adapter, so B3 reports 501 with
-    a ``next_task`` pointer.
+    OpenAI provider. B6 lands the OpenAI adapter; in the meantime B4's
+    router resolves the alias and tries to dispatch, finds no adapter,
+    and returns ``provider_unavailable``.
     """
 
     response = await client.post(
         "/v1/chat/completions",
-        json={"model": "embedding", "messages": []},
+        json={"model": "embedding", "messages": [{"role": "user", "content": "hi"}]},
     )
 
-    assert response.status_code == 501
+    assert response.status_code == 503
     body = response.json()
-    assert body["error"]["code"] == "not_implemented"
-    assert "B4" in body["error"]["details"]["next_task"]
+    assert body["error"]["code"] == "provider_unavailable"
 
 
 @pytest.mark.unit

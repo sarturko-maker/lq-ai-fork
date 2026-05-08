@@ -4,8 +4,8 @@ The gateway loads ``gateway.yaml`` on startup, validates it via Pydantic,
 and instantiates a :class:`~app.providers.ProviderAdapter` for every
 configured provider whose credentials are present. A3 landed config
 loading; B3 added the Anthropic adapter and the chat-completion data
-path; B4 (next) replaces the temporary routing in
-:mod:`app.api.inference` with a real router + tier derivation.
+path; B4 added the real router (alias resolution + tier derivation +
+fallback skeleton) and the ``inference_routing_log`` writer.
 
 If the config is missing or malformed the lifespan raises
 :class:`~app.config_loader.ConfigLoadError` and the process exits
@@ -13,15 +13,16 @@ non-zero — the gateway is the security boundary, and silently coming
 up with an empty config would mask operator misconfiguration. Adapter
 construction failures (missing env vars) are *not* fatal; the affected
 providers are skipped with a warning so the gateway still serves the
-endpoints that don't need them.
+endpoints that don't need them. Likewise the ``DATABASE_URL`` is
+optional — without it the gateway runs in ``NullRoutingLogWriter`` mode
+(audit rows discarded). Operators see a startup warning so the gap is
+visible.
 
 Endpoint posture (current):
 
 * ``GET  /health``                — 200 (liveness; independent of config).
 * ``GET  /ready``                 — 200 once config has loaded; 503 otherwise.
-* ``POST /v1/chat/completions``   — routes to Anthropic when the model
-  alias resolves to an Anthropic provider (B3); other providers return
-  a structured 501 until B4/B6.
+* ``POST /v1/chat/completions``   — routes through :class:`app.router.Router`.
 * ``POST /v1/embeddings``         — 501 (lands with B6 OpenAI adapter).
 * ``GET  /v1/models``             — returns configured aliases.
 * ``GET  /admin/v1/tier-config``  — returns loaded tier policy.
@@ -53,7 +54,10 @@ from app import __version__
 from app.api import admin_router, inference_router
 from app.config import GatewayConfig
 from app.config_loader import ConfigLoadError, load_config
+from app.db import engine_or_none
 from app.providers import AnthropicAdapter, ProviderAdapter
+from app.router import Router
+from app.routing_log import NullRoutingLogWriter, RoutingLogWriter, SQLRoutingLogWriter
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +124,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
     app.state.adapters = adapters
 
+    # B4: build the request router around the loaded config + adapter
+    # registry. Per-request handlers pull this off ``app.state.router``
+    # rather than reconstructing it on every call.
+    app.state.router = Router(config=config, adapters=adapters)
+
+    # B4: wire the inference_routing_log writer. ``DATABASE_URL`` is
+    # optional — without it the gateway falls back to a no-op writer
+    # so the data path keeps working in degraded deployments. The
+    # warning makes the gap operator-visible.
+    engine = engine_or_none()
+    routing_log: RoutingLogWriter
+    if engine is None:
+        logger.warning(
+            "DATABASE_URL is not set; inference_routing_log writes are disabled "
+            "(routing still works, but no audit rows are persisted)"
+        )
+        routing_log = NullRoutingLogWriter()
+    else:
+        routing_log = SQLRoutingLogWriter(engine)
+        logger.info("inference_routing_log writer wired against DATABASE_URL")
+    app.state.routing_log = routing_log
+    app.state.db_engine = engine  # held so shutdown can dispose
+
     try:
         yield
     finally:
@@ -129,6 +156,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await adapter.aclose()
             except Exception:
                 logger.exception("error closing adapter %r", name)
+        if engine is not None:
+            try:
+                await engine.dispose()
+            except Exception:
+                logger.exception("error disposing DB engine")
 
 
 app = FastAPI(
