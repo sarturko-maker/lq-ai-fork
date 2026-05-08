@@ -63,6 +63,7 @@ CODE_VALIDATION_ERROR = "validation_error"
 CODE_RATE_LIMITED = "rate_limited"
 CODE_INTERNAL_ERROR = "internal_error"
 CODE_PASSWORD_CHANGE_REQUIRED = "password_change_required"
+CODE_PAYLOAD_TOO_LARGE = "payload_too_large"
 
 # Backend↔gateway crossing codes (also declared in gateway/app/errors.py).
 # These propagate from gateway responses into backend exceptions; the
@@ -212,6 +213,19 @@ class PasswordChangeRequired(LQAIError):
     http_status = status.HTTP_403_FORBIDDEN
 
 
+class PayloadTooLarge(LQAIError):
+    """Request body exceeds the configured upload-size limit — 413.
+
+    Raised by the file-upload handler (C4) when the streamed body grows
+    past ``LQ_AI_MAX_UPLOAD_SIZE_MB``. ``details`` carries
+    ``{"limit_bytes": ..., "received_bytes": ...}`` so clients can show
+    a useful "your file is too large" message.
+    """
+
+    code = CODE_PAYLOAD_TOO_LARGE
+    http_status = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+
+
 # --- Gateway-crossing subclasses ---------------------------------------------
 # Raised by the GatewayClient (or by handlers that translate gateway
 # responses) when the backend↔gateway hop fails or surfaces a structured
@@ -322,6 +336,7 @@ __all__ = [
     "CODE_INVALID_MODEL",
     "CODE_NOT_FOUND",
     "CODE_PASSWORD_CHANGE_REQUIRED",
+    "CODE_PAYLOAD_TOO_LARGE",
     "CODE_PROVIDER_UNAVAILABLE",
     "CODE_RATE_LIMITED",
     "CODE_TIER_BELOW_MINIMUM",
@@ -336,6 +351,7 @@ __all__ = [
     "LQAIError",
     "NotFound",
     "PasswordChangeRequired",
+    "PayloadTooLarge",
     "ProviderUnavailable",
     "RateLimited",
     "TierBelowMinimum",

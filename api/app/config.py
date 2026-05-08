@@ -61,6 +61,24 @@ class Settings(BaseSettings):
     s3_bucket: str = Field(default="lq-ai-files", description="S3 bucket for uploaded files.")
     s3_region: str = Field(default="us-east-1", description="S3 region.")
 
+    # ----- File upload limits (Task C4) -----
+    # Per-request cap on uploaded-file size. Documented in `.env.example`
+    # as ``LQ_AI_MAX_UPLOAD_SIZE_MB``. The handler streams the body and
+    # raises 413 (PayloadTooLarge) the instant the running byte count
+    # exceeds the limit; we never load the full body into memory just to
+    # check the size. Operators raising this should ensure their reverse
+    # proxy / ingress (nginx/Traefik) raises its own ``client_max_body_size``
+    # in step.
+    lq_ai_max_upload_size_mb: int = Field(
+        default=100,
+        description=(
+            "Per-request cap on uploaded-file size in MB. M1 default: 100. "
+            "Streamed enforcement; never loads the body into memory to "
+            "measure. Operators raising this must also raise their "
+            "ingress's body-size limit."
+        ),
+    )
+
     # ----- Inference Gateway -----
     lq_ai_gateway_url: str = Field(
         default="http://localhost:8001",
