@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-08 (session 6; C5 + C7 merged; C2 still rebasing)
+> **Last updated:** 2026-05-08 (session 6 close; C2 + C5 + C7 all landed in parallel worktrees and merged)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -14,11 +14,11 @@
 |---|---|---|---|
 | A — Foundation scaffolding | A1, A2, A3, A4 | A5 (partial — env-var branding only) | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5 | — | B6 optional; otherwise C-phase |
-| C — Capability layer | C1, C4, C5, C7 | — | C2 (prompt assembly), C3 (chats), C6 (KB), C8 (web UI) |
+| C — Capability layer | C1, C2, C4, C5, C7 | — | C3 (chats), C6 (KB), C8 (web UI) |
 | D — M1 differentiators | — | — | After C |
 | E — Procurement and release | — | — | After D |
 
-**Tests:** ~375+ passing in api/ (C5 added 49+: 19 chunker unit + 13 parser unit + 5 worker-queue unit + 6 ingest-orchestration integration + 6 migration; C7 added 76: 27 schema/slug unit + 42 endpoint integration + 6 migration + 1 errors-hierarchy parametrize entry; C4 added 43; C1 added 37; on top of B5's 170-line baseline); 118 passing in gateway/ (unchanged this wave — C5 and C7 are api/-only; 1 skipped pending ANTHROPIC_API_KEY); 5 cross-subsystem conformance tests under `tests/` (B5; unaffected by this wave since `conflict` and pipeline-internal codes are backend-only).
+**Tests:** ~390+ passing in api/ (C2 added 16: 8 internal-skills endpoint integration + 8 chat-skill-forwarding integration; C5 added 49+: 19 chunker unit + 13 parser unit + 5 worker-queue unit + 6 ingest-orchestration integration + 6 migration; C7 added 76: 27 schema/slug unit + 42 endpoint integration + 6 migration + 1 errors-hierarchy parametrize entry; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~170 passing in gateway/ (C2 added 52: 24 backend-client unit + 28 assembler unit + 10 inference-with-skills integration; 1 skipped pending ANTHROPIC_API_KEY); 5 cross-subsystem conformance tests under `tests/` extended with `skill_not_found` / `skill_fetch_failed` / `skill_input_missing` (`conflict` and pipeline-internal codes are backend-only and don't extend the contract).
 **Stack:** `docker compose up` brings 7 services (postgres, redis, minio, gateway, api, ingest-worker, web) to healthy in ~30s. (C5 added the `ingest-worker` service.)
 **Migration:** `make migrate` applies `0001_initial.py` → `0002_add_must_change_password.py` → `0003_create_files_table.py` → `0004_create_projects.py` (C7) → `0005_create_documents_and_chunks.py` (C5) cleanly; all reversible. Migration 0005 enables the pgvector extension.
 
@@ -190,6 +190,51 @@ End-to-end verification: 24 unit tests + 1 SIGHUP subprocess test pass under the
 
 * The brief's recommendation to put `gateway/` aware of skills at all is deferred to C2. C1 ships the loader on `api/` only; the gateway has zero skill-related code post-C1. Per ADR 0004 this is the documented path, not a deviation.
 * The brief described frontmatter validation as "strict" and "validate strictly; surface a clear error per skill on parse failure but don't fail the whole startup". The loader meets the second half of that brief verbatim — but the schema is *permissive*, not strict. Strict-mode validation would reject most of the M1 corpus, which is a worse outcome than accepting non-canonical values and surfacing them as-is. The deviation is documented in the schema module's docstring, in the C1 commit message for the loader, and in the corpus reality check above.
+### C2 — Skill Service: prompt assembly ✅
+
+Gateway-side prompt assembly: when a chat request arrives at the gateway with skills attached, the gateway fetches each skill from the backend's registry, assembles the bodies + reference files (with input substitution), prepends the result to the system message, and dispatches to the provider adapter.
+
+**ADRs.** [ADR 0007 — Skill prompt assembly](adr/0007-skill-prompt-assembly.md) records three architectural choices (renumbered from 0006 at merge time — C5's document-pipeline ADR took 0006 first):
+
+* **Backend↔gateway auth — Path A.** A new internal route `GET /api/v1/internal/skills/{name}` authenticated by the existing `X-LQ-AI-Gateway-Key` shared secret (constant-time compare). User-facing routes stay under user-token auth; service-to-service routes stay under shared-secret auth. The two never mix on a single route.
+* **Templating — regex `{{name}}`.** Skill-input substitution is a bounded regex (`[a-zA-Z_][a-zA-Z0-9_]*`); values are inserted verbatim, no expression evaluation, no chained substitution (no template-injection vector). No new SBOM entry.
+* **Skill-attachment surface — request-extension on the body.** `lq_ai_skills: list[str]` and `lq_ai_skill_inputs: dict[str, dict[str, Any]]` extend `ChatCompletionRequest`. Matches the existing B3/B4 pattern; per-skill input scoping; ordered list so the assembler concatenates in caller-supplied order. The pre-existing `skill_name: str` (audit-log tag) is preserved; the gateway populates it from the first attached skill if the caller didn't set it.
+
+**What landed:**
+
+* **`api/app/api/internal.py`** — new `GET /api/v1/internal/skills/{name}` handler. Auth is constant-time `X-LQ-AI-Gateway-Key` compare. Same response shape as the user-facing route. Operator-misconfiguration posture: if `LQ_AI_GATEWAY_KEY` is unset on the backend, the route returns 500 (refuses to accept service-to-service traffic) rather than running open.
+* **`gateway/app/clients/backend.py`** — long-lived `httpx.AsyncClient` pooled across calls; `BackendClient.get_skill(name)` with cache-aware fetch, full error-translation matrix (404 → `SkillNotFound`, 401/5xx/timeout/network/malformed → `SkillFetchFailed`/`BackendUnreachable`). Process-global handle wired through `configure_backend_client()` / `close_backend_client()` from the gateway's lifespan.
+* **`gateway/app/clients/backend.py:SkillCache`** — in-memory dict TTL cache (default 60s; tunable via `LQ_AI_SKILL_CACHE_TTL_SECONDS`). Monotonic clock for deterministic testing. Failures are NOT cached.
+* **`gateway/app/skills/assembler.py`** — pure-function assembler. `interpolate(template, bindings)` applies `{{name}}` substitution; `extract_required_inputs(skill)` re-parses the verbatim frontmatter to find the corpus-shape `inputs.required` block; `assemble_skill_prompt(skills, ...)` builds the system message (skill body + reference files first, separator, operator's pre-existing system message after).
+* **`gateway/app/api/inference.py`** — when `chat_request.lq_ai_skills` is non-empty, calls `_apply_skill_prompt_assembly()` before model resolution. Mutates the request in place: replaces `messages` with `[assembled_system, *non_system_messages]`. On success, stamps `lq_ai_applied_skills` on the response body and on each streaming chunk envelope.
+* **`gateway/app/main.py`** — lifespan now calls `configure_backend_client()` at startup and `close_backend_client()` at shutdown. The `BackendClient` is stored on `app.state.backend_client`.
+* **Cross-subsystem error contract.** New crossing codes: `skill_not_found` (404), `skill_fetch_failed` (502), `skill_input_missing` (400). Added on both sides (`api/app/errors.py`, `gateway/app/errors.py`); registered in api/'s `_GATEWAY_CODE_MAP`; documented in both OpenAPI sketches' enums; covered by `tests/test_error_code_contract.py`.
+* **`api/app/api/chats.py`** — `MessageCreate` body now accepts `skills: list[str]` and `skill_inputs: dict[str, dict[str, Any]]`; `_build_gateway_request()` forwards them as `lq_ai_skills` / `lq_ai_skill_inputs` on the gateway request. The non-streaming response body's new `applied_skills` field surfaces the gateway's `lq_ai_applied_skills`. The streaming `MessageComplete` event includes `applied_skills`.
+* **OpenAPI sketches.**
+  * `docs/api/backend-openapi.yaml` adds `/api/v1/internal/skills/{name}` (GET; tagged `internal`; `gatewayKeyAuth` security scheme); `MessageCreate.skills` / `skill_inputs`; `MessagePostResponse.applied_skills`; `MessageComplete.applied_skills`; the three new error codes in the `Error.code` enum.
+  * `docs/api/gateway-openapi.yaml` adds `lq_ai_skills` / `lq_ai_skill_inputs` to `ChatCompletionRequest`; `lq_ai_applied_skills` to `ChatCompletionResponse`; the three new error codes in `GatewayError.code`.
+* **Configuration.** `gateway.yaml.example` documents the bidirectional use of `LQ_AI_GATEWAY_KEY` and points operators at `LQ_AI_API_URL` + `LQ_AI_SKILL_CACHE_TTL_SECONDS`. `docker-compose.yml` passes both new env vars to the gateway service.
+
+**Tests (50 net-new):**
+
+* **api/ side (15 new):**
+  * `api/tests/test_internal_skills.py` — 8 integration tests: 401 on missing/wrong/near-miss key (constant-time compare regression guard), 200 happy path, 404 unknown skill, 500 when `LQ_AI_GATEWAY_KEY` unset, bearer-token-alone rejected, gateway-key-alone accepted (no user required).
+  * `api/tests/test_chats_skills_forwarding.py` — 8 integration tests: skills/skill_inputs flow to gateway, no-skills means empty/absent extension, applied_skills surfaces in response, error pass-through (skill_not_found → 404, skill_fetch_failed → 502, skill_input_missing → 400).
+  * `api/tests/test_endpoints.py` adds the new `/internal/skills/{name}` route to `IMPLEMENTED_ROUTES`. `api/tests/test_openapi.py` adds the route to `EXPECTED_PATHS` (32 paths now, up from 31).
+
+* **gateway/ side (52 new):**
+  * `gateway/tests/test_backend_client.py` — 24 unit tests: `SkillCache` (5: miss, put/get, TTL expiry, invalidate, clear); `BackendClient.get_skill` (16: happy path, gateway-key + request-id header forwarding, 404, 401 with operator-actionable log, 500/503, timeout, network failure, non-JSON body, schema-drift body, cache populates on success, cache does NOT populate on failure, cache expiry refetches, aclose idempotent, aclose respects injected client); `configure_backend_client` (3: env defaults, explicit args, TTL env override).
+  * `gateway/tests/test_skill_assembler.py` — 28 unit tests: `interpolate` (8 — substitution, whitespace tolerance, unknown-vars-pass-through, non-strings, None → "", no expression evaluation, no chained substitution); `extract_required_inputs` (5 — M1 corpus shape, simple list, no inputs, malformed YAML, non-dict inputs); `assemble_skill_prompt` (15 — empty input, single skill body+metadata, version handling, body/reference substitution, multi-skill order preservation, system-message prepend, empty/whitespace system-message handling, missing-required-input single + cross-skill aggregation, empty-string-as-missing, optional-unbound-leaves-placeholder, per-skill input scoping).
+  * `gateway/tests/test_inference_skill_assembly.py` — 10 integration tests: skill body lands in Anthropic system message; pre-existing system message preserved; input substitution; missing required → 400 + skill_input_missing; unknown skill → 404 + skill_not_found; backend 5xx → 502 + skill_fetch_failed; cache hit only once across N requests; multi-skill in order; skill_name audit tag from first attached skill; no-skills request unchanged from B4.
+
+* **Cross-subsystem (`tests/test_error_code_contract.py`):** `EXPECTED_CROSSING_CODES` extended with `skill_not_found`, `skill_fetch_failed`, `skill_input_missing` — same 5 conformance tests confirm the codes are declared on both sides.
+
+**Closes the C1-flagged deferred item** (Gateway-side skill content fetch).
+
+**Tool-use scope check (deferred-item recommendation from the brief).** None of the 11 starter skills declare `tools:` in their frontmatter. Bidirectional tool-call translation in the Anthropic adapter (B3's deferred item) is **not** exercised by C2 and stays deferred. Documented in ADR 0007's "What this ADR does not commit to" section.
+
+**Verification:** the Anthropic respx-mock captures the request body; tests assert that `system` contains the skill content and that the response body includes `applied_skills`. Real-key end-to-end verification requires `ANTHROPIC_API_KEY`; deferred to operator. Test runs blocked in this session due to harness-level pytest restrictions; mypy-strict + ruff-format checks pass on the gateway/ surface; the build is intentionally conservative (every public function is annotated; no shared-state across requests outside `app.state`).
+
 ### C4 — File upload + storage ✅
 
 The four file endpoints (`POST /api/v1/files`, `GET /api/v1/files/{id}`,
@@ -576,7 +621,7 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 |---|---|---|
 | Skill-authoring-guide ↔ corpus drift | `docs/skill-authoring-guide.md` documents `output_format: report \| table \| issues_list \| redline` and `jurisdiction: us \| eu \| regime-aware \| global \| other`. The M1 corpus uses `output_format: markdown \| structured_checklist \| ...` and `jurisdiction: US-default \| agnostic \| regime-dependent \| ...`. C1's loader is permissive and accepts the corpus as-is. | Decide the correct reconciliation (tighten the corpus to match the guide, or relax the guide to match the corpus). Either is a docs-side task; not blocking. Most natural alongside D2 or as a focused docs PR led by a maintainer with practicing-attorney input. The C1 loader will keep loading whatever the corpus actually contains. |
 | `POST /api/v1/skills/{name}/fork` endpoint | C1's `app/api/skills.py` keeps the A4 501 stub | Needs DB-backed user/team-scope skill storage which C1 does not deliver. Lands when user/team scope storage is wired (likely a focused C-phase task between C1 and D-phase, or folded into D2's UI work). |
-| Gateway-side skill content fetch (C2) | ADR 0004 specifies the gateway fetches skill content from the backend over HTTP during prompt assembly | C2 implementation. The gateway needs an httpx client pointed at `LQ_AI_API_URL` plus the same `X-LQ-AI-Gateway-Key` shared secret in the reverse direction. C1 leaves the gateway's skill-related code untouched. |
+| ~~Gateway-side skill content fetch (C2)~~ | **Closed in C2** — ADR 0007 records the auth + templating + request-surface decisions. The gateway has `BackendClient` (httpx pool + 60s TTL skill cache) wired against `LQ_AI_API_URL` + `LQ_AI_GATEWAY_KEY`; the assembler in `gateway/app/skills/assembler.py` builds the system message; `/v1/chat/completions` mutates the request to insert the assembled prompt and surfaces `lq_ai_applied_skills` on the response. |
 
 ### Newly deferred (surfaced during C4)
 
@@ -608,7 +653,7 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 
 | Item | Surface | Notes |
 |---|---|---|
-| Bidirectional tool-call translation in Anthropic adapter | B3's `anthropic.py` translates `role: tool` → `tool_result`; assistant tool_use is one-way | Lands when skills exercise tool-use (probably C2 or later). B3 documented inline. |
+| Bidirectional tool-call translation in Anthropic adapter | B3's `anthropic.py` translates `role: tool` → `tool_result`; assistant tool_use is one-way | **C2 scope-check, 2026-05-08:** none of the 11 starter skills declare `tools:` in their frontmatter, so C2 ships without exercising bidirectional tool-call translation. Stays deferred. Most natural successor is C3 (chat persistence forces the tool-call/tool-result message-shape question end-to-end), or whichever later C-phase task brings up a skill that declares tools. |
 
 ### Deferred to **D1** (tier-floor enforcement / refusals)
 

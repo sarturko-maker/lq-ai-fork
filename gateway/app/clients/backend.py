@@ -1,6 +1,6 @@
 """HTTP client + cache for the backend's internal-skills endpoint (C2).
 
-Per ADR 0006 the gateway fetches skill content from the backend's
+Per ADR 0007 the gateway fetches skill content from the backend's
 ``GET /api/v1/internal/skills/{name}`` endpoint during prompt assembly.
 This module owns:
 
@@ -83,7 +83,7 @@ DEFAULT_CACHE_TTL_SECONDS: Final[float] = 60.0
 """Default TTL for the skill cache; tunable via LQ_AI_SKILL_CACHE_TTL_SECONDS."""
 
 GATEWAY_KEY_HEADER: Final[str] = "X-LQ-AI-Gateway-Key"
-"""Shared-secret header sent on every gateway → backend call (ADR 0006)."""
+"""Shared-secret header sent on every gateway → backend call (ADR 0007)."""
 
 
 # --- Skill response shape ----------------------------------------------------

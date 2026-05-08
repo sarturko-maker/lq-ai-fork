@@ -754,7 +754,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Skill'}
 
-  # ----------- INTERNAL (gateway → backend, ADR 0006) -----------
+  # ----------- INTERNAL (gateway → backend, ADR 0007) -----------
   /api/v1/internal/skills/{skill_name}:
     parameters:
       - name: skill_name
@@ -766,7 +766,7 @@ paths:
       summary: Internal — fetch a skill from the registry (gateway → backend)
       description: |
         Service-to-service endpoint used by the Inference Gateway during
-        prompt assembly (Task C2 / ADR 0006). The user-facing
+        prompt assembly (Task C2 / ADR 0007). The user-facing
         `GET /api/v1/skills/{name}` endpoint is gated by user-token auth
         (`get_active_user`) and is inappropriate for the gateway's calls
         — the gateway has no user. This route is gated by the shared
@@ -1267,7 +1267,7 @@ components:
       name: X-LQ-AI-Gateway-Key
       description: |
         Shared-secret used by the Inference Gateway to call the
-        backend's `/api/v1/internal/*` routes (per ADR 0006). Constant-
+        backend's `/api/v1/internal/*` routes (per ADR 0007). Constant-
         time compare against `LQ_AI_GATEWAY_KEY` on the backend. The
         same secret is used in the reverse direction (backend → gateway)
         for incoming-request auth on the gateway's surface, though the

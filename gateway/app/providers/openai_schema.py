@@ -110,7 +110,7 @@ class ChatCompletionRequest(BaseModel):
     chat_id: str | None = None
     anonymize: bool = True
 
-    # --- C2 (skill prompt assembly per ADR 0006) -----------------------------
+    # --- C2 (skill prompt assembly per ADR 0007) -----------------------------
     lq_ai_skills: list[str] = Field(default_factory=list)
     """Ordered list of skill names to attach to this request. The gateway
     fetches each from the backend's internal-skills endpoint, assembles

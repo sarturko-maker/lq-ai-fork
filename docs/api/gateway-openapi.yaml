@@ -423,7 +423,7 @@ components:
           type: boolean
           default: true
           description: "Apply anonymization layer (M2; ignored before)"
-        # C2 — skill prompt assembly (ADR 0006)
+        # C2 — skill prompt assembly (ADR 0007)
         lq_ai_skills:
           type: array
           items: {type: string}
@@ -432,7 +432,7 @@ components:
             gateway fetches each from the backend's internal-skills
             endpoint, assembles the bodies (with reference files and
             input substitution applied), and prepends the result to
-            the system message. Per ADR 0006.
+            the system message. Per ADR 0007.
         lq_ai_skill_inputs:
           type: object
           additionalProperties:
@@ -487,7 +487,7 @@ components:
           nullable: true
           description: |
             Names of skills whose content was successfully assembled
-            into the prompt for this request (C2 / ADR 0006). Null
+            into the prompt for this request (C2 / ADR 0007). Null
             when no skills were attached. Backends surface this on
             the audit log so operators can see which skills shaped
             a given response.

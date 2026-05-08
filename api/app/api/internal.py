@@ -1,6 +1,6 @@
 """Internal service-to-service routes (gateway → backend).
 
-Per ADR 0006 (Skill prompt assembly), the gateway needs to read skill
+Per ADR 0007 (Skill prompt assembly), the gateway needs to read skill
 content from the backend's registry during prompt assembly. The
 user-facing ``GET /api/v1/skills/{name}`` endpoint is gated by
 ``get_active_user`` (B1 bearer + B2 password-change gate) and is

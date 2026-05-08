@@ -1,4 +1,4 @@
-# ADR 0006 — Skill prompt assembly: gateway↔backend auth, templating, and request surface
+# ADR 0007 — Skill prompt assembly: gateway↔backend auth, templating, and request surface
 
 **Status:** Accepted (2026-05-08)
 **Decision-makers:** Kevin Keller (initial maintainer)
