@@ -61,7 +61,12 @@ from app.config import GatewayConfig
 from app.config_loader import ConfigLoadError, load_config
 from app.db import engine_or_none
 from app.errors import LQAIError
-from app.providers import AnthropicAdapter, OpenAIAdapter, ProviderAdapter
+from app.providers import (
+    AnthropicAdapter,
+    OllamaAdapter,
+    OpenAIAdapter,
+    ProviderAdapter,
+)
 from app.router import Router
 from app.routing_log import NullRoutingLogWriter, RoutingLogWriter, SQLRoutingLogWriter
 
@@ -147,7 +152,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     exc,
                 )
             continue
-        # B6 lands the remaining adapters (Vertex, Bedrock, Ollama, etc.).
+        if provider.type == "ollama":
+            # B6 partial: Ollama is the Mode-2 (air-gapped local
+            # inference) backbone per PRD §1.5.1 / §6.1. Chat
+            # completions are wired here; embeddings raise
+            # ProviderUnsupportedError (the embedding alias still routes
+            # through the OpenAI adapter per ADR 0008).
+            try:
+                adapters[provider.name] = OllamaAdapter.from_config(provider)
+                logger.info(
+                    "instantiated Ollama adapter for provider %r (base_url=%s)",
+                    provider.name,
+                    provider.base_url,
+                )
+            except ValueError as exc:
+                logger.warning(
+                    "skipping Ollama provider %r: %s",
+                    provider.name,
+                    exc,
+                )
+            continue
+        # B6 lands the remaining adapters (Vertex, Bedrock).
         logger.debug(
             "no adapter for provider %r (type=%s); awaiting B6",
             provider.name,

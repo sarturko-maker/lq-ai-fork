@@ -166,6 +166,11 @@ def _map_provider_error_to_response(exc: ProviderAdapterError) -> JSONResponse:
       domain; an upstream credential failure is a misconfiguration, not
       the caller's fault).
     * Upstream 429 → ``rate_limit_exceeded`` / 429.
+    * Upstream 404 with ``code = "invalid_model"`` (e.g., Ollama
+      "model not pulled") → ``invalid_model`` / 400. The caller named
+      a model the deployment can't serve — that's a request-side
+      mistake, not an upstream outage. Adapters set ``code`` on the
+      :class:`ProviderHTTPError` to opt into this mapping.
     * Upstream other 4xx → ``provider_unavailable`` / 502.
     * Upstream 5xx (after fallback exhausted) → ``provider_unavailable`` /
       502.
@@ -190,10 +195,20 @@ def _map_provider_error_to_response(exc: ProviderAdapterError) -> JSONResponse:
         )
     if isinstance(exc, ProviderHTTPError):
         upstream = exc.upstream_status
-        gw_status = (
-            status.HTTP_429_TOO_MANY_REQUESTS if upstream == 429 else status.HTTP_502_BAD_GATEWAY
-        )
-        gw_code = "rate_limit_exceeded" if upstream == 429 else exc.code
+        if upstream == 429:
+            gw_status = status.HTTP_429_TOO_MANY_REQUESTS
+            gw_code = "rate_limit_exceeded"
+        elif upstream == 404 and exc.code == "invalid_model":
+            # Adapter signaled "the request named a model the upstream
+            # can't serve" (e.g., Ollama's "model not found, try
+            # pulling it first"). Surface as 400 invalid_model so
+            # callers see the request-side mistake clearly rather
+            # than a generic upstream-flake 502.
+            gw_status = status.HTTP_400_BAD_REQUEST
+            gw_code = "invalid_model"
+        else:
+            gw_status = status.HTTP_502_BAD_GATEWAY
+            gw_code = exc.code
         return _gateway_error(
             code=gw_code,
             message=exc.message,

@@ -4,7 +4,10 @@ Each adapter translates between the gateway's OpenAI-compatible surface
 (:mod:`app.providers.openai_schema`) and a specific provider's native
 wire format. The :class:`~app.providers.base.ProviderAdapter` abstract
 base defines the contract; B3 ships :class:`~app.providers.anthropic.
-AnthropicAdapter`; B6 adds the rest (OpenAI, Vertex, Bedrock, etc.).
+AnthropicAdapter`; C6 added :class:`~app.providers.openai.OpenAIAdapter`
+(embeddings only); B6 partial adds
+:class:`~app.providers.ollama.OllamaAdapter` (chat completions for
+Mode-2 air-gapped local inference).
 
 Adapters are constructed once at startup and reused across requests
 (they own a long-lived ``httpx.AsyncClient``). Lifespan teardown calls
@@ -22,6 +25,7 @@ from app.providers.base import (
     ProviderNetworkError,
     ProviderUnsupportedError,
 )
+from app.providers.ollama import OllamaAdapter, ProviderModelNotFound
 from app.providers.openai import OpenAIAdapter
 from app.providers.openai_schema import (
     ChatCompletionChoice,
@@ -52,12 +56,14 @@ __all__ = [
     "EmbeddingsRequest",
     "EmbeddingsResponse",
     "EmbeddingsUsage",
+    "OllamaAdapter",
     "OpenAIAdapter",
     "ProviderAdapter",
     "ProviderAdapterError",
     "ProviderAuthError",
     "ProviderHTTPError",
     "ProviderHealth",
+    "ProviderModelNotFound",
     "ProviderNetworkError",
     "ProviderUnsupportedError",
 ]
