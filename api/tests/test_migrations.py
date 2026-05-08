@@ -376,3 +376,216 @@ async def test_files_project_fk_set_null_on_delete(
     await db_session.flush()
     await db_session.refresh(f)
     assert f.project_id is None
+
+
+# ---------------------------------------------------------------------------
+# C5 — documents and document_chunks tables (migration 0005)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_documents_table_exists(db_session: AsyncSession) -> None:
+    result = await db_session.execute(
+        text(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+            "AND tablename = 'documents'"
+        )
+    )
+    assert result.scalar_one_or_none() == "documents"
+
+
+@pytest.mark.integration
+async def test_document_chunks_table_exists(db_session: AsyncSession) -> None:
+    result = await db_session.execute(
+        text(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+            "AND tablename = 'document_chunks'"
+        )
+    )
+    assert result.scalar_one_or_none() == "document_chunks"
+
+
+@pytest.mark.integration
+async def test_pgvector_extension_installed(db_session: AsyncSession) -> None:
+    """The pgvector extension is enabled by migration 0005."""
+    result = await db_session.execute(
+        text("SELECT extname FROM pg_extension WHERE extname = 'vector'")
+    )
+    assert result.scalar_one_or_none() == "vector"
+
+
+@pytest.mark.integration
+async def test_documents_unique_file_id(db_session: AsyncSession) -> None:
+    """Only one Document row per file."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models import Document, File, User
+
+    user = User(email=f"doc-uq-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
+    db_session.add(user)
+    await db_session.flush()
+
+    file_row = File(
+        owner_id=user.id,
+        filename="x.pdf",
+        mime_type="application/pdf",
+        size_bytes=10,
+        hash_sha256="0" * 64,
+        storage_path="abc",
+    )
+    db_session.add(file_row)
+    await db_session.flush()
+
+    db_session.add(Document(file_id=file_row.id, parser="pymupdf"))
+    await db_session.flush()
+
+    db_session.add(Document(file_id=file_row.id, parser="pymupdf"))
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_document_chunks_offset_check_constraints(
+    db_session: AsyncSession,
+) -> None:
+    """char_offset_end >= char_offset_start; both >= 0."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models import Document, DocumentChunk, File, User
+
+    user = User(
+        email=f"chunk-chk-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="h",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    file_row = File(
+        owner_id=user.id,
+        filename="x.pdf",
+        mime_type="application/pdf",
+        size_bytes=10,
+        hash_sha256="0" * 64,
+        storage_path="abc",
+    )
+    db_session.add(file_row)
+    await db_session.flush()
+
+    doc = Document(file_id=file_row.id, parser="pymupdf")
+    db_session.add(doc)
+    await db_session.flush()
+
+    # char_offset_start < 0 → CHECK violation
+    bad = DocumentChunk(
+        document_id=doc.id,
+        chunk_index=0,
+        content="hi",
+        char_offset_start=-1,
+        char_offset_end=10,
+    )
+    db_session.add(bad)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_document_chunks_unique_index_pair(db_session: AsyncSession) -> None:
+    """(document_id, chunk_index) is UNIQUE."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models import Document, DocumentChunk, File, User
+
+    user = User(
+        email=f"chunk-unq-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="h",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    file_row = File(
+        owner_id=user.id,
+        filename="x.pdf",
+        mime_type="application/pdf",
+        size_bytes=10,
+        hash_sha256="0" * 64,
+        storage_path="abc",
+    )
+    db_session.add(file_row)
+    await db_session.flush()
+    doc = Document(file_id=file_row.id, parser="pymupdf")
+    db_session.add(doc)
+    await db_session.flush()
+
+    db_session.add(
+        DocumentChunk(
+            document_id=doc.id,
+            chunk_index=0,
+            content="a",
+            char_offset_start=0,
+            char_offset_end=1,
+        )
+    )
+    await db_session.flush()
+
+    db_session.add(
+        DocumentChunk(
+            document_id=doc.id,
+            chunk_index=0,  # duplicate index
+            content="b",
+            char_offset_start=2,
+            char_offset_end=3,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_documents_cascade_delete_via_file(db_session: AsyncSession) -> None:
+    """Hard-deleting a file cascades to document and chunks."""
+    from app.models import Document, DocumentChunk, File, User
+
+    user = User(email=f"cascade-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
+    db_session.add(user)
+    await db_session.flush()
+    file_row = File(
+        owner_id=user.id,
+        filename="x.pdf",
+        mime_type="application/pdf",
+        size_bytes=10,
+        hash_sha256="0" * 64,
+        storage_path="abc",
+    )
+    db_session.add(file_row)
+    await db_session.flush()
+    doc = Document(file_id=file_row.id, parser="pymupdf")
+    db_session.add(doc)
+    await db_session.flush()
+    db_session.add(
+        DocumentChunk(
+            document_id=doc.id,
+            chunk_index=0,
+            content="content",
+            char_offset_start=0,
+            char_offset_end=7,
+        )
+    )
+    await db_session.flush()
+
+    # Hard-delete the file (DELETE FROM files WHERE id = ...).
+    await db_session.execute(text("DELETE FROM files WHERE id = :id"), {"id": file_row.id})
+    await db_session.flush()
+
+    # The document and its chunks should be gone.
+    docs_remaining = await db_session.execute(
+        text("SELECT count(*) FROM documents WHERE file_id = :id"),
+        {"id": file_row.id},
+    )
+    assert docs_remaining.scalar_one() == 0
+
+    chunks_remaining = await db_session.execute(
+        text("SELECT count(*) FROM document_chunks WHERE document_id = :id"),
+        {"id": doc.id},
+    )
+    assert chunks_remaining.scalar_one() == 0
