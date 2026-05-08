@@ -19,7 +19,13 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# Anchored to root so it ignores Python venv `lib/` directories at the
+# project root (and per-subsystem) without reaching into `web/src/lib/`,
+# which is OpenWebUI's tracked Svelte library.
+/lib/
+/api/lib/
+/gateway/lib/
+/scripts/lib/
 lib64/
 parts/
 sdist/
