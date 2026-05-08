@@ -131,9 +131,9 @@ git rebase --signoff main                 # all commits since main diverged
 ### JavaScript / TypeScript (`web/`)
 
 - **Formatter:** Prettier with the project's `.prettierrc`. CI rejects unformatted code.
-- **Linter:** ESLint with the project's `.eslintrc`. TypeScript-specific rules enforced for `.ts`/`.tsx` files.
+- **Linter:** ESLint with the project's `.eslintrc`. TypeScript-specific rules enforced for `.ts` files; Svelte rules for `.svelte` files.
 - **TypeScript:** required for new files; gradual migration of legacy `.js` files welcome but not required for unrelated changes.
-- **React:** functional components and hooks; class components only for legacy code that hasn't been migrated.
+- **Framework:** SvelteKit. The `web/` codebase is a fork of OpenWebUI, which is a SvelteKit app — extensions and customizations stay in Svelte. Do **not** introduce React into `web/`. The Word add-in (`word-addin/`, M3) uses Office.js with React; the `web/` codebase does not.
 - **Component conventions:** match the OpenWebUI conventions for shared components; use the project's design system primitives rather than ad-hoc Tailwind.
 
 ### Configuration files

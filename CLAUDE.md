@@ -79,7 +79,8 @@ Each subsystem (`api/`, `gateway/`, `web/`) is a self-contained service. They ta
 - **Formatter:** Prettier per `.prettierrc`.
 - **Linter:** ESLint per `.eslintrc`.
 - **TypeScript:** required for new files; legacy `.js` files migrate gradually.
-- **React:** functional components and hooks.
+- **Framework:** SvelteKit. The `web/` subdirectory is a fork of OpenWebUI, which is a SvelteKit app — extensions and customizations stay in Svelte. We do **not** mix React into `web/`. The Word add-in (`word-addin/`, M3) uses Office.js with React; the `web/` codebase does not.
+- **Component conventions:** match the OpenWebUI conventions for shared components; use the project's design system primitives rather than ad-hoc Tailwind.
 
 ### Both
 
