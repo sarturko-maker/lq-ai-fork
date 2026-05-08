@@ -64,6 +64,7 @@ CODE_RATE_LIMITED = "rate_limited"
 CODE_INTERNAL_ERROR = "internal_error"
 CODE_PASSWORD_CHANGE_REQUIRED = "password_change_required"
 CODE_PAYLOAD_TOO_LARGE = "payload_too_large"
+CODE_CONFLICT = "conflict"
 
 # Backend↔gateway crossing codes (also declared in gateway/app/errors.py).
 # These propagate from gateway responses into backend exceptions; the
@@ -226,6 +227,20 @@ class PayloadTooLarge(LQAIError):
     http_status = status.HTTP_413_CONTENT_TOO_LARGE
 
 
+class Conflict(LQAIError):
+    """Request collides with current resource state — 409.
+
+    Used for uniqueness collisions (e.g., a project slug already in use
+    by the caller for an active project) and idempotency-violating
+    operations (e.g., attaching a file or skill that's already attached
+    to a project). Backend-only code; does not cross the gateway
+    boundary.
+    """
+
+    code = CODE_CONFLICT
+    http_status = status.HTTP_409_CONFLICT
+
+
 # --- Gateway-crossing subclasses ---------------------------------------------
 # Raised by the GatewayClient (or by handlers that translate gateway
 # responses) when the backend↔gateway hop fails or surfaces a structured
@@ -328,6 +343,7 @@ def map_gateway_error_code(code: str) -> type[LQAIError]:
 # --- Public re-exports -------------------------------------------------------
 # Keep this list explicit so ``from app.errors import *`` is well-defined.
 __all__ = [
+    "CODE_CONFLICT",
     "CODE_FORBIDDEN",
     "CODE_GATEWAY_INVALID_RESPONSE",
     "CODE_GATEWAY_TIMEOUT",
@@ -342,6 +358,7 @@ __all__ = [
     "CODE_TIER_BELOW_MINIMUM",
     "CODE_UNAUTHORIZED",
     "CODE_VALIDATION_ERROR",
+    "Conflict",
     "Forbidden",
     "GatewayInvalidResponse",
     "GatewayTimeout",
