@@ -1,7 +1,7 @@
 /**
  * Barrel re-export for the LQ.AI canonical /api/v1 client.
  *
- * Per ADR 0008 this is the only API surface the LQ.AI shell talks to. The
+ * Per ADR 0009 this is the only API surface the LQ.AI shell talks to. The
  * OpenWebUI shell's clients in `lib/apis/` are unrelated and unaffected.
  */
 export * from './client';

@@ -3,7 +3,7 @@
  *
  * Holds the access token, refresh token, expiry timestamp, and the current
  * user. Persists to `localStorage` under keys distinct from OpenWebUI's
- * `token` key (per ADR 0008).
+ * `token` key (per ADR 0009).
  */
 import { writable, get, type Writable } from 'svelte/store';
 

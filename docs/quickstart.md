@@ -72,7 +72,7 @@ Save the password. You'll use it momentarily.
 
 ## Step 2 — First-run setup
 
-Open <http://localhost:3000> in your browser. Sign in as `admin` with the password from the previous step. The first time you sign in, you're prompted to set a permanent password; do so.
+Open <http://localhost:3000/lq-ai> in your browser. The LQ.AI chat shell lives at `/lq-ai` per [ADR 0009](adr/0009-web-lq-ai-shell-coexistence.md); the upstream OpenWebUI shell at `/` is preserved untouched and is not the canonical experience for this quickstart. Sign in with email `admin@lq.ai` (the default — configurable via `LQ_AI_FIRST_RUN_ADMIN_EMAIL`) and the password from the previous step. The first time you sign in, you're prompted to set a permanent password; do so.
 
 You then land on the first-run setup checklist. Four steps, in order, none blocking:
 
@@ -339,6 +339,10 @@ You configured `allowed_tiers_global` to disallow Tier 4 in setup item 2; either
 ### "I want to use Mode 2 (local Ollama) instead"
 
 Replace `docker compose up -d` with `docker compose --profile local up -d`. The local profile pulls Ollama (a few GB, slower than Mode 1's first run) and configures the gateway to route to local-only models. The starter skills run on Llama 3.1 70B locally; expect higher latency than cloud and somewhat different calibration nuance. Mode 2 is the air-gap-capable mode; once images are pulled, the deployment runs without internet.
+
+### "I see the OpenWebUI shell at `/`, not the LQ.AI shell"
+
+That's expected: the upstream OpenWebUI fork's chat shell lives at `/` and is preserved untouched per [ADR 0009](adr/0009-web-lq-ai-shell-coexistence.md). The LQ.AI canonical experience is at `/lq-ai` — point your bookmark there. If you want `/` to redirect to `/lq-ai` (i.e., not expose the OpenWebUI shell at all), add a one-line `+page.svelte` at `web/src/routes/+page.svelte` (or `(app)/+page.svelte`) that calls `goto('/lq-ai')` on mount. This is an operator-side decision; the upstream-shell-at-`/` posture is the default so the OpenWebUI fork's other features (admin, RAG, model management) remain reachable for operators who want them.
 
 ### My issue isn't here
 

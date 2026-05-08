@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-08 (C6 landed in worktree; KB CRUD + hybrid retrieval; OpenAI embeddings adapter; embedding-on-write/read backfill; ADR 0008)
+> **Last updated:** 2026-05-08 (C-phase complete: C6 KB + embeddings landed under ADR 0008; C8 LQ.AI web shell landed under ADR 0009 co-existence model; A5 deferred branding + auth wiring closed)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -12,9 +12,9 @@
 
 | Phase | Done | In progress | Next |
 |---|---|---|---|
-| A — Foundation scaffolding | A1, A2, A3, A4 | A5 (partial — env-var branding only) | — |
+| A — Foundation scaffolding | A1, A2, A3, A4, A5 | — | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5 | — | B6 optional; otherwise C-phase |
-| C — Capability layer | C1, C2, C3, C4, C5, C6, C7 | — | C8 (web UI) |
+| C — Capability layer | C1, C2, C3, C4, C5, C6, C7, C8 | — | — (phase complete; C8 pending operator end-to-end verification per ADR 0009) |
 | D — M1 differentiators | — | — | After C |
 | E — Procurement and release | — | — | After D |
 
@@ -42,13 +42,11 @@ gateway/ now loads gateway.yaml on startup (Pydantic schema validation, ${VAR:-d
 
 api/ now connects to Postgres + Redis + MinIO + gateway on lifespan startup. /ready reports per-dependency status. All 30 paths from backend-openapi.yaml are registered as 501-returning stubs (with a structured error body naming the next task that lands real implementation). OpenAPI 3.1 spec at /openapi.json. 47 endpoint stub tests + 3 OpenAPI conformance tests.
 
-### A5 — Web shell scaffold (PARTIAL) ⏳
+### A5 — Web shell scaffold ✅
 
-What's done: OpenWebUI v0.9.2 fork imported, builds in Docker, `WEBUI_NAME=LQ.AI` and `WEBUI_AUTH=false` set in .env.example. Container healthy.
+OpenWebUI v0.9.2 fork imported, builds in Docker, `WEBUI_NAME=LQ.AI` and `WEBUI_AUTH=false` set in .env.example. Container healthy.
 
-What's deferred (per the entry in M1-IMPLEMENTATION-ORDER.md):
-- **Delegated auth wiring** (Svelte component changes) → folds into B1 verification + future UI task
-- **Visual branding** (logo, color scheme, footer per ADR 0001 dual-branding constraint) → folds into D2
+A5's two deferred items — delegated auth wiring and visual branding — landed in **C8** under the LQ.AI shell at `/lq-ai`. Per ADR 0009, the OpenWebUI shell at `/` is left untouched (rebase-friendly); the LQ.AI shell is the canonical chat experience for the M1 quickstart.
 
 ### B1 — User model + auth endpoints (backend) ✅
 
@@ -891,6 +889,61 @@ security review per CODEOWNERS — the embeddings handler mirrors
 the chat handler's security posture (gateway-key auth, no key
 leakage in errors, no PII in logs).
 
+### C8 — Web UI: chat experience ✅
+
+The first frontend task. Delivers the chat experience documented in `docs/quickstart.md` Step 4: chat sidebar grouped by project, attached-files panel, multi-skill picker with frontmatter-driven input forms, streaming message display with applied-skills chips and tier badge, dual-branding chrome, forced-password-change route guard, delegated auth wiring against the LQ.AI backend.
+
+**Architectural decision (ADR 0009): the LQ.AI shell co-exists with the OpenWebUI shell rather than replacing it.** Path B from the C8 brief. The OpenWebUI v0.9.2 fork's chat shell at `/` is left untouched (rebase-friendly per ADR 0001 §"Refresh cadence"); the LQ.AI canonical experience lives at `/lq-ai` with its own auth flow, API client, components, routes, and stores. Reasoning: replacing OpenWebUI's ~3,100-line `Chat.svelte` plus dozens of supporting files would create a quarterly rebase liability for the maintainer team and break OpenWebUI's other features (admin / RAG / model management) by side-effect; the co-existence model lands every C8 deliverable inside isolated `web/src/lib/lq-ai/` files that the upstream rebase never touches. The trade-off (two routes the operator could land on) is mitigated by the post-login redirect targeting `/lq-ai` and by a one-line operator-side option to redirect `/` → `/lq-ai` for deployments that don't want the OpenWebUI shell exposed at all.
+
+**What landed (under `web/src/lib/lq-ai/` and `web/src/routes/lq-ai/`):**
+
+* **Canonical API client** (`web/src/lib/lq-ai/api/`). Typed against the OpenAPI sketches in `docs/api/backend-openapi.yaml`. Modules for `auth` (login/refresh/logout/change-password/users-me), `projects` (list/create/get/patch/archive), `chats` (list/create/get/patch/archive + `listAllChats` cursor-paginating helper), `messages` (list + non-streaming send + streaming send), `skills` (list + detail with frontmatter-`inputs:` parser), `files` (multipart upload + metadata + delete + project attach/detach). The base `client.ts` attaches `Authorization: Bearer <access_token>` automatically, refreshes once on 401 and retries, raises typed `LQAIApiError` / `UnauthorizedError` / `PasswordChangeRequiredError` subclasses keyed off `detail.code` so the layout's gate can intercept.
+* **Auth store + token rotation** (`web/src/lib/lq-ai/auth/store.ts`). Persists `lq_ai_auth` to `localStorage` with keys distinct from OpenWebUI's `token` so the two shells don't share session state. `tokenIsStale(60)` reports staleness with a 60-second margin so refreshes fire before the access token actually expires (per the B1 15-minute TTL).
+* **Forced-password-change route guard.** The `/lq-ai/+layout.svelte` calls `/users/me` on mount; when `must_change_password` is set or any subsequent API call returns 403 `password_change_required`, the user is redirected to `/lq-ai/change-password` (the only `/lq-ai/*` route the layout doesn't gate). The change-password screen calls `/auth/change-password`, which revokes all sessions; the user re-auths after.
+* **SSE consumer** (`web/src/lib/lq-ai/sse/parser.ts`). Wraps `eventsource-parser/stream` (already a dep via the OpenWebUI streaming module) and emits typed `MessageStart` / `MessageDelta` / `MessageComplete` / `Error` frames matching the backend OpenAPI sketch's `MessageStreamEvent` `oneOf`. Coerces both canonical (`type: error`) and bare (`detail.code`) error envelopes into the canonical shape so consumers always switch on `.type`.
+* **Components** (`web/src/lib/lq-ai/components/`). `ChatSidebar` (project-grouped chat list with project picker + archived-toggle), `AttachedFilesPanel` (file picker, upload progress, ingestion-status badge per file, project-attached files surfaced read-only with the source-of-attachment tag), `SkillPicker` (multi-select with attach-order preserved, frontmatter-driven input form), `SkillInputForm` (renders `enum` / `boolean` / `integer` / `string` inputs from the parsed frontmatter; required-input validation gates submission), `MessageList` + `MessageBubble` (Markdown via `marked` + DOMPurify-sanitised; applied-skills chips per assistant message; tier badge; error-banner when `error_code` is populated), `TierBadge` (small inline badge — D2 will land the click-for-details panel), `AppliedSkillsChip` (clickable; M1 surface is an info toast, M2 lands the full skill-inspector), `DualBrandingFooter` (per ADR 0001 clause 4 — LQ.AI alongside Open WebUI, with attribution to the upstream fork pin), `ChangePasswordCard` (12-char min, must-differ-from-current, redirects to `/lq-ai/login` after success).
+* **Stores** (`web/src/lib/lq-ai/stores/`). `projectsStore`, `chatsStore`, `skillsStore`, `activeChatStore`, `messagesStore`, plus a derived `chatsByProject` that groups active chats under their project (newest-first per group; no-project bucket last; empty project groups hidden).
+* **Routes** (`web/src/routes/lq-ai/`). `+layout.svelte` (header with brand + sign-out, the auth/forced-change gate, footer), `+page.svelte` (the chat shell — sidebar / messages / attached-files panel / skill picker / composer; streaming dispatch with optimistic user-message rendering and live applied-skills + tier surfacing per chunk), `login/+page.svelte`, `change-password/+page.svelte`.
+
+**Project context inheritance.** When a chat is in a project, the project's `attached_skill_names` are surfaced in the skill picker as already-attached and read-only (the user can attach additional per-message skills); the project's `attached_file_ids` are surfaced in the attached-files panel as read-only with a source tag. Privileged projects show a `PRIVILEGED` chip in the sidebar.
+
+**Out-of-scope (deferred per the C8 brief):**
+
+* **Tier-awareness UI** (full click-for-details panel surfacing provider, retention policy, training implications) — D2 owns this. C8's `TierBadge` is the small inline badge.
+* **Citation rendering** — M2 owns the citation engine. C8 surfaces an empty-citations placeholder ("M2: citation links will land here").
+* **MFA UI** — D5.
+* **Per-user export / delete UI** — D6.
+* **Admin / user management UI** — not on the M1 critical path.
+* **Custom OpenWebUI shell auth replacement** — per ADR 0009, deferred indefinitely; the OpenWebUI shell is left untouched.
+
+**Tests (~30 net-new vitest tests; jsdom not required):**
+
+* `web/src/lib/lq-ai/__tests__/sse-parser.test.ts` — 9 tests pinning the start/delta/complete/error frame parses, mid-stream error termination, malformed-line drops, `[DONE]` clean exit, and the bare-detail-envelope-to-error coercion.
+* `web/src/lib/lq-ai/__tests__/skills-yaml.test.ts` — 6 tests pinning the minimal frontmatter `inputs:` parser against the corpus shape (string / enum-with-flow-list / boolean / integer / mixed; stop at next top-level key; unknown-type tolerance).
+* `web/src/lib/lq-ai/__tests__/auth-store.test.ts` — 4 tests on the token-store lifecycle (empty / set / stale / clear; 60-second margin).
+* `web/src/lib/lq-ai/__tests__/api-client.test.ts` — 7 tests on the fetch wrapper: header attachment, 401 → refresh → retry round-trip, 401-without-refresh-token clears session, 403/`password_change_required` → typed exception, 204 → undefined, JSON body serialisation, 4xx code surfacing on `LQAIApiError.code`.
+* `web/src/lib/lq-ai/__tests__/stores.test.ts` — 4 tests on the `chatsByProject` derived store (grouping order, no-project bucket last, archived exclusion, empty project hidden).
+
+**Verification.**
+
+* `vitest --run` against the new tests — _not exercised in this worktree_ (no `node_modules/`; `npm install` blocked by sandbox). Tests are written to be portable to the `npm run test:frontend` script and avoid `$lib`/`$app` imports so they run on the vitest node runner without SvelteKit alias setup.
+* `svelte-check` / `npm run check` against the new TypeScript — _not exercised in this worktree_ (`node_modules/` absent). Files were written to the project's `tsconfig.json` strict mode and Prettier conventions (tabs, single-quote, no trailing comma, 100-col, lf).
+* `npm run build` — _not exercised in this worktree_.
+* `docker compose up -d && make migrate` quickstart Step 4 walkthrough — _not exercised in this worktree_ (sandbox blocks `docker compose`). The route exposes the contract documented in `docs/quickstart.md` Step 4: at `/lq-ai`, click `+ New Chat`, click `+ Files` → upload a file, click `+ Skills` → select `nda-review` → fill the input form, type a message, hit Send, observe streamed output with applied-skills chips and tier badge.
+
+**Honest state — what's implemented vs. what's verified.** Every deliverable in the C8 brief has corresponding code in `web/src/lib/lq-ai/`. The component logic, API client, SSE consumer, auth store, and route layouts are exercised by 30 unit tests. **However, neither the build nor the docker-compose end-to-end walkthrough was run in the worktree** (the sandbox blocks `npm install` and `docker compose`). A maintainer running `cd web && npm install && npm run check && npm run test:frontend` should see the unit tests pass and `svelte-check` clean; a maintainer running the full quickstart Step 4 needs to actually exercise the in-browser flow before this can be marked verified end-to-end. **Conservative posture: this should be considered "code-complete pending end-to-end verification" until a human or follow-on agent runs the docker-compose walkthrough.**
+
+**Newly deferred (surfaced during C8):**
+
+| Item | Surface | Owning task |
+|---|---|---|
+| Generated TypeScript types from OpenAPI | `web/src/lib/lq-ai/types.ts` is hand-typed against `docs/api/backend-openapi.yaml`; a thin `__tests__` covers the shape | Filed as a candidate **DE-XXX** for PRD §9 — the natural shape is `openapi-typescript` codegen pinned to a regenerate-on-CI step. M1 doesn't need it (the schema surface is small and stable); a future contributor can land it as a focused refactor. |
+| Backend-surfaced `inputs:` field on `Skill` | C8 parses `inputs` from `content_yaml` client-side via a minimal YAML subset parser (string / enum / boolean / integer; flow-list `enum: [a, b]` only) | C1 owner / a follow-on focused task. The backend's existing `Skill` payload carries `content_yaml` raw; surfacing parsed `inputs` would let the UI drop the local parser. Until then the local parser handles the M1 corpus and degrades gracefully (returns `[]`) for skills with shapes it doesn't recognise. |
+| OpenWebUI-shell-at-`/` redirect to `/lq-ai` | Deployment docs / quickstart should call out the operator-side option; the SvelteKit app currently leaves `/` on the OpenWebUI shell | Operator-side documentation. Lands in deploy/ docs revision or a quickstart troubleshooting subsection. |
+| Forked-skill UI (per Quickstart Step 6 "Fork this skill" affordance) | C1's `POST /api/v1/skills/{name}/fork` endpoint is still a 501 stub; the C8 UI has no skill inspector / fork button | C1 follow-on (user/team scope storage) + a focused UI task. Quickstart Step 6 documents the experience; landing it requires the backend fork endpoint plus a side-panel skill-inspector component. |
+| Cypress / Playwright e2e for the LQ.AI chat shell | No e2e test landed in C8 — the OpenWebUI fork uses Cypress (per `cypress.config.ts`) but the LQ.AI shell needs its own spec; the C8 brief mentioned Playwright but the harness in this fork is Cypress | A focused follow-on task. The cleanest shape is a Cypress spec under `web/cypress/e2e/lq-ai-chat.cy.ts` that exercises the full Step 4 flow against `docker compose up`. |
+| OpenWebUI shell dual-branding footer | The LQ.AI shell renders the dual-branding footer per ADR 0001 clause 4; the OpenWebUI shell at `/` does not yet | Landing this requires touching `web/src/routes/(app)/+layout.svelte`, which is upstream-modifiable but increases the rebase cost. ADR 0009 records the trade-off. The cleanest pattern is to land an `LQAIBrandingFooter` Svelte snippet in the OpenWebUI layout's footer slot in a focused future task. Until then, operators above the 50-user threshold who deploy the OpenWebUI shell as their primary surface should use the LQ.AI shell at `/lq-ai` (which carries the attribution) or land the footer themselves. |
+
 ---
 
 ## Tasks ahead
@@ -989,8 +1042,14 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 
 | Item | Surface | Notes |
 |---|---|---|
-| OpenWebUI fork visual branding | A5 partial — env vars set, no Svelte changes yet | Per ADR 0001 license clause 4: dual-branding (LQ.AI alongside Open WebUI), not replacement. D2 is already touching the OpenWebUI shell to add the tier badge — natural place to also land branding. |
-| OpenWebUI fork delegated auth wiring | A5 partial — backend serves /api/v1/auth/login, but the OpenWebUI default login form doesn't yet POST there | Folds into D2 or its own UI task. The Svelte component change is small once the visual approach is decided. |
+| Tier-awareness click-for-details panel | C8's `TierBadge` is the small inline badge per the C8 brief; D2 lands the full PRD §3.13 click-for-details (provider, retention policy, training implications, audit-log entry link) | D2 takes the C8 `TierBadge` component as a starting point. |
+
+### ~~Deferred to D2 (visual branding + auth wiring)~~ — landed in C8
+
+| Item | Disposition |
+|---|---|
+| OpenWebUI fork visual branding | **Landed in C8 under the LQ.AI shell at `/lq-ai`** per ADR 0009. The LQ.AI shell renders LQ.AI branding in the header (logo + name + tagline) and the dual-branding footer per ADR 0001 clause 4 (LQ.AI alongside Open WebUI, with a link to the upstream fork). The OpenWebUI shell at `/` is left untouched — that route's footer dual-branding is a remaining minor task surfaced in C8's deferred-items table. |
+| OpenWebUI fork delegated auth wiring | **Landed in C8 under the LQ.AI shell at `/lq-ai/login`** per ADR 0009. The login form POSTs `/api/v1/auth/login`, surfaces 401 / 403 / 423 (MFA challenge — D5) errors, persists `lq_ai_auth` to localStorage, refreshes the access token on staleness or 401 with a `lq_ai_refresh_token`, and routes through the forced-password-change gate when `must_change_password` is set. The OpenWebUI shell's own auth flow at `/auth` is untouched (reaches OpenWebUI's own backend, which is not LQ.AI's; operators who deploy only the OpenWebUI shell wire it themselves). |
 
 ### Deferred to **D5** (MFA enrollment + verification)
 
