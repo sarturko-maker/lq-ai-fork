@@ -63,7 +63,7 @@ tags:
 paths:
 
   # ----------- AUTH -----------
-  /api/auth/login:
+  /api/v1/auth/login:
     post:
       tags: [auth]
       summary: Authenticate with email and password
@@ -90,7 +90,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MfaChallenge'
 
-  /api/auth/mfa/verify:
+  /api/v1/auth/mfa/verify:
     post:
       tags: [auth]
       summary: Complete MFA challenge with TOTP code
@@ -115,7 +115,7 @@ paths:
         '401':
           description: Invalid MFA code
 
-  /api/auth/refresh:
+  /api/v1/auth/refresh:
     post:
       tags: [auth]
       summary: Refresh access token using refresh token
@@ -137,14 +137,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/TokenResponse'
 
-  /api/auth/logout:
+  /api/v1/auth/logout:
     post:
       tags: [auth]
       summary: Invalidate the current refresh token
       responses:
         '204': {description: Logout successful}
 
-  /api/auth/mfa/setup:
+  /api/v1/auth/mfa/setup:
     post:
       tags: [auth]
       summary: Enroll in TOTP-based MFA
@@ -162,7 +162,7 @@ paths:
                   recovery_codes: {type: array, items: {type: string}}
 
   # ----------- USERS -----------
-  /api/users/me:
+  /api/v1/users/me:
     get:
       tags: [users]
       summary: Get current user
@@ -174,7 +174,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
 
-  /api/users/me/export:
+  /api/v1/users/me/export:
     post:
       tags: [users]
       summary: Request a per-user data export (GDPR Article 20)
@@ -194,7 +194,7 @@ paths:
                   status: {type: string, enum: [queued, processing, completed, failed]}
                   download_url: {type: string, nullable: true}
 
-  /api/users/me/delete:
+  /api/v1/users/me/delete:
     post:
       tags: [users]
       summary: Request account deletion (GDPR Article 17)
@@ -214,7 +214,7 @@ paths:
                   grace_period_days: {type: integer}
 
   # ----------- PROJECTS -----------
-  /api/projects:
+  /api/v1/projects:
     get:
       tags: [projects]
       summary: List the user's projects
@@ -255,7 +255,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Project'
 
-  /api/projects/{project_id}:
+  /api/v1/projects/{project_id}:
     parameters:
       - name: project_id
         in: path
@@ -287,7 +287,7 @@ paths:
       responses:
         '204': {description: Project deleted (soft)}
 
-  /api/projects/{project_id}/skills:
+  /api/v1/projects/{project_id}/skills:
     parameters:
       - name: project_id
         in: path
@@ -309,7 +309,7 @@ paths:
       responses:
         '204': {description: Attached}
 
-  /api/projects/{project_id}/files:
+  /api/v1/projects/{project_id}/files:
     parameters:
       - name: project_id
         in: path
@@ -331,7 +331,7 @@ paths:
         '204': {description: Attached}
 
   # ----------- CHATS -----------
-  /api/chats:
+  /api/v1/chats:
     get:
       tags: [chats]
       summary: List chats; optionally filter by project
@@ -373,7 +373,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Chat'}
 
-  /api/chats/{chat_id}:
+  /api/v1/chats/{chat_id}:
     parameters:
       - name: chat_id
         in: path
@@ -409,7 +409,7 @@ paths:
       responses:
         '204': {description: Chat deleted}
 
-  /api/chats/{chat_id}/messages:
+  /api/v1/chats/{chat_id}/messages:
     parameters:
       - name: chat_id
         in: path
@@ -445,7 +445,7 @@ paths:
             text/event-stream:
               schema: {$ref: '#/components/schemas/MessageStreamEvent'}
 
-  /api/chats/{chat_id}/messages/{message_id}/citations:
+  /api/v1/chats/{chat_id}/messages/{message_id}/citations:
     parameters:
       - name: chat_id
         in: path
@@ -468,7 +468,7 @@ paths:
                 items: {$ref: '#/components/schemas/Citation'}
 
   # ----------- SKILLS -----------
-  /api/skills:
+  /api/v1/skills:
     get:
       tags: [skills]
       summary: List available skills
@@ -488,7 +488,7 @@ paths:
                 type: array
                 items: {$ref: '#/components/schemas/SkillSummary'}
 
-  /api/skills/{skill_name}:
+  /api/v1/skills/{skill_name}:
     parameters:
       - name: skill_name
         in: path
@@ -504,7 +504,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Skill'}
 
-  /api/skills/{skill_name}/fork:
+  /api/v1/skills/{skill_name}/fork:
     parameters:
       - name: skill_name
         in: path
@@ -531,7 +531,7 @@ paths:
               schema: {$ref: '#/components/schemas/Skill'}
 
   # ----------- FILES -----------
-  /api/files:
+  /api/v1/files:
     post:
       tags: [files]
       summary: Upload a file
@@ -552,7 +552,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/File'}
 
-  /api/files/{file_id}:
+  /api/v1/files/{file_id}:
     parameters:
       - name: file_id
         in: path
@@ -571,7 +571,7 @@ paths:
       responses:
         '204': {description: File deleted}
 
-  /api/files/{file_id}/content:
+  /api/v1/files/{file_id}/content:
     parameters:
       - name: file_id
         in: path
@@ -587,7 +587,7 @@ paths:
             application/octet-stream: {}
 
   # ----------- KNOWLEDGE BASES -----------
-  /api/knowledge-bases:
+  /api/v1/knowledge-bases:
     get:
       tags: [knowledge-bases]
       responses:
@@ -618,7 +618,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/KnowledgeBase'}
 
-  /api/knowledge-bases/{kb_id}/search:
+  /api/v1/knowledge-bases/{kb_id}/search:
     parameters:
       - name: kb_id
         in: path
@@ -648,7 +648,7 @@ paths:
                 items: {$ref: '#/components/schemas/SearchResult'}
 
   # ----------- ORGANIZATION PROFILE -----------
-  /api/organization-profile:
+  /api/v1/organization-profile:
     get:
       tags: [organization-profile]
       summary: Get the deployment's Organization Profile (singleton skill)
@@ -678,7 +678,7 @@ paths:
               schema: {$ref: '#/components/schemas/Skill'}
 
   # ----------- SAVED PROMPTS -----------
-  /api/saved-prompts:
+  /api/v1/saved-prompts:
     get:
       tags: [saved-prompts]
       responses:
@@ -709,7 +709,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/SavedPrompt'}
 
-  /api/saved-prompts/{prompt_id}:
+  /api/v1/saved-prompts/{prompt_id}:
     parameters:
       - name: prompt_id
         in: path
@@ -739,7 +739,7 @@ paths:
         '204': {description: Deleted}
 
   # ----------- ADMIN: AUDIT LOG -----------
-  /admin/audit-log:
+  /api/v1/admin/audit-log:
     get:
       tags: [audit-log]
       summary: Query audit log (admin only)
@@ -783,7 +783,7 @@ paths:
                   next_cursor: {type: string, nullable: true}
 
   # ----------- ADMIN: TIER POLICY -----------
-  /admin/tier-policy:
+  /api/v1/admin/tier-policy:
     get:
       tags: [tier-policy]
       summary: Get current Inference Tier policy

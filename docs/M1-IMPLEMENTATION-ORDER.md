@@ -82,13 +82,13 @@ Users can sign in. The backend can route inference requests through the gateway 
 
 ### Task B1 — User model + auth endpoints (backend)
 
-**Scope:** Implement `/api/auth/login`, `/api/auth/logout`, `/api/auth/refresh`, `/api/users/me`. Bcrypt password hashing. JWT access tokens (short-lived, 15 min). Refresh tokens (long-lived, 7 days, hashed in DB).
+**Scope:** Implement `/api/v1/auth/login`, `/api/v1/auth/logout`, `/api/v1/auth/refresh`, `/api/v1/users/me`. Bcrypt password hashing. JWT access tokens (short-lived, 15 min). Refresh tokens (long-lived, 7 days, hashed in DB).
 
 **Dependencies:** A4.
 
 **Output:** Login flow works end-to-end with username/password.
 
-**Verification:** Integration test creates a user, logs in, fetches `/api/users/me` with the bearer token, refreshes, logs out.
+**Verification:** Integration test creates a user, logs in, fetches `/api/v1/users/me` with the bearer token, refreshes, logs out.
 
 **Effort:** 6–8 hours.
 
@@ -160,13 +160,13 @@ The substantive features. Skills load, chats persist, files upload, knowledge ba
 
 ### Task C1 — Skill Service: filesystem loading
 
-**Scope:** On gateway startup, load all skills from `skills/` filesystem directory. Parse frontmatter, validate schema, register in memory. Reload on SIGHUP. Expose `GET /api/skills` and `GET /api/skills/{name}`.
+**Scope:** On gateway startup, load all skills from `skills/` filesystem directory. Parse frontmatter, validate schema, register in memory. Reload on SIGHUP. Expose `GET /api/v1/skills` and `GET /api/v1/skills/{name}`.
 
 **Dependencies:** A4.
 
 **Output:** All 10 starter skills loaded and queryable.
 
-**Verification:** `curl http://localhost:8000/api/skills` returns the 10 skills with their metadata; `curl http://localhost:8000/api/skills/nda-review` returns full skill content.
+**Verification:** `curl http://localhost:8000/api/v1/skills` returns the 10 skills with their metadata; `curl http://localhost:8000/api/v1/skills/nda-review` returns full skill content.
 
 **Effort:** 6–8 hours.
 
@@ -184,7 +184,7 @@ The substantive features. Skills load, chats persist, files upload, knowledge ba
 
 ### Task C3 — Chat service + message persistence
 
-**Scope:** Implement `/api/chats` (CRUD), `/api/chats/{id}/messages` (POST creates new exchange and streams response). Persist messages to DB. Stream chunks via SSE. Persist final message with citations, routed_inference_tier, cost.
+**Scope:** Implement `/api/v1/chats` (CRUD), `/api/v1/chats/{id}/messages` (POST creates new exchange and streams response). Persist messages to DB. Stream chunks via SSE. Persist final message with citations, routed_inference_tier, cost.
 
 **Dependencies:** B5, C2.
 
@@ -196,7 +196,7 @@ The substantive features. Skills load, chats persist, files upload, knowledge ba
 
 ### Task C4 — File upload + storage
 
-**Scope:** Implement `/api/files` (POST upload, GET metadata, DELETE). Files stored in MinIO with `storage_path` recorded. `ingestion_status` set to `pending` initially.
+**Scope:** Implement `/api/v1/files` (POST upload, GET metadata, DELETE). Files stored in MinIO with `storage_path` recorded. `ingestion_status` set to `pending` initially.
 
 **Dependencies:** A4.
 
@@ -220,7 +220,7 @@ The substantive features. Skills load, chats persist, files upload, knowledge ba
 
 ### Task C6 — Knowledge Service: hybrid retrieval
 
-**Scope:** `/api/knowledge-bases` CRUD. Hybrid retrieval combining pgvector cosine similarity and Postgres FTS. Configurable `hybrid_alpha` parameter (0=vector, 1=FTS).
+**Scope:** `/api/v1/knowledge-bases` CRUD. Hybrid retrieval combining pgvector cosine similarity and Postgres FTS. Configurable `hybrid_alpha` parameter (0=vector, 1=FTS).
 
 **Dependencies:** C5.
 
@@ -232,7 +232,7 @@ The substantive features. Skills load, chats persist, files upload, knowledge ba
 
 ### Task C7 — Project service
 
-**Scope:** `/api/projects` CRUD. Attached files and skills tracked in join tables. Free-form context document stored. `privileged` flag with constraint that `minimum_inference_tier` must be set.
+**Scope:** `/api/v1/projects` CRUD. Attached files and skills tracked in join tables. Free-form context document stored. `privileged` flag with constraint that `minimum_inference_tier` must be set.
 
 **Dependencies:** C1, C4.
 
@@ -298,7 +298,7 @@ The features that make this InHouse AI rather than just another chat-with-LLMs a
 
 ### Task D4 — Organization Profile singleton
 
-**Scope:** Organization Profile is a singleton skill at the deployment level. `/api/organization-profile` GET/PUT. Constraint enforced via partial unique index. Profile content prepended to every other skill's prompt unless `use_organization_profile: false` in the skill's frontmatter.
+**Scope:** Organization Profile is a singleton skill at the deployment level. `/api/v1/organization-profile` GET/PUT. Constraint enforced via partial unique index. Profile content prepended to every other skill's prompt unless `use_organization_profile: false` in the skill's frontmatter.
 
 **Dependencies:** C2.
 
@@ -310,7 +310,7 @@ The features that make this InHouse AI rather than just another chat-with-LLMs a
 
 ### Task D5 — MFA enrollment + verification
 
-**Scope:** `/api/auth/mfa/setup` and `/api/auth/mfa/verify`. TOTP via `pyotp`. QR code generation for provisioning URI. Recovery codes (10 single-use codes, hashed). Login flow detects `mfa_enabled` and returns 423 with MFA challenge if required.
+**Scope:** `/api/v1/auth/mfa/setup` and `/api/v1/auth/mfa/verify`. TOTP via `pyotp`. QR code generation for provisioning URI. Recovery codes (10 single-use codes, hashed). Login flow detects `mfa_enabled` and returns 423 with MFA challenge if required.
 
 **Dependencies:** B1.
 
@@ -322,7 +322,7 @@ The features that make this InHouse AI rather than just another chat-with-LLMs a
 
 ### Task D6 — Per-user export and delete (GDPR Articles 17 and 20)
 
-**Scope:** `/api/users/me/export` generates a ZIP with the user's data (chats, messages, files, projects, skills). `/api/users/me/delete` schedules account deletion with a grace period (default 30 days). Hard delete after grace period.
+**Scope:** `/api/v1/users/me/export` generates a ZIP with the user's data (chats, messages, files, projects, skills). `/api/v1/users/me/delete` schedules account deletion with a grace period (default 30 days). Hard delete after grace period.
 
 **Dependencies:** C3, C4, C7.
 
@@ -334,7 +334,7 @@ The features that make this InHouse AI rather than just another chat-with-LLMs a
 
 ### Task D7 — Saved Prompts (per Issue 04)
 
-**Scope:** `/api/saved-prompts` CRUD. Sidebar in web UI. "Promote to Skill" affordance.
+**Scope:** `/api/v1/saved-prompts` CRUD. Sidebar in web UI. "Promote to Skill" affordance.
 
 **Dependencies:** C8.
 
