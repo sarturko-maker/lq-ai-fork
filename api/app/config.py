@@ -85,6 +85,27 @@ class Settings(BaseSettings):
         description="Refresh-token TTL in seconds. Default: 7 days.",
     )
 
+    # ----- Password hashing (per ADR 0002) -----
+    # Default 12 rounds matches bcrypt's library default and the OWASP
+    # password-storage recommendation. Operators may tune downward in CI
+    # (where speed matters and threat-model is internal) or upward for
+    # high-assurance deployments. The cost factor is per-hash; verifying
+    # an existing hash respects whatever cost factor it was minted with.
+    bcrypt_rounds: int = Field(
+        default=12,
+        description="Bcrypt cost factor for password hashing. Default 12.",
+    )
+
+    # ----- MFA challenge token (per ADR 0002 / PRD §5.1) -----
+    # Issued by /auth/login when the user has mfa_enabled=true; redeemed
+    # by /auth/mfa/verify (D5) within this window. Short-lived: 5 minutes
+    # is enough for a user to fish their TOTP code out of an authenticator
+    # app and submit it; longer windows widen the replay surface.
+    mfa_token_ttl_seconds: int = Field(
+        default=300,
+        description="MFA challenge token TTL in seconds. Default: 5 minutes.",
+    )
+
     # ----- Operational -----
     log_level: LogLevel = Field(default="info", description="Log level for the api/ service.")
     lq_ai_dev_mode: bool = Field(

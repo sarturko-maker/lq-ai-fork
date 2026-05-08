@@ -1,8 +1,9 @@
-"""Endpoint scaffold tests — every /api/v1 route returns the canonical 501 body.
+"""Endpoint scaffold tests — every still-stub /api/v1 route returns the canonical 501 body.
 
-A4 registers every endpoint from `docs/api/backend-openapi.yaml` as a
-stub returning HTTP 501 with a structured body that names the implementing
-M1 task. Until each implementing task lands, the contract is:
+A4 registered every endpoint from `docs/api/backend-openapi.yaml` as a stub
+returning HTTP 501 with a structured body that names the implementing M1
+task. As tasks land, their endpoints leave the stub set; the remaining
+stubs continue to honor the contract:
 
     {
       "error": {
@@ -14,8 +15,9 @@ M1 task. Until each implementing task lands, the contract is:
     }
 
 This test enumerates the registered routes via `app.routes` and exercises
-every one. It pins both the surface (every route returns 501) and the body
-shape (clients can rely on `error.code == 'not_implemented'`).
+every one EXCEPT those whose implementing task has shipped (tracked in
+`IMPLEMENTED_ROUTES` below). Implemented routes have their own dedicated
+test files (e.g., `test_auth.py` for B1).
 """
 
 from __future__ import annotations
@@ -58,8 +60,21 @@ def _materialise(path: str) -> str:
     return re.sub(r"\{([^}]+)\}", repl, path)
 
 
+# Routes whose implementing task has landed. These are exercised by their
+# own dedicated test files; this scaffold-test must skip them or the
+# now-implemented handler returns 200/204/etc. and fails the 501 assertion.
+# Format: (METHOD, registered_path).
+IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
+    # B1 — User model + auth endpoints (backend)
+    ("POST", "/api/v1/auth/login"),
+    ("POST", "/api/v1/auth/refresh"),
+    ("POST", "/api/v1/auth/logout"),
+    ("GET", "/api/v1/users/me"),
+}
+
+
 def _api_v1_routes() -> list[tuple[str, str, str]]:
-    """Return (method, registered_path, materialised_path) for every /api/v1 route."""
+    """Return (method, registered_path, materialised_path) for every still-stub /api/v1 route."""
     rows: list[tuple[str, str, str]] = []
     for route in app.routes:
         if not isinstance(route, APIRoute):
@@ -68,6 +83,8 @@ def _api_v1_routes() -> list[tuple[str, str, str]]:
             continue
         for method in route.methods or ():
             if method in {"HEAD", "OPTIONS"}:
+                continue
+            if (method, route.path) in IMPLEMENTED_ROUTES:
                 continue
             rows.append((method, route.path, _materialise(route.path)))
     return rows
