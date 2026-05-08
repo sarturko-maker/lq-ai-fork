@@ -1,37 +1,130 @@
 """HTTP client for the LQ.AI Inference Gateway.
 
-A4 scope: just the construction + a `health_check()` method so the
-backend's `/ready` endpoint can confirm the gateway is reachable. The
-full OpenAI-compatible surface (`chat.completions.create`, etc.) lands
-in Task B5 — those methods will live on this same class.
+A4 landed the skeleton with ``health_check()`` only; B5 fleshes out the
+full chat-completion surface. The client owns a long-lived
+``httpx.AsyncClient`` pooled across calls (per CLAUDE.md "reuse the same
+client across calls"; do not construct a fresh client per request).
 
-Per ADR 0002 / `.env.example`: every backend → gateway request includes
-`X-LQ-AI-Gateway-Key`, the shared secret. The gateway rejects requests
-without it.
+Per ADR 0002 / ``.env.example``: every backend → gateway request includes
+``X-LQ-AI-Gateway-Key``, the shared secret. The gateway rejects requests
+that lack it. The default-headers approach below stamps the key on every
+call.
+
+Error translation
+-----------------
+
+Gateway errors (parsed from the ``GatewayError`` envelope) and transport
+errors (timeout, network failure, malformed body) are translated to the
+backend's ``LQAIError`` hierarchy (per :doc:`docs/adr/0003-error-handling.md`):
+
+* Timeout → :class:`app.errors.GatewayTimeout` (HTTP 504).
+* Network / DNS / TLS failure → :class:`app.errors.GatewayUnreachable`
+  (HTTP 503).
+* Gateway 5xx → :class:`app.errors.GatewayUnreachable` (HTTP 503; the
+  operator sees "service unavailable" rather than the underlying detail
+  per the brief).
+* Gateway 401 (bad gateway key) → logged loudly and re-raised as
+  :class:`app.errors.GatewayUnreachable` (the user must not see "the
+  operator misconfigured the gateway key" — they see "service unavailable").
+* Gateway 4xx with a parseable body → mapped via
+  :func:`app.errors.map_gateway_error_code` to the right backend
+  exception class (``provider_unavailable``, ``invalid_model``, etc.).
+* Body that fails to parse → :class:`app.errors.GatewayInvalidResponse`
+  (HTTP 502) — indicates contract drift.
+
+Streaming
+---------
+
+``chat_completion_stream`` returns an :class:`AsyncIterator` of
+:class:`ChatCompletionChunk` objects. The gateway emits OpenAI-format SSE
+frames (``data: <json>\\n\\n``) terminated by ``data: [DONE]\\n\\n``;
+the iterator parses each frame, decodes the JSON envelope, and yields
+the parsed chunk. Mid-stream gateway errors come through as a final
+SSE frame with ``{"error": {...}}`` — the iterator translates that to
+the appropriate :class:`LQAIError` subclass and raises (so the caller
+sees one stream and then an exception, not a mixed signal).
+
+Embeddings
+----------
+
+The gateway's ``/v1/embeddings`` endpoint is 501 until B6 (OpenAI adapter
+ships embeddings). The :meth:`GatewayClient.embeddings` method exists so
+its callers (the future KB / RAG path) compile against a stable
+signature; today it propagates the gateway's 501 directly.
 """
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
+from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
+from pydantic import ValidationError as PydanticValidationError
 
 from app.config import get_settings
+from app.errors import (
+    GatewayInvalidResponse,
+    GatewayTimeout,
+    GatewayUnreachable,
+    InternalError,
+    LQAIError,
+    map_gateway_error_code,
+)
+from app.schemas.gateway import (
+    ChatCompletionChunk,
+    ChatCompletionRequest,
+    ChatCompletionResponse,
+    GatewayErrorEnvelope,
+)
 
 log = logging.getLogger(__name__)
 
 GATEWAY_KEY_HEADER = "X-LQ-AI-Gateway-Key"
+"""Shared-secret header sent on every backend → gateway call."""
+
+REQUEST_ID_HEADER = "X-Request-Id"
+"""Optional request-id forwarded so the gateway's audit row can correlate."""
+
+TIER_RESPONSE_HEADER = "X-LQ-AI-Routed-Inference-Tier"
+"""Response header set by the gateway (B4) carrying the routed Inference Tier."""
+
+DEFAULT_TIMEOUT_SECONDS = 60.0
+"""Default per-request timeout. Streaming overrides this (the stream is
+expected to take longer than a single API call). Health check overrides
+to a tight value separately."""
+
+
+def _structured_log_extra(**fields: Any) -> dict[str, Any]:
+    """Build a structured ``extra=`` dict for :func:`logging.Logger.log`.
+
+    Centralized so all gateway-client logs surface the same field names
+    (operator-grep-friendly).
+    """
+
+    return {"event": "gateway_client", **fields}
 
 
 class GatewayClient:
-    """Async HTTP client wrapping calls to the Inference Gateway."""
+    """Async HTTP client wrapping calls to the Inference Gateway.
 
-    def __init__(self, base_url: str, gateway_key: str, timeout: float = 30.0) -> None:
+    Construct once at app startup (the lifespan in :mod:`app.main` does
+    this implicitly via :func:`get_gateway_client`); the underlying
+    ``httpx.AsyncClient`` is reused across all calls. Closing happens at
+    shutdown via :func:`close_gateway_client`.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        gateway_key: str,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._gateway_key = gateway_key
-        # The /health endpoint is unauthenticated; chat / embeddings (later)
-        # require the gateway key. We attach default headers so all calls go
-        # through with the shared secret unless explicitly overridden.
+        self._timeout = timeout
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             timeout=timeout,
@@ -42,22 +135,492 @@ class GatewayClient:
     def base_url(self) -> str:
         return self._base_url
 
+    @property
+    def http_client(self) -> httpx.AsyncClient:
+        """Expose the underlying httpx client for advanced use (tests, streaming)."""
+
+        return self._client
+
+    # --- Health probe --------------------------------------------------------
+
     async def health_check(self) -> bool:
         """GET /health on the gateway; True iff the gateway returns 200.
 
         Used by the backend's /ready endpoint. Times out fast — the gateway
-        being slow to respond is itself a not-ready signal.
+        being slow to respond is itself a not-ready signal. Readiness probes
+        never raise.
         """
+
         try:
             response = await self._client.get("/health", timeout=5.0)
             return response.status_code == 200
         except Exception as exc:
-            # Readiness probes never raise; report failure in the response body.
             log.warning("Gateway health check failed: %s", exc)
             return False
 
+    # --- Chat completion (non-streaming) ------------------------------------
+
+    async def chat_completion(
+        self,
+        request: ChatCompletionRequest,
+        *,
+        request_id: str | None = None,
+    ) -> ChatCompletionResponse:
+        """POST a non-streaming chat-completion to the gateway.
+
+        ``request.stream`` is forced to ``False`` here regardless of input
+        because this method only handles the non-streaming path. Use
+        :meth:`chat_completion_stream` for streaming.
+
+        Raises one of the :class:`LQAIError` subclasses on any failure;
+        the caller catches the typed error rather than the underlying
+        transport exception.
+        """
+
+        # Defensive: ensure stream flag matches the path we're taking.
+        if request.stream:
+            request = request.model_copy(update={"stream": False})
+
+        body = request.model_dump(mode="json", exclude_none=True)
+        headers = self._build_headers(request_id=request_id)
+
+        try:
+            response = await self._client.post(
+                "/v1/chat/completions",
+                json=body,
+                headers=headers,
+            )
+        except httpx.TimeoutException as exc:
+            log.warning(
+                "Gateway request timed out",
+                extra=_structured_log_extra(
+                    op="chat_completion",
+                    timeout=self._timeout,
+                    request_id=request_id,
+                ),
+            )
+            raise GatewayTimeout(
+                "Gateway did not respond within the configured timeout",
+                details={"timeout_seconds": self._timeout},
+            ) from exc
+        except httpx.HTTPError as exc:
+            log.warning(
+                "Gateway transport failure: %s",
+                exc,
+                extra=_structured_log_extra(
+                    op="chat_completion",
+                    request_id=request_id,
+                    error_type=type(exc).__name__,
+                ),
+            )
+            raise GatewayUnreachable(
+                "Could not reach the Inference Gateway",
+                details={"transport_error": type(exc).__name__},
+            ) from exc
+
+        if response.status_code >= 400:
+            self._raise_for_gateway_error(
+                status_code=response.status_code,
+                body_bytes=response.content,
+                op="chat_completion",
+                request_id=request_id,
+            )
+
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as exc:
+            raise GatewayInvalidResponse(
+                "Gateway returned a non-JSON success response",
+                details={"status_code": response.status_code},
+            ) from exc
+
+        try:
+            parsed = ChatCompletionResponse.model_validate(payload)
+        except PydanticValidationError as exc:
+            raise GatewayInvalidResponse(
+                "Gateway response failed schema validation",
+                details={"validation_errors": exc.errors()},
+            ) from exc
+
+        # If the body lacks the tier annotation but the header carries it,
+        # backfill from the header so the caller doesn't have to know about
+        # both surfaces. (Per B4 the body always carries it; this is a
+        # forward-compat belt-and-suspenders.)
+        if parsed.routed_inference_tier is None:
+            header_tier = response.headers.get(TIER_RESPONSE_HEADER)
+            if header_tier is not None:
+                with contextlib.suppress(ValueError):
+                    parsed.routed_inference_tier = int(header_tier)
+
+        return parsed
+
+    # --- Chat completion (streaming) -----------------------------------------
+
+    async def chat_completion_stream(
+        self,
+        request: ChatCompletionRequest,
+        *,
+        request_id: str | None = None,
+    ) -> AsyncIterator[ChatCompletionChunk]:
+        """POST a streaming chat-completion; yield chunks as they arrive.
+
+        Yields :class:`ChatCompletionChunk` envelopes parsed from each
+        OpenAI-format SSE frame. Stream termination signals:
+
+        * ``data: [DONE]`` → iterator ends normally.
+        * Mid-stream ``{"error": ...}`` SSE frame → iterator raises the
+          mapped :class:`LQAIError` subclass.
+        * Transport failure → iterator raises
+          :class:`GatewayUnreachable` / :class:`GatewayTimeout`.
+
+        The caller iterates with ``async for`` and catches
+        :class:`LQAIError` to translate the failure to an HTTP response.
+        """
+
+        if not request.stream:
+            request = request.model_copy(update={"stream": True})
+
+        body = request.model_dump(mode="json", exclude_none=True)
+        headers = self._build_headers(request_id=request_id)
+
+        # Streaming uses ``client.stream`` so we don't buffer the whole
+        # body. Timeouts are handled per-line by httpx; the overall
+        # connect timeout is the same as non-streaming.
+        try:
+            async with self._client.stream(
+                "POST",
+                "/v1/chat/completions",
+                json=body,
+                headers=headers,
+            ) as response:
+                if response.status_code >= 400:
+                    # Read the body so we can map the structured error.
+                    raw = await response.aread()
+                    self._raise_for_gateway_error(
+                        status_code=response.status_code,
+                        body_bytes=raw,
+                        op="chat_completion_stream",
+                        request_id=request_id,
+                    )
+
+                async for chunk in self._iter_sse_chunks(response):
+                    yield chunk
+        except httpx.TimeoutException as exc:
+            log.warning(
+                "Gateway streaming timed out",
+                extra=_structured_log_extra(
+                    op="chat_completion_stream",
+                    request_id=request_id,
+                ),
+            )
+            raise GatewayTimeout(
+                "Gateway streaming did not respond within the configured timeout",
+                details={"timeout_seconds": self._timeout},
+            ) from exc
+        except httpx.HTTPError as exc:
+            # If we're already raising an LQAIError (from
+            # _raise_for_gateway_error), don't wrap it twice.
+            if isinstance(exc, LQAIError):
+                raise
+            log.warning(
+                "Gateway streaming transport failure: %s",
+                exc,
+                extra=_structured_log_extra(
+                    op="chat_completion_stream",
+                    request_id=request_id,
+                    error_type=type(exc).__name__,
+                ),
+            )
+            raise GatewayUnreachable(
+                "Could not reach the Inference Gateway for streaming",
+                details={"transport_error": type(exc).__name__},
+            ) from exc
+
+    # --- Embeddings ----------------------------------------------------------
+
+    async def embeddings(
+        self,
+        *,
+        model: str,
+        input_: str | list[str],
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST to the gateway's ``/v1/embeddings``.
+
+        Today the gateway returns 501 (B6 lands the OpenAI adapter that
+        ships the embeddings path). This method exists so callers (the
+        KB / RAG layer) compile against a stable signature; the 501 is
+        translated to :class:`InternalError` so the wire shape matches
+        the rest of the typed-error path. When B6 lands the embeddings
+        body, this method gains a real Pydantic response model and stops
+        returning a dict.
+        """
+
+        body: dict[str, Any] = {"model": model, "input": input_}
+        headers = self._build_headers(request_id=request_id)
+
+        try:
+            response = await self._client.post("/v1/embeddings", json=body, headers=headers)
+        except httpx.TimeoutException as exc:
+            raise GatewayTimeout(
+                "Gateway embeddings did not respond within the configured timeout",
+                details={"timeout_seconds": self._timeout},
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise GatewayUnreachable(
+                "Could not reach the Inference Gateway",
+                details={"transport_error": type(exc).__name__},
+            ) from exc
+
+        if response.status_code >= 400:
+            self._raise_for_gateway_error(
+                status_code=response.status_code,
+                body_bytes=response.content,
+                op="embeddings",
+                request_id=request_id,
+            )
+
+        try:
+            return response.json()  # type: ignore[no-any-return]
+        except json.JSONDecodeError as exc:
+            raise GatewayInvalidResponse(
+                "Gateway embeddings returned a non-JSON success response",
+                details={"status_code": response.status_code},
+            ) from exc
+
+    # --- Lifecycle -----------------------------------------------------------
+
     async def aclose(self) -> None:
+        """Close the underlying httpx client. Idempotent."""
+
         await self._client.aclose()
+
+    # --- Internals -----------------------------------------------------------
+
+    def _build_headers(self, *, request_id: str | None) -> dict[str, str]:
+        """Build per-request headers; X-Request-Id is forwarded when set."""
+
+        headers: dict[str, str] = {}
+        if request_id is not None:
+            headers[REQUEST_ID_HEADER] = request_id
+        return headers
+
+    def _raise_for_gateway_error(
+        self,
+        *,
+        status_code: int,
+        body_bytes: bytes,
+        op: str,
+        request_id: str | None,
+    ) -> None:
+        """Parse a non-2xx gateway response and raise the right LQAIError.
+
+        ``status_code == 401`` is special-cased per the brief: the user
+        must not see "the operator misconfigured the gateway key", they
+        see "service unavailable". The operator sees a WARNING log with
+        enough context to find the misconfiguration.
+
+        ``status_code >= 500`` is mapped to :class:`GatewayUnreachable`
+        rather than ``ProviderUnavailable`` (the wrapping is "we couldn't
+        reach the gateway service", not "the gateway said the upstream
+        provider was down" — the latter comes through as a 502 with
+        ``error.code == "provider_unavailable"`` which we DO map onward).
+        """
+
+        # 401 from the gateway = backend's own auth header was rejected.
+        # This is a deployment misconfiguration; the user must not see it.
+        if status_code == 401:
+            log.warning(
+                "Gateway rejected the backend's gateway-key header (401). "
+                "Check that LQ_AI_GATEWAY_KEY matches between api/ and "
+                "gateway/ deployments.",
+                extra=_structured_log_extra(
+                    op=op,
+                    request_id=request_id,
+                    status_code=status_code,
+                ),
+            )
+            raise GatewayUnreachable(
+                "Inference Gateway is unavailable",
+                details={"reason": "operator-configuration"},
+            )
+
+        # 5xx from the gateway itself (not from a wrapped provider call —
+        # that would be a structured 502 with provider_unavailable).
+        # Treat as gateway service unavailable.
+        if status_code >= 500 and not _looks_like_structured_body(body_bytes):
+            log.warning(
+                "Gateway returned 5xx without a parseable structured body",
+                extra=_structured_log_extra(
+                    op=op,
+                    request_id=request_id,
+                    status_code=status_code,
+                ),
+            )
+            raise GatewayUnreachable(
+                "Inference Gateway returned an unexpected server error",
+                details={"status_code": status_code},
+            )
+
+        # Try to parse the structured GatewayError envelope.
+        try:
+            envelope = GatewayErrorEnvelope.model_validate_json(body_bytes)
+        except PydanticValidationError as exc:
+            log.warning(
+                "Gateway returned non-conforming error body",
+                extra=_structured_log_extra(
+                    op=op,
+                    request_id=request_id,
+                    status_code=status_code,
+                    validation_errors=str(exc),
+                ),
+            )
+            raise GatewayInvalidResponse(
+                "Gateway returned an error response that did not match the schema",
+                details={"status_code": status_code},
+            ) from exc
+
+        payload = envelope.error
+        # Map the gateway code to the backend exception class. Unknown
+        # codes fall back to InternalError per app.errors.map_gateway_error_code.
+        exception_cls = map_gateway_error_code(payload.code)
+
+        # If the exception class is InternalError because the code was
+        # unknown, log so operators see drift quickly.
+        if exception_cls is InternalError and payload.code not in {
+            "anonymization_failed",
+            "not_implemented",
+        }:
+            log.warning(
+                "Gateway returned an unknown error code; mapping to InternalError",
+                extra=_structured_log_extra(
+                    op=op,
+                    request_id=request_id,
+                    gateway_code=payload.code,
+                    status_code=status_code,
+                ),
+            )
+
+        raise exception_cls(
+            payload.message,
+            details={**payload.details, "gateway_code": payload.code},
+        )
+
+    @staticmethod
+    async def _iter_sse_chunks(
+        response: httpx.Response,
+    ) -> AsyncIterator[ChatCompletionChunk]:
+        """Parse OpenAI-format SSE frames into typed chunks.
+
+        The gateway emits ``data: <json>\\n\\n`` frames terminated by
+        ``data: [DONE]\\n\\n``. Mid-stream errors come through as a
+        regular ``data:`` frame whose JSON has ``{"error": {...}}``;
+        the parser detects this, raises the mapped LQAIError subclass,
+        and ends the stream.
+        """
+
+        buffer = ""
+        async for raw_line in response.aiter_lines():
+            line = raw_line.rstrip("\r")
+            # Blank line = frame separator. We use a buffer rather than
+            # one-line-per-frame because the SSE spec allows multi-line
+            # data fields (``data: foo\ndata: bar`` joined). The gateway
+            # only emits single-line frames today; the buffer is forward-
+            # compatible.
+            if line == "":
+                if buffer:
+                    chunk = _parse_sse_data(buffer)
+                    buffer = ""
+                    if chunk is not None:
+                        yield chunk
+                continue
+            if line.startswith("data:"):
+                payload = line[len("data:") :].lstrip()
+                if payload == "[DONE]":
+                    return
+                # Append to the buffer; flush on the next blank line.
+                # In practice the gateway emits exactly one data: per
+                # frame followed by a blank line.
+                if buffer:
+                    buffer += "\n" + payload
+                else:
+                    buffer = payload
+            # Other SSE field lines (event:, id:, retry:) are ignored —
+            # the gateway never emits them.
+        # Stream ended without a [DONE] terminator. Flush any remaining
+        # buffer so the last chunk is delivered.
+        if buffer:
+            chunk = _parse_sse_data(buffer)
+            if chunk is not None:
+                yield chunk
+
+
+def _parse_sse_data(payload: str) -> ChatCompletionChunk | None:
+    """Parse one SSE ``data:`` payload into a chunk; raise on error frames.
+
+    The gateway emits two payload shapes:
+
+    * Normal ``ChatCompletionChunk`` — parsed as a typed object.
+    * Error frame ``{"error": {"code": ..., "message": ..., ...}}`` —
+      mapped to an :class:`LQAIError` subclass and raised.
+
+    Anything else (malformed JSON, unrecognized shape) is treated as a
+    drift between subsystems and raises :class:`GatewayInvalidResponse`.
+    Returns ``None`` only for whitespace-only payloads (which we skip
+    silently — defensive against gateway side stripping).
+    """
+
+    if not payload.strip():
+        return None
+
+    try:
+        decoded = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise GatewayInvalidResponse(
+            "Gateway emitted an SSE frame that wasn't valid JSON",
+            details={"payload_preview": payload[:120]},
+        ) from exc
+
+    if isinstance(decoded, dict) and "error" in decoded:
+        # Mid-stream error envelope. Map to the right typed exception.
+        try:
+            envelope = GatewayErrorEnvelope.model_validate(decoded)
+        except PydanticValidationError as exc:
+            raise GatewayInvalidResponse(
+                "Gateway emitted an error frame that did not match the schema",
+                details={"payload_preview": payload[:120]},
+            ) from exc
+        exception_cls = map_gateway_error_code(envelope.error.code)
+        raise exception_cls(
+            envelope.error.message,
+            details={**envelope.error.details, "gateway_code": envelope.error.code},
+        )
+
+    try:
+        return ChatCompletionChunk.model_validate(decoded)
+    except PydanticValidationError as exc:
+        raise GatewayInvalidResponse(
+            "Gateway emitted a streaming chunk that did not match the schema",
+            details={"validation_errors": exc.errors()},
+        ) from exc
+
+
+def _looks_like_structured_body(body_bytes: bytes) -> bool:
+    """Cheap heuristic: does the body look like a JSON object with ``error``?
+
+    Used by ``_raise_for_gateway_error`` to decide whether to attempt
+    schema validation or treat the response as opaque server breakage.
+    The full validation happens after this; we just want to avoid
+    confusing log lines for bodies that aren't even close.
+    """
+
+    if not body_bytes:
+        return False
+    try:
+        decoded = json.loads(body_bytes)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return isinstance(decoded, dict) and "error" in decoded
 
 
 _client: GatewayClient | None = None
@@ -73,6 +636,16 @@ def get_gateway_client() -> GatewayClient:
             gateway_key=settings.lq_ai_gateway_key,
         )
     return _client
+
+
+def set_gateway_client(client: GatewayClient | None) -> None:
+    """Override the process-global gateway client.
+
+    Used by tests to inject a respx-backed client. Pass ``None`` to clear.
+    """
+
+    global _client
+    _client = client
 
 
 async def close_gateway_client() -> None:

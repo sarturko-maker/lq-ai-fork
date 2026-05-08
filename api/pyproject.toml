@@ -55,6 +55,11 @@ dev = [
     "httpx>=0.27",
     "ruff>=0.6",
     "mypy>=1.11",
+    # respx mocks httpx at the transport layer; B5 introduces it on the
+    # api/ side to test the GatewayClient. Already used the same way in
+    # gateway/'s dev deps for the AnthropicAdapter — same library, same
+    # pattern, no new SBOM family.
+    "respx>=0.21",
 ]
 
 # Note: a `[project.scripts]` console-script entry was considered for
