@@ -74,6 +74,16 @@ Lays the substrate. By the end of Phase A, the repository has running services t
 
 **Effort:** 6–8 hours (most time on getting OpenWebUI fork building cleanly).
 
+**Status (2026-05-07): partially complete; full delivery folded into Phase B/C/D UI work.**
+
+What landed in A1.d + A1.c: OpenWebUI v0.9.2 imported (per ADR 0001), builds in Docker via `docker compose`, `WEBUI_NAME=LQ.AI` and `WEBUI_AUTH=false` set in `.env.example`. The container starts healthy and serves OpenWebUI's default UI with the LQ.AI display name in its header.
+
+What's deferred:
+- **Delegated auth wiring** — the OpenWebUI fork needs Svelte-component changes to call the LQ.AI backend's `/api/v1/auth/login` instead of OpenWebUI's built-in auth (per ADR 0002). Folds into B1's verification (the auth flow is end-to-end testable once both pieces exist).
+- **Visual branding (LQ.AI logo, color scheme, footer)** — needs design decisions plus dual-branding per ADR 0001's branding-clause analysis. Folds into D2 (Tier-Awareness UI work) where we're already touching the OpenWebUI shell.
+
+This is a deliberate sequencing choice: A5's full scope requires UI design decisions and Svelte-component work that's better done with the auth + tier substrate already in place. The env-var branding done in A1 is sufficient for Phase B/C work to proceed.
+
 ---
 
 ## Phase B — Core authentication and routing (Week 2)
