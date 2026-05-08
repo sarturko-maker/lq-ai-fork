@@ -1,8 +1,9 @@
 """Pydantic schema for ``gateway.yaml``.
 
 Mirrors the structure documented in ``gateway.yaml.example`` and PRD §4.4.
-A3 only loads and validates the config; tier-policy enforcement (D1), tier
-derivation (B4), and provider routing (B4) consume it later.
+A3 originally landed config loading; B4 extends the schema with
+``inference_tiers`` (per-provider-type defaults + per-(provider, model)
+overrides) and adds alias-cycle detection.
 
 Validation rules enforced here:
 
@@ -11,10 +12,15 @@ Validation rules enforced here:
   ``{1, 2, 3, 4, 5}``.
 * Every ``ModelAlias.primary.provider`` (and each fallback's ``provider``)
   references a configured provider name.
+* B4: ``model_aliases`` are checked for cycles. An alias's ``primary.model``
+  may itself be the name of another alias (multi-level aliasing), but the
+  resolution chain must terminate. A cycle is rejected at config load,
+  not at request time.
+* B4: ``inference_tiers.defaults`` keys are validated against the
+  ``ProviderType`` enum so a typo (``anthropc``) is caught at startup.
 
-Anything not strictly required for A3 acceptance is permissive
-(``extra="allow"``) so future tasks can keep adding fields without rev-locking
-the YAML schema.
+Anything not strictly required is permissive (``extra="allow"``) so future
+tasks can keep adding fields without rev-locking the YAML schema.
 """
 
 from __future__ import annotations
@@ -29,6 +35,14 @@ InferenceTier = Annotated[int, Field(ge=1, le=5)]
 """An Inference Tier (1-5 per PRD §1.5.2)."""
 
 LogLevel = Literal["debug", "info", "warn", "error"]
+
+MAX_ALIAS_DEPTH = 8
+"""Maximum length of a multi-level alias chain (``a -> b -> c -> ...``).
+
+Real configurations typically resolve in 1-2 levels; an 8-level depth is
+generous enough that legitimate operator setups never hit it but tight
+enough that a runaway cycle is caught quickly. Tunable via a future
+config field if the assumption ever bites."""
 
 
 # --- Server / auth ------------------------------------------------------------
@@ -117,6 +131,50 @@ class ModelAliasConfig(BaseModel):
     fallback: list[ModelTarget] = Field(default_factory=list)
 
 
+# --- Inference-tier derivation (B4) ------------------------------------------
+
+
+class InferenceTiersConfig(BaseModel):
+    """``inference_tiers:`` — operator-controlled tier-derivation overrides.
+
+    Two layers of resolution applied by :func:`derive_routed_inference_tier`:
+
+    1. ``overrides`` — exact ``"<provider_name>/<model>"`` keys win. Used when
+       a single (provider, model) pair lands at a non-default tier (e.g., a
+       ZDR'd Claude account on Bedrock that should be Tier 2 even though
+       Bedrock's default is 3).
+    2. ``defaults`` — per ``ProviderType`` (``anthropic``, ``openai``,
+       ``vertex``, ...). Used when an operator wants every model under a
+       given provider type to land at a non-default tier.
+
+    Both layers are *optional*. If neither matches, the tier falls back to the
+    provider entry's own ``tier:`` field (the simple posture documented in
+    ``gateway.yaml.example``).
+
+    Per PRD §4.4 / §1.5.2 / §3.13. Tier values are 1-5 inclusive.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    defaults: dict[ProviderType, InferenceTier] = Field(default_factory=dict)
+    """Per-provider-type tier defaults (``anthropic`` → 4, ``openai`` → 4,
+    ``ollama`` → 1, ...). Keys are validated against the ``ProviderType``
+    enum so a typo is caught at startup, not on the first inference call."""
+
+    overrides: dict[str, InferenceTier] = Field(default_factory=dict)
+    """Per-(provider, model) tier overrides keyed as ``"<provider>/<model>"``.
+
+    Example::
+
+        overrides:
+          anthropic-prod/claude-opus-4-7: 3   # operator's ZDR addendum
+
+    A bare ``"<provider>"`` key is also honored; it lifts every model on
+    that named provider to the override value (rare; per-type ``defaults``
+    is usually the cleaner expression of operator intent).
+    """
+
+
 # --- Tier policy --------------------------------------------------------------
 
 
@@ -169,10 +227,31 @@ class AnonymizationConfig(BaseModel):
     enabled: bool = False
 
 
+class CostRateEntry(BaseModel):
+    """One ``cost_tracking.rates`` entry: input/output USD per million tokens.
+
+    The B4 router uses these to populate ``inference_routing_log.cost_estimate``
+    for each routed request. If the resolved ``"<provider>/<model>"`` key is
+    not in :attr:`CostTrackingConfig.rates`, ``cost_estimate`` is left ``NULL``
+    rather than invented (per CLAUDE.md: don't overclaim).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    input_per_mtok: float = Field(ge=0.0)
+    output_per_mtok: float = Field(ge=0.0)
+
+
 class CostTrackingConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     enabled: bool = True
+    rates: dict[str, CostRateEntry] = Field(default_factory=dict)
+    """Per-(provider, model) USD-per-million-token rates keyed as
+    ``"<provider>/<model>"``. See ``gateway.yaml.example`` for the canonical
+    shape. The router consults this when computing ``cost_estimate`` for the
+    ``inference_routing_log`` row.
+    """
 
 
 class TelemetryConfig(BaseModel):
@@ -216,6 +295,7 @@ class GatewayConfig(BaseModel):
     gateway_auth: GatewayAuthConfig = Field(default_factory=GatewayAuthConfig)
     providers: list[ProviderConfig] = Field(default_factory=list)
     model_aliases: dict[str, ModelAliasConfig] = Field(default_factory=dict)
+    inference_tiers: InferenceTiersConfig = Field(default_factory=InferenceTiersConfig)
     tier_policy: TierPolicyConfig = Field(default_factory=TierPolicyConfig)
     rate_limits: RateLimitsConfig = Field(default_factory=RateLimitsConfig)
     anonymization: AnonymizationConfig = Field(default_factory=AnonymizationConfig)
@@ -257,6 +337,47 @@ class GatewayConfig(BaseModel):
                     )
         return self
 
+    @model_validator(mode="after")
+    def _aliases_have_no_cycles(self) -> GatewayConfig:
+        """Reject alias chains that don't terminate.
+
+        Multi-level aliasing (alias whose ``primary.model`` is itself the
+        name of another alias) is supported in B4's router, but the chain
+        must terminate at a provider-native model. A cycle (``a -> b -> a``)
+        or a chain longer than :data:`MAX_ALIAS_DEPTH` is rejected at
+        startup so the failure is visible during ``docker compose up``,
+        not on the first inference call.
+
+        We resolve from each alias separately because a chain like
+        ``a -> b -> c`` should be rejected as soon as we see it; doing
+        the full graph SCC analysis would catch the same cases at the
+        cost of clarity.
+        """
+
+        for alias_name in self.model_aliases:
+            seen: list[str] = []
+            current = alias_name
+            for _ in range(MAX_ALIAS_DEPTH + 1):
+                if current in seen:
+                    chain = " -> ".join([*seen, current])
+                    raise ValueError(
+                        f"model_aliases cycle detected: {chain} (each alias "
+                        "must terminate at a provider-native model name)"
+                    )
+                seen.append(current)
+                alias_def = self.model_aliases.get(current)
+                if alias_def is None:
+                    # Reached a provider-native model; chain terminated.
+                    break
+                current = alias_def.primary.model
+            else:
+                # Loop exhausted without break — chain too deep.
+                chain = " -> ".join(seen)
+                raise ValueError(
+                    f"model_aliases chain exceeds maximum depth {MAX_ALIAS_DEPTH}: {chain}"
+                )
+        return self
+
     # --- Convenience accessors used by routers --------------------------------
 
     def alias_ids(self) -> list[str]:
@@ -266,6 +387,18 @@ class GatewayConfig(BaseModel):
         """
 
         return list(self.model_aliases.keys())
+
+    def provider_by_name(self, name: str) -> ProviderConfig | None:
+        """Look up a configured provider by name; ``None`` if not found.
+
+        Used by the B4 router to dispatch to the right adapter and read the
+        provider's tier (used as the final fallback in tier derivation).
+        """
+
+        for provider in self.providers:
+            if provider.name == name:
+                return provider
+        return None
 
     def to_models_payload(self) -> dict[str, Any]:
         """OpenAI ``GET /v1/models``-shaped response built from aliases.

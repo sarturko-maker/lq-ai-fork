@@ -225,3 +225,63 @@ def test_model_target_requires_provider_and_model() -> None:
     target = ModelTarget(provider="x", model="y")
     assert target.provider == "x"
     assert target.model == "y"
+
+
+# --- inference_tiers (B4) ----------------------------------------------------
+
+
+@pytest.mark.unit
+def test_load_config_parses_inference_tiers_block(example_env: None) -> None:
+    """The example file's ``inference_tiers.defaults`` block loads."""
+
+    config = load_config(EXAMPLE_CONFIG)
+    assert config.inference_tiers.defaults["anthropic"] == 4
+    assert config.inference_tiers.defaults["ollama"] == 1
+
+
+@pytest.mark.unit
+def test_load_config_invalid_inference_tier_default_rejected(tmp_path: Path) -> None:
+    """A typo in ``inference_tiers.defaults`` (unknown provider type) fails."""
+
+    cfg = tmp_path / "gw.yaml"
+    cfg.write_text(
+        """
+providers:
+  - name: anthropic-prod
+    type: anthropic
+    base_url: https://api.anthropic.com
+    api_key_env: ANTHROPIC_API_KEY
+    tier: 4
+    models: [claude-opus-4-7]
+inference_tiers:
+  defaults:
+    anthropc: 4   # typo
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigLoadError):
+        load_config(cfg)
+
+
+@pytest.mark.unit
+def test_load_config_inference_tiers_value_out_of_range_rejected(tmp_path: Path) -> None:
+    """Tier values outside 1..5 are rejected at load."""
+
+    cfg = tmp_path / "gw.yaml"
+    cfg.write_text(
+        """
+providers:
+  - name: anthropic-prod
+    type: anthropic
+    base_url: https://api.anthropic.com
+    api_key_env: ANTHROPIC_API_KEY
+    tier: 4
+    models: [claude-opus-4-7]
+inference_tiers:
+  defaults:
+    anthropic: 9
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigLoadError):
+        load_config(cfg)

@@ -181,6 +181,43 @@ model_aliases:
     fallback: []
 
 # ============================================================
+# INFERENCE TIERS — derivation overrides (PRD §1.5.2 / §3.13)
+# ============================================================
+# Tier derivation runs for every routed request and stamps
+# ``routed_inference_tier`` on the response (header + body
+# field) and into ``inference_routing_log``. Resolution order
+# (first match wins):
+#
+#   1. inference_tiers.overrides["<provider_name>/<model>"]
+#   2. inference_tiers.overrides["<provider_name>"]
+#   3. inference_tiers.defaults["<provider_type>"]
+#   4. The provider entry's own ``tier:`` field (above)
+#
+# This block is OPTIONAL. With the block omitted, every routed
+# request takes its tier from the provider entry's ``tier:``
+# field — which is the simplest configuration and matches what
+# every provider in this example already declares.
+#
+# Operators with mixed posture (e.g., a single Bedrock model
+# under a ZDR addendum that should be Tier 2 instead of 3) use
+# ``overrides`` to call out the exception without restating the
+# whole provider's tier.
+
+inference_tiers:
+  defaults:
+    anthropic: 4         # standard commercial API
+    openai: 4
+    vertex: 3            # routes through customer GCP project
+    bedrock: 3           # routes through customer AWS account
+    azure_openai: 3      # routes through customer Azure tenant
+    cohere: 4
+    ollama: 1            # fully local
+    vllm: 1              # fully local
+    openai_compatible: 1 # local inference servers (vLLM, llama.cpp wrappers)
+  # overrides:
+  #   anthropic-prod/claude-opus-4-7: 3  # if operator has a ZDR addendum
+
+# ============================================================
 # TIER POLICY — what the deployment allows
 # ============================================================
 # The operator-level policy. Skills and Projects can require
