@@ -754,6 +754,59 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Skill'}
 
+  # ----------- INTERNAL (gateway → backend, ADR 0006) -----------
+  /api/v1/internal/skills/{skill_name}:
+    parameters:
+      - name: skill_name
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [internal]
+      summary: Internal — fetch a skill from the registry (gateway → backend)
+      description: |
+        Service-to-service endpoint used by the Inference Gateway during
+        prompt assembly (Task C2 / ADR 0006). The user-facing
+        `GET /api/v1/skills/{name}` endpoint is gated by user-token auth
+        (`get_active_user`) and is inappropriate for the gateway's calls
+        — the gateway has no user. This route is gated by the shared
+        `X-LQ-AI-Gateway-Key` secret instead.
+
+        Trust-domain separation: user-facing routes stay under user-token
+        auth; internal routes stay under shared-secret auth. The two
+        never mix on a single route.
+
+        The response shape matches `GET /api/v1/skills/{name}` (the
+        `Skill` schema) so the gateway-side client reuses the same
+        response model. Path differs; auth scheme differs; response
+        shape is identical.
+      security:
+        - gatewayKeyAuth: []
+      responses:
+        '200':
+          description: Skill detail
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Skill'}
+        '401':
+          description: Missing or invalid `X-LQ-AI-Gateway-Key`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: No skill with that name is in the registry.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: |
+            Operator has not configured `LQ_AI_GATEWAY_KEY` on the
+            backend; service-to-service traffic is refused rather than
+            silently accepted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
   # ----------- FILES -----------
   /api/v1/files:
     post:
@@ -1208,6 +1261,17 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    gatewayKeyAuth:
+      type: apiKey
+      in: header
+      name: X-LQ-AI-Gateway-Key
+      description: |
+        Shared-secret used by the Inference Gateway to call the
+        backend's `/api/v1/internal/*` routes (per ADR 0006). Constant-
+        time compare against `LQ_AI_GATEWAY_KEY` on the backend. The
+        same secret is used in the reverse direction (backend → gateway)
+        for incoming-request auth on the gateway's surface, though the
+        gateway-side enforcement is a deferred D-phase item.
 
   schemas:
     LoginRequest:

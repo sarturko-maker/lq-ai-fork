@@ -90,6 +90,8 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # C1 — Skill Service: filesystem loading
     ("GET", "/api/v1/skills"),
     ("GET", "/api/v1/skills/{skill_name}"),
+    # C2 — gateway-facing internal skills endpoint (X-LQ-AI-Gateway-Key auth)
+    ("GET", "/api/v1/internal/skills/{skill_name}"),
     # C4 — file upload + storage
     ("POST", "/api/v1/files"),
     ("GET", "/api/v1/files/{file_id}"),

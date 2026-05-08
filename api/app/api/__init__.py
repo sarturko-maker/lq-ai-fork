@@ -27,6 +27,7 @@ from app.api import (
     auth,
     chats,
     files,
+    internal,
     knowledge_bases,
     organization_profile,
     projects,
@@ -41,6 +42,11 @@ api_router = APIRouter(prefix="/api/v1")
 # Routers with mixed per-endpoint policies — see each module for details.
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
+
+# Service-to-service router (gateway → backend). Authenticated by the
+# shared X-LQ-AI-Gateway-Key header per ADR 0006, NOT by the user-token
+# gate. Mounted without `_active` deliberately: the gateway has no user.
+api_router.include_router(internal.router)
 
 # Routers that uniformly require an authenticated, must_change_password=false
 # user. Applying this at the router level means every current stub and every

@@ -46,6 +46,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/skills",
         "/api/v1/skills/{skill_name}",
         "/api/v1/skills/{skill_name}/fork",
+        # internal (gateway → backend, ADR 0006 / C2)
+        "/api/v1/internal/skills/{skill_name}",
         # files
         "/api/v1/files",
         "/api/v1/files/{file_id}",
@@ -84,7 +86,9 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    assert len(actual) == 33
+    # 34 distinct /api/v1 paths: C7 added 2 detach routes (33) plus C2's
+    # gateway-facing /internal/skills/{name} route (34).
+    assert len(actual) == 34
 
 
 @pytest.mark.unit
