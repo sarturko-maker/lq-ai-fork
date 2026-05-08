@@ -16,13 +16,16 @@ dependencies = [
     "pydantic>=2.7,<3",
     "pydantic-settings>=2.4,<3",
     "pyyaml>=6.0",
+    # B3: provider adapters use httpx.AsyncClient for outbound calls.
+    # No `anthropic` SDK — PRD §4 calls for hand-rolled gateway code in
+    # lieu of LLM-SDK dependencies, to keep the supply-chain surface honest.
+    "httpx>=0.27,<0.29",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
-    "httpx>=0.27",
     "respx>=0.21",
     "ruff>=0.6",
     "mypy>=1.11",

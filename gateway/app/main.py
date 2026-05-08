@@ -1,17 +1,28 @@
 """LQ.AI Inference Gateway entrypoint.
 
-A3 (this scaffold) loads ``gateway.yaml`` on startup and validates it via
-Pydantic. If the config is missing or malformed the lifespan raises
-:class:`~app.config_loader.ConfigLoadError` and the process exits non-zero —
-the gateway is the security boundary, and silently coming up with an empty
-config would mask operator misconfiguration.
+The gateway loads ``gateway.yaml`` on startup, validates it via Pydantic,
+and instantiates a :class:`~app.providers.ProviderAdapter` for every
+configured provider whose credentials are present. A3 landed config
+loading; B3 added the Anthropic adapter and the chat-completion data
+path; B4 (next) replaces the temporary routing in
+:mod:`app.api.inference` with a real router + tier derivation.
 
-Endpoint posture in A3:
+If the config is missing or malformed the lifespan raises
+:class:`~app.config_loader.ConfigLoadError` and the process exits
+non-zero — the gateway is the security boundary, and silently coming
+up with an empty config would mask operator misconfiguration. Adapter
+construction failures (missing env vars) are *not* fatal; the affected
+providers are skipped with a warning so the gateway still serves the
+endpoints that don't need them.
+
+Endpoint posture (current):
 
 * ``GET  /health``                — 200 (liveness; independent of config).
 * ``GET  /ready``                 — 200 once config has loaded; 503 otherwise.
-* ``POST /v1/chat/completions``   — 501 (B3 + B4 land real routing).
-* ``POST /v1/embeddings``         — 501.
+* ``POST /v1/chat/completions``   — routes to Anthropic when the model
+  alias resolves to an Anthropic provider (B3); other providers return
+  a structured 501 until B4/B6.
+* ``POST /v1/embeddings``         — 501 (lands with B6 OpenAI adapter).
 * ``GET  /v1/models``             — returns configured aliases.
 * ``GET  /admin/v1/tier-config``  — returns loaded tier policy.
 * Other ``/admin/v1/*`` endpoints — 501.
@@ -42,6 +53,7 @@ from app import __version__
 from app.api import admin_router, inference_router
 from app.config import GatewayConfig
 from app.config_loader import ConfigLoadError, load_config
+from app.providers import AnthropicAdapter, ProviderAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +95,40 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         len(config.providers),
         len(config.model_aliases),
     )
+
+    # B3: instantiate adapters for any provider whose credentials are
+    # actually present. Adapters with missing env vars are skipped (with
+    # a warning, not a fatal error) so the gateway still serves /health,
+    # /ready, /v1/models, and the configured providers that are usable.
+    # The chat-completions handler returns a structured 503 if a request
+    # routes to a provider with no adapter.
+    adapters: dict[str, ProviderAdapter] = {}
+    for provider in config.providers:
+        if not provider.enabled:
+            continue
+        if provider.type != "anthropic":
+            # B6 lands the rest of the adapters; B3 only ships Anthropic.
+            continue
+        try:
+            adapters[provider.name] = AnthropicAdapter.from_config(provider)
+            logger.info("instantiated Anthropic adapter for provider %r", provider.name)
+        except ValueError as exc:
+            logger.warning(
+                "skipping Anthropic provider %r: %s",
+                provider.name,
+                exc,
+            )
+    app.state.adapters = adapters
+
     try:
         yield
     finally:
-        # No teardown work in A3. Provider adapters (B3+) will close
-        # httpx clients here.
-        logger.info("gateway shutting down")
+        logger.info("gateway shutting down; closing %d adapters", len(adapters))
+        for name, adapter in adapters.items():
+            try:
+                await adapter.aclose()
+            except Exception:
+                logger.exception("error closing adapter %r", name)
 
 
 app = FastAPI(
