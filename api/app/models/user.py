@@ -33,6 +33,13 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # B2 — first-run admin is created with must_change_password=TRUE; the
+    # `/auth/change-password` endpoint flips it back to FALSE once the
+    # operator sets a permanent password. See docs/M1-IMPLEMENTATION-ORDER.md
+    # Task B2 and migration 0002.
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     totp_secret: Mapped[str | None] = mapped_column(String, nullable=True)
     recovery_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
 

@@ -26,24 +26,31 @@ This document is structured by subsystem; tables that span subsystems (audit log
 
 ```sql
 CREATE TABLE users (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
-    email           CITEXT NOT NULL UNIQUE,
-    display_name    TEXT,
-    hashed_password TEXT NOT NULL,
-    is_admin        BOOLEAN NOT NULL DEFAULT FALSE,
-    mfa_enabled     BOOLEAN NOT NULL DEFAULT FALSE,
-    totp_secret     TEXT,
-    recovery_codes  TEXT[],  -- bcrypt-hashed
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_login_at   TIMESTAMPTZ,
-    deleted_at      TIMESTAMPTZ,
+    id                    UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
+    email                 CITEXT NOT NULL UNIQUE,
+    display_name          TEXT,
+    hashed_password       TEXT NOT NULL,
+    is_admin              BOOLEAN NOT NULL DEFAULT FALSE,
+    mfa_enabled           BOOLEAN NOT NULL DEFAULT FALSE,
+    must_change_password  BOOLEAN NOT NULL DEFAULT FALSE,  -- B2: first-run admin + reset-admin
+    totp_secret           TEXT,
+    recovery_codes        TEXT[],  -- bcrypt-hashed
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_login_at         TIMESTAMPTZ,
+    deleted_at            TIMESTAMPTZ,
     deletion_scheduled_at TIMESTAMPTZ
 );
 
 CREATE INDEX idx_users_email_active ON users(email) WHERE deleted_at IS NULL;
 CREATE INDEX idx_users_deletion_scheduled ON users(deletion_scheduled_at) WHERE deletion_scheduled_at IS NOT NULL;
 ```
+
+`must_change_password` is set to TRUE for:
+- the auto-created first-run admin (Task B2 / migration `0002`),
+- any user touched by `python -m app.cli reset-admin-password`.
+
+Authenticated endpoints (other than `GET /users/me`, `POST /auth/logout`, and `POST /auth/change-password`) return HTTP 403 with `error.code = "password_change_required"` while this flag is true. The flag is cleared by a successful `POST /auth/change-password`.
 
 ### `user_sessions`
 
