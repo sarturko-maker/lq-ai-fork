@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -287,14 +288,14 @@ _HYDRATE_SQL = text(
 async def _hydrate_chunks(
     db: AsyncSession,
     chunk_ids: list[uuid.UUID],
-) -> list[dict[str, object]]:
+) -> list[dict[str, Any]]:
     """Fetch the chunk rows + file metadata for ``chunk_ids``."""
 
     if not chunk_ids:
         return []
     result = await db.execute(_HYDRATE_SQL, {"ids": [str(cid) for cid in chunk_ids]})
     rows = result.mappings().all()
-    out: list[dict[str, object]] = []
+    out: list[dict[str, Any]] = []
     for row in rows:
         out.append(
             {

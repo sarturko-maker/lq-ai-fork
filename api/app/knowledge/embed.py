@@ -107,7 +107,7 @@ def _get_tokenizer() -> object:
     if _tokenizer_cache is not None:
         return _tokenizer_cache
 
-    import tiktoken  # type: ignore[import-not-found]
+    import tiktoken
 
     _tokenizer_cache = tiktoken.get_encoding("cl100k_base")
     return _tokenizer_cache
