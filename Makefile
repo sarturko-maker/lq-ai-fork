@@ -66,9 +66,25 @@ clean: ## Tear down dev stack, volumes, and caches
 	find . -type d -name .mypy_cache -prune -exec rm -rf {} +
 
 .PHONY: migrate
-migrate: ## Run Alembic migrations (lands in Task A2)
-	@echo "Migrations land in Task A2 — Database migration scaffolding."
-	@exit 1
+migrate: ## Run Alembic migrations against the running api container
+	docker compose exec api alembic upgrade head
+
+.PHONY: migrate-down
+migrate-down: ## Roll back one migration in the running api container
+	docker compose exec api alembic downgrade -1
+
+.PHONY: migrate-status
+migrate-status: ## Show current migration head in the running api container
+	docker compose exec api alembic current
+
+.PHONY: migrate-create
+migrate-create: ## Create a new migration from model diffs. Pass MSG="..."
+	@if [ -z "$(MSG)" ]; then echo "Usage: make migrate-create MSG=\"description\""; exit 1; fi
+	docker compose exec api alembic revision --autogenerate -m "$(MSG)"
+
+.PHONY: psql
+psql: ## Open a psql shell against the dev database
+	docker compose exec postgres psql -U $${POSTGRES_USER:-lq_ai} -d $${POSTGRES_DB:-lq_ai}
 
 # ---------- api/ ----------
 
