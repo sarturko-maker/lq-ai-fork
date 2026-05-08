@@ -1504,10 +1504,23 @@ components:
             When true, response is `text/event-stream` per OpenAI streaming
             convention. When false, response is a single JSON body with the
             assistant message and routing metadata (B5 default).
+        skills:
+          type: array
+          items: {type: string}
+          description: |
+            C2: skill names to attach. The backend forwards these as
+            `lq_ai_skills` to the gateway, which fetches each from the
+            backend's internal-skills endpoint and assembles the prompt.
         skill_inputs:
           type: object
-          additionalProperties: true
-          description: "Per-skill input values when skills with input schemas are attached (C2)"
+          additionalProperties:
+            type: object
+            additionalProperties: true
+          description: |
+            C2: per-skill input bindings, keyed by skill name. Inner
+            dict maps input variable names to values. Required inputs
+            that the skill's frontmatter declares but the bindings
+            don't provide cause a 400 with `code=skill_input_missing`.
 
     MessagePostResponse:
       type: object
@@ -1516,7 +1529,8 @@ components:
         Non-streaming response for `POST /api/v1/chats/{chat_id}/messages`.
         The `routed_inference_tier`, `routed_provider`, and `cost_estimate`
         come from the gateway (B4). `stateless_passthrough` is true while
-        chat persistence is deferred (B5 → C3).
+        chat persistence is deferred (B5 → C3). `applied_skills` lists
+        the skills that were assembled into the prompt (C2).
       properties:
         message: {$ref: '#/components/schemas/Message'}
         citations:
@@ -1536,6 +1550,12 @@ components:
           type: number
           nullable: true
           description: "USD cost estimate (gateway-side, when rate is configured)"
+        applied_skills:
+          type: array
+          items: {type: string}
+          description: |
+            C2: skills that were successfully assembled into the prompt
+            for this request. Empty when no skills were attached.
         stateless_passthrough:
           type: boolean
           description: |
@@ -1569,6 +1589,12 @@ components:
         citations:
           type: array
           items: {$ref: '#/components/schemas/Citation'}
+        applied_skills:
+          type: array
+          items: {type: string}
+          description: |
+            C2: skills that were successfully assembled into the prompt
+            for this request. Empty when no skills were attached.
 
     Citation:
       type: object

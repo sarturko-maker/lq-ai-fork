@@ -72,6 +72,15 @@ class ChatCompletionRequest(BaseModel):
     chat_id: str | None = None
     anonymize: bool = True
 
+    # --- C2 (skill prompt assembly per ADR 0006) -----------------------------
+    lq_ai_skills: list[str] = Field(default_factory=list)
+    """Skill names to attach. The gateway fetches each from
+    ``/api/v1/internal/skills/{name}`` and assembles them into the
+    system message before dispatching to the provider."""
+
+    lq_ai_skill_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    """Per-skill input bindings, keyed by skill name."""
+
 
 # --- Chat completion response -------------------------------------------------
 
@@ -121,6 +130,10 @@ class ChatCompletionResponse(BaseModel):
     routed_provider: str | None = None
     cost_estimate: float | None = None
     anonymization_applied: bool | None = None
+    lq_ai_applied_skills: list[str] | None = None
+    """Skills successfully assembled into the prompt for this request
+    (C2). Null when no skills were attached. Backend surfaces this in
+    audit logs and the chat response."""
 
 
 # --- Streaming chunk ----------------------------------------------------------
@@ -166,6 +179,7 @@ class ChatCompletionChunk(BaseModel):
     # --- LQ.AI extensions ---------------------------------------------------
     routed_inference_tier: int | None = Field(default=None, ge=1, le=5)
     routed_provider: str | None = None
+    lq_ai_applied_skills: list[str] | None = None
 
 
 # --- Gateway error envelope --------------------------------------------------

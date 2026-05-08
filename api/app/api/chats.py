@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -54,8 +54,10 @@ _C3 = "C3 — Chat service + message persistence"
 class MessageCreateRequest(BaseModel):
     """`MessageCreate` schema from backend-openapi.yaml.
 
-    B5 supports the ``content`` and ``model`` fields. ``skill_inputs``
-    is accepted for forward-compat (skills land in C2) but ignored.
+    B5 supports ``content`` and ``model``. C2 adds ``skills`` (list of
+    skill names to attach) and ``skill_inputs`` (per-skill input
+    bindings) and forwards both to the gateway as the
+    ``lq_ai_skills`` / ``lq_ai_skill_inputs`` request-extension fields.
     """
 
     content: str = Field(min_length=1)
@@ -63,7 +65,17 @@ class MessageCreateRequest(BaseModel):
     """Model alias (per the OpenAPI sketch). Defaults to ``smart`` —
     operators map ``smart`` to a real model in ``gateway.yaml``.
     See ``gateway.yaml.example`` for the alias list."""
-    skill_inputs: dict[str, object] | None = None
+
+    skills: list[str] = Field(default_factory=list)
+    """C2: skill names to attach. The backend forwards them as
+    ``lq_ai_skills`` to the gateway, which fetches each from the
+    backend's internal-skills endpoint and assembles the prompt."""
+
+    skill_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    """C2: per-skill input bindings, keyed by skill name. Forwarded as
+    ``lq_ai_skill_inputs`` to the gateway. Per-skill scoping so two
+    attached skills with overlapping variable names don't collide."""
+
     stream: bool = False
     """Whether to stream the response as SSE chunks. ``False`` returns a
     single JSON body; ``True`` returns a ``text/event-stream`` response
@@ -89,6 +101,10 @@ def _build_gateway_request(
     The ``chat_id`` is forwarded so the gateway's ``inference_routing_log``
     row carries it (correlation across the stateless pass-through; once
     C3 persists, the same id resolves to the chat row).
+
+    C2: ``skills`` and ``skill_inputs`` from the backend's
+    MessageCreate body forward as ``lq_ai_skills`` and
+    ``lq_ai_skill_inputs`` to the gateway, which assembles the prompt.
     """
 
     return ChatCompletionRequest(
@@ -96,6 +112,8 @@ def _build_gateway_request(
         messages=[ChatCompletionMessage(role="user", content=payload.content)],
         stream=payload.stream,
         chat_id=chat_id,
+        lq_ai_skills=list(payload.skills),
+        lq_ai_skill_inputs=dict(payload.skill_inputs),
     )
 
 
@@ -321,6 +339,8 @@ async def _non_streaming_response(
         "routed_inference_tier": response.routed_inference_tier,
         "routed_provider": response.routed_provider,
         "cost_estimate": response.cost_estimate,
+        # C2: surface which skills were assembled into the prompt.
+        "applied_skills": response.lq_ai_applied_skills or [],
         # B5 cannot return citations until C5 (document pipeline) lands.
         "citations": [],
         # Surface that B5 doesn't yet persist the message — clients can
@@ -363,11 +383,14 @@ async def _stream_response(
         last_tier: int | None = None
         last_provider: str | None = None
         last_model: str | None = None
+        last_applied_skills: list[str] | None = None
         try:
             async for chunk in gateway.chat_completion_stream(request, request_id=request_id):
                 last_tier = chunk.routed_inference_tier or last_tier
                 last_provider = chunk.routed_provider or last_provider
                 last_model = chunk.model
+                if chunk.lq_ai_applied_skills is not None:
+                    last_applied_skills = list(chunk.lq_ai_applied_skills)
                 for choice in chunk.choices:
                     delta = choice.delta.content or ""
                     if not delta:
@@ -385,7 +408,7 @@ async def _stream_response(
 
         # Stream ended cleanly. Emit a final ``complete`` event with the
         # synthesized assistant message and the routing metadata.
-        complete = {
+        complete: dict[str, Any] = {
             "type": "complete",
             "message": _assistant_message_dict(
                 chat_id=chat_id,
@@ -397,6 +420,7 @@ async def _stream_response(
                 tokens_out=None,
                 cost_estimate=None,
             ),
+            "applied_skills": last_applied_skills or [],
             "citations": [],
         }
         yield f"data: {_json.dumps(complete, separators=(',', ':'))}\n\n".encode()
