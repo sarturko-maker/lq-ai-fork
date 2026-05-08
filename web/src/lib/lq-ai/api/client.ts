@@ -1,0 +1,246 @@
+/**
+ * Base HTTP client for the LQ.AI backend.
+ *
+ * - Attaches `Authorization: Bearer <access_token>` to every request once a
+ *   session is established.
+ * - On 401, attempts a single refresh-and-retry; on a second 401 the session
+ *   is cleared and the caller is expected to redirect to login.
+ * - On 403 with `code=password_change_required`, throws `PasswordChangeRequiredError`
+ *   so the layout's gate can intercept and route to the change-password screen.
+ * - All errors surface as typed exception subclasses; the response body's
+ *   `detail.code` is preserved on the exception for downstream branching.
+ */
+import {
+	auth,
+	clearSession,
+	getAccessToken,
+	getRefreshToken,
+	setSession
+} from '../auth/store';
+import type { TokenResponse, ErrorBody } from '../types';
+import { get } from 'svelte/store';
+
+// Direct feature-detection so this module is portable to the vitest node
+// runner without SvelteKit alias setup.
+const browser =
+	typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+export const LQ_AI_API_BASE_URL = '/api/v1';
+
+export class LQAIApiError extends Error {
+	readonly status: number;
+	readonly code: string;
+	readonly details: Record<string, unknown> | undefined;
+
+	constructor(status: number, code: string, message: string, details?: Record<string, unknown>) {
+		super(message);
+		this.name = 'LQAIApiError';
+		this.status = status;
+		this.code = code;
+		this.details = details;
+	}
+}
+
+export class UnauthorizedError extends LQAIApiError {
+	constructor(message = 'Not authenticated', details?: Record<string, unknown>) {
+		super(401, 'unauthorized', message, details);
+		this.name = 'UnauthorizedError';
+	}
+}
+
+export class PasswordChangeRequiredError extends LQAIApiError {
+	constructor(message = 'Password change required', details?: Record<string, unknown>) {
+		super(403, 'password_change_required', message, details);
+		this.name = 'PasswordChangeRequiredError';
+	}
+}
+
+interface RequestOptions {
+	method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+	body?: unknown;
+	headers?: Record<string, string>;
+	/** Skip auth header attachment (used by /auth/login + /auth/refresh). */
+	skipAuth?: boolean;
+	/** Skip the on-401 refresh-and-retry (used by /auth/refresh itself). */
+	skipRefresh?: boolean;
+	/** Override the `Accept` header (e.g., for SSE). */
+	accept?: string;
+	/** When true, expect a streaming response and return the raw `Response`. */
+	stream?: boolean;
+	/** Multipart form body; replaces `body`. */
+	formData?: FormData;
+	signal?: AbortSignal;
+}
+
+/**
+ * Internal: perform a single HTTP request with auth header attachment and
+ * structured error translation. Caller handles refresh / retry.
+ */
+async function rawRequest(path: string, options: RequestOptions): Promise<Response> {
+	const headers: Record<string, string> = { ...(options.headers ?? {}) };
+
+	if (options.formData) {
+		// Browsers set the multipart Content-Type with boundary themselves.
+	} else if (options.body !== undefined) {
+		headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
+	}
+
+	if (options.accept) {
+		headers['Accept'] = options.accept;
+	}
+
+	if (!options.skipAuth) {
+		const token = getAccessToken();
+		if (token) {
+			headers['Authorization'] = `Bearer ${token}`;
+		}
+	}
+
+	const init: RequestInit = {
+		method: options.method ?? 'GET',
+		headers,
+		signal: options.signal
+	};
+
+	if (options.formData) {
+		init.body = options.formData;
+	} else if (options.body !== undefined) {
+		init.body = JSON.stringify(options.body);
+	}
+
+	return fetch(`${LQ_AI_API_BASE_URL}${path}`, init);
+}
+
+async function refreshOnce(): Promise<boolean> {
+	const refresh_token = getRefreshToken();
+	if (!refresh_token) {
+		return false;
+	}
+	const res = await rawRequest('/auth/refresh', {
+		method: 'POST',
+		body: { refresh_token },
+		skipAuth: true,
+		skipRefresh: true
+	});
+	if (!res.ok) {
+		return false;
+	}
+	const data = (await res.json()) as TokenResponse;
+	setSession({
+		access_token: data.access_token,
+		refresh_token: data.refresh_token,
+		expires_in: data.expires_in
+	});
+	return true;
+}
+
+async function parseErrorBody(res: Response): Promise<ErrorBody | null> {
+	try {
+		return (await res.json()) as ErrorBody;
+	} catch {
+		return null;
+	}
+}
+
+function errorFor(status: number, body: ErrorBody | null): LQAIApiError {
+	const code = body?.detail?.code ?? `http_${status}`;
+	const message = body?.detail?.message ?? `Request failed with status ${status}`;
+	const details = body?.detail?.details;
+	if (status === 401) {
+		return new UnauthorizedError(message, details);
+	}
+	if (status === 403 && code === 'password_change_required') {
+		return new PasswordChangeRequiredError(message, details);
+	}
+	return new LQAIApiError(status, code, message, details);
+}
+
+/**
+ * JSON request: serialize body, parse JSON response, throw typed errors on
+ * non-2xx. Refresh-and-retry once on 401.
+ */
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+	let res = await rawRequest(path, options);
+
+	if (res.status === 401 && !options.skipRefresh && !options.skipAuth) {
+		const refreshed = await refreshOnce();
+		if (refreshed) {
+			res = await rawRequest(path, options);
+		} else {
+			clearSession();
+		}
+	}
+
+	if (!res.ok) {
+		const body = await parseErrorBody(res);
+		const err = errorFor(res.status, body);
+		if (err.status === 401) {
+			clearSession();
+		}
+		throw err;
+	}
+
+	if (res.status === 204) {
+		// No content
+		return undefined as T;
+	}
+
+	const contentType = res.headers.get('content-type') ?? '';
+	if (contentType.includes('application/json')) {
+		return (await res.json()) as T;
+	}
+	return (await res.text()) as unknown as T;
+}
+
+/**
+ * Streaming variant: returns the raw `Response` (after auth + refresh-on-401)
+ * so the caller can iterate `res.body`. Throws on non-OK before any bytes
+ * are returned.
+ */
+export async function apiStreamRequest(
+	path: string,
+	options: RequestOptions = {}
+): Promise<Response> {
+	let res = await rawRequest(path, { ...options, accept: 'text/event-stream' });
+
+	if (res.status === 401 && !options.skipRefresh && !options.skipAuth) {
+		const refreshed = await refreshOnce();
+		if (refreshed) {
+			res = await rawRequest(path, { ...options, accept: 'text/event-stream' });
+		} else {
+			clearSession();
+		}
+	}
+
+	if (!res.ok) {
+		const body = await parseErrorBody(res);
+		const err = errorFor(res.status, body);
+		if (err.status === 401) {
+			clearSession();
+		}
+		throw err;
+	}
+
+	return res;
+}
+
+/**
+ * Subscribe to the auth store: when the user signs out, this hook fires.
+ * Used by the layout to redirect to /lq-ai/login on revocation.
+ */
+export function onSignOut(handler: () => void): () => void {
+	if (!browser) {
+		return () => undefined;
+	}
+	const unsub = auth.subscribe((state) => {
+		if (!state.access_token) {
+			handler();
+		}
+	});
+	// Drop the initial fire if we already had no token.
+	const initial = get(auth);
+	if (initial.access_token) {
+		// no-op — first real change will fire correctly
+	}
+	return unsub;
+}

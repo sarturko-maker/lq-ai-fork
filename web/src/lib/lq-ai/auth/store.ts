@@ -1,0 +1,128 @@
+/**
+ * LQ.AI auth store.
+ *
+ * Holds the access token, refresh token, expiry timestamp, and the current
+ * user. Persists to `localStorage` under keys distinct from OpenWebUI's
+ * `token` key (per ADR 0008).
+ */
+import { writable, get, type Writable } from 'svelte/store';
+
+import type { User } from '../types';
+
+// Avoid `$app/environment` so this module is portable to vitest's node
+// runner without SvelteKit alias setup. Direct feature-detection on
+// `localStorage` is equivalent for our purposes.
+const browser =
+	typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+
+export interface AuthState {
+	access_token: string | null;
+	refresh_token: string | null;
+	/** Unix-millis when the access token expires. Null when no session. */
+	expires_at: number | null;
+	user: User | null;
+}
+
+const STORAGE_KEY = 'lq_ai_auth';
+
+const empty: AuthState = {
+	access_token: null,
+	refresh_token: null,
+	expires_at: null,
+	user: null
+};
+
+function loadInitial(): AuthState {
+	if (!browser) {
+		return empty;
+	}
+	try {
+		const raw = localStorage.getItem(STORAGE_KEY);
+		if (!raw) {
+			return empty;
+		}
+		const parsed = JSON.parse(raw) as Partial<AuthState>;
+		return {
+			access_token: parsed.access_token ?? null,
+			refresh_token: parsed.refresh_token ?? null,
+			expires_at: parsed.expires_at ?? null,
+			user: parsed.user ?? null
+		};
+	} catch {
+		return empty;
+	}
+}
+
+export const auth: Writable<AuthState> = writable(loadInitial());
+
+if (browser) {
+	auth.subscribe((value) => {
+		try {
+			if (value.access_token) {
+				localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+			} else {
+				localStorage.removeItem(STORAGE_KEY);
+			}
+		} catch {
+			// localStorage may be unavailable (private mode, quota); ignore.
+		}
+	});
+}
+
+/**
+ * Apply a successful login or refresh response to the store.
+ */
+export function setSession(params: {
+	access_token: string;
+	refresh_token?: string | null;
+	expires_in: number;
+	user?: User | null;
+}): void {
+	const now = Date.now();
+	auth.update((state) => ({
+		access_token: params.access_token,
+		refresh_token: params.refresh_token ?? state.refresh_token,
+		expires_at: now + params.expires_in * 1000,
+		user: params.user ?? state.user
+	}));
+}
+
+/**
+ * Update only the cached user (e.g. after `/users/me` or a password change
+ * that clears `must_change_password`).
+ */
+export function setUser(user: User | null): void {
+	auth.update((state) => ({ ...state, user }));
+}
+
+/**
+ * Clear the session entirely (logout, revocation, refresh failure).
+ */
+export function clearSession(): void {
+	auth.set(empty);
+}
+
+export function getAccessToken(): string | null {
+	return get(auth).access_token;
+}
+
+export function getRefreshToken(): string | null {
+	return get(auth).refresh_token;
+}
+
+export function getCurrentUser(): User | null {
+	return get(auth).user;
+}
+
+/**
+ * `true` when the access token is missing or within `marginSeconds` of
+ * expiry. The default 60-second margin gives the refresh call a
+ * safe window before the token actually expires.
+ */
+export function tokenIsStale(marginSeconds = 60): boolean {
+	const state = get(auth);
+	if (!state.access_token || !state.expires_at) {
+		return true;
+	}
+	return Date.now() + marginSeconds * 1000 >= state.expires_at;
+}
