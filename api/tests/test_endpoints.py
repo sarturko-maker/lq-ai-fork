@@ -87,6 +87,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/auth/change-password"),
     # B5 — backend chat endpoint wired through gateway (stateless pass-through)
     ("POST", "/api/v1/chats/{chat_id}/messages"),
+    # C1 — Skill Service: filesystem loading
+    ("GET", "/api/v1/skills"),
+    ("GET", "/api/v1/skills/{skill_name}"),
 }
 
 

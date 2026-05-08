@@ -587,6 +587,11 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Skill'}
+        '404':
+          description: No skill with that name is in the registry.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/skills/{skill_name}/fork:
     parameters:
@@ -1226,12 +1231,34 @@ components:
       required: [name, version, scope, title]
       properties:
         name: {type: string}
-        version: {type: string}
+        version:
+          type: string
+          description: >-
+            Skill version. Free-form to accommodate skills authored before
+            the formal authoring guide; the loader defaults to
+            ``"unversioned"`` when the source frontmatter omits this field.
         scope: {type: string, enum: [builtin, user, team]}
         title: {type: string}
         description: {type: string}
         tags: {type: array, items: {type: string}}
-        jurisdiction: {type: string}
+        jurisdiction:
+          type: string
+          description: >-
+            Free-form jurisdiction tag (e.g., ``us``, ``regime-aware``,
+            ``agnostic``). Surfaced verbatim from the skill's frontmatter.
+        minimum_inference_tier:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: >-
+            Inference-tier floor declared by the skill, if any. The gateway's
+            tier-floor enforcement (Task D1) consults this; C1 only surfaces
+            the value.
+        output_format:
+          type: string
+          description: >-
+            Skill's documented output format (e.g., ``report``, ``markdown``,
+            ``structured_checklist``, ``redline``). Free-form per the corpus.
 
     Skill:
       allOf:
