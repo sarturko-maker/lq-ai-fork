@@ -115,9 +115,7 @@ def _mock_backend_skill(
     if inputs_yaml:
         yaml_block += inputs_yaml
 
-    references = [
-        {"path": path, "content": content} for (path, content) in (reference or [])
-    ]
+    references = [{"path": path, "content": content} for (path, content) in (reference or [])]
 
     respx.get(f"{BACKEND_URL}/api/v1/internal/skills/{name}").mock(
         return_value=httpx.Response(
@@ -282,9 +280,7 @@ async def test_skill_assembly_with_input_substitution(
             "model": "smart",
             "messages": [{"role": "user", "content": "hello"}],
             "lq_ai_skills": ["alpha"],
-            "lq_ai_skill_inputs": {
-                "alpha": {"document": "the NDA", "perspective": "discloser"}
-            },
+            "lq_ai_skill_inputs": {"alpha": {"document": "the NDA", "perspective": "discloser"}},
         },
     )
     assert response.status_code == 200, response.text
@@ -306,9 +302,7 @@ async def test_skill_assembly_missing_required_input_returns_400(
     _mock_backend_skill(
         "alpha",
         body="Review {{document}}",
-        inputs_yaml=(
-            "inputs:\n  required:\n    - name: document\n      type: document\n"
-        ),
+        inputs_yaml=("inputs:\n  required:\n    - name: document\n      type: document\n"),
     )
 
     response = await client.post(

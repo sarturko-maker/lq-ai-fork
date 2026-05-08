@@ -107,9 +107,7 @@ async def test_forwards_skills_to_gateway(client: AsyncClient, db_user: User) ->
     """`skills` in MessageCreate becomes `lq_ai_skills` to the gateway."""
 
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
-        return_value=httpx.Response(
-            200, json=_success_payload(applied_skills=["nda-review"])
-        )
+        return_value=httpx.Response(200, json=_success_payload(applied_skills=["nda-review"]))
     )
     token = _bearer_for(db_user)
     await client.post(
@@ -133,9 +131,7 @@ async def test_forwards_skill_inputs_to_gateway(client: AsyncClient, db_user: Us
     """`skill_inputs` in MessageCreate becomes `lq_ai_skill_inputs`."""
 
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
-        return_value=httpx.Response(
-            200, json=_success_payload(applied_skills=["nda-review"])
-        )
+        return_value=httpx.Response(200, json=_success_payload(applied_skills=["nda-review"]))
     )
     token = _bearer_for(db_user)
     await client.post(
@@ -144,9 +140,7 @@ async def test_forwards_skill_inputs_to_gateway(client: AsyncClient, db_user: Us
             "content": "review this NDA",
             "model": "smart",
             "skills": ["nda-review"],
-            "skill_inputs": {
-                "nda-review": {"document": "<NDA text>", "perspective": "discloser"}
-            },
+            "skill_inputs": {"nda-review": {"document": "<NDA text>", "perspective": "discloser"}},
         },
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -159,9 +153,7 @@ async def test_forwards_skill_inputs_to_gateway(client: AsyncClient, db_user: Us
 
 @pytest.mark.integration
 @respx.mock
-async def test_no_skills_means_empty_extension_fields(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_no_skills_means_empty_extension_fields(client: AsyncClient, db_user: User) -> None:
     """A request without `skills` sends empty `lq_ai_skills` to the gateway."""
 
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -187,9 +179,7 @@ async def test_no_skills_means_empty_extension_fields(
 
 @pytest.mark.integration
 @respx.mock
-async def test_applied_skills_surfaces_in_response(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_applied_skills_surfaces_in_response(client: AsyncClient, db_user: User) -> None:
     """The gateway's `lq_ai_applied_skills` lands in the response body's
     `applied_skills`."""
 
@@ -215,9 +205,7 @@ async def test_applied_skills_surfaces_in_response(
 
 @pytest.mark.integration
 @respx.mock
-async def test_no_applied_skills_means_empty_list(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_no_applied_skills_means_empty_list(client: AsyncClient, db_user: User) -> None:
     """When the gateway doesn't surface applied_skills, the response shows []."""
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -239,9 +227,7 @@ async def test_no_applied_skills_means_empty_list(
 
 @pytest.mark.integration
 @respx.mock
-async def test_skill_not_found_propagates_to_404(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_skill_not_found_propagates_to_404(client: AsyncClient, db_user: User) -> None:
     """Gateway's `skill_not_found` (404) passes through as 404 to the API caller."""
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -273,9 +259,7 @@ async def test_skill_not_found_propagates_to_404(
 
 @pytest.mark.integration
 @respx.mock
-async def test_skill_fetch_failed_propagates_to_502(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_skill_fetch_failed_propagates_to_502(client: AsyncClient, db_user: User) -> None:
     """Gateway's `skill_fetch_failed` (502) passes through as 502."""
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -303,9 +287,7 @@ async def test_skill_fetch_failed_propagates_to_502(
 
 @pytest.mark.integration
 @respx.mock
-async def test_skill_input_missing_propagates_to_400(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_skill_input_missing_propagates_to_400(client: AsyncClient, db_user: User) -> None:
     """Gateway's `skill_input_missing` (400) passes through as 400."""
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(

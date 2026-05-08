@@ -140,7 +140,9 @@ async def db_session(test_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
         outer = await conn.begin()
         await conn.begin_nested()  # Initial SAVEPOINT
 
-        session = AsyncSession(bind=conn, expire_on_commit=False, join_transaction_mode="create_savepoint")
+        session = AsyncSession(
+            bind=conn, expire_on_commit=False, join_transaction_mode="create_savepoint"
+        )
 
         @event.listens_for(session.sync_session, "after_transaction_end")
         def restart_savepoint(sess, trans):

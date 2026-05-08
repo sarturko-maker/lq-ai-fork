@@ -343,17 +343,13 @@ def test_assemble_aggregates_missing_inputs_across_skills() -> None:
         name="alpha",
         title="Alpha",
         content_md="x",
-        content_yaml=(
-            "inputs:\n  required:\n    - name: doc_a\n"
-        ),
+        content_yaml=("inputs:\n  required:\n    - name: doc_a\n"),
     )
     b = Skill(
         name="beta",
         title="Beta",
         content_md="x",
-        content_yaml=(
-            "inputs:\n  required:\n    - name: doc_b\n"
-        ),
+        content_yaml=("inputs:\n  required:\n    - name: doc_b\n"),
     )
     with pytest.raises(SkillInputMissing) as exc_info:
         assemble_skill_prompt([a, b])
@@ -370,9 +366,7 @@ def test_assemble_optional_input_not_supplied_leaves_placeholder() -> None:
         name="alpha",
         title="Alpha",
         content_md="Optional: {{maybe}}",
-        content_yaml=(
-            "inputs:\n  optional:\n    - name: maybe\n"
-        ),
+        content_yaml=("inputs:\n  optional:\n    - name: maybe\n"),
     )
     out = assemble_skill_prompt([skill])
     # No raise — and the literal placeholder is preserved.

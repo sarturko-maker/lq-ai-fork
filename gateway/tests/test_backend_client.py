@@ -21,14 +21,12 @@ import respx
 from app.clients.backend import (
     BackendClient,
     BackendUnreachable,
+    Skill as ClientSkill,
     SkillCache,
     SkillFetchFailed,
     SkillNotFound,
     configure_backend_client,
     set_backend_client,
-)
-from app.clients.backend import (
-    Skill as ClientSkill,
 )
 
 # --- SkillCache --------------------------------------------------------------
@@ -178,9 +176,7 @@ async def test_get_skill_forwards_request_id_header() -> None:
 
     def _capture(request: httpx.Request) -> httpx.Response:
         captured["request_id"] = request.headers.get("X-Request-Id", "")
-        return httpx.Response(
-            200, json={"name": "alpha", "content_md": "x", "content_yaml": "y"}
-        )
+        return httpx.Response(200, json={"name": "alpha", "content_md": "x", "content_yaml": "y"})
 
     respx.get("http://api.test/api/v1/internal/skills/alpha").mock(side_effect=_capture)
     client = _client_with_respx()

@@ -208,12 +208,8 @@ def upgrade() -> None:
     )
 
     op.execute("CREATE INDEX idx_audit_log_timestamp ON audit_log (timestamp DESC)")
-    op.execute(
-        "CREATE INDEX idx_audit_log_user_timestamp ON audit_log (user_id, timestamp DESC)"
-    )
-    op.execute(
-        "CREATE INDEX idx_audit_log_resource ON audit_log (resource_type, resource_id)"
-    )
+    op.execute("CREATE INDEX idx_audit_log_user_timestamp ON audit_log (user_id, timestamp DESC)")
+    op.execute("CREATE INDEX idx_audit_log_resource ON audit_log (resource_type, resource_id)")
     op.execute(
         """
         CREATE INDEX idx_audit_log_privileged
@@ -279,9 +275,7 @@ def upgrade() -> None:
         ),
     )
 
-    op.execute(
-        "CREATE INDEX idx_inference_log_timestamp ON inference_routing_log (timestamp DESC)"
-    )
+    op.execute("CREATE INDEX idx_inference_log_timestamp ON inference_routing_log (timestamp DESC)")
     op.execute(
         """
         CREATE INDEX idx_inference_log_user

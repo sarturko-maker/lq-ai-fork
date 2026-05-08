@@ -28,16 +28,12 @@ async def create_kb(request: Request) -> JSONResponse:
 
 @router.get("/{kb_id}")
 async def get_kb(request: Request, kb_id: str) -> JSONResponse:
-    return not_implemented(
-        request, next_task=_C6, endpoint="GET /api/v1/knowledge-bases/{kb_id}"
-    )
+    return not_implemented(request, next_task=_C6, endpoint="GET /api/v1/knowledge-bases/{kb_id}")
 
 
 @router.patch("/{kb_id}")
 async def update_kb(request: Request, kb_id: str) -> JSONResponse:
-    return not_implemented(
-        request, next_task=_C6, endpoint="PATCH /api/v1/knowledge-bases/{kb_id}"
-    )
+    return not_implemented(request, next_task=_C6, endpoint="PATCH /api/v1/knowledge-bases/{kb_id}")
 
 
 @router.delete("/{kb_id}")

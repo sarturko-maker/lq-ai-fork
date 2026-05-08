@@ -27,9 +27,7 @@ async def create_prompt(request: Request) -> JSONResponse:
 
 @router.get("/{prompt_id}")
 async def get_prompt(request: Request, prompt_id: str) -> JSONResponse:
-    return not_implemented(
-        request, next_task=_D7, endpoint="GET /api/v1/saved-prompts/{prompt_id}"
-    )
+    return not_implemented(request, next_task=_D7, endpoint="GET /api/v1/saved-prompts/{prompt_id}")
 
 
 @router.patch("/{prompt_id}")

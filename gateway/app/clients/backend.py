@@ -233,9 +233,7 @@ class BackendClient:
             self._client = client
             self._owns_client = False
         else:
-            default_headers = (
-                {GATEWAY_KEY_HEADER: gateway_key} if gateway_key else {}
-            )
+            default_headers = {GATEWAY_KEY_HEADER: gateway_key} if gateway_key else {}
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
                 timeout=timeout,
@@ -392,9 +390,7 @@ def configure_backend_client(
     resolved_key = gateway_key if gateway_key is not None else os.environ.get(ENV_GATEWAY_KEY, "")
     if cache_ttl_seconds is None:
         env_ttl = os.environ.get(ENV_CACHE_TTL)
-        cache_ttl_seconds = (
-            float(env_ttl) if env_ttl else DEFAULT_CACHE_TTL_SECONDS
-        )
+        cache_ttl_seconds = float(env_ttl) if env_ttl else DEFAULT_CACHE_TTL_SECONDS
     cache = SkillCache(ttl_seconds=cache_ttl_seconds)
 
     _client = BackendClient(
@@ -442,8 +438,6 @@ async def close_backend_client() -> None:
 
 
 __all__ = [
-    "BackendClient",
-    "BackendUnreachable",
     "DEFAULT_API_URL",
     "DEFAULT_CACHE_TTL_SECONDS",
     "DEFAULT_TIMEOUT_SECONDS",
@@ -451,6 +445,8 @@ __all__ = [
     "ENV_CACHE_TTL",
     "ENV_GATEWAY_KEY",
     "GATEWAY_KEY_HEADER",
+    "BackendClient",
+    "BackendUnreachable",
     "Skill",
     "SkillCache",
     "SkillFetchFailed",

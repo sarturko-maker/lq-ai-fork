@@ -69,7 +69,6 @@ from app.providers import (
     ProviderNetworkError,
     ProviderUnsupportedError,
 )
-from app.skills import assemble_skill_prompt
 from app.router import (
     ChatCompletionRoutedResult,
     ModelResolutionError,
@@ -85,6 +84,7 @@ from app.routing_log import (
     NullRoutingLogWriter,
     RoutingLogWriter,
 )
+from app.skills import assemble_skill_prompt
 
 logger = logging.getLogger(__name__)
 
