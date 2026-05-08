@@ -105,6 +105,13 @@ services:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
       AZURE_OPENAI_RESOURCE: ${AZURE_OPENAI_RESOURCE:-}
+      # B6 partial — Ollama (Mode-2 / Tier-1). Forwarded so the
+      # gateway.yaml's ${OLLAMA_BASE_URL:-http://ollama:11434}
+      # placeholder resolves at config-load time. Operators running
+      # Ollama on the host set OLLAMA_BASE_URL=http://host.docker.internal:11434
+      # in their .env; default reaches the in-Compose `ollama` service
+      # (`--profile local up`).
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       # Observability
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
@@ -260,6 +267,17 @@ services:
       - ollamadata:/root/.ollama
     ports:
       - "${OLLAMA_HOST_PORT:-11434}:11434"
+    healthcheck:
+      # Ollama exposes /api/tags as the cheapest GET; a 200 means the
+      # server is up (models are loaded lazily on first inference, so
+      # we don't probe model presence here — `docker compose exec
+      # ollama ollama pull <model>` is the operator's responsibility).
+      # The ollama/ollama image ships /bin/ollama itself; we shell out
+      # to it instead of curl (which the image doesn't ship).
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
     # GPU acceleration is operator-configured; uncomment when nvidia-docker
     # is available.
     # deploy:
