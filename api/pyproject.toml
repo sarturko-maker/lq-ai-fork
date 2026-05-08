@@ -57,6 +57,16 @@ dev = [
     "mypy>=1.11",
 ]
 
+# Note: a `[project.scripts]` console-script entry was considered for
+# the CLI but the current Dockerfile installs the package metadata only
+# (the `app/` source tree is `COPY`'d in afterward and imported from
+# /app via WORKDIR). A console script would resolve `app.cli:main` at
+# entry-point invocation time but `app` is not on the site-packages
+# path, so the script fails with ModuleNotFoundError. The canonical
+# invocation in docs/quickstart.md is `python -m app.cli` which works
+# from /app/. If/when the Dockerfile is changed to install the real
+# wheel, a `[project.scripts]` block can be reintroduced here.
+
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 

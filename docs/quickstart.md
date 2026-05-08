@@ -322,7 +322,7 @@ docker compose up -d
 docker compose logs api | grep "First-run admin password"
 ```
 
-For an established deployment, the admin password is reset via `docker compose exec api python -m lq_ai.cli reset-admin-password`.
+For an established deployment, the admin password is reset via `docker compose exec api python -m app.cli reset-admin-password`. The CLI prints the new password and sets `must_change_password=true` on the user, so they will be forced to set a fresh password on the next login.
 
 ### Chat returns "no model configured"
 

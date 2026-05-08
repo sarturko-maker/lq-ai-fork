@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-07 (end of session 2; B1 + B3 just landed)
+> **Last updated:** 2026-05-08 (B2 landed; B4 in flight in parallel worktree)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -13,14 +13,14 @@
 | Phase | Done | In progress | Next |
 |---|---|---|---|
 | A — Foundation scaffolding | A1, A2, A3, A4 | A5 (partial — env-var branding only) | — |
-| B — Core authentication and routing | B1, B3 | — | **B2 + B4 next (parallel)** then B5; B6 optional |
+| B — Core authentication and routing | B1, B2, B3 | B4 (parallel worktree) | B5 after B4; B6 optional |
 | C — Capability layer | — | — | After B5 |
 | D — M1 differentiators | — | — | After C |
 | E — Procurement and release | — | — | After D |
 
-**Tests:** 51 passing in api/ (28 skipped pending DATABASE_URL); 57 passing in gateway/ (1 skipped pending ANTHROPIC_API_KEY).
+**Tests:** 101 passing in api/ (B2 added 22 tests: 16 admin-bootstrap + 5 CLI + 1 inherited gate test); 57 passing in gateway/ (1 skipped pending ANTHROPIC_API_KEY).
 **Stack:** `docker compose up` brings 6 services (postgres, redis, minio, gateway, api, web) to healthy in ~30s.
-**Migration:** `make migrate` applies `0001_initial.py` cleanly; reversible.
+**Migration:** `make migrate` applies `0001_initial.py` and `0002_add_must_change_password.py` cleanly; both reversible.
 
 ---
 
@@ -56,6 +56,27 @@ Bcrypt password hashing + JWT access tokens (15min) + opaque refresh tokens (7d,
 
 End-to-end verification: 401 confirmed against the running stack with no matching user.
 
+### B2 — First-run admin user setup ✅
+
+Migration `0002_add_must_change_password.py` adds `users.must_change_password BOOLEAN NOT NULL DEFAULT FALSE` (reversible). On API startup, `app.admin_bootstrap.ensure_first_run_admin` creates an admin (`admin@lq.ai` by default; configurable via `LQ_AI_FIRST_RUN_ADMIN_EMAIL`) with `must_change_password=True` and a 24-character CSPRNG password. The lifespan handler in `main.py` logs the password at WARNING level once on the actual creation event ("First-run admin password (record it now and rotate on first login): …"), matching the grep pattern in `docs/quickstart.md`. Race-safe via `INSERT ... ON CONFLICT DO NOTHING`.
+
+`POST /api/v1/auth/change-password` (B1 token-protected) verifies the current password, enforces a 12-char minimum and a "must differ from current" rule, hashes the new password, clears `must_change_password`, and revokes every active session for the user. The login response and `/users/me` payload now expose `must_change_password` so the client can route. The forced-change gate is a `get_active_user` dependency wired at the router level: every authenticated router except `/auth/*` and `/users/me` returns HTTP 403 with `{ "detail": { "code": "password_change_required", ... } }` until the user clears the flag.
+
+The CLI **landed in this task** (originally listed as deferred-or-later): `python -m app.cli reset-admin-password [--email EMAIL]` rotates the password, sets `must_change_password=True`, prints the new password to stdout, and revokes any active sessions. Exit codes: 0 success, 2 user-error (no admin, missing email, multiple admins).
+
+22 new tests: 16 `test_admin_bootstrap.py` (3 unit on `generate_password`, 13 integration covering bootstrap idempotency + change-password happy/error paths + the gate + the end-to-end flow); 5 `test_cli.py` (CLI happy path + each error branch + session revocation); the `test_endpoints.py` 501-stub fixture was upgraded to authenticate every request (the auth gate now applies to those routers).
+
+End-to-end verification on the running stack:
+1. Fresh `docker compose down -v && up -d && make migrate` → API logs `WARNING:app.main:First-run admin password (record it now and rotate on first login): <pw>`.
+2. `POST /auth/login` with the printed password → 200 with `user.must_change_password: true`.
+3. `GET /api/v1/projects` → 403 `password_change_required`.
+4. `POST /auth/change-password` (current=printed, new=permanent) → 204.
+5. Login with old password → 401; login with new password → `user.must_change_password: false`.
+6. `GET /api/v1/projects` → 501 (stub passes through gate).
+7. `docker compose exec api python -m app.cli reset-admin-password` → prints new password and re-arms the gate; subsequent login surfaces `must_change_password: true` again.
+
+Drift flagged: OpenAPI sketch updated with `/auth/change-password` path, `ChangePasswordRequest` schema, and `must_change_password` added to the `User` schema (now in `required`). `docs/db-schema.md` updated with the new column. `docs/quickstart.md:325` updated from the `lq_ai.cli` placeholder to `python -m app.cli reset-admin-password` (the canonical invocation in this codebase; the package is named `app`, not `lq_ai`).
+
 ### B3 — Anthropic provider adapter (gateway) ✅
 
 ProviderAdapter abstract base + Pydantic OpenAI schema (with LQ.AI extensions: routed_inference_tier, routed_provider, cost_estimate, anonymization_applied). AnthropicAdapter translates OpenAI Chat Completions ↔ Anthropic Messages format (system-message extraction, stop-reason mapping, token-usage translation, streaming SSE chunk translation). Hand-rolled httpx — no `anthropic` SDK dep per PRD §4. Wired into inference.py with B3-temporary "Anthropic-only" routing (B4 replaces with the real router).
@@ -67,21 +88,6 @@ End-to-end verification: 503 `provider_unavailable` confirmed when no key is set
 ---
 
 ## Tasks ahead
-
-### B2 — First-run admin user setup (next, ~2-3h)
-
-**Depends on:** B1.
-
-**Scope:** On first start, create admin user with a randomly generated password. Print password to API container logs (matching the quickstart's expected behavior). Force password change on first login.
-
-**Verification:** Fresh deployment → admin password in logs → login → forced password change → permanent password works.
-
-**Notes for the agent:**
-- B1 has the `User` model and password-hashing utilities ready
-- "First start" detection: check if any user exists with `is_admin=True`; if not, create one
-- Print to logs (don't email) — matches quickstart and operator expectation
-- Forced password change: store a flag like `must_change_password=True` on the user (likely needs a new column on `users` via a migration), or stash a one-time JWT claim
-- Quickstart text references `python -m lq_ai.cli reset-admin-password` (docs/quickstart.md:325) — that CLI doesn't exist yet; flag whether to land it now or as a follow-up
 
 ### B4 — Gateway router + alias resolution + tier derivation (parallel with B2, ~5-7h)
 
@@ -120,11 +126,11 @@ End-to-end verification: 503 `provider_unavailable` confirmed when no key is set
 
 These were flagged during execution but deliberately deferred. Each has an owning task — when that task lands, it pulls the deferred item with it. **Per Kevin's standing instruction: address tech debt along the way; don't foist on the community.**
 
-### Deferred to **B2** (first-run admin)
+### ~~Deferred to B2~~ — landed in B2
 
-| Item | Surface | Notes |
-|---|---|---|
-| `lq_ai.cli reset-admin-password` CLI | quickstart.md:325 references it; doesn't exist yet | Decide whether to land in B2 or as a follow-up. If B2, it's a small `argparse` script that connects to the DB and resets the admin password. |
+| Item | Disposition |
+|---|---|
+| `lq_ai.cli reset-admin-password` CLI | **Landed in B2 as `python -m app.cli reset-admin-password`.** The package is named `app`, not `lq_ai`, in this codebase; quickstart.md:325 was updated to the correct invocation. Argparse-based, ~150 LOC, 5 integration tests. A `[project.scripts]` console-script entry was considered but pulled because the current Dockerfile installs only the package metadata (the `app/` source tree is `COPY`'d in afterward); the console script would resolve `app.cli:main` against an empty wheel and fail. `python -m app.cli` works correctly because the API container's WORKDIR is `/app`. Reintroduce the console script when the Dockerfile installs the real wheel. |
 
 ### Deferred to **B4** (gateway router + tier derivation)
 
@@ -192,6 +198,7 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 | Item | Notes |
 |---|---|
 | Worktree GC | The Claude Code harness still considers some agent worktrees "owned" — they don't auto-clean. `git worktree list` shows them; `git worktree remove --force` requires `-f -f` per git's safety mechanism. Cosmetic, not blocking. |
+| Dockerfile installs metadata-only wheel | `api/Dockerfile`'s `pip install --no-cache-dir .` runs before `COPY app/ ./app/`, so the installed wheel has no source files (the metadata installs and the source is imported via WORKDIR=/app). `python -m app.cli` works; `[project.scripts]` console-scripts do not because their stub-script imports `app.cli` from site-packages. Out of scope to fix in B2; documented inline in `api/pyproject.toml`. |
 
 ---
 
@@ -253,14 +260,12 @@ When you resume:
 1. **Check git status is clean** and you're at HEAD of origin/main:
    ```bash
    git status   # expect: "nothing to commit, working tree clean"
-   git log -1 --oneline   # expect the M1-PROGRESS doc commit
+   git log -1 --oneline   # expect the most recent merge / progress commit
    ```
 2. **Read this doc top to bottom** to recover state.
-3. **Scan `docs/M1-IMPLEMENTATION-ORDER.md`** for the B2 and B4 task specs (they have effort estimates and verification criteria).
-4. **Spawn B2 + B4 in parallel** via `Agent` calls with `isolation: "worktree"` — same pattern as A3+A4 and B1+B3 in this session. The agent prompts should reference this doc + the implementation order + the relevant PRD sections + the deferred items each task should pull along (per the table above).
-5. **After B2 + B4 land**, verify the integrated stack, then proceed to B5 (which ties them together end-to-end).
-
-That's it — clean continuation.
+3. **B2 is done.** B4 should be in flight in a sibling worktree — merge it back, verify, then proceed to B5.
+4. **B5** is the next solo task: it ties the backend chat path (currently a 501 stub gated behind `ActiveUser`) to the gateway's now-real router and adapter. It's a sequence: backend chat handler → `GatewayClient.chat_completion(...)` → gateway `/v1/chat/completions` → AnthropicAdapter → response back through the layers.
+5. **B6 is optional** for M1 baseline — recommended order is OpenAI first (largest user base), then Ollama (Mode 2 unlock), then Vertex/Bedrock.
 
 ---
 
