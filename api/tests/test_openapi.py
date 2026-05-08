@@ -32,7 +32,11 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/projects",
         "/api/v1/projects/{project_id}",
         "/api/v1/projects/{project_id}/skills",
+        # C7 — detach skill by name (extends the sketch).
+        "/api/v1/projects/{project_id}/skills/{skill_name}",
         "/api/v1/projects/{project_id}/files",
+        # C7 — detach file by id (extends the sketch).
+        "/api/v1/projects/{project_id}/files/{file_id}",
         # chats + messages
         "/api/v1/chats",
         "/api/v1/chats/{chat_id}",
@@ -64,7 +68,11 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
 
 @pytest.mark.unit
 async def test_openapi_paths_match_sketch() -> None:
-    """All paths from `backend-openapi.yaml` are registered (30 from A4 + B2's change-password)."""
+    """All paths from `backend-openapi.yaml` are registered.
+
+    Counts: 30 from A4 + 1 from B2 (change-password) + 2 from C7
+    (project file/skill detach by id) = 33 total.
+    """
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/openapi.json")
@@ -76,8 +84,7 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 31 distinct /api/v1 paths after B2 (the original 30 plus /auth/change-password).
-    assert len(actual) == 31
+    assert len(actual) == 33
 
 
 @pytest.mark.unit

@@ -95,6 +95,16 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/files/{file_id}"),
     ("GET", "/api/v1/files/{file_id}/content"),
     ("DELETE", "/api/v1/files/{file_id}"),
+    # C7 — Project service
+    ("POST", "/api/v1/projects"),
+    ("GET", "/api/v1/projects"),
+    ("GET", "/api/v1/projects/{project_id}"),
+    ("PATCH", "/api/v1/projects/{project_id}"),
+    ("DELETE", "/api/v1/projects/{project_id}"),
+    ("POST", "/api/v1/projects/{project_id}/files"),
+    ("DELETE", "/api/v1/projects/{project_id}/files/{file_id}"),
+    ("POST", "/api/v1/projects/{project_id}/skills"),
+    ("DELETE", "/api/v1/projects/{project_id}/skills/{skill_name}"),
 }
 
 
@@ -121,11 +131,15 @@ ROUTES = _api_v1_routes()
 
 @pytest.mark.unit
 async def test_route_inventory_is_nonempty() -> None:
-    """Sanity: at least 29 (method, path) pairs are registered under /api/v1."""
-    # 29 distinct paths in the sketch; multiple methods per path gives more
-    # registrations than that. Lower bound is a safety check against
-    # accidentally dropping the include_router calls.
-    assert len(ROUTES) >= 29
+    """Sanity: stub routes still exist under /api/v1.
+
+    The bound is intentionally loose — as tasks land, they migrate
+    routes from this 501-stub set into ``IMPLEMENTED_ROUTES``. The
+    primary purpose of this assertion is to catch the failure mode
+    of accidentally dropping all the include_router calls. >=15 is
+    well below the count after C-phase wave-2 lands.
+    """
+    assert len(ROUTES) >= 15
 
 
 @pytest_asyncio.fixture

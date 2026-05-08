@@ -236,3 +236,143 @@ async def test_files_size_nonneg_check(db_session: AsyncSession) -> None:
     with pytest.raises(IntegrityError):
         await db_session.flush()
     await db_session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# C7 — projects + project_files + project_skills (migration 0004)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_projects_tables_exist(db_session: AsyncSession) -> None:
+    """`projects`, `project_files`, `project_skills` exist after 0004."""
+
+    expected = {"projects", "project_files", "project_skills"}
+    result = await db_session.execute(
+        text(
+            "SELECT tablename FROM pg_tables "
+            "WHERE schemaname = 'public' AND tablename = ANY(:names)"
+        ),
+        {"names": list(expected)},
+    )
+    found = {row[0] for row in result.fetchall()}
+    assert found == expected, f"missing tables: {expected - found}"
+
+
+@pytest.mark.integration
+async def test_projects_indexes_exist(db_session: AsyncSession) -> None:
+    """The expected indexes from migration 0004 are present."""
+
+    expected = {
+        "idx_projects_owner_active",
+        "idx_projects_slug_owner_active",
+        "idx_project_files_file",
+        "idx_project_skills_skill",
+    }
+    result = await db_session.execute(
+        text(
+            "SELECT indexname FROM pg_indexes "
+            "WHERE schemaname = 'public' AND indexname = ANY(:names)"
+        ),
+        {"names": list(expected)},
+    )
+    found = {row[0] for row in result.fetchall()}
+    assert found == expected, f"missing indexes: {expected - found}"
+
+
+@pytest.mark.integration
+async def test_files_project_id_fk_exists(db_session: AsyncSession) -> None:
+    """The C4-deferred FK on files.project_id was added by 0004."""
+
+    result = await db_session.execute(
+        text("SELECT conname FROM pg_constraint WHERE conname = 'fk_files_project_id'")
+    )
+    assert result.scalar_one_or_none() == "fk_files_project_id"
+
+
+@pytest.mark.integration
+async def test_projects_privileged_implies_tier_check(db_session: AsyncSession) -> None:
+    """privileged=true requires minimum_inference_tier IS NOT NULL (DB-layer)."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models import Project, User
+
+    user = User(email=f"proj-chk-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
+    db_session.add(user)
+    await db_session.flush()
+
+    # privileged=true with no tier → CHECK violation.
+    bad = Project(
+        owner_id=user.id,
+        name="bad",
+        slug="bad",
+        privileged=True,
+        minimum_inference_tier=None,
+    )
+    db_session.add(bad)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_projects_tier_range_check(db_session: AsyncSession) -> None:
+    """minimum_inference_tier must be NULL or in 1-5 (DB-layer)."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models import Project, User
+
+    user = User(email=f"proj-tier-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
+    db_session.add(user)
+    await db_session.flush()
+
+    bad = Project(
+        owner_id=user.id,
+        name="bad",
+        slug="bad-tier",
+        privileged=False,
+        minimum_inference_tier=7,
+    )
+    db_session.add(bad)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_files_project_fk_set_null_on_delete(
+    db_session: AsyncSession,
+) -> None:
+    """ON DELETE SET NULL: deleting a project nulls files.project_id."""
+    from app.models import File, Project, User
+
+    user = User(email=f"fk-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
+    db_session.add(user)
+    await db_session.flush()
+
+    project = Project(
+        owner_id=user.id,
+        name="P",
+        slug=f"p-{uuid.uuid4().hex[:6]}",
+    )
+    db_session.add(project)
+    await db_session.flush()
+
+    f = File(
+        owner_id=user.id,
+        project_id=project.id,
+        filename="x.pdf",
+        mime_type="application/pdf",
+        size_bytes=10,
+        hash_sha256="0" * 64,
+        storage_path="abc",
+    )
+    db_session.add(f)
+    await db_session.flush()
+    assert f.project_id == project.id
+
+    # Delete the project; the FK should NULL out files.project_id.
+    await db_session.delete(project)
+    await db_session.flush()
+    await db_session.refresh(f)
+    assert f.project_id is None
