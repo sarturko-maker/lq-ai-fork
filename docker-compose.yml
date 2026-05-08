@@ -103,10 +103,13 @@ services:
       # Operational
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LQ_AI_DEV_MODE: ${LQ_AI_DEV_MODE:-false}
-    # gateway.yaml lands when Task A3 implements config loading; for now the
-    # scaffold service starts without it and /ready returns 503.
-    # volumes:
-    #   - ./gateway.yaml:/etc/gateway.yaml:ro
+    # Mount the operator's gateway.yaml at /etc/gateway.yaml. For dev, fall
+    # back to gateway.yaml.example so a fresh `docker compose up` works
+    # out-of-the-box. Operators copy the example to gateway.yaml and edit
+    # for their deployment; the .env can override GATEWAY_CONFIG_FILE to
+    # point at the operator copy.
+    volumes:
+      - ${GATEWAY_CONFIG_FILE:-./gateway.yaml.example}:/etc/gateway.yaml:ro
     ports:
       - "${GATEWAY_HOST_PORT:-8001}:8001"
     healthcheck:

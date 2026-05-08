@@ -79,7 +79,10 @@ providers:
     type: vertex
     base_url: https://us-central1-aiplatform.googleapis.com
     api_key_env: GOOGLE_APPLICATION_CREDENTIALS  # path to service-account JSON
-    project_id: ${GCP_PROJECT_ID}
+    # `:-` default lets the gateway load even when GCP_PROJECT_ID is unset
+    # (fresh `docker compose up` works without GCP credentials). Operators
+    # routing to Vertex set GCP_PROJECT_ID in their .env.
+    project_id: ${GCP_PROJECT_ID:-disabled}
     region: us-central1
     tier: 3  # Vertex routes through customer's GCP project; ZDR by GCP terms
     models:
@@ -88,7 +91,7 @@ providers:
 
   - name: bedrock
     type: bedrock
-    base_url: https://bedrock-runtime.${AWS_REGION}.amazonaws.com
+    base_url: https://bedrock-runtime.${AWS_REGION:-us-east-1}.amazonaws.com
     aws_region: us-east-1
     aws_access_key_env: AWS_ACCESS_KEY_ID
     aws_secret_key_env: AWS_SECRET_ACCESS_KEY
@@ -99,7 +102,9 @@ providers:
 
   - name: azure-openai
     type: azure_openai
-    base_url: https://${AZURE_OPENAI_RESOURCE}.openai.azure.com
+    # `:-` default lets the gateway load without an Azure resource configured;
+    # operators routing to Azure set AZURE_OPENAI_RESOURCE in their .env.
+    base_url: https://${AZURE_OPENAI_RESOURCE:-disabled}.openai.azure.com
     api_key_env: AZURE_OPENAI_API_KEY
     api_version: '2024-08-01-preview'
     tier: 3  # Azure OpenAI under customer's Azure subscription
@@ -314,7 +319,7 @@ telemetry:
     enabled: ${OTEL_ENABLED:-false}
     endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
     service_name: lq-ai-gateway
-    service_version: ${LQ_AI_VERSION}
+    service_version: ${LQ_AI_VERSION:-0.1.0}
     # The gateway emits traces for: every inference request
     # (with provider, model, tier, latency, cost), every
     # refusal (with reason), every fallback (with both
