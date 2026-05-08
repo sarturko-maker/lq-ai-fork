@@ -36,7 +36,6 @@ from app.errors import (
 )
 from app.main import _lqai_error_handler, app
 
-
 # --- Construction & envelope shape -------------------------------------------
 
 

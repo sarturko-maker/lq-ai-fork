@@ -43,7 +43,6 @@ from app.errors import (
 )
 from app.main import app
 
-
 # --- Construction & envelope shape -------------------------------------------
 
 
@@ -70,9 +69,7 @@ def test_envelope_uses_detail_wrapper_with_inner_code_message_details() -> None:
 @pytest.mark.unit
 def test_envelope_carries_empty_details_when_none_supplied() -> None:
     err = NotFound("nope")
-    assert err.to_envelope() == {
-        "detail": {"code": "not_found", "message": "nope", "details": {}}
-    }
+    assert err.to_envelope() == {"detail": {"code": "not_found", "message": "nope", "details": {}}}
 
 
 @pytest.mark.unit

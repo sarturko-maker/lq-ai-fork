@@ -599,9 +599,7 @@ async def test_send_message_streaming_pre_frame_error_emits_error_frame(
     The HTTP status stays 200 (SSE convention: errors are in-band).
     """
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
-        return_value=httpx.Response(
-            400, json={"error": {"code": "invalid_model", "message": "no"}}
-        )
+        return_value=httpx.Response(400, json={"error": {"code": "invalid_model", "message": "no"}})
     )
     token = _bearer_for(db_user)
 
