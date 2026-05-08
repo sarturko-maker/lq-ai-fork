@@ -43,6 +43,7 @@ from app.security import (
     create_access_token,
     create_mfa_token,
     create_refresh_token,
+    hash_password,
     refresh_token_matches,
     verify_password,
 )
@@ -84,6 +85,7 @@ class UserPublic(BaseModel):
     display_name: str | None = None
     is_admin: bool
     mfa_enabled: bool
+    must_change_password: bool = False
     created_at: datetime
     last_login_at: datetime | None = None
 
@@ -95,6 +97,7 @@ class UserPublic(BaseModel):
             display_name=user.display_name,
             is_admin=user.is_admin,
             mfa_enabled=user.mfa_enabled,
+            must_change_password=user.must_change_password,
             created_at=user.created_at,
             last_login_at=user.last_login_at,
         )
@@ -132,6 +135,18 @@ class MfaChallenge(BaseModel):
 
     mfa_token: str
     methods: list[str]
+
+
+class ChangePasswordRequest(BaseModel):
+    """`ChangePasswordRequest` schema from backend-openapi.yaml.
+
+    Both the current (last-known) password and the new password are
+    required. The current password gates the change so a stolen access
+    token alone cannot rotate credentials — see PRD §5.1.
+    """
+
+    current_password: str = Field(min_length=1, max_length=1024)
+    new_password: str = Field(min_length=1, max_length=1024)
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +371,86 @@ async def logout(
         .values(revoked_at=_utcnow())
     )
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# /auth/change-password — set a new password for the calling user.
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/change-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Change the calling user's password",
+    responses={
+        204: {"description": "Password changed successfully"},
+        400: {"description": "New password fails policy check"},
+        401: {"description": "Current password is wrong"},
+    },
+)
+async def change_password(
+    payload: ChangePasswordRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """POST /api/v1/auth/change-password.
+
+    Bearer-authenticated; the bearer token's user is the one whose password
+    is being changed. The current password is required (defense against
+    a stolen access token; an attacker who only has the token cannot
+    rotate the credentials underneath the legitimate user).
+
+    Behavior:
+    - Verifies `current_password` against the stored hash.
+    - Validates `new_password` against the configured minimum length and
+      "must differ from current" policy.
+    - Hashes and stores the new password.
+    - Clears `must_change_password` (the first-run forced-change flag).
+    - Revokes ALL active sessions for the user — the caller must log in
+      again with the new password. This is intentional: it invalidates
+      any session that may have been spawned with the old credential.
+
+    Returns 204 on success, 401 on wrong current password, 400 on policy
+    violation. The response body for 400 names the violated rule so the
+    UI can render a usable message.
+    """
+    settings = get_settings()
+
+    if not verify_password(payload.current_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect",
+        )
+
+    new_password = payload.new_password
+    if len(new_password) < settings.password_min_length:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(f"New password must be at least {settings.password_min_length} characters."),
+        )
+
+    if new_password == payload.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must differ from the current password.",
+        )
+
+    # Hash and persist. Clear the forced-change flag in the same transaction
+    # so a crash mid-way doesn't leave the user in an inconsistent state.
+    user.hashed_password = hash_password(new_password)
+    user.must_change_password = False
+
+    # Revoke all active sessions — the user must re-authenticate. This is
+    # the same pattern as /auth/logout; we don't reuse the handler so the
+    # behavior is explicit.
+    await db.execute(
+        update(UserSession)
+        .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
+        .values(revoked_at=_utcnow())
+    )
+    await db.commit()
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

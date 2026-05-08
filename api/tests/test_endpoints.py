@@ -17,18 +17,31 @@ stubs continue to honor the contract:
 This test enumerates the registered routes via `app.routes` and exercises
 every one EXCEPT those whose implementing task has shipped (tracked in
 `IMPLEMENTED_ROUTES` below). Implemented routes have their own dedicated
-test files (e.g., `test_auth.py` for B1).
+test files (e.g., `test_auth.py` for B1, `test_change_password.py` for B2).
+
+Most stub routers are mounted under the `ActiveUser` dependency since
+Task B2 — they require a valid bearer token whose user has cleared the
+must-change-password gate. Tests therefore mint a JWT for an inserted
+test user (with `must_change_password=False`) and pass it on every
+request.
 """
 
 from __future__ import annotations
 
 import re
+import uuid
+from collections.abc import AsyncIterator
 
 import pytest
+import pytest_asyncio
 from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import get_db
 from app.main import app
+from app.models.user import User
+from app.security import create_access_token, hash_password
 
 # Substitution table for path parameters when exercising stubs.
 # Any UUID-shaped parameter gets a fixed UUID v4; named params get a
@@ -70,6 +83,8 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/auth/refresh"),
     ("POST", "/api/v1/auth/logout"),
     ("GET", "/api/v1/users/me"),
+    # B2 — first-run admin + forced password change
+    ("POST", "/api/v1/auth/change-password"),
 }
 
 
@@ -103,19 +118,62 @@ async def test_route_inventory_is_nonempty() -> None:
     assert len(ROUTES) >= 29
 
 
-@pytest.mark.unit
+@pytest_asyncio.fixture
+async def stub_test_user(db_session: AsyncSession) -> User:
+    """Insert a user with must_change_password=False so stub tests can pass the B2 gate."""
+    user = User(
+        email=f"stub-{uuid.uuid4().hex[:8]}@example.com",
+        display_name="Stub Test User",
+        hashed_password=hash_password("correct-horse-battery-staple"),
+        is_admin=False,
+        mfa_enabled=False,
+        must_change_password=False,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    return user
+
+
+@pytest_asyncio.fixture
+async def stub_client(
+    db_session: AsyncSession, stub_test_user: User
+) -> AsyncIterator[tuple[AsyncClient, str]]:
+    """Async HTTP client + a bearer token good for the stub tests' authenticated routers."""
+
+    async def _override() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override
+    token = create_access_token(
+        stub_test_user.id, stub_test_user.email, is_admin=stub_test_user.is_admin
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac, token
+    app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("method", "path_template", "path"),
     ROUTES,
     ids=[f"{m} {p}" for (m, p, _) in ROUTES],
 )
 async def test_endpoint_returns_canonical_501_body(
-    method: str, path_template: str, path: str
+    stub_client: tuple[AsyncClient, str],
+    method: str,
+    path_template: str,
+    path: str,
 ) -> None:
-    """Every /api/v1 endpoint returns HTTP 501 with the documented body shape."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.request(method, path)
+    """Every /api/v1 endpoint returns HTTP 501 with the documented body shape.
+
+    Authenticated routers (most of them since B2) are exercised with a
+    bearer token whose user has `must_change_password=False`, so the gate
+    passes and the request reaches the stub handler. Unauthenticated
+    endpoints (auth/login etc.) ignore the header.
+    """
+    client, token = stub_client
+    response = await client.request(method, path, headers={"Authorization": f"Bearer {token}"})
 
     assert response.status_code == 501, (
         f"{method} {path} returned {response.status_code}, expected 501"

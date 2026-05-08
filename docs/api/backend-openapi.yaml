@@ -161,6 +161,32 @@ paths:
                   provisioning_uri: {type: string, description: "otpauth:// URI for QR code"}
                   recovery_codes: {type: array, items: {type: string}}
 
+  /api/v1/auth/change-password:
+    post:
+      tags: [auth]
+      summary: Change the calling user's password
+      description: |
+        Bearer-authenticated. Verifies the current password before
+        accepting a new one (defense against a stolen access token).
+        Clears `must_change_password` if it was set (used by the
+        first-run admin flow per Task B2). Revokes all active sessions
+        for the user; the caller must re-authenticate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '204': {description: Password changed successfully}
+        '400': {description: New password fails policy (too short, identical to current)}
+        '401': {description: Bearer token invalid or current_password is wrong}
+        '403':
+          description: |
+            Reserved by the must-change-password gate elsewhere; the
+            change-password endpoint itself is reachable while the gate
+            is active.
+
   # ----------- USERS -----------
   /api/v1/users/me:
     get:
@@ -914,15 +940,45 @@ components:
         mfa_token: {type: string}
         methods: {type: array, items: {type: string, enum: [totp, recovery_code]}}
 
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+          description: |
+            The user's current password. Required even when the
+            `must_change_password` flag is set — a stolen access token
+            alone must not be sufficient to rotate credentials.
+        new_password:
+          type: string
+          format: password
+          description: |
+            The replacement password. Must satisfy the deployment's
+            password policy (minimum length, etc.) and must differ from
+            `current_password`. The first-run admin flow accepts any
+            password meeting policy; subsequent rotations may add
+            complexity rules.
+
     User:
       type: object
-      required: [id, email, is_admin, mfa_enabled, created_at]
+      required: [id, email, is_admin, mfa_enabled, must_change_password, created_at]
       properties:
         id: {type: string, format: uuid}
         email: {type: string, format: email}
         display_name: {type: string, nullable: true}
         is_admin: {type: boolean}
         mfa_enabled: {type: boolean}
+        must_change_password:
+          type: boolean
+          description: |
+            When true, the user must call POST /api/v1/auth/change-password
+            before they can use any other authenticated endpoint. Set on
+            the auto-created first-run admin (Task B2) and on accounts
+            after `reset-admin-password`. Other authenticated endpoints
+            return 403 with `error.code = "password_change_required"`
+            until this clears.
         created_at: {type: string, format: date-time}
         last_login_at: {type: string, format: date-time, nullable: true}
 

@@ -25,11 +25,12 @@ from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
 
 from app import __version__
+from app.admin_bootstrap import ensure_first_run_admin
 from app.api import api_router
 from app.cache import check_redis, close_redis
 from app.clients.gateway import close_gateway_client, get_gateway_client
 from app.config import get_settings
-from app.db.session import check_db, dispose_engine
+from app.db.session import check_db, dispose_engine, get_session_factory
 from app.storage import check_storage, ensure_bucket
 
 if TYPE_CHECKING:
@@ -57,6 +58,25 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         # Startup must not crash the process — surface degradation via /ready.
         log.warning("ensure_bucket failed at startup: %s (continuing)", exc)
+
+    # First-run admin bootstrap (Task B2). If the DB is unreachable at
+    # startup we log and continue — the readiness probe will reflect the
+    # outage and the operator can recover, and the bootstrap will retry on
+    # the next restart. We deliberately do NOT crash the process here.
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            generated = await ensure_first_run_admin(session)
+        if generated is not None:
+            # The password is intentionally surfaced in the container log,
+            # exactly once, on the actual creation event. Quickstart docs
+            # tell operators to grep for the prefix below.
+            log.warning(
+                "First-run admin password (record it now and rotate on first login): %s",
+                generated,
+            )
+    except Exception as exc:
+        log.warning("first-run admin bootstrap failed: %s (continuing)", exc)
 
     try:
         yield

@@ -5,9 +5,22 @@ Each module under `app.api` corresponds to one tag-group in
 is registered but returns HTTP 501 with a structured "not implemented" body
 that names the M1 task implementing it. Subsequent tasks (B1, B5, C3, C4,
 C7, etc.) replace each 501 with a real handler.
+
+Auth gating (Task B2): the `auth` and `users` routers are mounted without
+a router-level auth dependency — they need different per-endpoint policies
+(login is unauthenticated, /users/me must be reachable while
+must_change_password is true so the client can read the flag, etc.). Every
+other router is mounted under the `ActiveUser` dependency, which enforces:
+
+1. A valid bearer token (401 without it).
+2. `must_change_password = false` (403 with `password_change_required`).
+
+This means future C-/D-phase implementations of these endpoints inherit
+the auth+gate without any change at the handler level — they just need a
+real handler body to replace the 501.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api import (
     admin,
@@ -21,17 +34,25 @@ from app.api import (
     skills,
     users,
 )
+from app.api.dependencies import get_active_user
 
 api_router = APIRouter(prefix="/api/v1")
+
+# Routers with mixed per-endpoint policies — see each module for details.
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
-api_router.include_router(projects.router)
-api_router.include_router(chats.router)
-api_router.include_router(skills.router)
-api_router.include_router(files.router)
-api_router.include_router(knowledge_bases.router)
-api_router.include_router(organization_profile.router)
-api_router.include_router(saved_prompts.router)
-api_router.include_router(admin.router)
+
+# Routers that uniformly require an authenticated, must_change_password=false
+# user. Applying this at the router level means every current stub and every
+# future real handler in these modules inherits the gate automatically.
+_active = [Depends(get_active_user)]
+api_router.include_router(projects.router, dependencies=_active)
+api_router.include_router(chats.router, dependencies=_active)
+api_router.include_router(skills.router, dependencies=_active)
+api_router.include_router(files.router, dependencies=_active)
+api_router.include_router(knowledge_bases.router, dependencies=_active)
+api_router.include_router(organization_profile.router, dependencies=_active)
+api_router.include_router(saved_prompts.router, dependencies=_active)
+api_router.include_router(admin.router, dependencies=_active)
 
 __all__ = ["api_router"]

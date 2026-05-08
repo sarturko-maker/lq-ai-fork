@@ -96,6 +96,27 @@ class Settings(BaseSettings):
         description="Bcrypt cost factor for password hashing. Default 12.",
     )
 
+    # ----- First-run admin (per Task B2) -----
+    # Email used for the auto-created first-run admin. Operators can override
+    # this via environment before the first `docker compose up` to control
+    # which address the bootstrapped admin uses. The email is never changed
+    # after first-run by the bootstrap (only by manual operator action).
+    first_run_admin_email: str = Field(
+        default="admin@lq.ai",
+        description=(
+            "Email for the auto-created first-run admin user. Set before "
+            "first deployment; ignored on subsequent restarts."
+        ),
+    )
+
+    # Minimum length for user-set passwords (the change-password endpoint
+    # rejects shorter inputs). 12 is a reasonable floor for an admin tool;
+    # individual operators may raise but should not lower it.
+    password_min_length: int = Field(
+        default=12,
+        description="Minimum length for user-set passwords. Default: 12 characters.",
+    )
+
     # ----- MFA challenge token (per ADR 0002 / PRD §5.1) -----
     # Issued by /auth/login when the user has mfa_enabled=true; redeemed
     # by /auth/mfa/verify (D5) within this window. Short-lived: 5 minutes

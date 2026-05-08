@@ -69,3 +69,37 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 """Type alias so handlers can write `user: CurrentUser` rather than
 unpacking the Depends() each time."""
+
+
+async def get_active_user(user: CurrentUser) -> User:
+    """`CurrentUser` plus the must-change-password gate.
+
+    Used by every authenticated endpoint EXCEPT the small set the user is
+    allowed to call before completing a forced password change:
+
+    - `GET  /api/v1/users/me`     — so the client can read the flag
+    - `POST /api/v1/auth/change-password` — to actually clear the flag
+    - `POST /api/v1/auth/logout`  — to walk away without changing it
+
+    Anything else returns 403 with `error.code = "password_change_required"`,
+    instructing the client to redirect to the change-password flow. This
+    is the gate that enforces "can't use API beyond the change endpoint
+    until password is changed" per Task B2's verification criteria.
+    """
+    if user.must_change_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "password_change_required",
+                "message": (
+                    "You must change your password before using the API. "
+                    "POST /api/v1/auth/change-password to set a new password."
+                ),
+            },
+        )
+    return user
+
+
+ActiveUser = Annotated[User, Depends(get_active_user)]
+"""Type alias for endpoints that require both a valid bearer token AND a
+user who has cleared the must_change_password gate."""
