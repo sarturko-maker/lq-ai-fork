@@ -52,6 +52,11 @@ from fastapi.responses import JSONResponse
 
 from app import __version__
 from app.api import admin_router, inference_router
+from app.clients.backend import (
+    BackendClient,
+    close_backend_client,
+    configure_backend_client,
+)
 from app.config import GatewayConfig
 from app.config_loader import ConfigLoadError, load_config
 from app.db import engine_or_none
@@ -148,6 +153,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.routing_log = routing_log
     app.state.db_engine = engine  # held so shutdown can dispose
 
+    # C2: backend HTTP client + skill cache. The client reads
+    # LQ_AI_API_URL / LQ_AI_GATEWAY_KEY / LQ_AI_SKILL_CACHE_TTL_SECONDS
+    # from the environment. The skill assembler in
+    # ``app.api.inference`` uses ``app.state.backend_client`` if set,
+    # otherwise falls back to the process-global handle. We stash both
+    # so tests bypassing lifespan still get a usable handle.
+    backend_client: BackendClient = configure_backend_client()
+    app.state.backend_client = backend_client
+    logger.info("backend client wired against %s", backend_client.base_url)
+
     try:
         yield
     finally:
@@ -157,6 +172,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await adapter.aclose()
             except Exception:
                 logger.exception("error closing adapter %r", name)
+        try:
+            await close_backend_client()
+        except Exception:
+            logger.exception("error closing backend client")
         if engine is not None:
             try:
                 await engine.dispose()

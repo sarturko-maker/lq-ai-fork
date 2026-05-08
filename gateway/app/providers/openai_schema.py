@@ -102,8 +102,25 @@ class ChatCompletionRequest(BaseModel):
     # --- LQ.AI extensions (per gateway-openapi.yaml) -------------------------
     minimum_inference_tier: int | None = Field(default=None, ge=1, le=5)
     skill_name: str | None = None
+    """Audit-log routing tag (B3 / B4); does not by itself trigger skill
+    prompt assembly — see ``lq_ai_skills`` for that. When ``lq_ai_skills``
+    is set and ``skill_name`` is not, the gateway populates this field
+    with the first attached skill's name for audit consistency."""
+
     chat_id: str | None = None
     anonymize: bool = True
+
+    # --- C2 (skill prompt assembly per ADR 0006) -----------------------------
+    lq_ai_skills: list[str] = Field(default_factory=list)
+    """Ordered list of skill names to attach to this request. The gateway
+    fetches each from the backend's internal-skills endpoint, assembles
+    the bodies (with reference files and input substitution applied),
+    and prepends the result to the request's system message."""
+
+    lq_ai_skill_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    """Per-skill input bindings, keyed by skill name. Inner dict maps
+    input variable names to values. Per-skill scoping means two attached
+    skills with overlapping variable names don't collide."""
 
 
 # --- Chat completion response -------------------------------------------------
@@ -156,6 +173,11 @@ class ChatCompletionResponse(BaseModel):
     routed_provider: str | None = None
     cost_estimate: float | None = None
     anonymization_applied: bool | None = None
+    lq_ai_applied_skills: list[str] | None = None
+    """Skills that were assembled into this request's prompt (C2). Null
+    when no skills were attached; populated on requests with at least
+    one entry in ``lq_ai_skills``. The backend surfaces this on the
+    audit log so operators can see which skills shaped a given response."""
 
 
 # --- Streaming chunk ----------------------------------------------------------
@@ -203,6 +225,7 @@ class ChatCompletionChunk(BaseModel):
     # --- LQ.AI extensions ---------------------------------------------------
     routed_inference_tier: int | None = Field(default=None, ge=1, le=5)
     routed_provider: str | None = None
+    lq_ai_applied_skills: list[str] | None = None
 
 
 # --- Embeddings ---------------------------------------------------------------

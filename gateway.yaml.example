@@ -31,6 +31,17 @@ gateway_auth:
   enabled: true
   api_key_env: LQ_AI_GATEWAY_KEY
   # Backend services must include X-LQ-AI-Gateway-Key header
+  #
+  # The gateway uses the SAME shared secret in the reverse direction
+  # when fetching skill content from the backend's
+  # `/api/v1/internal/skills/{name}` endpoint during prompt assembly
+  # (C2 / ADR 0006). The api/ side also reads LQ_AI_GATEWAY_KEY and
+  # constant-time compares the X-LQ-AI-Gateway-Key header on inbound
+  # internal-route calls.
+  #
+  # Skill-fetch base URL: LQ_AI_API_URL (env var; defaults to
+  # http://api:8000 in the Compose stack). Skill-fetch cache TTL:
+  # LQ_AI_SKILL_CACHE_TTL_SECONDS (env var; default 60s).
 
 # ============================================================
 # PROVIDERS — what LLM endpoints the gateway can reach

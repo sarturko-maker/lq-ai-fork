@@ -409,7 +409,12 @@ components:
             backend per skill or project requirements.
         skill_name:
           type: string
-          description: "For audit log routing; not used by inference"
+          description: |
+            Audit-log routing tag (B3-era). Does NOT by itself trigger
+            skill prompt assembly — see `lq_ai_skills` for that. When
+            `lq_ai_skills` is set and `skill_name` is not, the gateway
+            populates this field with the first attached skill's name
+            for audit consistency.
         chat_id:
           type: string
           format: uuid
@@ -418,6 +423,28 @@ components:
           type: boolean
           default: true
           description: "Apply anonymization layer (M2; ignored before)"
+        # C2 — skill prompt assembly (ADR 0006)
+        lq_ai_skills:
+          type: array
+          items: {type: string}
+          description: |
+            Ordered list of skill names to attach to this request. The
+            gateway fetches each from the backend's internal-skills
+            endpoint, assembles the bodies (with reference files and
+            input substitution applied), and prepends the result to
+            the system message. Per ADR 0006.
+        lq_ai_skill_inputs:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: true
+          description: |
+            Per-skill input bindings, keyed by skill name. Inner dict
+            maps input variable names to values. Per-skill scoping so
+            two attached skills with overlapping variable names don't
+            collide. Required inputs that the skill's frontmatter
+            declares but the bindings don't provide cause the gateway
+            to refuse with `code=skill_input_missing` (HTTP 400).
 
     ChatCompletionResponse:
       type: object
@@ -454,6 +481,16 @@ components:
         routed_provider: {type: string}
         cost_estimate: {type: number}
         anonymization_applied: {type: boolean}
+        lq_ai_applied_skills:
+          type: array
+          items: {type: string}
+          nullable: true
+          description: |
+            Names of skills whose content was successfully assembled
+            into the prompt for this request (C2 / ADR 0006). Null
+            when no skills were attached. Backends surface this on
+            the audit log so operators can see which skills shaped
+            a given response.
 
     GatewayError:
       type: object

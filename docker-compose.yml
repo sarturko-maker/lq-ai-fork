@@ -86,8 +86,12 @@ services:
       redis:
         condition: service_healthy
     environment:
-      # Auth — backend → gateway
+      # Auth — backend → gateway (and gateway → backend for C2 skill fetches).
+      # The gateway uses the SAME shared secret in BOTH directions.
       LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
+      # C2 — backend HTTP client for skill prompt assembly (ADR 0006).
+      LQ_AI_API_URL: ${LQ_AI_API_URL:-http://api:8000}
+      LQ_AI_SKILL_CACHE_TTL_SECONDS: ${LQ_AI_SKILL_CACHE_TTL_SECONDS:-60}
       # B4 — inference_routing_log writer (audit trail of every routed
       # request). Optional: without DATABASE_URL the gateway logs a
       # warning at startup and runs in NullRoutingLogWriter mode.

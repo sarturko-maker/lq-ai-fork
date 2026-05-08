@@ -54,9 +54,12 @@ from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
+from app.clients.backend import BackendClient, Skill, get_backend_client
 from app.config import GatewayConfig
+from app.errors import LQAIError
 from app.providers import (
     ChatCompletionChunk,
+    ChatCompletionMessage,
     ChatCompletionRequest,
     ChatCompletionResponse,
     ProviderAdapter,
@@ -66,6 +69,7 @@ from app.providers import (
     ProviderNetworkError,
     ProviderUnsupportedError,
 )
+from app.skills import assemble_skill_prompt
 from app.router import (
     ChatCompletionRoutedResult,
     ModelResolutionError,
@@ -207,6 +211,77 @@ def _config(request: Request) -> GatewayConfig:
     return request.app.state.config  # type: ignore[no-any-return]
 
 
+def _backend(request: Request) -> BackendClient:
+    """Return the gateway's :class:`BackendClient`.
+
+    The lifespan handler installs ``app.state.backend_client``; tests
+    that bypass lifespan get the process-global default.
+    """
+
+    pre_built: BackendClient | None = getattr(request.app.state, "backend_client", None)
+    if pre_built is not None:
+        return pre_built
+    return get_backend_client()
+
+
+async def _apply_skill_prompt_assembly(
+    chat_request: ChatCompletionRequest,
+    *,
+    backend: BackendClient,
+    request_id: str,
+) -> list[str]:
+    """Mutate ``chat_request`` in place to include skill-assembled content.
+
+    Returns the names of skills whose content was actually fetched and
+    assembled (i.e., the value to surface as ``lq_ai_applied_skills`` on
+    the response).
+
+    No-ops when ``lq_ai_skills`` is empty.
+
+    Raises :class:`LQAIError` subclasses on fetch failure / missing
+    required input. The route handler's ``LQAIError`` handler in
+    :mod:`app.main` translates them to the canonical envelope.
+    """
+
+    if not chat_request.lq_ai_skills:
+        return []
+
+    # Fetch each skill (cache-aware). Fail-fast on the first failure;
+    # we don't try to dispatch a request with a partial skill block.
+    skills: list[Skill] = []
+    for name in chat_request.lq_ai_skills:
+        skill = await backend.get_skill(name, request_id=request_id)
+        skills.append(skill)
+
+    # Pull out any existing system message(s). OpenAI permits multiple;
+    # we concatenate them with a blank line so the assembler can
+    # prepend skill content as one block.
+    system_chunks: list[str] = []
+    non_system: list[ChatCompletionMessage] = []
+    for msg in chat_request.messages:
+        if msg.role == "system" and msg.content:
+            system_chunks.append(msg.content)
+        else:
+            non_system.append(msg)
+    existing_system = "\n\n".join(s for s in system_chunks if s)
+
+    assembled = assemble_skill_prompt(
+        skills,
+        skill_inputs=chat_request.lq_ai_skill_inputs or {},
+        existing_system_message=existing_system or None,
+    )
+
+    new_system = ChatCompletionMessage(role="system", content=assembled)
+    chat_request.messages = [new_system, *non_system]
+
+    # Audit-log tagging: surface the first attached skill in the
+    # B3-era ``skill_name`` field if the caller didn't set it.
+    if not chat_request.skill_name and chat_request.lq_ai_skills:
+        chat_request.skill_name = chat_request.lq_ai_skills[0]
+
+    return [skill.name for skill in skills]
+
+
 def _adapters(request: Request) -> dict[str, ProviderAdapter]:
     """Pull the adapter registry off ``app.state`` (set by lifespan)."""
 
@@ -276,6 +351,29 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
     log_writer = _routing_log(request)
     request_id = synthesize_request_id(_request_id_header(request))
 
+    # --- Skill prompt assembly (C2) ----------------------------------------
+    # Mutates chat_request in place: replaces system message(s) with
+    # the assembled skill content (skills first, operator system
+    # message after a separator). Errors here are typed LQAIError
+    # subclasses (SkillNotFound / SkillFetchFailed / SkillInputMissing);
+    # let them propagate to the FastAPI handler so the canonical
+    # envelope wraps them.
+    applied_skills: list[str] = []
+    if chat_request.lq_ai_skills:
+        backend = _backend(request)
+        try:
+            applied_skills = await _apply_skill_prompt_assembly(
+                chat_request,
+                backend=backend,
+                request_id=request_id,
+            )
+        except LQAIError:
+            # Re-raise — the global LQAIError handler in app.main
+            # serializes the canonical envelope. We don't write a
+            # routing-log row here because the request never reached
+            # an adapter.
+            raise
+
     # --- Resolution (no upstream call yet) ----------------------------------
     try:
         candidates = gw_router.resolve(chat_request.model)
@@ -301,6 +399,7 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
             candidates=candidates,
             log_writer=log_writer,
             request_id=request_id,
+            applied_skills=applied_skills,
         )
 
     # --- Non-streaming path -------------------------------------------------
@@ -337,6 +436,8 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
 
     # --- Success: stamp tier on body, write log, return --------------------
     annotated = _annotate_response(result.response, target=result.target, config=config)
+    if applied_skills:
+        annotated.lq_ai_applied_skills = list(applied_skills)
     await _write_success(
         log_writer,
         chat_request=chat_request,
@@ -385,6 +486,7 @@ async def _stream_with_fallback(
     candidates: list[ResolvedTarget],
     log_writer: RoutingLogWriter,
     request_id: str,
+    applied_skills: list[str] | None = None,
 ) -> StreamingResponse:
     """Run the streaming path with primary + fallback chain.
 
@@ -466,6 +568,7 @@ async def _stream_with_fallback(
             chat_request=chat_request,
             log_writer=log_writer,
             request_id=request_id,
+            applied_skills=applied_skills or [],
         ),
         media_type="text/event-stream",
         headers={
@@ -485,6 +588,7 @@ async def _stream_openai_sse(
     chat_request: ChatCompletionRequest,
     log_writer: RoutingLogWriter,
     request_id: str,
+    applied_skills: list[str] | None = None,
 ) -> AsyncIterator[bytes]:
     """Serialize chunks as OpenAI-format SSE frames; write log on completion."""
 
@@ -495,6 +599,8 @@ async def _stream_openai_sse(
         async for chunk in chunks:
             chunk.routed_provider = target.provider.name
             chunk.routed_inference_tier = target.routed_inference_tier
+            if applied_skills:
+                chunk.lq_ai_applied_skills = list(applied_skills)
             last_chunk = chunk
             payload = chunk.model_dump(mode="json", exclude_none=True)
             yield f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode()
