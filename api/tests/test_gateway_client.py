@@ -208,17 +208,31 @@ async def test_chat_completion_401_raises_gateway_unreachable_not_unauthorized(
 ) -> None:
     """401 from the gateway = backend's auth header was rejected. The user
     must see "service unavailable", not "your gateway key is wrong"."""
+    import logging as _logging
+
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(401, json={"error": {"code": "unauthorized", "message": "x"}})
     )
 
-    with caplog.at_level("WARNING"), pytest.raises(GatewayUnreachable) as exc_info:
-        await client.chat_completion(_request())
+    # pytest's logging plugin can disable loggers between tests; re-enable
+    # so the WARNING our handler emits actually reaches caplog. (See the
+    # same workaround in test_admin_bootstrap.py.)
+    gw_log = _logging.getLogger("app.clients.gateway")
+    prior_disabled = gw_log.disabled
+    gw_log.disabled = False
+    try:
+        with (
+            caplog.at_level("WARNING", logger="app.clients.gateway"),
+            pytest.raises(GatewayUnreachable) as exc_info,
+        ):
+            await client.chat_completion(_request())
+    finally:
+        gw_log.disabled = prior_disabled
 
     assert exc_info.value.effective_http_status == 503
     # The operator-facing log must mention the gateway-key configuration so
     # the misconfiguration is debuggable.
-    assert any("gateway-key" in r.message.lower() for r in caplog.records)
+    assert any("gateway-key" in r.getMessage().lower() for r in caplog.records)
 
 
 @pytest.mark.unit
@@ -283,6 +297,8 @@ async def test_chat_completion_unknown_code_maps_to_internal_error(
     client: GatewayClient,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    import logging as _logging
+
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(
             418,
@@ -290,11 +306,20 @@ async def test_chat_completion_unknown_code_maps_to_internal_error(
         )
     )
 
-    with caplog.at_level("WARNING"), pytest.raises(InternalError):
-        await client.chat_completion(_request())
+    gw_log = _logging.getLogger("app.clients.gateway")
+    prior_disabled = gw_log.disabled
+    gw_log.disabled = False
+    try:
+        with (
+            caplog.at_level("WARNING", logger="app.clients.gateway"),
+            pytest.raises(InternalError),
+        ):
+            await client.chat_completion(_request())
+    finally:
+        gw_log.disabled = prior_disabled
 
     # Drift surface: log carries the unknown code so operators can tell.
-    assert any("unknown error code" in r.message.lower() for r in caplog.records)
+    assert any("unknown error code" in r.getMessage().lower() for r in caplog.records)
 
 
 @pytest.mark.unit

@@ -381,7 +381,8 @@ class GatewayClient:
             )
 
         try:
-            return response.json()  # type: ignore[no-any-return]
+            payload: dict[str, Any] = response.json()
+            return payload
         except json.JSONDecodeError as exc:
             raise GatewayInvalidResponse(
                 "Gateway embeddings returned a non-JSON success response",

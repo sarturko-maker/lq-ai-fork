@@ -586,28 +586,44 @@ async def test_send_message_streaming_mid_stream_error_emits_error_frame(
 
 @pytest.mark.integration
 @respx.mock
-async def test_send_message_streaming_pre_frame_error(
+async def test_send_message_streaming_pre_frame_error_emits_error_frame(
     client: AsyncClient,
     db_user: User,
 ) -> None:
-    """Status-code error before any data frame goes through the non-stream path."""
+    """Status-code error before any data frame: SSE response with an error frame.
+
+    Once the StreamingResponse has been returned to FastAPI we can no
+    longer change the HTTP status — the response headers have been
+    sent. The pre-frame error therefore comes through as a single SSE
+    frame carrying the canonical Error envelope, terminated by [DONE].
+    The HTTP status stays 200 (SSE convention: errors are in-band).
+    """
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
-        return_value=httpx.Response(400, json={"error": {"code": "invalid_model", "message": "no"}})
+        return_value=httpx.Response(
+            400, json={"error": {"code": "invalid_model", "message": "no"}}
+        )
     )
     token = _bearer_for(db_user)
 
-    response = await client.post(
+    async with client.stream(
+        "POST",
         f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
         json={"content": "hi", "stream": True},
         headers={"Authorization": f"Bearer {token}"},
-    )
+    ) as resp:
+        # SSE response has 200 status; error is in-band.
+        assert resp.status_code == 200
+        events: list[dict[str, object]] = []
+        async for line in resp.aiter_lines():
+            line = line.strip()
+            if not line:
+                continue
+            if line == "data: [DONE]":
+                break
+            events.append(_json.loads(line[len("data:") :].strip()))
 
-    # Pre-frame errors raise during stream setup; FastAPI's exception
-    # handler renders the canonical Error envelope. The handler turns
-    # this into a non-stream JSON response.
-    assert response.status_code == 400
-    body = response.json()
-    assert body["detail"]["code"] == "invalid_model"
+    assert len(events) == 1
+    assert events[0]["detail"]["code"] == "invalid_model"
 
 
 # ---------------------------------------------------------------------------
