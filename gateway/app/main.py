@@ -61,7 +61,7 @@ from app.config import GatewayConfig
 from app.config_loader import ConfigLoadError, load_config
 from app.db import engine_or_none
 from app.errors import LQAIError
-from app.providers import AnthropicAdapter, ProviderAdapter
+from app.providers import AnthropicAdapter, OpenAIAdapter, ProviderAdapter
 from app.router import Router
 from app.routing_log import NullRoutingLogWriter, RoutingLogWriter, SQLRoutingLogWriter
 
@@ -116,18 +116,43 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     for provider in config.providers:
         if not provider.enabled:
             continue
-        if provider.type != "anthropic":
-            # B6 lands the rest of the adapters; B3 only ships Anthropic.
+        if provider.type == "anthropic":
+            try:
+                adapters[provider.name] = AnthropicAdapter.from_config(provider)
+                logger.info("instantiated Anthropic adapter for provider %r", provider.name)
+            except ValueError as exc:
+                logger.warning(
+                    "skipping Anthropic provider %r: %s",
+                    provider.name,
+                    exc,
+                )
             continue
-        try:
-            adapters[provider.name] = AnthropicAdapter.from_config(provider)
-            logger.info("instantiated Anthropic adapter for provider %r", provider.name)
-        except ValueError as exc:
-            logger.warning(
-                "skipping Anthropic provider %r: %s",
-                provider.name,
-                exc,
-            )
+        if provider.type in ("openai", "openai_compatible"):
+            # C6 ships the OpenAI adapter for the embeddings path. Chat
+            # completions raise ProviderUnsupportedError until B6 fills
+            # them in. The lifespan-time check matches the pattern for
+            # Anthropic: a missing key for cloud OpenAI is non-fatal at
+            # startup but produces a clean 503 at request time.
+            try:
+                adapters[provider.name] = OpenAIAdapter.from_config(provider)
+                logger.info(
+                    "instantiated OpenAI adapter for provider %r (type=%s)",
+                    provider.name,
+                    provider.type,
+                )
+            except ValueError as exc:
+                logger.warning(
+                    "skipping OpenAI provider %r: %s",
+                    provider.name,
+                    exc,
+                )
+            continue
+        # B6 lands the remaining adapters (Vertex, Bedrock, Ollama, etc.).
+        logger.debug(
+            "no adapter for provider %r (type=%s); awaiting B6",
+            provider.name,
+            provider.type,
+        )
     app.state.adapters = adapters
 
     # B4: build the request router around the loaded config + adapter

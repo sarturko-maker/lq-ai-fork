@@ -22,6 +22,7 @@ from app.providers.base import (
     ProviderNetworkError,
     ProviderUnsupportedError,
 )
+from app.providers.openai import OpenAIAdapter
 from app.providers.openai_schema import (
     ChatCompletionChoice,
     ChatCompletionChunk,
@@ -31,8 +32,10 @@ from app.providers.openai_schema import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCompletionUsage,
+    EmbeddingObject,
     EmbeddingsRequest,
     EmbeddingsResponse,
+    EmbeddingsUsage,
 )
 
 __all__ = [
@@ -45,8 +48,11 @@ __all__ = [
     "ChatCompletionRequest",
     "ChatCompletionResponse",
     "ChatCompletionUsage",
+    "EmbeddingObject",
     "EmbeddingsRequest",
     "EmbeddingsResponse",
+    "EmbeddingsUsage",
+    "OpenAIAdapter",
     "ProviderAdapter",
     "ProviderAdapterError",
     "ProviderAuthError",
