@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["."]
+markers = [
+    "unit: pure unit tests, no I/O",
+    "integration: tests that exercise contracts across subsystems",
+]

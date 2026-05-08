@@ -126,7 +126,7 @@ git rebase --signoff main                 # all commits since main diverged
 - **Imports:** sorted by `ruff` (isort-compatible). Standard library first, then third-party, then local.
 - **Docstrings:** required on public modules, classes, and functions in the gateway and backend. Format: triple-quoted, summary line, blank line, detail. Descriptive variable names reduce the need for inline comments.
 - **Async:** prefer `async def` for I/O-bound functions; use `httpx.AsyncClient` rather than `requests`. Sync helpers are fine for CPU-bound or test code.
-- **Exceptions:** use the project's `lq_ai.errors` exception hierarchy; do not raise bare `Exception`.
+- **Exceptions:** raise typed errors from each subsystem's `app.errors` module ([api/app/errors.py](api/app/errors.py), [gateway/app/errors.py](gateway/app/errors.py)) — `LQAIError` and its subclasses. Do not raise bare `Exception`. Per [ADR 0003](docs/adr/0003-error-handling.md), the two subsystems each ship parallel hierarchies; the cross-subsystem contract is the error-code enum in the OpenAPI sketches plus the conformance test in [`tests/test_error_code_contract.py`](tests/test_error_code_contract.py).
 
 ### JavaScript / TypeScript (`web/`)
 
