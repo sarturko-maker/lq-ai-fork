@@ -1593,8 +1593,33 @@ components:
         ingestion_status:
           type: string
           enum: [pending, processing, ready, failed]
-        page_count: {type: integer, nullable: true}
-        character_count: {type: integer, nullable: true}
+          description: |
+            Lifecycle: `pending` (just uploaded; C4 sets this on insert)
+            → `processing` (C5 worker has picked it up) → `ready`
+            (parsed, chunks persisted) OR `failed` (with `ingestion_error`
+            set; e.g., `unsupported_type` for non-PDF MIMEs in M1, or
+            `parse_failed` for corrupt PDFs).
+        ingestion_error:
+          type: string
+          nullable: true
+          description: |
+            Set when `ingestion_status='failed'`. M1 values include
+            `unsupported_type`, `unsupported_content`, `parse_failed`.
+        page_count:
+          type: integer
+          nullable: true
+          description: |
+            Populated by the C5 document pipeline once
+            `ingestion_status='ready'`; `null` while pending /
+            processing / failed.
+        character_count:
+          type: integer
+          nullable: true
+          description: |
+            Populated by the C5 document pipeline once
+            `ingestion_status='ready'`; counts characters of the
+            canonical PyMuPDF-extracted text, not of the original
+            PDF byte stream.
         created_at: {type: string, format: date-time}
 
     KnowledgeBase:

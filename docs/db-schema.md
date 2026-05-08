@@ -366,27 +366,36 @@ CREATE INDEX idx_files_hash ON files(hash_sha256);  -- dedup detection
 
 ### `documents`
 
-Parsed-document metadata after the document pipeline runs.
+Parsed-document metadata after the document pipeline runs (Task C5,
+migration `0004_create_documents_and_chunks.py`).
 
 ```sql
 CREATE TABLE documents (
-    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     file_id             UUID NOT NULL UNIQUE REFERENCES files(id) ON DELETE CASCADE,
-    parser              TEXT NOT NULL,  -- 'docling', 'pymupdf', 'docling+ocr'
+    parser              TEXT NOT NULL,  -- 'docling+pymupdf', 'pymupdf', 'pymupdf-only'
+    parser_version      TEXT,            -- e.g. 'pymupdf=1.24.0; docling=1.16.0'
     page_count          INTEGER,
     character_count     INTEGER,
-    structured_content  JSONB,  -- Docling's structured representation
+    structured_content  JSONB,           -- Docling's structured representation; M2 reads
     processed_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE INDEX idx_documents_file_id ON documents(file_id);
 ```
+
+Per ADR 0006, the `parser` column carries the cascade outcome:
+`docling+pymupdf` (both succeeded), `pymupdf` (Docling fell through),
+or `pymupdf-only` (Docling intentionally disabled via
+`LQ_AI_DOCLING_ENABLED=false`).
 
 ### `document_chunks`
 
-Chunked content with embeddings and full-text indexing.
+Chunked content with embeddings and full-text indexing (Task C5).
 
 ```sql
 CREATE TABLE document_chunks (
-    id                   UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_id          UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     chunk_index          INTEGER NOT NULL,
     content              TEXT NOT NULL,
@@ -394,11 +403,16 @@ CREATE TABLE document_chunks (
     page_end             INTEGER,
     char_offset_start    INTEGER NOT NULL,
     char_offset_end      INTEGER NOT NULL,
-    embedding            VECTOR(1536),  -- adjust dim per embedding model
+    tokens               INTEGER,                  -- C6 backfills alongside embeddings
+    embedding            VECTOR(1536),             -- nullable for M1 (ADR 0006); C6 backfills
     content_tsv          TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', content)) STORED,
-    metadata             JSONB,
+    metadata_json        JSONB,
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (document_id, chunk_index)
+
+    UNIQUE (document_id, chunk_index),
+    CHECK (char_offset_start >= 0),
+    CHECK (char_offset_end >= char_offset_start),
+    CHECK (chunk_index >= 0)
 );
 
 CREATE INDEX idx_chunks_embedding ON document_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
@@ -407,6 +421,31 @@ CREATE INDEX idx_chunks_document ON document_chunks(document_id, chunk_index);
 ```
 
 The `ivfflat` index is appropriate for moderate scale; transition to `hnsw` (Postgres 16+) for larger deployments.
+
+Per ADR 0006, the `embedding` column is **nullable for M1** — the C5
+pipeline writes chunks with `embedding=NULL` and C6 backfills via the
+gateway's `/v1/embeddings` endpoint. The pgvector extension is enabled
+by migration 0004. The `(document_id, chunk_index)` UNIQUE constraint
+backs the C5 worker's idempotent-replace strategy: re-running ingest
+for a file deletes prior chunks and re-inserts them in the same
+transaction.
+
+The `metadata_json` column is named with the `_json` suffix because
+the bare `metadata` identifier conflicts with SQLAlchemy's declarative
+`Base.metadata` attribute. Functionally it's the JSONB column the
+schema doc has historically called `metadata`.
+
+The `char_offset_start` and `char_offset_end` columns are 0-based
+half-open offsets (`[start, end)`, Python slice semantics) into the
+canonical PyMuPDF character stream of the document. The fidelity
+invariant the M2 Citation Engine consumes is:
+
+```
+canonical_text[char_offset_start:char_offset_end] == content
+```
+
+The C5 chunker tests assert this byte-for-byte against three fixture
+PDFs of varying complexity.
 
 ---
 

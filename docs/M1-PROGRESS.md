@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-08 (session 6; C7 landed in a parallel worktree alongside C2 + C5)
+> **Last updated:** 2026-05-08 (session 6; C5 + C7 merged; C2 still rebasing)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -14,13 +14,13 @@
 |---|---|---|---|
 | A — Foundation scaffolding | A1, A2, A3, A4 | A5 (partial — env-var branding only) | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5 | — | B6 optional; otherwise C-phase |
-| C — Capability layer | C1, C4, C7 | — | C2 (prompt assembly), C3 (chats), C5 (doc pipeline), C6 (KB), C8 (web UI) |
+| C — Capability layer | C1, C4, C5, C7 | — | C2 (prompt assembly), C3 (chats), C6 (KB), C8 (web UI) |
 | D — M1 differentiators | — | — | After C |
 | E — Procurement and release | — | — | After D |
 
-**Tests:** ~325+ passing in api/ (C7 added 75: 27 schema/slug unit + 42 endpoint integration + 6 migration + 1 errors-hierarchy parametrize entry; C4 added 43; C1 added 37; on top of B5's 170-line baseline); 118 passing in gateway/ (unchanged this wave — C7 is api/-only; 1 skipped pending ANTHROPIC_API_KEY); 5 cross-subsystem conformance tests under `tests/` (B5; unaffected by C7 since `conflict` is backend-only).
-**Stack:** `docker compose up` brings 6 services (postgres, redis, minio, gateway, api, web) to healthy in ~30s.
-**Migration:** `make migrate` applies `0001_initial.py`, `0002_add_must_change_password.py`, `0003_create_files_table.py`, and `0004_create_projects.py` cleanly; all reversible.
+**Tests:** ~375+ passing in api/ (C5 added 49+: 19 chunker unit + 13 parser unit + 5 worker-queue unit + 6 ingest-orchestration integration + 6 migration; C7 added 76: 27 schema/slug unit + 42 endpoint integration + 6 migration + 1 errors-hierarchy parametrize entry; C4 added 43; C1 added 37; on top of B5's 170-line baseline); 118 passing in gateway/ (unchanged this wave — C5 and C7 are api/-only; 1 skipped pending ANTHROPIC_API_KEY); 5 cross-subsystem conformance tests under `tests/` (B5; unaffected by this wave since `conflict` and pipeline-internal codes are backend-only).
+**Stack:** `docker compose up` brings 7 services (postgres, redis, minio, gateway, api, ingest-worker, web) to healthy in ~30s. (C5 added the `ingest-worker` service.)
+**Migration:** `make migrate` applies `0001_initial.py` → `0002_add_must_change_password.py` → `0003_create_files_table.py` → `0004_create_projects.py` (C7) → `0005_create_documents_and_chunks.py` (C5) cleanly; all reversible. Migration 0005 enables the pgvector extension.
 
 ---
 
@@ -420,6 +420,119 @@ skill, attach a file, `GET` and verify round-trip, `POST` again with
 operator verification step. The 48-test integration suite enforces
 the contract automatically on every CI run that has DATABASE_URL set.
 
+### C5 — Document pipeline (basic) ✅
+
+The async document pipeline that processes uploaded PDFs into
+character-precise chunks. PyMuPDF is the canonical parser (byte-precise
+offsets); Docling runs alongside for structured-content extraction
+(stashed for M2 consumption). The chunker produces chunks whose
+``[char_offset_start:char_offset_end]`` slice of the canonical text
+equals the chunk's ``content`` byte-for-byte — the load-bearing
+invariant the M2 Citation Engine consumes.
+
+**ADR 0006 — document pipeline architecture.** Records the four
+architectural calls C5 made: (1) Docling primary, PyMuPDF for
+byte-precise offset reconciliation; (2) `arq` for the worker queue
+(async-native, small footprint, fits the codebase); (3) **embeddings
+deferred to C6** — chunks land with `embedding=NULL` for M1, the
+schema accepts NULL, and C6 backfills via the gateway's
+`/v1/embeddings` once it lands; (4) idempotency via transactional
+delete-then-insert.
+
+**Migration `0005_create_documents_and_chunks.py`.** Adds the
+`documents` and `document_chunks` tables, enables the pgvector
+extension. Embedding column is `vector(1536)` (sized for OpenAI
+text-embedding-3-small/-large; alterable when C6 picks); content_tsv
+is a generated TSVECTOR column. Indexes: `idx_chunks_embedding`
+(ivfflat, vector_cosine_ops), `idx_chunks_tsv` (GIN), `idx_chunks_document`
+(ordered scan), `idx_documents_file_id`. Reversible.
+
+**The pipeline (`api/app/pipeline/`).**
+
+* `parsers.py` — PyMuPDF + Docling adapters. PyMuPDF is mandatory
+  (without it no offsets, no ingestion); Docling is best-effort
+  (failures degrade gracefully to PyMuPDF-only with a WARNING log).
+  Encrypted PDFs raise `ParserUnsupported` (M1 doesn't decrypt).
+* `chunker.py` — character-precise sliding-window chunker. Snaps to
+  paragraph breaks first, then sentence terminators, within a
+  200-char lookback window — but never below the configurable
+  `min_chars` floor. Page assignment via the parser's PageSpan
+  table; chunks crossing page boundaries record both pages.
+* `ingest.py` — orchestration: load file row, refuse if soft-deleted
+  or unsupported MIME, pull bytes via `stream_download`, run parser
+  cascade in `asyncio.to_thread`, chunk, persist Document +
+  DocumentChunks transactionally (idempotent replace), flip
+  `files.ingestion_status` to `ready` (or `failed` with
+  `ingestion_error`).
+
+**The worker (`api/app/workers/`).** `arq`-backed. New
+docker-compose service `ingest-worker` runs `arq
+app.workers.document_pipeline.WorkerSettings`. The worker's
+on-startup hook re-enqueues any rows stuck in `pending` or
+`processing` (self-healing across crashes / restarts). The
+upload handler (C4) now enqueues a job after successful row
+commit; enqueue failures are non-fatal — the row stays at
+`pending` and the worker's startup sweep picks it up.
+
+**New runtime deps (justified per ADR 0006).** `pymupdf>=1.24`
+(AGPL-3.0, server-side per PRD §1519/§7.2), `docling>=1.16`
+(MIT), `arq>=0.25` (MIT). New env vars in `.env.example`:
+`LQ_AI_INGEST_WORKER_CONCURRENCY=2`, `LQ_AI_DOCLING_TIMEOUT_SECONDS=300`,
+`LQ_AI_DOCLING_ENABLED=true`, `LQ_AI_CHUNK_TARGET_CHARS=2000`,
+`LQ_AI_CHUNK_OVERLAP_CHARS=200`.
+
+**Tests (37+ new unit tests + 6 new migration tests + 6 new
+integration tests; ≥49 total net-new):**
+
+* `api/tests/test_chunker.py` — 19 unit tests including the
+  canonical fidelity invariant (`canonical[start:end] ==
+  content`) over varied chunk shapes, unicode content, and the
+  default chunk size.
+* `api/tests/test_pipeline_parsers.py` — 13 unit tests including
+  the **mandatory offset-fidelity test** parametrised over three
+  fixture PDFs (simple, multi-page, two-column). Every chunk in
+  every fixture slices back byte-for-byte.
+* `api/tests/test_pipeline_ingest.py` — 6 integration tests
+  (DB-backed + MinIO-mocked): happy path, multi-page chunk
+  page-tracking, idempotent re-run (no duplicate chunks),
+  unsupported MIME (failed + `unsupported_type`), corrupt PDF
+  (failed + `parse_failed`), soft-deleted skip.
+* `api/tests/test_workers_queue.py` — 5 unit tests: enqueue
+  success / failure / import-error paths, idempotent close.
+* `api/tests/test_migrations.py` — extended with 6 C5 tests:
+  documents and document_chunks table existence, pgvector
+  extension installed, documents.file_id UNIQUE, offset CHECK
+  constraints, (document_id, chunk_index) UNIQUE, FK CASCADE
+  on file hard-delete.
+
+**Verification (achievable without DB).** ruff format clean. ruff
+check clean (3 pre-existing B017 issues in test_migrations.py
+unaffected). mypy clean across `api/app/` (1 pre-existing
+storage.py mypy issue from C4 not in C5 scope). 37 unit tests pass
+in 0.22s with PyMuPDF installed; the 6 integration tests + 6
+migration tests run with `DATABASE_URL` set per the standard
+quickstart.
+
+End-to-end verification (DB-required): `docker compose up -d`,
+`make migrate` applies migration 0005 cleanly, upload a real PDF
+via the API, wait for `ingestion_status='ready'`, query
+`document_chunks`, slice a random chunk's content from the
+canonical text, byte-compare. The mocked-MinIO + real-PyMuPDF
+integration test enforces this contract automatically on every
+CI run.
+
+**Deviations from the C5 brief:**
+
+* Embeddings deferred to C6, documented in ADR 0006 §3 and the
+  newly-deferred-items section below. The C5 brief listed
+  "embeddings generated" in scope; we ship chunks with
+  `embedding=NULL` so the citation-engine offset contract holds
+  immediately, and C6 (KB hybrid retrieval) is the natural place
+  for the embedding model selection + generation work.
+* `metadata` column on `document_chunks` named `metadata_json` to
+  avoid SQLAlchemy declarative's `Base.metadata` reserved name
+  conflict. Functionally equivalent.
+
 ---
 
 ## Tasks ahead
@@ -473,6 +586,17 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 | ~~`project_id` FK constraint on `files.project_id`~~ | ~~Migration 0003 leaves the column nullable without an FK constraint~~ | **Landed in C7.** Migration 0004's ALTER TABLE adds `fk_files_project_id REFERENCES projects(id) ON DELETE SET NULL`. Migration test pins both the constraint existence and the SET NULL behavior. |
 | ~~Multipart `project_id` form field on `POST /api/v1/files`~~ | ~~The handler accepted but did not persist the field~~ | **Landed in C7.** The C4 handler now declares `project_id` as a `Form` parameter, validates it against the caller's active projects (rejecting bogus / cross-user / invalid-UUID values with 422 before any bytes touch MinIO), and persists `files.project_id`. 4 new integration tests cover persistence, unknown id, cross-user id, and invalid-UUID id. |
 | `forceful=true` immediate hard-delete on `DELETE /api/v1/files/{id}` | Considered in ADR 0005; not in C4 scope | Out of M1; will be reconsidered in D-phase if operator feedback reveals demand. Until then, the only hard-delete path is D6. |
+
+### Newly deferred (surfaced during C5)
+
+| Item | Surface | Owning task |
+|---|---|---|
+| Embedding generation for `document_chunks` | C5 writes `embedding=NULL` for every chunk per ADR 0006 §3; the column type is `vector(1536)` and the ivfflat index is in place | **C6 (KB hybrid retrieval)** absorbs the embedding-generation work. C6 already needs the gateway's `/v1/embeddings` to actually work (it's the retrieval-side call); landing it once for both ingestion and retrieval is more efficient than landing it twice. The M1-IMPLEMENTATION-ORDER C6 spec should be updated to reflect this absorption (small, additive — the retrieval flow naturally calls embed-on-write for any chunks where `embedding IS NULL`). |
+| Gateway `/v1/embeddings` endpoint implementation | B5 left it as a 501 stub returning `not_implemented`; `GatewayClient.embeddings()` already has the right shape | **C6** lands the real implementation. Per CLAUDE.md the embedding call must go through the gateway (it's a provider call); C6 is the right place because it's the consumer. B6 (additional provider adapters) is a separate concern. |
+| OCR for image-only PDFs | C5 marks scanned/image PDFs as `failed` because PyMuPDF returns empty text; per the brief OCR is M2 | **M2** Document Pipeline expansion. Mistral OCR API for cloud, PaddleOCR-VL for air-gapped. PRD §3 and §6.1 have the design. |
+| DOCX/RTF/TXT parser support | C5 marks non-PDF MIMEs as `failed` with `unsupported_type`; M1 is PDF-only per the brief | **M2**. The parser cascade in `app/pipeline/parsers.py` is structured to accept additional adapters; the dispatch is by MIME type. New adapters need to produce a canonical character stream + page spans (or chapter spans / section spans for DOCX) that satisfy the offset-fidelity invariant. |
+| Per-chunk token count | C5 writes `tokens=NULL` (column nullable); per ADR 0006 token counts are computed alongside embeddings, which means C6 owns this | **C6** (alongside embeddings). The tokenizer choice is coupled to the embedding model choice (most providers tokenize via tiktoken or a model-specific BPE). C6's embedding-model decision drives the tokenizer. |
+| Operator re-ingest CLI | A future `python -m app.cli reingest --file <id>` (or `--all-failed`) for operator-driven re-ingestion of files | Not strictly needed for M1 — operators can `UPDATE files SET ingestion_status='pending' WHERE ...` against the database directly, and the worker's startup sweep picks it up on the next worker restart. The CLI affordance is convenience-only; deferred to **D-phase** or later as operator-side experience guides demand. |
 
 ### Deferred to **C3** (chat service + message persistence)
 
