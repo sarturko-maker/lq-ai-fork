@@ -81,6 +81,21 @@ class ChatCompletionRequest(BaseModel):
     lq_ai_skill_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """Per-skill input bindings, keyed by skill name."""
 
+    # --- C3 (chat / message identity for routing-log correlation) ------------
+    lq_ai_chat_id: str | None = None
+    """UUID for ``inference_routing_log.chat_id``. The backend generates
+    the chat id (from the persisted ``chats`` row) and forwards it on
+    the request envelope so the routing-log row carries it.
+    Distinct from the pre-existing ``chat_id`` field (B3-era audit-log
+    tag); ``lq_ai_chat_id`` takes precedence when both are present and
+    is the canonical surface after C3."""
+
+    lq_ai_message_id: str | None = None
+    """UUID for ``inference_routing_log.message_id``. The backend
+    generates a UUID for the assistant message *before* dispatch and
+    forwards it; the gateway writes the same UUID into the routing log
+    so the log row joins to the persisted message row by ``id``."""
+
 
 # --- Chat completion response -------------------------------------------------
 

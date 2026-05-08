@@ -1,40 +1,93 @@
-"""Chats and messages endpoints.
+"""Chats and messages endpoints — Task C3 (Chat service + persistence).
 
-Per ADR 0002 (backend owns auth) + the M1 build plan, the chat surface
-lands progressively:
+Surface (per ``docs/api/backend-openapi.yaml``):
 
-* **B5 (this commit).** ``POST /api/v1/chats/{chat_id}/messages`` is
-  wired through to the gateway's ``/v1/chat/completions``. Persistence
-  lands in C3 — until then this endpoint is a *stateless pass-through*:
-  the request body's ``content`` becomes a single ``user`` message, the
-  gateway's response becomes the response body, and **nothing is written
-  to** ``chats`` **or** ``messages`` (those tables don't exist yet — C3
-  adds them). The gateway-side ``inference_routing_log`` row IS written
-  (B4), so the audit trail still captures the call.
+* ``POST   /api/v1/chats``                                — create.
+* ``GET    /api/v1/chats``                                — list with cursor
+  pagination and ``project_id`` / ``archived`` filters.
+* ``GET    /api/v1/chats/{chat_id}``                      — fetch single.
+* ``PATCH  /api/v1/chats/{chat_id}``                      — partial update
+  (title, archived).
+* ``DELETE /api/v1/chats/{chat_id}``                      — soft-delete.
+* ``GET    /api/v1/chats/{chat_id}/messages``             — list messages
+  with cursor pagination.
+* ``POST   /api/v1/chats/{chat_id}/messages``             — **the keystone**:
+  persist user message → forward to gateway → persist assistant message
+  (or stream SSE chunks and persist the assistant row at end-of-stream).
 
-* **C3.** Real ``chats`` and ``messages`` tables; the request persists a
-  user message, the response persists the assistant message, the
-  citation engine attaches verified citations.
+All endpoints inherit the auth + must-change-password gate from the
+chats router's router-level ``Depends(get_active_user)`` in
+``app.api.__init__`` (B2 pattern). Each handler also takes
+``ActiveUser`` directly so the user object is available for owner
+checks (FastAPI dedupes the dependency).
 
-The other endpoints in this module (list/create/get/patch/delete chats,
-list messages, citations) stay 501 — those are all C3 territory.
+**Per-user isolation.** Chats are scoped to ``owner_id``. Cross-user
+access returns 404, not 403, to avoid leaking existence (same posture
+as C4 / files and C7 / projects).
+
+**The keystone POST /messages flow** (the heart of C3):
+
+1. Validate auth + chat ownership (404 on cross-user).
+2. Persist a ``user`` message row (with the request's ``skills`` list
+   captured as ``applied_skills``).
+3. Auto-rename the chat from the first user message if its title is
+   still ``"New chat"``.
+4. Generate a UUID for the eventual assistant message.
+5. Forward to the gateway via :class:`GatewayClient`. Pass
+   ``lq_ai_chat_id`` and ``lq_ai_message_id`` so the gateway's routing
+   log row carries the same identifiers (closing the A2-deferred FKs).
+6. Streaming: emit OpenAI-style SSE chunks per ADR 0007. Persist the
+   assistant row at end-of-stream — partial writes during streaming
+   would expose half-built rows to readers. If the stream fails
+   mid-way, persist a row with whatever content was received and the
+   error code populated (full audit; clients can resume).
+7. Non-streaming: persist the assistant row from the gateway's
+   complete response.
+
+We do NOT write ``inference_routing_log`` from the backend — the
+gateway is the canonical writer (B4). The backend persists the message
+row; the gateway writes the routing log with ``message_id`` pointing at
+that same row.
 """
 
 from __future__ import annotations
 
+import json as _json
 import logging
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError as PydanticValidationError
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._stub import not_implemented
 from app.api.dependencies import ActiveUser
 from app.clients.gateway import GatewayClient, get_gateway_client
-from app.errors import LQAIError, ValidationError as DomainValidationError
+from app.db.session import get_db
+from app.errors import LQAIError, NotFound, ValidationError
+from app.models.chat import Chat, Message
+from app.models.user import User
+from app.schemas.chats import (
+    LIST_LIMIT_DEFAULT,
+    LIST_LIMIT_MAX,
+    ChatCreateRequest,
+    ChatListResponse,
+    ChatResponse,
+    ChatUpdateRequest,
+    Cursor,
+    MessageCreateRequest,
+    MessageListResponse,
+    MessagePostResponse,
+    decode_cursor,
+    derive_chat_title,
+    encode_cursor,
+    message_to_response,
+    usd_to_micros,
+)
 from app.schemas.gateway import (
     ChatCompletionMessage,
     ChatCompletionRequest,
@@ -43,310 +96,663 @@ from app.schemas.gateway import (
 router = APIRouter(prefix="/chats", tags=["chats"])
 log = logging.getLogger(__name__)
 
-_C3 = "C3 — Chat service + message persistence"
-
 
 # ---------------------------------------------------------------------------
-# Request schema (matches the OpenAPI sketch's MessageCreate).
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-class MessageCreateRequest(BaseModel):
-    """`MessageCreate` schema from backend-openapi.yaml.
-
-    B5 supports ``content`` and ``model``. C2 adds ``skills`` (list of
-    skill names to attach) and ``skill_inputs`` (per-skill input
-    bindings) and forwards both to the gateway as the
-    ``lq_ai_skills`` / ``lq_ai_skill_inputs`` request-extension fields.
-    """
-
-    content: str = Field(min_length=1)
-    model: str = Field(default="smart")
-    """Model alias (per the OpenAPI sketch). Defaults to ``smart`` —
-    operators map ``smart`` to a real model in ``gateway.yaml``.
-    See ``gateway.yaml.example`` for the alias list."""
-
-    skills: list[str] = Field(default_factory=list)
-    """C2: skill names to attach. The backend forwards them as
-    ``lq_ai_skills`` to the gateway, which fetches each from the
-    backend's internal-skills endpoint and assembles the prompt."""
-
-    skill_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    """C2: per-skill input bindings, keyed by skill name. Forwarded as
-    ``lq_ai_skill_inputs`` to the gateway. Per-skill scoping so two
-    attached skills with overlapping variable names don't collide."""
-
-    stream: bool = False
-    """Whether to stream the response as SSE chunks. ``False`` returns a
-    single JSON body; ``True`` returns a ``text/event-stream`` response
-    matching the OpenAPI sketch's ``MessageStreamEvent``."""
-
-
-# ---------------------------------------------------------------------------
-# Helpers.
-# ---------------------------------------------------------------------------
-
-
-def _build_gateway_request(
-    payload: MessageCreateRequest,
-    *,
-    chat_id: str,
-) -> ChatCompletionRequest:
-    """Translate the backend request into a gateway-shaped request.
-
-    B5 maps the single ``content`` string to one ``user`` message. C3
-    will pull prior messages from ``messages`` to build full conversation
-    context; until then the gateway sees a single-turn request.
-
-    The ``chat_id`` is forwarded so the gateway's ``inference_routing_log``
-    row carries it (correlation across the stateless pass-through; once
-    C3 persists, the same id resolves to the chat row).
-
-    C2: ``skills`` and ``skill_inputs`` from the backend's
-    MessageCreate body forward as ``lq_ai_skills`` and
-    ``lq_ai_skill_inputs`` to the gateway, which assembles the prompt.
-    """
-
-    return ChatCompletionRequest(
-        model=payload.model,
-        messages=[ChatCompletionMessage(role="user", content=payload.content)],
-        stream=payload.stream,
-        chat_id=chat_id,
-        lq_ai_skills=list(payload.skills),
-        lq_ai_skill_inputs=dict(payload.skill_inputs),
-    )
-
-
-def _validate_chat_id(chat_id: str) -> str:
+def _validate_chat_id(chat_id: str) -> uuid.UUID:
     """Reject non-UUID chat ids per the OpenAPI sketch's ``{chat_id}: uuid``."""
 
     try:
-        uuid.UUID(chat_id)
+        return uuid.UUID(chat_id)
     except ValueError as exc:
-        raise DomainValidationError(
+        raise ValidationError(
             "chat_id must be a UUID",
             details={"chat_id": chat_id},
         ) from exc
-    return chat_id
 
 
-def _assistant_message_dict(
+async def _load_visible_chat(
+    db: AsyncSession,
+    chat_id: uuid.UUID,
+    owner_id: uuid.UUID,
     *,
-    chat_id: str,
-    content: str,
-    model: str | None,
-    routed_provider: str | None,
-    routed_inference_tier: int | None,
-    tokens_in: int | None,
-    tokens_out: int | None,
-    cost_estimate: float | None,
-) -> dict[str, object]:
-    """Build the ``Message`` dict from the OpenAPI sketch.
+    include_archived: bool = False,
+) -> Chat:
+    """Load a chat row scoped to the caller; 404 on miss / cross-user.
 
-    ``id`` is synthesized — until C3, no row exists. Operators reading
-    the response should not rely on the id resolving to a database
-    record yet. Documented in the response below.
+    ``include_archived=True`` surfaces archived rows (used by GET so
+    archived chats can still be viewed; list excludes them by default).
     """
 
-    from datetime import UTC, datetime
+    stmt = select(Chat).where(Chat.id == chat_id, Chat.owner_id == owner_id)
+    if not include_archived:
+        stmt = stmt.where(Chat.archived_at.is_(None))
 
-    return {
-        "id": str(uuid.uuid4()),
-        "chat_id": chat_id,
-        "role": "assistant",
-        "content": content,
-        "model": model,
-        "provider": routed_provider,
-        "routed_inference_tier": routed_inference_tier,
-        "tokens_in": tokens_in,
-        "tokens_out": tokens_out,
-        "cost_estimate": cost_estimate,
-        "created_at": datetime.now(tz=UTC).isoformat(),
-    }
+    result = await db.execute(stmt)
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise NotFound(
+            f"Chat {chat_id} not found.",
+            details={"chat_id": str(chat_id)},
+        )
+    return row
+
+
+async def _message_count(db: AsyncSession, chat_id: uuid.UUID) -> int:
+    """Return the count of messages for a chat (single COUNT(*) query)."""
+
+    stmt = select(func.count()).select_from(Message).where(Message.chat_id == chat_id)
+    result = await db.execute(stmt)
+    return int(result.scalar_one())
+
+
+async def _message_counts_for(db: AsyncSession, chat_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+    """Return per-chat message counts in a single GROUP BY query."""
+
+    if not chat_ids:
+        return {}
+    stmt = (
+        select(Message.chat_id, func.count())
+        .where(Message.chat_id.in_(chat_ids))
+        .group_by(Message.chat_id)
+    )
+    result = await db.execute(stmt)
+    counts = {row[0]: int(row[1]) for row in result.all()}
+    # Chats with zero messages don't appear in the GROUP BY result;
+    # backfill with 0 so callers get a complete map.
+    for cid in chat_ids:
+        counts.setdefault(cid, 0)
+    return counts
+
+
+async def _serialize_chat(
+    db: AsyncSession,
+    chat: Chat,
+    *,
+    message_count: int | None = None,
+) -> ChatResponse:
+    """Build the ``ChatResponse`` for a single row."""
+
+    if message_count is None:
+        message_count = await _message_count(db, chat.id)
+    return ChatResponse(
+        id=chat.id,
+        owner_id=chat.owner_id,
+        project_id=chat.project_id,
+        title=chat.title,
+        archived_at=chat.archived_at,
+        created_at=chat.created_at,
+        updated_at=chat.updated_at,
+        message_count=message_count,
+    )
+
+
+def _decode_cursor_or_400(value: str) -> Cursor:
+    """Decode a wire cursor; raise ValidationError on malformed input."""
+
+    try:
+        return decode_cursor(value)
+    except (ValueError, PydanticValidationError) as exc:
+        raise ValidationError(
+            "cursor is malformed",
+            details={"cursor": value},
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
-# Endpoints.
+# CRUD endpoints
 # ---------------------------------------------------------------------------
 
 
-@router.get("")
-async def list_chats(request: Request) -> JSONResponse:
-    return not_implemented(request, next_task=_C3, endpoint="GET /api/v1/chats")
+@router.post(
+    "",
+    response_model=ChatResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new chat",
+    description=(
+        "Create a chat owned by the caller. ``title`` defaults to "
+        '"New chat" when omitted; the API auto-renames the chat from '
+        "the first user message's first 80 chars on the first POST "
+        "/messages call."
+    ),
+)
+async def create_chat(
+    payload: ChatCreateRequest,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ChatResponse:
+    chat = Chat(
+        owner_id=user.id,
+        project_id=payload.project_id,
+        title=payload.title or "New chat",
+    )
+    db.add(chat)
+    await db.flush()
+    await db.commit()
+    await db.refresh(chat)
+
+    log.info(
+        "chat created",
+        extra={
+            "event": "chat_created",
+            "user_id": str(user.id),
+            "chat_id": str(chat.id),
+            "project_id": str(chat.project_id) if chat.project_id else None,
+        },
+    )
+
+    return await _serialize_chat(db, chat, message_count=0)
 
 
-@router.post("")
-async def create_chat(request: Request) -> JSONResponse:
-    return not_implemented(request, next_task=_C3, endpoint="POST /api/v1/chats")
+@router.get(
+    "",
+    response_model=ChatListResponse,
+    summary="List the caller's chats (cursor-paginated)",
+    description=(
+        "Returns the caller's active chats by default. "
+        "``archived=true`` returns archived chats only. "
+        "``project_id`` filters to chats inside a specific project. "
+        "``cursor`` and ``limit`` paginate; ``next_cursor`` in the "
+        "response carries the next page's cursor (null when "
+        "exhausted)."
+    ),
+)
+async def list_chats(
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    project_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Filter to chats inside a specific project."),
+    ] = None,
+    archived: Annotated[
+        bool | None,
+        Query(description="When true, return archived chats only."),
+    ] = None,
+    cursor: Annotated[
+        str | None,
+        Query(description="Opaque cursor from a previous page's `next_cursor`."),
+    ] = None,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=LIST_LIMIT_MAX, description="Page size; capped at 100."),
+    ] = LIST_LIMIT_DEFAULT,
+) -> ChatListResponse:
+    stmt = select(Chat).where(Chat.owner_id == user.id)
+    if archived is True:
+        stmt = stmt.where(Chat.archived_at.is_not(None))
+    else:
+        stmt = stmt.where(Chat.archived_at.is_(None))
+
+    if project_id is not None:
+        stmt = stmt.where(Chat.project_id == project_id)
+
+    # Newest-first listing. The keyset cursor compares against
+    # ``(created_at, id)`` so ties on created_at break by id (stable
+    # ordering across pages even if the same created_at is assigned
+    # to multiple rows).
+    if cursor is not None:
+        decoded = _decode_cursor_or_400(cursor)
+        stmt = stmt.where(
+            or_(
+                Chat.created_at < decoded.created_at,
+                and_(Chat.created_at == decoded.created_at, Chat.id < decoded.id),
+            )
+        )
+
+    stmt = stmt.order_by(Chat.created_at.desc(), Chat.id.desc()).limit(limit + 1)
+
+    result = await db.execute(stmt)
+    rows = list(result.scalars().all())
+    next_cursor: str | None = None
+    if len(rows) > limit:
+        # Trim the over-fetched row; encode the page's last row as the
+        # cursor for the next page.
+        rows = rows[:limit]
+        last = rows[-1]
+        next_cursor = encode_cursor(last.created_at, last.id)
+
+    counts = await _message_counts_for(db, [r.id for r in rows])
+    items = [await _serialize_chat(db, row, message_count=counts.get(row.id, 0)) for row in rows]
+
+    return ChatListResponse(items=items, next_cursor=next_cursor)
 
 
-@router.get("/{chat_id}")
-async def get_chat(request: Request, chat_id: str) -> JSONResponse:
-    return not_implemented(request, next_task=_C3, endpoint="GET /api/v1/chats/{chat_id}")
+@router.get(
+    "/{chat_id}",
+    response_model=ChatResponse,
+    summary="Fetch a single chat",
+)
+async def get_chat(
+    chat_id: str,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ChatResponse:
+    cid = _validate_chat_id(chat_id)
+    # Archived chats are visible via direct GET (so a client can render
+    # the archived-detail page); list excludes them by default.
+    chat = await _load_visible_chat(db, cid, user.id, include_archived=True)
+    return await _serialize_chat(db, chat)
 
 
-@router.patch("/{chat_id}")
-async def update_chat(request: Request, chat_id: str) -> JSONResponse:
-    return not_implemented(request, next_task=_C3, endpoint="PATCH /api/v1/chats/{chat_id}")
+@router.patch(
+    "/{chat_id}",
+    response_model=ChatResponse,
+    summary="Partial update of a chat",
+)
+async def update_chat(
+    chat_id: str,
+    payload: ChatUpdateRequest,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ChatResponse:
+    cid = _validate_chat_id(chat_id)
+    chat = await _load_visible_chat(db, cid, user.id, include_archived=True)
+
+    update_fields = payload.model_dump(exclude_unset=True)
+
+    if "title" in update_fields:
+        new_title = update_fields["title"]
+        if new_title is None:
+            raise ValidationError(
+                "title cannot be cleared; supply a non-empty value or omit the field.",
+            )
+        chat.title = new_title
+
+    if "archived" in update_fields:
+        archived = update_fields["archived"]
+        if archived is True and chat.archived_at is None:
+            chat.archived_at = datetime.now(tz=UTC)
+        elif archived is False and chat.archived_at is not None:
+            chat.archived_at = None
+
+    await db.commit()
+    await db.refresh(chat)
+
+    log.info(
+        "chat updated",
+        extra={
+            "event": "chat_updated",
+            "user_id": str(user.id),
+            "chat_id": str(chat.id),
+            "fields": sorted(update_fields.keys()),
+        },
+    )
+    return await _serialize_chat(db, chat)
 
 
-@router.delete("/{chat_id}")
-async def delete_chat(request: Request, chat_id: str) -> JSONResponse:
-    return not_implemented(request, next_task=_C3, endpoint="DELETE /api/v1/chats/{chat_id}")
+@router.delete(
+    "/{chat_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Soft-delete a chat",
+    description=(
+        "Sets ``archived_at`` on the chat. Hard-delete is owned by D6. "
+        "Idempotent: a second delete on an already-archived chat returns 404."
+    ),
+    response_class=Response,
+)
+async def delete_chat(
+    chat_id: str,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    cid = _validate_chat_id(chat_id)
+    chat = await _load_visible_chat(db, cid, user.id, include_archived=False)
+    chat.archived_at = datetime.now(tz=UTC)
+    await db.commit()
+    log.info(
+        "chat archived",
+        extra={
+            "event": "chat_archived",
+            "user_id": str(user.id),
+            "chat_id": str(cid),
+        },
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/{chat_id}/messages")
-async def list_messages(request: Request, chat_id: str) -> JSONResponse:
-    return not_implemented(request, next_task=_C3, endpoint="GET /api/v1/chats/{chat_id}/messages")
+# ---------------------------------------------------------------------------
+# Messages: list
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{chat_id}/messages",
+    response_model=MessageListResponse,
+    summary="List messages in a chat (cursor-paginated, oldest-first)",
+)
+async def list_messages(
+    chat_id: str,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    cursor: Annotated[
+        str | None,
+        Query(description="Opaque cursor from a previous page's `next_cursor`."),
+    ] = None,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=LIST_LIMIT_MAX, description="Page size; capped at 100."),
+    ] = LIST_LIMIT_DEFAULT,
+) -> MessageListResponse:
+    cid = _validate_chat_id(chat_id)
+    # The chat must be visible to the caller (404 cross-user). We
+    # accept archived chats so a user can read history of an archived
+    # conversation.
+    await _load_visible_chat(db, cid, user.id, include_archived=True)
+
+    stmt = select(Message).where(Message.chat_id == cid)
+
+    if cursor is not None:
+        decoded = _decode_cursor_or_400(cursor)
+        # Oldest-first listing — the cursor represents the last
+        # already-seen row, so the next page is rows AFTER it.
+        stmt = stmt.where(
+            or_(
+                Message.created_at > decoded.created_at,
+                and_(Message.created_at == decoded.created_at, Message.id > decoded.id),
+            )
+        )
+
+    stmt = stmt.order_by(Message.created_at.asc(), Message.id.asc()).limit(limit + 1)
+    result = await db.execute(stmt)
+    rows = list(result.scalars().all())
+    next_cursor: str | None = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        last = rows[-1]
+        next_cursor = encode_cursor(last.created_at, last.id)
+
+    return MessageListResponse(
+        items=[message_to_response(row) for row in rows],
+        next_cursor=next_cursor,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Messages: post (the keystone)
+# ---------------------------------------------------------------------------
 
 
 @router.post(
     "/{chat_id}/messages",
     response_model=None,  # union return type; FastAPI handles via Response
-    summary="Post a user message; pass through to the gateway and return the response",
+    summary="Post a user message; persist + forward to gateway + persist response",
     description=(
-        "B5 stateless pass-through. Until C3 lands chat persistence, this endpoint "
-        "translates the request into a single-turn gateway call and returns the "
-        "response. The gateway-side `inference_routing_log` row is written; "
-        "the chat / messages tables do not yet exist, so nothing is persisted "
-        "on the backend side."
+        "C3: persists the user message, forwards to the gateway, "
+        "persists the assistant message (or streams SSE chunks and "
+        "persists the assistant row at end-of-stream). Returns either "
+        "a JSON body or an SSE stream depending on ``stream``."
     ),
 )
 async def send_message(
     chat_id: str,
     request: Request,
     user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> JSONResponse | StreamingResponse:
-    """POST a user message; pass through to the gateway and return the response.
-
-    Auth gate: bearer token + cleared must_change_password (B2).
-
-    Behavior (B5):
-
-    1. Parse the request body as ``MessageCreate``.
-    2. Translate to a single-turn ``ChatCompletionRequest`` with the
-       request's ``content`` as the only message.
-    3. Call :meth:`GatewayClient.chat_completion` (or its streaming
-       variant if ``stream=True``).
-    4. Surface the gateway's ``routed_inference_tier`` to the response.
-    5. **Do NOT persist anything** — chats and messages tables don't
-       exist yet; C3 adds them.
-    6. **Do NOT write** ``inference_routing_log`` from the backend —
-       the gateway already writes it (B4). Backend writing would
-       double-count.
-    """
-
-    _validate_chat_id(chat_id)
+    cid = _validate_chat_id(chat_id)
 
     try:
         raw_body = await request.json()
     except Exception as exc:
-        raise DomainValidationError(
-            "Request body is not valid JSON",
-        ) from exc
+        raise ValidationError("Request body is not valid JSON") from exc
 
     try:
         payload = MessageCreateRequest.model_validate(raw_body)
-    except ValidationError as exc:
-        raise DomainValidationError(
+    except PydanticValidationError as exc:
+        raise ValidationError(
             "Request body failed schema validation",
             details={"errors": exc.errors()},
         ) from exc
 
-    # Forward an X-Request-Id so the gateway's audit row correlates back
-    # to this hop. Use an upstream-supplied id if the caller provided
-    # one; otherwise synthesize a UUID per the same convention as the
-    # gateway's synthesize_request_id.
+    # Auth + ownership: load the chat (visible to caller, not
+    # archived). Posting to an archived chat returns 404 — clients
+    # must explicitly unarchive (PATCH archived=false) before posting.
+    chat = await _load_visible_chat(db, cid, user.id, include_archived=False)
+
+    # Persist the user message FIRST. This is unconditionally written,
+    # even if the gateway call ultimately fails — the user did say
+    # something and the audit trail must reflect that.
+    user_message = Message(
+        chat_id=cid,
+        role="user",
+        content=payload.content,
+        applied_skills=list(payload.skills),
+    )
+    db.add(user_message)
+
+    # Auto-rename if this is still the default title. We do this in the
+    # same transaction so the rename and the user message land
+    # atomically. ``derive_chat_title`` returns "New chat" for empty
+    # input, so a degenerate first message keeps the default rather
+    # than blanking the title.
+    if chat.title == "New chat":
+        chat.title = derive_chat_title(payload.content)
+
+    await db.flush()
+    await db.commit()
+    await db.refresh(user_message)
+    await db.refresh(chat)
+
+    # Generate the assistant message id BEFORE dispatch so the gateway
+    # can stamp it on the routing log row and the persisted message
+    # row carries the same id. Idempotent across retries.
+    assistant_message_id = uuid.uuid4()
+
     request_id = (
         request.headers.get("x-request-id")
         or request.headers.get("x-correlation-id")
         or f"req_{uuid.uuid4().hex}"
     )
 
-    gw_request = _build_gateway_request(payload, chat_id=chat_id)
+    # Build the gateway request. C3 still sends a single-turn request
+    # (the user's content as one ``user`` message); a future task may
+    # widen this to include prior history. The gateway does the skill
+    # prompt assembly per ADR 0007.
+    gw_request = ChatCompletionRequest(
+        model=payload.model,
+        messages=[ChatCompletionMessage(role="user", content=payload.content)],
+        stream=payload.stream,
+        chat_id=str(cid),
+        lq_ai_chat_id=str(cid),
+        lq_ai_message_id=str(assistant_message_id),
+        lq_ai_skills=list(payload.skills),
+        lq_ai_skill_inputs=dict(payload.skill_inputs),
+    )
 
     log.info(
-        "chat send_message: user=%s chat_id=%s model=%s stream=%s request_id=%s",
-        user.id,
-        chat_id,
-        payload.model,
-        payload.stream,
-        request_id,
+        "chat send_message",
+        extra={
+            "event": "chat_send_message",
+            "user_id": str(user.id),
+            "chat_id": str(cid),
+            "user_message_id": str(user_message.id),
+            "assistant_message_id": str(assistant_message_id),
+            "model": payload.model,
+            "stream": payload.stream,
+            "request_id": request_id,
+        },
     )
 
     if payload.stream:
         return await _stream_response(
+            db=db,
+            user=user,
             gateway=gateway,
             request=gw_request,
-            chat_id=chat_id,
+            chat=chat,
+            assistant_message_id=assistant_message_id,
             request_id=request_id,
         )
     return await _non_streaming_response(
+        db=db,
+        user=user,
         gateway=gateway,
-        payload=payload,
         request=gw_request,
-        chat_id=chat_id,
+        chat=chat,
+        assistant_message_id=assistant_message_id,
         request_id=request_id,
     )
 
 
-@router.get("/{chat_id}/messages/{message_id}/citations")
-async def get_citations(request: Request, chat_id: str, message_id: str) -> JSONResponse:
-    return not_implemented(
-        request,
-        next_task=_C3,
-        endpoint="GET /api/v1/chats/{chat_id}/messages/{message_id}/citations",
+@router.get(
+    "/{chat_id}/messages/{message_id}/citations",
+    summary="Get citations for a message (M2 — empty until citation engine ships)",
+)
+async def get_citations(
+    chat_id: str,
+    message_id: str,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[dict[str, Any]]:
+    """Return persisted citations on the message row.
+
+    M1 stores ``[]``; M2 populates the structured shape. C3 returns
+    whatever the row carries so this endpoint is forward-compatible
+    without an additional task. The chat ownership check is enforced
+    so a cross-user request can't enumerate message ids.
+    """
+
+    cid = _validate_chat_id(chat_id)
+    try:
+        mid = uuid.UUID(message_id)
+    except ValueError as exc:
+        raise ValidationError(
+            "message_id must be a UUID",
+            details={"message_id": message_id},
+        ) from exc
+
+    await _load_visible_chat(db, cid, user.id, include_archived=True)
+
+    stmt = select(Message).where(Message.id == mid, Message.chat_id == cid)
+    result = await db.execute(stmt)
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise NotFound(
+            f"Message {mid} not found.",
+            details={"message_id": str(mid)},
+        )
+    citations: list[dict[str, Any]] = list(row.citations or [])
+    return citations
+
+
+# ---------------------------------------------------------------------------
+# Internal: persistence flow for non-streaming and streaming
+# ---------------------------------------------------------------------------
+
+
+async def _persist_assistant_message(
+    db: AsyncSession,
+    *,
+    message_id: uuid.UUID,
+    chat_id: uuid.UUID,
+    content: str,
+    routed_provider: str | None,
+    routed_model: str | None,
+    routed_inference_tier: int | None,
+    prompt_tokens: int | None,
+    completion_tokens: int | None,
+    cost_estimate_usd: float | None,
+    applied_skills: list[str],
+    error_code: str | None,
+) -> Message:
+    """Insert one assistant message row in its own transaction.
+
+    The handler calls this exactly once per request — at end-of-stream
+    for streaming, after the gateway response for non-streaming. We
+    take the explicit ``message_id`` so the value matches the
+    ``lq_ai_message_id`` we forwarded to the gateway, which means the
+    gateway's routing-log row's ``message_id`` resolves to this row.
+    """
+
+    row = Message(
+        id=message_id,
+        chat_id=chat_id,
+        role="assistant",
+        content=content,
+        applied_skills=list(applied_skills),
+        routed_inference_tier=routed_inference_tier,
+        routed_provider=routed_provider,
+        routed_model=routed_model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cost_estimate_micros=usd_to_micros(cost_estimate_usd),
+        error_code=error_code,
+        citations=[],
     )
-
-
-# ---------------------------------------------------------------------------
-# Internal: streaming + non-streaming response builders.
-# ---------------------------------------------------------------------------
+    db.add(row)
+    await db.flush()
+    await db.commit()
+    await db.refresh(row)
+    return row
 
 
 async def _non_streaming_response(
     *,
+    db: AsyncSession,
+    user: User,
     gateway: GatewayClient,
-    payload: MessageCreateRequest,
     request: ChatCompletionRequest,
-    chat_id: str,
+    chat: Chat,
+    assistant_message_id: uuid.UUID,
     request_id: str,
 ) -> JSONResponse:
-    """Run the non-streaming pass-through and serialize the response."""
+    """Run the non-streaming path: forward, persist, return JSON."""
 
-    # The GatewayClient raises LQAIError subclasses for every failure
-    # mode; the FastAPI exception handler (app.main) translates them
-    # to the canonical error envelope. We let those propagate.
-    response = await gateway.chat_completion(request, request_id=request_id)
+    try:
+        response = await gateway.chat_completion(request, request_id=request_id)
+    except LQAIError as exc:
+        # Gateway-side failure: the user message is already persisted.
+        # We do NOT persist an assistant row — the assistant produced
+        # nothing. The error envelope from the global LQAIError handler
+        # surfaces the failure to the client. This is the
+        # gateway-failure-pre-stream case.
+        log.warning(
+            "chat send_message failed pre-response",
+            extra={
+                "event": "chat_send_message_failed_pre",
+                "user_id": str(user.id),
+                "chat_id": str(chat.id),
+                "assistant_message_id": str(assistant_message_id),
+                "request_id": request_id,
+                "error_code": getattr(exc, "effective_code", "internal_error"),
+            },
+        )
+        raise
 
     assistant_text = ""
     if response.choices:
         message = response.choices[0].message
         assistant_text = message.content or ""
 
-    body: dict[str, object] = {
-        "message": _assistant_message_dict(
-            chat_id=chat_id,
-            content=assistant_text,
-            model=response.model,
-            routed_provider=response.routed_provider,
-            routed_inference_tier=response.routed_inference_tier,
-            tokens_in=response.usage.prompt_tokens if response.usage else None,
-            tokens_out=response.usage.completion_tokens if response.usage else None,
-            cost_estimate=response.cost_estimate,
-        ),
-        "routed_inference_tier": response.routed_inference_tier,
-        "routed_provider": response.routed_provider,
-        "cost_estimate": response.cost_estimate,
-        # C2: surface which skills were assembled into the prompt.
-        "applied_skills": response.lq_ai_applied_skills or [],
-        # B5 cannot return citations until C5 (document pipeline) lands.
-        "citations": [],
-        # Surface that B5 doesn't yet persist the message — clients can
-        # show this if useful, and integration tests pin the marker.
-        "stateless_passthrough": True,
-    }
+    applied_skills = list(response.lq_ai_applied_skills or [])
+
+    persisted = await _persist_assistant_message(
+        db,
+        message_id=assistant_message_id,
+        chat_id=chat.id,
+        content=assistant_text,
+        routed_provider=response.routed_provider,
+        routed_model=response.model,
+        routed_inference_tier=response.routed_inference_tier,
+        prompt_tokens=response.usage.prompt_tokens if response.usage else None,
+        completion_tokens=response.usage.completion_tokens if response.usage else None,
+        cost_estimate_usd=response.cost_estimate,
+        applied_skills=applied_skills,
+        error_code=None,
+    )
+
+    body = MessagePostResponse(
+        message=message_to_response(persisted),
+        citations=[],
+        routed_inference_tier=response.routed_inference_tier,
+        routed_provider=response.routed_provider,
+        cost_estimate=response.cost_estimate,
+        applied_skills=applied_skills,
+    )
 
     headers: dict[str, str] = {}
     if response.routed_inference_tier is not None:
@@ -356,27 +762,22 @@ async def _non_streaming_response(
 
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content=body,
+        content=body.model_dump(mode="json"),
         headers=headers,
     )
 
 
 async def _stream_response(
     *,
+    db: AsyncSession,
+    user: User,
     gateway: GatewayClient,
     request: ChatCompletionRequest,
-    chat_id: str,
+    chat: Chat,
+    assistant_message_id: uuid.UUID,
     request_id: str,
 ) -> StreamingResponse:
-    """Run the streaming pass-through and serialize as SSE per the sketch."""
-
-    # The OpenAPI sketch's ``MessageStreamEvent`` has two variants
-    # (delta and complete). We emit a sequence of ``delta`` events
-    # followed by a final ``complete`` event when the stream ends.
-    # Mid-stream errors are surfaced as a final ``error`` SSE frame
-    # whose body matches the canonical Error envelope.
-
-    import json as _json
+    """Run the streaming path: forward, stream SSE, persist at end."""
 
     async def _generate() -> AsyncIterator[bytes]:
         accumulated: list[str] = []
@@ -384,6 +785,20 @@ async def _stream_response(
         last_provider: str | None = None
         last_model: str | None = None
         last_applied_skills: list[str] | None = None
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
+        error_code: str | None = None
+        error_envelope: dict[str, Any] | None = None
+
+        # The opening frame carries the ``lq_ai_message_id`` so clients
+        # can poll the persisted row later. Per ADR 0007 / C3 brief.
+        opening = {
+            "type": "start",
+            "lq_ai_message_id": str(assistant_message_id),
+            "chat_id": str(chat.id),
+        }
+        yield f"data: {_json.dumps(opening, separators=(',', ':'))}\n\n".encode()
+
         try:
             async for chunk in gateway.chat_completion_stream(request, request_id=request_id):
                 last_tier = chunk.routed_inference_tier or last_tier
@@ -391,39 +806,114 @@ async def _stream_response(
                 last_model = chunk.model
                 if chunk.lq_ai_applied_skills is not None:
                     last_applied_skills = list(chunk.lq_ai_applied_skills)
+                if chunk.usage is not None:
+                    if chunk.usage.prompt_tokens:
+                        prompt_tokens = chunk.usage.prompt_tokens
+                    if chunk.usage.completion_tokens:
+                        completion_tokens = chunk.usage.completion_tokens
+
                 for choice in chunk.choices:
                     delta = choice.delta.content or ""
                     if not delta:
                         continue
                     accumulated.append(delta)
-                    payload = {"type": "delta", "delta": delta}
-                    yield f"data: {_json.dumps(payload, separators=(',', ':'))}\n\n".encode()
+                    frame: dict[str, Any] = {
+                        "type": "delta",
+                        "delta": delta,
+                        "lq_ai_message_id": str(assistant_message_id),
+                    }
+                    # Per ADR 0007 / C3 brief: surface the LQ.AI extension
+                    # fields on each chunk so header-blind clients can
+                    # observe routing without a separate request.
+                    if last_tier is not None:
+                        frame["routed_inference_tier"] = last_tier
+                    if last_applied_skills is not None:
+                        frame["applied_skills"] = list(last_applied_skills)
+                    yield f"data: {_json.dumps(frame, separators=(',', ':'))}\n\n".encode()
         except LQAIError as exc:
-            # Surface the structured error envelope as a final SSE
-            # frame so the client knows the stream ended in failure.
-            envelope = exc.to_envelope()
-            yield (f"data: {_json.dumps(envelope, separators=(',', ':'))}\n\n".encode())
-            yield b"data: [DONE]\n\n"
-            return
+            # Stream ended in failure. We persist a partial assistant
+            # row with whatever content the client already saw, and
+            # ``error_code`` populated. This is the audit-friendly
+            # decision documented inline in the C3 brief.
+            error_code = exc.effective_code
+            error_envelope = exc.to_envelope()
+            log.warning(
+                "chat send_message failed mid-stream",
+                extra={
+                    "event": "chat_send_message_failed_mid_stream",
+                    "user_id": str(user.id),
+                    "chat_id": str(chat.id),
+                    "assistant_message_id": str(assistant_message_id),
+                    "request_id": request_id,
+                    "error_code": error_code,
+                },
+            )
 
-        # Stream ended cleanly. Emit a final ``complete`` event with the
-        # synthesized assistant message and the routing metadata.
-        complete: dict[str, Any] = {
-            "type": "complete",
-            "message": _assistant_message_dict(
-                chat_id=chat_id,
+        # Persist the assistant row exactly once. Even if everything
+        # failed, we record what we got so operators see the full
+        # exchange. ``content`` may be empty if the failure happened
+        # before the first chunk.
+        try:
+            await _persist_assistant_message(
+                db,
+                message_id=assistant_message_id,
+                chat_id=chat.id,
                 content="".join(accumulated),
-                model=last_model,
                 routed_provider=last_provider,
+                routed_model=last_model,
                 routed_inference_tier=last_tier,
-                tokens_in=None,
-                tokens_out=None,
-                cost_estimate=None,
-            ),
-            "applied_skills": last_applied_skills or [],
-            "citations": [],
-        }
-        yield f"data: {_json.dumps(complete, separators=(',', ':'))}\n\n".encode()
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                # Streaming chunks carry no cost surface today (the
+                # gateway populates it on the routing log; the chunk
+                # envelope has only token usage). Leave NULL on the
+                # message; the routing-log row carries the
+                # authoritative cost.
+                cost_estimate_usd=None,
+                applied_skills=last_applied_skills or [],
+                error_code=error_code,
+            )
+        except Exception as persist_exc:
+            # Persisting the audit row must not break the stream; the
+            # operator sees this in logs and the client gets the same
+            # final SSE frames it would have without the failure.
+            log.error(
+                "chat send_message: failed to persist assistant row",
+                extra={
+                    "event": "chat_persist_failed",
+                    "user_id": str(user.id),
+                    "chat_id": str(chat.id),
+                    "assistant_message_id": str(assistant_message_id),
+                    "error": repr(persist_exc),
+                },
+            )
+
+        # Final frames.
+        if error_envelope is not None:
+            yield (f"data: {_json.dumps(error_envelope, separators=(',', ':'))}\n\n".encode())
+        else:
+            complete: dict[str, Any] = {
+                "type": "complete",
+                "lq_ai_message_id": str(assistant_message_id),
+                "message": {
+                    "id": str(assistant_message_id),
+                    "chat_id": str(chat.id),
+                    "role": "assistant",
+                    "content": "".join(accumulated),
+                    "model": last_model,
+                    "provider": last_provider,
+                    "routed_inference_tier": last_tier,
+                    "tokens_in": prompt_tokens,
+                    "tokens_out": completion_tokens,
+                    "created_at": datetime.now(tz=UTC).isoformat(),
+                },
+                "applied_skills": last_applied_skills or [],
+                "citations": [],
+                "routed_inference_tier": last_tier,
+                "routed_provider": last_provider,
+            }
+            yield f"data: {_json.dumps(complete, separators=(',', ':'))}\n\n".encode()
+
         yield b"data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -431,3 +921,16 @@ async def _stream_response(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+__all__ = [
+    "create_chat",
+    "delete_chat",
+    "get_chat",
+    "get_citations",
+    "list_chats",
+    "list_messages",
+    "router",
+    "send_message",
+    "update_chat",
+]

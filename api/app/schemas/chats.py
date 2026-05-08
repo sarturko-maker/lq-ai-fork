@@ -90,7 +90,7 @@ def usd_to_micros(value: float | None) -> int | None:
 
     if value is None:
         return None
-    return int(round(value * 1_000_000))
+    return round(value * 1_000_000)
 
 
 def micros_to_usd(value: int | None) -> float | None:
@@ -174,7 +174,7 @@ class Cursor(BaseModel):
         return base64.urlsafe_b64encode(body.encode("utf-8")).rstrip(b"=").decode("ascii")
 
     @classmethod
-    def decode(cls, value: str) -> "Cursor":
+    def decode(cls, value: str) -> Cursor:
         """Decode a wire cursor; raises ValueError on malformed input."""
 
         # Restore padding.
@@ -304,7 +304,7 @@ class MessageResponse(BaseModel):
     created_at: datetime
 
 
-def message_to_response(row: Any) -> "MessageResponse":
+def message_to_response(row: Any) -> MessageResponse:
     """Build a :class:`MessageResponse` from an ORM ``Message`` row.
 
     Materializes ``cost_estimate`` from the DB's integer micros column.
@@ -380,19 +380,19 @@ def decode_cursor(value: str) -> Cursor:
 __all__ = [
     "AUTO_RENAME_MAX_CHARS",
     "CONTENT_MIN_LEN",
+    "LIST_LIMIT_DEFAULT",
+    "LIST_LIMIT_MAX",
+    "TITLE_MAX_LEN",
     "ChatCreateRequest",
     "ChatListResponse",
     "ChatResponse",
     "ChatTitle",
     "ChatUpdateRequest",
     "Cursor",
-    "LIST_LIMIT_DEFAULT",
-    "LIST_LIMIT_MAX",
     "MessageCreateRequest",
     "MessageListResponse",
     "MessagePostResponse",
     "MessageResponse",
-    "TITLE_MAX_LEN",
     "decode_cursor",
     "derive_chat_title",
     "encode_cursor",
