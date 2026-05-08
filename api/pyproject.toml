@@ -59,6 +59,27 @@ dependencies = [
     # library; we're moving from "transitive when extras are installed"
     # to "explicit declaration."
     "python-multipart>=0.0.20,<0.1",
+    # C5 — document pipeline. New family in the SBOM; each library is
+    # PRD-anchored and called out in ADR 0006.
+    #
+    # PyMuPDF: byte-precise text extraction. The M2 Citation Engine's
+    # deterministic substring verification depends on character-precise
+    # offsets being preserved from the first ingestion (see ADR 0006).
+    # AGPL-3.0 — server-side use only; not redistributed as a library.
+    # Boundary documented in PRD §1519 and §7.2.
+    "pymupdf>=1.24,<2",
+    # Docling: structure-aware parsing (titles, tables, paragraphs).
+    # MIT-licensed; produces a structured representation we stash in
+    # `documents.structured_content` for M2 consumption. M1 chunker
+    # drives off PyMuPDF's character stream, not Docling's offsets.
+    # Heavy install footprint (transformers, sentencepiece) — accepted
+    # for M1 per PRD §3 and §7.6.
+    "docling>=1.16,<2",
+    # arq: Redis-native asyncio job queue for the document-pipeline
+    # worker. MIT-licensed; small dep footprint (just redis-py which
+    # we already have, plus click). Avoids Celery's complexity at
+    # M1 scale; ADR 0006 §2 records the call.
+    "arq>=0.25,<0.27",
 ]
 
 [project.optional-dependencies]
@@ -119,4 +140,12 @@ disallow_untyped_defs = true
 # standard mypy mode (not strict mode), so this is in line with policy.
 [[tool.mypy.overrides]]
 module = ["aioboto3", "aioboto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
+# C5 dependencies — none ship type stubs. PyMuPDF (`fitz`) and Docling
+# are imported lazily inside `app/pipeline/parsers.py` and used at
+# runtime. arq is imported lazily inside `app/workers/`. The SDKs are
+# active code paths; mypy sees them as untyped.
+[[tool.mypy.overrides]]
+module = ["fitz", "fitz.*", "docling", "docling.*", "arq", "arq.*"]
 ignore_missing_imports = true
