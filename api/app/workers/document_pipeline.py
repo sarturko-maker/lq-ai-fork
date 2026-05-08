@@ -66,12 +66,64 @@ async def ingest_file_job(ctx: dict[str, Any], file_id_str: str) -> dict[str, An
     async with factory() as session:
         result = await ingest_file(session, file_id)
 
+    # C6: enqueue an embed-chunks job after a successful ingest so
+    # newly-written chunks land in the vector index without waiting for
+    # the next KB-attach call. Best-effort; failures here don't block
+    # the ingest result. The job itself is a no-op if no chunks need
+    # embedding (idempotent).
+    if result.status == "ready":
+        redis = ctx.get("redis")
+        if redis is not None:
+            try:
+                await redis.enqueue_job("embed_chunks_for_file_job", file_id_str)
+            except Exception as exc:
+                log.warning(
+                    "worker: failed to enqueue embed job after ingest",
+                    extra={
+                        "event": "worker_embed_enqueue_failed",
+                        "file_id": file_id_str,
+                        "error": str(exc),
+                    },
+                )
+
     return {
         "file_id": str(result.file_id),
         "status": result.status,
         "document_id": (str(result.document_id) if result.document_id is not None else None),
         "chunk_count": result.chunk_count,
         "parser": result.parser,
+        "error": result.error,
+    }
+
+
+async def embed_chunks_for_file_job(
+    ctx: dict[str, Any],
+    file_id_str: str,
+) -> dict[str, Any]:
+    """Worker job: embed every NULL-embedding chunk of a file (C6).
+
+    Idempotent — the underlying ``embed_chunks_for_file`` filters on
+    ``embedding IS NULL`` so a re-run is a no-op when nothing needs
+    embedding. Failures (gateway down, OpenAI 429, etc.) bubble to
+    arq's retry mechanism; partial-success state is preserved (chunks
+    that did get embedded stay embedded).
+    """
+
+    file_id = uuid.UUID(file_id_str)
+    log.info(
+        "worker: embed job start",
+        extra={"event": "worker_embed_start", "file_id": file_id_str},
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        from app.knowledge.embed import embed_chunks_for_file
+
+        result = await embed_chunks_for_file(session, file_id)
+
+    return {
+        "file_id": str(result.file_id),
+        "chunks_embedded": result.chunks_embedded,
         "error": result.error,
     }
 
@@ -163,7 +215,7 @@ class WorkerSettings:
     See https://arq-docs.helpmanual.io/#workersettings for the schema.
     """
 
-    functions: ClassVar[list[Any]] = [ingest_file_job]
+    functions: ClassVar[list[Any]] = [ingest_file_job, embed_chunks_for_file_job]
     on_startup = on_startup
     on_shutdown = on_shutdown
     # Lazily resolved via property-like attribute lookup arq does on

@@ -492,15 +492,55 @@ CREATE INDEX idx_chunks_tsv ON document_chunks USING gin (content_tsv);
 CREATE INDEX idx_chunks_document ON document_chunks(document_id, chunk_index);
 ```
 
-The `ivfflat` index is appropriate for moderate scale; transition to `hnsw` (Postgres 16+) for larger deployments.
+The `ivfflat` index is appropriate for moderate scale; transition to `hnsw` (Postgres 16+) for larger deployments. Per ADR 0008 we keep `ivfflat` for M1 — the differential against HNSW only shows at corpus sizes well above what M1 deployments will see.
 
-Per ADR 0006, the `embedding` column is **nullable for M1** — the C5
+Per ADR 0006, the `embedding` column was **nullable for M1** — the C5
 pipeline writes chunks with `embedding=NULL` and C6 backfills via the
-gateway's `/v1/embeddings` endpoint. The pgvector extension is enabled
-by migration 0004. The `(document_id, chunk_index)` UNIQUE constraint
+gateway's `/v1/embeddings`. The pgvector extension is enabled by
+migration 0005. The dimension `vector(1536)` matches OpenAI's
+`text-embedding-3-small` per ADR 0008 (the embedding-model decision).
+
+C6 closes the embedding deferral via two backfill paths:
+
+* **Eager (worker-driven).** `app.workers.document_pipeline.embed_chunks_for_file_job` walks every `embedding IS NULL` chunk for a file and calls the gateway's `/v1/embeddings` in 64-row batches. Triggered by `POST /api/v1/knowledge-bases/{id}/files` (when the file has unembedded chunks) and by the ingest-completion hook (every successful ingest enqueues an embed job for forward chunks).
+* **Lazy (query-driven).** `app.knowledge.embed.ensure_embeddings_for_chunk_ids` covers the gap when a query runs before the worker has caught up.
+
+Token counts (`document_chunks.tokens`) are populated alongside the embedding via `tiktoken`'s `cl100k_base` BPE — closing the C5-deferred per-chunk token-count item. The tokenizer choice tracks the embedding-model choice per ADR 0008.
+
+The `(document_id, chunk_index)` UNIQUE constraint
 backs the C5 worker's idempotent-replace strategy: re-running ingest
 for a file deletes prior chunks and re-inserts them in the same
 transaction.
+
+#### Hybrid retrieval score formula (C6 / ADR 0008)
+
+The KB query handler computes a per-chunk `hybrid_score`:
+
+```
+vector_score_raw = 1 - cosine_distance(embedding, query_embedding)
+fts_score_raw    = ts_rank_cd(content_tsv, plainto_tsquery('english', query))
+
+vector_score = min_max_normalize(vector_score_raw across candidate union)
+fts_score    = min_max_normalize(fts_score_raw across candidate union)
+
+hybrid_score = (1 - alpha) * vector_score + alpha * fts_score
+```
+
+* `alpha` is `KBQueryRequest.hybrid_alpha` (per-query override) or
+  `knowledge_bases.hybrid_alpha` (KB default; default 0.5).
+* `0` means vector-only; `1` means FTS-only; `0.5` means balanced.
+* Each side returns `top_k * 4` candidates; the union is normalized
+  per-side then linearly combined; top-`k` by combined score returns.
+* If embedding generation fails for the query string, the handler
+  drops to FTS-only ranking gracefully (`vector_score = 0` everywhere).
+* If a chunk's embedding is `NULL` it's invisible to the vector side
+  but still visible to the FTS side; the embed-on-write path closes
+  this for new chunks.
+
+Min-max (rather than z-score) is used because z-score requires
+non-trivial standard deviation — fragile on small candidate sets
+common at M1 scale. Min-max also gives values in `[0, 1]` that
+operators can read directly.
 
 The `metadata_json` column is named with the `_json` suffix because
 the bare `metadata` identifier conflicts with SQLAlchemy's declarative
@@ -525,21 +565,52 @@ PDFs of varying complexity.
 
 ### `knowledge_bases`
 
+Lands in migration 0007 (Task C6). The schema below reflects what's
+shipped; minor naming differences from earlier sketches (`archived_at`
+rather than `deleted_at`; `gen_random_uuid()` rather than v7; explicit
+`hybrid_alpha`) are documented inline.
+
 ```sql
 CREATE TABLE knowledge_bases (
-    id           UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
-    name         TEXT NOT NULL,
-    description  TEXT,
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id     UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     project_id   UUID REFERENCES projects(id) ON DELETE SET NULL,
+    name         TEXT NOT NULL,
+    description  TEXT,
+    hybrid_alpha REAL NOT NULL DEFAULT 0.5,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at   TIMESTAMPTZ
+    archived_at  TIMESTAMPTZ,
+
+    CONSTRAINT chk_knowledge_bases_alpha_range
+        CHECK (hybrid_alpha >= 0.0 AND hybrid_alpha <= 1.0),
+    CONSTRAINT chk_knowledge_bases_name_len
+        CHECK (char_length(name) > 0 AND char_length(name) <= 200)
 );
 
-CREATE INDEX idx_kbs_owner_active ON knowledge_bases(owner_id) WHERE deleted_at IS NULL;
-CREATE INDEX idx_kbs_project ON knowledge_bases(project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX idx_kbs_owner_active
+    ON knowledge_bases (owner_id, created_at DESC)
+    WHERE archived_at IS NULL;
+CREATE INDEX idx_kbs_project
+    ON knowledge_bases (project_id)
+    WHERE project_id IS NOT NULL;
+
+CREATE TRIGGER trg_knowledge_bases_updated_at
+    BEFORE UPDATE ON knowledge_bases
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 ```
+
+* `hybrid_alpha` is the per-KB default for the score combine (see the
+  document_chunks section above for the formula). `0 ↔ vector-only`,
+  `1 ↔ FTS-only`, `0.5 ↔ balanced`. The CHECK constraint is the safety
+  net; the API also clamps at the request boundary.
+* `archived_at` is the soft-delete column (matching projects/chats).
+  Hard-delete is D6 territory.
+* `owner_id ON DELETE RESTRICT` — KBs outlive their owner's
+  soft-delete; D6's hard-delete cascade will remove them.
+* `project_id ON DELETE SET NULL` — KBs outlive their projects (an
+  operator may dissolve a project without losing its research
+  artifacts).
 
 ### `knowledge_base_files`
 
@@ -547,10 +618,16 @@ CREATE INDEX idx_kbs_project ON knowledge_bases(project_id) WHERE project_id IS 
 CREATE TABLE knowledge_base_files (
     kb_id        UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
     file_id      UUID NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-    added_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    attached_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (kb_id, file_id)
 );
+
+CREATE INDEX idx_kb_files_file_id ON knowledge_base_files (file_id);
 ```
+
+The `(file_id)` inverse index supports the embed-on-write trigger's
+"which KBs contain this file?" query when ingest completes for a
+chunk.
 
 ---
 

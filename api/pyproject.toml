@@ -80,6 +80,13 @@ dependencies = [
     # we already have, plus click). Avoids Celery's complexity at
     # M1 scale; ADR 0006 §2 records the call.
     "arq>=0.25,<0.27",
+    # C6 — tiktoken: BPE tokenizer for OpenAI's text-embedding-3-* family.
+    # Used by app.knowledge.embed.count_tokens to populate
+    # document_chunks.tokens during the embed-on-write path. ADR 0008
+    # records the choice; the dep is small (BSD-3, no transitive deps
+    # beyond `regex`) and the alternative (hand-rolling cl100k_base
+    # BPE) would be hundreds of lines for the same SBOM cost.
+    "tiktoken>=0.7,<1",
 ]
 
 [project.optional-dependencies]
@@ -148,4 +155,12 @@ ignore_missing_imports = true
 # active code paths; mypy sees them as untyped.
 [[tool.mypy.overrides]]
 module = ["fitz", "fitz.*", "docling", "docling.*", "arq", "arq.*"]
+ignore_missing_imports = true
+
+# C6 — tiktoken doesn't ship type stubs; its API is small and we use
+# it in one module (app.knowledge.embed). The lazy import is annotated
+# with an inline `type: ignore[import-not-found]` for the optional path
+# but the override here covers the standard case.
+[[tool.mypy.overrides]]
+module = ["tiktoken", "tiktoken.*"]
 ignore_missing_imports = true

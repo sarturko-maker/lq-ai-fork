@@ -34,6 +34,11 @@ log = logging.getLogger(__name__)
 # in :mod:`app.workers.document_pipeline`.
 INGEST_JOB_NAME = "ingest_file_job"
 
+EMBED_JOB_NAME = "embed_chunks_for_file_job"
+"""C6 — embedding-on-write job for ``document_chunks`` of a single
+file. Triggered on KB attachment (when the file has chunks with NULL
+embeddings) and from the ingest-completion hook."""
+
 _pool: Any = None
 
 
@@ -96,6 +101,34 @@ async def enqueue_ingest_job(file_id: uuid.UUID) -> bool:
             "enqueue_ingest_job: failed; row stays pending",
             extra={
                 "event": "ingest_enqueue_failed",
+                "file_id": str(file_id),
+                "error": str(exc),
+            },
+        )
+        return False
+
+
+async def enqueue_embed_job(file_id: uuid.UUID) -> bool:
+    """Enqueue an embed-chunks job for ``file_id``; return True on success.
+
+    Triggered from the KB attach handler when a newly-attached file has
+    chunks with NULL embeddings. Failures are non-fatal — the lazy
+    embed-on-read path in the query handler covers the gap.
+    """
+
+    try:
+        pool = await _get_pool()
+        await pool.enqueue_job(EMBED_JOB_NAME, str(file_id))
+        log.info(
+            "enqueue_embed_job: enqueued",
+            extra={"event": "embed_enqueue", "file_id": str(file_id)},
+        )
+        return True
+    except Exception as exc:
+        log.warning(
+            "enqueue_embed_job: failed; embed-on-read will cover at query time",
+            extra={
+                "event": "embed_enqueue_failed",
                 "file_id": str(file_id),
                 "error": str(exc),
             },

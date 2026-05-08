@@ -1016,10 +1016,22 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
 
-  # ----------- KNOWLEDGE BASES -----------
+  # ----------- KNOWLEDGE BASES (Task C6) -----------
   /api/v1/knowledge-bases:
     get:
       tags: [knowledge-bases]
+      summary: List the caller's knowledge bases
+      parameters:
+        - name: archived
+          in: query
+          required: false
+          schema: {type: boolean}
+          description: "When true, list archived KBs. Default (omit) lists active only."
+        - name: project_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+          description: "Filter to KBs associated with this project."
       responses:
         '200':
           description: KBs accessible to the user
@@ -1030,23 +1042,23 @@ paths:
                 items: {$ref: '#/components/schemas/KnowledgeBase'}
     post:
       tags: [knowledge-bases]
+      summary: Create a knowledge base
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [name]
-              properties:
-                name: {type: string}
-                description: {type: string}
-                project_id: {type: string, format: uuid, nullable: true}
+            schema: {$ref: '#/components/schemas/KnowledgeBaseCreate'}
       responses:
         '201':
           description: KB created
           content:
             application/json:
               schema: {$ref: '#/components/schemas/KnowledgeBase'}
+        '404':
+          description: Project (if `project_id` was provided) not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/knowledge-bases/{kb_id}:
     parameters:
@@ -1063,35 +1075,43 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/KnowledgeBase'}
-        '404': {description: Not found}
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
     patch:
       tags: [knowledge-bases]
-      summary: Update name, description, or project association
+      summary: Partial update — name, description, project association, alpha, or archived
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              properties:
-                name: {type: string}
-                description: {type: string}
-                project_id: {type: string, format: uuid, nullable: true}
+            schema: {$ref: '#/components/schemas/KnowledgeBaseUpdate'}
       responses:
         '200':
           description: Updated
           content:
             application/json:
               schema: {$ref: '#/components/schemas/KnowledgeBase'}
-        '404': {description: Not found}
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
     delete:
       tags: [knowledge-bases]
-      summary: Delete a knowledge base (soft-delete)
+      summary: Soft-delete a knowledge base
       responses:
-        '204': {description: Deleted}
-        '404': {description: Not found}
+        '204':
+          description: Soft-deleted
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
-  /api/v1/knowledge-bases/{kb_id}/search:
+  /api/v1/knowledge-bases/{kb_id}/files:
     parameters:
       - name: kb_id
         in: path
@@ -1099,26 +1119,103 @@ paths:
         schema: {type: string, format: uuid}
     post:
       tags: [knowledge-bases]
-      summary: Hybrid search (vector + FTS)
+      summary: Attach a file to a knowledge base
+      description: |
+        The file must be owned by the caller and have completed the C5
+        ingest pipeline (`ingestion_status='ready'`). After successful
+        attach the backend enqueues an embed job; the query path also
+        covers any unembedded chunks lazily (embed-on-read).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [query]
+              required: [file_id]
               properties:
-                query: {type: string}
-                limit: {type: integer, default: 10}
-                hybrid_alpha: {type: number, default: 0.5, description: "0=vector only, 1=FTS only"}
+                file_id: {type: string, format: uuid}
+      responses:
+        '204':
+          description: Attached
+        '400':
+          description: file_id is malformed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: KB or file not found / cross-user
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: File already attached to this KB (idempotency-violating POST)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422':
+          description: File is not in `ingestion_status='ready'`
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/knowledge-bases/{kb_id}/files/{file_id}:
+    parameters:
+      - name: kb_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: file_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    delete:
+      tags: [knowledge-bases]
+      summary: Detach a file from a knowledge base
+      responses:
+        '204':
+          description: Detached
+        '404':
+          description: KB not found, or the file is not attached
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/knowledge-bases/{kb_id}/query:
+    parameters:
+      - name: kb_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      tags: [knowledge-bases]
+      summary: Hybrid (vector + FTS) search over the knowledge base
+      description: |
+        Per ADR 0008 the score is `(1 - alpha) * vector + alpha * fts`,
+        where each side is min-max normalized across the union of the
+        per-side candidate sets (each side returns up to `top_k * 4`
+        candidates). `hybrid_alpha` defaults to the KB's stored value
+        (which itself defaults to 0.5).
+
+        Embed-on-read: if the gateway's `/v1/embeddings` is unavailable
+        the query degrades gracefully to FTS-only ranking; the response
+        carries `score_components.vector = 0` for every result in that
+        case so the client can detect the degraded mode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/KBQueryRequest'}
       responses:
         '200':
           description: Search results
           content:
             application/json:
-              schema:
-                type: array
-                items: {$ref: '#/components/schemas/SearchResult'}
+              schema: {$ref: '#/components/schemas/KBQueryResponse'}
+        '404':
+          description: KB not found / cross-user
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   # ----------- ORGANIZATION PROFILE -----------
   /api/v1/organization-profile:
@@ -1845,25 +1942,89 @@ components:
 
     KnowledgeBase:
       type: object
-      required: [id, name, owner_id, created_at]
+      required: [id, name, owner_id, hybrid_alpha, file_count, chunk_count, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
-        name: {type: string}
+        name: {type: string, minLength: 1, maxLength: 200}
         description: {type: string, nullable: true}
         owner_id: {type: string, format: uuid}
         project_id: {type: string, format: uuid, nullable: true}
-        file_count: {type: integer}
-        chunk_count: {type: integer}
+        hybrid_alpha:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: |
+            Per-KB default for the hybrid score combine. 0 = vector-only;
+            1 = FTS-only; 0.5 = balanced (per ADR 0008).
+        file_count: {type: integer, minimum: 0}
+        chunk_count: {type: integer, minimum: 0}
+        archived_at: {type: string, format: date-time, nullable: true}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
 
+    KnowledgeBaseCreate:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 2000, nullable: true}
+        project_id: {type: string, format: uuid, nullable: true}
+        hybrid_alpha:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          default: 0.5
+
+    KnowledgeBaseUpdate:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 2000, nullable: true}
+        project_id: {type: string, format: uuid, nullable: true}
+        hybrid_alpha:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        archived: {type: boolean, description: "true to archive; false to unarchive"}
+
+    KBQueryRequest:
+      type: object
+      required: [query]
+      properties:
+        query: {type: string, minLength: 1, maxLength: 10000}
+        top_k:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+        hybrid_alpha:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: |
+            Override the KB's stored alpha for this query. Omit to use
+            the KB default.
+
+    KBQueryResponse:
+      type: object
+      required: [results, hybrid_alpha]
+      properties:
+        results:
+          type: array
+          items: {$ref: '#/components/schemas/SearchResult'}
+        hybrid_alpha:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          description: "The alpha actually used (per-query override or KB default)."
+
     SearchResult:
       type: object
-      required: [chunk, score]
+      required: [chunk, score, score_components]
       properties:
         chunk:
           type: object
-          required: [id, document_id, content]
+          required: [id, document_id, file_id, file_name, content, char_offset_start, char_offset_end]
           properties:
             id: {type: string, format: uuid}
             document_id: {type: string, format: uuid}
@@ -1874,12 +2035,15 @@ components:
             page_end: {type: integer, nullable: true}
             char_offset_start: {type: integer}
             char_offset_end: {type: integer}
-        score: {type: number}
+        score:
+          type: number
+          description: "Combined hybrid score: (1 - alpha) * vector + alpha * fts. Min-max normalized; in [0, 1]."
         score_components:
           type: object
+          required: [vector, fts]
           properties:
-            vector: {type: number}
-            fts: {type: number}
+            vector: {type: number, minimum: 0.0, maximum: 1.0}
+            fts: {type: number, minimum: 0.0, maximum: 1.0}
 
     SavedPrompt:
       type: object
