@@ -1249,12 +1249,23 @@ A pre-processing step in the Inference Gateway pipeline (per the architecture di
 
 ### 5.1 Authentication and Authorization
 
-- v1 uses OpenWebUI's built-in auth: local accounts, OAuth (Google, Microsoft, GitHub), SAML, LDAP/AD, SCIM 2.0, trusted-header SSO.
-- Operators with complex IdP needs front the deployment with Authentik or Keycloak via reverse proxy; documented integration recipe.
-- Every API request authenticates via session cookie (web/Word) or API token (programmatic).
-- **MFA-mandatory option** (M1): operators can configure the deployment to require multi-factor authentication for all logins. OpenWebUI's auth system supports TOTP and WebAuthn; the configuration is documented in the deployment guide as a recommended default for any deployment handling client-confidential data.
-- **Session timeouts** (M1): configurable absolute and idle timeouts; default 8 hours absolute, 30 minutes idle. Documented in the deployment guide.
-- **Role-bounded admin actions audit** (M1): admin actions on the audit log itself, RBAC changes, and tier-config changes are logged with elevated detail and cannot be silently dropped.
+The InHouse AI **backend (FastAPI) owns authentication**. The web client (the OpenWebUI fork) and the Word add-in are configured to delegate to the backend's auth surface rather than running OpenWebUI's built-in auth. There is one identity store, one session model, and one audit-log trail across all surfaces. (Earlier PRD drafts described "v1 uses OpenWebUI's built-in auth" — that direction was reversed during M1 planning when the OpenAPI surface and the backend's audit-log requirements made backend-owned auth the simpler architecture. The decision is recorded in `docs/adr/0002-backend-owned-auth.md`.)
+
+**Identity and credentials.**
+- Local accounts with bcrypt-hashed passwords as the v1 baseline. Email and display name on every account.
+- OAuth (Google, Microsoft, GitHub), SAML 2.0, LDAP / Active Directory, SCIM 2.0, and trusted-header SSO are first-class IdP integrations. The backend implements each as a pluggable auth provider; the OpenWebUI fork does not do its own IdP integration.
+- Operators with complex IdP needs front the deployment with Authentik or Keycloak via reverse proxy; the backend trusts the proxy's authenticated headers. Documented integration recipe.
+
+**Sessions and tokens.**
+- Web client (OpenWebUI fork) and Word add-in use short-lived JWT access tokens (~15 min) plus longer-lived refresh tokens (default 7 days, hashed at rest in the `user_sessions` table). Refresh tokens are rotated on each refresh.
+- Programmatic clients use API tokens with scoped permissions; tokens are listable and revocable per-user.
+- Every API request authenticates via `Authorization: Bearer <jwt>` in the standard FastAPI dependency.
+
+**MFA-mandatory option** (M1): operators can configure the deployment to require multi-factor authentication for all logins. The backend implements TOTP via `pyotp` (M1) with WebAuthn as a tracked enhancement (DE-### TBD). Recovery codes are single-use, hashed at rest, and rotated when the user re-enrolls. Configuration is documented in the deployment guide as a recommended default for any deployment handling client-confidential data.
+
+**Session timeouts** (M1): configurable absolute and idle timeouts; default 8 hours absolute, 30 minutes idle. Both are enforced in the backend; the OpenWebUI client respects them by 401-on-expired-token.
+
+**Role-bounded admin actions audit** (M1): admin actions on the audit log itself, RBAC changes, and tier-config changes are logged with elevated detail and cannot be silently dropped.
 
 ### 5.2 RBAC
 
