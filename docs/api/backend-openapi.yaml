@@ -454,11 +454,30 @@ paths:
                 items: {$ref: '#/components/schemas/Message'}
     post:
       tags: [messages]
-      summary: Post a user message and get streaming model response
+      summary: Post a user message and get the model response
       description: |
-        Streaming response via Server-Sent Events.
-        Each event is a JSON delta following the OpenAI streaming format.
-        Final event includes citations, routed_inference_tier, cost.
+        Posts a user message and returns the assistant response. The
+        request's `stream` field selects between two response shapes:
+
+        * `stream: false` (default) → JSON response with the assistant
+          message, the routed Inference Tier, and routing metadata.
+        * `stream: true` → Server-Sent Events stream; each event is a
+          JSON delta following the OpenAI streaming format. The final
+          event is a `complete` event with the synthesized message and
+          citations; mid-stream errors come through as a final event
+          carrying the canonical `Error` envelope.
+
+        **B5 stateless pass-through.** Until C3 lands chat persistence,
+        this endpoint translates the request into a single-turn gateway
+        call and returns the response. Nothing is persisted on the
+        backend side; the gateway-side `inference_routing_log` row IS
+        written (B4 owns that audit trail). The response includes a
+        `stateless_passthrough: true` marker so clients can detect the
+        transitional state. Citations are an empty array until C5.
+
+        The response also surfaces the routed Inference Tier in the
+        `X-LQ-AI-Routed-Inference-Tier` HTTP header (header-only
+        consumers don't need to parse the body).
       requestBody:
         required: true
         content:
@@ -466,10 +485,49 @@ paths:
             schema: {$ref: '#/components/schemas/MessageCreate'}
       responses:
         '200':
-          description: SSE stream of response chunks
+          description: Either a JSON response or an SSE stream depending on `stream`
           content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MessagePostResponse'}
             text/event-stream:
               schema: {$ref: '#/components/schemas/MessageStreamEvent'}
+          headers:
+            X-LQ-AI-Routed-Inference-Tier:
+              schema: {type: integer, enum: [1,2,3,4,5]}
+              description: "Routed Inference Tier — duplicates the body field for header-only consumers"
+            X-LQ-AI-Routed-Provider:
+              schema: {type: string}
+              description: "Provider that handled the request (set by gateway)"
+        '400':
+          description: Invalid request (bad chat_id, empty content, malformed body)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '403':
+          description: Forced password change required (B2 gate) or tier-floor refusal (D1)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '502':
+          description: Gateway returned an upstream error (provider_unavailable, etc.)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: Gateway unreachable (network failure or 5xx)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '504':
+          description: Gateway request timed out
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/chats/{chat_id}/messages/{message_id}/citations:
     parameters:
@@ -1071,19 +1129,66 @@ components:
       type: object
       required: [content]
       properties:
-        content: {type: string}
-        model: {type: string, description: "Model alias (e.g., 'smart', 'fast')"}
+        content: {type: string, minLength: 1}
+        model:
+          type: string
+          default: smart
+          description: "Model alias (e.g., 'smart', 'fast') or provider-native model name"
+        stream:
+          type: boolean
+          default: false
+          description: |
+            When true, response is `text/event-stream` per OpenAI streaming
+            convention. When false, response is a single JSON body with the
+            assistant message and routing metadata (B5 default).
         skill_inputs:
           type: object
           additionalProperties: true
-          description: "Per-skill input values when skills with input schemas are attached"
+          description: "Per-skill input values when skills with input schemas are attached (C2)"
+
+    MessagePostResponse:
+      type: object
+      required: [message, citations]
+      description: |
+        Non-streaming response for `POST /api/v1/chats/{chat_id}/messages`.
+        The `routed_inference_tier`, `routed_provider`, and `cost_estimate`
+        come from the gateway (B4). `stateless_passthrough` is true while
+        chat persistence is deferred (B5 → C3).
+      properties:
+        message: {$ref: '#/components/schemas/Message'}
+        citations:
+          type: array
+          items: {$ref: '#/components/schemas/Citation'}
+          description: "Empty until C5 (document pipeline)."
+        routed_inference_tier:
+          type: integer
+          enum: [1,2,3,4,5]
+          nullable: true
+          description: "Routed Inference Tier as derived by the gateway (B4)"
+        routed_provider:
+          type: string
+          nullable: true
+          description: "Provider name that handled the request (B4)"
+        cost_estimate:
+          type: number
+          nullable: true
+          description: "USD cost estimate (gateway-side, when rate is configured)"
+        stateless_passthrough:
+          type: boolean
+          description: |
+            True while B5 is in effect — backend does not persist chats or
+            messages yet (C3 will). Set false once C3 lands.
 
     MessageStreamEvent:
       oneOf:
         - $ref: '#/components/schemas/MessageDelta'
         - $ref: '#/components/schemas/MessageComplete'
-      discriminator:
-        propertyName: type
+        - $ref: '#/components/schemas/Error'
+      description: |
+        Frames emitted on the SSE stream. Most frames are deltas;
+        the final frame is either a `complete` event (success) or
+        an `Error` envelope (the stream ended in failure). The latter
+        carries the same shape as a non-streaming error response.
 
     MessageDelta:
       type: object
