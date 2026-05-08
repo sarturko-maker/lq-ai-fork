@@ -618,6 +618,49 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/KnowledgeBase'}
 
+  /api/v1/knowledge-bases/{kb_id}:
+    parameters:
+      - name: kb_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [knowledge-bases]
+      summary: Fetch a single knowledge base with metadata + file count
+      responses:
+        '200':
+          description: Knowledge base
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeBase'}
+        '404': {description: Not found}
+    patch:
+      tags: [knowledge-bases]
+      summary: Update name, description, or project association
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                description: {type: string}
+                project_id: {type: string, format: uuid, nullable: true}
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeBase'}
+        '404': {description: Not found}
+    delete:
+      tags: [knowledge-bases]
+      summary: Delete a knowledge base (soft-delete)
+      responses:
+        '204': {description: Deleted}
+        '404': {description: Not found}
+
   /api/v1/knowledge-bases/{kb_id}/search:
     parameters:
       - name: kb_id
@@ -715,6 +758,16 @@ paths:
         in: path
         required: true
         schema: {type: string, format: uuid}
+    get:
+      tags: [saved-prompts]
+      summary: Fetch a single saved prompt
+      responses:
+        '200':
+          description: Saved prompt
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SavedPrompt'}
+        '404': {description: Not found}
     patch:
       tags: [saved-prompts]
       requestBody:
@@ -793,9 +846,12 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/TierPolicy'}
-    put:
+    patch:
       tags: [tier-policy]
-      summary: Update Inference Tier policy
+      summary: Partial update to Inference Tier policy
+      description: |
+        Admin-only. Audited. Partial-update semantics — fields omitted from
+        the request body are left unchanged.
       requestBody:
         required: true
         content:

@@ -25,6 +25,13 @@ async def create_prompt(request: Request) -> JSONResponse:
     return not_implemented(request, next_task=_D7, endpoint="POST /api/v1/saved-prompts")
 
 
+@router.get("/{prompt_id}")
+async def get_prompt(request: Request, prompt_id: str) -> JSONResponse:
+    return not_implemented(
+        request, next_task=_D7, endpoint="GET /api/v1/saved-prompts/{prompt_id}"
+    )
+
+
 @router.patch("/{prompt_id}")
 async def update_prompt(request: Request, prompt_id: str) -> JSONResponse:
     return not_implemented(

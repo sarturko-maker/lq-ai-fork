@@ -47,6 +47,7 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/files/{file_id}/content",
         # knowledge bases
         "/api/v1/knowledge-bases",
+        "/api/v1/knowledge-bases/{kb_id}",
         "/api/v1/knowledge-bases/{kb_id}/search",
         # organization profile
         "/api/v1/organization-profile",
@@ -62,7 +63,7 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
 
 @pytest.mark.unit
 async def test_openapi_paths_match_sketch() -> None:
-    """All 29 paths from `backend-openapi.yaml` are registered."""
+    """All 30 paths from `backend-openapi.yaml` are registered."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/openapi.json")
@@ -74,8 +75,8 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 29 distinct /api/v1 paths per the sketch.
-    assert len(actual) == 29
+    # 30 distinct /api/v1 paths per the sketch.
+    assert len(actual) == 30
 
 
 @pytest.mark.unit
