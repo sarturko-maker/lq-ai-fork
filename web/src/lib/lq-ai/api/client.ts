@@ -25,7 +25,21 @@ import { get } from 'svelte/store';
 const browser =
 	typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 
-export const LQ_AI_API_BASE_URL = '/api/v1';
+/**
+ * Base URL for backend API calls.
+ *
+ * Production deployments front web + api at the same origin via a
+ * reverse proxy and leave PUBLIC_LQ_AI_API_BASE_URL unset, so all calls
+ * go to ``/api/v1`` on the same origin (no CORS needed).
+ *
+ * Local Compose dev needs an absolute URL because web (:3000) and api
+ * (:8000) live at different origins. The operator's .env sets
+ * PUBLIC_LQ_AI_API_BASE_URL=http://localhost:8000/api/v1; Vite bakes
+ * it into the build via the PUBLIC_LQ_AI_API_BASE_URL build arg passed
+ * through docker-compose.yml.
+ */
+export const LQ_AI_API_BASE_URL =
+	(import.meta.env?.PUBLIC_LQ_AI_API_BASE_URL as string | undefined) ?? '/api/v1';
 
 export class LQAIApiError extends Error {
 	readonly status: number;

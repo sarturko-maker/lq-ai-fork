@@ -173,6 +173,9 @@ services:
       # Operational
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LQ_AI_DEV_MODE: ${LQ_AI_DEV_MODE:-false}
+      # CORS — empty disables. Production behind a same-origin reverse
+      # proxy: leave unset. Local Compose dev: http://localhost:3000.
+      LQ_AI_CORS_ORIGINS: ${LQ_AI_CORS_ORIGINS:-}
       # Skills loader — C1 walks this directory at startup. Mounted
       # read-only so the container can only consume the skills filesystem,
       # not mutate it (skill authoring is a host-side / human-attestation
@@ -249,6 +252,13 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        # Vite/SvelteKit bakes PUBLIC_* env vars into the static build.
+        # Production deployments front web + api at the same origin via
+        # a reverse proxy and leave this UNSET (relative /api/v1).
+        # Local Compose dev sets it to http://localhost:8000/api/v1 in
+        # .env so the LQ.AI shell at :3000 can talk to the api at :8000.
+        PUBLIC_LQ_AI_API_BASE_URL: ${PUBLIC_LQ_AI_API_BASE_URL:-/api/v1}
     restart: unless-stopped
     depends_on:
       api:

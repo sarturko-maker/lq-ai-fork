@@ -222,6 +222,20 @@ class Settings(BaseSettings):
         description="When true, relax some safety checks for local development.",
     )
 
+    # ----- CORS -----
+    # Comma-separated list of origins allowed to call the api from the
+    # browser. Production deployments typically front web + api at the
+    # same origin via a reverse proxy and leave this UNSET (no CORS).
+    # Local Compose dev needs http://localhost:3000 because web (:3000)
+    # and api (:8000) live at different origins.
+    lq_ai_cors_origins: str = Field(
+        default="",
+        description=(
+            "Comma-separated allowed origins for CORS. Empty disables CORS. "
+            "For local Compose dev set to http://localhost:3000."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

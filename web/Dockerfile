@@ -26,6 +26,11 @@ ARG GID=0
 ######## WebUI frontend ########
 FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS build
 ARG BUILD_HASH
+# LQ.AI: Vite/SvelteKit bakes PUBLIC_* env vars into the static build at
+# `npm run build` time. Production: leave unset (relative /api/v1, behind
+# a reverse proxy). Local Compose dev: passed via docker-compose.yml's
+# `args:` from .env's PUBLIC_LQ_AI_API_BASE_URL=http://localhost:8000/api/v1.
+ARG PUBLIC_LQ_AI_API_BASE_URL=/api/v1
 
 # Set Node.js options (heap limit Allocation failed - JavaScript heap out of memory)
 # ENV NODE_OPTIONS="--max-old-space-size=4096"
@@ -40,6 +45,7 @@ RUN npm ci --force
 
 COPY . .
 ENV APP_BUILD_HASH=${BUILD_HASH}
+ENV PUBLIC_LQ_AI_API_BASE_URL=${PUBLIC_LQ_AI_API_BASE_URL}
 RUN npm run build
 
 ######## WebUI backend ########

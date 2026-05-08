@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import __version__
@@ -118,6 +119,26 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+# CORS — configurable allowed origins for cross-origin browser clients.
+# Production deployments typically front web + api at the same origin via
+# a reverse proxy and leave LQ_AI_CORS_ORIGINS unset (no CORS needed).
+# Local Compose dev needs CORS because web (:3000) and api (:8000) live
+# at different origins; the operator's .env sets the value.
+_settings = get_settings()
+_cors_origins = [
+    o.strip() for o in (_settings.lq_ai_cors_origins or "").split(",") if o.strip()
+]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
+        expose_headers=["X-LQ-AI-Routed-Inference-Tier", "X-LQ-AI-Routed-Provider"],
+        max_age=600,
+    )
 
 app.include_router(api_router)
 
