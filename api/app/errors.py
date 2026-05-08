@@ -223,7 +223,7 @@ class PayloadTooLarge(LQAIError):
     """
 
     code = CODE_PAYLOAD_TOO_LARGE
-    http_status = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+    http_status = status.HTTP_413_CONTENT_TOO_LARGE
 
 
 # --- Gateway-crossing subclasses ---------------------------------------------
