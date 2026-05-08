@@ -1,0 +1,51 @@
+# CODEOWNERS — InHouse AI
+# ============================================================
+# Path-based reviewer assignments. The most recent matching
+# pattern takes precedence; later patterns override earlier ones.
+#
+# At launch, the @legalquants/maintainers team handles all
+# default reviews. As the project grows and specialized teams
+# stand up (security, compliance, practicing-attorneys), this
+# file is updated to route reviews appropriately.
+#
+# References:
+# - PR review process: ../CONTRIBUTING.md#pull-request-process
+# - Skill review process: ../skills/CONTRIBUTING.md
+# ============================================================
+
+# Default — all changes require maintainer review
+*                              @legalquants/maintainers
+
+# ---------- Repository-level governance ----------
+/LICENSE                       @legalquants/maintainers
+/CODE_OF_CONDUCT.md            @legalquants/maintainers
+/CONTRIBUTING.md               @legalquants/maintainers
+/SECURITY.md                   @legalquants/maintainers @legalquants/security
+/.github/CODEOWNERS            @legalquants/maintainers
+
+# ---------- Security-sensitive paths ----------
+# Inference Gateway holds the security boundary; changes here
+# require security review in addition to maintainer review.
+/gateway/                      @legalquants/maintainers @legalquants/security
+/docs/security/                @legalquants/security @legalquants/maintainers
+/.github/workflows/            @legalquants/maintainers @legalquants/security
+
+# ---------- Compliance documentation ----------
+# Compliance Alignment Pack mappings affect procurement posture;
+# changes require counsel + maintainer review.
+/docs/compliance/              @legalquants/counsel @legalquants/maintainers
+/docs/procurement/             @legalquants/counsel @legalquants/maintainers
+
+# ---------- Skills (legal substance) ----------
+# Skills containing legal substance require attorney review
+# in addition to maintainer review. See skills/CONTRIBUTING.md
+# for the attestation and review process.
+/skills/                       @legalquants/maintainers @legalquants/practicing-attorneys
+/skills/CONTRIBUTING.md        @legalquants/maintainers @legalquants/practicing-attorneys
+
+# ---------- Canonical specification ----------
+# PRD changes affect every downstream artifact; require
+# maintainer review by default.
+/docs/PRD.md                   @legalquants/maintainers
+/docs/architecture.md          @legalquants/maintainers
+/docs/skill-authoring-guide.md @legalquants/maintainers @legalquants/practicing-attorneys

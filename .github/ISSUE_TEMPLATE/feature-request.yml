@@ -1,0 +1,85 @@
+name: Feature Request
+description: Propose a new feature or enhancement
+title: "[Feature] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a feature. The more specific the use case and proposed approach, the more likely the proposal moves forward.
+
+        **Before submitting:** please check [PRD §9 Deferred Enhancements](../docs/PRD.md#9-deferred-enhancements-and-identified-future-work) to see if this is already tracked. If a DE-### entry exists, link it instead of duplicating.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I have searched existing issues and the PRD §9 deferred-enhancements list.
+          required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: What problem does this feature solve? Who benefits?
+      placeholder: As an in-house counsel, I want to ... so that I can ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-state
+    attributes:
+      label: Why this can't be met today
+      description: How are you currently working around this, and why isn't that sufficient?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-approach
+    attributes:
+      label: Proposed approach
+      description: Sketch of how this could work. Implementation details if you have them; otherwise the user-facing shape is fine.
+    validations:
+      required: true
+
+  - type: input
+    id: de-reference
+    attributes:
+      label: Related DE-### entry (if any)
+      description: If a deferred-enhancement entry already exists, link it.
+      placeholder: e.g., DE-013
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Affected subsystem
+      multiple: true
+      options:
+        - "Skills"
+        - "Inference Gateway"
+        - "Backend (API)"
+        - "Web (chat UI)"
+        - "Word Add-In"
+        - "Slack/Teams Bridge"
+        - "Document Pipeline / Citation Engine"
+        - "Knowledge Service"
+        - "Autonomous Layer"
+        - "Documentation"
+        - "Compliance / Procurement"
+        - "Deployment / Infrastructure"
+        - "Other / unsure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you consider, and why is the proposed one preferred?
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Anything else relevant.

@@ -1,0 +1,106 @@
+name: Bug Report
+description: Report a bug to help us improve InHouse AI
+title: "[Bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The more specific the report, the faster we can investigate.
+
+        **Before submitting:** please search [existing issues](https://github.com/legalquants/inhouse-ai/issues) to avoid duplicates.
+
+        **Security-sensitive issues:** do **not** file as a public bug report. Use [Security Advisories](https://github.com/legalquants/inhouse-ai/security/advisories/new) or email security@legalquants.com per [SECURITY.md](../SECURITY.md).
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I have searched existing issues for this bug.
+          required: true
+        - label: This is not a security vulnerability (those go through the disclosure process in SECURITY.md).
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug. What did you observe?
+      placeholder: When I clicked X, the application showed Y instead of Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Step-by-step instructions to reproduce the bug.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: InHouse AI version
+      description: Output of `inhouse-ai --version` or the commit SHA you're running.
+      placeholder: e.g., v0.5.0 or commit abc123
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment-mode
+    attributes:
+      label: Deployment mode
+      description: Which mode are you running?
+      options:
+        - "Mode 1 (cloud LLM keys)"
+        - "Mode 2 (local Ollama / vLLM, air-gap-capable)"
+        - "Other / hybrid"
+        - "Not applicable / unsure"
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: LLM provider (if applicable)
+      description: Which provider was the request routed to?
+      placeholder: e.g., Anthropic Claude, OpenAI GPT-4, Ollama Llama 3.1 70B
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Docker version, browser (if a web UI bug), other relevant context.
+      value: |
+        - OS:
+        - Docker:
+        - Browser:
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Output from `docker compose logs api`, `docker compose logs gateway`, or browser console. Redact any sensitive content.
+      render: shell
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Anything else that might help us investigate.

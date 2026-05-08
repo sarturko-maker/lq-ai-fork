@@ -1,0 +1,121 @@
+name: Skill Proposal
+description: Propose a new skill (or substantive change to an existing skill)
+title: "[Skill] "
+labels: ["skill-proposal", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a skill. Skills are the canonical artifact of value in InHouse AI; substantive contributions are credited and meaningful.
+
+        **Before submitting:**
+        - Read [`skills/CONTRIBUTING.md`](../skills/CONTRIBUTING.md) for the contribution process.
+        - Read [`docs/skill-authoring-guide.md`](../docs/skill-authoring-guide.md) for authoring conventions.
+        - Check [PRD §9 Deferred Enhancements](../docs/PRD.md#9-deferred-enhancements-and-identified-future-work) — DE-001 catalogs candidate starter skills, DE-002 catalogs additional regimes for DPA Checklist Review.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I have read skills/CONTRIBUTING.md and the skill-authoring guide.
+          required: true
+        - label: I have searched existing issues and the PRD §9 deferred-enhancements list.
+          required: true
+
+  - type: input
+    id: skill-name
+    attributes:
+      label: Skill name
+      description: Proposed kebab-case name (used as folder name and identifier).
+      placeholder: e.g., settlement-agreement-review
+    validations:
+      required: true
+
+  - type: textarea
+    id: skill-description
+    attributes:
+      label: Description
+      description: One-sentence description for the SKILL.md frontmatter.
+      placeholder: Reviews settlement agreements for release scope, carve-outs, and enforceability hooks.
+    validations:
+      required: true
+
+  - type: textarea
+    id: when-applies
+    attributes:
+      label: When this skill applies
+      description: What inputs trigger this skill? What's the user's intent when invoking it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: when-not-applies
+    attributes:
+      label: When this skill does NOT apply
+      description: Important boundary — what inputs should this skill refuse?
+    validations:
+      required: true
+
+  - type: textarea
+    id: inputs
+    attributes:
+      label: Inputs
+      description: Required and optional inputs. For optional inputs, describe how each value changes analytical depth (per the optional-input design pattern in the skill-authoring guide).
+      placeholder: |
+        Required:
+        - document (the agreement to review)
+
+        Optional:
+        - perspective (paying_party | receiving_party) — changes severity calibration of release scope and remedies
+        - settlement_type (employment | commercial | ip | regulatory) — changes which red-flag categories apply
+    validations:
+      required: true
+
+  - type: dropdown
+    id: output-format
+    attributes:
+      label: Output format
+      options:
+        - "report (markdown)"
+        - "issues_list (structured JSON)"
+        - "table (structured grid)"
+        - "redline (Word tracked changes)"
+        - "Other / multiple"
+    validations:
+      required: true
+
+  - type: input
+    id: jurisdiction
+    attributes:
+      label: Jurisdiction
+      description: us | eu | regime-aware | global | other
+      placeholder: e.g., us
+    validations:
+      required: true
+
+  - type: input
+    id: de-reference
+    attributes:
+      label: Related DE-### entry (if any)
+      placeholder: e.g., DE-001
+
+  - type: textarea
+    id: practitioner-context
+    attributes:
+      label: Practitioner context
+      description: What's your practice background? Are you authoring as a practicing attorney, a legal-ops practitioner, or an engineer planning to pair with an attorney for the substantive review?
+    validations:
+      required: true
+
+  - type: textarea
+    id: existing-skills-comparison
+    attributes:
+      label: Comparison to existing skills
+      description: How does this differ from the M1 starter skills (NDA Review, MSA Review variants, DPA Checklist Review, etc.)? Should this be a new skill or a fork/variant of an existing one?
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Anything else relevant. Worked example outlines, severity rubric sketches, etc.

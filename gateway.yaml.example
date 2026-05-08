@@ -1,0 +1,371 @@
+# ============================================================
+# InHouse AI — Inference Gateway Configuration
+# ============================================================
+# This file configures the Inference Gateway: which providers
+# are available, which models map to which provider, what tier
+# each routing decision lands at, anonymization, rate limits,
+# and operational settings.
+#
+# Save your operator-specific copy as `gateway.yaml` (this
+# `.example` file is committed to the repo as reference).
+#
+# References:
+#   PRD §4 — Inference Gateway specification
+#   PRD §1.5.2 — Inference Choice Spectrum (the 5-tier model)
+#   PRD §4.7 — Anonymization Layer (M2)
+#
+# Configuration changes take effect on gateway restart for
+# top-level changes; tier-policy changes via /admin/inference-tiers
+# take effect immediately and are audited.
+# ============================================================
+
+# Gateway operational settings
+server:
+  host: 0.0.0.0
+  port: 8001
+  log_level: info  # debug | info | warn | error
+
+# How the gateway authenticates incoming requests
+# (the backend service identifies itself with this key)
+gateway_auth:
+  enabled: true
+  api_key_env: INHOUSE_AI_GATEWAY_KEY
+  # Backend services must include X-Inhouse-AI-Gateway-Key header
+
+# ============================================================
+# PROVIDERS — what LLM endpoints the gateway can reach
+# ============================================================
+# Each provider entry includes:
+#   name      — operator-chosen identifier (referenced from model_aliases)
+#   type      — provider family (anthropic, openai, vertex, etc.)
+#   base_url  — endpoint URL
+#   api_key_env — environment variable name (NOT the key itself)
+#   tier      — default Inference Tier for this provider/account
+#   models    — which models the provider exposes
+#
+# IMPORTANT: tier values reflect the operator's specific
+# agreement with the provider. A standard commercial Anthropic
+# API account is Tier 4. An Anthropic enterprise account with
+# zero-data-retention is Tier 3. Local Ollama is Tier 1. The
+# operator MUST verify their tier assignments match their
+# actual provider relationships.
+
+providers:
+  # --- Cloud providers ---
+
+  - name: anthropic-prod
+    type: anthropic
+    base_url: https://api.anthropic.com
+    api_key_env: ANTHROPIC_API_KEY
+    tier: 4  # Standard commercial Anthropic API
+    # tier: 3  # If operator has enterprise ZDR agreement
+    models:
+      - claude-opus-4-7
+      - claude-sonnet-4-6
+      - claude-haiku-4-5
+
+  - name: openai-prod
+    type: openai
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    tier: 4  # Standard commercial OpenAI API
+    # tier: 3  # If operator has zero-data-retention contract
+    models:
+      - gpt-4-turbo
+      - gpt-4o
+      - gpt-4o-mini
+
+  - name: vertex-anthropic
+    type: vertex
+    base_url: https://us-central1-aiplatform.googleapis.com
+    api_key_env: GOOGLE_APPLICATION_CREDENTIALS  # path to service-account JSON
+    project_id: ${GCP_PROJECT_ID}
+    region: us-central1
+    tier: 3  # Vertex routes through customer's GCP project; ZDR by GCP terms
+    models:
+      - claude-opus-4-7@anthropic
+      - claude-sonnet-4-6@anthropic
+
+  - name: bedrock
+    type: bedrock
+    base_url: https://bedrock-runtime.${AWS_REGION}.amazonaws.com
+    aws_region: us-east-1
+    aws_access_key_env: AWS_ACCESS_KEY_ID
+    aws_secret_key_env: AWS_SECRET_ACCESS_KEY
+    tier: 3  # AWS Bedrock routes through customer's AWS account
+    models:
+      - anthropic.claude-opus-4-7-v1:0
+      - anthropic.claude-sonnet-4-6-v1:0
+
+  - name: azure-openai
+    type: azure_openai
+    base_url: https://${AZURE_OPENAI_RESOURCE}.openai.azure.com
+    api_key_env: AZURE_OPENAI_API_KEY
+    api_version: '2024-08-01-preview'
+    tier: 3  # Azure OpenAI under customer's Azure subscription
+    models:
+      - gpt-4-turbo
+      - gpt-4o
+
+  # --- Local providers (Tier 1) ---
+
+  - name: ollama-local
+    type: ollama
+    base_url: http://ollama:11434
+    api_key_env: ''  # Ollama doesn't require an API key
+    tier: 1  # Fully local; no data leaves the deployment
+    models:
+      - llama3.1:70b
+      - llama3.1:8b
+      - mistral-large
+      - qwen2.5:72b
+    enabled: ${LOCAL_INFERENCE_ENABLED:-true}
+
+  - name: vllm-local
+    type: openai_compatible  # vLLM exposes OpenAI-compatible API
+    base_url: http://vllm:8000/v1
+    api_key_env: ''
+    tier: 1
+    models:
+      - meta-llama/Meta-Llama-3.1-70B-Instruct
+    enabled: ${VLLM_ENABLED:-false}
+
+# ============================================================
+# MODEL ALIASES — friendly names → specific provider/model
+# ============================================================
+# Skills and the backend reference models by alias rather than
+# by specific provider/model. This decouples skill authoring
+# from provider configuration; the operator can swap out the
+# provider behind 'smart' without changing any skill.
+
+model_aliases:
+  # User-facing aliases referenced by skills and the chat UI
+
+  smart:
+    primary:
+      provider: anthropic-prod
+      model: claude-opus-4-7
+    fallback:
+      - {provider: vertex-anthropic, model: claude-opus-4-7@anthropic}
+      - {provider: openai-prod, model: gpt-4-turbo}
+
+  fast:
+    primary:
+      provider: anthropic-prod
+      model: claude-sonnet-4-6
+    fallback:
+      - {provider: openai-prod, model: gpt-4o-mini}
+
+  budget:
+    primary:
+      provider: anthropic-prod
+      model: claude-haiku-4-5
+    fallback:
+      - {provider: openai-prod, model: gpt-4o-mini}
+
+  local:
+    primary:
+      provider: ollama-local
+      model: llama3.1:70b
+    fallback: []  # No fallback for local — Tier 1 must stay Tier 1
+
+  embedding:
+    primary:
+      provider: openai-prod
+      model: text-embedding-3-small
+    fallback: []
+
+# ============================================================
+# TIER POLICY — what the deployment allows
+# ============================================================
+# The operator-level policy. Skills and Projects can require
+# stricter (higher minimum) tiers than this; they cannot
+# loosen the policy below allowed_tiers_global.
+
+tier_policy:
+  # Tiers globally allowed in this deployment.
+  # Requests at any other tier are refused with HTTP 403.
+  allowed_tiers_global: [1, 2, 3, 4]
+  # Tier 5 (consumer/free endpoints) is disallowed by default
+
+  # Default minimum tier for non-privileged work.
+  default_minimum_tier: 4
+  # Most cloud providers under standard accounts are Tier 4;
+  # default of 4 means "use whatever's configured."
+
+  # Minimum tier when project.privileged = true.
+  privileged_minimum_tier: 3
+  # Privileged matters require enterprise ZDR or local
+  # inference. For most-sensitive work, operators set this to 1.
+
+  # Tiers that surface a warning in the chat UI.
+  # The user can still proceed; the warning is informational.
+  warn_on_tiers: [4, 5]
+
+# ============================================================
+# RATE LIMITING
+# ============================================================
+# Per-user, per-provider, per-model rate limits.
+# Backed by Redis token-bucket implementation.
+
+rate_limits:
+  per_user:
+    requests_per_minute: 60
+    tokens_per_minute: 100000
+    requests_per_day: 5000
+
+  per_provider:
+    anthropic-prod:
+      requests_per_minute: 200
+      tokens_per_minute: 500000
+    openai-prod:
+      requests_per_minute: 200
+      tokens_per_minute: 500000
+    ollama-local:
+      requests_per_minute: 30  # Local hardware constraint
+      tokens_per_minute: 50000
+
+  burst_allowance: 1.5  # Multiplier for short bursts above sustained rate
+
+# ============================================================
+# ANONYMIZATION (M2)
+# ============================================================
+# Pre/post middleware that pseudonymizes sensitive entities
+# before the model call and rehydrates after. Bypassed for
+# Tier 1 (local) inference where there's no benefit.
+
+anonymization:
+  enabled: false  # M2 feature; false until M2 ships
+
+  # Apply when:
+  # - The request's routed tier is in apply_at_tiers, AND
+  # - The user has not opted out for the request, AND
+  # - The chat is not in a privileged Project (privilege analysis
+  #   complications outweigh the marginal benefit)
+  apply_at_tiers: [3, 4, 5]
+
+  # Entity types to pseudonymize
+  entity_types:
+    - person_name
+    - organization
+    - email_address
+    - phone_number
+    - address
+    - account_number
+    - case_number
+    - matter_number
+    - financial_amount  # Optional; can be too aggressive
+
+  # Pseudonym format: ENTITY_TYPE_NNNN
+  # e.g., PERSON_0001, ORG_0042, EMAIL_0007
+  # Mapping table is in-process memory only; never persisted
+
+  # Rehydration: replace pseudonyms in response and citations
+  # back to original values. Operates on response stream
+  # before sending back to backend.
+
+# ============================================================
+# COST TRACKING
+# ============================================================
+# Per-model cost rates for the cost tracker. Updated as
+# providers change pricing. Operator overrides allowed.
+
+cost_tracking:
+  enabled: true
+
+  # Cost per million tokens (input / output)
+  # Update these when provider pricing changes
+  rates:
+    'anthropic-prod/claude-opus-4-7':
+      input_per_mtok: 15.00
+      output_per_mtok: 75.00
+    'anthropic-prod/claude-sonnet-4-6':
+      input_per_mtok: 3.00
+      output_per_mtok: 15.00
+    'anthropic-prod/claude-haiku-4-5':
+      input_per_mtok: 0.80
+      output_per_mtok: 4.00
+    'openai-prod/gpt-4-turbo':
+      input_per_mtok: 10.00
+      output_per_mtok: 30.00
+    'openai-prod/gpt-4o':
+      input_per_mtok: 2.50
+      output_per_mtok: 10.00
+    'openai-prod/gpt-4o-mini':
+      input_per_mtok: 0.15
+      output_per_mtok: 0.60
+    'ollama-local/llama3.1:70b':
+      input_per_mtok: 0.0  # Local; no per-token cost
+      output_per_mtok: 0.0
+
+  # Optional: budget alerts
+  budget_alerts:
+    daily_alert_threshold_usd: 50
+    weekly_alert_threshold_usd: 250
+    alert_email: ${BUDGET_ALERT_EMAIL:-admin@example.com}
+
+# ============================================================
+# TELEMETRY
+# ============================================================
+# Off by default. Operator opts in to specific sinks.
+
+telemetry:
+  opentelemetry:
+    enabled: ${OTEL_ENABLED:-false}
+    endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+    service_name: inhouse-ai-gateway
+    service_version: ${INHOUSE_AI_VERSION}
+    # The gateway emits traces for: every inference request
+    # (with provider, model, tier, latency, cost), every
+    # refusal (with reason), every fallback (with both
+    # primary and fallback details).
+
+  langfuse:
+    enabled: ${LANGFUSE_ENABLED:-false}
+    public_key_env: LANGFUSE_PUBLIC_KEY
+    secret_key_env: LANGFUSE_SECRET_KEY
+    host: ${LANGFUSE_HOST:-http://langfuse:3000}
+    # Langfuse captures LLM-specific traces — full prompts,
+    # full responses, eval scores. Self-hosted langfuse
+    # keeps data in operator's environment.
+
+# ============================================================
+# CIRCUIT BREAKER
+# ============================================================
+# Provider-level failure handling. When a provider fails
+# repeatedly, the gateway routes to fallback and stops
+# attempting the failing provider for a cool-down period.
+
+circuit_breaker:
+  enabled: true
+  # Open the circuit after N consecutive failures
+  failure_threshold: 5
+  # Stay open for this many seconds before allowing a probe
+  recovery_timeout_seconds: 60
+  # When circuit is open, fall back per the model_aliases chain
+
+# ============================================================
+# REQUEST VALIDATION
+# ============================================================
+
+request_validation:
+  # Reject requests with absurd parameters
+  max_max_tokens: 16384
+  max_messages_per_request: 100
+  max_total_request_chars: 1000000  # ~250K tokens
+
+  # Refuse requests above this token count without explicit
+  # opt-in (prevents accidental large-context expensive calls)
+  large_context_threshold_tokens: 50000
+
+# ============================================================
+# DEVELOPMENT-MODE OVERRIDES
+# ============================================================
+# When running in dev mode, relax some safety checks.
+# Set INHOUSE_AI_DEV_MODE=true to enable.
+
+dev_mode:
+  enabled: ${INHOUSE_AI_DEV_MODE:-false}
+  bypass_rate_limits: false  # Even in dev, keep rate limits
+  log_full_prompts: false    # PII concerns even in dev
+  allow_tier_5: false        # Tier 5 stays disallowed

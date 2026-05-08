@@ -1,0 +1,1144 @@
+openapi: 3.1.0
+info:
+  title: InHouse AI Backend API
+  version: 0.1.0
+  description: |
+    Canonical API specification for the InHouse AI backend (FastAPI service).
+    
+    This is a **sketch** — it covers the endpoints, request/response shapes, and
+    schemas needed to anchor implementation. Expect refinement during M1 build.
+    
+    The Inference Gateway has a separate OpenAPI specification at
+    `gateway-openapi.yaml` (consumes OpenAI-compatible inference requests from
+    this backend; not directly accessible to end-users).
+    
+    Conventions:
+    - All endpoints under `/api/` are user-facing; under `/admin/` require admin role.
+    - Authentication via Bearer JWT in `Authorization` header unless noted.
+    - All resource IDs are UUIDs.
+    - All timestamps are ISO 8601 with timezone (UTC by default).
+    - Pagination uses cursor-based pagination via `cursor` and `limit` query params.
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: InHouse AI
+    url: https://github.com/legalquants/inhouse-ai
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+  - url: https://{operator-host}/api
+    description: Operator-deployed instance
+
+tags:
+  - name: auth
+    description: Authentication and session management
+  - name: users
+    description: User account operations (self-service and admin)
+  - name: projects
+    description: Matter-scoped containers (chats, files, skills, context)
+  - name: chats
+    description: Conversation threads with message history
+  - name: messages
+    description: Individual messages within a chat (POST creates new exchange)
+  - name: skills
+    description: Skill library (read, attach, fork)
+  - name: files
+    description: File upload and management
+  - name: knowledge-bases
+    description: Persistent file collections with hybrid retrieval
+  - name: organization-profile
+    description: Singleton org-level skill capturing voice, jurisdiction, etc.
+  - name: saved-prompts
+    description: Per-user saved prompt fragments
+  - name: audit-log
+    description: Audit log query (admin only)
+  - name: tier-policy
+    description: Inference tier policy configuration (admin only)
+
+# ============================================================
+# PATHS
+# ============================================================
+paths:
+
+  # ----------- AUTH -----------
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Authenticate with email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+        '423':
+          description: MFA required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaChallenge'
+
+  /api/auth/mfa/verify:
+    post:
+      tags: [auth]
+      summary: Complete MFA challenge with TOTP code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfa_token, code]
+              properties:
+                mfa_token: {type: string, description: "Token from the MFA challenge response"}
+                code: {type: string, pattern: '^\d{6}$'}
+      responses:
+        '200':
+          description: MFA verification successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid MFA code
+
+  /api/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh access token using refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: {type: string}
+      responses:
+        '200':
+          description: New access token issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      summary: Invalidate the current refresh token
+      responses:
+        '204': {description: Logout successful}
+
+  /api/auth/mfa/setup:
+    post:
+      tags: [auth]
+      summary: Enroll in TOTP-based MFA
+      responses:
+        '200':
+          description: TOTP enrollment data (provisioning URI + recovery codes)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, provisioning_uri, recovery_codes]
+                properties:
+                  secret: {type: string}
+                  provisioning_uri: {type: string, description: "otpauth:// URI for QR code"}
+                  recovery_codes: {type: array, items: {type: string}}
+
+  # ----------- USERS -----------
+  /api/users/me:
+    get:
+      tags: [users]
+      summary: Get current user
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /api/users/me/export:
+    post:
+      tags: [users]
+      summary: Request a per-user data export (GDPR Article 20)
+      description: |
+        Generates an export package of all data associated with the current user.
+        Async; returns a job ID and link to retrieve when ready.
+      responses:
+        '202':
+          description: Export job queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, status]
+                properties:
+                  job_id: {type: string, format: uuid}
+                  status: {type: string, enum: [queued, processing, completed, failed]}
+                  download_url: {type: string, nullable: true}
+
+  /api/users/me/delete:
+    post:
+      tags: [users]
+      summary: Request account deletion (GDPR Article 17)
+      description: |
+        Initiates account-and-data deletion. Soft-delete with grace period;
+        hard delete after grace period (default 30 days, operator-configurable).
+      responses:
+        '202':
+          description: Deletion queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scheduled_deletion_at]
+                properties:
+                  scheduled_deletion_at: {type: string, format: date-time}
+                  grace_period_days: {type: integer}
+
+  # ----------- PROJECTS -----------
+  /api/projects:
+    get:
+      tags: [projects]
+      summary: List the user's projects
+      parameters:
+        - name: cursor
+          in: query
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: Paginated list of projects
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Project'}
+                  next_cursor: {type: string, nullable: true}
+    post:
+      tags: [projects]
+      summary: Create a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+
+  /api/projects/{project_id}:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [projects]
+      responses:
+        '200':
+          description: Project
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+    patch:
+      tags: [projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProjectUpdate'}
+      responses:
+        '200':
+          description: Project updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+    delete:
+      tags: [projects]
+      responses:
+        '204': {description: Project deleted (soft)}
+
+  /api/projects/{project_id}/skills:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      tags: [projects]
+      summary: Attach a skill to the project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [skill_name]
+              properties:
+                skill_name: {type: string}
+                skill_version: {type: string, description: "Defaults to latest"}
+      responses:
+        '204': {description: Attached}
+
+  /api/projects/{project_id}/files:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      tags: [projects]
+      summary: Attach an uploaded file to the project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_id]
+              properties:
+                file_id: {type: string, format: uuid}
+      responses:
+        '204': {description: Attached}
+
+  # ----------- CHATS -----------
+  /api/chats:
+    get:
+      tags: [chats]
+      summary: List chats; optionally filter by project
+      parameters:
+        - name: project_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: cursor
+          in: query
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, default: 20}
+      responses:
+        '200':
+          description: Paginated chats
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Chat'}
+                  next_cursor: {type: string, nullable: true}
+    post:
+      tags: [chats]
+      summary: Create a new chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChatCreate'}
+      responses:
+        '201':
+          description: Chat created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Chat'}
+
+  /api/chats/{chat_id}:
+    parameters:
+      - name: chat_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [chats]
+      responses:
+        '200':
+          description: Chat
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Chat'}
+    patch:
+      tags: [chats]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: {type: string}
+                attached_skills: {type: array, items: {type: string}}
+      responses:
+        '200':
+          description: Chat updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Chat'}
+    delete:
+      tags: [chats]
+      responses:
+        '204': {description: Chat deleted}
+
+  /api/chats/{chat_id}/messages:
+    parameters:
+      - name: chat_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [messages]
+      summary: List messages in chat
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Message'}
+    post:
+      tags: [messages]
+      summary: Post a user message and get streaming model response
+      description: |
+        Streaming response via Server-Sent Events.
+        Each event is a JSON delta following the OpenAI streaming format.
+        Final event includes citations, routed_inference_tier, cost.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MessageCreate'}
+      responses:
+        '200':
+          description: SSE stream of response chunks
+          content:
+            text/event-stream:
+              schema: {$ref: '#/components/schemas/MessageStreamEvent'}
+
+  /api/chats/{chat_id}/messages/{message_id}/citations:
+    parameters:
+      - name: chat_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: message_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [messages]
+      summary: Get citations for a message (resolves to source documents)
+      responses:
+        '200':
+          description: Citations
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Citation'}
+
+  # ----------- SKILLS -----------
+  /api/skills:
+    get:
+      tags: [skills]
+      summary: List available skills
+      parameters:
+        - name: scope
+          in: query
+          schema: {type: string, enum: [builtin, user, team, all], default: all}
+        - name: tag
+          in: query
+          schema: {type: string}
+      responses:
+        '200':
+          description: Skills
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/SkillSummary'}
+
+  /api/skills/{skill_name}:
+    parameters:
+      - name: skill_name
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [skills]
+      summary: Get skill details (frontmatter + body + reference files)
+      responses:
+        '200':
+          description: Skill
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Skill'}
+
+  /api/skills/{skill_name}/fork:
+    parameters:
+      - name: skill_name
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [skills]
+      summary: Fork a skill to user or team scope
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_name, scope]
+              properties:
+                new_name: {type: string}
+                scope: {type: string, enum: [user, team]}
+      responses:
+        '201':
+          description: Fork created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Skill'}
+
+  # ----------- FILES -----------
+  /api/files:
+    post:
+      tags: [files]
+      summary: Upload a file
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
+                project_id: {type: string, format: uuid, nullable: true}
+      responses:
+        '201':
+          description: File uploaded; ingestion may be async
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/File'}
+
+  /api/files/{file_id}:
+    parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [files]
+      responses:
+        '200':
+          description: File metadata
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/File'}
+    delete:
+      tags: [files]
+      responses:
+        '204': {description: File deleted}
+
+  /api/files/{file_id}/content:
+    parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [files]
+      summary: Download original file content
+      responses:
+        '200':
+          description: File bytes
+          content:
+            application/octet-stream: {}
+
+  # ----------- KNOWLEDGE BASES -----------
+  /api/knowledge-bases:
+    get:
+      tags: [knowledge-bases]
+      responses:
+        '200':
+          description: KBs accessible to the user
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/KnowledgeBase'}
+    post:
+      tags: [knowledge-bases]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string}
+                description: {type: string}
+                project_id: {type: string, format: uuid, nullable: true}
+      responses:
+        '201':
+          description: KB created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeBase'}
+
+  /api/knowledge-bases/{kb_id}/search:
+    parameters:
+      - name: kb_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      tags: [knowledge-bases]
+      summary: Hybrid search (vector + FTS)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: {type: string}
+                limit: {type: integer, default: 10}
+                hybrid_alpha: {type: number, default: 0.5, description: "0=vector only, 1=FTS only"}
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/SearchResult'}
+
+  # ----------- ORGANIZATION PROFILE -----------
+  /api/organization-profile:
+    get:
+      tags: [organization-profile]
+      summary: Get the deployment's Organization Profile (singleton skill)
+      responses:
+        '200':
+          description: Organization Profile
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Skill'}
+    put:
+      tags: [organization-profile]
+      summary: Update the Organization Profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content_md]
+              properties:
+                content_md: {type: string}
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Skill'}
+
+  # ----------- SAVED PROMPTS -----------
+  /api/saved-prompts:
+    get:
+      tags: [saved-prompts]
+      responses:
+        '200':
+          description: User's saved prompts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/SavedPrompt'}
+    post:
+      tags: [saved-prompts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, prompt_text]
+              properties:
+                name: {type: string}
+                prompt_text: {type: string}
+                tags: {type: array, items: {type: string}}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SavedPrompt'}
+
+  /api/saved-prompts/{prompt_id}:
+    parameters:
+      - name: prompt_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    patch:
+      tags: [saved-prompts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                prompt_text: {type: string}
+                tags: {type: array, items: {type: string}}
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SavedPrompt'}
+    delete:
+      tags: [saved-prompts]
+      responses:
+        '204': {description: Deleted}
+
+  # ----------- ADMIN: AUDIT LOG -----------
+  /admin/audit-log:
+    get:
+      tags: [audit-log]
+      summary: Query audit log (admin only)
+      parameters:
+        - name: user_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: action
+          in: query
+          schema: {type: string}
+        - name: resource_type
+          in: query
+          schema: {type: string}
+        - name: privilege_marked
+          in: query
+          schema: {type: boolean}
+        - name: routed_inference_tier
+          in: query
+          schema: {type: integer, enum: [1,2,3,4,5]}
+        - name: from
+          in: query
+          schema: {type: string, format: date-time}
+        - name: to
+          in: query
+          schema: {type: string, format: date-time}
+        - name: cursor
+          in: query
+          schema: {type: string}
+      responses:
+        '200':
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/AuditLogEntry'}
+                  next_cursor: {type: string, nullable: true}
+
+  # ----------- ADMIN: TIER POLICY -----------
+  /admin/tier-policy:
+    get:
+      tags: [tier-policy]
+      summary: Get current Inference Tier policy
+      responses:
+        '200':
+          description: Policy
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TierPolicy'}
+    put:
+      tags: [tier-policy]
+      summary: Update Inference Tier policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TierPolicy'}
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TierPolicy'}
+
+# ============================================================
+# COMPONENTS
+# ============================================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, format: password}
+
+    LoginResponse:
+      type: object
+      required: [access_token, token_type, expires_in, user]
+      properties:
+        access_token: {type: string}
+        token_type: {type: string, enum: [Bearer]}
+        expires_in: {type: integer, description: "Lifetime in seconds"}
+        refresh_token: {type: string}
+        user: {$ref: '#/components/schemas/User'}
+
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token: {type: string}
+        token_type: {type: string, enum: [Bearer]}
+        expires_in: {type: integer}
+
+    MfaChallenge:
+      type: object
+      required: [mfa_token, methods]
+      properties:
+        mfa_token: {type: string}
+        methods: {type: array, items: {type: string, enum: [totp, recovery_code]}}
+
+    User:
+      type: object
+      required: [id, email, is_admin, mfa_enabled, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        display_name: {type: string, nullable: true}
+        is_admin: {type: boolean}
+        mfa_enabled: {type: boolean}
+        created_at: {type: string, format: date-time}
+        last_login_at: {type: string, format: date-time, nullable: true}
+
+    Project:
+      type: object
+      required: [id, name, owner_id, privileged, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        context: {type: string, nullable: true, description: "Free-form markdown context document"}
+        owner_id: {type: string, format: uuid}
+        privileged:
+          type: boolean
+          description: |
+            When true, every chat in this project is marked privileged in the audit log
+            and the routed inference tier is forced to be at least minimum_inference_tier.
+        minimum_inference_tier:
+          type: integer
+          enum: [1,2,3,4,5]
+          nullable: true
+          description: "When set, requests below this tier are refused"
+        attached_skills: {type: array, items: {type: string}}
+        attached_files: {type: array, items: {type: string, format: uuid}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    ProjectCreate:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        description: {type: string}
+        context: {type: string}
+        privileged: {type: boolean, default: false}
+        minimum_inference_tier: {type: integer, enum: [1,2,3,4,5]}
+
+    ProjectUpdate:
+      type: object
+      properties:
+        name: {type: string}
+        description: {type: string}
+        context: {type: string}
+        privileged: {type: boolean}
+        minimum_inference_tier: {type: integer, enum: [1,2,3,4,5], nullable: true}
+
+    Chat:
+      type: object
+      required: [id, owner_id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        title: {type: string, nullable: true}
+        owner_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, nullable: true}
+        attached_skills: {type: array, items: {type: string}}
+        attached_files: {type: array, items: {type: string, format: uuid}}
+        message_count: {type: integer}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    ChatCreate:
+      type: object
+      properties:
+        title: {type: string}
+        project_id: {type: string, format: uuid, nullable: true}
+        attached_skills: {type: array, items: {type: string}}
+        attached_files: {type: array, items: {type: string, format: uuid}}
+
+    Message:
+      type: object
+      required: [id, chat_id, role, content, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        chat_id: {type: string, format: uuid}
+        role: {type: string, enum: [user, assistant, system, tool]}
+        content: {type: string}
+        model: {type: string, nullable: true}
+        provider: {type: string, nullable: true}
+        routed_inference_tier:
+          type: integer
+          enum: [1,2,3,4,5]
+          nullable: true
+          description: "Tier the request was routed against (set by gateway)"
+        tokens_in: {type: integer, nullable: true}
+        tokens_out: {type: integer, nullable: true}
+        cost_estimate: {type: number, nullable: true}
+        created_at: {type: string, format: date-time}
+
+    MessageCreate:
+      type: object
+      required: [content]
+      properties:
+        content: {type: string}
+        model: {type: string, description: "Model alias (e.g., 'smart', 'fast')"}
+        skill_inputs:
+          type: object
+          additionalProperties: true
+          description: "Per-skill input values when skills with input schemas are attached"
+
+    MessageStreamEvent:
+      oneOf:
+        - $ref: '#/components/schemas/MessageDelta'
+        - $ref: '#/components/schemas/MessageComplete'
+      discriminator:
+        propertyName: type
+
+    MessageDelta:
+      type: object
+      required: [type, delta]
+      properties:
+        type: {type: string, enum: [delta]}
+        delta: {type: string}
+
+    MessageComplete:
+      type: object
+      required: [type, message]
+      properties:
+        type: {type: string, enum: [complete]}
+        message: {$ref: '#/components/schemas/Message'}
+        citations:
+          type: array
+          items: {$ref: '#/components/schemas/Citation'}
+
+    Citation:
+      type: object
+      required: [id, source_file_id, source_text]
+      properties:
+        id: {type: string, format: uuid}
+        source_file_id: {type: string, format: uuid}
+        source_offset_start: {type: integer}
+        source_offset_end: {type: integer}
+        source_page: {type: integer, nullable: true}
+        source_text:
+          type: string
+          description: "Verbatim text from source — verified to appear in source"
+        verified: {type: boolean, description: "Citation engine verified the quote"}
+
+    SkillSummary:
+      type: object
+      required: [name, version, scope, title]
+      properties:
+        name: {type: string}
+        version: {type: string}
+        scope: {type: string, enum: [builtin, user, team]}
+        title: {type: string}
+        description: {type: string}
+        tags: {type: array, items: {type: string}}
+        jurisdiction: {type: string}
+
+    Skill:
+      allOf:
+        - $ref: '#/components/schemas/SkillSummary'
+        - type: object
+          required: [content_yaml, content_md]
+          properties:
+            content_yaml: {type: string, description: "Frontmatter YAML"}
+            content_md: {type: string, description: "Body markdown"}
+            reference_files:
+              type: array
+              items:
+                type: object
+                required: [path, content]
+                properties:
+                  path: {type: string}
+                  content: {type: string}
+            example_files:
+              type: array
+              items:
+                type: object
+                required: [path, content]
+                properties:
+                  path: {type: string}
+                  content: {type: string}
+
+    File:
+      type: object
+      required: [id, owner_id, filename, mime_type, size_bytes, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        owner_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, nullable: true}
+        filename: {type: string}
+        mime_type: {type: string}
+        size_bytes: {type: integer}
+        hash_sha256: {type: string}
+        ingestion_status:
+          type: string
+          enum: [pending, processing, ready, failed]
+        page_count: {type: integer, nullable: true}
+        character_count: {type: integer, nullable: true}
+        created_at: {type: string, format: date-time}
+
+    KnowledgeBase:
+      type: object
+      required: [id, name, owner_id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        owner_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, nullable: true}
+        file_count: {type: integer}
+        chunk_count: {type: integer}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    SearchResult:
+      type: object
+      required: [chunk, score]
+      properties:
+        chunk:
+          type: object
+          required: [id, document_id, content]
+          properties:
+            id: {type: string, format: uuid}
+            document_id: {type: string, format: uuid}
+            file_id: {type: string, format: uuid}
+            file_name: {type: string}
+            content: {type: string}
+            page_start: {type: integer, nullable: true}
+            page_end: {type: integer, nullable: true}
+            char_offset_start: {type: integer}
+            char_offset_end: {type: integer}
+        score: {type: number}
+        score_components:
+          type: object
+          properties:
+            vector: {type: number}
+            fts: {type: number}
+
+    SavedPrompt:
+      type: object
+      required: [id, user_id, name, prompt_text, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        name: {type: string}
+        prompt_text: {type: string}
+        tags: {type: array, items: {type: string}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    AuditLogEntry:
+      type: object
+      required: [id, timestamp, action, resource_type]
+      properties:
+        id: {type: string, format: uuid}
+        timestamp: {type: string, format: date-time}
+        user_id: {type: string, format: uuid, nullable: true}
+        action: {type: string, description: "e.g. chat.create, message.send, skill.fork"}
+        resource_type: {type: string, description: "e.g. chat, project, skill"}
+        resource_id: {type: string, nullable: true}
+        privilege_marked: {type: boolean}
+        privilege_basis: {type: string, nullable: true, description: "Why this entry was marked privileged"}
+        routed_inference_tier: {type: integer, enum: [1,2,3,4,5], nullable: true}
+        ip_address: {type: string, nullable: true}
+        user_agent: {type: string, nullable: true}
+        details: {type: object, additionalProperties: true}
+
+    TierPolicy:
+      type: object
+      required: [allowed_tiers_global, default_minimum_tier]
+      properties:
+        allowed_tiers_global:
+          type: array
+          items: {type: integer, enum: [1,2,3,4,5]}
+          description: "Tiers globally allowed; requests at other tiers refused"
+        default_minimum_tier:
+          type: integer
+          enum: [1,2,3,4,5]
+          description: "Default minimum tier for non-privileged work"
+        privileged_minimum_tier:
+          type: integer
+          enum: [1,2,3,4,5]
+          description: "Minimum tier when privileged: true on Project"
+        warn_on_tiers:
+          type: array
+          items: {type: integer, enum: [1,2,3,4,5]}
+          description: "Tiers that surface a warning in the chat UI"
+
+security:
+  - bearerAuth: []
