@@ -45,8 +45,12 @@ RUN npm ci --force
 
 COPY . .
 ENV APP_BUILD_HASH=${BUILD_HASH}
-ENV PUBLIC_LQ_AI_API_BASE_URL=${PUBLIC_LQ_AI_API_BASE_URL}
-RUN npm run build
+# SvelteKit/Vite reads PUBLIC_* vars from `.env` at build time. Writing
+# the build arg into `.env` is the most reliable substitution path —
+# `process.env` alone doesn't always trigger Vite's static replacement
+# of `import.meta.env.PUBLIC_*` references in client code.
+RUN printf 'PUBLIC_LQ_AI_API_BASE_URL=%s\n' "${PUBLIC_LQ_AI_API_BASE_URL}" > .env \
+    && npm run build
 
 ######## WebUI backend ########
 FROM python:3.11.14-slim-bookworm AS base
