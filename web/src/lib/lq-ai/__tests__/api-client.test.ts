@@ -42,7 +42,8 @@ describe('apiRequest', () => {
 
 		await apiRequest('/users/me');
 		expect(fetchSpy).toHaveBeenCalledTimes(1);
-		const init = fetchSpy.mock.calls[0][1] as RequestInit;
+		const call = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+		const init = call[1];
 		const headers = init.headers as Record<string, string>;
 		expect(headers.Authorization).toBe('Bearer tok');
 	});
@@ -110,7 +111,8 @@ describe('apiRequest', () => {
 		global.fetch = fetchSpy as unknown as typeof fetch;
 
 		await apiRequest('/projects', { method: 'POST', body: { name: 'P' } });
-		const init = fetchSpy.mock.calls[0][1] as RequestInit;
+		const call = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+		const init = call[1];
 		expect(init.body).toBe(JSON.stringify({ name: 'P' }));
 		const headers = init.headers as Record<string, string>;
 		expect(headers['Content-Type']).toBe('application/json');

@@ -106,8 +106,11 @@ export async function consumeMessageStream(
 	body: ReadableStream<Uint8Array>,
 	callbacks: MessageStreamCallbacks
 ): Promise<void> {
+	// TextDecoderStream's writable is typed as WritableStream<BufferSource> in
+	// the lib.dom types, not WritableStream<Uint8Array>; a single cast through
+	// unknown is the standard workaround for this interop pinch.
 	const reader = body
-		.pipeThrough(new TextDecoderStream())
+		.pipeThrough(new TextDecoderStream() as unknown as ReadableWritablePair<string, Uint8Array>)
 		.pipeThrough(new EventSourceParserStream())
 		.getReader();
 

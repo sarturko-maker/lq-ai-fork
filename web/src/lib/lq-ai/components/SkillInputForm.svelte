@@ -40,7 +40,10 @@
 	<form class="space-y-2" data-testid="lq-ai-skill-input-form">
 		{#each inputs as inp (inp.name)}
 			<div>
-				<label class="block text-xs font-medium text-gray-700 dark:text-gray-300">
+				<label
+					for={`lq-ai-skill-input-${inp.name}`}
+					class="block text-xs font-medium text-gray-700 dark:text-gray-300"
+				>
 					{inp.name}
 					{#if inp.required}
 						<span class="text-rose-600">*</span>
