@@ -423,13 +423,24 @@ components:
           properties:
             code:
               type: string
+              description: |
+                Stable error codes the gateway emits. Tier-policy and
+                routing codes (tier_below_minimum, tier_disallowed_globally,
+                anonymization_failed) are documented in PRD §1.5.2 / §3.13;
+                operational codes are emitted by the request pipeline before
+                routing happens.
               enum:
+                # Tier policy / routing (PRD §1.5.2, §3.13)
                 - tier_below_minimum
-                - provider_unavailable
-                - rate_limit_exceeded
                 - tier_disallowed_globally
                 - anonymization_failed
                 - invalid_model
+                # Provider / upstream
+                - provider_unavailable
+                - rate_limit_exceeded
+                # Operational
+                - invalid_request
+                - not_implemented
                 - unauthorized
             message: {type: string}
             details: {type: object, additionalProperties: true}

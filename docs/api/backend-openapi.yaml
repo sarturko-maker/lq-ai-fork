@@ -894,11 +894,18 @@ components:
 
     TokenResponse:
       type: object
-      required: [access_token, token_type, expires_in]
+      required: [access_token, refresh_token, token_type, expires_in]
       properties:
-        access_token: {type: string}
+        access_token: {type: string, description: "Short-lived JWT access token (~15 min)."}
+        refresh_token:
+          type: string
+          description: |
+            Refresh token returned on /auth/login and rotated on every
+            /auth/refresh per PRD §5.1. The bearer of the most recent
+            refresh_token can mint new access tokens; older refresh
+            tokens are revoked when rotation happens.
         token_type: {type: string, enum: [Bearer]}
-        expires_in: {type: integer}
+        expires_in: {type: integer, description: "Seconds until the access token expires."}
 
     MfaChallenge:
       type: object
