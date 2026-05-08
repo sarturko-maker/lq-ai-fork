@@ -36,7 +36,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -47,6 +47,7 @@ from app.config import get_settings
 from app.db.session import get_db
 from app.errors import NotFound, ValidationError
 from app.models.file import File as FileModel
+from app.models.project import Project
 from app.schemas.files import FileMetadata
 from app.storage import (
     StreamUploadResult,
@@ -181,23 +182,38 @@ async def upload_file(
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     file: Annotated[UploadFile, File(description="The file to upload.")],
+    project_id: Annotated[
+        str | None,
+        Form(
+            description=(
+                "Optional UUID of a project to attach this file to. The "
+                "caller must own the project; cross-user or unknown ids "
+                "return 422 (the upload is rejected before bytes touch "
+                "MinIO)."
+            ),
+        ),
+    ] = None,
 ) -> FileMetadata:
     """Stream the upload to MinIO; persist metadata; return the ``File`` shape.
 
     Order of operations:
 
-    1. **Pre-allocate the file_id** locally so we know the storage path
+    1. **Validate ``project_id``** if supplied. The form field is parsed
+       as a UUID; the project must exist, be owned by the caller, and
+       not be archived. Failures here return 422 *before* any bytes
+       touch MinIO so a bad project_id doesn't leak into orphan storage.
+    2. **Pre-allocate the file_id** locally so we know the storage path
        before touching MinIO. (Per ADR 0005 the storage key is the bare
        UUID.)
-    2. **Stream the upload to MinIO** via ``stream_upload``. This raises
+    3. **Stream the upload to MinIO** via ``stream_upload``. This raises
        :class:`PayloadTooLarge` if the streamed byte count exceeds the
        configured cap; on any other exception, the multipart upload is
        aborted (no orphan parts left behind).
-    3. **Insert the row** in ``files`` with the streamed size and SHA-256.
+    4. **Insert the row** in ``files`` with the streamed size and SHA-256.
        If the insert fails (e.g., the user has been deleted between
        auth and now), we hard-delete the just-uploaded MinIO object so
        we don't leak orphaned bytes.
-    4. **Return the ``FileMetadata``** matching the OpenAPI ``File`` schema.
+    5. **Return the ``FileMetadata``** matching the OpenAPI ``File`` schema.
     """
 
     settings = get_settings()
@@ -212,6 +228,33 @@ async def upload_file(
             "Multipart upload missing required `filename` on the file part.",
         )
 
+    # Resolve the project attachment up front. Anything other than
+    # "owner-visible active project" → 422 (validation error). We use
+    # 422 rather than 404 here because the caller is making a *create*
+    # request; the project_id is request input, not a path identifier
+    # whose existence is being probed.
+    resolved_project_id: uuid.UUID | None = None
+    if project_id is not None:
+        try:
+            resolved_project_id = uuid.UUID(project_id)
+        except ValueError as exc:
+            raise ValidationError(
+                "project_id must be a UUID",
+                details={"project_id": project_id},
+            ) from exc
+
+        stmt = select(Project.id).where(
+            Project.id == resolved_project_id,
+            Project.owner_id == user.id,
+            Project.archived_at.is_(None),
+        )
+        result = await db.execute(stmt)
+        if result.scalar_one_or_none() is None:
+            raise ValidationError(
+                "project_id does not reference a project owned by the caller.",
+                details={"project_id": str(resolved_project_id)},
+            )
+
     file_id = uuid.uuid4()
     storage_path = str(file_id)
     mime_type = file.content_type or DEFAULT_MIME
@@ -224,6 +267,7 @@ async def upload_file(
             "file_id": str(file_id),
             "filename": filename,
             "mime_type": mime_type,
+            "project_id": str(resolved_project_id) if resolved_project_id else None,
         },
     )
 
@@ -236,7 +280,7 @@ async def upload_file(
     row = FileModel(
         id=file_id,
         owner_id=user.id,
-        project_id=None,
+        project_id=resolved_project_id,
         filename=filename,
         mime_type=mime_type,
         size_bytes=upload_result.size_bytes,
