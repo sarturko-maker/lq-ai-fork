@@ -25,7 +25,7 @@ chunks and the caller's ``StreamingResponse`` flushes them out.
 Object key
 ----------
 
-Per ADR 0004 we use the bare file UUID as the MinIO object key. Callers
+Per ADR 0005 we use the bare file UUID as the MinIO object key. Callers
 pass the key in (the handler computes it as ``str(file.id)``); this module
 does not synthesize keys.
 """
@@ -173,7 +173,7 @@ async def stream_upload(
     parts.
 
     Args:
-        storage_path: MinIO object key (per ADR 0004 this is the bare
+        storage_path: MinIO object key (per ADR 0005 this is the bare
             file UUID).
         chunks: Async iterator yielding ``bytes`` of arbitrary size; an
             empty iteration is allowed (the resulting object is empty).
@@ -417,7 +417,7 @@ async def stream_download(*, storage_path: str) -> AsyncIterator[AsyncIterator[b
 async def delete_object(*, storage_path: str) -> None:
     """Hard-delete the MinIO object at ``storage_path``.
 
-    Per ADR 0004, the user-facing DELETE endpoint flips ``deleted_at``
+    Per ADR 0005, the user-facing DELETE endpoint flips ``deleted_at``
     on the row and does NOT call this function — the bytes outlive the
     soft-delete and are reaped later. This helper is exposed for D6
     (per-user export+delete) and for failure-path cleanup in the

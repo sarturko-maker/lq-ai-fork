@@ -624,6 +624,20 @@ paths:
     post:
       tags: [files]
       summary: Upload a file
+      description: |
+        Streaming multipart upload. The body is streamed to MinIO without
+        loading the whole file into memory; a SHA-256 is computed as bytes
+        flow past, and metadata is persisted with `ingestion_status='pending'`.
+        The document pipeline (Task C5) picks the row up asynchronously
+        and flips status through `processing` → `ready` (or `failed`).
+
+        Per-request size limit: `LQ_AI_MAX_UPLOAD_SIZE_MB` (default 100 MB
+        per Task C4). Exceeding it returns 413 with `code=payload_too_large`.
+
+        `project_id` is accepted for forward compatibility (it appears in
+        the multipart body) but is currently ignored; project attachment
+        lands in C7. Files always start unattached and are linked to a
+        project via `POST /api/v1/projects/{project_id}/files` (C7).
       requestBody:
         required: true
         content:
@@ -636,10 +650,34 @@ paths:
                 project_id: {type: string, format: uuid, nullable: true}
       responses:
         '201':
-          description: File uploaded; ingestion may be async
+          description: File uploaded; ingestion may be async.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/File'}
+        '400':
+          description: Validation error (e.g., missing filename on multipart part).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '403':
+          description: |
+            User must change their password before uploading (B2 gate).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '413':
+          description: |
+            Uploaded body exceeds the per-request size cap
+            (`LQ_AI_MAX_UPLOAD_SIZE_MB`, default 100 MB). The response
+            body's `details` carries `limit_bytes` and `received_bytes`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/files/{file_id}:
     parameters:
@@ -649,16 +687,58 @@ paths:
         schema: {type: string, format: uuid}
     get:
       tags: [files]
+      summary: Get file metadata
       responses:
         '200':
-          description: File metadata
+          description: File metadata.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/File'}
+        '400':
+          description: `file_id` is not a valid UUID.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: |
+            File does not exist, has been soft-deleted, or is owned by a
+            different user. The cross-user case returns 404 (not 403) to
+            avoid leaking existence information.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
     delete:
       tags: [files]
+      summary: Soft-delete a file
+      description: |
+        Sets `deleted_at` on the row; the MinIO object is left in place
+        and reaped later by D6 (per-user export+delete) or a future GC
+        sweep, per `docs/adr/0005-file-storage-soft-delete-and-key-scheme.md`.
+        Idempotent: deleting an already-soft-deleted or missing file
+        returns 404.
       responses:
-        '204': {description: File deleted}
+        '204':
+          description: File soft-deleted (no body).
+        '400':
+          description: `file_id` is not a valid UUID.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: File missing, soft-deleted, or owned by a different user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   /api/v1/files/{file_id}/content:
     parameters:
@@ -669,11 +749,42 @@ paths:
     get:
       tags: [files]
       summary: Download original file content
+      description: |
+        Streams the original bytes back as the upload arrived. The
+        `Content-Type` is the stored MIME type, `Content-Length` is the
+        stored size in bytes, and `Content-Disposition` is
+        `attachment; filename="..."` with an RFC 5987 `filename*=UTF-8''...`
+        for non-ASCII filenames.
       responses:
         '200':
-          description: File bytes
+          description: File bytes (streaming).
+          headers:
+            Content-Disposition:
+              description: |
+                `attachment; filename="..."` (RFC 6266); for non-ASCII
+                filenames an additional RFC 5987 `filename*=UTF-8''...`
+                parameter is included.
+              schema: {type: string}
+            X-Content-Type-Options:
+              description: Always `nosniff`.
+              schema: {type: string}
           content:
             application/octet-stream: {}
+        '400':
+          description: `file_id` is not a valid UUID.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: File missing, soft-deleted, or owned by a different user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   # ----------- KNOWLEDGE BASES -----------
   /api/v1/knowledge-bases:
@@ -1420,15 +1531,17 @@ components:
               type: string
               description: |
                 Stable error code. Backend-only codes:
-                `password_change_required`, `unauthorized`, `forbidden`,
-                `not_found`, `validation_error`, `rate_limited`,
-                `internal_error`. Backend↔gateway crossing codes
-                (propagated from gateway responses):
+                `password_change_required`, `payload_too_large`,
+                `unauthorized`, `forbidden`, `not_found`,
+                `validation_error`, `rate_limited`, `internal_error`.
+                Backend↔gateway crossing codes (propagated from gateway
+                responses):
                 `gateway_unreachable`, `gateway_timeout`,
                 `gateway_invalid_response`, `provider_unavailable`,
                 `tier_below_minimum`, `invalid_model`.
               enum:
                 - password_change_required
+                - payload_too_large
                 - unauthorized
                 - forbidden
                 - not_found

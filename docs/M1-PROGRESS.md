@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-08 (session 5 in flight; C1 landed)
+> **Last updated:** 2026-05-08 (session 5; C1 + C4 both landed in parallel worktrees and merged into main)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -14,13 +14,13 @@
 |---|---|---|---|
 | A — Foundation scaffolding | A1, A2, A3, A4 | A5 (partial — env-var branding only) | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5 | — | B6 optional; otherwise C-phase |
-| C — Capability layer | C1 | — | C2 (prompt assembly), C3 (chats), C4 (files), C5 (citations), C6 (KB), C7 (audit) |
+| C — Capability layer | C1, C4 | — | C2 (prompt assembly), C3 (chats), C5 (doc pipeline), C6 (KB), C7 (projects), C8 (web UI) |
 | D — M1 differentiators | — | — | After C |
 | E — Procurement and release | — | — | After D |
 
-**Tests:** 207 passing in api/ (C1 added 37: 24 loader/registry/schema unit + 12 endpoint integration + 1 SIGHUP subprocess integration); 118 passing in gateway/ (unchanged — C1 is api/-only per ADR 0004); 5 cross-subsystem conformance tests under `tests/` (B5).
+**Tests:** ~250 passing in api/ (C1 added 37: 24 loader/registry/schema unit + 12 endpoint integration + 1 SIGHUP subprocess; C4 added 43+: 14 storage-streaming unit + 22 file-endpoint integration + 7 helper unit + 4 migration + 1 errors-hierarchy parametrize entry; on top of B5's 170-line baseline); 118 passing in gateway/ (unchanged this wave — C1 is api/-only per ADR 0004; C4 doesn't touch gateway; 1 skipped pending ANTHROPIC_API_KEY); 5 cross-subsystem conformance tests under `tests/` (B5; unaffected by C1/C4 since `payload_too_large` is backend-only and skill loading doesn't cross the gateway boundary).
 **Stack:** `docker compose up` brings 6 services (postgres, redis, minio, gateway, api, web) to healthy in ~30s.
-**Migration:** `make migrate` applies `0001_initial.py` and `0002_add_must_change_password.py` cleanly; both reversible.
+**Migration:** `make migrate` applies `0001_initial.py`, `0002_add_must_change_password.py`, and `0003_create_files_table.py` cleanly; all reversible.
 
 ---
 
@@ -190,6 +190,107 @@ End-to-end verification: 24 unit tests + 1 SIGHUP subprocess test pass under the
 
 * The brief's recommendation to put `gateway/` aware of skills at all is deferred to C2. C1 ships the loader on `api/` only; the gateway has zero skill-related code post-C1. Per ADR 0004 this is the documented path, not a deviation.
 * The brief described frontmatter validation as "strict" and "validate strictly; surface a clear error per skill on parse failure but don't fail the whole startup". The loader meets the second half of that brief verbatim — but the schema is *permissive*, not strict. Strict-mode validation would reject most of the M1 corpus, which is a worse outcome than accepting non-canonical values and surfacing them as-is. The deviation is documented in the schema module's docstring, in the C1 commit message for the loader, and in the corpus reality check above.
+### C4 — File upload + storage ✅
+
+The four file endpoints (`POST /api/v1/files`, `GET /api/v1/files/{id}`,
+`GET /api/v1/files/{id}/content`, `DELETE /api/v1/files/{id}`) are wired
+end-to-end against MinIO with streaming I/O, content-addressable identity
+via SHA-256, and a 100 MB-per-request size cap (`LQ_AI_MAX_UPLOAD_SIZE_MB`).
+
+**Migration `0003_create_files_table.py`** — adds the `files` table per
+`docs/db-schema.md` §`files`. Columns: `id` (UUID PK), `owner_id` (FK to
+users with ON DELETE RESTRICT), `project_id` (nullable, FK deferred to C7),
+`filename`, `mime_type`, `size_bytes`, `hash_sha256`, `storage_path`,
+`ingestion_status` (CHECK in {`pending`,`processing`,`ready`,`failed`}),
+`ingestion_error`, `created_at`, `deleted_at`. Indexes: owner-active
+(listing), project-active (C7's file picker), status-pending-or-processing
+(C5's worker pickup), and hash (PRD §3.5 dedup). Reversible.
+
+**Streaming I/O.** `api/app/storage.py` now exposes `stream_upload` (S3
+multipart-upload with 8 MiB parts; SHA-256 computed as bytes flow past;
+413/PayloadTooLarge raised the moment the running total exceeds the cap;
+in-progress upload aborted on any failure so MinIO doesn't retain orphan
+parts), `stream_download` (async-context-manager yielding an async byte
+iterator), and `delete_object` (idempotent on 404). Bytes never reach
+RAM in their entirety: Starlette spools `UploadFile` to a
+`SpooledTemporaryFile` past 1 MB, and our handler reads `MULTIPART_PART_SIZE`
+chunks from it.
+
+**Architectural decisions (ADR 0005).** Two questions surfaced (C4's ADR was renamed from 0004 to 0005 at merge time because C1 took 0004 first):
+
+* **Soft-delete vs hard-delete.** ADR 0005 documents soft-delete by
+  default — `DELETE` flips `deleted_at` and leaves the MinIO bytes in
+  place. Hard-deletion is owned by D6 (per-user export+delete) and a
+  future operator-facing GC sweep. Reasoning: audit-log integrity, the
+  C5 race window, the `documents.file_id ON DELETE CASCADE` blast
+  radius, and consistency with `users.deleted_at`.
+* **MinIO key scheme.** ADR 0005 picks the bare file UUID as the
+  storage key (`<bucket>/<file_id>`) — no owner prefix, no filename in
+  the path. Multitenancy is enforced at the application layer
+  (`files.owner_id`); the key scheme is not a parallel access boundary.
+
+**Error hierarchy.** Added `app.errors.PayloadTooLarge` (HTTP 413) +
+`CODE_PAYLOAD_TOO_LARGE = "payload_too_large"`. Backend-only code; does
+NOT cross the gateway boundary, so the cross-subsystem contract test
+(`tests/test_error_code_contract.py`) is unaffected.
+
+**Per-user isolation.** `_load_visible_file` filters on `(id, owner_id,
+deleted_at IS NULL)`. The cross-user case returns 404 (not 403) per the
+brief and CLAUDE.md — avoids leaking existence information.
+
+**Content-Disposition.** `_content_disposition_attachment` emits the
+canonical RFC 6266 form for ASCII filenames and adds an RFC 5987
+`filename*=UTF-8''<percent-encoded>` for non-ASCII filenames. Quote and
+backslash characters are escaped per the spec.
+
+**`ingestion_status='pending'`.** Set on insert. C4 does NOT enqueue or
+notify — the C5 document pipeline polls or subscribes; that's its
+problem.
+
+**Dependency.** Added `python-multipart>=0.0.20,<0.1` to `api/`'s
+runtime deps — required by Starlette to parse `multipart/form-data`
+request bodies. Already a Starlette optional dep; we pin it directly
+because we use `UploadFile` at runtime. No new SBOM family.
+
+**Tests (43 new).**
+
+* `api/tests/test_storage_streaming.py` — 14 unit tests against an
+  in-memory `FakeS3Client` covering the multipart-upload sequence,
+  SHA-256/size accounting across chunk shapes (empty body, multiple
+  small chunks, parts-boundary roll-over), the 413 abort path, the
+  abort-failure tolerance, the streaming download path, and
+  `delete_object` idempotency.
+* `api/tests/test_files_endpoints.py` — 22 integration tests
+  (DB-backed + MinIO-mocked) covering the full handler matrix: auth
+  gates (401, 403), validation (400, 422), happy-path round trip
+  (upload → metadata → byte-equal download), per-user isolation
+  (404 cross-user), soft-delete semantics (idempotent, MinIO bytes
+  preserved), the 413 size cap, and the Content-Disposition shape
+  for ASCII and non-ASCII filenames. The bytes-fidelity assertion
+  (the C4 verification step from M1-IMPLEMENTATION-ORDER) lives here.
+* `api/tests/test_files_helpers.py` — 7 unit tests for the
+  `Content-Disposition` builder and `_validate_file_id`.
+* `api/tests/test_migrations.py` — 4 new tests for the `files` table:
+  table existence, the four expected indexes, the `ingestion_status`
+  CHECK, and the `size_bytes >= 0` CHECK.
+* `api/tests/test_errors.py` — extended with the `PayloadTooLarge`
+  case in the parametrized status/code matrix.
+* `api/tests/test_endpoints.py` — file routes added to
+  `IMPLEMENTED_ROUTES` so the 501-stub test no longer asserts on
+  them.
+
+**Drift flagged.** `docs/api/backend-openapi.yaml` updated: the four
+file endpoints carry full responses (not just 201/200/204), with
+documented 4xx/5xx error envelopes; the `Content-Disposition` and
+`X-Content-Type-Options` headers are documented on the GET-content
+endpoint; the `payload_too_large` code is added to the `Error.detail.code`
+enum. `.env.example` adds `LQ_AI_MAX_UPLOAD_SIZE_MB=100`.
+
+End-to-end verification: stack-level smoke (real MinIO via
+`docker compose up -d`, real upload of a binary blob via curl,
+download via curl, byte-compare) is the next-session operator
+verification step. The mocked-MinIO bytes-fidelity test enforces the
+contract automatically on every CI run.
 
 ---
 
@@ -235,6 +336,15 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 | Skill-authoring-guide ↔ corpus drift | `docs/skill-authoring-guide.md` documents `output_format: report \| table \| issues_list \| redline` and `jurisdiction: us \| eu \| regime-aware \| global \| other`. The M1 corpus uses `output_format: markdown \| structured_checklist \| ...` and `jurisdiction: US-default \| agnostic \| regime-dependent \| ...`. C1's loader is permissive and accepts the corpus as-is. | Decide the correct reconciliation (tighten the corpus to match the guide, or relax the guide to match the corpus). Either is a docs-side task; not blocking. Most natural alongside D2 or as a focused docs PR led by a maintainer with practicing-attorney input. The C1 loader will keep loading whatever the corpus actually contains. |
 | `POST /api/v1/skills/{name}/fork` endpoint | C1's `app/api/skills.py` keeps the A4 501 stub | Needs DB-backed user/team-scope skill storage which C1 does not deliver. Lands when user/team scope storage is wired (likely a focused C-phase task between C1 and D-phase, or folded into D2's UI work). |
 | Gateway-side skill content fetch (C2) | ADR 0004 specifies the gateway fetches skill content from the backend over HTTP during prompt assembly | C2 implementation. The gateway needs an httpx client pointed at `LQ_AI_API_URL` plus the same `X-LQ-AI-Gateway-Key` shared secret in the reverse direction. C1 leaves the gateway's skill-related code untouched. |
+
+### Newly deferred (surfaced during C4)
+
+| Item | Surface | Owning task |
+|---|---|---|
+| MinIO-bytes GC for soft-deleted files | C4's `DELETE /api/v1/files/{id}` flips `deleted_at` and leaves the bytes; ADR 0005 documents the rationale | **D6 (per-user export+delete)** owns the user-driven hard-delete path. Operators who care about storage cost before D6 ships need a manual cleanup tool. Filed as a candidate **DE-XXX** in PRD §9 next time we update the deferred-enhancements list — the natural shape is a CLI subcommand under `python -m app.cli` that hard-deletes `files` rows + objects past a retention window. |
+| `project_id` FK constraint on `files.project_id` | Migration 0003 leaves the column nullable without an FK constraint because `projects` doesn't exist yet (C7) | **C7** ALTERs the table to add `fk_files_project_id REFERENCES projects(id) ON DELETE SET NULL`. Same pattern A2 used for `inference_routing_log.chat_id` / `.message_id`. |
+| Multipart `project_id` form field on `POST /api/v1/files` | The OpenAPI sketch's multipart body declares the field; the C4 handler accepts it (FastAPI parses it as part of the form) but **does not persist it** | **C7** wires the project-attachment path. The OpenAPI sketch is honest about it: the field is in the body schema and silently ignored until C7 lands. |
+| `forceful=true` immediate hard-delete on `DELETE /api/v1/files/{id}` | Considered in ADR 0005; not in C4 scope | Out of M1; will be reconsidered in D-phase if operator feedback reveals demand. Until then, the only hard-delete path is D6. |
 
 ### Deferred to **C3** (chat service + message persistence)
 
@@ -349,11 +459,11 @@ When you resume:
 1. **Check git status is clean** and you're at HEAD of origin/main:
    ```bash
    git status   # expect: "nothing to commit, working tree clean"
-   git log -1 --oneline   # expect the B5 progress-doc commit (or the merge commit)
+   git log -1 --oneline   # expect the C4 progress-doc commit (or the merge commit)
    ```
 2. **Read this doc top to bottom** to recover state.
-3. **B5 and C1 are done.** The B-phase is complete (B6 is optional); C-phase wave-1 has C1 in. The end-to-end inference path is wired (B5); skills are loaded into a backend in-memory registry queryable via `GET /api/v1/skills` and `GET /api/v1/skills/{name}`, with SIGHUP-driven atomic-swap reload (C1, ADR 0004). The cross-cutting `lq_ai.errors` hierarchy is in place (ADR 0003).
-4. **C-phase next.** Remaining tasks: C2 (prompt assembly — gateway-side; reads skill content from backend over HTTP per ADR 0004), C3 (chat persistence — removes the "stateless pass-through" caveat from B5), C4 (files), C5 (citations), C6 (KB), C7 (audit). Recommended order from here: C3 → C2 → C4 → C5 → C6 → C7. C3 unblocks real persisted chats; C2 needs C1 (in place) plus C3 to be most useful.
+3. **C-phase wave-1 is done.** B-phase complete (B6 optional). C1 (skill loader, backend-side per ADR 0004) and C4 (file upload + MinIO, soft-delete + bare-UUID key per ADR 0005) both landed. End-to-end inference path is wired (B5); skills are loaded into a backend in-memory registry with SIGHUP-driven atomic-swap reload; file upload/metadata/download/soft-delete is end-to-end against MinIO with streaming I/O, SHA-256 content addressing, and a 100 MB cap. The cross-cutting `lq_ai.errors` hierarchy is in place (ADR 0003).
+4. **C-phase wave-2 unblocked.** Remaining tasks: C2 (prompt assembly — gateway-side; reads skill content from backend over HTTP per ADR 0004), C3 (chat persistence — removes the "stateless pass-through" caveat from B5), C5 (document pipeline + character-precise offsets — depends on C4, now unblocked; load-bearing for M2 citation engine), C6 (KB hybrid retrieval — depends on C5), C7 (project service — depends on C1 + C4, both in), C8 (web UI chat — depends on C3). Wave-2 parallel candidates: C2 ∥ C5 ∥ C7. C3 is the keystone task and runs after C2.
 5. **B6 is optional** for M1 baseline — recommended order is OpenAI first (largest user base), then Ollama (Mode 2 unlock), then Vertex/Bedrock. Ollama specifically is the Mode 2 (air-gapped local inference) unlock.
 
 That's it — clean continuation.

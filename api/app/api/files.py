@@ -12,7 +12,7 @@ Surface (per ``docs/api/backend-openapi.yaml``):
   original bytes; ``Content-Disposition: attachment; filename=...`` with
   RFC 5987-encoded ``filename*`` for non-ASCII filenames.
 * ``DELETE /api/v1/files/{file_id}``     — soft-delete (sets ``deleted_at``);
-  the MinIO bytes outlive the soft-delete per ADR 0004. The endpoint is
+  the MinIO bytes outlive the soft-delete per ADR 0005. The endpoint is
   idempotent: deleting an already-soft-deleted file (or a file that
   never existed) returns 404.
 
@@ -187,7 +187,7 @@ async def upload_file(
     Order of operations:
 
     1. **Pre-allocate the file_id** locally so we know the storage path
-       before touching MinIO. (Per ADR 0004 the storage key is the bare
+       before touching MinIO. (Per ADR 0005 the storage key is the bare
        UUID.)
     2. **Stream the upload to MinIO** via ``stream_upload``. This raises
        :class:`PayloadTooLarge` if the streamed byte count exceeds the
@@ -352,7 +352,7 @@ async def get_file_content(
     description=(
         "Sets `deleted_at` on the row; the MinIO object is left in place "
         "and reaped later by D6 (per-user export+delete) or a future GC "
-        "sweep, per `docs/adr/0004-file-storage-soft-delete-and-key-scheme.md`. "
+        "sweep, per `docs/adr/0005-file-storage-soft-delete-and-key-scheme.md`. "
         "Idempotent: deleting an already-soft-deleted file or a missing "
         "file returns 404."
     ),

@@ -11,7 +11,7 @@ Lifecycle (M1):
   through `processing` → `ready` or `failed`.
 * Soft-deleted on `DELETE /api/v1/files/{id}` (Task C4) — `deleted_at` is
   set to `now()`; the MinIO bytes are NOT reaped synchronously (per
-  `docs/adr/0004-file-storage-soft-delete-and-key-scheme.md`).
+  `docs/adr/0005-file-storage-soft-delete-and-key-scheme.md`).
 
 `project_id` references `projects(id)` once that table exists (Task C7);
 0003 leaves it nullable without an FK constraint and a future migration
@@ -33,7 +33,7 @@ from app.db.base import Base
 class File(Base):
     """A single uploaded file.
 
-    `storage_path` is the MinIO object key; per ADR 0004 we use the bare
+    `storage_path` is the MinIO object key; per ADR 0005 we use the bare
     UUID as the key (no prefix) so the column carries the same string
     as `id`. The column is TEXT (not UUID) to leave room for a future
     migration that layers prefixes (`tenants/<tenant>/<file_id>`)
