@@ -321,6 +321,29 @@ async def upload_file(
         },
     )
 
+    # Enqueue the ingest job for the C5 document pipeline. Failures are
+    # non-fatal — the row stays at `pending` and the worker's startup
+    # sweep will pick it up. We import lazily so test environments
+    # that don't have arq installed (or that monkey-patch the queue)
+    # don't pay an import cost on every upload.
+    try:
+        from app.workers.queue import enqueue_ingest_job
+
+        await enqueue_ingest_job(file_id)
+    except Exception as exc:
+        # The enqueue helper itself catches exceptions and returns a
+        # bool, but defensively handle any path that raises (e.g., the
+        # import failed). The upload itself is committed; ingestion
+        # is delayed.
+        log.warning(
+            "enqueue_ingest_job raised; row remains pending",
+            extra={
+                "event": "file_upload_enqueue_raised",
+                "file_id": str(file_id),
+                "error": str(exc),
+            },
+        )
+
     return FileMetadata.model_validate(row)
 
 
