@@ -31,7 +31,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "${POSTGRES_BIND_ADDR:-127.0.0.1}:${POSTGRES_HOST_PORT:-5432}:5432"
     healthcheck:
       test:
         ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-lq_ai} -d $${POSTGRES_DB:-lq_ai}"]
@@ -46,7 +46,7 @@ services:
     volumes:
       - redisdata:/data
     ports:
-      - "${REDIS_HOST_PORT:-6379}:6379"
+      - "${REDIS_BIND_ADDR:-127.0.0.1}:${REDIS_HOST_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -63,8 +63,8 @@ services:
     volumes:
       - miniodata:/data
     ports:
-      - "${MINIO_API_HOST_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+      - "${MINIO_BIND_ADDR:-127.0.0.1}:${MINIO_API_HOST_PORT:-9000}:9000"
+      - "${MINIO_BIND_ADDR:-127.0.0.1}:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
       interval: 10s
@@ -128,7 +128,7 @@ services:
     volumes:
       - ${GATEWAY_CONFIG_FILE:-./gateway.yaml.example}:/etc/gateway.yaml:ro
     ports:
-      - "${GATEWAY_HOST_PORT:-8001}:8001"
+      - "${GATEWAY_BIND_ADDR:-127.0.0.1}:${GATEWAY_HOST_PORT:-8001}:8001"
     healthcheck:
       # python:3.12-slim has no curl; use stdlib urllib instead
       test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health', timeout=2).status == 200 else 1)"]
@@ -173,8 +173,15 @@ services:
       # Operational
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LQ_AI_DEV_MODE: ${LQ_AI_DEV_MODE:-false}
+      # Skills loader — C1 walks this directory at startup. Mounted
+      # read-only so the container can only consume the skills filesystem,
+      # not mutate it (skill authoring is a host-side / human-attestation
+      # workflow per CLAUDE.md "Working with skills").
+      LQ_AI_SKILLS_DIR: ${LQ_AI_SKILLS_DIR:-/skills}
+    volumes:
+      - ./skills:/skills:ro
     ports:
-      - "${API_HOST_PORT:-8000}:8000"
+      - "${API_BIND_ADDR:-127.0.0.1}:${API_HOST_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"]
       interval: 5s
@@ -247,7 +254,7 @@ services:
       # ENABLE_*, etc.) lands when Task A1.d imports the fork and we know
       # the exact set to override vs. default.
     ports:
-      - "${WEB_HOST_PORT:-3000}:8080"
+      - "${WEB_BIND_ADDR:-127.0.0.1}:${WEB_HOST_PORT:-3000}:8080"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
       interval: 10s
@@ -266,7 +273,7 @@ services:
     volumes:
       - ollamadata:/root/.ollama
     ports:
-      - "${OLLAMA_HOST_PORT:-11434}:11434"
+      - "${OLLAMA_BIND_ADDR:-127.0.0.1}:${OLLAMA_HOST_PORT:-11434}:11434"
     healthcheck:
       # Ollama exposes /api/tags as the cheapest GET; a 200 means the
       # server is up (models are loaded lazily on first inference, so
