@@ -51,6 +51,14 @@ dependencies = [
     # so no new SBOM family is introduced (see ADR 0004 for the locus
     # decision and CLAUDE.md's bar on new dependencies).
     "pyyaml>=6.0,<7",
+    # C4 — python-multipart: required by Starlette to parse multipart/form-data
+    # request bodies, which is how Task C4's `POST /api/v1/files` accepts
+    # file uploads. Starlette declares it as an optional dep ("multipart"
+    # extra); we pin it directly because we use the `UploadFile` type at
+    # runtime. No new SBOM family — Starlette already supports the same
+    # library; we're moving from "transitive when extras are installed"
+    # to "explicit declaration."
+    "python-multipart>=0.0.20,<0.1",
 ]
 
 [project.optional-dependencies]
