@@ -1,18 +1,79 @@
 """LQ.AI backend API entrypoint.
 
-This is the M1-Task-A1 scaffold: a minimal FastAPI service that returns 503 from
-its health endpoints. Implementation lands in subsequent tasks per
-docs/M1-IMPLEMENTATION-ORDER.md.
+Task A4 — Backend minimal scaffold. The full surface from
+`docs/api/backend-openapi.yaml` is registered here so OpenAPI clients see
+the contract; every endpoint except `/health` and `/ready` returns 501
+with a structured "not implemented" body until its implementing task
+(B1, C3, etc.) lands. See `app.api._stub.not_implemented`.
+
+Lifespan:
+- on startup: build the Postgres engine, Redis client, and gateway client
+  lazily (their first call wires them up), and ensure the configured S3
+  bucket exists so file uploads in C4 don't trip on missing-bucket.
+- on shutdown: dispose / aclose all four.
 """
 
 from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
 
 from app import __version__
+from app.api import api_router
+from app.cache import check_redis, close_redis
+from app.clients.gateway import close_gateway_client, get_gateway_client
+from app.config import get_settings
+from app.db.session import check_db, dispose_engine
+from app.storage import check_storage, ensure_bucket
+
+if TYPE_CHECKING:
+    pass
 
 SERVICE_NAME = "lq-ai-api"
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Open process-global clients on startup; close them on shutdown.
+
+    Bucket creation is best-effort: if storage is unavailable at startup
+    the readiness probe will reflect that and operators can retry. We do
+    not fail the process — the service should come up and report degraded
+    so liveness probes still pass and operators can diagnose.
+    """
+    settings = get_settings()
+    logging.basicConfig(level=settings.log_level.upper())
+    log.info("Starting %s v%s", SERVICE_NAME, __version__)
+
+    try:
+        await ensure_bucket()
+    except Exception as exc:
+        # Startup must not crash the process — surface degradation via /ready.
+        log.warning("ensure_bucket failed at startup: %s (continuing)", exc)
+
+    try:
+        yield
+    finally:
+        log.info("Shutting down %s", SERVICE_NAME)
+        # Close clients in reverse order of dependency. Failures here are
+        # logged but never propagate — shutdown is best-effort.
+        for closer_name, closer in (
+            ("gateway client", close_gateway_client),
+            ("redis", close_redis),
+            ("db engine", dispose_engine),
+        ):
+            try:
+                await closer()
+            except Exception as exc:
+                log.warning("Error closing %s: %s", closer_name, exc)
+
 
 app = FastAPI(
     title="LQ.AI Backend API",
@@ -20,13 +81,17 @@ app = FastAPI(
     description=(
         "Backend API for the LQ.AI platform. The full surface is specified "
         "in docs/api/backend-openapi.yaml. M1 implementation lands progressively "
-        "per docs/M1-IMPLEMENTATION-ORDER.md; until then, all endpoints return 501 "
-        "or 503 with a structured 'not implemented' body."
+        "per docs/M1-IMPLEMENTATION-ORDER.md; until then, all endpoints under "
+        "/api/v1 return 501 with a structured 'not implemented' body that names "
+        "the implementing task."
     ),
+    lifespan=lifespan,
 )
 
+app.include_router(api_router)
 
-@app.get("/health")
+
+@app.get("/health", tags=["meta"])
 async def health() -> JSONResponse:
     """Liveness probe — returns 200 as soon as the process is serving requests.
 
@@ -44,21 +109,46 @@ async def health() -> JSONResponse:
     )
 
 
-@app.get("/ready")
+async def _check_gateway() -> bool:
+    return await get_gateway_client().health_check()
+
+
+@app.get("/ready", tags=["meta"])
 async def ready() -> JSONResponse:
-    """Readiness probe — returns 200 when the service can serve real traffic.
+    """Readiness probe — returns 200 when DB + Redis + MinIO + gateway are reachable.
 
     Per K8s readiness convention: this answers "can I serve user requests?"
-    Returns 503 with a structured "not ready" body until Task A4 (Backend
-    minimal scaffold) wires up Postgres, Redis, and MinIO connections.
+    Returns 200 with per-dependency `ok: true` when everything is up.
+    Returns 503 with per-dependency status (and `ok: false` for failed
+    deps) when any dependency is unreachable. Liveness (`/health`) stays
+    200 in either case so orchestrators don't kill the pod for a transient
+    dependency outage.
     """
+    db_ok, redis_ok, storage_ok, gateway_ok = await asyncio.gather(
+        check_db(),
+        check_redis(),
+        check_storage(),
+        _check_gateway(),
+        return_exceptions=False,
+    )
+    deps: dict[str, dict[str, bool]] = {
+        "database": {"ok": db_ok},
+        "redis": {"ok": redis_ok},
+        "storage": {"ok": storage_ok},
+        "gateway": {"ok": gateway_ok},
+    }
+    all_ok = all(d["ok"] for d in deps.values())
+    failed = [name for name, d in deps.items() if not d["ok"]]
+    body: dict[str, object] = {
+        "status": "ready" if all_ok else "not_ready",
+        "service": SERVICE_NAME,
+        "version": __version__,
+        "dependencies": deps,
+    }
+    if not all_ok:
+        body["failed"] = failed
+
     return JSONResponse(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        content={
-            "status": "not_ready",
-            "service": SERVICE_NAME,
-            "version": __version__,
-            "reason": "scaffold_only",
-            "next_task": "A4 — Backend minimal scaffold (DB/Redis/MinIO connections)",
-        },
+        status_code=status.HTTP_200_OK if all_ok else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=body,
     )

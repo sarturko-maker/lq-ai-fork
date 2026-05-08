@@ -20,6 +20,18 @@ dependencies = [
     "alembic>=1.13,<2",
     "psycopg2-binary>=2.9,<3",
     "greenlet>=3.0,<4",
+    # A4 dependencies — readiness wiring + clients used at startup.
+    # `redis` ships an async client at `redis.asyncio` (formerly aioredis,
+    # merged into redis-py). One library covers sync + async.
+    "redis>=5.0,<6",
+    # `aioboto3` is an asyncio wrapper over botocore; required because the
+    # backend's storage path (Task C4) is async and we don't want to block
+    # the event loop on file I/O. Pulls boto3/botocore transitively.
+    "aioboto3>=13.0,<14",
+    # httpx is FastAPI's recommended async HTTP client and is used by the
+    # gateway client. Already a transitive of fastapi/starlette test deps,
+    # declared explicitly here because we use it at runtime, not just in tests.
+    "httpx>=0.27,<0.29",
 ]
 
 [project.optional-dependencies]
@@ -54,3 +66,12 @@ markers = [
 strict_optional = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
+
+# aioboto3 / botocore do not ship type stubs (and the boto3-stubs project
+# only stubs sync boto3). The backend uses both in `app/storage.py`; we
+# tell mypy to skip them rather than slathering # type: ignore[import-untyped]
+# at every call site. Per CONTRIBUTING.md, the api/ subsystem uses
+# standard mypy mode (not strict mode), so this is in line with policy.
+[[tool.mypy.overrides]]
+module = ["aioboto3", "aioboto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
