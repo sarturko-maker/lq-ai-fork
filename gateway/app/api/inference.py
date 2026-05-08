@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Final
 
@@ -632,6 +633,7 @@ async def _stream_openai_sse(
         if usage is not None
         else None
     )
+    chat_id, message_id = _correlation_ids(chat_request)
     await log_writer.write(
         InferenceRoutingLogRow(
             requested_model=chat_request.model,
@@ -643,6 +645,8 @@ async def _stream_openai_sse(
             cost_estimate=cost,
             latency_ms=None,  # streaming latency is wall-time; left null for now
             request_id=request_id,
+            chat_id=chat_id,
+            message_id=message_id,
         )
     )
 
@@ -656,6 +660,35 @@ async def _single_error_sse(*, code: str, message: str) -> AsyncIterator[bytes]:
 
 
 # --- Routing-log writers ------------------------------------------------------
+
+
+def _correlation_ids(
+    chat_request: ChatCompletionRequest,
+) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+    """Extract ``(chat_id, message_id)`` from the request envelope (C3).
+
+    The C3 envelope adds ``lq_ai_chat_id`` and ``lq_ai_message_id`` —
+    the canonical surface for routing-log correlation. The pre-existing
+    ``chat_id`` field (B3-era audit-log tag) is honoured as a fallback
+    so older callers (or callers that don't yet plumb the C3 fields)
+    still get a chat-id stamp on the routing log.
+
+    Returns ``(None, None)`` for any field that's absent or fails UUID
+    parse — defensive: we never let a malformed correlation id break
+    the routing-log write.
+    """
+
+    def _parse(value: str | None) -> uuid.UUID | None:
+        if not value:
+            return None
+        try:
+            return uuid.UUID(value)
+        except ValueError:
+            return None
+
+    chat_id = _parse(chat_request.lq_ai_chat_id) or _parse(chat_request.chat_id)
+    message_id = _parse(chat_request.lq_ai_message_id)
+    return chat_id, message_id
 
 
 def _annotate_response(
@@ -693,6 +726,7 @@ async def _write_success(
     if cost_estimate is not None:
         cost = _Decimal(str(cost_estimate))
 
+    chat_id, message_id = _correlation_ids(chat_request)
     await writer.write(
         InferenceRoutingLogRow(
             requested_model=chat_request.model,
@@ -704,6 +738,8 @@ async def _write_success(
             cost_estimate=cost,
             latency_ms=result.latency_ms,
             request_id=request_id,
+            chat_id=chat_id,
+            message_id=message_id,
         )
     )
 
@@ -730,6 +766,7 @@ async def _write_failure(
     docs/M1-PROGRESS.md.
     """
 
+    chat_id, message_id = _correlation_ids(chat_request)
     await writer.write(
         InferenceRoutingLogRow(
             requested_model=chat_request.model,
@@ -740,6 +777,8 @@ async def _write_failure(
             refused=False,
             refusal_reason=f"upstream_error:{error.code}",
             request_id=request_id,
+            chat_id=chat_id,
+            message_id=message_id,
         )
     )
 
@@ -754,6 +793,7 @@ async def _write_unavailable(
 ) -> None:
     """Write a routing-log row when no adapter could handle the request."""
 
+    chat_id, message_id = _correlation_ids(chat_request)
     await writer.write(
         InferenceRoutingLogRow(
             requested_model=chat_request.model,
@@ -763,6 +803,8 @@ async def _write_unavailable(
             refused=False,
             refusal_reason=f"adapter_unavailable:{message}",
             request_id=request_id,
+            chat_id=chat_id,
+            message_id=message_id,
         )
     )
 
@@ -787,6 +829,7 @@ async def _write_unresolved(
     don't know where this would have gone".
     """
 
+    chat_id, message_id = _correlation_ids(chat_request)
     await writer.write(
         InferenceRoutingLogRow(
             requested_model=chat_request.model,
@@ -796,6 +839,8 @@ async def _write_unresolved(
             refused=True,
             refusal_reason=f"invalid_model:{message}",
             request_id=request_id,
+            chat_id=chat_id,
+            message_id=message_id,
         )
     )
 
