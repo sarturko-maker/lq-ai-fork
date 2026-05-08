@@ -455,9 +455,7 @@ def _to_ollama_request(
     if request.top_p is not None:
         options["top_p"] = request.top_p
     if request.stop is not None:
-        options["stop"] = (
-            [request.stop] if isinstance(request.stop, str) else list(request.stop)
-        )
+        options["stop"] = [request.stop] if isinstance(request.stop, str) else list(request.stop)
     if options:
         body["options"] = options
 
@@ -584,9 +582,7 @@ async def _ollama_stream_iter(
     role_emitted = False
 
     try:
-        async with client.stream(
-            "POST", "/api/chat", json=body, headers=headers
-        ) as response:
+        async with client.stream("POST", "/api/chat", json=body, headers=headers) as response:
             if response.status_code >= 400:
                 # Read the error body so callers see a structured error
                 # rather than a hung stream.

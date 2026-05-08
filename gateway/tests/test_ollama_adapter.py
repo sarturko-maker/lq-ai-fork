@@ -203,9 +203,7 @@ def test_from_config_reads_api_key_when_configured() -> None:
             "models": [],
         }
     )
-    adapter = OllamaAdapter.from_config(
-        provider, env={"OLLAMA_PROXY_TOKEN": "proxy-bearer-xyz"}
-    )
+    adapter = OllamaAdapter.from_config(provider, env={"OLLAMA_PROXY_TOKEN": "proxy-bearer-xyz"})
     assert adapter._api_key == "proxy-bearer-xyz"
     assert adapter._auth_headers().get("authorization") == "Bearer proxy-bearer-xyz"
 
@@ -558,9 +556,7 @@ async def test_streaming_skips_blank_lines_and_malformed_json() -> None:
         '"done_reason":"stop","prompt_eval_count":2,"eval_count":2}\n'
         "\n"
     )
-    respx.post(f"{OLLAMA_BASE}/api/chat").mock(
-        return_value=httpx.Response(200, text=body)
-    )
+    respx.post(f"{OLLAMA_BASE}/api/chat").mock(return_value=httpx.Response(200, text=body))
 
     adapter = _make_adapter()
     try:
@@ -576,9 +572,7 @@ async def test_streaming_skips_blank_lines_and_malformed_json() -> None:
     # line is silently skipped.
     assert len(chunks) == 4
     contents = [
-        chunk.choices[0].delta.content
-        for chunk in chunks
-        if chunk.choices[0].delta.content
+        chunk.choices[0].delta.content for chunk in chunks if chunk.choices[0].delta.content
     ]
     assert contents == ["hi", "!"]
 
@@ -595,9 +589,7 @@ async def test_streaming_emits_role_chunk_only_once() -> None:
         '{"model":"llama3.1","message":{"role":"assistant","content":""},"done":true,'
         '"done_reason":"stop","prompt_eval_count":1,"eval_count":2}\n'
     )
-    respx.post(f"{OLLAMA_BASE}/api/chat").mock(
-        return_value=httpx.Response(200, text=body)
-    )
+    respx.post(f"{OLLAMA_BASE}/api/chat").mock(return_value=httpx.Response(200, text=body))
     adapter = _make_adapter()
     try:
         result = await adapter.chat_completion(
@@ -619,12 +611,8 @@ async def test_streaming_emits_terminal_chunk_even_without_done_line() -> None:
     adapter still emits a final chunk with finish_reason='stop' so the
     OpenAI shape is honored."""
 
-    body = (
-        '{"model":"llama3.1","message":{"role":"assistant","content":"hi"},"done":false}\n'
-    )
-    respx.post(f"{OLLAMA_BASE}/api/chat").mock(
-        return_value=httpx.Response(200, text=body)
-    )
+    body = '{"model":"llama3.1","message":{"role":"assistant","content":"hi"},"done":false}\n'
+    respx.post(f"{OLLAMA_BASE}/api/chat").mock(return_value=httpx.Response(200, text=body))
     adapter = _make_adapter()
     try:
         result = await adapter.chat_completion(
@@ -663,9 +651,7 @@ async def test_upstream_404_raises_provider_model_not_found() -> None:
     adapter = _make_adapter()
     try:
         with pytest.raises(ProviderModelNotFound) as excinfo:
-            await adapter.chat_completion(
-                _basic_request(model="foo"), model="foo", stream=False
-            )
+            await adapter.chat_completion(_basic_request(model="foo"), model="foo", stream=False)
     finally:
         await adapter.aclose()
 
@@ -694,9 +680,7 @@ async def test_upstream_503_raises_provider_http_error() -> None:
     adapter = _make_adapter()
     try:
         with pytest.raises(ProviderHTTPError) as excinfo:
-            await adapter.chat_completion(
-                _basic_request(), model="llama3.1", stream=False
-            )
+            await adapter.chat_completion(_basic_request(), model="llama3.1", stream=False)
     finally:
         await adapter.aclose()
     err = excinfo.value
@@ -714,9 +698,7 @@ async def test_upstream_500_raises_provider_http_error() -> None:
     adapter = _make_adapter()
     try:
         with pytest.raises(ProviderHTTPError) as excinfo:
-            await adapter.chat_completion(
-                _basic_request(), model="llama3.1", stream=False
-            )
+            await adapter.chat_completion(_basic_request(), model="llama3.1", stream=False)
     finally:
         await adapter.aclose()
     assert excinfo.value.upstream_status == 500
@@ -727,15 +709,11 @@ async def test_upstream_500_raises_provider_http_error() -> None:
 async def test_network_error_raises_provider_network_error() -> None:
     """Connection refused (Ollama not running) -> ProviderNetworkError."""
 
-    respx.post(f"{OLLAMA_BASE}/api/chat").mock(
-        side_effect=httpx.ConnectError("connection refused")
-    )
+    respx.post(f"{OLLAMA_BASE}/api/chat").mock(side_effect=httpx.ConnectError("connection refused"))
     adapter = _make_adapter()
     try:
         with pytest.raises(ProviderNetworkError):
-            await adapter.chat_completion(
-                _basic_request(), model="llama3.1", stream=False
-            )
+            await adapter.chat_completion(_basic_request(), model="llama3.1", stream=False)
     finally:
         await adapter.aclose()
 
@@ -752,9 +730,7 @@ async def test_non_json_200_raises_provider_http_error() -> None:
     adapter = _make_adapter()
     try:
         with pytest.raises(ProviderHTTPError):
-            await adapter.chat_completion(
-                _basic_request(), model="llama3.1", stream=False
-            )
+            await adapter.chat_completion(_basic_request(), model="llama3.1", stream=False)
     finally:
         await adapter.aclose()
 
@@ -783,9 +759,7 @@ async def test_embeddings_raises_unsupported() -> None:
 async def test_health_check_reports_reachable_on_200() -> None:
     """A 200 from /api/tags means the Ollama server is up."""
 
-    respx.get(f"{OLLAMA_BASE}/api/tags").mock(
-        return_value=httpx.Response(200, json={"models": []})
-    )
+    respx.get(f"{OLLAMA_BASE}/api/tags").mock(return_value=httpx.Response(200, json={"models": []}))
     adapter = _make_adapter()
     try:
         health = await adapter.health_check()
@@ -813,9 +787,7 @@ async def test_health_check_reports_unreachable_on_500() -> None:
 @pytest.mark.unit
 @respx.mock
 async def test_health_check_reports_unreachable_on_network_error() -> None:
-    respx.get(f"{OLLAMA_BASE}/api/tags").mock(
-        side_effect=httpx.ConnectError("connection refused")
-    )
+    respx.get(f"{OLLAMA_BASE}/api/tags").mock(side_effect=httpx.ConnectError("connection refused"))
     adapter = _make_adapter()
     try:
         health = await adapter.health_check()

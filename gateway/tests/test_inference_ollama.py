@@ -379,9 +379,7 @@ async def test_ollama_503_model_loading_returns_502(
     the call ends here."""
 
     respx.post("http://ollama:11434/api/chat").mock(
-        return_value=httpx.Response(
-            503, json={"error": "model is currently loading"}
-        )
+        return_value=httpx.Response(503, json={"error": "model is currently loading"})
     )
     response = await ollama_client.post(
         "/v1/chat/completions",
@@ -527,9 +525,7 @@ async def test_fallback_chain_ollama_503_falls_through_to_anthropic(
 
     # Primary: Ollama returns 503 (model loading).
     ollama_route = respx.post("http://ollama:11434/api/chat").mock(
-        return_value=httpx.Response(
-            503, json={"error": "model is currently loading"}
-        )
+        return_value=httpx.Response(503, json={"error": "model is currently loading"})
     )
     # Fallback: Anthropic returns a real-looking response.
     anthropic_route = respx.post("https://api.anthropic.com/v1/messages").mock(
@@ -566,11 +562,7 @@ async def test_fallback_chain_ollama_503_falls_through_to_anthropic(
     assert anthropic_route.called
 
     # Routing-log row attributes to the actual provider that answered.
-    rows = [
-        r
-        for r in recorder.rows
-        if r.requested_model == "smart-with-local-fallback"
-    ]
+    rows = [r for r in recorder.rows if r.requested_model == "smart-with-local-fallback"]
     assert len(rows) == 1
     row = rows[0]
     assert row.routed_provider == "anthropic-prod"
@@ -595,9 +587,7 @@ async def test_fallback_chain_ollama_404_does_not_fall_back(
     recorder.rows.clear()
 
     ollama_route = respx.post("http://ollama:11434/api/chat").mock(
-        return_value=httpx.Response(
-            404, json={"error": "model 'llama3.1:8b' not found"}
-        )
+        return_value=httpx.Response(404, json={"error": "model 'llama3.1:8b' not found"})
     )
     anthropic_route = respx.post("https://api.anthropic.com/v1/messages").mock(
         return_value=httpx.Response(
