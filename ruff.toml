@@ -1,0 +1,57 @@
+# InHouse AI — top-level ruff configuration
+#
+# Applies to api/, gateway/, scripts/. Per CONTRIBUTING.md:
+#   - ruff format is Black-compatible
+#   - ruff check enforces pyflakes / pycodestyle / pyupgrade / bugbear /
+#     isort import sorting
+#   - mypy strict mode for gateway/, standard mode for api/
+
+target-version = "py312"
+line-length = 100
+extend-exclude = [
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    "build",
+    "dist",
+    "web",  # SvelteKit fork; uses prettier/eslint, not ruff
+]
+
+[lint]
+# Enabled rule families:
+#   F   — pyflakes (unused imports, undefined names, etc.)
+#   E,W — pycodestyle errors + warnings
+#   I   — isort (import order)
+#   UP  — pyupgrade (modern Python idioms)
+#   B   — flake8-bugbear (common bug patterns)
+#   C4  — flake8-comprehensions (idiomatic comprehensions)
+#   SIM — flake8-simplify (simpler code patterns)
+#   TID — flake8-tidy-imports (no banned-relative-imports)
+#   RUF — ruff-specific rules
+select = ["F", "E", "W", "I", "UP", "B", "C4", "SIM", "TID", "RUF"]
+
+ignore = [
+    # Black-compatible formatting handles E501 line length
+    "E501",
+    # Allow assert in tests
+    "B011",
+]
+
+[lint.per-file-ignores]
+# Tests can use assertions and unused fixtures freely
+"**/tests/**" = ["S101", "ARG", "B011"]
+# __init__.py files commonly re-export symbols
+"**/__init__.py" = ["F401"]
+
+[lint.isort]
+known-first-party = ["app"]
+combine-as-imports = true
+
+[format]
+# Black-compatible defaults
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
