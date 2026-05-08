@@ -21,7 +21,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from app import __version__
@@ -31,6 +31,7 @@ from app.cache import check_redis, close_redis
 from app.clients.gateway import close_gateway_client, get_gateway_client
 from app.config import get_settings
 from app.db.session import check_db, dispose_engine, get_session_factory
+from app.errors import LQAIError
 from app.storage import check_storage, ensure_bucket
 
 if TYPE_CHECKING:
@@ -109,6 +110,25 @@ app = FastAPI(
 )
 
 app.include_router(api_router)
+
+
+@app.exception_handler(LQAIError)
+async def _lqai_error_handler(_request: Request, exc: LQAIError) -> JSONResponse:
+    """Translate :class:`LQAIError` to the canonical structured error body.
+
+    Renders ``{"detail": {"code": ..., "message": ..., "details": ...}}``
+    with the exception's effective HTTP status. Documented in
+    ``docs/api/backend-openapi.yaml`` as the ``Error`` schema and in
+    :doc:`docs/adr/0003-error-handling.md`.
+
+    The handler does not log here; subclasses or call sites that need
+    operator-visible logging do so before raising. This keeps the
+    handler a pure shape translator.
+    """
+    return JSONResponse(
+        status_code=exc.effective_http_status,
+        content=exc.to_envelope(),
+    )
 
 
 @app.get("/health", tags=["meta"])

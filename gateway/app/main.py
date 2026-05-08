@@ -55,6 +55,7 @@ from app.api import admin_router, inference_router
 from app.config import GatewayConfig
 from app.config_loader import ConfigLoadError, load_config
 from app.db import engine_or_none
+from app.errors import LQAIError
 from app.providers import AnthropicAdapter, ProviderAdapter
 from app.router import Router
 from app.routing_log import NullRoutingLogWriter, RoutingLogWriter, SQLRoutingLogWriter
@@ -179,6 +180,22 @@ app = FastAPI(
 
 app.include_router(inference_router)
 app.include_router(admin_router)
+
+
+@app.exception_handler(LQAIError)
+async def _lqai_error_handler(_request: Request, exc: LQAIError) -> JSONResponse:
+    """Translate :class:`LQAIError` to the canonical ``GatewayError`` envelope.
+
+    Renders ``{"error": {"code": ..., "message": ..., "details": ...}}``
+    with the exception's effective HTTP status, matching the
+    ``GatewayError`` schema in ``docs/api/gateway-openapi.yaml`` and the
+    decision in :doc:`docs/adr/0003-error-handling.md`.
+    """
+
+    return JSONResponse(
+        status_code=exc.effective_http_status,
+        content=exc.to_envelope(),
+    )
 
 
 def _config_loaded(app: FastAPI) -> GatewayConfig | None:

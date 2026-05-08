@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.errors import PasswordChangeRequired
 from app.models.user import User
 from app.security.jwt import decode_access_token
 
@@ -87,15 +88,11 @@ async def get_active_user(user: CurrentUser) -> User:
     until password is changed" per Task B2's verification criteria.
     """
     if user.must_change_password:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "password_change_required",
-                "message": (
-                    "You must change your password before using the API. "
-                    "POST /api/v1/auth/change-password to set a new password."
-                ),
-            },
+        raise PasswordChangeRequired(
+            message=(
+                "You must change your password before using the API. "
+                "POST /api/v1/auth/change-password to set a new password."
+            ),
         )
     return user
 

@@ -1259,5 +1259,58 @@ components:
           items: {type: integer, enum: [1,2,3,4,5]}
           description: "Tiers that surface a warning in the chat UI"
 
+    Error:
+      type: object
+      required: [detail]
+      description: |
+        Canonical structured error envelope returned by every backend
+        endpoint that raises a typed error (`LQAIError` subclass).
+        Implemented by the FastAPI exception handler in
+        `api/app/main.py`; per ADR 0003 the wrapper key is `detail`
+        (matching FastAPI's native `HTTPException` response and the
+        existing B2 forced-password-change pattern). The inner shape
+        — `code` + `message` + `details` — is the load-bearing
+        contract and matches the shape the gateway uses on its side
+        under the `error` wrapper (see gateway-openapi.yaml's
+        `GatewayError`).
+
+        The pre-existing 501 stub envelope (returned by un-implemented
+        endpoints during M1 buildout, A4 scaffold) uses the legacy
+        `{"error": {...}}` wrapper instead. Each stub is replaced by a
+        real handler as its M1 task lands; new typed errors all use
+        the `detail` wrapper above.
+      properties:
+        detail:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: |
+                Stable error code. Backend-only codes:
+                `password_change_required`, `unauthorized`, `forbidden`,
+                `not_found`, `validation_error`, `rate_limited`,
+                `internal_error`. Backend↔gateway crossing codes
+                (propagated from gateway responses):
+                `gateway_unreachable`, `gateway_timeout`,
+                `gateway_invalid_response`, `provider_unavailable`,
+                `tier_below_minimum`, `invalid_model`.
+              enum:
+                - password_change_required
+                - unauthorized
+                - forbidden
+                - not_found
+                - validation_error
+                - rate_limited
+                - internal_error
+                - gateway_unreachable
+                - gateway_timeout
+                - gateway_invalid_response
+                - provider_unavailable
+                - tier_below_minimum
+                - invalid_model
+            message: {type: string}
+            details: {type: object, additionalProperties: true}
+
 security:
   - bearerAuth: []
