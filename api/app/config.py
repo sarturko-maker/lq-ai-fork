@@ -127,6 +127,21 @@ class Settings(BaseSettings):
         description="MFA challenge token TTL in seconds. Default: 5 minutes.",
     )
 
+    # ----- Skill registry (per Task C1 / ADR 0004) -----
+    # Filesystem path the skill loader walks at startup (and re-walks on
+    # SIGHUP). Defaults to the repo's `skills/` directory; in tests and
+    # operator-side overlays this is overridden to a fixture or merged
+    # directory. Resolved against the process working directory if
+    # relative — the API container's WORKDIR is `/app`, so a relative
+    # default is anchored there.
+    skills_dir: str = Field(
+        default="../skills",
+        description=(
+            "Filesystem directory the skill loader walks at startup and "
+            "on SIGHUP. Default is the repo's `skills/` folder."
+        ),
+    )
+
     # ----- Operational -----
     log_level: LogLevel = Field(default="info", description="Log level for the api/ service.")
     lq_ai_dev_mode: bool = Field(

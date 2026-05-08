@@ -19,7 +19,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
@@ -32,17 +32,16 @@ from app.clients.gateway import close_gateway_client, get_gateway_client
 from app.config import get_settings
 from app.db.session import check_db, dispose_engine, get_session_factory
 from app.errors import LQAIError
+from app.skills import install_sighup_reload, load_registry
+from app.skills.registry import MutableSkillRegistry
 from app.storage import check_storage, ensure_bucket
-
-if TYPE_CHECKING:
-    pass
 
 SERVICE_NAME = "lq-ai-api"
 log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Open process-global clients on startup; close them on shutdown.
 
     Bucket creation is best-effort: if storage is unavailable at startup
@@ -59,6 +58,17 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         # Startup must not crash the process — surface degradation via /ready.
         log.warning("ensure_bucket failed at startup: %s (continuing)", exc)
+
+    # Skill registry (Task C1). Walk the configured skills directory,
+    # parse + validate each SKILL.md's frontmatter, and register in
+    # memory. Per-skill failures emit WARNING and are skipped; the
+    # registry is built from whatever parses cleanly. The SIGHUP
+    # handler triggers an atomic-swap reload from disk on demand.
+    skills_dir = Path(settings.skills_dir).resolve()
+    initial_registry = load_registry(skills_dir)
+    skill_registry_holder = MutableSkillRegistry(initial_registry)
+    app.state.skill_registry = skill_registry_holder
+    install_sighup_reload(skill_registry_holder, skills_dir)
 
     # First-run admin bootstrap (Task B2). If the DB is unreachable at
     # startup we log and continue — the readiness probe will reflect the
