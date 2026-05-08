@@ -167,6 +167,40 @@ Pytest coverage target is **80%** across `api/` and `gateway/`. The CI configura
 - **End-to-end tests** — Playwright tests covering happy paths in the web UI. Run on every PR.
 - **Fuzzing** — the Inference Gateway's OpenAI compatibility surface is fuzzed continuously in CI against the OpenAI API spec.
 
+### Test stack conventions (Python)
+
+Locked-in choices so new tests don't drift across `api/` and `gateway/`. Changes to these defaults need a PR with rationale.
+
+- **Test runner:** `pytest`. No alternative.
+- **Async tests:** `pytest-asyncio` with `asyncio_mode = "auto"` configured in `pyproject.toml`. Async test functions are written as `async def test_*(...)` without a per-test decorator. We picked `pytest-asyncio` over `anyio`'s test plugin because the project's runtime is asyncio-only — we never need trio compatibility, and `pytest-asyncio` has the larger ecosystem.
+- **HTTP client in tests:** `httpx.AsyncClient` with `ASGITransport` for in-process FastAPI tests; no `TestClient`. Real-network calls in tests are forbidden outside the `provider`-marked tests.
+- **Test database:** session-scoped fixture runs Alembic migrations once against a per-CI-run Postgres database; per-test fixture wraps each test in a transaction that rolls back on teardown. No truncation between tests; no test-specific migrations. Both subsystems share `tests/conftest.py` patterns.
+- **Test data:** factory pattern using `polyfactory` for Pydantic models; no hand-written fixture dictionaries except for canonical examples that stay readable inline.
+- **Provider mocking:** `respx` for httpx-level mocks; record-replay fixtures for end-to-end provider flows under `tests/fixtures/providers/`.
+- **Time and randomness:** `freezegun` for time, `random.seed(0)` at the top of any test that uses randomness. Flaky tests are not tolerated; if you find one, fix it or skip it with a tracked issue.
+
+### Test markers
+
+Standard markers — declared in each subsystem's `pyproject.toml` so `pytest --strict-markers` will reject typos:
+
+| Marker | Purpose | Default behavior |
+|---|---|---|
+| `unit` | Pure unit, no I/O | Always run |
+| `integration` | Hits Postgres, Redis, MinIO, or the Gateway | Run on every PR |
+| `provider` | Hits a real LLM provider; requires API key | Skipped unless `-m provider` |
+| `slow` | Takes > 5s; usually integration with realistic data | Run nightly, optional locally |
+| `e2e` | Playwright end-to-end | Run on every PR via the Playwright job |
+
+`pytest -m "not provider and not slow"` is the local-loop default; `make test` runs this.
+
+### JavaScript/TypeScript tests (`web/`)
+
+The OpenWebUI fork is SvelteKit. New tests use **Vitest** (Svelte's standard) for unit and component tests; Playwright for end-to-end. Don't introduce Jest unless there's a concrete reason — Vitest is closer to SvelteKit's tooling and has fewer ESM-vs-CJS pitfalls.
+
+- **Component tests:** `@testing-library/svelte` with Vitest.
+- **Type checking in tests:** test files are `.ts` / `.svelte` and pass `npm run typecheck`.
+- **Snapshot testing:** discouraged for component output; preferred for stable structured data (e.g., backend-returned shapes).
+
 ### When to write what kind of test
 
 | Change type | Required tests |
