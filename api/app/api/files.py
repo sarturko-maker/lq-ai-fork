@@ -265,7 +265,10 @@ async def upload_file(
             "event": "file_upload_start",
             "user_id": str(user.id),
             "file_id": str(file_id),
-            "filename": filename,
+            # Use ``upload_filename`` not ``filename`` because ``filename``
+            # is a reserved attribute on Python's ``LogRecord`` and
+            # supplying it via ``extra`` raises a KeyError.
+            "upload_filename": filename,
             "mime_type": mime_type,
             "project_id": str(resolved_project_id) if resolved_project_id else None,
         },
