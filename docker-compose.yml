@@ -218,6 +218,15 @@ services:
       LQ_AI_CHUNK_TARGET_CHARS: ${LQ_AI_CHUNK_TARGET_CHARS:-2000}
       LQ_AI_CHUNK_OVERLAP_CHARS: ${LQ_AI_CHUNK_OVERLAP_CHARS:-200}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    # Persist Docling's Hugging Face model cache and EasyOCR's detection
+    # model cache across container restarts so the operator only pays
+    # the first-run download cost once per host (not once per container).
+    # Without these volumes, every `docker compose down`/`up` re-downloads
+    # ~700MB of models on the first ingestion, blocking the user for ~1
+    # minute. See `docs/adr/0006-document-pipeline-architecture.md`.
+    volumes:
+      - ingest-hf-cache:/root/.cache/huggingface
+      - ingest-easyocr-cache:/root/.EasyOCR
     # arq's CLI discovers WorkerSettings from the dotted module path.
     # The image's WORKDIR is /app, so app.workers.* resolves directly.
     command: ["arq", "app.workers.document_pipeline.WorkerSettings"]
@@ -313,3 +322,8 @@ volumes:
   redisdata:
   miniodata:
   ollamadata:
+  # Caches for the ingest-worker. Persisting these volumes across
+  # `docker compose down` cycles avoids repeated ~700MB model downloads
+  # on first ingestion. Per ADR 0006 (document pipeline architecture).
+  ingest-hf-cache:
+  ingest-easyocr-cache:
