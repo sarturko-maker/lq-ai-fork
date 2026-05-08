@@ -128,10 +128,13 @@
 
 	function toggleArchived(next: boolean) {
 		archivedToggle = next;
-		// M1: archived listing reload — refresh both endpoints with `archived` flag.
+		// M1: archived listing reload. Per the backend OpenAPI sketch, omitting
+		// `archived` is equivalent to `archived=false`; `archived=true` returns
+		// archived rows only. So when the operator flips the toggle on we pass
+		// `archived: true`; when off, we omit the flag.
 		Promise.all([
-			projectsApi.listProjects({ archived: next ? undefined : false }),
-			chatsApi.listAllChats({ archived: next || undefined })
+			projectsApi.listProjects(next ? { archived: true } : {}),
+			chatsApi.listAllChats(next ? { archived: true } : {})
 		])
 			.then(([p, c]) => {
 				projectsStore.set(p);
@@ -154,8 +157,9 @@
 
 	function detachSkill(name: string) {
 		attachedSkillNames = attachedSkillNames.filter((n) => n !== name);
-		const { [name]: _, ...rest } = skillInputs;
-		skillInputs = rest;
+		const next = { ...skillInputs };
+		delete next[name];
+		skillInputs = next;
 	}
 
 	function updateSkillInputs(name: string, values: Record<string, unknown>) {
