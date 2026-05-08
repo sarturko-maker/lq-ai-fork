@@ -151,3 +151,88 @@ async def test_per_test_isolation_canary_gone(db_session: AsyncSession) -> None:
         text("SELECT id FROM users WHERE email = 'isolation-canary@example.com'")
     )
     assert result.first() is None, "previous test's row leaked across test boundary"
+
+
+# ---------------------------------------------------------------------------
+# C4 — files table (migration 0003)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_files_table_exists(db_session: AsyncSession) -> None:
+    """`files` table exists after the C4 migration runs."""
+    result = await db_session.execute(
+        text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = 'files'")
+    )
+    assert result.scalar_one_or_none() == "files"
+
+
+@pytest.mark.integration
+async def test_files_indexes_exist(db_session: AsyncSession) -> None:
+    """The four indexes on `files` from migration 0003 are created."""
+    expected = {
+        "idx_files_owner_active",
+        "idx_files_project",
+        "idx_files_status",
+        "idx_files_hash",
+    }
+    result = await db_session.execute(
+        text(
+            "SELECT indexname FROM pg_indexes "
+            "WHERE schemaname = 'public' AND indexname = ANY(:names)"
+        ),
+        {"names": list(expected)},
+    )
+    found = {row[0] for row in result.fetchall()}
+    assert found == expected, f"missing indexes: {expected - found}"
+
+
+@pytest.mark.integration
+async def test_files_ingestion_status_check(db_session: AsyncSession) -> None:
+    """files.ingestion_status accepts only the four valid states."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models import File, User
+
+    user = User(email=f"file-chk-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
+    db_session.add(user)
+    await db_session.flush()
+
+    bad = File(
+        owner_id=user.id,
+        filename="x.pdf",
+        mime_type="application/pdf",
+        size_bytes=10,
+        hash_sha256="0" * 64,
+        storage_path="abc",
+        ingestion_status="invalid_state",
+    )
+    db_session.add(bad)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_files_size_nonneg_check(db_session: AsyncSession) -> None:
+    """files.size_bytes >= 0 (CHECK constraint)."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models import File, User
+
+    user = User(email=f"file-neg-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
+    db_session.add(user)
+    await db_session.flush()
+
+    bad = File(
+        owner_id=user.id,
+        filename="x.pdf",
+        mime_type="application/pdf",
+        size_bytes=-1,
+        hash_sha256="0" * 64,
+        storage_path="abc",
+    )
+    db_session.add(bad)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
