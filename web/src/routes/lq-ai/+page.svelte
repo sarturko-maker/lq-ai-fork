@@ -10,7 +10,16 @@
 	 */
 	import { onMount } from 'svelte';
 
-	import { chatsApi, filesApi, messagesApi, projectsApi, skillsApi } from '$lib/lq-ai/api';
+	import {
+		chatsApi,
+		filesApi,
+		messagesApi,
+		modelsApi,
+		projectsApi,
+		skillsApi
+	} from '$lib/lq-ai/api';
+	import type { ModelListResponse } from '$lib/lq-ai/api/models';
+	import { defaultSelection, groupModels } from '$lib/lq-ai/api/models';
 	import {
 		activeChatStore,
 		chatsByProject,
@@ -33,6 +42,7 @@
 	import ChatSidebar from '$lib/lq-ai/components/ChatSidebar.svelte';
 	import AttachedFilesPanel from '$lib/lq-ai/components/AttachedFilesPanel.svelte';
 	import SkillPicker from '$lib/lq-ai/components/SkillPicker.svelte';
+	import ModelPicker from '$lib/lq-ai/components/ModelPicker.svelte';
 	import MessageList from '$lib/lq-ai/components/MessageList.svelte';
 	import TierBadge from '$lib/lq-ai/components/TierBadge.svelte';
 
@@ -45,6 +55,15 @@
 	let attachedSkillNames: string[] = [];
 	let skillDetails: Record<string, Skill> = {};
 	let skillInputs: Record<string, Record<string, unknown>> = {};
+
+	// D0 — model picker state. `availableModels` holds the merged list from
+	// `GET /api/v1/models`; `modelByChat` persists the per-chat selection
+	// client-side (keyed by chat_id) so switching between chats doesn't
+	// reset the user's choice. `currentModelId` is the selection for the
+	// active chat, falling back to the picker's default when the chat has
+	// no remembered choice yet.
+	let availableModels: ModelListResponse = { object: 'list', data: [] };
+	let modelByChat: Record<string, string> = {};
 
 	let chatFiles: FileMeta[] = [];
 	let projectFiles: FileMeta[] = [];
@@ -68,6 +87,21 @@
 		} catch (e) {
 			console.error('lq-ai: bootstrap load failed', e);
 		}
+		// D0 — model list. Best-effort: if the gateway is unreachable the
+		// picker shows an empty state and the composer falls back to the
+		// "smart" alias on send so the chat still works.
+		try {
+			availableModels = await modelsApi.listModels();
+		} catch (e) {
+			console.error('lq-ai: model list load failed', e);
+			availableModels = { object: 'list', data: [] };
+		}
+	}
+
+	function selectModel(id: string): void {
+		const chat = $activeChatStore;
+		if (!chat) return;
+		modelByChat = { ...modelByChat, [chat.id]: id };
 	}
 
 	async function selectChat(chat: Chat) {
@@ -245,6 +279,7 @@
 				chat.id,
 				{
 					content: composerText,
+					model: currentModelId ?? undefined,
 					skills: attachedSkillNames.length > 0 ? attachedSkillNames : undefined,
 					skill_inputs:
 						Object.keys(skillInputs).length > 0
@@ -347,6 +382,15 @@
 	$: projectAttachedSkills = activeChat?.project_id
 		? $projectsStore.find((p) => p.id === activeChat?.project_id)?.attached_skill_names ?? []
 		: [];
+
+	// D0 — current selection for the active chat. Falls back to the
+	// picker's default (``smart`` if available, else the first row) when
+	// the user hasn't picked yet for this chat.
+	$: currentModelId = activeChat
+		? modelByChat[activeChat.id] ??
+		  defaultSelection(groupModels(availableModels))?.id ??
+		  null
+		: null;
 </script>
 
 <div class="flex flex-1 overflow-hidden" data-testid="lq-ai-chat-shell">
@@ -402,6 +446,14 @@
 				class="border-t border-gray-200 dark:border-gray-800 p-3 space-y-2"
 				data-testid="lq-ai-composer"
 			>
+				<div class="flex items-center justify-between">
+					<ModelPicker
+						models={availableModels}
+						selectedId={currentModelId}
+						onSelect={selectModel}
+					/>
+				</div>
+
 				<SkillPicker
 					availableSkills={$skillsStore}
 					selectedSkillNames={attachedSkillNames}
