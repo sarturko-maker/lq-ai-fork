@@ -70,6 +70,7 @@ from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
 from app.errors import LQAIError, NotFound, ValidationError
 from app.models.chat import Chat, Message
+from app.models.project import Project
 from app.models.user import User
 from app.schemas.chats import (
     LIST_LIMIT_DEFAULT,
@@ -548,6 +549,17 @@ async def send_message(
         or f"req_{uuid.uuid4().hex}"
     )
 
+    # D1: forward the project's tier floor (if any) so the gateway can
+    # enforce ``Project.minimum_inference_tier`` as one of three sources
+    # of a tier floor (per PRD §4.4 / D1). The backend is authoritative
+    # on chat ↔ project; the gateway never queries projects directly,
+    # so the value travels on the request envelope.
+    project_floor: int | None = None
+    if chat.project_id is not None:
+        project_stmt = select(Project.minimum_inference_tier).where(Project.id == chat.project_id)
+        project_result = await db.execute(project_stmt)
+        project_floor = project_result.scalar_one_or_none()
+
     # Build the gateway request. C3 still sends a single-turn request
     # (the user's content as one ``user`` message); a future task may
     # widen this to include prior history. The gateway does the skill
@@ -561,6 +573,7 @@ async def send_message(
         lq_ai_message_id=str(assistant_message_id),
         lq_ai_skills=list(payload.skills),
         lq_ai_skill_inputs=dict(payload.skill_inputs),
+        lq_ai_project_minimum_inference_tier=project_floor,
     )
 
     log.info(
