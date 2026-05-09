@@ -96,6 +96,7 @@ from app.routing_log import (
     RoutingLogWriter,
 )
 from app.skills import assemble_skill_prompt
+from app.tier_floor import TierFloor, is_refused, resolve_tier_floor
 
 logger = logging.getLogger(__name__)
 
@@ -266,12 +267,13 @@ async def _apply_skill_prompt_assembly(
     *,
     backend: BackendClient,
     request_id: str,
-) -> list[str]:
+) -> list[Skill]:
     """Mutate ``chat_request`` in place to include skill-assembled content.
 
-    Returns the names of skills whose content was actually fetched and
-    assembled (i.e., the value to surface as ``lq_ai_applied_skills`` on
-    the response).
+    Returns the :class:`Skill` objects whose content was actually fetched
+    and assembled. The route handler reads ``[s.name for s in skills]``
+    for the ``lq_ai_applied_skills`` response field, and reads
+    ``s.minimum_inference_tier`` for D1 tier-floor enforcement.
 
     No-ops when ``lq_ai_skills`` is empty.
 
@@ -316,7 +318,7 @@ async def _apply_skill_prompt_assembly(
     if not chat_request.skill_name and chat_request.lq_ai_skills:
         chat_request.skill_name = chat_request.lq_ai_skills[0]
 
-    return [skill.name for skill in skills]
+    return skills
 
 
 def _adapters(request: Request) -> dict[str, ProviderAdapter]:
@@ -407,11 +409,11 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
     # subclasses (SkillNotFound / SkillFetchFailed / SkillInputMissing);
     # let them propagate to the FastAPI handler so the canonical
     # envelope wraps them.
-    applied_skills: list[str] = []
+    applied_skill_objects: list[Skill] = []
     if chat_request.lq_ai_skills:
         backend = _backend(request)
         try:
-            applied_skills = await _apply_skill_prompt_assembly(
+            applied_skill_objects = await _apply_skill_prompt_assembly(
                 chat_request,
                 backend=backend,
                 request_id=request_id,
@@ -422,6 +424,8 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
             # routing-log row here because the request never reached
             # an adapter.
             raise
+
+    applied_skills: list[str] = [skill.name for skill in applied_skill_objects]
 
     # --- Resolution (no upstream call yet) ----------------------------------
     try:
@@ -438,6 +442,44 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
             message=str(exc),
             http_status=status.HTTP_400_BAD_REQUEST,
             details={"requested_model": chat_request.model},
+        )
+
+    # --- Tier-floor refusal (D1) -------------------------------------------
+    # The effective floor is max(request override, project floor, skill
+    # floors). Per PRD §4.4, the gateway refuses with 403
+    # ``tier_below_minimum`` when the routed tier of the primary
+    # candidate falls below that floor. We compare against the *primary*
+    # candidate's tier — fallbacks only matter if the primary actually
+    # tries and fails. Refusing on the primary's tier mirrors the
+    # documented "what tier would this request go to?" semantics.
+    floor = resolve_tier_floor(request=chat_request, skills=applied_skill_objects)
+    primary = candidates[0]
+    if is_refused(resolved_tier=primary.routed_inference_tier, floor=floor):
+        await _write_refusal(
+            log_writer,
+            chat_request=chat_request,
+            target=primary,
+            request_id=request_id,
+            floor=floor,
+        )
+        assert floor is not None  # is_refused returns False when None
+        return _gateway_error(
+            code="tier_below_minimum",
+            message=(
+                f"Request requires Inference Tier {floor.value} "
+                f"(source: {floor.source}), but the routed model resolves "
+                f"to tier {primary.routed_inference_tier}. Pick a model "
+                "with an equal or stricter tier, or relax the floor."
+            ),
+            http_status=status.HTTP_403_FORBIDDEN,
+            details={
+                "required_tier": floor.value,
+                "resolved_tier": primary.routed_inference_tier,
+                "source": floor.source,
+                "requested_model": chat_request.model,
+                "routed_provider": primary.provider.name,
+                "routed_model": primary.native_model,
+            },
         )
 
     # --- Streaming path -----------------------------------------------------
@@ -1036,6 +1078,44 @@ async def _write_unavailable(
             routed_inference_tier=target.routed_inference_tier,
             refused=False,
             refusal_reason=f"adapter_unavailable:{message}",
+            request_id=request_id,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+    )
+
+
+async def _write_refusal(
+    writer: RoutingLogWriter,
+    *,
+    chat_request: ChatCompletionRequest,
+    target: ResolvedTarget,
+    request_id: str,
+    floor: TierFloor,
+) -> None:
+    """Write a routing-log row for a D1 tier-floor refusal.
+
+    The row carries the *primary* candidate's tier (the one we would
+    have routed to) so operators auditing the log can see which tier
+    the request was about to land on when refusal fired. The
+    ``refused`` flag is True (the canonical D1 signal) and the
+    ``refusal_reason`` carries the structured ``tier_below_minimum``
+    code plus the binding source so the audit trail records *why* the
+    refusal happened, not just that it did.
+    """
+
+    chat_id, message_id = _correlation_ids(chat_request)
+    await writer.write(
+        InferenceRoutingLogRow(
+            requested_model=chat_request.model,
+            routed_provider=target.provider.name,
+            routed_model=target.native_model,
+            routed_inference_tier=target.routed_inference_tier,
+            refused=True,
+            refusal_reason=(
+                f"tier_below_minimum:required={floor.value}:"
+                f"resolved={target.routed_inference_tier}:source={floor.source}"
+            ),
             request_id=request_id,
             chat_id=chat_id,
             message_id=message_id,

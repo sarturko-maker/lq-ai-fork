@@ -101,6 +101,18 @@ class ChatCompletionRequest(BaseModel):
 
     # --- LQ.AI extensions (per gateway-openapi.yaml) -------------------------
     minimum_inference_tier: int | None = Field(default=None, ge=1, le=5)
+    """D1: per-call request override of the tier floor. The most restrictive
+    of (this, project floor, skill floor) wins; if the resolved routed
+    tier falls below the effective floor the gateway returns HTTP 403
+    with ``tier_below_minimum``."""
+
+    lq_ai_project_minimum_inference_tier: int | None = Field(default=None, ge=1, le=5)
+    """D1: project-level tier floor forwarded by the backend when the chat
+    lives inside a Project (per ``Project.minimum_inference_tier``).
+    Gateway never queries the backend for the project; the backend is
+    the authority on whether a chat belongs to a project, and this field
+    is the single carrier of the project floor on the gateway hop."""
+
     skill_name: str | None = None
     """Audit-log routing tag (B3 / B4); does not by itself trigger skill
     prompt assembly — see ``lq_ai_skills`` for that. When ``lq_ai_skills``
