@@ -211,9 +211,18 @@ def resolve_alias_chain(
       fallback lists are intentionally ignored — they describe how those
       aliases would resolve if requested directly, not what to try after
       this request fails. Mixing the two would surprise operators.)
-    * A provider-native model name (``claude-sonnet-4-6``) — resolved to
-      the first provider whose ``models`` list contains it. Fallbacks
-      come from no alias because no alias was named.
+    * A **raw** ``provider/model`` form (``anthropic-prod/claude-haiku-4-5``,
+      ``ollama-local/qwen2.5:7b``) — D0. Split on the *first* slash; the
+      prefix names a configured provider, the suffix is the provider-native
+      model string. Skips alias resolution; builds a single
+      :class:`ResolvedTarget` directly. Cycle detection does not apply
+      (it's a one-shot lookup with no fallback). The provider must
+      exist in :attr:`GatewayConfig.providers`; an unknown provider
+      raises :class:`ModelResolutionError` with a message naming the
+      configured set so the operator can see the typo.
+    * A provider-native model name without a slash (``claude-sonnet-4-6``) —
+      resolved to the first provider whose ``models`` list contains it.
+      Fallbacks come from no alias because no alias was named.
 
     Cycles are pre-validated at config load
     (:func:`GatewayConfig._aliases_have_no_cycles`); this function trusts
@@ -223,6 +232,47 @@ def resolve_alias_chain(
     """
 
     candidates: list[ResolvedTarget] = []
+
+    # D0: raw ``provider/model`` passthrough. Aliases never contain a
+    # slash (Pydantic doesn't constrain this, but every alias in
+    # ``gateway.yaml.example`` is a single word), so a slash is the
+    # signal to skip alias resolution. We still check the alias map
+    # first below so operators who name an alias with a slash (an
+    # unusual choice) keep working. The order of the checks is:
+    #
+    #   1. Alias name match (exact) — even if the alias has a slash.
+    #   2. Slash-form passthrough — ``provider/model``.
+    #   3. Provider-native model name (no slash, scan provider lists).
+    #
+    # The slash-form passthrough never falls back through the alias's
+    # fallback chain because no alias was named.
+    if requested_model not in config.model_aliases and "/" in requested_model:
+        provider_name, native_model = requested_model.split("/", 1)
+        provider = config.provider_by_name(provider_name)
+        if provider is None:
+            configured = sorted(p.name for p in config.providers)
+            raise ModelResolutionError(
+                f"raw model {requested_model!r} names provider {provider_name!r} "
+                f"which is not configured; configured providers: {configured}"
+            )
+        if not native_model:
+            raise ModelResolutionError(
+                f"raw model {requested_model!r} has an empty model component "
+                "(format: 'provider/model')"
+            )
+        tier = derive_routed_inference_tier(
+            provider=provider,
+            native_model=native_model,
+            inference_tiers=config.inference_tiers,
+        )
+        return [
+            ResolvedTarget(
+                provider=provider,
+                native_model=native_model,
+                routed_inference_tier=tier,
+                role="primary",
+            )
+        ]
 
     if requested_model in config.model_aliases:
         # Outer alias — walk to a provider-native model.
