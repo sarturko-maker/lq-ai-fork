@@ -455,6 +455,9 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
     floor = resolve_tier_floor(request=chat_request, skills=applied_skill_objects)
     primary = candidates[0]
     if is_refused(resolved_tier=primary.routed_inference_tier, floor=floor):
+        # is_refused returns False when floor is None; the assert tells mypy
+        # what the runtime invariant guarantees so `floor` narrows to TierFloor.
+        assert floor is not None
         await _write_refusal(
             log_writer,
             chat_request=chat_request,
@@ -462,7 +465,6 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
             request_id=request_id,
             floor=floor,
         )
-        assert floor is not None  # is_refused returns False when None
         return _gateway_error(
             code="tier_below_minimum",
             message=(

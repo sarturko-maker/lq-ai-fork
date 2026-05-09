@@ -20,6 +20,7 @@ from __future__ import annotations
 import hmac
 import logging
 import os
+from collections.abc import Awaitable, Callable
 
 from fastapi import Header, HTTPException, Request, status
 
@@ -55,7 +56,7 @@ def _resolve_required_key(config: GatewayConfig) -> str | None:
     return expected
 
 
-def make_require_gateway_key() -> object:
+def make_require_gateway_key() -> "Callable[..., Awaitable[None]]":
     """Build a FastAPI dependency that gates a route on the gateway key.
 
     Returns a callable suitable for ``Depends(...)``. Reads the live
