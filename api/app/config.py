@@ -200,6 +200,22 @@ class Settings(BaseSettings):
         description="MFA challenge token TTL in seconds. Default: 5 minutes.",
     )
 
+    # ----- GDPR Article 17 grace period (per Task D6 / PRD §5.3) -----
+    # When a user calls /users/me/delete, deletion_scheduled_at is set to
+    # now() + this many days. The hard-delete worker scans daily and only
+    # touches users whose schedule has elapsed. 30 days is the GDPR-typical
+    # default; operators with stricter retention policies may shorten it,
+    # and tests use 0 to exercise the cascade path immediately.
+    gdpr_grace_period_days: int = Field(
+        default=30,
+        ge=0,
+        description=(
+            "Days between a user's account-deletion request and hard "
+            "deletion. 0 hard-deletes on the next worker tick; the GDPR-"
+            "typical default is 30."
+        ),
+    )
+
     # ----- Skill registry (per Task C1 / ADR 0004) -----
     # Filesystem path the skill loader walks at startup (and re-walks on
     # SIGHUP). Defaults to the repo's `skills/` directory; in tests and

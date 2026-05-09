@@ -18,6 +18,7 @@ from app.models.inference import InferenceRoutingLog
 from app.models.knowledge import KnowledgeBase, KnowledgeBaseFile
 from app.models.project import Project, ProjectFile, ProjectSkill
 from app.models.user import User, UserSession
+from app.models.user_export import UserExportJob
 
 __all__ = [
     "AuditLog",
@@ -33,5 +34,6 @@ __all__ = [
     "ProjectFile",
     "ProjectSkill",
     "User",
+    "UserExportJob",
     "UserSession",
 ]

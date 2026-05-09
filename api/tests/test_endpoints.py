@@ -90,6 +90,11 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/auth/mfa/enable"),
     ("POST", "/api/v1/auth/mfa/verify"),
     ("POST", "/api/v1/auth/mfa/disable"),
+    # D6 — GDPR Article 17 + 20 surface
+    ("POST", "/api/v1/users/me/export"),
+    ("GET", "/api/v1/users/me/export/{job_id}"),
+    ("POST", "/api/v1/users/me/delete"),
+    ("POST", "/api/v1/users/me/delete/cancel"),
     # B5 + C3 — backend chats + messages with persistence; SSE streaming.
     ("POST", "/api/v1/chats"),
     ("GET", "/api/v1/chats"),
@@ -168,9 +173,9 @@ async def test_route_inventory_is_nonempty() -> None:
     The bound is intentionally loose — as tasks land, they migrate
     routes from this 501-stub set into ``IMPLEMENTED_ROUTES``. The
     primary purpose of this assertion is to catch the failure mode
-    of accidentally dropping all the include_router calls. After D5
-    landed (4 MFA endpoints implemented), the remaining stub count
-    sits in the low teens; lowered to ``>= 5`` so the bound continues
+    of accidentally dropping all the include_router calls. After D5/D6
+    landed (4 MFA + 4 GDPR endpoints), the remaining stub count drops
+    into the single digits; lowered to ``>= 5`` so the bound continues
     to fire as a sanity check through wave-2 (D2, D3, D4, D7) without
     needing to re-tune on every task.
     """

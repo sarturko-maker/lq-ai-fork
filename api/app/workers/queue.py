@@ -39,6 +39,11 @@ EMBED_JOB_NAME = "embed_chunks_for_file_job"
 file. Triggered on KB attachment (when the file has chunks with NULL
 embeddings) and from the ingest-completion hook."""
 
+EXPORT_USER_DATA_JOB_NAME = "export_user_data_job"
+"""D6 — GDPR Article 20 export job. Triggered by the API when a user
+calls ``POST /api/v1/users/me/export``; the worker assembles the ZIP
+and writes it to MinIO under ``exports/<user_id>/<job_id>.zip``."""
+
 _pool: Any = None
 
 
@@ -130,6 +135,36 @@ async def enqueue_embed_job(file_id: uuid.UUID) -> bool:
             extra={
                 "event": "embed_enqueue_failed",
                 "file_id": str(file_id),
+                "error": str(exc),
+            },
+        )
+        return False
+
+
+async def enqueue_user_export_job(job_id: uuid.UUID) -> bool:
+    """Enqueue a D6 GDPR export job; return True on success.
+
+    Failures here surface to the API endpoint which keeps the job row
+    at ``status='queued'`` and returns 202 to the caller (the user can
+    retry). The status-poll endpoint will report queued indefinitely
+    until the worker picks it up — operators monitoring the
+    ``user_export_jobs`` table for stale rows can re-enqueue manually.
+    """
+
+    try:
+        pool = await _get_pool()
+        await pool.enqueue_job(EXPORT_USER_DATA_JOB_NAME, str(job_id))
+        log.info(
+            "enqueue_user_export_job: enqueued",
+            extra={"event": "user_export_enqueue", "job_id": str(job_id)},
+        )
+        return True
+    except Exception as exc:
+        log.warning(
+            "enqueue_user_export_job: failed; job stays queued",
+            extra={
+                "event": "user_export_enqueue_failed",
+                "job_id": str(job_id),
                 "error": str(exc),
             },
         )

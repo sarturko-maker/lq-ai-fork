@@ -73,6 +73,42 @@ CREATE INDEX idx_user_sessions_token_hash ON user_sessions(refresh_token_hash) W
 CREATE INDEX idx_user_sessions_expires ON user_sessions(expires_at);
 ```
 
+### `user_export_jobs`
+
+Per-user GDPR Article 20 export job, tracked from queued → processing →
+completed/failed. The actual ZIP bytes live in MinIO under
+`storage_key`; the table itself is a job-state ledger that
+`POST /users/me/export` writes to and the worker mutates.
+
+```sql
+CREATE TABLE user_export_jobs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status          TEXT NOT NULL CHECK (status IN ('queued', 'processing', 'completed', 'failed')),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at      TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ,
+    storage_key     TEXT,
+    error_message   TEXT,
+    expires_at      TIMESTAMPTZ
+);
+
+CREATE INDEX idx_user_export_jobs_user_created ON user_export_jobs (user_id, created_at DESC);
+CREATE INDEX idx_user_export_jobs_expires ON user_export_jobs (expires_at) WHERE storage_key IS NOT NULL;
+```
+
+`expires_at` is set to `now() + 7 days` when the worker completes; an
+hourly GC cron clears `storage_key` (and deletes the MinIO bytes) once
+that timestamp passes. The row itself is retained so status polling
+remains deterministic for a recently-deleted bundle.
+
+`status` is TEXT + CHECK rather than a Postgres ENUM so adding a state
+later doesn't require a schema migration; the running set is fixed at
+4 values.
+
+ON DELETE CASCADE on `user_id` so the D6 hard-delete worker can drop a
+user without needing to manually clear export-job rows first.
+
 ---
 
 ## Projects (matter-scoped containers)

@@ -264,8 +264,10 @@ paths:
       tags: [users]
       summary: Request a per-user data export (GDPR Article 20)
       description: |
-        Generates an export package of all data associated with the current user.
-        Async; returns a job ID and link to retrieve when ready.
+        Bearer-authenticated. Inserts a `user_export_jobs` row with
+        status `queued` and enqueues the worker job that builds +
+        uploads the ZIP. Returns 202 immediately — clients poll the
+        per-job endpoint below for completion.
       responses:
         '202':
           description: Export job queued
@@ -279,13 +281,47 @@ paths:
                   status: {type: string, enum: [queued, processing, completed, failed]}
                   download_url: {type: string, nullable: true}
 
+  /api/v1/users/me/export/{job_id}:
+    get:
+      tags: [users]
+      summary: Poll a user-export job's status
+      description: |
+        Bearer-authenticated. Returns the current status of the export
+        job. When `status=completed` and the bundle has not yet expired,
+        `download_url` is a presigned MinIO URL valid for 24 hours. A
+        404 covers both "no such job" and "job belongs to another user"
+        (does not leak existence cross-user).
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Job status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, status]
+                properties:
+                  job_id: {type: string, format: uuid}
+                  status: {type: string, enum: [queued, processing, completed, failed]}
+                  download_url: {type: string, nullable: true}
+        '404': {description: Job not found}
+
   /api/v1/users/me/delete:
     post:
       tags: [users]
       summary: Request account deletion (GDPR Article 17)
       description: |
-        Initiates account-and-data deletion. Soft-delete with grace period;
-        hard delete after grace period (default 30 days, operator-configurable).
+        Bearer-authenticated. Soft-schedules deletion: sets
+        `users.deletion_scheduled_at = now() + gdpr_grace_period_days`,
+        revokes all active sessions, and audit-logs the request. Login
+        during the grace period is preserved so the user can call the
+        cancel endpoint. Hard delete itself runs daily via a worker
+        cron. Idempotent: re-calling returns the existing schedule
+        rather than pushing it back.
       responses:
         '202':
           description: Deletion queued
@@ -293,10 +329,24 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [scheduled_deletion_at]
+                required: [scheduled_deletion_at, grace_period_days]
                 properties:
                   scheduled_deletion_at: {type: string, format: date-time}
                   grace_period_days: {type: integer}
+
+  /api/v1/users/me/delete/cancel:
+    post:
+      tags: [users]
+      summary: Cancel a pending account deletion
+      description: |
+        Bearer-authenticated. Clears `deletion_scheduled_at` if a
+        pending deletion exists; returns 400 if there is no pending
+        deletion to cancel. Only valid during the grace-period window —
+        once the hard-delete worker has run, there is no user row to
+        recover.
+      responses:
+        '204': {description: Pending deletion cancelled}
+        '400': {description: No pending deletion to cancel}
 
   # ----------- PROJECTS -----------
   /api/v1/projects:
