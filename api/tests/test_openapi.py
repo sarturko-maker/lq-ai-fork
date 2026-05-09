@@ -66,6 +66,10 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # admin
         "/api/v1/admin/audit-log",
         "/api/v1/admin/tier-policy",
+        # D0.5 — model alias admin
+        "/api/v1/admin/config",
+        "/api/v1/admin/aliases",
+        "/api/v1/admin/aliases/{name}",
         # D0 — model availability proxy
         "/api/v1/models",
     }
@@ -90,8 +94,9 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 37 distinct /api/v1 paths: prior 36 plus D0's /api/v1/models.
-    assert len(actual) == 37
+    # 40 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
+    # alias endpoints (/admin/config, /admin/aliases, /admin/aliases/{name}).
+    assert len(actual) == 40
 
 
 @pytest.mark.unit

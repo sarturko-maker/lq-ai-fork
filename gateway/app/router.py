@@ -529,7 +529,7 @@ class Router:
         *,
         config: GatewayConfig,
         adapters: dict[str, ProviderAdapter],
-        config_provider: "Callable[[], GatewayConfig] | None" = None,
+        config_provider: Callable[[], GatewayConfig] | None = None,
     ) -> None:
         self._config = config
         self._adapters = adapters

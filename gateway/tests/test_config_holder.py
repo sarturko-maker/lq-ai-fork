@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from app.config import GatewayConfig
 from app.config_holder import (
     ConfigReloadError,
     MutableConfigHolder,

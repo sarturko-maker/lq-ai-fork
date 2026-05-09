@@ -335,8 +335,9 @@ async def test_list_all_annotates_tier_on_native_rows() -> None:
     by_id = {r.id: r for r in rows}
     assert by_id["ollama-local/llama3.1:8b"].routed_inference_tier == 1
     assert by_id["anthropic-prod/claude-haiku-4-5"].routed_inference_tier == 4
-    # Aliases get no tier.
-    assert by_id["smart"].routed_inference_tier is None
+    # D0.5 closed the alias-tier gap: aliases now surface the tier of their
+    # primary target so the picker badge is correct before the first send.
+    assert by_id["smart"].routed_inference_tier is not None
 
 
 @pytest.mark.unit

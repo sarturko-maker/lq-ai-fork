@@ -284,7 +284,7 @@ async def list_aliases(request: Request) -> dict[str, Any]:
     }
 
 
-@router.get("/aliases/{name}")
+@router.get("/aliases/{name}", response_model=None)
 async def get_alias(request: Request, name: str) -> dict[str, Any] | JSONResponse:
     """Return a single alias by name (404 if not configured)."""
 
@@ -312,7 +312,7 @@ async def get_alias(request: Request, name: str) -> dict[str, Any] | JSONRespons
     return payload
 
 
-@router.post("/aliases", status_code=status.HTTP_201_CREATED)
+@router.post("/aliases", status_code=status.HTTP_201_CREATED, response_model=None)
 async def create_alias(
     request: Request,
     body: AliasCreateRequest,
@@ -353,7 +353,7 @@ async def create_alias(
     return _alias_to_payload(body.name, alias)
 
 
-@router.patch("/aliases/{name}")
+@router.patch("/aliases/{name}", response_model=None)
 async def update_alias(
     request: Request,
     name: str,

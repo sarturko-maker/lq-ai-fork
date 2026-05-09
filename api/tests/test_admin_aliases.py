@@ -98,9 +98,7 @@ async def test_admin_aliases_requires_auth(client: AsyncClient) -> None:
 
 
 @pytest.mark.unit
-async def test_admin_aliases_rejects_non_admin(
-    client: AsyncClient, regular_user: User
-) -> None:
+async def test_admin_aliases_rejects_non_admin(client: AsyncClient, regular_user: User) -> None:
     res = await client.get(
         "/api/v1/admin/aliases",
         headers={"Authorization": f"Bearer {_bearer_for(regular_user)}"},
@@ -111,9 +109,7 @@ async def test_admin_aliases_rejects_non_admin(
 
 
 @pytest.mark.unit
-async def test_admin_aliases_admin_passes_through(
-    client: AsyncClient, admin_user: User
-) -> None:
+async def test_admin_aliases_admin_passes_through(client: AsyncClient, admin_user: User) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.get("/admin/v1/aliases").mock(
             return_value=httpx.Response(
@@ -145,9 +141,7 @@ async def test_admin_aliases_admin_passes_through(
 
 
 @pytest.mark.unit
-async def test_get_alias_proxies_through(
-    client: AsyncClient, admin_user: User
-) -> None:
+async def test_get_alias_proxies_through(client: AsyncClient, admin_user: User) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.get("/admin/v1/aliases/smart").mock(
             return_value=httpx.Response(
@@ -170,9 +164,7 @@ async def test_get_alias_proxies_through(
 
 
 @pytest.mark.unit
-async def test_get_alias_404_propagates(
-    client: AsyncClient, admin_user: User
-) -> None:
+async def test_get_alias_404_propagates(client: AsyncClient, admin_user: User) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.get("/admin/v1/aliases/ghost").mock(
             return_value=httpx.Response(
@@ -195,9 +187,7 @@ async def test_get_alias_404_propagates(
 
 
 @pytest.mark.unit
-async def test_create_alias_proxies(
-    client: AsyncClient, admin_user: User
-) -> None:
+async def test_create_alias_proxies(client: AsyncClient, admin_user: User) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.post("/admin/v1/aliases").mock(
             return_value=httpx.Response(
@@ -224,9 +214,7 @@ async def test_create_alias_proxies(
 
 
 @pytest.mark.unit
-async def test_create_alias_409_propagates(
-    client: AsyncClient, admin_user: User
-) -> None:
+async def test_create_alias_409_propagates(client: AsyncClient, admin_user: User) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.post("/admin/v1/aliases").mock(
             return_value=httpx.Response(
@@ -254,9 +242,7 @@ async def test_create_alias_409_propagates(
 
 
 @pytest.mark.unit
-async def test_update_alias_proxies(
-    client: AsyncClient, admin_user: User
-) -> None:
+async def test_update_alias_proxies(client: AsyncClient, admin_user: User) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.patch("/admin/v1/aliases/fast").mock(
             return_value=httpx.Response(
@@ -282,9 +268,7 @@ async def test_update_alias_proxies(
 
 
 @pytest.mark.unit
-async def test_update_alias_422_propagates(
-    client: AsyncClient, admin_user: User
-) -> None:
+async def test_update_alias_422_propagates(client: AsyncClient, admin_user: User) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.patch("/admin/v1/aliases/fast").mock(
             return_value=httpx.Response(
@@ -310,13 +294,9 @@ async def test_update_alias_422_propagates(
 
 
 @pytest.mark.unit
-async def test_delete_alias_proxies_204(
-    client: AsyncClient, admin_user: User
-) -> None:
+async def test_delete_alias_proxies_204(client: AsyncClient, admin_user: User) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
-        router.delete("/admin/v1/aliases/throwaway").mock(
-            return_value=httpx.Response(204)
-        )
+        router.delete("/admin/v1/aliases/throwaway").mock(return_value=httpx.Response(204))
         res = await client.delete(
             "/api/v1/admin/aliases/throwaway",
             headers={"Authorization": f"Bearer {_bearer_for(admin_user)}"},
@@ -325,17 +305,13 @@ async def test_delete_alias_proxies_204(
 
 
 @pytest.mark.unit
-async def test_admin_config_proxy(
-    client: AsyncClient, admin_user: User
-) -> None:
+async def test_admin_config_proxy(client: AsyncClient, admin_user: User) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.get("/admin/v1/config").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "providers": [
-                        {"name": "anthropic-prod", "type": "anthropic", "tier": 4}
-                    ],
+                    "providers": [{"name": "anthropic-prod", "type": "anthropic", "tier": 4}],
                     "model_aliases": {},
                 },
             )
@@ -350,9 +326,7 @@ async def test_admin_config_proxy(
 
 
 @pytest.mark.unit
-async def test_admin_config_rejects_non_admin(
-    client: AsyncClient, regular_user: User
-) -> None:
+async def test_admin_config_rejects_non_admin(client: AsyncClient, regular_user: User) -> None:
     res = await client.get(
         "/api/v1/admin/config",
         headers={"Authorization": f"Bearer {_bearer_for(regular_user)}"},
