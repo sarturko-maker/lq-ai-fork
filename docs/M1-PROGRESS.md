@@ -1144,6 +1144,42 @@ PRD §4.4's tier-floor refusal is now wired end-to-end. Tier *derivation* alread
 * The skill's `minimum_inference_tier` is read from the backend's cached `Skill` shape (per C2); a freshly-edited skill might be served from the cache for up to the configured TTL (default 60s). Operators who edit a skill's tier-floor expect a brief delay before refusals take effect. Acceptable for M1; flagged for ops docs.
 * No request-override surface on `MessageCreateRequest` yet — the only path that exposes the override is the direct gateway client. Adding a `minimum_inference_tier` field to `MessageCreateRequest` is a small follow-on; deferred until a UX surface needs it (D2's tier-awareness panel is the natural driver).
 
+### D5 — MFA enrollment + verification ✅
+
+PRD §5.3 MFA cycle (enroll → log in with TOTP → unenroll) is now wired end-to-end. Two-step enrollment, single-use recovery codes, and a symmetric disable path round out the surface.
+
+**Endpoints landed (replacing the A4-era 501 stubs):**
+
+* `POST /api/v1/auth/mfa/setup` — bearer-authed; issues a fresh TOTP secret + `otpauth://` provisioning URI + 10 plaintext recovery codes. Persists `users.totp_secret` (plaintext base32) and `users.recovery_codes` (bcrypt hashes); `users.mfa_enabled` stays FALSE until the user proves possession at `/auth/mfa/enable`. Re-running setup before enable overwrites the pending secret + codes; re-running after enabled returns 409 `mfa_already_enabled`.
+* `POST /api/v1/auth/mfa/enable` (new endpoint, extends the OpenAPI sketch) — bearer-authed; takes `{code}` and verifies it against the pending TOTP secret. On success flips `users.mfa_enabled=TRUE`. Subsequent logins for this user receive 423 + `MfaChallenge`.
+* `POST /api/v1/auth/mfa/verify` — unauthed; redeems a 423 `mfa_token` (issued by `/auth/login`) plus a TOTP or recovery code. On success mints the same access+refresh session as a regular login (shared `_create_session` + `_login_response` helpers). Recovery codes are single-use — the matched hash is removed from the array and persisted in the same transaction as the session creation.
+* `POST /api/v1/auth/mfa/disable` (new endpoint) — bearer-authed; requires both the user's password AND a current TOTP/recovery code. On success clears `totp_secret`, `recovery_codes`, and the `mfa_enabled` flag. Wrong-password and wrong-code branches both return 401 — the response shape does not reveal which leg failed.
+
+**Files touched.**
+
+* `api/pyproject.toml` — adds `pyotp>=2.9,<3` (RFC 6238 TOTP, MIT-licensed, ~300 LOC, no transitive deps) + a mypy override for the missing type stubs.
+* `api/app/security/totp.py` (new) — thin wrapper around pyotp + the recovery-code generation/consumption helpers. Keeps `auth.py` focused on HTTP shape.
+* `api/app/api/auth.py` — replaces the two 501 MFA stubs with four real handlers; adds `MfaSetupResponse`, `MfaEnableRequest`, `MfaVerifyRequest`, `MfaDisableRequest` Pydantic models.
+* `docs/api/backend-openapi.yaml` — documents the `/mfa/enable` and `/mfa/disable` endpoints; expands the `/mfa/setup` description for the two-step enrollment flow.
+* `api/tests/test_mfa.py` (new) — 20 integration tests covering setup/enable/verify/disable + the full PRD §5.3 round trip. `tests/test_endpoints.py` and `tests/test_openapi.py` updated for the four routes moving from stub to implemented; path-count assertion advances 40 → 42.
+
+**No migration needed.** `users.mfa_enabled`, `users.totp_secret`, and `users.recovery_codes` columns have existed since migration `0001` (B1's foresight); D5 only fills in the application-layer logic.
+
+**Architectural decisions.**
+
+1. **Two-step enrollment (setup → enable).** Generating the secret and confirming possession are separate so a user who closes their authenticator app mid-enrollment can re-run setup without being locked into a secret they never bound. The OpenAPI sketch's original `/mfa/setup` did not mark MFA as enabled, so a confirmation step was always implied; D5 makes it explicit as `/mfa/enable`. Re-running setup after enabled returns 409 — the user must `/mfa/disable` first to keep the audit trail clear.
+2. **Verify is the single redemption path** for recovery codes. Both login challenge (against an unauthenticated `mfa_token`) and the regular TOTP path go through `/auth/mfa/verify`. Recovery codes are removed from the array on match — single-use enforced at the database level, not just in memory. A second attempt with the same code finds no match and 401s.
+3. **Disable requires password + a current code together.** A stolen access token alone cannot weaken the user's authentication posture (without password); an attacker who knows the password but doesn't have the device cannot strip MFA (without code). Symmetric to `/auth/change-password`'s "current password gates the change" pattern.
+4. **Generic 401 across all MFA verify failure modes.** Invalid token, expired token, missing user, MFA-not-enabled, wrong code — all collapse to the same response so an attacker cannot probe which leg failed. Same OWASP-aligned posture as `/auth/login`.
+
+**Test counts.** 20 integration tests in `tests/test_mfa.py`, all green against the worktree's per-test SAVEPOINT-isolated DB. The full api/ test suite shows D5 introduces no regressions; the 17 pre-existing failures (admin endpoints requiring 403→501 fix, skill-loader and pipeline-ingest fixture drift) all reproduce on `main` HEAD and predate D5.
+
+**Known limitations.**
+
+* TOTP secrets are persisted plaintext on `users.totp_secret`. The operator-of-self deployment model gives the user no recovery path for a lost secret other than disabling MFA, so encrypting at rest would only add operational complexity. PRD §5.3 accepts this; documented inline in `app/security/totp.py`.
+* `mfa/disable` doesn't audit-log the disable action; the `audit_log` schema exists but the call site doesn't yet emit a `user.mfa_disabled` event. Filed as a candidate **DE-XXX** for D3 (audit log privilege fields) — the natural shape is to extend the audit pattern uniformly across auth state changes when D3 lands.
+* The `/auth/mfa/setup` endpoint returns `recovery_codes` as a JSON array; rendering as a downloadable text file is a UI concern, not a backend one. The CLI `python -m app.cli` could grow a `print-mfa-recovery-codes` helper for operators if a use case materializes; not in M1 scope.
+
 ---
 
 ## Tasks ahead
