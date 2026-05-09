@@ -1,4 +1,4 @@
-"""Document-pipeline ``arq`` worker — Task C5.
+"""Document-pipeline ``arq`` worker — Task C5 (+ D6 cron jobs).
 
 Run as a separate process via the docker-compose ``ingest-worker``
 service::
@@ -18,6 +18,15 @@ The worker:
    to arq's retry mechanism. Failures inside the parser cascade
    are caught by ``ingest_file`` itself and translate to
    ``ingestion_status='failed'`` rather than retries.
+4. Hosts the D6 GDPR jobs alongside the ingest pipeline:
+   :func:`app.workers.user_export.export_user_data_job` (queued from
+   the API on POST /users/me/export), :func:`...export_gc_job`
+   (hourly cron sweeping expired bundles), and
+   :func:`app.workers.user_deletion.hard_delete_due_users_job` (daily
+   cron). Keeping all M1 background work in one worker process is
+   simpler than running a separate cron container; the job-functions
+   are independent enough that lock contention isn't a concern at
+   single-tenant deployment scale.
 
 Concurrency is configured via :data:`LQ_AI_INGEST_WORKER_CONCURRENCY`
 in the settings. The default of 2 is conservative — bump it for
@@ -36,6 +45,8 @@ from typing import Any, ClassVar
 from app.config import get_settings
 from app.db.session import dispose_engine, get_session_factory
 from app.pipeline.ingest import find_orphaned_files, ingest_file
+from app.workers.user_deletion import hard_delete_due_users_job
+from app.workers.user_export import export_gc_job, export_user_data_job
 
 log = logging.getLogger(__name__)
 
@@ -209,13 +220,34 @@ def _build_redis_settings() -> Any:
     return RedisSettings.from_dsn(get_settings().redis_url)
 
 
+def _build_cron_jobs() -> list[Any]:
+    """Build arq's cron_jobs list. Lazy import keeps arq optional at module load."""
+
+    from arq import cron
+
+    return [
+        # Hourly: clear expired user-export bundles from MinIO + the
+        # user_export_jobs row's storage_key. Runs at minute 7 to avoid
+        # piling onto top-of-hour traffic.
+        cron(export_gc_job, minute=7),
+        # Daily at 03:00 UTC: hard-delete users whose grace period
+        # elapsed. The window is intentionally off-peak so a slow
+        # cascade (lots of files) doesn't compete with daytime traffic.
+        cron(hard_delete_due_users_job, hour=3, minute=0),
+    ]
+
+
 class WorkerSettings:
     """arq worker configuration discovered by the arq CLI.
 
     See https://arq-docs.helpmanual.io/#workersettings for the schema.
     """
 
-    functions: ClassVar[list[Any]] = [ingest_file_job, embed_chunks_for_file_job]
+    functions: ClassVar[list[Any]] = [
+        ingest_file_job,
+        embed_chunks_for_file_job,
+        export_user_data_job,
+    ]
     on_startup = on_startup
     on_shutdown = on_shutdown
     # Lazily resolved via property-like attribute lookup arq does on
@@ -229,6 +261,7 @@ class WorkerSettings:
         settings = get_settings()
         return {
             "functions": cls.functions,
+            "cron_jobs": _build_cron_jobs(),
             "on_startup": cls.on_startup,
             "on_shutdown": cls.on_shutdown,
             "redis_settings": _build_redis_settings(),
@@ -252,6 +285,7 @@ def _populate_class_attrs() -> None:
 
     try:
         WorkerSettings.redis_settings = _build_redis_settings()  # type: ignore[attr-defined]
+        WorkerSettings.cron_jobs = _build_cron_jobs()  # type: ignore[attr-defined]
         settings = get_settings()
         WorkerSettings.max_jobs = settings.lq_ai_ingest_worker_concurrency  # type: ignore[attr-defined]
         WorkerSettings.job_timeout = settings.lq_ai_docling_timeout_seconds  # type: ignore[attr-defined]
