@@ -6,14 +6,15 @@
 
 ## State at handoff
 
-- **Branch:** `main`, **5 commits ahead of origin/main** (D3-core not yet pushed; see "Push status" below).
-- **Last commit:** `45b94f3` *docs: mark D3 core complete (D3)*.
-- **Wave-1 (D5 + D6):** ✅ pushed to origin (`c00c5cb..b57cf4f`, 12 commits). Verified.
-- **Wave-2 D3-core:** ✅ committed locally (`b57cf4f..45b94f3`, 5 commits). Not pushed.
-- **Stack:** `docker compose up -d` — all services healthy as of close. Postgres recovered after the ollama-volume incident (see "Ollama volume incident" below).
-- **Auth:** `admin@lq.ai` / `LQ-AI-smoke-test-Pw1!` (rotate when convenient).
-- **Migrations applied:** `0001` → `0009`.
-- **ADRs in tree:** unchanged from prior handoff.
+- **Branch:** `main`, ahead of origin until pushed at session close (see "Push status" below).
+- **Last commit:** `1569eb4` *docs: mark D4 backend complete (D4)*.
+- **Wave-1 (D5 + D6):** ✅ pushed to origin earlier in the session (`c00c5cb..b57cf4f`, 12 commits).
+- **Wave-2 D3-core + handoff:** ✅ pushed mid-session (`b57cf4f..ebc909d`, 6 commits).
+- **Wave-2 D4 backend:** ✅ committed locally (`ebc909d..1569eb4`, 4 commits) — push at end of session per the user's standing flow.
+- **Stack:** `docker compose up -d` — all services healthy. The api/ container has NOT been rebuilt with the new D3/D4 code; running `docker compose up -d --build api` will pick up `app/audit.py`, the chat audit row, the `/admin/audit-log` endpoint, and the `/organization-profile` endpoints.
+- **Auth:** `admin@lq.ai` / `LQ-AI-smoke-test-Pw1!`.
+- **Migrations applied (live DB):** `0001` → `0009`. **Migration `0010` (organization_profile) has NOT yet been applied to the live `lq_ai` database.** Run `docker compose exec api alembic upgrade head` before the rebuilt api container starts serving — otherwise `/organization-profile` will 500 on the first call.
+- **ADRs in tree:** unchanged.
 
 ---
 
@@ -23,7 +24,8 @@
 |---|---|---|
 | **D5** Wave-1: MFA enrollment + verification | ✅ pushed | `9716519..6dca723` + merge `9738240` |
 | **D6** Wave-1: GDPR Article 17 + 20 | ✅ pushed | `3980c5b..b754449` + merge `b57cf4f` |
-| **D3** Wave-2 core: audit-log helper + chat keystone + admin read endpoint | ✅ local | `5aba280..45b94f3` |
+| **D3** Wave-2 core: audit-log helper + chat keystone + admin read endpoint | ✅ pushed | `5aba280..45b94f3` |
+| **D4** Wave-2 backend: organization_profile singleton + endpoints | ✅ local | `586c329..1569eb4` |
 
 **Wave-2 D3-core:**
 - `5aba280` audit-log helper module + migrate D6 callsites
@@ -32,7 +34,14 @@
 - `10489cc` D3 audit-log critical path coverage (10 tests)
 - `45b94f3` docs: mark D3 core complete
 
-**D3 verification step passes:** create privileged project → send chat → query `/admin/audit-log?privilege_marked=true` → row appears with `routed_inference_tier` populated.
+**Wave-2 D4 backend:**
+- `586c329` organization_profile singleton table + ORM model
+- `737d0b3` GET/PUT /api/v1/organization-profile + /raw markdown variant
+- `7cf618d` D4 organization-profile coverage (10 tests)
+- `1569eb4` docs: mark D4 backend complete
+
+**D3 verification step passes** today (privileged project → chat send → admin/audit-log filter).
+**D4 verification step does NOT pass** until D4-coverage lands — the Profile is editable and readable but not yet prepended to skill prompts. Backend OpenAPI surface is complete.
 
 ---
 
@@ -40,10 +49,10 @@
 
 ### Wave-2 remaining
 
-- **D3-coverage** (the rest of D3, filed as separate scope per the user's "wide D3" decision but split off into a follow-on session for context-budget reasons). See "D3-coverage scope" below.
-- **D2** (Inference Tier Awareness UI) — web/ work; tier badge in chat header showing routed tier (1–5), click for details panel. **Dependencies:** D1 ✅ + C8 ✅. **Effort:** 4–6h.
-- **D4** (Organization Profile singleton) — `/api/v1/organization-profile` GET/PUT, partial unique index, prepend to skill prompts unless `use_organization_profile: false`. **Dependencies:** C2 ✅. **Effort:** 4–6h.
+- **D3-coverage** — auth/MFA/projects/files/KBs audit writes + retroactive backfill + admin filtering UI. See "D3-coverage scope" below.
+- **D4-coverage** — gateway-side prompt-assembly hook to auto-prepend the Profile to attached skills with `use_organization_profile: true`. See "D4-coverage scope" below. The verification step doesn't pass until this lands.
 - **D7** (Saved Prompts per Issue 04) — `/api/v1/saved-prompts` CRUD + sidebar UI + Promote-to-Skill affordance. **Dependencies:** C8 ✅. **Effort:** 4–6h.
+- **D2** (Inference Tier Awareness UI) — web/ work; tier badge in chat header showing routed tier (1–5), click for details panel. **Dependencies:** D1 ✅ + C8 ✅. **Effort:** 4–6h.
 
 ### B6 remainder + Phase E
 
@@ -118,6 +127,44 @@ Each instrumented endpoint should add a single integration test that confirms th
 
 ---
 
+## D4-coverage scope (next session)
+
+D4-core landed the backend OpenAPI surface. D4-coverage is the gateway-side wiring that makes the Profile actually shape skill output (PRD §3.12 verification path).
+
+### Implementation steps
+
+1. **Backend: `GET /api/v1/internal/organization-profile`** (in `api/app/api/internal.py`, alongside the existing `/internal/skills/{name}` endpoint). Auth: `X-LQ-AI-Gateway-Key` (constant-time). Returns a `Skill`-shaped JSON synthesized from the DB row:
+   ```python
+   {
+       "name": "organization-profile",
+       "version": "v1",
+       "title": "Organization Profile",
+       "description": "Singleton org profile",
+       "is_organization_profile": True,
+       "use_organization_profile": False,  # the profile itself doesn't prepend itself
+       "content_md": <row.content_md>,     # body
+       "content_yaml": "<synthesized frontmatter>",
+       # ... default optional fields
+   }
+   ```
+   When no row exists, return 404 (or 200 with empty content; pick the simpler path the gateway can branch on).
+2. **Gateway: `BackendClient.get_organization_profile()`** — new method in `gateway/app/clients/backend.py` (the same module that has `get_skill`). Caches with same TTL as skills.
+3. **Gateway: `_apply_skill_prompt_assembly`** in `gateway/app/api/inference.py`. Modify so:
+   - Always fetch the Profile (no-op if 404 or `content_md=""`).
+   - Pass it to `assemble_skill_prompt` as a special "leading skill" alongside the user-attached skill list.
+   - In `assemble_skill_prompt`, prepend the Profile content to each attached skill's section *unless* that skill's frontmatter has `use_organization_profile: false`.
+4. **Tests:**
+   - `gateway/tests/test_skill_assembly_org_profile.py` — fixture skills with `use_organization_profile=true|false`, assert Profile presence/absence in the assembled output.
+   - E2E test (`tests/test_organization_profile_e2e.py` at the repo root) — set Profile via PUT, send chat, assert the gateway's request payload to the upstream LLM contains the Profile content.
+
+### What "D4 verification passes" means
+
+> Set Organization Profile saying "we always recommend Delaware as choice of law"; run NDA Review; output reflects this preference.
+
+Test surface: PUT the Profile → send a chat with NDA-Review attached → inspect the gateway-to-upstream request and confirm the Profile body is in the system prompt. Doesn't require the LLM to actually output Delaware language — that's a generative property, not a determinable contract.
+
+---
+
 ## How to resume next session
 
 1. `cd /Users/kevinkeller/Desktop/LegalQuants/inhouse-ai`
@@ -125,8 +172,12 @@ Each instrumented endpoint should add a single integration test that confirms th
 3. `docker compose ps` — all services healthy.
 4. Read `docs/M1-PROGRESS.md` (D3 section is at the bottom of the wave-2 stack) and this handoff.
 5. **Pick the next move:**
-   - If finishing D3-coverage feels right: walk the auth → projects → files → KBs → MFA → hard-delete-worker subsystems, one atomic commit per subsystem, using `audit_action` everywhere. ~6–10 commits, ~6–10h.
-   - If you want a different task next: D2 (web/, ~4-6h), D4 (api/, ~4-6h), D7 (api/ + web/, ~4-6h). All independent of D3-coverage; pick whichever has the most user-facing value.
+   - **D4-coverage** (~3-4h) — small focused chunk, makes the D4 verification step pass, completes the Organization Profile surface end-to-end. Recommended as the next pick: it closes one open commitment per task rather than continuing partial work across multiple tasks.
+   - **D7 Saved Prompts** (~4-6h) — backend CRUD + sidebar UI + Promote-to-Skill. Tied to a specific tracked issue (Issue 04).
+   - **D3-coverage** (~6-10h) — extends audit-log writes across auth/projects/files/KBs/MFA; biggest scope but distributed (easy to commit incrementally).
+   - **D2 Tier UI** (~4-6h) — pure web/ work; different mode entirely.
+
+6. **Before serving the new endpoints,** run `docker compose up -d --build api` to pick up the D3 + D4 code, then `docker compose exec api alembic upgrade head` to apply migration 0010 (organization_profile table). The api container's healthcheck will fail until both are done.
 
 ---
 
