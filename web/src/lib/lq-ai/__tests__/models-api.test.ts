@@ -150,8 +150,9 @@ describe('ModelEntry shape', () => {
 		const native = entries.filter((e) => e.lq_ai_kind === 'provider_native');
 		expect(aliases.length).toBe(2);
 		expect(native.length).toBe(3);
-		// Aliases have no tier; native rows do.
-		expect(aliases.every((e) => e.routed_inference_tier === undefined)).toBe(true);
+		// D0.5: native rows always carry a tier; aliases MAY carry one
+		// (the gateway computes the primary-target tier), or omit it
+		// when the alias's primary target couldn't be resolved.
 		expect(native.every((e) => typeof e.routed_inference_tier === 'number')).toBe(true);
 	});
 });
