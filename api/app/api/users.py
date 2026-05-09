@@ -26,16 +26,16 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import UserPublic
 from app.api.dependencies import CurrentUser, get_active_user
+from app.audit import audit_action
 from app.config import get_settings
 from app.db.session import get_db
-from app.models.audit import AuditLog
 from app.models.user import UserSession
 from app.models.user_export import UserExportJob
 from app.storage import presigned_get_url
@@ -111,6 +111,7 @@ async def get_me(user: CurrentUser) -> UserPublic:
     summary="Queue a per-user data export",
 )
 async def export_me(
+    request: Request,
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ExportJobResponse:
@@ -129,14 +130,14 @@ async def export_me(
     db.add(job)
     await db.flush()
 
-    db.add(
-        AuditLog(
-            user_id=user.id,
-            action="user.export_requested",
-            resource_type="user",
-            resource_id=str(user.id),
-            details={"job_id": str(job.id)},
-        )
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.export_requested",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
+        details={"job_id": str(job.id)},
     )
     await db.commit()
 
@@ -204,6 +205,7 @@ async def get_export_job(
     summary="Schedule account deletion (GDPR Article 17)",
 )
 async def delete_me(
+    request: Request,
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DeleteScheduledResponse:
@@ -244,17 +246,17 @@ async def delete_me(
         .values(revoked_at=_utcnow())
     )
 
-    db.add(
-        AuditLog(
-            user_id=user.id,
-            action="user.deletion_scheduled",
-            resource_type="user",
-            resource_id=str(user.id),
-            details={
-                "scheduled_deletion_at": scheduled.isoformat(),
-                "grace_period_days": grace,
-            },
-        )
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.deletion_scheduled",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
+        details={
+            "scheduled_deletion_at": scheduled.isoformat(),
+            "grace_period_days": grace,
+        },
     )
     await db.commit()
 
@@ -271,6 +273,7 @@ async def delete_me(
     summary="Cancel a pending account deletion",
 )
 async def cancel_delete_me(
+    request: Request,
     user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
@@ -288,13 +291,13 @@ async def cancel_delete_me(
         )
 
     user.deletion_scheduled_at = None
-    db.add(
-        AuditLog(
-            user_id=user.id,
-            action="user.deletion_cancelled",
-            resource_type="user",
-            resource_id=str(user.id),
-        )
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.deletion_cancelled",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
     )
     await db.commit()
 
