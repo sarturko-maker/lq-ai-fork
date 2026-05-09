@@ -148,6 +148,14 @@ paths:
     post:
       tags: [auth]
       summary: Enroll in TOTP-based MFA
+      description: |
+        Bearer-authenticated. Issues a fresh TOTP secret, provisioning
+        URI, and 10 single-use recovery codes. Persists the secret +
+        bcrypt-hashed codes on the user, but does NOT enable MFA — the
+        user must subsequently prove possession by submitting a TOTP
+        code to `/auth/mfa/enable`. Re-running setup before enable
+        overwrites the pending secret + codes; re-running after MFA is
+        already enabled is a 409 (`mfa_already_enabled`).
       responses:
         '200':
           description: TOTP enrollment data (provisioning URI + recovery codes)
@@ -160,6 +168,57 @@ paths:
                   secret: {type: string}
                   provisioning_uri: {type: string, description: "otpauth:// URI for QR code"}
                   recovery_codes: {type: array, items: {type: string}}
+        '409':
+          description: MFA is already enabled (call `/auth/mfa/disable` first)
+
+  /api/v1/auth/mfa/enable:
+    post:
+      tags: [auth]
+      summary: Confirm TOTP enrollment with a verification code
+      description: |
+        Bearer-authenticated. Verifies a 6-digit TOTP code against the
+        pending secret stored by `/auth/mfa/setup`. On success flips
+        `users.mfa_enabled` to TRUE; subsequent logins for this user
+        return 423 + `MfaChallenge`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: {type: string, pattern: '^\d{6}$'}
+      responses:
+        '204': {description: MFA enabled}
+        '400': {description: Setup not started or code invalid}
+        '409': {description: MFA is already enabled}
+
+  /api/v1/auth/mfa/disable:
+    post:
+      tags: [auth]
+      summary: Disable MFA after re-proving password and a current MFA code
+      description: |
+        Bearer-authenticated. Requires both the user's current password
+        AND a current TOTP code (or a single-use recovery code). On
+        success clears the TOTP secret, recovery codes, and the
+        `mfa_enabled` flag. Wrong-password and wrong-code branches both
+        return 401 — the response shape does not reveal which leg
+        failed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password, code]
+              properties:
+                password: {type: string}
+                code: {type: string}
+      responses:
+        '204': {description: MFA disabled}
+        '400': {description: MFA is not enabled}
+        '401': {description: Invalid credentials or MFA code}
 
   /api/v1/auth/change-password:
     post:
