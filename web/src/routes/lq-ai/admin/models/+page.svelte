@@ -12,7 +12,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
-	import { adminApi } from '$lib/lq-ai/api';
+	import { adminApi, modelsApi } from '$lib/lq-ai/api';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import type { Alias, AliasFallback } from '$lib/lq-ai/api/admin';
@@ -43,20 +43,49 @@
 
 		loading = true;
 		try {
-			const [list, cfg] = await Promise.all([
+			// Three sources, in parallel:
+			//   1. listAliases — current admin alias config
+			//   2. getAdminConfig — provider definitions (names + types,
+			//      used for the provider dropdown)
+			//   3. listModels — D0's *live* discovery from each provider
+			//      (Ollama /api/tags + Anthropic /v1/models). This is the
+			//      authoritative source for "what can this provider serve
+			//      RIGHT NOW", not gateway.yaml's static curated list.
+			const [list, cfg, models] = await Promise.all([
 				adminApi.listAliases(),
-				adminApi.getAdminConfig()
+				adminApi.getAdminConfig(),
+				modelsApi.listModels()
 			]);
 			aliases = list.data;
 			availableProviders = (cfg.providers ?? [])
 				.filter((p) => p.enabled !== false)
 				.map((p) => ({ name: p.name, type: p.type }));
-			providerModels = {};
+
+			// Build providerModels from D0's live discovery. Each
+			// `provider_native` row is `<provider>/<model>` owned_by the
+			// provider name; collect them grouped by owned_by.
+			const dynamic: Record<string, string[]> = {};
+			for (const m of models.data) {
+				if (m.lq_ai_kind !== 'provider_native') continue;
+				const slash = m.id.indexOf('/');
+				if (slash < 0) continue;
+				const provider = m.owned_by;
+				const model = m.id.slice(slash + 1);
+				if (!dynamic[provider]) dynamic[provider] = [];
+				if (!dynamic[provider].includes(model)) dynamic[provider].push(model);
+			}
+
+			// Fall back to gateway.yaml's static `providers[].models` ONLY for
+			// providers where dynamic discovery returned nothing (e.g.,
+			// provider with no live catalog endpoint, or the operator
+			// running offline). The static list is the operator's
+			// curated guidance; the dynamic list is reality.
 			for (const p of cfg.providers ?? []) {
-				if (Array.isArray(p.models)) {
-					providerModels[p.name] = p.models;
+				if (!dynamic[p.name] && Array.isArray(p.models)) {
+					dynamic[p.name] = p.models;
 				}
 			}
+			providerModels = dynamic;
 		} catch (e) {
 			console.error('admin: bootstrap failed', e);
 			listError = e instanceof Error ? e.message : 'Failed to load aliases';
