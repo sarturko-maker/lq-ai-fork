@@ -374,6 +374,11 @@ _GATEWAY_CODE_MAP: dict[str, type[LQAIError]] = {
     "skill_not_found": SkillNotFound,
     "skill_fetch_failed": SkillFetchFailed,
     "skill_input_missing": SkillInputMissing,
+    # D0.5: admin alias CRUD surfaces. The gateway emits these on the
+    # admin/v1/aliases path; the backend's admin proxy passes them
+    # through with the matching backend-side typed exception.
+    "not_found": NotFound,
+    "conflict": Conflict,
 }
 
 

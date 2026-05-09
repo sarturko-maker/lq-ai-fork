@@ -460,6 +460,159 @@ class GatewayClient:
                 details={"status_code": response.status_code},
             ) from exc
 
+    # --- Admin: alias CRUD (D0.5) -------------------------------------------
+
+    async def list_aliases(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """GET /admin/v1/aliases. Returns the gateway's full alias list."""
+
+        return await self._admin_request(
+            method="GET",
+            path="/admin/v1/aliases",
+            op="list_aliases",
+            request_id=request_id,
+        )
+
+    async def get_alias(
+        self,
+        name: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """GET /admin/v1/aliases/{name}. 404 surfaces as :class:`NotFound`."""
+
+        return await self._admin_request(
+            method="GET",
+            path=f"/admin/v1/aliases/{name}",
+            op="get_alias",
+            request_id=request_id,
+        )
+
+    async def create_alias(
+        self,
+        body: dict[str, Any],
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /admin/v1/aliases. 409 surfaces as :class:`Conflict`."""
+
+        return await self._admin_request(
+            method="POST",
+            path="/admin/v1/aliases",
+            op="create_alias",
+            request_id=request_id,
+            body=body,
+        )
+
+    async def update_alias(
+        self,
+        name: str,
+        body: dict[str, Any],
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """PATCH /admin/v1/aliases/{name}. 404 surfaces as :class:`NotFound`."""
+
+        return await self._admin_request(
+            method="PATCH",
+            path=f"/admin/v1/aliases/{name}",
+            op="update_alias",
+            request_id=request_id,
+            body=body,
+        )
+
+    async def delete_alias(
+        self,
+        name: str,
+        *,
+        request_id: str | None = None,
+    ) -> None:
+        """DELETE /admin/v1/aliases/{name}. 404 surfaces as :class:`NotFound`."""
+
+        await self._admin_request(
+            method="DELETE",
+            path=f"/admin/v1/aliases/{name}",
+            op="delete_alias",
+            request_id=request_id,
+            allow_204=True,
+        )
+
+    async def get_admin_config(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """GET /admin/v1/config — sanitized current config payload."""
+
+        return await self._admin_request(
+            method="GET",
+            path="/admin/v1/config",
+            op="get_admin_config",
+            request_id=request_id,
+        )
+
+    async def _admin_request(
+        self,
+        *,
+        method: str,
+        path: str,
+        op: str,
+        request_id: str | None,
+        body: dict[str, Any] | None = None,
+        allow_204: bool = False,
+    ) -> dict[str, Any]:
+        """Shared admin-request transport. Returns parsed JSON or {}.
+
+        Translates errors via the same path :meth:`chat_completion`
+        uses (timeout → :class:`GatewayTimeout`, transport → :class:`GatewayUnreachable`,
+        structured 4xx → mapped via :func:`map_gateway_error_code`).
+        """
+
+        headers = self._build_headers(request_id=request_id)
+        try:
+            if body is not None:
+                response = await self._client.request(
+                    method,
+                    path,
+                    json=body,
+                    headers=headers,
+                )
+            else:
+                response = await self._client.request(method, path, headers=headers)
+        except httpx.TimeoutException as exc:
+            raise GatewayTimeout(
+                "Gateway did not respond within the configured timeout",
+                details={"timeout_seconds": self._timeout},
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise GatewayUnreachable(
+                "Could not reach the Inference Gateway",
+                details={"transport_error": type(exc).__name__},
+            ) from exc
+
+        if response.status_code >= 400:
+            self._raise_for_gateway_error(
+                status_code=response.status_code,
+                body_bytes=response.content,
+                op=op,
+                request_id=request_id,
+            )
+
+        if response.status_code == 204 or (allow_204 and not response.content):
+            return {}
+
+        try:
+            payload: dict[str, Any] = response.json()
+            return payload
+        except json.JSONDecodeError as exc:
+            raise GatewayInvalidResponse(
+                f"Gateway {op} returned a non-JSON success response",
+                details={"status_code": response.status_code},
+            ) from exc
+
     # --- Lifecycle -----------------------------------------------------------
 
     async def aclose(self) -> None:

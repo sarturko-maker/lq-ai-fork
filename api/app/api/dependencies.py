@@ -100,3 +100,30 @@ async def get_active_user(user: CurrentUser) -> User:
 ActiveUser = Annotated[User, Depends(get_active_user)]
 """Type alias for endpoints that require both a valid bearer token AND a
 user who has cleared the must_change_password gate."""
+
+
+async def get_admin_user(user: ActiveUser) -> User:
+    """`ActiveUser` plus the ``is_admin == True`` gate.
+
+    Used by every admin-only endpoint (D0.5 alias-CRUD; D3 audit-log;
+    D1 tier-policy; future D-phase admin surfaces). Non-admin authenticated
+    users get 403 ``forbidden``; admins pass through.
+
+    The 403 carries ``code = "forbidden"`` (not ``unauthorized``) — the
+    user *is* authenticated, they're just not authorized for this
+    surface. The OpenAPI sketch documents this distinction.
+    """
+
+    if not user.is_admin:
+        from app.errors import Forbidden
+
+        raise Forbidden(
+            message="Admin privileges required for this endpoint.",
+        )
+    return user
+
+
+AdminUser = Annotated[User, Depends(get_admin_user)]
+"""Type alias for endpoints that require ``is_admin = true``. Stacks on
+top of :data:`ActiveUser` (so it inherits the bearer-token + must-change-
+password gate) and adds the admin check."""
