@@ -1270,6 +1270,49 @@ These are filed as **D3-coverage** rather than re-blocking D3 because the verifi
 * The audit row's `details.applied_skills` is a list of skill names; if a skill is renamed mid-flight, prior rows reference the old name. This is the intentional snapshot semantic (audit captures what happened at the time, not what currently exists), but it's worth noting for query writers.
 * The `since` / `until` filters use exact `timestamp` matching with `>=` / `<=`. A future enhancement might add `timestamp_within_range_seconds` for "last 5 minutes"-style queries; for now, callers compute the range client-side.
 
+### D4 — Organization Profile singleton ✅ (backend; gateway integration continuing)
+
+PRD §3.12 calls the Organization Profile a "singleton skill" — same SKILL.md format, treated as a singleton by the Skill Service. ADR 0004 keeps built-in skills filesystem-canonical (no `skills` SQL table for M1) so D4 can't add an `is_organization_profile` column to that nonexistent table. Instead, **D4-core** (this milestone) lands a focused single-row table backing the GET/PUT API; **D4-coverage** (filed for a follow-on session) is the gateway-side prompt-assembly hook that auto-prepends the Profile to attached skills.
+
+**What landed in D4-core:**
+
+* **Migration `0010_create_organization_profile`** + ORM model — single-row `organization_profile` table with `content_md`, `updated_at`, `updated_by`. Singleton enforced via `CREATE UNIQUE INDEX ... ON organization_profile ((true))` (the Postgres "at-most-one-row" pattern).
+* **`GET /api/v1/organization-profile`** — bearer-authed, any active user. Returns the current Profile or `content_md=""` + null timestamps when none is set. Transparency principle (PRD §1.3): every user is entitled to see what's shaping their output.
+* **`PUT /api/v1/organization-profile`** — admin-only upsert. Idempotent: insert when no row, update in place when one exists; never creates a second row. Empty `content_md` is allowed. Audit-logged via the D3 helper as `organization_profile.updated`.
+* **`GET /api/v1/organization-profile/raw`** — convenience text/markdown endpoint for Skill Inspector / UI surfaces (extends the OpenAPI sketch).
+
+**Files touched.**
+
+* `api/alembic/versions/0010_create_organization_profile.py` (new), `api/app/models/organization_profile.py` (new), `api/app/models/__init__.py` updated.
+* `api/app/api/organization_profile.py` — replaces the A4 501 stubs with full handlers.
+* `docs/api/backend-openapi.yaml` — documents the GET/PUT response shape (was just `Skill`-typed; now explicit content_md + timestamps), adds the `/raw` path.
+* `api/tests/test_organization_profile.py` (new) — 10 integration tests.
+* `api/tests/test_endpoints.py` + `api/tests/test_openapi.py` — three routes move stub → implemented; path-count assertion 44 → 45.
+
+**Architectural decisions.**
+
+1. **Single focused table, not a generic `skills` table.** PRD §3.12 says "reuses Skill Service tables", but ADR 0004 froze built-in skills as filesystem-canonical for M1. Building the full `skills` SQL table (per `docs/db-schema.md §skills`) is its own task and out of D4's scope. A focused `organization_profile` row keeps the surface small + transactional + audit-loggable, and the singleton constraint is DB-enforced rather than application-layer (PRD §3.12 acknowledges either path is acceptable).
+2. **GET is readable by every authenticated user, PUT is admin-only.** The transparency principle requires read access; the PRD §3.12 user stories explicitly call out "user-readable, admin-edited." The 401 vs 403 split is consistent with the D0.5 admin-CRUD pattern.
+3. **Empty content_md is a valid PUT body.** Operators may want to clear the Profile temporarily (e.g., during an A/B test of a new draft) without deleting the row. The DB column has a default empty string so a PUT-with-empty-body remains transactional.
+4. **`/raw` extends the sketch as a convenience endpoint.** The Skill Inspector (§3.4) and the eventual admin UI both need a content-typed Markdown body; serving it directly from the API saves a JSON parse round-trip on the client. Same pattern would apply to other "view a skill" surfaces if they materialize.
+
+**D4-coverage — what's NOT in this milestone:**
+
+* **Gateway-side prompt-assembly hook.** The verification step ("Set Organization Profile saying 'we always recommend Delaware as choice of law'; run NDA Review; output reflects this preference") requires the gateway to fetch the Profile and prepend it to every attached skill whose frontmatter doesn't opt out (`use_organization_profile: false`). Implementation path:
+  1. New `GET /api/v1/internal/organization-profile` endpoint (gateway-key auth) that synthesizes a `Skill`-shaped response from the DB row.
+  2. Gateway-side fetch in `_apply_skill_prompt_assembly`: pull the Profile, prepend to the skill list head, respect each user-attached skill's `use_organization_profile` flag.
+  3. Tests: filesystem-skill fixture with `use_organization_profile: false`; assert the assembled prompt does not contain the Profile body.
+* **First-run onboarding hook** (PRD §6.2: "First-run onboarding prompts the operator to create or import an Organization Profile or skip and create later"). The first-run admin flow (B2) doesn't currently surface this; deferring until UI work picks it up.
+* **Skill Inspector view of the Profile** (PRD §3.4 + §3.12): UI work; the JSON + `/raw` endpoints are the data contract.
+
+**Test counts.** 10 net-new tests in `tests/test_organization_profile.py`; full run of D3+D4+D5+D6 + endpoint/openapi: 62 passed, 2 pre-existing tier-policy failures (predate D4).
+
+**Known limitations.**
+
+* Until D4-coverage lands, the Profile is *editable* but not yet *applied* — admins can store and read it, but it doesn't yet shape skill output. The PRD §3.12 verification step ("output reflects this preference") fails today and is the explicit work of D4-coverage.
+* `content_md` is capped at 200,000 characters (the Pydantic `Field(max_length=...)` limit). That's ~50,000 tokens of headroom — generous enough for any realistic Profile but also the kind of cap an operator might want to raise. Promote to a config knob if a use case materializes.
+* The audit log captures `content_length` in `details` rather than the full content (PII / volume concerns). Operators wanting a full content-history audit can periodically snapshot the Profile via cron + a `python -m app.cli` helper; not in M1 scope.
+
 ---
 
 ## Tasks ahead
