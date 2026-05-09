@@ -66,6 +66,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # admin
         "/api/v1/admin/audit-log",
         "/api/v1/admin/tier-policy",
+        # D0 — model availability proxy
+        "/api/v1/models",
     }
 )
 
@@ -88,10 +90,8 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 36 distinct /api/v1 paths: prior 34 (A4 base + B2 + C7 + C2)
-    # plus C6's two new KB routes (/files and /files/{file_id} attach
-    # surface; /search → /query rename keeps the count; +2 net).
-    assert len(actual) == 36
+    # 37 distinct /api/v1 paths: prior 36 plus D0's /api/v1/models.
+    assert len(actual) == 37
 
 
 @pytest.mark.unit

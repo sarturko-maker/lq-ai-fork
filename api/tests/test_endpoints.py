@@ -114,6 +114,8 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("DELETE", "/api/v1/projects/{project_id}/files/{file_id}"),
     ("POST", "/api/v1/projects/{project_id}/skills"),
     ("DELETE", "/api/v1/projects/{project_id}/skills/{skill_name}"),
+    # D0 — Model availability (proxy to gateway /v1/models)
+    ("GET", "/api/v1/models"),
     # C6 — Knowledge bases
     ("POST", "/api/v1/knowledge-bases"),
     ("GET", "/api/v1/knowledge-bases"),

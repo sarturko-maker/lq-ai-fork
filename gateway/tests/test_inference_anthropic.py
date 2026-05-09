@@ -296,3 +296,65 @@ async def test_chat_completions_handles_malformed_json(
     )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_request"
+
+
+# --- D0: raw provider/model passthrough --------------------------------------
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_chat_completions_accepts_raw_provider_model_form(
+    anthropic_client: AsyncClient,
+) -> None:
+    """``model: "anthropic-prod/claude-haiku-4-5"`` dispatches directly to
+    the Anthropic adapter without going through the alias map (D0).
+
+    This is the form the LQ.AI shell's model picker emits when the user
+    selects a provider-native model from the Anthropic group.
+    """
+
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "msg_d0_raw_passthrough",
+                "model": "claude-haiku-4-5",
+                "content": [{"type": "text", "text": "Hi from haiku."}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 4, "output_tokens": 5},
+            },
+        )
+    )
+
+    response = await anthropic_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anthropic-prod/claude-haiku-4-5",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    # Tier comes from the inference_tiers.defaults.anthropic = 4 in the example.
+    assert body["routed_inference_tier"] == 4
+    assert body["routed_provider"] == "anthropic-prod"
+
+
+@pytest.mark.integration
+async def test_chat_completions_rejects_unknown_provider_in_raw_form(
+    anthropic_client: AsyncClient,
+) -> None:
+    """``unknown-provider/some-model`` -> 400 invalid_model with helpful message."""
+
+    response = await anthropic_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "definitely-not-a-provider/x",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"]["code"] == "invalid_model"
+    assert "definitely-not-a-provider" in body["error"]["message"]

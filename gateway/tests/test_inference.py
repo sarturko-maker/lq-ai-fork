@@ -121,6 +121,14 @@ async def test_embeddings_malformed_body_returns_400(client: AsyncClient) -> Non
 
 @pytest.mark.unit
 async def test_models_returns_configured_aliases(client: AsyncClient) -> None:
+    """``GET /v1/models`` returns aliases (D0 augmented, A3 baseline preserved).
+
+    D0 added live discovery on top: with no API keys in the test env and no
+    Ollama reachable, the per-source discoverers log WARNING and return
+    ``[]`` — the response still surfaces the configured aliases. This test
+    pins that posture.
+    """
+
     response = await client.get("/v1/models")
 
     assert response.status_code == 200
@@ -130,10 +138,12 @@ async def test_models_returns_configured_aliases(client: AsyncClient) -> None:
     # Aliases that exist in gateway.yaml.example
     for expected in ("smart", "fast", "budget", "local", "embedding"):
         assert expected in ids, f"alias {expected!r} missing from /v1/models"
-    # Each entry must have the OpenAI-compatible shape
+    # Each entry must have the OpenAI-compatible shape plus the D0
+    # ``lq_ai_kind`` extension.
     for entry in body["data"]:
-        assert set(entry.keys()) >= {"id", "object", "created", "owned_by"}
+        assert set(entry.keys()) >= {"id", "object", "created", "owned_by", "lq_ai_kind"}
         assert entry["object"] == "model"
+        assert entry["lq_ai_kind"] in ("alias", "provider_native")
 
 
 @pytest.mark.unit

@@ -619,6 +619,84 @@ async def test_aclose_does_not_raise() -> None:
     await c.aclose()
 
 
+# --- D0: list_models ---------------------------------------------------------
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_list_models_forwards_payload_verbatim(client: GatewayClient) -> None:
+    """The proxy returns the gateway's body unchanged."""
+
+    payload = {
+        "object": "list",
+        "data": [
+            {
+                "id": "smart",
+                "object": "model",
+                "created": 0,
+                "owned_by": "lq-ai-gateway",
+                "lq_ai_kind": "alias",
+            },
+            {
+                "id": "ollama-local/llama3.1:8b",
+                "object": "model",
+                "created": 0,
+                "owned_by": "ollama-local",
+                "lq_ai_kind": "provider_native",
+                "routed_inference_tier": 1,
+                "provider_type": "ollama",
+            },
+        ],
+    }
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(return_value=httpx.Response(200, json=payload))
+
+    result = await client.list_models()
+    assert result == payload
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_list_models_401_raises_gateway_unreachable(client: GatewayClient) -> None:
+    """Gateway 401 must NOT leak through as Unauthorized — it's an operator
+    misconfiguration that the user must not see."""
+
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(
+        return_value=httpx.Response(
+            401, json={"error": {"code": "unauthorized", "message": "bad key"}}
+        )
+    )
+
+    with pytest.raises(GatewayUnreachable):
+        await client.list_models()
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_list_models_5xx_raises_gateway_unreachable(client: GatewayClient) -> None:
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(return_value=httpx.Response(503, text="oops"))
+    with pytest.raises(GatewayUnreachable):
+        await client.list_models()
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_list_models_timeout_raises_gateway_timeout(client: GatewayClient) -> None:
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(side_effect=httpx.TimeoutException("slow"))
+    with pytest.raises(GatewayTimeout):
+        await client.list_models()
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_list_models_sends_gateway_key_header(client: GatewayClient) -> None:
+    route = respx.get(f"{GATEWAY_BASE}/v1/models").mock(
+        return_value=httpx.Response(200, json={"object": "list", "data": []})
+    )
+    await client.list_models()
+    request = route.calls.last.request
+    assert request.headers.get(GATEWAY_KEY_HEADER) == GATEWAY_KEY
+
+
 # Suppress the "task pending" warning that respx can emit on cancellation.
 @pytest.fixture(autouse=True)
 def _suppress_pending_task_warnings() -> None:
