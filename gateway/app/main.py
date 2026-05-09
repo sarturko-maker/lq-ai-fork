@@ -61,6 +61,7 @@ from app.config import GatewayConfig
 from app.config_loader import ConfigLoadError, load_config
 from app.db import engine_or_none
 from app.errors import LQAIError
+from app.model_discovery import ModelDiscoverer
 from app.providers import (
     AnthropicAdapter,
     OllamaAdapter,
@@ -213,6 +214,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.backend_client = backend_client
     logger.info("backend client wired against %s", backend_client.base_url)
 
+    # D0: live model discovery for ``GET /v1/models``. The discoverer
+    # owns its own httpx client and a TTL cache. Per-source failures
+    # never raise — see app.model_discovery.
+    model_discoverer = ModelDiscoverer()
+    app.state.model_discoverer = model_discoverer
+    logger.info("model discoverer wired (Ollama 60s TTL, Anthropic 300s TTL)")
+
     try:
         yield
     finally:
@@ -226,6 +234,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await close_backend_client()
         except Exception:
             logger.exception("error closing backend client")
+        try:
+            await model_discoverer.aclose()
+        except Exception:
+            logger.exception("error closing model discoverer")
         if engine is not None:
             try:
                 await engine.dispose()

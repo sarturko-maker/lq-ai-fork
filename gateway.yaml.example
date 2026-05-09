@@ -160,6 +160,16 @@ providers:
 # by specific provider/model. This decouples skill authoring
 # from provider configuration; the operator can swap out the
 # provider behind 'smart' without changing any skill.
+#
+# RAW PASSTHROUGH (D0): callers may also bypass the alias map by
+# sending ``model: "<provider_name>/<native_model>"`` directly,
+# e.g., ``anthropic-prod/claude-haiku-4-5`` or
+# ``ollama-local/qwen2.5:7b``. The provider name MUST match an
+# entry in ``providers:`` above; the model component is the
+# provider-native name (no further translation). Tier is derived
+# the same way as for aliases — overrides → defaults →
+# provider.tier. Used by the LQ.AI shell's model picker so users
+# can target a specific model without authoring a new alias.
 
 model_aliases:
   # User-facing aliases referenced by skills and the chat UI

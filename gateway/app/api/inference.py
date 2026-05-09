@@ -64,6 +64,7 @@ from pydantic import ValidationError
 from app.clients.backend import BackendClient, Skill, get_backend_client
 from app.config import GatewayConfig
 from app.errors import LQAIError
+from app.model_discovery import ModelDiscoverer
 from app.providers import (
     ChatCompletionChunk,
     ChatCompletionMessage,
@@ -333,6 +334,18 @@ def _routing_log(request: Request) -> RoutingLogWriter:
 
     writer: RoutingLogWriter | None = getattr(request.app.state, "routing_log", None)
     return writer if writer is not None else NullRoutingLogWriter()
+
+
+def _model_discoverer(request: Request) -> ModelDiscoverer | None:
+    """Pull the :class:`ModelDiscoverer` off ``app.state`` if installed.
+
+    Lifespan bound: the gateway's startup constructs one and stashes it
+    on ``app.state.model_discoverer`` (D0). Tests that bypass lifespan
+    return ``None``; the route handler falls back to the alias-only
+    payload in that case.
+    """
+
+    return getattr(request.app.state, "model_discoverer", None)
 
 
 # --- Route handlers -----------------------------------------------------------
@@ -657,9 +670,34 @@ async def embeddings(request: Request) -> JSONResponse:
 
 @router.get("/models")
 async def list_models(request: Request) -> dict[str, Any]:
-    """Return the configured aliases as an OpenAI-shaped models list."""
+    """Return aliases + live-discovered provider-native models.
 
-    return _config(request).to_models_payload()
+    OpenAI's ``GET /v1/models`` shape is preserved — ``{"object": "list",
+    "data": [...]}`` with each entry carrying ``{id, object, created,
+    owned_by}``. D0 extends each entry with ``lq_ai_kind`` (``"alias"``
+    or ``"provider_native"``) and, where known,
+    ``routed_inference_tier`` and ``provider_type`` so the LQ.AI shell's
+    model picker can group rows and surface tier badges without a second
+    roundtrip.
+
+    Discovery walks every enabled Ollama provider's ``/api/tags`` and
+    every Anthropic provider's ``/v1/models``. Each call is best-effort
+    behind a short cache (60s for Ollama, 5min for Anthropic). A failed
+    source does not abort the merge; the response surfaces whatever
+    other sources produced.
+    """
+
+    config = _config(request)
+    discoverer = _model_discoverer(request)
+    if discoverer is None:
+        # Lifespan hasn't run (e.g., a test that bypassed startup) — fall
+        # back to the alias-only payload so the endpoint stays usable.
+        return config.to_models_payload()
+    discovered = await discoverer.list_all(config)
+    return {
+        "object": "list",
+        "data": [entry.to_payload() for entry in discovered],
+    }
 
 
 # --- Streaming helpers --------------------------------------------------------
