@@ -15,7 +15,7 @@
 | A — Foundation scaffolding | A1, A2, A3, A4, A5 | — | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5, B6 partial (Ollama) | — | B6 remainder optional (OpenAI chat, Vertex, Bedrock) |
 | C — Capability layer | C1, C2, C3, C4, C5, C6, C7, C8 | — | — (phase complete; C8 pending operator end-to-end verification per ADR 0009) |
-| D — M1 differentiators | D0, D0.5 | — | D1 (tier-floor enforcement) |
+| D — M1 differentiators | D0, D0.5, D1 | — | D2 (tier-awareness UI) |
 | E — Procurement and release | — | — | After D |
 
 **Tests:** ~495+ passing in api/ (C6 added ~50: 8 migration + 16 retrieval unit + 12 embed unit + ~24 endpoint integration; C3 added ~55; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~225 passing in gateway/ (B6 partial added ~30: 22 Ollama adapter unit + 8 Ollama integration including the B4-fallback-chain end-to-end exercise; C6 added ~25: 15 OpenAI adapter + 8 embeddings integration + 2 inference updates; C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
@@ -1094,6 +1094,56 @@ The gateway's alias map (`smart`, `fast`, `budget`, `local`, `local-fast`, `loca
 * `delete_alias` doesn't yet check whether an alias is "the default for some tier" because the schema doesn't express that concept. The 409 branch is reserved for a D1+ task that introduces the concept.
 * Multi-replica deployments share the file via the named volume, so two replicas mutating the same alias get last-write-wins. Single-replica (the M1 default) is unaffected. ADR 0010 documents this.
 
+### D1 — Tier-floor enforcement (refusals) ✅
+
+PRD §4.4's tier-floor refusal is now wired end-to-end. Tier *derivation* already landed in B4; D1 narrowly adds the refusal logic when a request's resolved tier falls below the most-restrictive declared floor.
+
+**Three sources of a tier floor (per PRD §4.4 / D1 brief):**
+
+1. **Request override** — `ChatCompletionRequest.minimum_inference_tier` (already on the schema).
+2. **Project** — `Project.minimum_inference_tier` (already in DB from C7). The backend's chat handler (`api/app/api/chats.py`) reads the project row when a chat lives inside a project and forwards the value as `lq_ai_project_minimum_inference_tier` on the gateway request.
+3. **Skill** — `Skill.minimum_inference_tier` (already on the gateway's `Skill` shape from C2). The gateway's skill prompt-assembly pipeline now returns `Skill` objects (not just names) so the tier-floor resolver can read each skill's frontmatter floor.
+
+**Effective floor = `max(any of the three)`** — most restrictive wins. Tie-breaking is request → project → skill (attachment order); the *value* is identical across ties, so this only affects the diagnostic `details.source` string. Centralized in the new pure-logic module `gateway/app/tier_floor.py` so tests don't need FastAPI / DB / Pydantic.
+
+**Refusal mechanics:**
+
+* **Gateway (`gateway/app/api/inference.py`)**: after candidates resolve and skill-prompt assembly completes, the handler computes the effective floor and compares against the *primary* candidate's tier. When `resolved_tier < effective_floor`, the request never reaches the upstream — the handler returns HTTP 403 with the `tier_below_minimum` envelope including `{required_tier, resolved_tier, source, requested_model, routed_provider, routed_model}` in `details`.
+* **Audit log**: `_write_refusal` writes one row with `refused=True` and `refusal_reason='tier_below_minimum:required=N:resolved=M:source=...'` so operators grep for refusals without parsing free-text. The `routed_*` columns carry the *primary* candidate's resolution so the audit row records what tier the request was about to land on.
+* **Backend translation**: the existing `_GATEWAY_CODE_MAP` already mapped `tier_below_minimum` to the typed `TierBelowMinimum` exception (HTTP 403). The chat handler's pre-stream failure path catches `LQAIError` and propagates to the FastAPI handler, which serializes the canonical `{detail: {code, message, details}}` envelope. No 500 morphing; the user sees the structured 403 with the binding source.
+
+**Coverage.** PRD §4.4 / D1 verification cases (a)-(d) all pass:
+
+* (a) Request override 5 against tier-4 `smart` → 403, `source="request"`.
+* (b) Skill with `minimum_inference_tier=5` attached to tier-4 chat → 403, `source="skill:<name>"`.
+* (c) Project floor 5 forwarded by the backend → 403, `source="project"`.
+* (d) Refused request writes one routing-log row with `refused=True` and the structured `refusal_reason`.
+
+**Files touched.**
+
+* `gateway/app/tier_floor.py` (new) — pure-logic resolver + `is_refused` predicate.
+* `gateway/app/api/inference.py` — D1 refusal block between candidate resolution and dispatch; new `_write_refusal` audit-row helper. `_apply_skill_prompt_assembly` now returns the full `Skill` objects (the names list is built at the call site) so the tier-floor resolver sees each skill's frontmatter floor.
+* `gateway/app/providers/openai_schema.py` — adds `lq_ai_project_minimum_inference_tier` to `ChatCompletionRequest`.
+* `api/app/schemas/gateway.py` — mirror of the above on the backend's gateway-request shape.
+* `api/app/api/chats.py` — looks up `Project.minimum_inference_tier` for chats inside a project and forwards it to the gateway.
+* `docs/api/gateway-openapi.yaml` — documents the new `lq_ai_project_minimum_inference_tier` field on `ChatCompletionRequest`.
+* `gateway/tests/test_tier_floor.py` (new), `gateway/tests/test_inference_tier_floor.py` (new), `api/tests/test_chats_tier_floor.py` (new) — D1 coverage end-to-end.
+* `tests/test_error_code_contract.py` — adds two D1-specific symmetry assertions: HTTP 403 on both sides, `tier_below_minimum` literal stable across subsystems.
+
+**Test counts.** ~22 net-new (gateway: 11 unit on the resolver + 8 integration on the route handler; api: 6 on chat-handler forwarding + translation; cross-subsystem: 2). All pass under `pytest -m unit and integration` against the worktree.
+
+**Architectural decisions.**
+
+1. **Per-call clamp via request-body field**, not a header. The OpenAPI sketch already had `minimum_inference_tier` on the request body; the project floor takes the symmetric approach with `lq_ai_project_minimum_inference_tier`. Two body fields rather than one because the source label needs to be deterministic (the gateway can't otherwise tell whether a value came from the user or the backend's project lookup).
+2. **Refusal compares against the *primary* candidate's tier**, not the eventual fallback. The fallback list only matters if the primary actually tries and fails; refusing on what the request "would" route to mirrors the documented "what tier would this request go to?" semantics. If a future request targets a primary at tier 4 with a fallback at tier 1 and the floor is 3, refusal on the primary is the correct posture — falling through silently to the lower-tier fallback would surprise operators.
+3. **`refusal_reason` is structured**, not just `'tier_below_minimum'`. The encoded form `tier_below_minimum:required=5:resolved=4:source=skill:nda-review` lets operators run a single grep against the audit log without joining to anything; the structured details are also in the response envelope's `details` so a UI can render them.
+4. **Streaming refusal returns JSON, not SSE.** The refusal happens before the streaming path forks, so the caller sees a plain 403 JSON response — no half-opened SSE stream that the client has to parse only to discover an error frame. Documented in the test `test_streaming_refusal_returns_403_not_sse`.
+
+**Known limitations.**
+
+* The skill's `minimum_inference_tier` is read from the backend's cached `Skill` shape (per C2); a freshly-edited skill might be served from the cache for up to the configured TTL (default 60s). Operators who edit a skill's tier-floor expect a brief delay before refusals take effect. Acceptable for M1; flagged for ops docs.
+* No request-override surface on `MessageCreateRequest` yet — the only path that exposes the override is the direct gateway client. Adding a `minimum_inference_tier` field to `MessageCreateRequest` is a small follow-on; deferred until a UX surface needs it (D2's tier-awareness panel is the natural driver).
+
 ---
 
 ## Tasks ahead
@@ -1182,11 +1232,11 @@ These were flagged during execution but deliberately deferred. Each has an ownin
 |---|---|---|
 | Bidirectional tool-call translation in Anthropic adapter | B3's `anthropic.py` translates `role: tool` → `tool_result`; assistant tool_use is one-way | **C3 scope-check, 2026-05-08 (re-confirmed):** none of the 11 starter skills declare `tools:` in their frontmatter; C3 ships without exercising bidirectional tool-call translation. Stays deferred. Most natural successor is whichever later task brings up a skill that declares tools. |
 
-### Deferred to **D1** (tier-floor enforcement / refusals)
+### ~~Deferred to D1 (tier-floor enforcement / refusals)~~ — landed in D1
 
-| Item | Surface | Notes |
-|---|---|---|
-| HTTP 403 `tier_below_minimum` refusal logic | The error code is in the gateway-openapi.yaml enum; B4 writes the tier annotation but doesn't refuse | D1 implements refusal at all three tier-floor sources (skill frontmatter, Project setting, request override). |
+| Item | Disposition |
+|---|---|
+| HTTP 403 `tier_below_minimum` refusal logic | **Landed in D1.** All three sources (request override, project setting, skill frontmatter) wired with the most-restrictive-wins semantics. Audit log row carries `refused=True` + structured `refusal_reason`. See "D1 — Tier-floor enforcement (refusals) ✅" above. |
 
 ### Deferred to **D2** (Inference Tier Awareness UI)
 

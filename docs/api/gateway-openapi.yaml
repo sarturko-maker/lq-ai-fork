@@ -688,8 +688,23 @@ components:
           type: integer
           enum: [1,2,3,4,5]
           description: |
-            Refuse if the routed tier would be below this. Set by the
-            backend per skill or project requirements.
+            Per-call tier floor. The most restrictive of (this,
+            `lq_ai_project_minimum_inference_tier`, attached skills'
+            frontmatter floor) wins; if the routed tier falls below the
+            effective floor the gateway refuses with HTTP 403 and code
+            `tier_below_minimum`. Source label in the refusal envelope
+            is `"request"`.
+        lq_ai_project_minimum_inference_tier:
+          type: integer
+          enum: [1,2,3,4,5]
+          description: |
+            D1: project-level tier floor forwarded by the backend when
+            the chat lives inside a Project (per
+            `Project.minimum_inference_tier`). The gateway never queries
+            the backend for project metadata; the backend is the
+            authority on chat ↔ project, and this field is the single
+            carrier on the gateway hop. Source label in refusal envelope
+            is `"project"`.
         skill_name:
           type: string
           description: |
