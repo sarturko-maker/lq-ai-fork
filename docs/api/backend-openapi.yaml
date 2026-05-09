@@ -1394,16 +1394,32 @@ paths:
   /api/v1/organization-profile:
     get:
       tags: [organization-profile]
-      summary: Get the deployment's Organization Profile (singleton skill)
+      summary: Get the deployment's Organization Profile (singleton)
+      description: |
+        Bearer-authenticated. Readable by every authenticated user
+        (PRD §1.3 transparency: users are entitled to see what's
+        shaping their output). Returns `content_md=""` plus null
+        timestamps when no admin has set a Profile yet — the read
+        path never 404s.
       responses:
         '200':
-          description: Organization Profile
+          description: Organization Profile (or empty placeholder)
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/Skill'}
+              schema:
+                type: object
+                required: [content_md]
+                properties:
+                  content_md: {type: string}
+                  updated_at: {type: string, format: date-time, nullable: true}
+                  updated_by: {type: string, format: uuid, nullable: true}
     put:
       tags: [organization-profile]
-      summary: Update the Organization Profile
+      summary: Update the Organization Profile (admin only)
+      description: |
+        Admin-only upsert: idempotent against the singleton row. Empty
+        `content_md` is allowed (operators may want to clear without
+        deleting). Audit-logged as `organization_profile.updated`.
       requestBody:
         required: true
         content:
@@ -1412,13 +1428,36 @@ paths:
               type: object
               required: [content_md]
               properties:
-                content_md: {type: string}
+                content_md: {type: string, maxLength: 200000}
       responses:
         '200':
           description: Updated
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/Skill'}
+              schema:
+                type: object
+                required: [content_md]
+                properties:
+                  content_md: {type: string}
+                  updated_at: {type: string, format: date-time, nullable: true}
+                  updated_by: {type: string, format: uuid, nullable: true}
+        '401': {description: Bearer token missing or invalid}
+        '403': {description: Caller is not an admin}
+
+  /api/v1/organization-profile/raw:
+    get:
+      tags: [organization-profile]
+      summary: Get the Profile body as raw Markdown
+      description: |
+        Bearer-authenticated. Convenience endpoint for the Skill
+        Inspector (§3.4) and any UI surface that wants to render the
+        Profile as Markdown without JSON-decoding the body. Returns
+        an empty 200 when no Profile is set.
+      responses:
+        '200':
+          description: Profile body
+          content:
+            text/markdown: {}
 
   # ----------- SAVED PROMPTS -----------
   /api/v1/saved-prompts:

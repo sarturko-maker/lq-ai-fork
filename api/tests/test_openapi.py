@@ -67,6 +67,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/knowledge-bases/{kb_id}/query",
         # organization profile
         "/api/v1/organization-profile",
+        # D4 — convenience text/markdown endpoint (extends the sketch).
+        "/api/v1/organization-profile/raw",
         # saved prompts
         "/api/v1/saved-prompts",
         "/api/v1/saved-prompts/{prompt_id}",
@@ -101,12 +103,12 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 44 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
-    # alias endpoints + D5's two new MFA endpoints (/auth/mfa/enable and
-    # /auth/mfa/disable; /auth/mfa/setup and /auth/mfa/verify already
-    # existed as A4 stubs) + D6's two new GDPR endpoints (status-poll for
-    # /users/me/export/{job_id} and /users/me/delete/cancel).
-    assert len(actual) == 44
+    # 45 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
+    # alias endpoints + D5's two new MFA endpoints + D6's two new GDPR
+    # endpoints (status-poll for /users/me/export/{job_id} and
+    # /users/me/delete/cancel) + D4's /organization-profile/raw
+    # convenience endpoint (extends the sketch).
+    assert len(actual) == 45
 
 
 @pytest.mark.unit
