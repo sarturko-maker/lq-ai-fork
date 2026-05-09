@@ -66,6 +66,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ActiveUser
+from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
 from app.errors import LQAIError, NotFound, ValidationError
@@ -599,6 +600,7 @@ async def send_message(
             chat=chat,
             assistant_message_id=assistant_message_id,
             request_id=request_id,
+            http_request=request,
         )
     return await _non_streaming_response(
         db=db,
@@ -608,6 +610,7 @@ async def send_message(
         chat=chat,
         assistant_message_id=assistant_message_id,
         request_id=request_id,
+        http_request=request,
     )
 
 
@@ -655,6 +658,55 @@ async def get_citations(
 # ---------------------------------------------------------------------------
 # Internal: persistence flow for non-streaming and streaming
 # ---------------------------------------------------------------------------
+
+
+async def _audit_message_sent(
+    db: AsyncSession,
+    *,
+    user: User,
+    chat: Chat,
+    assistant_message_id: uuid.UUID,
+    routed_inference_tier: int | None,
+    routed_provider: str | None,
+    applied_skills: list[str],
+    error_code: str | None,
+    request: Request | None,
+) -> None:
+    """Write the D3 audit row for a completed chat-message exchange.
+
+    Per PRD §5.3: every state-changing API call writes to ``audit_log``;
+    chat exchanges in privileged projects must mark the row privileged
+    and capture the routed inference tier so admins can audit which
+    matters routed to which providers.
+
+    The privilege resolution walks ``chat.project_id`` to read the
+    project's ``privileged`` flag. The audit row commits with the
+    handler's outer transaction (FastAPI dependency commits per
+    request); we flush so the row is visible to subsequent reads in
+    the same request scope.
+    """
+
+    project: Project | None = None
+    if chat.project_id is not None:
+        project = await db.get(Project, chat.project_id)
+
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="chat.message_sent",
+        resource_type="message",
+        resource_id=str(assistant_message_id),
+        project=project,
+        routed_inference_tier=routed_inference_tier,
+        routed_provider=routed_provider,
+        request=request,
+        details={
+            "chat_id": str(chat.id),
+            "applied_skills": list(applied_skills),
+            "error_code": error_code,
+        },
+    )
+    await db.commit()
 
 
 async def _persist_assistant_message(
@@ -712,6 +764,7 @@ async def _non_streaming_response(
     chat: Chat,
     assistant_message_id: uuid.UUID,
     request_id: str,
+    http_request: Request | None = None,
 ) -> JSONResponse:
     """Run the non-streaming path: forward, persist, return JSON."""
 
@@ -758,6 +811,18 @@ async def _non_streaming_response(
         error_code=None,
     )
 
+    await _audit_message_sent(
+        db,
+        user=user,
+        chat=chat,
+        assistant_message_id=assistant_message_id,
+        routed_inference_tier=response.routed_inference_tier,
+        routed_provider=response.routed_provider,
+        applied_skills=applied_skills,
+        error_code=None,
+        request=http_request,
+    )
+
     body = MessagePostResponse(
         message=message_to_response(persisted),
         citations=[],
@@ -789,6 +854,7 @@ async def _stream_response(
     chat: Chat,
     assistant_message_id: uuid.UUID,
     request_id: str,
+    http_request: Request | None = None,
 ) -> StreamingResponse:
     """Run the streaming path: forward, stream SSE, persist at end."""
 
@@ -886,6 +952,30 @@ async def _stream_response(
                 applied_skills=last_applied_skills or [],
                 error_code=error_code,
             )
+            # D3 audit row — best-effort, must not break the stream.
+            try:
+                await _audit_message_sent(
+                    db,
+                    user=user,
+                    chat=chat,
+                    assistant_message_id=assistant_message_id,
+                    routed_inference_tier=last_tier,
+                    routed_provider=last_provider,
+                    applied_skills=last_applied_skills or [],
+                    error_code=error_code,
+                    request=http_request,
+                )
+            except Exception as audit_exc:
+                log.warning(
+                    "chat send_message: failed to write audit row",
+                    extra={
+                        "event": "chat_audit_failed",
+                        "user_id": str(user.id),
+                        "chat_id": str(chat.id),
+                        "assistant_message_id": str(assistant_message_id),
+                        "error": str(audit_exc),
+                    },
+                )
         except Exception as persist_exc:
             # Persisting the audit row must not break the stream; the
             # operator sees this in logs and the client gets the same
