@@ -1,49 +1,192 @@
-"""Admin endpoints under ``/admin/v1/...`` (PRD §4.5).
+"""Admin endpoints under ``/admin/v1/...`` (PRD §4.5; D0.5).
 
-A3 lands surface stubs:
+Surface (current):
 
-* ``GET /admin/v1/providers/health`` — 501 (B3+ wires real provider probes).
-* ``GET /admin/v1/usage`` — 501 (cost-tracker task wires this).
-* ``GET /admin/v1/tier-config`` — returns the loaded ``tier_policy`` block.
-* ``GET /admin/v1/anonymization-config`` — 501 (M2).
+* ``GET    /admin/v1/config``                 — sanitized current config (D0.5)
+* ``GET    /admin/v1/aliases``                — list configured aliases (D0.5)
+* ``GET    /admin/v1/aliases/{name}``         — single-alias detail (D0.5)
+* ``POST   /admin/v1/aliases``                — create alias (D0.5)
+* ``PATCH  /admin/v1/aliases/{name}``         — update alias (D0.5)
+* ``DELETE /admin/v1/aliases/{name}``         — remove alias (D0.5)
+* ``GET    /admin/v1/tier-config``            — tier policy block (A3)
+* ``GET    /admin/v1/providers/health``       — 501 stub
+* ``GET    /admin/v1/usage``                  — 501 stub
+* ``GET    /admin/v1/anonymization-config``   — 501 stub (M2)
 
-Every other admin endpoint sketched in PRD §4.5 (``PATCH``-style writes,
-``POST /admin/v1/config/reload``) lands later.
+Auth: every endpoint here is gated by
+:func:`app.api.dependencies.make_require_gateway_key` — the same shared
+secret the backend already holds. Per ADR 0010, the user-level
+``is_admin`` check is the **backend's** responsibility (the gateway
+has no concept of users); requests that arrive at the gateway have
+already passed the backend's admin gate.
 
-Note re: OpenAPI vs. PRD: ``docs/api/gateway-openapi.yaml`` (an older sketch)
-shows ``/admin/inference-tiers`` rather than ``/admin/v1/tier-config``.
-Per ``CLAUDE.md`` decision routing the PRD wins; the implementation order's
-A3 entry and PRD §4.5 both specify ``/admin/v1/tier-config``, so that's what
-A3 ships. The OpenAPI sketch will get refreshed in a later docs pass.
+Hot-reload semantics: write endpoints (POST/PATCH/DELETE) update the
+on-disk YAML atomically, then trigger a re-read through
+:meth:`MutableConfigHolder.reload_from_disk`. If the new config fails
+Pydantic validation the holder retains the prior snapshot and the
+endpoint returns 422 with a structured error; the file write is
+rolled back to the prior bytes on a best-effort basis.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
-from app.config import GatewayConfig
+from app.api.dependencies import make_require_gateway_key
+from app.config import GatewayConfig, ModelAliasConfig
+from app.config_holder import ConfigReloadError, MutableConfigHolder
+from app.config_writer import AliasMutationError, delete_alias, upsert_alias
+from app.router import derive_routed_inference_tier
 
-router = APIRouter(prefix="/admin/v1", tags=["admin"])
+require_gateway_key = make_require_gateway_key()
+
+router = APIRouter(
+    prefix="/admin/v1",
+    tags=["admin"],
+    dependencies=[Depends(require_gateway_key)],
+)
 
 
-def _not_implemented(*, message: str, next_task: str) -> JSONResponse:
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _config(request: Request) -> GatewayConfig:
+    """Read the live config snapshot off ``app.state``."""
+
+    holder: MutableConfigHolder | None = getattr(request.app.state, "config_holder", None)
+    if holder is not None:
+        return holder.current()
+    return request.app.state.config  # type: ignore[no-any-return]
+
+
+def _holder(request: Request) -> MutableConfigHolder:
+    """Pull the :class:`MutableConfigHolder` off ``app.state`` (write paths)."""
+
+    holder: MutableConfigHolder | None = getattr(request.app.state, "config_holder", None)
+    if holder is None:
+        # Tests may bypass lifespan; they should install the holder via a
+        # fixture before exercising the write endpoints.
+        raise RuntimeError(
+            "gateway config holder not installed on app.state; "
+            "the admin write endpoints require a lifespan-built app"
+        )
+    return holder
+
+
+def _gateway_error(
+    *,
+    code: str,
+    message: str,
+    http_status: int,
+    details: dict[str, Any] | None = None,
+) -> JSONResponse:
+    """Render the canonical ``GatewayError`` envelope."""
+
     return JSONResponse(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        status_code=http_status,
         content={
             "error": {
-                "code": "not_implemented",
+                "code": code,
                 "message": message,
-                "details": {"next_task": next_task},
+                "details": details or {},
             }
         },
     )
 
 
-def _config(request: Request) -> GatewayConfig:
-    return request.app.state.config  # type: ignore[no-any-return]
+def _not_implemented(*, message: str, next_task: str) -> JSONResponse:
+    return _gateway_error(
+        code="not_implemented",
+        message=message,
+        http_status=status.HTTP_501_NOT_IMPLEMENTED,
+        details={"next_task": next_task},
+    )
+
+
+def _alias_to_payload(name: str, alias: ModelAliasConfig) -> dict[str, Any]:
+    """Render a single alias as the admin-API JSON shape.
+
+    Wire shape (matches the OpenAPI sketch, see the docs/api/ update
+    that lands with D0.5):
+
+    .. code-block:: json
+
+        {
+          "name": "smart",
+          "provider": "anthropic-prod",
+          "model": "claude-opus-4-7",
+          "fallback": [{"provider": "...", "model": "..."}]
+        }
+    """
+
+    return {
+        "name": name,
+        "provider": alias.primary.provider,
+        "model": alias.primary.model,
+        "fallback": [{"provider": fb.provider, "model": fb.model} for fb in alias.fallback],
+    }
+
+
+def _sanitized_config_payload(config: GatewayConfig) -> dict[str, Any]:
+    """Build the GET /admin/v1/config payload — secrets stripped.
+
+    What we expose: provider entries (without sensitive fields like
+    ``api_key_env`` *values* — only the variable *name* is safe to
+    show), model_aliases, inference_tiers, tier_policy, cost_tracking
+    rates, anonymization (M2 settings), gateway_auth (without the
+    secret).
+
+    What we strip: nothing today — the schema only stores env-var
+    *names*, never values. We keep this helper as the single
+    chokepoint so future fields that *do* hold secrets get scrubbed
+    here in one place.
+    """
+
+    payload = config.model_dump(mode="json")
+    # Defense-in-depth: the schema doesn't put real secrets in this
+    # struct (env-var names only), but if a future field ever does,
+    # stripping it here is the right place. Today this is a no-op.
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# Schemas (D0.5)
+# ---------------------------------------------------------------------------
+
+
+class _FallbackEntry(BaseModel):
+    """One ``fallback`` list entry on an alias write."""
+
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+
+
+class AliasCreateRequest(BaseModel):
+    """``POST /admin/v1/aliases`` body (D0.5)."""
+
+    name: str = Field(min_length=1, max_length=64)
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    fallback: list[_FallbackEntry] | None = None
+
+
+class AliasUpdateRequest(BaseModel):
+    """``PATCH /admin/v1/aliases/{name}`` body (D0.5)."""
+
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    fallback: list[_FallbackEntry] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Existing surface (A3)
+# ---------------------------------------------------------------------------
 
 
 @router.get("/providers/health")
@@ -75,12 +218,7 @@ async def usage(request: Request) -> JSONResponse:
 
 @router.get("/tier-config")
 async def get_tier_config(request: Request) -> dict[str, Any]:
-    """Return the loaded ``tier_policy`` block from ``gateway.yaml``.
-
-    A3 returns the loaded policy as-is. ``PATCH`` (admin-only updates) and
-    audit logging of changes land in D1, where tier-floor refusal logic and
-    its operational surface are wired together.
-    """
+    """Return the loaded ``tier_policy`` block from ``gateway.yaml``."""
 
     cfg = _config(request)
     return {"tier_policy": cfg.tier_policy.model_dump(mode="json")}
@@ -88,14 +226,7 @@ async def get_tier_config(request: Request) -> dict[str, Any]:
 
 @router.get("/anonymization-config")
 async def get_anonymization_config(request: Request) -> JSONResponse:
-    """Anonymization config — M2 feature; A3 returns 501.
-
-    The ``anonymization`` block does load into config (so operators can put
-    M2-shaped settings in their ``gateway.yaml`` today), but the surface is
-    stubbed until the M2 implementation lands. Returning 501 here matches
-    the chat-completions stub posture: the config is parsed; the feature is
-    not yet served.
-    """
+    """Anonymization config — M2 feature; A3 returns 501."""
 
     return _not_implemented(
         message=(
@@ -106,3 +237,198 @@ async def get_anonymization_config(request: Request) -> JSONResponse:
         ),
         next_task="M2 — anonymization middleware (PRD §4.7)",
     )
+
+
+# ---------------------------------------------------------------------------
+# D0.5: config + alias CRUD
+# ---------------------------------------------------------------------------
+
+
+@router.get("/config")
+async def get_config(request: Request) -> dict[str, Any]:
+    """Return the live :class:`GatewayConfig` as JSON (sanitized).
+
+    The payload is the Pydantic ``model_dump(mode="json")`` of the
+    current snapshot. Secrets are not in the schema (env-var *names*
+    are; *values* are never modeled), so the dump is safe to surface
+    to admin clients. The endpoint is gated by the gateway-key check
+    so anonymous reads never see provider names or alias maps.
+    """
+
+    config = _config(request)
+    return _sanitized_config_payload(config)
+
+
+@router.get("/aliases")
+async def list_aliases(request: Request) -> dict[str, Any]:
+    """List every configured model alias.
+
+    Wire shape::
+
+        {
+            "object": "list",
+            "data": [{"name": "smart", "provider": "...", "model": "...", "fallback": [...]}, ...],
+        }
+
+    Tier annotation is **not** included on this listing because an
+    alias may resolve to multiple targets through fallback; the tier
+    is observable on the response of an actual chat call. The web UI
+    derives a hint by looking up the alias's primary provider in the
+    config payload.
+    """
+
+    config = _config(request)
+    return {
+        "object": "list",
+        "data": [_alias_to_payload(name, alias) for name, alias in config.model_aliases.items()],
+    }
+
+
+@router.get("/aliases/{name}")
+async def get_alias(request: Request, name: str) -> dict[str, Any] | JSONResponse:
+    """Return a single alias by name (404 if not configured)."""
+
+    config = _config(request)
+    alias = config.model_aliases.get(name)
+    if alias is None:
+        return _gateway_error(
+            code="not_found",
+            message=f"alias {name!r} not found",
+            http_status=status.HTTP_404_NOT_FOUND,
+            details={"alias": name},
+        )
+    payload = _alias_to_payload(name, alias)
+    # Decoration: include the derived tier of the *primary* target so
+    # the UI can render a tier badge without a second roundtrip. We
+    # explicitly do not include fallback-chain tiers — the UI cares
+    # about the typical-case routing decision.
+    provider = config.provider_by_name(alias.primary.provider)
+    if provider is not None and alias.primary.model:
+        payload["primary_inference_tier"] = derive_routed_inference_tier(
+            provider=provider,
+            native_model=alias.primary.model,
+            inference_tiers=config.inference_tiers,
+        )
+    return payload
+
+
+@router.post("/aliases", status_code=status.HTTP_201_CREATED)
+async def create_alias(
+    request: Request,
+    body: AliasCreateRequest,
+) -> dict[str, Any] | JSONResponse:
+    """Create a new alias. 409 if ``body.name`` is already configured."""
+
+    holder = _holder(request)
+    fallback_payload = (
+        [{"provider": fb.provider, "model": fb.model} for fb in body.fallback]
+        if body.fallback is not None
+        else None
+    )
+    try:
+        upsert_alias(
+            holder,
+            name=body.name,
+            provider=body.provider,
+            model=body.model,
+            fallback=fallback_payload,
+            create_only=True,
+        )
+    except AliasMutationError as exc:
+        return _gateway_error(
+            code=_alias_error_code(exc),
+            message=str(exc),
+            http_status=exc.http_status,
+            details={"alias": body.name},
+        )
+    except ConfigReloadError as exc:
+        return _gateway_error(
+            code="invalid_request",
+            message=str(exc),
+            http_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            details={"alias": body.name},
+        )
+    config = holder.current()
+    alias = config.model_aliases[body.name]
+    return _alias_to_payload(body.name, alias)
+
+
+@router.patch("/aliases/{name}")
+async def update_alias(
+    request: Request,
+    name: str,
+    body: AliasUpdateRequest,
+) -> dict[str, Any] | JSONResponse:
+    """Update an existing alias. 404 if not configured."""
+
+    holder = _holder(request)
+    fallback_payload = (
+        [{"provider": fb.provider, "model": fb.model} for fb in body.fallback]
+        if body.fallback is not None
+        else None
+    )
+    try:
+        upsert_alias(
+            holder,
+            name=name,
+            provider=body.provider,
+            model=body.model,
+            fallback=fallback_payload,
+            update_only=True,
+        )
+    except AliasMutationError as exc:
+        return _gateway_error(
+            code=_alias_error_code(exc),
+            message=str(exc),
+            http_status=exc.http_status,
+            details={"alias": name},
+        )
+    except ConfigReloadError as exc:
+        return _gateway_error(
+            code="invalid_request",
+            message=str(exc),
+            http_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            details={"alias": name},
+        )
+    config = holder.current()
+    alias = config.model_aliases[name]
+    return _alias_to_payload(name, alias)
+
+
+@router.delete("/aliases/{name}")
+async def remove_alias(request: Request, name: str) -> JSONResponse:
+    """Remove an alias. 404 if not configured."""
+
+    holder = _holder(request)
+    try:
+        delete_alias(holder, name=name)
+    except AliasMutationError as exc:
+        return _gateway_error(
+            code=_alias_error_code(exc),
+            message=str(exc),
+            http_status=exc.http_status,
+            details={"alias": name},
+        )
+    except ConfigReloadError as exc:
+        return _gateway_error(
+            code="invalid_request",
+            message=str(exc),
+            http_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            details={"alias": name},
+        )
+    return JSONResponse(
+        status_code=status.HTTP_204_NO_CONTENT,
+        content=None,
+    )
+
+
+def _alias_error_code(exc: AliasMutationError) -> str:
+    """Map an :class:`AliasMutationError` HTTP status to a gateway code."""
+
+    if exc.http_status == status.HTTP_404_NOT_FOUND:
+        return "not_found"
+    if exc.http_status == status.HTTP_409_CONFLICT:
+        return "conflict"
+    if exc.http_status == status.HTTP_422_UNPROCESSABLE_ENTITY:
+        return "invalid_request"
+    return "internal_error"
