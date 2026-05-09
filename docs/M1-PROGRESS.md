@@ -1226,6 +1226,50 @@ PRD §5.3 GDPR surface lands end-to-end. Article 20 export is async via arq (que
 * The status-poll endpoint doesn't paginate the user's job history — it only returns one job by id. Operators who want a list of past exports can query the table directly. A `GET /users/me/export` listing endpoint is a natural follow-on if the UX surfaces a "your export history" panel.
 * The hard-delete worker doesn't audit-log the deletion itself (the user row is gone). The schedule and cancel events are audited; the actual hard delete leaves a worker-log line at INFO. Adding an audit row with `user_id=NULL` and a structured `details` payload is the cleanest forward path; rolls into D3 (audit log privilege fields).
 
+### D3 — Audit log: privilege fields ✅ (core; coverage continuing)
+
+PRD §5.3 audit-log surface lands in two slices. **D3-core** (this milestone) wires the helper, the chat-message keystone audit row, and the admin read endpoint — enough to make the documented verification step pass. **D3-coverage** (filed as DE for a focused follow-on session) extends audit-log writes across the rest of the M1 state-changing surface (auth events, project/file/KB CRUD, MFA enable/disable).
+
+**What landed in D3-core:**
+
+* **`app/audit.py`** — single `audit_action(...)` helper. Resolves `privilege_marked` + `privilege_basis` from the affected project's `privileged` flag automatically; captures `ip_address` / `user_agent` / `request_id` from the FastAPI Request when supplied; takes the row through `db.add` + `db.flush` so it rides the caller's outer transaction.
+* **D6 audit writes migrated to the helper** — `user.export_requested`, `user.deletion_scheduled`, `user.deletion_cancelled` now populate the request-context columns alongside the privilege fields (none are privileged today; the columns are correctly null/false rather than omitted).
+* **Chat-message keystone** (`api/app/api/chats.py`) — every completed exchange (streaming and non-streaming) writes one `chat.message_sent` audit row. `chat.project_id` resolves to a `Project` lookup; if `project.privileged` is true, the row carries `privilege_marked=true` + `privilege_basis="project:<name>"`. `routed_inference_tier`, `routed_provider`, `applied_skills`, `error_code`, and `chat_id` all land on the row (the last three under `details`).
+* **`GET /api/v1/admin/audit-log`** (`api/app/api/admin.py`) — admin-only read endpoint replacing the A4 501 stub. Filters: `privilege_marked`, `routed_inference_tier`, `action`, `user_id`, `since` / `until`. Cursor-based pagination ordered `timestamp DESC, id ASC`, page size cap 500 (default 50). Cursor encodes `<iso-timestamp>|<uuid>` so concurrent inserts during a paginated walk don't shift boundaries.
+
+**Files touched.**
+
+* `api/app/audit.py` (new) — the helper module.
+* `api/app/api/users.py` — D6 callsites migrated to `audit_action`.
+* `api/app/api/chats.py` — `_audit_message_sent` helper + integrations in both `_non_streaming_response` and `_stream_response`.
+* `api/app/api/admin.py` — `/admin/audit-log` read endpoint with `AuditLogEntry` / `AuditLogPage` shapes.
+* `api/tests/test_audit_log.py` (new) — 10 integration tests: helper privilege resolution (3 cases), endpoint unfiltered (1), filter cases (3), pagination (1), admin gate (2).
+* `api/tests/test_endpoints.py` — `/admin/audit-log` moves from the 501-stub set to `IMPLEMENTED_ROUTES`.
+
+**Test counts.** 10 net-new tests in `test_audit_log.py`; the D5/D6 tests that exercise the D6 helper migration (11 of them) still pass. Combined D3+D5+D6 + endpoint/openapi run: 54 passed, 2 pre-existing failures (`/admin/tier-policy` GET + PATCH 501 stubs predate D3).
+
+**D3-coverage — what's NOT in this milestone:**
+
+* Audit-log writes for: auth events (`user.login`, `user.logout`, `user.password_changed`), MFA events (`user.mfa_setup`, `user.mfa_enabled`, `user.mfa_disabled`, `user.mfa_recovery_code_used`), project CRUD (7 endpoints), file CRUD (3 endpoints), KB CRUD (7 endpoints). All consistent shape using `audit_action` — additive work, no architectural surprises.
+* Retroactive backfill of `audit_log` rows from the existing data (today's audit rows are all from this same session so backfill is essentially a no-op against current state).
+* Admin filtering UI in `web/src/routes/lq-ai/admin/audit-log/+page.svelte`. The `/admin/audit-log` JSON endpoint is the API contract; the UI is a Svelte rendering on top.
+* The hard-delete worker's missing audit row (D6 known-limitation) — should land alongside the D3-coverage commit set.
+
+These are filed as **D3-coverage** rather than re-blocking D3 because the verification step ("Create privileged project, send chat, query audit log filtered by privilege_marked=true, get expected entries") passes today against D3-core alone.
+
+**Architectural decisions.**
+
+1. **Single helper, not per-subsystem audit writers.** Centralising in `app/audit.py` means privilege resolution is consistent across every audit row in the codebase; subsystem-local audit code would diverge over time on what counts as "privileged" or how request context is captured. Cost: a small import ripple across handlers; benefit: one PR can fix every audit row's behavior.
+2. **Chat audit row commits separately from the message row.** The existing `_persist_assistant_message` calls `db.commit()` to land the message; the audit row commits in a follow-on transaction. This is intentional: the message is the user-visible artifact and must always land cleanly even if audit writes fail. Streaming-path audit failures log at warning and don't break the SSE stream. Symmetric to how the message-persist failure mode is treated.
+3. **Cursor format `<iso-timestamp>|<uuid>`** rather than offset pagination. Audit log volumes will outpace offset-pagination's accuracy (offset 1000 means different rows over time as new entries land at the head). Cursor is concurrent-insert-safe and the order key is the same one we filter on.
+4. **`privilege_basis` carries the project name, not the project ID.** An admin reading the audit log wants a human-readable handle ("Acme v Smith — privileged"). The project ID is also recoverable via `details.chat_id` → `chats.project_id`, so the basis column doesn't need to be a foreign key. Future work can replace the basis with a matter or instruction reference once that surface exists.
+
+**Known limitations.**
+
+* See "D3-coverage" above — most of M1's state-changing endpoints don't yet write audit rows. The verification path passes because chat-message is the keystone, but the broader PRD §5.3 commitment ("Every state-changing API call writes to an `audit_log` table") is partial.
+* The audit row's `details.applied_skills` is a list of skill names; if a skill is renamed mid-flight, prior rows reference the old name. This is the intentional snapshot semantic (audit captures what happened at the time, not what currently exists), but it's worth noting for query writers.
+* The `since` / `until` filters use exact `timestamp` matching with `>=` / `<=`. A future enhancement might add `timestamp_within_range_seconds` for "last 5 minutes"-style queries; for now, callers compute the range client-side.
+
 ---
 
 ## Tasks ahead
