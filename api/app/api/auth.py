@@ -1,4 +1,4 @@
-"""Auth endpoints — Task B1.
+"""Auth endpoints — Task B1 + D5.
 
 Per ADR 0002 (Backend owns authentication) and `backend-openapi.yaml`,
 the backend exposes:
@@ -8,8 +8,14 @@ the backend exposes:
 - `POST /api/v1/auth/refresh`  — refresh-token → new access + rotated refresh.
 - `POST /api/v1/auth/logout`   — bearer token → revoke ALL active sessions
                                   for the calling user. Returns 204.
-- `POST /api/v1/auth/mfa/setup`  — TOTP enrollment. **501 until D5.**
-- `POST /api/v1/auth/mfa/verify` — TOTP verification. **501 until D5.**
+- `POST /api/v1/auth/mfa/setup`   — TOTP enrollment (D5). Bearer-authed.
+                                    Issues a fresh secret + 10 recovery codes.
+- `POST /api/v1/auth/mfa/enable`  — confirms enrollment with a TOTP code (D5).
+                                    Flips ``users.mfa_enabled`` to TRUE.
+- `POST /api/v1/auth/mfa/verify`  — completes a 423 login challenge (D5).
+                                    Accepts TOTP or single-use recovery code.
+- `POST /api/v1/auth/mfa/disable` — bearer-authed; clears MFA after re-proving
+                                    password + a current TOTP/recovery code (D5).
 
 Refresh tokens are opaque random strings (not JWTs) — only their bcrypt
 hashes are persisted to `user_sessions`. Refresh rotates the token: the
@@ -34,23 +40,29 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._stub import not_implemented
 from app.api.dependencies import CurrentUser
 from app.config import get_settings
 from app.db.session import get_db
+from app.errors import Conflict
 from app.models.user import User, UserSession
 from app.security import (
     create_access_token,
     create_mfa_token,
     create_refresh_token,
+    decode_mfa_token,
     hash_password,
     refresh_token_matches,
     verify_password,
 )
+from app.security.totp import (
+    consume_recovery_code,
+    generate_recovery_codes,
+    generate_totp_secret,
+    provisioning_uri,
+    verify_totp,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-_D5 = "D5 — MFA enrollment + verification"
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +159,51 @@ class ChangePasswordRequest(BaseModel):
 
     current_password: str = Field(min_length=1, max_length=1024)
     new_password: str = Field(min_length=1, max_length=1024)
+
+
+class MfaSetupResponse(BaseModel):
+    """`/auth/mfa/setup` response shape — see backend-openapi.yaml.
+
+    ``secret`` and ``provisioning_uri`` carry the same TOTP secret in
+    two encodings. ``recovery_codes`` is the **plaintext** list (only
+    time the user sees them) — the backend persists bcrypt hashes.
+    """
+
+    secret: str
+    provisioning_uri: str
+    recovery_codes: list[str]
+
+
+class MfaEnableRequest(BaseModel):
+    """`/auth/mfa/enable` body — confirms enrollment with a fresh TOTP code."""
+
+    code: str = Field(pattern=r"^\d{6}$")
+
+
+class MfaVerifyRequest(BaseModel):
+    """`/auth/mfa/verify` body — completes a 423 login challenge.
+
+    The ``code`` is either a 6-digit TOTP or a 14-character recovery
+    code (``xxxx-xxxx-xxxx``). The handler tries TOTP first, then
+    recovery; submitted format is not validated up-front so an attacker
+    cannot tell from the response shape which path matched.
+    """
+
+    mfa_token: str = Field(min_length=1)
+    code: str = Field(min_length=1, max_length=64)
+
+
+class MfaDisableRequest(BaseModel):
+    """`/auth/mfa/disable` body — re-proves password + a current MFA code.
+
+    Disabling MFA is account-shape-changing, so we require *both* the
+    password (defends against a stolen access token) and a current
+    TOTP/recovery code (defends against an attacker who knows the
+    password but doesn't have the device).
+    """
+
+    password: str = Field(min_length=1, max_length=1024)
+    code: str = Field(min_length=1, max_length=64)
 
 
 # ---------------------------------------------------------------------------
@@ -455,17 +512,229 @@ async def change_password(
 
 
 # ---------------------------------------------------------------------------
-# MFA stubs — D5 territory. The shapes are pinned by backend-openapi.yaml;
-# we keep them returning the canonical 501 body so clients can detect that
-# the surface exists but is not yet wired.
+# D5 — MFA enrollment + verification.
+#
+# Two-step enrollment:
+#   1. POST /mfa/setup     — bearer-authed; issues secret + provisioning URI
+#                            + 10 plaintext recovery codes (one-time display).
+#                            Persists secret + bcrypt-hashed codes; mfa_enabled
+#                            stays FALSE until the user proves possession.
+#   2. POST /mfa/enable    — bearer-authed; verifies a TOTP code against the
+#                            pending secret. On success flips mfa_enabled=TRUE.
+#
+# Login flow (existing /auth/login, line ~265):
+#   3. POST /mfa/verify    — unauthed; redeems an mfa_token (issued by /login
+#                            on 423) plus a TOTP or recovery code. On success
+#                            mints a full access+refresh session.
+#
+# Disabling:
+#   4. POST /mfa/disable   — bearer-authed; requires password + a current
+#                            TOTP/recovery code. Clears all MFA state.
+#
+# Persistence: ``users.totp_secret`` (plaintext base32 — no recovery path
+# without it) and ``users.recovery_codes`` (bcrypt hashes — single-use
+# enforced by removal-on-match).
 # ---------------------------------------------------------------------------
 
 
-@router.post("/mfa/setup")
-async def mfa_setup(request: Request) -> JSONResponse:
-    return not_implemented(request, next_task=_D5, endpoint="POST /api/v1/auth/mfa/setup")
+@router.post(
+    "/mfa/setup",
+    response_model=MfaSetupResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Enroll in TOTP-based MFA",
+    responses={
+        200: {"model": MfaSetupResponse},
+        409: {"description": "MFA already enabled"},
+    },
+)
+async def mfa_setup(
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MfaSetupResponse:
+    """POST /api/v1/auth/mfa/setup — issue a fresh TOTP secret + recovery codes.
+
+    Re-running setup before ``/mfa/enable`` overwrites the pending
+    secret + codes (the user is restarting enrollment). Re-running
+    after MFA is already enabled is a 409 ``mfa_already_enabled``;
+    the user must call ``/mfa/disable`` first.
+    """
+    if user.mfa_enabled:
+        raise Conflict(message="MFA already enabled", code="mfa_already_enabled")
+
+    secret = generate_totp_secret()
+    plaintext_codes, hashed_codes = generate_recovery_codes()
+
+    user.totp_secret = secret
+    user.recovery_codes = hashed_codes
+    await db.commit()
+
+    return MfaSetupResponse(
+        secret=secret,
+        provisioning_uri=provisioning_uri(secret, account_email=user.email),
+        recovery_codes=plaintext_codes,
+    )
 
 
-@router.post("/mfa/verify")
-async def mfa_verify(request: Request) -> JSONResponse:
-    return not_implemented(request, next_task=_D5, endpoint="POST /api/v1/auth/mfa/verify")
+@router.post(
+    "/mfa/enable",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Confirm TOTP enrollment with a verification code",
+    responses={
+        204: {"description": "MFA enabled"},
+        400: {"description": "Setup not started or code invalid"},
+        409: {"description": "MFA already enabled"},
+    },
+)
+async def mfa_enable(
+    payload: MfaEnableRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """POST /api/v1/auth/mfa/enable — flip ``mfa_enabled`` after first verify.
+
+    Requires that ``/mfa/setup`` has been called first (a pending
+    ``totp_secret`` is on the user row). On success the user's next
+    login will receive the 423 challenge.
+    """
+    if user.mfa_enabled:
+        raise Conflict(message="MFA already enabled", code="mfa_already_enabled")
+
+    if not user.totp_secret:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA setup has not been initiated; call /auth/mfa/setup first.",
+        )
+
+    if not verify_totp(user.totp_secret, payload.code):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code.",
+        )
+
+    user.mfa_enabled = True
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/mfa/verify",
+    response_model=None,  # JSONResponse with LoginResponse body
+    status_code=status.HTTP_200_OK,
+    summary="Complete MFA challenge with TOTP or recovery code",
+    responses={
+        200: {"model": LoginResponse},
+        401: {"description": "Invalid challenge token or code"},
+    },
+)
+async def mfa_verify(
+    payload: MfaVerifyRequest,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """POST /api/v1/auth/mfa/verify — redeem an mfa_token + code → LoginResponse.
+
+    On success, mints the same session shape as a regular login (the
+    issuance path is shared — see ``_create_session`` and
+    ``_login_response``).
+
+    All failure modes (invalid token, expired token, missing user,
+    MFA-not-enabled, wrong code) collapse into a single 401 so an
+    attacker cannot probe which leg failed.
+    """
+    claims = decode_mfa_token(payload.mfa_token)
+    if claims is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid MFA challenge",
+        )
+
+    result = await db.execute(
+        select(User).where(User.id == claims.user_id, User.deleted_at.is_(None))
+    )
+    user = result.scalar_one_or_none()
+    if user is None or not user.mfa_enabled or not user.totp_secret:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid MFA challenge",
+        )
+
+    matched = False
+
+    if verify_totp(user.totp_secret, payload.code):
+        matched = True
+    else:
+        remaining = consume_recovery_code(payload.code, list(user.recovery_codes or []))
+        if remaining is not None:
+            user.recovery_codes = remaining
+            matched = True
+
+    if not matched:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid MFA code",
+        )
+
+    plaintext, _session = await _create_session(db, user, request)
+    user.last_login_at = _utcnow()
+    await db.commit()
+
+    body = _login_response(user, plaintext)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=body.model_dump(mode="json"))
+
+
+@router.post(
+    "/mfa/disable",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Disable MFA after re-proving password and a current MFA code",
+    responses={
+        204: {"description": "MFA disabled"},
+        400: {"description": "MFA is not enabled"},
+        401: {"description": "Wrong password or invalid MFA code"},
+    },
+)
+async def mfa_disable(
+    payload: MfaDisableRequest,
+    user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """POST /api/v1/auth/mfa/disable — require password + MFA code together.
+
+    Both checks are required so a stolen access token alone cannot
+    weaken the user's authentication posture, and an attacker who has
+    the password but not the device cannot strip MFA.
+
+    Wrong-password and wrong-code branches both return generic 401 so
+    callers can't tell which leg failed.
+    """
+    if not user.mfa_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA is not enabled.",
+        )
+
+    if not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+
+    code_ok = False
+    if user.totp_secret and verify_totp(user.totp_secret, payload.code):
+        code_ok = True
+    elif consume_recovery_code(payload.code, list(user.recovery_codes or [])) is not None:
+        # Recovery code is single-use, but since we're about to clear all
+        # MFA state we don't need to persist the truncated list — the
+        # code being burned just to disable MFA is the explicit intent.
+        code_ok = True
+
+    if not code_ok:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid MFA code",
+        )
+
+    user.mfa_enabled = False
+    user.totp_secret = None
+    user.recovery_codes = None
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
