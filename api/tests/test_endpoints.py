@@ -133,6 +133,8 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("PATCH", "/api/v1/admin/aliases/{name}"),
     ("DELETE", "/api/v1/admin/aliases/{name}"),
     ("GET", "/api/v1/admin/config"),
+    # D3 — admin audit-log read endpoint
+    ("GET", "/api/v1/admin/audit-log"),
     # C6 — Knowledge bases
     ("POST", "/api/v1/knowledge-bases"),
     ("GET", "/api/v1/knowledge-bases"),
