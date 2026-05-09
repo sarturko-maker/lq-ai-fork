@@ -529,12 +529,23 @@ class Router:
         *,
         config: GatewayConfig,
         adapters: dict[str, ProviderAdapter],
+        config_provider: "Callable[[], GatewayConfig] | None" = None,
     ) -> None:
         self._config = config
         self._adapters = adapters
+        # D0.5: when ``config_provider`` is supplied, every per-request
+        # call resolves against the live snapshot returned by the
+        # callable rather than the constructor-time config. The
+        # gateway lifespan wires this to ``MutableConfigHolder.current``
+        # so admin alias edits take effect on the very next request
+        # without rebuilding the Router. Tests that don't wire the
+        # holder still work — the static ``config`` is the fallback.
+        self._config_provider = config_provider
 
     @property
     def config(self) -> GatewayConfig:
+        if self._config_provider is not None:
+            return self._config_provider()
         return self._config
 
     @property
@@ -544,7 +555,7 @@ class Router:
     def resolve(self, requested_model: str) -> list[ResolvedTarget]:
         """Resolve ``requested_model`` to an ordered list of candidate targets."""
 
-        return resolve_alias_chain(requested_model=requested_model, config=self._config)
+        return resolve_alias_chain(requested_model=requested_model, config=self.config)
 
     async def chat_completion(
         self,

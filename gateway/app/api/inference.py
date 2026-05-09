@@ -232,8 +232,19 @@ def _map_provider_error_to_response(exc: ProviderAdapterError) -> JSONResponse:
 
 
 def _config(request: Request) -> GatewayConfig:
-    """Pull the loaded :class:`GatewayConfig` off ``app.state``."""
+    """Pull the loaded :class:`GatewayConfig` off ``app.state``.
 
+    D0.5: prefer the live :class:`MutableConfigHolder` snapshot when
+    one is installed (lifespan-built apps); fall back to the static
+    ``app.state.config`` for tests that bypass the lifespan and stash
+    a config directly. The holder's :meth:`current` is a single
+    attribute fetch — atomic under CPython's GIL — so an in-flight
+    request always sees a single coherent snapshot.
+    """
+
+    holder = getattr(request.app.state, "config_holder", None)
+    if holder is not None:
+        return holder.current()  # type: ignore[no-any-return]
     return request.app.state.config  # type: ignore[no-any-return]
 
 

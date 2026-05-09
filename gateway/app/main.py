@@ -58,6 +58,7 @@ from app.clients.backend import (
     configure_backend_client,
 )
 from app.config import GatewayConfig
+from app.config_holder import MutableConfigHolder, install_sighup_reload
 from app.config_loader import ConfigLoadError, load_config
 from app.db import engine_or_none
 from app.errors import LQAIError
@@ -105,7 +106,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.exception("gateway config load failed; refusing to start")
         raise
 
+    # D0.5: wrap the loaded config in a mutable holder so admin endpoints
+    # can hot-reload after writing the YAML file. The router and admin
+    # handlers read through the holder; in-flight requests hold their
+    # own snapshot via :meth:`MutableConfigHolder.current`.
+    config_holder = MutableConfigHolder(config, config_path=config_path)
+    app.state.config_holder = config_holder
+    # Backwards-compat: the existing routes read ``app.state.config``
+    # for the *initial* snapshot. Per-request handlers that need the
+    # live snapshot read through ``app.state.config_holder.current()``.
     app.state.config = config
+    install_sighup_reload(config_holder)
     logger.info(
         "gateway config loaded: %d providers, %d aliases",
         len(config.providers),
@@ -184,7 +195,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # B4: build the request router around the loaded config + adapter
     # registry. Per-request handlers pull this off ``app.state.router``
     # rather than reconstructing it on every call.
-    app.state.router = Router(config=config, adapters=adapters)
+    # D0.5: pass the holder's ``current`` so the router reads the live
+    # config snapshot on each call. After an admin alias edit lands,
+    # the very next request resolves against the new map without
+    # restart.
+    app.state.router = Router(
+        config=config,
+        adapters=adapters,
+        config_provider=config_holder.current,
+    )
 
     # B4: wire the inference_routing_log writer. ``DATABASE_URL`` is
     # optional — without it the gateway falls back to a no-op writer

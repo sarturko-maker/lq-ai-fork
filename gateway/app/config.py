@@ -410,15 +410,34 @@ class GatewayConfig(BaseModel):
         client compatibility, not as a real value.
         """
 
-        return {
-            "object": "list",
-            "data": [
-                {
-                    "id": alias_id,
-                    "object": "model",
-                    "created": 0,
-                    "owned_by": "lq-ai-gateway",
-                }
-                for alias_id in self.alias_ids()
-            ],
-        }
+        # D0.5: surface ``lq_ai_kind`` and ``routed_inference_tier`` on
+        # the alias rows so the alias-only fallback (used by tests that
+        # bypass the lifespan-built ``ModelDiscoverer``) carries the
+        # same shape as the live-discovery merge. Avoids importing
+        # the router here (would create a circular dep) by inlining
+        # the same lookup chain ``derive_routed_inference_tier`` runs.
+        out: list[dict[str, Any]] = []
+        for alias_name, alias in self.model_aliases.items():
+            tier: int | None = None
+            primary = self.provider_by_name(alias.primary.provider)
+            if primary is not None and alias.primary.model:
+                pair = f"{primary.name}/{alias.primary.model}"
+                if pair in self.inference_tiers.overrides:
+                    tier = int(self.inference_tiers.overrides[pair])
+                elif primary.name in self.inference_tiers.overrides:
+                    tier = int(self.inference_tiers.overrides[primary.name])
+                elif primary.type in self.inference_tiers.defaults:
+                    tier = int(self.inference_tiers.defaults[primary.type])
+                else:
+                    tier = int(primary.tier)
+            entry: dict[str, Any] = {
+                "id": alias_name,
+                "object": "model",
+                "created": 0,
+                "owned_by": "lq-ai-gateway",
+                "lq_ai_kind": "alias",
+            }
+            if tier is not None:
+                entry["routed_inference_tier"] = tier
+            out.append(entry)
+        return {"object": "list", "data": out}

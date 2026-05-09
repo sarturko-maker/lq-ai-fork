@@ -438,12 +438,35 @@ class ModelDiscoverer:
         out: list[DiscoveredModel] = []
 
         # 1. Configured aliases.
-        for alias_id in config.alias_ids():
+        # D0.5 fix: aliases resolve to a specific (provider, model)
+        # pair at config-load time, so the tier IS knowable. D0
+        # accidentally left this off (it only stamped the tier on
+        # ``provider_native`` rows); the picker therefore couldn't
+        # render a tier badge for the alias options. Compute the
+        # primary-target tier per alias here so the UI surface is
+        # consistent.
+        for alias_name, alias in config.model_aliases.items():
+            primary_provider = config.provider_by_name(alias.primary.provider)
+            tier: int | None = None
+            if primary_provider is not None and alias.primary.model:
+                # Walk a single level: if the alias's primary.model is
+                # itself another alias (multi-level chains), the
+                # config-load validator already proved the chain
+                # terminates. We don't recurse here because the
+                # listing is best-effort metadata, not the dispatch
+                # path; a one-level lookup is the right precision
+                # for a UI badge.
+                tier = derive_routed_inference_tier(
+                    provider=primary_provider,
+                    native_model=alias.primary.model,
+                    inference_tiers=config.inference_tiers,
+                )
             out.append(
                 DiscoveredModel(
-                    id=alias_id,
+                    id=alias_name,
                     owned_by="lq-ai-gateway",
                     lq_ai_kind="alias",
+                    routed_inference_tier=tier,
                 )
             )
 
