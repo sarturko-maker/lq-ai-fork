@@ -389,6 +389,77 @@ class GatewayClient:
                 details={"status_code": response.status_code},
             ) from exc
 
+    # --- Model list (D0) -----------------------------------------------------
+
+    async def list_models(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """GET /v1/models on the gateway.
+
+        Returns the merged ``{object: "list", data: [...]}`` payload
+        per ``docs/api/gateway-openapi.yaml`` (D0). The response shape
+        is forwarded verbatim so the backend's ``/api/v1/models`` proxy
+        can hand it to clients without translation.
+
+        Errors translate the same way as ``chat_completion``: timeout
+        → :class:`GatewayTimeout`, transport failure →
+        :class:`GatewayUnreachable`, gateway 401 → logged warning +
+        :class:`GatewayUnreachable`, structured 4xx → mapped via
+        :func:`map_gateway_error_code`. Per the brief: a 401 from the
+        gateway must NOT leak the underlying "wrong gateway key"
+        signal to the user.
+        """
+
+        headers = self._build_headers(request_id=request_id)
+        try:
+            response = await self._client.get("/v1/models", headers=headers)
+        except httpx.TimeoutException as exc:
+            log.warning(
+                "Gateway list_models timed out",
+                extra=_structured_log_extra(
+                    op="list_models",
+                    timeout=self._timeout,
+                    request_id=request_id,
+                ),
+            )
+            raise GatewayTimeout(
+                "Gateway did not respond within the configured timeout",
+                details={"timeout_seconds": self._timeout},
+            ) from exc
+        except httpx.HTTPError as exc:
+            log.warning(
+                "Gateway list_models transport failure: %s",
+                exc,
+                extra=_structured_log_extra(
+                    op="list_models",
+                    request_id=request_id,
+                    error_type=type(exc).__name__,
+                ),
+            )
+            raise GatewayUnreachable(
+                "Could not reach the Inference Gateway",
+                details={"transport_error": type(exc).__name__},
+            ) from exc
+
+        if response.status_code >= 400:
+            self._raise_for_gateway_error(
+                status_code=response.status_code,
+                body_bytes=response.content,
+                op="list_models",
+                request_id=request_id,
+            )
+
+        try:
+            payload: dict[str, Any] = response.json()
+            return payload
+        except json.JSONDecodeError as exc:
+            raise GatewayInvalidResponse(
+                "Gateway list_models returned a non-JSON success response",
+                details={"status_code": response.status_code},
+            ) from exc
+
     # --- Lifecycle -----------------------------------------------------------
 
     async def aclose(self) -> None:

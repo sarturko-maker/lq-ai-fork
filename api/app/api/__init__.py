@@ -29,6 +29,7 @@ from app.api import (
     files,
     internal,
     knowledge_bases,
+    models,
     organization_profile,
     projects,
     saved_prompts,
@@ -55,6 +56,7 @@ _active = [Depends(get_active_user)]
 api_router.include_router(projects.router, dependencies=_active)
 api_router.include_router(chats.router, dependencies=_active)
 api_router.include_router(skills.router, dependencies=_active)
+api_router.include_router(models.router, dependencies=_active)
 api_router.include_router(files.router, dependencies=_active)
 api_router.include_router(knowledge_bases.router, dependencies=_active)
 api_router.include_router(organization_profile.router, dependencies=_active)
