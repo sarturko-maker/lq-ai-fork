@@ -61,11 +61,22 @@ User flagged that the **D0.5 admin alias form's model dropdown shows only the in
 ## How to resume next session
 
 1. `cd /Users/kevinkeller/Desktop/LegalQuants/inhouse-ai`
-2. `git pull origin main` and verify HEAD is `fd08354` or later.
+2. `git pull origin main` and verify HEAD is `bb41f8f` or later.
 3. `docker compose ps` — if not all-healthy, `docker compose up -d`.
 4. Read `docs/M1-PROGRESS.md` and this handoff doc.
-5. **Wait for the user's example code** for the model-picker UX pattern before touching `web/src/routes/lq-ai/admin/models/+page.svelte` or `web/src/lib/lq-ai/components/AliasForm.svelte`.
-6. **Then** spawn D-phase wave-1 (D1 + D5 + D6) in parallel worktrees per the established pattern (smallest-surface first at merge: D5 → D6 → D1).
+
+### Note for next session — D1 agent already in flight
+
+The previous session accidentally spawned a D1 agent (worktree `worktree-agent-a3cec7b630131a9e6`) before the user redirected to "let next session run D." Two scenarios:
+
+**(a) The D1 agent finished while no session was open.** Check for the worktree on disk: `git worktree list | grep a3cec7b6`. If it's there with commits ahead of main, treat it like any other completed agent worktree — verify, ff-merge or rebase, run static checks + tests, push.
+
+**(b) The D1 agent is still running.** Background tasks may not survive cleanly across session boundaries; if no completion notification arrived, check `docker compose logs` and the agent's output file at `/private/tmp/claude-501/-Users-kevinkeller-Desktop-LegalQuants-inhouse-ai/.../a3cec7b630131a9e6.output`. If incomplete, ABORT and re-spawn freshly.
+
+Either way: do NOT spawn D5 + D6 until D1's state is resolved.
+
+5. **Wait for the user's example code** for the model-picker UX pattern before touching `web/src/routes/lq-ai/admin/models/+page.svelte` or `web/src/lib/lq-ai/components/AliasForm.svelte`. The picker UX is deferred per the user's explicit "model picker can wait until D is done" decision.
+6. **Then** spawn D-phase wave-1 remainder (D5 + D6) in parallel worktrees, after D1 is merged. Surfaces don't overlap.
 
 ---
 
