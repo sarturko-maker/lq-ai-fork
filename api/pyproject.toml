@@ -87,6 +87,12 @@ dependencies = [
     # beyond `regex`) and the alternative (hand-rolling cl100k_base
     # BPE) would be hundreds of lines for the same SBOM cost.
     "tiktoken>=0.7,<1",
+    # D5 — pyotp: RFC 6238 TOTP implementation for MFA enrollment and
+    # verification. MIT-licensed; tiny (~300 LOC, no transitive deps).
+    # The alternative would be hand-rolling HMAC-SHA1 + base32 secret
+    # generation + drift handling, which is the same SBOM cost for a
+    # security-sensitive primitive we'd rather not own.
+    "pyotp>=2.9,<3",
 ]
 
 [project.optional-dependencies]
@@ -163,4 +169,10 @@ ignore_missing_imports = true
 # but the override here covers the standard case.
 [[tool.mypy.overrides]]
 module = ["tiktoken", "tiktoken.*"]
+ignore_missing_imports = true
+
+# D5 — pyotp has no type stubs (small module, BSD-2-clause; the project
+# does not ship a `py.typed` marker). Imported in app.security.totp.
+[[tool.mypy.overrides]]
+module = ["pyotp", "pyotp.*"]
 ignore_missing_imports = true

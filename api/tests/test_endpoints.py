@@ -85,6 +85,11 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/users/me"),
     # B2 — first-run admin + forced password change
     ("POST", "/api/v1/auth/change-password"),
+    # D5 — MFA enrollment + verification
+    ("POST", "/api/v1/auth/mfa/setup"),
+    ("POST", "/api/v1/auth/mfa/enable"),
+    ("POST", "/api/v1/auth/mfa/verify"),
+    ("POST", "/api/v1/auth/mfa/disable"),
     # B5 + C3 — backend chats + messages with persistence; SSE streaming.
     ("POST", "/api/v1/chats"),
     ("GET", "/api/v1/chats"),
@@ -163,10 +168,13 @@ async def test_route_inventory_is_nonempty() -> None:
     The bound is intentionally loose — as tasks land, they migrate
     routes from this 501-stub set into ``IMPLEMENTED_ROUTES``. The
     primary purpose of this assertion is to catch the failure mode
-    of accidentally dropping all the include_router calls. >=15 is
-    well below the count after C-phase wave-2 lands.
+    of accidentally dropping all the include_router calls. After D5
+    landed (4 MFA endpoints implemented), the remaining stub count
+    sits in the low teens; lowered to ``>= 5`` so the bound continues
+    to fire as a sanity check through wave-2 (D2, D3, D4, D7) without
+    needing to re-tune on every task.
     """
-    assert len(ROUTES) >= 15
+    assert len(ROUTES) >= 5
 
 
 @pytest_asyncio.fixture
