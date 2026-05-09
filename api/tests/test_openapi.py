@@ -23,6 +23,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/auth/refresh",
         "/api/v1/auth/mfa/setup",
         "/api/v1/auth/mfa/verify",
+        # D5 — MFA enrollment + verification
+        "/api/v1/auth/mfa/enable",
+        "/api/v1/auth/mfa/disable",
         "/api/v1/auth/change-password",  # B2
         # users
         "/api/v1/users/me",
@@ -94,9 +97,11 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 40 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
-    # alias endpoints (/admin/config, /admin/aliases, /admin/aliases/{name}).
-    assert len(actual) == 40
+    # 42 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
+    # alias endpoints + D5's two new MFA endpoints (/auth/mfa/enable and
+    # /auth/mfa/disable; /auth/mfa/setup and /auth/mfa/verify already
+    # existed as A4 stubs).
+    assert len(actual) == 42
 
 
 @pytest.mark.unit
