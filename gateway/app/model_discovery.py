@@ -496,7 +496,7 @@ class ModelDiscoverer:
 __all__ = [
     "ANTHROPIC_CACHE_TTL_SECONDS",
     "DISCOVERY_TIMEOUT_SECONDS",
+    "OLLAMA_CACHE_TTL_SECONDS",
     "DiscoveredModel",
     "ModelDiscoverer",
-    "OLLAMA_CACHE_TTL_SECONDS",
 ]

@@ -205,8 +205,9 @@ async def test_send_message_round_trips_raw_provider_model(
     ``POST /chats/{id}/messages`` round-trips through the gateway and
     persists the resolved model on the assistant message row."""
 
-    from app.models.chat import Chat, Message
     from sqlalchemy import select
+
+    from app.models.chat import Chat, Message
 
     chat = Chat(owner_id=db_user.id, title="New chat")
     db_session.add(chat)
@@ -252,10 +253,14 @@ async def test_send_message_round_trips_raw_provider_model(
 
     # Persisted message row carries the upstream-reported model name.
     rows = (
-        await db_session.execute(
-            select(Message).where(Message.chat_id == chat_id, Message.role == "assistant")
+        (
+            await db_session.execute(
+                select(Message).where(Message.chat_id == chat_id, Message.role == "assistant")
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].routed_model == "claude-haiku-4-5"
     assert rows[0].routed_provider == "anthropic-prod"

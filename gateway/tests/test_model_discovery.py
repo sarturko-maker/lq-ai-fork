@@ -108,9 +108,7 @@ async def test_discover_ollama_returns_empty_on_connection_error() -> None:
 
     config = _make_config()
     ollama = config.providers[1]
-    respx.get("http://ollama:11434/api/tags").mock(
-        side_effect=httpx.ConnectError("refused")
-    )
+    respx.get("http://ollama:11434/api/tags").mock(side_effect=httpx.ConnectError("refused"))
 
     async with httpx.AsyncClient() as client:
         discoverer = ModelDiscoverer(client=client)
@@ -124,9 +122,7 @@ async def test_discover_ollama_returns_empty_on_connection_error() -> None:
 async def test_discover_ollama_returns_empty_on_500() -> None:
     config = _make_config()
     ollama = config.providers[1]
-    respx.get("http://ollama:11434/api/tags").mock(
-        return_value=httpx.Response(500, text="boom")
-    )
+    respx.get("http://ollama:11434/api/tags").mock(return_value=httpx.Response(500, text="boom"))
 
     async with httpx.AsyncClient() as client:
         discoverer = ModelDiscoverer(client=client)
@@ -268,20 +264,14 @@ async def test_discover_anthropic_uses_5min_cache() -> None:
 async def test_list_all_merges_aliases_and_provider_native_rows() -> None:
     config = _make_config()
     respx.get("http://ollama:11434/api/tags").mock(
-        return_value=httpx.Response(
-            200, json={"models": [{"name": "llama3.1:8b"}]}
-        )
+        return_value=httpx.Response(200, json={"models": [{"name": "llama3.1:8b"}]})
     )
     respx.get("https://api.anthropic.com/v1/models").mock(
-        return_value=httpx.Response(
-            200, json={"data": [{"id": "claude-opus-4-7"}]}
-        )
+        return_value=httpx.Response(200, json={"data": [{"id": "claude-opus-4-7"}]})
     )
 
     async with httpx.AsyncClient() as client:
-        discoverer = ModelDiscoverer(
-            client=client, env={"ANTHROPIC_API_KEY": "sk-test"}
-        )
+        discoverer = ModelDiscoverer(client=client, env={"ANTHROPIC_API_KEY": "sk-test"})
         rows = await discoverer.list_all(config)
 
     ids = [r.id for r in rows]
@@ -298,15 +288,11 @@ async def test_list_all_isolates_per_source_failures() -> None:
     config = _make_config()
     respx.get("http://ollama:11434/api/tags").mock(side_effect=httpx.ConnectError("nope"))
     respx.get("https://api.anthropic.com/v1/models").mock(
-        return_value=httpx.Response(
-            200, json={"data": [{"id": "claude-opus-4-7"}]}
-        )
+        return_value=httpx.Response(200, json={"data": [{"id": "claude-opus-4-7"}]})
     )
 
     async with httpx.AsyncClient() as client:
-        discoverer = ModelDiscoverer(
-            client=client, env={"ANTHROPIC_API_KEY": "sk-test"}
-        )
+        discoverer = ModelDiscoverer(client=client, env={"ANTHROPIC_API_KEY": "sk-test"})
         rows = await discoverer.list_all(config)
 
     ids = {r.id for r in rows}
@@ -336,20 +322,14 @@ async def test_list_all_returns_aliases_when_no_providers_reachable() -> None:
 async def test_list_all_annotates_tier_on_native_rows() -> None:
     config = _make_config()
     respx.get("http://ollama:11434/api/tags").mock(
-        return_value=httpx.Response(
-            200, json={"models": [{"name": "llama3.1:8b"}]}
-        )
+        return_value=httpx.Response(200, json={"models": [{"name": "llama3.1:8b"}]})
     )
     respx.get("https://api.anthropic.com/v1/models").mock(
-        return_value=httpx.Response(
-            200, json={"data": [{"id": "claude-haiku-4-5"}]}
-        )
+        return_value=httpx.Response(200, json={"data": [{"id": "claude-haiku-4-5"}]})
     )
 
     async with httpx.AsyncClient() as client:
-        discoverer = ModelDiscoverer(
-            client=client, env={"ANTHROPIC_API_KEY": "sk-test"}
-        )
+        discoverer = ModelDiscoverer(client=client, env={"ANTHROPIC_API_KEY": "sk-test"})
         rows = await discoverer.list_all(config)
 
     by_id = {r.id: r for r in rows}
@@ -363,9 +343,7 @@ async def test_list_all_annotates_tier_on_native_rows() -> None:
 def test_discovered_model_payload_omits_optionals() -> None:
     """``to_payload`` drops ``routed_inference_tier`` / ``provider_type`` when None."""
 
-    alias_row = DiscoveredModel(
-        id="smart", owned_by="lq-ai-gateway", lq_ai_kind="alias"
-    )
+    alias_row = DiscoveredModel(id="smart", owned_by="lq-ai-gateway", lq_ai_kind="alias")
     payload = alias_row.to_payload()
     assert payload["id"] == "smart"
     assert payload["lq_ai_kind"] == "alias"
@@ -392,9 +370,7 @@ def test_discovered_model_payload_omits_optionals() -> None:
 @pytest.mark.unit
 def test_resolve_raw_provider_model_returns_single_target() -> None:
     config = _make_config()
-    targets = resolve_alias_chain(
-        requested_model="anthropic-prod/claude-haiku-4-5", config=config
-    )
+    targets = resolve_alias_chain(requested_model="anthropic-prod/claude-haiku-4-5", config=config)
     assert len(targets) == 1
     target = targets[0]
     assert target.provider.name == "anthropic-prod"
@@ -408,9 +384,7 @@ def test_resolve_raw_provider_model_supports_colon_in_model_name() -> None:
     """Ollama tags often contain ``:`` (``llama3.1:8b``) — split on the first ``/`` only."""
 
     config = _make_config()
-    targets = resolve_alias_chain(
-        requested_model="ollama-local/llama3.1:8b", config=config
-    )
+    targets = resolve_alias_chain(requested_model="ollama-local/llama3.1:8b", config=config)
     assert len(targets) == 1
     assert targets[0].provider.name == "ollama-local"
     assert targets[0].native_model == "llama3.1:8b"
@@ -421,9 +395,7 @@ def test_resolve_raw_provider_model_supports_colon_in_model_name() -> None:
 def test_resolve_raw_provider_model_rejects_unknown_provider() -> None:
     config = _make_config()
     with pytest.raises(ModelResolutionError) as exc_info:
-        resolve_alias_chain(
-            requested_model="not-a-provider/some-model", config=config
-        )
+        resolve_alias_chain(requested_model="not-a-provider/some-model", config=config)
     msg = str(exc_info.value)
     assert "not-a-provider" in msg
     # The message must enumerate the configured set so the operator can spot the typo.
@@ -465,9 +437,7 @@ async def test_v1_models_returns_merged_payload(client: AsyncClient) -> None:
     """
 
     respx.get("http://ollama:11434/api/tags").mock(
-        return_value=httpx.Response(
-            200, json={"models": [{"name": "llama3.1:8b"}]}
-        )
+        return_value=httpx.Response(200, json={"models": [{"name": "llama3.1:8b"}]})
     )
     # No ANTHROPIC_API_KEY in the test env -> Anthropic discovery skipped.
     response = await client.get("/v1/models")
@@ -490,9 +460,7 @@ async def test_v1_models_returns_merged_payload(client: AsyncClient) -> None:
 async def test_v1_models_survives_ollama_outage(client: AsyncClient) -> None:
     """Ollama down -> response still surfaces aliases."""
 
-    respx.get("http://ollama:11434/api/tags").mock(
-        side_effect=httpx.ConnectError("refused")
-    )
+    respx.get("http://ollama:11434/api/tags").mock(side_effect=httpx.ConnectError("refused"))
     response = await client.get("/v1/models")
     assert response.status_code == 200
     ids = {e["id"] for e in response.json()["data"]}
