@@ -65,18 +65,12 @@ User flagged that the **D0.5 admin alias form's model dropdown shows only the in
 3. `docker compose ps` — if not all-healthy, `docker compose up -d`.
 4. Read `docs/M1-PROGRESS.md` and this handoff doc.
 
-### Note for next session — D1 agent already in flight
+### D1 — completed and merged this session
 
-The previous session accidentally spawned a D1 agent (worktree `worktree-agent-a3cec7b630131a9e6`) before the user redirected to "let next session run D." Two scenarios:
-
-**(a) The D1 agent finished while no session was open.** Check for the worktree on disk: `git worktree list | grep a3cec7b6`. If it's there with commits ahead of main, treat it like any other completed agent worktree — verify, ff-merge or rebase, run static checks + tests, push.
-
-**(b) The D1 agent is still running.** Background tasks may not survive cleanly across session boundaries; if no completion notification arrived, check `docker compose logs` and the agent's output file at `/private/tmp/claude-501/-Users-kevinkeller-Desktop-LegalQuants-inhouse-ai/.../a3cec7b630131a9e6.output`. If incomplete, ABORT and re-spawn freshly.
-
-Either way: do NOT spawn D5 + D6 until D1's state is resolved.
+D1 (tier-floor enforcement) landed before session close: 5 commits on main from `bb41f8f..e13beca` covering the gateway refusal logic + audit `refused=true` row, backend project-floor forwarding + 403 translation, 22 net-new tests, and post-merge mypy fixes for two strict-mode gaps it surfaced. 573 total tests pass.
 
 5. **Wait for the user's example code** for the model-picker UX pattern before touching `web/src/routes/lq-ai/admin/models/+page.svelte` or `web/src/lib/lq-ai/components/AliasForm.svelte`. The picker UX is deferred per the user's explicit "model picker can wait until D is done" decision.
-6. **Then** spawn D-phase wave-1 remainder (D5 + D6) in parallel worktrees, after D1 is merged. Surfaces don't overlap.
+6. **Spawn D-phase wave-1 remainder** in parallel worktrees: **D5 (MFA)** and **D6 (GDPR export/delete)**. Surfaces don't overlap (auth.py + user-model migration vs users.py + delete worker). After those, D-phase wave-2: D2 (tier UI) + D3 (audit privilege) + D4 (Org Profile) + D7 (Saved Prompts).
 
 ---
 
