@@ -1144,6 +1144,52 @@ PRD §4.4's tier-floor refusal is now wired end-to-end. Tier *derivation* alread
 * The skill's `minimum_inference_tier` is read from the backend's cached `Skill` shape (per C2); a freshly-edited skill might be served from the cache for up to the configured TTL (default 60s). Operators who edit a skill's tier-floor expect a brief delay before refusals take effect. Acceptable for M1; flagged for ops docs.
 * No request-override surface on `MessageCreateRequest` yet — the only path that exposes the override is the direct gateway client. Adding a `minimum_inference_tier` field to `MessageCreateRequest` is a small follow-on; deferred until a UX surface needs it (D2's tier-awareness panel is the natural driver).
 
+### D6 — Per-user export and delete (GDPR Articles 17 and 20) ✅
+
+PRD §5.3 GDPR surface lands end-to-end. Article 20 export is async via arq (queue → worker → ZIP → MinIO → presigned URL); Article 17 delete is soft-schedule + grace period + daily hard-delete cron.
+
+**Endpoints landed (replacing the A4-era 501 stubs + extending the OpenAPI sketch):**
+
+* `POST /api/v1/users/me/export` (202) — inserts a queued `user_export_jobs` row, enqueues the worker job, audit-logs the request, returns the job id for polling.
+* `GET /api/v1/users/me/export/{job_id}` (200) — **new endpoint, extends the sketch**. Status poll. Returns a presigned MinIO URL valid 24h when status='completed'. 404 when the job doesn't exist or belongs to another user (does not leak existence cross-user).
+* `POST /api/v1/users/me/delete` (202) — soft-schedules deletion: `users.deletion_scheduled_at = now() + gdpr_grace_period_days`, revokes all active sessions, audit-logs the request. **Idempotent** — re-calling returns the existing schedule rather than pushing it back.
+* `POST /api/v1/users/me/delete/cancel` (204) — **new endpoint, extends the sketch**. Clears a pending schedule during the grace-period window. 400 when there is no pending deletion.
+
+**Worker jobs landed in `app/workers/`:**
+
+* `user_export.export_user_data_job(ctx, job_id)` — assembles the ZIP (user.json sanitized of credentials; chats.json, messages.json, projects.json, files.json + raw bytes under `files/<id>__<filename>`, knowledge_bases.json, audit_log.json, skills.json empty per ADR 0004, README.md). Uploads to MinIO under `exports/<user_id>/<job_id>.zip` with 7-day expiry. Per-row error becomes a placeholder file rather than a fatal abort.
+* `user_export.export_gc_job(ctx)` — hourly cron sweeping rows whose `expires_at` has passed; deletes MinIO bytes + clears `storage_key`. Row itself is preserved so a status poll for an expired bundle returns a deterministic answer rather than a 404 surprise.
+* `user_deletion.hard_delete_due_users_job(ctx)` — daily cron at 03:00 UTC. For each user past their grace period: delete export-bundle + file bytes from MinIO, then delete KBs / chats / files / projects in the FK-respecting order, then the user row itself. Per-user transaction: a stuck user logs + skips, doesn't block the batch.
+
+**Files touched.**
+
+* `api/alembic/versions/0009_create_user_export_jobs.py` (new) + `api/app/models/user_export.py` (new) + `docs/db-schema.md` updated to document the new table.
+* `api/app/api/users.py` — replaces both 501 stubs with full handlers; adds the status-poll and cancel-deletion endpoints.
+* `api/app/storage.py` — adds `upload_bytes()` (single-shot put for the worker's ZIP) and `presigned_get_url()` (24h URL for the status-poll's response).
+* `api/app/workers/user_export.py` (new) + `api/app/workers/user_deletion.py` (new) + `api/app/workers/document_pipeline.py` registers them in `WorkerSettings.functions` and `WorkerSettings.cron_jobs`.
+* `api/app/workers/queue.py` — `enqueue_user_export_job()` + matching `EXPORT_USER_DATA_JOB_NAME` constant.
+* `api/app/config.py` — `gdpr_grace_period_days` knob (env: `LQ_AI_GDPR_GRACE_PERIOD_DAYS`, default 30, ge=0). `0` hard-deletes on the next worker tick — used in tests.
+* `docs/api/backend-openapi.yaml` — documents the new status-poll and cancel-deletion endpoints; expands the export and delete descriptions for the async+grace-period semantics.
+* `api/tests/test_user_export.py` (new) + `api/tests/test_user_deletion.py` (new) + `api/tests/test_user_deletion_hard_delete.py` (new) — 12 integration tests. `tests/test_endpoints.py` and `tests/test_openapi.py` updated for the four routes moving from stub to implemented.
+
+**Audit retention.** `audit_log.user_id` is `ON DELETE SET NULL` (since A1's migration 0001) and `inference_routing_log.user_id` is the same — the FKs *already* anonymize the actor naturally when the user row is deleted. PRD §5.3's audit-retention requirement is satisfied without any new column or migration. Tested in `test_user_deletion_hard_delete.py` via a re-read after `expire_all()` to bypass the session cache.
+
+**Architectural decisions.**
+
+1. **Async with status-poll, not synchronous**, per the OpenAPI's `202 Accepted` shape. Worker writes to MinIO; API hands out presigned URLs with a 24h expiry rather than streaming bytes through the API process. Completed bundles live 7 days in storage; the GC cron clears expired rows. Operators who want longer retention can extend `_EXPORT_TTL` (kept private; behavioral change should go through a config knob if/when an operator asks).
+2. **Cron jobs co-tenant the ingest worker process.** Single-tenant deployment scale doesn't justify a separate cron container; both the GC sweep and the hard-delete sweep are I/O-bound and well-spaced (top of hour vs 03:00 UTC). If operators see contention with ingest at scale, splitting into a dedicated cron worker is a config change in `docker-compose.yml`, not a code change.
+3. **Idempotent delete-schedule.** Re-calling `/me/delete` returns the existing `scheduled_deletion_at` rather than pushing it back — this prevents accidental "extension" of the grace window via repeated UI clicks. Symmetric to GitHub's account-deletion pattern; the user's intent (delete) hasn't changed and the operator's clock should be authoritative.
+4. **Login during the grace period is preserved.** Otherwise the cancel endpoint is unreachable. The existing `dependencies.py` gate is on `deleted_at`, not `deletion_scheduled_at`; D6 leaves it that way and documents the choice in `users.py`.
+5. **FK-respecting cascade walk in the hard-delete worker** rather than flipping FKs to `ON DELETE CASCADE`. Most owner FKs are `ON DELETE RESTRICT` deliberately (a stray user delete shouldn't quietly nuke business data); hard delete is the *one* path that's allowed to walk the graph. Manual ordering keeps the safety posture intact for every other path.
+
+**Test counts.** 12 integration tests in `tests/test_user_export.py` + `tests/test_user_deletion.py` + `tests/test_user_deletion_hard_delete.py`, all green against the worktree's per-test SAVEPOINT-isolated DB. The full api/ test suite shows D6 introduces no regressions; pre-existing failures (admin endpoints' 403→501 mismatch, skill-loader and pipeline-ingest fixture drift) all reproduce on `main` HEAD.
+
+**Known limitations.**
+
+* The export ZIP is built in memory before the MinIO upload. For users with many GB of files this could OOM the worker process. M1 deployments are single-tenant with realistic per-user file totals well under 1 GB, so this is acceptable; the natural fix is a streaming multipart upload to MinIO with the ZIP written through a `tempfile.NamedTemporaryFile`. Filed as a candidate **DE-XXX** for M2 if export volumes become a real constraint.
+* The status-poll endpoint doesn't paginate the user's job history — it only returns one job by id. Operators who want a list of past exports can query the table directly. A `GET /users/me/export` listing endpoint is a natural follow-on if the UX surfaces a "your export history" panel.
+* The hard-delete worker doesn't audit-log the deletion itself (the user row is gone). The schedule and cancel events are audited; the actual hard delete leaves a worker-log line at INFO. Adding an audit row with `user_id=NULL` and a structured `details` payload is the cleanest forward path; rolls into D3 (audit log privilege fields).
+
 ---
 
 ## Tasks ahead
