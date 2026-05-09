@@ -74,6 +74,15 @@
 		</a>
 		{#if $auth.user}
 			<div class="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
+				{#if $auth.user.is_admin}
+					<a
+						href="/lq-ai/admin/models"
+						class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+						data-testid="lq-ai-admin-link"
+					>
+						Settings
+					</a>
+				{/if}
 				<span>{$auth.user.email}</span>
 				<button
 					type="button"
