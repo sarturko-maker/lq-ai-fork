@@ -796,6 +796,70 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Skill'}
 
+  # ----------- MODELS (D0) -----------
+  /api/v1/models:
+    get:
+      tags: [models]
+      summary: List available models — proxy to gateway /v1/models (D0)
+      description: |
+        Authenticated proxy that forwards the gateway's merged
+        ``GET /v1/models`` payload (aliases + live-discovered Ollama
+        tags + live-discovered Anthropic catalog rows). The LQ.AI shell's
+        model picker consumes this endpoint; the response shape is
+        identical to the gateway's per
+        ``docs/api/gateway-openapi.yaml`` so the contract stays single-
+        sourced.
+
+        Auth: bearer token + cleared ``must_change_password``. The
+        picker contents reveal which providers the operator has
+        configured, so anonymous reads are intentionally not allowed.
+
+        Errors:
+        - Gateway timeout → 504 ``gateway_timeout``.
+        - Gateway unreachable / 5xx / 401 → 503 ``gateway_unreachable``.
+          A 401 from the gateway is operator-side misconfiguration; the
+          user must not see the underlying detail.
+      responses:
+        '200':
+          description: Model list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [object, data]
+                properties:
+                  object: {type: string, enum: [list]}
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, object, created, owned_by, lq_ai_kind]
+                      properties:
+                        id: {type: string}
+                        object: {type: string, enum: [model]}
+                        created: {type: integer}
+                        owned_by: {type: string}
+                        lq_ai_kind: {type: string, enum: [alias, provider_native]}
+                        routed_inference_tier: {type: integer, enum: [1, 2, 3, 4, 5]}
+                        provider_type:
+                          type: string
+                          enum: [anthropic, openai, vertex, cohere, azure_openai, bedrock, ollama, vllm, openai_compatible]
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: Gateway unreachable
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '504':
+          description: Gateway timed out
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
   # ----------- INTERNAL (gateway → backend, ADR 0007) -----------
   /api/v1/internal/skills/{skill_name}:
     parameters:

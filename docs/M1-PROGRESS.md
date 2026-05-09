@@ -15,7 +15,7 @@
 | A — Foundation scaffolding | A1, A2, A3, A4, A5 | — | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5, B6 partial (Ollama) | — | B6 remainder optional (OpenAI chat, Vertex, Bedrock) |
 | C — Capability layer | C1, C2, C3, C4, C5, C6, C7, C8 | — | — (phase complete; C8 pending operator end-to-end verification per ADR 0009) |
-| D — M1 differentiators | — | — | After C |
+| D — M1 differentiators | D0 | — | D1 (tier-floor enforcement) |
 | E — Procurement and release | — | — | After D |
 
 **Tests:** ~495+ passing in api/ (C6 added ~50: 8 migration + 16 retrieval unit + 12 embed unit + ~24 endpoint integration; C3 added ~55; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~225 passing in gateway/ (B6 partial added ~30: 22 Ollama adapter unit + 8 Ollama integration including the B4-fallback-chain end-to-end exercise; C6 added ~25: 15 OpenAI adapter + 8 embeddings integration + 2 inference updates; C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
@@ -1006,6 +1006,35 @@ The first piece of B6 to land: the Ollama chat-completions adapter that wires Mo
 | Ollama `/api/embed` adapter | The `embedding` alias still routes through OpenAI per ADR 0008 (1536-dim matches the column); a Mode-2 deployment that wants local embeddings needs the Ollama embeddings path wired AND a destructive ALTER on `document_chunks.embedding` to whatever dim the local model produces (typically 768 or 1024). | B6 follow-on or D-phase. Track alongside ADR 0008's "Local sentence-transformers / Ollama embeddings adapter" deferred entry. |
 | Streaming-fallback semantics | When the streaming primary fails after producing some output, the gateway can't cleanly hand off to a fallback (partial output makes the handover ambiguous). The existing `_stream_with_fallback` only picks the first available adapter; it doesn't actually walk fallbacks during streaming. The Ollama integration didn't change this; the deferred item is documented in `docs/M1-PROGRESS.md` already. | D-phase or later. Operator-pragmatic posture today: the SSE error frame surfaces a structured error and the client retries the request. |
 | OpenAI chat-completions, Vertex, Bedrock | B6 remainder. | B6 itself, when an operator forces the question. The adapter framing is in place (the OpenAI adapter's `chat_completion` raises `ProviderUnsupportedError` today; B6 fills it in). |
+
+### D0 — Model availability + picker ✅
+
+Lands ahead of D-phase wave-1 (D1/D5/D6) so the model surface is right before tier-floor enforcement and other downstream work layers on top.
+
+**Gateway.** New `gateway/app/model_discovery.py` houses:
+
+* `ModelDiscoverer` — owns an `httpx.AsyncClient` plus a TTL cache (60s for Ollama tags, 5min for the Anthropic catalog; same monotonic-clock pattern as C2's `SkillCache`). Per-source failures (network, non-200, malformed body) log WARNING and return `[]` — `/v1/models` keeps working when half the providers are down.
+* Live discovery for **Ollama** (calls `GET /api/tags` per enabled `ollama` provider) and **Anthropic** (calls `GET /v1/models` with the operator's `x-api-key`; skipped when the key env var is unset). OpenAI / Vertex / Bedrock discovery is intentionally out of scope for D0 — the picker shows aliases for those today.
+* The merged `GET /v1/models` payload extends each entry with `lq_ai_kind` (`"alias"` / `"provider_native"`), `routed_inference_tier` (derived per B4's rules for native rows so the picker can render a tier badge without a second roundtrip), and `provider_type` (for grouping). The OpenAI-compatible `{id, object, created, owned_by}` envelope is preserved.
+
+**Router (`gateway/app/router.py`).** `resolve_alias_chain` now accepts a third form: a raw `<provider_name>/<native_model>` string. Split on the *first* slash; the prefix names a configured provider, the suffix is the provider-native model. Skips alias resolution; builds a single `ResolvedTarget` with tier derived through the existing overrides → defaults → `provider.tier` chain. Cycle detection does not apply (one-shot lookup, no fallback). Unknown provider → `ModelResolutionError` with a message naming the configured set so the operator sees the typo. Backward-compat: aliases that happen to contain a slash still take precedence.
+
+**Security posture.** The Anthropic discoverer calls upstream with the operator's API key. Per the security review on the gateway path: we never log the key value or the response headers/body — only the upstream status / exception type lands in WARNING lines. The TTL cache holds parsed model ids only.
+
+**Backend.** New `GET /api/v1/models` proxy in `api/app/api/models.py`. Auth-gated (every authenticated route requires `get_active_user` per B2). Forwards the gateway's payload verbatim. Reuses the B5 `GatewayClient` pool — no new outbound credentials. Gateway 401 (operator misconfiguration) translates to 503 `gateway_unreachable` so the user never sees "wrong gateway key". `GatewayClient.list_models()` mirrors the `chat_completion` error-translation rules (timeout → 504, transport → 503, structured 4xx → mapped via `map_gateway_error_code`).
+
+**Web (LQ.AI shell).** New `web/src/lib/lq-ai/api/models.ts` (`listModels()`, `groupModels()`, `defaultSelection()`). New `web/src/lib/lq-ai/components/ModelPicker.svelte` — a dropdown that groups options by source (Aliases, then per-provider native rows). Default selection: `smart` if available, else first alias, else first native row. Per-chat selection persists in a client-side `modelByChat: Record<string, string>` keyed by chat id; switching between chats restores the user's last pick. The selected `id` flows through `MessageCreate.model` so both alias and raw `provider/model` forms round-trip.
+
+**Configuration.** `gateway.yaml.example` gets a comment block under `model_aliases:` documenting the raw passthrough. `inference_tiers.defaults.openai` was already present; no new env vars needed (`OLLAMA_BASE_URL` and `ANTHROPIC_API_KEY` already exist).
+
+**Tests (43 net-new):** gateway 22 (20 in `test_model_discovery.py` covering discovery, cache TTL, single-source-failure isolation, raw passthrough resolver; 2 added to `test_inference_anthropic.py` exercising end-to-end raw-form chat completion); api 11 (6 in `test_models_endpoints.py` covering auth gate, happy-path, 401-doesn't-leak, 5xx, timeout, raw-model send + persistence; 5 added to `test_gateway_client.py`); web 10 in `models-api.test.ts` (`listModels`, `groupModels`, `defaultSelection`, `ModelEntry` shape).
+
+**Documentation.** `docs/api/gateway-openapi.yaml` documents the new `/v1/models` shape and the `ModelEntry` schema; the chat completions request schema notes the raw passthrough form. `docs/api/backend-openapi.yaml` documents `/api/v1/models`. The OpenAPI conformance test pins the new path; the endpoint scaffold test marks `GET /api/v1/models` as implemented.
+
+**Deferred (filed as DE entries below):**
+
+* OpenAI / Vertex / Bedrock catalog discovery. Picker shows aliases for those today.
+* Per-message tier badge: the picker shows the static derived tier from `/api/v1/models`. The post-response badge in the chat header (B5) still surfaces the actual routed tier per request — the two views are complementary.
 
 ---
 

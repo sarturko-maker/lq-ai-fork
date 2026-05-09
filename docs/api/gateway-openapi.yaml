@@ -120,6 +120,51 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/GatewayError'}
 
+  /v1/models:
+    get:
+      tags: [inference]
+      summary: List available models — aliases + live-discovered provider-native names (D0)
+      description: |
+        Returns the OpenAI-compatible ``{object: "list", data: [...]}``
+        envelope. Each entry carries the standard
+        ``{id, object, created, owned_by}`` fields plus LQ.AI extensions
+        documented under ``ModelEntry`` below.
+
+        D0 augments the A3 alias-only payload with two live-discovery
+        sources:
+
+        - **Ollama tags** — ``GET <ollama_url>/api/tags`` is called for
+          every enabled ``ollama`` provider. Each pulled model surfaces
+          as one entry with ``id = "<provider_name>/<tag>"`` and
+          ``lq_ai_kind = "provider_native"``. Cached 60 seconds.
+        - **Anthropic catalog** — ``GET <anthropic_url>/v1/models`` is
+          called for every enabled ``anthropic`` provider whose API key
+          env var is populated. Each catalog entry surfaces as one row
+          with ``id = "<provider_name>/<model_id>"``. Cached 5 minutes.
+
+        Per-source failures (Ollama not running, Anthropic key invalid,
+        network blip) are best-effort: a WARNING is logged and the
+        source returns no rows; the response still surfaces whatever
+        other sources produced. The endpoint never raises.
+
+        The raw ``provider/model`` form returned by discovery can be
+        sent verbatim as the ``model`` field on
+        ``POST /v1/chat/completions`` — D0 also lands the router-side
+        passthrough that resolves the form directly.
+      responses:
+        '200':
+          description: List of aliases + discovered models
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [object, data]
+                properties:
+                  object: {type: string, enum: [list]}
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/ModelEntry'}
+
   /v1/embeddings:
     post:
       tags: [inference]
@@ -471,7 +516,16 @@ components:
       type: object
       required: [model, messages]
       properties:
-        model: {type: string, description: "Model alias or specific model name"}
+        model:
+          type: string
+          description: |
+            Model alias (``smart``, ``fast``, …), a raw
+            ``<provider_name>/<native_model>`` form
+            (``anthropic-prod/claude-haiku-4-5``) per D0, or a
+            provider-native model name that any configured provider
+            lists in its ``models``. Aliases dispatch through the
+            full alias-resolution + fallback chain; raw forms skip
+            the alias map and dispatch to a single target.
         messages:
           type: array
           items:
@@ -593,6 +647,52 @@ components:
             when no skills were attached. Backends surface this on
             the audit log so operators can see which skills shaped
             a given response.
+
+    ModelEntry:
+      type: object
+      required: [id, object, created, owned_by, lq_ai_kind]
+      properties:
+        id:
+          type: string
+          description: |
+            Either a configured alias (``smart``) or a raw
+            ``<provider_name>/<native_model>`` form
+            (``anthropic-prod/claude-haiku-4-5``,
+            ``ollama-local/llama3.1:8b``). The latter form is sendable
+            verbatim as ``model`` on ``POST /v1/chat/completions``.
+        object: {type: string, enum: [model]}
+        created:
+          type: integer
+          description: |
+            Always ``0``. The gateway has no provider-relative creation
+            timestamp; the field is included for OpenAI compatibility.
+        owned_by:
+          type: string
+          description: |
+            ``"lq-ai-gateway"`` for aliases; the configured provider
+            name (e.g., ``"ollama-local"``) for provider-native rows.
+        lq_ai_kind:
+          type: string
+          enum: [alias, provider_native]
+          description: |
+            ``"alias"`` for entries from ``model_aliases``;
+            ``"provider_native"`` for live-discovered Ollama tags or
+            Anthropic catalog entries.
+        routed_inference_tier:
+          type: integer
+          enum: [1, 2, 3, 4, 5]
+          description: |
+            Tier the request would land at if dispatched at this id.
+            Present on ``provider_native`` rows; omitted on aliases
+            (the alias may resolve to different providers via fallback,
+            so the tier is settled per-request, not per-alias).
+        provider_type:
+          type: string
+          enum: [anthropic, openai, vertex, cohere, azure_openai, bedrock, ollama, vllm, openai_compatible]
+          description: |
+            For ``provider_native`` rows: the provider's ``type``
+            (``anthropic``, ``ollama``, …). Lets clients group rows
+            under user-friendly section headers.
 
     GatewayError:
       type: object
