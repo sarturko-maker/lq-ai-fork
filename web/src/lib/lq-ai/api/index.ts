@@ -11,3 +11,4 @@ export * as chatsApi from './chats';
 export * as messagesApi from './messages';
 export * as skillsApi from './skills';
 export * as filesApi from './files';
+export * as modelsApi from './models';
