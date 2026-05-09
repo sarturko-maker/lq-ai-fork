@@ -504,6 +504,151 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/GatewayError'}
 
+  # ----------- ADMIN: ALIAS CRUD (D0.5) -----------
+  /admin/v1/config:
+    get:
+      tags: [admin]
+      summary: Get the live gateway config (sanitized)
+      description: |
+        Returns the live ``GatewayConfig`` snapshot as JSON, with no
+        secret material (the schema only carries env-var *names*; never
+        values). Authenticated via ``X-LQ-AI-Gateway-Key``. The web UI
+        consumes this to populate the provider dropdown when editing
+        aliases.
+      security:
+        - apiKeyAuth: []
+      responses:
+        '200':
+          description: Live config payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: Missing or invalid X-LQ-AI-Gateway-Key
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+
+  /admin/v1/aliases:
+    get:
+      tags: [admin]
+      summary: List configured model aliases
+      security:
+        - apiKeyAuth: []
+      responses:
+        '200':
+          description: Alias list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [object, data]
+                properties:
+                  object: {type: string, enum: [list]}
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/AliasEntry'}
+    post:
+      tags: [admin]
+      summary: Create a new model alias
+      description: |
+        D0.5. Atomic write to gateway.yaml (temp + rename) followed by
+        in-process hot-reload. 409 if the alias name already exists.
+        Only the aliased provider is required to be configured; the
+        gateway validates the payload before writing.
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AliasCreateRequest'}
+      responses:
+        '201':
+          description: Alias created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AliasEntry'}
+        '409':
+          description: Alias name already configured
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+        '422':
+          description: Invalid payload (bad provider name, etc.)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+
+  /admin/v1/aliases/{name}:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: {type: string}
+    get:
+      tags: [admin]
+      summary: Get a single alias
+      security:
+        - apiKeyAuth: []
+      responses:
+        '200':
+          description: Alias detail (with primary_inference_tier annotation)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AliasEntry'}
+        '404':
+          description: Alias not configured
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+    patch:
+      tags: [admin]
+      summary: Update an existing alias
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AliasUpdateRequest'}
+      responses:
+        '200':
+          description: Alias updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AliasEntry'}
+        '404':
+          description: Alias not configured
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+        '422':
+          description: Invalid payload
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+    delete:
+      tags: [admin]
+      summary: Remove an alias
+      security:
+        - apiKeyAuth: []
+      responses:
+        '204':
+          description: Alias removed
+        '404':
+          description: Alias not configured
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+        '409':
+          description: Alias is referenced as a default and cannot be removed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GatewayError'}
+
 components:
   securitySchemes:
     apiKeyAuth:
@@ -694,6 +839,51 @@ components:
             (``anthropic``, ``ollama``, …). Lets clients group rows
             under user-friendly section headers.
 
+    AliasFallback:
+      type: object
+      required: [provider, model]
+      properties:
+        provider: {type: string, minLength: 1}
+        model: {type: string, minLength: 1}
+
+    AliasEntry:
+      type: object
+      required: [name, provider, model, fallback]
+      properties:
+        name: {type: string, minLength: 1}
+        provider: {type: string, minLength: 1}
+        model: {type: string, minLength: 1}
+        fallback:
+          type: array
+          items: {$ref: '#/components/schemas/AliasFallback'}
+        primary_inference_tier:
+          type: integer
+          enum: [1, 2, 3, 4, 5]
+          description: |
+            Derived tier of the primary target. Present on the single-
+            alias GET; omitted on list responses.
+
+    AliasCreateRequest:
+      type: object
+      required: [name, provider, model]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 64}
+        provider: {type: string, minLength: 1}
+        model: {type: string, minLength: 1}
+        fallback:
+          type: array
+          items: {$ref: '#/components/schemas/AliasFallback'}
+
+    AliasUpdateRequest:
+      type: object
+      required: [provider, model]
+      properties:
+        provider: {type: string, minLength: 1}
+        model: {type: string, minLength: 1}
+        fallback:
+          type: array
+          items: {$ref: '#/components/schemas/AliasFallback'}
+
     GatewayError:
       type: object
       required: [error]
@@ -727,6 +917,10 @@ components:
                 - skill_not_found
                 - skill_fetch_failed
                 - skill_input_missing
+                # Admin alias-CRUD (D0.5)
+                - not_found
+                - conflict
+                - internal_error
             message: {type: string}
             details: {type: object, additionalProperties: true}
 

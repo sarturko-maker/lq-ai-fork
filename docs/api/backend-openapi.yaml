@@ -1426,6 +1426,122 @@ paths:
                     items: {$ref: '#/components/schemas/AuditLogEntry'}
                   next_cursor: {type: string, nullable: true}
 
+  # ----------- ADMIN: MODEL ALIAS CRUD (D0.5) -----------
+  /api/v1/admin/aliases:
+    get:
+      tags: [admin]
+      summary: List configured model aliases (admin only)
+      description: |
+        Proxies the gateway's ``/admin/v1/aliases`` surface. The user's
+        bearer token must have ``is_admin = true`` or the endpoint
+        returns 403 ``forbidden``.
+      responses:
+        '200':
+          description: Alias list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [object, data]
+                properties:
+                  object: {type: string, enum: [list]}
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/AdminAliasEntry'}
+        '403':
+          description: Caller is not an admin
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      tags: [admin]
+      summary: Create a new model alias (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminAliasCreate'}
+      responses:
+        '201':
+          description: Alias created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminAliasEntry'}
+        '409':
+          description: Alias name already configured
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/admin/aliases/{name}:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: {type: string}
+    get:
+      tags: [admin]
+      summary: Get a single alias (admin only)
+      responses:
+        '200':
+          description: Alias detail
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminAliasEntry'}
+        '404':
+          description: Alias not configured
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    patch:
+      tags: [admin]
+      summary: Update an alias (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminAliasUpdate'}
+      responses:
+        '200':
+          description: Alias updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminAliasEntry'}
+        '404':
+          description: Alias not configured
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    delete:
+      tags: [admin]
+      summary: Remove an alias (admin only)
+      responses:
+        '204':
+          description: Alias removed
+        '404':
+          description: Alias not configured
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/admin/config:
+    get:
+      tags: [admin]
+      summary: Sanitized live gateway config (admin only)
+      description: |
+        Proxies the gateway's ``/admin/v1/config`` endpoint. Used by
+        the web UI to populate the provider dropdown when editing
+        aliases. Secrets are not in the schema; the payload contains
+        env-var *names* only.
+      responses:
+        '200':
+          description: Sanitized config payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
   # ----------- ADMIN: TIER POLICY -----------
   /api/v1/admin/tier-policy:
     get:
@@ -2158,6 +2274,48 @@ components:
           type: array
           items: {type: integer, enum: [1,2,3,4,5]}
           description: "Tiers that surface a warning in the chat UI"
+
+    AdminAliasFallback:
+      type: object
+      required: [provider, model]
+      properties:
+        provider: {type: string, minLength: 1}
+        model: {type: string, minLength: 1}
+
+    AdminAliasEntry:
+      type: object
+      required: [name, provider, model, fallback]
+      properties:
+        name: {type: string, minLength: 1}
+        provider: {type: string, minLength: 1}
+        model: {type: string, minLength: 1}
+        fallback:
+          type: array
+          items: {$ref: '#/components/schemas/AdminAliasFallback'}
+        primary_inference_tier:
+          type: integer
+          enum: [1, 2, 3, 4, 5]
+
+    AdminAliasCreate:
+      type: object
+      required: [name, provider, model]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 64}
+        provider: {type: string, minLength: 1}
+        model: {type: string, minLength: 1}
+        fallback:
+          type: array
+          items: {$ref: '#/components/schemas/AdminAliasFallback'}
+
+    AdminAliasUpdate:
+      type: object
+      required: [provider, model]
+      properties:
+        provider: {type: string, minLength: 1}
+        model: {type: string, minLength: 1}
+        fallback:
+          type: array
+          items: {$ref: '#/components/schemas/AdminAliasFallback'}
 
     Error:
       type: object

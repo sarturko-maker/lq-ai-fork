@@ -15,7 +15,7 @@
 | A — Foundation scaffolding | A1, A2, A3, A4, A5 | — | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5, B6 partial (Ollama) | — | B6 remainder optional (OpenAI chat, Vertex, Bedrock) |
 | C — Capability layer | C1, C2, C3, C4, C5, C6, C7, C8 | — | — (phase complete; C8 pending operator end-to-end verification per ADR 0009) |
-| D — M1 differentiators | D0 | — | D1 (tier-floor enforcement) |
+| D — M1 differentiators | D0, D0.5 | — | D1 (tier-floor enforcement) |
 | E — Procurement and release | — | — | After D |
 
 **Tests:** ~495+ passing in api/ (C6 added ~50: 8 migration + 16 retrieval unit + 12 embed unit + ~24 endpoint integration; C3 added ~55; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~225 passing in gateway/ (B6 partial added ~30: 22 Ollama adapter unit + 8 Ollama integration including the B4-fallback-chain end-to-end exercise; C6 added ~25: 15 OpenAI adapter + 8 embeddings integration + 2 inference updates; C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
@@ -1035,6 +1035,64 @@ Lands ahead of D-phase wave-1 (D1/D5/D6) so the model surface is right before ti
 
 * OpenAI / Vertex / Bedrock catalog discovery. Picker shows aliases for those today.
 * Per-message tier badge: the picker shows the static derived tier from `/api/v1/models`. The post-response badge in the chat header (B5) still surfaces the actual routed tier per request — the two views are complementary.
+
+### D0.5 — Admin: model alias settings UI ✅
+
+The gateway's alias map (`smart`, `fast`, `budget`, `local`, `local-fast`, `local-thinking`, `embedding`) is now editable through an admin UI. Operator workflow goes from "edit gateway.yaml on disk and `docker compose restart gateway`" to "click Settings → Models in the LQ.AI shell."
+
+**Gateway (security boundary).**
+
+* `MutableConfigHolder` (`gateway/app/config_holder.py`) wraps `GatewayConfig` with the C1 atomic-swap pattern — single Python attribute fetch on `current()` is atomic under the GIL; writes serialize through a threading lock; in-flight requests see a stable snapshot for the duration of their dispatch. SIGHUP triggers a re-read from disk; mirrors `app.skills.install_sighup_reload`.
+* `config_writer.upsert_alias` / `delete_alias` perform atomic `temp + os.replace` writes against `gateway.yaml`. After every write the holder is asked to `reload_from_disk`; if the new shape fails Pydantic validation the holder retains the prior snapshot AND the file is rolled back to its prior bytes. **The gateway never silently transitions to a malformed config.**
+* New admin endpoints under `/admin/v1/`: `GET /config` (sanitized current snapshot — provider names + alias map + tier policy + cost rates; secrets are not in the schema), `GET /aliases`, `GET /aliases/{name}` (with `primary_inference_tier` annotation), `POST /aliases` (409 on duplicate), `PATCH /aliases/{name}` (404 if absent), `DELETE /aliases/{name}`. All gated by the existing `X-LQ-AI-Gateway-Key` shared secret (`make_require_gateway_key` dependency in `gateway/app/api/dependencies.py`). The Router accepts an optional `config_provider` callable (wired to `holder.current` in the lifespan) so alias edits take effect on the very next request without rebuilding the Router.
+* Bug fix carried with this task: D0's `/v1/models` left the `routed_inference_tier` field off `lq_ai_kind=alias` rows. The brief flagged this; aliases resolve to a known (provider, model) pair at config-load time, so the tier IS knowable. `model_discovery.list_all` and `GatewayConfig.to_models_payload` now compute and surface the alias's primary-target tier.
+
+**Backend (admin gate + proxy).**
+
+* New `get_admin_user` dependency (`api/app/api/dependencies.py`) stacks on top of `get_active_user` and adds `is_admin == True`; non-admins see 403 `forbidden`. Exported as the `AdminUser` type alias.
+* `api/app/api/admin.py` gains `GET/POST/PATCH/DELETE /api/v1/admin/aliases` plus `GET /api/v1/admin/config`. Each handler uses `AdminUser` and proxies to the gateway via `GatewayClient`. New client methods: `list_aliases / get_alias / create_alias / update_alias / delete_alias / get_admin_config`. Error translation per ADR 0003: gateway 409 → backend `Conflict` (HTTP 409); gateway `not_found` → backend `NotFound` (HTTP 404). Two new entries in `_GATEWAY_CODE_MAP`.
+
+**Web (admin route + components).**
+
+* `/lq-ai/admin/models` — admin-only model alias editor. Route guard reads `$auth.user.is_admin` and redirects non-admins to `/lq-ai`.
+* `web/src/lib/lq-ai/api/admin.ts` — `listAliases / getAlias / createAlias / updateAlias / deleteAlias / getAdminConfig`. Encodes alias names for URL safety. Errors propagate as the existing `LQAIApiError` hierarchy.
+* `web/src/lib/lq-ai/components/AliasTable.svelte` — table view with name / provider / model / fallback-count / Edit + Delete actions. Empty state included.
+* `web/src/lib/lq-ai/components/AliasForm.svelte` — modal/inline form for create + edit. Provider dropdown populated from `/api/v1/admin/config`; model field free-text with `<datalist>` autocomplete from each provider's declared `models:` list. Inline validation (name, provider, model) plus parent-rendered server errors.
+* The shell's `+layout.svelte` adds a "Settings" link in the header **only when `$auth.user.is_admin === true`**.
+* After every successful create/update/delete, the page invalidates a `lq-ai:models-stale` sessionStorage key and refetches the alias list. The picker remounts on shell-navigation, picking up the new map.
+
+**Compose / image (decision #2 from the brief — the gateway.yaml vs gateway.yaml.example question).**
+
+* `docker-compose.yml` swaps the single-file mount for: (1) the repo's `gateway.yaml.example` mounted RO at `/usr/share/lq-ai/gateway.yaml.example`, (2) a named volume `gateway-config` mounted at `/etc/lq-ai`. The new `gateway/entrypoint.sh` seeds `/etc/lq-ai/gateway.yaml` from the example on first boot and exports `GATEWAY_CONFIG_PATH=/etc/lq-ai/gateway.yaml`. **The source-controlled example file is never mutated.** Operators who want immutable config bind-mount their own `gateway.yaml` over the writable path with `:ro` and accept that the admin write endpoints will fail.
+
+**ADR 0010** documents the decision (gateway.yaml is mutable at runtime; gateway-key authenticates admin writes; rejected DB-backed overrides for transparency reasons).
+
+**Tests added (35+ net-new):**
+
+* `gateway/tests/test_config_holder.py` — 9 unit tests: holder semantics (current/replace), reload happy-path, rejection of malformed YAML / unknown providers / missing required env-var, rollback retains prior snapshot, SIGHUP triggers reload, SIGHUP doesn't raise on bad file.
+* `gateway/tests/test_admin_aliases.py` — 14 endpoint tests (against a per-test temp `gateway.yaml`): list / get / create / update / delete; 409 on duplicate; 422 on unknown provider; 404 on missing alias; tier annotation on single-alias GET; atomic-write leaves no `.tmp` siblings; gateway-key gate (no header → 401, wrong → 401, right → 200).
+* `api/tests/test_admin_aliases.py` — 11 integration tests: auth required (401), admin gate (403 for non-admin, 200 for admin), proxy translation (200/404/409/422), CRUD round-trip, admin/config proxy.
+* `web/src/lib/lq-ai/__tests__/admin-api.test.ts` — 9 client tests: response parsing, 409/404 surface as typed errors, PATCH/DELETE methods, URL encoding for unsafe alias names, Authorization header attachment.
+
+**Documentation.**
+
+* `docs/api/gateway-openapi.yaml`: adds `/admin/v1/config`, `/admin/v1/aliases`, `/admin/v1/aliases/{name}` paths plus `AliasEntry / AliasFallback / AliasCreateRequest / AliasUpdateRequest` schemas. Adds `not_found / conflict / internal_error` to the `GatewayError.code` enum.
+* `docs/api/backend-openapi.yaml`: adds `/api/v1/admin/aliases`, `/api/v1/admin/aliases/{name}`, `/api/v1/admin/config` paths plus `AdminAliasEntry / AdminAliasCreate / AdminAliasUpdate` schemas.
+* `docs/adr/0010-gateway-config-hot-reload.md` — full decision record (atomic-swap pattern, RW mount + entrypoint seeding, why-not-DB-backed-overrides, security trade-off, multi-replica caveat).
+* `api/tests/test_endpoints.py` — added the new admin paths to `IMPLEMENTED_ROUTES` so the 501-stub test no longer asserts on them.
+
+**Architectural decisions (with rationale logged in this doc and the ADR):**
+
+1. **Hot-reload race semantics.** Each request resolves its alias chain against the snapshot returned by `holder.current()` at dispatch start. A reload happening mid-call leaves that call on the old config; the next call sees the new one. Documented in the `MutableConfigHolder` docstring.
+2. **gateway.yaml vs gateway.yaml.example.** Resolved by moving the runtime file into a named volume and seeding from the example on first boot. The source-controlled example is read-only inside the container; the writable file lives at a different path. ADR 0010 §"Gateway.yaml vs gateway.yaml.example" is the load-bearing reference.
+3. **`inference_tiers.overrides` UI editability.** Out of scope for D0.5 — flagged below as a deferred enhancement. The admin UI does surface tier badges (computed via the existing override→default→provider chain) so the operator sees what tier each alias's primary target lands at, but editing the override map itself is a D1 follow-on.
+4. **`providers:` UI editability.** Out of scope for D0.5 (heavier admin surface, smaller operator base, different threat model). Flagged in deferred items.
+
+**Known limitations.**
+
+* Tests for the alias-CRUD endpoints reload `app.main` per fixture so the lifespan picks up the per-test temp config path. This is the same pattern `test_main_no_config` uses; harmless but slow if run on a tight loop.
+* `delete_alias` doesn't yet check whether an alias is "the default for some tier" because the schema doesn't express that concept. The 409 branch is reserved for a D1+ task that introduces the concept.
+* Multi-replica deployments share the file via the named volume, so two replicas mutating the same alias get last-write-wins. Single-replica (the M1 default) is unaffected. ADR 0010 documents this.
 
 ---
 
