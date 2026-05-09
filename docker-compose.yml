@@ -120,13 +120,29 @@ services:
       # Operational
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LQ_AI_DEV_MODE: ${LQ_AI_DEV_MODE:-false}
-    # Mount the operator's gateway.yaml at /etc/gateway.yaml. For dev, fall
-    # back to gateway.yaml.example so a fresh `docker compose up` works
-    # out-of-the-box. Operators copy the example to gateway.yaml and edit
-    # for their deployment; the .env can override GATEWAY_CONFIG_FILE to
-    # point at the operator copy.
+    # D0.5 — gateway.yaml is now mutable at runtime via the admin
+    # alias-CRUD surface (ADR 0010). Two related volumes:
+    #
+    # 1. ``./gateway.yaml.example`` is mounted RO so the entrypoint
+    #    script can seed the writable copy from it on first boot.
+    # 2. A named volume ``gateway-config`` holds the writable
+    #    ``gateway.yaml`` between container restarts. Operators who
+    #    want to edit the config in their host filesystem replace
+    #    this with a host-path bind mount; operators who want
+    #    immutable config (a hardened deployment) bind-mount their
+    #    own ``gateway.yaml`` directly with ``:ro`` and accept that
+    #    the admin write endpoints will fail.
+    #
+    # The entrypoint sets GATEWAY_CONFIG_PATH=/etc/lq-ai/gateway.yaml
+    # automatically when the directory mount is present.
     volumes:
-      - ${GATEWAY_CONFIG_FILE:-./gateway.yaml.example}:/etc/gateway.yaml:ro
+      # Seed file (read-only). The entrypoint copies this into the
+      # writable named volume on first boot.
+      - ${GATEWAY_CONFIG_FILE:-./gateway.yaml.example}:/usr/share/lq-ai/gateway.yaml.example:ro
+      # Writable directory for the live gateway.yaml. Hot-reload (D0.5)
+      # writes to this directory atomically (temp + rename) and the
+      # named volume persists the file across container restarts.
+      - gateway-config:/etc/lq-ai
     ports:
       - "${GATEWAY_BIND_ADDR:-127.0.0.1}:${GATEWAY_HOST_PORT:-8001}:8001"
     healthcheck:
@@ -332,6 +348,10 @@ volumes:
   redisdata:
   miniodata:
   ollamadata:
+  # D0.5 — writable directory for the gateway's runtime gateway.yaml.
+  # Seeded from the repo's gateway.yaml.example on first boot via the
+  # gateway entrypoint script. See ADR 0010.
+  gateway-config:
   # Caches for the ingest-worker. Persisting these volumes across
   # `docker compose down` cycles avoids repeated ~700MB model downloads
   # on first ingestion. Per ADR 0006 (document pipeline architecture).
