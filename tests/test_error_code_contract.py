@@ -215,3 +215,39 @@ def test_no_unexpected_codes_on_either_side(
     gw_codes = {name for name in dir(gateway_errors) if name.startswith("CODE_")}
     assert len(api_codes) >= 8, "api/app/errors.py CODE_* set is unexpectedly small"
     assert len(gw_codes) >= 8, "gateway/app/errors.py CODE_* set is unexpectedly small"
+
+
+# --- D1: tier_below_minimum status + class symmetry ------------------------
+
+
+@pytest.mark.unit
+def test_tier_below_minimum_status_is_403_on_both_sides(
+    api_errors: ModuleType,
+    gateway_errors: ModuleType,
+) -> None:
+    """``tier_below_minimum`` is HTTP 403 on both api/ and gateway/ (D1).
+
+    Per ADR 0003 the gateway emits the original status; the backend
+    re-emits a 403 with the same code so the user sees a coherent
+    ``Forbidden`` rather than a 502 wrapping a 403.
+    """
+
+    gw_cls = gateway_errors.TierBelowMinimum
+    api_cls = api_errors.TierBelowMinimum
+    assert gw_cls.http_status == 403, (
+        f"gateway TierBelowMinimum http_status was {gw_cls.http_status}, expected 403"
+    )
+    assert api_cls.http_status == 403, (
+        f"api TierBelowMinimum http_status was {api_cls.http_status}, expected 403"
+    )
+
+
+@pytest.mark.unit
+def test_tier_below_minimum_code_constant_value_is_stable(
+    api_errors: ModuleType,
+    gateway_errors: ModuleType,
+) -> None:
+    """The wire string is exactly ``tier_below_minimum`` on both sides."""
+
+    assert api_errors.CODE_TIER_BELOW_MINIMUM == "tier_below_minimum"
+    assert gateway_errors.CODE_TIER_BELOW_MINIMUM == "tier_below_minimum"
