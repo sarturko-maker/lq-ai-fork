@@ -27,7 +27,11 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # users
         "/api/v1/users/me",
         "/api/v1/users/me/export",
+        # D6 — status-poll for queued export jobs (extends the sketch).
+        "/api/v1/users/me/export/{job_id}",
         "/api/v1/users/me/delete",
+        # D6 — cancel a pending account deletion (extends the sketch).
+        "/api/v1/users/me/delete/cancel",
         # projects
         "/api/v1/projects",
         "/api/v1/projects/{project_id}",
@@ -94,9 +98,10 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 40 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
-    # alias endpoints (/admin/config, /admin/aliases, /admin/aliases/{name}).
-    assert len(actual) == 40
+    # 42 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
+    # alias endpoints + D6's two new GDPR endpoints (status-poll for
+    # /users/me/export/{job_id} and /users/me/delete/cancel).
+    assert len(actual) == 42
 
 
 @pytest.mark.unit
