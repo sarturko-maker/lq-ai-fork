@@ -447,3 +447,55 @@ async def delete_object(*, storage_path: str) -> None:
                 },
             )
             raise
+
+
+# ---------------------------------------------------------------------------
+# Bytes-in / presigned-URL-out (D6 GDPR export)
+# ---------------------------------------------------------------------------
+
+
+async def upload_bytes(*, storage_path: str, body: bytes, content_type: str) -> None:
+    """Single-shot upload of an in-memory blob to ``storage_path``.
+
+    Counterpart to :func:`stream_upload` for callers that already hold
+    the full bytes (e.g., the D6 export worker, which buffers a
+    completed ZIP in a NamedTemporaryFile and reads it back at the
+    end). For multi-megabyte inputs this is fine; the multipart path
+    is reserved for files coming off a streaming request body whose
+    size is not known up front.
+    """
+
+    settings = get_settings()
+    bucket = settings.s3_bucket
+
+    async with s3_client() as s3:
+        await s3.put_object(
+            Bucket=bucket,
+            Key=storage_path,
+            Body=body,
+            ContentType=content_type,
+        )
+
+
+async def presigned_get_url(*, storage_path: str, expires_in_seconds: int) -> str:
+    """Return a presigned GET URL for ``storage_path``.
+
+    Used by D6's status-poll endpoint to hand the caller a time-bounded
+    download link without proxying bytes through the API process. The
+    URL is signed with the same S3 credentials the API uses for direct
+    operations; recipients need no auth beyond the URL itself.
+
+    ``expires_in_seconds`` is the validity window (S3 max is 7 days).
+    The D6 endpoint uses 24h.
+    """
+
+    settings = get_settings()
+    bucket = settings.s3_bucket
+
+    async with s3_client() as s3:
+        url: str = await s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": storage_path},
+            ExpiresIn=expires_in_seconds,
+        )
+        return url
