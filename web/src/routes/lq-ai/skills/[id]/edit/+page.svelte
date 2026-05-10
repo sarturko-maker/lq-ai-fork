@@ -1,0 +1,317 @@
+<script lang="ts">
+	/**
+	 * /lq-ai/skills/[id]/edit — edit an existing user-scope skill (D8 / ADR 0012).
+	 *
+	 * PATCH-driven: only the fields the user actually changes ride to the
+	 * server, so an idempotent re-save writes no audit row. The slug is
+	 * shown read-only — renaming a slug is out of scope for D8 (would
+	 * require a migration of any chat attaching it; deferred as DE).
+	 *
+	 * The shadow indicator surfaces on edit too: if this skill's slug
+	 * matches a built-in, the warning explains that the user's edits
+	 * will continue to shape their chats.
+	 */
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
+
+	import { userSkillsApi, skillsApi } from '$lib/lq-ai/api';
+	import { LQAIApiError } from '$lib/lq-ai/api/client';
+	import type { UserSkill, SkillSummary } from '$lib/lq-ai/types';
+
+	let row: UserSkill | null = null;
+	let builtinSlugs = new Set<string>();
+	let loading = true;
+	let loadError: string | null = null;
+
+	let displayName = '';
+	let description = '';
+	let version = '';
+	let tagsInput = '';
+	let body = '';
+
+	let submitting = false;
+	let submitError: string | null = null;
+	let saveOk: string | null = null;
+	let actionError: string | null = null;
+
+	$: skillId = $page.params.id;
+	$: justCreated = $page.url.searchParams.get('created') === '1';
+	$: shadowsBuiltIn = row !== null && builtinSlugs.has(row.slug);
+
+	async function load(): Promise<void> {
+		loading = true;
+		loadError = null;
+		try {
+			const [skill, builtins] = await Promise.all([
+				userSkillsApi.getUserSkill(skillId),
+				skillsApi.listSkills('builtin')
+			]);
+			row = skill;
+			builtinSlugs = new Set(builtins.map((s: SkillSummary) => s.name));
+			displayName = skill.display_name;
+			description = skill.description;
+			version = skill.version;
+			tagsInput = (skill.tags ?? []).join(', ');
+			body = skill.body;
+		} catch (e) {
+			console.error('user-skills/edit: load failed', e);
+			if (e instanceof LQAIApiError && e.status === 404) {
+				loadError = 'That skill no longer exists, or it isn\'t one of yours.';
+			} else {
+				loadError = e instanceof Error ? e.message : 'Failed to load the skill.';
+			}
+		} finally {
+			loading = false;
+		}
+	}
+
+	function parseTags(raw: string): string[] {
+		return raw
+			.split(',')
+			.map((t) => t.trim())
+			.filter((t) => t.length > 0);
+	}
+
+	function changeSet(): Partial<{
+		display_name: string;
+		description: string;
+		body: string;
+		version: string;
+		tags: string[];
+	}> {
+		if (!row) return {};
+		const diff: ReturnType<typeof changeSet> = {};
+		const trimmedDisplay = displayName.trim();
+		if (trimmedDisplay !== row.display_name) diff.display_name = trimmedDisplay;
+		const trimmedDescription = description.trim();
+		if (trimmedDescription !== row.description) diff.description = trimmedDescription;
+		if (body !== row.body) diff.body = body;
+		const trimmedVersion = version.trim();
+		if (trimmedVersion && trimmedVersion !== row.version) diff.version = trimmedVersion;
+		const newTags = parseTags(tagsInput);
+		const oldTags = row.tags ?? [];
+		if (
+			newTags.length !== oldTags.length ||
+			newTags.some((t, i) => oldTags[i] !== t)
+		) {
+			diff.tags = newTags;
+		}
+		return diff;
+	}
+
+	async function save(): Promise<void> {
+		if (!row) return;
+		const diff = changeSet();
+		if (Object.keys(diff).length === 0) {
+			saveOk = 'Nothing to save — no changes.';
+			return;
+		}
+		submitting = true;
+		submitError = null;
+		saveOk = null;
+		try {
+			const updated = await userSkillsApi.updateUserSkill(row.id, diff);
+			row = updated;
+			displayName = updated.display_name;
+			description = updated.description;
+			version = updated.version;
+			body = updated.body;
+			tagsInput = (updated.tags ?? []).join(', ');
+			saveOk = 'Saved.';
+		} catch (e) {
+			console.error('user-skills/edit: save failed', e);
+			submitError = e instanceof Error ? e.message : 'Failed to save changes.';
+		} finally {
+			submitting = false;
+		}
+	}
+
+	async function archive(): Promise<void> {
+		if (!row) return;
+		const confirmed = window.confirm(
+			`Archive "${row.display_name}"? You can recreate at the same slug afterwards.`
+		);
+		if (!confirmed) return;
+		actionError = null;
+		try {
+			await userSkillsApi.deleteUserSkill(row.id);
+			goto('/lq-ai/skills');
+		} catch (e) {
+			console.error('user-skills/edit: archive failed', e);
+			actionError = e instanceof Error ? e.message : 'Failed to archive skill.';
+		}
+	}
+
+	onMount(() => {
+		load();
+	});
+</script>
+
+<div class="p-4 max-w-3xl mx-auto" data-testid="lq-ai-user-skill-edit">
+	<header class="mb-4 flex items-center justify-between">
+		<div>
+			<h1 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Edit skill</h1>
+			{#if row}
+				<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+					<code class="font-mono">{row.slug}</code> · v{row.version}
+				</p>
+			{/if}
+		</div>
+		<a
+			href="/lq-ai/skills"
+			class="text-xs px-3 py-2 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+		>
+			Back
+		</a>
+	</header>
+
+	{#if justCreated}
+		<div
+			class="mb-4 p-3 rounded border border-emerald-300 bg-emerald-50 text-emerald-900 text-sm dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-100"
+			role="status"
+		>
+			Created. Tweak the body or version and Save to bump.
+		</div>
+	{/if}
+	{#if loadError}
+		<div
+			class="mb-4 p-3 rounded border border-rose-300 bg-rose-50 text-rose-900 text-sm dark:border-rose-700 dark:bg-rose-950 dark:text-rose-100"
+			role="alert"
+		>
+			{loadError}
+		</div>
+	{/if}
+	{#if loading}
+		<p class="text-sm text-gray-500">Loading…</p>
+	{:else if row}
+		{#if shadowsBuiltIn}
+			<div
+				class="mb-4 p-2 rounded border border-amber-300 bg-amber-50 text-amber-900 text-xs dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+				role="status"
+				data-testid="lq-ai-user-skill-edit-shadow-warning"
+			>
+				This skill shadows the built-in <code class="font-mono">{row.slug}</code>. When you attach
+				it to a chat, your version shapes the system prompt — the built-in is hidden for you.
+				Other users still see the built-in.
+			</div>
+		{/if}
+		{#if submitError}
+			<div
+				class="mb-4 p-3 rounded border border-rose-300 bg-rose-50 text-rose-900 text-sm dark:border-rose-700 dark:bg-rose-950 dark:text-rose-100"
+				role="alert"
+			>
+				{submitError}
+			</div>
+		{/if}
+		{#if actionError}
+			<div
+				class="mb-4 p-3 rounded border border-rose-300 bg-rose-50 text-rose-900 text-sm dark:border-rose-700 dark:bg-rose-950 dark:text-rose-100"
+				role="alert"
+			>
+				{actionError}
+			</div>
+		{/if}
+		{#if saveOk}
+			<div
+				class="mb-4 p-3 rounded border border-emerald-300 bg-emerald-50 text-emerald-900 text-sm dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-100"
+				role="status"
+				data-testid="lq-ai-user-skill-edit-saved"
+			>
+				{saveOk}
+			</div>
+		{/if}
+
+		<form
+			class="space-y-4"
+			on:submit|preventDefault={save}
+			data-testid="lq-ai-user-skill-edit-form"
+		>
+			<label class="block">
+				<span class="text-xs text-gray-600 dark:text-gray-400">Slug</span>
+				<input
+					type="text"
+					readonly
+					value={row.slug}
+					class="mt-1 w-full rounded border-gray-200 dark:border-gray-800 bg-gray-100 dark:bg-gray-900 text-sm font-mono text-gray-600"
+				/>
+				<p class="text-[11px] text-gray-500 mt-1">
+					Slugs are immutable in D8 — archive and recreate if you need a different one.
+				</p>
+			</label>
+
+			<label class="block">
+				<span class="text-xs text-gray-600 dark:text-gray-400">Display name</span>
+				<input
+					type="text"
+					bind:value={displayName}
+					required
+					maxlength="200"
+					class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+				/>
+			</label>
+
+			<label class="block">
+				<span class="text-xs text-gray-600 dark:text-gray-400">Description</span>
+				<input
+					type="text"
+					bind:value={description}
+					required
+					maxlength="2000"
+					class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+				/>
+			</label>
+
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+				<label class="block">
+					<span class="text-xs text-gray-600 dark:text-gray-400">Version</span>
+					<input
+						type="text"
+						bind:value={version}
+						maxlength="50"
+						class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm font-mono"
+					/>
+					<p class="text-[11px] text-gray-500 mt-1">Bump on edits; the audit log records before/after.</p>
+				</label>
+				<label class="block">
+					<span class="text-xs text-gray-600 dark:text-gray-400">Tags (comma-separated)</span>
+					<input
+						type="text"
+						bind:value={tagsInput}
+						class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+					/>
+				</label>
+			</div>
+
+			<label class="block">
+				<span class="text-xs text-gray-600 dark:text-gray-400">Body (Markdown system prompt)</span>
+				<textarea
+					bind:value={body}
+					rows="16"
+					required
+					maxlength="200000"
+					class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm font-mono"
+				></textarea>
+			</label>
+
+			<div class="flex items-center justify-between pt-2">
+				<button
+					type="button"
+					class="text-xs px-3 py-2 rounded border border-rose-300 text-rose-700 hover:bg-rose-50 dark:border-rose-700 dark:text-rose-300 dark:hover:bg-rose-950"
+					on:click={archive}
+					data-testid="lq-ai-user-skill-edit-archive-btn"
+				>
+					Archive
+				</button>
+				<button
+					type="submit"
+					disabled={submitting}
+					class="text-xs px-4 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+					data-testid="lq-ai-user-skill-edit-save-btn"
+				>
+					{submitting ? 'Saving…' : 'Save changes'}
+				</button>
+			</div>
+		</form>
+	{/if}
+</div>

@@ -302,3 +302,46 @@ export interface SavedPromptUpdate {
 	prompt_text?: string;
 	tags?: string[];
 }
+
+// ----- User skills (D8 / ADR 0012) -----
+
+/**
+ * A DB-backed user-scope skill. Shadows filesystem-canonical built-ins
+ * (per ADR 0004) at slug collision when resolved for the owning user's
+ * chats; other users still see the built-in. Mirrors the ``UserSkill``
+ * schema in ``docs/api/backend-openapi.yaml``.
+ */
+export interface UserSkill {
+	id: string;
+	scope: 'user' | 'team';
+	owner_user_id: string;
+	slug: string;
+	display_name: string;
+	description: string;
+	version: string;
+	tags: string[];
+	frontmatter_extra: Record<string, unknown>;
+	body: string;
+	archived_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface UserSkillCreate {
+	slug: string;
+	display_name: string;
+	description: string;
+	body: string;
+	version?: string;
+	tags?: string[];
+	frontmatter_extra?: Record<string, unknown>;
+}
+
+export interface UserSkillUpdate {
+	display_name?: string;
+	description?: string;
+	body?: string;
+	version?: string;
+	tags?: string[];
+	frontmatter_extra?: Record<string, unknown>;
+}

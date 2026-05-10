@@ -15,3 +15,4 @@ export * as modelsApi from './models';
 export * as adminApi from './admin';
 export * as auditLogApi from './auditLog';
 export * as savedPromptsApi from './savedPrompts';
+export * as userSkillsApi from './userSkills';
