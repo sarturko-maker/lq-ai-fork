@@ -1,22 +1,17 @@
 <script lang="ts">
 	/**
-	 * Model picker for the LQ.AI shell composer (Task D0).
+	 * Model picker for the LQ.AI shell composer (D0 + ADR 0011 wave-3).
 	 *
-	 * Surfaces aliases (`smart`, `fast`, ...) plus live-discovered Ollama
-	 * tags and Anthropic catalog rows in a single dropdown, grouped by
-	 * source. The selected model id flows through `MessageCreate.model`
+	 * Surfaces aliases (`smart`, `fast`, ...) plus live-discovered Ollama,
+	 * Anthropic, and OpenAI catalog rows in a single dropdown, grouped
+	 * by source. The selected model id flows through `MessageCreate.model`
 	 * to `POST /chats/{id}/messages`; the gateway's router accepts both
 	 * alias names and raw `provider/model` forms.
 	 *
-	 * Props:
-	 *   - `models`: the response from `modelsApi.listModels()`
-	 *   - `selectedId`: current selection (controlled by parent)
-	 *   - `onSelect(id)`: callback the parent uses to update selection
-	 *
-	 * Empty state: when `models.data` is empty (e.g., gateway is down at
-	 * the precise moment the picker mounted), the dropdown shows a single
-	 * read-only "no models available" row. Parent code falls back to
-	 * `"smart"` for the actual send so the chat still works.
+	 * ADR 0011 — transparency-first: each alias row publishes its
+	 * resolved primary target inline (`smart → anthropic-prod/claude-opus-4-7`),
+	 * along with the number of fallback entries. Users see what aliases
+	 * actually do without spelunking through admin config.
 	 */
 	import type { ModelEntry, ModelListResponse } from '../api/models';
 	import { groupModels } from '../api/models';
@@ -45,6 +40,14 @@
 		if (!tier) return '';
 		return `T${tier}`;
 	}
+
+	function aliasResolution(entry: ModelEntry): string {
+		// "smart → anthropic-prod/claude-opus-4-7 (+2 fallbacks)"
+		if (!entry.lq_ai_resolves_to) return '';
+		const fb = entry.lq_ai_fallback_count ?? 0;
+		const fbHint = fb > 0 ? ` (+${fb} fallback${fb === 1 ? '' : 's'})` : '';
+		return `→ ${entry.lq_ai_resolves_to}${fbHint}`;
+	}
 </script>
 
 <div class="relative inline-block" data-testid="lq-ai-model-picker">
@@ -53,10 +56,17 @@
 		class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
 		on:click={() => (open = !open)}
 		data-testid="lq-ai-model-picker-toggle"
-		title={selectedEntry?.id ?? 'Select model'}
+		title={selectedEntry?.lq_ai_resolves_to
+			? `${selectedEntry.id} ${aliasResolution(selectedEntry)}`
+			: (selectedEntry?.id ?? 'Select model')}
 	>
 		<span class="font-medium">Model:</span>
 		<span class="ml-1">{selectedEntry?.id ?? 'smart'}</span>
+		{#if selectedEntry?.lq_ai_resolves_to}
+			<span class="ml-1 text-[10px] text-gray-500" data-testid="lq-ai-model-picker-resolution">
+				{aliasResolution(selectedEntry)}
+			</span>
+		{/if}
 		{#if selectedEntry?.routed_inference_tier}
 			<span
 				class="ml-1 px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-[10px] uppercase tracking-wide"
@@ -80,19 +90,37 @@
 				{#if grouped.aliases.length > 0}
 					<div
 						class="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-gray-500"
+						title="Convenience defaults — each alias publishes its resolved provider/model below."
 					>
-						Aliases
+						Aliases (defaults)
 					</div>
 					{#each grouped.aliases as entry (entry.id)}
 						<button
 							type="button"
-							class="w-full text-left px-3 py-1.5 text-sm hover:bg-indigo-50 dark:hover:bg-indigo-900/40 flex items-center justify-between"
+							class="w-full text-left px-3 py-1.5 text-sm hover:bg-indigo-50 dark:hover:bg-indigo-900/40 flex flex-col items-start"
 							class:font-semibold={entry.id === selectedId}
 							class:bg-indigo-50={entry.id === selectedId}
 							on:click={() => pick(entry)}
 							data-testid="lq-ai-model-picker-option"
 						>
-							<span>{entry.id}</span>
+							<div class="flex items-center justify-between w-full">
+								<span>{entry.id}</span>
+								{#if entry.routed_inference_tier}
+									<span
+										class="ml-2 px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-[10px] uppercase tracking-wide"
+									>
+										{tierLabel(entry.routed_inference_tier)}
+									</span>
+								{/if}
+							</div>
+							{#if entry.lq_ai_resolves_to}
+								<div
+									class="text-[10px] text-gray-500 dark:text-gray-400 font-mono mt-0.5"
+									data-testid="lq-ai-model-picker-alias-resolution"
+								>
+									{aliasResolution(entry)}
+								</div>
+							{/if}
 						</button>
 					{/each}
 				{/if}

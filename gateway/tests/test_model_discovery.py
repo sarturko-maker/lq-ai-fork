@@ -628,3 +628,62 @@ async def test_discover_anthropic_uses_encrypted_key_when_set() -> None:
         assert route.calls.last.request.headers["x-api-key"] == "sk-ant-encrypted-test-key"
     finally:
         await discoverer.aclose()
+
+
+# --- Wave-3 alias resolution surfacing (ADR 0011) -----------------------------
+
+
+@pytest.mark.unit
+async def test_alias_entries_carry_resolves_to() -> None:
+    """ADR 0011: each alias entry exposes its resolved primary target.
+
+    The picker UI renders 'smart → anthropic-prod/claude-opus-4-7' so
+    aliases are convenience defaults rather than opacity. Verifying
+    this at the discoverer layer pins the contract; the web side has
+    its own unit tests against the API client typing.
+    """
+
+    config = _make_config()
+    discoverer = ModelDiscoverer(env={})  # No keys → no live discovery, just aliases.
+    try:
+        rows = await discoverer.list_all(config)
+    finally:
+        await discoverer.aclose()
+    aliases = {row.id: row for row in rows if row.lq_ai_kind == "alias"}
+    assert aliases["smart"].resolves_to == "anthropic-prod/claude-opus-4-7"
+    assert aliases["fast"].resolves_to == "anthropic-prod/claude-haiku-4-5"
+    # No fallbacks configured in _make_config, so count is 0 (omitted in
+    # the serialized payload but present on the dataclass).
+    assert aliases["smart"].fallback_count == 0
+
+
+@pytest.mark.unit
+def test_to_payload_omits_resolves_to_for_provider_native() -> None:
+    """Provider-native rows already encode their concrete provider/model
+    in `id`; surfacing `lq_ai_resolves_to` would be redundant."""
+
+    row = DiscoveredModel(
+        id="anthropic-prod/claude-opus-4-7",
+        owned_by="anthropic-prod",
+        lq_ai_kind="provider_native",
+        provider_type="anthropic",
+        routed_inference_tier=4,
+    )
+    payload = row.to_payload()
+    assert "lq_ai_resolves_to" not in payload
+    assert "lq_ai_fallback_count" not in payload
+
+
+@pytest.mark.unit
+def test_to_payload_includes_resolves_to_for_alias() -> None:
+    row = DiscoveredModel(
+        id="smart",
+        owned_by="lq-ai-gateway",
+        lq_ai_kind="alias",
+        routed_inference_tier=4,
+        resolves_to="anthropic-prod/claude-opus-4-7",
+        fallback_count=2,
+    )
+    payload = row.to_payload()
+    assert payload["lq_ai_resolves_to"] == "anthropic-prod/claude-opus-4-7"
+    assert payload["lq_ai_fallback_count"] == 2

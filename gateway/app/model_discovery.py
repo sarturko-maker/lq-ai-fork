@@ -120,6 +120,20 @@ class DiscoveredModel:
     (``anthropic``, ``ollama``, …). Lets the UI group rows under
     user-friendly section headers without re-deriving."""
 
+    resolves_to: str | None = None
+    """ADR 0011: for ``lq_ai_kind == "alias"`` entries, the
+    ``<provider_name>/<model>`` form that the alias's primary target
+    resolves to today. Surfaces in the picker so users see
+    ``smart → anthropic-prod/claude-opus-4-7`` rather than an opaque
+    ``smart`` label. ``None`` for provider-native rows (which already
+    carry their concrete ``provider/model`` in ``id``)."""
+
+    fallback_count: int = 0
+    """For aliases: how many entries are in the fallback chain after
+    the primary. Lets the picker show ``(+2 fallbacks)`` without
+    sending the full chain on every model-list request. ``0`` for
+    provider-native rows."""
+
     created: int = 0
     """OpenAI-compatible field; we always emit ``0`` (the gateway has no
     provider-relative creation timestamp). Present for client
@@ -139,6 +153,10 @@ class DiscoveredModel:
             out["routed_inference_tier"] = self.routed_inference_tier
         if self.provider_type is not None:
             out["provider_type"] = self.provider_type
+        if self.resolves_to is not None:
+            out["lq_ai_resolves_to"] = self.resolves_to
+        if self.fallback_count > 0:
+            out["lq_ai_fallback_count"] = self.fallback_count
         return out
 
 
@@ -606,12 +624,21 @@ class ModelDiscoverer:
                     native_model=alias.primary.model,
                     inference_tiers=config.inference_tiers,
                 )
+            # ADR 0011: surface the alias's resolved primary target so
+            # the picker can render "smart → anthropic-prod/claude-opus-4-7"
+            # rather than an opaque label. Aliases stay convenience
+            # *and* visible — "honest defaults," not opacity.
+            resolves_to: str | None = None
+            if alias.primary.provider and alias.primary.model:
+                resolves_to = f"{alias.primary.provider}/{alias.primary.model}"
             out.append(
                 DiscoveredModel(
                     id=alias_name,
                     owned_by="lq-ai-gateway",
                     lq_ai_kind="alias",
                     routed_inference_tier=tier,
+                    resolves_to=resolves_to,
+                    fallback_count=len(alias.fallback),
                 )
             )
 

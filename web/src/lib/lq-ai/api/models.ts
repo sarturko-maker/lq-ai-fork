@@ -25,6 +25,15 @@ export interface ModelEntry {
 	routed_inference_tier?: 1 | 2 | 3 | 4 | 5;
 	/** Provider type (`anthropic`, `ollama`, ...) for grouping. */
 	provider_type?: string;
+	/**
+	 * ADR 0011: for aliases, the resolved `<provider>/<model>` form of
+	 * the primary target. Lets the picker render "smart →
+	 * anthropic-prod/claude-opus-4-7" so aliases are convenience, not
+	 * opacity. Omitted on provider-native rows.
+	 */
+	lq_ai_resolves_to?: string;
+	/** Number of fallback entries past the primary (alias only). */
+	lq_ai_fallback_count?: number;
 }
 
 export interface ModelListResponse {
