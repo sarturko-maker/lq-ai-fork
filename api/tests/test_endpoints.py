@@ -143,6 +143,12 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/organization-profile"),
     ("PUT", "/api/v1/organization-profile"),
     ("GET", "/api/v1/organization-profile/raw"),
+    # D7 — Saved Prompts CRUD
+    ("GET", "/api/v1/saved-prompts"),
+    ("POST", "/api/v1/saved-prompts"),
+    ("GET", "/api/v1/saved-prompts/{prompt_id}"),
+    ("PATCH", "/api/v1/saved-prompts/{prompt_id}"),
+    ("DELETE", "/api/v1/saved-prompts/{prompt_id}"),
     # C6 — Knowledge bases
     ("POST", "/api/v1/knowledge-bases"),
     ("GET", "/api/v1/knowledge-bases"),
@@ -183,13 +189,13 @@ async def test_route_inventory_is_nonempty() -> None:
     The bound is intentionally loose — as tasks land, they migrate
     routes from this 501-stub set into ``IMPLEMENTED_ROUTES``. The
     primary purpose of this assertion is to catch the failure mode
-    of accidentally dropping all the include_router calls. After D5/D6
-    landed (4 MFA + 4 GDPR endpoints), the remaining stub count drops
-    into the single digits; lowered to ``>= 5`` so the bound continues
-    to fire as a sanity check through wave-2 (D2, D3, D4, D7) without
-    needing to re-tune on every task.
+    of accidentally dropping all the include_router calls. After D7
+    landed, the remaining stub set is essentially the deferred
+    admin/tier-policy surface plus the skill-fork affordance —
+    ``>= 1`` keeps the sanity check armed without needing to re-tune
+    on every subsequent task.
     """
-    assert len(ROUTES) >= 5
+    assert len(ROUTES) >= 1
 
 
 @pytest_asyncio.fixture

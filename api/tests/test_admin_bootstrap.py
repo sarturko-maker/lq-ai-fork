@@ -365,16 +365,18 @@ async def test_full_first_run_flow(
     second_login = await _login(client, user.email, permanent)
     assert second_login["user"]["must_change_password"] is False
 
-    # 6) Previously-gated endpoints are reachable (they still return 501 stubs,
-    #    but the gate no longer 403s — confirming the flag actually cleared).
-    #    Pick a still-stub endpoint; /api/v1/projects became real in C7,
-    #    /api/v1/knowledge-bases became real in C6. /saved-prompts is still a
-    #    501 stub at this point.
+    # 6) Previously-gated endpoints are reachable (the gate no longer 403s —
+    #    confirming the flag actually cleared). /api/v1/saved-prompts is a
+    #    user-scoped surface (D7) so a freshly-bootstrapped admin sees an
+    #    empty list rather than a 501. The gate-clear assertion is the same
+    #    either way: a 200 (or any non-403) means the must_change_password
+    #    bouncer let the request through.
     open_resp = await client.get(
         "/api/v1/saved-prompts",
         headers={"Authorization": f"Bearer {second_login['access_token']}"},
     )
-    assert open_resp.status_code == 501
+    assert open_resp.status_code == 200
+    assert open_resp.json() == []
 
 
 @pytest.mark.integration
