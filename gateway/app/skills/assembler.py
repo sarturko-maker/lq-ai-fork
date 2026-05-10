@@ -105,6 +105,49 @@ def interpolate(template: str, bindings: dict[str, Any]) -> str:
     return SKILL_INPUT_VARIABLE_RE.sub(_replace, template)
 
 
+def consumes_organization_profile(skill: Skill) -> bool:
+    """Return True iff the skill wants the Organization Profile prepended.
+
+    The PRD §3.12 default is opt-in: the Profile shapes every skill
+    unless the skill's frontmatter sets ``lq_ai.use_organization_profile:
+    false``. We re-parse the verbatim ``content_yaml`` here for the
+    same reason :func:`extract_required_inputs` does — the loader's
+    permissive schema doesn't expose the field as a typed attribute on
+    :class:`Skill`.
+
+    A YAML parse failure or unexpected structure is treated as opt-in
+    (the default); the conservative choice is "user gets Profile-shaped
+    output unless they explicitly opted out", because operating
+    deployments will set Profiles expecting them to apply broadly.
+
+    The Profile itself opts out (its synthesized frontmatter sets
+    ``use_organization_profile: false``) so the assembler never tries
+    to recursively prepend the Profile to itself.
+    """
+
+    try:
+        parsed = yaml.safe_load(skill.content_yaml or "") or {}
+    except yaml.YAMLError:
+        return True
+
+    if not isinstance(parsed, dict):
+        return True
+
+    # The flag may live at the top level (gateway's synthesized profile
+    # YAML, where there's no nested ``lq_ai:`` block) or under the
+    # ``lq_ai:`` block (real filesystem skills, per the authoring guide).
+    # Check both spellings; the explicit-false in either wins.
+    candidates: list[Any] = [parsed.get("use_organization_profile")]
+    nested = parsed.get("lq_ai")
+    if isinstance(nested, dict):
+        candidates.append(nested.get("use_organization_profile"))
+
+    for value in candidates:
+        if value is False:
+            return False
+    return True
+
+
 def extract_required_inputs(skill: Skill) -> list[str]:
     """Return the list of required-input names declared in the skill's frontmatter.
 
@@ -201,6 +244,7 @@ def assemble_skill_prompt(
     *,
     skill_inputs: dict[str, dict[str, Any]] | None = None,
     existing_system_message: str | None = None,
+    organization_profile: Skill | None = None,
 ) -> str:
     """Build the system-prompt block from the given skills.
 
@@ -212,6 +256,15 @@ def assemble_skill_prompt(
         existing_system_message: The user's pre-existing system message
             (if any). When non-empty, the assembled skill block is
             *prepended* to it with a clear separator.
+        organization_profile: D4 — the deployment's Organization
+            Profile, if one is set. When provided AND at least one
+            attached skill consumes it (per
+            :func:`consumes_organization_profile`), the Profile is
+            rendered as the first section of the assembled prompt so
+            org-wide voice / templates frame every downstream skill
+            section. The Profile is omitted when all attached skills
+            opt out, when no skills are attached, or when ``None`` is
+            passed (no Profile set on the deployment).
 
     Returns:
         A single string ready to drop into the gateway's system message.
@@ -252,8 +305,18 @@ def assemble_skill_prompt(
             },
         )
 
-    # 2) Render each skill with its bindings applied.
+    # 2) Render each skill with its bindings applied. The Organization
+    #    Profile (D4) leads the section list when at least one attached
+    #    skill consumes it; rendering it through the same path as
+    #    skills means it picks up the same header / formatting / input
+    #    substitution treatment without a special-case codepath.
     rendered: list[_AssembledSkill] = []
+    if organization_profile is not None and any(
+        consumes_organization_profile(s) for s in skills
+    ):
+        # Profile uses no caller-supplied inputs (its content is the
+        # operator-edited Markdown body); pass an empty bindings dict.
+        rendered.append(_render_skill(organization_profile, inputs={}))
     for skill in skills:
         bindings = skill_inputs.get(skill.name, {}) or {}
         rendered.append(_render_skill(skill, inputs=bindings))
