@@ -85,6 +85,14 @@ DEFAULT_CACHE_TTL_SECONDS: Final[float] = 60.0
 GATEWAY_KEY_HEADER: Final[str] = "X-LQ-AI-Gateway-Key"
 """Shared-secret header sent on every gateway → backend call (ADR 0007)."""
 
+ORGANIZATION_PROFILE_CACHE_KEY: Final[str] = "__organization_profile__"
+"""Sentinel key under which the singleton Organization Profile is cached.
+
+Re-uses the :class:`SkillCache` machinery so the Profile gets the same
+TTL and locking as skill fetches. The double-underscore prefix can never
+collide with a real skill name (skills are filesystem-canonical and the
+loader validates folder names against a kebab-case identifier shape)."""
+
 
 # --- Skill response shape ----------------------------------------------------
 
@@ -279,6 +287,73 @@ class BackendClient:
         await self._cache.put(name, skill)
         return skill
 
+    async def get_organization_profile(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> Skill | None:
+        """Fetch the deployment's Organization Profile, or None if unset.
+
+        Cache-aware on the same :class:`SkillCache` instance under the
+        :data:`ORGANIZATION_PROFILE_CACHE_KEY` sentinel; the TTL is the
+        skill cache's TTL because the Profile shapes the same prompt
+        path and the same staleness window applies. Returns ``None``
+        when the backend reports 404 (no row, or the row's body is
+        empty) — the prompt-assembly path branches on absence rather
+        than catching exceptions, since "no Profile" is the normal
+        operating state for a fresh deployment.
+
+        Other failures (network, 5xx, schema-validation) raise the
+        usual :class:`SkillFetchFailed` / :class:`BackendUnreachable`
+        so the caller fails-fast on real outages.
+        """
+
+        cached = await self._cache.get(ORGANIZATION_PROFILE_CACHE_KEY)
+        if cached is not None:
+            return cached
+
+        path = "/api/v1/internal/organization-profile"
+        headers: dict[str, str] | None = None
+        if request_id is not None:
+            headers = {"X-Request-Id": request_id}
+
+        try:
+            response = await self._client.get(path, headers=headers)
+        except httpx.TimeoutException as exc:
+            log.warning(
+                "backend organization-profile fetch timed out: request_id=%s",
+                request_id,
+            )
+            raise BackendUnreachable(
+                "Backend organization-profile fetch timed out",
+                details={"timeout_seconds": self._timeout},
+            ) from exc
+        except httpx.HTTPError as exc:
+            log.warning(
+                "backend organization-profile fetch transport failure: error=%s",
+                type(exc).__name__,
+            )
+            raise BackendUnreachable(
+                "Could not reach the backend to fetch the Organization Profile",
+                details={"transport_error": type(exc).__name__},
+            ) from exc
+
+        # 404 is the "no Profile" path — cache the absence so we don't
+        # re-hit the backend on every chat request. We can't store
+        # ``None`` directly in the SkillCache (the type contract is
+        # ``Skill | None`` on get / ``Skill`` on put), so we leave the
+        # cache untouched on absence. The TTL is short enough (60s
+        # default) that operators editing the Profile see their first
+        # post-save chat pick it up; the trade-off vs. caching absence
+        # is at most one extra HTTP roundtrip per request during the
+        # first minute of a deployment-with-no-Profile, which is fine.
+        if response.status_code == 404:
+            return None
+
+        skill = _parse_skill_response("organization-profile", response)
+        await self._cache.put(ORGANIZATION_PROFILE_CACHE_KEY, skill)
+        return skill
+
     async def _fetch_skill(self, name: str, *, request_id: str | None) -> Skill:
         """Issue the HTTP call and parse the response."""
 
@@ -445,6 +520,7 @@ __all__ = [
     "ENV_CACHE_TTL",
     "ENV_GATEWAY_KEY",
     "GATEWAY_KEY_HEADER",
+    "ORGANIZATION_PROFILE_CACHE_KEY",
     "BackendClient",
     "BackendUnreachable",
     "Skill",
