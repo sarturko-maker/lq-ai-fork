@@ -14,15 +14,22 @@
 	 * in-progress message. The parent component owns ``composerText`` and
 	 * exposes a setter; we never reach into the DOM.
 	 *
-	 * Promote-to-Skill: per ADR 0004 (skills are filesystem-canonical for
-	 * M1) we cannot create a real LQ.AI skill from the UI yet. Instead we
-	 * render a SKILL.md draft and trigger a download — the user submits
-	 * the file via PR or drops it into their ``skills/`` folder. The
-	 * full LQ.AI Skill Creator surface is tracked as phase D8.
+	 * Promote-to-Skill (D8 / ADR 0012 — landed): clicking "Promote to skill"
+	 * POSTs to ``/api/v1/user-skills`` and navigates the user to the
+	 * Skill Creator edit page so they can refine the body before relying
+	 * on it. Slug collisions with a filesystem-canonical built-in are
+	 * still allowed at the API level (the shadow case); the Skill Creator
+	 * page surfaces a warning when that happens.
+	 *
+	 * The legacy "Export as SKILL.md" download path stays available as a
+	 * secondary affordance for users who want to upstream a skill via PR
+	 * per ``skills/CONTRIBUTING.md``.
 	 */
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 
-	import { savedPromptsApi } from '$lib/lq-ai/api';
+	import { savedPromptsApi, userSkillsApi } from '$lib/lq-ai/api';
+	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import type { SavedPrompt } from '$lib/lq-ai/types';
 
 	export let onInsert: (text: string) => void = () => undefined;
@@ -147,10 +154,47 @@
 		return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 	}
 
+	let promoting: string | null = null;
+	let promoteError: string | null = null;
+
+	/**
+	 * POST the saved prompt as a new user-scope skill (D8 / ADR 0012) and
+	 * route the user to the Skill Creator edit page so they can refine
+	 * the body. Slug-collision-with-built-in is permitted and shows up as
+	 * a warning on the edit page rather than blocking creation.
+	 */
+	async function promoteToSkill(prompt: SavedPrompt): Promise<void> {
+		const slug = slugify(prompt.name);
+		promoting = prompt.id;
+		promoteError = null;
+		try {
+			const created = await userSkillsApi.createUserSkill({
+				slug,
+				display_name: prompt.name,
+				description: `Promoted from saved prompt "${prompt.name}".`,
+				body: prompt.prompt_text,
+				version: '0.1.0',
+				tags: prompt.tags
+			});
+			goto(`/lq-ai/skills/${created.id}/edit?created=1`);
+		} catch (e) {
+			console.error('lq-ai: promote-to-skill failed', e);
+			if (e instanceof LQAIApiError && e.status === 409) {
+				promoteError =
+					`You already have a user-scope skill at slug "${slug}". Open Skills to edit it, or rename this prompt first.`;
+			} else {
+				promoteError = e instanceof Error ? e.message : 'Failed to promote prompt to skill.';
+			}
+		} finally {
+			promoting = null;
+		}
+	}
+
 	/**
 	 * Render the saved prompt as a SKILL.md draft and trigger a browser
-	 * download. Per ADR 0004 we don't yet have a DB-backed user-skill
-	 * write surface; this is the honest path until D8.
+	 * download. Kept as a secondary "Export" path for users who want to
+	 * upstream a skill via PR rather than land it in their personal
+	 * scope.
 	 */
 	function downloadAsSkillMd(prompt: SavedPrompt): void {
 		const slug = slugify(prompt.name);
@@ -234,6 +278,16 @@
 			data-testid="lq-ai-saved-prompts-error"
 		>
 			{loadError}
+		</div>
+	{/if}
+
+	{#if promoteError}
+		<div
+			class="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1"
+			data-testid="lq-ai-saved-prompt-promote-error"
+			role="alert"
+		>
+			{promoteError}
 		</div>
 	{/if}
 
@@ -336,12 +390,22 @@
 								</button>
 								<button
 									type="button"
-									class="text-xs px-2 py-0.5 rounded text-emerald-700 hover:bg-emerald-50"
-									on:click={() => downloadAsSkillMd(prompt)}
-									title="Download as SKILL.md draft (review and submit via PR)"
+									class="text-xs px-2 py-0.5 rounded text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+									on:click={() => promoteToSkill(prompt)}
+									disabled={promoting === prompt.id}
+									title="Promote to a user-scope skill (lands in /lq-ai/skills, edit before using)"
 									data-testid={`lq-ai-saved-prompt-promote-${prompt.id}`}
 								>
-									Save as skill
+									{promoting === prompt.id ? 'Promoting…' : 'Promote to skill'}
+								</button>
+								<button
+									type="button"
+									class="text-xs px-2 py-0.5 rounded text-gray-600 hover:bg-gray-100"
+									on:click={() => downloadAsSkillMd(prompt)}
+									title="Download as SKILL.md draft to PR into the canonical skills/ directory"
+									data-testid={`lq-ai-saved-prompt-export-${prompt.id}`}
+								>
+									Export
 								</button>
 								<button
 									type="button"
