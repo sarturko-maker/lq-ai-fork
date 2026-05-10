@@ -1,9 +1,9 @@
 # ADR 0004 — Skill loader lives in the backend (`api/`), not the gateway
 
-**Status:** Accepted (2026-05-08)
+**Status:** Accepted (2026-05-08); extended by [ADR 0012 — DB-backed user skills](0012-db-backed-user-skills.md) (2026-05-10) for the user/team-scope shadow layer
 **Decision-makers:** Kevin Keller (initial maintainer)
 **Affected components:** `api/`, `gateway/` (downstream — C2 reads skill content from `api/`)
-**Related:** [`docs/M1-IMPLEMENTATION-ORDER.md` Task C1](../M1-IMPLEMENTATION-ORDER.md), [PRD §3 capability specs](../PRD.md#3-capability-specifications), [PRD §7.1 skills as canonical artifact](../PRD.md#71-skills-as-the-canonical-artifact-of-value), [skill-authoring guide](../skill-authoring-guide.md)
+**Related:** [`docs/M1-IMPLEMENTATION-ORDER.md` Task C1](../M1-IMPLEMENTATION-ORDER.md), [PRD §3 capability specs](../PRD.md#3-capability-specifications), [PRD §7.1 skills as canonical artifact](../PRD.md#71-skills-as-the-canonical-artifact-of-value), [skill-authoring guide](../skill-authoring-guide.md), [ADR 0012 — DB-backed user skills](0012-db-backed-user-skills.md) (the user-scope extension)
 
 ---
 
