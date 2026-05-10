@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-10 (D7 — Saved Prompts CRUD + sidebar UI + download-as-SKILL.md; full Skill Creator deferred to new D8 phase)
+> **Last updated:** 2026-05-10 (Wave-3 transparency pivot — ADR 0011 + encrypted-at-rest provider keys + live model discovery enrichment + ModelPicker alias resolution + D2 tier-badge click-for-details panel)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -15,7 +15,7 @@
 | A — Foundation scaffolding | A1, A2, A3, A4, A5 | — | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5, B6 partial (Ollama) | — | B6 remainder optional (OpenAI chat, Vertex, Bedrock) |
 | C — Capability layer | C1, C2, C3, C4, C5, C6, C7, C8 | — | — (phase complete; C8 pending operator end-to-end verification per ADR 0009) |
-| D — M1 differentiators | D0, D0.5, D1, D3-core, D4 (core + coverage), D5, D6, D7 | — | D2 (tier-awareness UI), D3-coverage, D8 (DB-backed user/team skills + Skill Creator) |
+| D — M1 differentiators | D0, D0.5, D1, D2, D3-core, D4 (core + coverage), D5, D6, D7 + Wave-3 (ADR 0011 transparency pivot — encrypted keys, discovery enrichment, alias resolution surfacing) | — | D3-coverage, D8 (DB-backed user/team skills + Skill Creator) |
 | E — Procurement and release | — | — | After D |
 
 **Tests:** ~495+ passing in api/ (C6 added ~50: 8 migration + 16 retrieval unit + 12 embed unit + ~24 endpoint integration; C3 added ~55; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~225 passing in gateway/ (B6 partial added ~30: 22 Ollama adapter unit + 8 Ollama integration including the B4-fallback-chain end-to-end exercise; C6 added ~25: 15 OpenAI adapter + 8 embeddings integration + 2 inference updates; C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
