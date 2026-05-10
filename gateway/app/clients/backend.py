@@ -94,6 +94,21 @@ collide with a real skill name (skills are filesystem-canonical and the
 loader validates folder names against a kebab-case identifier shape)."""
 
 
+def _skill_cache_key(name: str, user_id: str | None) -> str:
+    """Encode (skill name, user_id) into a single cache key.
+
+    Per ADR 0012 the gateway must hold user-scope shadows in a
+    per-user cache slot so user A's edits never bleed into user B's
+    chats. The encoding uses ``|`` as a separator — skill names are
+    kebab-case and UUIDs use dashes, so the separator is unambiguous.
+    A missing ``user_id`` becomes ``__none__`` so the registry-only
+    view gets its own slot distinct from any user's shadow at the
+    same skill name.
+    """
+
+    return f"{name}|{user_id or '__none__'}"
+
+
 # --- Skill response shape ----------------------------------------------------
 
 
@@ -271,20 +286,34 @@ class BackendClient:
 
     # --- Skill fetching ------------------------------------------------------
 
-    async def get_skill(self, name: str, *, request_id: str | None = None) -> Skill:
+    async def get_skill(
+        self,
+        name: str,
+        *,
+        request_id: str | None = None,
+        user_id: str | None = None,
+    ) -> Skill:
         """Fetch a skill from the backend's internal-skills endpoint.
 
         Cache-aware: a hit returns immediately. A miss fetches over
         HTTP and populates the cache before returning. Failures raise
         the appropriate typed exception; nothing is cached on failure.
+
+        When ``user_id`` is set, the backend resolves a user-scope
+        shadow before the filesystem-canonical registry (ADR 0012).
+        The cache keys on ``(name, user_id)`` so user A's shadow
+        doesn't bleed into user B's chats — and the
+        registry-only view (when ``user_id`` is omitted) gets its
+        own cache slot too.
         """
 
-        cached = await self._cache.get(name)
+        key = _skill_cache_key(name, user_id)
+        cached = await self._cache.get(key)
         if cached is not None:
             return cached
 
-        skill = await self._fetch_skill(name, request_id=request_id)
-        await self._cache.put(name, skill)
+        skill = await self._fetch_skill(name, request_id=request_id, user_id=user_id)
+        await self._cache.put(key, skill)
         return skill
 
     async def get_organization_profile(
@@ -354,16 +383,31 @@ class BackendClient:
         await self._cache.put(ORGANIZATION_PROFILE_CACHE_KEY, skill)
         return skill
 
-    async def _fetch_skill(self, name: str, *, request_id: str | None) -> Skill:
-        """Issue the HTTP call and parse the response."""
+    async def _fetch_skill(
+        self,
+        name: str,
+        *,
+        request_id: str | None,
+        user_id: str | None = None,
+    ) -> Skill:
+        """Issue the HTTP call and parse the response.
+
+        Threads ``user_id`` as a ``?user_id=`` query param so the
+        backend's resolver checks for a user-scope shadow first per
+        ADR 0012. When ``user_id`` is ``None`` the param is omitted
+        and the backend returns the filesystem-canonical row.
+        """
 
         path = f"/api/v1/internal/skills/{name}"
         headers: dict[str, str] | None = None
         if request_id is not None:
             headers = {"X-Request-Id": request_id}
+        params: dict[str, str] | None = None
+        if user_id is not None:
+            params = {"user_id": user_id}
 
         try:
-            response = await self._client.get(path, headers=headers)
+            response = await self._client.get(path, headers=headers, params=params)
         except httpx.TimeoutException as exc:
             log.warning(
                 "backend skill fetch timed out: name=%s request_id=%s",

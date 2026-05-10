@@ -572,6 +572,7 @@ async def send_message(
         chat_id=str(cid),
         lq_ai_chat_id=str(cid),
         lq_ai_message_id=str(assistant_message_id),
+        lq_ai_user_id=str(user.id),
         lq_ai_skills=list(payload.skills),
         lq_ai_skill_inputs=dict(payload.skill_inputs),
         lq_ai_project_minimum_inference_tier=project_floor,

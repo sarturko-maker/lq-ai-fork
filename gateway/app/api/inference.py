@@ -287,9 +287,14 @@ async def _apply_skill_prompt_assembly(
 
     # Fetch each skill (cache-aware). Fail-fast on the first failure;
     # we don't try to dispatch a request with a partial skill block.
+    # ``lq_ai_user_id`` (set by the backend per ADR 0012) drives the
+    # user-scope shadow lookup at the internal endpoint — when
+    # present, the backend resolves the user's user_skills row first
+    # before falling through to the filesystem registry.
+    user_id = chat_request.lq_ai_user_id
     skills: list[Skill] = []
     for name in chat_request.lq_ai_skills:
-        skill = await backend.get_skill(name, request_id=request_id)
+        skill = await backend.get_skill(name, request_id=request_id, user_id=user_id)
         skills.append(skill)
 
     # Fetch the deployment's Organization Profile (D4). Returns None

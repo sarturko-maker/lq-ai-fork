@@ -42,9 +42,10 @@ from __future__ import annotations
 
 import logging
 import secrets
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +54,7 @@ from app.config import get_settings
 from app.db.session import get_db
 from app.errors import InternalError, NotFound, Unauthorized
 from app.models.organization_profile import OrganizationProfile
+from app.models.user_skill import UserSkill
 from app.skills.registry import MutableSkillRegistry
 
 log = logging.getLogger(__name__)
@@ -121,18 +123,51 @@ def _registry(request: Request) -> MutableSkillRegistry:
 async def get_skill_internal(
     request: Request,
     skill_name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user_id: uuid.UUID | None = Query(default=None),
     x_lq_ai_gateway_key: str | None = Header(default=None, alias=GATEWAY_KEY_HEADER),
 ) -> JSONResponse:
-    """Return full skill detail for ``skill_name``.
+    """Return resolved skill detail for ``skill_name``.
 
     Same response shape as ``GET /api/v1/skills/{skill_name}`` — the
     full ``Skill`` from ``docs/api/backend-openapi.yaml``, with
     ``None``-valued optionals dropped for compactness. Auth is via
     ``X-LQ-AI-Gateway-Key`` (constant-time compare); 401 on bad key,
     404 on unknown skill name.
+
+    Resolution order (ADR 0012):
+
+    * If ``user_id`` is supplied AND a non-archived ``user_skills`` row
+      exists for that user at this slug, return the shadow synthesized
+      as a Skill payload (the user's edited body wins for their chats).
+    * Otherwise fall through to the filesystem-canonical registry.
+    * 404 if neither matches.
+
+    The gateway calls this with the authenticated user's UUID during
+    C2 prompt assembly so shadows actually shape the system prompt;
+    callers that don't care about user-scope (e.g., admin tooling)
+    omit ``user_id`` and get the registry view.
     """
 
     _verify_gateway_key(x_lq_ai_gateway_key)
+
+    if user_id is not None:
+        stmt = select(UserSkill).where(
+            UserSkill.scope == "user",
+            UserSkill.owner_user_id == user_id,
+            UserSkill.slug == skill_name,
+            UserSkill.archived_at.is_(None),
+        )
+        shadow = (await db.execute(stmt)).scalar_one_or_none()
+        if shadow is not None:
+            # Reuse the synthesizer that powers the user-facing
+            # GET /skills/{slug} shadow path. Cross-module import is
+            # fine here — both modules live in app.api and the
+            # skills <-> user_skills dependency already crosses (see
+            # the fork handler in skills.py).
+            from app.api.skills import _skill_from_user_skill
+
+            return JSONResponse(content=_skill_from_user_skill(shadow))
 
     holder = _registry(request)
     registry = holder.current()

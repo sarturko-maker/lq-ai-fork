@@ -106,6 +106,14 @@ class ChatCompletionRequest(BaseModel):
     forwards it; the gateway writes the same UUID into the routing log
     so the log row joins to the persisted message row by ``id``."""
 
+    lq_ai_user_id: str | None = None
+    """UUID of the authenticated user the request belongs to. The
+    gateway uses this to look up user-scope skill shadows (ADR 0012)
+    during prompt assembly — when set, ``/internal/skills/{slug}``
+    resolves to the user's row first and falls back to the
+    filesystem-canonical built-in. Omitted means "registry-only",
+    which is the right behavior for non-user-bearing callers."""
+
 
 # --- Chat completion response -------------------------------------------------
 

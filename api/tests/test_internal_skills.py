@@ -330,3 +330,178 @@ async def test_internal_org_profile_no_configured_key_returns_500(
     )
     assert resp.status_code == 500
     assert resp.json()["detail"]["code"] == "internal_error"
+
+
+# ---------------------------------------------------------------------------
+# D8 — user_id query param resolves user-scope shadows (ADR 0012)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_internal_skill_with_user_id_returns_shadow(
+    client_with_key: AsyncClient, db_session: AsyncSession
+) -> None:
+    """When a non-archived user_skills row exists at this slug for the
+    requesting user, the internal endpoint returns the shadow rather
+    than the filesystem-canonical built-in."""
+
+    import uuid as _uuid
+
+    from app.models import User, UserSkill
+    from app.security import hash_password
+
+    user = User(
+        email=f"shadow-{_uuid.uuid4().hex[:8]}@example.com",
+        display_name="Shadow Test",
+        hashed_password=hash_password("correct-horse-battery-staple"),
+        is_admin=False,
+        mfa_enabled=False,
+        must_change_password=False,
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    shadow = UserSkill(
+        scope="user",
+        owner_user_id=user.id,
+        slug="alpha-test-skill",
+        display_name="My Alpha",
+        description="user-scope alpha",
+        body="USER-SCOPE-SHADOW-BODY",
+    )
+    db_session.add(shadow)
+    await db_session.flush()
+
+    resp = await client_with_key.get(
+        f"/api/v1/internal/skills/alpha-test-skill?user_id={user.id}",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["scope"] == "user"
+    assert body["content_md"] == "USER-SCOPE-SHADOW-BODY"
+
+
+@pytest.mark.integration
+async def test_internal_skill_user_id_falls_back_to_builtin_when_no_shadow(
+    client_with_key: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Passing ``user_id`` with no shadow row for that user falls
+    through to the registry. The built-in remains the response."""
+
+    import uuid as _uuid
+
+    from app.models import User
+    from app.security import hash_password
+
+    user = User(
+        email=f"no-shadow-{_uuid.uuid4().hex[:8]}@example.com",
+        display_name="No Shadow",
+        hashed_password=hash_password("correct-horse-battery-staple"),
+        is_admin=False,
+        mfa_enabled=False,
+        must_change_password=False,
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    resp = await client_with_key.get(
+        f"/api/v1/internal/skills/alpha-test-skill?user_id={user.id}",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["scope"] == "builtin"
+
+
+@pytest.mark.integration
+async def test_internal_skill_user_id_shadow_is_per_user(
+    client_with_key: AsyncClient, db_session: AsyncSession
+) -> None:
+    """User A's shadow does not affect user B's resolution."""
+
+    import uuid as _uuid
+
+    from app.models import User, UserSkill
+    from app.security import hash_password
+
+    async def make_user(suffix: str) -> User:
+        u = User(
+            email=f"per-user-{suffix}-{_uuid.uuid4().hex[:8]}@example.com",
+            display_name=f"Per User {suffix}",
+            hashed_password=hash_password("correct-horse-battery-staple"),
+            is_admin=False,
+            mfa_enabled=False,
+            must_change_password=False,
+        )
+        db_session.add(u)
+        await db_session.flush()
+        return u
+
+    a = await make_user("a")
+    b = await make_user("b")
+    db_session.add(
+        UserSkill(
+            scope="user",
+            owner_user_id=a.id,
+            slug="alpha-test-skill",
+            display_name="A's Alpha",
+            description="a shadow",
+            body="A-ONLY-BODY",
+        )
+    )
+    await db_session.flush()
+
+    a_resp = await client_with_key.get(
+        f"/api/v1/internal/skills/alpha-test-skill?user_id={a.id}",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    b_resp = await client_with_key.get(
+        f"/api/v1/internal/skills/alpha-test-skill?user_id={b.id}",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert a_resp.json()["scope"] == "user"
+    assert a_resp.json()["content_md"] == "A-ONLY-BODY"
+    assert b_resp.json()["scope"] == "builtin"
+
+
+@pytest.mark.integration
+async def test_internal_skill_archived_shadow_falls_through(
+    client_with_key: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Archived shadows are excluded from resolution; built-in wins."""
+
+    import uuid as _uuid
+    from datetime import datetime, timezone
+
+    from app.models import User, UserSkill
+    from app.security import hash_password
+
+    user = User(
+        email=f"archived-{_uuid.uuid4().hex[:8]}@example.com",
+        display_name="Archived Shadow",
+        hashed_password=hash_password("correct-horse-battery-staple"),
+        is_admin=False,
+        mfa_enabled=False,
+        must_change_password=False,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    db_session.add(
+        UserSkill(
+            scope="user",
+            owner_user_id=user.id,
+            slug="alpha-test-skill",
+            display_name="Archived",
+            description="archived",
+            body="ARCHIVED-BODY",
+            archived_at=datetime.now(timezone.utc),
+        )
+    )
+    await db_session.flush()
+
+    resp = await client_with_key.get(
+        f"/api/v1/internal/skills/alpha-test-skill?user_id={user.id}",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["scope"] == "builtin"
