@@ -54,6 +54,7 @@ _PARAM_VALUES: dict[str, str] = {
     "file_id": _DUMMY_UUID,
     "kb_id": _DUMMY_UUID,
     "prompt_id": _DUMMY_UUID,
+    "skill_id": _DUMMY_UUID,
     "skill_name": "nda-review",
 }
 
@@ -111,6 +112,14 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # C1 — Skill Service: filesystem loading
     ("GET", "/api/v1/skills"),
     ("GET", "/api/v1/skills/{skill_name}"),
+    # D8 — fork built-in into user scope (replaces the C1-era 501 stub)
+    ("POST", "/api/v1/skills/{skill_name}/fork"),
+    # D8 — user-skills CRUD per ADR 0012
+    ("GET", "/api/v1/user-skills"),
+    ("POST", "/api/v1/user-skills"),
+    ("GET", "/api/v1/user-skills/{skill_id}"),
+    ("PATCH", "/api/v1/user-skills/{skill_id}"),
+    ("DELETE", "/api/v1/user-skills/{skill_id}"),
     # C2 — gateway-facing internal skills endpoint (X-LQ-AI-Gateway-Key auth)
     ("GET", "/api/v1/internal/skills/{skill_name}"),
     # C4 — file upload + storage

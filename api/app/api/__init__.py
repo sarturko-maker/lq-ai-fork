@@ -34,6 +34,7 @@ from app.api import (
     projects,
     saved_prompts,
     skills,
+    user_skills,
     users,
 )
 from app.api.dependencies import get_active_user
@@ -61,6 +62,7 @@ api_router.include_router(files.router, dependencies=_active)
 api_router.include_router(knowledge_bases.router, dependencies=_active)
 api_router.include_router(organization_profile.router, dependencies=_active)
 api_router.include_router(saved_prompts.router, dependencies=_active)
+api_router.include_router(user_skills.router, dependencies=_active)
 api_router.include_router(admin.router, dependencies=_active)
 
 __all__ = ["api_router"]

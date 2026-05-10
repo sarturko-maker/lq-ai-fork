@@ -52,6 +52,8 @@ tags:
     description: Singleton org-level skill capturing voice, jurisdiction, etc.
   - name: saved-prompts
     description: Per-user saved prompt fragments
+  - name: user-skills
+    description: Per-user DB-backed skills (D8) — owned CRUD that shadows built-ins per ADR 0012
   - name: audit-log
     description: Audit log query (admin only)
   - name: tier-policy
@@ -887,23 +889,142 @@ paths:
         schema: {type: string}
     post:
       tags: [skills]
-      summary: Fork a skill to user or team scope
+      summary: Fork a built-in skill into the caller's user scope (D8)
+      description: |
+        Copies the built-in's resolved frontmatter and body into a new
+        ``user_skills`` row owned by the caller (ADR 0012). The request
+        body's ``new_name`` becomes the new row's slug (omitted →
+        defaults to the source slug, which produces a same-slug shadow);
+        ``scope`` MUST be ``user`` in D8 — ``team`` is reserved for
+        D8.1 and returns 400.
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              required: [new_name, scope]
               properties:
-                new_name: {type: string}
-                scope: {type: string, enum: [user, team]}
+                new_name: {type: string, description: New slug for the user-scope row}
+                scope: {type: string, enum: [user, team], default: user}
       responses:
         '201':
           description: Fork created
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Skill'}
+        '400':
+          description: ``scope=team`` requested (deferred to D8.1).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: A user-scope skill with that slug already exists for this user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  # ----------- USER SKILLS (D8 — DB-backed CRUD per ADR 0012) -----------
+  /api/v1/user-skills:
+    get:
+      tags: [user-skills]
+      summary: List the caller's user-scope skills (newest first)
+      description: |
+        Returns the rich ``UserSkill`` view (body + frontmatter_extra
+        included) for the management UI. The picker-side merge view
+        lives at ``GET /api/v1/skills?scope=all`` (summary shape).
+      responses:
+        '200':
+          description: List of user-scope skill rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/UserSkill'}
+    post:
+      tags: [user-skills]
+      summary: Create a user-scope skill
+      description: |
+        Creates a new user-scope row owned by the caller (ADR 0012).
+        Slug collision with the caller's existing non-archived rows
+        returns 409. Collision with a filesystem built-in is **allowed**
+        — that's the deliberate shadow case; the user's row wins for
+        their chats.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UserSkillCreate'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserSkill'}
+        '409':
+          description: Slug collides with the caller's existing user-scope skills.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/user-skills/{skill_id}:
+    parameters:
+      - name: skill_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [user-skills]
+      summary: Fetch a single user-scope skill (owner-only)
+      responses:
+        '200':
+          description: Skill row
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserSkill'}
+        '404':
+          description: Skill not found OR not owned by the caller (id-probing-safe).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    patch:
+      tags: [user-skills]
+      summary: Partial update (owner-only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UserSkillUpdate'}
+      responses:
+        '200':
+          description: Updated row
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserSkill'}
+        '404':
+          description: Skill not found OR not owned by the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    delete:
+      tags: [user-skills]
+      summary: Soft-delete (owner-only)
+      description: |
+        Sets ``archived_at = now()``. The slug is freed for a new
+        user-scope skill of the same slug after archive. Audit log
+        records the deletion with the row's identity.
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Skill not found OR not owned by the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '410':
+          description: Skill is already archived.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 
   # ----------- MODELS (D0) -----------
   /api/v1/models:
@@ -2433,6 +2554,55 @@ components:
         tags: {type: array, items: {type: string}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+
+    # D8 — DB-backed user skills (ADR 0012).
+    UserSkill:
+      type: object
+      required:
+        [id, scope, owner_user_id, slug, display_name, description, version, body, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        scope: {type: string, enum: [user, team], description: D8 only emits 'user'; 'team' arrives in D8.1.}
+        owner_user_id: {type: string, format: uuid}
+        slug: {type: string, description: Stable identifier; matches filesystem skill folder-name conventions.}
+        display_name: {type: string}
+        description: {type: string}
+        version: {type: string, description: User-set free-form semver (e.g. "1.0.0").}
+        tags: {type: array, items: {type: string}}
+        frontmatter_extra:
+          type: object
+          additionalProperties: true
+          description: Arbitrary ``lq_ai:`` extension keys (jurisdiction, output_format, minimum_inference_tier, etc.).
+        body: {type: string}
+        archived_at: {type: string, format: date-time, nullable: true, description: Soft-delete timestamp; null when active.}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    UserSkillCreate:
+      type: object
+      required: [slug, display_name, description, body]
+      properties:
+        slug:
+          type: string
+          pattern: '^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$'
+          maxLength: 80
+        display_name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, minLength: 1, maxLength: 2000}
+        body: {type: string, minLength: 1, maxLength: 200000}
+        version: {type: string, default: '1.0.0', maxLength: 50}
+        tags: {type: array, items: {type: string}, maxItems: 20}
+        frontmatter_extra: {type: object, additionalProperties: true}
+
+    UserSkillUpdate:
+      type: object
+      description: All fields optional; only supplied keys are updated.
+      properties:
+        display_name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, minLength: 1, maxLength: 2000}
+        body: {type: string, minLength: 1, maxLength: 200000}
+        version: {type: string, maxLength: 50}
+        tags: {type: array, items: {type: string}, maxItems: 20}
+        frontmatter_extra: {type: object, additionalProperties: true}
 
     AuditLogEntry:
       type: object
