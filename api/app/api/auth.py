@@ -41,6 +41,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser
+from app.audit import audit_action
 from app.config import get_settings
 from app.db.session import get_db
 from app.errors import Conflict
@@ -305,12 +306,31 @@ async def login(
     if user is None:
         # Hash a constant-length string to consume comparable wall time.
         verify_password(payload.password, "$2b$12$" + "x" * 53)
+        await audit_action(
+            db,
+            user_id=None,
+            action="user.login_failed",
+            resource_type="user",
+            request=request,
+            details={"email": payload.email, "reason": "user_not_found"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
         )
 
     if not verify_password(payload.password, user.hashed_password):
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="user.login_failed",
+            resource_type="user",
+            resource_id=str(user.id),
+            request=request,
+            details={"email": payload.email, "reason": "wrong_password"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
@@ -322,6 +342,15 @@ async def login(
     if user.mfa_enabled:
         mfa_token = create_mfa_token(user.id)
         challenge = MfaChallenge(mfa_token=mfa_token, methods=["totp", "recovery_code"])
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="user.login_mfa_challenged",
+            resource_type="user",
+            resource_id=str(user.id),
+            request=request,
+        )
+        await db.commit()
         return JSONResponse(
             status_code=status.HTTP_423_LOCKED,
             content=challenge.model_dump(),
@@ -330,6 +359,14 @@ async def login(
     # Happy path. Create a session, stamp last_login_at, return tokens.
     plaintext, _session = await _create_session(db, user, request)
     user.last_login_at = _utcnow()
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.login",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
+    )
     await db.commit()
 
     body = _login_response(user, plaintext)
@@ -375,6 +412,17 @@ async def refresh(
             break
 
     if matched is None:
+        # No user context (the presented token didn't match any active
+        # session); the audit row records the *attempt* with no user id.
+        await audit_action(
+            db,
+            user_id=None,
+            action="user.session_refresh_failed",
+            resource_type="user_session",
+            request=request,
+            details={"reason": "no_matching_session"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
@@ -386,6 +434,16 @@ async def refresh(
     )
     user = user_result.scalar_one_or_none()
     if user is None:
+        await audit_action(
+            db,
+            user_id=matched.user_id,
+            action="user.session_refresh_failed",
+            resource_type="user_session",
+            resource_id=str(matched.id),
+            request=request,
+            details={"reason": "user_deleted"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
@@ -396,6 +454,14 @@ async def refresh(
     # active old session and no new one (or two active sessions).
     matched.revoked_at = now
     plaintext, _new_session = await _create_session(db, user, request)
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.session_refreshed",
+        resource_type="user_session",
+        resource_id=str(matched.id),
+        request=request,
+    )
     await db.commit()
 
     return TokenResponse(
@@ -413,6 +479,7 @@ async def refresh(
 )
 async def logout(
     user: CurrentUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     """POST /api/v1/auth/logout — bearer-authenticated.
@@ -426,6 +493,14 @@ async def logout(
         update(UserSession)
         .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
         .values(revoked_at=_utcnow())
+    )
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.logout",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
     )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -449,6 +524,7 @@ async def logout(
 async def change_password(
     payload: ChangePasswordRequest,
     user: CurrentUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     """POST /api/v1/auth/change-password.
@@ -475,6 +551,16 @@ async def change_password(
     settings = get_settings()
 
     if not verify_password(payload.current_password, user.hashed_password):
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="user.password_change_failed",
+            resource_type="user",
+            resource_id=str(user.id),
+            request=request,
+            details={"reason": "wrong_current_password"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Current password is incorrect",
@@ -505,6 +591,14 @@ async def change_password(
         update(UserSession)
         .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
         .values(revoked_at=_utcnow())
+    )
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.password_changed",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
     )
     await db.commit()
 
@@ -549,6 +643,7 @@ async def change_password(
 )
 async def mfa_setup(
     user: CurrentUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MfaSetupResponse:
     """POST /api/v1/auth/mfa/setup — issue a fresh TOTP secret + recovery codes.
@@ -566,6 +661,14 @@ async def mfa_setup(
 
     user.totp_secret = secret
     user.recovery_codes = hashed_codes
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.mfa_setup_initiated",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
+    )
     await db.commit()
 
     return MfaSetupResponse(
@@ -588,6 +691,7 @@ async def mfa_setup(
 async def mfa_enable(
     payload: MfaEnableRequest,
     user: CurrentUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     """POST /api/v1/auth/mfa/enable — flip ``mfa_enabled`` after first verify.
@@ -600,18 +704,46 @@ async def mfa_enable(
         raise Conflict(message="MFA already enabled", code="mfa_already_enabled")
 
     if not user.totp_secret:
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="user.mfa_enable_failed",
+            resource_type="user",
+            resource_id=str(user.id),
+            request=request,
+            details={"reason": "setup_not_initiated"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="MFA setup has not been initiated; call /auth/mfa/setup first.",
         )
 
     if not verify_totp(user.totp_secret, payload.code):
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="user.mfa_enable_failed",
+            resource_type="user",
+            resource_id=str(user.id),
+            request=request,
+            details={"reason": "invalid_code"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid verification code.",
         )
 
     user.mfa_enabled = True
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.mfa_enabled",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
+    )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -643,6 +775,15 @@ async def mfa_verify(
     """
     claims = decode_mfa_token(payload.mfa_token)
     if claims is None:
+        await audit_action(
+            db,
+            user_id=None,
+            action="user.mfa_verify_failed",
+            resource_type="user",
+            request=request,
+            details={"reason": "invalid_challenge_token"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid MFA challenge",
@@ -653,12 +794,23 @@ async def mfa_verify(
     )
     user = result.scalar_one_or_none()
     if user is None or not user.mfa_enabled or not user.totp_secret:
+        await audit_action(
+            db,
+            user_id=claims.user_id,
+            action="user.mfa_verify_failed",
+            resource_type="user",
+            resource_id=str(claims.user_id),
+            request=request,
+            details={"reason": "mfa_not_enabled_or_user_missing"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid MFA challenge",
         )
 
     matched = False
+    used_recovery_code = False
 
     if verify_totp(user.totp_secret, payload.code):
         matched = True
@@ -667,8 +819,19 @@ async def mfa_verify(
         if remaining is not None:
             user.recovery_codes = remaining
             matched = True
+            used_recovery_code = True
 
     if not matched:
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="user.mfa_verify_failed",
+            resource_type="user",
+            resource_id=str(user.id),
+            request=request,
+            details={"reason": "invalid_code"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid MFA code",
@@ -676,6 +839,15 @@ async def mfa_verify(
 
     plaintext, _session = await _create_session(db, user, request)
     user.last_login_at = _utcnow()
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.login",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
+        details={"mfa": True, "via": "recovery_code" if used_recovery_code else "totp"},
+    )
     await db.commit()
 
     body = _login_response(user, plaintext)
@@ -695,6 +867,7 @@ async def mfa_verify(
 async def mfa_disable(
     payload: MfaDisableRequest,
     user: CurrentUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     """POST /api/v1/auth/mfa/disable — require password + MFA code together.
@@ -713,6 +886,16 @@ async def mfa_disable(
         )
 
     if not verify_password(payload.password, user.hashed_password):
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="user.mfa_disable_failed",
+            resource_type="user",
+            resource_id=str(user.id),
+            request=request,
+            details={"reason": "wrong_password"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
@@ -728,6 +911,16 @@ async def mfa_disable(
         code_ok = True
 
     if not code_ok:
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="user.mfa_disable_failed",
+            resource_type="user",
+            resource_id=str(user.id),
+            request=request,
+            details={"reason": "invalid_code"},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid MFA code",
@@ -736,5 +929,13 @@ async def mfa_disable(
     user.mfa_enabled = False
     user.totp_secret = None
     user.recovery_codes = None
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.mfa_disabled",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
+    )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
