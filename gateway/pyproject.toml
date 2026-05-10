@@ -30,6 +30,13 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.30,<2.1",
     "asyncpg>=0.29,<0.31",
     "greenlet>=3.0,<4",
+    # ADR 0011: encrypted-at-rest provider keys via Fernet (AES-128-CBC +
+    # HMAC-SHA256). The cryptography library is the standard Python AEAD
+    # implementation; stdlib stops at hashlib/hmac. Master key is supplied
+    # by the operator at gateway startup via LQ_AI_GATEWAY_MASTER_KEY;
+    # individual provider keys live encrypted in gateway.yaml under
+    # api_key_encrypted: <fernet-token>.
+    "cryptography>=42,<46",
 ]
 
 [project.optional-dependencies]

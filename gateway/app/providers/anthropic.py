@@ -44,6 +44,7 @@ from typing import Any
 import httpx
 
 from app.config import ProviderConfig
+from app.secrets import ProviderKeyResolver
 from app.providers.base import (
     ProviderAdapter,
     ProviderAuthError,
@@ -130,24 +131,46 @@ class AnthropicAdapter(ProviderAdapter):
         *,
         env: dict[str, str] | None = None,
         client: httpx.AsyncClient | None = None,
+        key_resolver: ProviderKeyResolver | None = None,
     ) -> AnthropicAdapter:
         """Build an adapter from a loaded :class:`ProviderConfig`.
 
         ``env`` defaults to :data:`os.environ`; tests can pass an override
         to avoid mutating real environment state.
+
+        ``key_resolver`` (ADR 0011) handles ``api_key_encrypted`` paths in
+        addition to ``api_key_env``. When ``None`` the factory builds a
+        resolver from process env — which transparently handles both
+        paths if ``LQ_AI_GATEWAY_MASTER_KEY`` is set, and the env-only
+        path otherwise.
         """
 
         if provider.type != "anthropic":
             raise ValueError(
                 f"AnthropicAdapter requires provider.type == 'anthropic'; got {provider.type!r}"
             )
-        env_lookup = env if env is not None else dict(os.environ)
-        api_key_env = provider.api_key_env or "ANTHROPIC_API_KEY"
-        api_key = env_lookup.get(api_key_env)
+        if key_resolver is None:
+            env_lookup = env if env is not None else dict(os.environ)
+            key_resolver = ProviderKeyResolver(
+                master_key=env_lookup.get("LQ_AI_GATEWAY_MASTER_KEY") or None,
+                env=env_lookup,
+            )
+        # api_key_env defaults to ANTHROPIC_API_KEY when neither key
+        # source is set on the provider entry; the resolver returns ""
+        # if the env var is unset, which we treat as a config error.
+        effective_env = provider.api_key_env or (
+            None if provider.api_key_encrypted else "ANTHROPIC_API_KEY"
+        )
+        api_key = key_resolver.resolve(
+            provider_name=provider.name,
+            api_key_env=effective_env,
+            api_key_encrypted=provider.api_key_encrypted,
+        )
         if not api_key:
             raise ValueError(
-                f"Anthropic provider {provider.name!r} requires environment variable "
-                f"{api_key_env!r} to be set"
+                f"Anthropic provider {provider.name!r} requires either "
+                f"api_key_encrypted or environment variable "
+                f"{(effective_env or 'ANTHROPIC_API_KEY')!r} to be set"
             )
 
         # ``timeout_s`` is a forward-looking field on ProviderConfig per

@@ -89,6 +89,19 @@ class ProviderConfig(BaseModel):
     Keeps unknown provider-specific fields (``project_id``, ``region``,
     ``aws_region``, ``api_version``, etc.) by allowing extra fields. The
     per-type adapter (B3+) is responsible for reading what it needs.
+
+    API-key sourcing (per ADR 0011) supports two paths and exactly one
+    is used per provider:
+
+    * ``api_key_env: ANTHROPIC_API_KEY`` — read the key from the
+      environment at adapter build time. Existing path; deprecated but
+      still loadable through M1+M2.
+    * ``api_key_encrypted: gAAAAAB...`` — Fernet-wrapped ciphertext;
+      decrypted in-memory by ``app.secrets.ProviderKeyResolver`` using
+      the master key bound at gateway startup
+      (:envvar:`LQ_AI_GATEWAY_MASTER_KEY`).
+
+    Mixing both on a single entry is rejected by the validator.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -99,9 +112,24 @@ class ProviderConfig(BaseModel):
     # Some local providers (e.g., Ollama) legitimately have an empty string
     # here. Accept ``None`` and ``""`` to mean "no key required".
     api_key_env: str | None = None
+    api_key_encrypted: str | None = None
+    """Fernet token (urlsafe-base64) of the provider key. Decrypted at
+    gateway startup. See ``app.secrets`` and ADR 0011."""
     tier: InferenceTier
     models: list[str] = Field(default_factory=list)
     enabled: bool = True
+
+    @model_validator(mode="after")
+    def _exactly_one_key_source(self) -> ProviderConfig:
+        if self.api_key_env and self.api_key_encrypted:
+            raise ValueError(
+                f"Provider {self.name!r}: set either api_key_env OR "
+                f"api_key_encrypted, not both. Aborting at config-load "
+                f"time so a misconfigured provider can't silently fall "
+                f"back to a different key source than the operator "
+                f"intended."
+            )
+        return self
 
 
 # --- Model aliases ------------------------------------------------------------

@@ -83,6 +83,7 @@ from typing import Any
 import httpx
 
 from app.config import ProviderConfig
+from app.secrets import ProviderKeyResolver
 from app.providers.base import (
     ProviderAdapter,
     ProviderHealth,
@@ -172,6 +173,7 @@ class OllamaAdapter(ProviderAdapter):
         *,
         env: dict[str, str] | None = None,
         client: httpx.AsyncClient | None = None,
+        key_resolver: ProviderKeyResolver | None = None,
     ) -> OllamaAdapter:
         """Build an adapter from a loaded :class:`ProviderConfig`.
 
@@ -196,10 +198,18 @@ class OllamaAdapter(ProviderAdapter):
             )
 
         env_lookup = env if env is not None else dict(os.environ)
-        api_key = ""
-        api_key_env = provider.api_key_env or ""
-        if api_key_env:
-            api_key = env_lookup.get(api_key_env, "") or ""
+        if key_resolver is None:
+            key_resolver = ProviderKeyResolver(
+                master_key=env_lookup.get("LQ_AI_GATEWAY_MASTER_KEY") or None,
+                env=env_lookup,
+            )
+        # Ollama keys are optional. The resolver returns "" when both
+        # sources are unset, which the adapter treats as "no auth header".
+        api_key = key_resolver.resolve(
+            provider_name=provider.name,
+            api_key_env=provider.api_key_env or None,
+            api_key_encrypted=provider.api_key_encrypted,
+        )
 
         extra = provider.model_extra or {}
         timeout_raw = extra.get("timeout_s")

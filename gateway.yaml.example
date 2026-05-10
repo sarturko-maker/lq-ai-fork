@@ -50,9 +50,22 @@ gateway_auth:
 #   name      — operator-chosen identifier (referenced from model_aliases)
 #   type      — provider family (anthropic, openai, vertex, etc.)
 #   base_url  — endpoint URL
-#   api_key_env — environment variable name (NOT the key itself)
+#   api_key_env       — environment variable name to look up (NOT the key)
+#   api_key_encrypted — Fernet-wrapped ciphertext (ADR 0011, alternative)
 #   tier      — default Inference Tier for this provider/account
 #   models    — which models the provider exposes
+#
+# Per ADR 0011 each provider entry uses EITHER `api_key_env` OR
+# `api_key_encrypted`, not both. The encrypted path lets operators
+# commit `gateway.yaml` to a private repo / backup snapshots without
+# leaking the plaintext key:
+#   1. `python -m app.cli generate-master-key` → store as
+#      LQ_AI_GATEWAY_MASTER_KEY in your secrets vault.
+#   2. Export the master key in the gateway's environment.
+#   3. `python -m app.cli encrypt-key --provider <name>` → paste the
+#      output as `api_key_encrypted: gAAAAAB...`.
+# The gateway decrypts in-memory at adapter build time; plaintext keys
+# never touch disk after step 3.
 #
 # IMPORTANT: tier values reflect the operator's specific
 # agreement with the provider. A standard commercial Anthropic
