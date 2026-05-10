@@ -46,16 +46,31 @@ paths:
       tags: [inference]
       summary: OpenAI-compatible chat completions
       description: |
-        Accepts requests in OpenAI Chat Completions format. The gateway:
-        - Resolves the model alias (e.g., 'smart' → claude-opus-4-7)
+        Accepts requests in OpenAI Chat Completions format. The `model`
+        field can be either:
+
+        * **An alias** (`smart`, `fast`, …) — resolved through the
+          gateway's `model_aliases` config, with the alias's fallback
+          chain applied on primary failure.
+        * **A direct `<provider>/<model>` form** (`anthropic-prod/claude-opus-4-7`,
+          `openai-prod/gpt-4o`, `ollama-local/llama3.1:8b`) — dispatched
+          directly to that provider with **no fallback chain**. Per
+          ADR 0011: the transparency principle requires users / admins
+          to be able to pick a specific model without alias indirection.
+
+        The gateway:
+        - Resolves the model field (alias chain OR direct passthrough)
         - Determines the routed inference tier (B4)
         - Refuses if below the request's minimum_inference_tier (D1; B4 only annotates)
         - Applies anonymization (if enabled, M2)
         - Routes to the appropriate provider
-        - On a fallback-eligible primary failure, walks the alias's
-          fallback chain (B4 skeleton; full activation when more
-          providers ship in B6)
+        - On a fallback-eligible primary failure (alias mode only),
+          walks the fallback chain
         - Tracks cost and telemetry
+
+        Tier-floor enforcement (D1) applies to BOTH dispatch modes —
+        a direct selection of a tier-1 model against a skill that
+        declares `minimum_inference_tier: 3` is refused with 403.
 
         Per PRD §4.4, the routed Inference Tier is surfaced two ways
         on the response:
