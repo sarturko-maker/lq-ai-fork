@@ -42,12 +42,17 @@ from __future__ import annotations
 
 import logging
 import secrets
+from typing import Annotated
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.db.session import get_db
 from app.errors import InternalError, NotFound, Unauthorized
+from app.models.organization_profile import OrganizationProfile
 from app.skills.registry import MutableSkillRegistry
 
 log = logging.getLogger(__name__)
@@ -143,6 +148,83 @@ async def get_skill_internal(
         k: v
         for k, v in raw.items()
         if v is not None and not (isinstance(v, list) and len(v) == 0 and k in {"tags"})
+    }
+    return JSONResponse(content=payload)
+
+
+# ---------------------------------------------------------------------------
+# Organization Profile (D4-coverage)
+# ---------------------------------------------------------------------------
+#
+# The Profile is a singleton (migration 0010) holding a Markdown body the
+# gateway prepends to every skill's prompt unless the skill opts out via
+# ``use_organization_profile: false`` in its frontmatter (PRD §3.12). We
+# synthesize the Skill-shaped response on the fly so the gateway-side
+# client can reuse its existing :class:`Skill` parser. When no row exists
+# or its body is empty we return 404 — the gateway treats "no profile"
+# the same way regardless of which kind of empty it sees.
+
+# Synthetic frontmatter body. Mirrors the shape a real SKILL.md would
+# carry (per docs/skill-authoring-guide.md) so the gateway's permissive
+# YAML parse extracts the same keys it would from a filesystem skill.
+# ``use_organization_profile: false`` is explicit so the assembler never
+# tries to recursively prepend the Profile to itself.
+_ORG_PROFILE_YAML = (
+    "name: organization-profile\n"
+    "description: The deployment's Organization Profile — org-wide voice, "
+    "templates, and house style automatically prepended to every skill.\n"
+    "lq_ai:\n"
+    "  title: Organization Profile\n"
+    "  version: v1\n"
+    "  is_organization_profile: true\n"
+    "  use_organization_profile: false\n"
+)
+
+
+@router.get("/organization-profile")
+async def get_organization_profile_internal(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    x_lq_ai_gateway_key: str | None = Header(default=None, alias=GATEWAY_KEY_HEADER),
+) -> JSONResponse:
+    """Return the Organization Profile as a synthesized Skill payload.
+
+    Auth is the same shared-secret as ``/internal/skills/{name}``. The
+    response shape is a :class:`Skill`-compatible JSON body so the
+    gateway can plug it into the assembler without a special-case
+    parser. ``content_md`` carries the operator-edited Markdown body;
+    ``content_yaml`` carries synthesized frontmatter declaring
+    ``is_organization_profile: true`` so consumers can identify the
+    Profile by metadata rather than name string.
+
+    Returns 404 when no Profile row exists OR when its body is empty —
+    the gateway treats both as "no profile to prepend" and the single
+    error code keeps the branch simple.
+    """
+
+    _verify_gateway_key(x_lq_ai_gateway_key)
+
+    stmt = select(OrganizationProfile).limit(1)
+    row = (await db.execute(stmt)).scalar_one_or_none()
+    if row is None or not row.content_md.strip():
+        raise NotFound(
+            message="No Organization Profile is set for this deployment.",
+            details={"resource": "organization_profile"},
+        )
+
+    payload = {
+        "name": "organization-profile",
+        "version": "v1",
+        "scope": "builtin",
+        "title": "Organization Profile",
+        "description": (
+            "The deployment's Organization Profile — org-wide voice, "
+            "templates, and house style automatically prepended to "
+            "every skill."
+        ),
+        "content_yaml": _ORG_PROFILE_YAML,
+        "content_md": row.content_md,
+        "is_organization_profile": True,
+        "use_organization_profile": False,
     }
     return JSONResponse(content=payload)
 
