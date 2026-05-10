@@ -45,6 +45,7 @@
 	import ModelPicker from '$lib/lq-ai/components/ModelPicker.svelte';
 	import MessageList from '$lib/lq-ai/components/MessageList.svelte';
 	import TierBadge from '$lib/lq-ai/components/TierBadge.svelte';
+	import SavedPromptsPanel from '$lib/lq-ai/components/SavedPromptsPanel.svelte';
 
 	// ---- state ----
 	let activeProject: Project | null = null;
@@ -463,6 +464,14 @@
 					onAttach={attachSkill}
 					onDetach={detachSkill}
 					onUpdateInputs={updateSkillInputs}
+				/>
+
+				<SavedPromptsPanel
+					onInsert={(text) => {
+						composerText = composerText.trim()
+							? `${composerText.trimEnd()}\n\n${text}`
+							: text;
+					}}
 				/>
 
 				{#if sendError}

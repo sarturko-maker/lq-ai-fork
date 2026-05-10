@@ -1,0 +1,360 @@
+<script lang="ts">
+	/**
+	 * Saved-prompts panel above the chat input — D7 / DE-013 / Issue 04.
+	 *
+	 * Three modes:
+	 * - List (collapsed): shows count + button to expand.
+	 * - List (expanded): shows the user's saved prompts with quick-insert,
+	 *   edit/delete, and "Save as SKILL.md" download. New-prompt button
+	 *   above the list.
+	 * - Edit form: pinned in place; replaces the list while editing.
+	 *
+	 * Quick-insert appends the prompt body to the composer textarea
+	 * (rather than replacing) so users can stack a saved prompt onto an
+	 * in-progress message. The parent component owns ``composerText`` and
+	 * exposes a setter; we never reach into the DOM.
+	 *
+	 * Promote-to-Skill: per ADR 0004 (skills are filesystem-canonical for
+	 * M1) we cannot create a real LQ.AI skill from the UI yet. Instead we
+	 * render a SKILL.md draft and trigger a download — the user submits
+	 * the file via PR or drops it into their ``skills/`` folder. The
+	 * full LQ.AI Skill Creator surface is tracked as phase D8.
+	 */
+	import { onMount } from 'svelte';
+
+	import { savedPromptsApi } from '$lib/lq-ai/api';
+	import type { SavedPrompt } from '$lib/lq-ai/types';
+
+	export let onInsert: (text: string) => void = () => undefined;
+
+	let prompts: SavedPrompt[] = [];
+	let panelOpen = false;
+	let loading = false;
+	let loadError: string | null = null;
+
+	// Edit-form state. ``editing.id`` is the row being updated; ``null`` →
+	// the form is in "create new" mode.
+	interface EditState {
+		id: string | null;
+		name: string;
+		prompt_text: string;
+		tagsInput: string; // comma-separated UI representation
+	}
+	let editing: EditState | null = null;
+	let saving = false;
+	let saveError: string | null = null;
+
+	async function refresh(): Promise<void> {
+		loading = true;
+		loadError = null;
+		try {
+			prompts = await savedPromptsApi.listSavedPrompts();
+		} catch (e) {
+			console.error('lq-ai: saved-prompts list failed', e);
+			loadError = e instanceof Error ? e.message : 'Failed to load saved prompts';
+		} finally {
+			loading = false;
+		}
+	}
+
+	onMount(() => {
+		void refresh();
+	});
+
+	function openCreate(): void {
+		editing = { id: null, name: '', prompt_text: '', tagsInput: '' };
+		saveError = null;
+		panelOpen = true;
+	}
+
+	function openEdit(prompt: SavedPrompt): void {
+		editing = {
+			id: prompt.id,
+			name: prompt.name,
+			prompt_text: prompt.prompt_text,
+			tagsInput: prompt.tags.join(', ')
+		};
+		saveError = null;
+	}
+
+	function cancelEdit(): void {
+		editing = null;
+		saveError = null;
+	}
+
+	function parseTags(raw: string): string[] {
+		return raw
+			.split(',')
+			.map((t) => t.trim())
+			.filter((t) => t.length > 0);
+	}
+
+	async function save(): Promise<void> {
+		if (!editing) return;
+		const name = editing.name.trim();
+		const prompt_text = editing.prompt_text;
+		if (!name || !prompt_text) {
+			saveError = 'Name and prompt text are required.';
+			return;
+		}
+		const tags = parseTags(editing.tagsInput);
+		saving = true;
+		saveError = null;
+		try {
+			if (editing.id === null) {
+				await savedPromptsApi.createSavedPrompt({ name, prompt_text, tags });
+			} else {
+				await savedPromptsApi.updateSavedPrompt(editing.id, { name, prompt_text, tags });
+			}
+			await refresh();
+			editing = null;
+		} catch (e) {
+			console.error('lq-ai: saved-prompt save failed', e);
+			saveError = e instanceof Error ? e.message : 'Failed to save prompt';
+		} finally {
+			saving = false;
+		}
+	}
+
+	async function remove(prompt: SavedPrompt): Promise<void> {
+		if (!confirm(`Delete saved prompt "${prompt.name}"? This cannot be undone.`)) return;
+		try {
+			await savedPromptsApi.deleteSavedPrompt(prompt.id);
+			await refresh();
+		} catch (e) {
+			console.error('lq-ai: saved-prompt delete failed', e);
+			alert(e instanceof Error ? e.message : 'Failed to delete prompt');
+		}
+	}
+
+	function insert(prompt: SavedPrompt): void {
+		onInsert(prompt.prompt_text);
+	}
+
+	function slugify(value: string): string {
+		const base = value
+			.toLowerCase()
+			.replace(/[^a-z0-9\s-]/g, '')
+			.trim()
+			.replace(/\s+/g, '-')
+			.replace(/-+/g, '-');
+		return base || 'saved-prompt';
+	}
+
+	function escapeYamlString(value: string): string {
+		// Conservative double-quote escaping. Sufficient for the small
+		// frontmatter values we generate (skill name, description).
+		return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+	}
+
+	/**
+	 * Render the saved prompt as a SKILL.md draft and trigger a browser
+	 * download. Per ADR 0004 we don't yet have a DB-backed user-skill
+	 * write surface; this is the honest path until D8.
+	 */
+	function downloadAsSkillMd(prompt: SavedPrompt): void {
+		const slug = slugify(prompt.name);
+		const safeName = escapeYamlString(prompt.name);
+		const description = `Promoted from saved prompt "${prompt.name}".`;
+		const tagsLine =
+			prompt.tags.length > 0
+				? `tags: [${prompt.tags.map((t) => `"${escapeYamlString(t)}"`).join(', ')}]\n`
+				: '';
+		const yaml = [
+			'---',
+			`name: ${slug}`,
+			`title: "${safeName}"`,
+			`description: "${escapeYamlString(description)}"`,
+			'version: 0.1.0',
+			tagsLine ? tagsLine.trimEnd() : '',
+			'lq_ai:',
+			'  minimum_inference_tier: 2',
+			'---',
+			''
+		]
+			.filter((l) => l !== '')
+			.join('\n');
+		const body = [
+			`# ${prompt.name}`,
+			'',
+			'> Drafted from a saved prompt. Review the frontmatter (name, ' +
+				'description, tier) and submit via PR per CONTRIBUTING.md, or ' +
+				'drop the file into your local ``skills/`` directory.',
+			'',
+			prompt.prompt_text,
+			''
+		].join('\n');
+		const blob = new Blob([yaml + '\n' + body], { type: 'text/markdown' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `${slug}.SKILL.md`;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		setTimeout(() => URL.revokeObjectURL(url), 1000);
+	}
+</script>
+
+<div
+	class="border border-gray-200 dark:border-gray-800 rounded-md p-3 space-y-2"
+	data-testid="lq-ai-saved-prompts"
+>
+	<div class="flex items-center justify-between">
+		<span class="text-sm font-medium text-gray-700 dark:text-gray-200">
+			Saved prompts
+			{#if !loading && prompts.length > 0}
+				<span class="text-xs text-gray-400">({prompts.length})</span>
+			{/if}
+		</span>
+		<div class="flex items-center gap-2">
+			<button
+				type="button"
+				class="text-xs px-2 py-1 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+				on:click={openCreate}
+				disabled={editing !== null && editing.id === null}
+				data-testid="lq-ai-saved-prompts-new"
+			>
+				+ New
+			</button>
+			<button
+				type="button"
+				class="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+				on:click={() => (panelOpen = !panelOpen)}
+				data-testid="lq-ai-saved-prompts-toggle"
+			>
+				{panelOpen ? 'Hide' : 'Show'}
+			</button>
+		</div>
+	</div>
+
+	{#if loadError}
+		<div
+			class="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1"
+			data-testid="lq-ai-saved-prompts-error"
+		>
+			{loadError}
+		</div>
+	{/if}
+
+	{#if editing}
+		<div
+			class="border border-indigo-200 dark:border-indigo-800 rounded-md p-2 space-y-2 bg-indigo-50/40 dark:bg-indigo-900/10"
+			data-testid="lq-ai-saved-prompt-editor"
+		>
+			<input
+				type="text"
+				class="w-full text-sm border border-gray-300 rounded px-2 py-1 dark:bg-gray-800"
+				placeholder="Name (e.g., Executive summary)"
+				bind:value={editing.name}
+				maxlength={200}
+				data-testid="lq-ai-saved-prompt-name"
+			/>
+			<textarea
+				class="w-full text-sm border border-gray-300 rounded px-2 py-1 dark:bg-gray-800 resize-y"
+				rows="4"
+				placeholder="Prompt text…"
+				bind:value={editing.prompt_text}
+				data-testid="lq-ai-saved-prompt-text"
+			></textarea>
+			<input
+				type="text"
+				class="w-full text-xs border border-gray-300 rounded px-2 py-1 dark:bg-gray-800"
+				placeholder="Tags, comma-separated (optional)"
+				bind:value={editing.tagsInput}
+				data-testid="lq-ai-saved-prompt-tags"
+			/>
+			{#if saveError}
+				<div class="text-xs text-rose-700">{saveError}</div>
+			{/if}
+			<div class="flex items-center justify-end gap-2">
+				<button
+					type="button"
+					class="text-xs px-2 py-1 rounded text-gray-600 hover:bg-gray-100"
+					on:click={cancelEdit}
+					disabled={saving}
+				>
+					Cancel
+				</button>
+				<button
+					type="button"
+					class="text-xs px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+					on:click={save}
+					disabled={saving}
+					data-testid="lq-ai-saved-prompt-save"
+				>
+					{saving ? 'Saving…' : editing.id === null ? 'Create' : 'Update'}
+				</button>
+			</div>
+		</div>
+	{/if}
+
+	{#if panelOpen && !editing}
+		{#if loading}
+			<p class="text-xs text-gray-500 italic">Loading…</p>
+		{:else if prompts.length === 0}
+			<p class="text-xs text-gray-500 italic" data-testid="lq-ai-saved-prompts-empty">
+				No saved prompts yet. Click <strong>+ New</strong> to create your first one.
+			</p>
+		{:else}
+			<ul class="divide-y divide-gray-100 dark:divide-gray-800 max-h-72 overflow-y-auto">
+				{#each prompts as prompt (prompt.id)}
+					<li class="py-2" data-testid={`lq-ai-saved-prompt-${prompt.id}`}>
+						<div class="flex items-start justify-between gap-2">
+							<div class="min-w-0 flex-1">
+								<div class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">
+									{prompt.name}
+								</div>
+								<div class="text-xs text-gray-500 line-clamp-2">{prompt.prompt_text}</div>
+								{#if prompt.tags.length > 0}
+									<div class="mt-1 flex flex-wrap gap-1">
+										{#each prompt.tags as tag}
+											<span
+												class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200"
+											>
+												{tag}
+											</span>
+										{/each}
+									</div>
+								{/if}
+							</div>
+							<div class="flex flex-col items-end gap-1 shrink-0">
+								<button
+									type="button"
+									class="text-xs px-2 py-0.5 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+									on:click={() => insert(prompt)}
+									data-testid={`lq-ai-saved-prompt-insert-${prompt.id}`}
+								>
+									Insert
+								</button>
+								<button
+									type="button"
+									class="text-xs px-2 py-0.5 rounded text-gray-600 hover:bg-gray-100"
+									on:click={() => openEdit(prompt)}
+								>
+									Edit
+								</button>
+								<button
+									type="button"
+									class="text-xs px-2 py-0.5 rounded text-emerald-700 hover:bg-emerald-50"
+									on:click={() => downloadAsSkillMd(prompt)}
+									title="Download as SKILL.md draft (review and submit via PR)"
+									data-testid={`lq-ai-saved-prompt-promote-${prompt.id}`}
+								>
+									Save as skill
+								</button>
+								<button
+									type="button"
+									class="text-xs px-2 py-0.5 rounded text-rose-600 hover:bg-rose-50"
+									on:click={() => remove(prompt)}
+								>
+									Delete
+								</button>
+							</div>
+						</div>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	{/if}
+</div>
