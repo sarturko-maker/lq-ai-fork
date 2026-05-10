@@ -292,6 +292,17 @@ async def _apply_skill_prompt_assembly(
         skill = await backend.get_skill(name, request_id=request_id)
         skills.append(skill)
 
+    # Fetch the deployment's Organization Profile (D4). Returns None
+    # when no Profile is set; the assembler omits Profile rendering
+    # in that case. Profile-fetch failure is the same typed error as
+    # skill-fetch failure (BackendUnreachable / SkillFetchFailed) and
+    # propagates through the LQAIError path so the request fails-fast
+    # with a structured envelope rather than dispatching with a
+    # partial system prompt.
+    organization_profile = await backend.get_organization_profile(
+        request_id=request_id,
+    )
+
     # Pull out any existing system message(s). OpenAI permits multiple;
     # we concatenate them with a blank line so the assembler can
     # prepend skill content as one block.
@@ -308,6 +319,7 @@ async def _apply_skill_prompt_assembly(
         skills,
         skill_inputs=chat_request.lq_ai_skill_inputs or {},
         existing_system_message=existing_system or None,
+        organization_profile=organization_profile,
     )
 
     new_system = ChatCompletionMessage(role="system", content=assembled)
