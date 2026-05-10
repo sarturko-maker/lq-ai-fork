@@ -16,10 +16,18 @@
 	import type { Message } from '../types';
 	import AppliedSkillsChip from './AppliedSkillsChip.svelte';
 	import TierBadge from './TierBadge.svelte';
+	import TierDetailsPanel from './TierDetailsPanel.svelte';
 
 	export let message: Message;
 	export let isStreaming: boolean = false;
 	export let onAppliedSkillClicked: ((name: string) => void) | undefined = undefined;
+
+	// D2: tier badge opens a click-for-details panel surfacing the
+	// resolved provider/model + token usage. Per PRD §1.3 the user
+	// can always answer "what just ran?" from the message they
+	// received. State stays local to this bubble so multiple open
+	// panels are not possible (the modal is exclusive).
+	let tierDetailsOpen = false;
 
 	$: bubbleClasses =
 		message.role === 'user'
@@ -56,13 +64,29 @@
 	{#if message.role === 'assistant'}
 		<div class="mt-1 flex items-center gap-2 flex-wrap">
 			{#if message.routed_inference_tier}
-				<TierBadge tier={message.routed_inference_tier} provider={message.routed_provider ?? null} />
+				<TierBadge
+					tier={message.routed_inference_tier}
+					provider={message.routed_provider ?? null}
+					on:open={() => (tierDetailsOpen = true)}
+				/>
 			{/if}
 			<AppliedSkillsChip
 				appliedSkills={message.applied_skills ?? []}
 				onSkillClicked={onAppliedSkillClicked}
 			/>
 		</div>
+
+		{#if tierDetailsOpen}
+			<TierDetailsPanel
+				tier={message.routed_inference_tier ?? null}
+				provider={message.routed_provider ?? null}
+				model={message.routed_model ?? null}
+				promptTokens={message.prompt_tokens ?? null}
+				completionTokens={message.completion_tokens ?? null}
+				costEstimate={message.cost_estimate ?? null}
+				on:close={() => (tierDetailsOpen = false)}
+			/>
+		{/if}
 
 		{#if message.error_code}
 			<div
