@@ -55,6 +55,7 @@ import httpx
 
 from app.config import GatewayConfig, ProviderConfig
 from app.router import derive_routed_inference_tier
+from app.secrets import ProviderKeyResolver
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +229,12 @@ class ModelDiscoverer:
     """Override for environment lookups (used by tests). Defaults to
     :data:`os.environ` when ``None``."""
 
+    key_resolver: ProviderKeyResolver | None = None
+    """ADR 0011: when set, used to resolve provider keys (handles both
+    ``api_key_env`` and ``api_key_encrypted`` paths). When ``None``, a
+    default resolver is built lazily from :data:`os.environ` so existing
+    tests that only override ``env`` keep working unchanged."""
+
     _owns_client: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
@@ -241,6 +248,15 @@ class ModelDiscoverer:
 
     def _env(self) -> dict[str, str]:
         return self.env if self.env is not None else dict(os.environ)
+
+    def _resolver(self) -> ProviderKeyResolver:
+        """Lazy-build the key resolver from this discoverer's env override."""
+        if self.key_resolver is not None:
+            return self.key_resolver
+        env = self._env()
+        return ProviderKeyResolver(
+            master_key=env.get("LQ_AI_GATEWAY_MASTER_KEY") or None, env=env
+        )
 
     # --- Per-source discovery -------------------------------------------------
 
@@ -349,15 +365,31 @@ class ModelDiscoverer:
     ) -> list[DiscoveredModel]:
         if self.client is None:  # pragma: no cover - __post_init__ ensures
             return []
-        api_key_env = provider.api_key_env or "ANTHROPIC_API_KEY"
-        api_key = self._env().get(api_key_env, "")
-        if not api_key:
-            # Surface visibly that the key is unset so operators can
-            # tell "no key" from "key rejected".
-            logger.info(
-                "anthropic discovery skipped for provider %r: %s is unset",
+        # ADR 0011: resolve via ProviderKeyResolver so api_key_encrypted
+        # works the same as api_key_env. Default env-name when neither
+        # source is set on the provider entry.
+        effective_env = provider.api_key_env or (
+            None if provider.api_key_encrypted else "ANTHROPIC_API_KEY"
+        )
+        try:
+            api_key = self._resolver().resolve(
+                provider_name=provider.name,
+                api_key_env=effective_env,
+                api_key_encrypted=provider.api_key_encrypted,
+            )
+        except Exception as exc:
+            # Decryption / master-key errors are operator-actionable but
+            # must not break /v1/models. Log and treat as "no key".
+            logger.warning(
+                "anthropic discovery key-resolution failed for provider %r: %s",
                 provider.name,
-                api_key_env,
+                type(exc).__name__,
+            )
+            return []
+        if not api_key:
+            logger.info(
+                "anthropic discovery skipped for provider %r: no key configured",
+                provider.name,
             )
             return []
         base_url = (provider.base_url or "").rstrip("/")
@@ -393,6 +425,119 @@ class ModelDiscoverer:
         except ValueError:
             logger.warning(
                 "anthropic discovery for provider %r returned non-JSON body",
+                provider.name,
+            )
+            return []
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            return []
+        out: list[DiscoveredModel] = []
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            model_id = entry.get("id")
+            if not isinstance(model_id, str) or not model_id:
+                continue
+            out.append(
+                DiscoveredModel(
+                    id=f"{provider.name}/{model_id}",
+                    owned_by=provider.name,
+                    lq_ai_kind="provider_native",
+                    provider_type=provider.type,
+                )
+            )
+        return out
+
+    async def discover_openai(self, provider: ProviderConfig) -> list[DiscoveredModel]:
+        """Call ``GET <base_url>/models``; surface each model id as one entry.
+
+        OpenAI's catalog endpoint takes the same ``Authorization: Bearer``
+        header as chat completions. Like the Anthropic discoverer we
+        never log the key value or the response body. Cached for the
+        same TTL as Anthropic — OpenAI's public catalog moves on the
+        order of weeks too.
+
+        Provider-type ``openai_compatible`` (vLLM, llama-cpp servers) is
+        also supported here: the catalog endpoint is the same shape and
+        most local servers expose it. Local servers without a key are
+        called with no Authorization header, matching the OpenAIAdapter
+        behavior.
+        """
+
+        cached = await self.cache.get(
+            source="openai",
+            provider_name=provider.name,
+            ttl_seconds=ANTHROPIC_CACHE_TTL_SECONDS,
+        )
+        if cached is not None:
+            return cached
+
+        models = await self._fetch_openai_uncached(provider)
+        await self.cache.put(source="openai", provider_name=provider.name, models=models)
+        return models
+
+    async def _fetch_openai_uncached(
+        self,
+        provider: ProviderConfig,
+    ) -> list[DiscoveredModel]:
+        if self.client is None:  # pragma: no cover - __post_init__ ensures
+            return []
+        # OpenAI's default env name is OPENAI_API_KEY but openai_compatible
+        # local servers may legitimately have no key.
+        effective_env = provider.api_key_env or (
+            None if (provider.api_key_encrypted or provider.type == "openai_compatible")
+            else "OPENAI_API_KEY"
+        )
+        try:
+            api_key = self._resolver().resolve(
+                provider_name=provider.name,
+                api_key_env=effective_env,
+                api_key_encrypted=provider.api_key_encrypted,
+            )
+        except Exception as exc:
+            logger.warning(
+                "openai discovery key-resolution failed for provider %r: %s",
+                provider.name,
+                type(exc).__name__,
+            )
+            return []
+        if not api_key and provider.type == "openai":
+            logger.info(
+                "openai discovery skipped for provider %r: no key configured",
+                provider.name,
+            )
+            return []
+        base_url = (provider.base_url or "").rstrip("/")
+        if not base_url:
+            return []
+        headers: dict[str, str] = {}
+        if api_key:
+            headers["authorization"] = f"Bearer {api_key}"
+        try:
+            response = await self.client.get(
+                f"{base_url}/models",
+                headers=headers,
+                timeout=self.timeout_seconds,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "openai discovery failed for provider %r: %s",
+                provider.name,
+                type(exc).__name__,
+            )
+            return []
+        if response.status_code != 200:
+            logger.warning(
+                "openai discovery for provider %r returned HTTP %d",
+                provider.name,
+                response.status_code,
+            )
+            return []
+        try:
+            payload = response.json()
+        except ValueError:
+            logger.warning(
+                "openai discovery for provider %r returned non-JSON body",
                 provider.name,
             )
             return []
@@ -482,11 +627,19 @@ class ModelDiscoverer:
             elif provider.type == "anthropic":
                 tasks.append(asyncio.create_task(self.discover_anthropic(provider)))
                 annotators.append(provider)
-            # OpenAI / Vertex / Bedrock discovery is intentionally out of
-            # scope for D0 — the brief lists Ollama + Anthropic only.
-            # Operators wanting OpenAI-native model names ask for them
-            # via the raw passthrough form (anthropic-style); the picker
-            # shows aliases for OpenAI today.
+            elif provider.type in ("openai", "openai_compatible"):
+                # ADR 0011 wave-3: discover OpenAI / OpenAI-compatible
+                # catalogs so the picker can show real model ids
+                # (gpt-4o, gpt-4o-mini, …) as direct-selection
+                # options alongside aliases.
+                tasks.append(asyncio.create_task(self.discover_openai(provider)))
+                annotators.append(provider)
+            # Vertex / Bedrock discovery still deferred — both have
+            # provider-specific catalog APIs (boto3 list_foundation_models,
+            # GCP discovery client) that would pull large dependency
+            # surfaces. Operators wanting Vertex/Bedrock-native model
+            # names address them via aliases until those discoverers
+            # land.
 
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)

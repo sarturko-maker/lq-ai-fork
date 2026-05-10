@@ -468,3 +468,163 @@ async def test_v1_models_survives_ollama_outage(client: AsyncClient) -> None:
     assert "smart" in ids
     # No Ollama rows.
     assert not any(i.startswith("ollama-local/") for i in ids)
+
+
+# --- ModelDiscoverer — OpenAI (wave-3 / ADR 0011) -----------------------------
+
+
+def _make_config_with_openai() -> GatewayConfig:
+    providers = [
+        ProviderConfig(
+            name="openai-prod",
+            type="openai",
+            base_url="https://api.openai.com/v1",
+            api_key_env="OPENAI_API_KEY",
+            tier=4,
+            models=["gpt-4o"],
+        ),
+    ]
+    aliases = {
+        "smart": ModelAliasConfig(
+            primary=ModelTarget(provider="openai-prod", model="gpt-4o"),
+            fallback=[],
+        ),
+    }
+    return GatewayConfig(
+        providers=providers,
+        model_aliases=aliases,
+        inference_tiers=InferenceTiersConfig(defaults={"openai": 4}),
+    )
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_discover_openai_returns_catalog() -> None:
+    """``GET <base_url>/models`` is parsed and surfaces as provider/native rows."""
+
+    config = _make_config_with_openai()
+    discoverer = ModelDiscoverer(env={"OPENAI_API_KEY": "sk-test"})
+    try:
+        respx.get("https://api.openai.com/v1/models").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [
+                        {"id": "gpt-4o", "object": "model"},
+                        {"id": "gpt-4o-mini", "object": "model"},
+                    ],
+                },
+            )
+        )
+        rows = await discoverer.discover_openai(config.providers[0])
+        ids = {r.id for r in rows}
+        assert "openai-prod/gpt-4o" in ids
+        assert "openai-prod/gpt-4o-mini" in ids
+        # Each row carries lq_ai_kind + provider_type.
+        assert all(r.lq_ai_kind == "provider_native" for r in rows)
+        assert all(r.provider_type == "openai" for r in rows)
+    finally:
+        await discoverer.aclose()
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_discover_openai_skips_when_no_key() -> None:
+    """No key → []; logs at INFO, never raises."""
+
+    config = _make_config_with_openai()
+    # Empty env → no OPENAI_API_KEY.
+    discoverer = ModelDiscoverer(env={})
+    try:
+        rows = await discoverer.discover_openai(config.providers[0])
+        assert rows == []
+    finally:
+        await discoverer.aclose()
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_discover_openai_returns_empty_on_401() -> None:
+    config = _make_config_with_openai()
+    discoverer = ModelDiscoverer(env={"OPENAI_API_KEY": "sk-bad"})
+    try:
+        respx.get("https://api.openai.com/v1/models").mock(
+            return_value=httpx.Response(401, json={"error": "invalid"})
+        )
+        rows = await discoverer.discover_openai(config.providers[0])
+        assert rows == []
+    finally:
+        await discoverer.aclose()
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_discover_openai_compatible_works_without_key() -> None:
+    """Local OpenAI-compatible servers (vLLM) often serve /models without auth."""
+
+    provider = ProviderConfig(
+        name="vllm-local",
+        type="openai_compatible",
+        base_url="http://vllm:8000/v1",
+        api_key_env=None,
+        tier=1,
+        models=[],
+    )
+    discoverer = ModelDiscoverer(env={})
+    try:
+        respx.get("http://vllm:8000/v1/models").mock(
+            return_value=httpx.Response(
+                200,
+                json={"object": "list", "data": [{"id": "llama3.1-70b", "object": "model"}]},
+            )
+        )
+        rows = await discoverer.discover_openai(provider)
+        assert any(r.id == "vllm-local/llama3.1-70b" for r in rows)
+    finally:
+        await discoverer.aclose()
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_discover_anthropic_uses_encrypted_key_when_set() -> None:
+    """ADR 0011: api_key_encrypted resolves through the master key."""
+
+    from app.secrets import (
+        ProviderKeyResolver,
+        encrypt_value,
+        generate_master_key,
+    )
+
+    master = generate_master_key()
+    token = encrypt_value("sk-ant-encrypted-test-key", master_key=master)
+    provider = ProviderConfig(
+        name="anthropic-prod",
+        type="anthropic",
+        base_url="https://api.anthropic.com",
+        api_key_encrypted=token,
+        tier=4,
+        models=["claude-opus-4-7"],
+    )
+    resolver = ProviderKeyResolver(master_key=master, env={})
+    discoverer = ModelDiscoverer(env={}, key_resolver=resolver)
+    try:
+        # The respx route asserts the request's x-api-key matches the
+        # decrypted plaintext, proving the resolver was used.
+        route = respx.get("https://api.anthropic.com/v1/models").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"id": "claude-opus-4-7", "object": "model"},
+                    ]
+                },
+            )
+        )
+        rows = await discoverer.discover_anthropic(provider)
+        assert len(rows) == 1
+        assert rows[0].id == "anthropic-prod/claude-opus-4-7"
+        # Verify the decrypted key reached the upstream call.
+        assert route.calls.last.request.headers["x-api-key"] == "sk-ant-encrypted-test-key"
+    finally:
+        await discoverer.aclose()
