@@ -1373,7 +1373,8 @@ PRD §9 DE-013 / Issue 04: per-user saved prompts complement skills the way brow
 
 * **Full LQ.AI Skill Creator surface.** Filed as **D8**. Substantial — needs an ADR amendment to 0004, migration `0012_user_skills`, `POST/PATCH/DELETE /api/v1/skills`, registry merge in the Skill Service, gateway `/internal/skills/{name}` user-scope path, and a real Skill Creator page in `web/src/routes/lq-ai/`. Multi-day work; deliberately split out so D7 can ship a coherent surface.
 * **Tag-filter UI / endpoint.** The DB index supports it; the API doesn't expose `?tag=` filtering yet. Cheap to add when a UI need surfaces.
-* **Browser click-through verification of the SavedPromptsPanel.** Typecheck + vitest suite + live API verification all pass; the panel itself was not exercised in a browser this session. Recommend a quick smoke test in the next session before declaring the UI fully validated.
+
+**Browser verification (added 2026-05-10 afternoon).** A Playwright-driven smoke (`/tmp/d7_smoke.mjs`, single-use, not committed) drove the LQ.AI chat shell end-to-end after the web container was rebuilt: panel mounts, +New creates and renders a new row, Insert appends to the composer, Save-as-skill downloads `<slug>.SKILL.md` with well-formed frontmatter (`name`, `title`, `description`, `version`, `tags`, `lq_ai.minimum_inference_tier`), Edit propagates renames, Delete removes the row, and post-delete `GET /saved-prompts` returns `[]` (UI ↔ API parity confirmed). The "tests pass + build succeeds is necessary, not sufficient" rule (per Kevin's feedback) is honored.
 
 **Known limitations.**
 

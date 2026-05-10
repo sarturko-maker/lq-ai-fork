@@ -6,7 +6,7 @@
 
 ## State at handoff
 
-- **Branch:** `main`. D7 commits are local; **not yet pushed** (decide push timing — see below).
+- **Branch:** `main`. D7 commits pushed (`dc41807..7115f86`); **post-push browser smoke** (added 2026-05-10 afternoon) verified the SavedPromptsPanel end-to-end via Playwright. Reflected in the M1-PROGRESS D7 known-limitations + this handoff's "What's NOT done" section.
 - **Last commit before this session:** `22f5999` *test(d4): D4-coverage tests, OpenAPI sketch, progress + handoff*.
 - **D7 stack (commits below):** ✅ implemented + tested + live-verified end-to-end on backend; web UI typecheck-clean and unit-tested but **not browser click-tested** this session.
 - **Stack:** `docker compose up -d` — all services healthy. The `api` container was rebuilt this session with the D7 code; the live container at `lq-ai-api-1` is serving the new endpoints.
@@ -56,7 +56,7 @@
 
 ### D7 follow-ons / known limitations
 
-- **Browser click-through verification of the SavedPromptsPanel.** Typecheck + vitest + live API verification all pass; the panel itself was not exercised in a browser this session. Recommend a quick smoke test in the next session before declaring the UI fully validated. The Insert / Edit / Delete / Save-as-skill / Tag input flows are the main paths to exercise.
+- **Browser click-through verification of the SavedPromptsPanel.** ✅ Done 2026-05-10 afternoon via a one-shot Playwright script (`/tmp/d7_smoke.mjs`, not committed — single-use). Verified end-to-end: panel mounts in the chat shell, +New → Create renders a new row dynamically, Insert appends prompt body to the composer, Save-as-skill triggers a `<slug>.SKILL.md` download with well-formed frontmatter (`name`, `title`, `description`, `version`, `tags`, `lq_ai.minimum_inference_tier`), Edit propagates a rename, Delete removes the row, post-delete `GET /saved-prompts` returns `[]` (UI ↔ API parity).
 - **Tag-filter UI / endpoint.** The DB index supports it; the API doesn't expose `?tag=` filtering yet. Cheap to add when a UI need surfaces.
 - **Toast-based delete-confirm / error display.** SavedPromptsPanel currently uses `confirm()` and `alert()` to match the existing OpenWebUI fork's interaction style; a polished toast would live in the broader UI consistency pass.
 - **Optimistic UI for create/update/delete.** All mutations currently re-list after success; for a tight UI feel an optimistic update could elide the round-trip. Not critical at M1 scale.
