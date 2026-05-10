@@ -42,6 +42,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ActiveUser
+from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
 from app.errors import Conflict, LQAIError, NotFound, ValidationError
@@ -240,6 +241,7 @@ async def _file_has_null_embedding_chunks(db: AsyncSession, file_id: uuid.UUID) 
 async def create_kb(
     payload: KnowledgeBaseCreateRequest,
     user: ActiveUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> KnowledgeBaseResponse:
     if payload.project_id is not None:
@@ -262,6 +264,16 @@ async def create_kb(
             details={"name": payload.name},
         ) from exc
 
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="kb.created",
+        resource_type="knowledge_base",
+        resource_id=str(kb.id),
+        project_id=kb.project_id,
+        request=request,
+        details={"name": kb.name, "hybrid_alpha": kb.hybrid_alpha},
+    )
     await db.commit()
     await db.refresh(kb)
 
@@ -332,6 +344,7 @@ async def update_kb(
     kb_id: str,
     payload: KnowledgeBaseUpdateRequest,
     user: ActiveUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> KnowledgeBaseResponse:
     kid = _validate_kb_id(kb_id)
@@ -359,6 +372,16 @@ async def update_kb(
 
     try:
         await db.flush()
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="kb.updated",
+            resource_type="knowledge_base",
+            resource_id=str(kb.id),
+            project_id=kb.project_id,
+            request=request,
+            details={"fields": sorted(update_fields.keys())},
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -389,11 +412,22 @@ async def update_kb(
 async def delete_kb(
     kb_id: str,
     user: ActiveUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     kid = _validate_kb_id(kb_id)
     kb = await _load_visible_kb(db, kid, user.id, include_archived=False)
     kb.archived_at = datetime.now(tz=UTC)
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="kb.deleted",
+        resource_type="knowledge_base",
+        resource_id=str(kb.id),
+        project_id=kb.project_id,
+        request=request,
+        details={"name": kb.name},
+    )
     await db.commit()
     log.info(
         "kb archived",
@@ -424,6 +458,7 @@ async def attach_file(
     kb_id: str,
     payload: AttachFileRequest,
     user: ActiveUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     kid = _validate_kb_id(kb_id)
@@ -447,6 +482,16 @@ async def attach_file(
     db.add(join)
     try:
         await db.flush()
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="kb.file_attached",
+            resource_type="knowledge_base",
+            resource_id=str(kb_uuid),
+            project_id=kb.project_id,
+            request=request,
+            details={"file_id": str(file_uuid), "filename": file_row.filename},
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -496,6 +541,7 @@ async def detach_file(
     kb_id: str,
     file_id: str,
     user: ActiveUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     kid = _validate_kb_id(kb_id)
@@ -507,7 +553,7 @@ async def detach_file(
             details={"file_id": file_id},
         ) from exc
 
-    await _load_visible_kb(db, kid, user.id)
+    kb = await _load_visible_kb(db, kid, user.id)
 
     stmt = select(KnowledgeBaseFile).where(
         and_(
@@ -524,6 +570,16 @@ async def detach_file(
         )
 
     await db.delete(join)
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="kb.file_detached",
+        resource_type="knowledge_base",
+        resource_id=str(kid),
+        project_id=kb.project_id,
+        request=request,
+        details={"file_id": str(fid)},
+    )
     await db.commit()
     log.info(
         "kb file detached",
