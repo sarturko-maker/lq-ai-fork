@@ -18,6 +18,7 @@ from app.clients.backend import Skill, SkillFile
 from app.errors import SkillInputMissing
 from app.skills.assembler import (
     assemble_skill_prompt,
+    consumes_organization_profile,
     extract_required_inputs,
     interpolate,
 )
@@ -400,3 +401,141 @@ def test_assemble_per_skill_input_scoping_avoids_collisions() -> None:
     )
     assert "A says alpha-value" in out
     assert "B says beta-value" in out
+
+
+# --- consumes_organization_profile + Organization Profile assembly (D4) -----
+
+
+def _profile_skill(body: str = "Always cite Delaware as choice of law.") -> Skill:
+    """The Skill-shaped Profile payload the backend's internal endpoint
+    synthesizes — top-level ``use_organization_profile: false`` so the
+    assembler never recursively re-prepends the Profile to itself."""
+
+    return Skill(
+        name="organization-profile",
+        version="v1",
+        scope="builtin",
+        title="Organization Profile",
+        content_md=body,
+        content_yaml=(
+            "name: organization-profile\n"
+            "lq_ai:\n"
+            "  is_organization_profile: true\n"
+            "  use_organization_profile: false\n"
+        ),
+    )
+
+
+@pytest.mark.unit
+def test_consumes_org_profile_default_true_when_unset() -> None:
+    """A skill with no ``use_organization_profile`` opts in by default.
+
+    PRD §3.12 makes the Profile opt-in; opt-out requires an explicit
+    ``false`` so the cautious read of an undeclared skill is "the
+    operator wants their org voice applied here."
+    """
+
+    skill = _skill_with_yaml("name: alpha\nlq_ai:\n  title: Alpha\n")
+    assert consumes_organization_profile(skill) is True
+
+
+@pytest.mark.unit
+def test_consumes_org_profile_false_when_lq_ai_block_opts_out() -> None:
+    skill = _skill_with_yaml(
+        "name: alpha\nlq_ai:\n  use_organization_profile: false\n"
+    )
+    assert consumes_organization_profile(skill) is False
+
+
+@pytest.mark.unit
+def test_consumes_org_profile_false_when_top_level_opts_out() -> None:
+    """The synthesized Profile YAML carries the flag at the top level."""
+
+    skill = _skill_with_yaml("name: organization-profile\nuse_organization_profile: false\n")
+    assert consumes_organization_profile(skill) is False
+
+
+@pytest.mark.unit
+def test_consumes_org_profile_treats_malformed_yaml_as_opt_in() -> None:
+    skill = _skill_with_yaml("not: [valid yaml")
+    assert consumes_organization_profile(skill) is True
+
+
+@pytest.mark.unit
+def test_assemble_includes_profile_when_skill_consumes_it() -> None:
+    """Profile body lands in the assembled prompt before the skill."""
+
+    skill = _basic_skill()
+    profile = _profile_skill("Use Delaware as default choice of law.")
+    out = assemble_skill_prompt([skill], organization_profile=profile)
+    assert "Use Delaware as default choice of law." in out
+    # Profile leads the assembled section list — its position in the
+    # string is before the skill body.
+    assert out.index("Use Delaware") < out.index("Body")
+
+
+@pytest.mark.unit
+def test_assemble_omits_profile_when_all_skills_opt_out() -> None:
+    """Skills explicitly setting opt-out keep the Profile out of the prompt."""
+
+    skill = Skill(
+        name="opt-out-skill",
+        title="Opt Out",
+        content_md="Skill body — no profile please",
+        content_yaml="name: opt-out-skill\nlq_ai:\n  use_organization_profile: false\n",
+    )
+    profile = _profile_skill("Should not appear.")
+    out = assemble_skill_prompt([skill], organization_profile=profile)
+    assert "Should not appear." not in out
+    assert "Skill body — no profile please" in out
+
+
+@pytest.mark.unit
+def test_assemble_omits_profile_when_none_passed() -> None:
+    """No Profile set on the deployment → assembled output unchanged."""
+
+    skill = _basic_skill()
+    out_with = assemble_skill_prompt([skill], organization_profile=None)
+    out_without = assemble_skill_prompt([skill])
+    assert out_with == out_without
+
+
+@pytest.mark.unit
+def test_assemble_includes_profile_when_at_least_one_skill_opts_in() -> None:
+    """Mixed opt-in / opt-out: Profile appears once at the top.
+
+    The operator's intent (Profile is set) wins when *any* attached
+    skill consumes it. We could implement per-skill toggling later, but
+    a single system-prompt block is one shared context — toggling part
+    of it on a per-section basis isn't meaningful at the LLM API level.
+    """
+
+    opt_in = _basic_skill(name="alpha", body="Alpha body")
+    opt_out = Skill(
+        name="beta",
+        title="Beta",
+        content_md="Beta body",
+        content_yaml="name: beta\nlq_ai:\n  use_organization_profile: false\n",
+    )
+    profile = _profile_skill("Org-wide voice.")
+    out = assemble_skill_prompt([opt_in, opt_out], organization_profile=profile)
+    assert "Org-wide voice." in out
+    # Exactly one Profile section, not one per consuming skill — the
+    # current implementation prepends once and the test pins that
+    # contract so a future "repeat per skill" change is a deliberate
+    # signal, not an accidental token-count regression.
+    assert out.count("Org-wide voice.") == 1
+
+
+@pytest.mark.unit
+def test_assemble_with_no_skills_ignores_profile() -> None:
+    """Profile only fires when skills are attached.
+
+    A bare chat with no skills shouldn't get an unsolicited org-prompt
+    injected — the Profile is meta about how skills should behave, not
+    a default system prompt.
+    """
+
+    profile = _profile_skill("Should not appear.")
+    out = assemble_skill_prompt([], organization_profile=profile)
+    assert out == ""

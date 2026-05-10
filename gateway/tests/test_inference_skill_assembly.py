@@ -109,7 +109,17 @@ def _mock_backend_skill(
     inputs_yaml: str = "",
     reference: list[tuple[str, str]] | None = None,
 ) -> None:
-    """Register a respx stub for `GET /api/v1/internal/skills/{name}`."""
+    """Register a respx stub for `GET /api/v1/internal/skills/{name}`.
+
+    Side-effect: also registers a default 404 stub for
+    ``GET /api/v1/internal/organization-profile`` so tests that don't
+    care about the Profile see "no Profile set" (the normal state of a
+    bare deployment) and proceed unchanged. Tests that want a present
+    Profile call :func:`_mock_backend_org_profile` *after* this helper
+    — respx re-registers the same URL pattern, last call wins.
+    """
+
+    _mock_backend_no_org_profile()
 
     yaml_block = f"name: {name}\ndescription: ...\n"
     if inputs_yaml:
@@ -129,6 +139,48 @@ def _mock_backend_skill(
                 "content_md": body,
                 "content_yaml": yaml_block,
                 "reference_files": references,
+            },
+        )
+    )
+
+
+def _mock_backend_no_org_profile() -> None:
+    """Register a respx stub that returns 404 for the Profile endpoint."""
+
+    respx.get(f"{BACKEND_URL}/api/v1/internal/organization-profile").mock(
+        return_value=httpx.Response(
+            404,
+            json={
+                "error": {
+                    "code": "not_found",
+                    "message": "No Organization Profile is set for this deployment.",
+                    "details": {"resource": "organization_profile"},
+                }
+            },
+        )
+    )
+
+
+def _mock_backend_org_profile(body: str) -> None:
+    """Register a respx stub that returns a Skill-shaped Profile (D4)."""
+
+    respx.get(f"{BACKEND_URL}/api/v1/internal/organization-profile").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "name": "organization-profile",
+                "version": "v1",
+                "scope": "builtin",
+                "title": "Organization Profile",
+                "content_md": body,
+                "content_yaml": (
+                    "name: organization-profile\n"
+                    "lq_ai:\n"
+                    "  is_organization_profile: true\n"
+                    "  use_organization_profile: false\n"
+                ),
+                "is_organization_profile": True,
+                "use_organization_profile": False,
             },
         )
     )
@@ -388,6 +440,7 @@ async def test_skill_assembly_caches_across_requests(
     """Repeated requests with the same skill don't refetch within TTL."""
 
     client, backend = http_client
+    _mock_backend_no_org_profile()
     skill_route = respx.get(f"{BACKEND_URL}/api/v1/internal/skills/alpha").mock(
         return_value=httpx.Response(
             200,
@@ -561,3 +614,167 @@ async def test_skill_assembly_no_skills_attached_is_unchanged(
     sent = captured["body"]
     assert isinstance(sent, dict)
     assert sent.get("system") in (None, "", [])
+
+
+# --- Organization Profile prompt-assembly (D4) ------------------------------
+
+
+def _capture_anthropic_request(captured: dict[str, object]) -> httpx.Response:
+    """Build a respx side_effect that records the upstream Anthropic body."""
+
+    def _side_effect(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        captured["body"] = _json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_d4",
+                "model": "claude-opus-4-7",
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    return _side_effect  # type: ignore[return-value]
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_org_profile_prepended_to_system_prompt(
+    http_client: tuple[AsyncClient, BackendClient],
+) -> None:
+    """D4 verification path: a Profile set on the deployment shapes skill output.
+
+    The verification step in the PRD is "set Profile saying 'we always
+    recommend Delaware as choice of law'; run NDA Review; output
+    reflects this preference." We can't assert on generative output
+    without an LLM, so we assert on the contract that *gets* the
+    Profile to the LLM: the assembled ``system`` prompt sent upstream
+    contains the Profile body verbatim.
+    """
+
+    client, _backend = http_client
+    # Order matters: register the Profile mock AFTER _mock_backend_skill,
+    # which auto-registers the default 404 stub. The later registration
+    # for the same URL pattern wins.
+    _mock_backend_skill("nda-review", body="# NDA review workflow\n\nReview the NDA.")
+    _mock_backend_org_profile("Always recommend Delaware as choice of law.")
+    captured: dict[str, object] = {}
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        side_effect=_capture_anthropic_request(captured)
+    )
+
+    response = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "smart",
+            "messages": [{"role": "user", "content": "hi"}],
+            "lq_ai_skills": ["nda-review"],
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    body = captured["body"]
+    assert isinstance(body, dict)
+    system = body.get("system")
+    assert isinstance(system, str)
+    assert "Always recommend Delaware as choice of law." in system
+    # Profile leads the assembled prompt — its substring lands before
+    # the skill body.
+    assert system.index("Delaware") < system.index("NDA review workflow")
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_org_profile_omitted_when_skill_opts_out(
+    http_client: tuple[AsyncClient, BackendClient],
+) -> None:
+    """A skill with ``use_organization_profile: false`` keeps the Profile out."""
+
+    client, _backend = http_client
+    _mock_backend_org_profile("Should not appear in the upstream system prompt.")
+
+    # The skill stub mocked here has the opt-out flag in its frontmatter.
+    respx.get(f"{BACKEND_URL}/api/v1/internal/skills/independent-skill").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "name": "independent-skill",
+                "version": "1.0.0",
+                "scope": "builtin",
+                "title": "Independent Skill",
+                "content_md": "Skill body without org-voice shaping.",
+                "content_yaml": (
+                    "name: independent-skill\n"
+                    "lq_ai:\n"
+                    "  use_organization_profile: false\n"
+                ),
+            },
+        )
+    )
+    captured: dict[str, object] = {}
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        side_effect=_capture_anthropic_request(captured)
+    )
+
+    response = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "smart",
+            "messages": [{"role": "user", "content": "hi"}],
+            "lq_ai_skills": ["independent-skill"],
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    body = captured["body"]
+    assert isinstance(body, dict)
+    system = body.get("system")
+    assert isinstance(system, str)
+    assert "Should not appear in the upstream system prompt." not in system
+    assert "Skill body without org-voice shaping." in system
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_org_profile_absent_no_change_to_system_prompt(
+    http_client: tuple[AsyncClient, BackendClient],
+) -> None:
+    """No Profile on the deployment → assembled prompt unchanged from C2 behavior.
+
+    Pins the contract that introducing the Profile-fetch into
+    :func:`_apply_skill_prompt_assembly` doesn't perturb the existing
+    skill-only path. Useful guard against an "always-prepend even when
+    empty" regression.
+    """
+
+    client, _backend = http_client
+    _mock_backend_skill(
+        "alpha",
+        body="# Alpha workflow\n\n1. Read the input.\n2. Output a report.",
+    )
+    captured: dict[str, object] = {}
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        side_effect=_capture_anthropic_request(captured)
+    )
+
+    response = await client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "smart",
+            "messages": [{"role": "user", "content": "hi"}],
+            "lq_ai_skills": ["alpha"],
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    body = captured["body"]
+    assert isinstance(body, dict)
+    system = body.get("system")
+    assert isinstance(system, str)
+    # Skill body is present; nothing else got prepended.
+    assert "Alpha workflow" in system
+    assert "Organization Profile" not in system
+

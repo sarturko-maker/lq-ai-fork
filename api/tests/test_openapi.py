@@ -55,6 +55,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/skills/{skill_name}/fork",
         # internal (gateway → backend, ADR 0006 / C2)
         "/api/v1/internal/skills/{skill_name}",
+        # D4-coverage — gateway-facing Organization Profile fetch
+        "/api/v1/internal/organization-profile",
         # files
         "/api/v1/files",
         "/api/v1/files/{file_id}",
@@ -103,12 +105,13 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 45 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
+    # 46 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
     # alias endpoints + D5's two new MFA endpoints + D6's two new GDPR
     # endpoints (status-poll for /users/me/export/{job_id} and
     # /users/me/delete/cancel) + D4's /organization-profile/raw
-    # convenience endpoint (extends the sketch).
-    assert len(actual) == 45
+    # convenience endpoint + D4-coverage's
+    # /internal/organization-profile (extends the sketch).
+    assert len(actual) == 46
 
 
 @pytest.mark.unit

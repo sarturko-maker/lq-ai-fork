@@ -95,6 +95,10 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/users/me/export/{job_id}"),
     ("POST", "/api/v1/users/me/delete"),
     ("POST", "/api/v1/users/me/delete/cancel"),
+    # D4-coverage — gateway-facing internal Organization Profile endpoint
+    # (X-LQ-AI-Gateway-Key auth, returns Skill-shaped JSON for the
+    # gateway's prompt-assembly path).
+    ("GET", "/api/v1/internal/organization-profile"),
     # B5 + C3 — backend chats + messages with persistence; SSE streaming.
     ("POST", "/api/v1/chats"),
     ("GET", "/api/v1/chats"),

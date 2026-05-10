@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.session import get_db
 from app.main import app
+from app.models.organization_profile import OrganizationProfile
 from app.skills import load_registry
 from app.skills.registry import MutableSkillRegistry
 
@@ -208,3 +209,124 @@ async def test_internal_skill_user_token_alone_returns_401(
         headers={"Authorization": "Bearer some-user-token"},
     )
     assert resp.status_code == 401
+
+
+# --- /internal/organization-profile (D4-coverage) ----------------------------
+
+
+@pytest.mark.integration
+async def test_internal_org_profile_unauthenticated_returns_401(
+    client_with_key: AsyncClient,
+) -> None:
+    """No gateway-key header → 401 even when a Profile exists."""
+
+    resp = await client_with_key.get("/api/v1/internal/organization-profile")
+    assert resp.status_code == 401
+    assert resp.json()["detail"]["code"] == "unauthorized"
+
+
+@pytest.mark.integration
+async def test_internal_org_profile_wrong_key_returns_401(
+    client_with_key: AsyncClient,
+) -> None:
+    """Wrong key → 401 (constant-time-compare path)."""
+
+    resp = await client_with_key.get(
+        "/api/v1/internal/organization-profile",
+        headers={"X-LQ-AI-Gateway-Key": "wrong"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.integration
+async def test_internal_org_profile_unset_returns_404(
+    client_with_key: AsyncClient,
+) -> None:
+    """No row in the table → 404 ``not_found``.
+
+    The gateway treats this the same as the empty-body case; "no
+    profile to prepend" is a valid steady-state for a fresh
+    deployment, not an error.
+    """
+
+    resp = await client_with_key.get(
+        "/api/v1/internal/organization-profile",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert resp.status_code == 404
+    body = resp.json()
+    assert body["detail"]["code"] == "not_found"
+    assert body["detail"]["details"]["resource"] == "organization_profile"
+
+
+@pytest.mark.integration
+async def test_internal_org_profile_present_returns_skill_shape(
+    client_with_key: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """A populated row → 200 with Skill-shaped JSON the gateway can parse.
+
+    The gateway's :class:`Skill` parser is permissive (``extra="allow"``)
+    so the exact field set isn't load-bearing, but the contract pins
+    the keys the assembler reads: ``name``, ``content_md``,
+    ``content_yaml``. The synthesized YAML carries
+    ``use_organization_profile: false`` so the gateway never recursively
+    re-prepends the Profile to itself.
+    """
+
+    db_session.add(OrganizationProfile(content_md="Always cite Delaware as choice of law."))
+    await db_session.commit()
+
+    resp = await client_with_key.get(
+        "/api/v1/internal/organization-profile",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "organization-profile"
+    assert body["content_md"] == "Always cite Delaware as choice of law."
+    assert "is_organization_profile: true" in body["content_yaml"]
+    assert "use_organization_profile: false" in body["content_yaml"]
+    assert body["is_organization_profile"] is True
+    assert body["use_organization_profile"] is False
+
+
+@pytest.mark.integration
+async def test_internal_org_profile_empty_body_returns_404(
+    client_with_key: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """A row with empty (or whitespace-only) ``content_md`` → 404.
+
+    Operators may PUT an empty body to clear the Profile without
+    deleting the row; the internal endpoint surfaces that as "no
+    Profile" so the gateway has one branch instead of two.
+    """
+
+    db_session.add(OrganizationProfile(content_md="   \n\n  "))
+    await db_session.commit()
+
+    resp = await client_with_key.get(
+        "/api/v1/internal/organization-profile",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "not_found"
+
+
+@pytest.mark.integration
+async def test_internal_org_profile_no_configured_key_returns_500(
+    client_without_key: AsyncClient,
+) -> None:
+    """Operator hasn't set LQ_AI_GATEWAY_KEY → 500, not silent acceptance.
+
+    Same posture as ``/internal/skills/{name}`` — refusing the call is
+    safer than serving Profile content over an unauthenticated channel.
+    """
+
+    resp = await client_without_key.get(
+        "/api/v1/internal/organization-profile",
+        headers={"X-LQ-AI-Gateway-Key": "anything"},
+    )
+    assert resp.status_code == 500
+    assert resp.json()["detail"]["code"] == "internal_error"

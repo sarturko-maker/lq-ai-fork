@@ -1022,6 +1022,55 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
 
+  /api/v1/internal/organization-profile:
+    get:
+      tags: [internal]
+      summary: Internal — fetch the deployment's Organization Profile (gateway → backend)
+      description: |
+        Service-to-service endpoint used by the Inference Gateway during
+        prompt assembly (Task D4-coverage). Returns the Organization
+        Profile (PRD §3.12) as a `Skill`-shaped JSON body so the
+        gateway can plug it into the same prompt-assembler that
+        consumes user-attached skills. The synthesized frontmatter
+        carries `is_organization_profile: true` and
+        `use_organization_profile: false` so consumers identify the
+        Profile by metadata and the assembler never recursively
+        re-prepends the Profile to itself.
+
+        Same trust posture as `/internal/skills/{name}`:
+        `X-LQ-AI-Gateway-Key` shared-secret auth (constant-time
+        compare); user-facing reads of the Profile use the bearer-
+        authed `/api/v1/organization-profile` route instead.
+      security:
+        - gatewayKeyAuth: []
+      responses:
+        '200':
+          description: Profile present; body is the `Skill`-shaped synthesized payload.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Skill'}
+        '401':
+          description: Missing or invalid `X-LQ-AI-Gateway-Key`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: |
+            No Profile is set on this deployment, or the Profile's body
+            is empty. The gateway treats this as "no Profile to
+            prepend" and proceeds with skill-only prompt assembly.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500':
+          description: |
+            Operator has not configured `LQ_AI_GATEWAY_KEY` on the
+            backend; service-to-service traffic is refused rather than
+            silently accepted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
   # ----------- FILES -----------
   /api/v1/files:
     post:

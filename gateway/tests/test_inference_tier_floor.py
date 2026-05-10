@@ -92,7 +92,26 @@ async def http_client(
 
 
 def _mock_skill(name: str, *, minimum_inference_tier: int | None) -> None:
-    """Register a respx stub for ``GET /api/v1/internal/skills/{name}``."""
+    """Register a respx stub for ``GET /api/v1/internal/skills/{name}``.
+
+    Side-effect: also installs a default 404 stub for the Organization
+    Profile endpoint (D4) so the prompt-assembly path's Profile fetch
+    sees "no Profile set" and proceeds unchanged. Tier-floor tests
+    don't care about the Profile; the 404 stub is the simplest way to
+    keep them isolated from D4 behavior.
+    """
+
+    respx.get(f"{BACKEND_URL}/api/v1/internal/organization-profile").mock(
+        return_value=httpx.Response(
+            404,
+            json={
+                "error": {
+                    "code": "not_found",
+                    "message": "No Organization Profile is set for this deployment.",
+                }
+            },
+        )
+    )
 
     payload: dict[str, object] = {
         "name": name,

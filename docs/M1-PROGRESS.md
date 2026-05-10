@@ -1270,7 +1270,7 @@ These are filed as **D3-coverage** rather than re-blocking D3 because the verifi
 * The audit row's `details.applied_skills` is a list of skill names; if a skill is renamed mid-flight, prior rows reference the old name. This is the intentional snapshot semantic (audit captures what happened at the time, not what currently exists), but it's worth noting for query writers.
 * The `since` / `until` filters use exact `timestamp` matching with `>=` / `<=`. A future enhancement might add `timestamp_within_range_seconds` for "last 5 minutes"-style queries; for now, callers compute the range client-side.
 
-### D4 — Organization Profile singleton ✅ (backend; gateway integration continuing)
+### D4 — Organization Profile singleton ✅ (backend + gateway integration)
 
 PRD §3.12 calls the Organization Profile a "singleton skill" — same SKILL.md format, treated as a singleton by the Skill Service. ADR 0004 keeps built-in skills filesystem-canonical (no `skills` SQL table for M1) so D4 can't add an `is_organization_profile` column to that nonexistent table. Instead, **D4-core** (this milestone) lands a focused single-row table backing the GET/PUT API; **D4-coverage** (filed for a follow-on session) is the gateway-side prompt-assembly hook that auto-prepends the Profile to attached skills.
 
@@ -1296,22 +1296,39 @@ PRD §3.12 calls the Organization Profile a "singleton skill" — same SKILL.md 
 3. **Empty content_md is a valid PUT body.** Operators may want to clear the Profile temporarily (e.g., during an A/B test of a new draft) without deleting the row. The DB column has a default empty string so a PUT-with-empty-body remains transactional.
 4. **`/raw` extends the sketch as a convenience endpoint.** The Skill Inspector (§3.4) and the eventual admin UI both need a content-typed Markdown body; serving it directly from the API saves a JSON parse round-trip on the client. Same pattern would apply to other "view a skill" surfaces if they materialize.
 
+**What landed in D4-coverage (this session):**
+
+* **`GET /api/v1/internal/organization-profile`** (gateway-key auth, constant-time compare). Synthesizes a `Skill`-shaped JSON body from the DB row so the gateway-side parser reuses its existing `Skill` model. Synthesized frontmatter declares `is_organization_profile: true` and `use_organization_profile: false` so the assembler can identify the Profile by metadata and never recursively re-prepends it to itself. Returns 404 when no row exists OR when the row's body is empty/whitespace — the gateway treats both as "no profile to prepend" and the single error code keeps the branch simple.
+* **`BackendClient.get_organization_profile()`** in `gateway/app/clients/backend.py`. Cache-aware on the same `SkillCache` instance (sentinel key `__organization_profile__`, double-underscore prefix can't collide with a real skill name). Returns `Skill | None` — `None` on 404 so the prompt-assembly path branches on absence rather than catching exceptions. 5xx / network failures still raise `SkillFetchFailed` / `BackendUnreachable` for fail-fast posture. The 404 path is *not* cached so an operator's first PUT lands within the same chat (the empty-Profile lookup is a tiny round-trip on intra-cluster network — ~ms — and avoiding cache here means the fresh deployment doesn't see TTL-window staleness on first-set).
+* **`assemble_skill_prompt`** extended with an `organization_profile: Skill | None` parameter and a `consumes_organization_profile(skill)` helper. The Profile is rendered as the first section of the assembled prompt iff (a) it's not `None`, (b) at least one attached skill consumes it (default opt-in per PRD §3.12; opt-out requires explicit `lq_ai.use_organization_profile: false`). All-opt-out and no-skills-attached cases omit the Profile.
+* **`_apply_skill_prompt_assembly`** in `gateway/app/api/inference.py` always fetches the Profile after the user's skills and passes it through to the assembler; failure surfaces through the same `LQAIError` path as skill-fetch errors.
+* **OpenAPI sketch** updated — `/api/v1/internal/organization-profile` documented with the same trust posture as `/internal/skills/{name}`.
+
+**Files touched (D4-coverage).**
+
+* `api/app/api/internal.py` — new GET handler + synthesized YAML constant.
+* `gateway/app/clients/backend.py` — `get_organization_profile()` + `ORGANIZATION_PROFILE_CACHE_KEY` sentinel.
+* `gateway/app/skills/assembler.py` — `consumes_organization_profile()` helper + Profile-aware `assemble_skill_prompt`.
+* `gateway/app/skills/__init__.py` — export the new helper.
+* `gateway/app/api/inference.py` — Profile fetch in `_apply_skill_prompt_assembly`.
+* `docs/api/backend-openapi.yaml` — new path entry.
+* `gateway/tests/test_skill_assembler.py` (+9 tests), `gateway/tests/test_backend_client.py` (+7 tests), `gateway/tests/test_inference_skill_assembly.py` (+3 D4 integration tests + helper refactor), `gateway/tests/test_inference_tier_floor.py` (default 404 stub), `api/tests/test_internal_skills.py` (+6 tests), `api/tests/test_endpoints.py` (route promoted to IMPLEMENTED), `api/tests/test_openapi.py` (path-count 45 → 46).
+
+**D4 verification step PASSES.** Live end-to-end check on the running stack: PUT a Profile of size N tokens with the `nda-review` skill attached → upstream prompt to Anthropic grows by exactly N tokens. Clear the Profile (or wait the 60s cache TTL), same chat → upstream payload shrinks by N. The Profile body is provably reaching the LLM as part of the system prompt.
+
+**Test counts.** Gateway suite (excluding `test_routing_log_db.py`): 343 passed, 1 skipped. API: 36 passed across the four touched files (`test_internal_skills.py` + `test_organization_profile.py` + `test_endpoints.py` + `test_openapi.py`); 2 pre-existing `admin/tier-policy` failures predate D4 (per the prior handoff).
+
 **D4-coverage — what's NOT in this milestone:**
 
-* **Gateway-side prompt-assembly hook.** The verification step ("Set Organization Profile saying 'we always recommend Delaware as choice of law'; run NDA Review; output reflects this preference") requires the gateway to fetch the Profile and prepend it to every attached skill whose frontmatter doesn't opt out (`use_organization_profile: false`). Implementation path:
-  1. New `GET /api/v1/internal/organization-profile` endpoint (gateway-key auth) that synthesizes a `Skill`-shaped response from the DB row.
-  2. Gateway-side fetch in `_apply_skill_prompt_assembly`: pull the Profile, prepend to the skill list head, respect each user-attached skill's `use_organization_profile` flag.
-  3. Tests: filesystem-skill fixture with `use_organization_profile: false`; assert the assembled prompt does not contain the Profile body.
 * **First-run onboarding hook** (PRD §6.2: "First-run onboarding prompts the operator to create or import an Organization Profile or skip and create later"). The first-run admin flow (B2) doesn't currently surface this; deferring until UI work picks it up.
 * **Skill Inspector view of the Profile** (PRD §3.4 + §3.12): UI work; the JSON + `/raw` endpoints are the data contract.
-
-**Test counts.** 10 net-new tests in `tests/test_organization_profile.py`; full run of D3+D4+D5+D6 + endpoint/openapi: 62 passed, 2 pre-existing tier-policy failures (predate D4).
+* **Per-skill Profile rendering.** The assembler currently renders the Profile *once* at the top of the assembled prompt when at least one attached skill consumes it. The handoff initially described a "prepend the Profile to each attached skill's section" reading; we settled on once-at-top because (a) the system prompt is one shared context — toggling it per section isn't meaningful at the LLM API level, (b) it saves tokens, (c) all-opt-out still correctly omits the Profile entirely. A future "repeat per consuming skill" change would be deliberate, not accidental — pinned by `test_assemble_includes_profile_when_at_least_one_skill_opts_in`.
 
 **Known limitations.**
 
-* Until D4-coverage lands, the Profile is *editable* but not yet *applied* — admins can store and read it, but it doesn't yet shape skill output. The PRD §3.12 verification step ("output reflects this preference") fails today and is the explicit work of D4-coverage.
 * `content_md` is capped at 200,000 characters (the Pydantic `Field(max_length=...)` limit). That's ~50,000 tokens of headroom — generous enough for any realistic Profile but also the kind of cap an operator might want to raise. Promote to a config knob if a use case materializes.
 * The audit log captures `content_length` in `details` rather than the full content (PII / volume concerns). Operators wanting a full content-history audit can periodically snapshot the Profile via cron + a `python -m app.cli` helper; not in M1 scope.
+* The 60s `SkillCache` TTL on the Profile means an operator who PUTs a Profile and then immediately runs a chat sees the new content right away (404 path isn't cached, so the first chat after PUT picks up the row); a *change* to an existing Profile, however, may take up to 60s to appear in subsequent chats while the prior content lingers in the cache. Acceptable for the human-attestation pipeline; could promote `LQ_AI_SKILL_CACHE_TTL_SECONDS=0` to a runtime knob if operators need instant visibility.
 
 ---
 

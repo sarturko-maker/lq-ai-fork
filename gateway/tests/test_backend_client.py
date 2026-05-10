@@ -19,6 +19,7 @@ import pytest
 import respx
 
 from app.clients.backend import (
+    ORGANIZATION_PROFILE_CACHE_KEY,
     BackendClient,
     BackendUnreachable,
     Skill as ClientSkill,
@@ -388,6 +389,185 @@ async def test_aclose_does_not_close_injected_client() -> None:
     # The injected client is still usable.
     assert not injected.is_closed
     await injected.aclose()
+
+
+# --- BackendClient.get_organization_profile (D4) ----------------------------
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_get_org_profile_happy_path() -> None:
+    """Backend returns Skill-shaped Profile; client parses it."""
+
+    respx.get("http://api.test/api/v1/internal/organization-profile").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "name": "organization-profile",
+                "version": "v1",
+                "scope": "builtin",
+                "title": "Organization Profile",
+                "content_md": "Always recommend Delaware as choice of law.",
+                "content_yaml": (
+                    "name: organization-profile\n"
+                    "use_organization_profile: false\n"
+                    "is_organization_profile: true\n"
+                ),
+                "is_organization_profile": True,
+                "use_organization_profile": False,
+            },
+        )
+    )
+
+    client = _client_with_respx()
+    profile = await client.get_organization_profile()
+    assert profile is not None
+    assert profile.name == "organization-profile"
+    assert "Delaware" in profile.content_md
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_get_org_profile_404_returns_none() -> None:
+    """Absent Profile is the normal state for a fresh deployment.
+
+    The client returns ``None`` rather than raising so the prompt-
+    assembly path branches on absence without a try/except.
+    """
+
+    respx.get("http://api.test/api/v1/internal/organization-profile").mock(
+        return_value=httpx.Response(
+            404,
+            json={
+                "error": {
+                    "code": "not_found",
+                    "message": "No Organization Profile is set for this deployment.",
+                    "details": {"resource": "organization_profile"},
+                }
+            },
+        )
+    )
+
+    client = _client_with_respx()
+    assert await client.get_organization_profile() is None
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_get_org_profile_caches_successful_fetch() -> None:
+    """Subsequent calls return the cached Profile without re-hitting the wire."""
+
+    route = respx.get("http://api.test/api/v1/internal/organization-profile").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "name": "organization-profile",
+                "content_md": "x",
+                "content_yaml": "y",
+            },
+        )
+    )
+
+    client = _client_with_respx()
+    a = await client.get_organization_profile()
+    b = await client.get_organization_profile()
+    assert a is not None and b is not None
+    assert a.name == b.name
+    assert route.call_count == 1
+    # Cache stores the Profile under the sentinel key — and that's the
+    # only entry, since we haven't fetched any skills.
+    assert await client.cache.get(ORGANIZATION_PROFILE_CACHE_KEY) is not None
+    assert await client.cache.size() == 1
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_get_org_profile_does_not_cache_404() -> None:
+    """An absent Profile is NOT cached — the operator may set one any time.
+
+    The trade-off: extra round-trip per request during the "no Profile
+    yet" window. Acceptable because (a) the response is tiny, (b) the
+    backend serves it from postgres in a few ms, and (c) caching the
+    absence would mean operators don't see their first PUT take effect
+    until cache expiry.
+    """
+
+    route = respx.get("http://api.test/api/v1/internal/organization-profile").mock(
+        return_value=httpx.Response(404, json={"error": {"code": "not_found"}})
+    )
+
+    client = _client_with_respx()
+    assert await client.get_organization_profile() is None
+    assert await client.get_organization_profile() is None
+    assert route.call_count == 2
+    assert await client.cache.size() == 0
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_get_org_profile_500_raises_skill_fetch_failed() -> None:
+    """Operational failure surfaces as :class:`SkillFetchFailed`.
+
+    The chat path treats this as a fail-fast — we don't dispatch with
+    a Profile-less prompt when the backend is broken; the user sees a
+    canonical envelope error and retries when the backend recovers.
+    """
+
+    respx.get("http://api.test/api/v1/internal/organization-profile").mock(
+        return_value=httpx.Response(500, text="boom")
+    )
+
+    client = _client_with_respx()
+    with pytest.raises(SkillFetchFailed):
+        await client.get_organization_profile()
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_get_org_profile_timeout_raises_backend_unreachable() -> None:
+    respx.get("http://api.test/api/v1/internal/organization-profile").mock(
+        side_effect=httpx.TimeoutException("timeout")
+    )
+
+    client = _client_with_respx()
+    with pytest.raises(BackendUnreachable):
+        await client.get_organization_profile()
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_get_org_profile_sends_gateway_key_header() -> None:
+    captured: dict[str, str] = {}
+
+    def _capture(request: httpx.Request) -> httpx.Response:
+        captured["gateway_key"] = request.headers.get("X-LQ-AI-Gateway-Key", "")
+        return httpx.Response(
+            200, json={"name": "organization-profile", "content_md": "x", "content_yaml": "y"}
+        )
+
+    respx.get("http://api.test/api/v1/internal/organization-profile").mock(side_effect=_capture)
+
+    client = _client_with_respx()
+    await client.get_organization_profile()
+    assert captured["gateway_key"] == "test-secret"
+
+
+@pytest.mark.unit
+@respx.mock
+async def test_get_org_profile_forwards_request_id_header() -> None:
+    captured: dict[str, str] = {}
+
+    def _capture(request: httpx.Request) -> httpx.Response:
+        captured["request_id"] = request.headers.get("X-Request-Id", "")
+        return httpx.Response(
+            200, json={"name": "organization-profile", "content_md": "x", "content_yaml": "y"}
+        )
+
+    respx.get("http://api.test/api/v1/internal/organization-profile").mock(side_effect=_capture)
+
+    client = _client_with_respx()
+    await client.get_organization_profile(request_id="req-abc")
+    assert captured["request_id"] == "req-abc"
 
 
 # --- configure_backend_client ------------------------------------------------
