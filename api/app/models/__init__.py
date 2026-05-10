@@ -21,6 +21,7 @@ from app.models.project import Project, ProjectFile, ProjectSkill
 from app.models.saved_prompt import SavedPrompt
 from app.models.user import User, UserSession
 from app.models.user_export import UserExportJob
+from app.models.user_skill import UserSkill
 
 __all__ = [
     "AuditLog",
@@ -40,4 +41,5 @@ __all__ = [
     "User",
     "UserExportJob",
     "UserSession",
+    "UserSkill",
 ]

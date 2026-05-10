@@ -686,6 +686,48 @@ CREATE INDEX idx_saved_prompts_tags ON saved_prompts USING gin (tags);
 
 ---
 
+## User skills (per [ADR 0012](adr/0012-db-backed-user-skills.md))
+
+DB-backed user-scope skills that shadow filesystem-canonical built-ins (per ADR 0004) on slug collision when resolved for the owning user's chats. D8 ships the user-scope CRUD; team-scope columns are present from the start but the FK and API surface land in D8.1.
+
+```sql
+CREATE TABLE user_skills (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scope             TEXT NOT NULL CHECK (scope IN ('user', 'team')),
+    owner_user_id     UUID REFERENCES users(id) ON DELETE CASCADE,
+    owner_team_id     UUID,                                       -- FK target ships in D8.1
+    slug              TEXT NOT NULL,
+    display_name      TEXT NOT NULL,
+    description       TEXT NOT NULL,
+    version           TEXT NOT NULL DEFAULT '1.0.0',              -- free-form, user-set semver
+    tags              TEXT[] NOT NULL DEFAULT '{}',
+    frontmatter_extra JSONB NOT NULL DEFAULT '{}',
+    body              TEXT NOT NULL,
+    archived_at       TIMESTAMPTZ,                                -- soft-delete
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_user_skills_scope_owner_consistency CHECK (
+        (scope = 'user' AND owner_user_id IS NOT NULL AND owner_team_id IS NULL)
+        OR (scope = 'team' AND owner_team_id IS NOT NULL AND owner_user_id IS NULL)
+    )
+);
+
+-- Slug is unique within an owner for non-archived rows; archived rows free the slug.
+CREATE UNIQUE INDEX ux_user_skills_user_slug ON user_skills(owner_user_id, slug)
+    WHERE scope = 'user' AND archived_at IS NULL;
+CREATE UNIQUE INDEX ux_user_skills_team_slug ON user_skills(owner_team_id, slug)
+    WHERE scope = 'team' AND archived_at IS NULL;
+
+CREATE INDEX idx_user_skills_owner_user ON user_skills(owner_user_id, updated_at DESC)
+    WHERE scope = 'user' AND archived_at IS NULL;
+CREATE INDEX idx_user_skills_owner_team ON user_skills(owner_team_id, updated_at DESC)
+    WHERE scope = 'team' AND archived_at IS NULL;
+```
+
+Resolution path during prompt assembly (`/internal/skills/{slug}?user_id=…`): user-scope row for the requesting user wins on slug match; falls through to the filesystem registry otherwise. D8.1's only addition is the `teams` FK target and a middle resolution slot for team-scope rows.
+
+---
+
 ## Audit log (cross-cutting)
 
 The most consequential table in the schema. Every privilege-affecting action lands here. Privileged-marked entries and routed-inference-tier values are first-class fields, not buried in JSONB.
