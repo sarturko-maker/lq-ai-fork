@@ -6,10 +6,12 @@
 
 ## State at handoff
 
-- **Branch:** `main`. Ahead of `origin/main` until pushed (see "Push status" below).
+- **Branch:** `main`. Pushed through `9ae398a` (post-wave-3 OLLAMA env fix).
 - **Last pushed before this session's wave-3 work:** `299c6eb` (D7 docs polish; SavedPromptsPanel browser-verified).
-- **Wave-3 commits (local; not yet pushed):**
+- **Wave-3 commits (all pushed):**
   ```
+  9ae398a fix(env.example): default OLLAMA_BASE_URL to host.docker.internal
+  4fb1e7d docs(wave-3): handoff + M1-PROGRESS snapshot for transparency pivot
   9a23b17 feat(picker): surface alias resolution + fallback count (ADR 0011)
   d0fa2dc docs(gateway-openapi): document direct provider/model dispatch
   e8b2f68 feat(gateway): live model discovery — OpenAI catalog + encrypted-key path
@@ -83,6 +85,8 @@ Anthropic live catalog discovery is also working (returns the operator's availab
 4. **Vertex/Bedrock discovery still deferred.** Their catalog APIs (`boto3.list_foundation_models`, GCP discovery client) pull substantial dependency surfaces. Operators routing to those today address them via aliases until those discoverers ship.
 5. **D2's tier panel doesn't show "alias used"** even though it could — `Message.routed_provider`/`routed_model` are populated, but the alias label that the user originally picked isn't currently persisted on `Message`. If a user picked `smart` and it routed to `anthropic-prod/claude-opus-4-7`, the panel shows the latter. Adding `requested_model: 'smart'` to `Message` is a small, valuable enhancement — left as a follow-on.
 
+6. **The OLLAMA_BASE_URL trap (post-push fix).** Kevin smoke-tested the new admin alias dropdown and saw only 4 ollama models from `gateway.yaml`'s static curated list, despite `ollama ls` showing 58 on his host. Root cause: `.env` had `OLLAMA_BASE_URL=http://ollama:11434` (the in-compose `ollama` service that only exists with `--profile local`); discovery's never-raise posture silently returned `[]` and the admin form fell back to the static list. Fix: flipped his local `.env` to `http://host.docker.internal:11434`, restarted gateway with `--force-recreate`, verified live `/api/v1/models` now returns 58 ollama + 9 anthropic native rows. Also flipped `.env.example`'s default to the host-internal path with a two-scenario decision-matrix comment so the next operator avoids the trap. **Memory entry written** (`feedback_ollama_discovery.md`) so this trap is the first place to look on similar future symptoms.
+
 ---
 
 ## What's NOT done
@@ -101,28 +105,86 @@ Anthropic live catalog discovery is also working (returns the operator's availab
 
 ### Push status
 
-- **Wave-3 stack (6 commits)** is the next push:
-  1. `docs(adr): 0011 — transparency-first model selection posture`
-  2. `feat(gateway): encrypted-at-rest provider keys via Fernet (ADR 0011)`
-  3. `feat(web): D2 — tier badge click-for-details panel`
-  4. `feat(gateway): live model discovery — OpenAI catalog + encrypted-key path (ADR 0011)`
-  5. `docs(gateway-openapi): document direct provider/model dispatch (ADR 0011)`
-  6. `feat(picker): surface alias resolution + fallback count (ADR 0011)`
-- The full stack is internally consistent: ADR lands first, then implementation in dependency order, then UI consuming the enriched API. Push as one push.
+All 8 wave-3 commits pushed (`299c6eb..9ae398a`). Tree is clean
+modulo `docs/MODEL_PICKER_ARCHITECTURE.md` which stays untracked
+per memory rule (reference doc, not part of this milestone).
 
 ---
 
 ## How to resume next session
 
 1. `cd /Users/kevinkeller/Desktop/LegalQuants/inhouse-ai`
-2. **Push the wave-3 stack** if not already done.
-3. `docker compose ps` — all services should still be healthy (gateway + web were rebuilt with wave-3 code).
-4. **Browser-smoke the new ModelPicker + TierDetailsPanel** — open `http://localhost:3000/lq-ai`, log in, send a message, click the tier badge and confirm the panel shows the routed provider + model + tier description. Check the model picker shows aliases with their `→ <provider>/<model> (+N fallbacks)` resolution suffix.
-5. **Pick the next move:**
-   * **D3-coverage** (~6–10h) — distributed audit-write expansion.
-   * **D8** (~1–2 days, multi-phase) — DB-backed user/team skills.
-   * **Persist `requested_model` on `Message`** (~30 LOC + UI tweak) — closes the ADR-0011 disclosure loop fully. Small + high-leverage.
-   * **Operator workflow doc for `docs/security/`** explaining master-key rotation + encrypted-key migration. Not strictly code; protects procurement-readiness story.
+2. `git status` should be clean; `git log --oneline -5` should show
+   `9ae398a` at the top.
+3. `docker compose ps` — all 7 services healthy. Gateway + web were
+   rebuilt with wave-3 code; gateway was force-recreated post-fix
+   so it has the host-Ollama env. No rebuild needed unless the next
+   task touches one of those subsystems.
+4. **Pick the next move:**
+
+   ### Option A — Persist `requested_model` on `Message` (~1h)
+
+   *Smallest. Closes the ADR-0011 disclosure-loop hole completely.*
+
+   Today the chat handler sends `model: "smart"` to the gateway, the
+   gateway resolves to `anthropic-prod/claude-opus-4-7`, and only
+   the resolved provider/model lands on `Message.routed_provider /
+   routed_model`. The alias the user picked is lost — TierDetailsPanel
+   can't say "you asked for `smart`, it routed to opus".
+
+   Touchpoints:
+   * `api/alembic/versions/0012_*.py` — add `requested_model TEXT`
+     column to `messages` (nullable for backwards compat).
+   * `api/app/models/chat.py` — add the field to the ORM.
+   * `api/app/api/chats.py` (or wherever message-create lives) —
+     persist `request.model` on the assistant message.
+   * `web/src/lib/lq-ai/types.ts` — add to `Message`.
+   * `web/src/lib/lq-ai/components/TierDetailsPanel.svelte` —
+     render `Requested: smart → routed to anthropic-prod/claude-opus-4-7`
+     when `requested_model` differs from the routed pair.
+
+   ### Option B — D3-coverage audit-write expansion (~6–10h)
+
+   *Distributed; easy to commit incrementally.*
+
+   D3-core covered project / chat / message audit writes. D3-coverage
+   extends to: auth (login / refresh / logout), MFA (setup / enable /
+   verify / disable), files (upload / delete), KBs (CRUD + attach /
+   detach), users (export / deletion-schedule / cancel — partly done
+   in D6 already). Plus the admin filtering UI on
+   `/lq-ai/admin/audit-log` (currently the route exists but the
+   client-side filter form isn't wired).
+
+   Entry points: every callsite of `audit_action()` is a hit; the
+   gaps are paths that mutate state but don't yet call it. Grep
+   `db.commit\(\)` across `api/app/api/` and audit each that lacks
+   an `audit_action` call upstream.
+
+   ### Option C — D8 DB-backed user/team skills (~1–2 days)
+
+   *Largest. Surfaced by D7's "Save as SKILL.md" stand-in.*
+
+   ADR amendment to 0004 (filesystem-canonical built-ins coexist
+   with DB user/team scopes). Migration `0012_user_skills`. POST /
+   PATCH / DELETE `/api/v1/skills`. Skill Service registry merge.
+   Gateway internal-skills user-scope path. LQ.AI Skill Creator
+   page at `/lq-ai/skills/new`. Rewire D7's Promote-to-Skill from
+   download-as-SKILL.md to the Creator.
+
+   Per the wave-3 cadence: pre-write the ADR amendment first so the
+   migration + endpoint shapes have a north star.
+
+   ### Option D — Encrypted-keys operator workflow doc (~30 min)
+
+   `docs/security/encrypted-keys.md` — generate-master-key,
+   encrypt-key, paste-into-gateway.yaml, master-key rotation,
+   recovery-from-lost-master-key procedure. Not strictly code;
+   protects procurement-readiness story. Could bundle with B
+   above as part of D3-coverage's docs pass.
+
+   **Recommended sequence:** A first (closes a clean loose end),
+   then C (the bigger feature) or B (the wider audit pass) based
+   on which feels higher-leverage when you re-open. D as a tag-along.
 
 ---
 
