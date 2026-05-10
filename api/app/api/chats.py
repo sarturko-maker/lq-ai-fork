@@ -715,6 +715,7 @@ async def _persist_assistant_message(
     message_id: uuid.UUID,
     chat_id: uuid.UUID,
     content: str,
+    requested_model: str | None,
     routed_provider: str | None,
     routed_model: str | None,
     routed_inference_tier: int | None,
@@ -731,6 +732,11 @@ async def _persist_assistant_message(
     take the explicit ``message_id`` so the value matches the
     ``lq_ai_message_id`` we forwarded to the gateway, which means the
     gateway's routing-log row's ``message_id`` resolves to this row.
+
+    ``requested_model`` is the value the client sent in
+    ``ChatCompletionRequest.model`` (ADR 0011 follow-on). It may match
+    the ``routed_*`` pair (direct dispatch) or differ (alias resolved
+    server-side); persisting both lets the UI explain the difference.
     """
 
     row = Message(
@@ -742,6 +748,7 @@ async def _persist_assistant_message(
         routed_inference_tier=routed_inference_tier,
         routed_provider=routed_provider,
         routed_model=routed_model,
+        requested_model=requested_model,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         cost_estimate_micros=usd_to_micros(cost_estimate_usd),
@@ -801,6 +808,7 @@ async def _non_streaming_response(
         message_id=assistant_message_id,
         chat_id=chat.id,
         content=assistant_text,
+        requested_model=request.model,
         routed_provider=response.routed_provider,
         routed_model=response.model,
         routed_inference_tier=response.routed_inference_tier,
@@ -938,6 +946,7 @@ async def _stream_response(
                 message_id=assistant_message_id,
                 chat_id=chat.id,
                 content="".join(accumulated),
+                requested_model=request.model,
                 routed_provider=last_provider,
                 routed_model=last_model,
                 routed_inference_tier=last_tier,

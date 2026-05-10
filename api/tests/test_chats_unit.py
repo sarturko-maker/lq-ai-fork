@@ -209,6 +209,7 @@ def test_message_to_response_translates_micros_to_usd() -> None:
             self.routed_inference_tier = 3
             self.routed_provider = "anthropic-prod"
             self.routed_model = "claude-sonnet-4-6"
+            self.requested_model = "smart"
             self.prompt_tokens = 10
             self.completion_tokens = 20
             self.cost_estimate_micros = 250
@@ -221,3 +222,5 @@ def test_message_to_response_translates_micros_to_usd() -> None:
     assert math.isclose(response.cost_estimate, 0.00025, rel_tol=1e-9)
     assert response.applied_skills == ["nda-review"]
     assert response.routed_inference_tier == 3
+    assert response.requested_model == "smart"
+    assert response.routed_model == "claude-sonnet-4-6"

@@ -33,10 +33,12 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from app.clients.gateway import GatewayClient, set_gateway_client
 from app.db.session import get_db
 from app.main import app
-from app.models.chat import Chat
+from app.models.chat import Chat, Message
 from app.models.user import User
 from app.security import create_access_token, hash_password
 
@@ -721,3 +723,98 @@ async def _ensure_inference_routing_log_table_exists(db_session: AsyncSession) -
         await db_session.execute(text("SELECT 1 FROM inference_routing_log LIMIT 1"))
     except Exception:
         pytest.skip("inference_routing_log table not present in test DB")
+
+
+# ---------------------------------------------------------------------------
+# requested_model persistence (ADR 0011 follow-on)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_send_message_persists_requested_model_non_streaming(
+    client: AsyncClient,
+    db_user: User,
+    db_chat: Chat,
+    db_session: AsyncSession,
+) -> None:
+    """The alias the user picked is stored alongside the routed pair.
+
+    ADR 0011 makes alias resolution visible: ``routed_model`` records
+    what actually ran, ``requested_model`` records what the user asked
+    for. When an alias is used, the two differ; the TierDetailsPanel
+    needs both to render "Requested: smart → routed to claude-sonnet-4-6".
+    """
+
+    respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=_success_payload(content="ok"))
+    )
+    token = _bearer_for(db_user)
+
+    response = await client.post(
+        f"/api/v1/chats/{db_chat.id}/messages",
+        json={"content": "hello", "model": "smart"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    msg = body["message"]
+    assert msg["requested_model"] == "smart"
+    assert msg["routed_model"] == "claude-sonnet-4-6"
+
+    rows = await db_session.execute(
+        select(Message)
+        .where(Message.chat_id == db_chat.id, Message.role == "assistant")
+        .order_by(Message.created_at)
+    )
+    assistant_rows = list(rows.scalars().all())
+    assert len(assistant_rows) == 1
+    assert assistant_rows[0].requested_model == "smart"
+    assert assistant_rows[0].routed_model == "claude-sonnet-4-6"
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_send_message_persists_requested_model_streaming(
+    client: AsyncClient,
+    db_user: User,
+    db_chat: Chat,
+    db_session: AsyncSession,
+) -> None:
+    """Streaming path also persists ``requested_model`` (B5/C3 + ADR 0011).
+
+    The streaming handler accumulates chunks and writes the assistant
+    row at end-of-stream. The originally-requested alias must travel
+    through the gateway request envelope onto that row, same as the
+    non-streaming path.
+    """
+
+    body = _stream_chunk("hi ") + _stream_chunk("there") + "data: [DONE]\n\n"
+    respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200, content=body, headers={"content-type": "text/event-stream"}
+        )
+    )
+    token = _bearer_for(db_user)
+
+    async with client.stream(
+        "POST",
+        f"/api/v1/chats/{db_chat.id}/messages",
+        json={"content": "hi", "stream": True, "model": "fast"},
+        headers={"Authorization": f"Bearer {token}"},
+    ) as resp:
+        assert resp.status_code == 200
+        async for line in resp.aiter_lines():
+            if line.strip() == "data: [DONE]":
+                break
+
+    rows = await db_session.execute(
+        select(Message)
+        .where(Message.chat_id == db_chat.id, Message.role == "assistant")
+        .order_by(Message.created_at)
+    )
+    assistant_rows = list(rows.scalars().all())
+    assert len(assistant_rows) == 1
+    assert assistant_rows[0].requested_model == "fast"
+    assert assistant_rows[0].routed_model == "claude-sonnet-4-6"

@@ -173,6 +173,11 @@ class Message(Base):
     routed_inference_tier: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     routed_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
     routed_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """The ``model`` value the client originally sent (alias or
+    ``provider/model``). ADR 0011 follow-on: ``routed_*`` records what
+    actually ran; this records what the user asked for. Differ when an
+    alias was used."""
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_estimate_micros: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

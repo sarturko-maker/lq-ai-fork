@@ -294,6 +294,11 @@ class MessageResponse(BaseModel):
     routed_inference_tier: int | None = None
     routed_provider: str | None = None
     routed_model: str | None = None
+    requested_model: str | None = None
+    """The originally-requested model alias or ``provider/model`` pair
+    (ADR 0011 follow-on). Differs from ``routed_model`` when an alias
+    was resolved; null on rows persisted before this column existed."""
+
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     cost_estimate: float | None = None
@@ -322,6 +327,7 @@ def message_to_response(row: Any) -> MessageResponse:
         routed_inference_tier=row.routed_inference_tier,
         routed_provider=row.routed_provider,
         routed_model=row.routed_model,
+        requested_model=row.requested_model,
         prompt_tokens=row.prompt_tokens,
         completion_tokens=row.completion_tokens,
         cost_estimate=micros_to_usd(row.cost_estimate_micros),
