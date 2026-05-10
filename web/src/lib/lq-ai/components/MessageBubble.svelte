@@ -81,6 +81,7 @@
 				tier={message.routed_inference_tier ?? null}
 				provider={message.routed_provider ?? null}
 				model={message.routed_model ?? null}
+				requestedModel={message.requested_model ?? null}
 				promptTokens={message.prompt_tokens ?? null}
 				completionTokens={message.completion_tokens ?? null}
 				costEstimate={message.cost_estimate ?? null}

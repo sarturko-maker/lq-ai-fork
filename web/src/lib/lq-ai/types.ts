@@ -133,6 +133,12 @@ export interface Message {
 	routed_inference_tier?: 1 | 2 | 3 | 4 | 5 | null;
 	routed_provider?: string | null;
 	routed_model?: string | null;
+	/**
+	 * Originally-requested model alias or `provider/model` (ADR 0011
+	 * follow-on). Differs from `routed_model` when an alias resolved
+	 * server-side; null on rows persisted before this column existed.
+	 */
+	requested_model?: string | null;
 	prompt_tokens?: number | null;
 	completion_tokens?: number | null;
 	cost_estimate?: number | null;

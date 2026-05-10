@@ -20,6 +20,13 @@
 	export let tier: 1 | 2 | 3 | 4 | 5 | null | undefined = null;
 	export let provider: string | null | undefined = null;
 	export let model: string | null | undefined = null;
+	/**
+	 * The model the user originally requested — alias (e.g. `smart`) or
+	 * `provider/model` direct dispatch. ADR 0011 follow-on: when this
+	 * differs from the routed pair, the panel surfaces the resolution
+	 * step so users can answer "what did I ask for vs what ran?".
+	 */
+	export let requestedModel: string | null | undefined = null;
 	export let promptTokens: number | null | undefined = null;
 	export let completionTokens: number | null | undefined = null;
 	export let costEstimate: number | null | undefined = null;
@@ -55,6 +62,7 @@
 	};
 
 	$: tierInfo = tier ? tierDescriptions[tier] : null;
+	$: routedPair = provider && model ? `${provider}/${model}` : null;
 	$: providerModelLine =
 		provider && model
 			? `${provider} / ${model}`
@@ -63,6 +71,15 @@
 				: model
 					? model
 					: 'Provider/model not recorded for this message.';
+	/**
+	 * Show the requested-vs-routed line only when the user's original
+	 * request differed from the routed pair — i.e. an alias was resolved.
+	 * Direct `provider/model` dispatch produces identical strings; surfacing
+	 * "Requested: anthropic-prod/claude-opus-4-7 → routed to
+	 * anthropic-prod/claude-opus-4-7" is noise.
+	 */
+	$: showRequestedDelta =
+		requestedModel != null && requestedModel !== '' && requestedModel !== routedPair;
 	$: showTokens = promptTokens != null || completionTokens != null;
 	$: showCost = costEstimate != null && costEstimate > 0;
 
@@ -122,8 +139,25 @@
 			</p>
 		{/if}
 
+		{#if showRequestedDelta}
+			<div class="border-t border-gray-200 dark:border-gray-800 pt-2">
+				<div class="text-[10px] uppercase tracking-wide text-gray-500">Requested</div>
+				<div
+					class="text-sm font-mono text-gray-800 dark:text-gray-100"
+					data-testid="lq-ai-tier-details-requested-model"
+				>
+					{requestedModel}
+				</div>
+				<div class="text-[10px] text-gray-500 italic mt-0.5">
+					Resolved server-side per ADR 0011.
+				</div>
+			</div>
+		{/if}
+
 		<div class="border-t border-gray-200 dark:border-gray-800 pt-2">
-			<div class="text-[10px] uppercase tracking-wide text-gray-500">Routed to</div>
+			<div class="text-[10px] uppercase tracking-wide text-gray-500">
+				{showRequestedDelta ? 'Routed to' : 'Provider / model'}
+			</div>
 			<div
 				class="text-sm font-mono text-gray-800 dark:text-gray-100"
 				data-testid="lq-ai-tier-details-provider-model"
