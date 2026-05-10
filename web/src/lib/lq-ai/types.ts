@@ -266,3 +266,33 @@ export interface FileMeta {
 	character_count?: number | null;
 	created_at: string;
 }
+
+// ----- Saved prompts (D7 / DE-013) -----
+
+/**
+ * Per-user saved prompt fragment. Lighter than a skill (no folder, no
+ * frontmatter, no semver) — the in-chat reuse case for "the way I always
+ * ask for an executive summary." Mirrors the ``SavedPrompt`` schema in
+ * ``docs/api/backend-openapi.yaml``.
+ */
+export interface SavedPrompt {
+	id: string;
+	user_id: string;
+	name: string;
+	prompt_text: string;
+	tags: string[];
+	created_at: string;
+	updated_at: string;
+}
+
+export interface SavedPromptCreate {
+	name: string;
+	prompt_text: string;
+	tags?: string[];
+}
+
+export interface SavedPromptUpdate {
+	name?: string;
+	prompt_text?: string;
+	tags?: string[];
+}

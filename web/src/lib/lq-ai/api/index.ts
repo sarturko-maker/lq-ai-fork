@@ -13,3 +13,4 @@ export * as skillsApi from './skills';
 export * as filesApi from './files';
 export * as modelsApi from './models';
 export * as adminApi from './admin';
+export * as savedPromptsApi from './savedPrompts';
