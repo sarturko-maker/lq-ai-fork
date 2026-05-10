@@ -352,15 +352,27 @@ The features that make this LQ.AI rather than just another chat-with-LLMs app: t
 
 ### Task D7 — Saved Prompts (per Issue 04)
 
-**Scope:** `/api/v1/saved-prompts` CRUD. Sidebar in web UI. "Promote to Skill" affordance.
+**Scope:** `/api/v1/saved-prompts` CRUD. Sidebar in web UI. "Promote to Skill" affordance — in M1 this surfaces as a "Save as SKILL.md" client-side download per ADR 0004 (filesystem-canonical skills); full Skill Creator wiring lives in D8.
 
 **Dependencies:** C8.
 
-**Output:** Saved prompts work as documented in Issue 04.
+**Output:** Saved prompts work as documented in Issue 04. Promote affordance generates a SKILL.md draft that the user submits via PR or drops in their `skills/` folder.
 
-**Verification:** Create, list, update, delete saved prompts; promote-to-skill opens Skill Creator with content seeded.
+**Verification:** Create, list, update, delete saved prompts (live end-to-end). "Save as skill" produces a downloadable SKILL.md whose frontmatter parses against the skill-authoring guide.
 
 **Effort:** 4–6 hours.
+
+### Task D8 — DB-backed user/team skill storage + LQ.AI Skill Creator (surfaced by D7)
+
+**Scope:** Amend ADR 0004 to allow DB-backed user/team-scope skills alongside filesystem-canonical built-ins. Migration `0012_user_skills`. `POST /api/v1/skills`, `PATCH /api/v1/skills/{name}`, `DELETE /api/v1/skills/{name}`, plus a real implementation of `POST /api/v1/skills/{name}/fork`. Skill Service registry merge (filesystem + DB). Gateway `/internal/skills/{name}` user-scope path. LQ.AI Skill Creator page at `web/src/routes/lq-ai/skills/new/+page.svelte`. Rewire D7's Promote-to-Skill to the new Creator.
+
+**Dependencies:** D7 ✅.
+
+**Output:** Users can create user-scope skills from the UI. Promote-to-Skill from saved prompts opens the Skill Creator with content seeded. New skills appear in the chat-shell SkillPicker without a deploy.
+
+**Verification:** Create a skill via the UI; it shows up in `GET /skills?scope=user`; the chat shell lists it under the picker; attaching it to a chat ends in the gateway prompt assembly the same way builtin skills do.
+
+**Effort:** 1–2 days.
 
 ---
 

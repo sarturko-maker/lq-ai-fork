@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-08 (B6 partial — Ollama chat-completion adapter landed; first end-to-end exercise of B4's fallback skeleton; Mode-2 air-gapped path is now wired)
+> **Last updated:** 2026-05-10 (D7 — Saved Prompts CRUD + sidebar UI + download-as-SKILL.md; full Skill Creator deferred to new D8 phase)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -15,7 +15,7 @@
 | A — Foundation scaffolding | A1, A2, A3, A4, A5 | — | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5, B6 partial (Ollama) | — | B6 remainder optional (OpenAI chat, Vertex, Bedrock) |
 | C — Capability layer | C1, C2, C3, C4, C5, C6, C7, C8 | — | — (phase complete; C8 pending operator end-to-end verification per ADR 0009) |
-| D — M1 differentiators | D0, D0.5, D1 | — | D2 (tier-awareness UI) |
+| D — M1 differentiators | D0, D0.5, D1, D3-core, D4 (core + coverage), D5, D6, D7 | — | D2 (tier-awareness UI), D3-coverage, D8 (DB-backed user/team skills + Skill Creator) |
 | E — Procurement and release | — | — | After D |
 
 **Tests:** ~495+ passing in api/ (C6 added ~50: 8 migration + 16 retrieval unit + 12 embed unit + ~24 endpoint integration; C3 added ~55; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~225 passing in gateway/ (B6 partial added ~30: 22 Ollama adapter unit + 8 Ollama integration including the B4-fallback-chain end-to-end exercise; C6 added ~25: 15 OpenAI adapter + 8 embeddings integration + 2 inference updates; C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
@@ -1332,7 +1332,73 @@ PRD §3.12 calls the Organization Profile a "singleton skill" — same SKILL.md 
 
 ---
 
+### D7 — Saved Prompts CRUD + sidebar UI ✅ (Promote-to-Skill: download-as-SKILL.md; full Skill Creator deferred to D8)
+
+PRD §9 DE-013 / Issue 04: per-user saved prompts complement skills the way browser bookmarks complement Knowledge Bases — lighter than a full skill (no folder, no frontmatter, no semver) for personal "the way I always ask for an executive summary" reuse.
+
+**What landed:**
+
+* **Migration `0011_create_saved_prompts`** + ORM model — `saved_prompts` table per `docs/db-schema.md`. `(user_id, updated_at DESC)` btree + gin index on `tags`. `set_updated_at()` trigger from migration 0001 reused. `ON DELETE CASCADE` from `users.id` so the GDPR-Article-17 hard-delete path (D6) doesn't leave orphan rows.
+* **`GET /api/v1/saved-prompts`** — list the caller's prompts, newest first. Sort key `(updated_at DESC, id DESC)` — the `id DESC` tiebreaker keeps ordering deterministic when wall-clock collisions happen (PostgreSQL's `now()` returns transaction start time, so batch inserts/updates would otherwise alias).
+* **`POST /api/v1/saved-prompts`** — create. Tag dedup-with-order-preservation (callers can curate display order; duplicate tags collapse). Validates: name 1–200 chars, prompt_text 1–50K chars, ≤20 tags of ≤50 chars each. Audit-logged as `saved_prompt.create`.
+* **`GET /api/v1/saved-prompts/{id}`** — owner-only fetch. Returns 404 if the row doesn't exist OR belongs to another user (id-probing must not leak existence of other users' prompts).
+* **`PATCH /api/v1/saved-prompts/{id}`** — partial update; only supplied keys touch the row. Idempotent no-op PATCH (every supplied value matches stored value) returns 200 *without* writing an audit row to avoid log churn on UI auto-saves. Real changes audit as `saved_prompt.update` with `changed_fields` in `details`.
+* **`DELETE /api/v1/saved-prompts/{id}`** — owner-only delete (204). Audit-logged as `saved_prompt.delete`.
+* **Web SavedPromptsPanel** (`web/src/lib/lq-ai/components/SavedPromptsPanel.svelte`) — sits in the chat shell between SkillPicker and the composer textarea. List/create/edit/delete + quick-Insert (appends to the composer rather than replacing — supports stacking on an in-progress message). "Save as skill" button per row triggers a client-side download of a SKILL.md draft (frontmatter scaffold + body) — see "Promote-to-Skill posture" below.
+* **Web API client** (`web/src/lib/lq-ai/api/savedPrompts.ts`) — list/create/get/update/delete; uses the shared `apiRequest` so auth-header attachment, refresh-on-401, and 401/403 typed-error mapping all come for free.
+
+**Files touched.**
+
+* `api/alembic/versions/0011_create_saved_prompts.py` (new), `api/app/models/saved_prompt.py` (new), `api/app/models/__init__.py` updated.
+* `api/app/api/saved_prompts.py` — replaces the A4 501 stubs with full CRUD handlers + Pydantic models.
+* `api/tests/test_saved_prompts.py` (new) — 20 integration tests (list, create, get, patch, delete; cross-user isolation; tag dedup; idempotent-PATCH no-audit; oversize/empty validation).
+* `api/tests/test_endpoints.py` — five routes promoted to `IMPLEMENTED_ROUTES`; route-inventory bound lowered from `>= 5` to `>= 1` (D7 was the last wave-2 stub-eater).
+* `api/tests/test_admin_bootstrap.py` — gate-clear assertion swapped from `501` to `200 + []` (the gate-clearing semantic still holds; the underlying probe is now a real surface).
+* `web/src/lib/lq-ai/api/savedPrompts.ts` (new), `web/src/lib/lq-ai/api/index.ts` updated, `web/src/lib/lq-ai/types.ts` updated, `web/src/lib/lq-ai/components/SavedPromptsPanel.svelte` (new), `web/src/routes/lq-ai/+page.svelte` mounts the panel.
+* `web/src/lib/lq-ai/__tests__/saved-prompts-api.test.ts` (new) — 8 vitest cases covering the API client (list shape, auth header attachment, POST body serialization, error translation, URL encoding, PATCH/DELETE method).
+
+**Architectural decisions.**
+
+1. **Promote-to-Skill posture.** PRD §9 DE-013 / Issue 04 calls for "save as skill." ADR 0004 keeps skills filesystem-canonical for M1 — there is no `POST /api/v1/skills` endpoint, no DB-backed user/team-scope skill table, and `POST /skills/{name}/fork` is still 501-stubbed. Wiring Promote-to-Skill to OpenWebUI's `/workspace/skills/create` (which is fully built) would land a skill in OpenWebUI's database, *not* in LQ.AI's filesystem skills — those skills wouldn't appear in LQ.AI's chat-shell SkillPicker. To keep the affordance honest with the architecture, "Save as skill" generates a SKILL.md draft (frontmatter scaffold + the prompt body) and triggers a browser download. The user submits the file via PR per CONTRIBUTING.md or drops it into their local `skills/` directory. The full LQ.AI Skill Creator surface (DB-backed user/team skills, `POST /api/v1/skills`, registry merge) is filed as **phase D8**.
+2. **No-op PATCH skips audit.** UI auto-save patterns can fire a PATCH on every keystroke pause; writing an audit row for every "no actual change" call would flood the log without information value. The handler diffs each supplied field against current state and only writes an audit row when something changed. This is the same pragmatic choice the chats-rename surface makes (PRD §5.3 doesn't *require* per-keystroke audits; it requires "every state-changing API call writes" — a no-op isn't state-changing).
+3. **404 conflates "doesn't exist" with "owned by someone else".** Returning a different status for "exists but not yours" leaks the existence of other users' prompts via id-probing. The chats and projects routers use the same pattern; consistency is worth more than the slightly less specific error message.
+4. **Tag dedup preserves first-seen order.** Set semantics would lose ordering; full-curation would invalidate the API's normalize-on-write behavior. Preserving first-seen lets users curate display order while the backend guarantees no duplicates in the column.
+5. **`(updated_at DESC, id DESC)` tiebreaker.** PostgreSQL's transaction-start `now()` makes timestamp aliasing easy to hit (batch imports, fast UI flows, the test suite's SAVEPOINT-bound transactions). The `id DESC` tiebreaker keeps the UI's stable-key rendering deterministic without requiring `clock_timestamp()` in the trigger.
+
+**D7 verification step PASSES.** Live end-to-end smoke against the running stack: `POST /auth/login` → `POST /saved-prompts {...}` returns `201` with the new row including server-assigned uuid + tags + timestamps; `GET /saved-prompts` shows it; `GET /saved-prompts/{id}` returns the same row; `PATCH` mutates name + advances `updated_at` (trigger fired); `DELETE` returns `204`; subsequent `LIST` returns `[]`. Five-endpoint chain verified against migration `0011` running on the live `lq_ai_test_*` database.
+
+**Test counts.** API: 20 saved-prompts integration tests + 17 admin-bootstrap (already-passing, plus the swapped-probe assertion). Web (vitest): 8 saved-prompts API client cases. Pre-existing `admin/tier-policy` failures (D1 deferred surface) reproduce on `main` HEAD and predate D7.
+
+**D7 — what's NOT in this milestone:**
+
+* **Full LQ.AI Skill Creator surface.** Filed as **D8**. Substantial — needs an ADR amendment to 0004, migration `0012_user_skills`, `POST/PATCH/DELETE /api/v1/skills`, registry merge in the Skill Service, gateway `/internal/skills/{name}` user-scope path, and a real Skill Creator page in `web/src/routes/lq-ai/`. Multi-day work; deliberately split out so D7 can ship a coherent surface.
+* **Tag-filter UI / endpoint.** The DB index supports it; the API doesn't expose `?tag=` filtering yet. Cheap to add when a UI need surfaces.
+* **Browser click-through verification of the SavedPromptsPanel.** Typecheck + vitest suite + live API verification all pass; the panel itself was not exercised in a browser this session. Recommend a quick smoke test in the next session before declaring the UI fully validated.
+
+**Known limitations.**
+
+* The "Save as skill" download generates a starter SKILL.md but doesn't fork an existing skill or check for slug collisions. The user is expected to review/edit the frontmatter (description, tier, audience) before submitting via PR.
+* The sidebar uses `confirm()` and `alert()` for delete-confirm and error display, matching the existing OpenWebUI fork's interaction style. A toast-based design would be more polished but lives in the broader UI consistency pass.
+
+---
+
 ## Tasks ahead
+
+### D8 — DB-backed user/team skill storage + LQ.AI Skill Creator (new phase, surfaced by D7)
+
+**Depends on:** D7 ✅ (Promote-to-Skill download is the temporary stand-in until D8 lands).
+
+**Scope:**
+
+* **ADR amendment** to 0004 — DB-backed user/team skills coexist with filesystem-canonical built-ins (registry merge: filesystem provides `builtin` scope, DB provides `user`/`team` scope).
+* **Migration `0012_user_skills`** — table with `id`, `owner_id`, `scope` (`user` | `team`), `name`, `version`, `content_yaml`, `content_md`, `created_at`, `updated_at`. Compound unique on `(owner_id, scope, name, version)`.
+* **`POST /api/v1/skills`**, **`PATCH /api/v1/skills/{name}`**, **`DELETE /api/v1/skills/{name}`** — CRUD for user-scope skills. `POST /skills/{name}/fork` becomes a real handler (currently 501-stubbed in `app/api/skills.py`).
+* **Skill Service registry merge** — the `MutableSkillRegistry` extends to load DB-backed skills alongside the filesystem set. Cache invalidation on PATCH/DELETE.
+* **Gateway `/internal/skills/{name}`** — needs to resolve user-scope skills (currently filesystem-only). Likely a new `?scope=` parameter or a separate endpoint depending on how the registry merge plays out.
+* **LQ.AI Skill Creator page** at `web/src/routes/lq-ai/skills/new/+page.svelte` — form with frontmatter fields (name, title, description, version, tier floor, tags, optional `lq_ai:` extensions) and a Markdown body editor. Save → POST to `/api/v1/skills`, success → redirect to chat shell with the skill auto-attached.
+* **Promote-to-Skill rewires** to seed the Skill Creator form (replaces the D7 download-as-SKILL.md path).
+
+**Effort:** 1–2 days; multi-phase.
 
 ### B6 — Additional provider adapters (Ollama complete; remainder optional)
 
