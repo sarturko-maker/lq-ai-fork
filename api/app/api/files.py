@@ -36,7 +36,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -45,6 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import ActiveUser
 from app.config import get_settings
 from app.db.session import get_db
+from app.audit import audit_action
 from app.errors import NotFound, ValidationError
 from app.models.file import File as FileModel
 from app.models.project import Project
@@ -180,6 +181,7 @@ async def _upload_file_stream(
 )
 async def upload_file(
     user: ActiveUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     file: Annotated[UploadFile, File(description="The file to upload.")],
     project_id: Annotated[
@@ -294,6 +296,23 @@ async def upload_file(
     db.add(row)
     try:
         await db.flush()
+        # Privilege propagates from the project (if any) — audit_action
+        # resolves it from project_id without an extra fetch when the
+        # ORM Project isn't loaded here.
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="file.uploaded",
+            resource_type="file",
+            resource_id=str(file_id),
+            project_id=resolved_project_id,
+            request=request,
+            details={
+                "filename": filename,
+                "size_bytes": upload_result.size_bytes,
+                "mime_type": mime_type,
+            },
+        )
         await db.commit()
     except IntegrityError:
         # Failed to persist after the bytes were uploaded. Clean up the
@@ -431,6 +450,7 @@ async def get_file_content(
 async def delete_file(
     file_id: str,
     user: ActiveUser,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     """Soft-delete the file by setting ``deleted_at``.
@@ -446,6 +466,16 @@ async def delete_file(
     from datetime import UTC, datetime
 
     row.deleted_at = datetime.now(tz=UTC)
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="file.deleted",
+        resource_type="file",
+        resource_id=str(row.id),
+        project_id=row.project_id,
+        request=request,
+        details={"filename": row.filename},
+    )
     await db.commit()
 
     log.info(
