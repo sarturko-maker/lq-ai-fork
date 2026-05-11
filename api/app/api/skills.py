@@ -39,7 +39,12 @@ from app.db.session import get_db
 from app.errors import NotFound
 from app.models.user_skill import UserSkill
 from app.skills.registry import MutableSkillRegistry
-from app.skills.schema import filter_summary_for_response
+from app.skills.schema import (
+    SkillFrontmatter,
+    SkillInputs,
+    extract_inputs,
+    filter_summary_for_response,
+)
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 
@@ -293,13 +298,35 @@ async def get_skill(
     read; mutate rights stay admin-only at the management endpoints.
     """
 
-    shadow = await _load_user_shadow(db, user_id=user.id, slug=skill_name)
-    if shadow is not None:
-        return JSONResponse(content=_skill_from_user_skill(shadow))
+    payload = await _resolve_full_skill_payload(
+        request, db=db, user_id=user.id, skill_name=skill_name
+    )
+    return JSONResponse(content=payload)
 
-    team_shadow = await _load_team_shadow(db, user_id=user.id, slug=skill_name)
+
+async def _resolve_full_skill_payload(
+    request: Request,
+    *,
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    skill_name: str,
+) -> dict[str, Any]:
+    """Apply the D8.1b resolution stack and return the full Skill payload.
+
+    Shared between ``GET /skills/{name}`` and ``GET /skills/{name}/contents``
+    (which return the same shape — PRD §3.4 names the contents endpoint
+    explicitly as the inspector backend; ``/skills/{name}`` already
+    returns the same data, so contents is an alias the frontend can
+    target by URL semantics).
+    """
+
+    shadow = await _load_user_shadow(db, user_id=user_id, slug=skill_name)
+    if shadow is not None:
+        return _skill_from_user_skill(shadow)
+
+    team_shadow = await _load_team_shadow(db, user_id=user_id, slug=skill_name)
     if team_shadow is not None:
-        return JSONResponse(content=_skill_from_user_skill(team_shadow))
+        return _skill_from_user_skill(team_shadow)
 
     holder = _registry(request)
     registry = holder.current()
@@ -311,12 +338,115 @@ async def get_skill(
         )
 
     raw = skill.model_dump()
-    payload = {
+    return {
         k: v
         for k, v in raw.items()
         if v is not None and not (isinstance(v, list) and len(v) == 0 and k in {"tags"})
     }
+
+
+@router.get(
+    "/{skill_name}/contents",
+    summary="Full skill contents for the skill inspector (PRD §3.4)",
+)
+async def get_skill_contents(
+    request: Request,
+    skill_name: str,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> JSONResponse:
+    """Return the full skill payload — SKILL.md + reference + example files.
+
+    Same shape as ``GET /skills/{skill_name}`` (the user-facing read
+    endpoint). PRD §3.4 names this endpoint explicitly as the contract
+    the "view this skill" affordance + the skill inspector side panel
+    target; exposing it under a distinct URL lets the frontend use URL
+    semantics ("/contents") to signal inspection intent, even though
+    the response body is the same as the base GET. Applies the same
+    D8.1b resolution stack (user > team > built-in).
+    """
+
+    payload = await _resolve_full_skill_payload(
+        request, db=db, user_id=user.id, skill_name=skill_name
+    )
     return JSONResponse(content=payload)
+
+
+@router.get(
+    "/{skill_name}/inputs",
+    response_model=SkillInputs,
+    summary="Declared inputs (form schema) for the skill-input-form pattern",
+)
+async def get_skill_inputs(
+    request: Request,
+    skill_name: str,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SkillInputs:
+    """Return the skill's declared inputs (required + optional).
+
+    The PRD §3.4 skill-input-form pattern: skills declare inputs in
+    their frontmatter so the UI can render a structured form rather
+    than letting the model ask for missing context conversationally.
+    Used by Enhance Prompt's "missing required input" surface and by
+    any skill author who wants their skill to feel form-driven.
+
+    Resolution mirrors ``GET /skills/{name}``: user > team > built-in.
+    For user/team-scope rows the inputs live in ``frontmatter_extra``
+    (under either the top-level ``inputs`` key or ``lq_ai.inputs``);
+    for built-ins they ride the parsed SkillFrontmatter. Returns an
+    empty (name-only) shape when the skill declares no inputs.
+    """
+
+    shadow = await _load_user_shadow(db, user_id=user.id, slug=skill_name)
+    if shadow is not None:
+        return _inputs_from_user_skill_row(shadow)
+
+    team_shadow = await _load_team_shadow(db, user_id=user.id, slug=skill_name)
+    if team_shadow is not None:
+        return _inputs_from_user_skill_row(team_shadow)
+
+    holder = _registry(request)
+    registry = holder.current()
+    record = registry.get(skill_name)
+    if record is None:
+        raise NotFound(
+            message=f"Skill {skill_name!r} is not in the registry.",
+            details={"skill_name": skill_name},
+        )
+    return extract_inputs(record.name, record.frontmatter)
+
+
+def _inputs_from_user_skill_row(row: UserSkill) -> SkillInputs:
+    """Build a SkillInputs from a user/team-scope DB row's frontmatter_extra.
+
+    User-skill rows store extension keys in ``frontmatter_extra``;
+    when the row carries ``inputs`` (either top-level or under
+    ``lq_ai``) we surface it. Skills authored without inputs return
+    an empty schema — same UX as built-ins without inputs.
+    """
+
+    extras = dict(row.frontmatter_extra or {})
+    synthesized = {
+        "name": row.slug,
+        "description": row.description,
+        "lq_ai": {k: v for k, v in extras.items() if k != "inputs"},
+    }
+    inputs_block = extras.get("inputs")
+    if isinstance(inputs_block, dict):
+        # Place at top level — extract_inputs checks top-level first,
+        # so this gives author-supplied inputs visibility regardless of
+        # whether the original SKILL.md nested them under lq_ai.
+        synthesized["inputs"] = inputs_block
+
+    try:
+        frontmatter = SkillFrontmatter.model_validate(synthesized)
+    except Exception:
+        # Malformed extras — return empty rather than 500. The skill
+        # still resolves through /skills/{name}; the inspector form
+        # just won't render fields for it.
+        return SkillInputs(name=row.slug)
+    return extract_inputs(row.slug, frontmatter)
 
 
 @router.post("/{skill_name}/fork", status_code=status.HTTP_201_CREATED)

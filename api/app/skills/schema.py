@@ -148,6 +148,115 @@ class Skill(SkillSummary):
     example_files: list[SkillFile] = Field(default_factory=list)
 
 
+# --- Skill inputs (PRD §3.4 skill-input-form pattern) -----------------------
+#
+# Skills declare required + optional inputs in their frontmatter so the
+# application can render a form before invoking the skill. The corpus
+# reality is inconsistent — some skills nest ``inputs`` under ``lq_ai:``
+# (e.g., enhance-prompt) while the formal guide puts it at the top
+# level. The helper in this module looks in both places.
+
+
+class SkillInputDef(BaseModel):
+    """One declared input — the shape the skill-input form renders against.
+
+    Fields per ``docs/skill-authoring-guide.md`` + observed corpus
+    variance. ``name`` is the only strictly required field; the form can
+    render a text input as the default when ``type`` is absent.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    type: str | None = None
+    """One of ``text`` | ``enum`` | ``boolean`` | ``integer`` |
+    ``structured`` | ``file`` — free-form per corpus reality; the form
+    renderer chooses a sensible default when null."""
+
+    required: bool = False
+    description: str | None = None
+    enum: list[str] | None = None
+    default: Any | None = None
+
+
+class SkillInputs(BaseModel):
+    """The shape ``GET /api/v1/skills/{name}/inputs`` returns."""
+
+    name: str
+    required: list[SkillInputDef] = Field(default_factory=list)
+    optional: list[SkillInputDef] = Field(default_factory=list)
+
+
+def _coerce_input_entry(entry: Any, *, required: bool) -> SkillInputDef | None:
+    """Turn one frontmatter inputs entry into a SkillInputDef.
+
+    Two corpus shapes appear in the wild:
+
+    * Bare string (the formal guide's example): ``- document``. We treat
+      these as ``{name: "document", type: null}``.
+    * Dict (the corpus reality for enhance-prompt): ``{name, type,
+      description}``. We pass through the dict fields.
+
+    Anything else (non-string, non-dict; or dict missing ``name``)
+    returns ``None`` so the resolver can skip silently rather than
+    fail the whole inputs endpoint on a malformed entry.
+    """
+
+    if isinstance(entry, str):
+        return SkillInputDef(name=entry, required=required)
+    if isinstance(entry, dict):
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            return None
+        data = {**entry, "required": required}
+        try:
+            return SkillInputDef.model_validate(data)
+        except Exception:
+            # Malformed entry — surface as a name-only stub rather than
+            # 500 the whole inspector endpoint.
+            return SkillInputDef(name=name, required=required)
+    return None
+
+
+def extract_inputs(name: str, frontmatter: SkillFrontmatter) -> SkillInputs:
+    """Return the skill-input form schema for ``name``.
+
+    Looks for ``inputs:`` at the top level of the frontmatter first
+    (formal guide shape), then under ``lq_ai.inputs`` (corpus reality
+    for enhance-prompt). When neither is present, returns an empty
+    schema — meaning "no declared inputs; the skill is purely prompted."
+    """
+
+    extras = frontmatter.model_extra or {}
+    inputs_block: Any | None = extras.get("inputs")
+
+    if not isinstance(inputs_block, dict):
+        lq_extras = frontmatter.lq_ai.model_extra or {}
+        inputs_block = lq_extras.get("inputs")
+
+    if not isinstance(inputs_block, dict):
+        return SkillInputs(name=name)
+
+    required_entries = inputs_block.get("required") or []
+    optional_entries = inputs_block.get("optional") or []
+
+    required: list[SkillInputDef] = []
+    if isinstance(required_entries, list):
+        for entry in required_entries:
+            coerced = _coerce_input_entry(entry, required=True)
+            if coerced is not None:
+                required.append(coerced)
+
+    optional: list[SkillInputDef] = []
+    if isinstance(optional_entries, list):
+        for entry in optional_entries:
+            coerced = _coerce_input_entry(entry, required=False)
+            if coerced is not None:
+                optional.append(coerced)
+
+    return SkillInputs(name=name, required=required, optional=optional)
+
+
 # --- Internal helpers --------------------------------------------------------
 
 
@@ -204,8 +313,11 @@ __all__ = [
     "Skill",
     "SkillFile",
     "SkillFrontmatter",
+    "SkillInputDef",
+    "SkillInputs",
     "SkillScope",
     "SkillSummary",
     "derive_summary",
+    "extract_inputs",
     "filter_summary_for_response",
 ]
