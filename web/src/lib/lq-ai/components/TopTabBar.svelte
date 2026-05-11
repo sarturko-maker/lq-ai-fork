@@ -32,11 +32,23 @@
       comingSoonOpen = true;
     }
   }
+
+  function handleTabKeydown(e: KeyboardEvent, idx: number) {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const delta = e.key === 'ArrowRight' ? 1 : -1;
+      const next = (idx + delta + tabs.length) % tabs.length;
+      const buttons = (e.currentTarget as HTMLElement)
+        .closest('ul')
+        ?.querySelectorAll<HTMLButtonElement>('button[role="tab"]');
+      buttons?.[next]?.focus();
+    }
+  }
 </script>
 
 <nav class="lq-tabbar" aria-label="Primary">
   <ul role="tablist">
-    {#each tabs as tab (tab.id)}
+    {#each tabs as tab, tabIndex (tab.id)}
       <li role="presentation">
         <button
           type="button"
@@ -47,6 +59,7 @@
           class:lq-tab-active={active === tab.id}
           class:lq-tab-unavailable={!isTabAvailable(tab.id)}
           on:click={() => handleTabClick(tab.id, tab.route, tab.shipsInWave)}
+          on:keydown={(e) => handleTabKeydown(e, tabIndex)}
         >
           <span class="lq-tab-icon" aria-hidden="true">{tab.icon}</span>
           <span class="lq-tab-label">{tab.label}</span>
