@@ -77,6 +77,13 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # user skills (D8 — DB-backed user-scope skills per ADR 0012)
         "/api/v1/user-skills",
         "/api/v1/user-skills/{skill_id}",
+        # teams (D8.1a — admin CRUD + user-facing read)
+        "/api/v1/teams",
+        "/api/v1/teams/{team_id}",
+        "/api/v1/admin/teams",
+        "/api/v1/admin/teams/{team_id}",
+        "/api/v1/admin/teams/{team_id}/members",
+        "/api/v1/admin/teams/{team_id}/members/{user_id}",
         # admin
         "/api/v1/admin/audit-log",
         "/api/v1/admin/tier-policy",
@@ -108,14 +115,14 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 48 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
+    # 54 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
     # alias endpoints + D5's two new MFA endpoints + D6's two new GDPR
     # endpoints (status-poll for /users/me/export/{job_id} and
     # /users/me/delete/cancel) + D4's /organization-profile/raw
     # convenience endpoint + D4-coverage's
     # /internal/organization-profile + D8's two /api/v1/user-skills
-    # paths (extends the sketch).
-    assert len(actual) == 48
+    # paths + D8.1a's six teams paths (extends the sketch).
+    assert len(actual) == 54
 
 
 @pytest.mark.unit

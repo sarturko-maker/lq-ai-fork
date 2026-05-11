@@ -54,6 +54,8 @@ tags:
     description: Per-user saved prompt fragments
   - name: user-skills
     description: Per-user DB-backed skills (D8) — owned CRUD that shadows built-ins per ADR 0012
+  - name: teams
+    description: Operator-admin-controlled teams (D8.1a) — D8.1b will gate team-scope user-skills mutate on team-admin role
   - name: audit-log
     description: Audit log query (admin only)
   - name: tier-policy
@@ -965,6 +967,175 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+
+  # ----------- TEAMS (D8.1a — operator-admin-controlled) -----------
+  /api/v1/teams:
+    get:
+      tags: [teams]
+      summary: List teams the caller belongs to (newest first)
+      responses:
+        '200':
+          description: Caller's teams
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/TeamSummary'}
+
+  /api/v1/teams/{team_id}:
+    parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [teams]
+      summary: Fetch a team (member-only; 404 conflates "no such team" and "not a member")
+      responses:
+        '200':
+          description: Team payload with member roster
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Team'}
+        '404':
+          description: Team does not exist OR caller is not a member.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/admin/teams:
+    get:
+      tags: [teams]
+      summary: List every team in the deployment (admin)
+      responses:
+        '200':
+          description: All teams
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/TeamSummary'}
+    post:
+      tags: [teams]
+      summary: Create a new team; admin is auto-added as the first admin member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TeamCreate'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Team'}
+        '409':
+          description: A team with that slug already exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/admin/teams/{team_id}:
+    parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [teams]
+      summary: Fetch a team with its member roster (admin)
+      responses:
+        '200':
+          description: Team payload
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Team'}
+    patch:
+      tags: [teams]
+      summary: Update name / description (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TeamUpdate'}
+      responses:
+        '200':
+          description: Updated team
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Team'}
+    delete:
+      tags: [teams]
+      summary: Delete a team; CASCADES to team_members and team-scope user_skills
+      responses:
+        '204':
+          description: Deleted
+
+  /api/v1/admin/teams/{team_id}/members:
+    parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      tags: [teams]
+      summary: Add a user to a team (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: {type: string, format: uuid}
+                role: {type: string, enum: [admin, member], default: member}
+      responses:
+        '201':
+          description: Member added
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TeamMember'}
+        '409':
+          description: User is already a member of this team.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/admin/teams/{team_id}/members/{user_id}:
+    parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: user_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    patch:
+      tags: [teams]
+      summary: Change a member's role (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: {type: string, enum: [admin, member]}
+      responses:
+        '200':
+          description: Updated membership
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TeamMember'}
+    delete:
+      tags: [teams]
+      summary: Remove a user from a team (admin)
+      responses:
+        '204':
+          description: Member removed
 
   /api/v1/user-skills/{skill_id}:
     parameters:
@@ -2603,6 +2774,57 @@ components:
         version: {type: string, maxLength: 50}
         tags: {type: array, items: {type: string}, maxItems: 20}
         frontmatter_extra: {type: object, additionalProperties: true}
+
+    # D8.1a — operator-admin-controlled teams.
+    TeamSummary:
+      type: object
+      required: [id, slug, name, created_by_user_id, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        slug: {type: string}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        created_by_user_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        member_count: {type: integer, minimum: 0}
+
+    TeamMember:
+      type: object
+      required: [user_id, email, role, added_by_user_id, created_at]
+      properties:
+        user_id: {type: string, format: uuid}
+        email: {type: string}
+        display_name: {type: string, nullable: true}
+        role: {type: string, enum: [admin, member]}
+        added_by_user_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+
+    Team:
+      allOf:
+        - $ref: '#/components/schemas/TeamSummary'
+        - type: object
+          properties:
+            members:
+              type: array
+              items: {$ref: '#/components/schemas/TeamMember'}
+
+    TeamCreate:
+      type: object
+      required: [slug, name]
+      properties:
+        slug:
+          type: string
+          pattern: '^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$'
+          maxLength: 80
+        name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 2000, nullable: true}
+
+    TeamUpdate:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 2000, nullable: true}
 
     AuditLogEntry:
       type: object

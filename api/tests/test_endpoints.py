@@ -56,6 +56,8 @@ _PARAM_VALUES: dict[str, str] = {
     "prompt_id": _DUMMY_UUID,
     "skill_id": _DUMMY_UUID,
     "skill_name": "nda-review",
+    "team_id": _DUMMY_UUID,
+    "user_id": _DUMMY_UUID,
 }
 
 
@@ -120,6 +122,17 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/user-skills/{skill_id}"),
     ("PATCH", "/api/v1/user-skills/{skill_id}"),
     ("DELETE", "/api/v1/user-skills/{skill_id}"),
+    # D8.1a — teams (admin CRUD + read-only user-facing routes)
+    ("GET", "/api/v1/teams"),
+    ("GET", "/api/v1/teams/{team_id}"),
+    ("GET", "/api/v1/admin/teams"),
+    ("POST", "/api/v1/admin/teams"),
+    ("GET", "/api/v1/admin/teams/{team_id}"),
+    ("PATCH", "/api/v1/admin/teams/{team_id}"),
+    ("DELETE", "/api/v1/admin/teams/{team_id}"),
+    ("POST", "/api/v1/admin/teams/{team_id}/members"),
+    ("PATCH", "/api/v1/admin/teams/{team_id}/members/{user_id}"),
+    ("DELETE", "/api/v1/admin/teams/{team_id}/members/{user_id}"),
     # C2 — gateway-facing internal skills endpoint (X-LQ-AI-Gateway-Key auth)
     ("GET", "/api/v1/internal/skills/{skill_name}"),
     # C4 — file upload + storage
