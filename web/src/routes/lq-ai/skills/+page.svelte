@@ -14,6 +14,7 @@
 	import { userSkillsApi, skillsApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import type { UserSkill, SkillSummary } from '$lib/lq-ai/types';
+	import TrustPill from '$lib/lq-ai/components/TrustPill.svelte';
 
 	let rows: UserSkill[] = [];
 	let builtinSlugs = new Set<string>();
@@ -75,8 +76,8 @@
 <div class="p-4 max-w-5xl mx-auto" data-testid="lq-ai-user-skills">
 	<header class="mb-4 flex items-center justify-between">
 		<div>
-			<h1 class="text-xl font-semibold text-gray-900 dark:text-gray-100">My skills</h1>
-			<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+			<h1 class="lq-text-page-h">My skills</h1>
+			<p class="lq-text-caption mt-1" style="color: var(--lq-text-tertiary);">
 				Skills you've authored. A skill with a slug that matches a built-in shadows the built-in
 				for your chats only — other users still see the built-in.
 			</p>
@@ -84,13 +85,13 @@
 		<div class="flex gap-2">
 			<a
 				href="/lq-ai"
-				class="text-xs px-3 py-2 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+				class="lq-btn-secondary text-xs"
 			>
 				Back to chat
 			</a>
 			<a
 				href="/lq-ai/skills/new"
-				class="text-xs px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-500"
+				class="lq-btn-primary text-xs"
 				data-testid="lq-ai-user-skills-new-link"
 			>
 				+ New skill
@@ -116,69 +117,68 @@
 	{/if}
 
 	{#if loading}
-		<p class="text-sm text-gray-500">Loading…</p>
+		<p class="lq-text-body" style="color: var(--lq-text-secondary);">Loading…</p>
 	{:else if rows.length === 0}
 		<div
-			class="p-6 rounded border border-dashed border-gray-300 dark:border-gray-700 text-center text-sm text-gray-500"
+			class="lq-empty-state p-6 text-center"
 		>
-			<p>You haven't created any skills yet.</p>
-			<p class="mt-2">
-				<a href="/lq-ai/skills/new" class="text-indigo-600 dark:text-indigo-400 underline">
+			<p class="lq-text-body" style="color: var(--lq-text-secondary);">You haven't created any skills yet.</p>
+			<p class="mt-2 lq-text-body">
+				<a href="/lq-ai/skills/new" class="lq-link">
 					Create your first skill
 				</a>
 				, or fork a built-in from the picker.
 			</p>
 		</div>
 	{:else}
-		<div class="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded">
-			<table class="min-w-full text-sm">
-				<thead class="bg-gray-50 dark:bg-gray-900 text-xs uppercase text-gray-500">
+		<div class="lq-table-wrap overflow-x-auto">
+			<table class="min-w-full lq-text-body-sm">
+				<thead class="lq-thead">
 					<tr>
-						<th class="text-left px-3 py-2">Title</th>
-						<th class="text-left px-3 py-2">Slug</th>
-						<th class="text-left px-3 py-2">Version</th>
-						<th class="text-left px-3 py-2">Updated</th>
-						<th class="text-right px-3 py-2">Actions</th>
+						<th class="text-left px-3 py-2 lq-text-label">Title</th>
+						<th class="text-left px-3 py-2 lq-text-label">Slug</th>
+						<th class="text-left px-3 py-2 lq-text-label">Version</th>
+						<th class="text-left px-3 py-2 lq-text-label">Updated</th>
+						<th class="text-right px-3 py-2 lq-text-label">Actions</th>
 					</tr>
 				</thead>
-				<tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+				<tbody class="lq-tbody">
 					{#each rows as row (row.id)}
 						<tr data-testid="lq-ai-user-skill-row">
-							<td class="px-3 py-2 text-gray-900 dark:text-gray-100">
+							<td class="px-3 py-2" style="color: var(--lq-text);">
 								<a
 									href={`/lq-ai/skills/${row.id}/edit`}
-									class="font-medium text-indigo-700 dark:text-indigo-300 hover:underline"
+									class="font-medium lq-link hover:underline"
 								>
 									{row.display_name}
 								</a>
 								{#if row.description}
-									<div class="text-xs text-gray-500 mt-0.5 line-clamp-1">{row.description}</div>
+									<div class="lq-text-caption mt-0.5 line-clamp-1" style="color: var(--lq-text-tertiary);">{row.description}</div>
 								{/if}
 							</td>
 							<td class="px-3 py-2">
-								<code class="text-xs font-mono text-gray-700 dark:text-gray-300">{row.slug}</code>
+								<code class="lq-text-caption font-mono" style="color: var(--lq-text-secondary);">{row.slug}</code>
 								{#if builtinSlugs.has(row.slug)}
-									<span
-										class="ml-2 inline-flex items-center px-2 py-0.5 rounded text-[10px] uppercase tracking-wide bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100"
-										title="This slug matches a built-in skill; your version takes effect in your chats."
-										data-testid="lq-ai-user-skill-shadow-chip"
-									>
-										Shadows built-in
+									<span class="ml-2" data-testid="lq-ai-user-skill-shadow-chip">
+										<TrustPill
+											variant="tier"
+											label="Shadows built-in"
+										/>
 									</span>
 								{/if}
 							</td>
-							<td class="px-3 py-2 text-gray-600 dark:text-gray-400 font-mono text-xs">{row.version}</td>
-							<td class="px-3 py-2 text-xs text-gray-500">{shortDate(row.updated_at)}</td>
+							<td class="px-3 py-2 lq-tabular lq-text-caption" style="color: var(--lq-text-secondary);">{row.version}</td>
+							<td class="px-3 py-2 lq-text-caption" style="color: var(--lq-text-tertiary);">{shortDate(row.updated_at)}</td>
 							<td class="px-3 py-2 text-right whitespace-nowrap">
 								<a
 									href={`/lq-ai/skills/${row.id}/edit`}
-									class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+									class="lq-btn-secondary lq-text-caption"
 								>
 									Edit
 								</a>
 								<button
 									type="button"
-									class="ml-1 text-xs px-2 py-1 rounded border border-rose-300 text-rose-700 hover:bg-rose-50 dark:border-rose-700 dark:text-rose-300 dark:hover:bg-rose-950"
+									class="ml-1 lq-btn-danger lq-text-caption"
 									on:click={() => archive(row)}
 									data-testid="lq-ai-user-skill-archive-btn"
 								>
@@ -192,3 +192,69 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.lq-btn-primary {
+		background: var(--lq-accent);
+		color: white;
+		border: 0;
+		border-radius: var(--lq-radius);
+		padding: 8px 16px;
+		font-size: 14px;
+		font-weight: 500;
+		cursor: pointer;
+		text-decoration: none;
+		display: inline-flex;
+		align-items: center;
+	}
+
+	.lq-btn-secondary {
+		background: transparent;
+		color: var(--lq-text-secondary);
+		border: 1px solid var(--lq-border);
+		border-radius: var(--lq-radius);
+		padding: 6px 12px;
+		font-size: 12px;
+		cursor: pointer;
+		text-decoration: none;
+		display: inline-flex;
+		align-items: center;
+	}
+	.lq-btn-secondary:hover { background: var(--lq-inset); }
+
+	.lq-btn-danger {
+		background: transparent;
+		color: var(--lq-error);
+		border: 1px solid var(--lq-error);
+		border-radius: var(--lq-radius);
+		padding: 6px 12px;
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.lq-btn-danger:hover { background: var(--lq-error-soft); }
+
+	.lq-link {
+		color: var(--lq-accent);
+		text-decoration: none;
+	}
+	.lq-link:hover { text-decoration: underline; }
+
+	.lq-empty-state {
+		border-radius: var(--lq-radius-lg);
+		border: 1px dashed var(--lq-border);
+		padding: var(--lq-space-6);
+	}
+
+	.lq-table-wrap {
+		border-radius: var(--lq-radius-lg);
+		border: 1px solid var(--lq-border);
+	}
+
+	.lq-thead {
+		background: var(--lq-inset);
+	}
+
+	.lq-tbody tr {
+		border-top: 1px solid var(--lq-border);
+	}
+</style>
