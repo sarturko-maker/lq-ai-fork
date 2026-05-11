@@ -16,6 +16,8 @@
 	import { authApi } from '$lib/lq-ai/api';
 	import { LQAIApiError, PasswordChangeRequiredError } from '$lib/lq-ai/api/client';
 	import DualBrandingFooter from '$lib/lq-ai/components/DualBrandingFooter.svelte';
+	import TopTabBar from '$lib/lq-ai/components/TopTabBar.svelte';
+	import AmbientTrustChrome from '$lib/lq-ai/components/AmbientTrustChrome.svelte';
 	import '$lib/lq-ai/styles/practice.css';
 	import '$lib/lq-ai/styles/typography.css';
 
@@ -62,59 +64,36 @@
 	});
 </script>
 
-<div class="lq-shell min-h-screen flex flex-col bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
-	<header
-		class="px-4 py-2 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between"
-		data-testid="lq-ai-header"
-	>
-		<a href="/lq-ai" class="flex items-center gap-2">
-			<span class="inline-flex items-center justify-center h-8 w-8 rounded bg-indigo-600 text-white font-semibold">
-				LQ
-			</span>
-			<span class="text-base font-semibold">LQ.AI</span>
-			<span class="text-xs text-gray-400">/ legal AI for in-house teams</span>
-		</a>
-		{#if $auth.user}
-			<div class="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
-				<a
-					href="/lq-ai/skills"
-					class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-					data-testid="lq-ai-my-skills-link"
-				>
-					My skills
+{#if booted}
+	<div class="lq-shell">
+		{#if !isAuthExempt(pathname)}
+			<header class="lq-topbar">
+				<a class="lq-brand" href="/lq-ai">
+					<span class="lq-brand-lq">LQ</span>.AI
 				</a>
-				{#if $auth.user.is_admin}
-					<a
-						href="/lq-ai/admin/models"
-						class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-						data-testid="lq-ai-admin-link"
-					>
-						Settings
-					</a>
-				{/if}
-				<span>{$auth.user.email}</span>
-				<button
-					type="button"
-					class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-					on:click={async () => {
-						await authApi.logout();
-						goto('/lq-ai/login');
-					}}
-					data-testid="lq-ai-logout-btn"
-				>
-					Sign out
-				</button>
-			</div>
+				<AmbientTrustChrome />
+			</header>
+			<TopTabBar user={$auth.user ?? null} pathname={pathname} />
 		{/if}
-	</header>
-
-	<main class="flex-1 flex flex-col overflow-hidden">
-		{#if booted}
+		<main id="lq-main">
 			<slot />
-		{:else}
-			<div class="flex-1 flex items-center justify-center text-gray-500 text-sm">Loading…</div>
-		{/if}
-	</main>
+		</main>
+		<DualBrandingFooter />
+	</div>
+{/if}
 
-	<DualBrandingFooter />
-</div>
+<style>
+	.lq-shell { background: var(--lq-canvas); color: var(--lq-text); min-height: 100vh; display: flex; flex-direction: column; }
+	.lq-topbar {
+		display: flex; align-items: center; justify-content: space-between;
+		padding: var(--lq-space-3) var(--lq-space-4);
+		border-bottom: 1px solid var(--lq-border);
+		background: var(--lq-canvas);
+	}
+	.lq-brand {
+		font-size: 16px; font-weight: 600; color: var(--lq-text);
+		text-decoration: none;
+	}
+	.lq-brand-lq { color: var(--lq-accent); }
+	main { flex: 1; }
+</style>
