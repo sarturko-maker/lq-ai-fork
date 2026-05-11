@@ -111,7 +111,7 @@ The plan wires to these existing endpoints. Implementer should reference `docs/a
 | File | Change | Task |
 |---|---|---|
 | `web/src/routes/lq-ai/+page.svelte` | **Replace contents** — was the chat shell (moved in T1); becomes Guided Dashboard | Task 4 |
-| `web/src/lib/lq-ai/types.ts` | Add `role: 'admin'\|'team_admin'\|'member'` to User, plus `reasoning_visibility`, `session_absolute_expires_at`, `last_active_at` per migrations 0017/0018 | Task 2 (foundational) |
+| `web/src/lib/lq-ai/types.ts` | Add `role: 'admin'\|'member'\|'viewer'` to User (per PRD §5.2 + migration 0017), plus `reasoning_visibility`, `session_absolute_expires_at`, `last_active_at` per migrations 0017/0018 | Task 2 (foundational) |
 | `web/src/lib/lq-ai/tabs.ts` | Flip `chats` to `available: true`; refine admin gating to use `role === 'admin'` (keeps `is_admin` as fallback) | Task 1 + Task 5b |
 | `web/src/lib/lq-ai/__tests__/tabs.test.ts` | Update assertions: chats `isTabAvailable === true`; three-role gating coverage | Task 1 / 5b |
 | `web/src/lib/lq-ai/api/index.ts` | Export new `preferences`, `enhancePrompt`, `inferenceTier` clients | Task 2 / 6 / 4 |
@@ -221,7 +221,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 Add to `web/src/lib/lq-ai/types.ts` (alongside existing `User`):
 
 ```ts
-export type UserRole = 'admin' | 'team_admin' | 'member';
+export type UserRole = 'admin' | 'member' | 'viewer';
 
 // Augment User (verify field names against /users/me response — the
 // backend's exact JSON shape is canonical; adapt if drift).
@@ -899,11 +899,14 @@ export function isTabVisible(id: TabId, user: User | null): boolean {
 Add corresponding tests to `tabs.test.ts`:
 
 ```ts
-const teamAdminUser: User = { ...memberUser, role: 'team_admin', is_admin: false };
+const viewerUser: User = { ...memberUser, role: 'viewer', is_admin: false };
 const adminUserNoRole: User = { ...adminUser, role: 'admin' };
 
-it('hides admin tab for team_admin role', () => {
-  expect(isTabVisible('admin', teamAdminUser)).toBe(false);
+it('hides admin tab for viewer role', () => {
+  expect(isTabVisible('admin', viewerUser)).toBe(false);
+});
+it('hides admin tab for member role', () => {
+  expect(isTabVisible('admin', { ...memberUser, role: 'member' })).toBe(false);
 });
 it('shows admin tab for admin role even if is_admin flag is stale', () => {
   expect(isTabVisible('admin', { ...adminUserNoRole, is_admin: false })).toBe(true);
@@ -1192,7 +1195,7 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ## Open implementation questions (resolve during execution)
 
-1. **`User.role` field on `/users/me`** — confirm the backend exposes it. If not, derive from `is_admin` for the admin gate and defer three-role gating to a backend follow-up. Decide before Task 5b.
+1. **`User.role` field on `/users/me`** — **RESOLVED 2026-05-11.** Backend exposes `role` per migration 0017; OpenAPI sketch confirms enum `[admin, member, viewer]` (NOT `team_admin` — the earlier plan draft drifted from PRD §5.2). Frontend uses backend's enum verbatim; admin tab gates on `role === 'admin'` with `is_admin` as fallback for legacy callers. See spec §4.1.1 for the role enum contract.
 2. **`Preferences` JSON casing** — confirm snake_case vs camelCase by curling `/users/me/preferences`. Adjust `Preferences` type to match. Decide at Task 2.1.
 3. **`chats/search` empty-query semantics** — does `GET /chats/search?q=&limit=5` return most-recent, or does it require a query string? If it requires a query, fall back to `GET /chats?limit=5` for the dashboard "Recent chats" card.
 4. **`/admin/users` listing shape** — for the role-management card in Task 5, what's the response shape? Adjust the card accordingly.

@@ -65,6 +65,22 @@ Home · Chats · Matters · Skills · Knowledge · Saved Prompts                
 
 Admin renders only for admin users. The `?menu` provides re-runnable tour, "What's new", "Trust & Privacy" link, keyboard shortcuts.
 
+### 4.1.1 RBAC role enum
+
+The three-role system from PRD §5.2 is the canonical contract. Frontend consumes the backend's enum verbatim:
+
+```ts
+type UserRole = 'admin' | 'member' | 'viewer';
+```
+
+| Role | UI implications |
+|---|---|
+| `admin` | Admin tab visible. Full mutation access. Sees role-management card, audit log, model/tier policy. |
+| `member` | Admin tab hidden. Full mutation access on owned resources (chats, skills, prompts, KBs). Default role for new signups. |
+| `viewer` | Admin tab hidden. Read-only across the product — composer disabled, "Save", "Delete", "Edit" buttons hidden or surfaced as a polite "read-only" affordance. Mutating endpoints reject `viewer` via the backend's `MutatingUser` dependency. |
+
+**Gate pattern.** Tab/component visibility uses `role === 'admin'` (forward-compatible) with `is_admin === true` as a back-compat fallback for legacy callers; the backend keeps `role='admin'` in sync with `is_admin=true` per migration 0017. Read-only UX for `viewer` is implemented as a layer in §5 (visual treatment of disabled affordances + a small read-only badge in the ambient chrome) — **shipping the read-only UX is Wave C scope; Wave B v2 only consumes the enum for the admin-tab gate.**
+
 ### 4.2 Primary surfaces
 
 | Surface | Route | What it is | Key components |
