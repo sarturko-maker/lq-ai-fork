@@ -1007,3 +1007,113 @@ async def test_delete_team_scope_as_non_member_returns_404(
         f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_b)
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# D8.1c — list endpoint scope filter (user | team | all)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_list_default_scope_user_only(
+    client: AsyncClient, db_session: AsyncSession, user_a: User
+) -> None:
+    """The default ``?scope=user`` preserves the D8 behavior — team-scope
+    rows the caller can edit are NOT mixed in unless explicitly requested."""
+
+    team = await _make_team(db_session, slug="default-test", creator=user_a)
+    await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="user-row"),
+    )
+    await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="team-row", scope="team", owner_team_id=str(team.id)),
+    )
+
+    resp = await client.get("/api/v1/user-skills", headers=_bearer(user_a))
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert {r["slug"] for r in rows} == {"user-row"}
+    assert all(r["scope"] == "user" for r in rows)
+
+
+@pytest.mark.integration
+async def test_list_scope_team_returns_team_admin_rows(
+    client: AsyncClient, db_session: AsyncSession, user_a: User, user_b: User
+) -> None:
+    """``?scope=team`` returns team-scope rows from teams where the caller
+    is a team-admin. Rows from teams where the caller is only a member
+    do NOT appear (members read team skills in the chat picker, not here)."""
+
+    admin_team = await _make_team(
+        db_session, slug="admin-team", creator=user_a
+    )
+    member_team = await _make_team(
+        db_session, slug="member-team", creator=user_b, members=[user_a]
+    )
+
+    # user_a creates an admin-team skill; user_b creates a member-team skill.
+    await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(
+            slug="admin-team-skill", scope="team", owner_team_id=str(admin_team.id)
+        ),
+    )
+    await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_b),
+        json=_post_body(
+            slug="member-team-skill", scope="team", owner_team_id=str(member_team.id)
+        ),
+    )
+
+    resp = await client.get(
+        "/api/v1/user-skills?scope=team", headers=_bearer(user_a)
+    )
+    assert resp.status_code == 200
+    rows = resp.json()
+    slugs = {r["slug"] for r in rows}
+    assert "admin-team-skill" in slugs
+    assert "member-team-skill" not in slugs
+
+
+@pytest.mark.integration
+async def test_list_scope_all_returns_user_and_team_admin_rows(
+    client: AsyncClient, db_session: AsyncSession, user_a: User
+) -> None:
+    """``?scope=all`` returns both layers merged + sorted by updated_at."""
+
+    team = await _make_team(db_session, slug="merged", creator=user_a)
+    await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="merged-user"),
+    )
+    await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="merged-team", scope="team", owner_team_id=str(team.id)),
+    )
+
+    resp = await client.get(
+        "/api/v1/user-skills?scope=all", headers=_bearer(user_a)
+    )
+    assert resp.status_code == 200
+    rows = resp.json()
+    slugs = {r["slug"] for r in rows}
+    assert slugs == {"merged-user", "merged-team"}
+    assert {r["scope"] for r in rows} == {"user", "team"}
+
+
+@pytest.mark.integration
+async def test_list_invalid_scope_returns_422(
+    client: AsyncClient, user_a: User
+) -> None:
+    resp = await client.get(
+        "/api/v1/user-skills?scope=builtin", headers=_bearer(user_a)
+    )
+    assert resp.status_code == 422

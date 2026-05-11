@@ -31,7 +31,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -291,28 +291,64 @@ async def _load_mutable(
 @router.get(
     "",
     response_model=list[UserSkillResponse],
-    summary="List the caller's user-scope skills (newest first)",
+    summary="List the caller's editable skills (user-scope by default; team-scope via ?scope)",
 )
 async def list_user_skills(
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    scope: str = Query(default="user", pattern="^(user|team|all)$"),
 ) -> list[UserSkillResponse]:
-    """GET /api/v1/user-skills — the caller's non-archived user skills.
+    """GET /api/v1/user-skills — non-archived rows the caller can edit.
+
+    Scope filter (D8.1c — defaults to ``user`` for back-compat):
+
+    * ``user`` — the caller's user-scope rows only (the D8 behavior).
+    * ``team`` — team-scope rows from any team where the caller is an
+      admin. Members can read team skills in the chat picker but can't
+      mutate, so the management list returns admin-only rows.
+    * ``all`` — both, sorted together by ``updated_at DESC, id DESC``.
 
     Sort: ``updated_at DESC`` then ``id DESC`` for deterministic tie-
     breaking (mirrors the saved_prompts convention).
     """
 
-    stmt = (
-        select(UserSkill)
-        .where(
-            UserSkill.scope == "user",
-            UserSkill.owner_user_id == user.id,
-            UserSkill.archived_at.is_(None),
+    rows: list[UserSkill] = []
+
+    if scope in ("user", "all"):
+        stmt = (
+            select(UserSkill)
+            .where(
+                UserSkill.scope == "user",
+                UserSkill.owner_user_id == user.id,
+                UserSkill.archived_at.is_(None),
+            )
+            .order_by(UserSkill.updated_at.desc(), UserSkill.id.desc())
         )
-        .order_by(UserSkill.updated_at.desc(), UserSkill.id.desc())
-    )
-    rows = (await db.execute(stmt)).scalars().all()
+        rows.extend((await db.execute(stmt)).scalars().all())
+
+    if scope in ("team", "all"):
+        # Join through team_members filtered on role='admin' so the management
+        # list only includes rows the caller can actually mutate. Members
+        # see team skills through the merged picker at GET /skills, not here.
+        stmt = (
+            select(UserSkill)
+            .join(TeamMember, TeamMember.team_id == UserSkill.owner_team_id)
+            .where(
+                UserSkill.scope == "team",
+                UserSkill.archived_at.is_(None),
+                TeamMember.user_id == user.id,
+                TeamMember.role == "admin",
+            )
+            .order_by(UserSkill.updated_at.desc(), UserSkill.id.desc())
+        )
+        rows.extend((await db.execute(stmt)).scalars().all())
+
+    if scope == "all":
+        rows.sort(
+            key=lambda r: (r.updated_at, str(r.id)),
+            reverse=True,
+        )
+
     return [_to_response(r) for r in rows]
 
 

@@ -27,7 +27,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -93,7 +93,14 @@ class TeamMemberResponse(BaseModel):
 
 
 class TeamSummary(BaseModel):
-    """Compact team shape for list responses."""
+    """Compact team shape for list responses.
+
+    ``caller_role`` (D8.1c) carries the caller's role on this team —
+    ``admin`` or ``member`` for user-facing list/detail responses, and
+    ``None`` for operator-admin views where the caller isn't a
+    member. The UI uses this to render the admin badge + filter the
+    team-scope skill creation picker without a second round-trip.
+    """
 
     id: uuid.UUID
     slug: str
@@ -103,6 +110,7 @@ class TeamSummary(BaseModel):
     created_at: datetime
     updated_at: datetime
     member_count: int = 0
+    caller_role: str | None = None
 
 
 class TeamResponse(TeamSummary):
@@ -173,7 +181,11 @@ async def _member_count(db: AsyncSession, team_id: uuid.UUID) -> int:
     return len((await db.execute(stmt)).scalars().all())
 
 
-def _summary(row: Team, member_count: int = 0) -> TeamSummary:
+def _summary(
+    row: Team,
+    member_count: int = 0,
+    caller_role: str | None = None,
+) -> TeamSummary:
     return TeamSummary(
         id=row.id,
         slug=row.slug,
@@ -183,7 +195,24 @@ def _summary(row: Team, member_count: int = 0) -> TeamSummary:
         created_at=row.created_at,
         updated_at=row.updated_at,
         member_count=member_count,
+        caller_role=caller_role,
     )
+
+
+async def _caller_role(
+    db: AsyncSession, *, team_id: uuid.UUID, user_id: uuid.UUID
+) -> str | None:
+    """Return the caller's role on ``team_id`` (admin/member) or None.
+
+    None means the caller is not a member of this team — UI uses this
+    to decide whether mutate affordances render at all.
+    """
+
+    stmt = select(TeamMember).where(
+        TeamMember.team_id == team_id, TeamMember.user_id == user_id
+    )
+    membership = (await db.execute(stmt)).scalar_one_or_none()
+    return membership.role if membership is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -562,18 +591,28 @@ async def remove_member(
 async def list_my_teams(
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    role: str | None = Query(default=None, pattern="^(admin|member)$"),
 ) -> list[TeamSummary]:
+    """GET /api/v1/teams — caller's teams with ``caller_role`` populated.
+
+    Optional ``role`` filter (D8.1c) restricts to memberships of a
+    specific role. The UI uses ``?role=admin`` for the team-scope
+    skill creation picker so only teams the caller can mutate render.
+    """
+
     stmt = (
-        select(Team)
+        select(Team, TeamMember.role)
         .join(TeamMember, TeamMember.team_id == Team.id)
         .where(TeamMember.user_id == user.id)
         .order_by(Team.created_at.desc(), Team.id.desc())
     )
-    rows = (await db.execute(stmt)).scalars().all()
+    if role is not None:
+        stmt = stmt.where(TeamMember.role == role)
+    rows = (await db.execute(stmt)).all()
     summaries: list[TeamSummary] = []
-    for row in rows:
+    for row, caller_role in rows:
         count = await _member_count(db, row.id)
-        summaries.append(_summary(row, count))
+        summaries.append(_summary(row, count, caller_role=caller_role))
     return summaries
 
 
@@ -592,15 +631,16 @@ async def get_my_team(
     # enumerate teams the caller isn't in (same id-probing-safe posture
     # as user_skills / saved_prompts / chats).
     stmt = (
-        select(Team)
+        select(Team, TeamMember.role)
         .join(TeamMember, TeamMember.team_id == Team.id)
         .where(Team.id == team_id, TeamMember.user_id == user.id)
     )
-    row = (await db.execute(stmt)).scalar_one_or_none()
-    if row is None:
+    result = (await db.execute(stmt)).first()
+    if result is None:
         raise HTTPException(status_code=404, detail="team not found")
+    row, caller_role = result
     members = await _list_members(db, team_id)
     return TeamResponse(
-        **_summary(row, len(members)).model_dump(),
+        **_summary(row, len(members), caller_role=caller_role).model_dump(),
         members=members,
     )

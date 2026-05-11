@@ -495,6 +495,118 @@ async def test_my_team_returns_404_for_non_member(
 
 
 # ---------------------------------------------------------------------------
+# D8.1c — caller_role on user-facing endpoints + ?role= filter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_my_teams_includes_caller_role(
+    client: AsyncClient, admin_user: User, member_user: User
+) -> None:
+    """The caller's role on each team rides the list response so the UI
+    can render the admin-only mutate affordances without a second
+    round-trip."""
+
+    a = await client.post(
+        "/api/v1/admin/teams",
+        headers=_bearer(admin_user),
+        json={"slug": "admin-here", "name": "Admin Here"},
+    )
+    b = await client.post(
+        "/api/v1/admin/teams",
+        headers=_bearer(admin_user),
+        json={"slug": "member-here", "name": "Member Here"},
+    )
+    # member_user is added as admin on 'admin-here' and member on 'member-here'.
+    await client.post(
+        f"/api/v1/admin/teams/{a.json()['id']}/members",
+        headers=_bearer(admin_user),
+        json={"user_id": str(member_user.id), "role": "admin"},
+    )
+    await client.post(
+        f"/api/v1/admin/teams/{b.json()['id']}/members",
+        headers=_bearer(admin_user),
+        json={"user_id": str(member_user.id), "role": "member"},
+    )
+
+    mine = await client.get("/api/v1/teams", headers=_bearer(member_user))
+    assert mine.status_code == 200
+    rows = {r["slug"]: r for r in mine.json()}
+    assert rows["admin-here"]["caller_role"] == "admin"
+    assert rows["member-here"]["caller_role"] == "member"
+
+
+@pytest.mark.integration
+async def test_my_teams_role_filter_admin_only(
+    client: AsyncClient, admin_user: User, member_user: User
+) -> None:
+    """``?role=admin`` restricts the list to teams where the caller can
+    mutate team-scope skills — what the UI's team-picker needs."""
+
+    a = await client.post(
+        "/api/v1/admin/teams",
+        headers=_bearer(admin_user),
+        json={"slug": "ra-1", "name": "RA1"},
+    )
+    b = await client.post(
+        "/api/v1/admin/teams",
+        headers=_bearer(admin_user),
+        json={"slug": "ra-2", "name": "RA2"},
+    )
+    await client.post(
+        f"/api/v1/admin/teams/{a.json()['id']}/members",
+        headers=_bearer(admin_user),
+        json={"user_id": str(member_user.id), "role": "admin"},
+    )
+    await client.post(
+        f"/api/v1/admin/teams/{b.json()['id']}/members",
+        headers=_bearer(admin_user),
+        json={"user_id": str(member_user.id), "role": "member"},
+    )
+
+    admins_only = await client.get(
+        "/api/v1/teams?role=admin", headers=_bearer(member_user)
+    )
+    assert admins_only.status_code == 200
+    rows = admins_only.json()
+    assert {r["slug"] for r in rows} == {"ra-1"}
+    assert all(r["caller_role"] == "admin" for r in rows)
+
+
+@pytest.mark.integration
+async def test_my_teams_invalid_role_returns_422(
+    client: AsyncClient, admin_user: User
+) -> None:
+    resp = await client.get(
+        "/api/v1/teams?role=owner", headers=_bearer(admin_user)
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.integration
+async def test_get_my_team_includes_caller_role(
+    client: AsyncClient, admin_user: User, member_user: User
+) -> None:
+    created = await client.post(
+        "/api/v1/admin/teams",
+        headers=_bearer(admin_user),
+        json={"slug": "cr-team", "name": "CR Team"},
+    )
+    team_id = created.json()["id"]
+    await client.post(
+        f"/api/v1/admin/teams/{team_id}/members",
+        headers=_bearer(admin_user),
+        json={"user_id": str(member_user.id), "role": "member"},
+    )
+
+    resp = await client.get(
+        f"/api/v1/teams/{team_id}", headers=_bearer(member_user)
+    )
+    assert resp.status_code == 200
+    assert resp.json()["caller_role"] == "member"
+
+
+# ---------------------------------------------------------------------------
 # Migration 0014 invariants
 # ---------------------------------------------------------------------------
 
