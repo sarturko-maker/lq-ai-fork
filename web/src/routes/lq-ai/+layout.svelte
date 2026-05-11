@@ -8,7 +8,7 @@
 	 * - Access token but `must_change_password` → redirect to /lq-ai/change-password.
 	 * - Otherwise: render the child route.
 	 */
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
@@ -18,6 +18,8 @@
 	import DualBrandingFooter from '$lib/lq-ai/components/DualBrandingFooter.svelte';
 	import TopTabBar from '$lib/lq-ai/components/TopTabBar.svelte';
 	import AmbientTrustChrome from '$lib/lq-ai/components/AmbientTrustChrome.svelte';
+	import SessionTimeoutWarning from '$lib/lq-ai/components/SessionTimeoutWarning.svelte';
+	import { startTracker, stopTracker, noteActivity } from '$lib/lq-ai/stores/sessionActivity';
 	import '$lib/lq-ai/styles/practice.css';
 	import '$lib/lq-ai/styles/typography.css';
 
@@ -59,8 +61,27 @@
 		booted = true;
 	}
 
+	let activityHandler: (() => void) | null = null;
+
 	onMount(() => {
 		gate();
+		if (!isAuthExempt($page.url.pathname)) {
+			startTracker(() => goto('/lq-ai/login?reason=idle-timeout'));
+			activityHandler = () => noteActivity();
+			(['mousedown', 'keydown', 'scroll', 'touchstart'] as const).forEach((e) =>
+				window.addEventListener(e, activityHandler!, { passive: true })
+			);
+		}
+	});
+
+	onDestroy(() => {
+		stopTracker();
+		if (activityHandler) {
+			(['mousedown', 'keydown', 'scroll', 'touchstart'] as const).forEach((e) =>
+				window.removeEventListener(e, activityHandler!)
+			);
+			activityHandler = null;
+		}
 	});
 </script>
 
@@ -82,6 +103,7 @@
 			<slot />
 		</main>
 		<DualBrandingFooter />
+		<SessionTimeoutWarning />
 	</div>
 {/if}
 
