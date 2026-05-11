@@ -929,14 +929,27 @@ paths:
   /api/v1/user-skills:
     get:
       tags: [user-skills]
-      summary: List the caller's user-scope skills (newest first)
+      summary: List the caller's editable skills (user-scope by default; ?scope=team|all)
       description: |
         Returns the rich ``UserSkill`` view (body + frontmatter_extra
         included) for the management UI. The picker-side merge view
         lives at ``GET /api/v1/skills?scope=all`` (summary shape).
+
+        Scope filter (D8.1c — default ``user`` for back-compat):
+
+        * ``user`` — caller's user-scope rows only.
+        * ``team`` — team-scope rows from teams where the caller is a
+          team-admin. (Non-admin members read team skills in the picker,
+          not here, since they can't mutate.)
+        * ``all`` — both layers merged + sorted by ``updated_at DESC``.
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema: {type: string, enum: [user, team, all], default: user}
       responses:
         '200':
-          description: List of user-scope skill rows
+          description: List of editable skill rows for the caller
           content:
             application/json:
               schema:
@@ -991,9 +1004,20 @@ paths:
     get:
       tags: [teams]
       summary: List teams the caller belongs to (newest first)
+      description: |
+        Each row carries ``caller_role`` (admin | member) so the UI can
+        render mutate affordances without a second round-trip. The
+        optional ``?role=`` filter (D8.1c) restricts to a specific
+        role — the team-scope skill creation picker uses
+        ``?role=admin``.
+      parameters:
+        - name: role
+          in: query
+          required: false
+          schema: {type: string, enum: [admin, member]}
       responses:
         '200':
-          description: Caller's teams
+          description: Caller's teams (with caller_role populated)
           content:
             application/json:
               schema:
@@ -2840,7 +2864,7 @@ components:
         tags: {type: array, items: {type: string}, maxItems: 20}
         frontmatter_extra: {type: object, additionalProperties: true}
 
-    # D8.1a — operator-admin-controlled teams.
+    # D8.1a — operator-admin-controlled teams. D8.1c adds caller_role.
     TeamSummary:
       type: object
       required: [id, slug, name, created_by_user_id, created_at, updated_at]
@@ -2853,6 +2877,15 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         member_count: {type: integer, minimum: 0}
+        caller_role:
+          type: string
+          enum: [admin, member]
+          nullable: true
+          description: |
+            The caller's role on this team (D8.1c). Populated by the
+            user-facing ``GET /api/v1/teams`` and
+            ``GET /api/v1/teams/{id}`` endpoints. Null on operator-admin
+            views (``/admin/teams``) when the admin isn't a member.
 
     TeamMember:
       type: object

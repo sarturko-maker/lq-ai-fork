@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-10f (D8.1b — team-scope `user_skills` CRUD branches landed (`POST/PATCH/DELETE /user-skills` accept `scope='team'` + `owner_team_id` with team-admin role gate; 404 id-probing-safe; audit rows carry team_id) + gateway middle-resolution slot (`GET /api/v1/internal/skills/{slug}?user_id=...` resolves user > team > built-in; multi-team conflicts → newest `updated_at` wins; cache key stays `(name, user_id)`). +17 api tests (665 passing total); 11 live curl smokes verify end-to-end including user-shadow-beats-team. The D-track is now fully landed at the api layer. Remaining: D8 UI browser-smoke (clicking through the Skill Creator) + D8.1c (a UI surface to manage team-scope skills — currently they're API-only).)
+> **Last updated:** 2026-05-10g (D8.1c — Skill Creator UI now handles team-scope skills. Backend: GET /user-skills accepts ?scope=user|team|all (default user for back-compat); team-scope returns rows from teams where the caller is admin. GET /teams carries caller_role + accepts ?role=admin|member filter. Web: new teams.ts client; types updated for nullable owner_user_id + owner_team_id + caller_role; /lq-ai/skills list shows scope column with Team chip; /lq-ai/skills/new gains scope picker + team dropdown; /lq-ai/skills/[id]/edit surfaces team context. +8 api tests (656 passing); +9 web vitests (81 passing). Live smoke confirms scope filter + role filter + UI render. The Skill Creator now exposes the full D8.1b surface. Remaining: D8 UI browser-smoke is the only thing left in the D track.)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -15,7 +15,7 @@
 | A — Foundation scaffolding | A1, A2, A3, A4, A5 | — | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5, B6 partial (Ollama) | — | B6 remainder optional (OpenAI chat, Vertex, Bedrock) |
 | C — Capability layer | C1, C2, C3, C4, C5, C6, C7, C8 | — | — (phase complete; C8 pending operator end-to-end verification per ADR 0009) |
-| D — M1 differentiators | D0, D0.5, D1, D2, D3-core, **D3-coverage** (auth/MFA/files/KBs audit writes + admin filter UI), D4 (core + coverage), D5, D6, D7 + Wave-3 (ADR 0011 transparency pivot — encrypted keys, discovery enrichment, alias resolution surfacing, requested_model on messages) + **Encrypted-keys ops doc** + **D8 end-to-end** (migration 0013 + user_skills CRUD + shadow merge in `/skills` + real fork endpoint + gateway internal-endpoint `?user_id=` extension + Skill Creator UI at `/lq-ai/skills*` + D7 Promote-to-Skill rewire) + **D8.1a** (migration 0014 + teams + team_members + admin-gated team CRUD + member management) + **D8.1b** (team-scope branches in `/user-skills` POST/PATCH/DELETE + gateway middle-resolution slot user > team > built-in + multi-team newest-wins tiebreak) | D8 UI browser-smoke (clicking through new/list/edit pages) + D8.1c (UI surface for managing team-scope skills — API-only as of 2026-05-10f) | — |
+| D — M1 differentiators | D0, D0.5, D1, D2, D3-core, **D3-coverage** (auth/MFA/files/KBs audit writes + admin filter UI), D4 (core + coverage), D5, D6, D7 + Wave-3 (ADR 0011 transparency pivot — encrypted keys, discovery enrichment, alias resolution surfacing, requested_model on messages) + **Encrypted-keys ops doc** + **D8 end-to-end** (migration 0013 + user_skills CRUD + shadow merge in `/skills` + real fork endpoint + gateway internal-endpoint `?user_id=` extension + Skill Creator UI at `/lq-ai/skills*` + D7 Promote-to-Skill rewire) + **D8.1a** (migration 0014 + teams + team_members + admin-gated team CRUD + member management) + **D8.1b** (team-scope branches in `/user-skills` POST/PATCH/DELETE + gateway middle-resolution slot user > team > built-in + multi-team newest-wins tiebreak) + **D8.1c** (UI surface for team-scope skills — list page Scope column with Team chip, new-skill scope picker + team dropdown, edit page team context, GET /user-skills ?scope filter, GET /teams caller_role + ?role filter) | D8 UI browser-smoke (clicking through new/list/edit pages) | — |
 | E — Procurement and release | — | — | After D |
 
 **Tests:** ~495+ passing in api/ (C6 added ~50: 8 migration + 16 retrieval unit + 12 embed unit + ~24 endpoint integration; C3 added ~55; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~225 passing in gateway/ (B6 partial added ~30: 22 Ollama adapter unit + 8 Ollama integration including the B4-fallback-chain end-to-end exercise; C6 added ~25: 15 OpenAI adapter + 8 embeddings integration + 2 inference updates; C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
@@ -1422,6 +1422,31 @@ PRD §9 DE-013 / Issue 04: per-user saved prompts complement skills the way brow
 **Live verification:** 11 curl smokes against the running stack — every state transition (create, 422 validation, 404 non-admin, 409 slug collision, PATCH, audit-row team_id, user>team precedence by archiving/recreating shadows at slug `nda-review` with sentinel bodies).
 
 **Effort actual:** ~2h (smaller than D8.1a because the schema work was already done).
+
+### D8.1c — Skill Creator UI for team-scope skills ✅
+
+**Depends on:** D8.1b ✅ (team-scope API surface) + D8.1a ✅ (teams + admin CRUD).
+
+**Scope:** make the D8.1b team-scope surface visible in the Skill Creator UI so team-admins can author, edit, and archive team-scope skills without the curl.
+
+**Backend (additive):**
+* **`GET /api/v1/user-skills?scope=user|team|all`** — default `user` for D8 back-compat. `team` returns rows from teams where the caller is admin (mirrors mutate eligibility so members don't see non-editable rows in the management list). `all` merges both layers, sorted by `updated_at DESC, id DESC`.
+* **`GET /api/v1/teams`** — every TeamSummary now carries `caller_role: 'admin' | 'member' | null` so the UI can render mutate affordances without a second round-trip. Optional `?role=admin|member` filter narrows the list — the team-scope create picker uses `?role=admin`.
+* **Admin views unchanged.** `/admin/teams` continues to return `caller_role: null` because operator-admin views aren't membership-scoped.
+
+**Web (additive):**
+* **`web/src/lib/lq-ai/api/teams.ts`** — new `listMyTeams(role?)` + `getMyTeam(id)` wrappers; barrel-exported as `teamsApi`.
+* **`web/src/lib/lq-ai/api/userSkills.ts`** — `listUserSkills(scope?)` appends `?scope=` when non-default; `createUserSkill` threads `scope` + `owner_team_id`.
+* **`web/src/lib/lq-ai/types.ts`** — `UserSkill.owner_user_id` is now nullable; new `owner_team_id` field; new `TeamSummary` / `Team` / `TeamMember` types with `caller_role`.
+* **`/lq-ai/skills` list** — loads `scope=all`; adds a Scope column with a sky-blue "Team · {name}" chip for team-scope rows and a grey "Personal" chip for user-scope rows. The amber "Shadows built-in" chip continues to flow.
+* **`/lq-ai/skills/new`** — fieldset scope picker (Personal | Team) renders only when the caller admins ≥1 team. Selecting Team reveals a dropdown populated from `listMyTeams('admin')`. Shadow warning is scope-aware ("any member of this team…" for team scope).
+* **`/lq-ai/skills/[id]/edit`** — header surfaces the team chip when scope='team'. Shadow warning re-tuned for team semantics. PATCH / DELETE continue to gate on team-admin role server-side (per D8.1b).
+
+**Tests:** +8 api integration tests (scope filter behavior + caller_role population + role filter + invalid scope/role surfaces). +5 vitests for the new teams client + 4 for the user-skills scope filter and team-scope create body shape. 656 api tests pass; 81 web vitests pass.
+
+**Live verification:** 6 curl smokes against the rebuilt stack — caller_role on `/teams`, `?role=admin` filter, 422 on invalid role, default-scope user-only, `?scope=team` admin-only rows, `?scope=all` merged view showing the user+team shadow coexisting at slug `nda-review`.
+
+**Effort actual:** ~2h.
 
 ### B6 — Additional provider adapters (Ollama complete; remainder optional)
 
