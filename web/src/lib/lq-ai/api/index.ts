@@ -16,3 +16,4 @@ export * as adminApi from './admin';
 export * as auditLogApi from './auditLog';
 export * as savedPromptsApi from './savedPrompts';
 export * as userSkillsApi from './userSkills';
+export * as teamsApi from './teams';

@@ -36,6 +36,7 @@ const SAMPLE: UserSkill = {
 	id: 'cdbd099e-250d-4240-bff3-6e5154bb78e9',
 	scope: 'user',
 	owner_user_id: '0a4fe1ed-6fff-4f72-a027-6dedeac4fa36',
+	owner_team_id: null,
 	slug: 'my-nda-review',
 	display_name: 'My NDA Review',
 	description: 'Personal NDA workflow',
@@ -156,5 +157,55 @@ describe('user-skills API', () => {
 			expect(e).toBeInstanceOf(LQAIApiError);
 			expect((e as LQAIApiError).status).toBe(410);
 		}
+	});
+
+	// D8.1c — scope filter + team-scope create body shape.
+
+	it('listUserSkills default scope omits the ?scope query', async () => {
+		const fetchSpy = vi.fn(async () => jsonResponse(200, []));
+		global.fetch = fetchSpy as unknown as typeof fetch;
+		await listUserSkills();
+		const url = (fetchSpy.mock.calls[0] as unknown as [string, RequestInit])[0];
+		expect(url.endsWith('/user-skills')).toBe(true);
+	});
+
+	it('listUserSkills appends ?scope=team when requested', async () => {
+		const fetchSpy = vi.fn(async () => jsonResponse(200, []));
+		global.fetch = fetchSpy as unknown as typeof fetch;
+		await listUserSkills('team');
+		const url = (fetchSpy.mock.calls[0] as unknown as [string, RequestInit])[0];
+		expect(url).toContain('/user-skills?scope=team');
+	});
+
+	it('listUserSkills appends ?scope=all when requested', async () => {
+		const fetchSpy = vi.fn(async () => jsonResponse(200, []));
+		global.fetch = fetchSpy as unknown as typeof fetch;
+		await listUserSkills('all');
+		const url = (fetchSpy.mock.calls[0] as unknown as [string, RequestInit])[0];
+		expect(url).toContain('/user-skills?scope=all');
+	});
+
+	it('createUserSkill forwards scope + owner_team_id on team-scope create', async () => {
+		const fetchSpy = vi.fn(async () =>
+			jsonResponse(201, {
+				...SAMPLE,
+				scope: 'team',
+				owner_user_id: null,
+				owner_team_id: 'team-uuid'
+			})
+		);
+		global.fetch = fetchSpy as unknown as typeof fetch;
+		await createUserSkill({
+			slug: 'team-nda',
+			display_name: 'Team NDA',
+			description: 'team workflow',
+			body: 'body',
+			scope: 'team',
+			owner_team_id: 'team-uuid'
+		});
+		const init = (fetchSpy.mock.calls[0] as unknown as [string, RequestInit])[1];
+		const parsed = JSON.parse(init.body as string);
+		expect(parsed.scope).toBe('team');
+		expect(parsed.owner_team_id).toBe('team-uuid');
 	});
 });
