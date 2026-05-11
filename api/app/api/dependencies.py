@@ -127,3 +127,45 @@ AdminUser = Annotated[User, Depends(get_admin_user)]
 """Type alias for endpoints that require ``is_admin = true``. Stacks on
 top of :data:`ActiveUser` (so it inherits the bearer-token + must-change-
 password gate) and adds the admin check."""
+
+
+# PRD §5.2 RBAC three-role system (Wave C). ``viewer`` users can read
+# resources they own but cannot mutate; ``admin`` and ``member`` can
+# both mutate. Backed by ``users.role`` (migration 0017) with a
+# server-default of ``member`` so existing rows + new signups
+# inherit mutating access without explicit promotion.
+_MUTATING_ROLES = frozenset({"admin", "member"})
+
+
+async def get_mutating_user(user: ActiveUser) -> User:
+    """``ActiveUser`` plus a role check that excludes ``viewer``.
+
+    Wave C. Apply to state-changing endpoints (POST/PATCH/DELETE) so
+    operators can hand out read-only logins for auditors / observers.
+    Read-only endpoints (GET) keep using ``ActiveUser`` directly.
+
+    Returns 403 with ``code='forbidden'`` and a body mentioning the
+    role requirement so a CLI / UI can render a useful message.
+    """
+
+    if getattr(user, "role", "member") not in _MUTATING_ROLES:
+        from app.errors import Forbidden
+
+        raise Forbidden(
+            message=(
+                "This endpoint requires a member or admin role; viewer-role "
+                "users have read-only access."
+            ),
+            details={"role": user.role, "required_roles": sorted(_MUTATING_ROLES)},
+        )
+    return user
+
+
+MutatingUser = Annotated[User, Depends(get_mutating_user)]
+"""Type alias for endpoints that must reject ``viewer`` users.
+
+State-changing handlers (POST/PATCH/DELETE) on owned resources use
+this in place of ``ActiveUser`` so the role gate fires before any
+business logic runs. Admin-only endpoints continue to use
+``AdminUser``; pure-read endpoints stay on ``ActiveUser``.
+"""

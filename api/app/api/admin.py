@@ -553,3 +553,129 @@ async def get_admin_config(
     """Return the gateway's sanitized current config (D0.5)."""
 
     return await gateway.get_admin_config()
+
+
+# ---------------------------------------------------------------------------
+# Wave C — RBAC three-role management (PRD §5.2)
+# ---------------------------------------------------------------------------
+
+
+_ROLE_ENUM = frozenset({"admin", "member", "viewer"})
+
+
+class UserRoleUpdate(BaseModel):
+    """``PATCH /admin/users/{user_id}/role`` body."""
+
+    role: str
+
+
+class UserRoleResponse(BaseModel):
+    """``PATCH /admin/users/{user_id}/role`` response."""
+
+    user_id: str
+    email: str
+    role: str
+    is_admin: bool
+
+
+@router.patch("/users/{user_id}/role", response_model=UserRoleResponse)
+async def update_user_role(
+    user_id: str,
+    body: UserRoleUpdate,
+    request: Request,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserRoleResponse:
+    """PATCH /api/v1/admin/users/{user_id}/role — set RBAC role (Wave C).
+
+    Admin-only. Updates ``users.role`` and keeps ``is_admin`` in sync
+    (True iff role='admin'). Idempotent: re-applying the same role
+    returns 200 without writing an audit row. Writes
+    ``user.role_updated`` on real changes with before/after values.
+
+    Refuses to demote the last admin (lockout protection): if the
+    target user is the only ``role='admin'`` row in the deployment
+    and the caller is trying to set them to non-admin, returns 409
+    so the operator can promote someone else first.
+    """
+
+    import uuid as _uuid
+
+    from sqlalchemy import func
+
+    from app.audit import audit_action
+    from app.errors import NotFound, Forbidden
+    from app.models.user import User as UserORM
+
+    if body.role not in _ROLE_ENUM:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=422,
+            detail=f"role must be one of {sorted(_ROLE_ENUM)}",
+        )
+
+    try:
+        target_uuid = _uuid.UUID(user_id)
+    except (TypeError, ValueError):
+        raise NotFound(message="user not found")
+
+    target = await db.get(UserORM, target_uuid)
+    if target is None or target.deleted_at is not None:
+        raise NotFound(message="user not found")
+
+    before_role = target.role
+    if before_role == body.role:
+        return UserRoleResponse(
+            user_id=str(target.id),
+            email=target.email,
+            role=target.role,
+            is_admin=target.is_admin,
+        )
+
+    # Lockout protection: don't allow demoting the last admin.
+    if before_role == "admin" and body.role != "admin":
+        remaining_admins = (
+            await db.execute(
+                select(func.count())
+                .select_from(UserORM)
+                .where(
+                    UserORM.role == "admin",
+                    UserORM.id != target.id,
+                    UserORM.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one()
+        if int(remaining_admins or 0) == 0:
+            raise Forbidden(
+                message=(
+                    "Cannot demote the last admin. Promote another user to "
+                    "admin first, then retry the demotion."
+                ),
+            )
+
+    target.role = body.role
+    target.is_admin = body.role == "admin"
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="user.role_updated",
+        resource_type="user",
+        resource_id=str(target.id),
+        request=request,
+        details={
+            "before": {"role": before_role},
+            "after": {"role": body.role},
+            "target_user_email": target.email,
+        },
+    )
+    await db.commit()
+    await db.refresh(target)
+
+    return UserRoleResponse(
+        user_id=str(target.id),
+        email=target.email,
+        role=target.role,
+        is_admin=target.is_admin,
+    )

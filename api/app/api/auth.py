@@ -97,6 +97,7 @@ class UserPublic(BaseModel):
     email: str
     display_name: str | None = None
     is_admin: bool
+    role: str = "member"
     mfa_enabled: bool
     must_change_password: bool = False
     reasoning_visibility: str = "disclosure"
@@ -110,6 +111,7 @@ class UserPublic(BaseModel):
             email=user.email,
             display_name=user.display_name,
             is_admin=user.is_admin,
+            role=getattr(user, "role", "member"),
             mfa_enabled=user.mfa_enabled,
             must_change_password=user.must_change_password,
             reasoning_visibility=getattr(user, "reasoning_visibility", "disclosure"),
