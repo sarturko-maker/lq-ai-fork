@@ -201,6 +201,8 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/admin/usage"),
     # Wave B — chats search (PRD §1.7 acceptance criterion)
     ("GET", "/api/v1/chats/search"),
+    # Wave C — RBAC role updates (PRD §5.2)
+    ("PATCH", "/api/v1/admin/users/{user_id}/role"),
 }
 
 

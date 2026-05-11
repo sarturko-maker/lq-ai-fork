@@ -96,6 +96,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/inference/tier-config",
         "/api/v1/admin/usage",
         "/api/v1/chats/search",
+        # Wave C — RBAC role updates (PRD §5.2)
+        "/api/v1/admin/users/{user_id}/role",
         # admin
         "/api/v1/admin/audit-log",
         "/api/v1/admin/tier-policy",
@@ -127,16 +129,15 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 63 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
+    # 64 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
     # alias endpoints + D5's two new MFA endpoints + D6's two new GDPR
     # endpoints (status-poll for /users/me/export/{job_id} and
     # /users/me/delete/cancel) + D4's /organization-profile/raw
     # convenience endpoint + D4-coverage's
     # /internal/organization-profile + D8's two /api/v1/user-skills
     # paths + D8.1a's six teams paths + Wave A's five paths +
-    # Wave B's four paths (inference/current-tier, inference/tier-config,
-    # admin/usage, chats/search).
-    assert len(actual) == 63
+    # Wave B's four paths + Wave C's /admin/users/{user_id}/role.
+    assert len(actual) == 64
 
 
 @pytest.mark.unit
