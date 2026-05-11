@@ -71,7 +71,10 @@
 				<a class="lq-brand" href="/lq-ai">
 					<span class="lq-brand-lq">LQ</span>.AI
 				</a>
-				<AmbientTrustChrome />
+				<div style="display: inline-flex; align-items: center; gap: var(--lq-space-3);">
+					<AmbientTrustChrome />
+					<a href="/lq-ai/settings/appearance" aria-label="Settings" title="Settings" style="color: var(--lq-text-secondary); text-decoration: none; padding: var(--lq-space-1) var(--lq-space-2); border-radius: var(--lq-radius-sm);">⚙</a>
+				</div>
 			</header>
 			<TopTabBar user={$auth.user ?? null} pathname={pathname} />
 		{/if}
