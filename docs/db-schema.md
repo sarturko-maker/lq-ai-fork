@@ -31,10 +31,18 @@ CREATE TABLE users (
     display_name          TEXT,
     hashed_password       TEXT NOT NULL,
     is_admin              BOOLEAN NOT NULL DEFAULT FALSE,
+    role                  TEXT NOT NULL DEFAULT 'member',       -- PRD §5.2 RBAC; CHECK (role IN ('admin','member','viewer'))
     mfa_enabled           BOOLEAN NOT NULL DEFAULT FALSE,
     must_change_password  BOOLEAN NOT NULL DEFAULT FALSE,  -- B2: first-run admin + reset-admin
     totp_secret           TEXT,
     recovery_codes        TEXT[],  -- bcrypt-hashed
+    -- PRD §3.2 Wave A — Enhance Prompt reasoning visibility
+    reasoning_visibility  TEXT NOT NULL DEFAULT 'disclosure',  -- CHECK (reasoning_visibility IN ('always_show','disclosure','on_request'))
+    -- PRD §3.2.1 Wave B v2 — personalization preferences (frontend spec §4.3)
+    featured_tools        TEXT NOT NULL DEFAULT 'prominent',   -- CHECK (featured_tools IN ('prominent','inline'))
+    workspace_layout      TEXT NOT NULL DEFAULT 'three_pane',  -- CHECK (workspace_layout IN ('three_pane','two_pane','one_pane'))
+    trust_pills           TEXT NOT NULL DEFAULT 'labels',      -- CHECK (trust_pills IN ('labels','dots'))
+    provenance_pills      TEXT NOT NULL DEFAULT 'always',      -- CHECK (provenance_pills IN ('always','collapsed'))
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_login_at         TIMESTAMPTZ,
@@ -45,6 +53,17 @@ CREATE TABLE users (
 CREATE INDEX idx_users_email_active ON users(email) WHERE deleted_at IS NULL;
 CREATE INDEX idx_users_deletion_scheduled ON users(deletion_scheduled_at) WHERE deletion_scheduled_at IS NOT NULL;
 ```
+
+**Column notes.**
+
+| Column | Migration | Notes |
+|---|---|---|
+| `role` | 0017 | Three-role RBAC per PRD §5.2 (`admin`, `member`, `viewer`). Kept in sync with `is_admin` (role=`admin` iff `is_admin=true`). |
+| `reasoning_visibility` | 0015 | Enhance Prompt reasoning display mode (§3.2). Default `disclosure` = collapsed behind toggle. |
+| `featured_tools` | 0019 | Dashboard tool surfacing: `prominent` (cards) vs. `inline` (toolbar only). |
+| `workspace_layout` | 0019 | Matter workspace pane count for Wave C: `three_pane`, `two_pane`, `one_pane`. |
+| `trust_pills` | 0019 | Ambient trust label format: `labels` (full text) vs. `dots` (minimal). |
+| `provenance_pills` | 0019 | Per-message skill/tier/provider pill row: `always` visible vs. `collapsed`. |
 
 `must_change_password` is set to TRUE for:
 - the auto-created first-run admin (Task B2 / migration `0002`),

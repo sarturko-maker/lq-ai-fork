@@ -358,6 +358,34 @@ This section specifies each major capability. Every capability section follows t
 
 **Open questions.** None blocking.
 
+### 3.2.1 User personalization preferences (M1)
+
+**Description.** LQ.AI's default experience is calibrated to teach: reasoning is disclosed, tools are prominent, all provenance context is visible. Personalization preferences are the mechanism by which veteran users dial back that explicitness without the platform assuming everyone is an expert. The five preferences shipped in M1 (one from §3.2 Wave A, four new in Wave B v2) are stored as columns on `users`, queryable at the relational level, and exposed through a single partial-update endpoint. They are per-user, not per-org — the operator cannot suppress them. Spec reference: frontend design §4.3 (Wave B v2).
+
+**Preference fields.**
+
+| Field | Type | Values | Default | Surface |
+|---|---|---|---|---|
+| `reasoning_visibility` | text | `always_show`, `disclosure`, `on_request` | `disclosure` | Enhance Prompt reasoning section (§3.2) |
+| `featured_tools` | text | `prominent`, `inline` | `prominent` | Dashboard — Enhance Prompt, Skill Creator, KB, Apply Skill shown as prominent cards vs. inline toolbar only |
+| `workspace_layout` | text | `three_pane`, `two_pane`, `one_pane` | `three_pane` | Matter workspace composition (Wave C surfaces) |
+| `trust_pills` | text | `labels`, `dots` | `labels` | Ambient trust pill format — full label `● self-hosted` vs. minimal dot only |
+| `provenance_pills` | text | `always`, `collapsed` | `always` | Per-message skill / tier / provider pill row visibility |
+
+**Non-functional requirements.**
+- All five columns are `NOT NULL` with a `server_default` equal to the "brave choice" default. New users get the full-disclosure experience without any explicit write.
+- Each column carries a DB-level `CHECK` constraint (named `chk_users_<field>_enum`) that mirrors the Pydantic `Literal` type enforcement in the API layer. This is defense-in-depth: invalid values are rejected at the storage layer even if they bypass the API validator.
+- Preferences are readable immediately after login via `GET /users/me` (full user profile) or `GET /users/me/preferences` (preferences slice only).
+- A `PATCH` that supplies the same value as the existing value is idempotent: it returns 200 but does not write an audit row.
+
+**API surface.**
+- `GET /api/v1/users/me/preferences` — returns all five preference fields for the calling user.
+- `PATCH /api/v1/users/me/preferences` — partial update; only supplied fields move. Writes a `user.preferences_updated` audit row (action on `audit_log`) when at least one field changes, with `details.changes` listing before/after for every changed field. A single PATCH call that changes multiple fields produces exactly one audit row.
+
+**Data model.** All five fields are columns on the `users` table — not a separate `user_preferences` table. This keeps the preferences queryable alongside auth fields (e.g., `WHERE role = 'member' AND workspace_layout = 'three_pane'`) without a join, and makes migration straightforward (add column + CHECK constraint per migration 0015 and 0019).
+
+**Future extensions.** Later milestones may add preferences for default jurisdiction, default model, notification frequency, and citation display density. These will ride the same `PATCH /users/me/preferences` endpoint without a new route — the endpoint is intentionally forward-compatible.
+
 ### 3.3 Citation Engine (Exact Quote)
 
 **Description.** End-to-end pipeline that guarantees character-fidelity from document → model context → cited output → rendered viewer. When the model produces a claim with a citation, the system can highlight the exact substring in the source document, in the original page, with character precision. Includes a verification step that fails the citation if the cited substring does not appear verbatim in the source.

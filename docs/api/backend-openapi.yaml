@@ -2583,24 +2583,91 @@ components:
             ``disclosure`` (collapsed behind a toggle; spec default),
             ``on_request`` (hidden until the user opens the skill
             inspector). Modifiable via ``PATCH /users/me/preferences``.
+        featured_tools:
+          type: string
+          enum: [prominent, inline]
+          default: prominent
+          description: |
+            Wave B v2 — PRD §3.2.1 / frontend spec §4.3. Where Enhance
+            Prompt, Skill Creator, KB, and Apply Skill surface:
+            ``prominent`` (dashboard cards; default) vs. ``inline``
+            (toolbar only for veterans).
+        workspace_layout:
+          type: string
+          enum: [three_pane, two_pane, one_pane]
+          default: three_pane
+          description: |
+            Wave B v2 — PRD §3.2.1 / frontend spec §4.3. Matter workspace
+            pane composition (Wave C surfaces): ``three_pane`` (default),
+            ``two_pane``, or ``one_pane``.
+        trust_pills:
+          type: string
+          enum: [labels, dots]
+          default: labels
+          description: |
+            Wave B v2 — PRD §3.2.1 / frontend spec §4.3. Ambient trust
+            pill format: ``labels`` (full text, e.g. "● self-hosted";
+            default) vs. ``dots`` (minimal dot only).
+        provenance_pills:
+          type: string
+          enum: [always, collapsed]
+          default: always
+          description: |
+            Wave B v2 — PRD §3.2.1 / frontend spec §4.3. Per-message
+            skill/tier/provider pill row visibility: ``always`` (visible
+            by default) vs. ``collapsed`` (hidden until expanded).
         created_at: {type: string, format: date-time}
         last_login_at: {type: string, format: date-time, nullable: true}
 
     UserPreferences:
       type: object
-      required: [reasoning_visibility]
+      description: |
+        All 5 personalization preference fields. Wave A (``reasoning_visibility``)
+        per PRD §3.2; Wave B v2 fields per PRD §3.2.1 and frontend spec §4.3.
+      required: [reasoning_visibility, featured_tools, workspace_layout, trust_pills, provenance_pills]
       properties:
         reasoning_visibility:
           type: string
           enum: [always_show, disclosure, on_request]
+          default: disclosure
+        featured_tools:
+          type: string
+          enum: [prominent, inline]
+          default: prominent
+        workspace_layout:
+          type: string
+          enum: [three_pane, two_pane, one_pane]
+          default: three_pane
+        trust_pills:
+          type: string
+          enum: [labels, dots]
+          default: labels
+        provenance_pills:
+          type: string
+          enum: [always, collapsed]
+          default: always
 
     UserPreferencesUpdate:
       type: object
-      description: All fields optional; only supplied keys are updated.
+      description: |
+        All fields optional; only supplied keys are updated. Wave B v2 adds
+        four personalization fields per PRD §3.2.1 and frontend spec §4.3.
       properties:
         reasoning_visibility:
           type: string
           enum: [always_show, disclosure, on_request]
+        featured_tools:
+          type: string
+          enum: [prominent, inline]
+        workspace_layout:
+          type: string
+          enum: [three_pane, two_pane, one_pane]
+        trust_pills:
+          type: string
+          enum: [labels, dots]
+        provenance_pills:
+          type: string
+          enum: [always, collapsed]
 
     Project:
       type: object
