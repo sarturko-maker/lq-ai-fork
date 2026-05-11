@@ -102,11 +102,41 @@ docker compose --profile local up -d   # Mode 2 (Ollama, air-gap-capable)
 After ~2 minutes:
 
 ```
-✓ LQ.AI is ready at http://localhost:3000
-✓ First-run admin account: see logs for password
-✓ API documentation: http://localhost:8000/docs
-✓ Inference Gateway: http://localhost:8001/docs
+✓ LQ.AI shell:           http://localhost:3000/lq-ai
+✓ OpenWebUI shell:       http://localhost:3000        (rebase-friendly chat, ADR 0009)
+✓ Backend API docs:      http://localhost:8000/docs   (Swagger UI)
+✓ Backend API docs:      http://localhost:8000/redoc  (ReDoc)
+✓ Inference Gateway:     http://localhost:8001/docs
 ```
+
+### First-run admin login
+
+On first boot, the API auto-creates a first-run admin user and prints a 24-character random password **once** to the API logs at `WARNING` level. Grab it before it scrolls off:
+
+```bash
+# Default email — override with LQ_AI_FIRST_RUN_ADMIN_EMAIL in .env
+docker compose logs api 2>&1 | grep "First-run admin password"
+# →  WARNING:app.main:First-run admin password (record it now and rotate on first login): <24-char password>
+```
+
+Then log in:
+
+- **URL:** `http://localhost:3000/lq-ai/login`
+- **Email:** `admin@lq.ai` (or whatever you set in `LQ_AI_FIRST_RUN_ADMIN_EMAIL`)
+- **Password:** the value from the log line above
+
+The first login forces a password change (the must-change-password gate). Pick a new password ≥ 12 characters, different from the printed one.
+
+**If you lose the admin password**, reset it from the host:
+
+```bash
+docker compose exec api python -m app.cli reset-admin-password
+# →  prints a fresh random password, sets must-change-password=true, revokes active sessions
+```
+
+The shipped admin account is fine for evaluating the stack. For a production deployment, create per-user accounts via the admin UI and disable the bootstrap admin once your team is set up.
+
+> Full pull-and-stand-up walkthrough (Helm chart, reverse-proxy recipes, reference architectures, air-gap install) is in [PRD §6 Deployment](docs/PRD.md#6-deployment); a self-contained Operator Quickstart guide lands as part of M1 Phase E (release-readiness).
 
 The first-run setup checklist in the web UI guides you through:
 
