@@ -191,6 +191,16 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # Wave A — user preferences (reasoning_visibility per PRD §3.2)
     ("GET", "/api/v1/users/me/preferences"),
     ("PATCH", "/api/v1/users/me/preferences"),
+    # Wave B — tier inquiry (PRD §3.13)
+    ("GET", "/api/v1/inference/current-tier"),
+    ("GET", "/api/v1/inference/tier-config"),
+    # Wave B — admin tier-policy (replaces D1 stubs)
+    ("GET", "/api/v1/admin/tier-policy"),
+    ("PATCH", "/api/v1/admin/tier-policy"),
+    # Wave B — admin/usage cost dashboard (PRD §5.5)
+    ("GET", "/api/v1/admin/usage"),
+    # Wave B — chats search (PRD §1.7 acceptance criterion)
+    ("GET", "/api/v1/chats/search"),
 }
 
 
@@ -217,18 +227,21 @@ ROUTES = _api_v1_routes()
 
 @pytest.mark.unit
 async def test_route_inventory_is_nonempty() -> None:
-    """Sanity: stub routes still exist under /api/v1.
+    """Sanity: /api/v1 surface is registered.
 
-    The bound is intentionally loose — as tasks land, they migrate
-    routes from this 501-stub set into ``IMPLEMENTED_ROUTES``. The
-    primary purpose of this assertion is to catch the failure mode
-    of accidentally dropping all the include_router calls. After D7
-    landed, the remaining stub set is essentially the deferred
-    admin/tier-policy surface plus the skill-fork affordance —
-    ``>= 1`` keeps the sanity check armed without needing to re-tune
-    on every subsequent task.
+    Originally checked that stub routes existed. After Wave B (PRD §3.13
+    tier-policy + §5.5 admin/usage) every documented endpoint has a
+    real handler — so we now check the *implemented* set instead. The
+    primary purpose of this assertion is to catch the failure mode of
+    accidentally dropping all the include_router calls; the floor at
+    50 routes is generous against the current 60+ but tight enough to
+    fail loudly if a wholesale drop happens.
     """
-    assert len(ROUTES) >= 1
+
+    from app.main import app as _app
+
+    api_routes = [r for r in _app.routes if getattr(r, "path", "").startswith("/api/v1")]
+    assert len(api_routes) >= 50
 
 
 @pytest_asyncio.fixture
