@@ -46,6 +46,7 @@
 	import MessageList from '$lib/lq-ai/components/MessageList.svelte';
 	import TierBadge from '$lib/lq-ai/components/TierBadge.svelte';
 	import SavedPromptsPanel from '$lib/lq-ai/components/SavedPromptsPanel.svelte';
+	import AmbientFooter from '$lib/lq-ai/components/AmbientFooter.svelte';
 
 	// ---- state ----
 	let activeProject: Project | null = null;
@@ -392,6 +393,19 @@
 		  defaultSelection(groupModels(availableModels))?.id ??
 		  null
 		: null;
+
+	// AmbientFooter — derive provider/tier from the latest assistant message.
+	// Wave B will wire these from a dedicated trust endpoint.
+	$: footerProvider = (() => {
+		const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+		return lastAssistant?.routed_provider ?? 'no provider';
+	})();
+	$: footerTier = (() => {
+		const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+		return lastAssistant?.routed_inference_tier != null
+			? String(lastAssistant.routed_inference_tier)
+			: 'default';
+	})();
 </script>
 
 <div class="flex flex-1 overflow-hidden" data-testid="lq-ai-chat-shell">
@@ -413,7 +427,7 @@
 		>
 			{#if activeChat}
 				<div>
-					<h2 class="text-sm font-semibold text-gray-800 dark:text-gray-100">
+					<h2 class="lq-text-panel-h">
 						{activeChat.title || 'Untitled chat'}
 					</h2>
 					{#if activeChat.project_id}
@@ -514,6 +528,7 @@
 				</div>
 			</div>
 		{/if}
+		<AmbientFooter provider={footerProvider} tier={footerTier} />
 	</section>
 
 	{#if activeChat}
