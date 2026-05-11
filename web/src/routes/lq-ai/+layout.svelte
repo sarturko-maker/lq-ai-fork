@@ -16,6 +16,8 @@
 	import { authApi } from '$lib/lq-ai/api';
 	import { LQAIApiError, PasswordChangeRequiredError } from '$lib/lq-ai/api/client';
 	import DualBrandingFooter from '$lib/lq-ai/components/DualBrandingFooter.svelte';
+	import '$lib/lq-ai/styles/practice.css';
+	import '$lib/lq-ai/styles/typography.css';
 
 	let booted = false;
 
@@ -60,7 +62,7 @@
 	});
 </script>
 
-<div class="min-h-screen flex flex-col bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+<div class="lq-shell min-h-screen flex flex-col bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
 	<header
 		class="px-4 py-2 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between"
 		data-testid="lq-ai-header"
