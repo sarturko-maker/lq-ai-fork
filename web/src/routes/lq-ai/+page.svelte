@@ -499,7 +499,7 @@
 
 				<div class="flex items-end gap-2">
 					<textarea
-						class="flex-1 text-sm border border-gray-300 rounded px-2 py-1 dark:bg-gray-800 resize-none"
+						class="lq-composer flex-1 text-sm resize-none"
 						rows="3"
 						placeholder="Type a message…"
 						bind:value={composerText}
@@ -508,7 +508,7 @@
 					{#if streamingMessageId}
 						<button
 							type="button"
-							class="px-3 py-2 rounded-md bg-rose-600 text-white hover:bg-rose-700 text-sm font-medium"
+							class="lq-btn-abort text-sm font-medium"
 							on:click={abortStream}
 							data-testid="lq-ai-abort-btn"
 						>
@@ -517,7 +517,7 @@
 					{:else}
 						<button
 							type="button"
-							class="px-3 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
+							class="lq-btn-send text-sm font-medium disabled:opacity-50"
 							on:click={sendMessage}
 							disabled={!composerText.trim()}
 							data-testid="lq-ai-send-btn"
@@ -541,3 +541,50 @@
 		/>
 	{/if}
 </div>
+
+<style>
+	@import '$lib/lq-ai/styles/practice.css';
+
+	.lq-composer {
+		background: var(--lq-canvas);
+		color: var(--lq-text);
+		border: 1.5px solid var(--lq-border);
+		border-radius: var(--lq-radius-lg);
+		padding: 12px;
+	}
+	.lq-composer:focus {
+		border-color: var(--lq-accent);
+		outline: none;
+	}
+	.lq-composer::placeholder {
+		color: var(--lq-text-tertiary);
+	}
+
+	.lq-btn-send {
+		background: var(--lq-accent);
+		color: white;
+		border: 0;
+		border-radius: var(--lq-radius);
+		padding: 8px 16px;
+		cursor: pointer;
+	}
+	.lq-btn-send:hover {
+		filter: brightness(0.95);
+	}
+	.lq-btn-send:focus-visible {
+		outline: 2px solid var(--lq-accent);
+		outline-offset: 2px;
+	}
+
+	.lq-btn-abort {
+		background: #dc2626;
+		color: white;
+		border: 0;
+		border-radius: var(--lq-radius);
+		padding: 8px 16px;
+		cursor: pointer;
+	}
+	.lq-btn-abort:hover {
+		filter: brightness(0.95);
+	}
+</style>
