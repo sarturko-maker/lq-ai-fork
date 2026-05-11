@@ -13,6 +13,7 @@ from __future__ import annotations
 from app.models.audit import AuditLog
 from app.models.chat import Chat, Message
 from app.models.document import Document, DocumentChunk
+from app.models.enhance_prompt import EnhancePromptInteraction
 from app.models.file import File
 from app.models.inference import InferenceRoutingLog
 from app.models.knowledge import KnowledgeBase, KnowledgeBaseFile
@@ -29,6 +30,7 @@ __all__ = [
     "Chat",
     "Document",
     "DocumentChunk",
+    "EnhancePromptInteraction",
     "File",
     "InferenceRoutingLog",
     "KnowledgeBase",

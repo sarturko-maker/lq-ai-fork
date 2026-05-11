@@ -43,6 +43,15 @@ class User(Base):
     totp_secret: Mapped[str | None] = mapped_column(String, nullable=True)
     recovery_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
 
+    # PRD §3.2 — Enhance Prompt reasoning visibility. ``disclosure`` is the
+    # spec default (reasoning collapsed behind a "why these changes?"
+    # toggle). ``always_show`` makes reasoning visible by default;
+    # ``on_request`` hides it until the user opens the skill inspector.
+    # The CHECK constraint enforces the enum at the DB layer.
+    reasoning_visibility: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'disclosure'")
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
