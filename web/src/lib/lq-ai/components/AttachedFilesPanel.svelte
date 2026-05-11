@@ -47,19 +47,19 @@
 </script>
 
 <section
-	class="border-l border-gray-200 dark:border-gray-800 p-3 w-72 flex flex-col gap-3 overflow-y-auto"
+	class="lq-files-panel border-l p-3 w-72 flex flex-col gap-3 overflow-y-auto"
 	data-testid="lq-ai-attached-files-panel"
 >
 	<div>
-		<h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Attached files</h3>
-		<p class="text-xs text-gray-500 mt-0.5">
+		<h3 class="text-sm font-semibold lq-heading">Attached files</h3>
+		<p class="text-xs lq-subtext mt-0.5">
 			Upload documents the skill should review. Citations will land in M2.
 		</p>
 	</div>
 
 	<button
 		type="button"
-		class="px-3 py-1.5 rounded-md border border-indigo-300 text-indigo-700 hover:bg-indigo-50 text-sm font-medium disabled:opacity-50"
+		class="lq-btn-secondary text-sm font-medium disabled:opacity-50"
 		on:click={() => fileInput?.click()}
 		disabled={uploading}
 		data-testid="lq-ai-upload-btn"
@@ -126,6 +126,40 @@
 	{/if}
 
 	{#if chatFiles.length === 0 && projectFiles.length === 0}
-		<p class="text-xs text-gray-400 italic">No files attached yet.</p>
+		<p class="text-xs italic lq-subtext">No files attached yet.</p>
 	{/if}
 </section>
+
+<style>
+	@import '../styles/practice.css';
+
+	.lq-files-panel {
+		border-color: var(--lq-border);
+		background: var(--lq-canvas);
+	}
+
+	.lq-heading {
+		color: var(--lq-text);
+	}
+
+	.lq-subtext {
+		color: var(--lq-text-tertiary);
+	}
+
+	.lq-btn-secondary {
+		background: white;
+		color: var(--lq-accent);
+		border: 1px solid var(--lq-accent-border);
+		border-radius: var(--lq-radius);
+		padding: 4px 10px;
+		font-size: 13px;
+		cursor: pointer;
+	}
+	.lq-btn-secondary:hover {
+		background: var(--lq-accent-soft);
+	}
+	.lq-btn-secondary:focus-visible {
+		outline: 2px solid var(--lq-accent);
+		outline-offset: 2px;
+	}
+</style>
