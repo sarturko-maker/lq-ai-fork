@@ -352,6 +352,113 @@ paths:
         '204': {description: Pending deletion cancelled}
         '400': {description: No pending deletion to cancel}
 
+  /api/v1/users/me/preferences:
+    get:
+      tags: [users]
+      summary: Read the caller's preferences (Wave A — PRD §3.2)
+      description: |
+        Returns the preferences slice of the user profile. The same
+        fields appear on ``GET /users/me``; this dedicated endpoint
+        exists so frontends can subscribe to preferences changes
+        without re-fetching the whole user object.
+      responses:
+        '200':
+          description: Preferences snapshot
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserPreferences'}
+    patch:
+      tags: [users]
+      summary: Update the caller's preferences (partial)
+      description: |
+        Only the fields the user supplies move. An idempotent PATCH
+        (same value re-supplied) returns 200 without writing an audit
+        row, matching the user_skills / saved_prompts pattern. Real
+        changes write a ``user.preferences_updated`` audit row with
+        before/after values in details.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UserPreferencesUpdate'}
+      responses:
+        '200':
+          description: Updated preferences
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserPreferences'}
+
+  # ----------- ENHANCE PROMPT (PRD §3.2 — Wave A) -----------
+  /api/v1/enhance-prompt:
+    post:
+      tags: [enhance-prompt]
+      summary: Expand a short prompt into a structured legal prompt
+      description: |
+        Invokes the ``enhance-prompt`` skill against the gateway (with
+        ``lq_ai_skills=['enhance-prompt']`` so user/team-scope
+        shadows of the skill are honored per the D8.1b resolver).
+        Returns the structured expansion the SKILL.md output schema
+        produces — ``expansion_applied`` + ``expanded_prompt`` +
+        ``reasoning`` + ``skip_reason`` + ``preview_to_user`` — plus
+        an ``interaction_id`` the frontend uses to PATCH ``used`` /
+        ``edited_before_use`` after the user acts on the preview.
+
+        Defaults to the ``fast`` model alias (cheaper/smaller than
+        ``smart`` per the spec's "smaller/cheaper model" guidance);
+        ``model`` on the body overrides per-request.
+
+        When the model produces malformed structured output, the
+        response carries ``expansion_applied=false`` +
+        ``skip_reason='parse_error'`` rather than 500 — the frontend
+        falls back to submitting the original prompt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EnhancePromptRequest'}
+      responses:
+        '200':
+          description: Expansion (or a structured skip decision)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EnhancePromptResponse'}
+        '502':
+          description: Gateway / provider failure during enhancement
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/enhance-prompt/{interaction_id}:
+    parameters:
+      - name: interaction_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    patch:
+      tags: [enhance-prompt]
+      summary: Record what the user did with the enhancement preview
+      description: |
+        Updates ``used`` and ``edited_before_use`` for telemetry.
+        Owner-only (404 if the row belongs to another user — same
+        id-probing posture as user_skills + chats). Idempotent: a
+        no-op PATCH returns 200 without writing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EnhancePromptOutcomeUpdate'}
+      responses:
+        '200':
+          description: Updated interaction
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EnhancePromptResponse'}
+        '404':
+          description: Interaction not found OR not owned by the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
   # ----------- PROJECTS -----------
   /api/v1/projects:
     get:
@@ -879,6 +986,64 @@ paths:
               schema: {$ref: '#/components/schemas/Skill'}
         '404':
           description: No skill with that name is in the registry.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/skills/{skill_name}/contents:
+    parameters:
+      - name: skill_name
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [skills]
+      summary: Full skill contents for the skill inspector (PRD §3.4 — Wave A)
+      description: |
+        Returns the same payload shape as ``GET /skills/{skill_name}``
+        (SKILL.md frontmatter + body + reference + example files). The
+        dedicated URL exists because PRD §3.4 names it explicitly as
+        the contract behind the "view this skill" affordance + the
+        skill inspector side panel. Applies the D8.1b resolution stack
+        (user > team > built-in).
+      responses:
+        '200':
+          description: Skill (same shape as the base GET)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Skill'}
+        '404':
+          description: No skill with that name resolves for the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/skills/{skill_name}/inputs:
+    parameters:
+      - name: skill_name
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [skills]
+      summary: Declared inputs (form schema) for the skill (PRD §3.4 — Wave A)
+      description: |
+        The PRD §3.4 skill-input-form pattern: skills declare inputs
+        in their frontmatter so the UI can render a structured form
+        rather than letting the model ask for missing context
+        conversationally. The endpoint resolves user > team > built-in
+        and looks for the inputs block at either the top of the
+        frontmatter (formal-guide shape) or under ``lq_ai.inputs``
+        (corpus reality for skills like enhance-prompt). Returns a
+        name-only stub when the skill declares no inputs.
+      responses:
+        '200':
+          description: Inputs (required + optional)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SkillInputs'}
+        '404':
+          description: No skill with that name resolves for the caller.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -2230,8 +2395,34 @@ components:
             after `reset-admin-password`. Other authenticated endpoints
             return 403 with `error.code = "password_change_required"`
             until this clears.
+        reasoning_visibility:
+          type: string
+          enum: [always_show, disclosure, on_request]
+          default: disclosure
+          description: |
+            Wave A — PRD §3.2 Enhance Prompt reasoning visibility:
+            ``always_show`` (reasoning visible by default),
+            ``disclosure`` (collapsed behind a toggle; spec default),
+            ``on_request`` (hidden until the user opens the skill
+            inspector). Modifiable via ``PATCH /users/me/preferences``.
         created_at: {type: string, format: date-time}
         last_login_at: {type: string, format: date-time, nullable: true}
+
+    UserPreferences:
+      type: object
+      required: [reasoning_visibility]
+      properties:
+        reasoning_visibility:
+          type: string
+          enum: [always_show, disclosure, on_request]
+
+    UserPreferencesUpdate:
+      type: object
+      description: All fields optional; only supplied keys are updated.
+      properties:
+        reasoning_visibility:
+          type: string
+          enum: [always_show, disclosure, on_request]
 
     Project:
       type: object
@@ -2635,6 +2826,106 @@ components:
                 properties:
                   path: {type: string}
                   content: {type: string}
+
+    # Wave A — Skill inputs (form schema for the skill-input-form pattern).
+    SkillInputDef:
+      type: object
+      required: [name, required]
+      properties:
+        name: {type: string}
+        type:
+          type: string
+          nullable: true
+          description: Free-form per corpus reality (text, enum, boolean, integer, structured, file, ...).
+        required: {type: boolean, default: false}
+        description: {type: string, nullable: true}
+        enum:
+          type: array
+          items: {type: string}
+          nullable: true
+        default: {nullable: true}
+
+    SkillInputs:
+      type: object
+      required: [name, required, optional]
+      properties:
+        name: {type: string}
+        required:
+          type: array
+          items: {$ref: '#/components/schemas/SkillInputDef'}
+        optional:
+          type: array
+          items: {$ref: '#/components/schemas/SkillInputDef'}
+
+    # Wave A — Enhance Prompt (PRD §3.2).
+    EnhancePromptAttachedSkill:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        description: {type: string, nullable: true}
+
+    EnhancePromptAttachedFile:
+      type: object
+      required: [filename]
+      properties:
+        file_id: {type: string, format: uuid, nullable: true}
+        filename: {type: string}
+        mime_type: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+
+    EnhancePromptRequest:
+      type: object
+      required: [raw_input]
+      properties:
+        raw_input: {type: string, minLength: 1, maxLength: 4096}
+        chat_id: {type: string, format: uuid, nullable: true}
+        attached_skills:
+          type: array
+          items: {$ref: '#/components/schemas/EnhancePromptAttachedSkill'}
+        attached_files:
+          type: array
+          items: {$ref: '#/components/schemas/EnhancePromptAttachedFile'}
+        jurisdiction: {type: string, nullable: true, maxLength: 200}
+        model:
+          type: string
+          nullable: true
+          maxLength: 200
+          description: Optional model alias override. Defaults to ``fast``.
+
+    EnhancePromptResponse:
+      type: object
+      required: [interaction_id, expansion_applied, expanded_prompt, reasoning]
+      properties:
+        interaction_id: {type: string, format: uuid}
+        expansion_applied: {type: boolean}
+        expanded_prompt:
+          type: string
+          description: |
+            The expansion when ``expansion_applied=true``, or the original
+            ``raw_input`` (echoed back for client convenience) when
+            ``expansion_applied=false``.
+        reasoning:
+          type: array
+          items: {type: string}
+        skip_reason: {type: string, nullable: true}
+        preview_to_user:
+          type: string
+          description: Human-readable render of the expansion + reasoning the application can show in the review screen.
+        routed_inference_tier:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 5
+        routed_provider: {type: string, nullable: true}
+        routed_model: {type: string, nullable: true}
+
+    EnhancePromptOutcomeUpdate:
+      type: object
+      description: All fields optional; only supplied keys move.
+      properties:
+        used: {type: boolean, nullable: true}
+        edited_before_use: {type: boolean, nullable: true}
 
     File:
       type: object
