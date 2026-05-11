@@ -412,6 +412,36 @@ export interface UserSkillUpdate {
 	frontmatter_extra?: Record<string, unknown>;
 }
 
+// ----- Admin usage -----
+
+export type UsageGroupBy = 'user' | 'provider' | 'model' | 'tier' | 'day';
+
+export interface UsageRow {
+	group_key: string;
+	request_count: number;
+	tokens_in_sum: number;
+	tokens_out_sum: number;
+	cost_estimate_sum: number;
+}
+
+export interface UsageResponse {
+	rows: UsageRow[];
+	group_by: UsageGroupBy;
+	total_request_count: number;
+	total_tokens_in: number;
+	total_tokens_out: number;
+	total_cost_estimate: number;
+}
+
+export interface UsageQuery {
+	group_by?: UsageGroupBy;
+	date_from?: string;
+	date_to?: string;
+	user_id?: string;
+	provider?: string;
+	tier?: number;
+}
+
 // ----- Teams (D8.1a + D8.1c caller_role) -----
 
 /**

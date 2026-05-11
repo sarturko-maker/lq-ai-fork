@@ -6,6 +6,7 @@
  * into a redirect to /lq-ai with a flash error.
  */
 import { apiRequest } from './client';
+import type { UsageResponse, UsageQuery } from '../types';
 
 export interface AliasFallback {
 	provider: string;
@@ -87,4 +88,19 @@ export interface AdminConfigSnapshot {
 
 export async function getAdminConfig(): Promise<AdminConfigSnapshot> {
 	return apiRequest<AdminConfigSnapshot>('/admin/config');
+}
+
+/**
+ * GET /api/v1/admin/usage — aggregated turn counts for trust + cost visibility.
+ *
+ * Admin-only; callers must handle `LQAIApiError` with status 403 (non-admin
+ * users) by showing a graceful "admins only" message rather than an error.
+ */
+export async function getUsage(query: UsageQuery = {}): Promise<UsageResponse> {
+	const params = new URLSearchParams();
+	for (const [k, v] of Object.entries(query)) {
+		if (v !== undefined && v !== null && v !== '') params.append(k, String(v));
+	}
+	const qs = params.toString();
+	return apiRequest<UsageResponse>(`/admin/usage${qs ? '?' + qs : ''}`);
 }
