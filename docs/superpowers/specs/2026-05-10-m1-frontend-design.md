@@ -75,7 +75,7 @@ Admin renders only for admin users. The `?menu` provides re-runnable tour, "What
 | Skills | `/lq-ai/skills`, `/lq-ai/skills/new`, `/lq-ai/skills/[id]`, `/lq-ai/skills/[id]/edit` | Library + creator (D8) | Built-in + user/team skills · scope filter chips · prominent "Create skill" · skill detail = tabbed (Use it · View source · Try it · Versions) |
 | Knowledge | `/lq-ai/knowledge` *(new)* and `/lq-ai/knowledge/[id]` *(new)* | KB browser / uploader | Card grid · embedding status · attach-to-matter shortcut · upload zone |
 | Saved Prompts | `/lq-ai/saved-prompts` *(new)* | D7 deliverable | List · run · edit · "convert to skill" |
-| Admin (gated) | `/lq-ai/admin/*` | Audit, models, providers | Existing `/admin/audit-log` and `/admin/models` extended |
+| Admin (gated) | `/lq-ai/admin/*` | Audit, models, providers, developer support | Existing `/admin/audit-log` and `/admin/models` extended; new `/admin/developer` *(Wave B)* — links to backend OpenAPI docs (Swagger UI / ReDoc) and a developer "API playground" panel for trying endpoints with the operator's own auth token |
 | Trust & Privacy | `/lq-ai/trust` *(new)* | Procurement-grade FUD-buster | Data residency map · providers configured · external-turn counts · SBOM / signed-releases / threat-model links |
 
 Cross-cutting surfaces (not tabs, but reachable from chrome):
@@ -343,7 +343,7 @@ Toggle inside any chat: `💬 Chat ⇄ 📜 Receipts`. Chronological event log:
 | Wave | Scope | Depends on |
 |---|---|---|
 | A — Foundation | Practice visual system; `TrustPill`, `ProvenancePill`, base layout chrome with top tabs + ambient pills; visual update to existing routes (login, change-password, skills list/new/detail, admin/audit-log, admin/models). No new surfaces. | — |
-| B — Dashboard + IA | Home (Guided Dashboard) with trust panel, featured tools, checklist scaffold; settings/appearance; Trust & Privacy page. | Wave A; backend `/api/v1/trust/*` |
+| B — Dashboard + IA | Home (Guided Dashboard) with trust panel, featured tools, checklist scaffold; settings/appearance; Trust & Privacy page; **Admin Developer Support tab (§10.4)** — backend OpenAPI doc links + API playground. | Wave A; backend `/api/v1/trust/*`; backend config-exposure endpoint surfacing OpenAPI URLs |
 | C — Matter Workspace | `/lq-ai/matters` list + `/lq-ai/matters/[id]` 3-pane Workspace; chat wired into workspace. Largest single piece. | Wave A; backend `/api/v1/matters/*` |
 | D — Power features | Enhance Prompt expansion · Skill Creator 3-mode wizard + try-it · KB attach modal · tier-floor refusal block · Receipts mode toggle. | Wave C for in-chat surfaces; backend power-feature routes |
 | E — Onboarding | Sandbox seed + walkthrough overlay + JIT triggers + concierge tour overlay. | Waves A–D; backend onboarding routes; sandbox content authored |
@@ -392,6 +392,10 @@ The frontend depends on these backend resources. Many exist or have stubs; some 
 - `GET/PUT /api/v1/user/preferences` — personalization toggles + `jit_dismissals[]`
 - Migration: `user_preferences` table OR `users.preferences` JSONB (design decision for backend)
 
+**Developer support (admin-only, §10.4):**
+- `GET /api/v1/admin/developer/openapi-urls` — returns `{ backend_openapi: "...", backend_redoc: "...", backend_swagger_ui: "...", gateway_openapi: "..." }` resolved from the operator's deployment config
+- (FastAPI already exposes `/openapi.json`, `/docs`, `/redoc` natively on api/ and gateway/; this endpoint just tells the frontend the canonical URLs for the current deployment so the developer tab can link to them correctly)
+
 ### 9.2 Wave C prerequisites
 
 **Matters (PRD C7 "projects" may need surface aliasing):**
@@ -438,9 +442,52 @@ The frontend depends on these backend resources. Many exist or have stubs; some 
 
 ---
 
-## 10. Theming and customization (open-source posture)
+## 10. Theming, customization, and developer extensibility (open-source posture)
 
-LQ.AI is open source; downstream forks should be able to re-brand without touching component logic. CSS architecture exposes semantic CSS variables (`--lq-accent`, `--lq-secure`, `--lq-warn`, `--lq-tier`, `--lq-canvas`, etc.) so a fork can swap visual identity at the variable layer. This is consistent with PRD §1.3's transparency-as-forkability principle extended to visuals. Practice is the reference palette but not the only palette.
+This design is built to be **a great default, not the only answer**. LQ.AI is open source and downstream firms should be able to fork the frontend to match their own UI/UX opinions — or replace it entirely — without disturbing the backend. The frontend's job is to surface the backend power; the *shape* of that surface is a decision an operator gets to make.
+
+### 10.1 Theming (visual identity)
+
+CSS architecture exposes semantic tokens (`--lq-accent`, `--lq-secure`, `--lq-warn`, `--lq-tier`, `--lq-canvas`, etc.) at `web/src/lib/lq-ai/styles/practice.css`. A fork can swap visual identity by overriding these variables — no component code changes required. Practice is the reference palette but not the only palette.
+
+### 10.2 Component extensibility
+
+Net-new shared components live under `web/src/lib/lq-ai/components/` and follow a deliberately narrow public-API contract (typed props, no internal-state coupling to consumers). A fork that wants different chrome can:
+
+- Override individual components by re-implementing them with the same prop interface
+- Replace whole regions (top-bar, footer, sidebar) by swapping the corresponding `<*Chrome>` composition
+- Keep the LQ.AI logic stores (`$auth`, `$activeChatStore`, etc.) and just re-skin the view layer
+
+### 10.3 Layout pluggability
+
+The `+layout.svelte` for `/lq-ai/*` is the single mount point that wires the top-tab nav + ambient chrome around route content. A fork that wants a different IA (left rail instead of top tabs, no chrome at all, embedded-in-Word shape) replaces this one file. Routes underneath continue to work because they don't depend on the layout's chrome — they consume the same data layer.
+
+### 10.4 Backend API access for developers (the Developer Support tab)
+
+The Admin surface includes `/lq-ai/admin/developer` *(Wave B)* — a one-stop developer support panel surfacing:
+- Direct links to the backend's auto-generated API docs (FastAPI's `/docs` Swagger UI and `/redoc` ReDoc), scoped to the configured backend host
+- Direct link to the Inference Gateway's OpenAPI spec
+- A small "API playground" panel where a developer can paste a JWT and try endpoints inline (or click "Open in Swagger" to launch the full UI in a new tab)
+- Pointers to the SBOM, signed releases, and threat model artifacts (cross-link with the Trust & Privacy page)
+- A "Build your own frontend" call-out that links to a forthcoming developer-fork guide (see §10.5)
+
+This is admin-gated because exposing live API docs publicly is a security-surface decision an operator should make explicitly.
+
+### 10.5 Companion developer-fork documentation
+
+A companion guide ships alongside the M1 codebase (target: post-Wave-F, to be authored in a separate cycle):
+
+- **Anatomy of the `/lq-ai/*` shell** — what each component does and what extending it looks like
+- **The data layer** — auth store, API client, SSE streaming, types — what survives a fork unchanged
+- **Swap-the-shell recipe** — replacing top tabs with a left rail; replacing the chrome entirely; embedding LQ.AI logic into an existing firm intranet
+- **Theming recipe** — overriding the Practice palette without touching component code
+- **Versioning and rebase** — keeping a fork updated against upstream LQ.AI without losing your customizations
+
+This guide lives at `docs/developer-fork-guide.md` and is referenced from the Developer Support tab.
+
+### 10.6 PRD anchor
+
+This whole section is the visual/architectural expression of PRD §1.3 transparency-as-forkability — extended from "skills are forkable" to "the entire frontend is forkable." Operators who want LQ.AI's backend with their own brand and IA shouldn't have to fight the codebase to do it.
 
 ---
 
