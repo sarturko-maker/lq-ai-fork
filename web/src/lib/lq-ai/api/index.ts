@@ -19,3 +19,4 @@ export * as userSkillsApi from './userSkills';
 export * as teamsApi from './teams';
 export * as preferencesApi from './preferences';
 export * as usersApi from './users';
+export * as enhancePromptApi from './enhancePrompt';

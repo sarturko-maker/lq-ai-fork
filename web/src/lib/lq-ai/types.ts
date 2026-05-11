@@ -429,6 +429,46 @@ export interface UserSkillUpdate {
 	frontmatter_extra?: Record<string, unknown>;
 }
 
+// ----- Enhance Prompt (T6) -----
+
+export interface EnhancePromptAttachedSkill {
+	name: string;
+	description?: string | null;
+}
+
+export interface EnhancePromptAttachedFile {
+	file_id?: string | null;
+	filename: string;
+	mime_type?: string | null;
+	description?: string | null;
+}
+
+export interface EnhancePromptRequest {
+	raw_input: string;
+	chat_id?: string | null;
+	attached_skills?: EnhancePromptAttachedSkill[];
+	attached_files?: EnhancePromptAttachedFile[];
+	jurisdiction?: string | null;
+	model?: string | null;
+}
+
+export interface EnhancePromptResponse {
+	interaction_id: string;
+	expansion_applied: boolean;
+	expanded_prompt: string;
+	reasoning: string[];
+	skip_reason?: string | null;
+	preview_to_user?: string;
+	routed_inference_tier?: 1 | 2 | 3 | 4 | 5 | null;
+	routed_provider?: string | null;
+	routed_model?: string | null;
+}
+
+export interface EnhancePromptOutcomeUpdate {
+	used?: boolean;
+	edited_before_use?: boolean;
+}
+
 // ----- Admin usage -----
 
 export type UsageGroupBy = 'user' | 'provider' | 'model' | 'tier' | 'day';
