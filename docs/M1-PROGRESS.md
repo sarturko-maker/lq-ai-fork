@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-10e (D8 end-to-end + D8.1a — Skill Creator UI shipped (`/lq-ai/skills*` routes with shadow-warning UX), gateway internal-endpoint `?user_id=` extension closes the shadow-during-inference loop, D7 Promote-to-Skill rewired to POST /user-skills, plus D8.1a teams: migration 0014 + Team/TeamMember ORM + /admin/teams CRUD + member management + /teams user-facing read. 53 new tests across api+web. ADR 0011 + 0012 + encrypted-keys ops doc all landed earlier in the day. Remaining D-work: D8.1b — wire team-scope branches into /user-skills + the gateway middle-resolution slot. D8 UI still needs a browser-smoke pass.)
+> **Last updated:** 2026-05-10f (D8.1b — team-scope `user_skills` CRUD branches landed (`POST/PATCH/DELETE /user-skills` accept `scope='team'` + `owner_team_id` with team-admin role gate; 404 id-probing-safe; audit rows carry team_id) + gateway middle-resolution slot (`GET /api/v1/internal/skills/{slug}?user_id=...` resolves user > team > built-in; multi-team conflicts → newest `updated_at` wins; cache key stays `(name, user_id)`). +17 api tests (665 passing total); 11 live curl smokes verify end-to-end including user-shadow-beats-team. The D-track is now fully landed at the api layer. Remaining: D8 UI browser-smoke (clicking through the Skill Creator) + D8.1c (a UI surface to manage team-scope skills — currently they're API-only).)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -15,7 +15,7 @@
 | A — Foundation scaffolding | A1, A2, A3, A4, A5 | — | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5, B6 partial (Ollama) | — | B6 remainder optional (OpenAI chat, Vertex, Bedrock) |
 | C — Capability layer | C1, C2, C3, C4, C5, C6, C7, C8 | — | — (phase complete; C8 pending operator end-to-end verification per ADR 0009) |
-| D — M1 differentiators | D0, D0.5, D1, D2, D3-core, **D3-coverage** (auth/MFA/files/KBs audit writes + admin filter UI), D4 (core + coverage), D5, D6, D7 + Wave-3 (ADR 0011 transparency pivot — encrypted keys, discovery enrichment, alias resolution surfacing, requested_model on messages) + **Encrypted-keys ops doc** + **D8 end-to-end** (migration 0013 + user_skills CRUD + shadow merge in `/skills` + real fork endpoint + gateway internal-endpoint `?user_id=` extension + Skill Creator UI at `/lq-ai/skills*` + D7 Promote-to-Skill rewire) + **D8.1a** (migration 0014 + teams + team_members + admin-gated team CRUD + member management) | D8 UI browser-smoke (clicking through new/list/edit pages) | D8.1b (team-scope branches in `/user-skills` + gateway middle-resolution slot for team shadows) |
+| D — M1 differentiators | D0, D0.5, D1, D2, D3-core, **D3-coverage** (auth/MFA/files/KBs audit writes + admin filter UI), D4 (core + coverage), D5, D6, D7 + Wave-3 (ADR 0011 transparency pivot — encrypted keys, discovery enrichment, alias resolution surfacing, requested_model on messages) + **Encrypted-keys ops doc** + **D8 end-to-end** (migration 0013 + user_skills CRUD + shadow merge in `/skills` + real fork endpoint + gateway internal-endpoint `?user_id=` extension + Skill Creator UI at `/lq-ai/skills*` + D7 Promote-to-Skill rewire) + **D8.1a** (migration 0014 + teams + team_members + admin-gated team CRUD + member management) + **D8.1b** (team-scope branches in `/user-skills` POST/PATCH/DELETE + gateway middle-resolution slot user > team > built-in + multi-team newest-wins tiebreak) | D8 UI browser-smoke (clicking through new/list/edit pages) + D8.1c (UI surface for managing team-scope skills — API-only as of 2026-05-10f) | — |
 | E — Procurement and release | — | — | After D |
 
 **Tests:** ~495+ passing in api/ (C6 added ~50: 8 migration + 16 retrieval unit + 12 embed unit + ~24 endpoint integration; C3 added ~55; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~225 passing in gateway/ (B6 partial added ~30: 22 Ollama adapter unit + 8 Ollama integration including the B4-fallback-chain end-to-end exercise; C6 added ~25: 15 OpenAI adapter + 8 embeddings integration + 2 inference updates; C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
@@ -1400,6 +1400,28 @@ PRD §9 DE-013 / Issue 04: per-user saved prompts complement skills the way brow
 * **Promote-to-Skill rewires** to seed the Skill Creator form (replaces the D7 download-as-SKILL.md path).
 
 **Effort:** 1–2 days; multi-phase.
+
+### D8.1b — team-scope user-skills + gateway middle-resolution slot ✅
+
+**Depends on:** D8.1a ✅ (teams schema + admin CRUD shipped 2026-05-10e).
+
+**Scope:** wire the `scope='team'` branch through the management surface and the resolver — D8.1a left the schema + CHECK constraints + partial UNIQUE indexes in place; D8.1b is purely API + resolver work.
+
+* **`POST /api/v1/user-skills` team branch** — accepts `scope='team'` + `owner_team_id`. Caller must be a **team-admin** member of the named team (404 id-probing-safe if not). Slug collision within the team's non-archived rows returns 409 (partial UNIQUE index `ux_user_skills_team_slug`).
+* **`PATCH /api/v1/user-skills/{id}`** — team-scope rows gate on team-admin role; user-scope rows continue to gate on ownership. 404 covers both "no such id" and "exists but you can't mutate it" (matches the saved_prompts / chats privacy posture).
+* **`DELETE /api/v1/user-skills/{id}`** — same gate; audit row carries `team_id` in `details` for forensics ("who archived team X's skill Y?").
+* **`GET /api/v1/internal/skills/{slug}?user_id=...` middle slot** — resolution becomes **user > team > built-in**. Team shadows are visible to every team member (admin AND member) for chat use; mutate rights stay admin-only. Multi-team conflicts resolve to the row with the most recent `updated_at` (per Kevin's design call recorded in SESSION-HANDOFF-2026-05-10e).
+* **`GET /api/v1/skills/{slug}` (user-facing)** — same middle-slot resolution stack, so the picker preview and the gateway prompt-assembly path see consistent content.
+* **Cache key strategy** (D8.1b decision recorded): gateway-side `(name, user_id)` cache key is unchanged. Team-membership churn is operator-mediated and rare; the 60s TTL absorbs propagation lag without a per-membership signature. Re-evaluate if membership becomes high-churn.
+* **`_summary_from_user_skill` fix** — now emits `scope: row.scope` rather than hardcoded `"user"` so the synthesized `Skill` payload reflects the source.
+
+**Audit actions:** `user_skill.created` / `.updated` / `.deleted` on team-scope rows carry `details.scope = "team"` + `details.team_id` (and `team_slug` on create) alongside the existing slug / version_before/_after / changed_fields. Forensic shape preserved.
+
+**Tests:** +12 in `tests/test_user_skills.py` (team-scope CRUD + ownership gates + 422 / 404 / 409 surfaces + cross-scope slug coexistence) and +5 in `tests/test_internal_skills.py` (team shadow visible to member + user>team precedence + outsider isolation + multi-team newest-wins + archived team shadow falls through). Total api test count 648 → 665. Pre-existing failures unchanged (one new flake in `test_health.py` is environment-sensitive: it expects 503 in unit-test mode where the dependencies are unreachable, but our docker-compose run has them all healthy — not introduced by this work).
+
+**Live verification:** 11 curl smokes against the running stack — every state transition (create, 422 validation, 404 non-admin, 409 slug collision, PATCH, audit-row team_id, user>team precedence by archiving/recreating shadows at slug `nda-review` with sentinel bodies).
+
+**Effort actual:** ~2h (smaller than D8.1a because the schema work was already done).
 
 ### B6 — Additional provider adapters (Ollama complete; remainder optional)
 
