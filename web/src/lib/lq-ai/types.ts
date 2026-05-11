@@ -11,15 +11,39 @@
 
 // ----- Auth / users -----
 
+export type UserRole = 'admin' | 'member' | 'viewer';
+
+export type ReasoningVisibility = 'always_show' | 'disclosure' | 'on_request';
+export type FeaturedTools = 'prominent' | 'inline';
+export type WorkspaceLayout = 'three_pane' | 'two_pane' | 'one_pane';
+export type TrustPills = 'labels' | 'dots';
+export type ProvenancePills = 'always' | 'collapsed';
+
+export interface Preferences {
+	reasoning_visibility: ReasoningVisibility;
+	featured_tools: FeaturedTools;
+	workspace_layout: WorkspaceLayout;
+	trust_pills: TrustPills;
+	provenance_pills: ProvenancePills;
+}
+
+export type PreferencesUpdate = Partial<Preferences>;
+
 export interface User {
 	id: string;
 	email: string;
 	display_name?: string | null;
 	is_admin: boolean;
+	role?: UserRole;
 	mfa_enabled: boolean;
 	must_change_password: boolean;
 	created_at: string;
 	last_login_at?: string | null;
+	reasoning_visibility?: ReasoningVisibility;
+	featured_tools?: FeaturedTools;
+	workspace_layout?: WorkspaceLayout;
+	trust_pills?: TrustPills;
+	provenance_pills?: ProvenancePills;
 }
 
 export interface LoginRequest {
