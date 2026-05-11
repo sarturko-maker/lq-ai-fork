@@ -2292,6 +2292,39 @@ paths:
                 additionalProperties: true
 
   # ----------- ADMIN: USERS (Wave C — PRD §5.2) -----------
+  /api/v1/admin/users:
+    get:
+      tags: [admin]
+      summary: List users for RBAC administration (Wave B v2 — PRD §5.2)
+      description: |
+        Admin-only. Returns the full list of non-deleted users with
+        their role + auth state. Supports filtering by role, email
+        substring search, and pagination. Default sort is email ASC.
+        Used by /lq-ai/admin/developer's role-management card.
+      parameters:
+        - name: role
+          in: query
+          schema: {type: string, enum: [admin, member, viewer]}
+        - name: email_q
+          in: query
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+        - name: offset
+          in: query
+          schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        '200':
+          description: User list (paginated)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminUserListResponse'}
+        '400':
+          description: Invalid role filter
+        '403':
+          description: Caller is not admin
+
   /api/v1/admin/users/{user_id}/role:
     parameters:
       - name: user_id
@@ -2485,6 +2518,32 @@ components:
         gateway-side enforcement is a deferred D-phase item.
 
   schemas:
+    AdminUserRow:
+      type: object
+      required: [id, email, role, is_admin, mfa_enabled, must_change_password, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        display_name: {type: string, nullable: true}
+        role: {type: string, enum: [admin, member, viewer]}
+        is_admin: {type: boolean}
+        mfa_enabled: {type: boolean}
+        must_change_password: {type: boolean}
+        created_at: {type: string, format: date-time}
+        last_login_at: {type: string, format: date-time, nullable: true}
+        deletion_scheduled_at: {type: string, format: date-time, nullable: true}
+
+    AdminUserListResponse:
+      type: object
+      required: [users, total_count, limit, offset]
+      properties:
+        users:
+          type: array
+          items: {$ref: '#/components/schemas/AdminUserRow'}
+        total_count: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
+
     LoginRequest:
       type: object
       required: [email, password]

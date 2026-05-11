@@ -28,20 +28,21 @@ envelope through the global exception handler in :mod:`app.main`.
 
 from __future__ import annotations
 
+import uuid as _uuid_mod
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import Text, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._stub import not_implemented
 from app.api.dependencies import AdminUser
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
 from app.models.audit import AuditLog
+from app.models.user import User as UserORM
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -276,9 +277,7 @@ async def get_tier_policy(
     clean).
     """
 
-    payload = await gateway.get_tier_config(
-        request_id=request.headers.get("x-request-id")
-    )
+    payload = await gateway.get_tier_config(request_id=request.headers.get("x-request-id"))
     return _project_tier_policy(payload)
 
 
@@ -300,9 +299,7 @@ async def update_tier_policy(
 
     from app.audit import audit_action
 
-    before_payload = await gateway.get_tier_config(
-        request_id=request.headers.get("x-request-id")
-    )
+    before_payload = await gateway.get_tier_config(request_id=request.headers.get("x-request-id"))
     before = _project_tier_policy(before_payload)
 
     payload_to_send = body.model_dump(exclude_none=True)
@@ -412,9 +409,7 @@ async def get_usage(
     if date_to is not None:
         conditions.append(InferenceRoutingLog.timestamp <= date_to)
     if user_id is not None:
-        conditions.append(
-            func.cast(InferenceRoutingLog.user_id, type_=Text) == user_id
-        )
+        conditions.append(func.cast(InferenceRoutingLog.user_id, type_=Text) == user_id)
     if provider is not None:
         conditions.append(InferenceRoutingLog.routed_provider == provider)
     if model is not None:
@@ -428,7 +423,9 @@ async def get_usage(
             func.count().label("request_count"),
             func.coalesce(func.sum(InferenceRoutingLog.tokens_in), 0).label("tokens_in_sum"),
             func.coalesce(func.sum(InferenceRoutingLog.tokens_out), 0).label("tokens_out_sum"),
-            func.coalesce(func.sum(InferenceRoutingLog.cost_estimate), 0).label("cost_estimate_sum"),
+            func.coalesce(func.sum(InferenceRoutingLog.cost_estimate), 0).label(
+                "cost_estimate_sum"
+            ),
         )
         .where(and_(*conditions))
         .group_by(group_col)
@@ -559,8 +556,99 @@ async def get_admin_config(
 # Wave C — RBAC three-role management (PRD §5.2)
 # ---------------------------------------------------------------------------
 
-
 _ROLE_ENUM = frozenset({"admin", "member", "viewer"})
+
+
+class AdminUserRow(BaseModel):
+    """One row in the admin user list (Wave B v2 — PRD §5.2)."""
+
+    id: _uuid_mod.UUID
+    email: str
+    display_name: str | None
+    role: str  # 'admin' | 'member' | 'viewer'
+    is_admin: bool
+    mfa_enabled: bool
+    must_change_password: bool
+    created_at: datetime
+    last_login_at: datetime | None
+    deletion_scheduled_at: datetime | None
+
+
+class AdminUserListResponse(BaseModel):
+    """Paginated user list for ``GET /api/v1/admin/users``."""
+
+    users: list[AdminUserRow]
+    total_count: int
+    limit: int
+    offset: int
+
+
+@router.get(
+    "/users",
+    response_model=AdminUserListResponse,
+    summary="List users for RBAC administration (Wave B v2 — PRD §5.2)",
+)
+async def list_users(
+    _admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    role: str | None = None,
+    email_q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> AdminUserListResponse:
+    """GET /api/v1/admin/users — paginated, filtered user list (admin-only).
+
+    Returns all non-deleted users with their full auth state. Supports
+    optional filtering by role and email substring. Default sort is
+    ``email ASC`` for predictable alphabetical scanning. Pagination via
+    ``limit`` + ``offset``; ``total_count`` is the full filtered count
+    before pagination so the UI can show "Showing 50 of 187".
+
+    Users with a pending deletion (``deletion_scheduled_at`` set) are
+    included so admins can see the grace-period state and act if needed.
+    """
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    stmt = select(UserORM).where(UserORM.deleted_at.is_(None))
+
+    if role is not None:
+        if role not in _ROLE_ENUM:
+            raise HTTPException(status_code=400, detail="invalid role filter")
+        stmt = stmt.where(UserORM.role == role)
+
+    if email_q is not None and email_q.strip():
+        # email is CITEXT — ilike works but CITEXT makes the comparison
+        # case-insensitive at the DB layer already; ilike adds the
+        # substring wildcard.
+        stmt = stmt.where(UserORM.email.ilike(f"%{email_q.strip()}%"))
+
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total_count: int = (await db.execute(count_stmt)).scalar_one()
+
+    stmt = stmt.order_by(UserORM.email.asc()).limit(limit).offset(offset)
+    rows = (await db.execute(stmt)).scalars().all()
+
+    return AdminUserListResponse(
+        users=[
+            AdminUserRow(
+                id=r.id,
+                email=r.email,
+                display_name=r.display_name,
+                role=r.role,
+                is_admin=r.is_admin,
+                mfa_enabled=r.mfa_enabled,
+                must_change_password=r.must_change_password,
+                created_at=r.created_at,
+                last_login_at=r.last_login_at,
+                deletion_scheduled_at=r.deletion_scheduled_at,
+            )
+            for r in rows
+        ],
+        total_count=total_count,
+        limit=limit,
+        offset=offset,
+    )
 
 
 class UserRoleUpdate(BaseModel):
@@ -599,26 +687,19 @@ async def update_user_role(
     so the operator can promote someone else first.
     """
 
-    import uuid as _uuid
-
-    from sqlalchemy import func
-
     from app.audit import audit_action
-    from app.errors import NotFound, Forbidden
-    from app.models.user import User as UserORM
+    from app.errors import Forbidden, NotFound
 
     if body.role not in _ROLE_ENUM:
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=422,
             detail=f"role must be one of {sorted(_ROLE_ENUM)}",
         )
 
     try:
-        target_uuid = _uuid.UUID(user_id)
+        target_uuid = _uuid_mod.UUID(user_id)
     except (TypeError, ValueError):
-        raise NotFound(message="user not found")
+        raise NotFound(message="user not found") from None
 
     target = await db.get(UserORM, target_uuid)
     if target is None or target.deleted_at is not None:
