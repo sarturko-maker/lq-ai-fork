@@ -187,6 +187,22 @@ For procurement reviews, see:
 
 ---
 
+## Accessibility
+
+LQ.AI is built to be **usable by every attorney on a team — including those who rely on assistive technology, keyboard navigation, or low-vision modes**. Most legal-tech products treat accessibility as a compliance afterthought; we treat it as a quality bar that ships from M1.
+
+Concretely, this means:
+
+- **WCAG 2.1 AA as the design target** for every shipped surface — color contrast, focus indication, keyboard reachability, semantic structure.
+- **Semantic HTML + ARIA patterns by default** — every tab, dialog, button, and form control uses the correct role, label, and state attributes (the top-tab nav implements the WAI-ARIA tablist pattern with roving arrow-key focus; modals use `role="dialog"` + `aria-modal="true"` + escape-to-close).
+- **Keyboard parity with mouse** for every power feature — Enhance Prompt (`⌘E`), Skill Creator, knowledge-base attach, and the launcher all reachable without a pointing device.
+- **Tested both ways** — automated `axe-cli` scans across primary surfaces (target: 0 critical/serious findings), plus Cypress E2E coverage of the chrome's keyboard and screen-reader-relevant assertions, plus a manual keyboard pass before each release.
+- **Theming respects user-agent preferences** — the Practice palette ships with light-mode defaults; downstream forks and operator deployments can override the semantic CSS variables (see [§10 of the M1 frontend design](docs/superpowers/specs/2026-05-10-m1-frontend-design.md#10-theming-customization-and-developer-extensibility-open-source-posture)) to match their own contrast and color-blindness needs.
+
+Accessibility findings are treated as defects, not nice-to-haves. If you find one, [open an issue](https://github.com/LegalQuants/lq-ai/issues) — we'll prioritize it alongside functional bugs.
+
+---
+
 ## Project status
 
 **Pre-release.** The PRD is at v0.2 and ten starter skills are authored. Active work toward M1.
