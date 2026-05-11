@@ -47,6 +47,7 @@
 	import TierBadge from '$lib/lq-ai/components/TierBadge.svelte';
 	import SavedPromptsPanel from '$lib/lq-ai/components/SavedPromptsPanel.svelte';
 	import AmbientFooter from '$lib/lq-ai/components/AmbientFooter.svelte';
+	import EnhancePromptExpansion from '$lib/lq-ai/components/EnhancePromptExpansion.svelte';
 
 	// ---- state ----
 	let activeProject: Project | null = null;
@@ -74,6 +75,9 @@
 	let streamingMessageId: string | null = null;
 	let streamAbort: AbortController | null = null;
 	let sendError: string | null = null;
+
+	// T6 — Enhance Prompt panel reference. Parent calls expansionPanel.open().
+	let expansionPanel: EnhancePromptExpansion | null = null;
 
 	// ---- bootstrap ----
 	async function loadShell() {
@@ -371,6 +375,31 @@
 		alert(`This message used the ${name} skill.\n\n(M2 will land a full skill-inspector panel.)`);
 	}
 
+	// T6 — Enhance Prompt callbacks. The panel is mounted inline below the
+	// composer; parent owns composerText so the panel never reaches into the DOM.
+	function handleUseEnhanced(enhanced: string, _interactionId: string): void {
+		composerText = enhanced;
+	}
+
+	function handleEditEnhanced(enhanced: string, _interactionId: string): void {
+		composerText = enhanced;
+	}
+
+	function handleKeepOriginal(_interactionId: string | null): void {
+		// composerText stays; just close (panel sets state=closed internally).
+	}
+
+	function handleEnhanceDismiss(): void {
+		// Panel closed by X; no composerText change needed.
+	}
+
+	function handleComposerKeydown(e: KeyboardEvent): void {
+		if ((e.metaKey || e.ctrlKey) && e.key === 'e') {
+			e.preventDefault();
+			expansionPanel?.open();
+		}
+	}
+
 	onMount(() => {
 		loadShell();
 	});
@@ -504,6 +533,7 @@
 						placeholder="Type a message…"
 						bind:value={composerText}
 						data-testid="lq-ai-composer-input"
+						on:keydown={handleComposerKeydown}
 					></textarea>
 					{#if streamingMessageId}
 						<button
@@ -517,6 +547,17 @@
 					{:else}
 						<button
 							type="button"
+							class="lq-btn-secondary text-sm"
+							aria-label="Enhance prompt"
+							title="Enhance with AI (Cmd/Ctrl+E)"
+							on:click={() => expansionPanel?.open()}
+							disabled={!composerText.trim() || !!streamingMessageId}
+							data-testid="lq-ai-enhance-btn"
+						>
+							✨
+						</button>
+						<button
+							type="button"
 							class="lq-btn-send text-sm font-medium disabled:opacity-50"
 							on:click={sendMessage}
 							disabled={!composerText.trim()}
@@ -526,6 +567,16 @@
 						</button>
 					{/if}
 				</div>
+
+				<EnhancePromptExpansion
+					bind:this={expansionPanel}
+					originalText={composerText}
+					chatId={activeChat?.id ?? null}
+					onUseEnhanced={handleUseEnhanced}
+					onEditEnhanced={handleEditEnhanced}
+					onKeepOriginal={handleKeepOriginal}
+					onDismiss={handleEnhanceDismiss}
+				/>
 			</div>
 		{/if}
 		<AmbientFooter provider={footerProvider} tier={footerTier} />
@@ -586,5 +637,26 @@
 	}
 	.lq-btn-abort:hover {
 		filter: brightness(0.95);
+	}
+
+	.lq-btn-secondary {
+		background: white;
+		color: var(--lq-accent);
+		border: 1px solid var(--lq-accent-border);
+		border-radius: var(--lq-radius);
+		padding: 8px 12px;
+		font-size: 14px;
+		cursor: pointer;
+	}
+	.lq-btn-secondary:hover {
+		background: var(--lq-accent-soft);
+	}
+	.lq-btn-secondary:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.lq-btn-secondary:focus-visible {
+		outline: 2px solid var(--lq-accent);
+		outline-offset: 2px;
 	}
 </style>
