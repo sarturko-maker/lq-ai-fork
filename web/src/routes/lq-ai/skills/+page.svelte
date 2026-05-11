@@ -156,7 +156,7 @@
 						<tr data-testid="lq-ai-user-skill-row" data-scope={row.scope}>
 							<td class="px-3 py-2" style="color: var(--lq-text);">
 								<a
-									href={`/lq-ai/skills/${row.id}/edit`}
+									href={`/lq-ai/skills/${encodeURIComponent(row.slug)}`}
 									class="font-medium lq-link hover:underline"
 								>
 									{row.display_name}

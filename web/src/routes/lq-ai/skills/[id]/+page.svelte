@@ -1,0 +1,76 @@
+<script lang="ts">
+	import { page } from '$app/stores';
+	import { onMount } from 'svelte';
+	import { skillsApi } from '$lib/lq-ai/api';
+	import type { Skill } from '$lib/lq-ai/types';
+	import SkillDetailTabs from '$lib/lq-ai/components/SkillDetailTabs.svelte';
+	import SkillSourceView from '$lib/lq-ai/components/SkillSourceView.svelte';
+
+	let activeTab: 'use' | 'source' = 'use';
+	let skill: Skill | null = null;
+	let error: string | null = null;
+
+	$: skillName = $page.params.id;
+
+	onMount(async () => {
+		if (!skillName) return;
+		try {
+			skill = await skillsApi.getSkill(skillName);
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to load skill';
+		}
+	});
+</script>
+
+<main style="padding: var(--lq-space-6); max-width: 1100px; margin: 0 auto;">
+	{#if error}
+		<p class="lq-text-body" style="color: var(--lq-error);">Couldn't load skill: {error}</p>
+	{:else if skill}
+		<header style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--lq-space-4);">
+			<div>
+				<h1 class="lq-text-page-h">{skill.title ?? skill.name}</h1>
+				<p class="lq-text-caption" style="color: var(--lq-text-tertiary); margin-top: var(--lq-space-1);">
+					{skill.name}{skill.version ? ` · v${skill.version}` : ''}
+				</p>
+			</div>
+			<a href={`/lq-ai/skills/${encodeURIComponent(skill.name)}/edit`} class="lq-btn-primary">Edit</a>
+		</header>
+
+		<SkillDetailTabs {activeTab} onTabChange={(t) => (activeTab = t)} />
+
+		<div style="margin-top: var(--lq-space-4);">
+			{#if activeTab === 'use'}
+				<article class="lq-text-body" style="white-space: pre-wrap;">
+					{skill.description ?? '(no description)'}
+				</article>
+			{:else if activeTab === 'source'}
+				<SkillSourceView
+					slug={skill.name}
+					contentMd={skill.content_md}
+					contentYaml={skill.content_yaml}
+				/>
+			{/if}
+		</div>
+	{:else}
+		<p class="lq-text-body" style="color: var(--lq-text-secondary);">Loading skill…</p>
+	{/if}
+</main>
+
+<style>
+	.lq-btn-primary {
+		background: var(--lq-accent);
+		color: white;
+		border: 0;
+		border-radius: var(--lq-radius);
+		padding: 8px 16px;
+		font-size: 14px;
+		font-weight: 500;
+		cursor: pointer;
+		text-decoration: none;
+		display: inline-flex;
+		align-items: center;
+	}
+	.lq-btn-primary:hover {
+		opacity: 0.9;
+	}
+</style>
