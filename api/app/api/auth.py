@@ -99,6 +99,7 @@ class UserPublic(BaseModel):
     is_admin: bool
     mfa_enabled: bool
     must_change_password: bool = False
+    reasoning_visibility: str = "disclosure"
     created_at: datetime
     last_login_at: datetime | None = None
 
@@ -111,6 +112,7 @@ class UserPublic(BaseModel):
             is_admin=user.is_admin,
             mfa_enabled=user.mfa_enabled,
             must_change_password=user.must_change_password,
+            reasoning_visibility=getattr(user, "reasoning_visibility", "disclosure"),
             created_at=user.created_at,
             last_login_at=user.last_login_at,
         )
