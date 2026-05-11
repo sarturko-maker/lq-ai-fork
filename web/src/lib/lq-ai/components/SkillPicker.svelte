@@ -41,12 +41,12 @@
 		.sort((a, b) => a.title.localeCompare(b.title));
 </script>
 
-<div class="border border-gray-200 dark:border-gray-800 rounded-md p-3 space-y-2" data-testid="lq-ai-skill-picker">
+<div class="lq-panel rounded-md p-3 space-y-2" data-testid="lq-ai-skill-picker">
 	<div class="flex items-center justify-between">
-		<span class="text-sm font-medium text-gray-700 dark:text-gray-200">Skills</span>
+		<span class="text-sm font-medium lq-label">Skills</span>
 		<button
 			type="button"
-			class="text-xs px-2 py-1 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+			class="lq-btn-secondary"
 			on:click={() => (pickerOpen = !pickerOpen)}
 			data-testid="lq-ai-skill-picker-toggle"
 		>
@@ -73,9 +73,9 @@
 	{#if selectedSkillNames.length > 0}
 		<div class="space-y-2">
 			{#each selectedSkillNames as name (name)}
-				<div class="rounded border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/20 dark:border-indigo-800 p-2">
+				<div class="lq-attached-skill rounded p-2">
 					<div class="flex items-center justify-between">
-						<span class="text-sm font-medium text-indigo-900 dark:text-indigo-100">
+						<span class="text-sm font-medium lq-attached-skill-title">
 							{skillDetails[name]?.title ?? name}
 						</span>
 						<button
@@ -104,35 +104,105 @@
 	{/if}
 
 	{#if pickerOpen}
-		<div class="border-t border-gray-200 dark:border-gray-800 pt-2">
+		<div class="lq-picker-dropdown pt-2">
 			<input
 				type="text"
 				placeholder="Search skills…"
-				class="w-full text-sm border border-gray-300 rounded px-2 py-1 dark:bg-gray-800"
+				class="lq-search-input w-full text-sm rounded px-2 py-1"
 				bind:value={searchTerm}
 				data-testid="lq-ai-skill-picker-search"
 			/>
-			<ul class="mt-2 max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
+			<ul class="mt-2 max-h-48 overflow-y-auto divide-y lq-divider">
 				{#each filteredAvailable as s (s.name)}
 					<li>
 						<button
 							type="button"
-							class="w-full text-left px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800"
+							class="w-full text-left px-2 py-1.5 lq-skill-option"
 							on:click={() => onAttach(s.name)}
 							data-testid={`lq-ai-skill-attach-${s.name}`}
 						>
-							<div class="text-sm font-medium text-gray-800 dark:text-gray-100">
+							<div class="text-sm font-medium lq-label">
 								{s.title}
 							</div>
 							{#if s.description}
-								<div class="text-xs text-gray-500">{s.description}</div>
+								<div class="text-xs lq-subtext">{s.description}</div>
 							{/if}
 						</button>
 					</li>
 				{:else}
-					<li class="text-xs text-gray-500 italic px-2 py-2">No matching skills.</li>
+					<li class="text-xs italic px-2 py-2 lq-subtext">No matching skills.</li>
 				{/each}
 			</ul>
 		</div>
 	{/if}
 </div>
+
+<style>
+	@import '../styles/practice.css';
+
+	.lq-panel {
+		border: 1px solid var(--lq-border);
+		background: var(--lq-canvas);
+	}
+
+	.lq-label {
+		color: var(--lq-text);
+	}
+
+	.lq-subtext {
+		color: var(--lq-text-tertiary);
+	}
+
+	.lq-btn-secondary {
+		background: white;
+		color: var(--lq-accent);
+		border: 1px solid var(--lq-accent-border);
+		border-radius: var(--lq-radius);
+		padding: 4px 10px;
+		font-size: 13px;
+		cursor: pointer;
+	}
+	.lq-btn-secondary:hover {
+		background: var(--lq-accent-soft);
+	}
+	.lq-btn-secondary:focus-visible {
+		outline: 2px solid var(--lq-accent);
+		outline-offset: 2px;
+	}
+
+	.lq-attached-skill {
+		border: 1px solid var(--lq-accent-border);
+		background: var(--lq-accent-soft);
+	}
+
+	.lq-attached-skill-title {
+		color: var(--lq-accent);
+	}
+
+	.lq-picker-dropdown {
+		border-top: 1px solid var(--lq-border);
+	}
+
+	.lq-search-input {
+		border: 1px solid var(--lq-border);
+		color: var(--lq-text);
+		background: var(--lq-canvas);
+	}
+	.lq-search-input:focus {
+		border-color: var(--lq-accent);
+		outline: none;
+	}
+
+	.lq-divider {
+		border-color: var(--lq-border);
+	}
+
+	.lq-skill-option {
+		background: transparent;
+		border: 0;
+		cursor: pointer;
+	}
+	.lq-skill-option:hover {
+		background: var(--lq-accent-soft);
+	}
+</style>

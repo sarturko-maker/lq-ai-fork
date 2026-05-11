@@ -53,7 +53,7 @@
 <div class="relative inline-block" data-testid="lq-ai-model-picker">
 	<button
 		type="button"
-		class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+		class="lq-model-pill"
 		on:click={() => (open = !open)}
 		data-testid="lq-ai-model-picker-toggle"
 		title={selectedEntry?.lq_ai_resolves_to
@@ -63,13 +63,13 @@
 		<span class="font-medium">Model:</span>
 		<span class="ml-1">{selectedEntry?.id ?? 'smart'}</span>
 		{#if selectedEntry?.lq_ai_resolves_to}
-			<span class="ml-1 text-[10px] text-gray-500" data-testid="lq-ai-model-picker-resolution">
+			<span class="ml-1 lq-resolution" data-testid="lq-ai-model-picker-resolution">
 				{aliasResolution(selectedEntry)}
 			</span>
 		{/if}
 		{#if selectedEntry?.routed_inference_tier}
 			<span
-				class="ml-1 px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-[10px] uppercase tracking-wide"
+				class="ml-1 lq-tier-chip"
 				data-testid="lq-ai-model-picker-tier"
 			>
 				{tierLabel(selectedEntry.routed_inference_tier)}
@@ -79,17 +79,17 @@
 
 	{#if open}
 		<div
-			class="absolute z-10 mt-1 w-72 max-h-80 overflow-auto rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg"
+			class="lq-dropdown absolute z-10 mt-1 w-72 max-h-80 overflow-auto rounded-md shadow-lg"
 			data-testid="lq-ai-model-picker-dropdown"
 		>
 			{#if models.data.length === 0}
-				<div class="p-3 text-xs text-gray-500" data-testid="lq-ai-model-picker-empty">
+				<div class="p-3 text-xs lq-empty" data-testid="lq-ai-model-picker-empty">
 					No models available. Check that the Inference Gateway is reachable.
 				</div>
 			{:else}
 				{#if grouped.aliases.length > 0}
 					<div
-						class="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-gray-500"
+						class="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide lq-group-label"
 						title="Convenience defaults — each alias publishes its resolved provider/model below."
 					>
 						Aliases (defaults)
@@ -97,25 +97,21 @@
 					{#each grouped.aliases as entry (entry.id)}
 						<button
 							type="button"
-							class="w-full text-left px-3 py-1.5 text-sm hover:bg-indigo-50 dark:hover:bg-indigo-900/40 flex flex-col items-start"
-							class:font-semibold={entry.id === selectedId}
-							class:bg-indigo-50={entry.id === selectedId}
+							class="lq-option w-full text-left px-3 py-1.5 text-sm flex flex-col items-start {entry.id === selectedId ? 'lq-option--selected font-semibold' : ''}"
 							on:click={() => pick(entry)}
 							data-testid="lq-ai-model-picker-option"
 						>
 							<div class="flex items-center justify-between w-full">
 								<span>{entry.id}</span>
 								{#if entry.routed_inference_tier}
-									<span
-										class="ml-2 px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-[10px] uppercase tracking-wide"
-									>
+									<span class="ml-2 lq-tier-chip">
 										{tierLabel(entry.routed_inference_tier)}
 									</span>
 								{/if}
 							</div>
 							{#if entry.lq_ai_resolves_to}
 								<div
-									class="text-[10px] text-gray-500 dark:text-gray-400 font-mono mt-0.5"
+									class="text-[10px] lq-mono lq-resolution mt-0.5"
 									data-testid="lq-ai-model-picker-alias-resolution"
 								>
 									{aliasResolution(entry)}
@@ -126,17 +122,13 @@
 				{/if}
 
 				{#each [...grouped.nativeByProvider.entries()] as [provider, entries] (provider)}
-					<div
-						class="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-gray-500"
-					>
+					<div class="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide lq-group-label">
 						{provider}
 					</div>
 					{#each entries as entry (entry.id)}
 						<button
 							type="button"
-							class="w-full text-left px-3 py-1.5 text-sm hover:bg-indigo-50 dark:hover:bg-indigo-900/40 flex items-center justify-between"
-							class:font-semibold={entry.id === selectedId}
-							class:bg-indigo-50={entry.id === selectedId}
+							class="lq-option w-full text-left px-3 py-1.5 text-sm flex items-center justify-between {entry.id === selectedId ? 'lq-option--selected font-semibold' : ''}"
 							on:click={() => pick(entry)}
 							data-testid="lq-ai-model-picker-option"
 						>
@@ -144,9 +136,7 @@
 								{entry.id.includes('/') ? entry.id.split('/').slice(1).join('/') : entry.id}
 							</span>
 							{#if entry.routed_inference_tier}
-								<span
-									class="ml-2 px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-[10px] uppercase tracking-wide"
-								>
+								<span class="ml-2 lq-tier-chip">
 									{tierLabel(entry.routed_inference_tier)}
 								</span>
 							{/if}
@@ -157,3 +147,73 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	@import '../styles/practice.css';
+
+	/* Trigger pill — slate variant per spec */
+	.lq-model-pill {
+		background: var(--lq-tier-soft);
+		color: var(--lq-tier);
+		border: 1px solid var(--lq-tier-border);
+		padding: 4px 10px;
+		border-radius: var(--lq-radius);
+		font-size: 12px;
+		font-family: ui-monospace, monospace;
+		cursor: pointer;
+	}
+	.lq-model-pill:hover {
+		filter: brightness(0.97);
+	}
+	.lq-model-pill:focus-visible {
+		outline: 2px solid var(--lq-tier);
+		outline-offset: 2px;
+	}
+
+	.lq-resolution {
+		font-size: 10px;
+		color: var(--lq-text-tertiary);
+	}
+
+	.lq-tier-chip {
+		padding: 1px 4px;
+		border-radius: var(--lq-radius-sm);
+		background: var(--lq-tier-soft);
+		color: var(--lq-tier);
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	/* Dropdown */
+	.lq-dropdown {
+		border: 1px solid var(--lq-border);
+		background: var(--lq-canvas);
+	}
+
+	.lq-empty {
+		color: var(--lq-text-tertiary);
+	}
+
+	.lq-group-label {
+		color: var(--lq-text-tertiary);
+	}
+
+	.lq-option {
+		background: transparent;
+		border: 0;
+		color: var(--lq-text);
+		cursor: pointer;
+	}
+	.lq-option:hover {
+		background: var(--lq-accent-soft);
+	}
+	.lq-option--selected {
+		background: var(--lq-accent-soft);
+		color: var(--lq-accent);
+	}
+
+	.lq-mono {
+		font-family: ui-monospace, monospace;
+	}
+</style>
