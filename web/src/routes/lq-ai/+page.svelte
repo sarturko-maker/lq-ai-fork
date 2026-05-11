@@ -1,10 +1,27 @@
 <script lang="ts">
-  // Transitional — Task 4 (Wave B v2) replaces this with the Guided Dashboard.
-  import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
-  onMount(() => goto('/lq-ai/chats', { replaceState: true }));
+  import { initPreferences } from '$lib/lq-ai/stores/preferences';
+  import GuidedDashboardWelcome from '$lib/lq-ai/components/GuidedDashboardWelcome.svelte';
+  import GuidedDashboardTrustPanel from '$lib/lq-ai/components/GuidedDashboardTrustPanel.svelte';
+  import FeaturedToolsRow from '$lib/lq-ai/components/FeaturedToolsRow.svelte';
+  import GettingStartedChecklist from '$lib/lq-ai/components/GettingStartedChecklist.svelte';
+  import RecentActivity from '$lib/lq-ai/components/RecentActivity.svelte';
+
+  onMount(() => { initPreferences(); });
 </script>
 
-<div class="lq-shell" style="padding: var(--lq-space-8); text-align: center;">
-  <p class="lq-text-body" style="color: var(--lq-text-tertiary);">Redirecting to chats…</p>
+<div class="lq-dashboard">
+  <GuidedDashboardWelcome />
+  <GuidedDashboardTrustPanel />
+  <FeaturedToolsRow />
+  <GettingStartedChecklist />
+  <RecentActivity />
 </div>
+
+<style>
+  .lq-dashboard {
+    padding: var(--lq-space-6);
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+</style>
