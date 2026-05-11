@@ -35,6 +35,7 @@ export interface User {
   email: string;
   is_admin: boolean;
   must_change_password: boolean;
+  role?: 'admin' | 'member' | 'viewer';
 }
 
 export const TABS: readonly TabDef[] = [
@@ -50,7 +51,9 @@ export const TABS: readonly TabDef[] = [
 export function isTabVisible(id: TabId, user: User | null): boolean {
   const tab = TABS.find((t) => t.id === id);
   if (!tab) return false;
-  if (tab.adminOnly && !user?.is_admin) return false;
+  if (tab.adminOnly) {
+    return user?.role === 'admin' || user?.is_admin === true;
+  }
   return true;
 }
 

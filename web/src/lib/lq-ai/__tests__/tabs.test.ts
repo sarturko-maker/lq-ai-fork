@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { TABS, isTabVisible, isTabAvailable, activeTabFor, type TabId, type User } from '../tabs';
 
 describe('tabs', () => {
-  const adminUser: User = { id: '1', email: 'a@x.io', is_admin: true, must_change_password: false };
-  const memberUser: User = { id: '2', email: 'm@x.io', is_admin: false, must_change_password: false };
+  const adminUser: User = { id: '1', email: 'a@x.io', is_admin: true, must_change_password: false, role: 'admin' };
+  const memberUser: User = { id: '2', email: 'm@x.io', is_admin: false, must_change_password: false, role: 'member' };
 
   it('defines six core tabs plus admin', () => {
     const ids = TABS.map((t) => t.id);
@@ -40,5 +40,19 @@ describe('tabs', () => {
     expect(activeTabFor('/lq-ai/admin/audit-log')).toBe('admin');
     expect(activeTabFor('/lq-ai/login')).toBe(null);
     expect(activeTabFor('/lq-ai/change-password')).toBe(null);
+  });
+
+  // Three-role gating — spec §4.1.1
+  const viewerUser: User = { ...memberUser, role: 'viewer', is_admin: false };
+  const adminUserNoRole: User = { ...adminUser, role: 'admin' };
+
+  it('hides admin tab for viewer role', () => {
+    expect(isTabVisible('admin', viewerUser)).toBe(false);
+  });
+  it('hides admin tab for member role', () => {
+    expect(isTabVisible('admin', { ...memberUser, role: 'member' })).toBe(false);
+  });
+  it('shows admin tab for admin role even if is_admin flag is stale', () => {
+    expect(isTabVisible('admin', { ...adminUserNoRole, is_admin: false })).toBe(true);
   });
 });
