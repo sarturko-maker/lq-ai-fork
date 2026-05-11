@@ -145,11 +145,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 )
             continue
         if provider.type in ("openai", "openai_compatible"):
-            # C6 ships the OpenAI adapter for the embeddings path. Chat
-            # completions raise ProviderUnsupportedError until B6 fills
-            # them in. The lifespan-time check matches the pattern for
-            # Anthropic: a missing key for cloud OpenAI is non-fatal at
-            # startup but produces a clean 503 at request time.
+            # C6 + B6: OpenAI adapter services both embeddings and chat
+            # completions. The lifespan-time check matches the pattern
+            # for Anthropic: a missing key for cloud OpenAI is non-fatal
+            # at startup but produces a clean 503 at request time.
             try:
                 adapters[provider.name] = OpenAIAdapter.from_config(provider)
                 logger.info(

@@ -7,17 +7,20 @@ chat-completion-stub posture, error mapping (auth, network, HTTP), and
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
 
 from app.config import ProviderConfig
 from app.providers import (
+    ChatCompletionChunk,
+    ChatCompletionResponse,
     OpenAIAdapter,
     ProviderAuthError,
     ProviderHTTPError,
     ProviderNetworkError,
-    ProviderUnsupportedError,
 )
 from app.providers.openai_schema import (
     ChatCompletionMessage,
@@ -346,30 +349,329 @@ async def test_embeddings_no_authorization_when_no_key() -> None:
     assert "authorization" not in {k.lower() for k in sent.headers}
 
 
-# --- Chat completions (stubbed) ----------------------------------------
+# --- Chat completions (B6) ----------------------------------------------
+
+
+def _basic_chat_request(stream: bool = False) -> ChatCompletionRequest:
+    return ChatCompletionRequest(
+        model="gpt-4o",
+        messages=[
+            ChatCompletionMessage(role="system", content="be brief"),
+            ChatCompletionMessage(role="user", content="say hi"),
+        ],
+        max_tokens=64,
+        stream=stream,
+    )
 
 
 @pytest.mark.unit
-async def test_chat_completion_raises_unsupported() -> None:
-    """C6: chat completions are deferred to B6; the call raises."""
+async def test_chat_completion_unary_happy_path() -> None:
+    """B6: a 200 response translates to ChatCompletionResponse with usage."""
 
-    adapter = OpenAIAdapter(
-        name="openai-prod",
-        base_url="https://api.openai.com/v1",
-        api_key="sk-test",
-    )
-    try:
-        with pytest.raises(ProviderUnsupportedError):
-            await adapter.chat_completion(
-                ChatCompletionRequest(
-                    model="gpt-4o",
-                    messages=[ChatCompletionMessage(role="user", content="hi")],
-                ),
-                model="gpt-4o",
-                stream=False,
+    payload = {
+        "id": "chatcmpl-abc123",
+        "object": "chat.completion",
+        "created": 1715000000,
+        "model": "gpt-4o-2024-08-06",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "Hi there!"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 3, "total_tokens": 14},
+    }
+    with respx.mock(base_url="https://api.openai.com/v1") as router:
+        route = router.post("/chat/completions").mock(
+            return_value=httpx.Response(200, json=payload)
+        )
+        client = httpx.AsyncClient(base_url="https://api.openai.com/v1")
+        try:
+            adapter = OpenAIAdapter(
+                name="openai-prod",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+                client=client,
             )
-    finally:
-        await adapter.aclose()
+            result = await adapter.chat_completion(
+                _basic_chat_request(), model="gpt-4o", stream=False
+            )
+        finally:
+            await client.aclose()
+    assert isinstance(result, ChatCompletionResponse)
+    assert result.id == "chatcmpl-abc123"
+    assert result.choices[0].message.content == "Hi there!"
+    assert result.choices[0].finish_reason == "stop"
+    assert result.usage.total_tokens == 14
+    # The request we sent upstream uses the provider-native model name
+    # (not whatever the alias resolved from) and stream=False.
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["model"] == "gpt-4o"
+    assert sent["stream"] is False
+
+
+@pytest.mark.unit
+async def test_chat_completion_strips_lq_ai_extension_keys() -> None:
+    """B6: LQ.AI extension fields never leak to OpenAI (it 400s on unknowns)."""
+
+    payload = {
+        "id": "x",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gpt-4o",
+        "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": ""}, "finish_reason": "stop"}
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 0, "total_tokens": 1},
+    }
+    request = ChatCompletionRequest(
+        model="gpt-4o",
+        messages=[ChatCompletionMessage(role="user", content="hi")],
+        minimum_inference_tier=3,
+        skill_name="nda-review",
+        lq_ai_skills=["nda-review"],
+        lq_ai_chat_id="11111111-1111-1111-1111-111111111111",
+        lq_ai_message_id="22222222-2222-2222-2222-222222222222",
+        lq_ai_user_id="33333333-3333-3333-3333-333333333333",
+        chat_id="audit-tag",
+        anonymize=True,
+    )
+    with respx.mock(base_url="https://api.openai.com/v1") as router:
+        route = router.post("/chat/completions").mock(
+            return_value=httpx.Response(200, json=payload)
+        )
+        client = httpx.AsyncClient(base_url="https://api.openai.com/v1")
+        try:
+            adapter = OpenAIAdapter(
+                name="openai-prod",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+                client=client,
+            )
+            await adapter.chat_completion(request, model="gpt-4o", stream=False)
+        finally:
+            await client.aclose()
+    sent = json.loads(route.calls.last.request.content)
+    for forbidden in (
+        "minimum_inference_tier",
+        "lq_ai_project_minimum_inference_tier",
+        "skill_name",
+        "chat_id",
+        "anonymize",
+        "lq_ai_skills",
+        "lq_ai_skill_inputs",
+        "lq_ai_chat_id",
+        "lq_ai_message_id",
+        "lq_ai_user_id",
+    ):
+        assert forbidden not in sent, f"LQ.AI extension {forbidden!r} leaked to OpenAI"
+
+
+@pytest.mark.unit
+async def test_chat_completion_forces_model_and_stream() -> None:
+    """B6: model + stream on the body are overwritten by adapter args."""
+
+    payload = {
+        "id": "x",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gpt-4o",
+        "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": ""}, "finish_reason": "stop"}
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 0, "total_tokens": 1},
+    }
+    # Caller set model="alias-name" + stream=True; adapter args override.
+    request = ChatCompletionRequest(
+        model="some-alias",
+        messages=[ChatCompletionMessage(role="user", content="hi")],
+        stream=True,
+    )
+    with respx.mock(base_url="https://api.openai.com/v1") as router:
+        route = router.post("/chat/completions").mock(
+            return_value=httpx.Response(200, json=payload)
+        )
+        client = httpx.AsyncClient(base_url="https://api.openai.com/v1")
+        try:
+            adapter = OpenAIAdapter(
+                name="openai-prod",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+                client=client,
+            )
+            await adapter.chat_completion(request, model="gpt-4o-mini", stream=False)
+        finally:
+            await client.aclose()
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["model"] == "gpt-4o-mini"
+    assert sent["stream"] is False
+
+
+@pytest.mark.unit
+async def test_chat_completion_streaming_translates_sse() -> None:
+    """B6: OpenAI SSE chunks pass through to ChatCompletionChunk objects."""
+
+    sse_body = (
+        'data: {"id":"chatcmpl-s1","object":"chat.completion.chunk","created":1,'
+        '"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant"},'
+        '"finish_reason":null}]}\n\n'
+        'data: {"id":"chatcmpl-s1","object":"chat.completion.chunk","created":1,'
+        '"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Hel"},'
+        '"finish_reason":null}]}\n\n'
+        'data: {"id":"chatcmpl-s1","object":"chat.completion.chunk","created":1,'
+        '"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"lo"},'
+        '"finish_reason":null}]}\n\n'
+        'data: {"id":"chatcmpl-s1","object":"chat.completion.chunk","created":1,'
+        '"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],'
+        '"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}\n\n'
+        "data: [DONE]\n\n"
+    )
+    with respx.mock(base_url="https://api.openai.com/v1") as router:
+        route = router.post("/chat/completions").mock(
+            return_value=httpx.Response(
+                200, text=sse_body, headers={"content-type": "text/event-stream"}
+            )
+        )
+        client = httpx.AsyncClient(base_url="https://api.openai.com/v1")
+        try:
+            adapter = OpenAIAdapter(
+                name="openai-prod",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+                client=client,
+            )
+            result = await adapter.chat_completion(
+                _basic_chat_request(stream=True), model="gpt-4o", stream=True
+            )
+            assert not isinstance(result, ChatCompletionResponse)
+            chunks: list[ChatCompletionChunk] = [c async for c in result]
+        finally:
+            await client.aclose()
+    # 1 role chunk + 2 content chunks + 1 final chunk with finish_reason + usage.
+    assert len(chunks) == 4
+    assert chunks[0].choices[0].delta.role == "assistant"
+    assert chunks[1].choices[0].delta.content == "Hel"
+    assert chunks[2].choices[0].delta.content == "lo"
+    final = chunks[-1]
+    assert final.choices[0].finish_reason == "stop"
+    assert final.usage is not None
+    assert final.usage.total_tokens == 9
+    # Streaming opts include_usage so the final usage block arrives.
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["stream"] is True
+    assert sent.get("stream_options", {}).get("include_usage") is True
+
+
+@pytest.mark.unit
+async def test_chat_completion_401_translates_to_auth_error() -> None:
+    """B6: a 401 from chat completions raises ProviderAuthError; key not echoed."""
+
+    error_body = {
+        "error": {
+            "message": "Incorrect API key provided",
+            "type": "invalid_request_error",
+            "code": "invalid_api_key",
+        }
+    }
+    with respx.mock(base_url="https://api.openai.com/v1") as router:
+        router.post("/chat/completions").mock(return_value=httpx.Response(401, json=error_body))
+        client = httpx.AsyncClient(base_url="https://api.openai.com/v1")
+        secret = "sk-test-do-not-leak"
+        try:
+            adapter = OpenAIAdapter(
+                name="openai-prod",
+                base_url="https://api.openai.com/v1",
+                api_key=secret,
+                client=client,
+            )
+            with pytest.raises(ProviderAuthError) as excinfo:
+                await adapter.chat_completion(
+                    _basic_chat_request(), model="gpt-4o", stream=False
+                )
+        finally:
+            await client.aclose()
+    serialized = json.dumps(excinfo.value.to_envelope())
+    assert secret not in serialized
+    assert excinfo.value.details.get("upstream_status") == 401
+
+
+@pytest.mark.unit
+async def test_chat_completion_500_translates_to_http_error() -> None:
+    """B6: a 500 from chat completions raises ProviderHTTPError."""
+
+    with respx.mock(base_url="https://api.openai.com/v1") as router:
+        router.post("/chat/completions").mock(
+            return_value=httpx.Response(500, json={"error": {"message": "boom"}})
+        )
+        client = httpx.AsyncClient(base_url="https://api.openai.com/v1")
+        try:
+            adapter = OpenAIAdapter(
+                name="openai-prod",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+                client=client,
+            )
+            with pytest.raises(ProviderHTTPError) as excinfo:
+                await adapter.chat_completion(
+                    _basic_chat_request(), model="gpt-4o", stream=False
+                )
+        finally:
+            await client.aclose()
+    assert excinfo.value.upstream_status == 500
+
+
+@pytest.mark.unit
+async def test_chat_completion_network_error_translates() -> None:
+    """B6: transport failures raise ProviderNetworkError."""
+
+    with respx.mock(base_url="https://api.openai.com/v1") as router:
+        router.post("/chat/completions").mock(side_effect=httpx.ConnectError("boom"))
+        client = httpx.AsyncClient(base_url="https://api.openai.com/v1")
+        try:
+            adapter = OpenAIAdapter(
+                name="openai-prod",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+                client=client,
+            )
+            with pytest.raises(ProviderNetworkError):
+                await adapter.chat_completion(
+                    _basic_chat_request(), model="gpt-4o", stream=False
+                )
+        finally:
+            await client.aclose()
+
+
+@pytest.mark.unit
+async def test_chat_completion_streaming_upstream_error_raises() -> None:
+    """B6: a non-200 on the streaming POST surfaces a structured error,
+    not a hung generator."""
+
+    with respx.mock(base_url="https://api.openai.com/v1") as router:
+        router.post("/chat/completions").mock(
+            return_value=httpx.Response(
+                429,
+                json={"error": {"message": "rate limited", "type": "rate_limit_error"}},
+            )
+        )
+        client = httpx.AsyncClient(base_url="https://api.openai.com/v1")
+        try:
+            adapter = OpenAIAdapter(
+                name="openai-prod",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+                client=client,
+            )
+            result = await adapter.chat_completion(
+                _basic_chat_request(stream=True), model="gpt-4o", stream=True
+            )
+            with pytest.raises(ProviderHTTPError) as excinfo:
+                async for _ in result:  # type: ignore[union-attr]
+                    pass
+        finally:
+            await client.aclose()
+    assert excinfo.value.upstream_status == 429
 
 
 # --- Health --------------------------------------------------------------

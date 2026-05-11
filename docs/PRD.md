@@ -2007,6 +2007,100 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 
 **Acceptance criteria:** Backup-restore round-trip tested in CI; documented procedure for upgrade-with-restore.
 
+#### DE-034 — Google Vertex AI provider adapter (Anthropic on Vertex)
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** PRD §4 calls for Vertex AI support as one of the v1 providers (per the supported-provider list and `gateway.yaml.example`'s `vertex-anthropic` entry). M1 ships the Anthropic, OpenAI, and Ollama adapters; the Vertex adapter is the Tier-3 path for operators who want Anthropic-quality models routed through their own GCP project under their existing Google Cloud DPA, with no third-party processor introduced between LQ.AI and the model.
+
+The architectural slot exists: `ProviderType` already accepts `"vertex"` (`gateway/app/config.py`), `gateway.yaml.example` documents the `vertex-anthropic` entry (provider name → type, base_url, project_id, region, tier), and `gateway/app/main.py`'s adapter dispatch already has a branch placeholder ("B6 lands the remaining adapters"). The work is the adapter implementation itself.
+
+**Wire format (Anthropic-on-Vertex specifically).** Vertex serves Anthropic models via the publisher-models surface. Endpoint shape:
+
+```
+POST https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/{REGION}/publishers/anthropic/models/{MODEL_ID}:rawPredict
+POST https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/{REGION}/publishers/anthropic/models/{MODEL_ID}:streamRawPredict
+```
+
+The `MODEL_ID` is the Vertex-specific suffixed form (e.g., `claude-opus-4-7@anthropic`). The request body is the Anthropic Messages body shape (`messages`, `system`, `max_tokens`, etc.) **with the `model` field removed** (Vertex derives the model from the URL path) and `anthropic_version: "vertex-2023-10-16"` added at the body root (not the same as the Anthropic-direct `anthropic-version` header). The response body is identical to Anthropic Messages. SSE streaming uses the same event names (`message_start`, `content_block_delta`, `message_delta`, `message_stop`).
+
+**Auth.** Vertex uses Google IAM, not API keys. The flow is:
+
+1. Read a service-account JSON file from the path in `GOOGLE_APPLICATION_CREDENTIALS` (or the value of `provider.api_key_env` in `gateway.yaml`).
+2. Build a JWT bearer assertion with claims `{iss: <service-account-email>, scope: "https://www.googleapis.com/auth/cloud-platform", aud: "https://oauth2.googleapis.com/token", exp: now+3600, iat: now}` signed with the service account's private key (RS256).
+3. Exchange the JWT for an access token: `POST https://oauth2.googleapis.com/token` with `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=<jwt>`.
+4. Use the returned `access_token` in `Authorization: Bearer <token>`. Tokens are valid for 1h; cache and refresh.
+
+Hand-rolled implementation needs: `cryptography` for RSA signing (already a gateway dep for Fernet), a small JWT builder (~30 LOC), and a token cache with proactive refresh at T-5min. Alternative: depend on `google-auth` to handle the JWT-exchange flow (adds two heavyweight transitive dep trees but is the canonical implementation). Project decision punted to implementation time; the PRD §4 "no LLM-SDK dep" posture argues hand-rolled.
+
+**Error mapping.** Vertex returns `403 PERMISSION_DENIED` (treat as `ProviderAuthError`), `404 NOT_FOUND` (model not enabled in this region — map to `invalid_model`), `429 RESOURCE_EXHAUSTED` (treat as `ProviderHTTPError` upstream_status=429 for fallback eligibility), `5xx` (treat as `ProviderHTTPError`). Errors come back in the Google standard envelope `{"error": {"code": int, "message": str, "status": str}}`.
+
+**Tier handling.** Vertex is Tier 3 by default (operator's GCP project, ZDR by GCP terms) per `gateway.yaml.example`. The tier resolver already supports this; no changes needed.
+
+**Acceptance criteria:**
+- `VertexAdapter` in `gateway/app/providers/vertex.py` implementing `ProviderAdapter` contract: `chat_completion` (unary + streaming via `:rawPredict` / `:streamRawPredict`), `embeddings` raises `ProviderUnsupportedError` (Vertex does not serve Anthropic embeddings).
+- `health_check` probes `GET /v1/projects/{project}/locations/{region}/publishers/anthropic/models/{model}` (cheapest authenticated GET).
+- JWT-bearer auth flow with token caching; service-account JSON loaded via `GOOGLE_APPLICATION_CREDENTIALS` env var.
+- Unit tests with mocked httpx covering: happy path (unary + streaming), 403 auth error, 404 model-not-found, 429 rate-limit, network error, token refresh on expiry, no-key-leak invariant.
+- `gateway/app/main.py` lifespan handles `provider.type == "vertex"` and instantiates `VertexAdapter`; missing creds at startup is a warning, not fatal (matches Anthropic adapter pattern).
+- Live smoke verified against a real GCP project with Vertex AI Anthropic enabled in at least one region (us-central1 or us-east5).
+
+**Estimated effort:** 8–12 hours including JWT auth + tests + live smoke. Existing AnthropicAdapter is the template for request/response translation; the JWT/token-exchange flow is the new work.
+
+#### DE-035 — AWS Bedrock provider adapter (Anthropic on Bedrock)
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** PRD §4 calls for Bedrock support as one of the v1 providers. M1 ships the Anthropic, OpenAI, and Ollama adapters; the Bedrock adapter is the Tier-3 path for operators who want Anthropic-quality models routed through their own AWS account under their existing AWS DPA, with no third-party processor introduced.
+
+The architectural slot exists: `ProviderType` already accepts `"bedrock"`, `gateway.yaml.example` documents the `bedrock` provider entry (type, base_url with region template, aws_region, aws_access_key_env, aws_secret_key_env, tier), and `gateway/app/main.py`'s adapter dispatch has a placeholder branch. The work is the adapter implementation itself.
+
+**Wire format (Anthropic-on-Bedrock specifically).** Bedrock-Runtime hosts Anthropic models at:
+
+```
+POST https://bedrock-runtime.{AWS_REGION}.amazonaws.com/model/{MODEL_ID}/invoke
+POST https://bedrock-runtime.{AWS_REGION}.amazonaws.com/model/{MODEL_ID}/invoke-with-response-stream
+```
+
+Where `MODEL_ID` is the Bedrock-specific identifier (e.g., `anthropic.claude-opus-4-7-v1:0` from `gateway.yaml.example`). The request body is the Anthropic Messages body shape **with the `model` field removed** (Bedrock derives it from the URL) and `anthropic_version: "bedrock-2023-05-31"` added at the body root. The response body for `/invoke` is identical to Anthropic Messages.
+
+**Streaming protocol — critical departure from Anthropic-direct.** Bedrock's `/invoke-with-response-stream` does **not** use SSE. It uses the AWS Event Stream binary protocol — a length-prefixed framing format where each frame has a header block (HTTP/2-style key/value pairs) plus a payload. For Anthropic streams, each frame's payload is a JSON object of shape `{"bytes": "<base64>"}` and the base64-decoded bytes are an Anthropic SSE event payload (the same `message_start` / `content_block_delta` / etc. payload that the direct Anthropic API emits in `data:` lines).
+
+Frame parser shape (hand-rolled per the AWS Event Stream spec — ~100 LOC):
+
+```
+Frame := TotalLength(4B) HeadersLength(4B) PreludeCRC(4B) Headers(...) Payload(...) FrameCRC(4B)
+Header := NameLen(1B) Name(...) Type(1B) ValueLen(2B) Value(...)
+```
+
+The relevant header is `:event-type` (`chunk` for data frames, `exception` for errors). On a `chunk` frame, parse the JSON payload, base64-decode the `bytes` field, then translate the inner Anthropic SSE event into an OpenAI-shaped `ChatCompletionChunk` (the existing `gateway/app/providers/anthropic.py:_anthropic_stream_iter` already has this translation; refactor to be reusable).
+
+**Auth.** Bedrock uses AWS SigV4 request signing. The signing flow per signature:
+
+1. Build the canonical request: `<HTTPVerb>\n<URI-encoded-path>\n<canonical-query-string>\n<canonical-headers>\n<signed-header-names>\n<hex(sha256(body))>`.
+2. Build the string-to-sign: `AWS4-HMAC-SHA256\n<ISO8601-UTC>\n<credential-scope>\n<hex(sha256(canonical-request))>`. Credential scope is `<date>/<region>/bedrock/aws4_request`.
+3. Derive signing key: HMAC chain `kSecret -> kDate -> kRegion -> kService -> kSigning`.
+4. Sign: `signature = hex(HMAC-SHA256(kSigning, string-to-sign))`.
+5. Set headers: `Authorization: AWS4-HMAC-SHA256 Credential=<access-key>/<scope>, SignedHeaders=<names>, Signature=<sig>`, plus `x-amz-date`, `x-amz-content-sha256`, and (if STS session) `x-amz-security-token`.
+
+Hand-rolled implementation needs: `hmac` and `hashlib` from stdlib (no new deps). ~200 LOC. Alternative: depend on `boto3` purely for the signer (adds large transitive tree but is canonical). PRD §4 "no LLM-SDK dep" posture argues hand-rolled, especially because the SigV4 implementation is small and well-specified.
+
+**Error mapping.** Bedrock returns `403 AccessDeniedException` (auth error), `404 ResourceNotFoundException` (model not enabled in this region — map to `invalid_model`), `424 ModelStreamErrorException` (mid-stream model failure — surface as `ProviderHTTPError`), `429 ThrottlingException` (rate-limit, fallback-eligible), `5xx` (`ServiceUnavailableException` etc., fallback-eligible). Errors come back in the AWS standard JSON envelope.
+
+**Tier handling.** Bedrock is Tier 3 by default (operator's AWS account, ZDR by AWS terms) per `gateway.yaml.example`. The tier resolver already supports this; no changes needed.
+
+**Acceptance criteria:**
+- `BedrockAdapter` in `gateway/app/providers/bedrock.py` implementing `ProviderAdapter` contract: `chat_completion` (unary via `/invoke` + streaming via `/invoke-with-response-stream` with AWS Event Stream frame parsing), `embeddings` raises `ProviderUnsupportedError` (Bedrock has separate embedding models; out of scope for this DE).
+- `health_check` probes `GET /foundation-models` on the Bedrock control-plane (cheapest authenticated GET against the region) — note this is `bedrock.{region}.amazonaws.com`, not `bedrock-runtime`. Health probe signs SigV4 for service `bedrock` not `bedrock-runtime`.
+- Hand-rolled SigV4 signer in `gateway/app/providers/_sigv4.py` (or inlined); covers the path-encoding, query-canonicalization, and STS-session-token cases.
+- AWS Event Stream binary frame parser supporting `chunk` and `exception` event types.
+- Refactor: extract Anthropic SSE-event-to-OpenAI-chunk translation from `gateway/app/providers/anthropic.py` into a shared helper so both `AnthropicAdapter` and `BedrockAdapter` use it.
+- Unit tests with mocked httpx covering: happy path (unary + streaming with crafted event-stream frames), 403/404/429/5xx error mapping, SigV4 signature determinism (canonical-request fixtures match AWS-spec test vectors), no-key-leak invariant.
+- `gateway/app/main.py` lifespan handles `provider.type == "bedrock"` and instantiates `BedrockAdapter`; missing creds at startup is a warning, not fatal.
+- Live smoke verified against a real AWS account with Bedrock Claude access enabled in at least one region.
+
+**Estimated effort:** 12–16 hours including SigV4 signer + event-stream parser + tests + live smoke. The event-stream parser is the most novel piece; the SigV4 signer is small but exacting (AWS provides spec test vectors that the implementation can hit exactly).
+
 ### Capability extensions
 
 #### DE-060 — Multi-document Q&A for Contract QA
