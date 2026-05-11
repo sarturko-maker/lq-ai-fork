@@ -459,6 +459,35 @@ export interface UsageQuery {
 	tier?: number;
 }
 
+// ----- Admin users -----
+
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  display_name?: string | null;
+  role: UserRole;
+  is_admin: boolean;
+  mfa_enabled: boolean;
+  must_change_password: boolean;
+  created_at: string;
+  last_login_at?: string | null;
+  deletion_scheduled_at?: string | null;
+}
+
+export interface AdminUserListResponse {
+  users: AdminUserRow[];
+  total_count: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AdminUserListQuery {
+  role?: UserRole;
+  email_q?: string;
+  limit?: number;
+  offset?: number;
+}
+
 // ----- Teams (D8.1a + D8.1c caller_role) -----
 
 /**

@@ -6,7 +6,7 @@
  * into a redirect to /lq-ai with a flash error.
  */
 import { apiRequest } from './client';
-import type { UsageResponse, UsageQuery } from '../types';
+import type { UsageResponse, UsageQuery, AdminUserListResponse, AdminUserListQuery, AdminUserRow } from '../types';
 
 export interface AliasFallback {
 	provider: string;
@@ -103,4 +103,33 @@ export async function getUsage(query: UsageQuery = {}): Promise<UsageResponse> {
 	}
 	const qs = params.toString();
 	return apiRequest<UsageResponse>(`/admin/usage${qs ? '?' + qs : ''}`);
+}
+
+/**
+ * GET /api/v1/admin/users — list platform users with optional role/email filters.
+ *
+ * Admin-only. Callers must handle LQAIApiError status 403.
+ */
+export async function listUsers(query: AdminUserListQuery = {}): Promise<AdminUserListResponse> {
+	const params = new URLSearchParams();
+	for (const [k, v] of Object.entries(query)) {
+		if (v !== undefined && v !== null && v !== '') params.append(k, String(v));
+	}
+	const qs = params.toString();
+	return apiRequest<AdminUserListResponse>(`/admin/users${qs ? '?' + qs : ''}`);
+}
+
+/**
+ * PATCH /api/v1/admin/users/{user_id}/role — update a user's platform role.
+ *
+ * Returns 409 with code "last_admin" when demoting the last admin account.
+ */
+export async function patchUserRole(
+	userId: string,
+	role: 'admin' | 'member' | 'viewer'
+): Promise<AdminUserRow> {
+	return apiRequest<AdminUserRow>(`/admin/users/${encodeURIComponent(userId)}/role`, {
+		method: 'PATCH',
+		body: { role }
+	});
 }
