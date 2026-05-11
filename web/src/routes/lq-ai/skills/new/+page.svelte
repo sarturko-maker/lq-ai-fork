@@ -92,15 +92,15 @@
 <div class="p-4 max-w-3xl mx-auto" data-testid="lq-ai-user-skill-new">
 	<header class="mb-4 flex items-center justify-between">
 		<div>
-			<h1 class="text-xl font-semibold text-gray-900 dark:text-gray-100">New skill</h1>
-			<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+			<h1 class="lq-text-page-h">New skill</h1>
+			<p class="lq-text-caption mt-1" style="color: var(--lq-text-tertiary);">
 				Author a skill that lives in your account. It shapes the system prompt for any chat where
 				you attach it.
 			</p>
 		</div>
 		<a
 			href="/lq-ai/skills"
-			class="text-xs px-3 py-2 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+			class="lq-btn-secondary lq-text-caption"
 		>
 			Cancel
 		</a>
@@ -129,7 +129,7 @@
 		data-testid="lq-ai-user-skill-new-form"
 	>
 		<label class="block">
-			<span class="text-xs text-gray-600 dark:text-gray-400">Slug</span>
+			<span class="lq-text-label">Slug</span>
 			<input
 				type="text"
 				bind:value={slug}
@@ -139,11 +139,11 @@
 				class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm font-mono"
 				data-testid="lq-ai-user-skill-new-slug"
 			/>
-			<p class="text-[11px] text-gray-500 mt-1">
+			<p class="lq-text-caption mt-1" style="color: var(--lq-text-tertiary);">
 				Lowercase, alphanumeric, hyphens. Used as the stable identifier the chat picker references.
 			</p>
 			{#if trimmedSlug.length > 0 && !slugIsValid}
-				<p class="text-[11px] text-rose-600 mt-1" data-testid="lq-ai-user-skill-new-slug-invalid">
+				<p class="lq-text-caption mt-1" style="color: var(--lq-error);" data-testid="lq-ai-user-skill-new-slug-invalid">
 					Slug must be lowercase, start and end with an alphanumeric, and use only letters, digits,
 					and hyphens.
 				</p>
@@ -163,7 +163,7 @@
 		</label>
 
 		<label class="block">
-			<span class="text-xs text-gray-600 dark:text-gray-400">Display name</span>
+			<span class="lq-text-label">Display name</span>
 			<input
 				type="text"
 				bind:value={displayName}
@@ -175,7 +175,7 @@
 		</label>
 
 		<label class="block">
-			<span class="text-xs text-gray-600 dark:text-gray-400">Description</span>
+			<span class="lq-text-label">Description</span>
 			<input
 				type="text"
 				bind:value={description}
@@ -188,7 +188,7 @@
 
 		<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 			<label class="block">
-				<span class="text-xs text-gray-600 dark:text-gray-400">Version</span>
+				<span class="lq-text-label">Version</span>
 				<input
 					type="text"
 					bind:value={version}
@@ -198,7 +198,7 @@
 				/>
 			</label>
 			<label class="block">
-				<span class="text-xs text-gray-600 dark:text-gray-400">Tags (comma-separated)</span>
+				<span class="lq-text-label">Tags (comma-separated)</span>
 				<input
 					type="text"
 					bind:value={tagsInput}
@@ -209,7 +209,7 @@
 		</div>
 
 		<label class="block">
-			<span class="text-xs text-gray-600 dark:text-gray-400">Body (Markdown system prompt)</span>
+			<span class="lq-text-label">Body (Markdown system prompt)</span>
 			<textarea
 				bind:value={body}
 				rows="14"
@@ -219,7 +219,7 @@
 				class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm font-mono"
 				data-testid="lq-ai-user-skill-new-body"
 			></textarea>
-			<p class="text-[11px] text-gray-500 mt-1">
+			<p class="lq-text-caption mt-1" style="color: var(--lq-text-tertiary);">
 				This text becomes the system-prompt chunk for any chat that attaches the skill. Markdown
 				renders verbatim — the model reads it as instructions.
 			</p>
@@ -228,14 +228,14 @@
 		<div class="flex items-center justify-end gap-2 pt-2">
 			<a
 				href="/lq-ai/skills"
-				class="text-xs px-3 py-2 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+				class="lq-btn-secondary lq-text-caption"
 			>
 				Cancel
 			</a>
 			<button
 				type="submit"
 				disabled={!canSubmit}
-				class="text-xs px-4 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+				class="lq-btn-primary lq-text-caption"
 				data-testid="lq-ai-user-skill-new-submit"
 			>
 				{submitting ? 'Creating…' : 'Create skill'}
@@ -243,3 +243,37 @@
 		</div>
 	</form>
 </div>
+
+<style>
+	.lq-btn-primary {
+		background: var(--lq-accent);
+		color: white;
+		border: 0;
+		border-radius: var(--lq-radius);
+		padding: 8px 16px;
+		font-size: 14px;
+		font-weight: 500;
+		cursor: pointer;
+		text-decoration: none;
+		display: inline-flex;
+		align-items: center;
+	}
+	.lq-btn-primary:disabled {
+		background: var(--lq-text-tertiary);
+		cursor: not-allowed;
+	}
+
+	.lq-btn-secondary {
+		background: transparent;
+		color: var(--lq-text-secondary);
+		border: 1px solid var(--lq-border);
+		border-radius: var(--lq-radius);
+		padding: 6px 12px;
+		font-size: 12px;
+		cursor: pointer;
+		text-decoration: none;
+		display: inline-flex;
+		align-items: center;
+	}
+	.lq-btn-secondary:hover { background: var(--lq-inset); }
+</style>
