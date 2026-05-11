@@ -19,6 +19,7 @@ from app.models.knowledge import KnowledgeBase, KnowledgeBaseFile
 from app.models.organization_profile import OrganizationProfile
 from app.models.project import Project, ProjectFile, ProjectSkill
 from app.models.saved_prompt import SavedPrompt
+from app.models.team import Team, TeamMember
 from app.models.user import User, UserSession
 from app.models.user_export import UserExportJob
 from app.models.user_skill import UserSkill
@@ -38,6 +39,8 @@ __all__ = [
     "ProjectFile",
     "ProjectSkill",
     "SavedPrompt",
+    "Team",
+    "TeamMember",
     "User",
     "UserExportJob",
     "UserSession",
