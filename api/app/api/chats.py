@@ -890,9 +890,73 @@ async def _persist_assistant_message(
     )
     db.add(row)
     await db.flush()
+
+    # Wave C — chain-of-custody row per PRD §3.3 data model.
+    # Skipped on error_code (no model-generated artifact to attribute).
+    if error_code is None:
+        await _write_work_product_attribution(
+            db,
+            message=row,
+            applied_skills=applied_skills,
+            routed_inference_tier=routed_inference_tier,
+            routed_provider=routed_provider,
+            routed_model=routed_model,
+        )
+
     await db.commit()
     await db.refresh(row)
     return row
+
+
+async def _write_work_product_attribution(
+    db: AsyncSession,
+    *,
+    message: Message,
+    applied_skills: list[str],
+    routed_inference_tier: int | None,
+    routed_provider: str | None,
+    routed_model: str | None,
+) -> None:
+    """Insert the WorkProductAttribution row for a successful assistant
+    message (Wave C — PRD §3.3).
+
+    Same single-transaction-commit pattern as the audit-log writes —
+    the attribution row rides the same flush as the Message itself so
+    a chat send is either fully persisted (message + attribution) or
+    not at all.
+    """
+
+    import hashlib
+
+    from app.models.chat import Chat as ChatORM
+    from app.models.work_product import WorkProductAttribution
+
+    # Look up the chat to populate the owner + project denormalized
+    # columns. The chat row was loaded earlier by the calling handler;
+    # a per-message lookup keeps this helper self-contained.
+    chat_row = await db.get(ChatORM, message.chat_id)
+    if chat_row is None:  # pragma: no cover — message FK guarantees existence
+        return
+
+    content_hash = hashlib.sha256(
+        (message.content or "").encode("utf-8")
+    ).hexdigest()
+
+    attribution = WorkProductAttribution(
+        message_id=message.id,
+        user_id=chat_row.owner_id,
+        chat_id=message.chat_id,
+        project_id=chat_row.project_id,
+        routed_inference_tier=routed_inference_tier,
+        provider=routed_provider,
+        model=routed_model,
+        model_version=routed_model,
+        skill_ids=list(applied_skills or []),
+        playbook_id=None,
+        content_hash=content_hash,
+    )
+    db.add(attribution)
+    await db.flush()
 
 
 async def _non_streaming_response(

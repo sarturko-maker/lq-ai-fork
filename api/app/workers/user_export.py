@@ -166,6 +166,31 @@ def _serialize_audit(row: AuditLog) -> dict[str, Any]:
     }
 
 
+def _serialize_work_product(row: Any) -> dict[str, Any]:
+    """Serialize one WorkProductAttribution row for the export bundle.
+
+    Imported lazily inside :func:`_build_zip` so this helper survives a
+    cyclic-import-style load (the model imports nothing from this
+    module, but keeping the lazy pattern matches the surrounding
+    serializers).
+    """
+
+    return {
+        "id": str(row.id),
+        "message_id": str(row.message_id),
+        "chat_id": str(row.chat_id),
+        "project_id": str(row.project_id) if row.project_id else None,
+        "routed_inference_tier": row.routed_inference_tier,
+        "provider": row.provider,
+        "model": row.model,
+        "model_version": row.model_version,
+        "skill_ids": list(row.skill_ids or []),
+        "playbook_id": str(row.playbook_id) if row.playbook_id else None,
+        "content_hash": row.content_hash,
+        "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+    }
+
+
 _README_TEMPLATE = """\
 # LQ.AI personal data export
 
@@ -189,6 +214,13 @@ original bytes for any files you uploaded.
 - `files/<id>__<name>`   — original bytes for each file.
 - `knowledge_bases.json` — knowledge bases you own.
 - `audit_log.json`       — log of state-changing actions you took.
+- `work_product_attribution.json` — chain-of-custody metadata
+                            (PRD §3.3): one row per assistant message you
+                            generated, with tier / provider / model /
+                            applied skills / content hash. Hand this to
+                            a third party (e.g., trial counsel, an
+                            auditor) when you need to attest to how a
+                            specific piece of model output was produced.
 - `skills.json`          — empty under M1; skills are filesystem-canonical
                             (see ADR 0004) and live in the deployment's
                             `skills/` directory rather than the database.
@@ -305,6 +337,25 @@ async def _build_zip(session: AsyncSession, user: User) -> bytes:
         zf.writestr(
             "audit_log.json",
             json.dumps([_serialize_audit(r) for r in audit_rows], indent=2),
+        )
+
+        # Wave C — chain-of-custody attributions (PRD §3.3).
+        from app.models.work_product import WorkProductAttribution
+
+        attrib_rows = (
+            (
+                await session.execute(
+                    select(WorkProductAttribution).where(
+                        WorkProductAttribution.user_id == user.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        zf.writestr(
+            "work_product_attribution.json",
+            json.dumps([_serialize_work_product(r) for r in attrib_rows], indent=2),
         )
 
         # Skills — empty under M1 (filesystem-canonical per ADR 0004).
