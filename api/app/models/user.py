@@ -32,6 +32,13 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # PRD §5.2 RBAC three-role system (Wave C). DB-side CHECK enforces
+    # the enum at the storage layer; the existing ``is_admin`` flag stays
+    # as a convenience and is kept in sync by app code that changes role
+    # (see app.api.admin.update_user_role).
+    role: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'member'")
+    )
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     # B2 — first-run admin is created with must_change_password=TRUE; the
     # `/auth/change-password` endpoint flips it back to FALSE once the

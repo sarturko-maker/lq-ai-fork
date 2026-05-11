@@ -24,6 +24,7 @@ from app.models.team import Team, TeamMember
 from app.models.user import User, UserSession
 from app.models.user_export import UserExportJob
 from app.models.user_skill import UserSkill
+from app.models.work_product import WorkProductAttribution
 
 __all__ = [
     "AuditLog",
@@ -47,4 +48,5 @@ __all__ = [
     "UserExportJob",
     "UserSession",
     "UserSkill",
+    "WorkProductAttribution",
 ]
