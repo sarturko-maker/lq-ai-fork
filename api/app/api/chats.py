@@ -61,7 +61,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import ValidationError as PydanticValidationError
+from pydantic import BaseModel, ValidationError as PydanticValidationError
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -247,6 +247,138 @@ async def create_chat(
     )
 
     return await _serialize_chat(db, chat, message_count=0)
+
+
+class ChatSearchHit(BaseModel):
+    """One row in the chat-search response.
+
+    Carries the matching chat ID + title for navigation, the per-row
+    relevance rank from the FTS engine, and a snippet of the matching
+    message body (or the title itself when only the title matched).
+    """
+
+    chat_id: uuid.UUID
+    title: str
+    snippet: str
+    match_source: str
+    """Either ``'title'`` (the chat title matched) or ``'message'``
+    (a message body matched)."""
+
+    rank: float
+    """The Postgres ``ts_rank_cd`` score for the matching row. Higher
+    means a better match; relative within a single response only."""
+
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChatSearchResponse(BaseModel):
+    items: list[ChatSearchHit]
+    query: str
+
+
+@router.get(
+    "/search",
+    response_model=ChatSearchResponse,
+    summary="Full-text search across the caller's chats + messages (PRD §1.7)",
+)
+async def search_chats(
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    q: Annotated[str, Query(min_length=1, max_length=500)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> ChatSearchResponse:
+    """GET /api/v1/chats/search — Postgres FTS over chats + messages.
+
+    Wave B — PRD §1.7 acceptance criterion: "search prior chats."
+    Uses ``websearch_to_tsquery`` against the ``title_tsv`` /
+    ``content_tsv`` generated columns (migration 0016) so the query
+    parser is the friendly Google-flavored one (no operator escaping
+    required). Results are ranked by ``ts_rank_cd`` and capped at
+    ``limit``.
+
+    Owner-scoped: only the caller's own chats + messages are searched.
+    Archived chats are excluded — the search affordance is for finding
+    active work, not historic cleanup.
+    """
+
+    from sqlalchemy import literal, text as sa_text
+
+    tsquery = func.websearch_to_tsquery("english", q)
+
+    # Title hits — each chat contributes at most one row (one title).
+    title_subq = (
+        select(
+            Chat.id.label("chat_id"),
+            Chat.title.label("title"),
+            Chat.title.label("snippet"),
+            literal("title").label("match_source"),
+            func.ts_rank_cd(
+                sa_text("chats.title_tsv"), tsquery
+            ).label("rank"),
+            Chat.created_at.label("created_at"),
+            Chat.updated_at.label("updated_at"),
+        )
+        .where(
+            Chat.owner_id == user.id,
+            Chat.archived_at.is_(None),
+            sa_text("chats.title_tsv @@ websearch_to_tsquery('english', :q)"),
+        )
+        .params(q=q)
+    )
+
+    # Message hits — DISTINCT ON (chat_id) to surface only the
+    # highest-ranking message per chat (Postgres extension; falls back
+    # to row_number window if portability matters later).
+    message_subq = (
+        select(
+            Message.chat_id.label("chat_id"),
+            Chat.title.label("title"),
+            func.ts_headline(
+                "english",
+                Message.content,
+                tsquery,
+                "MaxFragments=2, MinWords=5, MaxWords=20",
+            ).label("snippet"),
+            literal("message").label("match_source"),
+            func.ts_rank_cd(
+                sa_text("messages.content_tsv"), tsquery
+            ).label("rank"),
+            Chat.created_at.label("created_at"),
+            Chat.updated_at.label("updated_at"),
+        )
+        .join(Chat, Chat.id == Message.chat_id)
+        .where(
+            Chat.owner_id == user.id,
+            Chat.archived_at.is_(None),
+            sa_text("messages.content_tsv @@ websearch_to_tsquery('english', :q)"),
+        )
+        .params(q=q)
+    )
+
+    union = title_subq.union_all(message_subq).subquery()
+    stmt = (
+        select(union).order_by(union.c.rank.desc(), union.c.created_at.desc()).limit(limit)
+    )
+
+    result = await db.execute(stmt)
+    rows = result.mappings().all()
+
+    return ChatSearchResponse(
+        query=q,
+        items=[
+            ChatSearchHit(
+                chat_id=row["chat_id"],
+                title=row["title"] or "",
+                snippet=row["snippet"] or "",
+                match_source=row["match_source"],
+                rank=float(row["rank"] or 0),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ],
+    )
 
 
 @router.get(
