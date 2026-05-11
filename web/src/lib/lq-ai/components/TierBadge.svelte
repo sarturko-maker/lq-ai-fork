@@ -2,22 +2,33 @@
 	/**
 	 * Inference Tier badge per PRD §3.13.
 	 *
-	 * C8 surfaced this as a static badge; D2 (this file) makes it
-	 * clickable — the click event opens the TierDetailsPanel via the
-	 * parent (MessageBubble owns the panel state). The badge stays
-	 * compact: a tier number + colour + tooltip; the details panel
-	 * shows the full provider/model + token usage + tier description.
+	 * Now delegates to TrustPill (variant="tier") so the LQ.AI ambient chrome
+	 * stays visually consistent. Public API preserved — callers are unchanged.
 	 *
-	 * Keyboard accessibility: the badge is a button, so it focuses with
-	 * Tab and activates with Enter/Space. The tooltip (`title` attr)
-	 * still works for hover users who don't need the full panel.
+	 * Prop mapping:
+	 *   tier      → label ("Tier N" / "Tier ?") + TrustTone override
+	 *   provider  → tooltip text (title on wrapper span)
+	 *   interactive → onClick forwarded to TrustPill; false = no handler
+	 *
+	 * The component continues to dispatch a Svelte "open" event so existing
+	 * callers using `on:open` don't need to change.
+	 *
+	 * Tone mapping (closest match from TrustPill's palette):
+	 *   Tier 1 (was emerald) → sage
+	 *   Tier 2 (was sky)     → neutral
+	 *   Tier 3 (was amber)   → amber
+	 *   Tier 4 (was orange)  → amber
+	 *   Tier 5 (was rose)    → red
+	 *   unknown              → neutral
 	 */
 	import { createEventDispatcher } from 'svelte';
+	import TrustPill from './TrustPill.svelte';
+	import type { TrustTone } from './TrustPill.svelte';
 
 	export let tier: 1 | 2 | 3 | 4 | 5 | null | undefined = null;
 	export let provider: string | null | undefined = null;
 	/**
-	 * When `false` the badge renders as a static span (no click /
+	 * When `false` the badge renders as a static pill (no click /
 	 * keyboard handlers). Used by surfaces where the parent has its
 	 * own interaction model (admin alias UI, model picker resolution
 	 * preview).
@@ -26,50 +37,27 @@
 
 	const dispatch = createEventDispatcher<{ open: void }>();
 
-	const tierColour: Record<number, string> = {
-		1: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-		2: 'bg-sky-100 text-sky-800 border-sky-300',
-		3: 'bg-amber-100 text-amber-800 border-amber-300',
-		4: 'bg-orange-100 text-orange-800 border-orange-300',
-		5: 'bg-rose-100 text-rose-800 border-rose-300'
+	const tierTone: Record<number, TrustTone> = {
+		1: 'sage',
+		2: 'neutral',
+		3: 'amber',
+		4: 'amber',
+		5: 'red'
 	};
 
-	$: classes = tier ? tierColour[tier] : 'bg-gray-100 text-gray-700 border-gray-300';
 	$: label = tier ? `Tier ${tier}` : 'Tier ?';
+	$: tone = (tier ? tierTone[tier] : 'neutral') as TrustTone;
 	$: title = provider
 		? `${label} — ${provider} (click for details)`
 		: `${label} — click for details`;
-
-	function handleClick(): void {
-		if (interactive) dispatch('open');
-	}
-
-	function handleKey(event: KeyboardEvent): void {
-		if (!interactive) return;
-		if (event.key === 'Enter' || event.key === ' ') {
-			event.preventDefault();
-			dispatch('open');
-		}
-	}
+	$: handleClick = interactive ? () => dispatch('open') : undefined;
 </script>
 
-{#if interactive}
-	<button
-		type="button"
-		class="inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-indigo-400 {classes}"
-		{title}
-		on:click={handleClick}
-		on:keydown={handleKey}
-		data-testid="lq-ai-tier-badge"
-	>
-		{label}
-	</button>
-{:else}
-	<span
-		class="inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium {classes}"
-		{title}
-		data-testid="lq-ai-tier-badge"
-	>
-		{label}
-	</span>
-{/if}
+<!--
+  Wrap in a span so we can attach `title` (hover tooltip) and
+  `data-testid` without modifying TrustPill's public API.
+  `display: contents` keeps the wrapper invisible in layout.
+-->
+<span {title} data-testid="lq-ai-tier-badge" style="display: contents">
+	<TrustPill variant="tier" {label} {tone} onClick={handleClick} />
+</span>
