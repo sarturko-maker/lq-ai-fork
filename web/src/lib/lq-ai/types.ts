@@ -71,6 +71,38 @@ export interface ChangePasswordRequest {
 	new_password: string;
 }
 
+// ----- MFA -----
+
+export interface MfaSetupResponse {
+	secret: string;
+	provisioning_uri: string;
+	recovery_codes: string[];
+}
+
+export interface MfaEnableRequest {
+	code: string;
+}
+
+export interface MfaDisableRequest {
+	password: string;
+	code: string;
+}
+
+// ----- Account ops -----
+
+export type ExportJobStatus = 'queued' | 'processing' | 'completed' | 'failed';
+
+export interface ExportJob {
+	job_id: string;
+	status: ExportJobStatus;
+	download_url?: string | null;
+}
+
+export interface DeleteScheduledResponse {
+	scheduled_deletion_at: string;
+	grace_period_days: number;
+}
+
 // ----- Errors -----
 
 export interface ErrorBody {
