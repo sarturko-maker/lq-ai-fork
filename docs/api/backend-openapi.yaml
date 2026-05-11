@@ -944,13 +944,21 @@ paths:
                 items: {$ref: '#/components/schemas/UserSkill'}
     post:
       tags: [user-skills]
-      summary: Create a user-scope skill
+      summary: Create a user- or team-scope skill (D8 + D8.1b)
       description: |
-        Creates a new user-scope row owned by the caller (ADR 0012).
-        Slug collision with the caller's existing non-archived rows
-        returns 409. Collision with a filesystem built-in is **allowed**
-        — that's the deliberate shadow case; the user's row wins for
-        their chats.
+        Creates a new skill row. Scope branches (per ADR 0012 + D8.1b):
+
+        * ``scope='user'`` (default) — owned by the caller. Slug
+          collision with the caller's existing non-archived rows
+          returns 409. Collision with a filesystem built-in is
+          **allowed** — the deliberate shadow case; the user's row
+          wins for their chats.
+        * ``scope='team'`` — owned by ``owner_team_id``. Caller must
+          be a team-admin of that team or 404 (id-probing-safe).
+          Slug collision within the team's non-archived rows returns
+          409. The D8.1b resolver picks user > team > built-in.
+
+        422 fires when ``scope`` and ``owner_team_id`` are inconsistent.
       requestBody:
         required: true
         content:
@@ -962,8 +970,18 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/UserSkill'}
+        '404':
+          description: Team referenced by owner_team_id does not exist OR caller is not a team-admin (id-probing-safe).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
         '409':
-          description: Slug collides with the caller's existing user-scope skills.
+          description: Slug collides with the caller's user-scope rows OR the named team's team-scope rows.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422':
+          description: scope/owner_team_id combination is invalid (team missing team id, or user carrying team id).
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -1145,7 +1163,12 @@ paths:
         schema: {type: string, format: uuid}
     get:
       tags: [user-skills]
-      summary: Fetch a single user-scope skill (owner-only)
+      summary: Fetch a single user- or team-scope skill (owner or team-admin)
+      description: |
+        Owner-only for ``scope='user'`` rows; team-admin-only for
+        ``scope='team'`` rows (D8.1b). Non-admin team members read team
+        skills through the merged picker at ``GET /api/v1/skills/{slug}``,
+        not through this management endpoint.
       responses:
         '200':
           description: Skill row
@@ -1153,13 +1176,17 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/UserSkill'}
         '404':
-          description: Skill not found OR not owned by the caller (id-probing-safe).
+          description: Skill not found OR caller is not the owner / not a team-admin (id-probing-safe).
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
     patch:
       tags: [user-skills]
-      summary: Partial update (owner-only)
+      summary: Partial update (owner or team-admin)
+      description: |
+        Owner-only for ``scope='user'`` rows; team-admin-only for
+        ``scope='team'`` rows (D8.1b). Audit details on team-scope
+        rows carry ``team_id`` alongside slug + changed fields.
       requestBody:
         required: true
         content:
@@ -1172,22 +1199,24 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/UserSkill'}
         '404':
-          description: Skill not found OR not owned by the caller.
+          description: Skill not found OR caller is not the owner / not a team-admin.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
     delete:
       tags: [user-skills]
-      summary: Soft-delete (owner-only)
+      summary: Soft-delete (owner or team-admin)
       description: |
-        Sets ``archived_at = now()``. The slug is freed for a new
-        user-scope skill of the same slug after archive. Audit log
-        records the deletion with the row's identity.
+        Owner-only for ``scope='user'`` rows; team-admin-only for
+        ``scope='team'`` rows (D8.1b). Sets ``archived_at = now()``.
+        The slug is freed for a new skill at the same slug after
+        archive. Audit log records the deletion with the row's
+        identity; team-scope rows carry ``team_id`` in the details bag.
       responses:
         '204':
           description: Deleted
         '404':
-          description: Skill not found OR not owned by the caller.
+          description: Skill not found OR caller is not the owner / not a team-admin.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -1268,9 +1297,21 @@ paths:
         in: path
         required: true
         schema: {type: string}
+      - name: user_id
+        in: query
+        required: false
+        schema: {type: string, format: uuid}
+        description: |
+          When supplied, the resolver applies the D8.1b stack (per
+          ADR 0012): user shadow → team shadow → filesystem built-in.
+          A non-archived ``user_skills`` row for that user at this slug
+          wins outright; otherwise the newest non-archived team-scope
+          row owned by any team the user is a member of wins;
+          otherwise the filesystem-canonical built-in is returned.
+          When omitted, the registry view (built-in only) is returned.
     get:
       tags: [internal]
-      summary: Internal — fetch a skill from the registry (gateway → backend)
+      summary: Internal — fetch a skill (gateway → backend; user > team > built-in)
       description: |
         Service-to-service endpoint used by the Inference Gateway during
         prompt assembly (Task C2 / ADR 0007). The user-facing
@@ -1283,10 +1324,15 @@ paths:
         auth; internal routes stay under shared-secret auth. The two
         never mix on a single route.
 
+        The optional ``user_id`` query param activates the D8.1b
+        resolution stack (user > team > built-in). Multi-team conflicts
+        resolve to the row with the most recent ``updated_at``. The
+        gateway's skill cache stays keyed on ``(name, user_id)``;
+        team-membership changes propagate via the existing TTL.
+
         The response shape matches `GET /api/v1/skills/{name}` (the
         `Skill` schema) so the gateway-side client reuses the same
-        response model. Path differs; auth scheme differs; response
-        shape is identical.
+        response model.
       security:
         - gatewayKeyAuth: []
       responses:
@@ -2726,15 +2772,24 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
 
-    # D8 — DB-backed user skills (ADR 0012).
+    # D8 + D8.1b — DB-backed user/team skills (ADR 0012).
     UserSkill:
       type: object
       required:
-        [id, scope, owner_user_id, slug, display_name, description, version, body, created_at, updated_at]
+        [id, scope, slug, display_name, description, version, body, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
-        scope: {type: string, enum: [user, team], description: D8 only emits 'user'; 'team' arrives in D8.1.}
-        owner_user_id: {type: string, format: uuid}
+        scope: {type: string, enum: [user, team], description: '''user'' is owned by ``owner_user_id``; ''team'' is owned by ``owner_team_id`` (D8.1b).'}
+        owner_user_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set when scope='user'; null when scope='team'. Exactly one of owner_user_id / owner_team_id is non-null (enforced by ck_user_skills_scope_owner_consistency).
+        owner_team_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set when scope='team' (D8.1b). null when scope='user'.
         slug: {type: string, description: Stable identifier; matches filesystem skill folder-name conventions.}
         display_name: {type: string}
         description: {type: string}
@@ -2763,6 +2818,16 @@ components:
         version: {type: string, default: '1.0.0', maxLength: 50}
         tags: {type: array, items: {type: string}, maxItems: 20}
         frontmatter_extra: {type: object, additionalProperties: true}
+        scope:
+          type: string
+          enum: [user, team]
+          default: user
+          description: Defaults to 'user'. 'team' (D8.1b) requires owner_team_id and gates on team-admin role.
+        owner_team_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Required when scope='team'; must be null when scope='user'. 422 if the combination is inconsistent. 404 if the caller is not a team-admin of the named team (id-probing-safe).
 
     UserSkillUpdate:
       type: object
