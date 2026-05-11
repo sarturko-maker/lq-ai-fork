@@ -34,7 +34,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import Text, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._stub import not_implemented
@@ -232,14 +232,230 @@ async def get_audit_log(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/tier-policy")
-async def get_tier_policy(request: Request, _admin: AdminUser) -> JSONResponse:
-    return not_implemented(request, next_task=_D1, endpoint="GET /api/v1/admin/tier-policy")
+class TierPolicyResponse(BaseModel):
+    """``GET /admin/tier-policy`` body (Wave B)."""
+
+    allowed_tiers_global: list[int]
+    default_minimum_tier: int
+    privileged_minimum_tier: int
+    warn_on_tiers: list[int]
 
 
-@router.patch("/tier-policy")
-async def update_tier_policy(request: Request, _admin: AdminUser) -> JSONResponse:
-    return not_implemented(request, next_task=_D1, endpoint="PATCH /api/v1/admin/tier-policy")
+class TierPolicyPatchRequest(BaseModel):
+    """``PATCH /admin/tier-policy`` body — partial update (Wave B)."""
+
+    allowed_tiers_global: list[int] | None = None
+    default_minimum_tier: int | None = Field(default=None, ge=1, le=5)
+    privileged_minimum_tier: int | None = Field(default=None, ge=1, le=5)
+    warn_on_tiers: list[int] | None = None
+
+
+def _project_tier_policy(payload: dict[str, Any]) -> TierPolicyResponse:
+    policy = payload.get("tier_policy", {})
+    return TierPolicyResponse(
+        allowed_tiers_global=list(policy.get("allowed_tiers_global") or [1, 2, 3, 4]),
+        default_minimum_tier=int(policy.get("default_minimum_tier", 4)),
+        privileged_minimum_tier=int(policy.get("privileged_minimum_tier", 3)),
+        warn_on_tiers=list(policy.get("warn_on_tiers") or [4, 5]),
+    )
+
+
+@router.get("/tier-policy", response_model=TierPolicyResponse)
+async def get_tier_policy(
+    request: Request,
+    _admin: AdminUser,
+    gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
+) -> TierPolicyResponse:
+    """GET /api/v1/admin/tier-policy — operator's tier policy (admin-only).
+
+    Returns the same shape as ``GET /api/v1/inference/tier-config``;
+    the admin variant exists so the admin UI can render the policy on
+    the operator console without granting the read endpoint to every
+    user (it's already user-accessible at the non-admin URL, but
+    surfacing it under /admin keeps the operator UI's permission model
+    clean).
+    """
+
+    payload = await gateway.get_tier_config(
+        request_id=request.headers.get("x-request-id")
+    )
+    return _project_tier_policy(payload)
+
+
+@router.patch("/tier-policy", response_model=TierPolicyResponse)
+async def update_tier_policy(
+    request: Request,
+    body: TierPolicyPatchRequest,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
+) -> TierPolicyResponse:
+    """PATCH /api/v1/admin/tier-policy — partial-update the tier policy.
+
+    Proxies through to the gateway's PATCH /admin/v1/tier-config (which
+    atomically rewrites ``gateway.yaml`` and reloads the live snapshot).
+    Writes a ``tier_policy.updated`` audit row with before/after values
+    so a privacy auditor can reconstruct the policy history.
+    """
+
+    from app.audit import audit_action
+
+    before_payload = await gateway.get_tier_config(
+        request_id=request.headers.get("x-request-id")
+    )
+    before = _project_tier_policy(before_payload)
+
+    payload_to_send = body.model_dump(exclude_none=True)
+    if not payload_to_send:
+        return before
+
+    updated_payload = await gateway.patch_tier_config(
+        body=payload_to_send,
+        request_id=request.headers.get("x-request-id"),
+    )
+    after = _project_tier_policy(updated_payload)
+
+    if after.model_dump() != before.model_dump():
+        await audit_action(
+            db,
+            user_id=admin.id,
+            action="tier_policy.updated",
+            resource_type="tier_policy",
+            resource_id="singleton",
+            request=request,
+            details={
+                "before": before.model_dump(),
+                "after": after.model_dump(),
+                "fields_supplied": sorted(payload_to_send.keys()),
+            },
+        )
+        await db.commit()
+
+    return after
+
+
+# ---------------------------------------------------------------------------
+# Wave B — /admin/usage (cost + tokens dashboard)
+# ---------------------------------------------------------------------------
+
+
+class UsageRow(BaseModel):
+    """One aggregated row from /admin/usage."""
+
+    group_key: str
+    request_count: int
+    tokens_in_sum: int = 0
+    tokens_out_sum: int = 0
+    cost_estimate_sum: float = 0.0
+
+
+class UsageResponse(BaseModel):
+    rows: list[UsageRow]
+    group_by: str
+    total_request_count: int
+    total_tokens_in: int
+    total_tokens_out: int
+    total_cost_estimate: float
+
+
+_USAGE_GROUP_BY = {"user", "provider", "model", "tier", "day"}
+
+
+@router.get("/usage", response_model=UsageResponse)
+async def get_usage(
+    request: Request,
+    _admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_by: str = Query(default="provider"),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    user_id: str | None = Query(default=None),
+    provider: str | None = Query(default=None),
+    model: str | None = Query(default=None),
+    tier: int | None = Query(default=None, ge=1, le=5),
+) -> UsageResponse:
+    """GET /api/v1/admin/usage — cost + tokens aggregations (Wave B / PRD §5.5).
+
+    Aggregates ``inference_routing_log`` by one of: user, provider,
+    model, tier, day. Filters on the same dimensions plus a date range.
+    Refusals are excluded by default (they didn't consume tokens
+    upstream). All counts/sums are returned alongside a deployment-wide
+    total so the admin UI can render percentages without a second
+    query.
+    """
+
+    from app.models.inference import InferenceRoutingLog
+
+    if group_by not in _USAGE_GROUP_BY:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=422,
+            detail=f"group_by must be one of {sorted(_USAGE_GROUP_BY)}",
+        )
+
+    group_col_map = {
+        "user": func.coalesce(
+            func.cast(InferenceRoutingLog.user_id, type_=Text),
+            "anonymous",
+        ),
+        "provider": InferenceRoutingLog.routed_provider,
+        "model": InferenceRoutingLog.routed_model,
+        "tier": func.cast(InferenceRoutingLog.routed_inference_tier, type_=Text),
+        "day": func.to_char(InferenceRoutingLog.timestamp, "YYYY-MM-DD"),
+    }
+    group_col = group_col_map[group_by]
+
+    conditions = [InferenceRoutingLog.refused.is_(False)]
+    if date_from is not None:
+        conditions.append(InferenceRoutingLog.timestamp >= date_from)
+    if date_to is not None:
+        conditions.append(InferenceRoutingLog.timestamp <= date_to)
+    if user_id is not None:
+        conditions.append(
+            func.cast(InferenceRoutingLog.user_id, type_=Text) == user_id
+        )
+    if provider is not None:
+        conditions.append(InferenceRoutingLog.routed_provider == provider)
+    if model is not None:
+        conditions.append(InferenceRoutingLog.routed_model == model)
+    if tier is not None:
+        conditions.append(InferenceRoutingLog.routed_inference_tier == tier)
+
+    stmt = (
+        select(
+            group_col.label("group_key"),
+            func.count().label("request_count"),
+            func.coalesce(func.sum(InferenceRoutingLog.tokens_in), 0).label("tokens_in_sum"),
+            func.coalesce(func.sum(InferenceRoutingLog.tokens_out), 0).label("tokens_out_sum"),
+            func.coalesce(func.sum(InferenceRoutingLog.cost_estimate), 0).label("cost_estimate_sum"),
+        )
+        .where(and_(*conditions))
+        .group_by(group_col)
+        .order_by(func.count().desc())
+    )
+
+    rows = (await db.execute(stmt)).all()
+
+    usage_rows = [
+        UsageRow(
+            group_key=str(row.group_key) if row.group_key is not None else "unknown",
+            request_count=int(row.request_count or 0),
+            tokens_in_sum=int(row.tokens_in_sum or 0),
+            tokens_out_sum=int(row.tokens_out_sum or 0),
+            cost_estimate_sum=float(row.cost_estimate_sum or 0),
+        )
+        for row in rows
+    ]
+
+    return UsageResponse(
+        rows=usage_rows,
+        group_by=group_by,
+        total_request_count=sum(r.request_count for r in usage_rows),
+        total_tokens_in=sum(r.tokens_in_sum for r in usage_rows),
+        total_tokens_out=sum(r.tokens_out_sum for r in usage_rows),
+        total_cost_estimate=sum(r.cost_estimate_sum for r in usage_rows),
+    )
 
 
 # ---------------------------------------------------------------------------
