@@ -18,3 +18,4 @@ export * as savedPromptsApi from './savedPrompts';
 export * as userSkillsApi from './userSkills';
 export * as teamsApi from './teams';
 export * as preferencesApi from './preferences';
+export * as usersApi from './users';
