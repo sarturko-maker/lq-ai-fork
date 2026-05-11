@@ -26,6 +26,7 @@ from app.api import (
     admin,
     auth,
     chats,
+    enhance_prompt,
     files,
     internal,
     knowledge_bases,
@@ -66,6 +67,7 @@ api_router.include_router(saved_prompts.router, dependencies=_active)
 api_router.include_router(user_skills.router, dependencies=_active)
 api_router.include_router(teams.user_router, dependencies=_active)
 api_router.include_router(teams.admin_router, dependencies=_active)
+api_router.include_router(enhance_prompt.router, dependencies=_active)
 api_router.include_router(admin.router, dependencies=_active)
 
 __all__ = ["api_router"]

@@ -58,6 +58,8 @@ _PARAM_VALUES: dict[str, str] = {
     "skill_name": "nda-review",
     "team_id": _DUMMY_UUID,
     "user_id": _DUMMY_UUID,
+    "interaction_id": _DUMMY_UUID,
+    "job_id": _DUMMY_UUID,
 }
 
 
@@ -180,6 +182,15 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/knowledge-bases/{kb_id}/files"),
     ("DELETE", "/api/v1/knowledge-bases/{kb_id}/files/{file_id}"),
     ("POST", "/api/v1/knowledge-bases/{kb_id}/query"),
+    # Wave A — Enhance Prompt (PRD §3.2)
+    ("POST", "/api/v1/enhance-prompt"),
+    ("PATCH", "/api/v1/enhance-prompt/{interaction_id}"),
+    # Wave A — skill inspection (PRD §3.4)
+    ("GET", "/api/v1/skills/{skill_name}/contents"),
+    ("GET", "/api/v1/skills/{skill_name}/inputs"),
+    # Wave A — user preferences (reasoning_visibility per PRD §3.2)
+    ("GET", "/api/v1/users/me/preferences"),
+    ("PATCH", "/api/v1/users/me/preferences"),
 }
 
 
