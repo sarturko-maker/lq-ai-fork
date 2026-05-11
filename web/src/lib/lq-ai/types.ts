@@ -327,6 +327,13 @@ export interface Skill extends SkillSummary {
 	inputs?: SkillInputDef[];
 }
 
+/** Response shape for GET /api/v1/skills/{name}/inputs. Resolves user > team > built-in. */
+export interface SkillInputs {
+	name: string;
+	required: SkillInputDef[];
+	optional: SkillInputDef[];
+}
+
 // ----- Files -----
 
 export type IngestionStatus = 'pending' | 'processing' | 'ready' | 'failed';

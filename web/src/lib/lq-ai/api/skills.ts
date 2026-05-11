@@ -10,12 +10,17 @@
  * Skill payload, this client adopts that and skips the local parse.
  */
 import { apiRequest } from './client';
-import type { Skill, SkillInputDef, SkillSummary } from '../types';
+import type { Skill, SkillInputDef, SkillInputs, SkillSummary } from '../types';
 
 /** GET /api/v1/skills — summary list. */
 export async function listSkills(scope?: 'builtin' | 'user' | 'team'): Promise<SkillSummary[]> {
 	const qs = scope ? `?scope=${encodeURIComponent(scope)}` : '';
 	return apiRequest<SkillSummary[]>(`/skills${qs}`);
+}
+
+/** GET /api/v1/skills/{name}/inputs — canonical input definitions resolved user > team > built-in. */
+export async function getInputs(name: string): Promise<SkillInputs> {
+	return apiRequest<SkillInputs>(`/skills/${encodeURIComponent(name)}/inputs`);
 }
 
 /**
