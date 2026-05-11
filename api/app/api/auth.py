@@ -239,22 +239,38 @@ async def _create_session(
     db: AsyncSession,
     user: User,
     request: Request,
+    *,
+    absolute_expires_at: datetime | None = None,
 ) -> tuple[str, UserSession]:
     """Mint and persist a new refresh-token session.
 
     Returns (plaintext_refresh_token, the inserted UserSession row).
     The plaintext is for the response body; the row carries the hash.
+
+    M-Sec.1 — ``absolute_expires_at`` carries the original-login deadline
+    across refresh rotations. On a fresh login (``None``), the deadline
+    is computed from ``settings.session_absolute_timeout_seconds`` (PRD
+    §5.1 default 8h). On a refresh, the caller passes the matched
+    session's ``absolute_expires_at`` so the clock keeps running from
+    the user's first password entry, not from the most recent rotation.
     """
     settings = get_settings()
     plaintext, hashed = create_refresh_token()
     user_agent, ip_address = _client_metadata(request)
+
+    now = _utcnow()
+    effective_absolute = absolute_expires_at or (
+        now + timedelta(seconds=settings.session_absolute_timeout_seconds)
+    )
 
     session = UserSession(
         user_id=user.id,
         refresh_token_hash=hashed,
         user_agent=user_agent,
         ip_address=ip_address,
-        expires_at=_utcnow() + timedelta(seconds=settings.jwt_refresh_token_ttl_seconds),
+        expires_at=now + timedelta(seconds=settings.jwt_refresh_token_ttl_seconds),
+        absolute_expires_at=effective_absolute,
+        last_active_at=now,
     )
     db.add(session)
     await db.flush()
@@ -432,6 +448,53 @@ async def refresh(
             detail="Invalid refresh token",
         )
 
+    # M-Sec.1 — absolute + idle timeout enforcement (PRD §5.1).
+    # Enforced at refresh time only because access tokens are short
+    # (15min default) and a stale access token expires on its own; this
+    # keeps the JWT path stateless and avoids per-request DB hits.
+    if now > matched.absolute_expires_at:
+        matched.revoked_at = now
+        await audit_action(
+            db,
+            user_id=matched.user_id,
+            action="user.session_refresh_failed",
+            resource_type="user_session",
+            resource_id=str(matched.id),
+            request=request,
+            details={
+                "reason": "absolute_timeout_exceeded",
+                "absolute_expires_at": matched.absolute_expires_at.isoformat(),
+            },
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has reached its absolute timeout; please log in again",
+        )
+
+    idle_deadline = matched.last_active_at + timedelta(
+        seconds=settings.session_idle_timeout_seconds
+    )
+    if now > idle_deadline:
+        matched.revoked_at = now
+        await audit_action(
+            db,
+            user_id=matched.user_id,
+            action="user.session_refresh_failed",
+            resource_type="user_session",
+            resource_id=str(matched.id),
+            request=request,
+            details={
+                "reason": "idle_timeout_exceeded",
+                "last_active_at": matched.last_active_at.isoformat(),
+            },
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been idle too long; please log in again",
+        )
+
     # Look up the owning user; if missing or soft-deleted, refuse.
     user_result = await db.execute(
         select(User).where(User.id == matched.user_id, User.deleted_at.is_(None))
@@ -456,8 +519,16 @@ async def refresh(
     # Rotate: revoke this session, mint a fresh one. Both happen in the
     # same transaction so a crash mid-way doesn't leave the user with an
     # active old session and no new one (or two active sessions).
+    # M-Sec.1 — propagate the absolute-timeout deadline forward so the
+    # original-login clock survives rotation. ``last_active_at`` on the
+    # new row is stamped fresh by ``_create_session``.
     matched.revoked_at = now
-    plaintext, _new_session = await _create_session(db, user, request)
+    plaintext, _new_session = await _create_session(
+        db,
+        user,
+        request,
+        absolute_expires_at=matched.absolute_expires_at,
+    )
     await audit_action(
         db,
         user_id=user.id,

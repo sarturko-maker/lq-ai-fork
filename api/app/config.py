@@ -158,6 +158,46 @@ class Settings(BaseSettings):
         description="Refresh-token TTL in seconds. Default: 7 days.",
     )
 
+    # M-Sec.1 — session timeouts per PRD §5.1. Both are configurable;
+    # defaults match the PRD's stated floor (8h absolute, 30m idle).
+    # The refresh handler enforces both; access tokens themselves use
+    # ``jwt_access_token_ttl_seconds``. Setting either timeout shorter
+    # than the access-token TTL effectively means "the access token
+    # outlives the session" — operators tuning the absolute below
+    # ``jwt_access_token_ttl_seconds`` should also shorten the access
+    # token to match (or accept the implicit drift).
+    session_absolute_timeout_seconds: int = Field(
+        default=28800,  # 8h
+        description=(
+            "Absolute session timeout in seconds. Copied verbatim "
+            "across refresh-token rotations; the refresh endpoint "
+            "401s when exceeded. PRD §5.1 default: 8 hours."
+        ),
+    )
+    session_idle_timeout_seconds: int = Field(
+        default=1800,  # 30m
+        description=(
+            "Idle session timeout in seconds. Refreshing the access "
+            "token resets the clock; the refresh endpoint 401s when "
+            "exceeded. PRD §5.1 default: 30 minutes."
+        ),
+    )
+
+    # M-Sec.1 — MFA-mandatory deployment flag per PRD §5.1. When True,
+    # the backend treats any authenticated user without MFA enrolled
+    # as not-fully-authenticated for normal endpoints — they can only
+    # call the MFA enrollment flow (and a small whitelist of safe
+    # endpoints like ``/users/me`` and ``/auth/logout``). Operators
+    # handling client-confidential data are expected to enable this.
+    mfa_mandatory: bool = Field(
+        default=False,
+        description=(
+            "Require MFA enrollment for every user. When True, "
+            "non-enrolled users are gated to the MFA-setup endpoints "
+            "until they enroll."
+        ),
+    )
+
     # ----- Password hashing (per ADR 0002) -----
     # Default 12 rounds matches bcrypt's library default and the OWASP
     # password-storage recommendation. Operators may tune downward in CI

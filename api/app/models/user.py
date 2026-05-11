@@ -109,6 +109,20 @@ class UserSession(Base):
         server_default=text("now()"),
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # M-Sec.1 — absolute session timeout per PRD §5.1 (8h default). Copied
+    # verbatim across refresh-token rotations so the original-login clock
+    # is preserved; the refresh handler 401s when ``now > absolute_expires_at``.
+    absolute_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    # M-Sec.1 — idle-timeout clock per PRD §5.1 (30m default). Stamped on
+    # insert; updated on each refresh. The refresh handler 401s when the
+    # gap from ``last_active_at`` to ``now`` exceeds the idle timeout.
+    last_active_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
 
     def __repr__(self) -> str:
         return f"<UserSession id={self.id} user_id={self.user_id} revoked={self.revoked_at is not None}>"
