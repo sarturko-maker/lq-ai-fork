@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.main import app
 from app.models import AuditLog, User, UserSkill
+from app.models.team import Team, TeamMember
 from app.security import create_access_token, hash_password
 from app.skills import load_registry
 from app.skills.registry import MutableSkillRegistry
@@ -675,3 +676,334 @@ async def test_user_skills_table_indexes_exist(db_session: AsyncSession) -> None
     )
     found = {row[0] for row in result.fetchall()}
     assert found == expected, f"missing: {expected - found}"
+
+
+# ---------------------------------------------------------------------------
+# D8.1b — team-scope user-skills (POST/PATCH/DELETE branches)
+# ---------------------------------------------------------------------------
+
+
+async def _make_team(
+    db_session: AsyncSession,
+    *,
+    slug: str,
+    creator: User,
+    admins: list[User] | None = None,
+    members: list[User] | None = None,
+) -> Team:
+    """Create a team and populate its membership in one shot.
+
+    ``creator`` is implicitly added as a team-admin member (mirrors the
+    auto-membership the ``POST /admin/teams`` handler performs); extra
+    admins / members ride the explicit lists.
+    """
+
+    team = Team(
+        slug=slug,
+        name=slug.replace("-", " ").title(),
+        created_by_user_id=creator.id,
+    )
+    db_session.add(team)
+    await db_session.flush()
+
+    db_session.add(
+        TeamMember(
+            team_id=team.id,
+            user_id=creator.id,
+            role="admin",
+            added_by_user_id=creator.id,
+        )
+    )
+    for admin in admins or []:
+        if admin.id == creator.id:
+            continue
+        db_session.add(
+            TeamMember(
+                team_id=team.id,
+                user_id=admin.id,
+                role="admin",
+                added_by_user_id=creator.id,
+            )
+        )
+    for member in members or []:
+        if member.id == creator.id:
+            continue
+        db_session.add(
+            TeamMember(
+                team_id=team.id,
+                user_id=member.id,
+                role="member",
+                added_by_user_id=creator.id,
+            )
+        )
+    await db_session.flush()
+    return team
+
+
+@pytest.mark.integration
+async def test_create_team_scope_skill_as_team_admin_returns_201(
+    client: AsyncClient, db_session: AsyncSession, user_a: User
+) -> None:
+    """Team admin posts a team-scope skill → 201; row carries owner_team_id,
+    audit details include team_id + team_slug."""
+
+    team = await _make_team(db_session, slug="contracts", creator=user_a)
+
+    resp = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(
+            slug="team-nda", scope="team", owner_team_id=str(team.id)
+        ),
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["scope"] == "team"
+    assert body["owner_user_id"] is None
+    assert body["owner_team_id"] == str(team.id)
+    assert body["slug"] == "team-nda"
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "user_skill.created",
+                AuditLog.resource_id == body["id"],
+            )
+        )
+    ).scalar_one()
+    assert audit.details["scope"] == "team"
+    assert audit.details["team_id"] == str(team.id)
+    assert audit.details["team_slug"] == "contracts"
+
+
+@pytest.mark.integration
+async def test_create_team_scope_skill_as_member_returns_404(
+    client: AsyncClient, db_session: AsyncSession, user_a: User, user_b: User
+) -> None:
+    """Non-admin members cannot create team-scope skills. 404 (not 403) keeps
+    the id-probing-safe posture: a stranger can't distinguish 'wrong role'
+    from 'no such team' by status code alone."""
+
+    team = await _make_team(
+        db_session, slug="readers", creator=user_a, members=[user_b]
+    )
+
+    resp = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_b),
+        json=_post_body(
+            slug="member-attempt", scope="team", owner_team_id=str(team.id)
+        ),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_create_team_scope_skill_as_non_member_returns_404(
+    client: AsyncClient, db_session: AsyncSession, user_a: User, user_b: User
+) -> None:
+    """A user with no membership in the named team → 404 (same id-probing posture)."""
+
+    team = await _make_team(db_session, slug="strangers", creator=user_a)
+
+    resp = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_b),
+        json=_post_body(
+            slug="stranger-attempt", scope="team", owner_team_id=str(team.id)
+        ),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_create_team_scope_without_owner_team_id_returns_422(
+    client: AsyncClient, user_a: User
+) -> None:
+    resp = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="no-team", scope="team"),
+    )
+    assert resp.status_code == 422
+    assert "owner_team_id is required" in resp.json()["detail"]
+
+
+@pytest.mark.integration
+async def test_create_user_scope_with_owner_team_id_returns_422(
+    client: AsyncClient, db_session: AsyncSession, user_a: User
+) -> None:
+    """Hybrid rows (scope=user + owner_team_id set) are rejected at the API
+    boundary — keeps the DB CHECK constraint as defense-in-depth."""
+
+    team = await _make_team(db_session, slug="oops", creator=user_a)
+
+    resp = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(
+            slug="hybrid", scope="user", owner_team_id=str(team.id)
+        ),
+    )
+    assert resp.status_code == 422
+    assert "must be null" in resp.json()["detail"]
+
+
+@pytest.mark.integration
+async def test_create_team_scope_slug_collision_returns_409(
+    client: AsyncClient, db_session: AsyncSession, user_a: User
+) -> None:
+    """Two non-archived team-scope rows at the same (team, slug) violate the
+    partial UNIQUE index. The handler surfaces 409 with a team-flavored
+    error message."""
+
+    team = await _make_team(db_session, slug="docs", creator=user_a)
+
+    first = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="onboard", scope="team", owner_team_id=str(team.id)),
+    )
+    assert first.status_code == 201
+
+    second = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="onboard", scope="team", owner_team_id=str(team.id)),
+    )
+    assert second.status_code == 409
+    assert "team" in second.json()["detail"]
+
+
+@pytest.mark.integration
+async def test_team_and_user_scope_can_share_slug(
+    client: AsyncClient, db_session: AsyncSession, user_a: User
+) -> None:
+    """A user can simultaneously have a user-scope shadow AND a team-scope
+    skill at the same slug — the partial UNIQUE indexes are scope-segmented.
+    The D8.1b resolver picks the user one for that user."""
+
+    team = await _make_team(db_session, slug="ny-litigation", creator=user_a)
+
+    user_row = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="briefing"),
+    )
+    assert user_row.status_code == 201
+
+    team_row = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="briefing", scope="team", owner_team_id=str(team.id)),
+    )
+    assert team_row.status_code == 201
+
+
+@pytest.mark.integration
+async def test_patch_team_scope_as_team_admin_succeeds(
+    client: AsyncClient, db_session: AsyncSession, user_a: User
+) -> None:
+    team = await _make_team(db_session, slug="patchers", creator=user_a)
+
+    created = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="team-edit", scope="team", owner_team_id=str(team.id)),
+    )
+    skill_id = created.json()["id"]
+
+    resp = await client.patch(
+        f"/api/v1/user-skills/{skill_id}",
+        headers=_bearer(user_a),
+        json={"display_name": "Renamed Team Skill"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["display_name"] == "Renamed Team Skill"
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "user_skill.updated",
+                AuditLog.resource_id == skill_id,
+            )
+        )
+    ).scalar_one()
+    assert audit.details["scope"] == "team"
+    assert audit.details["team_id"] == str(team.id)
+
+
+@pytest.mark.integration
+async def test_patch_team_scope_as_member_returns_404(
+    client: AsyncClient, db_session: AsyncSession, user_a: User, user_b: User
+) -> None:
+    """A non-admin member sees the team-scope row in the picker but cannot
+    PATCH it — 404 keeps the id-probing-safe posture."""
+
+    team = await _make_team(
+        db_session, slug="read-only", creator=user_a, members=[user_b]
+    )
+    created = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="member-cant-edit", scope="team", owner_team_id=str(team.id)),
+    )
+    skill_id = created.json()["id"]
+
+    resp = await client.patch(
+        f"/api/v1/user-skills/{skill_id}",
+        headers=_bearer(user_b),
+        json={"display_name": "I am a member trying to edit"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_delete_team_scope_as_team_admin_archives_row(
+    client: AsyncClient, db_session: AsyncSession, user_a: User
+) -> None:
+    team = await _make_team(db_session, slug="deleters", creator=user_a)
+    created = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="team-archive", scope="team", owner_team_id=str(team.id)),
+    )
+    skill_id = created.json()["id"]
+
+    resp = await client.delete(
+        f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_a)
+    )
+    assert resp.status_code == 204
+
+    row = await db_session.get(UserSkill, uuid.UUID(skill_id))
+    assert row is not None
+    assert row.archived_at is not None
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "user_skill.deleted",
+                AuditLog.resource_id == skill_id,
+            )
+        )
+    ).scalar_one()
+    assert audit.details["scope"] == "team"
+    assert audit.details["team_id"] == str(team.id)
+
+
+@pytest.mark.integration
+async def test_delete_team_scope_as_non_member_returns_404(
+    client: AsyncClient, db_session: AsyncSession, user_a: User, user_b: User
+) -> None:
+    team = await _make_team(db_session, slug="locked", creator=user_a)
+    created = await client.post(
+        "/api/v1/user-skills",
+        headers=_bearer(user_a),
+        json=_post_body(slug="locked-skill", scope="team", owner_team_id=str(team.id)),
+    )
+    skill_id = created.json()["id"]
+
+    resp = await client.delete(
+        f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_b)
+    )
+    assert resp.status_code == 404
