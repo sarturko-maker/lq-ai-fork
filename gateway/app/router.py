@@ -68,8 +68,41 @@ from app.providers import (
     ProviderHTTPError,
     ProviderNetworkError,
 )
+from app.observability import INFERENCE_REQUESTS_TOTAL
 
 logger = logging.getLogger(__name__)
+
+
+def _outcome_label_from_error(exc: ProviderAdapterError) -> str:
+    """Pick a stable outcome label for the inference-dispatch metric.
+
+    Keeps cardinality bounded — three buckets cover the operator
+    questions the metric answers: "did the provider service the call",
+    "did it fail at the network layer", "did it return a non-success
+    HTTP status".
+    """
+
+    if isinstance(exc, ProviderNetworkError):
+        return "network_error"
+    if isinstance(exc, ProviderHTTPError):
+        return "provider_error"
+    return "provider_error"
+
+
+def _record_inference_outcome(*, target: ResolvedTarget, outcome: str) -> None:
+    """Increment the inference-dispatch counter for one routed request.
+
+    Called from the dispatch loop on both success and error paths. The
+    ``target`` is the candidate the router actually tried (primary or
+    fallback); ``outcome`` is one of the four stable label values
+    documented on :data:`INFERENCE_REQUESTS_TOTAL`.
+    """
+
+    INFERENCE_REQUESTS_TOTAL.labels(
+        provider=target.provider.name,
+        tier=str(target.routed_inference_tier),
+        outcome=outcome,
+    ).inc()
 
 
 # --- Exceptions ---------------------------------------------------------------
@@ -612,6 +645,10 @@ class Router:
                     # handler can map to the right HTTP status. Wrap with
                     # the target so the routing-log row attributes the
                     # failure to the right upstream.
+                    _record_inference_outcome(
+                        target=target,
+                        outcome=_outcome_label_from_error(exc),
+                    )
                     raise RoutedProviderError(
                         target=target,
                         error=exc,
@@ -629,6 +666,7 @@ class Router:
                 )
 
             latency_ms = int((time.monotonic() - start) * 1000)
+            _record_inference_outcome(target=target, outcome="success")
             return ChatCompletionRoutedResult(
                 response=result,
                 target=target,
@@ -638,6 +676,10 @@ class Router:
 
         # Every candidate failed.
         if last_error is not None and last_error_target is not None:
+            _record_inference_outcome(
+                target=last_error_target,
+                outcome=_outcome_label_from_error(last_error),
+            )
             raise RoutedProviderError(
                 target=last_error_target,
                 error=last_error,
