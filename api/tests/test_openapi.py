@@ -77,6 +77,27 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # user skills (D8 — DB-backed user-scope skills per ADR 0012)
         "/api/v1/user-skills",
         "/api/v1/user-skills/{skill_id}",
+        # teams (D8.1a — admin CRUD + user-facing read)
+        "/api/v1/teams",
+        "/api/v1/teams/{team_id}",
+        "/api/v1/admin/teams",
+        "/api/v1/admin/teams/{team_id}",
+        "/api/v1/admin/teams/{team_id}/members",
+        "/api/v1/admin/teams/{team_id}/members/{user_id}",
+        # Wave A — skill inspection (PRD §3.4) + Enhance Prompt (PRD §3.2)
+        "/api/v1/skills/{skill_name}/contents",
+        "/api/v1/skills/{skill_name}/inputs",
+        "/api/v1/enhance-prompt",
+        "/api/v1/enhance-prompt/{interaction_id}",
+        # Wave A — user preferences (reasoning_visibility per PRD §3.2)
+        "/api/v1/users/me/preferences",
+        # Wave B — tier inquiry (PRD §3.13) + cost dashboard (PRD §5.5) + chat search (PRD §1.7)
+        "/api/v1/inference/current-tier",
+        "/api/v1/inference/tier-config",
+        "/api/v1/admin/usage",
+        "/api/v1/chats/search",
+        # Wave C — RBAC role updates (PRD §5.2)
+        "/api/v1/admin/users/{user_id}/role",
         # admin
         "/api/v1/admin/audit-log",
         "/api/v1/admin/tier-policy",
@@ -108,14 +129,15 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 48 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
+    # 64 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
     # alias endpoints + D5's two new MFA endpoints + D6's two new GDPR
     # endpoints (status-poll for /users/me/export/{job_id} and
     # /users/me/delete/cancel) + D4's /organization-profile/raw
     # convenience endpoint + D4-coverage's
     # /internal/organization-profile + D8's two /api/v1/user-skills
-    # paths (extends the sketch).
-    assert len(actual) == 48
+    # paths + D8.1a's six teams paths + Wave A's five paths +
+    # Wave B's four paths + Wave C's /admin/users/{user_id}/role.
+    assert len(actual) == 64
 
 
 @pytest.mark.unit

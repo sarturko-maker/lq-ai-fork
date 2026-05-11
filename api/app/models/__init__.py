@@ -13,21 +13,25 @@ from __future__ import annotations
 from app.models.audit import AuditLog
 from app.models.chat import Chat, Message
 from app.models.document import Document, DocumentChunk
+from app.models.enhance_prompt import EnhancePromptInteraction
 from app.models.file import File
 from app.models.inference import InferenceRoutingLog
 from app.models.knowledge import KnowledgeBase, KnowledgeBaseFile
 from app.models.organization_profile import OrganizationProfile
 from app.models.project import Project, ProjectFile, ProjectSkill
 from app.models.saved_prompt import SavedPrompt
+from app.models.team import Team, TeamMember
 from app.models.user import User, UserSession
 from app.models.user_export import UserExportJob
 from app.models.user_skill import UserSkill
+from app.models.work_product import WorkProductAttribution
 
 __all__ = [
     "AuditLog",
     "Chat",
     "Document",
     "DocumentChunk",
+    "EnhancePromptInteraction",
     "File",
     "InferenceRoutingLog",
     "KnowledgeBase",
@@ -38,8 +42,11 @@ __all__ = [
     "ProjectFile",
     "ProjectSkill",
     "SavedPrompt",
+    "Team",
+    "TeamMember",
     "User",
     "UserExportJob",
     "UserSession",
     "UserSkill",
+    "WorkProductAttribution",
 ]

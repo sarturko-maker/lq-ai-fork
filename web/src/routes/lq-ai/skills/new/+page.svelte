@@ -1,20 +1,27 @@
 <script lang="ts">
 	/**
-	 * /lq-ai/skills/new — create a new user-scope skill (D8 / ADR 0012).
+	 * /lq-ai/skills/new — create a new user- or team-scope skill
+	 * (D8 / D8.1c / ADR 0012).
 	 *
-	 * The form fields map 1:1 to UserSkillCreate. The slug input watches
-	 * for collisions with filesystem-canonical built-ins and surfaces
-	 * a yellow inline note so the user knows their skill will shadow the
-	 * built-in for their chats. Collision is permitted (forking-by-
-	 * shadowing per PRD §1.3 transparency); the note exists to make the
-	 * behavior comprehensible, not to block.
+	 * The form fields map to ``UserSkillCreate``. Scope defaults to
+	 * ``'user'`` (Personal). Picking "Team" reveals a dropdown of teams
+	 * where the caller is a team-admin (fetched from ``GET /api/v1/teams
+	 * ?role=admin``); team scope is hidden entirely if the caller admins
+	 * no teams.
+	 *
+	 * The slug input watches for collisions with filesystem-canonical
+	 * built-ins and surfaces a yellow inline note so the user knows
+	 * their skill will shadow the built-in for the relevant scope.
+	 * Collision is permitted (forking-by-shadowing per PRD §1.3
+	 * transparency); the note exists to make the behavior comprehensible,
+	 * not to block.
 	 */
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
-	import { userSkillsApi, skillsApi } from '$lib/lq-ai/api';
+	import { userSkillsApi, skillsApi, teamsApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
-	import type { SkillSummary } from '$lib/lq-ai/types';
+	import type { SkillSummary, TeamSummary } from '$lib/lq-ai/types';
 
 	const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$/;
 
@@ -24,29 +31,39 @@
 	let version = '1.0.0';
 	let tagsInput = '';
 	let body = '';
+	let scope: 'user' | 'team' = 'user';
+	let ownerTeamId = '';
 	let submitting = false;
 	let submitError: string | null = null;
 	let builtinSlugs = new Set<string>();
+	let adminTeams: TeamSummary[] = [];
 	let loadError: string | null = null;
 
 	$: trimmedSlug = slug.trim();
 	$: slugIsValid = trimmedSlug.length > 0 && SLUG_RE.test(trimmedSlug);
 	$: shadowsBuiltIn = slugIsValid && builtinSlugs.has(trimmedSlug);
+	$: scopePickerEnabled = adminTeams.length > 0;
+	$: teamScopeReady = scope !== 'team' || ownerTeamId !== '';
 	$: canSubmit =
 		!submitting &&
 		slugIsValid &&
 		displayName.trim().length > 0 &&
 		description.trim().length > 0 &&
-		body.trim().length > 0;
+		body.trim().length > 0 &&
+		teamScopeReady;
 
-	async function loadBuiltins(): Promise<void> {
+	async function loadContext(): Promise<void> {
 		try {
-			const builtins = await skillsApi.listSkills('builtin');
+			const [builtins, teams] = await Promise.all([
+				skillsApi.listSkills('builtin'),
+				teamsApi.listMyTeams('admin')
+			]);
 			builtinSlugs = new Set(builtins.map((s: SkillSummary) => s.name));
+			adminTeams = teams;
 		} catch (e) {
-			console.error('user-skills/new: failed to load built-ins for shadow check', e);
+			console.error('user-skills/new: failed to load form context', e);
 			loadError =
-				'Could not load the built-in skill list to check for shadow collisions. You can still create the skill; the shadow indicator just won\'t appear.';
+				'Could not load reference data (built-in skills + your teams). You can still create a personal skill; team scope and the shadow indicator may not appear.';
 		}
 	}
 
@@ -68,14 +85,18 @@
 				description: description.trim(),
 				body,
 				version: version.trim() || '1.0.0',
-				tags: parseTags(tagsInput)
+				tags: parseTags(tagsInput),
+				scope,
+				owner_team_id: scope === 'team' ? ownerTeamId : null
 			});
 			goto(`/lq-ai/skills/${created.id}/edit?created=1`);
 		} catch (e) {
 			console.error('user-skills/new: create failed', e);
 			if (e instanceof LQAIApiError && e.status === 409) {
 				submitError =
-					'You already have a skill with this slug. Pick a different slug or archive the existing one first.';
+					scope === 'team'
+						? 'This team already has a skill with this slug. Pick a different slug or archive the existing one first.'
+						: 'You already have a skill with this slug. Pick a different slug or archive the existing one first.';
 			} else {
 				submitError = e instanceof Error ? e.message : 'Failed to create the skill.';
 			}
@@ -85,7 +106,7 @@
 	}
 
 	onMount(() => {
-		loadBuiltins();
+		loadContext();
 	});
 </script>
 
@@ -128,6 +149,58 @@
 		on:submit|preventDefault={submit}
 		data-testid="lq-ai-user-skill-new-form"
 	>
+		{#if scopePickerEnabled}
+			<fieldset
+				class="block border border-gray-200 dark:border-gray-800 rounded p-3"
+				data-testid="lq-ai-user-skill-new-scope"
+			>
+				<legend class="text-xs text-gray-600 dark:text-gray-400 px-1">Scope</legend>
+				<div class="flex flex-col gap-2 mt-1">
+					<label class="inline-flex items-start gap-2 text-sm">
+						<input
+							type="radio"
+							name="scope"
+							value="user"
+							bind:group={scope}
+							class="mt-0.5"
+							data-testid="lq-ai-user-skill-new-scope-user"
+						/>
+						<span>
+							<span class="font-medium text-gray-900 dark:text-gray-100">Personal</span>
+							<span class="text-xs text-gray-500 block">Only you see it. Shadows the built-in for your chats on slug collision.</span>
+						</span>
+					</label>
+					<label class="inline-flex items-start gap-2 text-sm">
+						<input
+							type="radio"
+							name="scope"
+							value="team"
+							bind:group={scope}
+							class="mt-0.5"
+							data-testid="lq-ai-user-skill-new-scope-team"
+						/>
+						<span class="flex-1">
+							<span class="font-medium text-gray-900 dark:text-gray-100">Team</span>
+							<span class="text-xs text-gray-500 block">Every team member sees it; only team-admins can edit. Shadows the built-in for team members on slug collision.</span>
+							{#if scope === 'team'}
+								<select
+									bind:value={ownerTeamId}
+									required
+									class="mt-2 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+									data-testid="lq-ai-user-skill-new-team-picker"
+								>
+									<option value="" disabled>Pick a team…</option>
+									{#each adminTeams as team (team.id)}
+										<option value={team.id}>{team.name} ({team.slug})</option>
+									{/each}
+								</select>
+							{/if}
+						</span>
+					</label>
+				</div>
+			</fieldset>
+		{/if}
+
 		<label class="block">
 			<span class="lq-text-label">Slug</span>
 			<input
@@ -154,10 +227,19 @@
 					data-testid="lq-ai-user-skill-new-shadow-warning"
 					role="status"
 				>
-					<strong>Heads up — this shadows a built-in.</strong> When you reference
+					<strong>Heads up — this shadows a built-in.</strong> When
+					{#if scope === 'team'}
+						any member of this team references
+					{:else}
+						you reference
+					{/if}
 					<code class="font-mono">{trimmedSlug}</code> in a chat,
-					<em>your</em> version will shape the prompt instead of the built-in. Other users still
-					see the built-in. Pick a different slug if you want both to coexist for you.
+					{#if scope === 'team'}
+						the <em>team's</em> version will shape the prompt instead of the built-in (users outside this team still see the built-in unless they have their own user-scope shadow).
+					{:else}
+						<em>your</em> version will shape the prompt instead of the built-in. Other users still see the built-in.
+					{/if}
+					Pick a different slug if you want both to coexist.
 				</div>
 			{/if}
 		</label>

@@ -37,6 +37,24 @@ dependencies = [
     # individual provider keys live encrypted in gateway.yaml under
     # api_key_encrypted: <fernet-token>.
     "cryptography>=42,<46",
+    # M-Obs.1 — Prometheus /metrics (PRD §5.4). The official client
+    # exposes a stdlib-only counter/histogram/gauge API plus an ASGI
+    # app for mounting at /metrics. Small, BSD-licensed, no transitive
+    # deps. The deployment scrapes /metrics from operator infra
+    # (Prometheus, Grafana Agent, Vector, etc.).
+    "prometheus-client>=0.20,<1",
+    # M-Obs.1 — OpenTelemetry instrumentation (PRD §5.4). The
+    # operator gets distributed traces spanning api → gateway →
+    # provider with standard W3C propagation. SDK is dormant unless
+    # OTEL_EXPORTER_OTLP_ENDPOINT is set — that's the "no telemetry
+    # by default" guarantee in PRD §5.7. Apache-2.0 across the OTel
+    # family. The pin-floor matches the OTel stable-API minor that
+    # ships the Python `metrics` API as stable.
+    "opentelemetry-api>=1.27,<2",
+    "opentelemetry-sdk>=1.27,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
+    "opentelemetry-instrumentation-fastapi>=0.48b0,<1",
+    "opentelemetry-instrumentation-httpx>=0.48b0,<1",
 ]
 
 [project.optional-dependencies]

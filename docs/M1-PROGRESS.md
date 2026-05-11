@@ -2,7 +2,7 @@
 
 > **Living status for the M1 build.** Updated at every session boundary or significant milestone. Pair this with `docs/M1-IMPLEMENTATION-ORDER.md` (which has the per-task spec, scope, and verification criteria) — this doc tracks what's *done* against that plan and what's *deferred* with explicit owning tasks.
 >
-> **Last updated:** 2026-05-10d (D8 API slice — DB-backed user skills per ADR 0012 ship: migration 0013 + `user_skills` table + `UserSkill` ORM + new `/api/v1/user-skills` CRUD router + audit writes + merge/shadow extensions to `/api/v1/skills` + real fork endpoint replacing the C1-era 501 stub. 25 new tests pass. Encrypted-keys ops doc landed earlier in the day; ADR 0012 banner-references ADR 0004. Team scope columns ship from migration 0013; CRUD deferred to D8.1 along with the `teams` FK target. Skill Creator UI is the remaining D8 piece.)
+> **Last updated:** 2026-05-11 (M1 backend gap-fill — **Wave D follow-up** closed every remaining backend M1 item except Vertex/Bedrock (now M2). Wave D: OpenAI chat completions adapter (live-verified against gpt-4o-mini, unary + streaming); Prometheus /metrics on both api+gateway + OpenTelemetry SDK opt-in via OTEL_EXPORTER_OTLP_ENDPOINT (PRD §5.4 / §5.7); session-timeout enforcement at /auth/refresh via migration 0018 adding user_sessions.absolute_expires_at + last_active_at (PRD §5.1 defaults 8h/30m); MFA-mandatory deployment flag LQ_AI_MFA_MANDATORY gated via get_active_user with whitelist for the enrollment flow. Vertex + Bedrock deferred to M2 as PRD §9 DE-034 / DE-035 with full wire-format + auth-flow + acceptance-criteria specs. Three commits today on top of Waves A+B+C: `212e590` (OpenAI + DEs), `44a5532` (/metrics + OTel), `f4b0a49` (session timeouts + MFA-mandatory). Gateway: 117 tests pass; api: 50 tests pass across auth + obs + admin bootstrap + new M-Sec.1. **Remaining M1: Phase E release-readiness only** (compliance docs, threat model, CI for SBOM/SLSA/cosign, Helm). Detail in docs/SESSION-HANDOFF-2026-05-11-wave-d.md.)
 > **Repo:** [github.com/LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (origin/main is in sync)
 > **Local working dir:** `/Users/kevinkeller/Desktop/LegalQuants/inhouse-ai` (project renamed from InHouse AI to LQ.AI on 2026-05-07; local directory not yet renamed)
 
@@ -15,7 +15,7 @@
 | A — Foundation scaffolding | A1, A2, A3, A4, A5 | — | — |
 | B — Core authentication and routing | B1, B2, B3, B4, B5, B6 partial (Ollama) | — | B6 remainder optional (OpenAI chat, Vertex, Bedrock) |
 | C — Capability layer | C1, C2, C3, C4, C5, C6, C7, C8 | — | — (phase complete; C8 pending operator end-to-end verification per ADR 0009) |
-| D — M1 differentiators | D0, D0.5, D1, D2, D3-core, **D3-coverage** (auth/MFA/files/KBs audit writes + admin filter UI), D4 (core + coverage), D5, D6, D7 + Wave-3 (ADR 0011 transparency pivot — encrypted keys, discovery enrichment, alias resolution surfacing, requested_model on messages) + **Encrypted-keys ops doc** + **D8 API slice** (migration 0013 + user_skills CRUD + shadow merge in `/skills` + real fork endpoint per ADR 0012) | D8 UI (Skill Creator page `/lq-ai/skills/new`) | D8.1 (team scope CRUD — schema columns already ship in 0013) |
+| D — M1 differentiators | D0, D0.5, D1, D2, D3-core, **D3-coverage** (auth/MFA/files/KBs audit writes + admin filter UI), D4 (core + coverage), D5, D6, D7 + Wave-3 (ADR 0011 transparency pivot — encrypted keys, discovery enrichment, alias resolution surfacing, requested_model on messages) + **Encrypted-keys ops doc** + **D8 end-to-end** (migration 0013 + user_skills CRUD + shadow merge in `/skills` + real fork endpoint + gateway internal-endpoint `?user_id=` extension + Skill Creator UI at `/lq-ai/skills*` + D7 Promote-to-Skill rewire) + **D8.1a** (migration 0014 + teams + team_members + admin-gated team CRUD + member management) + **D8.1b** (team-scope branches in `/user-skills` POST/PATCH/DELETE + gateway middle-resolution slot user > team > built-in + multi-team newest-wins tiebreak) + **D8.1c** (UI surface for team-scope skills — list page Scope column with Team chip, new-skill scope picker + team dropdown, edit page team context, GET /user-skills ?scope filter, GET /teams caller_role + ?role filter) | D8 UI browser-smoke (clicking through new/list/edit pages) | — |
 | E — Procurement and release | — | — | After D |
 
 **Tests:** ~495+ passing in api/ (C6 added ~50: 8 migration + 16 retrieval unit + 12 embed unit + ~24 endpoint integration; C3 added ~55; C2 added 16; C5 added 49+; C7 added 76; C4 added 43; C1 added 37; on top of B5's 170-line baseline); ~225 passing in gateway/ (B6 partial added ~30: 22 Ollama adapter unit + 8 Ollama integration including the B4-fallback-chain end-to-end exercise; C6 added ~25: 15 OpenAI adapter + 8 embeddings integration + 2 inference updates; C2 added 52); 5 cross-subsystem conformance tests under `tests/`.
@@ -1400,6 +1400,53 @@ PRD §9 DE-013 / Issue 04: per-user saved prompts complement skills the way brow
 * **Promote-to-Skill rewires** to seed the Skill Creator form (replaces the D7 download-as-SKILL.md path).
 
 **Effort:** 1–2 days; multi-phase.
+
+### D8.1b — team-scope user-skills + gateway middle-resolution slot ✅
+
+**Depends on:** D8.1a ✅ (teams schema + admin CRUD shipped 2026-05-10e).
+
+**Scope:** wire the `scope='team'` branch through the management surface and the resolver — D8.1a left the schema + CHECK constraints + partial UNIQUE indexes in place; D8.1b is purely API + resolver work.
+
+* **`POST /api/v1/user-skills` team branch** — accepts `scope='team'` + `owner_team_id`. Caller must be a **team-admin** member of the named team (404 id-probing-safe if not). Slug collision within the team's non-archived rows returns 409 (partial UNIQUE index `ux_user_skills_team_slug`).
+* **`PATCH /api/v1/user-skills/{id}`** — team-scope rows gate on team-admin role; user-scope rows continue to gate on ownership. 404 covers both "no such id" and "exists but you can't mutate it" (matches the saved_prompts / chats privacy posture).
+* **`DELETE /api/v1/user-skills/{id}`** — same gate; audit row carries `team_id` in `details` for forensics ("who archived team X's skill Y?").
+* **`GET /api/v1/internal/skills/{slug}?user_id=...` middle slot** — resolution becomes **user > team > built-in**. Team shadows are visible to every team member (admin AND member) for chat use; mutate rights stay admin-only. Multi-team conflicts resolve to the row with the most recent `updated_at` (per Kevin's design call recorded in SESSION-HANDOFF-2026-05-10e).
+* **`GET /api/v1/skills/{slug}` (user-facing)** — same middle-slot resolution stack, so the picker preview and the gateway prompt-assembly path see consistent content.
+* **Cache key strategy** (D8.1b decision recorded): gateway-side `(name, user_id)` cache key is unchanged. Team-membership churn is operator-mediated and rare; the 60s TTL absorbs propagation lag without a per-membership signature. Re-evaluate if membership becomes high-churn.
+* **`_summary_from_user_skill` fix** — now emits `scope: row.scope` rather than hardcoded `"user"` so the synthesized `Skill` payload reflects the source.
+
+**Audit actions:** `user_skill.created` / `.updated` / `.deleted` on team-scope rows carry `details.scope = "team"` + `details.team_id` (and `team_slug` on create) alongside the existing slug / version_before/_after / changed_fields. Forensic shape preserved.
+
+**Tests:** +12 in `tests/test_user_skills.py` (team-scope CRUD + ownership gates + 422 / 404 / 409 surfaces + cross-scope slug coexistence) and +5 in `tests/test_internal_skills.py` (team shadow visible to member + user>team precedence + outsider isolation + multi-team newest-wins + archived team shadow falls through). Total api test count 648 → 665. Pre-existing failures unchanged (one new flake in `test_health.py` is environment-sensitive: it expects 503 in unit-test mode where the dependencies are unreachable, but our docker-compose run has them all healthy — not introduced by this work).
+
+**Live verification:** 11 curl smokes against the running stack — every state transition (create, 422 validation, 404 non-admin, 409 slug collision, PATCH, audit-row team_id, user>team precedence by archiving/recreating shadows at slug `nda-review` with sentinel bodies).
+
+**Effort actual:** ~2h (smaller than D8.1a because the schema work was already done).
+
+### D8.1c — Skill Creator UI for team-scope skills ✅
+
+**Depends on:** D8.1b ✅ (team-scope API surface) + D8.1a ✅ (teams + admin CRUD).
+
+**Scope:** make the D8.1b team-scope surface visible in the Skill Creator UI so team-admins can author, edit, and archive team-scope skills without the curl.
+
+**Backend (additive):**
+* **`GET /api/v1/user-skills?scope=user|team|all`** — default `user` for D8 back-compat. `team` returns rows from teams where the caller is admin (mirrors mutate eligibility so members don't see non-editable rows in the management list). `all` merges both layers, sorted by `updated_at DESC, id DESC`.
+* **`GET /api/v1/teams`** — every TeamSummary now carries `caller_role: 'admin' | 'member' | null` so the UI can render mutate affordances without a second round-trip. Optional `?role=admin|member` filter narrows the list — the team-scope create picker uses `?role=admin`.
+* **Admin views unchanged.** `/admin/teams` continues to return `caller_role: null` because operator-admin views aren't membership-scoped.
+
+**Web (additive):**
+* **`web/src/lib/lq-ai/api/teams.ts`** — new `listMyTeams(role?)` + `getMyTeam(id)` wrappers; barrel-exported as `teamsApi`.
+* **`web/src/lib/lq-ai/api/userSkills.ts`** — `listUserSkills(scope?)` appends `?scope=` when non-default; `createUserSkill` threads `scope` + `owner_team_id`.
+* **`web/src/lib/lq-ai/types.ts`** — `UserSkill.owner_user_id` is now nullable; new `owner_team_id` field; new `TeamSummary` / `Team` / `TeamMember` types with `caller_role`.
+* **`/lq-ai/skills` list** — loads `scope=all`; adds a Scope column with a sky-blue "Team · {name}" chip for team-scope rows and a grey "Personal" chip for user-scope rows. The amber "Shadows built-in" chip continues to flow.
+* **`/lq-ai/skills/new`** — fieldset scope picker (Personal | Team) renders only when the caller admins ≥1 team. Selecting Team reveals a dropdown populated from `listMyTeams('admin')`. Shadow warning is scope-aware ("any member of this team…" for team scope).
+* **`/lq-ai/skills/[id]/edit`** — header surfaces the team chip when scope='team'. Shadow warning re-tuned for team semantics. PATCH / DELETE continue to gate on team-admin role server-side (per D8.1b).
+
+**Tests:** +8 api integration tests (scope filter behavior + caller_role population + role filter + invalid scope/role surfaces). +5 vitests for the new teams client + 4 for the user-skills scope filter and team-scope create body shape. 656 api tests pass; 81 web vitests pass.
+
+**Live verification:** 6 curl smokes against the rebuilt stack — caller_role on `/teams`, `?role=admin` filter, 422 on invalid role, default-scope user-only, `?scope=team` admin-only rows, `?scope=all` merged view showing the user+team shadow coexisting at slug `nda-review`.
+
+**Effort actual:** ~2h.
 
 ### B6 — Additional provider adapters (Ollama complete; remainder optional)
 

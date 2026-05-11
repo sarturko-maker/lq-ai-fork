@@ -15,12 +15,13 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
-	import { userSkillsApi, skillsApi } from '$lib/lq-ai/api';
+	import { userSkillsApi, skillsApi, teamsApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
-	import type { UserSkill, SkillSummary } from '$lib/lq-ai/types';
+	import type { UserSkill, SkillSummary, TeamSummary } from '$lib/lq-ai/types';
 
 	let row: UserSkill | null = null;
 	let builtinSlugs = new Set<string>();
+	let teamNamesById = new Map<string, string>();
 	let loading = true;
 	let loadError: string | null = null;
 
@@ -43,12 +44,16 @@
 		loading = true;
 		loadError = null;
 		try {
-			const [skill, builtins] = await Promise.all([
+			const [skill, builtins, myTeams] = await Promise.all([
 				userSkillsApi.getUserSkill(skillId),
-				skillsApi.listSkills('builtin')
+				skillsApi.listSkills('builtin'),
+				teamsApi.listMyTeams()
 			]);
 			row = skill;
 			builtinSlugs = new Set(builtins.map((s: SkillSummary) => s.name));
+			teamNamesById = new Map(
+				(myTeams as TeamSummary[]).map((t) => [t.id, t.name])
+			);
 			displayName = skill.display_name;
 			description = skill.description;
 			version = skill.version;
@@ -155,6 +160,18 @@
 			{#if row}
 				<p class="lq-text-caption mt-1" style="color: var(--lq-text-tertiary);">
 					<code class="font-mono">{row.slug}</code> · v{row.version}
+					{#if row.scope === 'team' && row.owner_team_id}
+						·
+						<span
+							class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide bg-sky-100 text-sky-900 dark:bg-sky-900 dark:text-sky-100"
+							data-testid="lq-ai-user-skill-edit-team-chip"
+						>
+							Team · {teamNamesById.get(row.owner_team_id) ?? 'unknown'}
+						</span>
+					{:else}
+						·
+						<span class="text-gray-500">Personal</span>
+					{/if}
 				</p>
 			{/if}
 		</div>
@@ -191,9 +208,16 @@
 				role="status"
 				data-testid="lq-ai-user-skill-edit-shadow-warning"
 			>
-				This skill shadows the built-in <code class="font-mono">{row.slug}</code>. When you attach
-				it to a chat, your version shapes the system prompt — the built-in is hidden for you.
-				Other users still see the built-in.
+				This skill shadows the built-in <code class="font-mono">{row.slug}</code>.
+				{#if row.scope === 'team'}
+					When any member of this team attaches it to a chat, the team's version shapes the
+					system prompt — the built-in is hidden for them. A user-scope shadow at the same slug
+					(per-user) would in turn take precedence over the team version.
+				{:else}
+					When you attach it to a chat, your version shapes the system prompt — the built-in is
+					hidden for you. Other users still see the built-in unless they're in a team that also
+					shadows this slug.
+				{/if}
 			</div>
 		{/if}
 		{#if submitError}

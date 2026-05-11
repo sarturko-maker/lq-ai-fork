@@ -293,3 +293,135 @@ async def test_get_skill_minimal_skill_has_empty_reference_lists(
     # than omitting the fields — that matches the OpenAPI shape.
     assert body.get("reference_files", []) == []
     assert body.get("example_files", []) == []
+
+
+# ---------------------------------------------------------------------------
+# Wave A — /skills/{name}/contents + /skills/{name}/inputs (PRD §3.4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_contents_returns_same_shape_as_base_get(
+    client: AsyncClient, db_user: User
+) -> None:
+    """``/skills/{name}/contents`` and ``/skills/{name}`` return the same
+    payload — the contents URL is the frontend-targeted alias PRD §3.4
+    names as the contract behind the skill inspector."""
+
+    token = _bearer(db_user)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    base = await client.get("/api/v1/skills/alpha-test-skill", headers=headers)
+    contents = await client.get(
+        "/api/v1/skills/alpha-test-skill/contents", headers=headers
+    )
+    assert base.status_code == 200
+    assert contents.status_code == 200
+    assert base.json() == contents.json()
+
+
+@pytest.mark.integration
+async def test_contents_404_for_unknown_skill(
+    client: AsyncClient, db_user: User
+) -> None:
+    token = _bearer(db_user)
+    resp = await client.get(
+        "/api/v1/skills/does-not-exist/contents",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_inputs_returns_lq_ai_inputs_block(
+    client: AsyncClient, db_user: User
+) -> None:
+    """alpha-test-skill declares ``input_a`` under ``lq_ai.inputs.required``;
+    the endpoint surfaces it as a SkillInputDef in the form schema."""
+
+    token = _bearer(db_user)
+    resp = await client.get(
+        "/api/v1/skills/alpha-test-skill/inputs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "alpha-test-skill"
+    assert len(body["required"]) == 1
+    assert body["required"][0]["name"] == "input_a"
+    assert body["required"][0]["required"] is True
+    assert body["required"][0]["type"] == "text"
+    assert body["optional"] == []
+
+
+@pytest.mark.integration
+async def test_inputs_empty_for_skill_without_inputs(
+    client: AsyncClient, db_user: User
+) -> None:
+    """beta-minimal declares no inputs — endpoint returns a name-only stub."""
+
+    token = _bearer(db_user)
+    resp = await client.get(
+        "/api/v1/skills/beta-minimal/inputs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"name": "beta-minimal", "required": [], "optional": []}
+
+
+@pytest.mark.integration
+async def test_inputs_404_for_unknown_skill(
+    client: AsyncClient, db_user: User
+) -> None:
+    token = _bearer(db_user)
+    resp = await client.get(
+        "/api/v1/skills/does-not-exist/inputs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_inputs_reads_from_user_skill_shadow(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """User-scope shadow at the same slug surfaces its own inputs block
+    when the row's ``frontmatter_extra`` carries one. The D8.1b resolver
+    applies: user > team > built-in."""
+
+    from app.models import UserSkill
+
+    db_session.add(
+        UserSkill(
+            scope="user",
+            owner_user_id=db_user.id,
+            slug="alpha-test-skill",
+            display_name="My Alpha",
+            description="user override",
+            body="custom body",
+            frontmatter_extra={
+                "inputs": {
+                    "required": [
+                        {"name": "override_required", "type": "enum", "enum": ["a", "b"]}
+                    ],
+                    "optional": [{"name": "override_optional", "type": "text"}],
+                },
+            },
+        )
+    )
+    await db_session.flush()
+
+    token = _bearer(db_user)
+    resp = await client.get(
+        "/api/v1/skills/alpha-test-skill/inputs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["required"]) == 1
+    assert body["required"][0]["name"] == "override_required"
+    assert body["required"][0]["enum"] == ["a", "b"]
+    assert len(body["optional"]) == 1
+    assert body["optional"][0]["name"] == "override_optional"
+

@@ -34,7 +34,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import Text, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._stub import not_implemented
@@ -232,14 +232,230 @@ async def get_audit_log(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/tier-policy")
-async def get_tier_policy(request: Request, _admin: AdminUser) -> JSONResponse:
-    return not_implemented(request, next_task=_D1, endpoint="GET /api/v1/admin/tier-policy")
+class TierPolicyResponse(BaseModel):
+    """``GET /admin/tier-policy`` body (Wave B)."""
+
+    allowed_tiers_global: list[int]
+    default_minimum_tier: int
+    privileged_minimum_tier: int
+    warn_on_tiers: list[int]
 
 
-@router.patch("/tier-policy")
-async def update_tier_policy(request: Request, _admin: AdminUser) -> JSONResponse:
-    return not_implemented(request, next_task=_D1, endpoint="PATCH /api/v1/admin/tier-policy")
+class TierPolicyPatchRequest(BaseModel):
+    """``PATCH /admin/tier-policy`` body — partial update (Wave B)."""
+
+    allowed_tiers_global: list[int] | None = None
+    default_minimum_tier: int | None = Field(default=None, ge=1, le=5)
+    privileged_minimum_tier: int | None = Field(default=None, ge=1, le=5)
+    warn_on_tiers: list[int] | None = None
+
+
+def _project_tier_policy(payload: dict[str, Any]) -> TierPolicyResponse:
+    policy = payload.get("tier_policy", {})
+    return TierPolicyResponse(
+        allowed_tiers_global=list(policy.get("allowed_tiers_global") or [1, 2, 3, 4]),
+        default_minimum_tier=int(policy.get("default_minimum_tier", 4)),
+        privileged_minimum_tier=int(policy.get("privileged_minimum_tier", 3)),
+        warn_on_tiers=list(policy.get("warn_on_tiers") or [4, 5]),
+    )
+
+
+@router.get("/tier-policy", response_model=TierPolicyResponse)
+async def get_tier_policy(
+    request: Request,
+    _admin: AdminUser,
+    gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
+) -> TierPolicyResponse:
+    """GET /api/v1/admin/tier-policy — operator's tier policy (admin-only).
+
+    Returns the same shape as ``GET /api/v1/inference/tier-config``;
+    the admin variant exists so the admin UI can render the policy on
+    the operator console without granting the read endpoint to every
+    user (it's already user-accessible at the non-admin URL, but
+    surfacing it under /admin keeps the operator UI's permission model
+    clean).
+    """
+
+    payload = await gateway.get_tier_config(
+        request_id=request.headers.get("x-request-id")
+    )
+    return _project_tier_policy(payload)
+
+
+@router.patch("/tier-policy", response_model=TierPolicyResponse)
+async def update_tier_policy(
+    request: Request,
+    body: TierPolicyPatchRequest,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
+) -> TierPolicyResponse:
+    """PATCH /api/v1/admin/tier-policy — partial-update the tier policy.
+
+    Proxies through to the gateway's PATCH /admin/v1/tier-config (which
+    atomically rewrites ``gateway.yaml`` and reloads the live snapshot).
+    Writes a ``tier_policy.updated`` audit row with before/after values
+    so a privacy auditor can reconstruct the policy history.
+    """
+
+    from app.audit import audit_action
+
+    before_payload = await gateway.get_tier_config(
+        request_id=request.headers.get("x-request-id")
+    )
+    before = _project_tier_policy(before_payload)
+
+    payload_to_send = body.model_dump(exclude_none=True)
+    if not payload_to_send:
+        return before
+
+    updated_payload = await gateway.patch_tier_config(
+        body=payload_to_send,
+        request_id=request.headers.get("x-request-id"),
+    )
+    after = _project_tier_policy(updated_payload)
+
+    if after.model_dump() != before.model_dump():
+        await audit_action(
+            db,
+            user_id=admin.id,
+            action="tier_policy.updated",
+            resource_type="tier_policy",
+            resource_id="singleton",
+            request=request,
+            details={
+                "before": before.model_dump(),
+                "after": after.model_dump(),
+                "fields_supplied": sorted(payload_to_send.keys()),
+            },
+        )
+        await db.commit()
+
+    return after
+
+
+# ---------------------------------------------------------------------------
+# Wave B — /admin/usage (cost + tokens dashboard)
+# ---------------------------------------------------------------------------
+
+
+class UsageRow(BaseModel):
+    """One aggregated row from /admin/usage."""
+
+    group_key: str
+    request_count: int
+    tokens_in_sum: int = 0
+    tokens_out_sum: int = 0
+    cost_estimate_sum: float = 0.0
+
+
+class UsageResponse(BaseModel):
+    rows: list[UsageRow]
+    group_by: str
+    total_request_count: int
+    total_tokens_in: int
+    total_tokens_out: int
+    total_cost_estimate: float
+
+
+_USAGE_GROUP_BY = {"user", "provider", "model", "tier", "day"}
+
+
+@router.get("/usage", response_model=UsageResponse)
+async def get_usage(
+    request: Request,
+    _admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_by: str = Query(default="provider"),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    user_id: str | None = Query(default=None),
+    provider: str | None = Query(default=None),
+    model: str | None = Query(default=None),
+    tier: int | None = Query(default=None, ge=1, le=5),
+) -> UsageResponse:
+    """GET /api/v1/admin/usage — cost + tokens aggregations (Wave B / PRD §5.5).
+
+    Aggregates ``inference_routing_log`` by one of: user, provider,
+    model, tier, day. Filters on the same dimensions plus a date range.
+    Refusals are excluded by default (they didn't consume tokens
+    upstream). All counts/sums are returned alongside a deployment-wide
+    total so the admin UI can render percentages without a second
+    query.
+    """
+
+    from app.models.inference import InferenceRoutingLog
+
+    if group_by not in _USAGE_GROUP_BY:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=422,
+            detail=f"group_by must be one of {sorted(_USAGE_GROUP_BY)}",
+        )
+
+    group_col_map = {
+        "user": func.coalesce(
+            func.cast(InferenceRoutingLog.user_id, type_=Text),
+            "anonymous",
+        ),
+        "provider": InferenceRoutingLog.routed_provider,
+        "model": InferenceRoutingLog.routed_model,
+        "tier": func.cast(InferenceRoutingLog.routed_inference_tier, type_=Text),
+        "day": func.to_char(InferenceRoutingLog.timestamp, "YYYY-MM-DD"),
+    }
+    group_col = group_col_map[group_by]
+
+    conditions = [InferenceRoutingLog.refused.is_(False)]
+    if date_from is not None:
+        conditions.append(InferenceRoutingLog.timestamp >= date_from)
+    if date_to is not None:
+        conditions.append(InferenceRoutingLog.timestamp <= date_to)
+    if user_id is not None:
+        conditions.append(
+            func.cast(InferenceRoutingLog.user_id, type_=Text) == user_id
+        )
+    if provider is not None:
+        conditions.append(InferenceRoutingLog.routed_provider == provider)
+    if model is not None:
+        conditions.append(InferenceRoutingLog.routed_model == model)
+    if tier is not None:
+        conditions.append(InferenceRoutingLog.routed_inference_tier == tier)
+
+    stmt = (
+        select(
+            group_col.label("group_key"),
+            func.count().label("request_count"),
+            func.coalesce(func.sum(InferenceRoutingLog.tokens_in), 0).label("tokens_in_sum"),
+            func.coalesce(func.sum(InferenceRoutingLog.tokens_out), 0).label("tokens_out_sum"),
+            func.coalesce(func.sum(InferenceRoutingLog.cost_estimate), 0).label("cost_estimate_sum"),
+        )
+        .where(and_(*conditions))
+        .group_by(group_col)
+        .order_by(func.count().desc())
+    )
+
+    rows = (await db.execute(stmt)).all()
+
+    usage_rows = [
+        UsageRow(
+            group_key=str(row.group_key) if row.group_key is not None else "unknown",
+            request_count=int(row.request_count or 0),
+            tokens_in_sum=int(row.tokens_in_sum or 0),
+            tokens_out_sum=int(row.tokens_out_sum or 0),
+            cost_estimate_sum=float(row.cost_estimate_sum or 0),
+        )
+        for row in rows
+    ]
+
+    return UsageResponse(
+        rows=usage_rows,
+        group_by=group_by,
+        total_request_count=sum(r.request_count for r in usage_rows),
+        total_tokens_in=sum(r.tokens_in_sum for r in usage_rows),
+        total_tokens_out=sum(r.tokens_out_sum for r in usage_rows),
+        total_cost_estimate=sum(r.cost_estimate_sum for r in usage_rows),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -337,3 +553,129 @@ async def get_admin_config(
     """Return the gateway's sanitized current config (D0.5)."""
 
     return await gateway.get_admin_config()
+
+
+# ---------------------------------------------------------------------------
+# Wave C — RBAC three-role management (PRD §5.2)
+# ---------------------------------------------------------------------------
+
+
+_ROLE_ENUM = frozenset({"admin", "member", "viewer"})
+
+
+class UserRoleUpdate(BaseModel):
+    """``PATCH /admin/users/{user_id}/role`` body."""
+
+    role: str
+
+
+class UserRoleResponse(BaseModel):
+    """``PATCH /admin/users/{user_id}/role`` response."""
+
+    user_id: str
+    email: str
+    role: str
+    is_admin: bool
+
+
+@router.patch("/users/{user_id}/role", response_model=UserRoleResponse)
+async def update_user_role(
+    user_id: str,
+    body: UserRoleUpdate,
+    request: Request,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserRoleResponse:
+    """PATCH /api/v1/admin/users/{user_id}/role — set RBAC role (Wave C).
+
+    Admin-only. Updates ``users.role`` and keeps ``is_admin`` in sync
+    (True iff role='admin'). Idempotent: re-applying the same role
+    returns 200 without writing an audit row. Writes
+    ``user.role_updated`` on real changes with before/after values.
+
+    Refuses to demote the last admin (lockout protection): if the
+    target user is the only ``role='admin'`` row in the deployment
+    and the caller is trying to set them to non-admin, returns 409
+    so the operator can promote someone else first.
+    """
+
+    import uuid as _uuid
+
+    from sqlalchemy import func
+
+    from app.audit import audit_action
+    from app.errors import NotFound, Forbidden
+    from app.models.user import User as UserORM
+
+    if body.role not in _ROLE_ENUM:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=422,
+            detail=f"role must be one of {sorted(_ROLE_ENUM)}",
+        )
+
+    try:
+        target_uuid = _uuid.UUID(user_id)
+    except (TypeError, ValueError):
+        raise NotFound(message="user not found")
+
+    target = await db.get(UserORM, target_uuid)
+    if target is None or target.deleted_at is not None:
+        raise NotFound(message="user not found")
+
+    before_role = target.role
+    if before_role == body.role:
+        return UserRoleResponse(
+            user_id=str(target.id),
+            email=target.email,
+            role=target.role,
+            is_admin=target.is_admin,
+        )
+
+    # Lockout protection: don't allow demoting the last admin.
+    if before_role == "admin" and body.role != "admin":
+        remaining_admins = (
+            await db.execute(
+                select(func.count())
+                .select_from(UserORM)
+                .where(
+                    UserORM.role == "admin",
+                    UserORM.id != target.id,
+                    UserORM.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one()
+        if int(remaining_admins or 0) == 0:
+            raise Forbidden(
+                message=(
+                    "Cannot demote the last admin. Promote another user to "
+                    "admin first, then retry the demotion."
+                ),
+            )
+
+    target.role = body.role
+    target.is_admin = body.role == "admin"
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="user.role_updated",
+        resource_type="user",
+        resource_id=str(target.id),
+        request=request,
+        details={
+            "before": {"role": before_role},
+            "after": {"role": body.role},
+            "target_user_email": target.email,
+        },
+    )
+    await db.commit()
+    await db.refresh(target)
+
+    return UserRoleResponse(
+        user_id=str(target.id),
+        email=target.email,
+        role=target.role,
+        is_admin=target.is_admin,
+    )

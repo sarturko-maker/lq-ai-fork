@@ -306,15 +306,21 @@ export interface SavedPromptUpdate {
 // ----- User skills (D8 / ADR 0012) -----
 
 /**
- * A DB-backed user-scope skill. Shadows filesystem-canonical built-ins
- * (per ADR 0004) at slug collision when resolved for the owning user's
- * chats; other users still see the built-in. Mirrors the ``UserSkill``
- * schema in ``docs/api/backend-openapi.yaml``.
+ * A DB-backed user- or team-scope skill. Shadows filesystem-canonical
+ * built-ins (per ADR 0004) at slug collision when resolved for the
+ * owning user's chats (user shadow) or for any team member's chats
+ * (team shadow). The D8.1b resolver picks user > team > built-in.
+ * Mirrors the ``UserSkill`` schema in ``docs/api/backend-openapi.yaml``.
+ *
+ * Exactly one of ``owner_user_id`` / ``owner_team_id`` is set (DB
+ * CHECK ``ck_user_skills_scope_owner_consistency``); the other is
+ * null.
  */
 export interface UserSkill {
 	id: string;
 	scope: 'user' | 'team';
-	owner_user_id: string;
+	owner_user_id: string | null;
+	owner_team_id: string | null;
 	slug: string;
 	display_name: string;
 	description: string;
@@ -335,6 +341,10 @@ export interface UserSkillCreate {
 	version?: string;
 	tags?: string[];
 	frontmatter_extra?: Record<string, unknown>;
+	/** D8.1b — defaults to 'user' on the server when omitted. */
+	scope?: 'user' | 'team';
+	/** Required when scope='team'; must be null/omitted when scope='user'. */
+	owner_team_id?: string | null;
 }
 
 export interface UserSkillUpdate {
@@ -344,4 +354,36 @@ export interface UserSkillUpdate {
 	version?: string;
 	tags?: string[];
 	frontmatter_extra?: Record<string, unknown>;
+}
+
+// ----- Teams (D8.1a + D8.1c caller_role) -----
+
+/**
+ * Compact team shape returned by the listing endpoints. ``caller_role``
+ * (D8.1c) is populated for user-facing ``GET /api/v1/teams`` responses
+ * and null for operator-admin views where the admin isn't a member.
+ */
+export interface TeamSummary {
+	id: string;
+	slug: string;
+	name: string;
+	description: string | null;
+	created_by_user_id: string;
+	member_count: number;
+	caller_role: 'admin' | 'member' | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface TeamMember {
+	user_id: string;
+	email: string;
+	display_name: string | null;
+	role: 'admin' | 'member';
+	added_by_user_id: string;
+	created_at: string;
+}
+
+export interface Team extends TeamSummary {
+	members: TeamMember[];
 }

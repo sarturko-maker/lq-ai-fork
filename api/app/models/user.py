@@ -32,6 +32,13 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # PRD §5.2 RBAC three-role system (Wave C). DB-side CHECK enforces
+    # the enum at the storage layer; the existing ``is_admin`` flag stays
+    # as a convenience and is kept in sync by app code that changes role
+    # (see app.api.admin.update_user_role).
+    role: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'member'")
+    )
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     # B2 — first-run admin is created with must_change_password=TRUE; the
     # `/auth/change-password` endpoint flips it back to FALSE once the
@@ -42,6 +49,15 @@ class User(Base):
     )
     totp_secret: Mapped[str | None] = mapped_column(String, nullable=True)
     recovery_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+
+    # PRD §3.2 — Enhance Prompt reasoning visibility. ``disclosure`` is the
+    # spec default (reasoning collapsed behind a "why these changes?"
+    # toggle). ``always_show`` makes reasoning visible by default;
+    # ``on_request`` hides it until the user opens the skill inspector.
+    # The CHECK constraint enforces the enum at the DB layer.
+    reasoning_visibility: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'disclosure'")
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -93,6 +109,20 @@ class UserSession(Base):
         server_default=text("now()"),
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # M-Sec.1 — absolute session timeout per PRD §5.1 (8h default). Copied
+    # verbatim across refresh-token rotations so the original-login clock
+    # is preserved; the refresh handler 401s when ``now > absolute_expires_at``.
+    absolute_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    # M-Sec.1 — idle-timeout clock per PRD §5.1 (30m default). Stamped on
+    # insert; updated on each refresh. The refresh handler 401s when the
+    # gap from ``last_active_at`` to ``now`` exceeds the idle timeout.
+    last_active_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
 
     def __repr__(self) -> str:
         return f"<UserSession id={self.id} user_id={self.user_id} revoked={self.revoked_at is not None}>"

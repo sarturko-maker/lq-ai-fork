@@ -1,34 +1,51 @@
-"""OpenAI provider adapter — embeddings now, chat completions stubbed.
+"""OpenAI provider adapter — embeddings (C6) + chat completions (B6).
 
-Per ADR 0008, C6 ships an OpenAI adapter scoped to the embeddings path.
-The chat-completion method raises :class:`ProviderUnsupportedError` and
-will be filled in by B6. The auth header wiring, error translation, and
-httpx pool are all in place so B6 only adds the chat-completion
-translation surface.
+C6 shipped the embeddings path; B6 fills in chat completions (the LLM
+gateway's main load-bearing path for OpenAI). Auth-header wiring,
+error translation, and the long-lived httpx pool are shared.
 
 Wire-format notes
 -----------------
 
-* OpenAI's Embeddings API: ``POST /embeddings`` with body
-  ``{"model": "text-embedding-3-small", "input": "..." | [...]}``.
-  Returns ``{"data": [{"embedding": [...], "index": int, "object":
-  "embedding"}, ...], "model": str, "usage": {"prompt_tokens": int,
-  "total_tokens": int}}``. The shape is identical to OpenAI's so the
-  gateway's OpenAI-compatible response model passes through almost
-  verbatim — only the LQ.AI extensions (``routed_inference_tier``)
-  are added by the route handler.
+* **Embeddings.** ``POST /embeddings`` with body
+  ``{"model": ..., "input": "..." | [...]}``. Response shape matches
+  the gateway's :class:`EmbeddingsResponse` verbatim.
+* **Chat completions.** ``POST /chat/completions`` with body
+  ``{"model": ..., "messages": [...], "max_tokens": ..., "stream": ...}``.
+  OpenAI's wire format IS the gateway's wire format
+  (:class:`ChatCompletionRequest` / :class:`ChatCompletionResponse`),
+  so translation is a pass-through — we serialize the request through
+  pydantic, send what the schema produces (with the LQ.AI extension
+  fields stripped, since OpenAI rejects unknown body keys with HTTP
+  400), and parse the response back through the same model.
+* **Streaming.** OpenAI emits SSE frames with ``data: <json>\\n\\n`` for
+  each :class:`ChatCompletionChunk`, terminated by ``data: [DONE]\\n\\n``.
+  The adapter parses these directly into :class:`ChatCompletionChunk`
+  instances and yields them; the route handler is responsible for
+  re-emitting ``[DONE]`` on the wire (the adapter only yields data
+  chunks per the contract in :mod:`app.providers.anthropic`).
 * The base URL convention is ``https://api.openai.com/v1`` (with the
   ``/v1`` already in ``base_url`` per ``gateway.yaml.example``); we do
   NOT prepend ``/v1`` to the path here.
 * Authentication: ``Authorization: Bearer <key>``.
 
+LQ.AI extension fields
+----------------------
+
+OpenAI rejects unknown body fields with HTTP 400, so the adapter
+strips the LQ.AI-specific keys (``minimum_inference_tier``,
+``skill_name``, ``chat_id``, ``anonymize``, ``lq_ai_*``) before
+serialization. The router has already consumed any of these that
+mattered for routing; the upstream provider never sees them.
+
 Why no ``openai`` SDK dependency
 --------------------------------
 
 Per PRD §4 / ADR 0008 §"Adapter scope" — the gateway hand-rolls httpx
-to keep the supply-chain surface honest. The Embeddings request and
-response shapes are small enough that a pydantic schema + a single
-POST is cleaner than pulling the full openai SDK.
+to keep the supply-chain surface honest. The chat-completion surface
+is large but the translation is pass-through; a pydantic schema + a
+single POST + an SSE iterator is cleaner than pulling the full openai
+SDK with its transitive dep tree.
 """
 
 from __future__ import annotations
@@ -37,6 +54,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -50,7 +68,6 @@ from app.providers.base import (
     ProviderHealth,
     ProviderHTTPError,
     ProviderNetworkError,
-    ProviderUnsupportedError,
 )
 from app.providers.openai_schema import (
     ChatCompletionChunk,
@@ -60,6 +77,27 @@ from app.providers.openai_schema import (
     EmbeddingsRequest,
     EmbeddingsResponse,
     EmbeddingsUsage,
+)
+
+# Body keys that the gateway adds on top of OpenAI's schema (per
+# ``docs/api/gateway-openapi.yaml``) and that OpenAI itself rejects with
+# HTTP 400 if forwarded. The router consumes everything in this set
+# before dispatch; the adapter strips them defensively in case the
+# request landed here without going through the router (tests, direct
+# adapter use, future code paths).
+_LQ_AI_EXTENSION_KEYS = frozenset(
+    {
+        "minimum_inference_tier",
+        "lq_ai_project_minimum_inference_tier",
+        "skill_name",
+        "chat_id",
+        "anonymize",
+        "lq_ai_skills",
+        "lq_ai_skill_inputs",
+        "lq_ai_chat_id",
+        "lq_ai_message_id",
+        "lq_ai_user_id",
+    }
 )
 
 logger = logging.getLogger(__name__)
@@ -178,18 +216,56 @@ class OpenAIAdapter(ProviderAdapter):
         model: str,
         stream: bool,
     ) -> ChatCompletionResponse | AsyncIterator[ChatCompletionChunk]:
-        """OpenAI chat completions are deferred to B6.
+        """Issue a chat-completion request against ``POST /chat/completions``.
 
-        The adapter framing is in place so when B6 lands the chat
-        translation surface (a thin pass-through, since OpenAI is the
-        wire format the gateway already speaks) it goes here.
+        OpenAI's wire format is what the gateway already speaks. The
+        translation is mostly identity: serialize the pydantic request,
+        strip the LQ.AI extension keys OpenAI doesn't accept, force the
+        ``model`` field to the provider-native value, and overwrite
+        ``stream`` to match the route handler's decision.
         """
 
-        raise ProviderUnsupportedError(
-            "OpenAI chat-completions are not yet implemented; lands with B6 "
-            "(the OpenAI adapter currently only services embeddings, per ADR 0008)",
-            details={"provider": self.name, "model": model},
-        )
+        body = _to_openai_request(request, model=model, stream=stream)
+
+        if stream:
+            return _openai_stream_iter(
+                client=self._client,
+                body=body,
+                headers=self._auth_headers(),
+                provider_name=self.name,
+                requested_model=model,
+            )
+        return await self._chat_completion_unary(body, model=model)
+
+    async def _chat_completion_unary(
+        self,
+        body: dict[str, Any],
+        *,
+        model: str,
+    ) -> ChatCompletionResponse:
+        try:
+            response = await self._client.post(
+                "/chat/completions",
+                json=body,
+                headers=self._auth_headers(),
+            )
+        except httpx.HTTPError as exc:
+            raise ProviderNetworkError(
+                f"failed to reach OpenAI: {type(exc).__name__}",
+                details={"provider": self.name},
+            ) from exc
+
+        _raise_for_status(response, provider=self.name)
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as exc:
+            raise ProviderHTTPError(
+                "OpenAI returned a non-JSON response",
+                upstream_status=response.status_code,
+                details={"provider": self.name},
+            ) from exc
+
+        return _from_openai_chat_response(payload, requested_model=model)
 
     async def embeddings(
         self,
@@ -364,6 +440,169 @@ def _from_openai_embeddings_response(
         model=response_model,
         usage=usage,
     )
+
+
+# --- Translation: gateway -> OpenAI chat completions ------------------------
+
+
+def _to_openai_request(
+    request: ChatCompletionRequest,
+    *,
+    model: str,
+    stream: bool,
+) -> dict[str, Any]:
+    """Build the OpenAI ``POST /chat/completions`` request body.
+
+    Translation is identity in shape; the only edits are:
+
+    * ``model`` is forced to the provider-native name (the alias may
+      have resolved to a different model than the caller asked for).
+    * ``stream`` is forced to the route handler's decision (the body's
+      original ``stream`` was a hint, not authoritative).
+    * LQ.AI extension keys (per :data:`_LQ_AI_EXTENSION_KEYS`) are
+      stripped — OpenAI rejects unknown body fields with HTTP 400.
+    * ``messages`` is serialized via pydantic so role/content/tool_calls
+      are normalized; pydantic's ``mode="json"`` produces wire-shaped
+      dicts (``None`` fields dropped via ``exclude_none``).
+
+    The serializer preserves any caller-set OpenAI-specific extras
+    (``tools``, ``tool_choice``, ``response_format``, ``seed``, etc.)
+    that landed in ``model_extra`` after the request was parsed with
+    ``extra="allow"``.
+    """
+
+    body = request.model_dump(mode="json", exclude_none=True)
+    for key in _LQ_AI_EXTENSION_KEYS:
+        body.pop(key, None)
+    body["model"] = model
+    body["stream"] = stream
+    # ``stream_options.include_usage`` is required for OpenAI to emit a
+    # usage block on the final streaming chunk. The gateway expects that
+    # data to populate the routing log + cost estimate, so opt in.
+    if stream:
+        existing = body.get("stream_options")
+        if isinstance(existing, dict):
+            existing.setdefault("include_usage", True)
+        else:
+            body["stream_options"] = {"include_usage": True}
+    return body
+
+
+# --- Translation: OpenAI -> gateway (non-streaming) -------------------------
+
+
+def _from_openai_chat_response(
+    payload: dict[str, Any],
+    *,
+    requested_model: str,
+) -> ChatCompletionResponse:
+    """Translate an OpenAI chat-completion JSON response into the gateway shape.
+
+    OpenAI's body matches :class:`ChatCompletionResponse` directly; we
+    parse through pydantic so the response model validates and the
+    LQ.AI extension fields default to ``None`` (the route handler
+    stamps them post-adapter).
+
+    Defensive: if ``model`` is missing we fall back to ``requested_model``
+    so downstream consumers always see a model identifier on the row.
+    """
+
+    if "model" not in payload or not payload.get("model"):
+        payload = dict(payload)
+        payload["model"] = requested_model
+    return ChatCompletionResponse.model_validate(payload)
+
+
+# --- Translation: OpenAI SSE -> gateway chunks -------------------------------
+
+
+async def _openai_stream_iter(
+    *,
+    client: httpx.AsyncClient,
+    body: dict[str, Any],
+    headers: dict[str, str],
+    provider_name: str,
+    requested_model: str,
+) -> AsyncIterator[ChatCompletionChunk]:
+    """Stream OpenAI SSE and yield :class:`ChatCompletionChunk` objects.
+
+    OpenAI emits SSE frames of the form ``data: <json>\\n\\n`` terminated
+    by ``data: [DONE]\\n\\n``. Each ``<json>`` payload is already shaped
+    as a :class:`ChatCompletionChunk` (object="chat.completion.chunk"),
+    so the adapter parses each line and validates through pydantic.
+
+    Per the adapter contract, the ``[DONE]`` sentinel is the route
+    handler's responsibility — the adapter only yields data chunks.
+    Empty lines, ``:`` comments, and ``event:`` / ``id:`` / ``retry:``
+    fields are ignored (we don't depend on them).
+    """
+
+    fallback_id = f"chatcmpl-{uuid.uuid4().hex}"
+
+    try:
+        async with client.stream(
+            "POST", "/chat/completions", json=body, headers=headers
+        ) as response:
+            if response.status_code >= 400:
+                error_body = await response.aread()
+                _raise_from_error_body(
+                    status_code=response.status_code,
+                    body=error_body,
+                    provider=provider_name,
+                )
+
+            async for raw_data in _iter_sse_data(response):
+                if not raw_data or raw_data == "[DONE]":
+                    continue
+                try:
+                    parsed = json.loads(raw_data)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(parsed, dict):
+                    continue
+                if not parsed.get("model"):
+                    parsed["model"] = requested_model
+                if not parsed.get("id"):
+                    parsed["id"] = fallback_id
+                try:
+                    yield ChatCompletionChunk.model_validate(parsed)
+                except Exception:
+                    # Defensive: skip malformed chunks rather than killing
+                    # the whole stream. The route handler still emits
+                    # [DONE] when the iterator finishes.
+                    continue
+    except httpx.HTTPError as exc:
+        raise ProviderNetworkError(
+            f"failed to stream from OpenAI: {type(exc).__name__}",
+            details={"provider": provider_name},
+        ) from exc
+
+
+async def _iter_sse_data(response: httpx.Response) -> AsyncIterator[str]:
+    """Yield ``data:`` payloads from an SSE response.
+
+    Implements the subset of SSE that OpenAI uses: only ``data:`` lines
+    matter; blank lines terminate frames; multi-line ``data:`` values
+    concatenate with ``\\n``. ``event:`` / ``id:`` / ``retry:`` / comment
+    (``:``) lines are ignored.
+    """
+
+    data_lines: list[str] = []
+    async for line in response.aiter_lines():
+        if line == "":
+            if data_lines:
+                yield "\n".join(data_lines)
+            data_lines = []
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line[len("data:") :].lstrip(" "))
+            continue
+        # event: / id: / retry: / unknown -> ignore.
+    # Trailing frame without blank-line terminator (rare; defensive).
+    if data_lines:
+        yield "\n".join(data_lines)
 
 
 # --- Error mapping -----------------------------------------------------------

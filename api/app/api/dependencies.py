@@ -73,7 +73,8 @@ unpacking the Depends() each time."""
 
 
 async def get_active_user(user: CurrentUser) -> User:
-    """`CurrentUser` plus the must-change-password gate.
+    """`CurrentUser` plus the must-change-password gate and the
+    MFA-mandatory gate.
 
     Used by every authenticated endpoint EXCEPT the small set the user is
     allowed to call before completing a forced password change:
@@ -86,12 +87,35 @@ async def get_active_user(user: CurrentUser) -> User:
     instructing the client to redirect to the change-password flow. This
     is the gate that enforces "can't use API beyond the change endpoint
     until password is changed" per Task B2's verification criteria.
+
+    M-Sec.1 — when the deployment has ``LQ_AI_MFA_MANDATORY=true`` and
+    the user has not yet enrolled MFA, this dependency raises
+    :class:`MfaEnrollmentRequired` (403, ``code='mfa_enrollment_required'``).
+    The whitelist endpoints (``/auth/mfa/setup``, ``/auth/mfa/enable``,
+    ``/auth/logout``, ``/users/me``) keep using :data:`CurrentUser`
+    directly so the user can complete enrollment.
     """
     if user.must_change_password:
         raise PasswordChangeRequired(
             message=(
                 "You must change your password before using the API. "
                 "POST /api/v1/auth/change-password to set a new password."
+            ),
+        )
+
+    # M-Sec.1: mandatory-MFA deployment flag. The check fires AFTER
+    # password-change so an admin onboarding a brand-new user with a
+    # temporary password walks through password rotation first, MFA
+    # second.
+    from app.config import get_settings
+    from app.errors import MfaEnrollmentRequired
+
+    settings = get_settings()
+    if settings.mfa_mandatory and not user.mfa_enabled:
+        raise MfaEnrollmentRequired(
+            message=(
+                "This deployment requires MFA enrollment. "
+                "POST /api/v1/auth/mfa/setup to begin enrollment."
             ),
         )
     return user
@@ -127,3 +151,45 @@ AdminUser = Annotated[User, Depends(get_admin_user)]
 """Type alias for endpoints that require ``is_admin = true``. Stacks on
 top of :data:`ActiveUser` (so it inherits the bearer-token + must-change-
 password gate) and adds the admin check."""
+
+
+# PRD §5.2 RBAC three-role system (Wave C). ``viewer`` users can read
+# resources they own but cannot mutate; ``admin`` and ``member`` can
+# both mutate. Backed by ``users.role`` (migration 0017) with a
+# server-default of ``member`` so existing rows + new signups
+# inherit mutating access without explicit promotion.
+_MUTATING_ROLES = frozenset({"admin", "member"})
+
+
+async def get_mutating_user(user: ActiveUser) -> User:
+    """``ActiveUser`` plus a role check that excludes ``viewer``.
+
+    Wave C. Apply to state-changing endpoints (POST/PATCH/DELETE) so
+    operators can hand out read-only logins for auditors / observers.
+    Read-only endpoints (GET) keep using ``ActiveUser`` directly.
+
+    Returns 403 with ``code='forbidden'`` and a body mentioning the
+    role requirement so a CLI / UI can render a useful message.
+    """
+
+    if getattr(user, "role", "member") not in _MUTATING_ROLES:
+        from app.errors import Forbidden
+
+        raise Forbidden(
+            message=(
+                "This endpoint requires a member or admin role; viewer-role "
+                "users have read-only access."
+            ),
+            details={"role": user.role, "required_roles": sorted(_MUTATING_ROLES)},
+        )
+    return user
+
+
+MutatingUser = Annotated[User, Depends(get_mutating_user)]
+"""Type alias for endpoints that must reject ``viewer`` users.
+
+State-changing handlers (POST/PATCH/DELETE) on owned resources use
+this in place of ``ActiveUser`` so the role gate fires before any
+business logic runs. Admin-only endpoints continue to use
+``AdminUser``; pure-read endpoints stay on ``ActiveUser``.
+"""

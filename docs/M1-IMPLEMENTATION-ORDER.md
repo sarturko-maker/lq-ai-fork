@@ -156,15 +156,23 @@ Users can sign in. The backend can route inference requests through the gateway 
 
 ### Task B6 — Additional provider adapters [parallel; can defer to Phase E]
 
-**Scope:** Implement adapters for OpenAI, Vertex (Anthropic on Vertex), Bedrock. Optional for M1 baseline; recommended for breadth. Ollama adapter is critical for Mode 2.
+**Scope:** Provider adapters beyond the B3 Anthropic adapter. M1 lands the three that the alternate frontend and the cloud-key/local-key value proposition both depend on; Vertex and Bedrock are deferred to M2 as DE-034 and DE-035 (PRD §9 has full implementation specs sufficient for any developer to pick up).
 
-**Dependencies:** B3 (template).
+**M1 in-scope (landed):**
+- **Ollama** (B6 partial, 2026-05-09): the Mode-2 air-gapped local-inference backbone per PRD §1.5.1 / §6.1. `gateway/app/providers/ollama.py`. Chat completions (unary + line-delimited JSON streaming); embeddings raise `ProviderUnsupportedError` (the `embedding` alias routes to OpenAI per ADR 0008).
+- **OpenAI** (C6 embeddings + B6 chat completions, 2026-05-11): the most-deployed Tier-3/Tier-4 cloud provider. `gateway/app/providers/openai.py`. Chat completions are largely pass-through since OpenAI's wire format is the gateway's wire format; the LQ.AI extension keys are stripped before send (OpenAI 400s on unknown body keys). SSE streaming with `stream_options.include_usage` opt-in so the final chunk carries usage.
 
-**Output:** Each provider can be configured and routed to.
+**M2 deferred (documented as DEs):**
+- **Vertex AI (Anthropic on Vertex)** — see PRD §9 DE-034. JWT-bearer auth flow + `:rawPredict` / `:streamRawPredict` endpoints. Reuses the Anthropic SSE translation surface.
+- **Bedrock** — see PRD §9 DE-035. AWS SigV4 signing + AWS Event Stream binary frame parsing for `/invoke-with-response-stream`. Reuses the Anthropic SSE translation surface (refactor required to extract the helper).
 
-**Verification:** Per provider: configure in `gateway.yaml`, send a request, verify response.
+**Dependencies:** B3 (template for translation surface, error mapping, and streaming contracts).
 
-**Effort:** 3–4 hours per provider.
+**Output:** Each in-scope provider can be configured in `gateway.yaml`, registered at lifespan, and routed to. Adapters with missing creds at startup log a warning (non-fatal); request-time fallback walk picks the next eligible target.
+
+**Verification:** Per provider: configure in `gateway.yaml`, send a request, verify response. Unit tests cover translation, error mapping, streaming, and no-key-leak invariants. Live smoke verified against real provider when creds available.
+
+**Effort:** 3–4 hours per provider for OpenAI/Ollama-class adapters where the wire format is OpenAI-compatible or close to it. 8–16 hours for Vertex and Bedrock per the DE estimates (the auth flow and event-stream parser dominate).
 
 ---
 

@@ -65,6 +65,7 @@ CODE_INTERNAL_ERROR = "internal_error"
 CODE_PASSWORD_CHANGE_REQUIRED = "password_change_required"
 CODE_PAYLOAD_TOO_LARGE = "payload_too_large"
 CODE_CONFLICT = "conflict"
+CODE_MFA_ENROLLMENT_REQUIRED = "mfa_enrollment_required"
 
 # Backend↔gateway crossing codes (also declared in gateway/app/errors.py).
 # These propagate from gateway responses into backend exceptions; the
@@ -219,6 +220,19 @@ class PasswordChangeRequired(LQAIError):
     """
 
     code = CODE_PASSWORD_CHANGE_REQUIRED
+    http_status = status.HTTP_403_FORBIDDEN
+
+
+class MfaEnrollmentRequired(LQAIError):
+    """The user must enroll in MFA before proceeding — 403.
+
+    Surfaced by the MFA-mandatory gate (M-Sec.1) when the deployment
+    is configured with ``LQ_AI_MFA_MANDATORY=true`` and the calling
+    user has ``mfa_enabled=False``. The body's ``code`` is the stable
+    string the client branches on to redirect to the MFA-setup flow.
+    """
+
+    code = CODE_MFA_ENROLLMENT_REQUIRED
     http_status = status.HTTP_403_FORBIDDEN
 
 
@@ -403,6 +417,7 @@ __all__ = [
     "CODE_GATEWAY_UNREACHABLE",
     "CODE_INTERNAL_ERROR",
     "CODE_INVALID_MODEL",
+    "CODE_MFA_ENROLLMENT_REQUIRED",
     "CODE_NOT_FOUND",
     "CODE_PASSWORD_CHANGE_REQUIRED",
     "CODE_PAYLOAD_TOO_LARGE",
@@ -422,6 +437,7 @@ __all__ = [
     "InternalError",
     "InvalidModel",
     "LQAIError",
+    "MfaEnrollmentRequired",
     "NotFound",
     "PasswordChangeRequired",
     "PayloadTooLarge",

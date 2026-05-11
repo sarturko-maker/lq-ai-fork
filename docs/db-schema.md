@@ -728,6 +728,42 @@ Resolution path during prompt assembly (`/internal/skills/{slug}?user_id=…`): 
 
 ---
 
+## Teams (D8.1a, per [ADR 0012](adr/0012-db-backed-user-skills.md))
+
+Operator-admin-controlled groupings that scope shared skills. `is_admin=true` users create teams and add members; each `team_members` row carries a `role` (`admin` or `member`) that D8.1b uses to gate mutate rights on team-scope `user_skills` rows. The migration closing the `user_skills.owner_team_id` FK lands here.
+
+```sql
+CREATE TABLE teams (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name               TEXT NOT NULL,
+    slug               TEXT NOT NULL UNIQUE,                       -- stable lowercase identifier
+    description        TEXT,
+    created_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE team_members (
+    team_id           UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    user_id           UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role              TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+    added_by_user_id  UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (team_id, user_id)
+);
+
+CREATE INDEX idx_team_members_user ON team_members(user_id);
+
+-- Closes the user_skills.owner_team_id FK that 0013 left unbound.
+ALTER TABLE user_skills
+    ADD CONSTRAINT fk_user_skills_team
+    FOREIGN KEY (owner_team_id) REFERENCES teams(id) ON DELETE CASCADE;
+```
+
+Team deletion CASCADEs to `team_members` and to `user_skills` with `scope='team'`. User deletion CASCADEs into membership rows but is RESTRICTed by the `created_by_user_id` and `added_by_user_id` references — deleting a user requires re-assigning or deleting the teams they created and removing their membership audit trail first.
+
+---
+
 ## Audit log (cross-cutting)
 
 The most consequential table in the schema. Every privilege-affecting action lands here. Privileged-marked entries and routed-inference-tier values are first-class fields, not buried in JSONB.

@@ -1,23 +1,27 @@
 <script lang="ts">
 	/**
-	 * /lq-ai/skills — Skill Creator landing page (D8 / ADR 0012).
+	 * /lq-ai/skills — Skill Creator landing page (D8 / D8.1c / ADR 0012).
 	 *
-	 * Lists the caller's DB-backed user-scope skills with edit / archive
-	 * affordances. Empty state nudges toward "New skill". A user-scope
-	 * skill at the same slug as a built-in shadows the built-in for that
-	 * user's chats (per ADR 0012); the shadow indicator surfaces here so
-	 * the user can see at-a-glance which of their skills are overriding.
+	 * Lists the caller's DB-backed user- and team-scope skills with edit /
+	 * archive affordances. Team-scope rows are restricted to teams where
+	 * the caller is a team-admin (members read team skills in the chat
+	 * picker, not here). Empty state nudges toward "New skill". A skill
+	 * at the same slug as a built-in shadows the built-in for the
+	 * relevant scope (per ADR 0012 + D8.1b resolver: user > team >
+	 * built-in); the shadow indicator surfaces here so the user can see
+	 * which slugs they're overriding.
 	 */
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
-	import { userSkillsApi, skillsApi } from '$lib/lq-ai/api';
+	import { userSkillsApi, skillsApi, teamsApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
-	import type { UserSkill, SkillSummary } from '$lib/lq-ai/types';
+	import type { UserSkill, SkillSummary, TeamSummary } from '$lib/lq-ai/types';
 	import TrustPill from '$lib/lq-ai/components/TrustPill.svelte';
 
 	let rows: UserSkill[] = [];
 	let builtinSlugs = new Set<string>();
+	let teamNamesById = new Map<string, string>();
 	let loading = false;
 	let listError: string | null = null;
 	let actionError: string | null = null;
@@ -26,12 +30,16 @@
 		loading = true;
 		listError = null;
 		try {
-			const [mine, builtins] = await Promise.all([
-				userSkillsApi.listUserSkills(),
-				skillsApi.listSkills('builtin')
+			const [mine, builtins, myTeams] = await Promise.all([
+				userSkillsApi.listUserSkills('all'),
+				skillsApi.listSkills('builtin'),
+				teamsApi.listMyTeams()
 			]);
 			rows = mine;
 			builtinSlugs = new Set(builtins.map((s: SkillSummary) => s.name));
+			teamNamesById = new Map(
+				(myTeams as TeamSummary[]).map((t) => [t.id, t.name])
+			);
 		} catch (e) {
 			console.error('user-skills: load failed', e);
 			listError =
@@ -78,8 +86,8 @@
 		<div>
 			<h1 class="lq-text-page-h">My skills</h1>
 			<p class="lq-text-caption mt-1" style="color: var(--lq-text-tertiary);">
-				Skills you've authored. A skill with a slug that matches a built-in shadows the built-in
-				for your chats only — other users still see the built-in.
+				Skills you can edit — your personal skills, plus team skills for any team where you're an
+				admin. A skill at the same slug as a built-in shadows the built-in for the relevant scope.
 			</p>
 		</div>
 		<div class="flex gap-2">
@@ -137,6 +145,7 @@
 					<tr>
 						<th class="text-left px-3 py-2 lq-text-label">Title</th>
 						<th class="text-left px-3 py-2 lq-text-label">Slug</th>
+						<th class="text-left px-3 py-2 lq-text-label">Scope</th>
 						<th class="text-left px-3 py-2 lq-text-label">Version</th>
 						<th class="text-left px-3 py-2 lq-text-label">Updated</th>
 						<th class="text-right px-3 py-2 lq-text-label">Actions</th>
@@ -144,7 +153,7 @@
 				</thead>
 				<tbody class="lq-tbody">
 					{#each rows as row (row.id)}
-						<tr data-testid="lq-ai-user-skill-row">
+						<tr data-testid="lq-ai-user-skill-row" data-scope={row.scope}>
 							<td class="px-3 py-2" style="color: var(--lq-text);">
 								<a
 									href={`/lq-ai/skills/${row.id}/edit`}
@@ -164,6 +173,20 @@
 											variant="tier"
 											label="Shadows built-in"
 										/>
+									</span>
+								{/if}
+							</td>
+							<td class="px-3 py-2">
+								{#if row.scope === 'team'}
+									<span data-testid="lq-ai-user-skill-team-chip" title="Team-scope skill — visible to every member of this team.">
+										<TrustPill
+											variant="tier"
+											label={`Team · ${row.owner_team_id ? (teamNamesById.get(row.owner_team_id) ?? 'unknown') : 'unknown'}`}
+										/>
+									</span>
+								{:else}
+									<span class="lq-scope-personal" data-testid="lq-ai-user-skill-personal-chip">
+										Personal
 									</span>
 								{/if}
 							</td>
@@ -256,5 +279,17 @@
 
 	.lq-tbody tr {
 		border-top: 1px solid var(--lq-border);
+	}
+
+	.lq-scope-personal {
+		display: inline-flex;
+		align-items: center;
+		padding: 2px 8px;
+		border-radius: var(--lq-radius-pill);
+		font-size: 11px;
+		font-weight: 500;
+		background: var(--lq-inset);
+		color: var(--lq-text-secondary);
+		border: 1px solid var(--lq-border);
 	}
 </style>

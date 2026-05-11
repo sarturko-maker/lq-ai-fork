@@ -26,7 +26,9 @@ from app.api import (
     admin,
     auth,
     chats,
+    enhance_prompt,
     files,
+    inference,
     internal,
     knowledge_bases,
     models,
@@ -34,6 +36,7 @@ from app.api import (
     projects,
     saved_prompts,
     skills,
+    teams,
     user_skills,
     users,
 )
@@ -63,6 +66,10 @@ api_router.include_router(knowledge_bases.router, dependencies=_active)
 api_router.include_router(organization_profile.router, dependencies=_active)
 api_router.include_router(saved_prompts.router, dependencies=_active)
 api_router.include_router(user_skills.router, dependencies=_active)
+api_router.include_router(teams.user_router, dependencies=_active)
+api_router.include_router(teams.admin_router, dependencies=_active)
+api_router.include_router(enhance_prompt.router, dependencies=_active)
+api_router.include_router(inference.router, dependencies=_active)
 api_router.include_router(admin.router, dependencies=_active)
 
 __all__ = ["api_router"]

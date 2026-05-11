@@ -16,9 +16,20 @@
 import { apiRequest } from './client';
 import type { UserSkill, UserSkillCreate, UserSkillUpdate } from '../types';
 
-/** GET /api/v1/user-skills — non-archived rows owned by the caller, newest first. */
-export async function listUserSkills(): Promise<UserSkill[]> {
-	return apiRequest<UserSkill[]>('/user-skills');
+/**
+ * GET /api/v1/user-skills — non-archived rows the caller can edit.
+ *
+ * Scope filter (D8.1c — default ``'user'`` for back-compat):
+ *
+ * * ``'user'`` — caller's user-scope rows only.
+ * * ``'team'`` — team-scope rows from teams where the caller is admin.
+ * * ``'all'`` — both layers merged + sorted by ``updated_at DESC``.
+ */
+export async function listUserSkills(
+	scope: 'user' | 'team' | 'all' = 'user'
+): Promise<UserSkill[]> {
+	const path = scope === 'user' ? '/user-skills' : `/user-skills?scope=${scope}`;
+	return apiRequest<UserSkill[]>(path);
 }
 
 /** GET /api/v1/user-skills/{id} — owner-only fetch (404 for non-owner). */

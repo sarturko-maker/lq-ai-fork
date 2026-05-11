@@ -34,12 +34,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.dependencies import make_require_gateway_key
 from app.config import GatewayConfig, ModelAliasConfig
 from app.config_holder import ConfigReloadError, MutableConfigHolder
-from app.config_writer import AliasMutationError, delete_alias, upsert_alias
+from app.config_writer import AliasMutationError, delete_alias, update_tier_policy, upsert_alias
 from app.router import derive_routed_inference_tier
 
 require_gateway_key = make_require_gateway_key()
@@ -222,6 +222,51 @@ async def get_tier_config(request: Request) -> dict[str, Any]:
 
     cfg = _config(request)
     return {"tier_policy": cfg.tier_policy.model_dump(mode="json")}
+
+
+class TierPolicyPatch(BaseModel):
+    """``PATCH /admin/v1/tier-config`` body (Wave B).
+
+    All fields optional — only supplied keys are written to disk. The
+    write is atomic + reloaded; if the merged config fails Pydantic
+    re-validation (e.g., empty ``allowed_tiers_global``), the on-disk
+    file is rolled back and the response is 422 with the validation
+    error.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_tiers_global: list[int] | None = Field(default=None)
+    default_minimum_tier: int | None = Field(default=None, ge=1, le=5)
+    privileged_minimum_tier: int | None = Field(default=None, ge=1, le=5)
+    warn_on_tiers: list[int] | None = Field(default=None)
+
+
+@router.patch("/tier-config")
+async def patch_tier_config(
+    request: Request, body: TierPolicyPatch
+) -> dict[str, Any]:
+    """Update the operator's ``tier_policy`` block (Wave B).
+
+    Partial update — only supplied fields move. Writes through to
+    ``gateway.yaml`` atomically; the live config snapshot reloads on
+    success. On validation failure the on-disk file rolls back.
+    """
+
+    holder = _holder(request)
+    payload = body.model_dump(exclude_none=True)
+    if not payload:
+        return {"tier_policy": holder.current().tier_policy.model_dump(mode="json")}
+
+    try:
+        updated = update_tier_policy(holder, **payload)
+    except AliasMutationError as exc:
+        return _gateway_error(
+            code="invalid_tier_policy",
+            message=str(exc),
+            status_code=exc.http_status,
+        )
+    return {"tier_policy": updated}
 
 
 @router.get("/anonymization-config")

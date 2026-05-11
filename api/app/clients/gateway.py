@@ -554,6 +554,36 @@ class GatewayClient:
             request_id=request_id,
         )
 
+    async def get_tier_config(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """GET /admin/v1/tier-config — operator tier policy (Wave B)."""
+
+        return await self._admin_request(
+            method="GET",
+            path="/admin/v1/tier-config",
+            op="get_tier_config",
+            request_id=request_id,
+        )
+
+    async def patch_tier_config(
+        self,
+        *,
+        body: dict[str, Any],
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """PATCH /admin/v1/tier-config — partial-update tier_policy (Wave B)."""
+
+        return await self._admin_request(
+            method="PATCH",
+            path="/admin/v1/tier-config",
+            op="patch_tier_config",
+            request_id=request_id,
+            body=body,
+        )
+
     async def _admin_request(
         self,
         *,

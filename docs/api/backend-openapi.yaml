@@ -54,6 +54,8 @@ tags:
     description: Per-user saved prompt fragments
   - name: user-skills
     description: Per-user DB-backed skills (D8) — owned CRUD that shadows built-ins per ADR 0012
+  - name: teams
+    description: Operator-admin-controlled teams (D8.1a) — D8.1b will gate team-scope user-skills mutate on team-admin role
   - name: audit-log
     description: Audit log query (admin only)
   - name: tier-policy
@@ -350,6 +352,113 @@ paths:
         '204': {description: Pending deletion cancelled}
         '400': {description: No pending deletion to cancel}
 
+  /api/v1/users/me/preferences:
+    get:
+      tags: [users]
+      summary: Read the caller's preferences (Wave A — PRD §3.2)
+      description: |
+        Returns the preferences slice of the user profile. The same
+        fields appear on ``GET /users/me``; this dedicated endpoint
+        exists so frontends can subscribe to preferences changes
+        without re-fetching the whole user object.
+      responses:
+        '200':
+          description: Preferences snapshot
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserPreferences'}
+    patch:
+      tags: [users]
+      summary: Update the caller's preferences (partial)
+      description: |
+        Only the fields the user supplies move. An idempotent PATCH
+        (same value re-supplied) returns 200 without writing an audit
+        row, matching the user_skills / saved_prompts pattern. Real
+        changes write a ``user.preferences_updated`` audit row with
+        before/after values in details.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/UserPreferencesUpdate'}
+      responses:
+        '200':
+          description: Updated preferences
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserPreferences'}
+
+  # ----------- ENHANCE PROMPT (PRD §3.2 — Wave A) -----------
+  /api/v1/enhance-prompt:
+    post:
+      tags: [enhance-prompt]
+      summary: Expand a short prompt into a structured legal prompt
+      description: |
+        Invokes the ``enhance-prompt`` skill against the gateway (with
+        ``lq_ai_skills=['enhance-prompt']`` so user/team-scope
+        shadows of the skill are honored per the D8.1b resolver).
+        Returns the structured expansion the SKILL.md output schema
+        produces — ``expansion_applied`` + ``expanded_prompt`` +
+        ``reasoning`` + ``skip_reason`` + ``preview_to_user`` — plus
+        an ``interaction_id`` the frontend uses to PATCH ``used`` /
+        ``edited_before_use`` after the user acts on the preview.
+
+        Defaults to the ``fast`` model alias (cheaper/smaller than
+        ``smart`` per the spec's "smaller/cheaper model" guidance);
+        ``model`` on the body overrides per-request.
+
+        When the model produces malformed structured output, the
+        response carries ``expansion_applied=false`` +
+        ``skip_reason='parse_error'`` rather than 500 — the frontend
+        falls back to submitting the original prompt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EnhancePromptRequest'}
+      responses:
+        '200':
+          description: Expansion (or a structured skip decision)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EnhancePromptResponse'}
+        '502':
+          description: Gateway / provider failure during enhancement
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/enhance-prompt/{interaction_id}:
+    parameters:
+      - name: interaction_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    patch:
+      tags: [enhance-prompt]
+      summary: Record what the user did with the enhancement preview
+      description: |
+        Updates ``used`` and ``edited_before_use`` for telemetry.
+        Owner-only (404 if the row belongs to another user — same
+        id-probing posture as user_skills + chats). Idempotent: a
+        no-op PATCH returns 200 without writing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EnhancePromptOutcomeUpdate'}
+      responses:
+        '200':
+          description: Updated interaction
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EnhancePromptResponse'}
+        '404':
+          description: Interaction not found OR not owned by the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
   # ----------- PROJECTS -----------
   /api/v1/projects:
     get:
@@ -603,6 +712,31 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
 
   # ----------- CHATS -----------
+  /api/v1/chats/search:
+    get:
+      tags: [chats]
+      summary: Full-text search across chats + messages (PRD §1.7)
+      description: |
+        Wave B. Postgres ``websearch_to_tsquery`` against the
+        ``chats.title_tsv`` + ``messages.content_tsv`` generated
+        columns (migration 0016). Owner-scoped; archived chats are
+        excluded. Returns ranked hits with a ``ts_headline`` snippet
+        of the matching message (or the title itself for title hits).
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 500}
+        - name: limit
+          in: query
+          schema: {type: integer, default: 20, minimum: 1, maximum: 100}
+      responses:
+        '200':
+          description: Ranked search hits
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChatSearchResponse'}
+
   /api/v1/chats:
     get:
       tags: [chats]
@@ -881,6 +1015,64 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
 
+  /api/v1/skills/{skill_name}/contents:
+    parameters:
+      - name: skill_name
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [skills]
+      summary: Full skill contents for the skill inspector (PRD §3.4 — Wave A)
+      description: |
+        Returns the same payload shape as ``GET /skills/{skill_name}``
+        (SKILL.md frontmatter + body + reference + example files). The
+        dedicated URL exists because PRD §3.4 names it explicitly as
+        the contract behind the "view this skill" affordance + the
+        skill inspector side panel. Applies the D8.1b resolution stack
+        (user > team > built-in).
+      responses:
+        '200':
+          description: Skill (same shape as the base GET)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Skill'}
+        '404':
+          description: No skill with that name resolves for the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/skills/{skill_name}/inputs:
+    parameters:
+      - name: skill_name
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [skills]
+      summary: Declared inputs (form schema) for the skill (PRD §3.4 — Wave A)
+      description: |
+        The PRD §3.4 skill-input-form pattern: skills declare inputs
+        in their frontmatter so the UI can render a structured form
+        rather than letting the model ask for missing context
+        conversationally. The endpoint resolves user > team > built-in
+        and looks for the inputs block at either the top of the
+        frontmatter (formal-guide shape) or under ``lq_ai.inputs``
+        (corpus reality for skills like enhance-prompt). Returns a
+        name-only stub when the skill declares no inputs.
+      responses:
+        '200':
+          description: Inputs (required + optional)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SkillInputs'}
+        '404':
+          description: No skill with that name resolves for the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
   /api/v1/skills/{skill_name}/fork:
     parameters:
       - name: skill_name
@@ -927,14 +1119,27 @@ paths:
   /api/v1/user-skills:
     get:
       tags: [user-skills]
-      summary: List the caller's user-scope skills (newest first)
+      summary: List the caller's editable skills (user-scope by default; ?scope=team|all)
       description: |
         Returns the rich ``UserSkill`` view (body + frontmatter_extra
         included) for the management UI. The picker-side merge view
         lives at ``GET /api/v1/skills?scope=all`` (summary shape).
+
+        Scope filter (D8.1c — default ``user`` for back-compat):
+
+        * ``user`` — caller's user-scope rows only.
+        * ``team`` — team-scope rows from teams where the caller is a
+          team-admin. (Non-admin members read team skills in the picker,
+          not here, since they can't mutate.)
+        * ``all`` — both layers merged + sorted by ``updated_at DESC``.
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema: {type: string, enum: [user, team, all], default: user}
       responses:
         '200':
-          description: List of user-scope skill rows
+          description: List of editable skill rows for the caller
           content:
             application/json:
               schema:
@@ -942,13 +1147,21 @@ paths:
                 items: {$ref: '#/components/schemas/UserSkill'}
     post:
       tags: [user-skills]
-      summary: Create a user-scope skill
+      summary: Create a user- or team-scope skill (D8 + D8.1b)
       description: |
-        Creates a new user-scope row owned by the caller (ADR 0012).
-        Slug collision with the caller's existing non-archived rows
-        returns 409. Collision with a filesystem built-in is **allowed**
-        — that's the deliberate shadow case; the user's row wins for
-        their chats.
+        Creates a new skill row. Scope branches (per ADR 0012 + D8.1b):
+
+        * ``scope='user'`` (default) — owned by the caller. Slug
+          collision with the caller's existing non-archived rows
+          returns 409. Collision with a filesystem built-in is
+          **allowed** — the deliberate shadow case; the user's row
+          wins for their chats.
+        * ``scope='team'`` — owned by ``owner_team_id``. Caller must
+          be a team-admin of that team or 404 (id-probing-safe).
+          Slug collision within the team's non-archived rows returns
+          409. The D8.1b resolver picks user > team > built-in.
+
+        422 fires when ``scope`` and ``owner_team_id`` are inconsistent.
       requestBody:
         required: true
         content:
@@ -960,11 +1173,201 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/UserSkill'}
-        '409':
-          description: Slug collides with the caller's existing user-scope skills.
+        '404':
+          description: Team referenced by owner_team_id does not exist OR caller is not a team-admin (id-probing-safe).
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Slug collides with the caller's user-scope rows OR the named team's team-scope rows.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422':
+          description: scope/owner_team_id combination is invalid (team missing team id, or user carrying team id).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  # ----------- TEAMS (D8.1a — operator-admin-controlled) -----------
+  /api/v1/teams:
+    get:
+      tags: [teams]
+      summary: List teams the caller belongs to (newest first)
+      description: |
+        Each row carries ``caller_role`` (admin | member) so the UI can
+        render mutate affordances without a second round-trip. The
+        optional ``?role=`` filter (D8.1c) restricts to a specific
+        role — the team-scope skill creation picker uses
+        ``?role=admin``.
+      parameters:
+        - name: role
+          in: query
+          required: false
+          schema: {type: string, enum: [admin, member]}
+      responses:
+        '200':
+          description: Caller's teams (with caller_role populated)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/TeamSummary'}
+
+  /api/v1/teams/{team_id}:
+    parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [teams]
+      summary: Fetch a team (member-only; 404 conflates "no such team" and "not a member")
+      responses:
+        '200':
+          description: Team payload with member roster
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Team'}
+        '404':
+          description: Team does not exist OR caller is not a member.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/admin/teams:
+    get:
+      tags: [teams]
+      summary: List every team in the deployment (admin)
+      responses:
+        '200':
+          description: All teams
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/TeamSummary'}
+    post:
+      tags: [teams]
+      summary: Create a new team; admin is auto-added as the first admin member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TeamCreate'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Team'}
+        '409':
+          description: A team with that slug already exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/admin/teams/{team_id}:
+    parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [teams]
+      summary: Fetch a team with its member roster (admin)
+      responses:
+        '200':
+          description: Team payload
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Team'}
+    patch:
+      tags: [teams]
+      summary: Update name / description (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TeamUpdate'}
+      responses:
+        '200':
+          description: Updated team
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Team'}
+    delete:
+      tags: [teams]
+      summary: Delete a team; CASCADES to team_members and team-scope user_skills
+      responses:
+        '204':
+          description: Deleted
+
+  /api/v1/admin/teams/{team_id}/members:
+    parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      tags: [teams]
+      summary: Add a user to a team (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: {type: string, format: uuid}
+                role: {type: string, enum: [admin, member], default: member}
+      responses:
+        '201':
+          description: Member added
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TeamMember'}
+        '409':
+          description: User is already a member of this team.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/admin/teams/{team_id}/members/{user_id}:
+    parameters:
+      - name: team_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: user_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    patch:
+      tags: [teams]
+      summary: Change a member's role (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: {type: string, enum: [admin, member]}
+      responses:
+        '200':
+          description: Updated membership
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TeamMember'}
+    delete:
+      tags: [teams]
+      summary: Remove a user from a team (admin)
+      responses:
+        '204':
+          description: Member removed
 
   /api/v1/user-skills/{skill_id}:
     parameters:
@@ -974,7 +1377,12 @@ paths:
         schema: {type: string, format: uuid}
     get:
       tags: [user-skills]
-      summary: Fetch a single user-scope skill (owner-only)
+      summary: Fetch a single user- or team-scope skill (owner or team-admin)
+      description: |
+        Owner-only for ``scope='user'`` rows; team-admin-only for
+        ``scope='team'`` rows (D8.1b). Non-admin team members read team
+        skills through the merged picker at ``GET /api/v1/skills/{slug}``,
+        not through this management endpoint.
       responses:
         '200':
           description: Skill row
@@ -982,13 +1390,17 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/UserSkill'}
         '404':
-          description: Skill not found OR not owned by the caller (id-probing-safe).
+          description: Skill not found OR caller is not the owner / not a team-admin (id-probing-safe).
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
     patch:
       tags: [user-skills]
-      summary: Partial update (owner-only)
+      summary: Partial update (owner or team-admin)
+      description: |
+        Owner-only for ``scope='user'`` rows; team-admin-only for
+        ``scope='team'`` rows (D8.1b). Audit details on team-scope
+        rows carry ``team_id`` alongside slug + changed fields.
       requestBody:
         required: true
         content:
@@ -1001,22 +1413,24 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/UserSkill'}
         '404':
-          description: Skill not found OR not owned by the caller.
+          description: Skill not found OR caller is not the owner / not a team-admin.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
     delete:
       tags: [user-skills]
-      summary: Soft-delete (owner-only)
+      summary: Soft-delete (owner or team-admin)
       description: |
-        Sets ``archived_at = now()``. The slug is freed for a new
-        user-scope skill of the same slug after archive. Audit log
-        records the deletion with the row's identity.
+        Owner-only for ``scope='user'`` rows; team-admin-only for
+        ``scope='team'`` rows (D8.1b). Sets ``archived_at = now()``.
+        The slug is freed for a new skill at the same slug after
+        archive. Audit log records the deletion with the row's
+        identity; team-scope rows carry ``team_id`` in the details bag.
       responses:
         '204':
           description: Deleted
         '404':
-          description: Skill not found OR not owned by the caller.
+          description: Skill not found OR caller is not the owner / not a team-admin.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -1097,9 +1511,21 @@ paths:
         in: path
         required: true
         schema: {type: string}
+      - name: user_id
+        in: query
+        required: false
+        schema: {type: string, format: uuid}
+        description: |
+          When supplied, the resolver applies the D8.1b stack (per
+          ADR 0012): user shadow → team shadow → filesystem built-in.
+          A non-archived ``user_skills`` row for that user at this slug
+          wins outright; otherwise the newest non-archived team-scope
+          row owned by any team the user is a member of wins;
+          otherwise the filesystem-canonical built-in is returned.
+          When omitted, the registry view (built-in only) is returned.
     get:
       tags: [internal]
-      summary: Internal — fetch a skill from the registry (gateway → backend)
+      summary: Internal — fetch a skill (gateway → backend; user > team > built-in)
       description: |
         Service-to-service endpoint used by the Inference Gateway during
         prompt assembly (Task C2 / ADR 0007). The user-facing
@@ -1112,10 +1538,15 @@ paths:
         auth; internal routes stay under shared-secret auth. The two
         never mix on a single route.
 
+        The optional ``user_id`` query param activates the D8.1b
+        resolution stack (user > team > built-in). Multi-team conflicts
+        resolve to the row with the most recent ``updated_at``. The
+        gateway's skill cache stays keyed on ``(name, user_id)``;
+        team-membership changes propagate via the existing TTL.
+
         The response shape matches `GET /api/v1/skills/{name}` (the
         `Skill` schema) so the gateway-side client reuses the same
-        response model. Path differs; auth scheme differs; response
-        shape is identical.
+        response model.
       security:
         - gatewayKeyAuth: []
       responses:
@@ -1860,6 +2291,62 @@ paths:
                 type: object
                 additionalProperties: true
 
+  # ----------- ADMIN: USERS (Wave C — PRD §5.2) -----------
+  /api/v1/admin/users/{user_id}/role:
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    patch:
+      tags: [admin]
+      summary: Set a user's RBAC role (admin | member | viewer)
+      description: |
+        Wave C. Updates ``users.role`` and keeps ``is_admin`` in sync
+        (True iff role='admin'). Idempotent: re-applying the same role
+        returns 200 without an audit row. Real changes write a
+        ``user.role_updated`` audit row with before/after values.
+
+        Lockout protection: refuses to demote the last admin in the
+        deployment (409 — promote someone else first).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: {type: string, enum: [admin, member, viewer]}
+      responses:
+        '200':
+          description: Updated role
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, email, role, is_admin]
+                properties:
+                  user_id: {type: string, format: uuid}
+                  email: {type: string, format: email}
+                  role: {type: string, enum: [admin, member, viewer]}
+                  is_admin: {type: boolean}
+        '403':
+          description: Last-admin demotion lockout.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Target user not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422':
+          description: Invalid role value.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
   # ----------- ADMIN: TIER POLICY -----------
   /api/v1/admin/tier-policy:
     get:
@@ -1888,6 +2375,93 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/TierPolicy'}
+
+  # ----------- ADMIN: USAGE (PRD §5.5 — Wave B) -----------
+  /api/v1/admin/usage:
+    get:
+      tags: [admin]
+      summary: Cost + tokens aggregation across inference_routing_log
+      description: |
+        Admin-only. Aggregates ``inference_routing_log`` rows by one of
+        user | provider | model | tier | day. Refusals are excluded by
+        default (they didn't consume upstream tokens). Filters: date
+        range + the same grouping dimensions. Returns per-group rows
+        plus deployment-wide totals so the admin UI can render
+        percentages without a second query.
+      parameters:
+        - name: group_by
+          in: query
+          schema: {type: string, enum: [user, provider, model, tier, day], default: provider}
+        - name: date_from
+          in: query
+          schema: {type: string, format: date-time}
+        - name: date_to
+          in: query
+          schema: {type: string, format: date-time}
+        - name: user_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: provider
+          in: query
+          schema: {type: string}
+        - name: model
+          in: query
+          schema: {type: string}
+        - name: tier
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 5}
+      responses:
+        '200':
+          description: Aggregated usage rows + totals
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UsageResponse'}
+
+  # ----------- INFERENCE (PRD §3.13 — Wave B) -----------
+  /api/v1/inference/current-tier:
+    get:
+      tags: [inference]
+      summary: Derive routed tier for a (provider, model) pair
+      description: |
+        The Tier Awareness UI's click-for-details panel calls this so
+        the user sees the human-readable tier label + the provider type
+        the Provider Compliance Matrix renders against. 404 when the
+        pair isn't in the gateway's model list.
+      parameters:
+        - name: provider
+          in: query
+          required: true
+          schema: {type: string}
+        - name: model
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Current tier + explanation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CurrentTierResponse'}
+        '404':
+          description: No (provider, model) entry in the gateway's model list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/inference/tier-config:
+    get:
+      tags: [inference]
+      summary: Operator's tier policy (deployment-level disclosure)
+      description: |
+        User-accessible read of allowed_tiers_global + the default /
+        privileged minima. The admin write surface lives at
+        ``PATCH /api/v1/admin/tier-policy``.
+      responses:
+        '200':
+          description: Tier policy snapshot
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TierConfigResponse'}
 
 # ============================================================
 # COMPONENTS
@@ -1979,6 +2553,16 @@ components:
         email: {type: string, format: email}
         display_name: {type: string, nullable: true}
         is_admin: {type: boolean}
+        role:
+          type: string
+          enum: [admin, member, viewer]
+          default: member
+          description: |
+            Wave C — PRD §5.2 RBAC three-role system. ``admin`` has
+            full access; ``member`` can mutate owned resources; ``viewer``
+            is read-only. Mutating endpoints reject ``viewer`` via the
+            ``MutatingUser`` dependency. Kept in sync with ``is_admin``
+            (``role='admin'`` iff ``is_admin=true``).
         mfa_enabled: {type: boolean}
         must_change_password:
           type: boolean
@@ -1989,8 +2573,34 @@ components:
             after `reset-admin-password`. Other authenticated endpoints
             return 403 with `error.code = "password_change_required"`
             until this clears.
+        reasoning_visibility:
+          type: string
+          enum: [always_show, disclosure, on_request]
+          default: disclosure
+          description: |
+            Wave A — PRD §3.2 Enhance Prompt reasoning visibility:
+            ``always_show`` (reasoning visible by default),
+            ``disclosure`` (collapsed behind a toggle; spec default),
+            ``on_request`` (hidden until the user opens the skill
+            inspector). Modifiable via ``PATCH /users/me/preferences``.
         created_at: {type: string, format: date-time}
         last_login_at: {type: string, format: date-time, nullable: true}
+
+    UserPreferences:
+      type: object
+      required: [reasoning_visibility]
+      properties:
+        reasoning_visibility:
+          type: string
+          enum: [always_show, disclosure, on_request]
+
+    UserPreferencesUpdate:
+      type: object
+      description: All fields optional; only supplied keys are updated.
+      properties:
+        reasoning_visibility:
+          type: string
+          enum: [always_show, disclosure, on_request]
 
     Project:
       type: object
@@ -2395,6 +3005,180 @@ components:
                   path: {type: string}
                   content: {type: string}
 
+    # Wave A — Skill inputs (form schema for the skill-input-form pattern).
+    SkillInputDef:
+      type: object
+      required: [name, required]
+      properties:
+        name: {type: string}
+        type:
+          type: string
+          nullable: true
+          description: Free-form per corpus reality (text, enum, boolean, integer, structured, file, ...).
+        required: {type: boolean, default: false}
+        description: {type: string, nullable: true}
+        enum:
+          type: array
+          items: {type: string}
+          nullable: true
+        default: {nullable: true}
+
+    SkillInputs:
+      type: object
+      required: [name, required, optional]
+      properties:
+        name: {type: string}
+        required:
+          type: array
+          items: {$ref: '#/components/schemas/SkillInputDef'}
+        optional:
+          type: array
+          items: {$ref: '#/components/schemas/SkillInputDef'}
+
+    # Wave A — Enhance Prompt (PRD §3.2).
+    EnhancePromptAttachedSkill:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        description: {type: string, nullable: true}
+
+    EnhancePromptAttachedFile:
+      type: object
+      required: [filename]
+      properties:
+        file_id: {type: string, format: uuid, nullable: true}
+        filename: {type: string}
+        mime_type: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+
+    EnhancePromptRequest:
+      type: object
+      required: [raw_input]
+      properties:
+        raw_input: {type: string, minLength: 1, maxLength: 4096}
+        chat_id: {type: string, format: uuid, nullable: true}
+        attached_skills:
+          type: array
+          items: {$ref: '#/components/schemas/EnhancePromptAttachedSkill'}
+        attached_files:
+          type: array
+          items: {$ref: '#/components/schemas/EnhancePromptAttachedFile'}
+        jurisdiction: {type: string, nullable: true, maxLength: 200}
+        model:
+          type: string
+          nullable: true
+          maxLength: 200
+          description: Optional model alias override. Defaults to ``fast``.
+
+    EnhancePromptResponse:
+      type: object
+      required: [interaction_id, expansion_applied, expanded_prompt, reasoning]
+      properties:
+        interaction_id: {type: string, format: uuid}
+        expansion_applied: {type: boolean}
+        expanded_prompt:
+          type: string
+          description: |
+            The expansion when ``expansion_applied=true``, or the original
+            ``raw_input`` (echoed back for client convenience) when
+            ``expansion_applied=false``.
+        reasoning:
+          type: array
+          items: {type: string}
+        skip_reason: {type: string, nullable: true}
+        preview_to_user:
+          type: string
+          description: Human-readable render of the expansion + reasoning the application can show in the review screen.
+        routed_inference_tier:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 5
+        routed_provider: {type: string, nullable: true}
+        routed_model: {type: string, nullable: true}
+
+    EnhancePromptOutcomeUpdate:
+      type: object
+      description: All fields optional; only supplied keys move.
+      properties:
+        used: {type: boolean, nullable: true}
+        edited_before_use: {type: boolean, nullable: true}
+
+    # Wave B — tier inquiry (PRD §3.13)
+    CurrentTierResponse:
+      type: object
+      required: [provider, model]
+      properties:
+        provider: {type: string}
+        model: {type: string}
+        routed_inference_tier:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 5
+        routed_provider_type: {type: string, nullable: true}
+        explanation: {type: string}
+
+    TierConfigResponse:
+      type: object
+      required: [allowed_tiers_global, default_minimum_tier, privileged_minimum_tier, warn_on_tiers]
+      properties:
+        allowed_tiers_global:
+          type: array
+          items: {type: integer, minimum: 1, maximum: 5}
+        default_minimum_tier: {type: integer, minimum: 1, maximum: 5}
+        privileged_minimum_tier: {type: integer, minimum: 1, maximum: 5}
+        warn_on_tiers:
+          type: array
+          items: {type: integer, minimum: 1, maximum: 5}
+
+    # Wave B — /admin/usage (PRD §5.5)
+    UsageRow:
+      type: object
+      required: [group_key, request_count, tokens_in_sum, tokens_out_sum, cost_estimate_sum]
+      properties:
+        group_key: {type: string}
+        request_count: {type: integer, minimum: 0}
+        tokens_in_sum: {type: integer, minimum: 0}
+        tokens_out_sum: {type: integer, minimum: 0}
+        cost_estimate_sum: {type: number}
+
+    UsageResponse:
+      type: object
+      required: [rows, group_by, total_request_count, total_tokens_in, total_tokens_out, total_cost_estimate]
+      properties:
+        rows:
+          type: array
+          items: {$ref: '#/components/schemas/UsageRow'}
+        group_by: {type: string, enum: [user, provider, model, tier, day]}
+        total_request_count: {type: integer, minimum: 0}
+        total_tokens_in: {type: integer, minimum: 0}
+        total_tokens_out: {type: integer, minimum: 0}
+        total_cost_estimate: {type: number}
+
+    # Wave B — /chats/search (PRD §1.7)
+    ChatSearchHit:
+      type: object
+      required: [chat_id, title, snippet, match_source, rank, created_at, updated_at]
+      properties:
+        chat_id: {type: string, format: uuid}
+        title: {type: string}
+        snippet: {type: string}
+        match_source: {type: string, enum: [title, message]}
+        rank: {type: number}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    ChatSearchResponse:
+      type: object
+      required: [items, query]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ChatSearchHit'}
+        query: {type: string}
+
     File:
       type: object
       required: [id, owner_id, filename, mime_type, size_bytes, created_at]
@@ -2555,15 +3339,24 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
 
-    # D8 — DB-backed user skills (ADR 0012).
+    # D8 + D8.1b — DB-backed user/team skills (ADR 0012).
     UserSkill:
       type: object
       required:
-        [id, scope, owner_user_id, slug, display_name, description, version, body, created_at, updated_at]
+        [id, scope, slug, display_name, description, version, body, created_at, updated_at]
       properties:
         id: {type: string, format: uuid}
-        scope: {type: string, enum: [user, team], description: D8 only emits 'user'; 'team' arrives in D8.1.}
-        owner_user_id: {type: string, format: uuid}
+        scope: {type: string, enum: [user, team], description: '''user'' is owned by ``owner_user_id``; ''team'' is owned by ``owner_team_id`` (D8.1b).'}
+        owner_user_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set when scope='user'; null when scope='team'. Exactly one of owner_user_id / owner_team_id is non-null (enforced by ck_user_skills_scope_owner_consistency).
+        owner_team_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set when scope='team' (D8.1b). null when scope='user'.
         slug: {type: string, description: Stable identifier; matches filesystem skill folder-name conventions.}
         display_name: {type: string}
         description: {type: string}
@@ -2592,6 +3385,16 @@ components:
         version: {type: string, default: '1.0.0', maxLength: 50}
         tags: {type: array, items: {type: string}, maxItems: 20}
         frontmatter_extra: {type: object, additionalProperties: true}
+        scope:
+          type: string
+          enum: [user, team]
+          default: user
+          description: Defaults to 'user'. 'team' (D8.1b) requires owner_team_id and gates on team-admin role.
+        owner_team_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Required when scope='team'; must be null when scope='user'. 422 if the combination is inconsistent. 404 if the caller is not a team-admin of the named team (id-probing-safe).
 
     UserSkillUpdate:
       type: object
@@ -2603,6 +3406,66 @@ components:
         version: {type: string, maxLength: 50}
         tags: {type: array, items: {type: string}, maxItems: 20}
         frontmatter_extra: {type: object, additionalProperties: true}
+
+    # D8.1a — operator-admin-controlled teams. D8.1c adds caller_role.
+    TeamSummary:
+      type: object
+      required: [id, slug, name, created_by_user_id, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        slug: {type: string}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        created_by_user_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        member_count: {type: integer, minimum: 0}
+        caller_role:
+          type: string
+          enum: [admin, member]
+          nullable: true
+          description: |
+            The caller's role on this team (D8.1c). Populated by the
+            user-facing ``GET /api/v1/teams`` and
+            ``GET /api/v1/teams/{id}`` endpoints. Null on operator-admin
+            views (``/admin/teams``) when the admin isn't a member.
+
+    TeamMember:
+      type: object
+      required: [user_id, email, role, added_by_user_id, created_at]
+      properties:
+        user_id: {type: string, format: uuid}
+        email: {type: string}
+        display_name: {type: string, nullable: true}
+        role: {type: string, enum: [admin, member]}
+        added_by_user_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+
+    Team:
+      allOf:
+        - $ref: '#/components/schemas/TeamSummary'
+        - type: object
+          properties:
+            members:
+              type: array
+              items: {$ref: '#/components/schemas/TeamMember'}
+
+    TeamCreate:
+      type: object
+      required: [slug, name]
+      properties:
+        slug:
+          type: string
+          pattern: '^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$'
+          maxLength: 80
+        name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 2000, nullable: true}
+
+    TeamUpdate:
+      type: object
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 2000, nullable: true}
 
     AuditLogEntry:
       type: object

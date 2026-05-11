@@ -505,3 +505,262 @@ async def test_internal_skill_archived_shadow_falls_through(
     )
     assert resp.status_code == 200
     assert resp.json()["scope"] == "builtin"
+
+
+# ---------------------------------------------------------------------------
+# D8.1b — middle-resolution slot (user > team > built-in)
+# ---------------------------------------------------------------------------
+
+
+async def _team_test_user(db_session: AsyncSession, suffix: str):
+    """Build a fresh User row inside the internal-skills test context."""
+
+    import uuid as _uuid
+
+    from app.models import User
+    from app.security import hash_password
+
+    user = User(
+        email=f"team-shadow-{suffix}-{_uuid.uuid4().hex[:8]}@example.com",
+        display_name=f"Team Shadow {suffix}",
+        hashed_password=hash_password("correct-horse-battery-staple"),
+        is_admin=False,
+        mfa_enabled=False,
+        must_change_password=False,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    return user
+
+
+async def _team_with_member(db_session: AsyncSession, *, slug: str, member):
+    """Create a team and add ``member`` as an admin in one shot.
+
+    Returns the Team row so callers can populate team-scope skills.
+    """
+
+    from app.models.team import Team, TeamMember
+
+    team = Team(
+        slug=slug,
+        name=slug.replace("-", " ").title(),
+        created_by_user_id=member.id,
+    )
+    db_session.add(team)
+    await db_session.flush()
+    db_session.add(
+        TeamMember(
+            team_id=team.id,
+            user_id=member.id,
+            role="admin",
+            added_by_user_id=member.id,
+        )
+    )
+    await db_session.flush()
+    return team
+
+
+@pytest.mark.integration
+async def test_internal_skill_team_shadow_visible_to_member(
+    client_with_key: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A user with no personal shadow at this slug sees the team shadow
+    (per ADR 0012 + D8.1b — middle resolution slot)."""
+
+    from app.models import UserSkill
+
+    user = await _team_test_user(db_session, "member")
+    team = await _team_with_member(db_session, slug="contracts-x", member=user)
+
+    db_session.add(
+        UserSkill(
+            scope="team",
+            owner_team_id=team.id,
+            slug="alpha-test-skill",
+            display_name="Team Alpha",
+            description="team shadow",
+            body="TEAM-SHADOW-BODY",
+        )
+    )
+    await db_session.flush()
+
+    resp = await client_with_key.get(
+        f"/api/v1/internal/skills/alpha-test-skill?user_id={user.id}",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["scope"] == "team"
+    assert body["content_md"] == "TEAM-SHADOW-BODY"
+
+
+@pytest.mark.integration
+async def test_internal_skill_user_shadow_beats_team_shadow(
+    client_with_key: AsyncClient, db_session: AsyncSession
+) -> None:
+    """When BOTH a user shadow and a team shadow exist at the same slug for
+    the caller, the user shadow wins (D8.1b resolver: user > team > built-in)."""
+
+    from app.models import UserSkill
+
+    user = await _team_test_user(db_session, "u-beats-t")
+    team = await _team_with_member(db_session, slug="rank-test", member=user)
+
+    db_session.add(
+        UserSkill(
+            scope="team",
+            owner_team_id=team.id,
+            slug="alpha-test-skill",
+            display_name="Team Alpha",
+            description="team shadow",
+            body="TEAM-BODY",
+        )
+    )
+    db_session.add(
+        UserSkill(
+            scope="user",
+            owner_user_id=user.id,
+            slug="alpha-test-skill",
+            display_name="User Alpha",
+            description="user shadow",
+            body="USER-BODY",
+        )
+    )
+    await db_session.flush()
+
+    resp = await client_with_key.get(
+        f"/api/v1/internal/skills/alpha-test-skill?user_id={user.id}",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["scope"] == "user"
+    assert body["content_md"] == "USER-BODY"
+
+
+@pytest.mark.integration
+async def test_internal_skill_team_shadow_invisible_to_non_member(
+    client_with_key: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A team shadow at slug X does not leak to users outside the team —
+    they continue to see the built-in (team membership scopes access)."""
+
+    from app.models import UserSkill
+
+    insider = await _team_test_user(db_session, "insider")
+    outsider = await _team_test_user(db_session, "outsider")
+    team = await _team_with_member(db_session, slug="walled", member=insider)
+
+    db_session.add(
+        UserSkill(
+            scope="team",
+            owner_team_id=team.id,
+            slug="alpha-test-skill",
+            display_name="Walled Alpha",
+            description="team-only",
+            body="WALLED-TEAM-BODY",
+        )
+    )
+    await db_session.flush()
+
+    resp = await client_with_key.get(
+        f"/api/v1/internal/skills/alpha-test-skill?user_id={outsider.id}",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["scope"] == "builtin"
+
+
+@pytest.mark.integration
+async def test_internal_skill_multi_team_conflict_resolves_to_newest(
+    client_with_key: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A user belongs to two teams that both define a skill at the same
+    slug — the resolver picks the row with the most recent ``updated_at``.
+
+    Per the D8.1a design decision recorded in
+    SESSION-HANDOFF-2026-05-10e §"Design decisions Kevin confirmed".
+    """
+
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import UserSkill
+
+    user = await _team_test_user(db_session, "multi-team")
+    team_old = await _team_with_member(db_session, slug="older", member=user)
+    team_new = await _team_with_member(db_session, slug="newer", member=user)
+
+    # Set ``updated_at`` in the constructor so the explicit timestamp
+    # lands at INSERT time. The ``trg_user_skills_updated_at`` trigger
+    # is BEFORE UPDATE only — INSERTs sidestep it. Setting the column
+    # post-flush would fire an UPDATE and lose the deterministic
+    # ordering we're testing.
+    old_ts = datetime.now(timezone.utc) - timedelta(hours=2)
+    new_ts = datetime.now(timezone.utc)
+
+    db_session.add(
+        UserSkill(
+            scope="team",
+            owner_team_id=team_old.id,
+            slug="alpha-test-skill",
+            display_name="Older Team Alpha",
+            description="older",
+            body="OLDER-TEAM-BODY",
+            updated_at=old_ts,
+        )
+    )
+    db_session.add(
+        UserSkill(
+            scope="team",
+            owner_team_id=team_new.id,
+            slug="alpha-test-skill",
+            display_name="Newer Team Alpha",
+            description="newer",
+            body="NEWER-TEAM-BODY",
+            updated_at=new_ts,
+        )
+    )
+    await db_session.flush()
+
+    resp = await client_with_key.get(
+        f"/api/v1/internal/skills/alpha-test-skill?user_id={user.id}",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["scope"] == "team"
+    assert body["content_md"] == "NEWER-TEAM-BODY"
+
+
+@pytest.mark.integration
+async def test_internal_skill_archived_team_shadow_falls_through(
+    client_with_key: AsyncClient, db_session: AsyncSession
+) -> None:
+    """An archived team-scope row is excluded from resolution — built-in wins."""
+
+    from datetime import datetime, timezone
+
+    from app.models import UserSkill
+
+    user = await _team_test_user(db_session, "archived-team")
+    team = await _team_with_member(db_session, slug="archived-shadow", member=user)
+
+    db_session.add(
+        UserSkill(
+            scope="team",
+            owner_team_id=team.id,
+            slug="alpha-test-skill",
+            display_name="Archived Team Alpha",
+            description="archived",
+            body="ARCHIVED-TEAM-BODY",
+            archived_at=datetime.now(timezone.utc),
+        )
+    )
+    await db_session.flush()
+
+    resp = await client_with_key.get(
+        f"/api/v1/internal/skills/alpha-test-skill?user_id={user.id}",
+        headers={"X-LQ-AI-Gateway-Key": VALID_KEY},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["scope"] == "builtin"

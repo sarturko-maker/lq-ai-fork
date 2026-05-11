@@ -145,11 +145,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 )
             continue
         if provider.type in ("openai", "openai_compatible"):
-            # C6 ships the OpenAI adapter for the embeddings path. Chat
-            # completions raise ProviderUnsupportedError until B6 fills
-            # them in. The lifespan-time check matches the pattern for
-            # Anthropic: a missing key for cloud OpenAI is non-fatal at
-            # startup but produces a clean 503 at request time.
+            # C6 + B6: OpenAI adapter services both embeddings and chat
+            # completions. The lifespan-time check matches the pattern
+            # for Anthropic: a missing key for cloud OpenAI is non-fatal
+            # at startup but produces a clean 503 at request time.
             try:
                 adapters[provider.name] = OpenAIAdapter.from_config(provider)
                 logger.info(
@@ -280,6 +279,14 @@ app = FastAPI(
 
 app.include_router(inference_router)
 app.include_router(admin_router)
+
+# M-Obs.1 — Prometheus /metrics + OpenTelemetry (PRD §5.4). OTel is
+# off unless OTEL_EXPORTER_OTLP_ENDPOINT is set; that's the "no
+# telemetry by default" guarantee in PRD §5.7. Wired AFTER the routers
+# are included so FastAPIInstrumentor walks the full route tree.
+from app.observability import install_observability  # noqa: E402
+
+install_observability(app, service_name=SERVICE_NAME, service_version=__version__)
 
 
 @app.exception_handler(LQAIError)

@@ -26,13 +26,15 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import UserPublic
-from app.api.dependencies import CurrentUser, get_active_user
+from app.api.dependencies import ActiveUser, CurrentUser, get_active_user
 from app.audit import audit_action
 from app.config import get_settings
 from app.db.session import get_db
@@ -77,6 +79,31 @@ class DeleteScheduledResponse(BaseModel):
     grace_period_days: int
 
 
+# PRD §3.2 — Enhance Prompt reasoning visibility values.
+ReasoningVisibility = Literal["always_show", "disclosure", "on_request"]
+
+
+class UserPreferencesUpdate(BaseModel):
+    """PATCH body for ``/users/me/preferences`` — all fields optional.
+
+    Structured as a forward-compatible preferences object: future Wave A+
+    preferences (e.g., default jurisdiction, default model) ride here
+    rather than each getting its own endpoint.
+    """
+
+    reasoning_visibility: ReasoningVisibility | None = None
+
+
+class UserPreferencesResponse(BaseModel):
+    """The preferences slice of the user profile.
+
+    Mirror of the corresponding fields on ``UserPublic`` so the frontend
+    can subscribe to preferences without watching the whole user object.
+    """
+
+    reasoning_visibility: ReasoningVisibility
+
+
 # ---------------------------------------------------------------------------
 # /users/me
 # ---------------------------------------------------------------------------
@@ -96,6 +123,85 @@ async def get_me(user: CurrentUser) -> UserPublic:
     """
 
     return UserPublic.from_user(user)
+
+
+@router.get(
+    "/me/preferences",
+    response_model=UserPreferencesResponse,
+    summary="Read the calling user's preferences (Wave A: reasoning_visibility)",
+)
+async def get_me_preferences(user: ActiveUser) -> UserPreferencesResponse:
+    """GET /api/v1/users/me/preferences — preferences slice of the profile.
+
+    Returns the same data ``GET /users/me`` does for the preferences
+    fields; this dedicated endpoint exists so frontends can subscribe
+    to preferences changes without re-fetching the whole user object.
+    """
+
+    return UserPreferencesResponse(
+        reasoning_visibility=getattr(user, "reasoning_visibility", "disclosure"),
+    )
+
+
+@router.patch(
+    "/me/preferences",
+    response_model=UserPreferencesResponse,
+    summary="Update the calling user's preferences (partial)",
+)
+async def patch_me_preferences(
+    payload: UserPreferencesUpdate,
+    request: Request,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserPreferencesResponse:
+    """PATCH /api/v1/users/me/preferences — partial update.
+
+    Only the fields the user actually supplies move. An idempotent
+    PATCH (same value re-supplied) returns 200 without writing an
+    audit row, matching the user_skills / saved_prompts pattern.
+    Writes ``user.preferences_updated`` audit rows when anything
+    actually changes, with details enumerating the changed fields and
+    before/after values (so a privacy audit can reconstruct the
+    preference history).
+    """
+
+    from app.models.user import User as UserORM  # local — only writer needs it
+
+    # Reload to ensure we see the persisted row (the ActiveUser dependency
+    # returns a refreshed instance, but we want explicit reload semantics
+    # before mutating).
+    row = await db.get(UserORM, user.id)
+    if row is None:  # pragma: no cover — dependency would have already 401d
+        raise HTTPException(status_code=404, detail="user not found")
+
+    changed: dict[str, dict[str, str]] = {}
+    if payload.reasoning_visibility is not None:
+        before = row.reasoning_visibility
+        after = payload.reasoning_visibility
+        if before != after:
+            row.reasoning_visibility = after
+            changed["reasoning_visibility"] = {"before": before, "after": after}
+
+    if not changed:
+        return UserPreferencesResponse(
+            reasoning_visibility=row.reasoning_visibility,
+        )
+
+    await audit_action(
+        db,
+        user_id=row.id,
+        action="user.preferences_updated",
+        resource_type="user",
+        resource_id=str(row.id),
+        request=request,
+        details={"changes": changed},
+    )
+    await db.commit()
+    await db.refresh(row)
+
+    return UserPreferencesResponse(
+        reasoning_visibility=row.reasoning_visibility,
+    )
 
 
 # ---------------------------------------------------------------------------
