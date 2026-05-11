@@ -26,7 +26,7 @@ describe('tabs', () => {
     expect(isTabAvailable('home')).toBe(true);
     expect(isTabAvailable('skills')).toBe(true);
     expect(isTabAvailable('admin')).toBe(true);
-    expect(isTabAvailable('chats')).toBe(false);
+    expect(isTabAvailable('chats')).toBe(true);
     expect(isTabAvailable('matters')).toBe(false);
     expect(isTabAvailable('knowledge')).toBe(false);
     expect(isTabAvailable('saved-prompts')).toBe(false);
