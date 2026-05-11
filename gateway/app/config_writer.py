@@ -345,8 +345,63 @@ def delete_alias(
         raise
 
 
+def update_tier_policy(
+    holder: MutableConfigHolder,
+    *,
+    allowed_tiers_global: list[int] | None = None,
+    default_minimum_tier: int | None = None,
+    privileged_minimum_tier: int | None = None,
+    warn_on_tiers: list[int] | None = None,
+) -> dict[str, Any]:
+    """Apply a partial update to ``tier_policy`` and reload.
+
+    Wave B of the M1 backend gap-fill. Same temp-file + atomic-replace
+    + reload-with-rollback pattern as ``upsert_alias`` — the only
+    structural difference is that ``tier_policy`` is a single block
+    rather than a keyed mapping, so the merge is field-wise rather
+    than key-wise.
+
+    Returns the new ``tier_policy`` block as a dict so the caller
+    (the admin endpoint) can echo it back without re-reading the
+    file.
+
+    Raises :class:`AliasMutationError` with ``http_status=422`` if
+    the merged payload fails Pydantic re-validation on reload (e.g.,
+    an empty ``allowed_tiers_global`` list, a tier outside 1-5).
+    """
+
+    raw = _read_yaml_mapping(holder.config_path)
+    tier_policy = raw.get("tier_policy")
+    if not isinstance(tier_policy, dict):
+        tier_policy = {}
+        raw["tier_policy"] = tier_policy
+
+    if allowed_tiers_global is not None:
+        tier_policy["allowed_tiers_global"] = list(allowed_tiers_global)
+    if default_minimum_tier is not None:
+        tier_policy["default_minimum_tier"] = int(default_minimum_tier)
+    if privileged_minimum_tier is not None:
+        tier_policy["privileged_minimum_tier"] = int(privileged_minimum_tier)
+    if warn_on_tiers is not None:
+        tier_policy["warn_on_tiers"] = list(warn_on_tiers)
+
+    prior_bytes = holder.config_path.read_bytes()
+    _atomic_write_yaml(holder.config_path, raw)
+    try:
+        holder.reload_from_disk()
+    except ConfigReloadError as exc:
+        holder.config_path.write_bytes(prior_bytes)
+        raise AliasMutationError(
+            f"tier_policy update failed validation: {exc}",
+            http_status=422,
+        ) from exc
+
+    return dict(holder.current().tier_policy.model_dump(mode="json"))
+
+
 __all__ = [
     "AliasMutationError",
     "delete_alias",
+    "update_tier_policy",
     "upsert_alias",
 ]
