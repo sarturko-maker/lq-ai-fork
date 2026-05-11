@@ -82,13 +82,18 @@ def _registry(request: Request) -> MutableSkillRegistry:
 
 def _summary_from_user_skill(row: UserSkill) -> dict[str, Any]:
     """Return the ``SkillSummary`` shape for a user-scope row, with
-    ``None``/empty optionals dropped per the existing summary contract."""
+    ``None``/empty optionals dropped per the existing summary contract.
+
+    The ``scope`` is whatever the row carries (``user`` or ``team``)
+    rather than hardcoded — D8.1b uses the same synthesizer for both
+    scopes so the gateway's payload shape is consistent.
+    """
 
     extra = dict(row.frontmatter_extra or {})
     summary: dict[str, Any] = {
         "name": row.slug,
         "version": row.version,
-        "scope": "user",
+        "scope": row.scope,
         "title": row.display_name,
         "description": row.description,
         "tags": list(row.tags or []),
@@ -144,6 +149,47 @@ async def _load_user_shadow(
         UserSkill.owner_user_id == user_id,
         UserSkill.slug == slug,
         UserSkill.archived_at.is_(None),
+    )
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+async def _load_team_shadow(
+    db: AsyncSession, *, user_id: uuid.UUID, slug: str
+) -> UserSkill | None:
+    """Return the newest non-archived team-scope row at ``slug`` the
+    user has access to via team membership, if any (D8.1b).
+
+    Resolution rule for multi-team conflicts: a user who belongs to
+    two teams both of which define a team-scope skill at the same
+    slug sees the row with the most recent ``updated_at``. The
+    decision is per Kevin's design call recorded in handoff
+    SESSION-HANDOFF-2026-05-10e § D8.1a. This deliberately does NOT
+    take role into account — read access flows to every team member
+    (admin OR member); mutate rights stay admin-only via the
+    ``_load_mutable`` helper in :mod:`app.api.user_skills`.
+
+    Returns ``None`` when no team-scope row exists at ``slug`` for
+    any of the user's teams. The caller (the gateway-internal resolver)
+    then falls through to the filesystem-canonical registry.
+    """
+
+    # Importing here keeps the skills.py → team.py edge optional —
+    # the model module already imports without circularity but the
+    # local import documents that this helper is the only consumer
+    # of the join.
+    from app.models.team import TeamMember
+
+    stmt = (
+        select(UserSkill)
+        .join(TeamMember, TeamMember.team_id == UserSkill.owner_team_id)
+        .where(
+            UserSkill.scope == "team",
+            UserSkill.slug == slug,
+            UserSkill.archived_at.is_(None),
+            TeamMember.user_id == user_id,
+        )
+        .order_by(UserSkill.updated_at.desc(), UserSkill.id.desc())
+        .limit(1)
     )
     return (await db.execute(stmt)).scalar_one_or_none()
 
@@ -234,16 +280,26 @@ async def get_skill(
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> JSONResponse:
-    """Return full skill detail, preferring the caller's user shadow if any.
+    """Return full skill detail using the D8.1b resolution stack.
 
-    Resolution order: caller's non-archived user-scope row for this
-    slug, then the filesystem-canonical built-in. 404 if neither
-    matches.
+    Resolution order (per ADR 0012 + D8.1b):
+
+    1. The caller's non-archived user-scope shadow at this slug.
+    2. The newest non-archived team-scope shadow at this slug owned
+       by any team the caller is a member of.
+    3. The filesystem-canonical built-in.
+
+    404 if none of the three match. Member-of-team is sufficient for
+    read; mutate rights stay admin-only at the management endpoints.
     """
 
     shadow = await _load_user_shadow(db, user_id=user.id, slug=skill_name)
     if shadow is not None:
         return JSONResponse(content=_skill_from_user_skill(shadow))
+
+    team_shadow = await _load_team_shadow(db, user_id=user.id, slug=skill_name)
+    if team_shadow is not None:
+        return JSONResponse(content=_skill_from_user_skill(team_shadow))
 
     holder = _registry(request)
     registry = holder.current()

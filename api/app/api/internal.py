@@ -135,23 +135,37 @@ async def get_skill_internal(
     ``X-LQ-AI-Gateway-Key`` (constant-time compare); 401 on bad key,
     404 on unknown skill name.
 
-    Resolution order (ADR 0012):
+    Resolution order (ADR 0012 + D8.1b):
 
-    * If ``user_id`` is supplied AND a non-archived ``user_skills`` row
-      exists for that user at this slug, return the shadow synthesized
-      as a Skill payload (the user's edited body wins for their chats).
-    * Otherwise fall through to the filesystem-canonical registry.
-    * 404 if neither matches.
+    1. ``user_id`` set + non-archived user-scope row for that user
+       at this slug → return the user shadow.
+    2. ``user_id`` set + non-archived team-scope row at this slug
+       owned by any team that user belongs to → return the team
+       shadow. Multi-team conflicts resolve to the row with the
+       most recent ``updated_at``.
+    3. Filesystem-canonical registry → return the built-in.
+    4. 404 if none of the three match.
 
     The gateway calls this with the authenticated user's UUID during
     C2 prompt assembly so shadows actually shape the system prompt;
     callers that don't care about user-scope (e.g., admin tooling)
-    omit ``user_id`` and get the registry view.
+    omit ``user_id`` and get the registry view directly.
+
+    Cache key strategy (D8.1b decision): the gateway-side cache stays
+    keyed on ``(name, user_id)``. Team-membership changes are
+    operator-mediated and rare; the existing 60s skill-cache TTL
+    absorbs propagation lag without a per-membership signature in
+    the key. Re-evaluate if team-membership churn becomes routine.
     """
 
     _verify_gateway_key(x_lq_ai_gateway_key)
 
     if user_id is not None:
+        # The synthesizer and team-shadow loader live in skills.py — the
+        # local imports keep the internal.py → skills.py edge implicit
+        # to the resolver branch that actually needs them.
+        from app.api.skills import _load_team_shadow, _skill_from_user_skill
+
         stmt = select(UserSkill).where(
             UserSkill.scope == "user",
             UserSkill.owner_user_id == user_id,
@@ -160,14 +174,13 @@ async def get_skill_internal(
         )
         shadow = (await db.execute(stmt)).scalar_one_or_none()
         if shadow is not None:
-            # Reuse the synthesizer that powers the user-facing
-            # GET /skills/{slug} shadow path. Cross-module import is
-            # fine here — both modules live in app.api and the
-            # skills <-> user_skills dependency already crosses (see
-            # the fork handler in skills.py).
-            from app.api.skills import _skill_from_user_skill
-
             return JSONResponse(content=_skill_from_user_skill(shadow))
+
+        team_shadow = await _load_team_shadow(
+            db, user_id=user_id, slug=skill_name
+        )
+        if team_shadow is not None:
+            return JSONResponse(content=_skill_from_user_skill(team_shadow))
 
     holder = _registry(request)
     registry = holder.current()

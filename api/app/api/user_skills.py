@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import ActiveUser
 from app.audit import audit_action
 from app.db.session import get_db
+from app.models.team import Team, TeamMember
 from app.models.user_skill import UserSkill
 
 router = APIRouter(prefix="/user-skills", tags=["user-skills"])
@@ -82,11 +83,16 @@ class UserSkillResponse(BaseModel):
     endpoint (``GET /api/v1/skills/{slug}``) because this view is
     designed for *editing*: every column is here, no synthesis,
     nothing dropped for compactness.
+
+    Exactly one of ``owner_user_id`` / ``owner_team_id`` is set — the
+    DB's ``ck_user_skills_scope_owner_consistency`` CHECK enforces
+    this. The matching slot is ``None``.
     """
 
     id: uuid.UUID
     scope: str
-    owner_user_id: uuid.UUID
+    owner_user_id: uuid.UUID | None = None
+    owner_team_id: uuid.UUID | None = None
     slug: str
     display_name: str
     description: str
@@ -101,7 +107,14 @@ class UserSkillResponse(BaseModel):
 
 class UserSkillCreate(BaseModel):
     """POST body. Required fields mirror the minimum needed to render
-    a Skill-shaped payload to the gateway during prompt assembly."""
+    a Skill-shaped payload to the gateway during prompt assembly.
+
+    ``scope`` defaults to ``'user'`` (the D8 path). ``scope='team'``
+    requires ``owner_team_id`` and the caller must be a team-admin
+    member of that team (gated at the handler). ``owner_team_id`` is
+    rejected when ``scope='user'`` so accidental hybrid rows can't be
+    constructed via the API.
+    """
 
     slug: str = Field(min_length=1, max_length=80)
     display_name: str = Field(min_length=1, max_length=_NAME_MAX)
@@ -110,6 +123,8 @@ class UserSkillCreate(BaseModel):
     version: str = Field(default="1.0.0", min_length=1, max_length=_VERSION_MAX)
     tags: list[str] = Field(default_factory=list, max_length=_MAX_TAGS)
     frontmatter_extra: dict[str, Any] = Field(default_factory=dict)
+    scope: str = Field(default="user", pattern=r"^(user|team)$")
+    owner_team_id: uuid.UUID | None = None
 
 
 class UserSkillUpdate(BaseModel):
@@ -190,7 +205,8 @@ def _to_response(row: UserSkill) -> UserSkillResponse:
     return UserSkillResponse(
         id=row.id,
         scope=row.scope,
-        owner_user_id=row.owner_user_id,  # type: ignore[arg-type]  # narrowed by scope='user'
+        owner_user_id=row.owner_user_id,
+        owner_team_id=row.owner_team_id,
         slug=row.slug,
         display_name=row.display_name,
         description=row.description,
@@ -204,29 +220,63 @@ def _to_response(row: UserSkill) -> UserSkillResponse:
     )
 
 
-async def _load_owned(
+async def _is_team_admin(
+    db: AsyncSession, *, team_id: uuid.UUID, user_id: uuid.UUID
+) -> bool:
+    """Return whether ``user_id`` is an ``admin``-role member of ``team_id``.
+
+    Mutate rights on team-scope skills require the team-admin role per
+    D8.1b. Non-admin members can attach the skill in chats but cannot
+    create / edit / archive it.
+    """
+
+    stmt = select(TeamMember).where(
+        TeamMember.team_id == team_id,
+        TeamMember.user_id == user_id,
+        TeamMember.role == "admin",
+    )
+    return (await db.execute(stmt)).scalar_one_or_none() is not None
+
+
+async def _load_mutable(
     db: AsyncSession,
     *,
     skill_id: uuid.UUID,
     user_id: uuid.UUID,
     include_archived: bool = False,
 ) -> UserSkill:
-    """Fetch a user-skill row by id; 404 if missing OR not owned.
+    """Fetch a user/team-skill row by id; 404 if missing OR caller cannot mutate.
 
-    Conflating "no such id" with "exists but not yours" matches the
-    privacy posture in saved_prompts / chats / projects — id-probing
-    can't enumerate other users' rows.
+    For ``scope='user'`` rows the caller must be ``owner_user_id``.
+    For ``scope='team'`` rows the caller must be a team-admin member
+    of ``owner_team_id``. Otherwise 404 — conflating "no such id"
+    with "exists but not yours" matches the privacy posture in
+    saved_prompts / chats / projects so id-probing can't enumerate
+    other users' or other teams' rows.
     """
 
-    stmt = select(UserSkill).where(
-        UserSkill.id == skill_id,
-        UserSkill.scope == "user",
-        UserSkill.owner_user_id == user_id,
-    )
+    stmt = select(UserSkill).where(UserSkill.id == skill_id)
     if not include_archived:
         stmt = stmt.where(UserSkill.archived_at.is_(None))
     row = (await db.execute(stmt)).scalar_one_or_none()
     if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
+        )
+
+    if row.scope == "user":
+        if row.owner_user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
+            )
+    elif row.scope == "team":
+        if row.owner_team_id is None or not await _is_team_admin(
+            db, team_id=row.owner_team_id, user_id=user_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
+            )
+    else:  # pragma: no cover — CHECK constraint blocks other values
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
         )
@@ -269,7 +319,7 @@ async def list_user_skills(
 @router.get(
     "/{skill_id}",
     response_model=UserSkillResponse,
-    summary="Fetch a single user-scope skill (owner-only)",
+    summary="Fetch a single user/team-scope skill (owner or team-admin)",
     responses={404: {"description": "User skill not found"}},
 )
 async def get_user_skill(
@@ -277,7 +327,14 @@ async def get_user_skill(
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserSkillResponse:
-    row = await _load_owned(db, skill_id=skill_id, user_id=user.id)
+    """Owner-only for user-scope; team-admin-only for team-scope rows.
+
+    Non-admin team members read team skills through the merged picker
+    (``GET /api/v1/skills/{slug}``), not through this management
+    endpoint — same posture as filesystem built-ins.
+    """
+
+    row = await _load_mutable(db, skill_id=skill_id, user_id=user.id)
     return _to_response(row)
 
 
@@ -285,7 +342,12 @@ async def get_user_skill(
     "",
     response_model=UserSkillResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new user-scope skill",
+    summary="Create a new user- or team-scope skill",
+    responses={
+        404: {"description": "Team referenced by owner_team_id not found"},
+        409: {"description": "Slug already exists in this scope"},
+        422: {"description": "scope / owner_team_id combination invalid"},
+    },
 )
 async def create_user_skill(
     payload: UserSkillCreate,
@@ -293,37 +355,94 @@ async def create_user_skill(
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserSkillResponse:
-    """POST /api/v1/user-skills — create a fresh user-scope skill.
+    """POST /api/v1/user-skills — create a fresh user- or team-scope skill.
 
-    Slug collision with a filesystem built-in is **allowed** — that's the
-    shadow case per ADR 0012. Slug collision with the caller's own
-    non-archived user-scope skills returns 409 (uniqueness violation
-    surfaced by the partial UNIQUE index).
+    Scope branches:
+
+    * ``scope='user'`` (default) — owned by the caller. Slug collision with
+      a filesystem built-in is **allowed** (the shadow case per ADR 0012).
+      Slug collision with the caller's own non-archived user-scope skills
+      returns 409.
+    * ``scope='team'`` — owned by ``owner_team_id``. Caller must be a
+      team-admin member of that team or 404 (id-probing-safe — same
+      privacy posture as cross-user reads). Slug collision within the
+      team's non-archived rows returns 409. Slug collision with a
+      built-in OR with any user-scope row is permitted (shadowing semantics
+      cascade per D8.1b resolver: user > team > built-in).
+
+    422 fires when ``scope`` and ``owner_team_id`` are inconsistent
+    (team scope missing the team id, user scope carrying a team id).
     """
 
     slug = _validate_slug(payload.slug)
     tags = _validate_tags(payload.tags)
     frontmatter_extra = _validate_frontmatter_extra(payload.frontmatter_extra)
 
-    row = UserSkill(
-        scope="user",
-        owner_user_id=user.id,
-        slug=slug,
-        display_name=payload.display_name.strip(),
-        description=payload.description.strip(),
-        version=payload.version.strip(),
-        tags=tags,
-        frontmatter_extra=frontmatter_extra,
-        body=payload.body,
-    )
+    if payload.scope == "user":
+        if payload.owner_team_id is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="owner_team_id must be null when scope='user'",
+            )
+        row = UserSkill(
+            scope="user",
+            owner_user_id=user.id,
+            slug=slug,
+            display_name=payload.display_name.strip(),
+            description=payload.description.strip(),
+            version=payload.version.strip(),
+            tags=tags,
+            frontmatter_extra=frontmatter_extra,
+            body=payload.body,
+        )
+        audit_details: dict[str, Any] = {
+            "slug": slug,
+            "version": payload.version.strip(),
+            "tags": tags,
+            "scope": "user",
+        }
+    else:  # scope == "team" (pattern validator restricts the alternatives)
+        if payload.owner_team_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail="owner_team_id is required when scope='team'",
+            )
+        team = await db.get(Team, payload.owner_team_id)
+        if team is None or not await _is_team_admin(
+            db, team_id=payload.owner_team_id, user_id=user.id
+        ):
+            # 404 for both "no such team" and "you're not a team-admin" —
+            # id-probing-safe, same posture as cross-user user-skill reads.
+            raise HTTPException(status_code=404, detail="team not found")
+        row = UserSkill(
+            scope="team",
+            owner_team_id=payload.owner_team_id,
+            slug=slug,
+            display_name=payload.display_name.strip(),
+            description=payload.description.strip(),
+            version=payload.version.strip(),
+            tags=tags,
+            frontmatter_extra=frontmatter_extra,
+            body=payload.body,
+        )
+        audit_details = {
+            "slug": slug,
+            "version": payload.version.strip(),
+            "tags": tags,
+            "scope": "team",
+            "team_id": str(payload.owner_team_id),
+            "team_slug": team.slug,
+        }
+
     db.add(row)
     try:
         await db.flush()
     except IntegrityError:
         await db.rollback()
+        owner_label = "team" if payload.scope == "team" else "user"
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"a user skill named {slug!r} already exists for this user",
+            detail=f"a user skill named {slug!r} already exists for this {owner_label}",
         ) from None
 
     await audit_action(
@@ -333,7 +452,7 @@ async def create_user_skill(
         resource_type="user_skill",
         resource_id=str(row.id),
         request=request,
-        details={"slug": slug, "version": row.version, "tags": tags},
+        details=audit_details,
     )
     await db.commit()
     await db.refresh(row)
@@ -363,7 +482,7 @@ async def update_user_skill(
     row without writing an audit row.
     """
 
-    row = await _load_owned(db, skill_id=skill_id, user_id=user.id)
+    row = await _load_mutable(db, skill_id=skill_id, user_id=user.id)
 
     changed: dict[str, Any] = {}
     version_before: str | None = None
@@ -402,8 +521,11 @@ async def update_user_skill(
 
     details: dict[str, Any] = {
         "slug": row.slug,
+        "scope": row.scope,
         "changed_fields": sorted(changed.keys()),
     }
+    if row.scope == "team" and row.owner_team_id is not None:
+        details["team_id"] = str(row.owner_team_id)
     if version_before is not None:
         details["version_before"] = version_before
         details["version_after"] = row.version
@@ -445,7 +567,7 @@ async def delete_user_skill(
     even after the slug has been reused.
     """
 
-    row = await _load_owned(
+    row = await _load_mutable(
         db, skill_id=skill_id, user_id=user.id, include_archived=True
     )
     if row.archived_at is not None:
@@ -456,6 +578,14 @@ async def delete_user_skill(
 
     row.archived_at = datetime.now(timezone.utc)
 
+    delete_details: dict[str, Any] = {
+        "slug": row.slug,
+        "version": row.version,
+        "scope": row.scope,
+    }
+    if row.scope == "team" and row.owner_team_id is not None:
+        delete_details["team_id"] = str(row.owner_team_id)
+
     await audit_action(
         db,
         user_id=user.id,
@@ -463,7 +593,7 @@ async def delete_user_skill(
         resource_type="user_skill",
         resource_id=str(row.id),
         request=request,
-        details={"slug": row.slug, "version": row.version},
+        details=delete_details,
     )
     await db.commit()
 
