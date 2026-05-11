@@ -2,7 +2,7 @@
  * /api/v1/chats — list / create / get / patch / delete.
  */
 import { apiRequest } from './client';
-import type { Chat, ChatCreate, ChatUpdate, PaginatedChats } from '../types';
+import type { Chat, ChatCreate, ChatUpdate, ChatSearchResponse, PaginatedChats } from '../types';
 
 export interface ListChatsOptions {
 	project_id?: string;
@@ -35,6 +35,19 @@ export async function listAllChats(opts: ListChatsOptions = {}): Promise<Chat[]>
 		cursor = page.next_cursor;
 	}
 	return all;
+}
+
+/**
+ * GET /api/v1/chats/search?q=...&limit=...
+ *
+ * NOTE: The OpenAPI spec requires q with minLength=1, so an empty string
+ * will be rejected. To list recent chats without a search term, use
+ * listAllChats({ limit: 5 }) instead — see RecentActivity.svelte which
+ * handles this fallback automatically.
+ */
+export async function search(query: string, limit = 5): Promise<ChatSearchResponse> {
+	const params = new URLSearchParams({ q: query, limit: String(limit) });
+	return apiRequest<ChatSearchResponse>(`/chats/search?${params}`);
 }
 
 /** POST /api/v1/chats */

@@ -168,6 +168,23 @@ export interface PaginatedChats {
 	next_cursor: string | null;
 }
 
+// ----- Chat search (Wave B — /chats/search) -----
+
+export interface ChatSearchHit {
+	chat_id: string;
+	title: string;
+	snippet: string;
+	match_source: 'title' | 'message';
+	rank: number;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface ChatSearchResponse {
+	items: ChatSearchHit[];
+	query: string;
+}
+
 export interface Citation {
 	id: string;
 	source_file_id: string;
