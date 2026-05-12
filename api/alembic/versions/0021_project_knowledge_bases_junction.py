@@ -34,25 +34,33 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["project_id"], ["projects.id"],
             ondelete="CASCADE",
-            name="fk_pkb_project_id",
+            name="fk_project_knowledge_bases_project_id",
         ),
         sa.ForeignKeyConstraint(
             ["knowledge_base_id"], ["knowledge_bases.id"],
             ondelete="CASCADE",
-            name="fk_pkb_kb_id",
+            name="fk_project_knowledge_bases_kb_id",
         ),
         sa.ForeignKeyConstraint(
             ["attached_by_user_id"], ["users.id"],
             ondelete="SET NULL",
-            name="fk_pkb_attached_by",
+            name="fk_project_knowledge_bases_attached_by",
         ),
-        sa.PrimaryKeyConstraint("project_id", "knowledge_base_id"),
+        sa.PrimaryKeyConstraint(
+            "project_id", "knowledge_base_id",
+            name="pk_project_knowledge_bases",
+        ),
     )
     op.create_index(
-        "idx_pkb_kb_id", "project_knowledge_bases", ["knowledge_base_id"]
+        "idx_project_knowledge_bases_kb_id",
+        "project_knowledge_bases",
+        ["knowledge_base_id"],
     )
 
 
 def downgrade() -> None:
-    op.drop_index("idx_pkb_kb_id", table_name="project_knowledge_bases")
+    op.drop_index(
+        "idx_project_knowledge_bases_kb_id",
+        table_name="project_knowledge_bases",
+    )
     op.drop_table("project_knowledge_bases")
