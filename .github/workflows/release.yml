@@ -70,3 +70,41 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/lq-ai-${{ matrix.service }}:latest
           provenance: false   # we attach SLSA provenance via actions/attest-build-provenance in T2
           sbom: false         # we attach SBOM via anchore/sbom-action in T1
+
+  sbom:
+    name: SBOM ${{ matrix.service }}
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, gateway, web]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dryrun-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate SBOM (SPDX JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/lq-ai-${{ matrix.service }}:${{ steps.tag.outputs.tag }}
+          format: spdx-json
+          output-file: ${{ matrix.service }}.spdx.json
+          upload-artifact: true
+          upload-artifact-retention: 90
+
+      - name: Verify SBOM is non-empty
+        run: |
+          test -s ${{ matrix.service }}.spdx.json
+          jq -e '.packages | length > 0' ${{ matrix.service }}.spdx.json > /dev/null
