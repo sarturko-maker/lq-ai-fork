@@ -32,3 +32,58 @@ export async function patchProject(id: string, body: Partial<Project>): Promise<
 export async function archiveProject(id: string): Promise<void> {
 	await apiRequest<void>(`/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
+
+// ---------------------------------------------------------------------------
+// File attachment / detachment
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/v1/projects/{id}/files — link an existing file row to this
+ * project. Returns the updated Project with `attached_file_ids` reflecting
+ * the new attachment.
+ */
+export async function attachFile(projectId: string, fileId: string): Promise<Project> {
+	return apiRequest<Project>(`/projects/${encodeURIComponent(projectId)}/files`, {
+		method: 'POST',
+		body: { file_id: fileId }
+	});
+}
+
+/**
+ * DELETE /api/v1/projects/{id}/files/{file_id} — remove the link between
+ * the file and the project (file row remains; only the link is removed).
+ * Returns the updated Project with `attached_file_ids` updated.
+ */
+export async function detachFile(projectId: string, fileId: string): Promise<Project> {
+	return apiRequest<Project>(
+		`/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}`,
+		{ method: 'DELETE' }
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Skill attachment / detachment
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/v1/projects/{id}/skills — attach a skill (by name) to this
+ * project. Returns the updated Project with `attached_skill_names` updated.
+ */
+export async function attachSkill(projectId: string, skillName: string): Promise<Project> {
+	return apiRequest<Project>(`/projects/${encodeURIComponent(projectId)}/skills`, {
+		method: 'POST',
+		body: { skill_name: skillName }
+	});
+}
+
+/**
+ * DELETE /api/v1/projects/{id}/skills/{skill_name} — detach a skill from
+ * this project. Returns the updated Project with `attached_skill_names`
+ * updated.
+ */
+export async function detachSkill(projectId: string, skillName: string): Promise<Project> {
+	return apiRequest<Project>(
+		`/projects/${encodeURIComponent(projectId)}/skills/${encodeURIComponent(skillName)}`,
+		{ method: 'DELETE' }
+	);
+}
