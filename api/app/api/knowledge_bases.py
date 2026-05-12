@@ -51,6 +51,7 @@ from app.knowledge.embed import (
     request_embedding_vector,
 )
 from app.knowledge.retrieval import hybrid_search
+from app.models.chat import Chat
 from app.models.document import Document, DocumentChunk
 from app.models.file import File as FileModel
 from app.models.knowledge import KnowledgeBase, KnowledgeBaseFile
@@ -647,6 +648,39 @@ async def query_kb(
         top_k=payload.top_k,
         alpha=alpha,
     )
+
+    # Wave D.1 T7: write a `inference.kb_chunks_retrieved` audit row when
+    # the query is chat-initiated and returned at least one chunk. The
+    # row is scoped to the chat (resource_type='chat') so the Receipts
+    # endpoint (T5/T6) can render it as a "📎 KB retrieval" event.
+    # We require the chat to be owner-visible — same posture as the
+    # chat surface itself (404 leaks no existence info).
+    if payload.chat_id is not None and raw_results:
+        chat_stmt = select(Chat).where(
+            and_(
+                Chat.id == payload.chat_id,
+                Chat.owner_id == user.id,
+                Chat.archived_at.is_(None),
+            )
+        )
+        chat_row = (await db.execute(chat_stmt)).scalar_one_or_none()
+        if chat_row is not None:
+            await audit_action(
+                db,
+                user_id=user.id,
+                action="inference.kb_chunks_retrieved",
+                resource_type="chat",
+                resource_id=str(payload.chat_id),
+                project_id=chat_row.project_id,
+                request=request,
+                details={
+                    "kb_ids": [str(kid)],
+                    "chunk_count": len(raw_results),
+                    "chunk_ids": [str(r.chunk_id) for r in raw_results],
+                    "query_token_estimate": len(payload.query.split()),
+                },
+            )
+            await db.commit()
 
     return KBQueryResponse(
         results=[
