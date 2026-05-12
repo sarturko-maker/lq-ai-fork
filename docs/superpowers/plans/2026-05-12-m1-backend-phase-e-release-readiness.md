@@ -714,6 +714,25 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/name: {{ include "lq-ai.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
+
+{{/*
+ServiceAccount sanity check.
+If operators set serviceAccount.create=false, they MUST also set
+serviceAccount.name to an existing SA. Otherwise pods reference a
+non-existent SA and fail admission silently. Fail fast at install time
+with a clear message instead.
+*/}}
+{{- define "lq-ai.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+{{- default (include "lq-ai.fullname" .) .Values.serviceAccount.name -}}
+{{- else -}}
+{{- if not .Values.serviceAccount.name -}}
+{{- fail "serviceAccount.create=false requires serviceAccount.name to be set to an existing ServiceAccount in the target namespace" -}}
+{{- else -}}
+{{- .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 ```
 
 Create `deploy/helm/lq-ai/values.yaml`:
@@ -1199,7 +1218,7 @@ Create `deploy/helm/lq-ai/templates/serviceaccount.yaml`:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ default (include "lq-ai.fullname" .) .Values.serviceAccount.name }}
+  name: {{ include "lq-ai.serviceAccountName" . }}
   labels:
     {{- include "lq-ai.labels" . | nindent 4 }}
   {{- with .Values.serviceAccount.annotations }}
@@ -1231,7 +1250,7 @@ spec:
         {{- include "lq-ai.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: gateway
     spec:
-      serviceAccountName: {{ default (include "lq-ai.fullname" .) .Values.serviceAccount.name }}
+      serviceAccountName: {{ include "lq-ai.serviceAccountName" . }}
       containers:
         - name: gateway
           image: "{{ .Values.image.registry }}/{{ .Values.image.owner }}/lq-ai-gateway:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -1261,7 +1280,7 @@ spec:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /ready
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -1293,7 +1312,7 @@ spec:
         {{- include "lq-ai.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:
-      serviceAccountName: {{ default (include "lq-ai.fullname" .) .Values.serviceAccount.name }}
+      serviceAccountName: {{ include "lq-ai.serviceAccountName" . }}
       containers:
         - name: api
           image: "{{ .Values.image.registry }}/{{ .Values.image.owner }}/lq-ai-api:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -1302,13 +1321,16 @@ spec:
             - name: http
               containerPort: 8000
           env:
-            - name: DATABASE_URL
-              value: "postgresql+asyncpg://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@{{ include "lq-ai.fullname" . }}-postgres:5432/{{ .Values.postgres.database }}"
+            # POSTGRES_PASSWORD must precede DATABASE_URL so K8s in-order env
+            # interpolation can substitute $(POSTGRES_PASSWORD) in the URL.
+            # See https://kubernetes.io/docs/tasks/inject-data-application/define-interdependent-environment-variables/
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.postgres.passwordSecretRef.name }}
                   key: {{ .Values.postgres.passwordSecretRef.key }}
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@{{ include "lq-ai.fullname" . }}-postgres:5432/{{ .Values.postgres.database }}"
             - name: REDIS_URL
               value: "redis://{{ include "lq-ai.fullname" . }}-redis:6379/0"
             - name: MINIO_ENDPOINT
@@ -1336,7 +1358,7 @@ spec:
             {{- toYaml .Values.api.resources | nindent 12 }}
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /ready
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -1364,7 +1386,7 @@ spec:
         {{- include "lq-ai.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: web
     spec:
-      serviceAccountName: {{ default (include "lq-ai.fullname" .) .Values.serviceAccount.name }}
+      serviceAccountName: {{ include "lq-ai.serviceAccountName" . }}
       containers:
         - name: web
           image: "{{ .Values.image.registry }}/{{ .Values.image.owner }}/lq-ai-web:{{ .Values.image.tag | default .Chart.AppVersion }}"

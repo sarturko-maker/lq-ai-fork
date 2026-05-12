@@ -17,7 +17,7 @@ spec:
         {{- include "lq-ai.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: gateway
     spec:
-      serviceAccountName: {{ default (include "lq-ai.fullname" .) .Values.serviceAccount.name }}
+      serviceAccountName: {{ include "lq-ai.serviceAccountName" . }}
       containers:
         - name: gateway
           image: "{{ .Values.image.registry }}/{{ .Values.image.owner }}/lq-ai-gateway:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -47,7 +47,7 @@ spec:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /ready
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10

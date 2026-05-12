@@ -35,3 +35,22 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/name: {{ include "lq-ai.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
+
+{{/*
+ServiceAccount sanity check.
+If operators set serviceAccount.create=false, they MUST also set
+serviceAccount.name to an existing SA. Otherwise pods reference a
+non-existent SA and fail admission silently. Fail fast at install time
+with a clear message instead.
+*/}}
+{{- define "lq-ai.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+{{- default (include "lq-ai.fullname" .) .Values.serviceAccount.name -}}
+{{- else -}}
+{{- if not .Values.serviceAccount.name -}}
+{{- fail "serviceAccount.create=false requires serviceAccount.name to be set to an existing ServiceAccount in the target namespace" -}}
+{{- else -}}
+{{- .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

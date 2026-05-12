@@ -17,7 +17,7 @@ spec:
         {{- include "lq-ai.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: web
     spec:
-      serviceAccountName: {{ default (include "lq-ai.fullname" .) .Values.serviceAccount.name }}
+      serviceAccountName: {{ include "lq-ai.serviceAccountName" . }}
       containers:
         - name: web
           image: "{{ .Values.image.registry }}/{{ .Values.image.owner }}/lq-ai-web:{{ .Values.image.tag | default .Chart.AppVersion }}"
