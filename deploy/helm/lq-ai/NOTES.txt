@@ -1,0 +1,32 @@
+Thanks for installing LQ.AI {{ .Chart.AppVersion }}.
+
+Verification of release artifacts (per docs/security/README.md):
+
+  cosign verify \
+    --certificate-identity-regexp "https://github.com/legalquants/lq-ai" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    ghcr.io/legalquants/lq-ai-api:{{ .Values.image.tag | default .Chart.AppVersion }}
+
+Components installed:
+- Postgres (pgvector/pgvector:pg16) — primary store
+- Redis (redis:7-alpine)             — cache + queue
+- MinIO (minio/minio:latest)         — object storage
+- Gateway                            — Inference Gateway (security boundary)
+- API                                — FastAPI backend
+- Web                                — OpenWebUI fork
+
+First-run admin password is printed by the api Pod at first boot. Retrieve with:
+  kubectl logs -n {{ .Release.Namespace }} \
+    -l app.kubernetes.io/component=api \
+    --tail=200 | grep "First-run admin password"
+
+Default web URL (port-forward):
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "lq-ai.fullname" . }}-web 8080:80
+  open http://localhost:8080
+
+If you forked LQ.AI and want to use operator-controlled cosign signing
+(instead of keyless OIDC), see docs/security/releases/README.md §"Operator-key signing".
+
+Configure your providers:
+  helm get values {{ .Release.Name }} -n {{ .Release.Namespace }}
+Edit gateway.config in values.yaml and helm upgrade.

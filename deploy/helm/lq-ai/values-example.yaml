@@ -1,0 +1,40 @@
+# Example values for a small self-hosted deployment.
+# Operators MUST create the referenced secrets before installing:
+#
+#   kubectl create secret generic lq-ai-postgres \
+#     --from-literal=password="$(openssl rand -hex 32)"
+#   kubectl create secret generic lq-ai-minio \
+#     --from-literal=password="$(openssl rand -hex 32)"
+#   kubectl create secret generic lq-ai-auth \
+#     --from-literal=jwt-secret="$(openssl rand -hex 32)" \
+#     --from-literal=gateway-key="$(openssl rand -hex 32)"
+#   kubectl create secret generic lq-ai-provider-keys \
+#     --from-literal=anthropic="sk-ant-..." \
+#     --from-literal=openai="sk-..."
+
+image:
+  tag: "v0.1.0"
+
+gateway:
+  config: |
+    providers:
+      - name: anthropic-prod
+        adapter: anthropic
+        api_key_env: ANTHROPIC_API_KEY
+        models:
+          - claude-opus-4-7
+          - claude-sonnet-4-6
+          - claude-haiku-4-5
+  providerKeys:
+    ANTHROPIC_API_KEY:
+      secretName: lq-ai-provider-keys
+      key: anthropic
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: lq-ai.example.com
+      paths:
+        - path: /
+          pathType: Prefix
