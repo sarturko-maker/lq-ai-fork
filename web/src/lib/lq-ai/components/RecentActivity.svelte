@@ -1,22 +1,41 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { chatsApi } from '$lib/lq-ai/api';
-  import type { Chat } from '$lib/lq-ai/types';
+  import { chatsApi, projectsApi } from '$lib/lq-ai/api';
+  import type { Chat, Project } from '$lib/lq-ai/types';
 
   let chats: Chat[] = [];
-  let loading = true;
-  let error = false;
+  let loadingChats = true;
+  let errorChats = false;
+
+  let matters: Project[] = [];
+  let loadingMatters = true;
+
+  // Keep the old `loading` / `error` names alive for the chats section
+  // (template references them via the new aliases below; aliases are local).
+  $: loading = loadingChats;
+  $: error = errorChats;
 
   onMount(async () => {
+    // Chats
     try {
       // /chats/search requires minLength=1 for q; use listChats instead
       // for the recent-activity view which needs no query term.
       const page = await chatsApi.listChats({ limit: 5 });
       chats = page.items;
     } catch {
-      error = true;
+      errorChats = true;
     } finally {
-      loading = false;
+      loadingChats = false;
+    }
+
+    // Matters — silent error: RecentActivity should never break the dashboard
+    try {
+      const all = await projectsApi.listProjects({ archived: false });
+      matters = all.slice(0, 5);
+    } catch {
+      // fall through — matters stays []
+    } finally {
+      loadingMatters = false;
     }
   });
 
@@ -51,13 +70,27 @@
     {/if}
   </div>
 
-  <!-- Recent matters — Wave C placeholder -->
-  <div class="activity-card placeholder-card">
+  <!-- Recent matters -->
+  <div class="activity-card">
     <p class="lq-text-label" style="margin-bottom: var(--lq-space-3);">Recent matters</p>
-    <p class="lq-text-body-sm" style="color: var(--lq-text-tertiary);">
-      Matter workspace is coming in a future release. Chats linked to matters will appear here.
-    </p>
-    <p class="lq-text-caption" style="margin-top: var(--lq-space-3); color: var(--lq-text-tertiary);">Wave C</p>
+
+    {#if loadingMatters}
+      <p class="lq-text-body-sm" style="color: var(--lq-text-tertiary);">Loading…</p>
+    {:else if matters.length === 0}
+      <p class="lq-text-body-sm" style="color: var(--lq-text-tertiary);">No matters yet. <a href="/lq-ai/matters" style="color: var(--lq-accent); text-decoration: none;">+ Start a matter</a></p>
+    {:else}
+      <ul class="chat-list">
+        {#each matters as matter (matter.id)}
+          <li>
+            <a href="/lq-ai/matters/{matter.id}" class="chat-row">
+              <span class="chat-title lq-text-body-sm">{matter.name}</span>
+              <span class="chat-date lq-text-caption">{formatDate(matter.updated_at)}</span>
+            </a>
+          </li>
+        {/each}
+      </ul>
+      <a href="/lq-ai/matters" class="view-all lq-text-body-sm">View all matters →</a>
+    {/if}
   </div>
 </section>
 
@@ -67,10 +100,6 @@
     border: 1px solid var(--lq-border);
     border-radius: var(--lq-radius-lg);
     padding: var(--lq-space-4);
-  }
-
-  .placeholder-card {
-    background: var(--lq-inset);
   }
 
   .chat-list {

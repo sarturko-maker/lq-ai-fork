@@ -41,7 +41,7 @@ export interface User {
 export const TABS: readonly TabDef[] = [
   { id: 'home',          label: 'Home',          icon: '🏠', route: '/lq-ai',                available: true },
   { id: 'chats',         label: 'Chats',         icon: '💬', route: '/lq-ai/chats',          available: true },
-  { id: 'matters',       label: 'Matters',       icon: '📁', route: '/lq-ai/matters',        available: false, shipsInWave: 'C' },
+  { id: 'matters',       label: 'Matters',       icon: '📁', route: '/lq-ai/matters',        available: true },
   { id: 'skills',        label: 'Skills',        icon: '🛠️', route: '/lq-ai/skills',         available: true },
   { id: 'knowledge',     label: 'Knowledge',     icon: '📎', route: '/lq-ai/knowledge',      available: false, shipsInWave: 'C' },
   { id: 'saved-prompts', label: 'Saved Prompts', icon: '📌', route: '/lq-ai/saved-prompts',  available: false, shipsInWave: 'D' },
