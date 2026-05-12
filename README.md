@@ -5,6 +5,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![PRD](https://img.shields.io/badge/PRD-v0.2-green.svg)](docs/PRD.md)
 [![Status](https://img.shields.io/badge/Status-Pre--Release-orange.svg)](#project-status)
+[![SLSA 3](https://img.shields.io/badge/SLSA-Level%203-green)](https://slsa.dev) [![Security Policy](https://img.shields.io/badge/Security-Policy-blue)](./SECURITY.md)
 
 LQ.AI is a self-hosted AI platform purpose-built for in-house legal teams. It delivers fast contract drafting and review, verifiable citations, reusable workflow skills, playbook-driven contract analysis, a Microsoft Word integration, and a curated library of starter skills for the everyday work in-house counsel actually do — running on a laptop, an internal server, or a cloud VM, against the customer's choice of model, with zero license fees.
 
@@ -200,7 +201,17 @@ For more, see [PRD §1.5 Deployment Modes and the Inference Choice Spectrum](doc
 
 ---
 
-## Security and procurement
+## Security
+
+LQ.AI ships with SLSA Level 3 build provenance, sigstore-signed
+container images, and a Software Bill of Materials (SBOM) with every
+release. See [`docs/security/`](docs/security/) for the threat model,
+cryptography reference, audit-logging policy, and dependency-management
+posture. Verify a release: [`docs/security/releases/README.md`](docs/security/releases/README.md).
+
+Reporting a vulnerability: see [`SECURITY.md`](SECURITY.md).
+
+### Security and procurement
 
 LQ.AI's security posture is structurally different from closed-source commercial alternatives. Three principles:
 

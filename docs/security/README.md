@@ -8,14 +8,14 @@ This folder is the home for LQ.AI's security artifacts. The PRD documents the pr
 
 | Artifact | Status | Description |
 |---|---|---|
-| **SBOM** (`sbom.spdx.json`) | M1 | Software Bill of Materials in SPDX format, generated at build time and shipped with each release. |
-| **Signed release attestations** (`releases/`) | M1 | Sigstore/cosign signatures for container images and release artifacts. |
-| **SLSA Provenance** (`slsa/`) | M1 | SLSA Level 3 build provenance attestations. |
-| **Threat model** (`threat-model.md`) | M1 | The project's documented threat model — assets, attackers, attack vectors, mitigations. |
-| **Dependency security** (`dependencies.md`) | M1 | Approach to dependency review, vulnerability monitoring, and update cadence. |
-| **Cryptographic implementations** (`cryptography.md`) | M1 | Documentation of cryptographic primitives used, key lifecycle, and known limitations. |
+| **SBOM** (`sbom.spdx.json`) | Landed (Phase E) | Software Bill of Materials in SPDX format, generated at build time and shipped with each release. |
+| **Signed release attestations** (`releases/`) | Landed (Phase E) | Sigstore/cosign signatures for container images and release artifacts. |
+| **SLSA Provenance** (`slsa/`) | Landed (Phase E) | SLSA Level 3 build provenance attestations. |
+| **Threat model** (`threat-model.md`) | Landed | The project's documented threat model — assets, attackers, attack vectors, mitigations. |
+| **Dependency security** (`dependencies.md`) | Landed | Approach to dependency review, vulnerability monitoring, and update cadence. |
+| **Cryptographic implementations** (`cryptography.md`) | Landed | Documentation of cryptographic primitives used, key lifecycle, and known limitations. |
 | **Network access controls** (`network-access-controls.md`) | M2 (or earlier with [DE-103 IP allowlisting](../PRD.md#de-103--ip-allowlisting-and-geo-restriction)) | IP allowlisting, geo-restriction, outbound proxy configuration. |
-| **Audit logging** (`audit-logging.md`) | M1 | What is logged, retention, integrity protection. |
+| **Audit logging** (`audit-logging.md`) | Landed | What is logged, retention, integrity protection. |
 | **Encrypted-at-rest provider keys** ([`encrypted-keys.md`](encrypted-keys.md)) | Landed (ADR 0011) | Operator workflow for the master-key + Fernet-wrapped `api_key_encrypted` path in `gateway.yaml`. Bootstrap, rotation, recovery. |
 | **Past advisories** (`advisories/`) | As advisories are published | Historical security advisories with reporter credit. |
 
