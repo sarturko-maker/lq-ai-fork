@@ -108,17 +108,25 @@
 {/if}
 
 <style>
-	.lq-shell { background: var(--lq-canvas); color: var(--lq-text); min-height: 100vh; display: flex; flex-direction: column; }
+	/* OpenWebUI's app.html pins html { overflow-y: hidden !important; } so
+	   the chat UI can manage its own scroll containers. The LQ.AI shell's
+	   non-chat surfaces (settings, admin sub-routes, trust page) need a
+	   scrollable main; the chat shell already wraps itself in flex+
+	   overflow-hidden and manages internal scroll, so adding overflow-y
+	   here doesn't disturb it. min-height: 0 lets flex children shrink
+	   correctly inside the column. */
+	.lq-shell { background: var(--lq-canvas); color: var(--lq-text); height: 100vh; display: flex; flex-direction: column; }
 	.lq-topbar {
 		display: flex; align-items: center; justify-content: space-between;
 		padding: var(--lq-space-3) var(--lq-space-4);
 		border-bottom: 1px solid var(--lq-border);
 		background: var(--lq-canvas);
+		flex-shrink: 0;
 	}
 	.lq-brand {
 		font-size: 16px; font-weight: 600; color: var(--lq-text);
 		text-decoration: none;
 	}
 	.lq-brand-lq { color: var(--lq-accent); }
-	main { flex: 1; }
+	main { flex: 1; min-height: 0; overflow-y: auto; }
 </style>
