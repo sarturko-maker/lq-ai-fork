@@ -59,6 +59,9 @@
 	import EnhancePromptExpansion from '$lib/lq-ai/components/EnhancePromptExpansion.svelte';
 	import AttachKBModal from '$lib/lq-ai/components/AttachKBModal.svelte';
 	import TierFloorOverrideModal from '$lib/lq-ai/components/TierFloorOverrideModal.svelte';
+	import ReceiptsDrawer, {
+		readPersistedOpen as readReceiptsDrawerOpen
+	} from '$lib/lq-ai/components/ReceiptsDrawer.svelte';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import { createEventDispatcher } from 'svelte';
 
@@ -104,6 +107,12 @@
 	// chats the 📎 button is hidden.
 	let attachKbModalOpen = false;
 	const dispatch = createEventDispatcher<{ kbsAttached: { kbIds: string[] } }>();
+
+	// Wave D.1 T19 — Receipts drawer state. The composer 📜 button toggles
+	// the right-side receipts drawer (T18). Open state is restored from
+	// localStorage when the active chat changes, so it survives reloads and
+	// chat switches.
+	let receiptsDrawerOpen = false;
 
 	function openAttachKbModal(): void {
 		attachKbModalOpen = true;
@@ -547,6 +556,13 @@
 		? $projectsStore.find((p) => p.id === composerProjectId)?.attached_knowledge_base_ids ?? []
 		: [];
 
+	// Wave D.1 T19 — Restore receipts drawer open-state when the active
+	// chat changes. Keyed by chat ID so each chat remembers its own drawer
+	// state across reloads + chat switches.
+	$: if (activeChat?.id) {
+		receiptsDrawerOpen = readReceiptsDrawerOpen(activeChat.id);
+	}
+
 	// D0 — current selection for the active chat. Falls back to the
 	// picker's default (``smart`` if available, else the first row) when
 	// the user hasn't picked yet for this chat.
@@ -723,6 +739,16 @@
 						</button>
 						<button
 							type="button"
+							class="lq-btn-secondary text-sm"
+							aria-label="Toggle receipts drawer"
+							title="Toggle receipts"
+							on:click={() => (receiptsDrawerOpen = !receiptsDrawerOpen)}
+							data-testid="lq-ai-receipts-toggle"
+						>
+							📜
+						</button>
+						<button
+							type="button"
 							class="lq-btn-send text-sm font-medium disabled:opacity-50"
 							on:click={sendMessage}
 							disabled={!composerText.trim()}
@@ -754,6 +780,14 @@
 			{uploading}
 			onUpload={uploadAttached}
 			onDetach={detachFile}
+		/>
+	{/if}
+
+	{#if activeChat && receiptsDrawerOpen}
+		<ReceiptsDrawer
+			bind:open={receiptsDrawerOpen}
+			chatId={activeChat.id}
+			onClose={() => (receiptsDrawerOpen = false)}
 		/>
 	{/if}
 </div>
