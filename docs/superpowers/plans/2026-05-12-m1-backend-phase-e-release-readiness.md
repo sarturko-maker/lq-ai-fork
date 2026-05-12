@@ -302,6 +302,7 @@ Edit `.github/workflows/release.yml` and add a new `sbom` job after the existing
   sbom:
     name: SBOM ${{ matrix.service }}
     needs: build-and-push
+    if: ${{ github.event_name == 'push' || !inputs.dry_run }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -2349,26 +2350,28 @@ Run:
 gh run watch
 ```
 
-Expected: matrix jobs (build-and-push for api/gateway/web) and sbom jobs complete. The `sign` job is skipped because `if: ${{ github.event_name == 'push' || !inputs.dry_run }}` short-circuits when `dry_run=true`. Final status: success (with sign job marked "skipped").
+Expected: matrix jobs (build-and-push for api/gateway/web) complete with status `success`. The `sbom` and `sign` jobs are SKIPPED in dry-run because their job-level `if:` gates evaluate to false (consistent with the dry-run semantic of "verify the build works without the supply-chain side-effects"). Final status: success (with sbom + sign jobs marked "skipped").
 
-- [ ] **Step 3: Spot-check SBOM artifact**
+- [ ] **Step 3: Spot-check SBOM via the local Makefile target**
+
+The release workflow's SBOM job is gated out of dry-run, so artifact-download spot-check is not available without a real tag push (which is Kevin's call to make). Instead, exercise the local SBOM tooling against the source tree:
+
+```bash
+cd /Users/kevinkeller/Desktop/lq-ai
+make sbom
+ls -la artifacts/sbom/
+jq -r '.spdxVersion, (.packages | length)' artifacts/sbom/api.spdx.json
+```
+
+Expected: `artifacts/sbom/{api,gateway,web}.spdx.json` exist, each non-empty, packages count > 0. This is a SOURCE-TREE SBOM (slightly different from the IMAGE SBOM the release workflow ships) but exercises the same Syft toolchain and proves the upstream tooling works. End-to-end image-SBOM verification happens at the first real release tag.
+
+- [ ] **Step 4: Cleanup local artifacts + write completion note**
 
 Run:
 ```bash
-RUN_ID=$(gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')
-gh run download "${RUN_ID}" -n api.spdx.json
-ls -la api.spdx.json
-jq -r '.spdxVersion, (.packages | length)' api.spdx.json
+rm -rf artifacts/sbom
 ```
-
-Expected: file exists, ≥10KB, `spdxVersion` printed, packages count > 0.
-
-- [ ] **Step 4: Cleanup local artifact + write completion note**
-
-Run:
-```bash
-rm -f api.spdx.json
-```
+(the source-tree SBOMs are throwaway; the artifacts/ directory is gitignored or should be — verify with `git status` showing nothing).
 
 Then update `docs/M1-PROGRESS.md` if it tracks backend phases (verify first):
 

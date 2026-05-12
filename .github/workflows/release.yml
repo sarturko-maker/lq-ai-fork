@@ -74,6 +74,7 @@ jobs:
   sbom:
     name: SBOM ${{ matrix.service }}
     needs: build-and-push
+    if: ${{ github.event_name == 'push' || !inputs.dry_run }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
