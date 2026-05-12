@@ -16,6 +16,13 @@
 	export let onRefusalOverrideRequested: (msg: Message) => void = () => {};
 	export let onRefusalExplainerRequested: (msg: Message) => void = () => {};
 
+	// Wave D.1 T20 follow-on — map of enhanced-prompt content → original
+	// prompt text the user typed before clicking "Use enhanced". Session
+	// scope only (server stores only the enhanced text; the original is
+	// not currently persisted — see EnhancedDiffModal docstring). Empty
+	// map is fine: MessageBubble renders a graceful fallback.
+	export let enhancementOriginals: Record<string, string> = {};
+
 	let scroller: HTMLDivElement;
 
 	afterUpdate(() => {
@@ -42,6 +49,7 @@
 			{onRefusalRerun}
 			{onRefusalOverrideRequested}
 			{onRefusalExplainerRequested}
+			originalEnhancedPrompt={enhancementOriginals[msg.content]}
 		/>
 	{/each}
 

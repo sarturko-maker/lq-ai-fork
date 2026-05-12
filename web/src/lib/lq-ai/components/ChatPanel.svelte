@@ -79,6 +79,19 @@
 	let skillDetails: Record<string, Skill> = {};
 	let skillInputs: Record<string, Record<string, unknown>> = {};
 
+	// Wave D.1 T20 follow-on (deferral A + B) — Enhance Prompt tracking.
+	// `pendingEnhancement` holds the most recent "Use enhanced" outcome
+	// from EnhancePromptExpansion; we use it on send to (a) inject
+	// `'enhance-prompt'` into the user-message `skills[]` payload so
+	// `MessageResponse.is_enhanced` flips true (per ADR 0007), and (b)
+	// remember the original prompt the user typed before the skill
+	// expanded it so the ✨ enhanced pill can open a tap-to-diff modal.
+	// Map keyed by the persisted message id (resolved after the start
+	// frame) — the original is otherwise unrecoverable server-side
+	// because the user-message row stores only the enhanced content.
+	let pendingEnhancement: { original: string; enhanced: string } | null = null;
+	let enhancementOriginals: Record<string, string> = {};
+
 	// D0 — model picker state. `availableModels` holds the merged list from
 	// `GET /api/v1/models`; `modelByChat` persists the per-chat selection
 	// client-side (keyed by chat_id) so switching between chats doesn't
@@ -380,6 +393,28 @@
 
 		sendError = null;
 
+		// Wave D.1 T20 follow-on: if the operator clicked "Use enhanced"
+		// and the composer still holds the AI-enhanced text, inject
+		// `'enhance-prompt'` into the skills payload so the persisted
+		// user-message row carries it in `applied_skills` (ADR 0007
+		// denormalization). `message_to_response` then flips
+		// `is_enhanced=true`, which MessageBubble keys the ✨ pill off.
+		// We also remember the original text keyed by the enhanced
+		// content so the tap-to-diff modal can recover it; session-only
+		// (lost on reload — the server stores only the enhanced text).
+		const sentSkillsForUser = [...attachedSkillNames];
+		let isEnhancedSend = false;
+		if (pendingEnhancement && pendingEnhancement.enhanced === composerText) {
+			isEnhancedSend = true;
+			if (!sentSkillsForUser.includes('enhance-prompt')) {
+				sentSkillsForUser.push('enhance-prompt');
+			}
+			enhancementOriginals = {
+				...enhancementOriginals,
+				[composerText]: pendingEnhancement.original
+			};
+		}
+
 		// Optimistically append the user message; the persisted row will
 		// supersede it once the start frame arrives.
 		const optimisticUserId = `optimistic-${Date.now()}`;
@@ -388,7 +423,8 @@
 			chat_id: chat.id,
 			role: 'user',
 			content: composerText,
-			applied_skills: attachedSkillNames,
+			applied_skills: sentSkillsForUser,
+			is_enhanced: isEnhancedSend,
 			created_at: new Date().toISOString()
 		};
 		messagesStore.update(($m) => [...$m, userMsg]);
@@ -413,7 +449,7 @@
 				{
 					content: composerText,
 					model: currentModelId ?? undefined,
-					skills: attachedSkillNames.length > 0 ? attachedSkillNames : undefined,
+					skills: sentSkillsForUser.length > 0 ? sentSkillsForUser : undefined,
 					skill_inputs:
 						Object.keys(skillInputs).length > 0
 							? (skillInputs as Record<string, Record<string, unknown>>)
@@ -423,6 +459,11 @@
 				streamAbort.signal
 			);
 			composerText = '';
+			// Clear the pending-enhancement marker now that the send is in
+			// flight. The enhancementOriginals map keeps the captured
+			// original keyed by content so the pill's tap-to-diff still
+			// resolves it after the user types another message.
+			pendingEnhancement = null;
 
 			if (!res.body) {
 				throw new Error('Empty stream body');
@@ -505,19 +546,34 @@
 	// T6 — Enhance Prompt callbacks. The panel is mounted inline below the
 	// composer; parent owns composerText so the panel never reaches into the DOM.
 	function handleUseEnhanced(enhanced: string, _interactionId: string): void {
+		// Capture the original (current composer text) BEFORE replacing it so
+		// the diff modal can show what the user originally typed. T20 deferral
+		// A+B follow-on.
+		pendingEnhancement = { original: composerText, enhanced };
 		composerText = enhanced;
 	}
 
 	function handleEditEnhanced(enhanced: string, _interactionId: string): void {
+		// Same capture — operator may still send the (possibly hand-edited)
+		// enhanced text. We record the AI-generated baseline; if the operator
+		// edits further the diff view shows the AI's enhanced version, which
+		// is the right reference for "what did the skill change about my
+		// prompt" rather than "what did I subsequently tweak."
+		pendingEnhancement = { original: composerText, enhanced };
 		composerText = enhanced;
 	}
 
 	function handleKeepOriginal(_interactionId: string | null): void {
-		// composerText stays; just close (panel sets state=closed internally).
+		// composerText stays; clear any pending enhancement so a subsequent
+		// send doesn't falsely mark the message as enhanced.
+		pendingEnhancement = null;
 	}
 
 	function handleEnhanceDismiss(): void {
-		// Panel closed by X; no composerText change needed.
+		// Panel closed by X; no composerText change needed. Clear the
+		// pending-enhancement record so an out-of-band close doesn't
+		// leak into a subsequent send.
+		pendingEnhancement = null;
 	}
 
 	function handleComposerKeydown(e: KeyboardEvent): void {
@@ -664,6 +720,7 @@
 			onRefusalRerun={handleRefusalRerun}
 			onRefusalOverrideRequested={handleRefusalOverrideRequested}
 			onRefusalExplainerRequested={handleRefusalExplainerRequested}
+			{enhancementOriginals}
 		/>
 
 		{#if activeChat}

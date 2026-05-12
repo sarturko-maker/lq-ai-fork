@@ -225,3 +225,49 @@ def test_message_to_response_translates_micros_to_usd() -> None:
     assert response.routed_inference_tier == 3
     assert response.requested_model == "smart"
     assert response.routed_model == "claude-sonnet-4-6"
+    # T20 follow-on: is_enhanced is False when 'enhance-prompt' is not
+    # in applied_skills (this row has only 'nda-review').
+    assert response.is_enhanced is False
+
+
+@pytest.mark.unit
+def test_message_to_response_is_enhanced_true_when_skill_applied() -> None:
+    """``message_to_response`` sets ``is_enhanced=True`` when the row's
+    ``applied_skills`` contains ``'enhance-prompt'`` (T20 follow-on,
+    ADR 0007 denormalization). The frontend keys the ✨ enhanced
+    provenance pill off this derived field."""
+
+    from app.schemas.chats import message_to_response
+
+    class FakeRow:
+        def __init__(self, skills: list[str]) -> None:
+            self.id = uuid.uuid4()
+            self.chat_id = uuid.uuid4()
+            self.role = "user"
+            self.kind = "user"
+            self.content = "draft an NDA"
+            self.applied_skills = skills
+            self.routed_inference_tier = None
+            self.routed_provider = None
+            self.routed_model = None
+            self.requested_model = None
+            self.prompt_tokens = None
+            self.completion_tokens = None
+            self.cost_estimate_micros = None
+            self.error_code: str | None = None
+            self.citations: list[object] = []
+            self.created_at = datetime(2026, 5, 12, 12, 0, 0, tzinfo=UTC)
+
+    # Only enhance-prompt → True.
+    assert message_to_response(FakeRow(["enhance-prompt"])).is_enhanced is True
+    # Mixed with other skills → still True.
+    assert (
+        message_to_response(FakeRow(["nda-review", "enhance-prompt"])).is_enhanced
+        is True
+    )
+    # No skills at all → False.
+    assert message_to_response(FakeRow([])).is_enhanced is False
+    # Empty/None applied_skills column → False (guard against NULLs).
+    row = FakeRow([])
+    row.applied_skills = None  # type: ignore[assignment]
+    assert message_to_response(row).is_enhanced is False

@@ -18,6 +18,8 @@
 
 	import type { Message } from '../types';
 	import AppliedSkillsChip from './AppliedSkillsChip.svelte';
+	import EnhancedDiffModal from './EnhancedDiffModal.svelte';
+	import ProvenancePill from './ProvenancePill.svelte';
 	import RefusalMessageBubble from './RefusalMessageBubble.svelte';
 	import TierBadge from './TierBadge.svelte';
 	import TierDetailsPanel from './TierDetailsPanel.svelte';
@@ -25,6 +27,15 @@
 	export let message: Message;
 	export let isStreaming: boolean = false;
 	export let onAppliedSkillClicked: ((name: string) => void) | undefined = undefined;
+
+	// Wave D.1 T20 follow-on — the original prompt the operator typed
+	// before clicking "Use enhanced" on the EnhancePromptExpansion panel.
+	// Session scope (in-memory, not persisted server-side); undefined when
+	// this is a historical message from a prior session. The ✨ pill is
+	// still rendered when `message.is_enhanced` is true even if the
+	// original is missing — the modal then shows a "not preserved"
+	// fallback so the operator gets the right transparency signal.
+	export let originalEnhancedPrompt: string | undefined = undefined;
 
 	// Wave D.1 T15 — refusal-bubble plumbing. Defaults are no-ops so the
 	// chat surface keeps working when the parent doesn't wire these (e.g.
@@ -41,6 +52,11 @@
 	// received. State stays local to this bubble so multiple open
 	// panels are not possible (the modal is exclusive).
 	let tierDetailsOpen = false;
+
+	// Wave D.1 T20 follow-on — ✨ enhanced pill state. Per-message-local
+	// so the diff modal is exclusive: clicking the pill on one message
+	// does not surface another message's diff.
+	let enhancedDiffOpen = false;
 
 	$: bubbleClasses =
 		message.role === 'user'
@@ -87,6 +103,26 @@
 			</div>
 		{/if}
 	</div>
+
+	{#if message.role === 'user' && message.is_enhanced}
+		<div
+			class="mt-1 flex items-center gap-2 flex-wrap justify-end"
+			data-testid="provenance-pill-enhanced"
+		>
+			<ProvenancePill
+				kind="enhanced"
+				summary="enhanced"
+				onTap={() => (enhancedDiffOpen = true)}
+			/>
+		</div>
+		{#if enhancedDiffOpen}
+			<EnhancedDiffModal
+				original={originalEnhancedPrompt}
+				enhanced={message.content}
+				on:close={() => (enhancedDiffOpen = false)}
+			/>
+		{/if}
+	{/if}
 
 	{#if message.role === 'assistant'}
 		<div class="mt-1 flex items-center gap-2 flex-wrap">

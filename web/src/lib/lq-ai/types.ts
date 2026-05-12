@@ -246,6 +246,13 @@ export interface Message {
 	refusal_reason?: string;
 	requested_tier?: string;
 	enforced_tier?: string;
+	/**
+	 * Wave D.1 T20 follow-on — true when the message's `applied_skills`
+	 * contains `'enhance-prompt'` (ADR 0007 denormalization). Derived
+	 * server-side by `message_to_response`. The chat surface keys the
+	 * ✨ enhanced provenance pill off this field.
+	 */
+	is_enhanced?: boolean;
 }
 
 export interface PaginatedMessages {

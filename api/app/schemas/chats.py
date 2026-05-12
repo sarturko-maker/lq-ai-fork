@@ -315,6 +315,15 @@ class MessageResponse(BaseModel):
     citations: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
 
+    is_enhanced: bool = False
+    """Wave D.1 T20 follow-on — true when the row's ``applied_skills``
+    contains ``'enhance-prompt'`` (ADR 0007 denormalization). The
+    frontend renders a ``✨ enhanced`` provenance pill on user-message
+    bubbles where this is true so an operator can tell at a glance that
+    the prompt that was sent had been expanded by the Enhance Prompt
+    skill. Derived in :func:`message_to_response`; the field is not
+    settable on the wire."""
+
 
 def message_to_response(row: Any) -> MessageResponse:
     """Build a :class:`MessageResponse` from an ORM ``Message`` row.
@@ -325,13 +334,14 @@ def message_to_response(row: Any) -> MessageResponse:
     workable (we don't accept the micros column on the wire).
     """
 
+    applied_skills = list(row.applied_skills or [])
     return MessageResponse(
         id=row.id,
         chat_id=row.chat_id,
         role=row.role,
         kind=row.kind,
         content=row.content,
-        applied_skills=list(row.applied_skills or []),
+        applied_skills=applied_skills,
         routed_inference_tier=row.routed_inference_tier,
         routed_provider=row.routed_provider,
         routed_model=row.routed_model,
@@ -342,6 +352,7 @@ def message_to_response(row: Any) -> MessageResponse:
         error_code=row.error_code,
         citations=list(row.citations or []),
         created_at=row.created_at,
+        is_enhanced="enhance-prompt" in applied_skills,
     )
 
 
