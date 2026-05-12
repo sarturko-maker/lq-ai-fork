@@ -44,6 +44,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/projects/{project_id}/files",
         # C7 — detach file by id (extends the sketch).
         "/api/v1/projects/{project_id}/files/{file_id}",
+        # Wave D.1 T3 — matter <-> KB attach/detach (extends the sketch).
+        "/api/v1/projects/{project_id}/knowledge-bases",
+        "/api/v1/projects/{project_id}/knowledge-bases/{kb_id}",
         # chats + messages
         "/api/v1/chats",
         "/api/v1/chats/{chat_id}",
@@ -98,6 +101,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/chats/search",
         # Wave C — RBAC role updates (PRD §5.2)
         "/api/v1/admin/users/{user_id}/role",
+        # Wave B v2 — admin user list for DevRoleManagementCard
+        "/api/v1/admin/users",
         # admin
         "/api/v1/admin/audit-log",
         "/api/v1/admin/tier-policy",
@@ -129,15 +134,16 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 64 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
+    # 67 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
     # alias endpoints + D5's two new MFA endpoints + D6's two new GDPR
     # endpoints (status-poll for /users/me/export/{job_id} and
     # /users/me/delete/cancel) + D4's /organization-profile/raw
     # convenience endpoint + D4-coverage's
     # /internal/organization-profile + D8's two /api/v1/user-skills
     # paths + D8.1a's six teams paths + Wave A's five paths +
-    # Wave B's four paths + Wave C's /admin/users/{user_id}/role.
-    assert len(actual) == 64
+    # Wave B's four paths + Wave C's /admin/users/{user_id}/role +
+    # Wave B v2's /admin/users + Wave D.1's two matter <-> KB attach/detach paths.
+    assert len(actual) == 67
 
 
 @pytest.mark.unit

@@ -231,6 +231,7 @@ class ProjectResponse(BaseModel):
     minimum_inference_tier: int | None = None
     attached_file_ids: list[uuid.UUID] = Field(default_factory=list)
     attached_skill_names: list[str] = Field(default_factory=list)
+    attached_knowledge_base_ids: list[uuid.UUID] = Field(default_factory=list)
     archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

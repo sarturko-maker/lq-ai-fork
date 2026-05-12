@@ -152,6 +152,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("DELETE", "/api/v1/projects/{project_id}/files/{file_id}"),
     ("POST", "/api/v1/projects/{project_id}/skills"),
     ("DELETE", "/api/v1/projects/{project_id}/skills/{skill_name}"),
+    # Wave D.1 T3 — matter <-> KB attach/detach
+    ("POST", "/api/v1/projects/{project_id}/knowledge-bases"),
+    ("DELETE", "/api/v1/projects/{project_id}/knowledge-bases/{kb_id}"),
     # D0 — Model availability (proxy to gateway /v1/models)
     ("GET", "/api/v1/models"),
     # D0.5 — Admin alias CRUD proxy
