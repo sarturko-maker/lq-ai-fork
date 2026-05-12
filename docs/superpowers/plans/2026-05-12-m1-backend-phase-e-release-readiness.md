@@ -330,6 +330,7 @@ Edit `.github/workflows/release.yml` and add a new `sbom` job after the existing
           image: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/lq-ai-${{ matrix.service }}:${{ steps.tag.outputs.tag }}
           format: spdx-json
           output-file: ${{ matrix.service }}.spdx.json
+          artifact-name: ${{ matrix.service }}.spdx.json
           upload-artifact: true
           upload-artifact-retention: 90
 
