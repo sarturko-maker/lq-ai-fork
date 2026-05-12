@@ -55,6 +55,7 @@
       <ChatPanel
         projectIdFilter={matter.id}
         initialChatId={activeChatId}
+        on:kbsAttached={loadMatter}
       />
     </div>
   </div>

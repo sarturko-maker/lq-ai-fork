@@ -57,6 +57,8 @@
 	import SavedPromptsPanel from '$lib/lq-ai/components/SavedPromptsPanel.svelte';
 	import AmbientFooter from '$lib/lq-ai/components/AmbientFooter.svelte';
 	import EnhancePromptExpansion from '$lib/lq-ai/components/EnhancePromptExpansion.svelte';
+	import AttachKBModal from '$lib/lq-ai/components/AttachKBModal.svelte';
+	import { createEventDispatcher } from 'svelte';
 
 	// ---- component props ----
 	export let projectIdFilter: string | undefined = undefined;
@@ -91,6 +93,44 @@
 
 	// T6 — Enhance Prompt panel reference. Parent calls expansionPanel.open().
 	let expansionPanel: EnhancePromptExpansion | null = null;
+
+	// T12 — Attach-KB modal state. The composer 📎 button mounts the shared
+	// AttachKBModal scoped to the active chat's project. Successful attaches
+	// bubble up to the matter workspace via the `kbsAttached` event so the
+	// matter rail can refresh its KB list. The modal is only meaningful when
+	// the active chat lives inside a project (legal matter); for project-less
+	// chats the 📎 button is hidden.
+	let attachKbModalOpen = false;
+	const dispatch = createEventDispatcher<{ kbsAttached: { kbIds: string[] } }>();
+
+	function openAttachKbModal(): void {
+		attachKbModalOpen = true;
+	}
+
+	function closeAttachKbModal(): void {
+		attachKbModalOpen = false;
+	}
+
+	async function handleKbsAttached(kbIds: string[]): Promise<void> {
+		attachKbModalOpen = false;
+		// Refresh the local projects-store entry so the modal's "currently
+		// attached" badge + the matter rail's KB list see the new ids without
+		// waiting for a chat re-select. The parent matter page also listens
+		// to `kbsAttached` and re-fetches the matter top-level for routes
+		// that hold matter state of their own.
+		const projectId = composerProjectId;
+		if (projectId) {
+			try {
+				const updated = await projectsApi.getProject(projectId);
+				projectsStore.update(($projects) =>
+					$projects.map((p) => (p.id === updated.id ? updated : p))
+				);
+			} catch (e) {
+				console.error('lq-ai: failed to refresh project after KB attach', e);
+			}
+		}
+		dispatch('kbsAttached', { kbIds });
+	}
 
 	// ---- bootstrap ----
 	async function loadShell() {
@@ -434,6 +474,15 @@
 		? $projectsStore.find((p) => p.id === activeChat?.project_id)?.attached_skill_names ?? []
 		: [];
 
+	// T12 — derive the project id + attached-KB ids the AttachKBModal needs.
+	// Pulled from the live projects store so an attach that happens via the
+	// matter rail (or from another chat in the same matter) reflects in the
+	// modal's "currently attached" badge without a manual refresh.
+	$: composerProjectId = activeChat?.project_id ?? null;
+	$: composerAttachedKbIds = composerProjectId
+		? $projectsStore.find((p) => p.id === composerProjectId)?.attached_knowledge_base_ids ?? []
+		: [];
+
 	// D0 — current selection for the active chat. Falls back to the
 	// picker's default (``smart`` if available, else the first row) when
 	// the user hasn't picked yet for this chat.
@@ -566,6 +615,18 @@
 							Stop
 						</button>
 					{:else}
+						{#if composerProjectId}
+							<button
+								type="button"
+								class="lq-btn-secondary text-sm"
+								aria-label="Attach knowledge base"
+								title="Attach a knowledge base to this matter"
+								on:click={openAttachKbModal}
+								data-testid="lq-ai-attach-kb-btn"
+							>
+								📎
+							</button>
+						{/if}
 						<button
 							type="button"
 							class="lq-btn-secondary text-sm"
@@ -613,6 +674,17 @@
 		/>
 	{/if}
 </div>
+
+{#if composerProjectId && attachKbModalOpen}
+	<AttachKBModal
+		bind:open={attachKbModalOpen}
+		projectId={composerProjectId}
+		attachedKbIds={composerAttachedKbIds}
+		onClose={closeAttachKbModal}
+		onAttach={handleKbsAttached}
+		onDetach={() => {}}
+	/>
+{/if}
 
 <style>
 	@import '$lib/lq-ai/styles/practice.css';

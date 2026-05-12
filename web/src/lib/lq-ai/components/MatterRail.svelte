@@ -3,6 +3,7 @@
   import { chatsApi } from '$lib/lq-ai/api';
   import MatterRailMetadata from './MatterRailMetadata.svelte';
   import MatterRailFiles from './MatterRailFiles.svelte';
+  import MatterRailKnowledge from './MatterRailKnowledge.svelte';
   import MatterRailSkills from './MatterRailSkills.svelte';
   import { onMount } from 'svelte';
 
@@ -48,6 +49,7 @@
 <aside class="matter-rail">
   <MatterRailMetadata {matter} {onMatterUpdate} {onMatterArchived} />
   <MatterRailFiles {matter} {onMatterUpdate} />
+  <MatterRailKnowledge {matter} {onMatterUpdate} />
   <MatterRailSkills {matter} {onMatterUpdate} />
 
   <section class="rail-section">
