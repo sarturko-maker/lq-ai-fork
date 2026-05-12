@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lq-ai.fullname" . }}-api
+  labels:
+    {{- include "lq-ai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "lq-ai.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "lq-ai.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: {{ default (include "lq-ai.fullname" .) .Values.serviceAccount.name }}
+      containers:
+        - name: api
+          image: "{{ .Values.image.registry }}/{{ .Values.image.owner }}/lq-ai-api:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@{{ include "lq-ai.fullname" . }}-postgres:5432/{{ .Values.postgres.database }}"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.passwordSecretRef.name }}
+                  key: {{ .Values.postgres.passwordSecretRef.key }}
+            - name: REDIS_URL
+              value: "redis://{{ include "lq-ai.fullname" . }}-redis:6379/0"
+            - name: MINIO_ENDPOINT
+              value: "{{ include "lq-ai.fullname" . }}-minio:9000"
+            - name: MINIO_ROOT_USER
+              value: {{ .Values.minio.rootUser }}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.rootPasswordSecretRef.name }}
+                  key: {{ .Values.minio.rootPasswordSecretRef.key }}
+            - name: GATEWAY_URL
+              value: "http://{{ include "lq-ai.fullname" . }}-gateway:8001"
+            - name: LQ_AI_GATEWAY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gateway.authSecretRef.name }}
+                  key: {{ .Values.gateway.authSecretRef.gatewayKey }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gateway.authSecretRef.name }}
+                  key: {{ .Values.gateway.authSecretRef.jwtKey }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
