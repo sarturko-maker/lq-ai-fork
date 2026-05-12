@@ -58,6 +58,8 @@
 	import AmbientFooter from '$lib/lq-ai/components/AmbientFooter.svelte';
 	import EnhancePromptExpansion from '$lib/lq-ai/components/EnhancePromptExpansion.svelte';
 	import AttachKBModal from '$lib/lq-ai/components/AttachKBModal.svelte';
+	import TierFloorOverrideModal from '$lib/lq-ai/components/TierFloorOverrideModal.svelte';
+	import { auth } from '$lib/lq-ai/auth/store';
 	import { createEventDispatcher } from 'svelte';
 
 	// ---- component props ----
@@ -130,6 +132,68 @@
 			}
 		}
 		dispatch('kbsAttached', { kbIds });
+	}
+
+	// Wave D.1 T15 — refusal-bubble flow. ChatPanel owns the override-modal
+	// state and the three per-message callbacks (re-run, override-requested,
+	// explainer). On override success the refusal row is replaced in-place by
+	// the new kind='ai' Message; admin-only override is enforced by the
+	// RefusalMessageBubble's showOverrideButton(role) helper — we still pass
+	// the real role here so members/viewers never see the button at all.
+	let overrideModalOpen = false;
+	let overrideMessage: Message | null = null;
+
+	function handleRefusalOverrideRequested(msg: Message): void {
+		overrideMessage = msg;
+		overrideModalOpen = true;
+	}
+
+	function closeOverrideModal(): void {
+		overrideModalOpen = false;
+		overrideMessage = null;
+	}
+
+	function handleRefusalRerun(msg: Message): void {
+		// Find the immediately-preceding user message and re-dispatch its
+		// content through the existing sendMessage() flow. Re-using the
+		// composer path keeps streaming + applied-skills + model selection
+		// consistent with a normal turn. Future: surface a "re-running…"
+		// indicator on the refusal row while the stream is in flight.
+		const list = get(messagesStore);
+		const idx = list.findIndex((m) => m.id === msg.id);
+		if (idx <= 0) return;
+		for (let i = idx - 1; i >= 0; i--) {
+			const candidate = list[i];
+			const isUser = candidate.kind === 'user' || candidate.role === 'user';
+			if (isUser && candidate.content) {
+				composerText = candidate.content;
+				void sendMessage();
+				return;
+			}
+		}
+	}
+
+	function handleRefusalExplainerRequested(_msg: Message): void {
+		// JIT explainer for the tier-floor refusal. M1 surfaces the trust
+		// page anchor; v1.1+ may swap to an inline modal carrying the §7.4
+		// copy without leaving the chat.
+		if (typeof window !== 'undefined') {
+			window.open('/lq-ai/trust#tier-floors', '_blank', 'noopener');
+		}
+	}
+
+	function handleOverrideSuccess(newAiMessage: Message): void {
+		// Replace the refusal row in-place so the operator's mental model
+		// (one turn → one bubble) survives the override path. The new
+		// kind='ai' Message carries the routed_inference_tier + provider, so
+		// the assistant rendering path takes over for that slot.
+		const replacing = overrideMessage;
+		if (replacing) {
+			messagesStore.update(($m) =>
+				$m.map((m) => (m.id === replacing.id ? newAiMessage : m))
+			);
+		}
+		closeOverrideModal();
 	}
 
 	// ---- bootstrap ----
@@ -492,6 +556,21 @@
 		  null
 		: null;
 
+	// Wave D.1 T15 — role for the refusal-bubble override-button gate.
+	// Reads from the LQ.AI auth store (auth/store.ts); falls back to
+	// 'member' when the session has no role surfaced yet so the override
+	// path stays gated. The User.is_admin legacy flag is treated as
+	// equivalent to role === 'admin' for back-compat with sessions
+	// established before the explicit role column landed.
+	$: currentUserRole = (() => {
+		const user = $auth.user;
+		if (!user) return 'member' as const;
+		if (user.role === 'admin' || user.role === 'member' || user.role === 'viewer') {
+			return user.role;
+		}
+		return user.is_admin ? ('admin' as const) : ('member' as const);
+	})();
+
 	// AmbientFooter — derive provider/tier from the latest assistant message.
 	// Wave B will wire these from a dedicated trust endpoint.
 	$: footerProvider = (() => {
@@ -553,6 +632,10 @@
 			{messages}
 			{streamingMessageId}
 			onAppliedSkillClicked={handleAppliedSkillClicked}
+			{currentUserRole}
+			onRefusalRerun={handleRefusalRerun}
+			onRefusalOverrideRequested={handleRefusalOverrideRequested}
+			onRefusalExplainerRequested={handleRefusalExplainerRequested}
 		/>
 
 		{#if activeChat}
@@ -683,6 +766,17 @@
 		onClose={closeAttachKbModal}
 		onAttach={handleKbsAttached}
 		onDetach={() => {}}
+	/>
+{/if}
+
+{#if overrideMessage}
+	<TierFloorOverrideModal
+		bind:open={overrideModalOpen}
+		messageId={overrideMessage.id}
+		originalTier={overrideMessage.requested_tier ?? 'unknown'}
+		enforcedTier={overrideMessage.enforced_tier ?? 'unknown'}
+		onClose={closeOverrideModal}
+		onSuccess={handleOverrideSuccess}
 	/>
 {/if}
 

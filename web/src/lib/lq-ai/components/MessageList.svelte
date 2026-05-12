@@ -8,6 +8,14 @@
 	export let streamingMessageId: string | null = null;
 	export let onAppliedSkillClicked: ((name: string) => void) | undefined = undefined;
 
+	// Wave D.1 T15 — refusal-bubble forwarding. ChatPanel owns the modal +
+	// re-run state; MessageList is a pure pass-through so the bubble can fire
+	// the three callbacks per refusal row.
+	export let currentUserRole: 'admin' | 'member' | 'viewer' = 'member';
+	export let onRefusalRerun: (msg: Message) => void = () => {};
+	export let onRefusalOverrideRequested: (msg: Message) => void = () => {};
+	export let onRefusalExplainerRequested: (msg: Message) => void = () => {};
+
 	let scroller: HTMLDivElement;
 
 	afterUpdate(() => {
@@ -30,6 +38,10 @@
 			message={msg}
 			isStreaming={streamingMessageId === msg.id}
 			{onAppliedSkillClicked}
+			{currentUserRole}
+			{onRefusalRerun}
+			{onRefusalOverrideRequested}
+			{onRefusalExplainerRequested}
 		/>
 	{/each}
 

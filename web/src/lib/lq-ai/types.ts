@@ -198,11 +198,28 @@ export interface Citation {
 
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 
+/**
+ * Discriminator over the kind of row carried in a `messages` table entry.
+ * Mirrors the T4 backend `MessageResponse.kind` field. The default rendering
+ * path keys off `role` (legacy); the refusal-bubble dispatch in
+ * `MessageBubble.svelte` keys off `kind === 'refusal'`. Optional on the
+ * canonical Message type because pre-T4 rows + the streaming draft path
+ * don't populate it; consumers default to the role-driven path when missing.
+ */
+export type MessageKind = 'user' | 'ai' | 'refusal' | 'system';
+
 export interface Message {
 	id: string;
 	chat_id: string;
 	role: MessageRole;
 	content: string;
+	/**
+	 * Discriminator over the message row variant (per T4). Optional for
+	 * back-compat with rows persisted before this column landed and with
+	 * client-side optimistic/draft messages; the chat surface treats a
+	 * missing `kind` as equivalent to the role-driven path.
+	 */
+	kind?: MessageKind;
 	applied_skills?: string[];
 	routed_inference_tier?: 1 | 2 | 3 | 4 | 5 | null;
 	routed_provider?: string | null;
@@ -219,6 +236,16 @@ export interface Message {
 	error_code?: string | null;
 	citations?: Citation[];
 	created_at: string;
+	/**
+	 * Refusal-specific surfacings (only populated when `kind === 'refusal'`).
+	 * Whether the backend Message schema itself carries these fields or they
+	 * come via `inference_routing_log` is a v1.1+ refinement; for M1 they
+	 * remain optional on the type. RefusalMessageBubble has safe defaults
+	 * when they are absent.
+	 */
+	refusal_reason?: string;
+	requested_tier?: string;
+	enforced_tier?: string;
 }
 
 export interface PaginatedMessages {

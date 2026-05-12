@@ -9,18 +9,31 @@
 	 * - error_code surfaces as a red-line banner (per Task C8 spec).
 	 * - Citations render as a "M2: citations coming soon" placeholder when
 	 *   the array is empty (M1 backend ships [] per `MessagePostResponse`).
+	 * - Wave D.1 T15: when `message.kind === 'refusal'` the bubble dispatches
+	 *   to `RefusalMessageBubble` and forwards the rerun / override /
+	 *   explainer callbacks; the default rendering below is skipped.
 	 */
 	import DOMPurify from 'dompurify';
 	import { marked } from 'marked';
 
 	import type { Message } from '../types';
 	import AppliedSkillsChip from './AppliedSkillsChip.svelte';
+	import RefusalMessageBubble from './RefusalMessageBubble.svelte';
 	import TierBadge from './TierBadge.svelte';
 	import TierDetailsPanel from './TierDetailsPanel.svelte';
 
 	export let message: Message;
 	export let isStreaming: boolean = false;
 	export let onAppliedSkillClicked: ((name: string) => void) | undefined = undefined;
+
+	// Wave D.1 T15 — refusal-bubble plumbing. Defaults are no-ops so the
+	// chat surface keeps working when the parent doesn't wire these (e.g.
+	// historical chats with no refusal rows). ChatPanel owns the modal +
+	// re-run state; this component only forwards the per-message callback.
+	export let currentUserRole: 'admin' | 'member' | 'viewer' = 'member';
+	export let onRefusalRerun: (msg: Message) => void = () => {};
+	export let onRefusalOverrideRequested: (msg: Message) => void = () => {};
+	export let onRefusalExplainerRequested: (msg: Message) => void = () => {};
 
 	// D2: tier badge opens a click-for-details panel surfacing the
 	// resolved provider/model + token usage. Per PRD §1.3 the user
@@ -42,6 +55,20 @@
 			: '';
 </script>
 
+{#if message.kind === 'refusal'}
+	<div
+		class="flex flex-col max-w-3xl items-start mb-3"
+		data-testid={`lq-ai-message-${message.id}`}
+	>
+		<RefusalMessageBubble
+			{message}
+			{currentUserRole}
+			onRerun={() => onRefusalRerun(message)}
+			onOverrideRequested={() => onRefusalOverrideRequested(message)}
+			onExplainerRequested={() => onRefusalExplainerRequested(message)}
+		/>
+	</div>
+{:else}
 <div class="flex flex-col max-w-3xl {message.role === 'user' ? 'items-end' : 'items-start'} mb-3" data-testid={`lq-ai-message-${message.id}`}>
 	<div class="rounded-lg px-3 py-2 {bubbleClasses} max-w-full">
 		{#if message.role === 'assistant'}
@@ -106,3 +133,4 @@
 		{/if}
 	{/if}
 </div>
+{/if}
