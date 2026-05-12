@@ -126,6 +126,7 @@ export interface Project {
 	minimum_inference_tier?: 1 | 2 | 3 | 4 | 5 | null;
 	attached_skill_names?: string[];
 	attached_file_ids?: string[];
+	attached_knowledge_base_ids?: string[];
 	archived_at?: string | null;
 	created_at: string;
 	updated_at: string;
