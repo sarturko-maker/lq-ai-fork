@@ -697,109 +697,18 @@ async def test_messages_cascade_delete_on_chat(db_session: AsyncSession) -> None
     assert rows.scalar_one() == 0
 
 
-@pytest.mark.integration
-async def test_inference_routing_log_chat_id_fk_set_null_on_chat_delete(
-    db_session: AsyncSession,
-) -> None:
-    """C3 closes A2: deleting a chat sets the routing-log row's
-    ``chat_id`` to NULL rather than expunging the audit history."""
-
-    from app.models.chat import Chat
-    from app.models.user import User
-
-    user = User(
-        email=f"rl-fk-chat-{uuid.uuid4().hex[:8]}@example.com",
-        hashed_password="hash",
-    )
-    db_session.add(user)
-    await db_session.flush()
-    chat = Chat(owner_id=user.id, title="x")
-    db_session.add(chat)
-    await db_session.flush()
-    chat_id = chat.id
-
-    # Insert a routing-log row referencing the chat.
-    await db_session.execute(
-        text(
-            "INSERT INTO inference_routing_log "
-            "(chat_id, routed_provider, routed_model, routed_inference_tier) "
-            "VALUES (:cid, 'p', 'm', 3)"
-        ),
-        {"cid": chat_id},
-    )
-    await db_session.flush()
-
-    # Delete the chat.
-    await db_session.execute(text("DELETE FROM chats WHERE id = :cid"), {"cid": chat_id})
-    await db_session.flush()
-
-    # The routing-log row survives with chat_id set to NULL.
-    rows = await db_session.execute(
-        text(
-            "SELECT chat_id FROM inference_routing_log "
-            "WHERE routed_provider = 'p' AND routed_model = 'm'"
-        )
-    )
-    found = rows.all()
-    assert len(found) == 1
-    assert found[0][0] is None
-
-
-@pytest.mark.integration
-async def test_inference_routing_log_message_id_fk_set_null_on_message_delete(
-    db_session: AsyncSession,
-) -> None:
-    """C3 closes A2: deleting a message sets the routing-log row's
-    ``message_id`` to NULL rather than expunging the audit history."""
-
-    from app.models.chat import Chat
-    from app.models.user import User
-
-    user = User(
-        email=f"rl-fk-msg-{uuid.uuid4().hex[:8]}@example.com",
-        hashed_password="hash",
-    )
-    db_session.add(user)
-    await db_session.flush()
-    chat = Chat(owner_id=user.id, title="x")
-    db_session.add(chat)
-    await db_session.flush()
-
-    msg_id = uuid.uuid4()
-    await db_session.execute(
-        text(
-            "INSERT INTO messages (id, chat_id, role, content) "
-            "VALUES (:mid, :cid, 'assistant', 'x')"
-        ),
-        {"mid": msg_id, "cid": chat.id},
-    )
-    await db_session.flush()
-
-    # Insert a routing-log row referencing the message.
-    await db_session.execute(
-        text(
-            "INSERT INTO inference_routing_log "
-            "(message_id, routed_provider, routed_model, routed_inference_tier) "
-            "VALUES (:mid, 'q', 'n', 3)"
-        ),
-        {"mid": msg_id},
-    )
-    await db_session.flush()
-
-    # Delete the message.
-    await db_session.execute(text("DELETE FROM messages WHERE id = :mid"), {"mid": msg_id})
-    await db_session.flush()
-
-    # The routing-log row survives with message_id set to NULL.
-    rows = await db_session.execute(
-        text(
-            "SELECT message_id FROM inference_routing_log "
-            "WHERE routed_provider = 'q' AND routed_model = 'n'"
-        )
-    )
-    found = rows.all()
-    assert len(found) == 1
-    assert found[0][0] is None
+# Note: previous tests at this position verified ON DELETE SET NULL behavior
+# for inference_routing_log.chat_id and .message_id (the FK constraints
+# closed C3's deferred A2 item). Migration 0008
+# (drop_inference_routing_log_message_fks) intentionally dropped both FKs to
+# fix the gateway/backend write-order race (the gateway writes the
+# routing-log row at end-of-call before the backend persists the message
+# row; the FK rejected the insert and B4's "never raise" invariant silently
+# swallowed every audit row). Per that migration's docstring, the
+# NULL-on-delete behavior "was not load-bearing because the messages row
+# carries the same routing metadata (routed_inference_tier, provider,
+# model, tokens, cost) on its own." The two tests were retired alongside
+# the constraint.
 
 
 @pytest.mark.integration
