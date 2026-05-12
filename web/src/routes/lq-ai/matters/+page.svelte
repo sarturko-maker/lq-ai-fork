@@ -3,8 +3,7 @@
   import { projectsApi } from '$lib/lq-ai/api';
   import type { Project } from '$lib/lq-ai/types';
   import MatterCard from '$lib/lq-ai/components/MatterCard.svelte';
-  // NewMatterModal wired in Commit B
-  // import NewMatterModal from '$lib/lq-ai/components/NewMatterModal.svelte';
+  import NewMatterModal from '$lib/lq-ai/components/NewMatterModal.svelte';
 
   let matters: Project[] = [];
   let loading = true;
@@ -71,16 +70,12 @@
   {/if}
 </main>
 
-<!--
-  NewMatterModal wired in Commit B:
-
-  {#if showNewModal}
-    <NewMatterModal
-      onClose={() => (showNewModal = false)}
-      onCreated={() => { showNewModal = false; refresh(); }}
-    />
-  {/if}
--->
+{#if showNewModal}
+  <NewMatterModal
+    onClose={() => (showNewModal = false)}
+    onCreated={() => { showNewModal = false; refresh(); }}
+  />
+{/if}
 
 <style>
   .mtr-page {
