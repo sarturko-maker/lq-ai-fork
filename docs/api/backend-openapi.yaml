@@ -2615,6 +2615,31 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
 
+  /api/v1/chats/{chat_id}/receipts/export.jsonl:
+    get:
+      summary: Export receipts as JSONL (one event per line)
+      tags: [chats]
+      parameters:
+        - name: chat_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: event_kinds
+          in: query
+          required: false
+          schema: { type: string }
+          description: Comma-separated subset (same as the JSON endpoint)
+      responses:
+        '200':
+          description: JSONL stream — one event per line
+          content:
+            application/jsonl:
+              schema: { type: string }
+        '403':
+          description: Forbidden — not the owner or admin
+        '404':
+          description: Chat not found
+
 # ============================================================
 # COMPONENTS
 # ============================================================

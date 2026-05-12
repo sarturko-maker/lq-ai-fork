@@ -27,11 +27,13 @@ rather than 400.
 
 from __future__ import annotations
 
+import json as _json
 import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -205,6 +207,40 @@ async def get_chat_receipts(
 
     events.sort(key=lambda e: e.ts)
     return events
+
+
+@router.get(
+    "/{chat_id}/receipts/export.jsonl",
+    summary="Export receipts as JSONL (one event per line)",
+    response_class=Response,
+)
+async def export_chat_receipts(
+    chat_id: uuid.UUID,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    event_kinds: Annotated[str | None, Query()] = None,
+) -> Response:
+    """Same payload as the JSON receipts endpoint, serialized as JSONL.
+
+    ``Content-Type: application/jsonl`` + ``Content-Disposition: attachment;
+    filename="chat-{id}-receipts.jsonl"`` so browsers trigger a download.
+    """
+    events = await get_chat_receipts(
+        chat_id=chat_id,
+        user=user,
+        db=db,
+        event_kinds=event_kinds,
+    )
+    body = "\n".join(_json.dumps(e.model_dump(mode="json")) for e in events)
+    return Response(
+        content=body,
+        media_type="application/jsonl",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="chat-{chat_id}-receipts.jsonl"'
+            ),
+        },
+    )
 
 
 __all__ = ["router"]
