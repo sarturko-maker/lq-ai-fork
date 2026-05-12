@@ -24,6 +24,22 @@
 	export let onKeepOriginal: (interactionId: string | null) => void = () => undefined;
 	export let onDismiss: () => void = () => undefined;
 
+	/**
+	 * §7.1 — first-time JIT onboarding strip. Shows once on the user's first
+	 * post-enhance shown state and persists dismissal in localStorage so
+	 * subsequent enhancements don't re-show it.
+	 */
+	export const JIT_SEEN_KEY = 'lq_ai_jit_enhance_seen';
+	let jitDismissed = readJitSeen();
+
+	function readJitSeen(): boolean {
+		try { return localStorage.getItem(JIT_SEEN_KEY) === 'true'; } catch { return false; }
+	}
+	function dismissJit(): void {
+		jitDismissed = true;
+		try { localStorage.setItem(JIT_SEEN_KEY, 'true'); } catch {}
+	}
+
 	type ExpansionState =
 		| { kind: 'closed' }
 		| { kind: 'loading'; original: string }
@@ -134,6 +150,24 @@
 				<span class="lq-text-caption">Enhancing… ✨</span>
 			</div>
 		{:else if state.kind === 'shown'}
+			{#if !jitDismissed}
+				<div class="lq-enhance-jit" data-testid="lq-ai-enhance-jit">
+					<span class="lq-text-caption lq-enhance-jit-msg">
+						Tip: ✨ rewrites your prompt so the AI has more to work with. Pick
+						<strong>Use enhanced</strong>, tweak with <strong>Edit enhanced</strong>, or
+						<strong>Keep original</strong>. (⌘E)
+					</span>
+					<button
+						type="button"
+						class="lq-btn-ghost lq-enhance-jit-dismiss"
+						on:click={dismissJit}
+						data-testid="lq-ai-enhance-jit-dismiss"
+						aria-label="Dismiss tip"
+					>
+						Got it
+					</button>
+				</div>
+			{/if}
 			<div class="lq-enhance-header">
 				<span class="lq-enhance-title">Prompt Enhancement</span>
 				<div class="lq-enhance-header-actions">
@@ -383,6 +417,20 @@
 	.lq-enhance-error-msg {
 		color: var(--lq-error);
 	}
+
+	.lq-enhance-jit {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--lq-space-3);
+		padding: var(--lq-space-2) var(--lq-space-3);
+		border-radius: var(--lq-radius);
+		background: var(--lq-warn-soft, #fef3c7);
+		border: 1px solid var(--lq-warn-border, #fcd34d);
+		color: var(--lq-warn, #92400e);
+	}
+	.lq-enhance-jit-msg { flex: 1; }
+	.lq-enhance-jit-dismiss { flex-shrink: 0; }
 
 	.lq-enhance-error-actions {
 		display: flex;

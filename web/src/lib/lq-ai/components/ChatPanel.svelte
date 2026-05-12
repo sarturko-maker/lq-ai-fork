@@ -599,6 +599,18 @@
 			? String(lastAssistant.routed_inference_tier)
 			: 'default';
 	})();
+
+	// §7.1 — long-prompt framing: at >500 word-tokens we shift the ✨ affordance
+	// from "Enhance" (expand a short prompt) to "Refine" (tighten/restructure a
+	// long prompt). Word-count is a coarse proxy for token-count; sufficient
+	// for the title/aria copy since the underlying API call is identical.
+	const ENHANCE_REFINE_TOKEN_THRESHOLD = 500;
+	$: composerWordCount = composerText.trim() ? composerText.trim().split(/\s+/).length : 0;
+	$: enhanceIsRefine = composerWordCount > ENHANCE_REFINE_TOKEN_THRESHOLD;
+	$: enhanceButtonTitle = enhanceIsRefine
+		? 'Refine prompt with AI (Cmd/Ctrl+E)'
+		: 'Enhance with AI (Cmd/Ctrl+E)';
+	$: enhanceButtonAriaLabel = enhanceIsRefine ? 'Refine prompt' : 'Enhance prompt';
 </script>
 
 <div class="flex flex-1 overflow-hidden" data-testid="lq-ai-chat-shell">
@@ -729,11 +741,12 @@
 						<button
 							type="button"
 							class="lq-btn-secondary text-sm"
-							aria-label="Enhance prompt"
-							title="Enhance with AI (Cmd/Ctrl+E)"
+							aria-label={enhanceButtonAriaLabel}
+							title={enhanceButtonTitle}
 							on:click={() => expansionPanel?.open()}
 							disabled={!composerText.trim() || !!streamingMessageId}
 							data-testid="lq-ai-enhance-btn"
+							data-enhance-mode={enhanceIsRefine ? 'refine' : 'enhance'}
 						>
 							✨
 						</button>

@@ -3,8 +3,23 @@
 	import { preferences, setPreference, initPreferences } from '$lib/lq-ai/stores/preferences';
 	import SettingsToggleGroup from '$lib/lq-ai/components/SettingsToggleGroup.svelte';
 	import type { FeaturedTools, WorkspaceLayout, TrustPills, ProvenancePills } from '$lib/lq-ai/types';
+	import {
+		AUTO_ENHANCE_STORAGE_KEY,
+		readAutoEnhance,
+		writeAutoEnhance
+	} from '$lib/lq-ai/preferences/autoEnhance';
 
-	onMount(() => initPreferences());
+	let autoEnhance = false;
+
+	onMount(() => {
+		initPreferences();
+		autoEnhance = readAutoEnhance();
+	});
+
+	function toggleAutoEnhance(): void {
+		autoEnhance = !autoEnhance;
+		writeAutoEnhance(autoEnhance);
+	}
 </script>
 
 <h2 class="lq-text-panel-h" style="margin-bottom: var(--lq-space-4);">Appearance</h2>
@@ -93,3 +108,27 @@
 	]}
 	onChange={(v) => setPreference('provenance_pills', v as ProvenancePills)}
 />
+
+<!--
+	§7.1 — Auto-enhance on send. Frontend-only preference (localStorage,
+	key=AUTO_ENHANCE_STORAGE_KEY) so it doesn't drift the backend Preferences
+	contract. The send-side wiring (call enhance() before sendMessage when
+	enabled) lands in v1.1+ once UX is settled for the implicit-confirm path.
+-->
+<div class="lq-auto-enhance" style="margin-top: var(--lq-space-6);">
+	<label class="lq-text-body" style="display: flex; gap: var(--lq-space-2); align-items: flex-start;">
+		<input
+			type="checkbox"
+			checked={autoEnhance}
+			on:change={toggleAutoEnhance}
+			data-testid="lq-ai-auto-enhance-toggle"
+		/>
+		<span>
+			<strong>Auto-enhance prompts on send</strong>
+			<span style="display: block; color: var(--lq-text-secondary); font-size: 12px;">
+				Run Enhance Prompt automatically before each send (preview-and-confirm UX
+				ships in v1.1+; setting is stored locally).
+			</span>
+		</span>
+	</label>
+</div>
