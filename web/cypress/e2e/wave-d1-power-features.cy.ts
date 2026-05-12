@@ -47,7 +47,11 @@ function login(email: string, password: string) {
 }
 
 /**
- * Create a fresh non-privileged matter and land in its workspace.
+ * Create a fresh non-privileged matter, click + New Chat to seed an active
+ * chat, and wait for the composer to render. The composer is gated on
+ * `{#if activeChat}` in ChatPanel.svelte, so without this step every test
+ * times out looking for `lq-ai-composer-input`.
+ *
  * Returns the matter name via Cypress alias `@matterName` so tests can assert
  * on it later. Mirrors wave-c-matters.cy.ts test 3.
  */
@@ -60,6 +64,13 @@ function createSampleMatter(prefix = 'Cypress Wave D.1') {
 	cy.contains('button', 'Create matter').click();
 	cy.url({ timeout: 10000 }).should('match', /\/lq-ai\/matters\/[a-f0-9-]+$/);
 	cy.get('[data-testid="lq-ai-chat-shell"]', { timeout: 10000 }).should('exist');
+
+	// + New Chat → auto-selects → composer mounts. createNewChat passes the
+	// matter id through as project_id so composerProjectId is set and the
+	// 📎/✨/📜 buttons render.
+	cy.get('[data-testid="lq-ai-new-chat-btn"]').click();
+	cy.get('[data-testid="lq-ai-composer-input"]', { timeout: 10000 }).should('be.visible');
+
 	cy.wrap(matterName).as('matterName');
 }
 
@@ -369,9 +380,11 @@ describe('Wave D.1 — in-chat power features', () => {
 		// response to 'member' on the post-matter reload.
 		createSampleMatter('Cypress Refusal Member');
 
-		// Intercept auth/me to return member role on subsequent reads. The
-		// frontend re-reads on reload via the auth store.
-		cy.intercept('GET', '/api/v1/auth/me', (req) => {
+		// Intercept the user-info endpoint to return member role on subsequent
+		// reads. Endpoint is `/api/v1/users/me` (per web/src/lib/lq-ai/api/auth.ts
+		// `getCurrentUser`), not `/api/v1/auth/me`. The frontend re-reads on
+		// reload via the auth store.
+		cy.intercept('GET', '/api/v1/users/me', (req) => {
 			req.reply((res) => {
 				if (res.statusCode === 200 && res.body) {
 					const body = typeof res.body === 'object' ? { ...res.body } : res.body;
