@@ -339,6 +339,37 @@ export interface SkillInputs {
 
 export type IngestionStatus = 'pending' | 'processing' | 'ready' | 'failed';
 
+/**
+ * Knowledge base record. Mirrors ``KnowledgeBase`` in
+ * ``docs/api/backend-openapi.yaml`` §components.schemas. ``ingestion_status``
+ * is a frontend-side derived/optional convenience — the backend KB row itself
+ * does not carry a single status (the constituent files do, per IngestionStatus)
+ * but C5/C7 surfaces a roll-up via the GET response in some builds; treat as
+ * optional and fall back to ``file_count > 0 ? 'ready' : 'pending'`` when
+ * absent.
+ */
+export interface KnowledgeBase {
+	id: string;
+	name: string;
+	description?: string | null;
+	owner_id: string;
+	project_id?: string | null;
+	hybrid_alpha: number;
+	file_count: number;
+	chunk_count: number;
+	ingestion_status?: IngestionStatus;
+	archived_at?: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface KnowledgeBaseCreate {
+	name: string;
+	description?: string | null;
+	project_id?: string | null;
+	hybrid_alpha?: number;
+}
+
 export interface FileMeta {
 	id: string;
 	owner_id: string;
