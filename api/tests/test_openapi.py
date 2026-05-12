@@ -114,6 +114,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/models",
         # Wave D.1 T4 — admin tier-floor override re-run
         "/api/v1/inference/override-tier-floor",
+        # Wave D.1 T5 — chat receipts (replay-at-read event log)
+        "/api/v1/chats/{chat_id}/receipts",
     }
 )
 
@@ -146,7 +148,7 @@ async def test_openapi_paths_match_sketch() -> None:
     # Wave B's four paths + Wave C's /admin/users/{user_id}/role +
     # Wave B v2's /admin/users + Wave D.1's two matter <-> KB attach/detach paths
     # + Wave D.1 T4's /inference/override-tier-floor.
-    assert len(actual) == 68
+    assert len(actual) == 69
 
 
 @pytest.mark.unit

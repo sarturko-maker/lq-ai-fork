@@ -157,6 +157,8 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("DELETE", "/api/v1/projects/{project_id}/knowledge-bases/{kb_id}"),
     # Wave D.1 T4 — admin tier-floor override re-run
     ("POST", "/api/v1/inference/override-tier-floor"),
+    # Wave D.1 T5 — chat receipts (replay-at-read event log)
+    ("GET", "/api/v1/chats/{chat_id}/receipts"),
     # D0 — Model availability (proxy to gateway /v1/models)
     ("GET", "/api/v1/models"),
     # D0.5 — Admin alias CRUD proxy

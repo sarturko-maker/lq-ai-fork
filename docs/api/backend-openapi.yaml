@@ -2553,6 +2553,68 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
 
+  /api/v1/chats/{chat_id}/receipts:
+    get:
+      tags: [chats]
+      summary: Chronological event log for a chat (replay-at-read)
+      description: |
+        Wave D.1 T5 (spec §7.6). Merges chronological events from four
+        source tables into a single timestamp-ordered stream:
+
+          * ``messages``                (``kind='message'``)
+          * ``messages.applied_skills`` (one event per skill name; ``kind='skill'``)
+          * ``inference_routing_log``   (``kind='inference'`` or ``kind='error'`` if ``refused=True``)
+          * ``audit_log``               (``kind='audit'`` or ``kind='retrieval'`` if ``action='inference.kb_chunks_retrieved'``)
+
+        Owner-of-chat or admin only. Replay-at-read for M1 — chats are
+        bounded (<100 events typical). A materialized ``chat_receipts``
+        projection is a v1.1+ candidate if latency degrades.
+      parameters:
+        - name: chat_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: event_kinds
+          in: query
+          required: false
+          schema: {type: string}
+          description: |
+            Comma-separated subset of: ``message``, ``inference``,
+            ``audit``, ``skill``, ``retrieval``, ``error``. Omit for
+            all kinds. Unknown tokens are silently ignored.
+      responses:
+        '200':
+          description: Chronological list of receipt events, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [ts, kind, detail]
+                  properties:
+                    ts:
+                      type: string
+                      format: date-time
+                    kind:
+                      type: string
+                      enum: [message, inference, audit, skill, retrieval, error]
+                    detail:
+                      type: object
+                      additionalProperties: true
+        '403':
+          description: Caller is not the chat owner or an admin.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Chat not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
 # ============================================================
 # COMPONENTS
 # ============================================================
