@@ -168,11 +168,14 @@ async def test_reset_admin_password_revokes_active_sessions(cli_db_url: str) -> 
             from datetime import UTC, datetime, timedelta
 
             user = (await s.execute(select(User).where(User.email == email))).scalar_one()
+            now = datetime.now(tz=UTC)
             s.add(
                 UserSession(
                     user_id=user.id,
                     refresh_token_hash="dummy-hash",
-                    expires_at=datetime.now(tz=UTC) + timedelta(days=7),
+                    expires_at=now + timedelta(days=7),
+                    absolute_expires_at=now + timedelta(hours=8),
+                    last_active_at=now,
                 )
             )
             await s.commit()

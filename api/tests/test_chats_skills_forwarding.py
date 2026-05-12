@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients.gateway import GatewayClient, set_gateway_client
 from app.db.session import get_db
 from app.main import app
+from app.models.chat import Chat
 from app.models.user import User
 from app.security import create_access_token, hash_password
 
@@ -50,6 +51,26 @@ async def db_user(db_session: AsyncSession) -> User:
     db_session.add(user)
     await db_session.flush()
     return user
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def db_chat(db_session: AsyncSession, db_user: User) -> Chat:
+    """Seed a chat at the well-known DUMMY id owned by db_user.
+
+    Autouse so every test in this file gets the chat without restating the
+    fixture in 8 signatures. POST /chats/{id}/messages calls
+    _load_visible_chat which 404s when the row doesn't exist or isn't owned
+    by the caller; these tests exercise the message-forwarding path, not
+    chat creation, so we pre-seed rather than POSTing through /chats first.
+    """
+    chat = Chat(
+        id=uuid.UUID(_DUMMY_CHAT_ID),
+        owner_id=db_user.id,
+        title="New chat",
+    )
+    db_session.add(chat)
+    await db_session.flush()
+    return chat
 
 
 @pytest_asyncio.fixture
