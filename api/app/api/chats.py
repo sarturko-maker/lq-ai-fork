@@ -70,9 +70,13 @@ from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
 from app.errors import LQAIError, NotFound, ValidationError
+from app.knowledge.embed import DEFAULT_EMBEDDING_MODEL, request_embedding_vector
+from app.knowledge.retrieval import HybridSearchResult, hybrid_search
 from app.models.chat import Chat, Message
 from app.models.inference import InferenceRoutingLog
+from app.models.knowledge import KnowledgeBase
 from app.models.project import Project
+from app.models.project_knowledge_base import ProjectKnowledgeBase
 from app.models.user import User
 from app.schemas.chats import (
     LIST_LIMIT_DEFAULT,
@@ -606,6 +610,179 @@ async def list_messages(
 
 
 # ---------------------------------------------------------------------------
+# Wave D.1 T7b: RAG step for the chat-send path
+# ---------------------------------------------------------------------------
+
+
+# Number of chunks retrieved per attached KB. Conservative default —
+# the model sees k chunks per KB summed across attachments. T7b does
+# not surface this in the request payload; a future task may expose
+# it on MessageCreateRequest if Kevin wants per-call tuning.
+RAG_TOP_K_PER_KB: int = 5
+
+# Maximum total chunks injected into the gateway request. Bounds the
+# context-prepend size when many KBs are attached.
+RAG_MAX_TOTAL_CHUNKS: int = 10
+
+
+async def _load_attached_kb_ids_for_chat(
+    db: AsyncSession, project_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Return the KB ids attached to the chat's project via the T2 junction.
+
+    Mirrors :func:`app.api.projects._load_attached_kb_ids`. Inlined here
+    rather than imported to keep the chat surface free of a reverse
+    dependency on the projects router module — both helpers are
+    one-statement SELECTs against the junction table.
+    """
+
+    stmt = (
+        select(ProjectKnowledgeBase.knowledge_base_id)
+        .where(ProjectKnowledgeBase.project_id == project_id)
+        .order_by(ProjectKnowledgeBase.attached_at)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def _retrieve_kb_context_for_chat(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    query: str,
+    gateway: GatewayClient,
+    request_id: str | None,
+) -> tuple[list[HybridSearchResult], list[uuid.UUID]]:
+    """Run hybrid search across every KB attached to the chat's project.
+
+    Returns a 2-tuple ``(chunks, kb_ids_searched)`` where ``chunks`` is
+    the merged-then-truncated list of :class:`HybridSearchResult`
+    ordered by descending ``hybrid_score`` (capped at
+    :data:`RAG_MAX_TOTAL_CHUNKS`) and ``kb_ids_searched`` is the list of
+    KB ids we actually queried (empty if the chat has no project or the
+    project has no KBs attached).
+
+    The embedding for ``query`` is computed once and reused across every
+    KB call — embed-on-read is the same shape as ``query_kb``. If the
+    embed fetch fails we downgrade to FTS-only retrieval per KB (the
+    same fallback ``query_kb`` uses).
+
+    The audit-row write is the caller's responsibility — this helper
+    only does retrieval. Empty-result handling is the caller's too
+    (T7 contract: no audit row when results are empty).
+    """
+
+    if chat.project_id is None:
+        return [], []
+
+    kb_ids = await _load_attached_kb_ids_for_chat(db, chat.project_id)
+    if not kb_ids:
+        return [], []
+
+    # Load KB rows (for hybrid_alpha per KB). One SELECT for the set.
+    kb_stmt = select(KnowledgeBase).where(KnowledgeBase.id.in_(kb_ids))
+    kb_rows = (await db.execute(kb_stmt)).scalars().all()
+    kb_by_id: dict[uuid.UUID, KnowledgeBase] = {kb.id: kb for kb in kb_rows}
+
+    # Embed the query once (reused across every KB). Mirrors the
+    # alpha<1.0 gate in query_kb: if every attached KB is FTS-only
+    # (hybrid_alpha == 1.0) we skip the embed call entirely. We also
+    # tolerate embed-fetch failure by downgrading to FTS-only.
+    needs_embedding = any(float(kb.hybrid_alpha) < 1.0 for kb in kb_rows)
+    query_embedding: list[float] | None = None
+    if needs_embedding:
+        try:
+            query_embedding = await request_embedding_vector(
+                query,
+                model=DEFAULT_EMBEDDING_MODEL,
+                gateway=gateway,
+                request_id=request_id,
+            )
+        except LQAIError as exc:
+            log.warning(
+                "chat-send RAG: query-embedding fetch failed; FTS-only fallback",
+                extra={
+                    "event": "chat_rag_embed_fetch_failed",
+                    "chat_id": str(chat.id),
+                    "error_code": exc.effective_code,
+                },
+            )
+            query_embedding = None
+
+    # Iterate every attached KB. hybrid_search is single-KB by
+    # signature (C6 / ADR 0008); a multi-KB primitive is a v1.1+
+    # refinement candidate. For M1 the per-call cost is small —
+    # legal users attach a handful of KBs, not hundreds.
+    merged: list[HybridSearchResult] = []
+    for kb in kb_rows:
+        alpha = float(kb.hybrid_alpha)
+        try:
+            results = await hybrid_search(
+                db,
+                kb_id=kb.id,
+                query=query,
+                query_embedding=query_embedding,
+                top_k=RAG_TOP_K_PER_KB,
+                alpha=alpha,
+            )
+        except Exception:  # noqa: BLE001 — defensive belt; log and skip
+            log.exception(
+                "chat-send RAG: hybrid_search failed for KB; skipping",
+                extra={
+                    "event": "chat_rag_kb_search_failed",
+                    "chat_id": str(chat.id),
+                    "kb_id": str(kb.id),
+                },
+            )
+            continue
+        merged.extend(results)
+
+    if not merged:
+        return [], [kb.id for kb in kb_rows]
+
+    merged.sort(key=lambda r: r.hybrid_score, reverse=True)
+    top = merged[:RAG_MAX_TOTAL_CHUNKS]
+    return top, [kb.id for kb in kb_rows]
+
+
+def _format_retrieval_context_block(
+    chunks: list[HybridSearchResult],
+) -> str:
+    """Render retrieved chunks as a Markdown system-message context block.
+
+    The shape is intentionally lightweight — a header line so the LLM
+    can recognize the block as retrieved context, then one Markdown
+    list item per chunk with a short header (``file_name``, optional
+    page range) and the chunk text. The block is prepended to the
+    gateway request as a ``system`` message so the LLM treats it as
+    grounding rather than user turn content.
+
+    Chunk text is included verbatim. We do not truncate at the
+    character level (the LLM's tokenizer will window if the request is
+    oversized); :data:`RAG_MAX_TOTAL_CHUNKS` upstream is the bound.
+    """
+
+    lines: list[str] = [
+        "Retrieved context from your matter's knowledge bases. "
+        "Cite these sources when they bear on the user's question; "
+        "ignore them if they are not relevant.",
+        "",
+    ]
+    for idx, chunk in enumerate(chunks, start=1):
+        location = ""
+        if chunk.page_start is not None:
+            if chunk.page_end is not None and chunk.page_end != chunk.page_start:
+                location = f" (pp. {chunk.page_start}-{chunk.page_end})"
+            else:
+                location = f" (p. {chunk.page_start})"
+        header = f"[{idx}] {chunk.file_name}{location}"
+        lines.append(f"{header}:")
+        lines.append(chunk.content)
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+# ---------------------------------------------------------------------------
 # Messages: post (the keystone)
 # ---------------------------------------------------------------------------
 
@@ -694,13 +871,66 @@ async def send_message(
         project_result = await db.execute(project_stmt)
         project_floor = project_result.scalar_one_or_none()
 
+    # Wave D.1 T7b — RAG step: when the chat's project has KBs attached,
+    # run hybrid_search across all of them for the user's just-sent
+    # message, write the T7-shape audit row so Receipts surfaces the
+    # 📎 KB retrieval event, and prepend the retrieved chunks as a
+    # ``system`` message to the gateway request so the LLM actually
+    # sees them. Empty results → no audit row, no context injection
+    # (same guard as T7's query_kb path).
+    retrieved_chunks, kb_ids_searched = await _retrieve_kb_context_for_chat(
+        db,
+        chat=chat,
+        query=payload.content,
+        gateway=gateway,
+        request_id=request.headers.get("x-request-id"),
+    )
+
+    # Build the gateway messages list. T7b prepends a ``system``-role
+    # context block when we have retrieved chunks; this is the
+    # least-invasive injection point — the gateway treats it as a
+    # system message and the C2 / ADR 0007 prompt-assembly logic still
+    # runs on top (the gateway concatenates its own system messages
+    # before the user turn, so the retrieved context shows up at the
+    # very front of the prompt). The user's just-sent message
+    # remains the last entry, unchanged.
+    gw_messages: list[ChatCompletionMessage] = []
+    if retrieved_chunks:
+        context_block = _format_retrieval_context_block(retrieved_chunks)
+        gw_messages.append(
+            ChatCompletionMessage(role="system", content=context_block)
+        )
+        # T7-shape audit row. Same details schema as query_kb (kb_ids
+        # plural here; query_kb is single-KB). The row commits with
+        # its own boundary so it's durable even if the gateway call
+        # later fails — Receipts must show retrieval happened
+        # regardless of LLM-call outcome.
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="inference.kb_chunks_retrieved",
+            resource_type="chat",
+            resource_id=str(cid),
+            project_id=chat.project_id,
+            request=request,
+            details={
+                "kb_ids": [str(k) for k in kb_ids_searched],
+                "chunk_count": len(retrieved_chunks),
+                "chunk_ids": [str(c.chunk_id) for c in retrieved_chunks],
+                "query_token_estimate": len(payload.content.split()),
+            },
+        )
+        await db.commit()
+    gw_messages.append(ChatCompletionMessage(role="user", content=payload.content))
+
     # Build the gateway request. C3 still sends a single-turn request
     # (the user's content as one ``user`` message); a future task may
     # widen this to include prior history. The gateway does the skill
-    # prompt assembly per ADR 0007.
+    # prompt assembly per ADR 0007. T7b prepends a system context
+    # block when KB retrieval returned chunks (see above).
     gw_request = ChatCompletionRequest(
         model=payload.model,
-        messages=[ChatCompletionMessage(role="user", content=payload.content)],
+        messages=gw_messages,
         stream=payload.stream,
         chat_id=str(cid),
         lq_ai_chat_id=str(cid),
