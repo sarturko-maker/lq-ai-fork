@@ -71,6 +71,14 @@ jobs:
           provenance: false   # we attach SLSA provenance via actions/attest-build-provenance in T2
           sbom: false         # we attach SBOM via anchore/sbom-action in T1
 
+      - name: Generate SLSA build provenance
+        if: ${{ github.event_name == 'push' || !inputs.dry_run }}
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/lq-ai-${{ matrix.service }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
   sbom:
     name: SBOM ${{ matrix.service }}
     needs: build-and-push
