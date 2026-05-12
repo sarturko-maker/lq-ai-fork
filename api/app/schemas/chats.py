@@ -289,6 +289,13 @@ class MessageResponse(BaseModel):
     id: uuid.UUID
     chat_id: uuid.UUID
     role: Literal["user", "assistant", "system", "tool"]
+    kind: Literal["user", "ai", "refusal", "system"] = "user"
+    """Wave D.1 — distinguishes assistant rows that carry a model
+    response (``ai``) from refusal rows (``refusal``) emitted by the
+    gateway's tier-floor enforcement. Defaults to ``user`` to match the
+    DB column server default; the override-tier-floor flow writes
+    ``ai`` explicitly so the UI can tell a re-run apart from a refusal."""
+
     content: str
     applied_skills: list[str] = Field(default_factory=list)
     routed_inference_tier: int | None = None
@@ -322,6 +329,7 @@ def message_to_response(row: Any) -> MessageResponse:
         id=row.id,
         chat_id=row.chat_id,
         role=row.role,
+        kind=getattr(row, "kind", "user") or "user",
         content=row.content,
         applied_skills=list(row.applied_skills or []),
         routed_inference_tier=row.routed_inference_tier,

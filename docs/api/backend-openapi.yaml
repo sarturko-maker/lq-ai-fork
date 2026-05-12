@@ -2496,6 +2496,63 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/TierConfigResponse'}
 
+  /api/v1/inference/override-tier-floor:
+    post:
+      tags: [inference]
+      summary: Re-run a refused inference with the tier floor lifted (admin only)
+      description: |
+        Wave D.1 T4. Admin-only override that re-runs the original user
+        prompt with ``tier_floor=None`` for this turn. Looks up the
+        ``kind='refusal'`` message at ``message_id``, finds the
+        immediately preceding ``kind='user'`` message in the same chat,
+        and forwards both to the gateway with no project floor and no
+        per-call minimum. Persists a new ``kind='ai'`` ``Message`` row
+        and writes an ``audit_log`` row with the operator-supplied
+        ``reason``. Returns the new message + the routing-log row id
+        the gateway wrote.
+
+        M1 binds to the ``is_admin`` role. Per-user
+        ``override_tier_floor`` capability is deferred to v1.1+.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message_id, reason]
+              properties:
+                message_id:
+                  type: string
+                  format: uuid
+                reason:
+                  type: string
+                  minLength: 10
+                  maxLength: 500
+      responses:
+        '200':
+          description: Re-run completed; new ``kind='ai'`` message persisted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ai_message]
+                properties:
+                  ai_message: {$ref: '#/components/schemas/Message'}
+                  routing_log_id:
+                    type: string
+                    format: uuid
+                    nullable: true
+        '403':
+          description: Caller is not an admin.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: ``message_id`` does not resolve to a refusal row.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
 # ============================================================
 # COMPONENTS
 # ============================================================

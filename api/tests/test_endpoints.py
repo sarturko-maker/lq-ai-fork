@@ -155,6 +155,8 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # Wave D.1 T3 — matter <-> KB attach/detach
     ("POST", "/api/v1/projects/{project_id}/knowledge-bases"),
     ("DELETE", "/api/v1/projects/{project_id}/knowledge-bases/{kb_id}"),
+    # Wave D.1 T4 — admin tier-floor override re-run
+    ("POST", "/api/v1/inference/override-tier-floor"),
     # D0 — Model availability (proxy to gateway /v1/models)
     ("GET", "/api/v1/models"),
     # D0.5 — Admin alias CRUD proxy

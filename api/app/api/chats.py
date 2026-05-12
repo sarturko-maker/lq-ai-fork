@@ -1232,6 +1232,134 @@ async def _stream_response(
     )
 
 
+# ---------------------------------------------------------------------------
+# Wave D.1 T4 — admin tier-floor override helper
+# ---------------------------------------------------------------------------
+
+
+async def run_inference_override(
+    *,
+    db: AsyncSession,
+    gateway: GatewayClient,
+    chat: Chat,
+    user: User,
+    user_msg: Message,
+    refusal_msg: Message,
+    override_reason: str,
+    request: Request | None = None,
+) -> tuple[Message, uuid.UUID | None]:
+    """Re-run a refused inference with the tier floor lifted.
+
+    Wave D.1 T4. Admin-only re-run of a refused user message: the
+    backend forwards the original user prompt to the gateway with both
+    ``minimum_inference_tier`` and ``lq_ai_project_minimum_inference_tier``
+    set to ``None`` so no tier floor binds for this turn. The new
+    assistant row is persisted with ``kind='ai'`` so the UI can tell it
+    apart from the refusal it supersedes.
+
+    Mirrors the synchronous, non-streaming branch of ``send_message``
+    (no SSE; one-shot JSON) — the override surface is admin-driven and
+    doesn't require streaming. Returns the persisted assistant
+    :class:`Message` plus the gateway-written
+    ``inference_routing_log`` row id (lookup by ``message_id``; the
+    gateway is still the canonical writer per B4).
+
+    ``override_reason`` is captured in the request log envelope; the
+    caller writes the audit row (we keep audit + commit in the
+    handler so the handler's transaction boundary is explicit).
+    """
+
+    assistant_message_id = uuid.uuid4()
+    request_id = (
+        (request.headers.get("x-request-id") if request else None)
+        or (request.headers.get("x-correlation-id") if request else None)
+        or f"req_{uuid.uuid4().hex}"
+    )
+
+    # Build the gateway request. Critically: do NOT forward the
+    # project floor and do NOT set a per-call minimum — both are None
+    # for this turn so the gateway routes without a tier floor.
+    gw_request = ChatCompletionRequest(
+        model="smart",
+        messages=[ChatCompletionMessage(role="user", content=user_msg.content)],
+        stream=False,
+        chat_id=str(chat.id),
+        lq_ai_chat_id=str(chat.id),
+        lq_ai_message_id=str(assistant_message_id),
+        lq_ai_user_id=str(user.id),
+        lq_ai_skills=list(user_msg.applied_skills or []),
+        minimum_inference_tier=None,
+        lq_ai_project_minimum_inference_tier=None,
+    )
+
+    log.info(
+        "inference override re-run",
+        extra={
+            "event": "inference_tier_floor_override",
+            "user_id": str(user.id),
+            "chat_id": str(chat.id),
+            "refusal_message_id": str(refusal_msg.id),
+            "assistant_message_id": str(assistant_message_id),
+            "request_id": request_id,
+            # ``override_reason`` is recorded on the audit row by the
+            # caller; we log presence here but not the prose so the
+            # operator log stays terse.
+            "override_reason_present": bool(override_reason),
+        },
+    )
+
+    response = await gateway.chat_completion(gw_request, request_id=request_id)
+
+    assistant_text = ""
+    if response.choices:
+        assistant_text = response.choices[0].message.content or ""
+
+    applied_skills = list(response.lq_ai_applied_skills or [])
+
+    # Persist the assistant message with ``kind='ai'`` (the new row is
+    # a successful AI response, not a refusal). ``_persist_assistant_message``
+    # writes ``role='assistant'`` and leaves ``kind`` at the DB default
+    # ('user'); we set it explicitly here so the UI can render the
+    # re-run differently from the refusal it replaced.
+    persisted = await _persist_assistant_message(
+        db,
+        message_id=assistant_message_id,
+        chat_id=chat.id,
+        content=assistant_text,
+        requested_model=gw_request.model,
+        routed_provider=response.routed_provider,
+        routed_model=response.model,
+        routed_inference_tier=response.routed_inference_tier,
+        prompt_tokens=response.usage.prompt_tokens if response.usage else None,
+        completion_tokens=response.usage.completion_tokens if response.usage else None,
+        cost_estimate_usd=response.cost_estimate,
+        applied_skills=applied_skills,
+        error_code=None,
+    )
+
+    # ``_persist_assistant_message`` doesn't carry ``kind``; flip it on
+    # the persisted row so the wire response reflects the override.
+    persisted.kind = "ai"
+    await db.flush()
+    await db.refresh(persisted)
+
+    # Look up the gateway-written routing log row by message_id. The
+    # gateway is the canonical writer (B4); the row exists by the time
+    # ``chat_completion`` returns. Returns None if the gateway did not
+    # write one (defensive — keeps the helper testable when the test
+    # stubs respx and doesn't write to the routing-log table).
+    from app.models.inference import InferenceRoutingLog
+
+    routing_log_row = await db.execute(
+        select(InferenceRoutingLog.id).where(
+            InferenceRoutingLog.message_id == assistant_message_id
+        )
+    )
+    routing_log_id = routing_log_row.scalar_one_or_none()
+
+    return persisted, routing_log_id
+
+
 __all__ = [
     "create_chat",
     "delete_chat",
@@ -1240,6 +1368,7 @@ __all__ = [
     "list_chats",
     "list_messages",
     "router",
+    "run_inference_override",
     "send_message",
     "update_chat",
 ]
