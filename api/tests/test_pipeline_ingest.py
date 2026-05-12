@@ -65,11 +65,22 @@ def _make_simple_pdf() -> bytes:
 
 def _make_multipage_pdf() -> bytes:
     doc = fitz.open()
+    # ``insert_text`` writes a single non-wrapping line, so a long
+    # string just runs off the page and PyMuPDF only extracts the
+    # leading portion. Use ``insert_textbox`` with a bounding rect so
+    # the content actually wraps onto multiple lines and PyMuPDF
+    # captures the full per-page text. Each page carries ~1.2K chars
+    # so the 3-page total (~3.6K) exceeds ``DEFAULT_TARGET_CHARS``
+    # (2_000) and the chunker emits multiple chunks spanning pages
+    # 1 and 2 — the cross-page assertion this test is meant to
+    # exercise.
     for chapter in ("Alpha", "Beta", "Gamma"):
         page = doc.new_page()
-        page.insert_text(
-            (50, 72),
-            f"Chapter {chapter}. " + "Content. " * 80,
+        body = f"Chapter {chapter}. " + "Content content content. " * 50
+        # A4 at 72 DPI is ~612x792; leave a half-inch margin.
+        page.insert_textbox(
+            fitz.Rect(50, 50, 562, 742),
+            body,
             fontsize=11,
         )
     out = doc.tobytes()
