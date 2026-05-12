@@ -20,6 +20,14 @@
 	export let onNewChat: () => void = () => undefined;
 	export let onSelectProject: (project: Project | null) => void = () => undefined;
 	export let onToggleArchived: (next: boolean) => void = () => undefined;
+
+	/**
+	 * When true, hides the project-filter UI (the "Projects" label, "All chats"
+	 * button, and per-project rows in the sidebar header). Used when ChatPanel
+	 * is mounted inside a matter workspace that already represents a single
+	 * project context — the user shouldn't see redundant project filtering.
+	 */
+	export let hideProjectFilter: boolean = false;
 </script>
 
 <aside
@@ -37,46 +45,73 @@
 		</button>
 	</div>
 
-	<div class="lq-sidebar-section-label">
-		<span>Projects</span>
-		<label class="inline-flex items-center gap-1 cursor-pointer">
-			<input
-				type="checkbox"
-				bind:checked={archivedToggle}
-				on:change={() => onToggleArchived(archivedToggle)}
-				data-testid="lq-ai-archived-toggle"
-			/>
-			<span>Show archived</span>
-		</label>
-	</div>
+	{#if !hideProjectFilter}
+		<div class="lq-sidebar-section-label">
+			<span>Projects</span>
+			<label class="inline-flex items-center gap-1 cursor-pointer">
+				<input
+					type="checkbox"
+					bind:checked={archivedToggle}
+					on:change={() => onToggleArchived(archivedToggle)}
+					data-testid="lq-ai-archived-toggle"
+				/>
+				<span>Show archived</span>
+			</label>
+		</div>
+	{/if}
 
 	<div class="flex-1 overflow-y-auto">
-		<button
-			type="button"
-			class="lq-project-row {activeProjectId === null ? 'lq-project-row--active' : ''}"
-			on:click={() => onSelectProject(null)}
-		>
-			All chats
-		</button>
+		{#if !hideProjectFilter}
+			<button
+				type="button"
+				class="lq-project-row {activeProjectId === null ? 'lq-project-row--active' : ''}"
+				on:click={() => onSelectProject(null)}
+			>
+				All chats
+			</button>
 
-		{#each groups as group (group.project?.id ?? '__no_project__')}
-			<div class="mt-2">
-				<button
-					type="button"
-					class="lq-project-row {activeProjectId === group.project?.id ? 'lq-project-row--active' : ''}"
-					on:click={() => onSelectProject(group.project)}
-					data-testid={`lq-ai-project-${group.project?.id ?? 'no-project'}`}
-				>
-					{group.project?.name ?? 'Without a project'}
-					{#if group.project?.privileged}
-						<span
-							class="ml-1 inline-block px-1 py-0.5 rounded text-[10px] font-semibold bg-rose-100 text-rose-700 align-middle"
-							title="Privileged matter — minimum_inference_tier enforced"
-						>
-							PRIVILEGED
-						</span>
-					{/if}
-				</button>
+			{#each groups as group (group.project?.id ?? '__no_project__')}
+				<div class="mt-2">
+					<button
+						type="button"
+						class="lq-project-row {activeProjectId === group.project?.id ? 'lq-project-row--active' : ''}"
+						on:click={() => onSelectProject(group.project)}
+						data-testid={`lq-ai-project-${group.project?.id ?? 'no-project'}`}
+					>
+						{group.project?.name ?? 'Without a project'}
+						{#if group.project?.privileged}
+							<span
+								class="ml-1 inline-block px-1 py-0.5 rounded text-[10px] font-semibold bg-rose-100 text-rose-700 align-middle"
+								title="Privileged matter — minimum_inference_tier enforced"
+							>
+								PRIVILEGED
+							</span>
+						{/if}
+					</button>
+					<ul class="mt-0.5">
+						{#each group.chats as chat (chat.id)}
+							<li>
+								<button
+									type="button"
+									class="lq-chat-row {activeChatId === chat.id ? 'lq-chat-row--active' : ''}"
+									on:click={() => onSelectChat(chat)}
+									data-testid={`lq-ai-chat-${chat.id}`}
+								>
+									{chat.title || 'Untitled chat'}
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/each}
+
+			{#if groups.length === 0}
+				<div class="px-3 py-6 text-sm text-center lq-empty-hint">
+					No chats yet. Click <strong>+ New Chat</strong> to start.
+				</div>
+			{/if}
+		{:else}
+			{#each groups as group (group.project?.id ?? '__no_project__')}
 				<ul class="mt-0.5">
 					{#each group.chats as chat (chat.id)}
 						<li>
@@ -91,13 +126,13 @@
 						</li>
 					{/each}
 				</ul>
-			</div>
-		{/each}
+			{/each}
 
-		{#if groups.length === 0}
-			<div class="px-3 py-6 text-sm text-center lq-empty-hint">
-				No chats yet. Click <strong>+ New Chat</strong> to start.
-			</div>
+			{#if groups.every((g) => g.chats.length === 0)}
+				<div class="px-3 py-6 text-sm text-center lq-empty-hint">
+					No chats yet. Click <strong>+ New Chat</strong> to start.
+				</div>
+			{/if}
 		{/if}
 	</div>
 </aside>
