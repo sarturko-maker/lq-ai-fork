@@ -21,7 +21,7 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.cli import _reset_admin_password
 from app.config import get_settings
@@ -30,8 +30,11 @@ from app.security import hash_password, verify_password
 
 
 @pytest_asyncio.fixture
-async def cli_db_url(test_db_url: str) -> AsyncIterator[str]:
+async def cli_db_url(test_db_url: str, test_engine: AsyncEngine) -> AsyncIterator[str]:
     """Point the CLI's settings at the test DB by overriding env + cache.
+
+    Depends on `test_engine` so Alembic migrations run before the CLI talks
+    to the DB; without it the `users` table wouldn't exist yet.
 
     The CLI calls `get_settings()` which reads `DATABASE_URL` from env at
     instantiation; we set it before invocation and restore after.
@@ -150,6 +153,87 @@ async def test_reset_admin_password_multiple_admins_requires_email(
         err = capsys.readouterr().err
         assert "multiple admin users" in err
         assert e1 in err and e2 in err
+    finally:
+        await _cleanup_users(cli_db_url)
+
+
+@pytest.mark.integration
+async def test_reset_admin_password_with_explicit_password_sets_it(
+    cli_db_url: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--password sets the supplied value (not a generated one) and does not echo it."""
+    email = f"admin-{uuid.uuid4().hex[:8]}@lq.ai"
+    await _seed_admin(cli_db_url, email, "OldOldOldOldOld!")
+    supplied = "FixtureSeedPw2026!"
+    try:
+        rc = await _reset_admin_password(email=email, password=supplied)
+        assert rc == 0
+
+        # Don't echo the supplied password into stdout.
+        captured = capsys.readouterr().out
+        assert supplied not in captured
+        assert "supplied value" in captured
+
+        # The supplied value verifies; the old one does not.
+        engine = create_async_engine(cli_db_url, future=True)
+        factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+        async with factory() as s:
+            row = (await s.execute(select(User).where(User.email == email))).scalar_one()
+            assert verify_password(supplied, row.hashed_password) is True
+            assert verify_password("OldOldOldOldOld!", row.hashed_password) is False
+            # Default still forces a change.
+            assert row.must_change_password is True
+        await engine.dispose()
+    finally:
+        await _cleanup_users(cli_db_url)
+
+
+@pytest.mark.integration
+async def test_reset_admin_password_no_force_change_leaves_flag_false(
+    cli_db_url: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--password + --no-force-change produces a login-ready fixture state."""
+    email = f"admin-{uuid.uuid4().hex[:8]}@lq.ai"
+    await _seed_admin(cli_db_url, email, "OldOldOldOldOld!")
+    supplied = "FixtureSeedPw2026!"
+    try:
+        rc = await _reset_admin_password(email=email, password=supplied, force_change=False)
+        assert rc == 0
+
+        captured = capsys.readouterr().out
+        assert "must_change_password is now false" in captured
+
+        engine = create_async_engine(cli_db_url, future=True)
+        factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+        async with factory() as s:
+            row = (await s.execute(select(User).where(User.email == email))).scalar_one()
+            assert row.must_change_password is False
+            assert verify_password(supplied, row.hashed_password) is True
+        await engine.dispose()
+    finally:
+        await _cleanup_users(cli_db_url)
+
+
+@pytest.mark.integration
+async def test_reset_admin_password_rejects_short_explicit_password(
+    cli_db_url: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--password shorter than password_min_length returns 2 without touching state."""
+    email = f"admin-{uuid.uuid4().hex[:8]}@lq.ai"
+    await _seed_admin(cli_db_url, email, "OldOldOldOldOld!")
+    try:
+        rc = await _reset_admin_password(email=email, password="short")
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert "shorter than the configured minimum" in err
+
+        # Old password still works — DB was not touched.
+        engine = create_async_engine(cli_db_url, future=True)
+        factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+        async with factory() as s:
+            row = (await s.execute(select(User).where(User.email == email))).scalar_one()
+            assert verify_password("OldOldOldOldOld!", row.hashed_password) is True
+        await engine.dispose()
     finally:
         await _cleanup_users(cli_db_url)
 
