@@ -220,3 +220,6 @@ pip-delete-this-directory.txt
 
 # Brainstorming mockups (visual companion)
 .superpowers/
+
+# Phase E Makefile sbom output (throwaway local-convenience artifacts)
+artifacts/
