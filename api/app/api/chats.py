@@ -71,6 +71,7 @@ from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
 from app.errors import LQAIError, NotFound, ValidationError
 from app.models.chat import Chat, Message
+from app.models.inference import InferenceRoutingLog
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.chats import (
@@ -857,6 +858,7 @@ async def _persist_assistant_message(
     cost_estimate_usd: float | None,
     applied_skills: list[str],
     error_code: str | None,
+    kind: str = "ai",
 ) -> Message:
     """Insert one assistant message row in its own transaction.
 
@@ -870,12 +872,19 @@ async def _persist_assistant_message(
     ``ChatCompletionRequest.model`` (ADR 0011 follow-on). It may match
     the ``routed_*`` pair (direct dispatch) or differ (alias resolved
     server-side); persisting both lets the UI explain the difference.
+
+    ``kind`` is the messages.kind discriminator (T1). Defaults to
+    ``'ai'`` because this helper exclusively persists assistant rows;
+    callers can override (e.g., to ``'refusal'`` if a future surface
+    needs it) but should never let the DB default of ``'user'`` leak
+    in — that's the latent T1 bug this parameter exists to prevent.
     """
 
     row = Message(
         id=message_id,
         chat_id=chat_id,
         role="assistant",
+        kind=kind,
         content=content,
         applied_skills=list(applied_skills),
         routed_inference_tier=routed_inference_tier,
@@ -1254,8 +1263,11 @@ async def run_inference_override(
     backend forwards the original user prompt to the gateway with both
     ``minimum_inference_tier`` and ``lq_ai_project_minimum_inference_tier``
     set to ``None`` so no tier floor binds for this turn. The new
-    assistant row is persisted with ``kind='ai'`` so the UI can tell it
-    apart from the refusal it supersedes.
+    assistant row is persisted with ``kind='ai'`` on initial INSERT
+    (via the ``kind`` parameter on :func:`_persist_assistant_message`)
+    so the UI can tell it apart from the refusal it supersedes, and so
+    the row's kind never disagrees with the audit row written by the
+    caller.
 
     Mirrors the synchronous, non-streaming branch of ``send_message``
     (no SSE; one-shot JSON) — the override surface is admin-driven and
@@ -1317,10 +1329,9 @@ async def run_inference_override(
     applied_skills = list(response.lq_ai_applied_skills or [])
 
     # Persist the assistant message with ``kind='ai'`` (the new row is
-    # a successful AI response, not a refusal). ``_persist_assistant_message``
-    # writes ``role='assistant'`` and leaves ``kind`` at the DB default
-    # ('user'); we set it explicitly here so the UI can render the
-    # re-run differently from the refusal it replaced.
+    # a successful AI response, not a refusal). The helper writes
+    # ``kind`` on initial INSERT so the message + audit row never
+    # disagree about what kind of row this is (T1 + T4).
     persisted = await _persist_assistant_message(
         db,
         message_id=assistant_message_id,
@@ -1335,21 +1346,14 @@ async def run_inference_override(
         cost_estimate_usd=response.cost_estimate,
         applied_skills=applied_skills,
         error_code=None,
+        kind="ai",
     )
-
-    # ``_persist_assistant_message`` doesn't carry ``kind``; flip it on
-    # the persisted row so the wire response reflects the override.
-    persisted.kind = "ai"
-    await db.flush()
-    await db.refresh(persisted)
 
     # Look up the gateway-written routing log row by message_id. The
     # gateway is the canonical writer (B4); the row exists by the time
     # ``chat_completion`` returns. Returns None if the gateway did not
     # write one (defensive — keeps the helper testable when the test
     # stubs respx and doesn't write to the routing-log table).
-    from app.models.inference import InferenceRoutingLog
-
     routing_log_row = await db.execute(
         select(InferenceRoutingLog.id).where(
             InferenceRoutingLog.message_id == assistant_message_id

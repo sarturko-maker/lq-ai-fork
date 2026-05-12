@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.chats import run_inference_override
 from app.api.dependencies import AdminUser
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
@@ -102,9 +103,6 @@ async def override_tier_floor(
 ) -> OverrideResponse:
     """Admin override of a tier-floor refusal."""
 
-    # Resolve the refusal row. Cross-existence / wrong-kind => 404
-    # (don't leak by-id existence to non-admins; admins still see 404
-    # for wrong-kind so the contract is uniform across roles).
     refusal = await db.get(Message, payload.message_id)
     if refusal is None or refusal.kind != "refusal":
         raise NotFound(
@@ -138,8 +136,6 @@ async def override_tier_floor(
 
     # Delegate to the chat module's helper — same gateway-call shape as
     # the normal send-message path but with the tier floor lifted.
-    from app.api.chats import run_inference_override
-
     ai_message, routing_log_id = await run_inference_override(
         db=db,
         gateway=gateway,
@@ -161,7 +157,6 @@ async def override_tier_floor(
         details={
             "reason": payload.reason,
             "chat_id": str(refusal.chat_id),
-            "refusal_message_id": str(refusal.id),
             "new_message_id": str(ai_message.id),
             "routing_log_id": str(routing_log_id) if routing_log_id else None,
         },

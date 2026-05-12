@@ -329,7 +329,7 @@ def message_to_response(row: Any) -> MessageResponse:
         id=row.id,
         chat_id=row.chat_id,
         role=row.role,
-        kind=getattr(row, "kind", "user") or "user",
+        kind=row.kind,
         content=row.content,
         applied_skills=list(row.applied_skills or []),
         routed_inference_tier=row.routed_inference_tier,

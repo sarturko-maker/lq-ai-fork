@@ -204,6 +204,7 @@ def test_message_to_response_translates_micros_to_usd() -> None:
             self.id = uuid.uuid4()
             self.chat_id = uuid.uuid4()
             self.role = "assistant"
+            self.kind = "ai"
             self.content = "hi"
             self.applied_skills = ["nda-review"]
             self.routed_inference_tier = 3
