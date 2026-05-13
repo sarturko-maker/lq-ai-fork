@@ -114,3 +114,51 @@ async def test_sandbox_ensure_recreates_after_archive(client: AsyncClient, db_us
     r2 = await client.post("/api/v1/projects/sandbox/ensure", headers=_h(db_user))
     assert r2.status_code == 201, r2.text
     assert r2.json()["id"] != pid1
+
+
+# ---------------------------------------------------------------------------
+# Wave D.2 Task 2.3 — ``is_sandbox`` query filters on ``GET /projects``
+# ---------------------------------------------------------------------------
+#
+# The list endpoint returns a bare JSON array (``list[ProjectResponse]``),
+# not an ``{"items": [...]}`` envelope — so these tests iterate ``r.json()``
+# directly rather than ``r.json()["items"]`` as the task plan sketched.
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_projects_excludes_sandbox_by_default(
+    client: AsyncClient, db_user: User
+) -> None:
+    await client.post("/api/v1/projects/sandbox/ensure", headers=_h(db_user))
+    await client.post(
+        "/api/v1/projects",
+        json={"name": "Acme NDA", "slug": "acme-nda", "description": ""},
+        headers=_h(db_user),
+    )
+    r = await client.get("/api/v1/projects", headers=_h(db_user))
+    assert r.status_code == 200, r.text
+    slugs = {p["slug"] for p in r.json()}
+    assert "acme-nda" in slugs
+    assert "__sandbox__" not in slugs
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_projects_include_sandbox(client: AsyncClient, db_user: User) -> None:
+    await client.post("/api/v1/projects/sandbox/ensure", headers=_h(db_user))
+    r = await client.get("/api/v1/projects?include_sandbox=true", headers=_h(db_user))
+    assert r.status_code == 200, r.text
+    slugs = {p["slug"] for p in r.json()}
+    assert "__sandbox__" in slugs
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_projects_only_sandbox(client: AsyncClient, db_user: User) -> None:
+    await client.post("/api/v1/projects/sandbox/ensure", headers=_h(db_user))
+    r = await client.get("/api/v1/projects?only_sandbox=true", headers=_h(db_user))
+    assert r.status_code == 200, r.text
+    items = r.json()
+    assert items, "only_sandbox=true should return at least the ensured sandbox row"
+    assert all(p["is_sandbox"] for p in items)

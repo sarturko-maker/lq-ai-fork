@@ -60,6 +60,7 @@ from sqlalchemy import select, text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import ColumnElement
 
 from app.api.dependencies import ActiveUser
 from app.audit import audit_action
@@ -408,7 +409,11 @@ async def create_project(
     description=(
         "Returns the caller's active projects by default. "
         "``archived=true`` returns archived projects only; "
-        "``archived=false`` is equivalent to omitting the parameter."
+        "``archived=false`` is equivalent to omitting the parameter. "
+        "Sandbox matters (``is_sandbox=true``) are excluded by default; "
+        "pass ``include_sandbox=true`` to surface them alongside regular "
+        "matters, or ``only_sandbox=true`` to return only sandboxes "
+        "(Wave D.2 Task 2.3)."
     ),
     response_model=list[ProjectResponse],
 )
@@ -419,14 +424,30 @@ async def list_projects(
         default=None,
         description="When true, return only archived projects.",
     ),
+    include_sandbox: Annotated[
+        bool,
+        Query(description="Include sandbox matters in results."),
+    ] = False,
+    only_sandbox: Annotated[
+        bool,
+        Query(description="Return only sandbox matters."),
+    ] = False,
 ) -> list[ProjectResponse]:
-    stmt = select(Project).where(Project.owner_id == user.id)
+    conditions: list[ColumnElement[bool]] = [Project.owner_id == user.id]
     if archived is True:
-        stmt = stmt.where(Project.archived_at.is_not(None))
+        conditions.append(Project.archived_at.is_not(None))
     else:
         # Default and ``archived=false`` both exclude archived rows.
-        stmt = stmt.where(Project.archived_at.is_(None))
-    stmt = stmt.order_by(Project.created_at.desc())
+        conditions.append(Project.archived_at.is_(None))
+
+    # Wave D.2 Task 2.3 — sandbox filter. ``only_sandbox`` wins over
+    # ``include_sandbox`` if both are passed (the more specific request).
+    if only_sandbox:
+        conditions.append(Project.is_sandbox.is_(True))
+    elif not include_sandbox:
+        conditions.append(Project.is_sandbox.is_(False))
+
+    stmt = select(Project).where(*conditions).order_by(Project.created_at.desc())
 
     result = await db.execute(stmt)
     rows = list(result.scalars().all())
