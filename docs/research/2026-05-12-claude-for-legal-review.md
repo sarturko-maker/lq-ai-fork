@@ -313,4 +313,58 @@ The strongest argument for delay (versus aggressive fold-in) is that LQ.AI's ski
 
 ---
 
-*Research conducted 2026-05-12 against `anthropics/claude-for-legal` main branch. Skill counts and structure verified via the GitHub git-trees API (`/repos/anthropics/claude-for-legal/git/trees/main?recursive=1`, 564 entries, not truncated). Skill bodies sampled across all 13 first-party plugins.*
+## 9. Decisions (2026-05-12)
+
+The 8 architectural questions in §7 were reviewed with Kevin. Decisions:
+
+| # | Question | Decision | Rationale |
+|---|----------|----------|-----------|
+| Q1 | Invocation model | **Add slash-command alongside attach-on-chat** | Diverges from research recommendation. Slash-command surface (`/<plugin>:<skill>`) lands alongside the existing attach-on-chat (`lq_ai.trigger_examples[]`) model. Triggers an ADR 0007 amendment. |
+| Q2 | Versioning | Per-skill semver only | Per recommendation. Stay flat. |
+| Q3 | Managed-Agents-equivalent | v1.1+ candidate, file as DE | Per recommendation. Out of M1 scope. |
+| Q4 | Port style | Verbatim-with-attribution as starting commit | Per recommendation. Practicing-attorney attestation paragraph reflects upstream provenance + LQ.AI adaptation. |
+| Q5 | Organization Profile | v1.1+ scope | Per recommendation. Ported skills use sensible defaults until v1.1+. |
+| Q6 | Community installer (`legal-builder-hub`-style) | v1.1+ Wave G, file as DE | Per recommendation. |
+| Q7 | NOTICES handling | `NOTICES.md` at repo root + frontmatter author pair | Per recommendation. `lq_ai.author = "Anthropic PBC (upstream) and LegalQuants (adaptation)"`. |
+| Q8 | Tool-use / MCP parity | Accept the deferral | Per recommendation. Non-tool-using skills only for M1/v1.1+. |
+
+### 9.1 Action items from Kevin's decisions
+
+1. **PRD §9 — Deferred Enhancements** — add three entries:
+   - **DE-Q3** — Managed-Agents-equivalent scheduled-agent runtime. Reference: Anthropic `managed-agent-cookbooks/` design.
+   - **DE-Q5** — Organization Profile singleton skill (per-firm playbook: GREEN/YELLOW/RED thresholds, escalation rules, house style). Unblocks calibration-driven skills like `nda-review`.
+   - **DE-Q6** — Wave G community-skill installer. Adapts `legal-builder-hub` 7-gate pipeline to LQ.AI: allowlist via `gateway.yaml`, raw-display in `web/`, license gate, `skills-qa`-style evaluator.
+
+2. **ADR 0007 amendment** — Q1 diverges from the research's recommendation. Add a section to ADR 0007 §3 describing the dual-invocation model: existing `lq_ai.trigger_examples[]` match-on-chat, plus a new slash-command surface (`/<skill-name>` or `/<plugin>:<skill>`). The amendment should specify:
+   - Slash parser surface (composer-level tokenizer; debounced completion against `/api/v1/skills`)
+   - Frontmatter contract — does `lq_ai.slash_alias` opt skills into slash invocation? Default yes for `user_invocable: true`?
+   - Discoverability — slash-completion UI: show `description` field, jurisdiction tag, version
+   - Telemetry — distinguish slash-invoked vs. match-invoked in `skill.applied` audit rows
+
+3. **CONTRIBUTING.md adjustment** — ported-skill attestation paragraph template. Suggested boilerplate: *"I am a practicing attorney admitted in {jurisdiction}. I have reviewed and adapted the upstream `<repo>/<path>` from `anthropics/claude-for-legal` at commit `<sha>`. The adapted skill reflects my professional judgement on the materially substantive provisions and conforms to LQ.AI's `docs/skill-authoring-guide.md` conventions."*
+
+4. **NOTICES.md authoring** — repo root `NOTICES.md` tracking upstream provenance per ported file. Lands with the first ported skill.
+
+### 9.2 Wave G provisional scoping (v1.1+)
+
+Per Q6's "v1.1+ Wave G, file as DE", here is the high-level wave shape so the DE entry is concrete enough to act on later:
+
+**Wave G — Community skill installer + first port batch** (v1.1+):
+
+- **G.1** — Skill installer infrastructure:
+  - `gateway.yaml` allowlist for upstream sources (`anthropics/claude-for-legal` initially; extensible)
+  - Web surface: skill-source browser, install/preview gate, raw-Markdown viewer (mirrors `legal-builder-hub`'s "raw-display first" pattern)
+  - License-gate UI: shows upstream LICENSE + NOTICES requirements before install; user must affirm
+  - `skills-qa`-style evaluator: runs frontmatter validation + trigger-example sanity check + basic body lint before install commits the skill to disk
+- **G.2** — First port batch (10 skills from §5):
+  - LIGHT-effort starter: `tabular-review`, `marketing-claims-review`, `oss-review`
+  - MEDIUM-effort follow: `aia-generation`, `vendor-ai-review`, `dsar-response`
+  - Skipped: HEAVY-effort `internal-investigation` + `worker-classification` (move to v1.2+)
+  - Audience-mismatch skip: `law-student`, `legal-clinic`, `cocounsel-legal`
+- **G.3** — Wave G close: `NOTICES.md` populated; per-skill attestation rows captured; updated `docs/skill-authoring-guide.md` reflects ported-skill conventions.
+
+**Out of Wave G scope:** Managed-Agents-equivalent (own DE-Q3, separate v1.2+ scoping); tool-use / MCP infrastructure (per Q8 deferral; unblocks alongside broader tool-call ADR work).
+
+---
+
+*Research conducted 2026-05-12 against `anthropics/claude-for-legal` main branch. Skill counts and structure verified via the GitHub git-trees API (`/repos/anthropics/claude-for-legal/git/trees/main?recursive=1`, 564 entries, not truncated). Skill bodies sampled across all 13 first-party plugins. §9 decisions added 2026-05-12 after Kevin's review.*

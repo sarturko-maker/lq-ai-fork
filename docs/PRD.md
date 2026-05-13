@@ -1872,6 +1872,21 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 
 **Acceptance criteria:** Reference business-user NDA generator skill, with documentation for skill authors on how to build similar.
 
+#### DE-219 — Wave G community-skill installer + first port batch
+
+**Priority:** P1 · **Effort:** L
+
+**Context:** Per `docs/research/2026-05-12-claude-for-legal-review.md` §9 (Q6 decision), LQ.AI will adopt a `legal-builder-hub`-style community-skill installation surface in a v1.1+ Wave G. The pattern: allowlist via `gateway.yaml`, raw-Markdown display in `web/`, license-gate UI, `skills-qa`-style frontmatter + trigger-example evaluator before install commits the skill to disk.
+
+**Specific scope:**
+- **G.1 Installer infrastructure:** allowlist source registry, web skill-source browser, install/preview gate, raw-display viewer, license-gate UI, `skills-qa`-style evaluator (frontmatter validation + trigger-example sanity + body lint).
+- **G.2 First port batch:** the 10 skills identified in the research doc §5. Verbatim-with-attribution port (per Q4 decision), each going through the existing claim → draft → attest → review → merge pipeline. Skipped from this batch: HEAVY-effort `internal-investigation`, `worker-classification` (v1.2+); audience-mismatch `law-student`, `legal-clinic`, `cocounsel-legal`.
+- **G.3 NOTICES + attestation conventions** (per Q7 decision): `NOTICES.md` at repo root tracking upstream provenance per ported file; `lq_ai.author = "Anthropic PBC (upstream) and LegalQuants (adaptation)"` in ported-skill frontmatter; CONTRIBUTING.md adjustment with ported-skill attestation paragraph template.
+
+**Out of scope:** Tool-using skills that depend on MCP connectors (Ironclad, DocuSign, iManage, etc.) — per Q8 decision, those stay pinned to the deferral list and unblock alongside the broader tool-call ADR work.
+
+**Acceptance criteria:** Installer ships with the allowlist gated to `anthropics/claude-for-legal` initially; first port batch (10 skills) lands through the standard skill-authoring pipeline; `NOTICES.md` populated; updated `docs/skill-authoring-guide.md` reflects ported-skill conventions.
+
 ### Application UI enhancements
 
 #### DE-010 — Skill input form rendering for any skill
@@ -2306,6 +2321,26 @@ In v1, each contract-review skill carries its own copy of the shared infrastruct
 **Context:** PRD §1.6 lists mobile native apps as out of scope; web UI is responsive.
 
 **Recommendation:** Wait for community demand. If demand materializes, consider PWA before native.
+
+#### DE-220 — Organization Profile singleton skill (per-firm playbook)
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** Per `docs/research/2026-05-12-claude-for-legal-review.md` §9 (Q5 decision), Anthropic's `claude-for-legal` skills heavily reference a team-specific `CLAUDE.md` playbook (GREEN/YELLOW/RED thresholds, escalation rules, house style). LQ.AI's nearest analog is the Organization Profile — a singleton skill that shapes every other skill's behavior. The Profile was deferred from M1; this entry surfaces it as a v1.1+ candidate that unblocks calibration-driven skills (`nda-review`, `msa-review`, etc.) and is a prerequisite for substantive fold-in from upstream (DE-219).
+
+**Specific scope:** Author the Organization Profile singleton skill (synthesized YAML, prepended to every other skill's system message at assembly time per ADR 0007). Authoring surface in `web/` (Settings → Organization Profile editor): house-style fields, jurisdiction defaults, escalation matrix, GREEN/YELLOW/RED threshold defaults, attorney-of-record. Per the input-default convention in `docs/skill-authoring-guide.md`, skills opt out via `lq_ai.use_organization_profile: false`; the Profile itself opts out so the assembler never recurses.
+
+**Acceptance criteria:** Profile is authorable through a web UI; renders correctly in every applicable skill's assembled system prompt; first ported skill (DE-219 G.2) that depends on calibration (e.g., `nda-review`) demonstrably reflects the Profile's GREEN/YELLOW/RED thresholds.
+
+#### DE-221 — Managed-Agents-equivalent (scheduled-agent runtime)
+
+**Priority:** P2 · **Effort:** L
+
+**Context:** Per `docs/research/2026-05-12-claude-for-legal-review.md` §9 (Q3 decision), several `claude-for-legal` plugins presuppose a scheduled-agent runtime that LQ.AI does not have: `renewal-watcher`, `docket-watcher`, `reg-feed-watcher`, `dataroom-watcher`, `launch-watcher`. The reference design exists in Anthropic's `managed-agent-cookbooks/` (`agent.yaml` + `subagents/*.yaml` + `steering-examples.json`). Per the decision, this is out of M1 scope and unlikely to land before v1.2+; filed here so the architectural shape can be referenced when scheduled-watcher demand materializes.
+
+**Specific scope:** A scheduled-agent surface in LQ.AI is a cron + recurrence + handoff layer on top of the existing Inference Gateway. Multi-Wave investment, not a fold-in. Out of scope for the v1.1+ Wave G (which is the skill-installer + first port batch).
+
+**Acceptance criteria:** Reference the Anthropic `managed-agent-cookbooks/` design for scope-shaping when this lands; LQ.AI's surface should support headless agents with cron triggers, recurrence rules, and a structured handoff format. The ported `*-watcher` skills from `claude-for-legal` are the natural first inhabitants.
 
 ### Process and project management
 
