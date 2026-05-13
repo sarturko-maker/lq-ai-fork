@@ -4,10 +4,43 @@
 import { apiRequest } from './client';
 import type { Project, ProjectCreate } from '../types';
 
-/** GET /api/v1/projects?archived=… */
-export async function listProjects(opts: { archived?: boolean } = {}): Promise<Project[]> {
-	const qs = opts.archived ? '?archived=true' : '';
-	return apiRequest<Project[]>(`/projects${qs}`);
+/**
+ * GET /api/v1/projects — list the caller's projects.
+ *
+ * Query parameters:
+ *
+ *   * ``archived`` — when true, surface soft-deleted rows alongside
+ *     active ones.
+ *   * ``includeSandbox`` — Wave D.2 Task 2.3: include the per-user
+ *     ``__sandbox__`` matter (excluded by default).
+ *   * ``onlySandbox`` — Wave D.2 Task 2.3: return only sandbox rows.
+ *     Wins over ``includeSandbox`` on the server when both are set.
+ */
+export async function listProjects(
+	opts: {
+		archived?: boolean;
+		includeSandbox?: boolean;
+		onlySandbox?: boolean;
+	} = {}
+): Promise<Project[]> {
+	const params = new URLSearchParams();
+	if (opts.archived) params.set('archived', 'true');
+	if (opts.includeSandbox) params.set('include_sandbox', 'true');
+	if (opts.onlySandbox) params.set('only_sandbox', 'true');
+	const qs = params.toString();
+	return apiRequest<Project[]>(`/projects${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * POST /api/v1/projects/sandbox/ensure — Wave D.2 Task 2.2.
+ *
+ * Idempotent find-or-create of the caller's per-user try-it sandbox
+ * matter (slug ``__sandbox__``). First call returns 201 with a fresh
+ * row; subsequent calls return 200 with the same row. The endpoint
+ * accepts no body; auth is the only requirement.
+ */
+export async function ensureSandbox(): Promise<Project> {
+	return apiRequest<Project>('/projects/sandbox/ensure', { method: 'POST' });
 }
 
 /** POST /api/v1/projects */

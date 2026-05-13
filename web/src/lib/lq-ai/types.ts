@@ -128,6 +128,13 @@ export interface Project {
 	attached_file_ids?: string[];
 	attached_knowledge_base_ids?: string[];
 	archived_at?: string | null;
+	/**
+	 * Wave D.2 Task 2.2 — true for the per-user system-managed try-it
+	 * sandbox matter (slug ``__sandbox__``). Sandboxes are excluded from
+	 * the default ``GET /projects`` listing; the caller opts in via
+	 * ``include_sandbox=true`` / ``only_sandbox=true``.
+	 */
+	is_sandbox?: boolean;
 	created_at: string;
 	updated_at: string;
 }
@@ -339,6 +346,18 @@ export interface SkillSummary {
 	jurisdiction?: string;
 	minimum_inference_tier?: 1 | 2 | 3 | 4 | 5;
 	output_format?: string;
+	/**
+	 * Wave D.2 — leading-slash chat invocation alias for user / team skills
+	 * (``^/[a-z0-9-]{1,32}$``). Null on built-ins (the surface lives only
+	 * on the DB-backed mutable rows).
+	 */
+	slash_alias?: string | null;
+	/**
+	 * Wave D.2 — slug of the skill this row was forked from (built-in or
+	 * user / team), set when the Skill Creator's "fork from existing" path
+	 * spawned the row. Null for from-scratch creates.
+	 */
+	forked_from?: string | null;
 }
 
 export interface SkillReferenceFile {
@@ -474,6 +493,17 @@ export interface UserSkill {
 	tags: string[];
 	frontmatter_extra: Record<string, unknown>;
 	body: string;
+	/**
+	 * Wave D.2 — leading-slash chat invocation alias
+	 * (``^/[a-z0-9-]{1,32}$``). Null when unset.
+	 */
+	slash_alias: string | null;
+	/**
+	 * Wave D.2 — slug of the skill this row was forked from (built-in or
+	 * user / team), set when the Skill Creator's "fork from existing" path
+	 * spawned the row. Null for from-scratch creates.
+	 */
+	forked_from: string | null;
 	archived_at: string | null;
 	created_at: string;
 	updated_at: string;
@@ -631,4 +661,47 @@ export interface TeamMember {
 
 export interface Team extends TeamSummary {
 	members: TeamMember[];
+}
+
+// ----- Skill autocomplete (Wave D.2 Task 2.5) -----
+
+/**
+ * One row in the ``GET /skills/autocomplete`` response. Lightweight by
+ * design — the autocomplete dropdown needs slug + slash badge + a short
+ * label, not the full skill body. ``slash_alias`` is null on built-ins
+ * (slash invocation lives only on DB-backed user / team rows).
+ */
+export interface SkillAutocompleteItem {
+	slug: string;
+	slash_alias: string | null;
+	title: string;
+	description: string;
+	scope: 'user' | 'team' | 'builtin';
+	icon: string | null;
+}
+
+export interface SkillAutocompleteResponse {
+	results: SkillAutocompleteItem[];
+}
+
+// ----- User-skill version history (Wave D.2 Task 2.6) -----
+
+/**
+ * One audit-log row projected onto the version-history view. The
+ * ``details`` blob is the raw ``audit_log.details`` JSON column;
+ * ``version`` is surfaced as a top-level convenience because every
+ * create / update row carries it (extracted from
+ * ``details.version`` / ``details.version_after``).
+ */
+export interface UserSkillVersion {
+	timestamp: string;
+	actor_user_id: string | null;
+	actor_email: string | null;
+	action: string;
+	version: string | null;
+	details: Record<string, unknown> | null;
+}
+
+export interface UserSkillVersionsResponse {
+	items: UserSkillVersion[];
 }

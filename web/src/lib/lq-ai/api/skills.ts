@@ -10,7 +10,13 @@
  * Skill payload, this client adopts that and skips the local parse.
  */
 import { apiRequest } from './client';
-import type { Skill, SkillInputDef, SkillInputs, SkillSummary } from '../types';
+import type {
+	Skill,
+	SkillAutocompleteResponse,
+	SkillInputDef,
+	SkillInputs,
+	SkillSummary
+} from '../types';
 
 /** GET /api/v1/skills — summary list. */
 export async function listSkills(scope?: 'builtin' | 'user' | 'team'): Promise<SkillSummary[]> {
@@ -21,6 +27,23 @@ export async function listSkills(scope?: 'builtin' | 'user' | 'team'): Promise<S
 /** GET /api/v1/skills/{name}/inputs — canonical input definitions resolved user > team > built-in. */
 export async function getInputs(name: string): Promise<SkillInputs> {
 	return apiRequest<SkillInputs>(`/skills/${encodeURIComponent(name)}/inputs`);
+}
+
+/**
+ * GET /api/v1/skills/autocomplete?q=&limit= — Wave D.2 Task 2.5.
+ *
+ * Lightweight typeahead suggestions for the slash-invocation dropdown
+ * and the Skill Creator's "fork from existing" picker. The backend ranks
+ * results by slash-alias prefix > slug prefix > title-substring; this
+ * client just forwards the query unchanged. ``limit`` defaults to 10
+ * (the backend caps at 50).
+ */
+export async function autocompleteSkills(
+	q: string,
+	limit: number = 10
+): Promise<SkillAutocompleteResponse> {
+	const path = `/skills/autocomplete?q=${encodeURIComponent(q)}&limit=${limit}`;
+	return apiRequest<SkillAutocompleteResponse>(path);
 }
 
 /**
