@@ -675,7 +675,7 @@ export interface SkillAutocompleteItem {
 	slug: string;
 	slash_alias: string | null;
 	title: string;
-	description: string;
+	description: string | null;
 	scope: 'user' | 'team' | 'builtin';
 	icon: string | null;
 }
