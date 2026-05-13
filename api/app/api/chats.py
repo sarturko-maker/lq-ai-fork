@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import json as _json
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -66,6 +67,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ActiveUser
+from app.api.skills import _resolve_skill_for_user
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
@@ -102,6 +104,60 @@ from app.schemas.gateway import (
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 log = logging.getLogger(__name__)
+
+
+# Wave D.2 Task 2.7 — send-time slash fallback. If the user's content
+# starts with ``/<token>`` and the frontend didn't pre-resolve it, the
+# backend retries against the merged catalogue. Token grammar matches
+# the autocomplete + ``user_skills.slash_alias`` shape: lowercase
+# alphanumerics or hyphens, 1-64 chars (slugs can be slightly longer
+# than aliases — the check that follows is by-value, not by-length, so
+# being a touch permissive here is fine), followed by whitespace.
+_LEADING_SLASH_RE = re.compile(r"^/([a-z0-9-]{1,64})\s")
+
+
+async def _maybe_resolve_leading_slash(
+    request: Request, db: AsyncSession, user: User, content: str
+) -> tuple[str | None, str, bool]:
+    """If ``content`` starts with ``/slug ``, try to resolve it to a skill.
+
+    Returns a 3-tuple ``(resolved_slug, content, slash_unresolved)``:
+
+    * ``resolved_slug`` — the canonical skill slug if resolution
+      succeeded, else ``None``.
+    * ``content`` — the original content with the leading ``/slug ``
+      token stripped *only when resolution succeeded*; otherwise
+      unchanged (the user's typo is forwarded verbatim so they still
+      get a real LLM answer).
+    * ``slash_unresolved`` — ``True`` when the regex matched but no row
+      resolved (either slug or slash_alias). The handler uses this to
+      flip the matching flag on the response body so the UI can hint.
+
+    The function is no-op when ``content`` doesn't start with
+    ``/<token><whitespace>`` — returns ``(None, content, False)``.
+    """
+
+    m = _LEADING_SLASH_RE.match(content)
+    if not m:
+        return None, content, False
+
+    token = m.group(1)
+    # Try slug match first (built-ins and user-shadows), then alias
+    # match against ``slash_alias`` (user/team rows only — built-ins
+    # don't carry an alias column per ADR 0012 / Wave D.2 Task 2.4).
+    resolved = await _resolve_skill_for_user(request, db, user=user, slug=token)
+    if resolved is None:
+        resolved = await _resolve_skill_for_user(request, db, user=user, slash_alias="/" + token)
+
+    if resolved is None:
+        return None, content, True
+    slug_value = resolved.get("slug")
+    if not isinstance(slug_value, str):
+        # Defensive: the merged-catalogue dict always carries ``slug``,
+        # but if it ever doesn't, treat as unresolved rather than
+        # crashing the send path.
+        return None, content, True
+    return slug_value, content[m.end() :], False
 
 
 # ---------------------------------------------------------------------------
@@ -818,14 +874,36 @@ async def send_message(
     # must explicitly unarchive (PATCH archived=false) before posting.
     chat = await _load_visible_chat(db, cid, user.id, include_archived=False)
 
+    # Wave D.2 Task 2.7 — send-time slash fallback. If the caller
+    # didn't pre-attach any skills AND the content starts with
+    # ``/<token> ``, try to resolve the token against the merged
+    # catalogue. On hit: append the slug to ``applied_skills`` for
+    # this turn and strip the leading token from the content so the
+    # gateway sees the same body the user would type without the
+    # ``/foo`` prefix. On miss: set ``slash_unresolved=True`` on the
+    # response so the UI can render a hint, but forward the original
+    # content as plain text — the user still gets an answer, the
+    # typo just doesn't activate a skill.
+    effective_content: str = payload.content
+    effective_skills: list[str] = list(payload.skills)
+    slash_unresolved = False
+    attached_skill_names: list[str] = list(payload.skills)
+    if not payload.skills and payload.content.startswith("/"):
+        resolved_slug, effective_content, slash_unresolved = await _maybe_resolve_leading_slash(
+            request, db, user, payload.content
+        )
+        if resolved_slug is not None:
+            effective_skills.append(resolved_slug)
+            attached_skill_names.append(resolved_slug)
+
     # Persist the user message FIRST. This is unconditionally written,
     # even if the gateway call ultimately fails — the user did say
     # something and the audit trail must reflect that.
     user_message = Message(
         chat_id=cid,
         role="user",
-        content=payload.content,
-        applied_skills=list(payload.skills),
+        content=effective_content,
+        applied_skills=effective_skills,
     )
     db.add(user_message)
 
@@ -833,9 +911,11 @@ async def send_message(
     # same transaction so the rename and the user message land
     # atomically. ``derive_chat_title`` returns "New chat" for empty
     # input, so a degenerate first message keeps the default rather
-    # than blanking the title.
+    # than blanking the title. We derive from ``effective_content`` so a
+    # resolved-slash send (``/foo go``) names the chat ``go`` rather
+    # than ``/foo go`` — matching what the user actually asked.
     if chat.title == "New chat":
-        chat.title = derive_chat_title(payload.content)
+        chat.title = derive_chat_title(effective_content)
 
     await db.flush()
     await db.commit()
@@ -874,7 +954,7 @@ async def send_message(
     retrieved_chunks, kb_ids_searched = await _retrieve_kb_context_for_chat(
         db,
         chat=chat,
-        query=payload.content,
+        query=effective_content,
         gateway=gateway,
         request_id=request.headers.get("x-request-id"),
     )
@@ -908,11 +988,11 @@ async def send_message(
                 "kb_ids": [str(k) for k in kb_ids_searched],
                 "chunk_count": len(retrieved_chunks),
                 "chunk_ids": [str(c.chunk_id) for c in retrieved_chunks],
-                "query_token_estimate": len(payload.content.split()),
+                "query_token_estimate": len(effective_content.split()),
             },
         )
         await db.commit()
-    gw_messages.append(ChatCompletionMessage(role="user", content=payload.content))
+    gw_messages.append(ChatCompletionMessage(role="user", content=effective_content))
 
     # Build the gateway request. C3 still sends a single-turn request
     # (the user's content as one ``user`` message); a future task may
@@ -927,7 +1007,7 @@ async def send_message(
         lq_ai_chat_id=str(cid),
         lq_ai_message_id=str(assistant_message_id),
         lq_ai_user_id=str(user.id),
-        lq_ai_skills=list(payload.skills),
+        lq_ai_skills=list(effective_skills),
         lq_ai_skill_inputs=dict(payload.skill_inputs),
         lq_ai_project_minimum_inference_tier=project_floor,
     )
@@ -966,6 +1046,8 @@ async def send_message(
         assistant_message_id=assistant_message_id,
         request_id=request_id,
         http_request=request,
+        attached_skill_names=attached_skill_names,
+        slash_unresolved=slash_unresolved,
     )
 
 
@@ -1197,8 +1279,15 @@ async def _non_streaming_response(
     assistant_message_id: uuid.UUID,
     request_id: str,
     http_request: Request | None = None,
+    attached_skill_names: list[str] | None = None,
+    slash_unresolved: bool = False,
 ) -> JSONResponse:
-    """Run the non-streaming path: forward, persist, return JSON."""
+    """Run the non-streaming path: forward, persist, return JSON.
+
+    Wave D.2 Task 2.7 — ``attached_skill_names`` and ``slash_unresolved``
+    are propagated from :func:`send_message`'s slash-fallback path.
+    Defaults preserve the pre-Task-2.7 wire contract for any caller
+    that doesn't pass them in."""
 
     try:
         response = await gateway.chat_completion(request, request_id=request_id)
@@ -1263,6 +1352,8 @@ async def _non_streaming_response(
         routed_provider=response.routed_provider,
         cost_estimate=response.cost_estimate,
         applied_skills=applied_skills,
+        attached_skill_names=list(attached_skill_names or []),
+        slash_unresolved=slash_unresolved,
     )
 
     headers: dict[str, str] = {}

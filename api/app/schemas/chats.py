@@ -385,6 +385,20 @@ class MessagePostResponse(BaseModel):
     routed_provider: str | None = None
     cost_estimate: float | None = None
     applied_skills: list[str] = Field(default_factory=list)
+    attached_skill_names: list[str] = Field(default_factory=list)
+    """Wave D.2 Task 2.7 — slugs the send-time slash fallback attached
+    on the caller's behalf. Distinct from ``applied_skills`` (the
+    gateway-reported list of skills that actually ran): this field
+    captures *what the backend resolved from the message body*, so the
+    frontend can render a chip / hint even before the gateway responds
+    or in the unresolved-slash branch where no skill actually ran."""
+
+    slash_unresolved: bool = False
+    """Wave D.2 Task 2.7 — set when the user's content started with
+    ``/<token>`` but no skill resolved against that token. The handler
+    still forwards the original content to the gateway as plain text;
+    this flag lets the UI surface a "couldn't resolve /foo" hint so
+    typos don't silently produce non-skill answers."""
 
 
 # --- Internal: helpers exposed for tests -------------------------------------

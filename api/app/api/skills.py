@@ -411,6 +411,39 @@ async def _list_merged_skills_for_user(
     return out
 
 
+async def _resolve_skill_for_user(
+    request: Request,
+    db: AsyncSession,
+    *,
+    user: User,
+    slug: str | None = None,
+    slash_alias: str | None = None,
+) -> dict[str, object] | None:
+    """Resolve a single skill from the caller's merged catalog.
+
+    Used by the send-message handler's slash-fallback path (Wave D.2
+    Task 2.7) — when a user types ``/foo ...`` and the frontend didn't
+    pre-resolve, the backend retries here. Returns the same dict shape
+    as :func:`_list_merged_skills_for_user` (``slug``, ``slash_alias``,
+    ``title``, ``description``, ``scope``, ``icon``) or ``None`` if no
+    row matches.
+
+    Exactly one of ``slug`` / ``slash_alias`` should be provided; if both
+    are given, the slug check wins (built-ins have no alias so a
+    slug-match is the more authoritative signal).
+    """
+
+    if slug is None and slash_alias is None:
+        return None
+    rows = await _list_merged_skills_for_user(request, db, user=user)
+    for r in rows:
+        if slug is not None and r.get("slug") == slug:
+            return r
+        if slash_alias is not None and r.get("slash_alias") == slash_alias:
+            return r
+    return None
+
+
 async def _recent_attached_skill_slugs(
     db: AsyncSession,
     *,
