@@ -56,7 +56,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text as sql_text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -243,6 +244,7 @@ async def _serialize_project(db: AsyncSession, project: Project) -> ProjectRespo
         context_md=project.context_md,
         privileged=project.privileged,
         minimum_inference_tier=project.minimum_inference_tier,
+        is_sandbox=project.is_sandbox,
         attached_file_ids=file_ids,
         attached_skill_names=skill_names,
         attached_knowledge_base_ids=kb_ids,
@@ -592,6 +594,107 @@ async def delete_project(
     )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Sandbox endpoint (Wave D.2 Task 2.2)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/sandbox/ensure",
+    response_model=ProjectResponse,
+    summary="Find or create the caller's try-it sandbox matter (Wave D.2)",
+    description=(
+        "Idempotent find-or-create for the per-user *try-it sandbox* "
+        "project. The sandbox is a system-managed matter (slug "
+        "``__sandbox__``) used to scope skill try-it conversations that "
+        "should not count toward billable matter activity. First call "
+        "returns 201 with a fresh row; subsequent calls return 200 with "
+        "the same row. After the sandbox is soft-deleted via the normal "
+        "DELETE endpoint, the next ensure call recreates it. Concurrent "
+        "callers see the same row — the per-owner-active partial unique "
+        "index on ``slug`` plus ``ON CONFLICT DO NOTHING`` make this "
+        "race-free."
+    ),
+)
+async def ensure_sandbox(
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+) -> ProjectResponse:
+    """Idempotent find-or-create of the per-user sandbox project."""
+
+    # Fast path: look up an existing non-archived sandbox first. The
+    # vast majority of calls hit this branch (the row is created once
+    # per user and reused indefinitely).
+    existing = await db.scalar(
+        select(Project).where(
+            Project.owner_id == user.id,
+            Project.is_sandbox.is_(True),
+            Project.archived_at.is_(None),
+        )
+    )
+    if existing is not None:
+        response.status_code = status.HTTP_200_OK
+        return await _serialize_project(db, existing)
+
+    # Insert with ON CONFLICT DO NOTHING in case of concurrent ensures.
+    # The unique partial index ``idx_projects_slug_owner_active`` on
+    # ``(owner_id, slug) WHERE archived_at IS NULL`` (migration 0004)
+    # is the arbiter — when two concurrent callers both reach this
+    # INSERT, the second one's row is dropped and ``row`` comes back
+    # ``None`` so we re-read the winner.
+    stmt = (
+        pg_insert(Project)
+        .values(
+            owner_id=user.id,
+            name="Try-it sandbox",
+            slug="__sandbox__",
+            description=(
+                "Auto-created sandbox for skill try-it. Conversations here are non-billable."
+            ),
+            privileged=False,
+            minimum_inference_tier=None,
+            is_sandbox=True,
+        )
+        .on_conflict_do_nothing(
+            index_elements=["owner_id", "slug"],
+            index_where=sql_text("archived_at IS NULL"),
+        )
+        .returning(Project)
+    )
+    row = await db.scalar(stmt)
+
+    if row is None:
+        # Another concurrent caller won the race; re-read the winner.
+        row = await db.scalar(
+            select(Project).where(
+                Project.owner_id == user.id,
+                Project.is_sandbox.is_(True),
+                Project.archived_at.is_(None),
+            )
+        )
+        await db.commit()
+        response.status_code = status.HTTP_200_OK
+    else:
+        await db.commit()
+        response.status_code = status.HTTP_201_CREATED
+
+    # Invariant: post-insert (or post-race re-read) there's always a row.
+    # If this assertion ever fires it means the unique-index covering
+    # ``(owner_id, slug) WHERE archived_at IS NULL`` is missing/wrong.
+    assert row is not None
+    log.info(
+        "sandbox ensured",
+        extra={
+            "event": "project_sandbox_ensured",
+            "user_id": str(user.id),
+            "project_id": str(row.id),
+            "created": response.status_code == status.HTTP_201_CREATED,
+        },
+    )
+    return await _serialize_project(db, row)
 
 
 # ---------------------------------------------------------------------------
@@ -1026,6 +1129,7 @@ __all__ = [
     "detach_file",
     "detach_knowledge_base",
     "detach_skill",
+    "ensure_sandbox",
     "get_project",
     "list_projects",
     "router",

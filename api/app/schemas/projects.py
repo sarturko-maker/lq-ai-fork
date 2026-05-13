@@ -239,6 +239,12 @@ class ProjectResponse(BaseModel):
     context_md: str | None = None
     privileged: bool
     minimum_inference_tier: int | None = None
+    # Wave D.2 Task 2.2: surface the per-user try-it sandbox flag so the
+    # frontend can render a "non-billable" badge and route messages
+    # appropriately without a second round-trip. ``False`` for the regular
+    # matters created via ``POST /projects``; ``True`` only for the
+    # internally-managed row created by ``POST /projects/sandbox/ensure``.
+    is_sandbox: bool = False
     attached_file_ids: list[uuid.UUID] = Field(default_factory=list)
     attached_skill_names: list[str] = Field(default_factory=list)
     attached_knowledge_base_ids: list[uuid.UUID] = Field(default_factory=list)
