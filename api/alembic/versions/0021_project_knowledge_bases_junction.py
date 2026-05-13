@@ -9,8 +9,8 @@ Composite PK; FK CASCADE on either side; attached_at + attached_by
 for audit ordering. Required for Wave D.1 KB attach modal (spec §7.3).
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0021"
@@ -32,22 +32,26 @@ def upgrade() -> None:
         ),
         sa.Column("attached_by_user_id", UUID(as_uuid=True), nullable=True),
         sa.ForeignKeyConstraint(
-            ["project_id"], ["projects.id"],
+            ["project_id"],
+            ["projects.id"],
             ondelete="CASCADE",
             name="fk_project_knowledge_bases_project_id",
         ),
         sa.ForeignKeyConstraint(
-            ["knowledge_base_id"], ["knowledge_bases.id"],
+            ["knowledge_base_id"],
+            ["knowledge_bases.id"],
             ondelete="CASCADE",
             name="fk_project_knowledge_bases_kb_id",
         ),
         sa.ForeignKeyConstraint(
-            ["attached_by_user_id"], ["users.id"],
+            ["attached_by_user_id"],
+            ["users.id"],
             ondelete="SET NULL",
             name="fk_project_knowledge_bases_attached_by",
         ),
         sa.PrimaryKeyConstraint(
-            "project_id", "knowledge_base_id",
+            "project_id",
+            "knowledge_base_id",
             name="pk_project_knowledge_bases",
         ),
     )

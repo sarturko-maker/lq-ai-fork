@@ -118,7 +118,9 @@ async def _metrics_middleware(
         # the response. We record a synthetic 500 row so the failure is
         # at least counted; re-raise so the handler runs normally.
         status_label = "500"
-        HTTP_REQUESTS_TOTAL.labels(method=method, route=_route_label(request), status=status_label).inc()
+        HTTP_REQUESTS_TOTAL.labels(
+            method=method, route=_route_label(request), status=status_label
+        ).inc()
         raise
 
     route = _route_label(request)
@@ -129,9 +131,9 @@ async def _metrics_middleware(
 
     elapsed = time.monotonic() - start
     HTTP_REQUESTS_TOTAL.labels(method=method, route=route, status=status_label).inc()
-    HTTP_REQUEST_DURATION_SECONDS.labels(
-        method=method, route=route, status=status_label
-    ).observe(elapsed)
+    HTTP_REQUEST_DURATION_SECONDS.labels(method=method, route=route, status=status_label).observe(
+        elapsed
+    )
     return response
 
 

@@ -199,18 +199,14 @@ def _summary(
     )
 
 
-async def _caller_role(
-    db: AsyncSession, *, team_id: uuid.UUID, user_id: uuid.UUID
-) -> str | None:
+async def _caller_role(db: AsyncSession, *, team_id: uuid.UUID, user_id: uuid.UUID) -> str | None:
     """Return the caller's role on ``team_id`` (admin/member) or None.
 
     None means the caller is not a member of this team — UI uses this
     to decide whether mutate affordances render at all.
     """
 
-    stmt = select(TeamMember).where(
-        TeamMember.team_id == team_id, TeamMember.user_id == user_id
-    )
+    stmt = select(TeamMember).where(TeamMember.team_id == team_id, TeamMember.user_id == user_id)
     membership = (await db.execute(stmt)).scalar_one_or_none()
     return membership.role if membership is not None else None
 
@@ -479,9 +475,7 @@ async def update_member_role(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TeamMemberResponse:
     role = _validate_role(payload.role)
-    stmt = select(TeamMember).where(
-        TeamMember.team_id == team_id, TeamMember.user_id == user_id
-    )
+    stmt = select(TeamMember).where(TeamMember.team_id == team_id, TeamMember.user_id == user_id)
     membership = (await db.execute(stmt)).scalar_one_or_none()
     if membership is None:
         raise HTTPException(
@@ -546,9 +540,7 @@ async def remove_member(
     admin: AdminUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
-    stmt = select(TeamMember).where(
-        TeamMember.team_id == team_id, TeamMember.user_id == user_id
-    )
+    stmt = select(TeamMember).where(TeamMember.team_id == team_id, TeamMember.user_id == user_id)
     membership = (await db.execute(stmt)).scalar_one_or_none()
     if membership is None:
         raise HTTPException(

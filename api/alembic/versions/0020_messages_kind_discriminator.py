@@ -18,9 +18,8 @@ Required for: tier-floor refusal block (D.1 §3.4), receipts filtering
 ``role='assistant'`` (the assistant "spoke" the refusal).
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "0020"
 down_revision: str | None = "0019"

@@ -121,9 +121,7 @@ async def test_users_role_check_constraint_blocks_invalid_value(
 
 
 @pytest.mark.integration
-async def test_users_me_surfaces_role(
-    client: AsyncClient, admin_user: User
-) -> None:
+async def test_users_me_surfaces_role(client: AsyncClient, admin_user: User) -> None:
     resp = await client.get("/api/v1/users/me", headers=_bearer(admin_user))
     assert resp.status_code == 200
     body = resp.json()
@@ -168,13 +166,17 @@ async def test_update_user_role_admin_to_member_writes_audit(
     assert body["is_admin"] is False
 
     audit = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "user.role_updated",
-                AuditLog.resource_id == str(member_user.id),
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "user.role_updated",
+                    AuditLog.resource_id == str(member_user.id),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     # Two updates (promote + demote) → two audit rows.
     assert len(audit) == 2
     assert audit[-1].details["after"]["role"] == "member"
@@ -196,13 +198,17 @@ async def test_update_user_role_idempotent_skips_audit(
     assert resp.status_code == 200
 
     audit = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "user.role_updated",
-                AuditLog.resource_id == str(member_user.id),
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "user.role_updated",
+                    AuditLog.resource_id == str(member_user.id),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert audit == []
 
 
@@ -219,9 +225,7 @@ async def test_update_user_role_invalid_value_returns_422(
 
 
 @pytest.mark.integration
-async def test_update_user_role_requires_admin(
-    client: AsyncClient, member_user: User
-) -> None:
+async def test_update_user_role_requires_admin(client: AsyncClient, member_user: User) -> None:
     resp = await client.patch(
         f"/api/v1/admin/users/{member_user.id}/role",
         headers=_bearer(member_user),

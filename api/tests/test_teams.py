@@ -40,9 +40,7 @@ def _override_get_db(db_session: AsyncSession):
     return _override
 
 
-async def _make_user(
-    db_session: AsyncSession, *, suffix: str = "", is_admin: bool = False
-) -> User:
+async def _make_user(db_session: AsyncSession, *, suffix: str = "", is_admin: bool = False) -> User:
     user = User(
         email=f"team-{suffix or uuid.uuid4().hex[:8]}@example.com",
         display_name=f"Team Test {suffix}".strip(),
@@ -131,9 +129,7 @@ async def test_create_team_slug_collision_returns_409(
 
 
 @pytest.mark.integration
-async def test_create_team_invalid_slug_returns_422(
-    client: AsyncClient, admin_user: User
-) -> None:
+async def test_create_team_invalid_slug_returns_422(client: AsyncClient, admin_user: User) -> None:
     resp = await client.post(
         "/api/v1/admin/teams",
         headers=_bearer(admin_user),
@@ -143,9 +139,7 @@ async def test_create_team_invalid_slug_returns_422(
 
 
 @pytest.mark.integration
-async def test_non_admin_cannot_create_team(
-    client: AsyncClient, member_user: User
-) -> None:
+async def test_non_admin_cannot_create_team(client: AsyncClient, member_user: User) -> None:
     resp = await client.post(
         "/api/v1/admin/teams",
         headers=_bearer(member_user),
@@ -219,9 +213,7 @@ async def test_delete_team_cascades_to_members_and_skills(
     )
     await db_session.flush()
 
-    delete = await client.delete(
-        f"/api/v1/admin/teams/{team_id}", headers=_bearer(admin_user)
-    )
+    delete = await client.delete(f"/api/v1/admin/teams/{team_id}", headers=_bearer(admin_user))
     assert delete.status_code == 204
 
     # Team gone.
@@ -235,12 +227,8 @@ async def test_delete_team_cascades_to_members_and_skills(
 
 
 @pytest.mark.integration
-async def test_admin_team_id_probing_returns_404(
-    client: AsyncClient, admin_user: User
-) -> None:
-    resp = await client.get(
-        f"/api/v1/admin/teams/{uuid.uuid4()}", headers=_bearer(admin_user)
-    )
+async def test_admin_team_id_probing_returns_404(client: AsyncClient, admin_user: User) -> None:
+    resp = await client.get(f"/api/v1/admin/teams/{uuid.uuid4()}", headers=_bearer(admin_user))
     assert resp.status_code == 404
 
 
@@ -393,13 +381,17 @@ async def test_role_change_no_op_does_not_audit(
     assert resp.status_code == 200
 
     audit = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "team.member_role_changed",
-                AuditLog.resource_id == team_id,
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "team.member_role_changed",
+                    AuditLog.resource_id == team_id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert audit == []
 
 
@@ -488,9 +480,7 @@ async def test_my_team_returns_404_for_non_member(
         json={"slug": "secret", "name": "Secret"},
     )
     team_id = created.json()["id"]
-    resp = await client.get(
-        f"/api/v1/teams/{team_id}", headers=_bearer(member_user)
-    )
+    resp = await client.get(f"/api/v1/teams/{team_id}", headers=_bearer(member_user))
     assert resp.status_code == 404
 
 
@@ -564,9 +554,7 @@ async def test_my_teams_role_filter_admin_only(
         json={"user_id": str(member_user.id), "role": "member"},
     )
 
-    admins_only = await client.get(
-        "/api/v1/teams?role=admin", headers=_bearer(member_user)
-    )
+    admins_only = await client.get("/api/v1/teams?role=admin", headers=_bearer(member_user))
     assert admins_only.status_code == 200
     rows = admins_only.json()
     assert {r["slug"] for r in rows} == {"ra-1"}
@@ -574,12 +562,8 @@ async def test_my_teams_role_filter_admin_only(
 
 
 @pytest.mark.integration
-async def test_my_teams_invalid_role_returns_422(
-    client: AsyncClient, admin_user: User
-) -> None:
-    resp = await client.get(
-        "/api/v1/teams?role=owner", headers=_bearer(admin_user)
-    )
+async def test_my_teams_invalid_role_returns_422(client: AsyncClient, admin_user: User) -> None:
+    resp = await client.get("/api/v1/teams?role=owner", headers=_bearer(admin_user))
     assert resp.status_code == 422
 
 
@@ -599,9 +583,7 @@ async def test_get_my_team_includes_caller_role(
         json={"user_id": str(member_user.id), "role": "member"},
     )
 
-    resp = await client.get(
-        f"/api/v1/teams/{team_id}", headers=_bearer(member_user)
-    )
+    resp = await client.get(f"/api/v1/teams/{team_id}", headers=_bearer(member_user))
     assert resp.status_code == 200
     assert resp.json()["caller_role"] == "member"
 
@@ -643,9 +625,7 @@ async def test_team_members_unique_per_user(
 ) -> None:
     """A user can only join a team once (composite PK on team_id, user_id)."""
 
-    team = Team(
-        slug="c-uniq", name="C", created_by_user_id=admin_user.id
-    )
+    team = Team(slug="c-uniq", name="C", created_by_user_id=admin_user.id)
     db_session.add(team)
     await db_session.flush()
 

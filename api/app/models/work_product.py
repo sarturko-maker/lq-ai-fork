@@ -82,9 +82,7 @@ class WorkProductAttribution(Base):
         nullable=True,
     )
 
-    routed_inference_tier: Mapped[int | None] = mapped_column(
-        Integer, nullable=True
-    )
+    routed_inference_tier: Mapped[int | None] = mapped_column(Integer, nullable=True)
     provider: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_version: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -98,9 +96,7 @@ class WorkProductAttribution(Base):
     """Skill names (slugs) applied during prompt assembly for this
     message. Empty when no skill was attached."""
 
-    playbook_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
+    playbook_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     """Reserved for M3 Playbook execution. Always null in M1."""
 
     content_hash: Mapped[str] = mapped_column(Text, nullable=False)

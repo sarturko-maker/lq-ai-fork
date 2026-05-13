@@ -24,9 +24,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
-
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
@@ -196,7 +194,12 @@ async def patch_me_preferences(
     if row is None:  # pragma: no cover — dependency would have already 401d
         raise HTTPException(status_code=404, detail="user not found")
 
+    # Annotate `before`/`after` as `str` so mypy doesn't narrow them to
+    # the first block's Literal type and then reject subsequent blocks.
+    # The DB CHECK enforces the actual enum.
     changed: dict[str, dict[str, str]] = {}
+    before: str
+    after: str
     if payload.reasoning_visibility is not None:
         before = row.reasoning_visibility
         after = payload.reasoning_visibility
@@ -340,9 +343,7 @@ async def get_export_job(
 
     job = await db.get(UserExportJob, job_uuid)
     if job is None or job.user_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Export job not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export job not found")
 
     download_url: str | None = None
     if job.status == "completed" and job.storage_key:

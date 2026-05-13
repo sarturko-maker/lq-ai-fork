@@ -301,9 +301,7 @@ async def test_get_skill_minimal_skill_has_empty_reference_lists(
 
 
 @pytest.mark.integration
-async def test_contents_returns_same_shape_as_base_get(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_contents_returns_same_shape_as_base_get(client: AsyncClient, db_user: User) -> None:
     """``/skills/{name}/contents`` and ``/skills/{name}`` return the same
     payload — the contents URL is the frontend-targeted alias PRD §3.4
     names as the contract behind the skill inspector."""
@@ -312,18 +310,14 @@ async def test_contents_returns_same_shape_as_base_get(
     headers = {"Authorization": f"Bearer {token}"}
 
     base = await client.get("/api/v1/skills/alpha-test-skill", headers=headers)
-    contents = await client.get(
-        "/api/v1/skills/alpha-test-skill/contents", headers=headers
-    )
+    contents = await client.get("/api/v1/skills/alpha-test-skill/contents", headers=headers)
     assert base.status_code == 200
     assert contents.status_code == 200
     assert base.json() == contents.json()
 
 
 @pytest.mark.integration
-async def test_contents_404_for_unknown_skill(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_contents_404_for_unknown_skill(client: AsyncClient, db_user: User) -> None:
     token = _bearer(db_user)
     resp = await client.get(
         "/api/v1/skills/does-not-exist/contents",
@@ -333,9 +327,7 @@ async def test_contents_404_for_unknown_skill(
 
 
 @pytest.mark.integration
-async def test_inputs_returns_lq_ai_inputs_block(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_inputs_returns_lq_ai_inputs_block(client: AsyncClient, db_user: User) -> None:
     """alpha-test-skill declares ``input_a`` under ``lq_ai.inputs.required``;
     the endpoint surfaces it as a SkillInputDef in the form schema."""
 
@@ -355,9 +347,7 @@ async def test_inputs_returns_lq_ai_inputs_block(
 
 
 @pytest.mark.integration
-async def test_inputs_empty_for_skill_without_inputs(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_inputs_empty_for_skill_without_inputs(client: AsyncClient, db_user: User) -> None:
     """beta-minimal declares no inputs — endpoint returns a name-only stub."""
 
     token = _bearer(db_user)
@@ -371,9 +361,7 @@ async def test_inputs_empty_for_skill_without_inputs(
 
 
 @pytest.mark.integration
-async def test_inputs_404_for_unknown_skill(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_inputs_404_for_unknown_skill(client: AsyncClient, db_user: User) -> None:
     token = _bearer(db_user)
     resp = await client.get(
         "/api/v1/skills/does-not-exist/inputs",
@@ -402,9 +390,7 @@ async def test_inputs_reads_from_user_skill_shadow(
             body="custom body",
             frontmatter_extra={
                 "inputs": {
-                    "required": [
-                        {"name": "override_required", "type": "enum", "enum": ["a", "b"]}
-                    ],
+                    "required": [{"name": "override_required", "type": "enum", "enum": ["a", "b"]}],
                     "optional": [{"name": "override_optional", "type": "text"}],
                 },
             },
@@ -424,4 +410,3 @@ async def test_inputs_reads_from_user_skill_shadow(
     assert body["required"][0]["enum"] == ["a", "b"]
     assert len(body["optional"]) == 1
     assert body["optional"][0]["name"] == "override_optional"
-

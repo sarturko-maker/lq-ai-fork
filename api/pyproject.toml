@@ -114,6 +114,9 @@ dev = [
     "httpx>=0.27",
     "ruff>=0.6",
     "mypy>=1.11",
+    # PyYAML type stubs — pyyaml has no inline typings, so mypy needs the
+    # types-PyYAML package to type-check `app.skills.loader` etc.
+    "types-PyYAML>=6.0",
     # respx mocks httpx at the transport layer; B5 introduces it on the
     # api/ side to test the GatewayClient. Already used the same way in
     # gateway/'s dev deps for the AnthropicAdapter — same library, same

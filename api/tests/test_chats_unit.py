@@ -175,7 +175,7 @@ class TestCursor:
 
         body = _json.dumps({"unrelated": "shape"})
         encoded = base64.urlsafe_b64encode(body.encode()).rstrip(b"=").decode("ascii")
-        with pytest.raises(Exception):  # noqa: B017 — pydantic ValidationError or ValueError
+        with pytest.raises(Exception):
             decode_cursor(encoded)
 
     def test_class_decode_helper(self) -> None:
@@ -261,10 +261,7 @@ def test_message_to_response_is_enhanced_true_when_skill_applied() -> None:
     # Only enhance-prompt → True.
     assert message_to_response(FakeRow(["enhance-prompt"])).is_enhanced is True
     # Mixed with other skills → still True.
-    assert (
-        message_to_response(FakeRow(["nda-review", "enhance-prompt"])).is_enhanced
-        is True
-    )
+    assert message_to_response(FakeRow(["nda-review", "enhance-prompt"])).is_enhanced is True
     # No skills at all → False.
     assert message_to_response(FakeRow([])).is_enhanced is False
     # Empty/None applied_skills column → False (guard against NULLs).

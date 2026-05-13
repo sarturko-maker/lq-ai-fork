@@ -586,9 +586,7 @@ async def test_chat_completion_401_translates_to_auth_error() -> None:
                 client=client,
             )
             with pytest.raises(ProviderAuthError) as excinfo:
-                await adapter.chat_completion(
-                    _basic_chat_request(), model="gpt-4o", stream=False
-                )
+                await adapter.chat_completion(_basic_chat_request(), model="gpt-4o", stream=False)
         finally:
             await client.aclose()
     serialized = json.dumps(excinfo.value.to_envelope())
@@ -613,9 +611,7 @@ async def test_chat_completion_500_translates_to_http_error() -> None:
                 client=client,
             )
             with pytest.raises(ProviderHTTPError) as excinfo:
-                await adapter.chat_completion(
-                    _basic_chat_request(), model="gpt-4o", stream=False
-                )
+                await adapter.chat_completion(_basic_chat_request(), model="gpt-4o", stream=False)
         finally:
             await client.aclose()
     assert excinfo.value.upstream_status == 500
@@ -636,9 +632,7 @@ async def test_chat_completion_network_error_translates() -> None:
                 client=client,
             )
             with pytest.raises(ProviderNetworkError):
-                await adapter.chat_completion(
-                    _basic_chat_request(), model="gpt-4o", stream=False
-                )
+                await adapter.chat_completion(_basic_chat_request(), model="gpt-4o", stream=False)
         finally:
             await client.aclose()
 

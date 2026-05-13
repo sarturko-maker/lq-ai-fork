@@ -318,9 +318,7 @@ async def search_chats(
             Chat.title.label("title"),
             Chat.title.label("snippet"),
             literal("title").label("match_source"),
-            func.ts_rank_cd(
-                sa_text("chats.title_tsv"), tsquery
-            ).label("rank"),
+            func.ts_rank_cd(sa_text("chats.title_tsv"), tsquery).label("rank"),
             Chat.created_at.label("created_at"),
             Chat.updated_at.label("updated_at"),
         )
@@ -346,9 +344,7 @@ async def search_chats(
                 "MaxFragments=2, MinWords=5, MaxWords=20",
             ).label("snippet"),
             literal("message").label("match_source"),
-            func.ts_rank_cd(
-                sa_text("messages.content_tsv"), tsquery
-            ).label("rank"),
+            func.ts_rank_cd(sa_text("messages.content_tsv"), tsquery).label("rank"),
             Chat.created_at.label("created_at"),
             Chat.updated_at.label("updated_at"),
         )
@@ -362,9 +358,7 @@ async def search_chats(
     )
 
     union = title_subq.union_all(message_subq).subquery()
-    stmt = (
-        select(union).order_by(union.c.rank.desc(), union.c.created_at.desc()).limit(limit)
-    )
+    stmt = select(union).order_by(union.c.rank.desc(), union.c.created_at.desc()).limit(limit)
 
     result = await db.execute(stmt)
     rows = result.mappings().all()
@@ -682,7 +676,6 @@ async def _retrieve_kb_context_for_chat(
     # Load KB rows (for hybrid_alpha per KB). One SELECT for the set.
     kb_stmt = select(KnowledgeBase).where(KnowledgeBase.id.in_(kb_ids))
     kb_rows = (await db.execute(kb_stmt)).scalars().all()
-    kb_by_id: dict[uuid.UUID, KnowledgeBase] = {kb.id: kb for kb in kb_rows}
 
     # Embed the query once (reused across every KB). Mirrors the
     # alpha<1.0 gate in query_kb: if every attached KB is FTS-only
@@ -725,7 +718,7 @@ async def _retrieve_kb_context_for_chat(
                 top_k=RAG_TOP_K_PER_KB,
                 alpha=alpha,
             )
-        except Exception:  # noqa: BLE001 — defensive belt; log and skip
+        except Exception:
             log.exception(
                 "chat-send RAG: hybrid_search failed for KB; skipping",
                 extra={
@@ -897,9 +890,7 @@ async def send_message(
     gw_messages: list[ChatCompletionMessage] = []
     if retrieved_chunks:
         context_block = _format_retrieval_context_block(retrieved_chunks)
-        gw_messages.append(
-            ChatCompletionMessage(role="system", content=context_block)
-        )
+        gw_messages.append(ChatCompletionMessage(role="system", content=context_block))
         # T7-shape audit row. Same details schema as query_kb (kb_ids
         # plural here; query_kb is single-KB). The row commits with
         # its own boundary so it's durable even if the gateway call
@@ -1177,9 +1168,7 @@ async def _write_work_product_attribution(
     if chat_row is None:  # pragma: no cover — message FK guarantees existence
         return
 
-    content_hash = hashlib.sha256(
-        (message.content or "").encode("utf-8")
-    ).hexdigest()
+    content_hash = hashlib.sha256((message.content or "").encode("utf-8")).hexdigest()
 
     attribution = WorkProductAttribution(
         message_id=message.id,
@@ -1585,9 +1574,7 @@ async def run_inference_override(
     # write one (defensive — keeps the helper testable when the test
     # stubs respx and doesn't write to the routing-log table).
     routing_log_row = await db.execute(
-        select(InferenceRoutingLog.id).where(
-            InferenceRoutingLog.message_id == assistant_message_id
-        )
+        select(InferenceRoutingLog.id).where(InferenceRoutingLog.message_id == assistant_message_id)
     )
     routing_log_id = routing_log_row.scalar_one_or_none()
 

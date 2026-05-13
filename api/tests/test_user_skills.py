@@ -124,9 +124,7 @@ def _post_body(**overrides: object) -> dict[str, object]:
 async def test_create_user_skill_returns_201_and_persists(
     client: AsyncClient, db_session: AsyncSession, user_a: User
 ) -> None:
-    resp = await client.post(
-        "/api/v1/user-skills", headers=_bearer(user_a), json=_post_body()
-    )
+    resp = await client.post("/api/v1/user-skills", headers=_bearer(user_a), json=_post_body())
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert body["scope"] == "user"
@@ -176,14 +174,10 @@ async def test_list_user_skills_is_owner_scoped_and_newest_first(
 async def test_get_user_skill_returns_404_for_non_owner(
     client: AsyncClient, user_a: User, user_b: User
 ) -> None:
-    resp = await client.post(
-        "/api/v1/user-skills", headers=_bearer(user_a), json=_post_body()
-    )
+    resp = await client.post("/api/v1/user-skills", headers=_bearer(user_a), json=_post_body())
     skill_id = resp.json()["id"]
 
-    cross = await client.get(
-        f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_b)
-    )
+    cross = await client.get(f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_b))
     assert cross.status_code == 404
 
 
@@ -193,16 +187,10 @@ async def test_get_user_skill_returns_404_for_non_owner(
 
 
 @pytest.mark.integration
-async def test_create_collides_with_own_slug_returns_409(
-    client: AsyncClient, user_a: User
-) -> None:
-    first = await client.post(
-        "/api/v1/user-skills", headers=_bearer(user_a), json=_post_body()
-    )
+async def test_create_collides_with_own_slug_returns_409(client: AsyncClient, user_a: User) -> None:
+    first = await client.post("/api/v1/user-skills", headers=_bearer(user_a), json=_post_body())
     assert first.status_code == 201
-    second = await client.post(
-        "/api/v1/user-skills", headers=_bearer(user_a), json=_post_body()
-    )
+    second = await client.post("/api/v1/user-skills", headers=_bearer(user_a), json=_post_body())
     assert second.status_code == 409
 
 
@@ -229,9 +217,7 @@ async def test_create_collides_with_builtin_slug_is_allowed(
 async def test_patch_partial_update_writes_audit_row(
     client: AsyncClient, db_session: AsyncSession, user_a: User
 ) -> None:
-    created = await client.post(
-        "/api/v1/user-skills", headers=_bearer(user_a), json=_post_body()
-    )
+    created = await client.post("/api/v1/user-skills", headers=_bearer(user_a), json=_post_body())
     skill_id = created.json()["id"]
 
     resp = await client.patch(
@@ -243,13 +229,17 @@ async def test_patch_partial_update_writes_audit_row(
     assert resp.json()["display_name"] == "Renamed"
 
     audit = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "user_skill.updated",
-                AuditLog.resource_id == skill_id,
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "user_skill.updated",
+                    AuditLog.resource_id == skill_id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(audit) == 1
     assert audit[0].details["changed_fields"] == ["display_name"]
 
@@ -289,9 +279,7 @@ async def test_patch_version_bump_records_before_and_after_in_audit(
 async def test_patch_no_op_does_not_write_audit_row(
     client: AsyncClient, db_session: AsyncSession, user_a: User
 ) -> None:
-    created = await client.post(
-        "/api/v1/user-skills", headers=_bearer(user_a), json=_post_body()
-    )
+    created = await client.post("/api/v1/user-skills", headers=_bearer(user_a), json=_post_body())
     skill_id = created.json()["id"]
 
     # PATCH with the same display_name → handler short-circuits without
@@ -304,23 +292,23 @@ async def test_patch_no_op_does_not_write_audit_row(
     assert resp.status_code == 200
 
     audit = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "user_skill.updated",
-                AuditLog.resource_id == skill_id,
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "user_skill.updated",
+                    AuditLog.resource_id == skill_id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert audit == []
 
 
 @pytest.mark.integration
-async def test_patch_non_owner_returns_404(
-    client: AsyncClient, user_a: User, user_b: User
-) -> None:
-    created = await client.post(
-        "/api/v1/user-skills", headers=_bearer(user_a), json=_post_body()
-    )
+async def test_patch_non_owner_returns_404(client: AsyncClient, user_a: User, user_b: User) -> None:
+    created = await client.post("/api/v1/user-skills", headers=_bearer(user_a), json=_post_body())
     skill_id = created.json()["id"]
     cross = await client.patch(
         f"/api/v1/user-skills/{skill_id}",
@@ -339,14 +327,10 @@ async def test_patch_non_owner_returns_404(
 async def test_delete_soft_deletes_and_writes_audit(
     client: AsyncClient, db_session: AsyncSession, user_a: User
 ) -> None:
-    created = await client.post(
-        "/api/v1/user-skills", headers=_bearer(user_a), json=_post_body()
-    )
+    created = await client.post("/api/v1/user-skills", headers=_bearer(user_a), json=_post_body())
     skill_id = created.json()["id"]
 
-    resp = await client.delete(
-        f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_a)
-    )
+    resp = await client.delete(f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_a))
     assert resp.status_code == 204
 
     row = await db_session.get(UserSkill, uuid.UUID(skill_id))
@@ -369,20 +353,12 @@ async def test_delete_soft_deletes_and_writes_audit(
 
 
 @pytest.mark.integration
-async def test_delete_then_delete_returns_410(
-    client: AsyncClient, user_a: User
-) -> None:
-    created = await client.post(
-        "/api/v1/user-skills", headers=_bearer(user_a), json=_post_body()
-    )
+async def test_delete_then_delete_returns_410(client: AsyncClient, user_a: User) -> None:
+    created = await client.post("/api/v1/user-skills", headers=_bearer(user_a), json=_post_body())
     skill_id = created.json()["id"]
-    first = await client.delete(
-        f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_a)
-    )
+    first = await client.delete(f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_a))
     assert first.status_code == 204
-    second = await client.delete(
-        f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_a)
-    )
+    second = await client.delete(f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_a))
     assert second.status_code == 410
 
 
@@ -392,15 +368,9 @@ async def test_recreate_at_same_slug_after_delete_succeeds(
 ) -> None:
     """Archiving a row frees the slug for a new creation."""
 
-    first = await client.post(
-        "/api/v1/user-skills", headers=_bearer(user_a), json=_post_body()
-    )
-    await client.delete(
-        f"/api/v1/user-skills/{first.json()['id']}", headers=_bearer(user_a)
-    )
-    second = await client.post(
-        "/api/v1/user-skills", headers=_bearer(user_a), json=_post_body()
-    )
+    first = await client.post("/api/v1/user-skills", headers=_bearer(user_a), json=_post_body())
+    await client.delete(f"/api/v1/user-skills/{first.json()['id']}", headers=_bearer(user_a))
+    second = await client.post("/api/v1/user-skills", headers=_bearer(user_a), json=_post_body())
     assert second.status_code == 201
     assert second.json()["slug"] == "personal-nda"
 
@@ -411,9 +381,7 @@ async def test_recreate_at_same_slug_after_delete_succeeds(
 
 
 @pytest.mark.integration
-async def test_merged_list_shows_user_rows_first(
-    client: AsyncClient, user_a: User
-) -> None:
+async def test_merged_list_shows_user_rows_first(client: AsyncClient, user_a: User) -> None:
     await client.post(
         "/api/v1/user-skills",
         headers=_bearer(user_a),
@@ -447,23 +415,17 @@ async def test_merged_list_dedupes_built_in_on_user_shadow(
 
 
 @pytest.mark.integration
-async def test_merged_list_scope_filters_independently(
-    client: AsyncClient, user_a: User
-) -> None:
+async def test_merged_list_scope_filters_independently(client: AsyncClient, user_a: User) -> None:
     await client.post(
         "/api/v1/user-skills",
         headers=_bearer(user_a),
         json=_post_body(slug="alpha-test-skill"),
     )
 
-    user_only = await client.get(
-        "/api/v1/skills?scope=user", headers=_bearer(user_a)
-    )
+    user_only = await client.get("/api/v1/skills?scope=user", headers=_bearer(user_a))
     assert all(r["scope"] == "user" for r in user_only.json())
 
-    builtin_only = await client.get(
-        "/api/v1/skills?scope=builtin", headers=_bearer(user_a)
-    )
+    builtin_only = await client.get("/api/v1/skills?scope=builtin", headers=_bearer(user_a))
     # builtin scope does NOT apply the shadow dedup — operator-side
     # surfaces (e.g., the "as-shipped catalog" admin view) need the
     # raw view. The handler returns built-ins straight from the
@@ -472,9 +434,7 @@ async def test_merged_list_scope_filters_independently(
     assert all(r["scope"] == "builtin" for r in builtin_rows)
     assert any(r["name"] == "alpha-test-skill" for r in builtin_rows)
 
-    team_only = await client.get(
-        "/api/v1/skills?scope=team", headers=_bearer(user_a)
-    )
+    team_only = await client.get("/api/v1/skills?scope=team", headers=_bearer(user_a))
     assert team_only.json() == []
 
 
@@ -484,17 +444,13 @@ async def test_merged_list_scope_filters_independently(
 
 
 @pytest.mark.integration
-async def test_get_skill_returns_shadow_when_present(
-    client: AsyncClient, user_a: User
-) -> None:
+async def test_get_skill_returns_shadow_when_present(client: AsyncClient, user_a: User) -> None:
     await client.post(
         "/api/v1/user-skills",
         headers=_bearer(user_a),
         json=_post_body(slug="alpha-test-skill", body="my custom body"),
     )
-    resp = await client.get(
-        "/api/v1/skills/alpha-test-skill", headers=_bearer(user_a)
-    )
+    resp = await client.get("/api/v1/skills/alpha-test-skill", headers=_bearer(user_a))
     assert resp.status_code == 200
     body = resp.json()
     assert body["scope"] == "user"
@@ -505,9 +461,7 @@ async def test_get_skill_returns_shadow_when_present(
 async def test_get_skill_falls_back_to_builtin_when_no_shadow(
     client: AsyncClient, user_a: User
 ) -> None:
-    resp = await client.get(
-        "/api/v1/skills/alpha-test-skill", headers=_bearer(user_a)
-    )
+    resp = await client.get("/api/v1/skills/alpha-test-skill", headers=_bearer(user_a))
     assert resp.status_code == 200
     assert resp.json()["scope"] == "builtin"
 
@@ -523,9 +477,7 @@ async def test_get_skill_shadow_is_per_user(
         headers=_bearer(user_a),
         json=_post_body(slug="alpha-test-skill", body="A's body"),
     )
-    b_resp = await client.get(
-        "/api/v1/skills/alpha-test-skill", headers=_bearer(user_b)
-    )
+    b_resp = await client.get("/api/v1/skills/alpha-test-skill", headers=_bearer(user_b))
     assert b_resp.status_code == 200
     body = b_resp.json()
     assert body["scope"] == "builtin"
@@ -554,17 +506,15 @@ async def test_fork_copies_built_in_into_user_scope(
     assert body.get("minimum_inference_tier") == 2
 
     audit = (
-        await db_session.execute(
-            select(AuditLog).where(AuditLog.action == "user_skill.created")
-        )
-    ).scalars().all()
+        (await db_session.execute(select(AuditLog).where(AuditLog.action == "user_skill.created")))
+        .scalars()
+        .all()
+    )
     assert any(a.details.get("forked_from") == "alpha-test-skill" for a in audit)
 
 
 @pytest.mark.integration
-async def test_fork_team_scope_returns_400(
-    client: AsyncClient, user_a: User
-) -> None:
+async def test_fork_team_scope_returns_400(client: AsyncClient, user_a: User) -> None:
     resp = await client.post(
         "/api/v1/skills/alpha-test-skill/fork",
         headers=_bearer(user_a),
@@ -575,9 +525,7 @@ async def test_fork_team_scope_returns_400(
 
 
 @pytest.mark.integration
-async def test_fork_unknown_source_returns_404(
-    client: AsyncClient, user_a: User
-) -> None:
+async def test_fork_unknown_source_returns_404(client: AsyncClient, user_a: User) -> None:
     resp = await client.post(
         "/api/v1/skills/does-not-exist/fork",
         headers=_bearer(user_a),
@@ -609,9 +557,7 @@ async def test_fork_default_slug_creates_same_name_shadow(
 
 
 @pytest.mark.integration
-async def test_user_skills_check_constraints(
-    db_session: AsyncSession, user_a: User
-) -> None:
+async def test_user_skills_check_constraints(db_session: AsyncSession, user_a: User) -> None:
     """The scope/owner-consistency CHECK rejects mismatched rows."""
 
     bad = UserSkill(
@@ -629,9 +575,7 @@ async def test_user_skills_check_constraints(
 
 
 @pytest.mark.integration
-async def test_user_skills_partial_unique_index(
-    db_session: AsyncSession, user_a: User
-) -> None:
+async def test_user_skills_partial_unique_index(db_session: AsyncSession, user_a: User) -> None:
     """Two non-archived rows for the same (user, slug) violate uniqueness."""
 
     first = UserSkill(
@@ -752,9 +696,7 @@ async def test_create_team_scope_skill_as_team_admin_returns_201(
     resp = await client.post(
         "/api/v1/user-skills",
         headers=_bearer(user_a),
-        json=_post_body(
-            slug="team-nda", scope="team", owner_team_id=str(team.id)
-        ),
+        json=_post_body(slug="team-nda", scope="team", owner_team_id=str(team.id)),
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
@@ -784,16 +726,12 @@ async def test_create_team_scope_skill_as_member_returns_404(
     the id-probing-safe posture: a stranger can't distinguish 'wrong role'
     from 'no such team' by status code alone."""
 
-    team = await _make_team(
-        db_session, slug="readers", creator=user_a, members=[user_b]
-    )
+    team = await _make_team(db_session, slug="readers", creator=user_a, members=[user_b])
 
     resp = await client.post(
         "/api/v1/user-skills",
         headers=_bearer(user_b),
-        json=_post_body(
-            slug="member-attempt", scope="team", owner_team_id=str(team.id)
-        ),
+        json=_post_body(slug="member-attempt", scope="team", owner_team_id=str(team.id)),
     )
     assert resp.status_code == 404
 
@@ -809,9 +747,7 @@ async def test_create_team_scope_skill_as_non_member_returns_404(
     resp = await client.post(
         "/api/v1/user-skills",
         headers=_bearer(user_b),
-        json=_post_body(
-            slug="stranger-attempt", scope="team", owner_team_id=str(team.id)
-        ),
+        json=_post_body(slug="stranger-attempt", scope="team", owner_team_id=str(team.id)),
     )
     assert resp.status_code == 404
 
@@ -841,9 +777,7 @@ async def test_create_user_scope_with_owner_team_id_returns_422(
     resp = await client.post(
         "/api/v1/user-skills",
         headers=_bearer(user_a),
-        json=_post_body(
-            slug="hybrid", scope="user", owner_team_id=str(team.id)
-        ),
+        json=_post_body(slug="hybrid", scope="user", owner_team_id=str(team.id)),
     )
     assert resp.status_code == 422
     assert "must be null" in resp.json()["detail"]
@@ -940,9 +874,7 @@ async def test_patch_team_scope_as_member_returns_404(
     """A non-admin member sees the team-scope row in the picker but cannot
     PATCH it — 404 keeps the id-probing-safe posture."""
 
-    team = await _make_team(
-        db_session, slug="read-only", creator=user_a, members=[user_b]
-    )
+    team = await _make_team(db_session, slug="read-only", creator=user_a, members=[user_b])
     created = await client.post(
         "/api/v1/user-skills",
         headers=_bearer(user_a),
@@ -970,9 +902,7 @@ async def test_delete_team_scope_as_team_admin_archives_row(
     )
     skill_id = created.json()["id"]
 
-    resp = await client.delete(
-        f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_a)
-    )
+    resp = await client.delete(f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_a))
     assert resp.status_code == 204
 
     row = await db_session.get(UserSkill, uuid.UUID(skill_id))
@@ -1003,9 +933,7 @@ async def test_delete_team_scope_as_non_member_returns_404(
     )
     skill_id = created.json()["id"]
 
-    resp = await client.delete(
-        f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_b)
-    )
+    resp = await client.delete(f"/api/v1/user-skills/{skill_id}", headers=_bearer(user_b))
     assert resp.status_code == 404
 
 
@@ -1048,32 +976,22 @@ async def test_list_scope_team_returns_team_admin_rows(
     is a team-admin. Rows from teams where the caller is only a member
     do NOT appear (members read team skills in the chat picker, not here)."""
 
-    admin_team = await _make_team(
-        db_session, slug="admin-team", creator=user_a
-    )
-    member_team = await _make_team(
-        db_session, slug="member-team", creator=user_b, members=[user_a]
-    )
+    admin_team = await _make_team(db_session, slug="admin-team", creator=user_a)
+    member_team = await _make_team(db_session, slug="member-team", creator=user_b, members=[user_a])
 
     # user_a creates an admin-team skill; user_b creates a member-team skill.
     await client.post(
         "/api/v1/user-skills",
         headers=_bearer(user_a),
-        json=_post_body(
-            slug="admin-team-skill", scope="team", owner_team_id=str(admin_team.id)
-        ),
+        json=_post_body(slug="admin-team-skill", scope="team", owner_team_id=str(admin_team.id)),
     )
     await client.post(
         "/api/v1/user-skills",
         headers=_bearer(user_b),
-        json=_post_body(
-            slug="member-team-skill", scope="team", owner_team_id=str(member_team.id)
-        ),
+        json=_post_body(slug="member-team-skill", scope="team", owner_team_id=str(member_team.id)),
     )
 
-    resp = await client.get(
-        "/api/v1/user-skills?scope=team", headers=_bearer(user_a)
-    )
+    resp = await client.get("/api/v1/user-skills?scope=team", headers=_bearer(user_a))
     assert resp.status_code == 200
     rows = resp.json()
     slugs = {r["slug"] for r in rows}
@@ -1099,9 +1017,7 @@ async def test_list_scope_all_returns_user_and_team_admin_rows(
         json=_post_body(slug="merged-team", scope="team", owner_team_id=str(team.id)),
     )
 
-    resp = await client.get(
-        "/api/v1/user-skills?scope=all", headers=_bearer(user_a)
-    )
+    resp = await client.get("/api/v1/user-skills?scope=all", headers=_bearer(user_a))
     assert resp.status_code == 200
     rows = resp.json()
     slugs = {r["slug"] for r in rows}
@@ -1110,10 +1026,6 @@ async def test_list_scope_all_returns_user_and_team_admin_rows(
 
 
 @pytest.mark.integration
-async def test_list_invalid_scope_returns_422(
-    client: AsyncClient, user_a: User
-) -> None:
-    resp = await client.get(
-        "/api/v1/user-skills?scope=builtin", headers=_bearer(user_a)
-    )
+async def test_list_invalid_scope_returns_422(client: AsyncClient, user_a: User) -> None:
+    resp = await client.get("/api/v1/user-skills?scope=builtin", headers=_bearer(user_a))
     assert resp.status_code == 422

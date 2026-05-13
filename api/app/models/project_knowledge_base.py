@@ -69,7 +69,4 @@ class ProjectKnowledgeBase(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<ProjectKnowledgeBase project_id={self.project_id} "
-            f"kb_id={self.knowledge_base_id}>"
-        )
+        return f"<ProjectKnowledgeBase project_id={self.project_id} kb_id={self.knowledge_base_id}>"

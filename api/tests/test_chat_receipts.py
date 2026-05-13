@@ -276,17 +276,14 @@ async def test_receipts_export_jsonl(
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("application/jsonl")
     assert "attachment" in response.headers["content-disposition"]
-    assert (
-        f"chat-{populated_chat.id}-receipts.jsonl"
-        in response.headers["content-disposition"]
-    )
+    assert f"chat-{populated_chat.id}-receipts.jsonl" in response.headers["content-disposition"]
 
     import json
 
-    lines = [l for l in response.text.splitlines() if l.strip()]
+    lines = [line for line in response.text.splitlines() if line.strip()]
     assert len(lines) > 0
-    for line in lines:
-        parsed = json.loads(line)
+    for raw in lines:
+        parsed = json.loads(raw)
         assert "ts" in parsed
         assert "kind" in parsed
         assert "detail" in parsed
@@ -303,9 +300,9 @@ async def test_receipts_export_jsonl_filter_event_kinds(
     assert response.status_code == 200, response.text
     import json
 
-    lines = [l for l in response.text.splitlines() if l.strip()]
-    for line in lines:
-        parsed = json.loads(line)
+    lines = [line for line in response.text.splitlines() if line.strip()]
+    for raw in lines:
+        parsed = json.loads(raw)
         assert parsed["kind"] == "message"
 
 

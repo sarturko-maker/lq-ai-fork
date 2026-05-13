@@ -650,7 +650,7 @@ async def test_messages_role_check_fires(db_session: AsyncSession) -> None:
     db_session.add(chat)
     await db_session.flush()
 
-    with pytest.raises(Exception):  # noqa: B017
+    with pytest.raises(Exception):
         await db_session.execute(
             text("INSERT INTO messages (chat_id, role, content) VALUES (:cid, 'bogus_role', 'x')"),
             {"cid": chat.id},

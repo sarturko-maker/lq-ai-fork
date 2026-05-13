@@ -35,7 +35,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import Text, and_, func, select
+from sqlalchemy import ColumnElement, Select, Text, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import AdminUser
@@ -403,7 +403,10 @@ async def get_usage(
     }
     group_col = group_col_map[group_by]
 
-    conditions = [InferenceRoutingLog.refused.is_(False)]
+    # Annotate as `ColumnElement[bool]` so mypy doesn't infer the narrower
+    # `BinaryExpression[bool]` from the first element and then reject the
+    # `==` / `>=` comparisons below.
+    conditions: list[ColumnElement[bool]] = [InferenceRoutingLog.refused.is_(False)]
     if date_from is not None:
         conditions.append(InferenceRoutingLog.timestamp >= date_from)
     if date_to is not None:
@@ -417,7 +420,9 @@ async def get_usage(
     if tier is not None:
         conditions.append(InferenceRoutingLog.routed_inference_tier == tier)
 
-    stmt = (
+    # `group_col` is dynamic across the if-branches above, so mypy can't
+    # infer the row type for the Select; annotate explicitly.
+    stmt: Select[Any] = (
         select(
             group_col.label("group_key"),
             func.count().label("request_count"),

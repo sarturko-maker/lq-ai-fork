@@ -142,16 +142,19 @@ async def test_chat_initiated_query_writes_retrieval_audit_row(
     chunk_ids = [uuid.uuid4() for _ in range(3)]
     fake_results = [_fake_hybrid_result(cid) for cid in chunk_ids]
 
-    with patch(
-        "app.api.knowledge_bases.hybrid_search",
-        new=AsyncMock(return_value=fake_results),
-    ), patch(
-        # alpha=1.0 path skips embedding entirely; safer than mocking
-        # the gateway client. We force FTS-only via hybrid_alpha=1.0
-        # below, but also patch embed-fetch as a defensive belt: any
-        # production-path change to alpha gating won't blow up the test.
-        "app.api.knowledge_bases.request_embedding_vector",
-        new=AsyncMock(return_value=[0.0] * 1536),
+    with (
+        patch(
+            "app.api.knowledge_bases.hybrid_search",
+            new=AsyncMock(return_value=fake_results),
+        ),
+        patch(
+            # alpha=1.0 path skips embedding entirely; safer than mocking
+            # the gateway client. We force FTS-only via hybrid_alpha=1.0
+            # below, but also patch embed-fetch as a defensive belt: any
+            # production-path change to alpha gating won't blow up the test.
+            "app.api.knowledge_bases.request_embedding_vector",
+            new=AsyncMock(return_value=[0.0] * 1536),
+        ),
     ):
         response = await client.post(
             f"/api/v1/knowledge-bases/{kb.id}/query",
@@ -167,13 +170,17 @@ async def test_chat_initiated_query_writes_retrieval_audit_row(
     assert response.status_code == 200, response.text
 
     audits = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "inference.kb_chunks_retrieved",
-                AuditLog.resource_id == str(chat_for_owner.id),
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "inference.kb_chunks_retrieved",
+                    AuditLog.resource_id == str(chat_for_owner.id),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(audits) == 1, f"Expected exactly one retrieval audit row, got {len(audits)}"
     row = audits[0]
     assert row.resource_type == "chat"
@@ -197,12 +204,15 @@ async def test_standalone_query_writes_no_retrieval_audit_row(
 
     fake_results = [_fake_hybrid_result(uuid.uuid4()) for _ in range(2)]
 
-    with patch(
-        "app.api.knowledge_bases.hybrid_search",
-        new=AsyncMock(return_value=fake_results),
-    ), patch(
-        "app.api.knowledge_bases.request_embedding_vector",
-        new=AsyncMock(return_value=[0.0] * 1536),
+    with (
+        patch(
+            "app.api.knowledge_bases.hybrid_search",
+            new=AsyncMock(return_value=fake_results),
+        ),
+        patch(
+            "app.api.knowledge_bases.request_embedding_vector",
+            new=AsyncMock(return_value=[0.0] * 1536),
+        ),
     ):
         response = await client.post(
             f"/api/v1/knowledge-bases/{kb.id}/query",
@@ -217,12 +227,16 @@ async def test_standalone_query_writes_no_retrieval_audit_row(
     assert response.status_code == 200, response.text
 
     audits = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "inference.kb_chunks_retrieved",
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "inference.kb_chunks_retrieved",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert audits == []
 
 
@@ -235,12 +249,15 @@ async def test_empty_results_writes_no_retrieval_audit_row(
 ) -> None:
     """``chat_id`` set + empty result set → no audit row (guard)."""
 
-    with patch(
-        "app.api.knowledge_bases.hybrid_search",
-        new=AsyncMock(return_value=[]),
-    ), patch(
-        "app.api.knowledge_bases.request_embedding_vector",
-        new=AsyncMock(return_value=[0.0] * 1536),
+    with (
+        patch(
+            "app.api.knowledge_bases.hybrid_search",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.api.knowledge_bases.request_embedding_vector",
+            new=AsyncMock(return_value=[0.0] * 1536),
+        ),
     ):
         response = await client.post(
             f"/api/v1/knowledge-bases/{kb.id}/query",
@@ -256,11 +273,15 @@ async def test_empty_results_writes_no_retrieval_audit_row(
     assert response.status_code == 200, response.text
 
     audits = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "inference.kb_chunks_retrieved",
-                AuditLog.resource_id == str(chat_for_owner.id),
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "inference.kb_chunks_retrieved",
+                    AuditLog.resource_id == str(chat_for_owner.id),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert audits == []

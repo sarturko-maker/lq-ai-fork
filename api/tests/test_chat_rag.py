@@ -99,9 +99,7 @@ async def owner_user(db_session: AsyncSession) -> User:
 
 
 @pytest_asyncio.fixture
-async def project_for_owner(
-    db_session: AsyncSession, owner_user: User
-) -> Project:
+async def project_for_owner(db_session: AsyncSession, owner_user: User) -> Project:
     project = Project(
         owner_id=owner_user.id,
         name="RAG matter",
@@ -113,9 +111,7 @@ async def project_for_owner(
 
 
 @pytest_asyncio.fixture
-async def kb_for_owner(
-    db_session: AsyncSession, owner_user: User
-) -> KnowledgeBase:
+async def kb_for_owner(db_session: AsyncSession, owner_user: User) -> KnowledgeBase:
     kb = KnowledgeBase(
         owner_id=owner_user.id,
         name="RAG KB",
@@ -171,9 +167,7 @@ async def chat_in_empty_project(
 
 
 @pytest_asyncio.fixture
-async def chat_no_project(
-    db_session: AsyncSession, owner_user: User
-) -> Chat:
+async def chat_no_project(db_session: AsyncSession, owner_user: User) -> Chat:
     """Standalone chat (no project_id)."""
 
     chat = Chat(owner_id=owner_user.id, title="rag-standalone")
@@ -290,13 +284,17 @@ async def test_chat_send_with_attached_kb_writes_audit_and_prepends_context(
 
     # Audit row written.
     audits = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "inference.kb_chunks_retrieved",
-                AuditLog.resource_id == str(chat_with_kb_attached.id),
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "inference.kb_chunks_retrieved",
+                    AuditLog.resource_id == str(chat_with_kb_attached.id),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(audits) == 1, f"Expected exactly one retrieval audit row, got {len(audits)}"
     row = audits[0]
     assert row.resource_type == "chat"
@@ -360,20 +358,22 @@ async def test_chat_send_with_attached_kb_and_empty_results_writes_no_audit(
     assert mock_search.called
 
     audits = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "inference.kb_chunks_retrieved",
-                AuditLog.resource_id == str(chat_with_kb_attached.id),
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "inference.kb_chunks_retrieved",
+                    AuditLog.resource_id == str(chat_with_kb_attached.id),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert audits == []
 
     # Gateway request has only the user turn.
     sent_body = _json.loads(route.calls[0].request.read())
-    assert sent_body["messages"] == [
-        {"role": "user", "content": "needle no haystack"}
-    ]
+    assert sent_body["messages"] == [{"role": "user", "content": "needle no haystack"}]
 
 
 # ---------------------------------------------------------------------------
@@ -408,12 +408,16 @@ async def test_chat_send_with_project_but_no_kbs_skips_retrieval(
     assert not mock_search.called, "hybrid_search must NOT be called when no KBs attached"
 
     audits = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "inference.kb_chunks_retrieved",
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "inference.kb_chunks_retrieved",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert audits == []
 
     sent_body = _json.loads(route.calls[0].request.read())
@@ -452,12 +456,16 @@ async def test_chat_send_standalone_chat_skips_retrieval(
     assert not mock_search.called
 
     audits = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "inference.kb_chunks_retrieved",
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "inference.kb_chunks_retrieved",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert audits == []
 
     sent_body = _json.loads(route.calls[0].request.read())

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -220,9 +220,7 @@ def _to_response(row: UserSkill) -> UserSkillResponse:
     )
 
 
-async def _is_team_admin(
-    db: AsyncSession, *, team_id: uuid.UUID, user_id: uuid.UUID
-) -> bool:
+async def _is_team_admin(db: AsyncSession, *, team_id: uuid.UUID, user_id: uuid.UUID) -> bool:
     """Return whether ``user_id`` is an ``admin``-role member of ``team_id``.
 
     Mutate rights on team-scope skills require the team-admin role per
@@ -260,9 +258,7 @@ async def _load_mutable(
         stmt = stmt.where(UserSkill.archived_at.is_(None))
     row = (await db.execute(stmt)).scalar_one_or_none()
     if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found")
 
     if row.scope == "user":
         if row.owner_user_id != user_id:
@@ -277,9 +273,7 @@ async def _load_mutable(
                 status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
             )
     else:  # pragma: no cover — CHECK constraint blocks other values
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found")
     return row
 
 
@@ -603,16 +597,14 @@ async def delete_user_skill(
     even after the slug has been reused.
     """
 
-    row = await _load_mutable(
-        db, skill_id=skill_id, user_id=user.id, include_archived=True
-    )
+    row = await _load_mutable(db, skill_id=skill_id, user_id=user.id, include_archived=True)
     if row.archived_at is not None:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="user skill is already archived",
         )
 
-    row.archived_at = datetime.now(timezone.utc)
+    row.archived_at = datetime.now(UTC)
 
     delete_details: dict[str, Any] = {
         "slug": row.slug,

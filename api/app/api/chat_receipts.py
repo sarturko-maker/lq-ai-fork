@@ -104,8 +104,7 @@ async def get_chat_receipts(
         )
 
     requested: frozenset[str] = (
-        frozenset(k.strip() for k in event_kinds.split(",") if k.strip())
-        & _ALL_KINDS
+        frozenset(k.strip() for k in event_kinds.split(",") if k.strip()) & _ALL_KINDS
         if event_kinds
         else _ALL_KINDS
     )
@@ -115,9 +114,7 @@ async def get_chat_receipts(
     # messages + denorm skill events
     if "message" in requested or "skill" in requested:
         msgs_result = await db.execute(
-            select(Message)
-            .where(Message.chat_id == chat_id)
-            .order_by(Message.created_at)
+            select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
         )
         for m in msgs_result.scalars():
             if "message" in requested:
@@ -185,11 +182,7 @@ async def get_chat_receipts(
             .order_by(AuditLog.timestamp)
         )
         for a in audits_result.scalars():
-            kind = (
-                "retrieval"
-                if a.action == "inference.kb_chunks_retrieved"
-                else "audit"
-            )
+            kind = "retrieval" if a.action == "inference.kb_chunks_retrieved" else "audit"
             if kind in requested:
                 events.append(
                     ReceiptEvent(
@@ -197,9 +190,7 @@ async def get_chat_receipts(
                         kind=kind,
                         detail={
                             "action": a.action,
-                            "actor_user_id": (
-                                str(a.user_id) if a.user_id else None
-                            ),
+                            "actor_user_id": (str(a.user_id) if a.user_id else None),
                             "details": a.details,
                         },
                     )
@@ -236,9 +227,7 @@ async def export_chat_receipts(
         content=body,
         media_type="application/jsonl",
         headers={
-            "Content-Disposition": (
-                f'attachment; filename="chat-{chat_id}-receipts.jsonl"'
-            ),
+            "Content-Disposition": (f'attachment; filename="chat-{chat_id}-receipts.jsonl"'),
         },
     )
 

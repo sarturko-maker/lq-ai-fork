@@ -110,9 +110,7 @@ def _h(user: User) -> dict[str, str]:
 
 
 @pytest_asyncio.fixture
-async def sample_refusal_message(
-    db_session: AsyncSession, admin_user: User
-) -> Message:
+async def sample_refusal_message(db_session: AsyncSession, admin_user: User) -> Message:
     """Create a chat with a preceding user message + a refusal row.
 
     The override path needs both: a ``kind='user'`` row to re-run, and
@@ -157,9 +155,7 @@ async def sample_refusal_message(
 
 
 @pytest_asyncio.fixture
-async def sample_ai_message(
-    db_session: AsyncSession, admin_user: User
-) -> Message:
+async def sample_ai_message(db_session: AsyncSession, admin_user: User) -> Message:
     """A normal ``kind='ai'`` assistant row — overriding this must 404."""
 
     chat = Chat(owner_id=admin_user.id, title="Normal exchange")
