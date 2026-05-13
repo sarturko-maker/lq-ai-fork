@@ -32,7 +32,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,6 +55,12 @@ router = APIRouter(prefix="/user-skills", tags=["user-skills"])
 # an alphanumeric. 80 chars is generous against the ~20-char names in
 # the starter corpus and short enough to fit comfortably in UI chips.
 _SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$")
+
+# Slash-alias shape: leading slash, then 1-32 lowercase alphanumerics or
+# hyphens. Mirrors the DB-layer ``chk_user_skills_slash_alias_format``
+# CHECK constraint added in migration 0023. Matched at the Pydantic layer
+# so the API rejects malformed aliases with a 422 before they hit the DB.
+_SLASH_ALIAS_RE = re.compile(r"^/[a-z0-9-]{1,32}$")
 
 _NAME_MAX = 200
 _DESCRIPTION_MAX = 2_000
@@ -100,6 +106,8 @@ class UserSkillResponse(BaseModel):
     tags: list[str] = Field(default_factory=list)
     frontmatter_extra: dict[str, Any] = Field(default_factory=dict)
     body: str
+    slash_alias: str | None = None
+    forked_from: str | None = None
     archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -125,10 +133,44 @@ class UserSkillCreate(BaseModel):
     frontmatter_extra: dict[str, Any] = Field(default_factory=dict)
     scope: str = Field(default="user", pattern=r"^(user|team)$")
     owner_team_id: uuid.UUID | None = None
+    slash_alias: str | None = Field(
+        default=None,
+        description="Optional /slug invocation alias; ^/[a-z0-9-]{1,32}$.",
+    )
+    forked_from: str | None = Field(
+        default=None,
+        description="Documentary slug of the source skill if forked. Write-once.",
+    )
+    source_message_id: str | None = Field(
+        default=None,
+        description=(
+            "Capture metadata: source AI message id when this skill was distilled "
+            "from chat. Documentary only — not persisted as a column; rides the "
+            "create-time audit-log row."
+        ),
+    )
+
+    @field_validator("slash_alias")
+    @classmethod
+    def _validate_slash_alias(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not _SLASH_ALIAS_RE.match(v):
+            raise ValueError(
+                "slash_alias must match ^/[a-z0-9-]{1,32}$ "
+                "(leading slash, then 1-32 lowercase alphanumerics or hyphens)"
+            )
+        return v
 
 
 class UserSkillUpdate(BaseModel):
-    """PATCH body. Every field is optional; only the supplied keys move."""
+    """PATCH body. Every field is optional; only the supplied keys move.
+
+    ``forked_from`` and ``source_message_id`` are intentionally absent —
+    they are write-once at create time so the documentary lineage cannot
+    be rewritten after creation. The audit log carries the actual lineage
+    record per ADR 0012 §5.
+    """
 
     display_name: str | None = Field(default=None, min_length=1, max_length=_NAME_MAX)
     description: str | None = Field(default=None, min_length=1, max_length=_DESCRIPTION_MAX)
@@ -136,6 +178,22 @@ class UserSkillUpdate(BaseModel):
     version: str | None = Field(default=None, min_length=1, max_length=_VERSION_MAX)
     tags: list[str] | None = Field(default=None, max_length=_MAX_TAGS)
     frontmatter_extra: dict[str, Any] | None = None
+    slash_alias: str | None = Field(
+        default=None,
+        description="Optional /slug invocation alias; ^/[a-z0-9-]{1,32}$.",
+    )
+
+    @field_validator("slash_alias")
+    @classmethod
+    def _validate_slash_alias(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not _SLASH_ALIAS_RE.match(v):
+            raise ValueError(
+                "slash_alias must match ^/[a-z0-9-]{1,32}$ "
+                "(leading slash, then 1-32 lowercase alphanumerics or hyphens)"
+            )
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +272,8 @@ def _to_response(row: UserSkill) -> UserSkillResponse:
         tags=list(row.tags or []),
         frontmatter_extra=dict(row.frontmatter_extra or {}),
         body=row.body,
+        slash_alias=row.slash_alias,
+        forked_from=row.forked_from,
         archived_at=row.archived_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -407,6 +467,9 @@ async def create_user_skill(
     slug = _validate_slug(payload.slug)
     tags = _validate_tags(payload.tags)
     frontmatter_extra = _validate_frontmatter_extra(payload.frontmatter_extra)
+    slash_alias = payload.slash_alias  # already regex-validated at the Pydantic layer
+    forked_from = payload.forked_from
+    source_message_id = payload.source_message_id
 
     if payload.scope == "user":
         if payload.owner_team_id is not None:
@@ -424,6 +487,8 @@ async def create_user_skill(
             tags=tags,
             frontmatter_extra=frontmatter_extra,
             body=payload.body,
+            slash_alias=slash_alias,
+            forked_from=forked_from,
         )
         audit_details: dict[str, Any] = {
             "slug": slug,
@@ -454,6 +519,8 @@ async def create_user_skill(
             tags=tags,
             frontmatter_extra=frontmatter_extra,
             body=payload.body,
+            slash_alias=slash_alias,
+            forked_from=forked_from,
         )
         audit_details = {
             "slug": slug,
@@ -464,11 +531,31 @@ async def create_user_skill(
             "team_slug": team.slug,
         }
 
+    # Documentary capture metadata lands in the audit-log row instead of a
+    # dedicated column. Keeps the row schema tight and preserves the
+    # forensic trail per ADR 0012 §5.
+    if slash_alias is not None:
+        audit_details["slash_alias"] = slash_alias
+    if forked_from is not None:
+        audit_details["forked_from"] = forked_from
+    if source_message_id is not None:
+        audit_details["source_message_id"] = source_message_id
+
     db.add(row)
     try:
         await db.flush()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
+        # The two partial unique indexes that can fire here:
+        #   idx_user_skills_slash_alias_owner_active / _team_active
+        #   ix_user_skills_owner_slug_active (the existing slug index)
+        # Disambiguate via the error text so the right 4xx surfaces.
+        err_text = str(getattr(e, "orig", e)).lower()
+        if "slash_alias" in err_text:
+            raise HTTPException(
+                status_code=422,
+                detail=(f"slash_alias {slash_alias!r} is already used by another of your skills."),
+            ) from None
         owner_label = "team" if payload.scope == "team" else "user"
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -545,6 +632,10 @@ async def update_user_skill(
         if new_extra != dict(row.frontmatter_extra or {}):
             row.frontmatter_extra = new_extra
             changed["frontmatter_extra"] = new_extra
+    if payload.slash_alias is not None and payload.slash_alias != row.slash_alias:
+        # Pydantic already enforces the ``^/[a-z0-9-]{1,32}$`` shape.
+        row.slash_alias = payload.slash_alias
+        changed["slash_alias"] = payload.slash_alias
 
     if not changed:
         return _to_response(row)
@@ -569,7 +660,20 @@ async def update_user_skill(
         request=request,
         details=details,
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        err_text = str(getattr(e, "orig", e)).lower()
+        if "slash_alias" in err_text:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"slash_alias {payload.slash_alias!r} is already used by "
+                    "another of your skills."
+                ),
+            ) from None
+        raise
     await db.refresh(row)
 
     return _to_response(row)
