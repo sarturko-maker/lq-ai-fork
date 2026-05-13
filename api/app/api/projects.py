@@ -50,10 +50,11 @@ handler validates the merged state; (3) the DB CHECK constraint
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -78,6 +79,13 @@ from app.skills.registry import MutableSkillRegistry
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 log = logging.getLogger(__name__)
+
+# Wave D.2 Task 2.1 — slugs matching ``^__[a-z0-9-]+__$`` are reserved for
+# system-managed matters (sandbox today; potentially other internal scopes
+# later). User-supplied slugs in this family are rejected with 422 in the
+# create handler. The sandbox-ensure endpoint (Task 2.2) constructs its
+# slug internally and bypasses this check.
+_RESERVED_SLUG_RE: re.Pattern[str] = re.compile(r"^__[a-z0-9-]+__$")
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +287,29 @@ async def _resolve_unique_slug(
         suffix += 1
 
 
+def _check_slug_not_reserved(slug: str) -> None:
+    """Reject slugs matching the reserved ``__*__`` family with 422.
+
+    Wave D.2 Task 2.1. The reservation is enforced on user-driven create
+    paths only — system-managed scopes (e.g., the per-user try-it sandbox
+    created by ``POST /projects/sandbox/ensure``) construct their slug
+    internally and don't call this helper.
+
+    Raises a plain :class:`fastapi.HTTPException` rather than an
+    :class:`app.errors.LQAIError` subclass so the response body renders
+    as the conventional ``{"detail": "<message>"}`` string shape that the
+    Wave D.2 frontend wizard expects when surfacing the error inline.
+    """
+
+    if _RESERVED_SLUG_RE.match(slug):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Slug pattern '__*__' is reserved for system-managed matters; '{slug}' rejected."
+            ),
+        )
+
+
 def _registry(request: Request) -> MutableSkillRegistry:
     """Return the live in-memory skill registry from app state.
 
@@ -321,6 +352,11 @@ async def create_project(
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProjectResponse:
+    # Wave D.2 Task 2.1 — reject the reserved ``__*__`` slug family before
+    # we generate or resolve a slug. Only user-supplied slugs can land in
+    # the reserved family; ``slugify`` itself never emits underscores.
+    if payload.slug is not None:
+        _check_slug_not_reserved(payload.slug)
     desired_slug = payload.slug or slugify(payload.name)
     final_slug = await _resolve_unique_slug(db, owner_id=user.id, desired=desired_slug)
 

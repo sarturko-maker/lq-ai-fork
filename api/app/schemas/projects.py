@@ -50,6 +50,13 @@ column is unrestricted ``TEXT``."""
 # leading/trailing-dash exclusion is captured by the regex shape.
 SLUG_RE: re.Pattern[str] = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
+# Wave D.2 Task 2.1: at the request-schema boundary we accept the strict
+# slug shape AND the reserved ``__*__`` family, so the create handler can
+# reject the reserved pattern with a domain-level 422 (``"reserved"`` in
+# the body). The narrower :data:`SLUG_RE` still gates PATCH and remains
+# the canonical shape for generated slugs.
+_REQUEST_SLUG_PATTERN: str = r"^(?:[a-z0-9]+(?:-[a-z0-9]+)*|__[a-z0-9-]+__)$"
+
 
 # ---------------------------------------------------------------------------
 # Type aliases for reusable annotated string fields.
@@ -64,9 +71,12 @@ ProjectName = Annotated[
 ProjectSlug = Annotated[
     str,
     StringConstraints(min_length=1, max_length=SLUG_MAX_LEN, strip_whitespace=True),
-    Field(pattern=SLUG_RE.pattern),
+    Field(pattern=_REQUEST_SLUG_PATTERN),
 ]
-"""1-80 chars, lowercase ascii letters/digits separated by dashes."""
+"""1-80 chars, lowercase ascii letters/digits separated by dashes. The
+reserved ``__*__`` family is admitted at this layer so the create handler
+can surface a domain-level 422 with ``"reserved"`` in the body; see
+:func:`app.api.projects._check_slug_not_reserved`."""
 
 ProjectDescription = Annotated[
     str,
