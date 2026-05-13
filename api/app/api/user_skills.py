@@ -40,7 +40,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import ActiveUser
 from app.audit import audit_action
 from app.db.session import get_db
+from app.models.audit import AuditLog
 from app.models.team import Team, TeamMember
+from app.models.user import User
 from app.models.user_skill import UserSkill
 
 router = APIRouter(prefix="/user-skills", tags=["user-skills"])
@@ -677,6 +679,98 @@ async def update_user_skill(
     await db.refresh(row)
 
     return _to_response(row)
+
+
+class UserSkillVersionItem(BaseModel):
+    """One audit-log row, projected onto the version-history view.
+
+    The ``details`` blob is the raw JSONB column from ``audit_log`` —
+    callers consuming this endpoint already trust the action vocabulary
+    so re-shaping per action would only add coupling. ``version`` is
+    surfaced as a top-level convenience because every create / update
+    row carries it and the timeline UI hangs the version pill off it.
+    """
+
+    timestamp: datetime
+    actor_user_id: uuid.UUID | None = None
+    actor_email: str | None = None
+    action: str
+    version: str | None = None
+    details: dict[str, Any] | None = None
+
+
+class UserSkillVersionsResponse(BaseModel):
+    """Wrapper so future cursors / counts can land without a breaking change."""
+
+    items: list[UserSkillVersionItem]
+
+
+@router.get(
+    "/{skill_id}/versions",
+    response_model=UserSkillVersionsResponse,
+    summary="Audit-log view of edits for this user-skill (Wave D.2)",
+    responses={404: {"description": "User skill not found"}},
+)
+async def list_user_skill_versions(
+    skill_id: uuid.UUID,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> UserSkillVersionsResponse:
+    """GET /api/v1/user-skills/{id}/versions — most-recent-first audit feed.
+
+    Returns the ``audit_log`` rows for ``resource_type='user_skill'``
+    keyed by this skill id. ``user_skill.created`` lands last in the
+    list because the result is ordered ``timestamp DESC`` — the timeline
+    UI renders top-down, newest at the top.
+
+    Access posture mirrors the mutable surface: user-scope rows are
+    visible only to the owner; team-scope rows only to team-admins.
+    Non-admin team members read the merged skill via ``GET /skills/{slug}``
+    but the audit feed is part of the management surface, not the
+    consumption surface, so the read gate is the mutate gate. 404 for
+    "no such id" and "exists but not yours" alike (id-probing-safe;
+    matches the load-mutable convention elsewhere in this router).
+
+    ``include_archived=True`` because a freshly-archived skill's
+    timeline still needs to render for the management UI; ``_load_mutable``
+    handles the auth check uniformly across active and archived rows.
+    """
+
+    # Reuse the mutable-access gate: read access to the audit timeline
+    # is the same as write access to the row (the timeline reveals
+    # body deltas via changed-field hints + version transitions).
+    await _load_mutable(db, skill_id=skill_id, user_id=user.id, include_archived=True)
+
+    # SELECT both AuditLog (the row) and User.email (the actor handle) in
+    # one query; ``db.scalars`` would only return the first entity, so we
+    # use ``db.execute(...).all()`` to get Row tuples accessible by
+    # attribute (Row.AuditLog, Row.email).
+    stmt = (
+        select(AuditLog, User.email)
+        .outerjoin(User, AuditLog.user_id == User.id)
+        .where(
+            AuditLog.resource_type == "user_skill",
+            AuditLog.resource_id == str(skill_id),
+        )
+        .order_by(AuditLog.timestamp.desc())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    items = [
+        UserSkillVersionItem(
+            timestamp=row.AuditLog.timestamp,
+            actor_user_id=row.AuditLog.user_id,
+            actor_email=row.email,
+            action=row.AuditLog.action,
+            version=(row.AuditLog.details or {}).get("version")
+            or (row.AuditLog.details or {}).get("version_after"),
+            details=row.AuditLog.details,
+        )
+        for row in rows
+    ]
+    return UserSkillVersionsResponse(items=items)
 
 
 @router.delete(
