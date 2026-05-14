@@ -145,6 +145,34 @@ class KnowledgeBaseResponse(BaseModel):
     updated_at: datetime
 
 
+class KBFileResponse(BaseModel):
+    """Wire shape for one row of ``GET /knowledge-bases/{id}/files`` (Wave C).
+
+    Mirrors the ``File`` schema in ``backend-openapi.yaml`` (the same
+    shape ``POST /files`` returns) so the Knowledge surface can render
+    per-doc ingestion status without a follow-up fetch per row. The
+    underlying join carries ``attached_at`` — surfaced as ``attached_at``
+    so the UI can sort by attachment time independently of file creation
+    time (a user may attach an old file to a new KB).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    project_id: uuid.UUID | None = None
+    filename: str
+    mime_type: str
+    size_bytes: int
+    hash_sha256: str
+    ingestion_status: str
+    ingestion_error: str | None = None
+    page_count: int | None = None
+    character_count: int | None = None
+    created_at: datetime
+    attached_at: datetime
+
+
 class SearchResultChunk(BaseModel):
     """One chunk in a search-result envelope.
 

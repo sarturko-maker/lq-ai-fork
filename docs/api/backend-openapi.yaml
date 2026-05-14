@@ -1891,6 +1891,31 @@ paths:
         in: path
         required: true
         schema: {type: string, format: uuid}
+    get:
+      tags: [knowledge-bases]
+      summary: List the files attached to a knowledge base
+      description: |
+        Returns the files currently attached to the KB (the `File`
+        shape from `GET /files/{id}` plus the `attached_at` timestamp
+        from the join). Owner-scoped — cross-user / unknown KB id
+        returns 404. Soft-deleted files are excluded. Sorted by
+        `attached_at DESC` so the most recent uploads surface first.
+
+        Drives the Knowledge surface's detail-page document list per
+        the M1 frontend design spec (Wave C).
+      responses:
+        '200':
+          description: List of attached files
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/KBFile'}
+        '404':
+          description: KB not found / cross-user
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
     post:
       tags: [knowledge-bases]
       summary: Attach a file to a knowledge base
@@ -3550,6 +3575,39 @@ components:
           minimum: 0.0
           maximum: 1.0
         archived: {type: boolean, description: "true to archive; false to unarchive"}
+
+    KBFile:
+      type: object
+      description: |
+        One row of `GET /api/v1/knowledge-bases/{kb_id}/files`. Mirrors
+        `File` (the wire shape returned by `POST /files` /
+        `GET /files/{id}`) and adds `attached_at` from the join row so
+        the Knowledge surface can sort by attach time.
+      required:
+        [id, owner_id, filename, mime_type, size_bytes, hash_sha256, ingestion_status, created_at, attached_at]
+      properties:
+        id: {type: string, format: uuid}
+        owner_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, nullable: true}
+        filename: {type: string}
+        mime_type: {type: string}
+        size_bytes: {type: integer}
+        hash_sha256: {type: string}
+        ingestion_status:
+          type: string
+          enum: [pending, processing, ready, failed]
+        ingestion_error:
+          type: string
+          nullable: true
+        page_count: {type: integer, nullable: true}
+        character_count: {type: integer, nullable: true}
+        created_at: {type: string, format: date-time}
+        attached_at:
+          type: string
+          format: date-time
+          description: |
+            When the file was attached to this KB (from
+            `knowledge_base_files.attached_at`).
 
     KBQueryRequest:
       type: object

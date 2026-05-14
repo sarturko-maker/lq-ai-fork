@@ -8,6 +8,7 @@ Surface (per ``docs/api/backend-openapi.yaml``):
 * ``PATCH  /api/v1/knowledge-bases/{kb_id}``           — partial update.
 * ``DELETE /api/v1/knowledge-bases/{kb_id}``           — soft-delete.
 * ``POST   /api/v1/knowledge-bases/{kb_id}/files``     — attach a file.
+* ``GET    /api/v1/knowledge-bases/{kb_id}/files``     — list attached files.
 * ``DELETE /api/v1/knowledge-bases/{kb_id}/files/{file_id}`` — detach.
 * ``POST   /api/v1/knowledge-bases/{kb_id}/query``     — hybrid search.
 
@@ -58,6 +59,7 @@ from app.models.knowledge import KnowledgeBase, KnowledgeBaseFile
 from app.models.project import Project
 from app.schemas.knowledge import (
     AttachFileRequest,
+    KBFileResponse,
     KBQueryRequest,
     KBQueryResponse,
     KnowledgeBaseCreateRequest,
@@ -532,6 +534,88 @@ async def attach_file(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get(
+    "/{kb_id}/files",
+    response_model=list[KBFileResponse],
+    summary="List the files attached to a knowledge base",
+    description=(
+        "Returns the files currently attached to the KB (the ``File`` "
+        "shape from ``GET /files/{id}`` plus the ``attached_at`` "
+        "timestamp from the join). Owner-scoped — cross-user / unknown "
+        "KB id returns 404. Soft-deleted files are excluded; an "
+        "attachment that points at a deleted file is filtered out at "
+        "the join. Sorted by ``attached_at DESC`` so the most recent "
+        "uploads surface first."
+    ),
+)
+async def list_kb_files(
+    kb_id: str,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[KBFileResponse]:
+    """Enumerate the files attached to ``kb_id``.
+
+    The detail page (Wave C) needs per-doc rows with ingestion status
+    so the UI can render the ``✓`` / ``⏳`` / ``⚠`` indicator next to
+    each filename. Backed by the ``knowledge_base_files`` join joined
+    to ``files`` — both ends scoped to the caller (the KB by
+    ``owner_id``; the file by ``deleted_at IS NULL`` to drop tombstones
+    that may still carry a join row mid-cascade).
+    """
+
+    from sqlalchemy.orm import aliased
+
+    kid = _validate_kb_id(kb_id)
+    # Owner-scope check — cross-user / unknown / archived → 404. We
+    # allow archived KBs here so the detail page can render a
+    # post-archive view (matches the ``get_kb`` posture).
+    await _load_visible_kb(db, kid, user.id, include_archived=True)
+
+    # Left-join to ``documents`` so ``page_count`` / ``character_count``
+    # come from the C5-pipeline row when present. A file in
+    # ``ingestion_status='pending' | 'processing'`` has no document row
+    # yet — those columns serialize as null until the pipeline finishes.
+    doc = aliased(Document)
+    stmt = (
+        select(
+            FileModel,
+            KnowledgeBaseFile.attached_at,
+            doc.page_count,
+            doc.character_count,
+        )
+        .join(KnowledgeBaseFile, KnowledgeBaseFile.file_id == FileModel.id)
+        .outerjoin(doc, doc.file_id == FileModel.id)
+        .where(
+            KnowledgeBaseFile.kb_id == kid,
+            FileModel.deleted_at.is_(None),
+        )
+        .order_by(KnowledgeBaseFile.attached_at.desc())
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    out: list[KBFileResponse] = []
+    for file_row, attached_at, page_count, character_count in rows:
+        out.append(
+            KBFileResponse(
+                id=file_row.id,
+                owner_id=file_row.owner_id,
+                project_id=file_row.project_id,
+                filename=file_row.filename,
+                mime_type=file_row.mime_type,
+                size_bytes=file_row.size_bytes,
+                hash_sha256=file_row.hash_sha256,
+                ingestion_status=file_row.ingestion_status,
+                ingestion_error=file_row.ingestion_error,
+                page_count=page_count,
+                character_count=character_count,
+                created_at=file_row.created_at,
+                attached_at=attached_at,
+            )
+        )
+    return out
+
+
 @router.delete(
     "/{kb_id}/files/{file_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -714,6 +798,7 @@ __all__ = [
     "delete_kb",
     "detach_file",
     "get_kb",
+    "list_kb_files",
     "list_kbs",
     "query_kb",
     "router",
