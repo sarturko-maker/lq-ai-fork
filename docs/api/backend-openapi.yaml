@@ -3256,6 +3256,18 @@ components:
         - type: object
           required: [content_yaml, content_md]
           properties:
+            id:
+              type: string
+              format: uuid
+              nullable: true
+              description: >-
+                Wave D.2 — underlying ``user_skills.id`` row UUID when the
+                resolved scope is ``user`` or ``team``. ``null`` for
+                built-in (filesystem-canonical) skills, which have no DB
+                row. The skill detail page's Versions tab needs this id
+                to call the audit-history endpoint; surfacing it on the
+                detail GET avoids a second round-trip to resolve
+                slug → id.
             content_yaml: {type: string, description: "Frontmatter YAML"}
             content_md: {type: string, description: "Body markdown"}
             reference_files:

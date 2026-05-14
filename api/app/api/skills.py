@@ -138,6 +138,11 @@ def _skill_from_user_skill(row: UserSkill) -> dict[str, Any]:
     content_yaml = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True)
 
     payload: dict[str, Any] = {
+        # Wave D.2 — surface the row UUID so the skill detail page's
+        # Versions tab can call the audit-history endpoint without a
+        # second round-trip to resolve slug → id. Built-ins (resolved
+        # via the registry path below) have no DB id and omit this key.
+        "id": str(row.id),
         **_summary_from_user_skill(row),
         "content_yaml": content_yaml,
         "content_md": row.body,
