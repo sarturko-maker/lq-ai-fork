@@ -37,7 +37,11 @@
 	 * built-ins have no DB id (and we never call the audit endpoint for them).
 	 */
 	export interface SkillForVersionsTab {
-		id?: string;
+		// Accepts ``string | null | undefined`` — the backend ``Skill`` shape
+		// surfaces ``id`` as nullable (``null`` for built-ins which have no DB
+		// row, populated UUID for user/team scope). ``isBuiltinReadonly``
+		// treats both ``undefined`` and ``null`` as "no DB row" via ``!skill.id``.
+		id?: string | null;
 		name: string;
 		scope: 'user' | 'team' | 'builtin';
 	}

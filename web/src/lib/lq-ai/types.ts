@@ -380,6 +380,14 @@ export interface SkillReferenceFile {
 }
 
 export interface Skill extends SkillSummary {
+	/**
+	 * Wave D.2 — underlying ``user_skills.id`` row UUID for user/team scope;
+	 * ``null`` for built-in (filesystem-canonical) skills which have no DB
+	 * row. The skill detail page's Versions tab consumes this to call the
+	 * audit-history endpoint without a second round-trip to resolve
+	 * slug → id. Mirrors the ``id`` field on the backend ``Skill`` schema.
+	 */
+	id?: string | null;
 	content_yaml: string;
 	content_md: string;
 	reference_files?: SkillReferenceFile[];

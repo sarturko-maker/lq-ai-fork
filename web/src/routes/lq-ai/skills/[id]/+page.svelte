@@ -1,16 +1,28 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { skillsApi } from '$lib/lq-ai/api';
 	import type { Skill } from '$lib/lq-ai/types';
 	import SkillDetailTabs from '$lib/lq-ai/components/SkillDetailTabs.svelte';
 	import SkillSourceView from '$lib/lq-ai/components/SkillSourceView.svelte';
+	import SkillTryItTab from '$lib/lq-ai/components/SkillTryItTab.svelte';
+	import SkillVersionsTab from '$lib/lq-ai/components/SkillVersionsTab.svelte';
 
-	let activeTab: 'use' | 'source' | 'try' | 'versions' = 'use';
+	type Tab = 'use' | 'source' | 'try' | 'versions';
+	const VALID: Tab[] = ['use', 'source', 'try', 'versions'];
+
 	let skill: Skill | null = null;
 	let error: string | null = null;
 
 	$: skillName = $page.params.id;
+	// Wave D.2 Task 6.4 — drive activeTab from ?tab= so deep links land on
+	// the right tab and back/forward navigation walks the tab history.
+	$: activeTab = (
+		VALID.includes($page.url.searchParams.get('tab') as Tab)
+			? ($page.url.searchParams.get('tab') as Tab)
+			: 'use'
+	) as Tab;
 
 	onMount(async () => {
 		if (!skillName) return;
@@ -20,6 +32,14 @@
 			error = e instanceof Error ? e.message : 'Failed to load skill';
 		}
 	});
+
+	function setTab(t: Tab): void {
+		const url = new URL($page.url);
+		url.searchParams.set('tab', t);
+		// keepFocus preserves the focused tab button across the navigation;
+		// replaceState:false adds a history entry so back/forward walks tabs.
+		void goto(url.pathname + url.search, { keepFocus: true, replaceState: false });
+	}
 </script>
 
 <main style="padding: var(--lq-space-6); max-width: 1100px; margin: 0 auto;">
@@ -43,7 +63,7 @@
 			</div>
 		</header>
 
-		<SkillDetailTabs {activeTab} onTabChange={(t) => (activeTab = t)} />
+		<SkillDetailTabs {activeTab} onTabChange={setTab} />
 
 		<div style="margin-top: var(--lq-space-4);">
 			{#if activeTab === 'use'}
@@ -56,6 +76,10 @@
 					contentMd={skill.content_md}
 					contentYaml={skill.content_yaml}
 				/>
+			{:else if activeTab === 'try'}
+				<SkillTryItTab skillSlug={skill.name} />
+			{:else if activeTab === 'versions'}
+				<SkillVersionsTab {skill} />
 			{/if}
 		</div>
 	{:else}
