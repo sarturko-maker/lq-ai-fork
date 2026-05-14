@@ -100,6 +100,7 @@ from app.schemas.chats import (
 from app.schemas.gateway import (
     ChatCompletionMessage,
     ChatCompletionRequest,
+    InlineSkillRef,
 )
 
 router = APIRouter(prefix="/chats", tags=["chats"])
@@ -864,9 +865,17 @@ async def send_message(
     try:
         payload = MessageCreateRequest.model_validate(raw_body)
     except PydanticValidationError as exc:
+        # ``include_context=False`` strips the raw exception instance
+        # pydantic stashes in ``ctx.error`` for ``value_error`` failures —
+        # those instances aren't JSON-serializable and the canonical
+        # error envelope is JSON-encoded. Wave D.2 Task 3.0's
+        # ``AttachedSkillRef`` XOR validator raises ``ValueError`` which
+        # surfaces this; previously all the schema's failures were
+        # type/missing-style which don't carry a ctx.error so the issue
+        # was latent.
         raise ValidationError(
             "Request body failed schema validation",
-            details={"errors": exc.errors()},
+            details={"errors": exc.errors(include_context=False, include_url=False)},
         ) from exc
 
     # Auth + ownership: load the chat (visible to caller, not
@@ -874,36 +883,120 @@ async def send_message(
     # must explicitly unarchive (PATCH archived=false) before posting.
     chat = await _load_visible_chat(db, cid, user.id, include_archived=False)
 
-    # Wave D.2 Task 2.7 — send-time slash fallback. If the caller
-    # didn't pre-attach any skills AND the content starts with
-    # ``/<token> ``, try to resolve the token against the merged
-    # catalogue. On hit: append the slug to ``applied_skills`` for
-    # this turn and strip the leading token from the content so the
-    # gateway sees the same body the user would type without the
-    # ``/foo`` prefix. On miss: set ``slash_unresolved=True`` on the
-    # response so the UI can render a hint, but forward the original
-    # content as plain text — the user still gets an answer, the
-    # typo just doesn't activate a skill.
-    effective_content: str = payload.content
+    # Wave D.2 Task 3.0 — merge legacy ``skills`` with new
+    # ``attached_skills``. Each ``attached_skills`` entry is XOR'd at
+    # schema time: ``slug`` entries roll into the legacy slug path
+    # (forwarded as ``lq_ai_skills`` to the gateway), ``inline_body``
+    # entries roll into a separate inline-body list forwarded as
+    # ``lq_ai_inline_skills``. Per-entry ``inputs`` merge into the
+    # combined ``skill_inputs`` map keyed by slug (catalogue) or the
+    # synthesized name (inline). Per-entry ``source`` is captured for
+    # audit-log provenance below.
     effective_skills: list[str] = list(payload.skills)
+    effective_skill_inputs: dict[str, dict[str, Any]] = {
+        k: dict(v) for k, v in payload.skill_inputs.items()
+    }
+    inline_skill_refs: list[InlineSkillRef] = []
+    # Per-attachment provenance for the audit log. Each entry is
+    # ``{"name": <slug or synthesized>, "source": <str|null>,
+    #   "kind": "slug"|"inline"}``.
+    attached_skill_provenance: list[dict[str, str | None]] = [
+        {"name": slug, "source": None, "kind": "slug"} for slug in payload.skills
+    ]
+    for entry in payload.attached_skills:
+        if entry.slug is not None:
+            effective_skills.append(entry.slug)
+            if entry.inputs:
+                # Per-attachment inputs win on collision with the
+                # top-level skill_inputs[<slug>] (the caller's
+                # most-specific intent for *this* attachment).
+                merged = dict(effective_skill_inputs.get(entry.slug, {}))
+                merged.update(entry.inputs)
+                effective_skill_inputs[entry.slug] = merged
+            attached_skill_provenance.append(
+                {"name": entry.slug, "source": entry.source, "kind": "slug"}
+            )
+        else:
+            # inline_body — XOR validator guarantees it's non-empty here.
+            assert entry.inline_body is not None
+            # Synthesized name: opaque + collision-free against real
+            # slugs (real slugs are lowercase-kebab; ``__inline__`` uses
+            # underscores which the slug pattern rejects). Hex tail keeps
+            # it unique within a single request so two inline entries
+            # don't collide in the gateway's per-skill inputs map.
+            inline_name = f"__inline__{uuid.uuid4().hex[:8]}"
+            inline_skill_refs.append(
+                InlineSkillRef(
+                    name=inline_name,
+                    body=entry.inline_body,
+                    inputs=entry.inputs,
+                    source=entry.source,
+                )
+            )
+            if entry.inputs:
+                effective_skill_inputs[inline_name] = dict(entry.inputs)
+            attached_skill_provenance.append(
+                {"name": inline_name, "source": entry.source, "kind": "inline"}
+            )
+
+    # Wave D.2 Task 2.7 — send-time slash fallback. If the caller
+    # didn't pre-attach any skills (legacy OR new attached_skills)
+    # AND the content starts with ``/<token> ``, try to resolve the
+    # token against the merged catalogue. On hit: append the slug to
+    # ``applied_skills`` for this turn and strip the leading token
+    # from the content so the gateway sees the same body the user
+    # would type without the ``/foo`` prefix. On miss: set
+    # ``slash_unresolved=True`` on the response so the UI can render
+    # a hint, but forward the original content as plain text — the
+    # user still gets an answer, the typo just doesn't activate a
+    # skill.
+    effective_content: str = payload.content
     slash_unresolved = False
     attached_skill_names: list[str] = list(payload.skills)
-    if not payload.skills and payload.content.startswith("/"):
+    # Surface slug attachments (not inline ones) in
+    # ``attached_skill_names`` — the field is documented as "slugs the
+    # send-time slash fallback attached on the caller's behalf" and is
+    # consumed by the UI to render chips; inline skills don't have a
+    # browsable slug to chip.
+    attached_skill_names.extend(
+        # ``name`` is always a non-empty str on a slug-kind row (we
+        # construct it from ``payload.skills`` / ``entry.slug`` /
+        # resolved slash slugs). The ``cast`` keeps mypy honest given
+        # the ``str | None`` value-type on the provenance dict.
+        str(e["name"])
+        for e in attached_skill_provenance
+        if e["kind"] == "slug" and e["name"] is not None and e["name"] not in attached_skill_names
+    )
+    have_any_attached = bool(payload.skills) or bool(payload.attached_skills)
+    if not have_any_attached and payload.content.startswith("/"):
         resolved_slug, effective_content, slash_unresolved = await _maybe_resolve_leading_slash(
             request, db, user, payload.content
         )
         if resolved_slug is not None:
             effective_skills.append(resolved_slug)
             attached_skill_names.append(resolved_slug)
+            attached_skill_provenance.append(
+                {"name": resolved_slug, "source": "slash", "kind": "slug"}
+            )
 
     # Persist the user message FIRST. This is unconditionally written,
     # even if the gateway call ultimately fails — the user did say
     # something and the audit trail must reflect that.
+    #
+    # Wave D.2 Task 3.0 — the user-message ``applied_skills`` column
+    # records *both* slug attachments AND synthesized inline-skill
+    # names. The synthesized name is opaque (``__inline__<hex>``); the
+    # audit-log row written later carries the full per-attachment
+    # provenance (kind/source) so receipts can render "from wizard
+    # tryout" instead of an inscrutable hex blob.
+    user_applied_skills: list[str] = [
+        e["name"] for e in attached_skill_provenance if e["name"] is not None
+    ]
     user_message = Message(
         chat_id=cid,
         role="user",
         content=effective_content,
-        applied_skills=effective_skills,
+        applied_skills=user_applied_skills,
     )
     db.add(user_message)
 
@@ -999,6 +1092,12 @@ async def send_message(
     # widen this to include prior history. The gateway does the skill
     # prompt assembly per ADR 0007. T7b prepends a system context
     # block when KB retrieval returned chunks (see above).
+    #
+    # Wave D.2 Task 3.0 — ``lq_ai_inline_skills`` carries inline-body
+    # attachments. The gateway assembles them alongside ``lq_ai_skills``
+    # without a backend round-trip; ``effective_skill_inputs`` is the
+    # merged-and-flattened map keyed by both slug AND synthesized
+    # inline-skill name.
     gw_request = ChatCompletionRequest(
         model=payload.model,
         messages=gw_messages,
@@ -1008,7 +1107,8 @@ async def send_message(
         lq_ai_message_id=str(assistant_message_id),
         lq_ai_user_id=str(user.id),
         lq_ai_skills=list(effective_skills),
-        lq_ai_skill_inputs=dict(payload.skill_inputs),
+        lq_ai_skill_inputs=dict(effective_skill_inputs),
+        lq_ai_inline_skills=list(inline_skill_refs),
         lq_ai_project_minimum_inference_tier=project_floor,
     )
 
@@ -1036,6 +1136,7 @@ async def send_message(
             assistant_message_id=assistant_message_id,
             request_id=request_id,
             http_request=request,
+            attached_skill_provenance=attached_skill_provenance,
         )
     return await _non_streaming_response(
         db=db,
@@ -1048,6 +1149,7 @@ async def send_message(
         http_request=request,
         attached_skill_names=attached_skill_names,
         slash_unresolved=slash_unresolved,
+        attached_skill_provenance=attached_skill_provenance,
     )
 
 
@@ -1108,6 +1210,7 @@ async def _audit_message_sent(
     applied_skills: list[str],
     error_code: str | None,
     request: Request | None,
+    attached_skill_provenance: list[dict[str, str | None]] | None = None,
 ) -> None:
     """Write the D3 audit row for a completed chat-message exchange.
 
@@ -1115,6 +1218,13 @@ async def _audit_message_sent(
     chat exchanges in privileged projects must mark the row privileged
     and capture the routed inference tier so admins can audit which
     matters routed to which providers.
+
+    Wave D.2 Task 3.0 — ``attached_skill_provenance`` carries
+    per-attachment ``{name, source, kind}`` so receipts can render
+    "from wizard tryout" / "from slash" instead of an opaque list of
+    slugs and ``__inline__`` synthesized names. Inline-body content is
+    NOT recorded here (PII risk); only the synthesized name + provenance
+    tag travel through the log.
 
     The privilege resolution walks ``chat.project_id`` to read the
     project's ``privileged`` flag. The audit row commits with the
@@ -1127,6 +1237,20 @@ async def _audit_message_sent(
     if chat.project_id is not None:
         project = await db.get(Project, chat.project_id)
 
+    details: dict[str, Any] = {
+        "chat_id": str(chat.id),
+        "applied_skills": list(applied_skills),
+        "error_code": error_code,
+    }
+    if attached_skill_provenance:
+        # Filter null-source entries to keep the row tidy when no
+        # surface tagged itself. Inline-body content is intentionally
+        # not included.
+        details["attached_skills"] = [
+            {"name": e["name"], "source": e["source"], "kind": e["kind"]}
+            for e in attached_skill_provenance
+        ]
+
     await audit_action(
         db,
         user_id=user.id,
@@ -1137,11 +1261,7 @@ async def _audit_message_sent(
         routed_inference_tier=routed_inference_tier,
         routed_provider=routed_provider,
         request=request,
-        details={
-            "chat_id": str(chat.id),
-            "applied_skills": list(applied_skills),
-            "error_code": error_code,
-        },
+        details=details,
     )
     await db.commit()
 
@@ -1281,6 +1401,7 @@ async def _non_streaming_response(
     http_request: Request | None = None,
     attached_skill_names: list[str] | None = None,
     slash_unresolved: bool = False,
+    attached_skill_provenance: list[dict[str, str | None]] | None = None,
 ) -> JSONResponse:
     """Run the non-streaming path: forward, persist, return JSON.
 
@@ -1343,6 +1464,7 @@ async def _non_streaming_response(
         applied_skills=applied_skills,
         error_code=None,
         request=http_request,
+        attached_skill_provenance=attached_skill_provenance,
     )
 
     body = MessagePostResponse(
@@ -1379,6 +1501,7 @@ async def _stream_response(
     assistant_message_id: uuid.UUID,
     request_id: str,
     http_request: Request | None = None,
+    attached_skill_provenance: list[dict[str, str | None]] | None = None,
 ) -> StreamingResponse:
     """Run the streaming path: forward, stream SSE, persist at end."""
 
@@ -1489,6 +1612,7 @@ async def _stream_response(
                     applied_skills=last_applied_skills or [],
                     error_code=error_code,
                     request=http_request,
+                    attached_skill_provenance=attached_skill_provenance,
                 )
             except Exception as audit_exc:
                 log.warning(

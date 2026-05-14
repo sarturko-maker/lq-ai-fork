@@ -46,6 +46,46 @@ class ChatCompletionMessage(BaseModel):
     tool_calls: list[dict[str, Any]] | None = None
 
 
+class InlineSkillRef(BaseModel):
+    """Wave D.2 Task 3.0 — one inline-body skill on a chat completion request.
+
+    Mirrors :class:`gateway.app.providers.openai_schema.InlineSkillRef`.
+    Forwarded from the backend's ``MessageCreateRequest.attached_skills``
+    when an entry carries ``inline_body``: the backend synthesizes a
+    name (so the gateway's assembler can key inputs / report applied
+    skills consistently) and forwards the verbatim body without a
+    catalogue fetch.
+
+    .. note::
+
+       OpenAPI sync deferred to Wave 9.1.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = Field(min_length=1, max_length=128)
+    """Synthesized, opaque name (e.g., ``__inline__<hex>``) so the
+    gateway can key into ``lq_ai_skill_inputs`` and report the skill in
+    ``lq_ai_applied_skills`` deterministically. Backend chooses; gateway
+    never validates against the catalogue."""
+
+    body: str = Field(min_length=1)
+    """Verbatim Markdown skill body. The gateway treats this as the
+    skill's ``content_md`` and runs it through the same assembler as
+    catalogue skills (header / input substitution / system-message
+    prepend) without an HTTP round-trip to the backend."""
+
+    inputs: dict[str, Any] | None = None
+    """Optional per-skill input bindings. Merged into
+    ``lq_ai_skill_inputs`` server-side under this synthesized name."""
+
+    minimum_inference_tier: int | None = Field(default=None, ge=1, le=5)
+    """D1 tier-floor honored exactly like a catalogue skill's floor."""
+
+    source: str | None = Field(default=None, max_length=64)
+    """Provenance tag (``wizard-tryout``, etc.) — surfaced on audit logs."""
+
+
 class ChatCompletionRequest(BaseModel):
     """OpenAI Chat Completions request body, plus LQ.AI extensions.
 
@@ -90,6 +130,12 @@ class ChatCompletionRequest(BaseModel):
 
     lq_ai_skill_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """Per-skill input bindings, keyed by skill name."""
+
+    lq_ai_inline_skills: list[InlineSkillRef] = Field(default_factory=list)
+    """Wave D.2 Task 3.0: inline-body skills the gateway assembles
+    without a catalogue fetch. Mirrors
+    :attr:`gateway.app.providers.openai_schema.ChatCompletionRequest.lq_ai_inline_skills`.
+    Empty list (default) preserves pre-D.2 wire shape exactly."""
 
     # --- C3 (chat / message identity for routing-log correlation) ------------
     lq_ai_chat_id: str | None = None
