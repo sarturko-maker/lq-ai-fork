@@ -6,20 +6,53 @@ info:
     The Inference Gateway is the security boundary for outbound LLM requests.
     Every inference request — from the backend, from skills, from the Word
     Add-in's backend integration — passes through this service.
-    
+
     The gateway exposes:
     1. An OpenAI-compatible chat-completions endpoint that backend services
        call (transparent to client code that already targets the OpenAI API).
     2. An OpenAI-compatible embeddings endpoint.
     3. Admin endpoints for tier configuration, provider configuration, cost.
-    
+
     Pipeline (per PRD §4.3):
       Auth → Router → Rate Limit → Tier Derivation → Anonymization (M2)
         → Provider Adapter → Anonymization-post → Cost Tracker → Telemetry
-    
+
     The gateway is NOT directly accessible to end users. End users interact
     with the backend; the backend calls the gateway. Direct gateway access
     is gated to admin operations and service-to-service traffic only.
+
+    M1 verification note (v0.1.0 prep, 2026-05-14): this sketch was audited
+    against gateway/app/api/inference.py and gateway/app/api/admin.py.
+
+    Routes confirmed in code at M1:
+      POST /v1/chat/completions  (inference.py @router.post)
+      POST /v1/embeddings        (inference.py @router.post)
+      GET  /v1/models            (inference.py @router.get)
+      GET  /health               (main.py @app.get)
+      GET  /ready                (main.py @app.get)
+      GET  /admin/v1/providers/health     (admin.py — 501 stub)
+      GET  /admin/v1/usage                (admin.py — 501 stub)
+      GET  /admin/v1/tier-config          (admin.py — live)
+      PATCH /admin/v1/tier-config         (admin.py — live)
+      GET  /admin/v1/anonymization-config (admin.py — 501 stub)
+      GET  /admin/v1/config               (admin.py — live)
+      GET  /admin/v1/aliases              (admin.py — live)
+      POST /admin/v1/aliases              (admin.py — live)
+      GET  /admin/v1/aliases/{name}       (admin.py — live)
+      PATCH /admin/v1/aliases/{name}      (admin.py — live)
+      DELETE /admin/v1/aliases/{name}     (admin.py — live)
+
+    Routes in this sketch not yet in code (M2 targets — see individual
+    endpoint descriptions for notes):
+      GET  /v1/inference/current-tier       (deferred; noted inline)
+      PATCH /admin/v1/anonymization-config  (M2 — anonymization middleware)
+      POST  /admin/v1/config/reload         (M2 — explicit HTTP reload trigger;
+                                             SIGHUP reload is operational at M1
+                                             via gateway/app/config_holder.py)
+
+    DE candidate: add test_openapi_paths_match_sketch in gateway/tests/ to
+    assert all non-deferred paths in this sketch exist in the live FastAPI
+    app's openapi.json. Currently no such test.
   license:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -470,6 +503,12 @@ paths:
     get:
       tags: [admin]
       summary: Get current anonymization configuration (M2)
+      description: |
+        M1 status: route exists in code (gateway/app/api/admin.py:270-282)
+        but returns 501 — the anonymization middleware is not running. The
+        config schema loads via gateway.yaml but is not enforced. Full
+        implementation lands with the M2 anonymization middleware (PRD §4.7).
+        See docs/HONEST-STATE.md §3.2.
       responses:
         '200':
           description: Anonymization configuration
@@ -482,6 +521,9 @@ paths:
       tags: [admin]
       summary: Partial update to anonymization configuration (M2)
       description: |
+        M1 status: NOT yet in code — this PATCH route does not exist in
+        gateway/app/api/admin.py at M1. The GET returns 501; the PATCH
+        lands with the M2 anonymization middleware alongside it.
         Admin-only. Audited. Updates take effect for new requests immediately.
       requestBody:
         required: true
@@ -499,6 +541,12 @@ paths:
       tags: [admin]
       summary: Reload gateway.yaml without restarting the service
       description: |
+        M1 status: NOT yet in code as an HTTP endpoint — this POST route
+        does not exist in gateway/app/api/admin.py at M1. Hot-reload is
+        operational at M1 via SIGHUP (gateway/app/config_holder.py +
+        gateway/app/config_loader.py; see docs/adr/0010-gateway-config-hot-reload.md).
+        The explicit HTTP reload trigger lands in M2 alongside the alias
+        write-through mutation endpoints or as a standalone DE.
         Admin-only. Re-reads the config file from disk and atomically swaps
         in the new state. If the new config is invalid, the call fails with
         400 and the existing config is preserved.
