@@ -141,26 +141,28 @@
 {:else if versions.length === 0}
 	<p class="lq-versions-empty" data-testid="lq-ai-versions-empty">No edit history yet.</p>
 {:else}
-	<table class="lq-versions" data-testid="lq-ai-versions-table">
-		<thead>
-			<tr>
-				<th>When</th>
-				<th>Who</th>
-				<th>Action</th>
-				<th>Version</th>
-			</tr>
-		</thead>
-		<tbody>
-			{#each versions as v}
+	<div class="lq-versions-scroll">
+		<table class="lq-versions" data-testid="lq-ai-versions-table">
+			<thead>
 				<tr>
-					<td>{formatTimestamp(v)}</td>
-					<td>{formatActor(v)}</td>
-					<td>{v.action}</td>
-					<td>{formatVersion(v)}</td>
+					<th>When</th>
+					<th>Who</th>
+					<th>Action</th>
+					<th>Version</th>
 				</tr>
-			{/each}
-		</tbody>
-	</table>
+			</thead>
+			<tbody>
+				{#each versions as v}
+					<tr>
+						<td>{formatTimestamp(v)}</td>
+						<td>{formatActor(v)}</td>
+						<td>{v.action}</td>
+						<td>{formatVersion(v)}</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	</div>
 {/if}
 
 <style>
@@ -187,8 +189,13 @@
 		border-radius: 6px;
 		font-size: 13px;
 	}
+	.lq-versions-scroll {
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+	}
 	.lq-versions {
 		width: 100%;
+		min-width: 480px;
 		border-collapse: collapse;
 		background: var(--lq-canvas, #ffffff);
 	}
