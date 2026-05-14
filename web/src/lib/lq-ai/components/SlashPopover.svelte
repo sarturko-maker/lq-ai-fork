@@ -304,7 +304,7 @@
 		display: flex;
 		flex-direction: column;
 		min-width: 280px;
-		max-width: 420px;
+		max-width: clamp(280px, 90vw, 420px);
 		max-height: 320px;
 		overflow-y: auto;
 		background: var(--lq-surface, var(--lq-canvas, #ffffff));
