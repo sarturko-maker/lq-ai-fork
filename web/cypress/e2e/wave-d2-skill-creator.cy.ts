@@ -21,6 +21,8 @@
 
 const ADMIN_EMAIL = () => Cypress.env('LQAI_ADMIN_EMAIL') || 'admin@lq.ai';
 const ADMIN_PASSWORD = () => Cypress.env('LQAI_ADMIN_PASSWORD') || 'LQ-AI-smoke-test-Pw1!';
+/** Direct API base — bypasses the SvelteKit web container which has no POST proxy for user-skills routes. */
+const API_BASE = () => Cypress.env('LQAI_API_BASE') ?? 'http://localhost:8000';
 
 /**
  * Inline login — mirrors wave-d1-power-features.cy.ts beforeEach pattern.
@@ -241,14 +243,6 @@ describe('Wave D.2 — Skill Creator', () => {
 		// carry the bearer token ourselves. The LQ.AI auth store writes the
 		// session under the key `lq_ai_auth` in localStorage as a JSON object
 		// with an `access_token` field (api/client.ts + auth/store.ts).
-		//
-		// cy.request must target the API container directly (localhost:8000) —
-		// the web container at localhost:3000 is SvelteKit static and does not
-		// proxy POST /api/v1/user-skills (that route only has a SvelteKit GET
-		// handler for the skills list page). Using the absolute API URL avoids
-		// the 405 that the web server returns when it receives a POST it has no
-		// route for.
-		const API = 'http://localhost:8000';
 
 		cy.window().then((win) => {
 			let token: string | null = null;
@@ -268,7 +262,7 @@ describe('Wave D.2 — Skill Creator', () => {
 			// Create the skill
 			cy.request({
 				method: 'POST',
-				url: `${API}/api/v1/user-skills`,
+				url: `${API_BASE()}/api/v1/user-skills`,
 				headers,
 				body: {
 					scope: 'user',
@@ -285,7 +279,7 @@ describe('Wave D.2 — Skill Creator', () => {
 					// Edit 1: update description
 					cy.request({
 						method: 'PATCH',
-						url: `${API}/api/v1/user-skills/${skillId}`,
+						url: `${API_BASE()}/api/v1/user-skills/${skillId}`,
 						headers,
 						body: { description: 'd2' }
 					});
@@ -293,7 +287,7 @@ describe('Wave D.2 — Skill Creator', () => {
 					// UserSkillUpdate in user_skills.py)
 					cy.request({
 						method: 'PATCH',
-						url: `${API}/api/v1/user-skills/${skillId}`,
+						url: `${API_BASE()}/api/v1/user-skills/${skillId}`,
 						headers,
 						body: { body: 'b2' }
 					});
@@ -310,7 +304,7 @@ describe('Wave D.2 — Skill Creator', () => {
 		cy.get('[data-testid="lq-ai-versions-table"]', { timeout: 10000 }).should('exist');
 
 		// 1 created + 2 updated = 3 rows in the tbody.
-		cy.get('[data-testid="lq-ai-versions-table"] tbody tr').should('have.length', 3);
+		cy.get('[data-testid="lq-ai-versions-table"] tbody tr', { timeout: 10000 }).should('have.length', 3);
 
 		// The table's Action column shows the raw action string from the
 		// audit log (`user_skill.created` / `user_skill.updated`).
