@@ -25,6 +25,38 @@ const ADMIN_PASSWORD = () => Cypress.env('LQAI_ADMIN_PASSWORD') || 'LQ-AI-smoke-
 const API_BASE = () => Cypress.env('LQAI_API_BASE') ?? 'http://localhost:8000';
 
 /**
+ * Extract the bearer token from localStorage. LQ.AI auth store writes the
+ * session under `lq_ai_auth` as a JSON object with an `access_token` field
+ * (api/client.ts + auth/store.ts).
+ *
+ * Accepts a callback that receives the token string. Usage pattern:
+ *
+ *   getBearerToken((token) => {
+ *     cy.request({ headers: { Authorization: `Bearer ${token}` }, ... });
+ *   });
+ *
+ * Extracted per Task 8.3 code-review feedback: the auth extraction block was
+ * duplicated in Test 6 inline; Tests 4 and 5 also need it, so a shared helper
+ * is cleaner than repeating the pattern a third and fourth time.
+ */
+function getBearerToken(cb: (token: string) => void): void {
+	cy.window().then((win) => {
+		let token: string | null = null;
+		try {
+			const raw = win.localStorage.getItem('lq_ai_auth');
+			if (raw) {
+				const parsed = JSON.parse(raw) as { access_token?: string };
+				token = parsed.access_token ?? null;
+			}
+		} catch {
+			token = null;
+		}
+		expect(token, 'auth token must exist after login').to.be.a('string');
+		cb(token as string);
+	});
+}
+
+/**
  * Inline login — mirrors wave-d1-power-features.cy.ts beforeEach pattern.
  * Wave D.1 did not extract a custom command for this; we follow the same shape
  * so anyone reading the suite sees a single consistent login flow.
@@ -223,12 +255,160 @@ describe('Wave D.2 — Skill Creator', () => {
 		cy.url({ timeout: 10000 }).should('include', `/lq-ai/skills/${forkSlug}`);
 	});
 
-	it.skip('4. Slash invocation: type "/" in composer → popover → pick → pill → send', () => {
-		// populated in Task 8.4
+	it('4. Slash invocation: type "/" in composer → popover → pick → pill → send', () => {
+		// Timestamp suffix ensures the slug + slash_alias are unique across reruns
+		// so repeated CI runs never hit a 409 on the pre-seed POST.
+		const ts = Date.now();
+		const skillSlug = `d2-slash-${ts}`;
+		const skillTitle = `D2 Slash ${ts}`;
+		const slashAlias = `/d2s${ts}`.slice(0, 33); // backend max 32 chars after /
+
+		// ── Pre-seed the slash skill via direct API call ─────────────────────
+		// cy.request fires outside the browser fetch context, so we carry the
+		// auth token from localStorage explicitly (same pattern as Test 6).
+		getBearerToken((token) => {
+			cy.request({
+				method: 'POST',
+				url: `${API_BASE()}/api/v1/user-skills`,
+				headers: { Authorization: `Bearer ${token}` },
+				body: {
+					scope: 'user',
+					slug: skillSlug,
+					display_name: skillTitle,
+					description: 'Slash-invocation cypress fixture',
+					body: 'echo: respond with "skill applied"',
+					version: '1.0.0',
+					slash_alias: slashAlias
+				}
+			})
+				.its('status')
+				.should('eq', 201);
+		});
+
+		// Create a matter + new chat so the composer is visible.
+		createSampleMatter('Slash Test Matter');
+
+		// ── Type "/" into the composer and wait for the popover ──────────────
+		// The popover anchor mounts when `slashOpen` becomes true in ChatPanel
+		// (onComposerInput sets it when a '/' is detected as the first char of
+		// a word). We assert the anchor then the listbox inside it.
+		cy.get('[data-testid="lq-ai-composer-input"]').first().type('/');
+		cy.get('[data-testid="lq-ai-slash-popover-anchor"]', { timeout: 5000 }).should('exist');
+		cy.get('[data-testid="lq-ai-slash-popover-anchor"] [role="listbox"]').should('exist');
+
+		// Type the rest of the query so the autocomplete narrows to our skill.
+		// The ts suffix is too long to type; type just 'd2s' (prefix of the alias
+		// slug which contains 'd2s<ts>') — or type the display_name prefix.
+		// The autocomplete searches title + slug, so 'd2-slash' prefix is safe.
+		cy.get('[data-testid="lq-ai-composer-input"]').first().type('d2s');
+
+		// Wait for the title span to appear inside the listbox.
+		cy.get('[data-testid="lq-ai-slash-popover-anchor"] [role="listbox"]')
+			.contains(skillTitle, { timeout: 10000 })
+			.should('exist');
+
+		// Pick the skill via Enter (the keyboard handler in SlashPopover.svelte
+		// fires `onSelect` on Enter with the activeIndex row, which defaults to 0
+		// — our skill is the only match after the query narrows).
+		cy.get('[data-testid="lq-ai-composer-input"]').first().type('{enter}');
+
+		// ── Assert the attached-skill pill renders in SkillPicker ────────────
+		// SkillPicker renders a detach button with data-testid
+		// "lq-ai-skill-detach-{slug}" (SkillPicker.svelte line ~85).
+		// The plan's `aria-label="remove <title>"` is from AttachedSkillPill.svelte,
+		// but the composer uses SkillPicker for the attached skill display, not
+		// AttachedSkillPill. Selector is the stable data-testid on the Detach btn.
+		cy.get(`[data-testid="lq-ai-skill-detach-${skillSlug}"]`, { timeout: 5000 }).should('exist');
+
+		// Composer text should now be empty (the slash query was removed by
+		// onSlashSelect's composerText splice in ChatPanel.svelte).
+		cy.get('[data-testid="lq-ai-composer-input"]').first().should('have.value', '');
+
+		// ── Send the message and assert the attached_skills payload ──────────
+		// ChatPanel uses sendMessageStream (streaming POST). Intercept BEFORE
+		// the click so the alias is registered when the request fires.
+		cy.intercept('POST', '**/messages').as('sendMessage');
+		cy.get('[data-testid="lq-ai-composer-input"]').first().type('test prompt');
+		cy.get('[data-testid="lq-ai-send-btn"]').click();
+
+		// 60s timeout: this is a real LLM round-trip. We assert only on the
+		// request body (not the streamed reply) so we don't depend on LLM output.
+		cy.wait('@sendMessage', { timeout: 60000 })
+			.its('request.body.attached_skills')
+			.should('deep.include', { slug: skillSlug, source: 'slash' });
 	});
 
-	it.skip('5. Try-it sandbox: detail Try-it tab → ensure sandbox → send → conversation persists', () => {
-		// populated in Task 8.4
+	it('5. Try-it sandbox: detail Try-it tab → ensure sandbox → send → LLM reply renders', () => {
+		// Timestamp suffix ensures the slug is unique across reruns.
+		const ts = Date.now();
+		const skillSlug = `d2-tryit-${ts}`;
+
+		// ── Pre-seed the try-it skill via direct API call ─────────────────────
+		getBearerToken((token) => {
+			cy.request({
+				method: 'POST',
+				url: `${API_BASE()}/api/v1/user-skills`,
+				headers: { Authorization: `Bearer ${token}` },
+				body: {
+					scope: 'user',
+					slug: skillSlug,
+					display_name: `D2 Try-it ${ts}`,
+					description: 'Try-it sandbox cypress fixture',
+					body: 'respond briefly with "sandbox ok"',
+					version: '1.0.0'
+				}
+			})
+				.its('status')
+				.should('eq', 201);
+		});
+
+		// Intercept BEFORE visiting the page — the pane's onMount calls
+		// ensureSandbox() which hits POST /api/v1/projects/sandbox/ensure.
+		// The alias must exist before the navigation triggers the mount.
+		cy.intercept('POST', '**/projects/sandbox/ensure').as('sandboxEnsure');
+
+		cy.visit(`/lq-ai/skills/${skillSlug}?tab=try`);
+
+		// Wait for sandbox ensure — 200 if already exists, 201 on first call.
+		cy.wait('@sandboxEnsure', { timeout: 15000 })
+			.its('response.statusCode')
+			.should('be.oneOf', [200, 201]);
+
+		// The pane enters the ready state once both sandbox + chatId are set
+		// (the loading placeholder disappears and the composer renders).
+		cy.get('[data-testid="lq-ai-tryit-composer"]', { timeout: 15000 }).should('exist');
+
+		// Send a prompt and wait for the LLM reply to appear in the message list.
+		// Intercept the sendMessage POST for the timeout — SkillTryItPane calls
+		// the non-streaming sendMessage (POST **/messages with stream:false).
+		cy.intercept('POST', '**/messages').as('trySend');
+		cy.get('[data-testid="lq-ai-tryit-composer"]').type('hello sandbox');
+		cy.get('[data-testid="lq-ai-tryit-send"]').click();
+
+		// 60s timeout: real LLM round-trip. Assert the user message appears first
+		// (optimistic render fires before the request lands). Then wait for the
+		// LLM reply — the message list grows from 1 (user) to 2 (user + assistant).
+		cy.wait('@trySend', { timeout: 60000 });
+		// The user message is rendered optimistically; the assistant reply
+		// appends on success. Assert the message area has at least 2 msg divs
+		// (user + assistant) and that the user turn text is present.
+		cy.get('[data-testid="lq-ai-tryit-messages"] .msg', { timeout: 60000 }).should(
+			'have.length.gte',
+			2
+		);
+		cy.get('[data-testid="lq-ai-tryit-messages"]').should('contain.text', 'hello sandbox');
+
+		// ── Deviation from plan: NO tab-switch persistence assertion ──────────
+		// SkillTryItPane holds messages in local Svelte component state.
+		// The skill detail page mounts/unmounts SkillTryItTab via a Svelte
+		// {#if activeTab === 'try'} block (+page.svelte line ~81), so switching
+		// tabs destroys the component and discards state. The plan's "visit
+		// ?tab=use → visit ?tab=try → assert 'hello sandbox' exists" would fail
+		// because the remounted pane starts with a fresh message list and a new
+		// chatId. This is a DONE_WITH_CONCERNS escalation — client-only state;
+		// server-side chat reload across tab switches is out of M1 scope.
+		// (See SkillTryItPane.svelte reset() comment: "M1 limitation: server-side
+		// chat reset is out of scope".)
 	});
 
 	it('6. Versions tab + slash_alias collision: edit twice → tab shows 3 rows; collision → inline error', () => {
@@ -244,19 +424,7 @@ describe('Wave D.2 — Skill Creator', () => {
 		// session under the key `lq_ai_auth` in localStorage as a JSON object
 		// with an `access_token` field (api/client.ts + auth/store.ts).
 
-		cy.window().then((win) => {
-			let token: string | null = null;
-			try {
-				const raw = win.localStorage.getItem('lq_ai_auth');
-				if (raw) {
-					const parsed = JSON.parse(raw) as { access_token?: string };
-					token = parsed.access_token ?? null;
-				}
-			} catch {
-				token = null;
-			}
-			expect(token, 'auth token must exist after login').to.be.a('string');
-
+		getBearerToken((token) => {
 			const headers = { Authorization: `Bearer ${token}` };
 
 			// Create the skill
