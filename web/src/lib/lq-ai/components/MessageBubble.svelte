@@ -139,7 +139,7 @@
 	{/if}
 
 	{#if message.role === 'assistant'}
-		<div class="mt-1 flex items-center gap-2 flex-wrap justify-between w-full">
+		<div class="mt-1 flex items-center gap-2 flex-wrap justify-start w-full">
 			<div class="flex items-center gap-2 flex-wrap">
 				{#if message.routed_inference_tier}
 					<TierBadge
