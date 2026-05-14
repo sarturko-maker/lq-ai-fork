@@ -158,7 +158,7 @@ describe('Wave D.2 — Skill Creator', () => {
 		cy.wait('@createSkill').its('response.statusCode').should('eq', 201);
 
 		// onSave navigates to /lq-ai/skills/{slug}?just_saved=1.
-		cy.url({ timeout: 10000 }).should('match', /\/lq-ai\/skills\/d-2-test-skill-\d+/);
+		cy.url({ timeout: 10000 }).should('include', `/lq-ai/skills/${expectedSlug}`);
 
 		// The skill detail page renders SkillDetailTabs which always has a
 		// "Use it" tab label — presence confirms the detail page loaded.
