@@ -37,6 +37,7 @@
 	 *     transient in-component status row.
 	 */
 	import type { UserSkillCreate } from '../types';
+	import { kebab } from '../util/slug';
 
 	/** Mutable form state — every input bound in the template, plus ``saving``. */
 	export interface WizardFormState {
@@ -67,23 +68,6 @@
 
 	const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$|^[a-z0-9]$/;
 	const SLASH_RE = /^\/[a-z0-9-]{1,32}$/;
-
-	/**
-	 * Kebab-case + trim + cap at 80 chars. Used to auto-derive the slug
-	 * from the display name until the user manually edits the slug.
-	 *
-	 * - Lowercases.
-	 * - Collapses any run of non-[a-z0-9] chars to a single dash.
-	 * - Trims leading and trailing dashes.
-	 * - Caps at 80 chars (the backend ``UserSkillCreate.slug`` max).
-	 */
-	export function kebab(s: string): string {
-		return s
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, '-')
-			.replace(/^-+|-+$/g, '')
-			.slice(0, 80);
-	}
 
 	/** Slug matches the backend's slug pattern (1-80 chars, lowercase, no leading/trailing dash). */
 	export function isSlugValid(slug: string): boolean {

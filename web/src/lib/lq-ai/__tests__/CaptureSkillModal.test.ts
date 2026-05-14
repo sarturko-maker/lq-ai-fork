@@ -23,7 +23,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-	kebab,
 	derive,
 	canSave,
 	buildPayload,
@@ -31,6 +30,7 @@ import {
 	stashStorageKey,
 	type CaptureFormState
 } from '../components/CaptureSkillModal.svelte';
+import { kebab } from '../util/slug';
 import type { Message } from '../types';
 
 function makeMessage(overrides: Partial<Message> = {}): Message {

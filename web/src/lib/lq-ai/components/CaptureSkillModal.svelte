@@ -31,6 +31,7 @@
 	 *     No ``--lq-surface`` token exists — surface is ``--lq-canvas``.
 	 */
 	import type { Message, UserSkillCreate } from '../types';
+	import { kebab } from '../util/slug';
 
 	/** Mutable modal form state — every field bound in the template, plus ``saving``. */
 	export interface CaptureFormState {
@@ -54,20 +55,6 @@
 		scope: 'user' | 'team';
 		version: string;
 		forkedFrom: string | null;
-	}
-
-	/**
-	 * Kebab-case + trim + cap at 80 chars. Matches ``SkillWizard.kebab`` —
-	 * keeping the helper local (rather than importing from SkillWizard.svelte)
-	 * so the modal can be reasoned about in isolation and the two surfaces
-	 * stay independently editable.
-	 */
-	export function kebab(s: string): string {
-		return s
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, '-')
-			.replace(/^-+|-+$/g, '')
-			.slice(0, 80);
 	}
 
 	/**

@@ -20,7 +20,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-	kebab,
 	isSlugValid,
 	isSlashAliasValid,
 	canSave,
@@ -29,6 +28,7 @@ import {
 	loadDraft,
 	type WizardFormState
 } from '../components/SkillWizard.svelte';
+import { kebab } from '../util/slug';
 
 function makeState(overrides: Partial<WizardFormState> = {}): WizardFormState {
 	return {
