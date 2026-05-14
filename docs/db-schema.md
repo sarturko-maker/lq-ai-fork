@@ -155,6 +155,7 @@ CREATE TABLE projects (
     context_md               TEXT,  -- free-form markdown
     privileged               BOOLEAN NOT NULL DEFAULT FALSE,
     minimum_inference_tier   SMALLINT,
+    is_sandbox               BOOLEAN NOT NULL DEFAULT FALSE,  -- 0022: system-managed try-it sandbox
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     archived_at              TIMESTAMPTZ,  -- soft-delete; NULL means active
@@ -176,6 +177,11 @@ CREATE INDEX idx_projects_owner_active
     ON projects (owner_id, created_at DESC)
     WHERE archived_at IS NULL;
 
+-- Migration 0022: non-sandbox active projects (the default list query).
+CREATE INDEX idx_projects_not_sandbox
+    ON projects (owner_id, created_at)
+    WHERE is_sandbox = false AND archived_at IS NULL;
+
 -- Slug uniqueness scoped to (owner, active). Archived projects free
 -- their slug so a user can reuse it on a new active project.
 CREATE UNIQUE INDEX idx_projects_slug_owner_active
@@ -187,6 +193,12 @@ CREATE TRIGGER trg_projects_set_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION set_updated_at();
 ```
+
+**Column notes.**
+
+| Column | Migration | Notes |
+|---|---|---|
+| `is_sandbox` | 0022 | System-managed flag for the per-user skill try-it sandbox (`slug='__sandbox__'`). `POST /projects/sandbox/ensure` creates or returns the row. Sandbox projects are excluded from the default `GET /projects` list; the `include_sandbox` / `only_sandbox` query params control visibility. |
 
 ### `project_files` and `project_skills`
 
@@ -722,12 +734,17 @@ CREATE TABLE user_skills (
     tags              TEXT[] NOT NULL DEFAULT '{}',
     frontmatter_extra JSONB NOT NULL DEFAULT '{}',
     body              TEXT NOT NULL,
+    slash_alias       TEXT,                                       -- 0023: chat-composer trigger alias (e.g. '/nda')
+    forked_from       TEXT,                                       -- 0023: source skill slug when created via fork
     archived_at       TIMESTAMPTZ,                                -- soft-delete
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT ck_user_skills_scope_owner_consistency CHECK (
         (scope = 'user' AND owner_user_id IS NOT NULL AND owner_team_id IS NULL)
         OR (scope = 'team' AND owner_team_id IS NOT NULL AND owner_user_id IS NULL)
+    ),
+    CONSTRAINT chk_user_skills_slash_alias_format CHECK (
+        slash_alias IS NULL OR slash_alias ~ '^/[a-z0-9-]{1,32}$'
     )
 );
 
@@ -741,7 +758,22 @@ CREATE INDEX idx_user_skills_owner_user ON user_skills(owner_user_id, updated_at
     WHERE scope = 'user' AND archived_at IS NULL;
 CREATE INDEX idx_user_skills_owner_team ON user_skills(owner_team_id, updated_at DESC)
     WHERE scope = 'team' AND archived_at IS NULL;
+
+-- Migration 0023: slash_alias uniqueness per owner within active rows.
+CREATE UNIQUE INDEX idx_user_skills_slash_alias_owner_active
+    ON user_skills (owner_user_id, slash_alias)
+    WHERE slash_alias IS NOT NULL AND archived_at IS NULL AND scope = 'user';
+CREATE UNIQUE INDEX idx_user_skills_slash_alias_team_active
+    ON user_skills (owner_team_id, slash_alias)
+    WHERE slash_alias IS NOT NULL AND archived_at IS NULL AND scope = 'team';
 ```
+
+**Column notes.**
+
+| Column | Migration | Notes |
+|---|---|---|
+| `slash_alias` | 0023 | Optional chat-composer trigger alias. Must match `^/[a-z0-9-]{1,32}$` (enforced by `chk_user_skills_slash_alias_format`). Unique per active owner (partial unique indexes above). `POST` and `PATCH /user-skills` return 422 with `"slash_alias '...' is already used by another of your skills."` on collision. |
+| `forked_from` | 0023 | Slug of the source skill when this row was created via the fork button on the skill detail page. Stored as plain text — the source may be a filesystem-canonical built-in with no DB row (per ADR 0004). Set on create; read-only afterward. |
 
 Resolution path during prompt assembly (`/internal/skills/{slug}?user_id=…`): user-scope row for the requesting user wins on slug match; falls through to the filesystem registry otherwise. D8.1's only addition is the `teams` FK target and a middle resolution slot for team-scope rows.
 
@@ -818,6 +850,17 @@ CREATE INDEX idx_audit_log_tier ON audit_log(routed_inference_tier, timestamp DE
 ```
 
 The audit log is **append-only** at the application layer; the database does not enforce this directly (the maintainer-team can add a trigger if desired).
+
+**`details` JSONB conventions.**
+
+The `details` column carries action-specific payloads. Documented keys by action:
+
+| Action | Key | Value |
+|---|---|---|
+| `chat.message_sent` | `user_message_id` | UUID (as string) of the `messages` row for the user-turn that initiated the exchange (Wave 7.2 — receipts source enrichment). The receipts builder joins `audit_log` to `chat_messages` via `details->>'user_message_id'` to correlate receipt rows with their originating user message. |
+| `user_skill.created` | `slug`, `scope`, `version` | Identifies the created row. `team_id` also present for `scope='team'` rows. |
+| `user_skill.updated` | `slug`, `scope`, `changed_fields`, `version_before`, `version_after` | `changed_fields` is a sorted array of mutated keys; `version_before`/`version_after` present only when `version` changed. `team_id` present for team-scope rows. |
+| `user_skill.deleted` | `slug`, `scope` | Identity of the archived row. |
 
 ### `inference_routing_log`
 
