@@ -83,27 +83,27 @@ describe('Wave D.2 — Skill Creator', () => {
 		login(ADMIN_EMAIL(), ADMIN_PASSWORD());
 	});
 
-	it('1. Capture happy path: AI reply → modal → save → skill in list', () => {
+	it.skip('1. Capture happy path: AI reply → modal → save → skill in list', () => {
 		// populated in Task 8.2
 	});
 
-	it('2. Wizard from scratch: blank → fill 3 sections → set slash_alias → save', () => {
+	it.skip('2. Wizard from scratch: blank → fill 3 sections → set slash_alias → save', () => {
 		// populated in Task 8.2
 	});
 
-	it('3. Fork flow: detail page → fork → wizard pre-populated → save', () => {
+	it.skip('3. Fork flow: detail page → fork → wizard pre-populated → save', () => {
 		// populated in Task 8.3
 	});
 
-	it('4. Slash invocation: type "/" in composer → popover → pick → pill → send', () => {
+	it.skip('4. Slash invocation: type "/" in composer → popover → pick → pill → send', () => {
 		// populated in Task 8.4
 	});
 
-	it('5. Try-it sandbox: detail Try-it tab → ensure sandbox → send → conversation persists', () => {
+	it.skip('5. Try-it sandbox: detail Try-it tab → ensure sandbox → send → conversation persists', () => {
 		// populated in Task 8.4
 	});
 
-	it('6. Versions tab + slash_alias collision: edit twice → tab shows 3 rows; collision → inline error', () => {
+	it.skip('6. Versions tab + slash_alias collision: edit twice → tab shows 3 rows; collision → inline error', () => {
 		// populated in Task 8.3
 	});
 });
