@@ -8,17 +8,29 @@
 		readAutoEnhance,
 		writeAutoEnhance
 	} from '$lib/lq-ai/preferences/autoEnhance';
+	import {
+		CAPTURE_AFFORDANCE_STORAGE_KEY,
+		readCaptureAffordanceInline,
+		writeCaptureAffordanceInline
+	} from '$lib/lq-ai/preferences/capture-affordance';
 
 	let autoEnhance = false;
+	let captureInline = true;
 
 	onMount(() => {
 		initPreferences();
 		autoEnhance = readAutoEnhance();
+		captureInline = readCaptureAffordanceInline();
 	});
 
 	function toggleAutoEnhance(): void {
 		autoEnhance = !autoEnhance;
 		writeAutoEnhance(autoEnhance);
+	}
+
+	function toggleCaptureInline(): void {
+		captureInline = !captureInline;
+		writeCaptureAffordanceInline(captureInline);
 	}
 </script>
 
@@ -128,6 +140,32 @@
 			<span style="display: block; color: var(--lq-text-secondary); font-size: 12px;">
 				Run Enhance Prompt automatically before each send (preview-and-confirm UX
 				ships in v1.1+; setting is stored locally).
+			</span>
+		</span>
+	</label>
+</div>
+
+<!--
+	Wave D.2 — Capture-as-skill affordance placement. Frontend-only preference
+	(localStorage, key=CAPTURE_AFFORDANCE_STORAGE_KEY) for the same reasons as
+	auto-enhance: the server Preferences schema is a strict 5-field contract
+	and adding a column would require an OpenAPI update + migration churn for
+	a per-device UX preference with no audit/policy implications. See Task 5.1
+	(commits 8ce9897 + 64ab0d9) for the storage layer + MessageBubble wiring.
+-->
+<div class="lq-capture-affordance" style="margin-top: var(--lq-space-6);">
+	<label class="lq-text-body" style="display: flex; gap: var(--lq-space-2); align-items: flex-start;">
+		<input
+			type="checkbox"
+			checked={captureInline}
+			on:change={toggleCaptureInline}
+			data-testid="lq-ai-capture-affordance-toggle"
+		/>
+		<span>
+			<strong>Skill capture button</strong>
+			<span style="display: block; color: var(--lq-text-secondary); font-size: 12px;">
+				Show 📝 Capture-as-skill inline on every AI message. When off, the action
+				stays in the message's overflow (⋯) menu.
 			</span>
 		</span>
 	</label>
