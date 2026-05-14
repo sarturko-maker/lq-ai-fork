@@ -94,6 +94,7 @@ _LQ_AI_EXTENSION_KEYS = frozenset(
         "anonymize",
         "lq_ai_skills",
         "lq_ai_skill_inputs",
+        "lq_ai_inline_skills",
         "lq_ai_chat_id",
         "lq_ai_message_id",
         "lq_ai_user_id",
