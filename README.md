@@ -94,65 +94,129 @@ The next layer of skills is on the deferred-enhancement list and welcomes commun
 
 ---
 
-## Quickstart
+## Quick Start
+
+**Prerequisites:** [Docker Desktop 4.x+](https://www.docker.com/products/docker-desktop) (or Docker Engine 24+ on Linux) and `git`. No other host tooling required — no Python, no Node, no language-specific runtimes. Plan for ~8 GB of free disk space and ~6 GB of RAM available to Docker.
+
+### Step 1 — Clone and configure
 
 ```bash
-git clone https://github.com/legalquants/lq-ai.git
+git clone https://github.com/LegalQuants/lq-ai.git
 cd lq-ai
 cp .env.example .env
-# Edit .env with at least one LLM provider API key (or use local profile)
-docker compose up -d              # Mode 1 (cloud LLM keys)
-# OR
-docker compose --profile local up -d   # Mode 2 (Ollama, air-gap-capable)
 ```
 
-After ~2 minutes:
+Open `.env` and set the four required secrets (the file explains each one):
 
-```
-✓ LQ.AI shell:           http://localhost:3000/lq-ai
-✓ OpenWebUI shell:       http://localhost:3000        (rebase-friendly chat, ADR 0009)
-✓ Backend API docs:      http://localhost:8000/docs   (Swagger UI)
-✓ Backend API docs:      http://localhost:8000/redoc  (ReDoc)
-✓ Inference Gateway:     http://localhost:8001/docs
-```
+- `POSTGRES_PASSWORD` — any long random string
+- `MINIO_ROOT_PASSWORD` — any long random string
+- `LQ_AI_GATEWAY_KEY` — any long random string
+- `JWT_SECRET` — any long random string
 
-### First-run admin login
-
-On first boot, the API auto-creates a first-run admin user and prints a 24-character random password **once** to the API logs at `WARNING` level. Grab it before it scrolls off:
+Generate all four at once if you want a quick path:
 
 ```bash
-# Default email — override with LQ_AI_FIRST_RUN_ADMIN_EMAIL in .env
-docker compose logs api 2>&1 | grep "First-run admin password"
-# →  WARNING:app.main:First-run admin password (record it now and rotate on first login): <24-char password>
+python3 -c 'import secrets; [print(f"secret_{i}: {secrets.token_urlsafe(32)}") for i in range(4)]'
 ```
 
-Then log in:
+Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are optional at this step. The stack starts without any; inference calls return "no provider configured" until you add at least one and restart the gateway.
 
-- **URL:** `http://localhost:3000/lq-ai/login`
-- **Email:** `admin@lq.ai` (or whatever you set in `LQ_AI_FIRST_RUN_ADMIN_EMAIL`)
-- **Password:** the value from the log line above
-
-The first login forces a password change (the must-change-password gate). Pick a new password ≥ 12 characters, different from the printed one.
-
-**If you lose the admin password**, reset it from the host:
+### Step 2 — Start the stack
 
 ```bash
-docker compose exec api python -m app.cli reset-admin-password
-# →  prints a fresh random password, sets must-change-password=true, revokes active sessions
+docker compose up -d
 ```
 
-The shipped admin account is fine for evaluating the stack. For a production deployment, create per-user accounts via the admin UI and disable the bootstrap admin once your team is set up.
+Seven services start: postgres, redis, minio, gateway, api, ingest-worker, web. Wait ~60 seconds for the postgres healthcheck and database migrations to settle, then confirm:
 
-> Full pull-and-stand-up walkthrough (Helm chart, reverse-proxy recipes, reference architectures, air-gap install) is in [PRD §6 Deployment](docs/PRD.md#6-deployment); a self-contained Operator Quickstart guide lands as part of M1 Phase E (release-readiness).
+```bash
+docker compose ps   # all 7 services should show "healthy" or "running"
+```
 
-The first-run setup checklist in the web UI guides you through:
+### Step 3 — Set the admin password
 
-1. **Create your Organization Profile** — your team's voice, jurisdiction, industry, standard positions. Or skip and create later.
-2. **Configure Inference Tier policy** — which tiers are allowed for your deployment; what is the minimum for privileged work.
-3. **Optionally enable MFA** and review session-timeout settings.
-4. **Create your first Project** and try the starter skills against a sample document.
+```bash
+docker compose exec api python -m app.cli reset-admin-password \
+  --email admin@lq.ai \
+  --password 'LQ-AI-smoke-test-Pw1!' \
+  --no-force-change
+```
 
-For production deployment, see [PRD §6 Deployment](docs/PRD.md#6-deployment) — Helm chart for Kubernetes, reverse proxy recipes (Caddy, Traefik, nginx), reference architectures (small / medium / large), and the air-gap install guide.
+This sets a known password for the bootstrap admin account so you can log in immediately without the must-change-password gate. Use a stronger password for anything beyond a local evaluation.
+
+### Step 4 — Log in
+
+Navigate to `http://localhost:3000/lq-ai/login` and sign in:
+
+- **Email:** `admin@lq.ai`
+- **Password:** `LQ-AI-smoke-test-Pw1!` (or whatever you set in step 3)
+
+Other endpoints available after the stack is up:
+
+```
+LQ.AI app:          http://localhost:3000/lq-ai
+Backend API docs:   http://localhost:8000/docs   (Swagger UI)
+Backend API docs:   http://localhost:8000/redoc  (ReDoc)
+Inference Gateway:  http://localhost:8001/docs
+```
+
+### Step 5 — First 5 minutes
+
+After login you land on the LQ.AI home. Three good starting points:
+
+- Click **Learn** in the top bar to take the interactive tour — six playgrounds walk through the architecture, the request lifecycle, the tier system, what the model sees, where your data lives, and how to author a skill. This is the fastest orientation for both evaluators and new contributors. (`http://localhost:3000/lq-ai/learn`)
+- Click **Skills** to browse the 10 built-in skills. Each is inspectable: click any skill to read the `SKILL.md` driving it.
+- Click **+ New matter** to create your first project workspace and attach a document to try a skill against.
+
+---
+
+### Providers and air-gapped deployments
+
+LQ.AI ships with three provider adapters in M1: Anthropic, OpenAI, and Ollama. Vertex AI and AWS Bedrock adapters are deferred to M2 — see [docs/HONEST-STATE.md](docs/HONEST-STATE.md) for the current shipped-vs-deferred catalog.
+
+For a **fully air-gapped deployment** (no outbound network calls), start the stack with the `local` profile to add Ollama and PaddleOCR sidecars:
+
+```bash
+docker compose --profile local up -d
+```
+
+In this mode, inference runs entirely on the local host via Ollama. The Inference Gateway is the only egress point in the stack — verify in `gateway/app/router.py`. Provider keys live only inside the Gateway, encrypted at rest (`gateway/app/secrets.py`); the API service never sees them.
+
+---
+
+### Troubleshooting
+
+**`docker compose up` fails immediately** — confirm Docker Desktop is running and has at least 6 GB RAM allocated. On macOS: Docker Desktop → Settings → Resources. Also confirm all four required `.env` variables are set (the compose file requires them and will exit with an error message naming the missing variable).
+
+**Fewer than 7 services are healthy** — wait 60 seconds; the postgres healthcheck can take time on first boot. If services are still unhealthy after that: `docker compose logs <service-name>` to see what is failing.
+
+**Login rejected / password not accepted** — re-run step 3 (the reset command is idempotent). Confirm you are using the login URL `http://localhost:3000/lq-ai/login`, not `http://localhost:3000`.
+
+**Inference returns "no provider configured"** — add at least one provider key to `.env` (e.g., `ANTHROPIC_API_KEY=sk-...`), then `docker compose restart gateway`. The gateway reads provider keys from environment variables at startup.
+
+**Port 3000 already in use** — change the host-side port in `docker-compose.yml` under the `web` service: `"3000:8080"` → `"3001:8080"`, then update your login URL accordingly.
+
+---
+
+### How to verify what this project says about itself
+
+The trust model for a self-hosted, open-source project is that every claim terminates in code you can read. Here are the five most important verification paths:
+
+- **E2E test suite:** `web/cypress/e2e/` — every M1 user-facing flow has a Cypress spec. Read the test to understand what the claim covers.
+- **Inference Gateway:** `gateway/app/router.py` — the only egress point, the security boundary, the place where routing decisions are made and logged.
+- **Audit log writer:** `api/app/audit.py` — what gets written to the `audit_log` table, and for which actions.
+- **Honest catalog:** [`docs/HONEST-STATE.md`](docs/HONEST-STATE.md) — the shipped-vs-deferred table with a verification path for every row. If you find a discrepancy between this document and the code, the code is canonical.
+- **Interactive architecture tour:** Navigate to `http://localhost:3000/lq-ai/learn` after logging in. The six playgrounds each point at the relevant source files for that topic.
+
+---
+
+### First steps after login
+
+**The Learn page is the guided tour.** New users and procurement evaluators start at `http://localhost:3000/lq-ai/learn`. Six interactive playgrounds walk through the architecture, the full request lifecycle, the five-tier inference model, what the model actually sees (and what it doesn't), where data lives, and how to author your own skill. Each playground links to the relevant source file.
+
+**The honest catalog.** [`docs/HONEST-STATE.md`](docs/HONEST-STATE.md) names what is shipped, what is deferred, and how to verify each. We publish this because the verification path for an open-source product terminates in code, not in claims. If anything in this README is inconsistent with what the code does, please [open an issue](https://github.com/LegalQuants/lq-ai/issues) — the code is canonical.
+
+**Want to contribute?** [`docs/contribute/EASIEST-CONTRIBUTIONS.md`](docs/contribute/EASIEST-CONTRIBUTIONS.md) is the curated list of short-cycle contributions where the foundation is already in source and the gap is written down in advance. Seven items are currently open, ranging from "a practicing attorney with no engineering background can pick this up" to "a security architect familiar with OWASP can pick this up." Each mini-PRD names the acceptance criteria, the contributor profile, and the files to start in.
 
 ---
 
