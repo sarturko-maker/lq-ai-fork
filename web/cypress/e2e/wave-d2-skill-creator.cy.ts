@@ -492,7 +492,7 @@ describe('Wave D.2 — Skill Creator', () => {
 		// alias input via the `{#if slashAliasError}` block — not via the
 		// `lq-ai-wizard-save-error` banner).
 		cy.visit('/lq-ai/skills/new');
-		cy.get('[data-testid="lq-ai-wizard-display-name"]').type('Collision Test');
+		cy.get('[data-testid="lq-ai-wizard-display-name"]').type(`Collision Test ${ts}`);
 		cy.get('[data-testid="lq-ai-wizard-description"]').type('collision description');
 		cy.get('[data-testid="lq-ai-wizard-body"]').type('collision body');
 		cy.get('[data-testid="lq-ai-wizard-slash-alias"]').type(targetAlias);
