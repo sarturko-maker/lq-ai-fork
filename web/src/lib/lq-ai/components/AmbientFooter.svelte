@@ -2,9 +2,10 @@
   /**
    * AmbientFooter — bottom-of-chat reassurance bar.
    *
-   * Wave A renders provider + tier + a static "audit on" pill. Wave B
-   * wires audit-health from /api/v1/trust/audit-health (backend gap §9.1).
-   * Wave D adds the "external turns today" counter.
+   * Renders provider + tier. The static "audit on" pill was removed for
+   * v0.1.0 — there's no /api/v1/trust/audit-health endpoint behind it,
+   * so the pill was a dishonest signal. When the backend ships an
+   * audit-health derivation we can render a real status here.
    */
   import TrustPill from './TrustPill.svelte';
 
@@ -14,9 +15,6 @@
 
 <footer class="lq-footer" aria-label="Chat status">
   <TrustPill variant="provider" label="● {provider} · {tier}" />
-  <!-- Audit-health wiring (Wave B backend dep): replace static label
-       with derived state once /api/v1/trust/audit-health ships. -->
-  <TrustPill variant="audit" label="✓ audit on" />
 </footer>
 
 <style>

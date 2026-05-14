@@ -64,6 +64,7 @@
 	 */
 	import { get } from 'svelte/store';
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 
 	import {
 		chatsApi,
@@ -625,10 +626,11 @@
 	}
 
 	function handleAppliedSkillClicked(name: string) {
-		// M1: a lightweight info toast. M2 will land a richer skill-inspector
-		// panel per the Quickstart Step 6 walkthrough.
-		// eslint-disable-next-line no-alert
-		alert(`This message used the ${name} skill.\n\n(M2 will land a full skill-inspector panel.)`);
+		// Navigate to the skill detail page so the user can read the source,
+		// fork it, or try it. A richer in-chat skill-inspector side panel is
+		// a future-release item (DE-012); detail-page navigation gives users
+		// the same answer ("what is this skill?") without modal noise.
+		void goto(`/lq-ai/skills/${encodeURIComponent(name)}`);
 	}
 
 	// T6 — Enhance Prompt callbacks. The panel is mounted inline below the

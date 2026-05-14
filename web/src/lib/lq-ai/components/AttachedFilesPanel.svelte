@@ -10,8 +10,9 @@
 	 * The file's `ingestion_status` is surfaced (pending / processing /
 	 * ready / failed) so the user can see when a file is parseable.
 	 *
-	 * Citations are M2 — this panel deliberately does not surface citation
-	 * links yet; the message bubble shows citations as raw JSON in M1.
+	 * The citation engine is a future-release item; this panel deliberately
+	 * does not surface citation links yet (and the message bubble renders
+	 * nothing for empty citation arrays — see MessageBubble's docstring).
 	 */
 	import type { FileMeta } from '../types';
 
@@ -53,7 +54,7 @@
 	<div>
 		<h3 class="text-sm font-semibold lq-heading">Attached files</h3>
 		<p class="text-xs lq-subtext mt-0.5">
-			Upload documents the skill should review. Citations will land in M2.
+			Upload documents the skill should review.
 		</p>
 	</div>
 

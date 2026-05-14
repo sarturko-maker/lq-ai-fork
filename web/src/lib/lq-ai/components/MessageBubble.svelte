@@ -7,8 +7,9 @@
 	 * - Applied-skills chips on assistant messages.
 	 * - Tier badge on assistant messages.
 	 * - error_code surfaces as a red-line banner (per Task C8 spec).
-	 * - Citations render as a "M2: citations coming soon" placeholder when
-	 *   the array is empty (M1 backend ships [] per `MessagePostResponse`).
+	 * - Citations: when the array is non-empty, render a count summary;
+	 *   when empty, render nothing (the citation engine lands in a future
+	 *   release — until then we don't telegraph a roadmap to users).
 	 * - Wave D.1 T15: when `message.kind === 'refusal'` the bubble dispatches
 	 *   to `RefusalMessageBubble` and forwards the rerun / override /
 	 *   explainer callbacks; the default rendering below is skipped.
@@ -206,9 +207,16 @@
 			</div>
 		{/if}
 
-		{#if message.citations && message.citations.length === 0}
-			<div class="mt-1 text-xs text-gray-400 italic">
-				M2: citation links will land in this message footer.
+		<!--
+			Citations footer intentionally omitted when the array is empty —
+			the placeholder text leaked the M1/M2 internal vocabulary to
+			users. The real citation engine lands in a future release; until
+			then we render nothing rather than telegraph a roadmap.
+		-->
+		{#if message.citations && message.citations.length > 0}
+			<div class="mt-1 text-xs text-gray-500" data-testid="lq-ai-message-citations">
+				{message.citations.length}
+				{message.citations.length === 1 ? 'citation' : 'citations'}
 			</div>
 		{/if}
 	{/if}

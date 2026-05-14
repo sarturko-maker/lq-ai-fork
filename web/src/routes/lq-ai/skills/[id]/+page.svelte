@@ -59,7 +59,9 @@
 					class="lq-btn-ghost"
 					aria-label={`Fork ${skill.title ?? skill.name} as my own`}
 				>🔱 Fork as my own</a>
-				<a href={`/lq-ai/skills/${encodeURIComponent(skill.name)}/edit`} class="lq-btn-primary">Edit</a>
+				{#if skill.scope !== 'builtin'}
+					<a href={`/lq-ai/skills/${encodeURIComponent(skill.name)}/edit`} class="lq-btn-primary">Edit</a>
+				{/if}
 			</div>
 		</header>
 

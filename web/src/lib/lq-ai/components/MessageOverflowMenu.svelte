@@ -4,8 +4,15 @@
    * footers (Wave D.2 Task 5.3). Composable by intent: callers pass in an
    * `onCapture` handler and toggle `captureInOverflow` to surface (or omit)
    * the "Capture as skill" item depending on whether the inline 📝 button
-   * is already showing in the parent's action row. Copy markdown / Retry
-   * are placeholders for later waves and stay disabled here.
+   * is already showing in the parent's action row.
+   *
+   * Trigger is hidden when no items would render — by default the inline
+   * 📝 button covers the only currently-implemented action, so the overflow
+   * trigger only appears when the user has demoted capture into the menu
+   * (settings → "Show inline on AI messages" off). Copy markdown / Retry
+   * are deferred to a future release and intentionally NOT rendered as
+   * placeholder items — surfacing them as greyed-out controls reads as
+   * broken UI rather than coming-soon. They land here when implemented.
    *
    * No unit tests — pure UI-state component; behavior covered by Wave 8
    * Cypress via the data-testids.
@@ -37,6 +44,12 @@
   let open = false;
   let rootEl: HTMLDivElement;
   let triggerEl: HTMLButtonElement;
+
+  // Currently the only implemented item is Capture (gated by
+  // `captureInOverflow`). When that's off too, the menu would only contain
+  // future-release items, so we hide the trigger entirely rather than
+  // present an empty / "broken" menu.
+  $: hasItems = captureInOverflow;
 
   function toggle(): void {
     open = !open;
@@ -79,38 +92,34 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
-<!-- svelte-ignore a11y-no-static-element-interactions -->
-<div class="overflow" bind:this={rootEl} on:focusout={handleFocusout}>
-  <button
-    type="button"
-    class="trigger"
-    aria-label="More actions"
-    aria-expanded={open}
-    data-testid="lq-ai-message-overflow-trigger"
-    bind:this={triggerEl}
-    on:click={toggle}
-  >⋯</button>
-  {#if open}
-    <ul class="menu">
-      {#if captureInOverflow}
-        <li>
-          <button
-            type="button"
-            disabled={captureDisabled}
-            data-testid="lq-ai-message-overflow-capture"
-            on:click={handleCapture}
-          >📝 Capture as skill</button>
-        </li>
-      {/if}
-      <li>
-        <button type="button" disabled>Copy markdown</button>
-      </li>
-      <li>
-        <button type="button" disabled>Retry</button>
-      </li>
-    </ul>
-  {/if}
-</div>
+{#if hasItems}
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="overflow" bind:this={rootEl} on:focusout={handleFocusout}>
+    <button
+      type="button"
+      class="trigger"
+      aria-label="More actions"
+      aria-expanded={open}
+      data-testid="lq-ai-message-overflow-trigger"
+      bind:this={triggerEl}
+      on:click={toggle}
+    >⋯</button>
+    {#if open}
+      <ul class="menu">
+        {#if captureInOverflow}
+          <li>
+            <button
+              type="button"
+              disabled={captureDisabled}
+              data-testid="lq-ai-message-overflow-capture"
+              on:click={handleCapture}
+            >📝 Capture as skill</button>
+          </li>
+        {/if}
+      </ul>
+    {/if}
+  </div>
+{/if}
 
 <style>
   @import '$lib/lq-ai/styles/practice.css';
