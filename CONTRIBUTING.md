@@ -259,6 +259,52 @@ PRs that change behavior without updating docs will be asked to add the doc chan
 
 ---
 
+## Porting skills from external sources
+
+Skills may be ported from external corpora (law firm knowledge bases, open-source legal-AI repositories, academic datasets, etc.) if the licence and provenance allow. Porting is a special case of the skill-contribution workflow documented in [`skills/CONTRIBUTING.md`](skills/CONTRIBUTING.md); the additional requirements below apply **in addition** to the standard skill-authoring steps.
+
+### Attestation
+
+Every ported skill PR description must include an attestation paragraph signed by a practicing attorney (the PR author, a co-author, or a named legal reviewer). Template:
+
+> I, [Name], a licensed attorney in [jurisdiction(s)], attest that:
+>
+> 1. I have reviewed the ported skill against the original source material and confirm the substance is accurately represented.
+> 2. The upstream licence ([SPDX identifier]) permits this use under the terms stated in NOTICES.md.
+> 3. Any jurisdictional limitations of the source material are reflected in the skill's `jurisdiction:` frontmatter field.
+> 4. This skill does not constitute legal advice and is labelled accordingly in the skill frontmatter.
+
+Pull requests without a complete attestation paragraph will not be merged. Agents do not attest — the human contributor is the attesting party.
+
+### Provenance preservation
+
+The upstream source must be recorded in three places:
+
+1. **Skill frontmatter** — add a `source:` key under the `lq_ai:` extension block:
+
+   ```yaml
+   lq_ai:
+     source:
+       uri: "https://example.com/original-skill-repo"
+       license: "Apache-2.0"
+       retrieved_at: "2026-05-14"
+   ```
+
+2. **NOTICES.md** — add a row to the per-skill provenance table at the repo root. See [`NOTICES.md`](NOTICES.md) for the column format.
+
+3. **Commit message** — include the upstream URI in the commit body:
+   `Ported from https://example.com/original-skill-repo (Apache-2.0).`
+
+### Attribution requirements
+
+If the upstream source requires attribution (e.g., a CC-BY licence), the attribution text must appear in:
+- The skill's `SKILL.md` under an "Attribution" heading.
+- The NOTICES.md row for that skill.
+
+Questions about licence compatibility should be directed to the maintainer team before opening the PR. When in doubt, do not port — create a new skill inspired by the source instead.
+
+---
+
 ## Reviewer expectations
 
 Reviewers will look for:
