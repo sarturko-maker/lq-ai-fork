@@ -1,361 +1,200 @@
 <script lang="ts">
 	/**
-	 * /lq-ai/skills/new — create a new user- or team-scope skill
-	 * (D8 / D8.1c / ADR 0012).
+	 * /lq-ai/skills/new — Wave D.2 Skill Creator wizard entry point.
 	 *
-	 * The form fields map to ``UserSkillCreate``. Scope defaults to
-	 * ``'user'`` (Personal). Picking "Team" reveals a dropdown of teams
-	 * where the caller is a team-admin (fetched from ``GET /api/v1/teams
-	 * ?role=admin``); team scope is hidden entirely if the caller admins
-	 * no teams.
+	 * Thin wrapper around ``SkillWizard`` (Task 4.2). Supports four entry
+	 * modes via query params:
 	 *
-	 * The slug input watches for collisions with filesystem-canonical
-	 * built-ins and surfaces a yellow inline note so the user knows
-	 * their skill will shadow the built-in for the relevant scope.
-	 * Collision is permitted (forking-by-shadowing per PRD §1.3
-	 * transparency); the note exists to make the behavior comprehensible,
-	 * not to block.
+	 *   blank          (no params)          fresh wizard, fresh draft key
+	 *   ?fork=<slug>                        pre-populate from a source skill via
+	 *                                       GET /skills/{slug}; uses a fork-scoped
+	 *                                       draft key so the source's autosave
+	 *                                       doesn't collide with other drafts.
+	 *   ?capture=<key>                      pre-populate from a localStorage stash
+	 *                                       at ``lq-ai:capture-stash:<key>``; the
+	 *                                       stash entry is removed after read so
+	 *                                       a refresh resumes from the draft, not
+	 *                                       the stash. Uses ``<key>`` as the draft key.
+	 *   ?draft=<key>                        resume an in-progress wizard draft
+	 *                                       (the wizard's own autosave key).
+	 *
+	 * Auth and force-change-password gating live in the parent ``/lq-ai``
+	 * layout — this page has no auth logic of its own.
+	 *
+	 * Implementation notes:
+	 *   - API imports are named functions per Wave D.2 convention.
+	 *   - ``initial`` intentionally omits ``jurisdiction``: the wizard does
+	 *     not surface that field (it would need to ride
+	 *     ``frontmatter_extra.jurisdiction``, not a top-level field). If a
+	 *     source skill has a jurisdiction set, it's dropped from the fork
+	 *     seed for now — a Wave 4 wizard limitation, not a data loss
+	 *     concern (the user can re-add it via the editor once
+	 *     frontmatter-extra surfaces in the wizard).
+	 *   - On ``?fork=`` 404 or capture-stash JSON parse failure, we set
+	 *     ``loadError`` AND fall through to a blank wizard so the user is
+	 *     never stuck on an error screen.
 	 */
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 
-	import { userSkillsApi, skillsApi, teamsApi } from '$lib/lq-ai/api';
-	import { LQAIApiError } from '$lib/lq-ai/api/client';
-	import type { SkillSummary, TeamSummary } from '$lib/lq-ai/types';
+	import { getSkill } from '$lib/lq-ai/api/skills';
+	import { listUserSkills, createUserSkill } from '$lib/lq-ai/api/userSkills';
+	import SkillWizard from '$lib/lq-ai/components/SkillWizard.svelte';
+	import type { UserSkillCreate } from '$lib/lq-ai/types';
 
-	const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$/;
+	interface WizardInitial {
+		slug?: string;
+		displayName?: string;
+		description?: string;
+		body?: string;
+		tags?: string[];
+		slashAlias?: string | null;
+		version?: string;
+		scope?: 'user' | 'team';
+		ownerTeamId?: string;
+		forkedFrom?: string | null;
+	}
 
-	let slug = '';
-	let displayName = '';
-	let description = '';
-	let version = '1.0.0';
-	let tagsInput = '';
-	let body = '';
-	let scope: 'user' | 'team' = 'user';
-	let ownerTeamId = '';
-	let submitting = false;
-	let submitError: string | null = null;
-	let builtinSlugs = new Set<string>();
-	let adminTeams: TeamSummary[] = [];
+	let initial: WizardInitial = {};
+	let draftKey: string | null = null;
 	let loadError: string | null = null;
+	let loading = true;
 
-	$: trimmedSlug = slug.trim();
-	$: slugIsValid = trimmedSlug.length > 0 && SLUG_RE.test(trimmedSlug);
-	$: shadowsBuiltIn = slugIsValid && builtinSlugs.has(trimmedSlug);
-	$: scopePickerEnabled = adminTeams.length > 0;
-	$: teamScopeReady = scope !== 'team' || ownerTeamId !== '';
-	$: canSubmit =
-		!submitting &&
-		slugIsValid &&
-		displayName.trim().length > 0 &&
-		description.trim().length > 0 &&
-		body.trim().length > 0 &&
-		teamScopeReady;
+	$: forkSlug = $page.url.searchParams.get('fork');
+	$: captureKey = $page.url.searchParams.get('capture');
+	$: explicitDraftKey = $page.url.searchParams.get('draft');
 
-	async function loadContext(): Promise<void> {
-		try {
-			const [builtins, teams] = await Promise.all([
-				skillsApi.listSkills('builtin'),
-				teamsApi.listMyTeams('admin')
-			]);
-			builtinSlugs = new Set(builtins.map((s: SkillSummary) => s.name));
-			adminTeams = teams;
-		} catch (e) {
-			console.error('user-skills/new: failed to load form context', e);
-			loadError =
-				'Could not load reference data (built-in skills + your teams). You can still create a personal skill; team scope and the shadow indicator may not appear.';
+	function newDraftKey(): string {
+		// `crypto.randomUUID` is available in every browser we target; the
+		// fallback exists only as a safety net for older / non-secure-context
+		// environments where the API may be missing.
+		if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
+			return globalThis.crypto.randomUUID();
 		}
+		return `draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 	}
 
-	function parseTags(raw: string): string[] {
-		return raw
-			.split(',')
-			.map((t) => t.trim())
-			.filter((t) => t.length > 0);
-	}
-
-	async function submit(): Promise<void> {
-		if (!canSubmit) return;
-		submitting = true;
-		submitError = null;
+	/**
+	 * Cheap dedup against the caller's existing user / team skills: append
+	 * -2, -3, etc. when the base slug is already taken. The server still
+	 * returns 409 on a save-time collision (the truth source); this is a
+	 * UX nicety so the wizard doesn't open with a slug that obviously
+	 * collides with one of the caller's own rows.
+	 */
+	async function uniqueSlug(base: string): Promise<string> {
 		try {
-			const created = await userSkillsApi.createUserSkill({
-				slug: trimmedSlug,
-				display_name: displayName.trim(),
-				description: description.trim(),
-				body,
-				version: version.trim() || '1.0.0',
-				tags: parseTags(tagsInput),
-				scope,
-				owner_team_id: scope === 'team' ? ownerTeamId : null
-			});
-			goto(`/lq-ai/skills/${created.id}/edit?created=1`);
-		} catch (e) {
-			console.error('user-skills/new: create failed', e);
-			if (e instanceof LQAIApiError && e.status === 409) {
-				submitError =
-					scope === 'team'
-						? 'This team already has a skill with this slug. Pick a different slug or archive the existing one first.'
-						: 'You already have a skill with this slug. Pick a different slug or archive the existing one first.';
-			} else {
-				submitError = e instanceof Error ? e.message : 'Failed to create the skill.';
+			const mine = await listUserSkills('all');
+			const taken = new Set(mine.map((s) => s.slug));
+			if (!taken.has(base)) return base;
+			for (let i = 2; i < 100; i++) {
+				const candidate = `${base}-${i}`;
+				if (!taken.has(candidate)) return candidate;
 			}
-		} finally {
-			submitting = false;
+			return `${base}-${newDraftKey().slice(0, 6)}`;
+		} catch (e) {
+			// Listing failed — fall back to the base slug. The server's 409
+			// path will surface any collision when the user clicks Save.
+			console.warn('skills/new: uniqueSlug fallback (listUserSkills failed)', e);
+			return base;
 		}
 	}
 
-	onMount(() => {
-		loadContext();
+	onMount(async () => {
+		try {
+			if (forkSlug) {
+				const source = await getSkill(forkSlug);
+				// `source.name` IS the slug (the SkillSummary field is named
+				// "name" but holds the slug — see types.ts:354). We use it
+				// for both the slug seed and the `forked_from` audit field.
+				const baseSlug = await uniqueSlug(`${source.name}-fork`);
+				initial = {
+					slug: baseSlug,
+					displayName: `${source.title ?? source.name} (fork)`,
+					description: source.description ?? '',
+					body: source.content_md ?? '',
+					tags: source.tags ?? [],
+					slashAlias: null,
+					version: '1.0.0',
+					scope: 'user',
+					forkedFrom: source.name
+				};
+				// Intentionally NOT seeding `jurisdiction` from the source —
+				// the wizard doesn't surface that field today (see header
+				// comment for the rationale).
+				draftKey = `fork-${forkSlug}-${newDraftKey()}`;
+			} else if (captureKey) {
+				try {
+					const stash = localStorage.getItem(`lq-ai:capture-stash:${captureKey}`);
+					if (stash) {
+						const parsed = JSON.parse(stash) as unknown;
+						if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+							initial = parsed as WizardInitial;
+						}
+						localStorage.removeItem(`lq-ai:capture-stash:${captureKey}`);
+					}
+				} catch (e) {
+					console.error('skills/new: failed to parse capture stash', e);
+					loadError =
+						e instanceof Error
+							? `capture stash: ${e.message}`
+							: 'capture stash could not be parsed';
+				}
+				draftKey = captureKey;
+			} else if (explicitDraftKey) {
+				draftKey = explicitDraftKey;
+			} else {
+				draftKey = newDraftKey();
+			}
+		} catch (e) {
+			console.error('skills/new: failed to prepare initial wizard state', e);
+			loadError = e instanceof Error ? e.message : 'Failed to load source';
+			// Fall through to a blank wizard so the user is never stuck.
+			if (!draftKey) draftKey = newDraftKey();
+		} finally {
+			loading = false;
+		}
 	});
+
+	async function onSave(payload: UserSkillCreate): Promise<string> {
+		const created = await createUserSkill(payload);
+		// UserSkill has both `id` and `slug`; the public detail route is
+		// slug-keyed (matches the chat-time invocation surface).
+		await goto(`/lq-ai/skills/${encodeURIComponent(created.slug)}?just_saved=1`);
+		return created.id;
+	}
+
+	function onDiscard(): void {
+		goto('/lq-ai/skills');
+	}
 </script>
 
-<div class="p-4 max-w-3xl mx-auto" data-testid="lq-ai-user-skill-new">
-	<header class="mb-4 flex items-center justify-between">
-		<div>
-			<h1 class="lq-text-page-h">New skill</h1>
-			<p class="lq-text-caption mt-1" style="color: var(--lq-text-tertiary);">
-				Author a skill that lives in your account. It shapes the system prompt for any chat where
-				you attach it.
-			</p>
-		</div>
-		<a
-			href="/lq-ai/skills"
-			class="lq-btn-secondary lq-text-caption"
-		>
-			Cancel
-		</a>
-	</header>
-
-	{#if loadError}
-		<div
-			class="mb-4 p-3 rounded border border-amber-300 bg-amber-50 text-amber-900 text-xs dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
-			role="status"
-		>
-			{loadError}
-		</div>
-	{/if}
-	{#if submitError}
-		<div
-			class="mb-4 p-3 rounded border border-rose-300 bg-rose-50 text-rose-900 text-sm dark:border-rose-700 dark:bg-rose-950 dark:text-rose-100"
-			role="alert"
-		>
-			{submitError}
-		</div>
-	{/if}
-
-	<form
-		class="space-y-4"
-		on:submit|preventDefault={submit}
-		data-testid="lq-ai-user-skill-new-form"
-	>
-		{#if scopePickerEnabled}
-			<fieldset
-				class="block border border-gray-200 dark:border-gray-800 rounded p-3"
-				data-testid="lq-ai-user-skill-new-scope"
-			>
-				<legend class="text-xs text-gray-600 dark:text-gray-400 px-1">Scope</legend>
-				<div class="flex flex-col gap-2 mt-1">
-					<label class="inline-flex items-start gap-2 text-sm">
-						<input
-							type="radio"
-							name="scope"
-							value="user"
-							bind:group={scope}
-							class="mt-0.5"
-							data-testid="lq-ai-user-skill-new-scope-user"
-						/>
-						<span>
-							<span class="font-medium text-gray-900 dark:text-gray-100">Personal</span>
-							<span class="text-xs text-gray-500 block">Only you see it. Shadows the built-in for your chats on slug collision.</span>
-						</span>
-					</label>
-					<label class="inline-flex items-start gap-2 text-sm">
-						<input
-							type="radio"
-							name="scope"
-							value="team"
-							bind:group={scope}
-							class="mt-0.5"
-							data-testid="lq-ai-user-skill-new-scope-team"
-						/>
-						<span class="flex-1">
-							<span class="font-medium text-gray-900 dark:text-gray-100">Team</span>
-							<span class="text-xs text-gray-500 block">Every team member sees it; only team-admins can edit. Shadows the built-in for team members on slug collision.</span>
-							{#if scope === 'team'}
-								<select
-									bind:value={ownerTeamId}
-									required
-									class="mt-2 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-									data-testid="lq-ai-user-skill-new-team-picker"
-								>
-									<option value="" disabled>Pick a team…</option>
-									{#each adminTeams as team (team.id)}
-										<option value={team.id}>{team.name} ({team.slug})</option>
-									{/each}
-								</select>
-							{/if}
-						</span>
-					</label>
-				</div>
-			</fieldset>
+<main class="lq-skills-new" data-testid="lq-ai-user-skill-new">
+	{#if loading}
+		<p class="lq-text-body" data-testid="lq-ai-user-skill-new-loading">Loading…</p>
+	{:else}
+		{#if loadError}
+			<div class="banner" role="status" data-testid="lq-ai-user-skill-new-load-error">
+				Couldn't load source skill ({loadError}). Starting blank.
+				<a href="/lq-ai/skills">Pick a different source</a>
+			</div>
 		{/if}
-
-		<label class="block">
-			<span class="lq-text-label">Slug</span>
-			<input
-				type="text"
-				bind:value={slug}
-				placeholder="my-nda-review"
-				required
-				maxlength="80"
-				class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm font-mono"
-				data-testid="lq-ai-user-skill-new-slug"
-			/>
-			<p class="lq-text-caption mt-1" style="color: var(--lq-text-tertiary);">
-				Lowercase, alphanumeric, hyphens. Used as the stable identifier the chat picker references.
-			</p>
-			{#if trimmedSlug.length > 0 && !slugIsValid}
-				<p class="lq-text-caption mt-1" style="color: var(--lq-error);" data-testid="lq-ai-user-skill-new-slug-invalid">
-					Slug must be lowercase, start and end with an alphanumeric, and use only letters, digits,
-					and hyphens.
-				</p>
-			{/if}
-			{#if shadowsBuiltIn}
-				<div
-					class="mt-2 p-2 rounded border border-amber-300 bg-amber-50 text-amber-900 text-xs dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
-					data-testid="lq-ai-user-skill-new-shadow-warning"
-					role="status"
-				>
-					<strong>Heads up — this shadows a built-in.</strong> When
-					{#if scope === 'team'}
-						any member of this team references
-					{:else}
-						you reference
-					{/if}
-					<code class="font-mono">{trimmedSlug}</code> in a chat,
-					{#if scope === 'team'}
-						the <em>team's</em> version will shape the prompt instead of the built-in (users outside this team still see the built-in unless they have their own user-scope shadow).
-					{:else}
-						<em>your</em> version will shape the prompt instead of the built-in. Other users still see the built-in.
-					{/if}
-					Pick a different slug if you want both to coexist.
-				</div>
-			{/if}
-		</label>
-
-		<label class="block">
-			<span class="lq-text-label">Display name</span>
-			<input
-				type="text"
-				bind:value={displayName}
-				placeholder="My NDA Review"
-				required
-				maxlength="200"
-				class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-			/>
-		</label>
-
-		<label class="block">
-			<span class="lq-text-label">Description</span>
-			<input
-				type="text"
-				bind:value={description}
-				placeholder="One-sentence summary of when to use this skill."
-				required
-				maxlength="2000"
-				class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-			/>
-		</label>
-
-		<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-			<label class="block">
-				<span class="lq-text-label">Version</span>
-				<input
-					type="text"
-					bind:value={version}
-					placeholder="1.0.0"
-					maxlength="50"
-					class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm font-mono"
-				/>
-			</label>
-			<label class="block">
-				<span class="lq-text-label">Tags (comma-separated)</span>
-				<input
-					type="text"
-					bind:value={tagsInput}
-					placeholder="contracts, nda"
-					class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-				/>
-			</label>
-		</div>
-
-		<label class="block">
-			<span class="lq-text-label">Body (Markdown system prompt)</span>
-			<textarea
-				bind:value={body}
-				rows="14"
-				required
-				maxlength="200000"
-				placeholder={'You are reviewing NDAs for an in-house legal team.\n\nWalk through:\n1. Parties + scope.\n2. Duration + permitted disclosures.\n...'}
-				class="mt-1 w-full rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm font-mono"
-				data-testid="lq-ai-user-skill-new-body"
-			></textarea>
-			<p class="lq-text-caption mt-1" style="color: var(--lq-text-tertiary);">
-				This text becomes the system-prompt chunk for any chat that attaches the skill. Markdown
-				renders verbatim — the model reads it as instructions.
-			</p>
-		</label>
-
-		<div class="flex items-center justify-end gap-2 pt-2">
-			<a
-				href="/lq-ai/skills"
-				class="lq-btn-secondary lq-text-caption"
-			>
-				Cancel
-			</a>
-			<button
-				type="submit"
-				disabled={!canSubmit}
-				class="lq-btn-primary lq-text-caption"
-				data-testid="lq-ai-user-skill-new-submit"
-			>
-				{submitting ? 'Creating…' : 'Create skill'}
-			</button>
-		</div>
-	</form>
-</div>
+		<SkillWizard {initial} {draftKey} {onSave} {onDiscard} />
+	{/if}
+</main>
 
 <style>
-	.lq-btn-primary {
-		background: var(--lq-accent);
-		color: white;
-		border: 0;
-		border-radius: var(--lq-radius);
-		padding: 8px 16px;
-		font-size: 14px;
-		font-weight: 500;
-		cursor: pointer;
-		text-decoration: none;
-		display: inline-flex;
-		align-items: center;
+	.lq-skills-new {
+		padding: 32px 24px;
 	}
-	.lq-btn-primary:disabled {
-		background: var(--lq-text-tertiary);
-		cursor: not-allowed;
+	.banner {
+		background: rgba(234, 179, 8, 0.1);
+		padding: 12px 16px;
+		border-radius: 6px;
+		margin-bottom: 16px;
 	}
-
-	.lq-btn-secondary {
-		background: transparent;
-		color: var(--lq-text-secondary);
-		border: 1px solid var(--lq-border);
-		border-radius: var(--lq-radius);
-		padding: 6px 12px;
-		font-size: 12px;
-		cursor: pointer;
-		text-decoration: none;
-		display: inline-flex;
-		align-items: center;
+	.banner a {
+		margin-left: 8px;
+		text-decoration: underline;
 	}
-	.lq-btn-secondary:hover { background: var(--lq-inset); }
 </style>
