@@ -42,7 +42,7 @@ from app.main import app
 from app.models.audit import AuditLog
 from app.models.chat import Message
 from app.models.user import User
-from app.schemas.chats import INLINE_SKILL_BODY_MAX_BYTES
+from app.schemas.chats import ATTACHED_SKILLS_MAX_LEN, INLINE_SKILL_BODY_MAX_BYTES
 from app.security import create_access_token, hash_password
 from app.skills import load_registry
 from app.skills.registry import MutableSkillRegistry
@@ -274,6 +274,71 @@ async def test_inline_body_oversize_error_does_not_echo_body_content(
     assert "string_too_long" in body_text or "inline_body" in body_text, (
         f"Error envelope is missing a useful identifier; got: {body_text!r}"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@respx.mock
+async def test_attached_skills_over_cap_returns_4xx(
+    client: AsyncClient, db_user: User
+) -> None:
+    """Wave D.2 Task 3.0 (I1) — ``attached_skills`` is capped at
+    :data:`ATTACHED_SKILLS_MAX_LEN` entries.
+
+    Regression for the I1 finding in the Task 3.0 code+security review:
+    without a cap, a single message could attach thousands of inline
+    refs and force the gateway to assemble a multi-megabyte system
+    prompt — workload-multiplication DoS available to any authenticated
+    user. The schema now refuses lists longer than the cap at validation
+    time.
+    """
+
+    headers = _h(db_user)
+    chat_resp = await client.post("/api/v1/chats", headers=headers, json={"title": "x"})
+    chat_id = chat_resp.json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/chats/{chat_id}/messages",
+        headers=headers,
+        json={
+            "content": "hello",
+            "attached_skills": [
+                {"slug": f"skill-{i}"} for i in range(ATTACHED_SKILLS_MAX_LEN + 1)
+            ],
+        },
+    )
+    # Schema validation failure wraps as 400 ``validation_error`` per
+    # the chats handler's exception path.
+    assert 400 <= resp.status_code < 500, resp.text
+    assert "too_long" in resp.text or "attached_skills" in resp.text, resp.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@respx.mock
+async def test_legacy_skills_over_cap_returns_4xx(
+    client: AsyncClient, db_user: User
+) -> None:
+    """Wave D.2 Task 3.0 (I1) — the legacy ``skills`` list is also capped.
+
+    Same DoS surface as ``attached_skills``; cap applied symmetrically
+    so the legacy field doesn't become an escape hatch.
+    """
+
+    headers = _h(db_user)
+    chat_resp = await client.post("/api/v1/chats", headers=headers, json={"title": "x"})
+    chat_id = chat_resp.json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/chats/{chat_id}/messages",
+        headers=headers,
+        json={
+            "content": "hello",
+            "skills": [f"skill-{i}" for i in range(ATTACHED_SKILLS_MAX_LEN + 1)],
+        },
+    )
+    assert 400 <= resp.status_code < 500, resp.text
+    assert "too_long" in resp.text or "skills" in resp.text, resp.text
 
 
 # ---------------------------------------------------------------------------

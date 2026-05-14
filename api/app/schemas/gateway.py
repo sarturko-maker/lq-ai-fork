@@ -123,19 +123,25 @@ class ChatCompletionRequest(BaseModel):
     anonymize: bool = True
 
     # --- C2 (skill prompt assembly per ADR 0007) -----------------------------
-    lq_ai_skills: list[str] = Field(default_factory=list)
+    lq_ai_skills: list[str] = Field(default_factory=list, max_length=16)
     """Skill names to attach. The gateway fetches each from
     ``/api/v1/internal/skills/{name}`` and assembles them into the
-    system message before dispatching to the provider."""
+    system message before dispatching to the provider. Capped at 16
+    entries (Wave D.2 Task 3.0 I1) to mirror
+    ``ATTACHED_SKILLS_MAX_LEN`` on the request schema and bound the
+    workload-multiplication DoS surface."""
 
     lq_ai_skill_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """Per-skill input bindings, keyed by skill name."""
 
-    lq_ai_inline_skills: list[InlineSkillRef] = Field(default_factory=list)
+    lq_ai_inline_skills: list[InlineSkillRef] = Field(default_factory=list, max_length=16)
     """Wave D.2 Task 3.0: inline-body skills the gateway assembles
     without a catalogue fetch. Mirrors
     :attr:`gateway.app.providers.openai_schema.ChatCompletionRequest.lq_ai_inline_skills`.
-    Empty list (default) preserves pre-D.2 wire shape exactly."""
+    Empty list (default) preserves pre-D.2 wire shape exactly. Capped at
+    16 entries (I1) to bound the workload-multiplication DoS surface —
+    each entry can carry up to 64 KB of body content × catalogue
+    round-trips for slug entries on the parallel list."""
 
     # --- C3 (chat / message identity for routing-log correlation) ------------
     lq_ai_chat_id: str | None = None

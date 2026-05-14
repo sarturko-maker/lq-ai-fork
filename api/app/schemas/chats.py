@@ -69,6 +69,20 @@ covers a long skill body but cuts off pathological inputs (full
 documents pasted as a "skill"). 422 on overflow keeps the failure mode
 explicit rather than letting the gateway choke on a 1 MB system prompt."""
 
+ATTACHED_SKILLS_MAX_LEN: int = 16
+"""Wave D.2 Task 3.0 (I1) — hard cap on the length of
+``MessageCreateRequest.attached_skills`` and the legacy ``skills`` list.
+
+Each list entry can ship up to ``INLINE_SKILL_BODY_MAX_BYTES`` (32 KB)
+of verbatim body content plus an additional catalogue round-trip for
+slug entries. Without a cap, a single message could attach thousands
+of inline refs and force the gateway to assemble a multi-megabyte
+system prompt — workload-multiplication DoS available to any
+authenticated user. 16 is generous for realistic workflows: the slash
+path attaches exactly one skill, the wizard tryout attaches exactly
+one, and even an "attach multiple skills to a chat" UX rarely exceeds
+a handful. Requests with more than 16 attachments 422 at schema time."""
+
 KNOWN_ATTACHED_SKILL_SOURCES: frozenset[str] = frozenset(
     {"slash", "wizard-tryout", "tryit-tab", "capture", "manual"}
 )
@@ -345,17 +359,23 @@ class MessageCreateRequest(BaseModel):
     model: str = Field(default="smart")
     """Model alias (per the OpenAPI sketch). Defaults to ``smart``."""
 
-    skills: list[str] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list, max_length=ATTACHED_SKILLS_MAX_LEN)
     """C2 (legacy): skill names to attach. Forwarded to the gateway as
     ``lq_ai_skills``. Continues to work in parallel with
-    ``attached_skills``."""
+    ``attached_skills``. Capped at :data:`ATTACHED_SKILLS_MAX_LEN`
+    entries to bound workload multiplication (Wave D.2 Task 3.0 I1)."""
 
-    attached_skills: list[AttachedSkillRef] = Field(default_factory=list)
+    attached_skills: list[AttachedSkillRef] = Field(
+        default_factory=list,
+        max_length=ATTACHED_SKILLS_MAX_LEN,
+    )
     """Wave D.2 Task 3.0: rich attached-skill list. Each entry is XOR
     of ``slug`` / ``inline_body``. Slug entries merge into the legacy
     slug-resolved path; inline-body entries are forwarded as
     ``lq_ai_inline_skills`` so the gateway can assemble them without a
-    catalogue fetch."""
+    catalogue fetch. Capped at :data:`ATTACHED_SKILLS_MAX_LEN` entries
+    to bound workload multiplication (I1 — a single message attaching
+    thousands of inline refs × 32 KB each is a DoS vector)."""
 
     skill_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """C2: per-skill input bindings, keyed by skill name. Forwarded as
@@ -535,6 +555,7 @@ def decode_cursor(value: str) -> Cursor:
 
 
 __all__ = [
+    "ATTACHED_SKILLS_MAX_LEN",
     "AUTO_RENAME_MAX_CHARS",
     "CONTENT_MIN_LEN",
     "INLINE_SKILL_BODY_MAX_BYTES",

@@ -455,3 +455,64 @@ async def test_oversize_inline_body_4xx_does_not_echo_body_content(
     assert "string_too_long" in body_text or "body" in body_text, (
         f"Error envelope is missing a useful identifier; got: {body_text!r}"
     )
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_lq_ai_inline_skills_over_cap_returns_4xx(
+    http_client: AsyncClient,
+) -> None:
+    """Wave D.2 Task 3.0 (I1) — ``lq_ai_inline_skills`` list is capped at 16.
+
+    Regression for the I1 finding: without a cap, a single chat
+    completion could attach thousands of inline refs × 64 KB each and
+    force the gateway to assemble a multi-megabyte system prompt
+    (workload-multiplication DoS).
+    """
+
+    _mock_no_org_profile()
+    over_cap = [
+        {
+            "name": f"__inline__cap{i:02d}",
+            "body": "tiny body",
+            "source": "wizard-tryout",
+        }
+        for i in range(17)
+    ]
+
+    response = await http_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "smart",
+            "messages": [{"role": "user", "content": "hi"}],
+            "lq_ai_inline_skills": over_cap,
+        },
+    )
+    assert 400 <= response.status_code < 500, response.text
+    body_text = response.text
+    assert "too_long" in body_text or "lq_ai_inline_skills" in body_text, body_text
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_lq_ai_skills_over_cap_returns_4xx(http_client: AsyncClient) -> None:
+    """Wave D.2 Task 3.0 (I1) — catalogue ``lq_ai_skills`` is capped at 16.
+
+    Symmetrical to the inline cap; the catalogue path also multiplies
+    workload (one backend round-trip per slug) so the same bound
+    applies."""
+
+    _mock_no_org_profile()
+    over_cap = [f"skill-{i:02d}" for i in range(17)]
+
+    response = await http_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "smart",
+            "messages": [{"role": "user", "content": "hi"}],
+            "lq_ai_skills": over_cap,
+        },
+    )
+    assert 400 <= response.status_code < 500, response.text
+    body_text = response.text
+    assert "too_long" in body_text or "lq_ai_skills" in body_text, body_text

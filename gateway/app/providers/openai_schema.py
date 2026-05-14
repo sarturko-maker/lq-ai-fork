@@ -179,23 +179,29 @@ class ChatCompletionRequest(BaseModel):
     anonymize: bool = True
 
     # --- C2 (skill prompt assembly per ADR 0007) -----------------------------
-    lq_ai_skills: list[str] = Field(default_factory=list)
+    lq_ai_skills: list[str] = Field(default_factory=list, max_length=16)
     """Ordered list of skill names to attach to this request. The gateway
     fetches each from the backend's internal-skills endpoint, assembles
     the bodies (with reference files and input substitution applied),
-    and prepends the result to the request's system message."""
+    and prepends the result to the request's system message. Capped at
+    16 entries (Wave D.2 Task 3.0 I1) to bound the
+    workload-multiplication DoS surface — each catalogue entry triggers
+    a backend round-trip plus an assembled-body system-prompt
+    contribution."""
 
     lq_ai_skill_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """Per-skill input bindings, keyed by skill name. Inner dict maps
     input variable names to values. Per-skill scoping means two attached
     skills with overlapping variable names don't collide."""
 
-    lq_ai_inline_skills: list[InlineSkillRef] = Field(default_factory=list)
+    lq_ai_inline_skills: list[InlineSkillRef] = Field(default_factory=list, max_length=16)
     """Wave D.2 Task 3.0 — inline-body skills the gateway assembles
     without a backend round-trip. Each entry carries a synthesized
     ``name``, a verbatim ``body``, optional ``inputs``, optional
     ``minimum_inference_tier``, and optional ``source`` (provenance
-    tag).
+    tag). Capped at 16 entries (I1) to bound the
+    workload-multiplication DoS surface — each entry can ship up to
+    64 KB of verbatim body content that lands in the system prompt.
 
     The assembler builds a :class:`app.clients.backend.Skill` instance
     from each entry directly (no HTTP) and appends it to the same
