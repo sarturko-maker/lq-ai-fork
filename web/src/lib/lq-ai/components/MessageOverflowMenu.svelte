@@ -7,6 +7,15 @@
    * is already showing in the parent's action row. Copy markdown / Retry
    * are placeholders for later waves and stay disabled here.
    *
+   * No unit tests — pure UI-state component; behavior covered by Wave 8
+   * Cypress via the data-testids.
+   *
+   * A11y posture: this is a "disclosure widget" (expandable button group),
+   * not a WAI-ARIA menu. The full menu pattern (arrow-key navigation,
+   * roving tabindex, focus management) is deferred until Copy/Retry
+   * placeholders wake up — track as a DE candidate. We keep `aria-expanded`
+   * on the trigger because that correctly describes a disclosure.
+   *
    * Notes for reviewers:
    *   - Scoped style block uses the same token vocabulary as
    *     `CaptureSkillModal.svelte` / `AttachKBModal.svelte`. There is NO
@@ -23,9 +32,11 @@
 
   export let onCapture: () => void;
   export let captureInOverflow = false;
+  export let captureDisabled = false;
 
   let open = false;
   let rootEl: HTMLDivElement;
+  let triggerEl: HTMLButtonElement;
 
   function toggle(): void {
     open = !open;
@@ -49,11 +60,24 @@
     });
   }
 
+  function handleKeydown(e: KeyboardEvent): void {
+    if (open && e.key === 'Escape') {
+      open = false;
+      triggerEl?.focus();
+    }
+  }
+
   function handleCapture(): void {
     open = false;
+    // Briefly restore focus to the trigger before the modal grabs it.
+    // For future sync menuitems (Copy/Retry), focus correctly returns to
+    // the trigger and no follow-up wiring is needed.
+    triggerEl?.focus();
     onCapture();
   }
 </script>
+
+<svelte:window on:keydown={handleKeydown} />
 
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div class="overflow" bind:this={rootEl} on:focusout={handleFocusout}>
@@ -61,28 +85,28 @@
     type="button"
     class="trigger"
     aria-label="More actions"
-    aria-haspopup="menu"
     aria-expanded={open}
     data-testid="lq-ai-message-overflow-trigger"
+    bind:this={triggerEl}
     on:click={toggle}
   >⋯</button>
   {#if open}
-    <ul class="menu" role="menu">
+    <ul class="menu">
       {#if captureInOverflow}
-        <li role="none">
+        <li>
           <button
             type="button"
-            role="menuitem"
+            disabled={captureDisabled}
             data-testid="lq-ai-message-overflow-capture"
             on:click={handleCapture}
           >📝 Capture as skill</button>
         </li>
       {/if}
-      <li role="none">
-        <button type="button" role="menuitem" disabled>Copy markdown</button>
+      <li>
+        <button type="button" disabled>Copy markdown</button>
       </li>
-      <li role="none">
-        <button type="button" role="menuitem" disabled>Retry</button>
+      <li>
+        <button type="button" disabled>Retry</button>
       </li>
     </ul>
   {/if}

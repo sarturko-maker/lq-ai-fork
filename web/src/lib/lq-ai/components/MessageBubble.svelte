@@ -156,15 +156,21 @@
 				{#if $captureAffordanceInline}
 					<button
 						type="button"
-						class="text-base leading-none px-2 py-1 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
-						aria-label="Capture as skill"
-						title="Capture as skill"
+						class="text-base leading-none px-2 py-1 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+						aria-label={isStreaming
+							? 'Capture as skill (available when streaming completes)'
+							: 'Capture as skill'}
+						title={isStreaming
+							? 'Capture as skill (available when streaming completes)'
+							: 'Capture as skill'}
+						disabled={isStreaming}
 						data-testid="lq-ai-message-capture-inline"
 						on:click={() => (captureOpen = true)}
 					>📝</button>
 				{/if}
 				<MessageOverflowMenu
 					captureInOverflow={!$captureAffordanceInline}
+					captureDisabled={isStreaming}
 					onCapture={() => (captureOpen = true)}
 				/>
 			</div>
