@@ -1,25 +1,27 @@
 <script lang="ts">
-	export let activeTab: 'use' | 'source' = 'use';
-	export let onTabChange: (tab: 'use' | 'source') => void;
+	type TabId = 'use' | 'source' | 'try' | 'versions';
+
+	export let activeTab: TabId = 'use';
+	export let onTabChange: (tab: TabId) => void;
+
+	const tabs: { id: TabId; label: string }[] = [
+		{ id: 'use', label: 'Use it' },
+		{ id: 'source', label: 'View source' },
+		{ id: 'try', label: 'Try it' },
+		{ id: 'versions', label: 'Versions' }
+	];
 </script>
 
 <nav role="tablist" aria-label="Skill detail tabs" class="lq-skill-tabs">
-	<button
-		role="tab"
-		type="button"
-		aria-selected={activeTab === 'use'}
-		class:active={activeTab === 'use'}
-		on:click={() => onTabChange('use')}
-	>Use it</button>
-	<button
-		role="tab"
-		type="button"
-		aria-selected={activeTab === 'source'}
-		class:active={activeTab === 'source'}
-		on:click={() => onTabChange('source')}
-	>View source</button>
-	<button role="tab" type="button" aria-disabled="true" disabled title="Wave D">Try it</button>
-	<button role="tab" type="button" aria-disabled="true" disabled title="Wave D">Versions</button>
+	{#each tabs as t (t.id)}
+		<button
+			role="tab"
+			type="button"
+			aria-selected={activeTab === t.id}
+			class:active={activeTab === t.id}
+			on:click={() => onTabChange(t.id)}
+		>{t.label}</button>
+	{/each}
 </nav>
 
 <style>
@@ -42,10 +44,6 @@
 	.lq-skill-tabs button.active {
 		color: var(--lq-accent);
 		border-bottom-color: var(--lq-accent);
-	}
-	.lq-skill-tabs button[disabled] {
-		color: var(--lq-text-tertiary);
-		cursor: not-allowed;
 	}
 	.lq-skill-tabs button:focus-visible {
 		outline: 2px solid var(--lq-accent);

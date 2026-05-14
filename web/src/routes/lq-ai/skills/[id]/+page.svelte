@@ -6,7 +6,7 @@
 	import SkillDetailTabs from '$lib/lq-ai/components/SkillDetailTabs.svelte';
 	import SkillSourceView from '$lib/lq-ai/components/SkillSourceView.svelte';
 
-	let activeTab: 'use' | 'source' = 'use';
+	let activeTab: 'use' | 'source' | 'try' | 'versions' = 'use';
 	let skill: Skill | null = null;
 	let error: string | null = null;
 
