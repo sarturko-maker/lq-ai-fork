@@ -169,9 +169,10 @@ describe('Wave M1-final — Saved Prompts + Knowledge + Receipts source', () => 
 		cy.wait('@uploadFile', { timeout: 30000 }).its('response.statusCode').should('eq', 201);
 
 		// Wait for the KB-attach POST to land (detail page polls for ready status
-		// then calls attachFileToKB). Asserting 201 here catches backend errors
-		// that would otherwise surface as a silent doc-row absence.
-		cy.wait('@kbAttach', { timeout: 60000 }).its('response.statusCode').should('eq', 201);
+		// then calls attachFileToKB). The endpoint returns 204 No Content on success;
+		// asserting here catches backend errors (4xx/5xx) that would otherwise
+		// surface as a silent doc-row absence or timeout.
+		cy.wait('@kbAttach', { timeout: 60000 }).its('response.statusCode').should('eq', 204);
 
 		// ── Wait for the doc row to appear in the table ───────────────────────
 		// The detail page polls for ready status (~1s interval, up to 30s) then
