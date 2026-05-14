@@ -535,6 +535,22 @@ export interface UserSkillCreate {
 	scope?: 'user' | 'team';
 	/** Required when scope='team'; must be null/omitted when scope='user'. */
 	owner_team_id?: string | null;
+	/**
+	 * Wave D.2 — leading-slash invocation alias; backend validates
+	 * ``^/[a-z0-9-]{1,32}$``. Null/undefined means "no alias".
+	 */
+	slash_alias?: string | null;
+	/**
+	 * Wave D.2 — documentary slug of the source skill when this row was
+	 * forked (built-in or user / team). Write-once at create time.
+	 */
+	forked_from?: string | null;
+	/**
+	 * Wave D.2 — capture-flow metadata: source AI message id when the
+	 * skill was distilled from a chat message. Documentary; not persisted
+	 * as a column — rides the create-time audit-log row.
+	 */
+	source_message_id?: string | null;
 }
 
 export interface UserSkillUpdate {
