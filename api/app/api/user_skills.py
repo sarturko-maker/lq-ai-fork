@@ -80,6 +80,29 @@ _FRONTMATTER_EXTRA_MAX_BYTES = 16_384
 
 
 # ---------------------------------------------------------------------------
+# Shared field validators
+# ---------------------------------------------------------------------------
+
+
+def _validate_slash_alias_value(v: str | None) -> str | None:
+    """Module-level slash_alias validator reused by UserSkillCreate and UserSkillUpdate.
+
+    Called from ``@field_validator("slash_alias")`` in both Pydantic models so
+    the body is not duplicated. Behaviour is identical in both callers: ``None``
+    passes through; a non-matching value raises ``ValueError`` with a descriptive
+    message; a matching value is returned unchanged.
+    """
+    if v is None:
+        return None
+    if not _SLASH_ALIAS_RE.match(v):
+        raise ValueError(
+            "slash_alias must match ^/[a-z0-9-]{1,32}$ "
+            "(leading slash, then 1-32 lowercase alphanumerics or hyphens)"
+        )
+    return v
+
+
+# ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
 
@@ -155,14 +178,7 @@ class UserSkillCreate(BaseModel):
     @field_validator("slash_alias")
     @classmethod
     def _validate_slash_alias(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        if not _SLASH_ALIAS_RE.match(v):
-            raise ValueError(
-                "slash_alias must match ^/[a-z0-9-]{1,32}$ "
-                "(leading slash, then 1-32 lowercase alphanumerics or hyphens)"
-            )
-        return v
+        return _validate_slash_alias_value(v)
 
 
 class UserSkillUpdate(BaseModel):
@@ -188,14 +204,7 @@ class UserSkillUpdate(BaseModel):
     @field_validator("slash_alias")
     @classmethod
     def _validate_slash_alias(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        if not _SLASH_ALIAS_RE.match(v):
-            raise ValueError(
-                "slash_alias must match ^/[a-z0-9-]{1,32}$ "
-                "(leading slash, then 1-32 lowercase alphanumerics or hyphens)"
-            )
-        return v
+        return _validate_slash_alias_value(v)
 
 
 # ---------------------------------------------------------------------------
