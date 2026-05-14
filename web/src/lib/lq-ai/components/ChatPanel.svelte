@@ -127,6 +127,15 @@
 	let skillDetails: Record<string, Skill> = {};
 	let skillInputs: Record<string, Record<string, unknown>> = {};
 
+	// Wave D.2 Task 7.2 — per-attachment provenance.
+	// Parallel map keyed by slug (mirrors `attachedSkillNames`). Default
+	// ('picker') is applied at attach-time for any slug not already
+	// tagged, so picker-driven attaches and the slash flow are
+	// disambiguated for receipts/audit. Reset alongside
+	// `attachedSkillNames` whenever the chat changes. Plain Record
+	// (not Map) so Svelte 4 reactivity tracks the assignment.
+	let attachmentSources: Record<string, string> = {};
+
 	// Wave D.1 T20 follow-on (deferral A + B) — Enhance Prompt tracking.
 	// `pendingEnhancement` holds the most recent "Use enhanced" outcome
 	// from EnhancePromptExpansion; we use it on send to (a) inject
@@ -304,6 +313,7 @@
 		// Reset draft state.
 		composerText = '';
 		attachedSkillNames = [];
+		attachmentSources = {};
 		skillInputs = {};
 		// Load messages.
 		try {
@@ -374,6 +384,15 @@
 	// ---- skill picker handlers ----
 	async function attachSkill(name: string) {
 		if (attachedSkillNames.includes(name)) return;
+		// Wave D.2 Task 7.2 — default attach provenance to 'picker'. The
+		// slash-invocation flow (onSlashSelect) pre-tags the slug with
+		// 'slash' BEFORE calling attachSkill, so this default only fires
+		// for SkillPicker-driven attaches. Don't overwrite an existing
+		// tag — that would silently demote 'slash' to 'picker' in any
+		// future re-entrant attach path.
+		if (!attachmentSources[name]) {
+			attachmentSources = { ...attachmentSources, [name]: 'picker' };
+		}
 		attachedSkillNames = [...attachedSkillNames, name];
 		try {
 			const detail = await skillsApi.getSkill(name);
@@ -388,6 +407,12 @@
 		const next = { ...skillInputs };
 		delete next[name];
 		skillInputs = next;
+		// Wave D.2 Task 7.2 — drop the parallel provenance entry so a
+		// re-attach starts fresh (and so the map doesn't accumulate
+		// orphaned slugs across the lifetime of a chat).
+		const nextSources = { ...attachmentSources };
+		delete nextSources[name];
+		attachmentSources = nextSources;
 	}
 
 	function updateSkillInputs(name: string, values: Record<string, unknown>) {
@@ -491,13 +516,28 @@
 
 		streamAbort = new AbortController();
 
+		// Wave D.2 Task 7.2 — send via the rich `attached_skills` shape so
+		// per-attachment provenance (slash vs picker) reaches the backend
+		// for receipts/audit attribution. The legacy `skills: list[str]`
+		// field is dropped — both formats are accepted in parallel by the
+		// API (api/app/schemas/chats.py: AttachedSkillRef + dedupe), and
+		// `attached_skills` is the canonical Wave D.2 surface. Slugs not
+		// in `attachmentSources` (defensive — shouldn't happen since
+		// attachSkill() seeds 'picker') fall back to 'picker' so audit
+		// records always carry a source.
+		const attachedSkillsPayload = sentSkillsForUser.map((slug) => ({
+			slug,
+			source: attachmentSources[slug] ?? 'picker'
+		}));
+
 		try {
 			const res = await messagesApi.sendMessageStream(
 				chat.id,
 				{
 					content: composerText,
 					model: currentModelId ?? undefined,
-					skills: sentSkillsForUser.length > 0 ? sentSkillsForUser : undefined,
+					attached_skills:
+						attachedSkillsPayload.length > 0 ? attachedSkillsPayload : undefined,
 					skill_inputs:
 						Object.keys(skillInputs).length > 0
 							? (skillInputs as Record<string, Record<string, unknown>>)
@@ -683,10 +723,12 @@
 		}
 		// Attach via the existing handler so the SkillPicker UI + the
 		// send-handler's `attachedSkillNames` list pick up the selection.
-		// Per Task 7.1 scope: provenance ('source: slash') is NOT carried
-		// through here — Task 7.2 will refactor `attachedSkillNames` into
-		// the richer `attachedSkills` shape and add `attached_skills` to
-		// the send payload.
+		// Wave D.2 Task 7.2 — pre-tag the slug with 'slash' BEFORE
+		// attachSkill() runs so its default-to-'picker' guard sees an
+		// existing entry and leaves the slash provenance intact. The
+		// send handler reads `attachmentSources` to populate
+		// `attached_skills[].source` on the outbound payload.
+		attachmentSources = { ...attachmentSources, [item.slug]: 'slash' };
 		void attachSkill(item.slug);
 		slashOpen = false;
 		slashQuery = '';
