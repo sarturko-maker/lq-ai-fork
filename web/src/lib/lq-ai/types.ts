@@ -273,6 +273,20 @@ export interface MessageCreate {
 	stream?: boolean;
 	skills?: string[];
 	skill_inputs?: Record<string, Record<string, unknown>>;
+	/**
+	 * Wave D.2 Task 3.0 — per-turn skill attachment for slash invocation
+	 * and try-it sandboxing. Each entry carries EITHER ``slug`` (saved
+	 * skill — built-in or user / team) OR ``inline_body`` (wizard draft).
+	 * Runtime XOR validation lives in the backend; we deliberately keep
+	 * the TS shape loose so the SkillTryItPane (Task 3.4) can pass either
+	 * mode without a discriminated-union dance.
+	 */
+	attached_skills?: Array<{
+		slug?: string;
+		inline_body?: string;
+		source?: string;
+		inputs?: Record<string, unknown>;
+	}>;
 }
 
 export interface MessagePostResponse {
