@@ -10,8 +10,8 @@
 	} from '$lib/lq-ai/preferences/autoEnhance';
 	import {
 		CAPTURE_AFFORDANCE_STORAGE_KEY,
-		readCaptureAffordanceInline,
-		writeCaptureAffordanceInline
+		captureAffordanceInline,
+		readCaptureAffordanceInline
 	} from '$lib/lq-ai/preferences/capture-affordance';
 
 	let autoEnhance = false;
@@ -30,7 +30,11 @@
 
 	function toggleCaptureInline(): void {
 		captureInline = !captureInline;
-		writeCaptureAffordanceInline(captureInline);
+		// Use the writable wrapper's setValue so subscribers in MessageBubble
+		// (via $captureAffordanceInline auto-subscribe) see the change live —
+		// the plain write* function only touches localStorage and doesn't
+		// broadcast to the in-memory store. (Wave D.2 final-review fix.)
+		captureAffordanceInline.setValue(captureInline);
 	}
 </script>
 
