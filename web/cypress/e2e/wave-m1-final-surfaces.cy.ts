@@ -151,9 +151,13 @@ describe('Wave M1-final — Saved Prompts + Knowledge + Receipts source', () => 
 
 		// ── Upload the fixture PDF ────────────────────────────────────────────
 		// The upload button calls fileInput.click() — the actual <input type="file">
-		// is hidden (.lq-file-input { display: none }). Intercept the upload POST
-		// before triggering the file selection.
+		// is hidden (.lq-file-input { display: none }). Intercept both the file
+		// upload POST and the KB-attach POST before triggering the file selection.
+		// The KB-attach intercept (kbAttach) provides better failure diagnostics:
+		// when the attach step fails we get a clear assertion failure with the
+		// actual status code rather than a timeout.
 		cy.intercept('POST', '/api/v1/files').as('uploadFile');
+		cy.intercept('POST', '**/knowledge-bases/**/files').as('kbAttach');
 
 		// Select file on the hidden input directly (force: true bypasses display:none).
 		cy.get('[data-testid="lq-ai-knowledge-upload-btn"]')
@@ -163,6 +167,11 @@ describe('Wave M1-final — Saved Prompts + Knowledge + Receipts source', () => 
 
 		// Wait for the upload POST to land.
 		cy.wait('@uploadFile', { timeout: 30000 }).its('response.statusCode').should('eq', 201);
+
+		// Wait for the KB-attach POST to land (detail page polls for ready status
+		// then calls attachFileToKB). Asserting 201 here catches backend errors
+		// that would otherwise surface as a silent doc-row absence.
+		cy.wait('@kbAttach', { timeout: 60000 }).its('response.statusCode').should('eq', 201);
 
 		// ── Wait for the doc row to appear in the table ───────────────────────
 		// The detail page polls for ready status (~1s interval, up to 30s) then
