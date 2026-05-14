@@ -33,7 +33,14 @@
 					{skill.name}{skill.version ? ` · v${skill.version}` : ''}
 				</p>
 			</div>
-			<a href={`/lq-ai/skills/${encodeURIComponent(skill.name)}/edit`} class="lq-btn-primary">Edit</a>
+			<div style="display: flex; gap: 8px;">
+				<a
+					href={`/lq-ai/skills/new?fork=${encodeURIComponent(skill.name)}`}
+					class="lq-btn-ghost"
+					aria-label={`Fork ${skill.title ?? skill.name} as my own`}
+				>🔱 Fork as my own</a>
+				<a href={`/lq-ai/skills/${encodeURIComponent(skill.name)}/edit`} class="lq-btn-primary">Edit</a>
+			</div>
 		</header>
 
 		<SkillDetailTabs {activeTab} onTabChange={(t) => (activeTab = t)} />
@@ -72,5 +79,20 @@
 	}
 	.lq-btn-primary:hover {
 		opacity: 0.9;
+	}
+	.lq-btn-ghost {
+		background: transparent;
+		color: #1f2937;
+		border: 1px solid var(--lq-border, #e5e7eb);
+		border-radius: var(--lq-radius);
+		padding: 8px 16px;
+		font-size: 14px;
+		font-weight: 500;
+		text-decoration: none;
+		display: inline-flex;
+		align-items: center;
+	}
+	.lq-btn-ghost:hover {
+		background: var(--lq-accent-soft, #e8f4ec);
 	}
 </style>
