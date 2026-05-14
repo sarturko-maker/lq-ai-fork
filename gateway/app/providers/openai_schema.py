@@ -74,6 +74,62 @@ class ChatCompletionMessage(BaseModel):
     tool_calls: list[dict[str, Any]] | None = None
 
 
+class InlineSkillRef(BaseModel):
+    """Wave D.2 Task 3.0 — one inline-body skill on a chat completion request.
+
+    Carries a literal skill body the gateway assembles into the system
+    message without an HTTP round-trip to the backend's
+    ``/internal/skills/{name}`` endpoint. This unlocks the wizard's
+    "Try it" surface: an unsaved draft body can be tested as a skill
+    against a real send without first persisting a ``user_skills`` row.
+
+    The ``name`` is synthesized by the backend (e.g.,
+    ``__inline__<hex>``) so it never collides with a real skill slug
+    (real slugs are lowercase-kebab; the synthesized form uses
+    underscores, which the slug pattern rejects). The gateway uses it
+    as the key into ``lq_ai_skill_inputs`` and reports it in
+    ``lq_ai_applied_skills`` for audit consistency — operators see a
+    distinct marker rather than an opaque token.
+
+    .. note::
+
+       OpenAPI sync deferred to Wave 9.1.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = Field(min_length=1, max_length=128)
+    """Synthesized opaque name (e.g., ``__inline__<hex>``). Backend
+    chooses; gateway never validates against the catalogue."""
+
+    body: str = Field(min_length=1, max_length=64 * 1024)
+    """Verbatim Markdown skill body. The gateway treats this as the
+    skill's ``content_md`` and runs the standard assembler pipeline
+    over it (header / input substitution / system-message prepend).
+
+    Hard-capped here as a defense-in-depth bound — the *backend's*
+    schema applies a 32 KB cap on the upstream side; the gateway accepts
+    up to 64 KB so we don't false-positive on a slightly-larger value
+    from a non-backend caller, but still refuse a multi-megabyte body
+    that would blow the upstream provider's context window."""
+
+    inputs: dict[str, Any] | None = None
+    """Optional per-skill input bindings. The gateway merges these
+    into ``lq_ai_skill_inputs`` keyed under :attr:`name` before
+    assembly."""
+
+    minimum_inference_tier: int | None = Field(default=None, ge=1, le=5)
+    """D1 tier-floor. Participates in
+    :func:`app.tier_floor.resolve_tier_floor` exactly like a catalogue
+    skill's floor — the synthesized :class:`Skill` instance built from
+    this ref carries the tier through unchanged."""
+
+    source: str | None = Field(default=None, max_length=64)
+    """Provenance tag (``wizard-tryout``, etc.). Surfaced by the
+    backend on audit-log rows; the gateway treats it as opaque
+    metadata."""
+
+
 class ChatCompletionRequest(BaseModel):
     """OpenAI Chat Completions request body, plus LQ.AI extensions.
 
@@ -133,6 +189,28 @@ class ChatCompletionRequest(BaseModel):
     """Per-skill input bindings, keyed by skill name. Inner dict maps
     input variable names to values. Per-skill scoping means two attached
     skills with overlapping variable names don't collide."""
+
+    lq_ai_inline_skills: list[InlineSkillRef] = Field(default_factory=list)
+    """Wave D.2 Task 3.0 — inline-body skills the gateway assembles
+    without a backend round-trip. Each entry carries a synthesized
+    ``name``, a verbatim ``body``, optional ``inputs``, optional
+    ``minimum_inference_tier``, and optional ``source`` (provenance
+    tag).
+
+    The assembler builds a :class:`app.clients.backend.Skill` instance
+    from each entry directly (no HTTP) and appends it to the same
+    ordered list that :attr:`lq_ai_skills` resolves into, so tier-floor
+    resolution and ``lq_ai_applied_skills`` reporting work uniformly
+    across both code paths. Order: catalogue (``lq_ai_skills``) first,
+    then inline (``lq_ai_inline_skills``) — both preserve their
+    input order within the group.
+
+    Empty list (default) preserves pre-D.2 wire shape exactly.
+
+    .. note::
+
+       OpenAPI sync deferred to Wave 9.1.
+    """
 
     # --- C3 (chat / message identity for routing-log correlation) ------------
     lq_ai_chat_id: str | None = None
