@@ -1,0 +1,376 @@
+<script context="module" lang="ts">
+	/**
+	 * SlashPopover — typeahead listbox rendered by the composer when the
+	 * user types a leading "/" to invoke a skill (Wave D.2 Task 3.3).
+	 *
+	 * Caller contract:
+	 *   - Parent (eventually `ChatPanel.svelte`, Task 7.1) *conditionally
+	 *     renders* this component when the slash-typeahead is open. While
+	 *     mounted, the component owns global keyboard handling via
+	 *     `<svelte:window on:keydown>` — Arrow keys cycle the active row,
+	 *     Enter selects, Escape dismisses. Unmount the component to hand
+	 *     keyboard control back to the composer.
+	 *   - `onSelect` fires on row click (mousedown|preventDefault, so the
+	 *     event lands before the composer blurs and tears the popover
+	 *     out from under the click) and on Enter.
+	 *   - `onDismiss` fires on Escape.
+	 *
+	 * Convention notes for reviewers:
+	 *   - Callback props (onSelect, onDismiss) match SkillPicker /
+	 *     AttachKBModal / AttachedSkillPill rather than
+	 *     createEventDispatcher.
+	 *   - The API import is a named function — `autocompleteSkills` —
+	 *     from `$lib/lq-ai/api/skills`, not a `skillsApi.autocomplete`
+	 *     method (the latter was the plan-text shape; the actual export
+	 *     shape per Task 3.1 is a plain function).
+	 *   - `SkillAutocompleteItem.description` is `string | null` (per
+	 *     Task 3.1's wire type), so the template `?? ''`s it.
+	 *   - Design tokens: the design spec called for `--lq-secure-tint`,
+	 *     which doesn't exist in this codebase. The "secure / sage" tone
+	 *     of AttachedSkillPill and TrustPill maps to `--lq-accent-soft`,
+	 *     `--lq-accent`, `--lq-accent-border` (styles/practice.css), so
+	 *     we use those here for the active row. `--lq-surface` is
+	 *     referenced elsewhere in the codebase but never defined, so we
+	 *     fall back to `--lq-canvas` (#ffffff) for the panel background.
+	 *   - Pure helpers exported from <script context="module"> so vitest
+	 *     can exercise them without @testing-library/svelte (which is
+	 *     not installed; see AttachKBModal.test.ts header).
+	 */
+	import { autocompleteSkills } from '$lib/lq-ai/api/skills';
+	import type { SkillAutocompleteItem } from '../types';
+
+	export type SlashPopoverState = {
+		results: SkillAutocompleteItem[];
+		activeIndex: number;
+		loading: boolean;
+		error: string | null;
+		query: string;
+	};
+
+	export type EmptyStateKind =
+		| 'loading'
+		| 'error'
+		| 'empty-with-query'
+		| 'empty-no-query'
+		| 'results';
+
+	export type KeyAction =
+		| { kind: 'select'; result: SkillAutocompleteItem }
+		| { kind: 'dismiss' }
+		| { kind: 'move'; nextIndex: number }
+		| { kind: 'noop' };
+
+	/**
+	 * Wrap-around index helper used by ArrowDown (direction = +1) and
+	 * ArrowUp (direction = -1). When there are no results the function
+	 * returns 0 — the caller is expected to early-return at the
+	 * decideKeyAction layer, but this defensive default keeps the helper
+	 * total (no NaN if it's ever called with length === 0).
+	 */
+	export function nextIndex(
+		activeIndex: number,
+		length: number,
+		direction: 1 | -1
+	): number {
+		if (length === 0) return 0;
+		// JS `%` keeps sign of the dividend, so add `length` to handle
+		// negative wraps when direction = -1.
+		return (((activeIndex + direction) % length) + length) % length;
+	}
+
+	/**
+	 * Decide which of the five panel states to render. Ordering matters:
+	 * loading wins over error wins over results (we don't show stale
+	 * results during an in-flight retry).
+	 */
+	export function emptyStateKind(state: SlashPopoverState): EmptyStateKind {
+		if (state.loading) return 'loading';
+		if (state.error) return 'error';
+		if (state.results.length === 0) {
+			return state.query ? 'empty-with-query' : 'empty-no-query';
+		}
+		return 'results';
+	}
+
+	/**
+	 * Map a KeyboardEvent.key + current state to the discrete action the
+	 * component should take. Pure for testability; the Svelte handler
+	 * calls e.preventDefault() at the action-application site so tests
+	 * don't need to construct synthetic events.
+	 */
+	export function decideKeyAction(
+		key: string,
+		state: SlashPopoverState
+	): KeyAction {
+		if (key === 'Escape') return { kind: 'dismiss' };
+		const len = state.results.length;
+		if (len === 0) return { kind: 'noop' };
+		if (key === 'Enter') {
+			const result = state.results[state.activeIndex];
+			if (!result) return { kind: 'noop' };
+			return { kind: 'select', result };
+		}
+		if (key === 'ArrowDown') {
+			return { kind: 'move', nextIndex: nextIndex(state.activeIndex, len, 1) };
+		}
+		if (key === 'ArrowUp') {
+			return { kind: 'move', nextIndex: nextIndex(state.activeIndex, len, -1) };
+		}
+		return { kind: 'noop' };
+	}
+
+	/** Bounds-checked active-row read; returns undefined when out of range. */
+	export function effectiveResult(
+		results: SkillAutocompleteItem[],
+		activeIndex: number
+	): SkillAutocompleteItem | undefined {
+		if (activeIndex < 0 || activeIndex >= results.length) return undefined;
+		return results[activeIndex];
+	}
+
+	/**
+	 * Thin wrapper around the autocomplete client. Returns the bare
+	 * results array (the component holds onto the array, not the
+	 * envelope). Errors propagate; the component catches and surfaces
+	 * them in the "error" empty state.
+	 */
+	export async function fetchResults(
+		query: string,
+		limit = 10
+	): Promise<SkillAutocompleteItem[]> {
+		const resp = await autocompleteSkills(query, limit);
+		return resp.results;
+	}
+
+	/** Glyph to display when a result omits a custom icon (matches AttachedSkillPill). */
+	export function displayIcon(icon: string | null | undefined): string {
+		return icon ? icon : '📜';
+	}
+</script>
+
+<script lang="ts">
+	import { onMount } from 'svelte';
+
+	export let query: string;
+	export let onSelect: (skill: SkillAutocompleteItem) => void;
+	export let onDismiss: () => void;
+
+	let results: SkillAutocompleteItem[] = [];
+	let activeIndex = 0;
+	let loading = false;
+	let error: string | null = null;
+
+	$: kind = emptyStateKind({ results, activeIndex, loading, error, query });
+
+	async function load() {
+		loading = true;
+		error = null;
+		try {
+			results = await fetchResults(query, 10);
+			// Clamp activeIndex to the new result-set length.
+			if (activeIndex >= results.length) activeIndex = 0;
+		} catch (e: unknown) {
+			error =
+				e instanceof Error
+					? (e.message ?? 'Failed to load suggestions.')
+					: 'Failed to load suggestions.';
+			results = [];
+		} finally {
+			loading = false;
+		}
+	}
+
+	function retry() {
+		void load();
+	}
+
+	// Initial fetch + re-fetch on query change.
+	let lastQuery: string | undefined;
+	onMount(() => {
+		lastQuery = query;
+		void load();
+	});
+	$: if (lastQuery !== undefined && query !== lastQuery) {
+		lastQuery = query;
+		activeIndex = 0;
+		void load();
+	}
+
+	function onWindowKey(e: KeyboardEvent) {
+		const action = decideKeyAction(e.key, {
+			results,
+			activeIndex,
+			loading,
+			error,
+			query
+		});
+		switch (action.kind) {
+			case 'select':
+				e.preventDefault();
+				onSelect(action.result);
+				return;
+			case 'dismiss':
+				e.preventDefault();
+				onDismiss();
+				return;
+			case 'move':
+				e.preventDefault();
+				activeIndex = action.nextIndex;
+				return;
+			case 'noop':
+				return;
+		}
+	}
+
+	function onRowMouseDown(e: MouseEvent, result: SkillAutocompleteItem) {
+		// mousedown (not click) so the handler fires before the composer
+		// blurs and the popover unmounts out from under us.
+		e.preventDefault();
+		onSelect(result);
+	}
+</script>
+
+<svelte:window on:keydown={onWindowKey} />
+
+<div class="lq-slash-popover" role="listbox" aria-label="Skill suggestions">
+	{#if kind === 'loading'}
+		<div class="lq-slash-popover__status" role="presentation">Loading…</div>
+	{:else if kind === 'error'}
+		<div class="lq-slash-popover__status lq-slash-popover__status--error" role="presentation">
+			Couldn't load suggestions ·
+			<button type="button" class="lq-slash-popover__retry" on:click={retry}>retry</button>
+		</div>
+	{:else if kind === 'empty-with-query'}
+		<div class="lq-slash-popover__status" role="presentation">
+			No matching skills · Esc to dismiss
+		</div>
+	{:else if kind === 'empty-no-query'}
+		<div class="lq-slash-popover__status" role="presentation">
+			You don't have any skills yet —
+			<a href="/lq-ai/skills" class="lq-slash-popover__link">Browse</a>
+			·
+			<a href="/lq-ai/skills/new" class="lq-slash-popover__link">Create</a>
+		</div>
+	{:else}
+		{#each results as r, i}
+			<button
+				type="button"
+				role="option"
+				class="lq-slash-popover__row"
+				class:active={i === activeIndex}
+				aria-selected={i === activeIndex}
+				on:mousedown={(e) => onRowMouseDown(e, r)}
+				on:mouseenter={() => (activeIndex = i)}
+			>
+				<span class="lq-slash-popover__icon" aria-hidden="true">{displayIcon(r.icon)}</span>
+				<span class="lq-slash-popover__body">
+					<span class="lq-slash-popover__title">{r.title}</span>
+					<span class="lq-slash-popover__desc">{r.description ?? ''}</span>
+				</span>
+			</button>
+		{/each}
+	{/if}
+</div>
+
+<style>
+	.lq-slash-popover {
+		display: flex;
+		flex-direction: column;
+		min-width: 280px;
+		max-width: 420px;
+		max-height: 320px;
+		overflow-y: auto;
+		background: var(--lq-surface, var(--lq-canvas, #ffffff));
+		border: 1px solid var(--lq-border, #e5e7eb);
+		border-radius: var(--lq-radius, 6px);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+		padding: var(--lq-space-1, 4px);
+		font-family: var(--lq-font-sans);
+		font-size: 13px;
+		color: var(--lq-text, #1a1a1a);
+	}
+
+	.lq-slash-popover__status {
+		padding: var(--lq-space-2, 8px) var(--lq-space-3, 12px);
+		color: var(--lq-text-tertiary, #9ca3af);
+		font-size: 12px;
+	}
+
+	.lq-slash-popover__status--error {
+		color: var(--lq-error, #b54848);
+	}
+
+	.lq-slash-popover__retry {
+		background: none;
+		border: 0;
+		padding: 0;
+		margin: 0;
+		color: inherit;
+		font: inherit;
+		text-decoration: underline;
+		cursor: pointer;
+	}
+
+	.lq-slash-popover__retry:focus-visible {
+		outline: 2px solid var(--lq-accent, #1f7a6b);
+		outline-offset: 2px;
+	}
+
+	.lq-slash-popover__link {
+		color: var(--lq-accent, #1f7a6b);
+		text-decoration: underline;
+	}
+
+	.lq-slash-popover__row {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--lq-space-2, 8px);
+		width: 100%;
+		text-align: left;
+		background: none;
+		border: 0;
+		padding: var(--lq-space-2, 8px) var(--lq-space-3, 12px);
+		border-radius: var(--lq-radius-sm, 4px);
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+	}
+
+	.lq-slash-popover__row.active {
+		background: var(--lq-accent-soft, #e8f4ec);
+	}
+
+	.lq-slash-popover__row:focus-visible {
+		outline: 2px solid var(--lq-accent, #1f7a6b);
+		outline-offset: -2px;
+	}
+
+	.lq-slash-popover__icon {
+		font-size: 14px;
+		line-height: 1.3;
+		padding-top: 1px;
+		flex: 0 0 auto;
+	}
+
+	.lq-slash-popover__body {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+
+	.lq-slash-popover__title {
+		font-weight: 500;
+		color: var(--lq-text, #1a1a1a);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.lq-slash-popover__desc {
+		color: var(--lq-text-tertiary, #9ca3af);
+		font-size: 12px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+</style>
