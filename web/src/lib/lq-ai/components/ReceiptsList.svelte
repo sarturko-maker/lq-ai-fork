@@ -23,6 +23,17 @@
     error: 'errors',
   };
 
+  /** Wave D.2 — human-readable labels for the per-attachment ``source``
+   *  tag the chats handler records (slash / picker / wizard-tryout /
+   *  tryit-tab / capture). Unknown / missing values render unlabelled. */
+  export const SOURCE_LABEL: Record<string, string> = {
+    slash: 'slash command',
+    picker: 'picker',
+    'wizard-tryout': 'wizard try-it',
+    'tryit-tab': 'try-it tab',
+    capture: 'capture',
+  };
+
   /** Format a timestamp string (ISO 8601) as HH:MM:SS. */
   export function formatTimestamp(ts: string): string {
     const d = new Date(ts);
@@ -41,8 +52,12 @@
         return `${detail.provider} — ${detail.model} (tier ${detail.tier})`;
       case 'audit':
         return String(detail.action ?? 'audit event');
-      case 'skill':
-        return `Skill applied: ${detail.skill_name}`;
+      case 'skill': {
+        const src = SOURCE_LABEL[String(detail.source ?? '')] ?? null;
+        return src
+          ? `Skill applied: ${detail.skill_name} (via ${src})`
+          : `Skill applied: ${detail.skill_name}`;
+      }
       case 'retrieval':
         return `KB retrieval — ${detail.chunk_count} chunks`;
       case 'error':

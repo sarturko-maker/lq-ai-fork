@@ -116,7 +116,38 @@ async def get_chat_receipts(
         msgs_result = await db.execute(
             select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
         )
-        for m in msgs_result.scalars():
+        msgs = list(msgs_result.scalars())
+
+        # Wave D.2 — pre-fetch per-message attachment provenance from
+        # the ``chat.message_sent`` audit row keyed by ``user_message_id``
+        # (added 2026-05-13). Lets us enrich ``kind='skill'`` events with
+        # the source surface (slash / picker / wizard-tryout / tryit-tab)
+        # the user originally invoked the skill from. Audit row may be
+        # missing for very old chats (pre-D.2) or for messages where no
+        # attachment carried provenance — falls back to ``source: None``.
+        skill_sources: dict[str, dict[str, str | None]] = {}
+        if "skill" in requested and msgs:
+            user_msg_ids = [str(m.id) for m in msgs if m.role == "user"]
+            if user_msg_ids:
+                provenance_rows = await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "chat.message_sent",
+                        AuditLog.resource_type == "message",
+                    )
+                )
+                for row in provenance_rows.scalars():
+                    details = row.details or {}
+                    user_msg_id = details.get("user_message_id")
+                    if not isinstance(user_msg_id, str) or user_msg_id not in user_msg_ids:
+                        continue
+                    attached = details.get("attached_skills") or []
+                    skill_sources[user_msg_id] = {
+                        e["name"]: e.get("source")
+                        for e in attached
+                        if isinstance(e, dict) and e.get("name")
+                    }
+
+        for m in msgs:
             if "message" in requested:
                 events.append(
                     ReceiptEvent(
@@ -132,6 +163,7 @@ async def get_chat_receipts(
                     )
                 )
             if "skill" in requested and m.applied_skills:
+                msg_sources = skill_sources.get(str(m.id), {})
                 for skill_name in m.applied_skills:
                     events.append(
                         ReceiptEvent(
@@ -140,6 +172,7 @@ async def get_chat_receipts(
                             detail={
                                 "skill_name": skill_name,
                                 "message_id": str(m.id),
+                                "source": msg_sources.get(skill_name),
                             },
                         )
                     )
