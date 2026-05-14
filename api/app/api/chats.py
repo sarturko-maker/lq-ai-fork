@@ -873,9 +873,24 @@ async def send_message(
         # surfaces this; previously all the schema's failures were
         # type/missing-style which don't carry a ctx.error so the issue
         # was latent.
+        #
+        # ``include_input=False`` strips pydantic's echo of the offending
+        # input payload. Without it, a ``string_too_long`` failure on a
+        # 32K+1-byte ``inline_body`` returns the FULL submitted body
+        # verbatim in the response envelope — leaking the user-drafted
+        # skill body back over the wire and violating the
+        # ``LQAIError.details MUST NOT contain secrets or PII`` contract
+        # (per ``api/app/errors.py``). Regression in
+        # ``tests/integration/test_attached_skills_send.py``.
         raise ValidationError(
             "Request body failed schema validation",
-            details={"errors": exc.errors(include_context=False, include_url=False)},
+            details={
+                "errors": exc.errors(
+                    include_context=False,
+                    include_url=False,
+                    include_input=False,
+                )
+            },
         ) from exc
 
     # Auth + ownership: load the chat (visible to caller, not

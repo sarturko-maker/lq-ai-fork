@@ -220,6 +220,62 @@ async def test_inline_body_oversize_returns_422(client: AsyncClient, db_user: Us
     assert resp.status_code == 400, resp.text
 
 
+@pytest.mark.asyncio
+@pytest.mark.integration
+@respx.mock
+async def test_inline_body_oversize_error_does_not_echo_body_content(
+    client: AsyncClient, db_user: User
+) -> None:
+    """Wave D.2 Task 3.0 security — the 4xx error envelope returned for
+    an oversize ``inline_body`` MUST NOT echo the submitted body content.
+
+    Regression for the C2 finding in the Task 3.0 code+security review:
+    pydantic's ``exc.errors()`` includes the offending ``input`` payload
+    by default, so a ``string_too_long`` failure on a 32K+1-byte
+    ``inline_body`` returned the FULL submitted body verbatim in the
+    response envelope. Violates the ``details MUST NOT contain secrets
+    or PII`` contract on ``app.errors.LQAIError``.
+
+    Fix: pass ``include_input=False`` to ``exc.errors()`` at the
+    schema-validation rescue site in ``api/app/api/chats.py``.
+    """
+
+    headers = _h(db_user)
+    chat_resp = await client.post("/api/v1/chats", headers=headers, json={"title": "x"})
+    chat_id = chat_resp.json()["id"]
+
+    # Sentinel marker so the assertion is unambiguous — must not appear
+    # anywhere else in the implementation or test fixtures.
+    sentinel = "S3CR3T-INLINE-BODY-LEAK-TEST-BACKEND-"
+    oversize_body = sentinel * ((INLINE_SKILL_BODY_MAX_BYTES // len(sentinel)) + 2)
+    assert len(oversize_body) > INLINE_SKILL_BODY_MAX_BYTES
+
+    resp = await client.post(
+        f"/api/v1/chats/{chat_id}/messages",
+        headers=headers,
+        json={
+            "content": "hello",
+            "attached_skills": [{"inline_body": oversize_body}],
+        },
+    )
+    # Validation failure still surfaces as 4xx (existing wrapping is 400).
+    assert 400 <= resp.status_code < 500, resp.status_code
+
+    body_text = resp.text
+    # CRITICAL: the submitted inline_body sentinel must not appear in
+    # the response envelope. Check both the raw text and the leading
+    # bytes that pydantic was previously echoing verbatim.
+    assert sentinel not in body_text, (
+        "Inline-body content leaked back in the error envelope — "
+        "pydantic input echo is not suppressed at the validation rescue site."
+    )
+    # Useful error identifier MUST still be present (we strip the
+    # input, not the diagnostic).
+    assert "string_too_long" in body_text or "inline_body" in body_text, (
+        f"Error envelope is missing a useful identifier; got: {body_text!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Legacy path still works
 # ---------------------------------------------------------------------------

@@ -466,11 +466,26 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
     try:
         chat_request = ChatCompletionRequest.model_validate(raw)
     except ValidationError as exc:
+        # ``include_input=False`` strips pydantic's echo of the offending
+        # input payload. Without it, a ``string_too_long`` failure on a
+        # 64K+1-byte inline-skill ``body`` returns the FULL submitted
+        # body verbatim in the response envelope — leaking the
+        # user-drafted skill body back over the wire to the caller.
+        # ``include_context=False`` / ``include_url=False`` strip
+        # non-JSON-serializable exception instances and pydantic doc URLs
+        # the caller doesn't need. Regression in
+        # ``tests/test_inference_inline_skills.py``.
         return _gateway_error(
             code="invalid_request",
             message="Chat completion request failed schema validation",
             http_status=status.HTTP_400_BAD_REQUEST,
-            details={"errors": exc.errors()},
+            details={
+                "errors": exc.errors(
+                    include_context=False,
+                    include_url=False,
+                    include_input=False,
+                )
+            },
         )
 
     config = _config(request)

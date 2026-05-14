@@ -399,3 +399,59 @@ async def test_inline_body_not_logged_at_info(
             assert needle not in record.getMessage(), (
                 f"inline body text leaked into log record {record.name}: {record.getMessage()!r}"
             )
+
+
+@pytest.mark.integration
+@respx.mock
+async def test_oversize_inline_body_4xx_does_not_echo_body_content(
+    http_client: AsyncClient,
+) -> None:
+    """Wave D.2 Task 3.0 security — the 4xx error envelope returned for
+    an oversize inline-skill ``body`` MUST NOT echo the submitted body.
+
+    Regression for the C2 finding in the Task 3.0 code+security review:
+    pydantic's ``exc.errors()`` includes the offending ``input`` payload
+    by default, so a ``string_too_long`` failure on a 64K+1-byte inline
+    body returned the FULL submitted body verbatim to the caller in the
+    gateway's error envelope.
+
+    Fix: pass ``include_input=False`` to ``exc.errors()`` at the
+    schema-validation rescue site in ``gateway/app/api/inference.py``.
+    """
+
+    _mock_no_org_profile()
+    # Sentinel marker so the assertion is unambiguous — must not appear
+    # anywhere else in the gateway implementation or test fixtures.
+    sentinel = "S3CR3T-INLINE-BODY-LEAK-TEST-GATEWAY-"
+    # Gateway-side cap is 64 KB per InlineSkillRef.body.
+    oversize_body = sentinel * ((64 * 1024 // len(sentinel)) + 2)
+    assert len(oversize_body) > 64 * 1024
+
+    response = await http_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "smart",
+            "messages": [{"role": "user", "content": "hi"}],
+            "lq_ai_inline_skills": [
+                {
+                    "name": "__inline__oversize",
+                    "body": oversize_body,
+                    "source": "wizard-tryout",
+                }
+            ],
+        },
+    )
+    # Validation failure surfaces as 4xx (the gateway wraps as 400).
+    assert 400 <= response.status_code < 500, response.status_code
+
+    body_text = response.text
+    # CRITICAL: the submitted inline body sentinel must not appear in
+    # the response envelope.
+    assert sentinel not in body_text, (
+        "Inline-body content leaked back in the gateway error envelope — "
+        "pydantic input echo is not suppressed at the validation rescue site."
+    )
+    # Useful error identifier MUST still be present.
+    assert "string_too_long" in body_text or "body" in body_text, (
+        f"Error envelope is missing a useful identifier; got: {body_text!r}"
+    )
