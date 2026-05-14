@@ -214,6 +214,11 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("PATCH", "/api/v1/admin/users/{user_id}/role"),
     # Wave B v2 — admin user list for DevRoleManagementCard (PRD §5.2)
     ("GET", "/api/v1/admin/users"),
+    # Wave D.2 — sandbox ensure, skills autocomplete, user-skill versions, KB files
+    ("POST", "/api/v1/projects/sandbox/ensure"),
+    ("GET", "/api/v1/skills/autocomplete"),
+    ("GET", "/api/v1/user-skills/{skill_id}/versions"),
+    ("GET", "/api/v1/knowledge-bases/{kb_id}/files"),
 }
 
 
