@@ -298,6 +298,8 @@ This section specifies each major capability. Every capability section follows t
 
 ### 3.1 Conversational Core
 
+**M1 status:** Shipped. Multi-turn chat with persistent history, full-text search over chat history, streaming SSE responses, and matter (project) workspace at `/lq-ai/matters/[id]` are all wired end-to-end. An operator can verify the backend at `api/app/api/chats.py` and `api/app/api/projects.py`; the Cypress E2E suite covers the surface in `web/cypress/e2e/wave-a-chrome.cy.ts` and `web/cypress/e2e/wave-c-matters.cy.ts`. Note: share-with-group and playbook attachment are deferred; the section below describes the full v1 design. See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface) for the per-capability verification table.
+
 **Description.** Multi-turn chat with persistent history, organized in a sidebar grouped by recency. Users can rename, delete, search, and share chats. Each chat is associated with the user who created it and optionally shared with groups or the whole organization. Chats can have files, skills, and playbooks attached.
 
 **User stories.**
@@ -344,6 +346,8 @@ This section specifies each major capability. Every capability section follows t
 
 ### 3.2 Enhance Prompt
 
+**M1 status:** Shipped. The ⌘E button and the expand-before-submit flow are wired end-to-end. An operator can verify at `api/app/api/enhance_prompt.py`; the Cypress E2E suite covers the surface in `web/cypress/e2e/wave-d1-power-features.cy.ts` Test 1. The reasoning-visibility preference (`reasoning_visibility`) is wired and stored per §3.2.1. See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface).
+
 **Description.** A prompt-rewriting skill that runs as an optional pre-step. The user types a short, natural-language question; Enhance Prompt expands it into a structured legal prompt (role, jurisdiction, audience, scope, output format, constraints, citation expectations) and shows the user the expanded version before submission. The user can edit the expansion, submit as-is, or skip and submit the original. The skill is *itself* inspectable — the user can view the SKILL.md and supporting files driving the enhancement at any time.
 
 **User stories.**
@@ -379,6 +383,8 @@ This section specifies each major capability. Every capability section follows t
 **Open questions.** None blocking.
 
 ### 3.2.1 User personalization preferences (M1)
+
+**M1 status:** Shipped. All five preference columns (`reasoning_visibility`, `featured_tools`, `workspace_layout`, `trust_pills`, `provenance_pills`) are in the `users` table with CHECK constraints and server defaults. The `GET /api/v1/users/me/preferences` and `PATCH /api/v1/users/me/preferences` endpoints are live. An operator can verify at `api/app/api/users.py` and migrations `0015` and `0019`. See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface).
 
 **Description.** LQ.AI's default experience is calibrated to teach: reasoning is disclosed, tools are prominent, all provenance context is visible. Personalization preferences are the mechanism by which veteran users dial back that explicitness without the platform assuming everyone is an expert. The five preferences shipped in M1 (one from §3.2 Wave A, four new in Wave B v2) are stored as columns on `users`, queryable at the relational level, and exposed through a single partial-update endpoint. They are per-user, not per-org — the operator cannot suppress them. Spec reference: frontend design §4.3 (Wave B v2).
 
@@ -492,6 +498,8 @@ This is the single most differentiated capability in the product. Specified in d
 - Side-panel viewer: PDF.js is the obvious choice for PDFs. For DOCX sources, do we render a synthesized PDF or a styled HTML view? Recommend HTML view for DOCX with span-level offset markers.
 
 ### 3.4 Skill Library and Skill Creator
+
+**M1 status:** Shipped. The Skill Library (browse built-in, user, and team scopes), Skill Creator (capture / wizard / fork), skill versions tab, per-version audit, Try-It sandbox, and slash-invoked skills with provenance pill are all wired end-to-end in Wave D.2. An operator can verify at `api/app/api/skills.py`; Cypress E2E coverage is in `web/cypress/e2e/wave-d2-skill-creator.cy.ts` (Tests 1–6). Skill script execution (`scripts/`) and autonomous skill self-improvement are deferred (M4). See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface).
 
 **Description.** Skills are reusable, structured prompt artifacts that users attach to chats. They follow the agentskills.io / Claude Skills format: a folder containing `SKILL.md` (with YAML frontmatter) and optional supporting files. Three tiers: built-in skills (ship with the product), user skills (created by the user), and shared skills (shared by other users in the organization).
 
@@ -610,6 +618,8 @@ The API endpoint `GET /api/v1/skills/{id}/inputs` returns the skill's input sche
 
 ### 3.5 Files / Knowledge Bases
 
+**M1 status:** Shipped. Knowledge base create, document attach, PDF upload, and ingest-to-`ready` (pgvector + FTS hybrid retrieval) are wired end-to-end. An operator can verify at `api/app/api/knowledge_bases.py`, `api/app/pipeline/ingest.py`, and `api/app/workers/document_pipeline.py`; Cypress E2E coverage is in `web/cypress/e2e/wave-m1-final-surfaces.cy.ts` Test 2. Note: the Citation Engine's verification step (byte-level citation confirmation) is not yet wired — uploaded files provide retrieval-grounded context but citations are not byte-verified at M1. See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface) and [HONEST-STATE.md §3.1](HONEST-STATE.md#31-citation-engine--architectural-slot-not-wired).
+
 **Description.** Persistent collections of documents accessible across chats. Files are uploaded once, ingested into the citation pipeline, and made available for retrieval. Knowledge Bases group files for shared access (e.g., "Privacy Compliance Library," "Standard Templates").
 
 **User stories.**
@@ -649,6 +659,8 @@ The API endpoint `GET /api/v1/skills/{id}/inputs` returns the skill's input sche
 
 ### 3.6 Research
 
+**M1 status:** Deferred-M2. No web-search backend or legal-source connector exists in the M1 codebase. `grep -r "research" api/app/api/` returns no research-specific handler; `api/alembic/versions/` has no `research_queries` migration. The capability is fully spec'd here and in [PRD §9](PRD.md#9-deferred-enhancements-and-identified-future-work); a contributor picking it up should open a discussion before starting because it depends on the Citation Engine pipeline (§3.3) landing in M2 first. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+
 **Description.** Real-time legal information retrieval from authoritative sources, with the same Citation Engine fidelity as document-based citations. Web sources are fetched, parsed, and treated as ephemeral documents in the citation pipeline.
 
 **User stories.**
@@ -685,6 +697,8 @@ The API endpoint `GET /api/v1/skills/{id}/inputs` returns the skill's input sche
 - Should research results be cached? Recommend: yes, with a configurable TTL (default 24h), and the cache is queryable as a "Research Cache" knowledge base.
 
 ### 3.7 Playbooks
+
+**M1 status:** Deferred-M3. No `playbooks` table exists in `api/alembic/versions/` (M1 head is migration 0023); no `playbook_executions` endpoint is registered. The `word-addin/` directory is absent. Playbook execution depends on the Citation Engine pipeline (§3.3) landing in M2 and the LangGraph executor landing in M3. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
 
 **Description.** Structured, reusable contract-review automation. A Playbook codifies an organization's standard positions and fallback positions on common contract issues. When applied to a contract, the Playbook produces a per-position assessment: matches standard, deviates (with severity), or missing entirely. Includes redline suggestions.
 
@@ -764,6 +778,8 @@ class Position(BaseModel):
 
 ### 3.8 Multi-Model Ensemble Verification
 
+**M1 status:** Deferred-M2. Ensemble verification is not running at M1. The gateway dispatches every request to exactly one provider; no parallel model calls or reconciliation step exists in `gateway/app/router.py` or `api/app/`. The capability depends on the Citation Engine pipeline (§3.3) that also lands in M2. No `ensemble-config` endpoint is registered. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+
 **Description.** GC.AI markets "multi-model RAG (calls 5 different AI models)" as an accuracy feature. LQ.AI implements this as an *optional* ensemble step where multiple models are queried in parallel and their outputs are reconciled. Off by default (cost reasons); on for specific high-stakes operations like Playbook execution and Citation Engine verification.
 
 **User stories.**
@@ -791,6 +807,8 @@ class Position(BaseModel):
 - **Inference tier exposure for multi-tier ensembles.** When the ensemble spans multiple Inference Tiers (a chat using Tier 3 cloud + Tier 1 local for cross-verification), how is the chat's effective tier represented in the UI (§3.13)? Recommended resolution: surface the *minimum* tier across the ensemble as the chat's effective tier, since that is the privacy posture that actually applies — every model in the ensemble has seen the data, so the chat's effective tier is the floor.
 
 ### 3.9 Word Add-In (M3)
+
+**M1 status:** Deferred-M3. The `word-addin/` directory is absent from the repository (`ls word-addin/` returns no such directory). No Office.js manifest, no Word-side JS bundle, no add-in-specific backend wiring. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
 
 **Description.** Microsoft Office.js add-in that brings LQ.AI capabilities directly into Word. Users can run skills, execute Playbooks, get redlines, ask questions about the document, and act on the assistant's suggestions — all without leaving Word.
 
@@ -832,6 +850,8 @@ class Position(BaseModel):
 
 ### 3.10 Autonomous Layer (M4)
 
+**M1 status:** Deferred-M4. No `autonomous_tasks`, `autonomous_schedules`, or `autonomous_watches` table exists in `api/alembic/versions/`. No per-user memory store. The architectural slot is committed; detailed M4 design is deferred. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+
 **Description.** Long-running per-user agents that observe activity, learn patterns, take proactive actions, and create skills autonomously. Runs as OpenWebUI Pipelines, off by default, opt-in per user.
 
 **User stories.**
@@ -866,6 +886,8 @@ class Position(BaseModel):
 ---
 
 ### 3.11 Projects (M1)
+
+**M1 status:** Shipped. Matter (project) workspaces are wired end-to-end: create, list, detail view at `/lq-ai/matters/[id]`, attached files/skills/knowledge bases, the `privileged` flag, and `minimum_inference_tier`. An operator can verify at `api/app/api/projects.py`; Cypress E2E coverage is in `web/cypress/e2e/wave-c-matters.cy.ts`. Note: playbook attachment lands when Playbooks ship (M3). See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface).
 
 **Description.** A Project is a user-curated container that scopes a set of chats, files, skills, playbooks, and a free-form context document around a single matter — a deal, a counterparty, a regulatory question, a policy refresh. Chats inside a Project automatically inherit the Project's attached files and skills. The Project's free-form context document ("we are the customer; counterparty is Acme; their counsel is Smith Crowell; we agreed to a 12-month liability cap last round") is read into every chat in the Project as context. Projects are the operational answer to the question "what about *this matter*?" — distinct from per-chat attachments (which solve "this conversation") and from autonomous-layer memory (which is system-curated rather than user-authored).
 
@@ -909,6 +931,8 @@ Persistent matter memory is the single most-cited capability across in-house use
 
 ### 3.12 Organization Profile (M1)
 
+**M1 status:** Shipped. The singleton skill pattern with `lq_ai: { is_organization_profile: true }` frontmatter is enforced by the Skill Service. Admins can create or edit the Organization Profile through the same Skill Library surface as any other skill. An operator can verify the singleton constraint at `api/app/api/skills.py`. See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface).
+
 **Description.** A singleton skill that captures the organization's voice, templates, and "what good looks like" reference, available as ambient context to every chat and skill execution in the deployment. The Organization Profile is implemented as a skill with `lq_ai: { is_organization_profile: true }` frontmatter — same skill format as everything else, same inspectability, same fork-and-replace pattern, but treated as a singleton by the Skill Service. Single-instance per deployment; admin-edited; user-readable.
 
 **Why a singleton skill (rather than a separate construct).** Treating the Organization Profile as a skill with special metadata preserves the architectural simplicity (one extensibility surface, not two) and the transparency principle (the Organization Profile is open source and inspectable like every other shaping artifact — see §1.3).
@@ -934,6 +958,8 @@ Persistent matter memory is the single most-cited capability across in-house use
 ---
 
 ### 3.13 Inference Tier Awareness (M1)
+
+**M1 status:** Shipped. The Inference Gateway annotates every request with `routed_inference_tier` (1–5) and enforces tier-floor refusal. The tier badge is present in the chat UI; admin tier-floor override is wired. An operator can verify the gateway enforcement at `gateway/app/tier_floor.py` (124 LOC) and `gateway/app/router.py`; Cypress E2E coverage is in `web/cypress/e2e/wave-d1-power-features.cy.ts` Tests 3 and 5. Note: `GET /api/v1/inference/current-tier` is not yet in code at M1 (it is in the gateway OpenAPI sketch as a deferred endpoint). See [HONEST-STATE.md §2](HONEST-STATE.md#2-inference-gateway-and-providers).
 
 **Description.** A persistent badge in the chat UI shows the current Inference Tier (1–5) and the specific provider routing for the current chat. A click on the badge opens a panel explaining what the tier implies: where the data is going, what the provider's retention policy is, whether the prompt is being logged in the operator's audit log, whether anonymization (§4) is on, and whether the deployment is air-gapped. The same panel is available in the Word add-in. This is the most important security-posture feature of the entire project and one of the smallest pieces of code: every chat already routes against an inference provider; the application already knows which one; surfacing that to the user is a UI affordance away. The transparency philosophy in §1.3 requires it.
 
@@ -976,6 +1002,8 @@ Persistent matter memory is the single most-cited capability across in-house use
 
 ### 3.14 Tabular / Multi-Document Review (M3)
 
+**M1 status:** Deferred-M3. No grid surface, no LangGraph Tabular Review workflow, and no `output_format: table` skill-mode handling exists in M1. The capability depends on the Citation Engine pipeline (§3.3) and the Playbook/LangGraph executor (§3.7), both of which land in M2–M3. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+
 **Description.** A view that takes (a) a set of documents (a Knowledge Base, a Project's files, a free selection) and (b) a set of questions or clauses to extract, and produces a row-per-document, column-per-question grid. Each cell is a citation-grounded answer that opens the side-panel viewer (§3.3) on click. The "compare clauses across N contracts in a grid" pattern (Legora Tabular Review, Harvey Vault, Ivo Repository columns) is a different UI shape than chat. In-house teams use it for due diligence, audits, portfolio-wide policy checks, and "what is market across the deals we have signed."
 
 **User stories.**
@@ -1002,6 +1030,8 @@ Persistent matter memory is the single most-cited capability across in-house use
 
 ### 3.15 Slack / Teams Light Intake Bridge (M3)
 
+**M1 status:** Deferred-M3. No `/lq` slash-command handler, no bot manifest, no `slack-bridge` or `teams-bridge` Docker Compose service exists at M1. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+
 **Description.** A Slack and Teams bot that supports two flows: (1) **forward as a chat** — a user `/lq` slash-command on a message thread creates an LQ.AI chat with the thread's content as initial context; (2) **quick ask** — `/lq ask "is this an MSA or an order form?"` runs a short skill (configurable via Org Profile) and replies in-thread. Replies render in the Slack/Teams thread; deeper engagement opens the web app. No matter management, no triage, no SLA tracking — that is the boundary with Streamline AI's category, which is explicitly out of scope per §1.6.
 
 In-house teams report (across the competitive research) that the majority of incoming requests arrive via Slack, Teams, or email — not via direct visits to the legal portal. A web-only product structurally underweights the channels users live in. A *light* Slack/Teams bridge — not full intake/triage like Streamline AI — closes this gap with bounded scope.
@@ -1019,6 +1049,8 @@ In-house teams report (across the competitive research) that the majority of inc
 ---
 
 ### 3.16 Contract Repository — Auto-Relationship Detection (M4)
+
+**M1 status:** Deferred-M4. No `contract_relationships` table exists in `api/alembic/versions/`; no relationship-detection pipeline or graph-query surface exists at M1. Depends on the Knowledge Service pgvector+FTS baseline (shipped M1) and on the Citation Engine pipeline (§3.3, M2). See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
 
 **Description.** A pipeline that runs over a Knowledge Base of contracts and produces a relationship graph: amendments (modifies-X), restatements (replaces-X), references (cross-references-X), and master/sub (parent-of-X) edges. The graph is queryable and visible in the UI as a sidebar on each document. Contracts about a counterparty rarely stand alone, and answering questions like "which liability cap actually governs?" requires knowing which document supersedes which. This is Ivo's positioning — that contracts are not isolated documents but a graph — and is not currently addressed in the PRD's flat Knowledge Base model.
 
