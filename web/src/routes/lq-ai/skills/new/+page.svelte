@@ -50,6 +50,7 @@
 	import { getSkill } from '$lib/lq-ai/api/skills';
 	import { listUserSkills, createUserSkill } from '$lib/lq-ai/api/userSkills';
 	import SkillWizard from '$lib/lq-ai/components/SkillWizard.svelte';
+	import { stashStorageKey } from '$lib/lq-ai/components/CaptureSkillModal.svelte';
 	import type { UserSkillCreate } from '$lib/lq-ai/types';
 
 	interface WizardInitial {
@@ -136,13 +137,13 @@
 				draftKey = `fork-${forkSlug}-${newDraftKey()}`;
 			} else if (captureKey) {
 				try {
-					const stash = localStorage.getItem(`lq-ai:capture-stash:${captureKey}`);
+					const stash = localStorage.getItem(stashStorageKey(captureKey));
 					if (stash) {
 						const parsed = JSON.parse(stash) as unknown;
 						if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
 							initial = parsed as WizardInitial;
 						}
-						localStorage.removeItem(`lq-ai:capture-stash:${captureKey}`);
+						localStorage.removeItem(stashStorageKey(captureKey));
 					}
 				} catch (e) {
 					console.error('skills/new: failed to parse capture stash', e);
