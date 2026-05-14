@@ -136,13 +136,15 @@ docker compose ps   # all 7 services should show "healthy" or "running"
 ### Step 3 — Set the admin password
 
 ```bash
-docker compose exec api python -m app.cli reset-admin-password \
+docker exec -w /app lq-ai-api-1 python -m app.cli reset-admin-password \
   --email admin@lq.ai \
   --password 'LQ-AI-smoke-test-Pw1!' \
   --no-force-change
 ```
 
 This sets a known password for the bootstrap admin account so you can log in immediately without the must-change-password gate. Use a stronger password for anything beyond a local evaluation.
+
+> If `docker exec` reports the container isn't found, run `docker compose ps` to see the actual container name on your setup — some Docker Compose versions use `lq-ai_api_1` (underscores) instead of `lq-ai-api-1` (hyphens). The `docker compose exec api python -m app.cli ...` form also works on most setups if you prefer it.
 
 ### Step 4 — Log in
 
