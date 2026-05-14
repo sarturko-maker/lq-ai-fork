@@ -160,23 +160,33 @@
 	let loading = false;
 	let error: string | null = null;
 
+	// Monotonic request token: when the user types fast, multiple load()
+	// calls can be in-flight simultaneously and resolve out of order. We
+	// capture an id at the top of each call and check it before every
+	// state mutation so only the most-recent fetch wins.
+	let requestId = 0;
+
 	$: kind = emptyStateKind({ results, activeIndex, loading, error, query });
 
 	async function load() {
+		const myId = ++requestId;
 		loading = true;
 		error = null;
 		try {
-			results = await fetchResults(query, 10);
+			const next = await fetchResults(query, 10);
+			if (myId !== requestId) return; // superseded by a newer call
+			results = next;
 			// Clamp activeIndex to the new result-set length.
 			if (activeIndex >= results.length) activeIndex = 0;
 		} catch (e: unknown) {
+			if (myId !== requestId) return;
 			error =
 				e instanceof Error
 					? (e.message ?? 'Failed to load suggestions.')
 					: 'Failed to load suggestions.';
 			results = [];
 		} finally {
-			loading = false;
+			if (myId === requestId) loading = false;
 		}
 	}
 
@@ -206,18 +216,25 @@
 		});
 		switch (action.kind) {
 			case 'select':
+				// stopPropagation so the composer's Enter-to-send handler
+				// (Task 7.1) doesn't also fire on the same keystroke.
 				e.preventDefault();
+				e.stopPropagation();
 				onSelect(action.result);
 				return;
 			case 'dismiss':
 				e.preventDefault();
+				e.stopPropagation();
 				onDismiss();
 				return;
 			case 'move':
 				e.preventDefault();
+				e.stopPropagation();
 				activeIndex = action.nextIndex;
 				return;
 			case 'noop':
+				// Let unhandled keys continue propagating so the user can
+				// keep typing into the composer.
 				return;
 		}
 	}
@@ -232,7 +249,16 @@
 
 <svelte:window on:keydown={onWindowKey} />
 
-<div class="lq-slash-popover" role="listbox" aria-label="Skill suggestions">
+<!-- tabindex="-1" required by a11y rule when aria-activedescendant is set;
+     the composer (Task 7.1) retains focus and keyboard events are caught
+     by the window handler above, so this listbox is never tab-focused. -->
+<div
+	class="lq-slash-popover"
+	role="listbox"
+	tabindex="-1"
+	aria-label="Skill suggestions"
+	aria-activedescendant={kind === 'results' ? `lq-slash-row-${activeIndex}` : undefined}
+>
 	{#if kind === 'loading'}
 		<div class="lq-slash-popover__status" role="presentation">Loading…</div>
 	{:else if kind === 'error'}
@@ -256,6 +282,7 @@
 			<button
 				type="button"
 				role="option"
+				id={`lq-slash-row-${i}`}
 				class="lq-slash-popover__row"
 				class:active={i === activeIndex}
 				aria-selected={i === activeIndex}
