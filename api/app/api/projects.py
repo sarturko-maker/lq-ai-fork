@@ -306,7 +306,7 @@ def _check_slug_not_reserved(slug: str) -> None:
 
     if _RESERVED_SLUG_RE.match(slug):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 f"Slug pattern '__*__' is reserved for system-managed matters; '{slug}' rejected."
             ),
