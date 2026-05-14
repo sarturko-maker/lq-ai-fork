@@ -22,7 +22,7 @@ describe('tabs', () => {
     }
   });
 
-  it('marks tabs whose routes are not yet implemented as not available', () => {
+  it('marks every M1 tab as available (last placeholder closed)', () => {
     expect(isTabAvailable('home')).toBe(true);
     expect(isTabAvailable('skills')).toBe(true);
     expect(isTabAvailable('admin')).toBe(true);
@@ -31,8 +31,8 @@ describe('tabs', () => {
     // saved-prompts route landed pre-v0.1.0 (Saved Prompts page wraps the
     // SavedPromptsPanel — same backend, full-width browse view).
     expect(isTabAvailable('saved-prompts')).toBe(true);
-    // Knowledge surface still pending — flip when /lq-ai/knowledge ships.
-    expect(isTabAvailable('knowledge')).toBe(false);
+    // Knowledge surface landed in Wave C — closes the last M1 placeholder.
+    expect(isTabAvailable('knowledge')).toBe(true);
   });
 
   it('derives active tab from pathname', () => {
