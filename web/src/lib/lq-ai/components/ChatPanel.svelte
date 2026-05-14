@@ -1,3 +1,49 @@
+<script context="module" lang="ts">
+	/**
+	 * Pure helpers for slash-invocation detection (Wave D.2 Task 7.1).
+	 *
+	 * Exposed from a `context="module"` block so vitest can exercise the
+	 * regex-based detection logic without mounting the (large) component.
+	 * Mirrors the convention SlashPopover uses for its keyboard-action
+	 * helpers.
+	 *
+	 * The detection contract:
+	 *   - The popover opens only when the slash sits at the start of a line
+	 *     (BOL or immediately after `\n`). Mid-line `/` (e.g., "and/or",
+	 *     "TCP/IP") does NOT open the popover.
+	 *   - Between the slash and the caret we accept the slash-alias
+	 *     character class (lowercase a-z, digits, hyphen) — matching the
+	 *     server-side `slash_alias` validator (Task 2.5). Any other char
+	 *     (whitespace, uppercase, underscore) terminates the candidate
+	 *     query and closes the popover.
+	 *   - Empty query is allowed (`/` alone opens the popover with the
+	 *     "no-query" empty state per SlashPopover.emptyStateKind()).
+	 */
+	export type SlashDetection =
+		| { open: false }
+		| { open: true; query: string; slashIndex: number };
+
+	export function isAtLineStart(text: string, pos: number): boolean {
+		if (pos === 0) return true;
+		return text[pos - 1] === '\n';
+	}
+
+	export function detectSlashAt(text: string, caret: number): SlashDetection {
+		if (caret === 0) return { open: false };
+		// Walk left from the caret over the legal slash-alias char class.
+		let scan = caret;
+		while (scan > 0 && /[a-z0-9-]/.test(text[scan - 1])) scan--;
+		if (scan === 0 || text[scan - 1] !== '/') return { open: false };
+		const slashIndex = scan - 1;
+		if (!isAtLineStart(text, slashIndex)) return { open: false };
+		return {
+			open: true,
+			query: text.slice(slashIndex + 1, caret),
+			slashIndex
+		};
+	}
+</script>
+
 <script lang="ts">
 	/**
 	 * ChatPanel — reusable chat composition surface.
@@ -62,6 +108,8 @@
 	import ReceiptsDrawer, {
 		readPersistedOpen as readReceiptsDrawerOpen
 	} from '$lib/lq-ai/components/ReceiptsDrawer.svelte';
+	import SlashPopover from '$lib/lq-ai/components/SlashPopover.svelte';
+	import type { SkillAutocompleteItem } from '$lib/lq-ai/types';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import { createEventDispatcher } from 'svelte';
 
@@ -577,10 +625,78 @@
 	}
 
 	function handleComposerKeydown(e: KeyboardEvent): void {
+		// When the slash popover is open it owns Arrow/Enter/Escape via its
+		// own <svelte:window on:keydown>, which stopPropagation()s. Those
+		// keystrokes don't reach this handler. We only need to prevent the
+		// composer's own shortcuts (Cmd/Ctrl+E) from firing while the
+		// popover is open so the operator can finish skill selection
+		// without accidentally launching Enhance Prompt.
+		if (slashOpen) return;
 		if ((e.metaKey || e.ctrlKey) && e.key === 'e') {
 			e.preventDefault();
 			expansionPanel?.open();
 		}
+	}
+
+	// Wave D.2 Task 7.1 — slash-invocation popover wiring.
+	//
+	// `slashOpen` is the visibility flag for <SlashPopover>; when true the
+	// popover is mounted and steals Arrow/Enter/Escape via its own window
+	// keydown listener. `slashQuery` is the live query passed to the
+	// popover (it re-fetches on change). `slashStartIndex` is the position
+	// of the leading `/` in `composerText` — captured so onSlashSelect()
+	// can splice it out cleanly when the user picks a result.
+	//
+	// Detection runs on every input event. The plan-text snippet's
+	// detection logic lives in the module-scope `detectSlashAt` helper at
+	// the top of this file so it's unit-testable.
+	let slashOpen = false;
+	let slashQuery = '';
+	let slashStartIndex = -1;
+
+	function onComposerInput(e: Event): void {
+		const ta = e.target as HTMLTextAreaElement;
+		// `bind:value` has already updated `composerText` before this
+		// handler fires; we read from the textarea directly anyway so the
+		// caret position and value are guaranteed consistent.
+		const detection = detectSlashAt(ta.value, ta.selectionStart);
+		if (detection.open) {
+			slashOpen = true;
+			slashQuery = detection.query;
+			slashStartIndex = detection.slashIndex;
+		} else {
+			slashOpen = false;
+			slashQuery = '';
+			slashStartIndex = -1;
+		}
+	}
+
+	function onSlashSelect(item: SkillAutocompleteItem): void {
+		// Splice the "/<query>" fragment out of the composer text. The
+		// before/after slices use the captured slashStartIndex (rather
+		// than re-detecting) so a race with concurrent typing can't
+		// remove the wrong span.
+		if (slashStartIndex >= 0) {
+			const before = composerText.slice(0, slashStartIndex);
+			const after = composerText.slice(slashStartIndex + 1 + slashQuery.length);
+			composerText = (before + after).replace(/^\s*/, '');
+		}
+		// Attach via the existing handler so the SkillPicker UI + the
+		// send-handler's `attachedSkillNames` list pick up the selection.
+		// Per Task 7.1 scope: provenance ('source: slash') is NOT carried
+		// through here — Task 7.2 will refactor `attachedSkillNames` into
+		// the richer `attachedSkills` shape and add `attached_skills` to
+		// the send payload.
+		void attachSkill(item.slug);
+		slashOpen = false;
+		slashQuery = '';
+		slashStartIndex = -1;
+	}
+
+	function onSlashDismiss(): void {
+		slashOpen = false;
+		slashQuery = '';
+		slashStartIndex = -1;
 	}
 
 	onMount(async () => {
@@ -765,14 +881,26 @@
 				{/if}
 
 				<div class="flex items-end gap-2">
-					<textarea
-						class="lq-composer flex-1 text-sm resize-none"
-						rows="3"
-						placeholder="Type a message…"
-						bind:value={composerText}
-						data-testid="lq-ai-composer-input"
-						on:keydown={handleComposerKeydown}
-					></textarea>
+					<div class="lq-composer-wrap flex-1">
+						<textarea
+							class="lq-composer w-full text-sm resize-none"
+							rows="3"
+							placeholder="Type a message…"
+							bind:value={composerText}
+							data-testid="lq-ai-composer-input"
+							on:keydown={handleComposerKeydown}
+							on:input={onComposerInput}
+						></textarea>
+						{#if slashOpen}
+							<div class="lq-composer-popover" data-testid="lq-ai-slash-popover-anchor">
+								<SlashPopover
+									query={slashQuery}
+									onSelect={onSlashSelect}
+									onDismiss={onSlashDismiss}
+								/>
+							</div>
+						{/if}
+					</div>
 					{#if streamingMessageId}
 						<button
 							type="button"
@@ -886,6 +1014,20 @@
 
 <style>
 	@import '$lib/lq-ai/styles/practice.css';
+
+	.lq-composer-wrap {
+		/* Anchor for the slash-invocation popover (Wave D.2 Task 7.1).
+		   The popover renders absolutely-positioned just above the
+		   textarea so the user's eye-line stays on what they typed. */
+		position: relative;
+	}
+
+	.lq-composer-popover {
+		position: absolute;
+		bottom: calc(100% + 4px);
+		left: 0;
+		z-index: 50;
+	}
 
 	.lq-composer {
 		background: var(--lq-canvas);
