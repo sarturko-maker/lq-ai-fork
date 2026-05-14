@@ -106,11 +106,18 @@ export interface DeleteScheduledResponse {
 // ----- Errors -----
 
 export interface ErrorBody {
-	detail?: {
-		code: string;
-		message: string;
-		details?: Record<string, unknown>;
-	};
+	/**
+	 * FastAPI surfaces three distinct detail shapes:
+	 *   1. string         — plain-text error message (most common, e.g. HTTPException with str detail)
+	 *   2. object         — LQ.AI structured error { code, message, details? }
+	 *   3. array          — Pydantic ValidationError [ { msg, type, loc } ]
+	 *
+	 * The `errorFor` function in api/client.ts handles all three shapes.
+	 */
+	detail?:
+		| string
+		| { code: string; message: string; details?: Record<string, unknown> }
+		| Array<{ msg: string; type?: string; loc?: unknown[] }>;
 }
 
 // ----- Projects -----
