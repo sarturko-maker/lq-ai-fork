@@ -3,7 +3,7 @@
 	 * /lq-ai/skills/new — Wave D.2 Skill Creator wizard entry point.
 	 *
 	 * Thin wrapper around ``SkillWizard`` (Task 4.2). Supports four entry
-	 * modes via query params:
+	 * modes via query params, plus an orthogonal team-scope seed:
 	 *
 	 *   blank          (no params)          fresh wizard, fresh draft key
 	 *   ?fork=<slug>                        pre-populate from a source skill via
@@ -17,6 +17,15 @@
 	 *                                       the stash. Uses ``<key>`` as the draft key.
 	 *   ?draft=<key>                        resume an in-progress wizard draft
 	 *                                       (the wizard's own autosave key).
+	 *   ?scope=team&team=<uuid>             (orthogonal to the above modes) seed
+	 *                                       the wizard with team scope and
+	 *                                       ``ownerTeamId``. Required for
+	 *                                       team-admins creating team-scope
+	 *                                       skills, since the wizard itself has
+	 *                                       no scope picker. The backend's
+	 *                                       POST /user-skills is the
+	 *                                       authoritative admin gate (403 on
+	 *                                       non-admin save attempts).
 	 *
 	 * Auth and force-change-password gating live in the parent ``/lq-ai``
 	 * layout — this page has no auth logic of its own.
@@ -64,6 +73,8 @@
 	$: forkSlug = $page.url.searchParams.get('fork');
 	$: captureKey = $page.url.searchParams.get('capture');
 	$: explicitDraftKey = $page.url.searchParams.get('draft');
+	$: scopeParam = $page.url.searchParams.get('scope');
+	$: teamParam = $page.url.searchParams.get('team');
 
 	function newDraftKey(): string {
 		// `crypto.randomUUID` is available in every browser we target; the
@@ -145,6 +156,20 @@
 				draftKey = explicitDraftKey;
 			} else {
 				draftKey = newDraftKey();
+			}
+
+			// Orthogonal team-scope seed. Layered AFTER fork/capture/draft so
+			// it overrides any source-derived scope (forks default to 'user').
+			// Backend POST /user-skills enforces admin membership; we do not
+			// validate it here.
+			if (scopeParam === 'team') {
+				if (teamParam && /^[0-9a-f-]{36}$/i.test(teamParam)) {
+					initial = { ...initial, scope: 'team', ownerTeamId: teamParam };
+				} else {
+					loadError =
+						'Team scope requires a valid ?team=<uuid> parameter. Starting as user-scope.';
+					initial = { ...initial, scope: 'user', ownerTeamId: undefined };
+				}
 			}
 		} catch (e) {
 			console.error('skills/new: failed to prepare initial wizard state', e);
