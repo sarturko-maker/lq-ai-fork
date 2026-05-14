@@ -706,6 +706,7 @@ async def ensure_sandbox(
     # If this assertion ever fires it means the unique-index covering
     # ``(owner_id, slug) WHERE archived_at IS NULL`` is missing/wrong.
     assert row is not None
+    await db.refresh(row)
     log.info(
         "sandbox ensured",
         extra={
