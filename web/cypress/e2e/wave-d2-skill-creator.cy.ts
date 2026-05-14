@@ -7,7 +7,7 @@
  *   2. Wizard from scratch (Task 8.2)   — blank → fill 3 sections → set slash_alias → save
  *   3. Fork flow (Task 8.3)             — detail page → fork → wizard pre-populated → save
  *   4. Slash invocation (Task 8.4)      — type "/" in composer → popover → pick → pill → send
- *   5. Try-it sandbox (Task 8.4)        — detail Try-it tab → ensure sandbox → send → conversation persists
+ *   5. Try-it sandbox (Task 8.4)        — detail Try-it tab → ensure sandbox → send → LLM reply renders
  *   6. Versions + slash_alias collision (Task 8.3) — edit twice → tab shows 3 rows; collision → inline error
  *
  * Run requires a live stack:
@@ -299,7 +299,9 @@ describe('Wave D.2 — Skill Creator', () => {
 		// Type the rest of the query so the autocomplete narrows to our skill.
 		// The ts suffix is too long to type; type just 'd2s' (prefix of the alias
 		// slug which contains 'd2s<ts>') — or type the display_name prefix.
-		// The autocomplete searches title + slug, so 'd2-slash' prefix is safe.
+		// The autocomplete ranks by: slash_alias prefix (score 3) > slug prefix (score 2) >
+		// title substring (score 1). On a dirty DB, prior-run d2s* skills also match —
+		// click the row by title to target the current run's skill unambiguously.
 		cy.get('[data-testid="lq-ai-composer-input"]').first().type('d2s');
 
 		// Wait for the title span to appear inside the listbox.
@@ -307,10 +309,13 @@ describe('Wave D.2 — Skill Creator', () => {
 			.contains(skillTitle, { timeout: 10000 })
 			.should('exist');
 
-		// Pick the skill via Enter (the keyboard handler in SlashPopover.svelte
-		// fires `onSelect` on Enter with the activeIndex row, which defaults to 0
-		// — our skill is the only match after the query narrows).
-		cy.get('[data-testid="lq-ai-composer-input"]').first().type('{enter}');
+		// Pick the skill by clicking the row matching the current run's title.
+		// The slash popover sorts by ranking score with stable insertion order for ties.
+		// With a dirty DB containing prior runs' d2s<ts> skills, activeIndex defaults to 0
+		// and {enter} would pick the OLDEST matching skill, not the current run's freshly-created one.
+		cy.get('[data-testid="lq-ai-slash-popover-anchor"]')
+			.contains('[role="option"]', skillTitle)
+			.click();
 
 		// ── Assert the attached-skill pill renders in SkillPicker ────────────
 		// SkillPicker renders a detach button with data-testid
