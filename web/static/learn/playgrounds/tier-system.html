@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LQ.AI — Tier System &amp; Refusal Explorer</title>
+<style>
+  :root {
+    --bg: #0c0f14;
+    --bg-elev: #151a23;
+    --bg-elev-2: #1d242f;
+    --border: #2a3340;
+    --border-hover: #3a4555;
+    --text: #e6ebf3;
+    --text-dim: #8a96a8;
+    --text-faint: #5a6578;
+    --accent: #7dd3fc;
+    --accent-dim: #38bdf8;
+    --web: #93c5fd;
+    --api: #fcd34d;
+    --gateway: #c4b5fd;
+    --data: #f9a8d4;
+    --workers: #86efac;
+    --providers: #fda4af;
+    --conn-data: #60a5fa;
+    --conn-audit: #f87171;
+    --conn-egress: #34d399;
+    --shadow: rgba(0,0,0,0.4);
+    --tier1: #86efac;
+    --tier2: #93c5fd;
+    --tier3: #fcd34d;
+    --tier4: #c4b5fd;
+    --tier5: #fda4af;
+    --refused: #f87171;
+    --refused-bg: rgba(248,113,113,0.08);
+    --refused-border: rgba(248,113,113,0.3);
+    --allowed: #86efac;
+    --allowed-bg: rgba(134,239,172,0.07);
+    --allowed-border: rgba(134,239,172,0.25);
+    --override-bg: rgba(252,211,77,0.07);
+    --override-border: rgba(252,211,77,0.3);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .app {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;
+  }
+  header {
+    padding: 12px 20px;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  header .subtitle {
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  header .spacer { flex: 1; }
+  header a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 4px;
+  }
+  header a:hover { border-color: var(--border-hover); background: var(--bg-elev-2); }
+
+  .main {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    overflow: hidden;
+  }
+  .controls {
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .controls h2 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 16px 0 8px;
+  }
+  .controls h2:first-child { margin-top: 0; }
+
+  .presets {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+  .preset-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    text-align: left;
+    transition: all 0.1s;
+    line-height: 1.4;
+  }
+  .preset-btn:hover { border-color: var(--border-hover); }
+  .preset-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+    font-weight: 600;
+  }
+
+  .radio-group { display: flex; flex-direction: column; gap: 4px; }
+  .radio-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s;
+    font-size: 13px;
+  }
+  .radio-row:hover { background: var(--bg-elev-2); }
+  .radio-row input { margin: 0; cursor: pointer; accent-color: var(--accent); }
+  .radio-row .badge {
+    font-size: 10px;
+    font-family: ui-monospace, Menlo, monospace;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-left: auto;
+    border: 1px solid var(--border);
+    color: var(--text-faint);
+  }
+  .radio-row.selected .badge { color: var(--accent); border-color: var(--accent); }
+
+  .matter-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .matter-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    text-align: left;
+    transition: all 0.1s;
+  }
+  .matter-btn:hover { border-color: var(--border-hover); }
+  .matter-btn.active { border-color: var(--accent); background: rgba(125,211,252,0.06); }
+  .matter-btn.active .matter-label { color: var(--accent); font-weight: 600; }
+  .matter-btn.dim { opacity: 0.45; cursor: not-allowed; }
+  .matter-label { display: block; font-size: 13px; font-weight: 500; }
+  .matter-desc { display: block; font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+  .advanced-toggle {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 4px 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }
+  .advanced-toggle:hover { color: var(--text); }
+  .advanced-toggle .arrow { transition: transform 0.15s; display: inline-block; }
+  .advanced-toggle.open .arrow { transform: rotate(90deg); }
+  .advanced-panel { display: none; padding-left: 0; }
+  .advanced-panel.open { display: block; }
+  .toggle {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s;
+    font-size: 12px;
+  }
+  .toggle:hover { background: var(--bg-elev-2); }
+  .toggle input { margin: 3px 0 0; cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
+  .toggle .toggle-label { flex: 1; line-height: 1.4; }
+  .toggle .toggle-label span { display: block; color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+
+  /* Preview pane */
+  .preview-wrap {
+    overflow-y: auto;
+    padding: 20px;
+    background:
+      radial-gradient(circle at 20% 20%, rgba(125,211,252,0.03), transparent 55%),
+      radial-gradient(circle at 80% 80%, rgba(196,181,253,0.03), transparent 55%),
+      var(--bg);
+  }
+
+  /* Scenarios bar */
+  .scenarios-bar {
+    padding: 0 20px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    background: var(--bg);
+  }
+  .scenario-chip {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 4px 10px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.1s;
+    white-space: nowrap;
+  }
+  .scenario-chip:hover { border-color: var(--border-hover); color: var(--text); }
+  .scenario-chip.active { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+
+  /* Result card */
+  .result-card {
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    padding: 20px 24px;
+    background: var(--bg-elev);
+    max-width: 700px;
+  }
+  .result-card.allowed { border-color: var(--allowed-border); background: var(--allowed-bg); }
+  .result-card.refused { border-color: var(--refused-border); background: var(--refused-bg); }
+  .result-card.override-active { border-color: var(--override-border); background: var(--override-bg); }
+
+  .result-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+  .status-pill.allowed { background: rgba(134,239,172,0.15); color: var(--allowed); border: 1px solid var(--allowed-border); }
+  .status-pill.refused { background: rgba(248,113,113,0.15); color: var(--refused); border: 1px solid var(--refused-border); }
+  .status-pill.override { background: rgba(252,211,77,0.15); color: var(--api); border: 1px solid var(--override-border); }
+
+  .result-title { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  .result-subtitle { font-size: 13px; color: var(--text-dim); margin: 0; }
+
+  .result-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 16px 0;
+  }
+  .result-field {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 10px 12px;
+  }
+  .result-field .field-key {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    margin-bottom: 4px;
+  }
+  .result-field .field-val {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .result-field .field-val .tier-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+
+  .result-reason {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.55;
+    margin: 12px 0;
+    padding: 12px 14px;
+    background: var(--bg-elev-2);
+    border-radius: 5px;
+    border-left: 3px solid var(--border);
+  }
+  .result-reason.allowed { border-left-color: var(--allowed); }
+  .result-reason.refused { border-left-color: var(--refused); }
+
+  .audit-log {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 10px 12px;
+    margin: 12px 0;
+    line-height: 1.65;
+    overflow-x: auto;
+  }
+  .audit-log .k { color: var(--text-faint); }
+  .audit-log .v { color: var(--text); }
+  .audit-log .v.green { color: var(--allowed); }
+  .audit-log .v.red { color: var(--refused); }
+  .audit-log .v.yellow { color: var(--api); }
+  .audit-log .v.purple { color: var(--gateway); }
+
+  /* Flow steps */
+  .flow-steps {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 16px 0;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .flow-step {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-shrink: 0;
+  }
+  .step-node {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 7px 11px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    transition: all 0.2s;
+  }
+  .step-node.active { border-color: var(--allowed); color: var(--allowed); background: var(--allowed-bg); }
+  .step-node.refused { border-color: var(--refused); color: var(--refused); background: var(--refused-bg); }
+  .step-node.pass { border-color: var(--accent); color: var(--accent); background: rgba(125,211,252,0.06); }
+  .step-node.override-step { border-color: var(--api); color: var(--api); background: rgba(252,211,77,0.06); }
+  .step-arrow {
+    width: 22px;
+    height: 2px;
+    background: var(--border);
+    position: relative;
+    flex-shrink: 0;
+  }
+  .step-arrow::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: -3px;
+    border: 4px solid transparent;
+    border-left: 6px solid var(--border);
+  }
+  .step-arrow.active { background: var(--accent); }
+  .step-arrow.active::after { border-left-color: var(--accent); }
+  .step-arrow.refused { background: var(--refused); }
+  .step-arrow.refused::after { border-left-color: var(--refused); }
+
+  /* Refusal bubble */
+  .refusal-bubble {
+    background: var(--bg-elev);
+    border: 1px solid var(--refused-border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin: 12px 0;
+    max-width: 500px;
+  }
+  .refusal-bubble .rb-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .refusal-bubble .rb-icon {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: var(--refused-bg);
+    border: 1px solid var(--refused-border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .refusal-bubble .rb-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--refused);
+  }
+  .refusal-bubble .rb-body {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin: 0 0 10px;
+    line-height: 1.5;
+  }
+  .refusal-bubble .rb-tiers {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .rb-tier-chip {
+    font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .rb-tier-chip.requested { border-color: var(--refused-border); color: var(--refused); background: var(--refused-bg); }
+  .rb-tier-chip.enforced { border-color: var(--allowed-border); color: var(--allowed); background: var(--allowed-bg); }
+
+  .override-btn {
+    background: var(--api);
+    border: none;
+    color: var(--bg);
+    padding: 7px 14px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: opacity 0.1s;
+  }
+  .override-btn:hover { opacity: 0.88; }
+
+  /* Override modal (inline) */
+  .override-modal {
+    background: var(--bg-elev);
+    border: 1px solid var(--override-border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 12px 0;
+    max-width: 500px;
+  }
+  .override-modal h4 { margin: 0 0 8px; font-size: 14px; color: var(--api); }
+  .override-modal p { font-size: 12px; color: var(--text-dim); margin: 0 0 12px; }
+  .override-modal textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 5px;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 70px;
+    line-height: 1.5;
+  }
+  .override-modal textarea:focus { outline: none; border-color: var(--accent); }
+  .override-modal textarea::placeholder { color: var(--text-faint); }
+  .override-modal .char-count { font-size: 10px; color: var(--text-faint); margin-top: 4px; }
+  .override-modal .char-count.error { color: var(--refused); }
+  .override-modal .modal-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .override-modal .confirm-btn {
+    background: var(--api);
+    border: none;
+    color: var(--bg);
+    padding: 7px 16px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: opacity 0.1s;
+  }
+  .override-modal .confirm-btn:hover { opacity: 0.88; }
+  .override-modal .confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .override-modal .cancel-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 7px 14px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .override-modal .cancel-btn:hover { border-color: var(--border-hover); color: var(--text); }
+
+  /* Override confirmed result */
+  .override-result {
+    background: var(--override-bg);
+    border: 1px solid var(--override-border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    max-width: 700px;
+    margin-top: 0;
+  }
+
+  /* Tier legend */
+  .tier-legend {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    margin: 0 0 16px;
+    max-width: 700px;
+  }
+  .tier-legend-item {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 8px 10px;
+    text-align: center;
+  }
+  .tier-legend-item .tl-num {
+    font-size: 11px;
+    font-weight: 700;
+    font-family: ui-monospace, Menlo, monospace;
+    margin-bottom: 3px;
+  }
+  .tier-legend-item .tl-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 1.3;
+  }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-faint);
+    margin: 16px 0 8px;
+  }
+
+  /* no-override note */
+  .no-override-note {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-style: italic;
+    padding: 7px 12px;
+    background: var(--bg-elev-2);
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    margin-top: 4px;
+  }
+
+  /* Receipt hint */
+  .receipt-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 8px 12px;
+    background: var(--bg-elev-2);
+    border-radius: 5px;
+    margin: 8px 0;
+  }
+  .receipt-row .receipt-pill {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    border: 1px solid var(--gateway);
+    color: var(--gateway);
+    font-weight: 600;
+    font-family: ui-monospace, Menlo, monospace;
+    white-space: nowrap;
+  }
+  .cost-hint {
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 4px;
+  }
+
+  /* Output panel */
+  .output {
+    background: var(--bg-elev);
+    border-top: 1px solid var(--border);
+    max-height: 220px;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+  .output-tabs {
+    display: flex;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    gap: 4px;
+    align-items: flex-end;
+  }
+  .output-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .output-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .output-tab:hover { color: var(--text); }
+  .output-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+  }
+  .copy-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace;
+    transition: all 0.15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .copy-btn.copied { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .output-body {
+    padding: 14px 16px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .output-body .pane { display: none; }
+  .output-body .pane.active { display: block; }
+  .output-body .file {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent);
+    text-decoration: none;
+    display: inline-block;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(125,211,252,0.08);
+  }
+  .output-body .file:hover { background: rgba(125,211,252,0.16); }
+  .output-body ul { margin: 4px 0; padding-left: 18px; }
+  .output-body li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>LQ.AI — Tier System &amp; Refusal Explorer</h1>
+    <span class="subtitle">See how the Inference Gateway enforces privilege-tier floors, routes requests, and handles overrides.</span>
+    <span class="spacer"></span>
+    <a href="../../" id="learn-home">&#8617; Learn</a>
+    <a href="https://github.com/LegalQuants/lq-ai" target="_blank" rel="noopener">View source &#8599;</a>
+  </header>
+
+  <div class="main">
+    <!-- Controls sidebar -->
+    <aside class="controls">
+      <h2>Preset scenarios</h2>
+      <div class="presets" id="scenario-presets">
+        <button class="preset-btn active" data-scenario="priv-smart">Privileged matter, smart model</button>
+        <button class="preset-btn" data-scenario="priv-fast">Privileged matter, fast model</button>
+        <button class="preset-btn" data-scenario="priv-local">Privileged matter, local model</button>
+        <button class="preset-btn" data-scenario="std-smart">Standard matter, smart model</button>
+        <button class="preset-btn" data-scenario="priv-admin-override">Privileged + admin override</button>
+        <button class="preset-btn" data-scenario="priv-member-refused">Member sees refusal, no override</button>
+      </div>
+
+      <h2>Matter context</h2>
+      <div class="matter-selector" id="matter-selector">
+        <button class="matter-btn active" data-matter="standard">
+          <span class="matter-label">Standard matter</span>
+          <span class="matter-desc">No tier floor — any configured model alias is reachable.</span>
+        </button>
+        <button class="matter-btn" data-matter="privileged">
+          <span class="matter-label">Privileged matter</span>
+          <span class="matter-desc">Tier floor: Tier 4+ (operator-configured privileged providers only).</span>
+        </button>
+        <button class="matter-btn dim" data-matter="restricted" title="Planned — not yet implemented">
+          <span class="matter-label">Confidential matter</span>
+          <span class="matter-desc">Tier floor: Tier 5 (future — operator-restricted providers only).</span>
+        </button>
+      </div>
+
+      <h2>Requested model alias</h2>
+      <div class="radio-group" id="model-radio">
+        <label class="radio-row">
+          <input type="radio" name="model" value="smart" checked>
+          <span>smart</span>
+          <span class="badge">Tier 4 · Anthropic Claude Sonnet</span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="model" value="fast">
+          <span>fast</span>
+          <span class="badge">Tier 3 · fast cloud (e.g. GPT-4o-mini)</span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="model" value="local">
+          <span>local</span>
+          <span class="badge">Tier 1 · Ollama local</span>
+        </label>
+      </div>
+
+      <h2>User role</h2>
+      <div class="radio-group" id="role-radio">
+        <label class="radio-row">
+          <input type="radio" name="role" value="admin" checked>
+          <span>admin</span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="role" value="member">
+          <span>member</span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="role" value="viewer">
+          <span>viewer</span>
+        </label>
+      </div>
+
+      <h2>
+        <button class="advanced-toggle" id="advanced-toggle">
+          <span class="arrow">&#9654;</span> Operator overrides
+        </button>
+      </h2>
+      <div class="advanced-panel" id="advanced-panel">
+        <label class="toggle">
+          <input type="checkbox" id="remap-smart">
+          <span class="toggle-label">
+            Operator remapped 'smart' to Tier 5
+            <span>Moves the smart alias to the highest-restriction provider in gateway.yaml.</span>
+          </span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="disable-cloud">
+          <span class="toggle-label">
+            Cloud providers disabled
+            <span>Operator set cloud_providers_enabled: false — only Tier 1 (local) is reachable.</span>
+          </span>
+        </label>
+      </div>
+    </aside>
+
+    <!-- Preview pane -->
+    <div class="preview-wrap" id="preview-wrap">
+      <div class="tier-legend">
+        <div class="tier-legend-item">
+          <div class="tl-num" style="color:var(--tier1)">Tier 1</div>
+          <div class="tl-label">Local / air-gapped (Ollama)</div>
+        </div>
+        <div class="tier-legend-item">
+          <div class="tl-num" style="color:var(--tier2)">Tier 2</div>
+          <div class="tl-label">Privacy cloud (data-retention limits)</div>
+        </div>
+        <div class="tier-legend-item">
+          <div class="tl-num" style="color:var(--tier3)">Tier 3</div>
+          <div class="tl-label">Standard cloud (default non-privileged)</div>
+        </div>
+        <div class="tier-legend-item">
+          <div class="tl-num" style="color:var(--tier4)">Tier 4</div>
+          <div class="tl-label">Privileged cloud (BAA / operator agreement)</div>
+        </div>
+        <div class="tier-legend-item">
+          <div class="tl-num" style="color:var(--tier5)">Tier 5</div>
+          <div class="tl-label">Highly-restricted (operator-approved only)</div>
+        </div>
+      </div>
+
+      <div id="result-area"></div>
+    </div>
+  </div>
+
+  <!-- Output panel -->
+  <div class="output">
+    <div class="output-tabs">
+      <button class="output-tab active" data-tab="verify">Verify in source</button>
+      <button class="output-tab" data-tab="describe">Description</button>
+      <div class="output-actions">
+        <button class="copy-btn" id="copy-btn">Copy</button>
+      </div>
+    </div>
+    <div class="output-body">
+      <div class="pane active" id="pane-verify"></div>
+      <div class="pane" id="pane-describe"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const REPO = 'https://github.com/LegalQuants/lq-ai/blob/main/';
+
+// State
+const state = {
+  matter: 'standard',
+  model: 'smart',
+  role: 'admin',
+  remapSmart: false,
+  disableCloud: false,
+  overrideModalOpen: false,
+  overrideConfirmed: false,
+  overrideReason: '',
+  scenario: 'priv-smart',
+};
+
+// Tier matrix (example values — actual mapping is operator-configured in gateway.yaml)
+const MODEL_TIERS = {
+  smart: 4,
+  fast: 3,
+  local: 1,
+};
+const MODEL_PROVIDERS = {
+  smart: 'Anthropic Claude Sonnet 4.6',
+  fast: 'Fast cloud provider (e.g. GPT-4o-mini)',
+  local: 'Ollama (local)',
+};
+const MATTER_FLOORS = {
+  standard: null,
+  privileged: 4,
+  restricted: 5,
+};
+const TIER_COLORS = {
+  1: 'var(--tier1)',
+  2: 'var(--tier2)',
+  3: 'var(--tier3)',
+  4: 'var(--tier4)',
+  5: 'var(--tier5)',
+};
+
+// Scenarios
+const SCENARIOS = {
+  'priv-smart':          { matter: 'privileged', model: 'smart',  role: 'admin',  remapSmart: false, disableCloud: false },
+  'priv-fast':           { matter: 'privileged', model: 'fast',   role: 'admin',  remapSmart: false, disableCloud: false },
+  'priv-local':          { matter: 'privileged', model: 'local',  role: 'admin',  remapSmart: false, disableCloud: false },
+  'std-smart':           { matter: 'standard',   model: 'smart',  role: 'admin',  remapSmart: false, disableCloud: false },
+  'priv-admin-override': { matter: 'privileged', model: 'fast',   role: 'admin',  remapSmart: false, disableCloud: false },
+  'priv-member-refused': { matter: 'privileged', model: 'fast',   role: 'member', remapSmart: false, disableCloud: false },
+};
+
+// Compute routing decision
+function computeDecision() {
+  let modelTier = MODEL_TIERS[state.model];
+  let provider = MODEL_PROVIDERS[state.model];
+  const floor = MATTER_FLOORS[state.matter];
+
+  // Operator override: remap smart to Tier 5
+  if (state.remapSmart && state.model === 'smart') {
+    modelTier = 5;
+    provider = 'Highly-restricted provider (Tier 5, operator-configured)';
+  }
+
+  // Operator override: disable cloud — only Tier 1 reachable
+  if (state.disableCloud && modelTier > 1) {
+    return {
+      verdict: 'refused',
+      reason: 'cloud-disabled',
+      requestedTier: modelTier,
+      enforcedFloor: null,
+      modelAlias: state.model,
+      provider,
+      resolvedTier: modelTier,
+      floor,
+    };
+  }
+
+  // Tier floor check
+  if (floor !== null && modelTier < floor) {
+    return {
+      verdict: 'refused',
+      reason: 'tier-floor',
+      requestedTier: modelTier,
+      enforcedFloor: floor,
+      modelAlias: state.model,
+      provider,
+      resolvedTier: modelTier,
+      floor,
+    };
+  }
+
+  return {
+    verdict: 'allowed',
+    reason: 'ok',
+    requestedTier: modelTier,
+    enforcedFloor: floor,
+    modelAlias: state.model,
+    provider,
+    resolvedTier: modelTier,
+    floor,
+  };
+}
+
+// Render flow steps
+function renderFlowSteps(decision, isOverride) {
+  const steps = decision.verdict === 'allowed' || isOverride
+    ? [
+        { label: '1. Request arrives', cls: 'pass' },
+        { label: '2. Tier-floor check', cls: 'pass' },
+        { label: isOverride ? '3. Admin override logged' : '3. Pass', cls: isOverride ? 'override-step' : 'pass' },
+        { label: '4. Route to provider', cls: 'active' },
+        { label: '5. Stream response', cls: 'active' },
+        { label: '6. Write routing log', cls: 'pass' },
+      ]
+    : [
+        { label: '1. Request arrives', cls: '' },
+        { label: '2. Tier-floor check', cls: 'refused' },
+        { label: '3. Refuse at Gateway', cls: 'refused' },
+        { label: '4. Propagate to API', cls: '' },
+        { label: '5. Render in Web UI', cls: '' },
+        { label: '6. Write routing log', cls: '' },
+      ];
+
+  let html = '<div class="flow-steps">';
+  steps.forEach((s, i) => {
+    html += `<div class="flow-step">`;
+    html += `<div class="step-node ${s.cls}">${s.label}</div>`;
+    if (i < steps.length - 1) {
+      const arrowCls = (decision.verdict === 'allowed' || isOverride) ? 'active'
+        : (i < 2) ? 'refused' : '';
+      html += `<div class="step-arrow ${arrowCls}"></div>`;
+    }
+    html += `</div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+// Render audit log entry
+function renderAuditLog(decision, isOverride) {
+  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+  const event = isOverride ? 'inference_override_approved'
+    : decision.verdict === 'refused' ? 'inference_tier_floor_refused'
+    : 'inference_routed';
+  const outcomeColor = isOverride ? 'yellow' : decision.verdict === 'allowed' ? 'green' : 'red';
+  const outcome = isOverride ? 'override_routed' : decision.verdict === 'refused' ? 'refused' : 'routed';
+
+  let lines = [
+    `<div><span class="k">event:    </span><span class="v ${outcomeColor}">${event}</span></div>`,
+    `<div><span class="k">timestamp:</span><span class="v">${ts}</span></div>`,
+    `<div><span class="k">matter_type:</span><span class="v">${state.matter}</span></div>`,
+    `<div><span class="k">model_alias:</span><span class="v">${decision.modelAlias}</span></div>`,
+    `<div><span class="k">resolved_tier:</span><span class="v purple">Tier ${decision.resolvedTier}</span></div>`,
+  ];
+
+  if (decision.floor !== null) {
+    lines.push(`<div><span class="k">tier_floor:</span><span class="v">${decision.floor}</span></div>`);
+  }
+
+  lines.push(`<div><span class="k">outcome:  </span><span class="v ${outcomeColor}">${outcome}</span></div>`);
+
+  if (isOverride && state.overrideReason) {
+    lines.push(`<div><span class="k">override_reason:</span><span class="v yellow">"${escHtml(state.overrideReason.slice(0, 80))}${state.overrideReason.length > 80 ? '…' : ''}"</span></div>`);
+  }
+
+  if (decision.verdict !== 'refused' || isOverride) {
+    lines.push(`<div><span class="k">provider: </span><span class="v">${decision.provider}</span></div>`);
+  }
+
+  lines.push(`<div><span class="k">user_role:</span><span class="v">${state.role}</span></div>`);
+
+  return `<div class="audit-log">${lines.join('')}</div>`;
+}
+
+// Tier badge html
+function tierBadge(tier) {
+  return `<span class="tier-badge" style="background:rgba(${tierRgb(tier)},0.12);color:${TIER_COLORS[tier]};border:1px solid rgba(${tierRgb(tier)},0.3)">Tier ${tier}</span>`;
+}
+function tierRgb(tier) {
+  const map = { 1:'134,239,172', 2:'147,197,253', 3:'252,211,77', 4:'196,181,253', 5:'253,164,175' };
+  return map[tier] || '100,100,100';
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Main render
+function renderResult() {
+  const decision = computeDecision();
+  const area = document.getElementById('result-area');
+
+  if (decision.verdict === 'allowed') {
+    // Allowed case
+    const reasonText = decision.floor
+      ? `Matter tier floor is ${decision.floor}. The requested alias "${decision.modelAlias}" resolves to ${tierBadge(decision.resolvedTier)}, which meets or exceeds the floor. The Gateway selects <strong>${escHtml(decision.provider)}</strong> and routes the request.`
+      : `This matter has no tier floor. The requested alias "${decision.modelAlias}" resolves to ${tierBadge(decision.resolvedTier)} — the Gateway routes directly to <strong>${escHtml(decision.provider)}</strong>.`;
+
+    const receiptText = state.remapSmart && state.model === 'smart'
+      ? `smart → Tier 5 (operator remap active)`
+      : `${decision.modelAlias} → Tier ${decision.resolvedTier}`;
+
+    let html = `
+      <div class="result-card allowed">
+        <div class="result-status">
+          <span class="status-pill allowed">&#10003; Routed</span>
+        </div>
+        <div class="result-title">Request routed — ${tierBadge(decision.resolvedTier)}</div>
+        <p class="result-subtitle">${escHtml(decision.provider)}</p>
+        <div class="result-grid">
+          <div class="result-field">
+            <div class="field-key">Resolved tier</div>
+            <div class="field-val">${tierBadge(decision.resolvedTier)}</div>
+          </div>
+          <div class="result-field">
+            <div class="field-key">Provider</div>
+            <div class="field-val" style="font-size:12px">${escHtml(decision.provider)}</div>
+          </div>
+          <div class="result-field">
+            <div class="field-key">Matter floor</div>
+            <div class="field-val">${decision.floor ? 'Tier ' + decision.floor + '+' : '<span style="color:var(--text-faint)">None</span>'}</div>
+          </div>
+          <div class="result-field">
+            <div class="field-key">User role</div>
+            <div class="field-val">${state.role}</div>
+          </div>
+        </div>
+        <div class="result-reason allowed">${reasonText}</div>
+        <div class="section-label">Request flow</div>
+        ${renderFlowSteps(decision, false)}
+        <div class="receipt-row">
+          <span class="receipt-pill">receipt</span>
+          <span>Routing receipt rendered in chat: <strong>${receiptText}</strong></span>
+        </div>
+        <div class="cost-hint">Cost / latency hint: ${costHint(decision.resolvedTier)}</div>
+        <div class="section-label">Routing log entry (gateway/app/routing_log.py)</div>
+        ${renderAuditLog(decision, false)}
+      </div>`;
+    area.innerHTML = html;
+
+  } else if (decision.verdict === 'refused') {
+    // Refusal case
+    const refusalReason = decision.reason === 'cloud-disabled'
+      ? `Cloud providers are disabled by operator configuration. The requested alias "${decision.modelAlias}" resolves to ${tierBadge(decision.resolvedTier)}, which requires a cloud provider. Only Tier 1 (local) is reachable.`
+      : `Matter privilege floor is Tier ${decision.enforcedFloor}+. The requested alias "${decision.modelAlias}" resolves to ${tierBadge(decision.requestedTier)}, which is below the floor. The Gateway refuses before forwarding the request to any provider.`;
+
+    const enforcedLabel = decision.reason === 'cloud-disabled'
+      ? 'Tier 1 (local only)'
+      : `Tier ${decision.enforcedFloor}+`;
+
+    const canOverride = state.role === 'admin';
+
+    let html = `
+      <div class="result-card refused">
+        <div class="result-status">
+          <span class="status-pill refused">&#9432; Refused</span>
+        </div>
+        <div class="result-title">Request refused at tier-floor check</div>
+        <p class="result-subtitle">The Gateway enforces this floor before any provider call is made.</p>
+        <div class="result-grid">
+          <div class="result-field">
+            <div class="field-key">Requested tier</div>
+            <div class="field-val">${tierBadge(decision.requestedTier)}</div>
+          </div>
+          <div class="result-field">
+            <div class="field-key">Enforced floor</div>
+            <div class="field-val" style="color:var(--refused);font-weight:600">${enforcedLabel}</div>
+          </div>
+          <div class="result-field">
+            <div class="field-key">Matter context</div>
+            <div class="field-val">${state.matter}</div>
+          </div>
+          <div class="result-field">
+            <div class="field-key">User role</div>
+            <div class="field-val">${state.role}</div>
+          </div>
+        </div>
+        <div class="result-reason refused">${refusalReason}</div>
+        <div class="section-label">Request flow</div>
+        ${renderFlowSteps(decision, false)}
+        <div class="section-label">Refusal bubble (web/src/lib/lq-ai/components/RefusalMessageBubble.svelte)</div>
+        <div class="refusal-bubble">
+          <div class="rb-header">
+            <div class="rb-icon">&#9888;</div>
+            <div class="rb-title">Inference refused — tier floor not met</div>
+          </div>
+          <p class="rb-body">This matter requires inference at <strong>${enforcedLabel}</strong>. The requested model alias resolves below that floor.</p>
+          <div class="rb-tiers">
+            <span class="rb-tier-chip requested">Requested: Tier ${decision.requestedTier}</span>
+            <span class="rb-tier-chip enforced">Required: ${enforcedLabel}</span>
+          </div>
+          ${canOverride
+            ? `<button class="override-btn" id="override-open-btn">&#9998; Override (admin)</button>`
+            : `<div class="no-override-note">Override requires admin role. Contact your workspace admin to change the model or matter tier configuration.</div>`
+          }
+        </div>`;
+
+    if (canOverride) {
+      if (state.overrideConfirmed) {
+        // Show confirmed override result
+        const overrideDecision = {
+          ...decision,
+          verdict: 'allowed',
+          resolvedTier: decision.requestedTier,
+          provider: MODEL_PROVIDERS[decision.modelAlias],
+        };
+        html += `
+        <div class="override-result">
+          <div class="result-status">
+            <span class="status-pill override">&#10003; Override confirmed</span>
+          </div>
+          <div class="result-title">Admin override applied — request re-routed</div>
+          <div class="result-grid">
+            <div class="result-field">
+              <div class="field-key">Re-routed to tier</div>
+              <div class="field-val">${tierBadge(decision.requestedTier)}</div>
+            </div>
+            <div class="result-field">
+              <div class="field-key">Provider</div>
+              <div class="field-val" style="font-size:12px">${escHtml(decision.provider)}</div>
+            </div>
+          </div>
+          <div class="result-reason allowed">The admin override was accepted. The reason is persisted in the audit log alongside the original refusal event. The request is re-routed to the originally-requested provider.</div>
+          ${renderFlowSteps(decision, true)}
+          <div class="section-label">Override audit entry (api/app/audit.py + gateway/app/routing_log.py)</div>
+          ${renderAuditLog(decision, true)}
+          <button style="background:none;border:1px solid var(--border);color:var(--text-dim);padding:5px 12px;border-radius:4px;cursor:pointer;font-size:11px;margin-top:8px" id="reset-override-btn">&#8635; Reset override</button>
+        </div>`;
+      } else if (state.overrideModalOpen) {
+        html += `
+        <div class="override-modal" id="override-modal">
+          <h4>&#9658; Admin override</h4>
+          <p>Overriding the tier floor is a privileged action. Provide a documented reason (10–500 characters). This reason is written to the audit log and is non-repudiable.</p>
+          <textarea id="override-reason-input" placeholder="e.g. Client authorized use of fast model for this matter after review of data handling policy…" maxlength="500">${escHtml(state.overrideReason)}</textarea>
+          <div class="char-count" id="char-count">${state.overrideReason.length}/500</div>
+          <div class="modal-actions">
+            <button class="confirm-btn" id="override-confirm-btn" ${state.overrideReason.length < 10 ? 'disabled' : ''}>Confirm override</button>
+            <button class="cancel-btn" id="override-cancel-btn">Cancel</button>
+          </div>
+        </div>`;
+      }
+    }
+
+    html += `
+        <div class="section-label">Routing log entry</div>
+        ${renderAuditLog(decision, false)}
+      </div>`;
+
+    area.innerHTML = html;
+
+    // Attach modal events
+    const openBtn = document.getElementById('override-open-btn');
+    if (openBtn) openBtn.addEventListener('click', () => {
+      state.overrideModalOpen = true;
+      renderResult(); renderOutputPanes();
+      setTimeout(() => { const ta = document.getElementById('override-reason-input'); if(ta) ta.focus(); }, 50);
+    });
+    const cancelBtn = document.getElementById('override-cancel-btn');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => {
+      state.overrideModalOpen = false;
+      renderResult(); renderOutputPanes();
+    });
+    const confirmBtn = document.getElementById('override-confirm-btn');
+    if (confirmBtn) confirmBtn.addEventListener('click', () => {
+      if (state.overrideReason.length >= 10) {
+        state.overrideModalOpen = false;
+        state.overrideConfirmed = true;
+        renderResult(); renderOutputPanes();
+      }
+    });
+    const resetBtn = document.getElementById('reset-override-btn');
+    if (resetBtn) resetBtn.addEventListener('click', () => {
+      state.overrideConfirmed = false;
+      state.overrideModalOpen = false;
+      state.overrideReason = '';
+      renderResult(); renderOutputPanes();
+    });
+    const textarea = document.getElementById('override-reason-input');
+    if (textarea) {
+      textarea.addEventListener('input', (e) => {
+        state.overrideReason = e.target.value;
+        const cc = document.getElementById('char-count');
+        const len = e.target.value.length;
+        if (cc) {
+          cc.textContent = `${len}/500`;
+          cc.className = 'char-count' + (len < 10 ? ' error' : '');
+        }
+        const cb = document.getElementById('override-confirm-btn');
+        if (cb) cb.disabled = len < 10;
+      });
+    }
+  }
+}
+
+function costHint(tier) {
+  const hints = {
+    1: 'Lowest cost, lowest latency for typical workloads. No external API call.',
+    2: 'Low-to-moderate cost. External call to privacy-respecting cloud provider.',
+    3: 'Moderate cost. Standard cloud API pricing applies.',
+    4: 'Moderate-to-higher cost. Provider with BAA/operator agreement — may carry premium.',
+    5: 'Highest tier — operator-configured restricted provider. Cost varies by agreement.',
+  };
+  return hints[tier] || 'Varies by provider configuration.';
+}
+
+// Render output panes
+function renderOutputPanes() {
+  const decision = computeDecision();
+  const verifyEl = document.getElementById('pane-verify');
+  const describeEl = document.getElementById('pane-describe');
+
+  // Files relevant to this scenario
+  const baseFiles = [
+    { path: 'gateway/app/tier_floor.py',           desc: 'Tier floor check + matrix evaluation' },
+    { path: 'gateway/app/router.py',               desc: 'Provider selection and routing' },
+    { path: 'gateway/app/routing_log.py',          desc: 'Routing log writer' },
+    { path: 'web/src/lib/lq-ai/components/RefusalMessageBubble.svelte', desc: 'Refusal UI bubble' },
+    { path: 'web/src/lib/lq-ai/components/TierFloorOverrideModal.svelte', desc: 'Override modal component' },
+    { path: 'api/app/api/inference_override.py',   desc: 'Override endpoint (admin only)' },
+    { path: 'api/app/audit.py',                    desc: 'Override-attempt audit event' },
+    { path: 'gateway/app/providers/anthropic.py',  desc: 'Anthropic provider adapter' },
+    { path: 'gateway/app/providers/ollama.py',     desc: 'Ollama local provider adapter' },
+  ];
+
+  let verifyHtml = `<p style="color:var(--text-dim);margin:0 0 10px">Key source paths for the current scenario (${state.matter} matter, ${state.model} model, ${state.role} role).</p>`;
+  verifyHtml += '<ul style="list-style:none;padding-left:0;margin:0">';
+  baseFiles.forEach(f => {
+    verifyHtml += `<li style="margin:5px 0"><a class="file" href="${REPO}${f.path}" target="_blank" rel="noopener">${f.path}</a> <span style="color:var(--text-faint);font-size:11px">— ${f.desc}</span></li>`;
+  });
+  verifyHtml += '</ul>';
+  verifyEl.innerHTML = verifyHtml;
+
+  // Description
+  const isRefused = decision.verdict === 'refused';
+  const floor = MATTER_FLOORS[state.matter];
+
+  const p1 = `A <strong>tier floor</strong> is the minimum inference tier that the Gateway will accept for a given matter context. When a matter is marked as privileged, the operator's <code>gateway.yaml</code> specifies that only Tier 4+ providers — those with a signed BAA or equivalent operator agreement — may handle that request. The floor is enforced at the Gateway boundary, before any provider call is attempted. This is the security-boundary guarantee: a mis-configured client or a compromised API node cannot bypass it by selecting a lower-tier alias.`;
+
+  const p2 = `The enforcement is layered across three components: <strong>gateway/app/tier_floor.py</strong> evaluates the floor check against the operator's tier matrix; <strong>api/app/</strong> surfaces the refusal or receipt to the client; and <strong>web/src/lib/lq-ai/components/RefusalMessageBubble.svelte</strong> renders the result in the chat UI. The Gateway refuses before any token is sent to a provider, so there is no partial-request data leak.`;
+
+  const p3Role = state.role === 'admin'
+    ? `As an <strong>admin</strong>, you can override a tier-floor refusal by providing a documented reason (10–500 characters). The override is written to both the routing log (gateway) and the audit log (api/app/audit.py) alongside the original refusal event — it is non-repudiable. The request is then re-routed to the originally-requested provider.`
+    : `As a <strong>${state.role}</strong>, you do not have permission to override a tier-floor refusal. The Override button is only shown to admin-role users, gated by <code>RefusalMessageBubble.svelte</code> checking the current user's role before rendering the button. A member or viewer must contact an admin to change the model alias or the matter's tier configuration.`;
+
+  const p4 = `For the current configuration (${state.matter} matter, ${state.model} alias, ${state.role} role${state.remapSmart ? ', smart remapped to Tier 5' : ''}${state.disableCloud ? ', cloud disabled' : ''}): the routing log entry above shows exactly what would be written to <code>routing_log</code> in Postgres. Admins can read these entries through the audit viewer; they are append-only and cannot be deleted by application-layer code.`;
+
+  describeEl.innerHTML = `<p>${p1}</p><p style="margin-top:10px">${p2}</p><p style="margin-top:10px">${p3Role}</p><p style="margin-top:10px">${p4}</p>`;
+}
+
+// Wire up controls
+document.getElementById('matter-selector').addEventListener('click', (e) => {
+  const btn = e.target.closest('.matter-btn');
+  if (!btn || btn.classList.contains('dim')) return;
+  state.matter = btn.dataset.matter;
+  state.overrideConfirmed = false;
+  state.overrideModalOpen = false;
+  document.querySelectorAll('.matter-btn').forEach(b => b.classList.toggle('active', b === btn));
+  clearActiveScenario();
+  renderResult();
+  renderOutputPanes();
+});
+
+document.querySelectorAll('input[name="model"]').forEach(r => {
+  r.addEventListener('change', (e) => {
+    state.model = e.target.value;
+    state.overrideConfirmed = false;
+    state.overrideModalOpen = false;
+    clearActiveScenario();
+    renderResult();
+    renderOutputPanes();
+  });
+});
+
+document.querySelectorAll('input[name="role"]').forEach(r => {
+  r.addEventListener('change', (e) => {
+    state.role = e.target.value;
+    state.overrideConfirmed = false;
+    state.overrideModalOpen = false;
+    clearActiveScenario();
+    renderResult();
+    renderOutputPanes();
+  });
+});
+
+document.getElementById('advanced-toggle').addEventListener('click', function() {
+  this.classList.toggle('open');
+  document.getElementById('advanced-panel').classList.toggle('open');
+});
+
+document.getElementById('remap-smart').addEventListener('change', (e) => {
+  state.remapSmart = e.target.checked;
+  state.overrideConfirmed = false;
+  state.overrideModalOpen = false;
+  clearActiveScenario();
+  renderResult();
+  renderOutputPanes();
+});
+
+document.getElementById('disable-cloud').addEventListener('change', (e) => {
+  state.disableCloud = e.target.checked;
+  state.overrideConfirmed = false;
+  state.overrideModalOpen = false;
+  clearActiveScenario();
+  renderResult();
+  renderOutputPanes();
+});
+
+// Scenario presets
+document.getElementById('scenario-presets').addEventListener('click', (e) => {
+  const btn = e.target.closest('.preset-btn');
+  if (!btn) return;
+  const s = SCENARIOS[btn.dataset.scenario];
+  if (!s) return;
+  state.scenario = btn.dataset.scenario;
+  state.matter = s.matter;
+  state.model = s.model;
+  state.role = s.role;
+  state.remapSmart = s.remapSmart;
+  state.disableCloud = s.disableCloud;
+  state.overrideConfirmed = false;
+  state.overrideModalOpen = false;
+  state.overrideReason = '';
+
+  // Sync UI controls
+  document.querySelectorAll('.matter-btn').forEach(b => b.classList.toggle('active', b.dataset.matter === s.matter));
+  document.querySelectorAll('input[name="model"]').forEach(r => { r.checked = r.value === s.model; });
+  document.querySelectorAll('input[name="role"]').forEach(r => { r.checked = r.value === s.role; });
+  document.getElementById('remap-smart').checked = s.remapSmart;
+  document.getElementById('disable-cloud').checked = s.disableCloud;
+
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.toggle('active', b === btn));
+  renderResult();
+  renderOutputPanes();
+});
+
+function clearActiveScenario() {
+  state.scenario = null;
+  document.querySelectorAll('#scenario-presets .preset-btn').forEach(b => b.classList.remove('active'));
+}
+
+// Output tabs
+document.querySelectorAll('.output-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.output-tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.output-body .pane').forEach(p => p.classList.toggle('active', p.id === `pane-${tab.dataset.tab}`));
+  });
+});
+
+// Copy
+document.getElementById('copy-btn').addEventListener('click', () => {
+  const activeTab = document.querySelector('.output-tab.active').dataset.tab;
+  const pane = document.getElementById(`pane-${activeTab}`);
+  navigator.clipboard.writeText(pane.innerText).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.classList.add('copied');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 1200);
+  });
+});
+
+// Init
+document.querySelectorAll('.matter-btn').forEach(b => b.classList.toggle('active', b.dataset.matter === 'standard'));
+// Apply the default scenario
+const defaultScenario = SCENARIOS['priv-smart'];
+state.matter = defaultScenario.matter;
+state.model = defaultScenario.model;
+state.role = defaultScenario.role;
+document.querySelectorAll('.matter-btn').forEach(b => b.classList.toggle('active', b.dataset.matter === state.matter));
+document.querySelectorAll('input[name="model"]').forEach(r => { r.checked = r.value === state.model; });
+document.querySelectorAll('input[name="role"]').forEach(r => { r.checked = r.value === state.role; });
+renderResult();
+renderOutputPanes();
+</script>
+</body>
+</html>

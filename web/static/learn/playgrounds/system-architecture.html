@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LQ.AI — System Architecture Map</title>
+<style>
+  :root {
+    --bg: #0c0f14;
+    --bg-elev: #151a23;
+    --bg-elev-2: #1d242f;
+    --border: #2a3340;
+    --border-hover: #3a4555;
+    --text: #e6ebf3;
+    --text-dim: #8a96a8;
+    --text-faint: #5a6578;
+    --accent: #7dd3fc;
+    --accent-dim: #38bdf8;
+    --web: #93c5fd;
+    --api: #fcd34d;
+    --gateway: #c4b5fd;
+    --data: #f9a8d4;
+    --workers: #86efac;
+    --providers: #fda4af;
+    --conn-data: #60a5fa;
+    --conn-audit: #f87171;
+    --conn-egress: #34d399;
+    --shadow: rgba(0,0,0,0.4);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .app {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;
+  }
+  header {
+    padding: 12px 20px;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  header .subtitle {
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  header .spacer { flex: 1; }
+  header a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 4px;
+  }
+  header a:hover { border-color: var(--border-hover); background: var(--bg-elev-2); }
+
+  .main {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    overflow: hidden;
+  }
+  .controls {
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .controls h2 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 16px 0 8px;
+  }
+  .controls h2:first-child { margin-top: 0; }
+  .presets {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .preset-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    text-align: left;
+    transition: all 0.1s;
+  }
+  .preset-btn:hover { border-color: var(--border-hover); }
+  .preset-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+    font-weight: 600;
+  }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s;
+  }
+  .toggle:hover { background: var(--bg-elev-2); }
+  .toggle input { margin: 0; cursor: pointer; }
+  .toggle .swatch {
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .toggle .label { flex: 1; font-size: 13px; }
+  .toggle .count {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: ui-monospace, Menlo, monospace;
+  }
+
+  .detail-panel {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    margin-top: 8px;
+  }
+  .detail-panel.empty {
+    color: var(--text-faint);
+    text-align: center;
+    font-size: 12px;
+    padding: 24px 14px;
+  }
+  .detail-panel h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
+  }
+  .detail-panel .role {
+    display: inline-block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .detail-panel p {
+    margin: 6px 0;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .detail-panel .meta {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--text);
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .detail-panel .meta div { margin: 3px 0; }
+  .detail-panel .meta .k { color: var(--text-faint); }
+  .detail-panel .files {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .detail-panel .files .file {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent);
+    display: block;
+    padding: 2px 0;
+    text-decoration: none;
+  }
+  .detail-panel .files .file:hover { color: var(--accent-dim); text-decoration: underline; }
+
+  .canvas-wrap {
+    position: relative;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(125,211,252,0.04), transparent 60%),
+      radial-gradient(circle at 80% 70%, rgba(196,181,253,0.04), transparent 60%),
+      var(--bg);
+    overflow: hidden;
+  }
+  svg.canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .legend {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(21,26,35,0.92);
+    backdrop-filter: blur(6px);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--text-dim);
+    pointer-events: none;
+  }
+  .legend .row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 3px 0;
+  }
+  .legend .swatch { width: 18px; height: 3px; border-radius: 1px; }
+  .legend .swatch.solid-line { background: var(--conn-data); }
+  .legend .swatch.audit-line {
+    background: linear-gradient(to right, var(--conn-audit) 50%, transparent 50%);
+    background-size: 6px 100%;
+    background-color: var(--conn-audit);
+  }
+  .legend .swatch.dashed-line {
+    background: linear-gradient(to right, var(--conn-egress) 50%, transparent 50%);
+    background-size: 10px 100%;
+    background-color: var(--conn-egress);
+  }
+
+  /* Nodes */
+  .node-bg {
+    transition: filter 0.15s, opacity 0.2s;
+  }
+  .node-group:hover .node-bg {
+    filter: brightness(1.18) drop-shadow(0 4px 12px var(--shadow));
+  }
+  .node-group {
+    cursor: pointer;
+  }
+  .node-group.selected .node-bg {
+    stroke-width: 2.5;
+    filter: drop-shadow(0 0 12px currentColor);
+  }
+  .node-group.dimmed { opacity: 0.18; }
+  .node-label {
+    font-size: 12px;
+    font-weight: 600;
+    fill: var(--bg);
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  .node-sublabel {
+    font-size: 10px;
+    fill: rgba(12,15,20,0.65);
+    text-anchor: middle;
+    pointer-events: none;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .external .node-label, .external .node-sublabel { fill: var(--text); }
+  .conn { stroke-width: 1.5; fill: none; transition: opacity 0.2s, stroke-width 0.15s; }
+  .conn.dimmed { opacity: 0.1; }
+  .conn:hover { stroke-width: 2.5; }
+  .conn-label {
+    font-size: 9.5px;
+    fill: var(--text-faint);
+    font-family: ui-monospace, Menlo, monospace;
+    pointer-events: none;
+  }
+
+  /* Output panel */
+  .output {
+    background: var(--bg-elev);
+    border-top: 1px solid var(--border);
+    max-height: 220px;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+  .output-tabs {
+    display: flex;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    gap: 4px;
+    align-items: flex-end;
+  }
+  .output-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .output-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  .output-tab:hover { color: var(--text); }
+  .output-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+  }
+  .copy-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace;
+    transition: all 0.15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .copy-btn.copied { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .output-body {
+    padding: 14px 16px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .output-body .pane { display: none; }
+  .output-body .pane.active { display: block; }
+  .output-body .file {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent);
+    text-decoration: none;
+    display: inline-block;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(125,211,252,0.08);
+  }
+  .output-body .file:hover { background: rgba(125,211,252,0.16); }
+  .output-body ul { margin: 4px 0; padding-left: 18px; }
+  .output-body li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>LQ.AI — System Architecture</h1>
+    <span class="subtitle">Click any component to see what it does, where it lives, and how to verify in source.</span>
+    <span class="spacer"></span>
+    <a href="../../" id="learn-home">↩ Learn</a>
+    <a href="https://github.com/LegalQuants/lq-ai" target="_blank" rel="noopener">View source ↗</a>
+  </header>
+
+  <div class="main">
+    <aside class="controls">
+      <h2>View preset</h2>
+      <div class="presets" id="presets">
+        <button class="preset-btn active" data-preset="full-system">Full system</button>
+        <button class="preset-btn" data-preset="chat-flow">Chat send</button>
+        <button class="preset-btn" data-preset="skill-resolution">Skill resolution</button>
+        <button class="preset-btn" data-preset="knowledge-ingest">Knowledge ingest</button>
+        <button class="preset-btn" data-preset="audit-path">Audit path</button>
+        <button class="preset-btn" data-preset="data-residency">Where data lives</button>
+      </div>
+
+      <h2>Layers</h2>
+      <div id="layer-toggles"></div>
+
+      <h2>Connection types</h2>
+      <div id="conn-toggles"></div>
+
+      <h2>Component detail</h2>
+      <div class="detail-panel empty" id="detail">
+        Click a component on the canvas.
+      </div>
+    </aside>
+
+    <div class="canvas-wrap">
+      <svg class="canvas" id="svg" viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <marker id="arrow-data" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#60a5fa"/>
+          </marker>
+          <marker id="arrow-audit" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#f87171"/>
+          </marker>
+          <marker id="arrow-egress" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#34d399"/>
+          </marker>
+        </defs>
+        <g id="connections"></g>
+        <g id="nodes"></g>
+      </svg>
+      <div class="legend">
+        <div class="row"><span class="swatch solid-line"></span> Data flow</div>
+        <div class="row"><span class="swatch audit-line"></span> Audit write</div>
+        <div class="row"><span class="swatch dashed-line"></span> External egress</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="output">
+    <div class="output-tabs">
+      <button class="output-tab active" data-tab="verify">Verify in source</button>
+      <button class="output-tab" data-tab="describe">Description</button>
+      <div class="output-actions">
+        <button class="copy-btn" id="copy">Copy</button>
+      </div>
+    </div>
+    <div class="output-body">
+      <div class="pane active" id="pane-verify"></div>
+      <div class="pane" id="pane-describe"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const REPO = 'https://github.com/LegalQuants/lq-ai/blob/main/';
+
+// Layer definitions
+const LAYERS = {
+  edge: { label: 'Browser', swatch: '#cbd5e1', y: 50 },
+  web: { label: 'Web container', swatch: 'var(--web)', y: 130 },
+  api: { label: 'API service', swatch: 'var(--api)', y: 230 },
+  gateway: { label: 'Inference Gateway', swatch: 'var(--gateway)', y: 330 },
+  workers: { label: 'Workers', swatch: 'var(--workers)', y: 230 },
+  data: { label: 'Data stores', swatch: 'var(--data)', y: 440 },
+  providers: { label: 'Inference providers', swatch: 'var(--providers)', y: 540 },
+};
+
+// Components
+const NODES = [
+  {
+    id: 'browser', layer: 'edge', label: 'User browser', sub: 'Chrome / Safari / Firefox',
+    x: 500, y: 50, w: 170, h: 50, external: true,
+    desc: 'The end user\'s browser. The web container serves the SvelteKit-rendered UI here over HTTPS in any deployment with a reverse-proxy in front.',
+    role: 'Edge', roleColor: '#cbd5e1',
+    files: [],
+    meta: { transport: 'HTTPS', notes: 'No LQ.AI code runs here — only the rendered UI assets.' },
+  },
+  {
+    id: 'web', layer: 'web', label: 'Web (SvelteKit)', sub: 'web container · :3000→:8080',
+    x: 500, y: 130, w: 200, h: 56,
+    desc: 'OpenWebUI fork (per ADR 0001) carrying LQ.AI surfaces under /lq-ai/*. Routes, components, stores, and Cypress E2E live here. Proxies /api/v1/* to the API container.',
+    role: 'Web', roleColor: 'var(--web)',
+    files: ['web/Dockerfile', 'web/svelte.config.js', 'web/src/routes/lq-ai/', 'web/src/lib/lq-ai/', 'web/cypress/e2e/'],
+    meta: { container: 'lq-ai-web-1', port: '3000:8080', dependsOn: 'api' },
+  },
+  {
+    id: 'api', layer: 'api', label: 'API (FastAPI)', sub: 'api container · :8000',
+    x: 500, y: 230, w: 200, h: 56,
+    desc: 'Application backend. Holds business logic, persists state, writes the audit log, talks to the Inference Gateway for every model call. Never holds provider keys directly.',
+    role: 'API', roleColor: 'var(--api)',
+    files: ['api/app/main.py', 'api/app/api/', 'api/app/audit.py', 'api/app/db/', 'api/alembic/versions/'],
+    meta: { container: 'lq-ai-api-1', port: '8000', dependsOn: 'postgres, redis, minio, gateway' },
+  },
+  {
+    id: 'gateway', layer: 'gateway', label: 'Inference Gateway', sub: 'gateway container · :8001',
+    x: 500, y: 330, w: 220, h: 56,
+    desc: 'The security boundary. The ONLY component holding privileged provider API keys; the ONLY component making outbound calls to inference providers. Enforces tier floors, writes the routing log, supports SIGHUP config reload.',
+    role: 'Gateway', roleColor: 'var(--gateway)',
+    files: ['gateway/app/main.py', 'gateway/app/router.py', 'gateway/app/tier_floor.py', 'gateway/app/providers/', 'gateway/app/routing_log.py', 'gateway/app/secrets.py'],
+    meta: { container: 'lq-ai-gateway-1', port: '8001', dependsOn: 'postgres, secrets' },
+  },
+  {
+    id: 'ingest', layer: 'workers', label: 'Ingest worker', sub: 'arq-backed · PDF / DOCX',
+    x: 200, y: 230, w: 170, h: 56,
+    desc: 'Async worker that parses documents (PyMuPDF, Docling), chunks them, generates embeddings, and writes document_chunks. Talks to PaddleOCR for local OCR when needed.',
+    role: 'Worker', roleColor: 'var(--workers)',
+    files: ['api/app/workers/document_pipeline.py', 'api/app/pipeline/ingest.py', 'api/app/knowledge/'],
+    meta: { container: 'lq-ai-ingest-worker-1', queue: 'arq via redis', notes: 'OCR via PaddleOCR sidecar.' },
+  },
+  {
+    id: 'postgres', layer: 'data', label: 'Postgres', sub: 'pgvector/pgvector:pg16 · :5432',
+    x: 280, y: 440, w: 170, h: 56,
+    desc: 'Primary persistence: chats, messages, projects, skills, user_skills, knowledge_bases, document_chunks (with embeddings via pgvector), audit_log, routing_log, saved_prompts.',
+    role: 'Data', roleColor: 'var(--data)',
+    files: ['api/alembic/versions/', 'api/app/db/'],
+    meta: { container: 'lq-ai-postgres-1', port: '5432', extensions: 'pgvector', migrations: '0001–0023' },
+  },
+  {
+    id: 'redis', layer: 'data', label: 'Redis', sub: 'redis:7-alpine · :6379',
+    x: 520, y: 440, w: 130, h: 56,
+    desc: 'Job queue (arq for ingest worker), short-lived caches, rate-limiter state. Not used as primary storage.',
+    role: 'Data', roleColor: 'var(--data)',
+    files: ['docker-compose.yml (redis service)'],
+    meta: { container: 'lq-ai-redis-1', port: '6379', notes: 'Not used for chat history.' },
+  },
+  {
+    id: 'minio', layer: 'data', label: 'MinIO', sub: 'S3-compatible · :9000',
+    x: 720, y: 440, w: 130, h: 56,
+    desc: 'Object storage for uploaded files (PDFs, DOCX). The API uploads here; the ingest worker reads from here to parse and chunk.',
+    role: 'Data', roleColor: 'var(--data)',
+    files: ['docker-compose.yml (minio service)', 'api/app/api/files.py'],
+    meta: { container: 'lq-ai-minio-1', port: '9000', api: 'S3 compatible', notes: 'Self-hosted blob store.' },
+  },
+  {
+    id: 'anthropic', layer: 'providers', label: 'Anthropic', sub: 'api.anthropic.com',
+    x: 220, y: 540, w: 150, h: 54, external: true,
+    desc: 'External inference provider. Reached only via the Gateway. Operator-configured key. Used for the smart-tier alias by default in the M1 reference config.',
+    role: 'External', roleColor: 'var(--providers)',
+    files: ['gateway/app/providers/anthropic.py'],
+    meta: { destination: 'api.anthropic.com', transport: 'HTTPS', notes: 'Operator BYO-key.' },
+  },
+  {
+    id: 'openai', layer: 'providers', label: 'OpenAI', sub: 'api.openai.com',
+    x: 420, y: 540, w: 150, h: 54, external: true,
+    desc: 'External inference provider. Reached only via the Gateway. Operator-configured key.',
+    role: 'External', roleColor: 'var(--providers)',
+    files: ['gateway/app/providers/openai.py'],
+    meta: { destination: 'api.openai.com', transport: 'HTTPS', notes: 'Operator BYO-key.' },
+  },
+  {
+    id: 'ollama', layer: 'providers', label: 'Ollama (local)', sub: 'ollama container · :11434',
+    x: 620, y: 540, w: 170, h: 54,
+    desc: 'Optional local inference container (Tier 1 — fully air-gapped). Started with `docker compose --profile local up`. No outbound calls.',
+    role: 'Local', roleColor: 'var(--workers)',
+    files: ['gateway/app/providers/ollama.py', 'docker-compose.yml (ollama profile)'],
+    meta: { container: 'lq-ai-ollama-1', port: '11434', profile: 'local', notes: 'No external network.' },
+  },
+  {
+    id: 'paddleocr', layer: 'workers', label: 'PaddleOCR', sub: 'sidecar · local OCR',
+    x: 30, y: 230, w: 140, h: 56,
+    desc: 'Local OCR sidecar for the ingest worker. Used when uploaded PDFs have non-text image pages. No external calls.',
+    role: 'Worker', roleColor: 'var(--workers)',
+    files: ['docker-compose.yml (paddleocr profile)'],
+    meta: { profile: 'local', notes: 'No external network.' },
+  },
+];
+
+// Connections
+const CONNECTIONS = [
+  { from: 'browser', to: 'web', type: 'data', label: 'HTTPS' },
+  { from: 'web', to: 'api', type: 'data', label: '/api/v1/*' },
+  { from: 'api', to: 'postgres', type: 'data', label: 'asyncpg' },
+  { from: 'api', to: 'redis', type: 'data', label: 'queue + cache' },
+  { from: 'api', to: 'minio', type: 'data', label: 'S3' },
+  { from: 'api', to: 'gateway', type: 'data', label: 'inference' },
+  { from: 'api', to: 'ingest', type: 'data', label: 'enqueue' },
+  { from: 'api', to: 'postgres', type: 'audit', label: 'audit_log' },
+  { from: 'gateway', to: 'postgres', type: 'audit', label: 'routing_log' },
+  { from: 'ingest', to: 'minio', type: 'data' },
+  { from: 'ingest', to: 'postgres', type: 'data', label: 'chunks' },
+  { from: 'ingest', to: 'paddleocr', type: 'data', label: 'OCR' },
+  { from: 'gateway', to: 'anthropic', type: 'egress' },
+  { from: 'gateway', to: 'openai', type: 'egress' },
+  { from: 'gateway', to: 'ollama', type: 'data' },
+];
+
+// Presets
+const PRESETS = {
+  'full-system': {
+    layers: ['edge','web','api','gateway','workers','data','providers'],
+    conns: ['data','audit','egress'],
+    highlight: null,
+  },
+  'chat-flow': {
+    layers: ['edge','web','api','gateway','data','providers'],
+    conns: ['data','audit'],
+    highlight: ['browser','web','api','gateway','postgres','anthropic','openai','ollama'],
+  },
+  'skill-resolution': {
+    layers: ['edge','web','api','gateway','data'],
+    conns: ['data'],
+    highlight: ['browser','web','api','postgres'],
+    note: 'Skills resolve in the API (user_skills table + built-in resolution); the Gateway assembles the system prompt server-side.',
+  },
+  'knowledge-ingest': {
+    layers: ['edge','web','api','workers','data'],
+    conns: ['data','audit'],
+    highlight: ['browser','web','api','ingest','paddleocr','minio','postgres','redis'],
+  },
+  'audit-path': {
+    layers: ['edge','web','api','gateway','data'],
+    conns: ['audit','data'],
+    highlight: ['api','gateway','postgres'],
+    note: 'Every sensitive action lands in audit_log (api) or routing_log (gateway). Both are append-only and read-back from an admin viewer.',
+  },
+  'data-residency': {
+    layers: ['edge','web','api','gateway','workers','data','providers'],
+    conns: ['egress','data'],
+    highlight: ['gateway','anthropic','openai','postgres','minio'],
+    note: 'The Gateway is the ONLY component making outbound calls. Everything else stays inside the operator\'s deployment.',
+  },
+};
+
+// State
+const state = {
+  preset: 'full-system',
+  layers: { edge: true, web: true, api: true, gateway: true, workers: true, data: true, providers: true },
+  conns: { data: true, audit: true, egress: true },
+  selected: null,
+  highlightSet: null,
+};
+
+// Helpers
+function nodeById(id) { return NODES.find(n => n.id === id); }
+function layerCount(layer) { return NODES.filter(n => n.layer === layer).length; }
+
+// Render layer toggles
+function renderLayerToggles() {
+  const wrap = document.getElementById('layer-toggles');
+  wrap.innerHTML = '';
+  Object.entries(LAYERS).forEach(([key, layer]) => {
+    const count = layerCount(key);
+    const label = document.createElement('label');
+    label.className = 'toggle';
+    label.innerHTML = `
+      <input type="checkbox" data-layer="${key}" ${state.layers[key] ? 'checked' : ''}>
+      <span class="swatch" style="background:${layer.swatch}"></span>
+      <span class="label">${layer.label}</span>
+      <span class="count">${count}</span>
+    `;
+    label.querySelector('input').addEventListener('change', (e) => {
+      state.layers[key] = e.target.checked;
+      updateAll();
+    });
+    wrap.appendChild(label);
+  });
+}
+
+// Render connection toggles
+function renderConnToggles() {
+  const wrap = document.getElementById('conn-toggles');
+  wrap.innerHTML = '';
+  const types = [
+    { key: 'data', label: 'Data flow', color: 'var(--conn-data)' },
+    { key: 'audit', label: 'Audit write', color: 'var(--conn-audit)' },
+    { key: 'egress', label: 'External egress', color: 'var(--conn-egress)' },
+  ];
+  types.forEach(t => {
+    const label = document.createElement('label');
+    label.className = 'toggle';
+    label.innerHTML = `
+      <input type="checkbox" data-conn="${t.key}" ${state.conns[t.key] ? 'checked' : ''}>
+      <span class="swatch" style="background:${t.color}"></span>
+      <span class="label">${t.label}</span>
+    `;
+    label.querySelector('input').addEventListener('change', (e) => {
+      state.conns[t.key] = e.target.checked;
+      updateAll();
+    });
+    wrap.appendChild(label);
+  });
+}
+
+// Render presets
+document.getElementById('presets').addEventListener('click', (e) => {
+  if (e.target.classList.contains('preset-btn')) {
+    const name = e.target.dataset.preset;
+    applyPreset(name);
+  }
+});
+
+function applyPreset(name) {
+  const p = PRESETS[name];
+  if (!p) return;
+  state.preset = name;
+  Object.keys(state.layers).forEach(k => state.layers[k] = p.layers.includes(k));
+  Object.keys(state.conns).forEach(k => state.conns[k] = p.conns.includes(k));
+  state.highlightSet = p.highlight ? new Set(p.highlight) : null;
+  state.selected = null;
+  // refresh toggles
+  renderLayerToggles();
+  renderConnToggles();
+  // mark preset active
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.toggle('active', b.dataset.preset === name));
+  updateAll();
+}
+
+// Render canvas
+function renderCanvas() {
+  const connG = document.getElementById('connections');
+  const nodeG = document.getElementById('nodes');
+  connG.innerHTML = '';
+  nodeG.innerHTML = '';
+
+  // Connections
+  CONNECTIONS.forEach((c, i) => {
+    const fromN = nodeById(c.from);
+    const toN = nodeById(c.to);
+    if (!fromN || !toN) return;
+
+    const layerVisible = state.layers[fromN.layer] && state.layers[toN.layer];
+    const connEnabled = state.conns[c.type];
+    if (!layerVisible || !connEnabled) return;
+
+    const fromVisible = !state.highlightSet || state.highlightSet.has(c.from);
+    const toVisible = !state.highlightSet || state.highlightSet.has(c.to);
+    const dimmed = state.highlightSet && (!fromVisible || !toVisible);
+
+    const color = c.type === 'audit' ? 'var(--conn-audit)' : c.type === 'egress' ? 'var(--conn-egress)' : 'var(--conn-data)';
+    const dash = c.type === 'audit' ? '5,3' : c.type === 'egress' ? '8,4' : '';
+    const marker = c.type === 'audit' ? 'arrow-audit' : c.type === 'egress' ? 'arrow-egress' : 'arrow-data';
+
+    const x1 = fromN.x;
+    const y1 = fromN.y + fromN.h / 2;
+    const x2 = toN.x;
+    const y2 = toN.y - toN.h / 2;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    // Bezier with control points
+    const ctrlOffset = Math.abs(dy) * 0.4;
+    const c1x = x1;
+    const c1y = y1 + ctrlOffset;
+    const c2x = x2;
+    const c2y = y2 - ctrlOffset;
+    const path = `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`;
+
+    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pathEl.setAttribute('d', path);
+    pathEl.setAttribute('stroke', color);
+    pathEl.setAttribute('stroke-width', '1.5');
+    pathEl.setAttribute('fill', 'none');
+    if (dash) pathEl.setAttribute('stroke-dasharray', dash);
+    pathEl.setAttribute('marker-end', `url(#${marker})`);
+    pathEl.setAttribute('class', `conn ${dimmed ? 'dimmed' : ''}`);
+    connG.appendChild(pathEl);
+
+    if (c.label) {
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('class', `conn-label ${dimmed ? 'dimmed' : ''}`);
+      label.setAttribute('x', mx + 6);
+      label.setAttribute('y', my);
+      label.textContent = c.label;
+      connG.appendChild(label);
+    }
+  });
+
+  // Nodes
+  NODES.forEach(n => {
+    if (!state.layers[n.layer]) return;
+    const dimmed = state.highlightSet && !state.highlightSet.has(n.id);
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', `node-group ${dimmed ? 'dimmed' : ''} ${state.selected === n.id ? 'selected' : ''} ${n.external ? 'external' : ''}`);
+    g.dataset.id = n.id;
+    g.style.color = LAYERS[n.layer].swatch;
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('class', 'node-bg');
+    rect.setAttribute('x', n.x - n.w / 2);
+    rect.setAttribute('y', n.y - n.h / 2);
+    rect.setAttribute('width', n.w);
+    rect.setAttribute('height', n.h);
+    rect.setAttribute('rx', '8');
+    rect.setAttribute('fill', LAYERS[n.layer].swatch);
+    rect.setAttribute('stroke', n.external ? 'rgba(230,235,243,0.18)' : 'transparent');
+    if (n.external) rect.setAttribute('fill-opacity', '0.22');
+    g.appendChild(rect);
+
+    const t1 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t1.setAttribute('class', 'node-label');
+    t1.setAttribute('x', n.x);
+    t1.setAttribute('y', n.y - 4);
+    t1.textContent = n.label;
+    g.appendChild(t1);
+
+    const t2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t2.setAttribute('class', 'node-sublabel');
+    t2.setAttribute('x', n.x);
+    t2.setAttribute('y', n.y + 12);
+    t2.textContent = n.sub;
+    g.appendChild(t2);
+
+    g.addEventListener('click', () => { state.selected = n.id; updateAll(); });
+
+    nodeG.appendChild(g);
+  });
+}
+
+// Render detail panel
+function renderDetail() {
+  const panel = document.getElementById('detail');
+  if (!state.selected) {
+    panel.className = 'detail-panel empty';
+    panel.innerHTML = 'Click a component on the canvas.';
+    return;
+  }
+  const n = nodeById(state.selected);
+  if (!n) return;
+  panel.className = 'detail-panel';
+  const filesHtml = n.files.length
+    ? `<div class="files">${n.files.map(f => f.startsWith('docker-compose') || f.includes(' ')
+        ? `<span class="file" style="color:var(--text-dim);cursor:default">${f}</span>`
+        : `<a class="file" href="${REPO}${f}" target="_blank" rel="noopener">${f}</a>`).join('')}</div>`
+    : '';
+  const metaHtml = Object.entries(n.meta).map(([k, v]) => `<div><span class="k">${k}:</span> ${v}</div>`).join('');
+  panel.innerHTML = `
+    <span class="role" style="background:${n.roleColor};color:var(--bg)">${n.role}</span>
+    <h3>${n.label}</h3>
+    <p>${n.desc}</p>
+    <div class="meta">${metaHtml}</div>
+    ${filesHtml}
+  `;
+}
+
+// Render output panes
+function renderOutput() {
+  const verifyEl = document.getElementById('pane-verify');
+  const describeEl = document.getElementById('pane-describe');
+
+  // Verify-in-source: enumerate file refs for visible nodes
+  const visibleNodes = NODES.filter(n => state.layers[n.layer] && (!state.highlightSet || state.highlightSet.has(n.id)));
+  const fileGroups = {};
+  visibleNodes.forEach(n => {
+    if (n.files.length) fileGroups[n.label] = n.files;
+  });
+  let verifyHtml = '<p style="color:var(--text-dim);margin:0 0 10px">Source paths for the components currently visible. Click any path to open it on GitHub.</p>';
+  verifyHtml += Object.entries(fileGroups).map(([label, files]) => `
+    <div style="margin:8px 0">
+      <strong style="color:var(--text);font-size:12px">${label}</strong>
+      <ul style="list-style:none;padding-left:0;margin:4px 0">
+        ${files.map(f => f.includes(' ') || f.startsWith('docker-compose')
+          ? `<li><span class="file" style="color:var(--text-dim)">${f}</span></li>`
+          : `<li><a class="file" href="${REPO}${f}" target="_blank" rel="noopener">${f}</a></li>`).join('')}
+      </ul>
+    </div>
+  `).join('');
+  verifyEl.innerHTML = verifyHtml;
+
+  // Description: narrative summary
+  const preset = PRESETS[state.preset];
+  const presetLabel = document.querySelector(`.preset-btn[data-preset="${state.preset}"]`)?.textContent || state.preset;
+  let describeHtml = `<p><strong>View:</strong> ${presetLabel}.</p>`;
+  if (preset.note) describeHtml += `<p style="color:var(--text-dim)">${preset.note}</p>`;
+  describeHtml += `<p>Visible: ${visibleNodes.map(n => `<strong>${n.label}</strong>`).join(', ')}.</p>`;
+  if (state.selected) {
+    const sel = nodeById(state.selected);
+    describeHtml += `<p style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><strong>Selected:</strong> ${sel.label}. ${sel.desc}</p>`;
+  }
+  describeEl.innerHTML = describeHtml;
+}
+
+// Output tab switcher
+document.querySelectorAll('.output-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.output-tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.output-body .pane').forEach(p => p.classList.toggle('active', p.id === `pane-${tab.dataset.tab}`));
+  });
+});
+
+// Copy
+document.getElementById('copy').addEventListener('click', () => {
+  const activeTab = document.querySelector('.output-tab.active').dataset.tab;
+  const pane = document.getElementById(`pane-${activeTab}`);
+  const text = pane.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy');
+    btn.classList.add('copied');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 1200);
+  });
+});
+
+// Master update
+function updateAll() {
+  renderCanvas();
+  renderDetail();
+  renderOutput();
+}
+
+// Init
+renderLayerToggles();
+renderConnToggles();
+applyPreset('full-system');
+</script>
+</body>
+</html>

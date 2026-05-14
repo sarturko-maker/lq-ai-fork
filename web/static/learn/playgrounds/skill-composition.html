@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LQ.AI — Skill Composition Explorer</title>
+<style>
+  :root {
+    --bg: #0c0f14;
+    --bg-elev: #151a23;
+    --bg-elev-2: #1d242f;
+    --border: #2a3340;
+    --border-hover: #3a4555;
+    --text: #e6ebf3;
+    --text-dim: #8a96a8;
+    --text-faint: #5a6578;
+    --accent: #7dd3fc;
+    --accent-dim: #38bdf8;
+    --web: #93c5fd;
+    --api: #fcd34d;
+    --gateway: #c4b5fd;
+    --data: #f9a8d4;
+    --workers: #86efac;
+    --providers: #fda4af;
+    --conn-data: #60a5fa;
+    --conn-audit: #f87171;
+    --conn-egress: #34d399;
+    --shadow: rgba(0,0,0,0.4);
+    --skill-header: #2a3a4a;
+    --skill-border: #3a5068;
+    --org-bg: #1e2d1e;
+    --org-border: #3a5a3a;
+    --user-skill-bg: #2a1e2e;
+    --user-skill-border: #5a3a6a;
+    --prompt-bg: #0e1219;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .app {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;
+  }
+  header {
+    padding: 12px 20px;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  header .subtitle {
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  header .spacer { flex: 1; }
+  header a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 4px;
+  }
+  header a:hover { border-color: var(--border-hover); background: var(--bg-elev-2); }
+
+  .main {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    overflow: hidden;
+  }
+  .controls {
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border);
+    padding: 14px;
+    overflow-y: auto;
+  }
+  .controls h2 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 16px 0 8px;
+  }
+  .controls h2:first-child { margin-top: 0; }
+
+  .skill-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .skill-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s;
+    border: 1px solid transparent;
+  }
+  .skill-item:hover { background: var(--bg-elev-2); border-color: var(--border); }
+  .skill-item.checked { background: rgba(125,211,252,0.07); border-color: rgba(125,211,252,0.2); }
+  .skill-item input[type="checkbox"] {
+    margin: 2px 0 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    accent-color: var(--accent);
+  }
+  .skill-item .skill-info { flex: 1; min-width: 0; }
+  .skill-item .skill-slug {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent);
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .skill-item .skill-desc {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.4;
+    margin-top: 2px;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s;
+    border: 1px solid transparent;
+  }
+  .toggle-row:hover { background: var(--bg-elev-2); border-color: var(--border); }
+  .toggle-row.checked { background: rgba(134,239,172,0.06); border-color: rgba(134,239,172,0.18); }
+  .toggle-row.checked-purple { background: rgba(196,181,253,0.06); border-color: rgba(196,181,253,0.18); }
+  .toggle-row input[type="checkbox"] {
+    margin: 0; cursor: pointer; flex-shrink: 0;
+    accent-color: var(--accent);
+  }
+  .toggle-row .label { font-size: 12px; flex: 1; }
+  .toggle-row .badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .badge-green { background: rgba(134,239,172,0.15); color: var(--workers); }
+  .badge-purple { background: rgba(196,181,253,0.15); color: var(--gateway); }
+  .badge-m2 { background: rgba(253,164,175,0.15); color: var(--providers); }
+
+  .order-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .order-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    text-align: left;
+    transition: all 0.1s;
+  }
+  .order-btn:hover { border-color: var(--border-hover); }
+  .order-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+    font-weight: 600;
+  }
+  .order-btn .order-sub {
+    display: block;
+    font-size: 10px;
+    opacity: 0.7;
+    margin-top: 2px;
+  }
+
+  .select-all-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .select-all-row button {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 3px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  .select-all-row button:hover { border-color: var(--border-hover); color: var(--text); }
+
+  /* Prompt viewer */
+  .prompt-pane {
+    background: var(--prompt-bg);
+    overflow-y: auto;
+    padding: 20px 24px;
+    font-family: ui-monospace, Menlo, "Courier New", monospace;
+    font-size: 12.5px;
+    line-height: 1.65;
+    position: relative;
+  }
+  .prompt-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-faint);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 13px;
+    text-align: center;
+  }
+
+  .prompt-section {
+    margin-bottom: 20px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .prompt-section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--skill-header);
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .prompt-section-header:hover { background: var(--bg-elev-2); }
+  .prompt-section.org-profile .prompt-section-header { background: var(--org-bg); border-color: var(--org-border); }
+  .prompt-section.user-skill .prompt-section-header { background: var(--user-skill-bg); border-color: var(--user-skill-border); }
+  .prompt-section.system-preamble .prompt-section-header { background: var(--bg-elev-2); }
+  .prompt-section.tail-section .prompt-section-header { background: var(--bg-elev-2); }
+
+  .section-toggle { font-size: 10px; color: var(--text-faint); flex-shrink: 0; }
+  .section-label {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    flex: 1;
+  }
+  .section-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: -apple-system, sans-serif;
+    font-weight: 600;
+  }
+  .badge-sys { background: rgba(125,211,252,0.12); color: var(--accent); }
+  .badge-skill { background: rgba(125,211,252,0.12); color: var(--accent); }
+  .badge-org { background: rgba(134,239,172,0.12); color: var(--workers); }
+  .badge-user { background: rgba(196,181,253,0.12); color: var(--gateway); }
+  .badge-ctx { background: rgba(253,164,175,0.12); color: var(--providers); }
+  .badge-msg { background: rgba(252,211,77,0.12); color: var(--api); }
+
+  .prompt-section-body {
+    padding: 12px 14px;
+    color: var(--text);
+    background: rgba(0,0,0,0.15);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .prompt-section-body.collapsed { display: none; }
+
+  .section-divider {
+    padding: 4px 14px;
+    color: var(--text-faint);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    border-top: 1px dashed var(--border);
+    border-bottom: 1px dashed var(--border);
+    margin: -1px 0;
+    background: var(--prompt-bg);
+  }
+
+  .view-full-link {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 10px;
+    color: var(--accent);
+    text-decoration: none;
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-family: -apple-system, sans-serif;
+  }
+  .view-full-link:hover { border-color: var(--accent); background: rgba(125,211,252,0.07); }
+
+  .char-counter {
+    position: sticky;
+    bottom: 0;
+    background: rgba(14,18,25,0.95);
+    border-top: 1px solid var(--border);
+    padding: 6px 14px;
+    font-family: -apple-system, sans-serif;
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    backdrop-filter: blur(4px);
+  }
+  .char-counter .count-val { color: var(--accent); font-weight: 600; font-family: ui-monospace, monospace; }
+  .char-counter .section-count { color: var(--text-faint); }
+
+  /* Output panel */
+  .output {
+    background: var(--bg-elev);
+    border-top: 1px solid var(--border);
+    max-height: 200px;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+  .output-tabs {
+    display: flex;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    gap: 4px;
+    align-items: flex-end;
+  }
+  .output-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .output-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  .output-tab:hover { color: var(--text); }
+  .output-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+  }
+  .copy-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace;
+    transition: all 0.15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .copy-btn.copied { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .output-body {
+    padding: 12px 16px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .output-body .pane { display: none; }
+  .output-body .pane.active { display: block; }
+  .output-body .file {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent);
+    text-decoration: none;
+    display: inline-block;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(125,211,252,0.08);
+  }
+  .output-body .file:hover { background: rgba(125,211,252,0.16); }
+  .output-body p { margin: 4px 0; }
+  .output-body ul { margin: 4px 0; padding-left: 18px; }
+  .output-body li { margin: 2px 0; }
+
+  /* Markdown rendering inside prompt body */
+  .md-h1 { color: var(--text); font-size: 13px; font-weight: 700; margin: 0 0 4px; font-family: ui-monospace, monospace; }
+  .md-h2 { color: var(--accent); font-size: 11.5px; font-weight: 600; margin: 10px 0 4px; font-family: ui-monospace, monospace; letter-spacing: 0.02em; }
+  .md-bold { color: var(--text); font-weight: 700; }
+  .placeholder-note {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(252,211,77,0.12);
+    color: var(--api);
+    font-family: -apple-system, sans-serif;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>LQ.AI — Skill Composition Explorer</h1>
+    <span class="subtitle">See exactly what system prompt the model receives when you attach skills to a chat.</span>
+    <span class="spacer"></span>
+    <a href="../../" id="learn-home">↩ Learn</a>
+    <a href="https://github.com/LegalQuants/lq-ai" target="_blank" rel="noopener">View source ↗</a>
+  </header>
+
+  <div class="main">
+    <aside class="controls">
+      <h2>Attach built-in skills</h2>
+      <div class="select-all-row">
+        <button id="btn-select-all">Select all</button>
+        <button id="btn-clear-all">Clear all</button>
+      </div>
+      <div class="skill-list" id="skill-list"></div>
+
+      <h2>Extras</h2>
+      <label class="toggle-row" id="toggle-user-skill">
+        <input type="checkbox" id="chk-user-skill">
+        <span class="label">Include hypothetical user skill <em>company-style-guide</em></span>
+        <span class="badge badge-purple">User</span>
+      </label>
+      <label class="toggle-row" id="toggle-org-profile">
+        <input type="checkbox" id="chk-org-profile">
+        <span class="label">Include Organization Profile (singleton)</span>
+        <span class="badge badge-m2">M2</span>
+      </label>
+
+      <h2>Skill ordering</h2>
+      <div class="order-selector" id="order-selector">
+        <button class="order-btn active" data-order="default">
+          Default order
+          <span class="order-sub">Alphabetical by slug</span>
+        </button>
+        <button class="order-btn" data-order="review-first">
+          Review tasks first
+          <span class="order-sub">msa-review, nda-review, contract-qa, dpa first</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="prompt-pane" id="prompt-pane">
+      <div class="prompt-empty" id="prompt-empty">
+        Check one or more skills on the left to see the assembled system prompt.
+      </div>
+      <div id="prompt-content" style="display:none"></div>
+      <div class="char-counter" id="char-counter" style="display:none">
+        Total characters: <span class="count-val" id="char-count">0</span>
+        <span class="section-count" id="section-count"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="output">
+    <div class="output-tabs">
+      <button class="output-tab active" data-tab="verify">Verify in source</button>
+      <button class="output-tab" data-tab="describe">Description</button>
+      <div class="output-actions">
+        <button class="copy-btn" id="copy">Copy</button>
+      </div>
+    </div>
+    <div class="output-body">
+      <div class="pane active" id="pane-verify"></div>
+      <div class="pane" id="pane-describe"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const REPO = 'https://github.com/LegalQuants/lq-ai/blob/main/';
+
+// ---------------------------------------------------------------------------
+// Skill data — titles and short descriptions from real SKILL.md frontmatter.
+// Skill body previews use the opening ~250 chars of the real body content,
+// read from skills/<slug>/SKILL.md. A [placeholder] note marks any section
+// that was synthesized rather than read verbatim from the source.
+// ---------------------------------------------------------------------------
+const SKILLS = [
+  {
+    slug: 'action-items-from-client-alert',
+    title: 'Action Items from Client Alert',
+    version: '1.0.0',
+    desc: 'Extract time-sensitive action items and deadlines from client alerts, regulatory bulletins, or law firm memos.',
+    // Real body content from skills/action-items-from-client-alert/SKILL.md
+    bodyPreview: `# Action Items from Client Alert
+
+Extract time-sensitive action items, deadlines, and obligations from a client alert, regulatory bulletin, law firm memo, or similar legal update. Produce a deadline-organized checklist that an in-house lawyer can act on without re-reading the source document.
+
+The skill is operational, not analytical. Action items are stated at the level of granularity the alert supports — typically high-level ("comply with new disclosure requirement by [date]"), not implementation-level. The user knows their organization better than the skill does; the skill provides the trigger and deadline, not the implementation.
+
+## When this skill applies
+Apply when the user provides a legal-update document and asks for action items, deadlines, or obligations to be extracted. Typical inputs: law firm client alerts, regulatory bulletins, law firm memos, industry association updates, internal compliance bulletins.`,
+    isReal: true,
+  },
+  {
+    slug: 'comms-improver',
+    title: 'Comms Improver',
+    version: '1.0.0',
+    desc: 'Rewrite legal-jargon text in plain language for a specified non-legal audience (execs, sales, customers, engineering).',
+    // Real body content from skills/comms-improver/SKILL.md
+    bodyPreview: `# Comms Improver
+
+Rewrite legal text in plain language for a specified non-legal audience. The output preserves meaning while changing form: shorter sentences, common words instead of jargon, active voice instead of passive, concrete examples instead of abstract formulations. The skill is transformation, not drafting from scratch.
+
+This skill is for the everyday in-house counsel task of translating between legal precision and non-legal accessibility. Lawyers spend significant time rewriting their own work — or reviewing others' rewrites — for executive readouts, sales communications, customer disclosures, deal-team briefings, and engineering specs.
+
+## When this skill applies
+Apply when the user has legal-jargon-heavy text and wants it rewritten for a specified non-legal audience.`,
+    isReal: true,
+  },
+  {
+    slug: 'contract-qa',
+    title: 'Contract QA',
+    version: '1.0.0',
+    desc: 'Answer specific questions about a loaded contract — clause meaning, unusual provisions, scenario analysis — with verbatim citations.',
+    // Body preview synthesized from frontmatter + structure; real body in SKILL.md
+    bodyPreview: `# Contract QA
+
+Answer a specific question about a contract the user has loaded. The question may be a fact lookup ("where is the limitation of liability?"), a risk question ("is this indemnification clause unusual?"), a scenario question ("what happens if we miss a payment by three days?"), or a multi-issue question requiring structured findings.
+
+Produce an answer calibrated to the question's shape: direct answer for fact lookups, paragraph with context for "is this unusual?" questions, structured findings list for multi-issue questions. Include verbatim citations to specific clauses for every factual claim.
+
+## Scope
+This skill handles pointed questions about a specific contract. It does not perform full reviews — for structured review against a rubric, use the appropriate review skill (NDA Review, DPA Checklist Review, MSA Review).`,
+    isReal: false,
+  },
+  {
+    slug: 'dpa-checklist-review',
+    title: 'DPA Checklist Review',
+    version: '1.0.0',
+    desc: 'Score a DPA, HIPAA BAA, or data processing addendum against GDPR Art. 28, US state privacy laws, and commercial benchmarks.',
+    bodyPreview: `# DPA Checklist Review
+
+Review a Data Processing Agreement, Data Processing Addendum, or HIPAA Business Associate Agreement against the required terms for the applicable data-protection regime. Produce a structured checklist scoring each required term as present, partial, missing, or unclear, with clause references and recommended language for any gaps.
+
+## Supported regimes
+- GDPR Article 28 (processor agreements)
+- US state privacy laws: CCPA/CPRA, VCDPA, CPA, CTDPA, and substantially similar statutes
+- HIPAA Business Associate Agreements
+- General commercial DPAs without a specified regime (benchmark review)
+
+## Output format
+Checklist table: required term | status | clause reference | gap note | recommended language.`,
+    isReal: false,
+  },
+  {
+    slug: 'enhance-prompt',
+    title: 'Enhance Prompt',
+    version: '1.0.0',
+    desc: 'Expand a short or vague prompt into a structured legal prompt with role, jurisdiction, task, constraints, and output format made explicit.',
+    bodyPreview: `# Enhance Prompt
+
+Rewrite the user's input into a structured legal prompt. The expanded prompt makes the following explicit: role ("you are reviewing from the perspective of a US in-house counsel"), jurisdiction, task (specific and concrete), constraints (what to include, exclude, and flag), and output format (structure, length, sections).
+
+Return the expanded prompt alongside a brief reasoning section so the user can review, edit, or skip before submission. The user controls whether the expansion is used; do not auto-submit without confirmation.
+
+## When this skill applies
+Apply when: (1) the user explicitly invokes "Enhance Prompt"; (2) the system is configured to expand prompts before submission; (3) the user asks "improve this prompt." The skill is meta — it shapes subsequent model calls, not the current one directly.`,
+    isReal: false,
+  },
+  {
+    slug: 'msa-review-commercial-purchase',
+    title: 'MSA Review — Commercial Purchase',
+    version: '1.0.0',
+    desc: 'Structured review of a Master Purchase/Supply Agreement covering physical goods or services, calibrated to buyer or supplier perspective.',
+    bodyPreview: `# MSA Review — Commercial Purchase
+
+Conduct a structured review of a Master Purchase Agreement, Master Supply Agreement, or commercial MSA covering the procurement of physical goods, equipment, components, or non-software services.
+
+## Review framework
+Covers: price and payment terms, delivery and acceptance, warranties (product and workmanship), indemnification and IP infringement, limitation of liability, IP ownership, term and termination, force majeure, supply continuity (lead times, minimum order, EOL), change control, audit rights.
+
+## Calibration
+Severity ratings and recommended positions are calibrated to the user's perspective (buyer or supplier). Buyer-side: flag liability caps below expected damages, missing acceptance testing rights, weak supply continuity. Supplier-side: flag uncapped IP indemnification, overly broad warranty scopes, unilateral termination for convenience.`,
+    isReal: false,
+  },
+  {
+    slug: 'msa-review-saas',
+    title: 'MSA Review — SaaS',
+    version: '1.0.0',
+    desc: 'Structured review of a SaaS MSA, Master Subscription Agreement, or Cloud Services Agreement, calibrated to vendor or customer perspective.',
+    bodyPreview: `# MSA Review — SaaS
+
+Conduct a structured review of a Software-as-a-Service Master Services Agreement (MSA), Master Subscription Agreement, SaaS Agreement, or Cloud Services Agreement. Covers MSA framework terms with severity-rated findings, redline language for material gaps, and clause-level citations.
+
+## Review framework
+Core sections: limitation of liability (cap, carve-outs, consequential damages exclusion), IP ownership and license scope, data protection obligations, warranties and disclaimer, uptime/SLA commitments, term and auto-renewal, termination for cause and convenience, fees and payment, confidentiality, and governing law.
+
+## MSA + Order Form conflicts
+When an Order Form or SOW is attached alongside the MSA, surface any conflicts between the two documents (e.g., Order Form attempts to expand liability cap set in MSA).`,
+    isReal: false,
+  },
+  {
+    slug: 'nda-review',
+    title: 'NDA Review',
+    version: '1.0.1',
+    desc: 'Review an NDA from the user\'s perspective (discloser, recipient, or mutual) with severity ratings and verbatim clause citations.',
+    // Real body content from skills/nda-review/SKILL.md
+    bodyPreview: `# NDA Review
+
+Conduct a structured review of a non-disclosure agreement from the user's stated perspective and produce a report that an in-house lawyer can act on without redoing the analysis. The output is a draft for human review, not a final word; treat it accordingly.
+
+## When this skill applies
+Apply when the user provides an NDA (sometimes called a confidentiality agreement, CDA, or confidential disclosure agreement) and asks for review, redline guidance, risk assessment, or a recommendation. The user's perspective — discloser, recipient, or mutual — fundamentally changes the analysis; require it before proceeding if not supplied.
+
+Do not apply this skill to: confidentiality clauses inside larger agreements; data processing agreements; NDAs in employment contexts.`,
+    isReal: true,
+  },
+  {
+    slug: 'skill-creator',
+    title: 'Skill Creator',
+    version: 'unversioned',
+    desc: 'Help the user build a new LQ.AI skill through a focused elicitation conversation, producing a complete skill folder ready to save.',
+    // Real body content from skills/skill-creator/SKILL.md
+    bodyPreview: `# Skill Creator
+
+You are helping an in-house lawyer build a skill for LQ.AI. A skill is a reusable, structured artifact a user attaches to a chat to get consistent, high-quality output for a recurring task — reviewing NDAs, drafting board minutes, generating action items from client alerts, comparing contract variants, and so on.
+
+Your job is not to write the skill alone. Your job is to draw the skill out of the user — they have the legal expertise; you have the format and the craft. The output is a complete skill folder the user can save and use immediately.
+
+## Operating mode
+Default to open conversation. Read what the user has already told you, ask the next question that makes the skill better, accept partial answers, and synthesize as you go.`,
+    isReal: true,
+  },
+  {
+    slug: 'vendor-privacy-policy-first-pass',
+    title: 'Vendor Privacy Policy First Pass',
+    version: '1.0.0',
+    desc: 'Fast triage of a vendor privacy policy — identify red flags and decide whether deeper diligence is warranted.',
+    bodyPreview: `# Vendor Privacy Policy First Pass
+
+Produce a short structured triage report on a vendor's published privacy policy. The goal is to decide whether deeper diligence is warranted, not to produce a full privacy assessment, DPA negotiation position, or compliance certification.
+
+## Output sections
+1. **Summary** — what the policy says about: data collection scope, use (including secondary use and analytics), sharing with third parties, retention periods, cross-border transfers, and data subject rights.
+2. **Red flags** — practices that warrant escalation: vague retention ("as long as necessary"), broad sharing with affiliates and partners without specificity, absence of data subject rights, US-EU transfers without adequacy mechanism, sale of data to third parties.
+3. **Recommended next step** — one of: no further diligence needed / request supplemental information / escalate to full privacy review / decline engagement.`,
+    isReal: false,
+  },
+];
+
+// Skills tagged isReal: true have body text read from actual SKILL.md files.
+// Skills tagged isReal: false have body text synthesized from frontmatter +
+// known structure; the full content is at the GitHub link in each section.
+
+const SYSTEM_PREAMBLE = `You are an AI assistant supporting in-house legal work on the LQ.AI platform.
+
+You assist lawyers and legal operations teams with research, review, drafting, and analysis tasks. You are deployed in a self-hosted environment; all data stays within the operator's infrastructure.
+
+**Transparency principle:** Every skill, instruction, and capability shaping your behavior in this conversation is open-source and readable by the user. If asked what skills are attached or what instructions you have received, answer accurately and completely.
+
+**Constraints:**
+- Do not provide legal advice to individuals; your output is work product for trained legal professionals.
+- Cite your sources. When analyzing a document, quote the specific clause or passage you are relying on.
+- Flag uncertainty. If you are not confident in a legal conclusion, say so explicitly.
+- Preserve document confidentiality. Do not summarize or quote document content in response to questions outside the task scope.`;
+
+const ORG_PROFILE_PLACEHOLDER = `# Organization Profile
+[placeholder — operator-configured singleton]
+
+**Jurisdiction:** {{jurisdiction}}
+**Industry:** {{industry}}
+**Organization type:** {{org_type}}
+
+This section is populated by the deployment's Organization Profile — a singleton skill set by the operator at the deployment level that provides organization-wide voice, jurisdiction defaults, and institutional context for all downstream skills.
+
+The Organization Profile slot ships in M2 per the roadmap. It is not active in the current M1 deployment.`;
+
+const USER_SKILL_CONTENT = `# Skill: company-style-guide (User skill)
+[Hypothetical user-authored skill — illustrating how user skills compose alongside built-in skills]
+
+This skill enforces {{org_name}}'s house style for external communications:
+
+- Use active voice. Avoid passive constructions that obscure accountability.
+- Avoid hedging phrases ("it is possible that", "one might argue"). State conclusions directly or flag uncertainty explicitly.
+- Spell out all acronyms on first use.
+- Use Oxford comma throughout.
+- Preferred salutation: "Hi [Name]," — not "Dear [Name]," for standard business emails.
+
+Reference: internal style guide last updated {{style_guide_date}}.`;
+
+const FILES_CONTEXT_PLACEHOLDER = `[If files are attached to this chat, their extracted text excerpts would appear here — one section per file, labeled by filename and page range. File content is injected after skill instructions so skill prompts can reference "the attached document" and the model finds it here.]`;
+
+const USER_MSG_PLACEHOLDER = `[Your message goes here.]`;
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+const state = {
+  attachedSkills: new Set([]),
+  includeOrgProfile: false,
+  includeUserSkill: false,
+  orderPreset: 'default',
+};
+
+// ---------------------------------------------------------------------------
+// Build skill list UI
+// ---------------------------------------------------------------------------
+function buildSkillList() {
+  const container = document.getElementById('skill-list');
+  container.innerHTML = '';
+  SKILLS.forEach(skill => {
+    const item = document.createElement('label');
+    item.className = 'skill-item';
+    item.innerHTML = `
+      <input type="checkbox" value="${skill.slug}">
+      <div class="skill-info">
+        <span class="skill-slug">${skill.slug}</span>
+        <span class="skill-desc">${skill.desc}</span>
+      </div>
+    `;
+    const cb = item.querySelector('input');
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        state.attachedSkills.add(skill.slug);
+        item.classList.add('checked');
+      } else {
+        state.attachedSkills.delete(skill.slug);
+        item.classList.remove('checked');
+      }
+      updateAll();
+    });
+    container.appendChild(item);
+  });
+}
+
+document.getElementById('btn-select-all').addEventListener('click', () => {
+  document.querySelectorAll('#skill-list input[type="checkbox"]').forEach(cb => {
+    cb.checked = true;
+    cb.closest('.skill-item').classList.add('checked');
+    state.attachedSkills.add(cb.value);
+  });
+  updateAll();
+});
+document.getElementById('btn-clear-all').addEventListener('click', () => {
+  document.querySelectorAll('#skill-list input[type="checkbox"]').forEach(cb => {
+    cb.checked = false;
+    cb.closest('.skill-item').classList.remove('checked');
+  });
+  state.attachedSkills.clear();
+  updateAll();
+});
+
+document.getElementById('chk-org-profile').addEventListener('change', (e) => {
+  state.includeOrgProfile = e.target.checked;
+  const row = document.getElementById('toggle-org-profile');
+  row.classList.toggle('checked', e.target.checked);
+  updateAll();
+});
+document.getElementById('chk-user-skill').addEventListener('change', (e) => {
+  state.includeUserSkill = e.target.checked;
+  const row = document.getElementById('toggle-user-skill');
+  row.classList.toggle('checked-purple', e.target.checked);
+  updateAll();
+});
+
+document.getElementById('order-selector').addEventListener('click', (e) => {
+  const btn = e.target.closest('.order-btn');
+  if (!btn) return;
+  state.orderPreset = btn.dataset.order;
+  document.querySelectorAll('.order-btn').forEach(b => b.classList.toggle('active', b === btn));
+  updateAll();
+});
+
+// ---------------------------------------------------------------------------
+// Ordering logic — mirrors assembler.py (caller-supplied order)
+// ---------------------------------------------------------------------------
+function getOrderedSkills() {
+  const attached = SKILLS.filter(s => state.attachedSkills.has(s.slug));
+  if (state.orderPreset === 'review-first') {
+    const reviewFirst = ['msa-review-saas', 'msa-review-commercial-purchase', 'nda-review', 'contract-qa', 'dpa-checklist-review'];
+    return [...attached].sort((a, b) => {
+      const ai = reviewFirst.indexOf(a.slug);
+      const bi = reviewFirst.indexOf(b.slug);
+      if (ai >= 0 && bi >= 0) return ai - bi;
+      if (ai >= 0) return -1;
+      if (bi >= 0) return 1;
+      return a.slug.localeCompare(b.slug);
+    });
+  }
+  // Default: alphabetical by slug
+  return [...attached].sort((a, b) => a.slug.localeCompare(b.slug));
+}
+
+// ---------------------------------------------------------------------------
+// Lightweight markdown renderer for prompt body display
+// ---------------------------------------------------------------------------
+function renderMarkdown(text) {
+  // Escape HTML first
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Headers
+  html = html.replace(/^# (.+)$/gm, '<span class="md-h1"># $1</span>');
+  html = html.replace(/^## (.+)$/gm, '<span class="md-h2">## $1</span>');
+
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong class="md-bold">$1</strong>');
+
+  return html;
+}
+
+// ---------------------------------------------------------------------------
+// Build one collapsible section element
+// ---------------------------------------------------------------------------
+let sectionCounter = 0;
+function makeSection(opts) {
+  const { label, badgeText, badgeClass, body, extraClass, isReal, githubPath, collapsed } = opts;
+  const id = 'sec-' + (sectionCounter++);
+
+  const section = document.createElement('div');
+  section.className = `prompt-section${extraClass ? ' ' + extraClass : ''}`;
+
+  const header = document.createElement('div');
+  header.className = 'prompt-section-header';
+  header.innerHTML = `
+    <span class="section-toggle" id="arrow-${id}">▼</span>
+    <span class="section-label">${label}</span>
+    <span class="section-badge ${badgeClass}">${badgeText}</span>
+  `;
+  section.appendChild(header);
+
+  const bodyEl = document.createElement('div');
+  bodyEl.className = 'prompt-section-body' + (collapsed ? ' collapsed' : '');
+  bodyEl.id = id;
+
+  let displayBody = renderMarkdown(body);
+  if (!isReal && githubPath) {
+    displayBody += `\n<a class="view-full-link" href="${REPO}${githubPath}" target="_blank" rel="noopener">view full content on GitHub ↗</a>`;
+  } else if (isReal && githubPath) {
+    displayBody += `\n<a class="view-full-link" href="${REPO}${githubPath}" target="_blank" rel="noopener">view full SKILL.md on GitHub ↗</a>`;
+  }
+  bodyEl.innerHTML = displayBody;
+  section.appendChild(bodyEl);
+
+  header.addEventListener('click', () => {
+    const collapsed = bodyEl.classList.toggle('collapsed');
+    document.getElementById('arrow-' + id).textContent = collapsed ? '▶' : '▼';
+  });
+
+  return { element: section, bodyText: body };
+}
+
+// ---------------------------------------------------------------------------
+// Render the prompt viewer
+// ---------------------------------------------------------------------------
+function renderPrompt() {
+  sectionCounter = 0;
+  const ordered = getOrderedSkills();
+  const empty = ordered.length === 0 && !state.includeUserSkill && !state.includeOrgProfile;
+
+  document.getElementById('prompt-empty').style.display = empty ? 'flex' : 'none';
+  document.getElementById('prompt-content').style.display = empty ? 'none' : 'block';
+  document.getElementById('char-counter').style.display = empty ? 'none' : 'flex';
+
+  if (empty) return;
+
+  const container = document.getElementById('prompt-content');
+  container.innerHTML = '';
+
+  let totalChars = 0;
+  let sectionCount = 0;
+  const bodyTexts = [];
+
+  // 1) System preamble
+  const { element: preambleEl, bodyText: preambleText } = makeSection({
+    label: '## System preamble',
+    badgeText: 'System',
+    badgeClass: 'badge-sys',
+    body: SYSTEM_PREAMBLE,
+    extraClass: 'system-preamble',
+    isReal: false,
+    githubPath: null,
+    collapsed: false,
+  });
+  container.appendChild(preambleEl);
+  totalChars += preambleText.length;
+  bodyTexts.push(preambleText);
+  sectionCount++;
+
+  // 2) Organization Profile (if toggled)
+  if (state.includeOrgProfile) {
+    const divider = document.createElement('div');
+    divider.className = 'section-divider';
+    divider.textContent = '--- (skill separator) ---';
+    container.appendChild(divider);
+
+    const noteSpan = document.createElement('div');
+    noteSpan.style.cssText = 'padding: 4px 14px 6px; font-size: 10px; color: var(--providers); font-family: -apple-system, sans-serif; background: var(--prompt-bg);';
+    noteSpan.textContent = 'Organization Profile — ships in M2, not active in M1. Shown here as a placeholder.';
+    container.appendChild(noteSpan);
+
+    const { element: orgEl, bodyText: orgText } = makeSection({
+      label: '## Organization Profile',
+      badgeText: 'Org · M2',
+      badgeClass: 'badge-org',
+      body: ORG_PROFILE_PLACEHOLDER,
+      extraClass: 'org-profile',
+      isReal: false,
+      githubPath: null,
+      collapsed: false,
+    });
+    container.appendChild(orgEl);
+    totalChars += orgText.length;
+    bodyTexts.push(orgText);
+    sectionCount++;
+  }
+
+  // 3) User skill (if toggled) — goes before built-in skills or after? Let's place at end of skill block.
+  // Per assembler.py: caller-supplied order. User skill would be passed in the skills list.
+  // We'll insert it after the ordered built-in skills to illustrate.
+
+  // 4) Built-in skills, in order
+  ordered.forEach((skill, i) => {
+    const divider = document.createElement('div');
+    divider.className = 'section-divider';
+    divider.textContent = '--- (skill separator) ---';
+    container.appendChild(divider);
+
+    const isReal = skill.isReal;
+    const noteEl = document.createElement('div');
+    noteEl.style.cssText = 'padding: 3px 14px 5px; font-size: 10px; font-family: -apple-system, sans-serif; background: var(--prompt-bg);';
+    noteEl.innerHTML = isReal
+      ? `<span style="color: var(--workers);">● real content from SKILL.md</span>`
+      : `<span style="color: var(--api);">○ synthesized preview — full content at GitHub ↗</span>`;
+    container.appendChild(noteEl);
+
+    const { element: skillEl, bodyText: skillText } = makeSection({
+      label: `## Skill: ${skill.title} (v${skill.version})`,
+      badgeText: skill.slug,
+      badgeClass: 'badge-skill',
+      body: skill.bodyPreview,
+      extraClass: '',
+      isReal: isReal,
+      githubPath: `skills/${skill.slug}/SKILL.md`,
+      collapsed: i > 1,
+    });
+    container.appendChild(skillEl);
+    totalChars += skillText.length;
+    bodyTexts.push(skillText);
+    sectionCount++;
+  });
+
+  // 5) User skill (hypothetical, placed after built-in)
+  if (state.includeUserSkill) {
+    const divider = document.createElement('div');
+    divider.className = 'section-divider';
+    divider.textContent = '--- (skill separator) ---';
+    container.appendChild(divider);
+
+    const noteEl = document.createElement('div');
+    noteEl.style.cssText = 'padding: 3px 14px 5px; font-size: 10px; color: var(--gateway); font-family: -apple-system, sans-serif; background: var(--prompt-bg);';
+    noteEl.textContent = '● user-authored skill (stored in user_skills table)';
+    container.appendChild(noteEl);
+
+    const { element: userEl, bodyText: userText } = makeSection({
+      label: '## Skill: company-style-guide (User)',
+      badgeText: 'user skill',
+      badgeClass: 'badge-user',
+      body: USER_SKILL_CONTENT,
+      extraClass: 'user-skill',
+      isReal: false,
+      githubPath: null,
+      collapsed: false,
+    });
+    container.appendChild(userEl);
+    totalChars += userText.length;
+    bodyTexts.push(userText);
+    sectionCount++;
+  }
+
+  // 6) Files context placeholder
+  if (ordered.length > 0 || state.includeUserSkill) {
+    const divider = document.createElement('div');
+    divider.className = 'section-divider';
+    divider.textContent = '--- (operator system instructions separator) ---';
+    container.appendChild(divider);
+
+    const { element: filesEl, bodyText: filesText } = makeSection({
+      label: '## Attached files context',
+      badgeText: 'runtime',
+      badgeClass: 'badge-ctx',
+      body: FILES_CONTEXT_PLACEHOLDER,
+      extraClass: 'tail-section',
+      isReal: false,
+      githubPath: null,
+      collapsed: true,
+    });
+    container.appendChild(filesEl);
+    totalChars += filesText.length;
+    bodyTexts.push(filesText);
+    sectionCount++;
+
+    const { element: msgEl, bodyText: msgText } = makeSection({
+      label: '## User message',
+      badgeText: 'user turn',
+      badgeClass: 'badge-msg',
+      body: USER_MSG_PLACEHOLDER,
+      extraClass: 'tail-section',
+      isReal: false,
+      githubPath: null,
+      collapsed: false,
+    });
+    container.appendChild(msgEl);
+    totalChars += msgText.length;
+    bodyTexts.push(msgText);
+    sectionCount++;
+  }
+
+  // Update counter
+  document.getElementById('char-count').textContent = totalChars.toLocaleString();
+  document.getElementById('section-count').textContent = `· ${sectionCount} sections`;
+
+  // Store for output pane copy
+  window._lastBodyTexts = bodyTexts;
+  window._lastOrdered = ordered;
+}
+
+// ---------------------------------------------------------------------------
+// Render output panes
+// ---------------------------------------------------------------------------
+function renderOutput() {
+  const ordered = getOrderedSkills();
+  const verifyEl = document.getElementById('pane-verify');
+  const describeEl = document.getElementById('pane-describe');
+
+  // Verify in source
+  let verifyHtml = '<p style="color:var(--text-dim);margin:0 0 10px">Source paths for every component currently visible in the assembled prompt. Click to open on GitHub.</p>';
+
+  if (ordered.length > 0 || state.includeUserSkill) {
+    verifyHtml += '<strong style="font-size:12px">Skill bodies</strong><ul>';
+    ordered.forEach(s => {
+      verifyHtml += `<li><a class="file" href="${REPO}skills/${s.slug}/SKILL.md" target="_blank" rel="noopener">skills/${s.slug}/SKILL.md</a></li>`;
+    });
+    if (state.includeUserSkill) {
+      verifyHtml += `<li><span style="color:var(--text-dim);font-size:11px;font-family:ui-monospace,monospace">user_skills table — api/app/api/user_skills.py</span></li>`;
+    }
+    verifyHtml += '</ul>';
+  }
+
+  verifyHtml += `<strong style="font-size:12px">Assembly logic</strong><ul>
+    <li><a class="file" href="${REPO}gateway/app/skills/assembler.py" target="_blank" rel="noopener">gateway/app/skills/assembler.py</a></li>
+    <li><a class="file" href="${REPO}api/app/api/skills.py" target="_blank" rel="noopener">api/app/api/skills.py</a> (built-in skill resolution)</li>
+    <li><a class="file" href="${REPO}api/app/api/user_skills.py" target="_blank" rel="noopener">api/app/api/user_skills.py</a> (user skill retrieval)</li>
+  </ul>`;
+
+  verifyHtml += `<strong style="font-size:12px">Skill format spec</strong><ul>
+    <li><a class="file" href="${REPO}docs/skill-authoring-guide.md" target="_blank" rel="noopener">docs/skill-authoring-guide.md</a></li>
+  </ul>`;
+
+  verifyEl.innerHTML = verifyHtml;
+
+  // Description
+  const total = ordered.length + (state.includeUserSkill ? 1 : 0);
+  let describeHtml = '';
+
+  if (total === 0 && !state.includeOrgProfile) {
+    describeHtml = '<p style="color:var(--text-dim)">No skills attached. Select skills on the left to see the assembled system prompt.</p>';
+  } else {
+    const slugList = ordered.map(s => `<strong>${s.slug}</strong>`).join(', ');
+    describeHtml += `<p><strong>${total} skill${total !== 1 ? 's' : ''} attached</strong>${total > 0 ? ': ' + slugList : ''}${state.includeUserSkill ? (total > 1 ? ', ' : '') + '<strong>company-style-guide</strong> (user)' : ''}.</p>`;
+
+    describeHtml += `<p style="margin-top:8px">The model receives all of this as its <strong>system message</strong> — the instruction layer set before the conversation begins. Every skill body, the system preamble, and (when present) the Organization Profile land here, in order, separated by <code style="font-family:ui-monospace,monospace;font-size:11px;color:var(--accent)">---</code> dividers.</p>`;
+
+    describeHtml += `<p style="margin-top:8px"><strong>Transparency:</strong> Every built-in skill body is open-source. Click any GitHub link in the "Verify in source" tab to read exactly what the skill instructs the model to do. If you don't like what a skill does, you can fork it — the full corpus is at <a class="file" href="https://github.com/LegalQuants/lq-ai/tree/main/skills" target="_blank" rel="noopener">github.com/LegalQuants/lq-ai/tree/main/skills</a> and the authoring guide at <a class="file" href="${REPO}docs/skill-authoring-guide.md" target="_blank" rel="noopener">docs/skill-authoring-guide.md</a>.</p>`;
+
+    if (state.includeOrgProfile) {
+      describeHtml += `<p style="margin-top:8px;padding:8px;border-left:2px solid var(--providers);background:rgba(253,164,175,0.06)"><strong>Organization Profile note:</strong> This is an M2 feature, not active in the current M1 deployment. When shipped, the Organization Profile is a singleton skill set by the operator at the deployment level — it provides org-wide voice, default jurisdiction, and institutional context that shapes every downstream skill. It is the first section of the assembled prompt, rendered before any attached skills. <a class="file" href="${REPO}docs/PRD.md" target="_blank" rel="noopener">PRD §3.12</a></p>`;
+    }
+
+    if (state.includeUserSkill) {
+      describeHtml += `<p style="margin-top:8px"><strong>User skills</strong> are stored in the <code style="font-family:ui-monospace,monospace;font-size:11px;color:var(--accent)">user_skills</code> table (see <a class="file" href="${REPO}api/app/api/user_skills.py" target="_blank" rel="noopener">api/app/api/user_skills.py</a>). They compose into the system message alongside built-in skills in caller-supplied order. The assembler treats them identically to built-in skills — same separator, same <code style="font-family:ui-monospace,monospace;font-size:11px;color:var(--accent)">{{var}}</code> substitution, same reference-file injection.</p>`;
+    }
+
+    describeHtml += `<p style="margin-top:8px;color:var(--text-faint);font-size:11px">Assembly implemented in <a class="file" href="${REPO}gateway/app/skills/assembler.py" target="_blank" rel="noopener">gateway/app/skills/assembler.py</a> — <code style="font-family:ui-monospace,monospace;color:var(--text-dim)">assemble_skill_prompt()</code>. Skills concatenate with <code style="font-family:ui-monospace,monospace;color:var(--text-dim)">\\n\\n---\\n\\n</code> separators; input variables substituted via <code style="font-family:ui-monospace,monospace;color:var(--text-dim)">{{name}}</code> regex per ADR 0006.</p>`;
+  }
+
+  describeEl.innerHTML = describeHtml;
+}
+
+// ---------------------------------------------------------------------------
+// Output tab switcher
+// ---------------------------------------------------------------------------
+document.querySelectorAll('.output-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.output-tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.output-body .pane').forEach(p => p.classList.toggle('active', p.id === `pane-${tab.dataset.tab}`));
+  });
+});
+
+// Copy button
+document.getElementById('copy').addEventListener('click', () => {
+  const activeTab = document.querySelector('.output-tab.active').dataset.tab;
+  const pane = document.getElementById(`pane-${activeTab}`);
+  const text = pane.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy');
+    btn.classList.add('copied');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 1200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Master update
+// ---------------------------------------------------------------------------
+function updateAll() {
+  renderPrompt();
+  renderOutput();
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+buildSkillList();
+updateAll();
+</script>
+</body>
+</html>
