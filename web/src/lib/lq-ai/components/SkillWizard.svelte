@@ -190,6 +190,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import SkillWizardSection from './SkillWizardSection.svelte';
 	import SkillTryItPane from './SkillTryItPane.svelte';
+	import { LQAIApiError } from '$lib/lq-ai/api/client';
 
 	export let initial: {
 		slug?: string;
@@ -356,12 +357,31 @@
 				}
 			}
 		} catch (e) {
-			const message = e instanceof Error ? e.message : 'Save failed';
-			saveError = message;
-			// 422 carrying a slash_alias hint goes near the alias input so
-			// the operator can correct it without reading the banner.
-			if (message.toLowerCase().includes('slash_alias')) {
-				slashAliasError = message;
+			// A 422 on this endpoint comes from the slash_alias partial-unique
+			// constraint (the only 422-yielding validator on POST /user-skills,
+			// per api/app/api/user_skills.py:556-560). Surface it inline near
+			// the alias input so the operator can correct it without reading
+			// the banner; do NOT also paint the banner red (the two are
+			// mutually exclusive by intent).
+			if (e instanceof LQAIApiError && e.status === 422) {
+				// Backend returns FastAPI's default string-shaped detail
+				// (``HTTPException(status_code=422, detail="slash_alias ...")``),
+				// which the typed client maps to a generic message. Look in
+				// every string field we have access to so a future client
+				// fix that preserves the raw detail will be picked up
+				// automatically.
+				const detailVals = e.details ? Object.values(e.details) : [];
+				const detailStr = detailVals.find((v): v is string => typeof v === 'string') ?? '';
+				const hintFromError =
+					(detailStr && detailStr.toLowerCase().includes('slash_alias') && detailStr) ||
+					(e.message.toLowerCase().includes('slash_alias') && e.message) ||
+					'';
+				slashAliasError =
+					hintFromError ||
+					`That slash alias is already used by another of your skills (slash_alias /${slashAlias.trim() || '?'}).`;
+				saveError = null;
+			} else {
+				saveError = e instanceof Error ? e.message : 'Save failed';
 			}
 		} finally {
 			saving = false;
