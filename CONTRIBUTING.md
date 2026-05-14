@@ -16,6 +16,19 @@ docker compose up -d              # Mode 1
 docker compose --profile local up -d   # Mode 2
 ```
 
+**Running backend tests in Docker** (recommended when you don't want a local Python venv):
+
+```bash
+# api/Dockerfile.dev installs [dev] extras (pytest, respx, pytest-cov, …)
+# on top of the production image so the test suite runs in-container.
+docker build -f api/Dockerfile.dev -t lq-ai-api-dev api/
+docker run --rm lq-ai-api-dev python -m pytest tests/ -x
+```
+
+The production image (`api/Dockerfile`) does **not** install dev extras to keep
+the runtime surface area minimal. Use `Dockerfile.dev` for any work that requires
+running the test suite inside a container.
+
 For backend development without Docker:
 
 ```bash
