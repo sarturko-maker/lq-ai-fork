@@ -28,8 +28,11 @@ describe('tabs', () => {
     expect(isTabAvailable('admin')).toBe(true);
     expect(isTabAvailable('chats')).toBe(true);
     expect(isTabAvailable('matters')).toBe(true);
+    // saved-prompts route landed pre-v0.1.0 (Saved Prompts page wraps the
+    // SavedPromptsPanel — same backend, full-width browse view).
+    expect(isTabAvailable('saved-prompts')).toBe(true);
+    // Knowledge surface still pending — flip when /lq-ai/knowledge ships.
     expect(isTabAvailable('knowledge')).toBe(false);
-    expect(isTabAvailable('saved-prompts')).toBe(false);
   });
 
   it('derives active tab from pathname', () => {

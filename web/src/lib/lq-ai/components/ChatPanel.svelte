@@ -749,6 +749,17 @@
 			const found = get(chatsStore).find((c) => c.id === initialChatId);
 			if (found) await selectChat(found);
 		}
+		// One-shot composer prefill — read + clear so a refresh doesn't
+		// re-prefill. Used by the standalone /lq-ai/saved-prompts page when
+		// the user clicks "Use in chat" on a saved prompt. sessionStorage
+		// (not URL) keeps prompt content out of referrers + browser history.
+		if (typeof window !== 'undefined' && window.sessionStorage) {
+			const stash = window.sessionStorage.getItem('lq-ai:composer-prefill');
+			if (stash) {
+				window.sessionStorage.removeItem('lq-ai:composer-prefill');
+				composerText = stash;
+			}
+		}
 	});
 
 	$: groups = $chatsByProject;

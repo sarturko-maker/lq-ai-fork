@@ -33,9 +33,17 @@
 	import type { SavedPrompt } from '$lib/lq-ai/types';
 
 	export let onInsert: (text: string) => void = () => undefined;
+	/** When true, the list is always rendered (no Show/Hide toggle) — used
+	 *  by the standalone /lq-ai/saved-prompts page. Default keeps the
+	 *  in-chat collapse behavior. */
+	export let alwaysOpen = false;
+	/** Label on the per-prompt insert button. The in-chat panel uses
+	 *  "Insert" (append to composer); the standalone page uses "Use in
+	 *  chat" (navigate to a fresh chat with the prompt prefilled). */
+	export let insertLabel = 'Insert';
 
 	let prompts: SavedPrompt[] = [];
-	let panelOpen = false;
+	let panelOpen = alwaysOpen;
 	let loading = false;
 	let loadError: string | null = null;
 
@@ -261,14 +269,16 @@
 			>
 				+ New
 			</button>
-			<button
-				type="button"
-				class="lq-btn-ghost"
-				on:click={() => (panelOpen = !panelOpen)}
-				data-testid="lq-ai-saved-prompts-toggle"
-			>
-				{panelOpen ? 'Hide' : 'Show'}
-			</button>
+			{#if !alwaysOpen}
+				<button
+					type="button"
+					class="lq-btn-ghost"
+					on:click={() => (panelOpen = !panelOpen)}
+					data-testid="lq-ai-saved-prompts-toggle"
+				>
+					{panelOpen ? 'Hide' : 'Show'}
+				</button>
+			{/if}
 		</div>
 	</div>
 
@@ -379,7 +389,7 @@
 									on:click={() => insert(prompt)}
 									data-testid={`lq-ai-saved-prompt-insert-${prompt.id}`}
 								>
-									Insert
+									{insertLabel}
 								</button>
 								<button
 									type="button"
