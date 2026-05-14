@@ -16,9 +16,13 @@
 	import DOMPurify from 'dompurify';
 	import { marked } from 'marked';
 
+	import { captureAffordanceInline } from '$lib/lq-ai/preferences/capture-affordance';
+
 	import type { Message } from '../types';
 	import AppliedSkillsChip from './AppliedSkillsChip.svelte';
+	import CaptureSkillModal from './CaptureSkillModal.svelte';
 	import EnhancedDiffModal from './EnhancedDiffModal.svelte';
+	import MessageOverflowMenu from './MessageOverflowMenu.svelte';
 	import ProvenancePill from './ProvenancePill.svelte';
 	import RefusalMessageBubble from './RefusalMessageBubble.svelte';
 	import TierBadge from './TierBadge.svelte';
@@ -57,6 +61,15 @@
 	// so the diff modal is exclusive: clicking the pill on one message
 	// does not surface another message's diff.
 	let enhancedDiffOpen = false;
+
+	// Wave D.2 Task 5.3 — capture-as-skill modal trigger. Per-message-local
+	// so each bubble owns its own modal instance and the right
+	// `sourceMessage` is captured in the closure. The inline 📝 / overflow
+	// "Capture as skill" item are conditional on the
+	// `captureAffordanceInline` preference (Wave D.2 Task 5.1) — auto-
+	// subscribed in the template via `$captureAffordanceInline` so Svelte
+	// handles teardown.
+	let captureOpen = false;
 
 	$: bubbleClasses =
 		message.role === 'user'
@@ -125,19 +138,44 @@
 	{/if}
 
 	{#if message.role === 'assistant'}
-		<div class="mt-1 flex items-center gap-2 flex-wrap">
-			{#if message.routed_inference_tier}
-				<TierBadge
-					tier={message.routed_inference_tier}
-					provider={message.routed_provider ?? null}
-					on:open={() => (tierDetailsOpen = true)}
+		<div class="mt-1 flex items-center gap-2 flex-wrap justify-between w-full">
+			<div class="flex items-center gap-2 flex-wrap">
+				{#if message.routed_inference_tier}
+					<TierBadge
+						tier={message.routed_inference_tier}
+						provider={message.routed_provider ?? null}
+						on:open={() => (tierDetailsOpen = true)}
+					/>
+				{/if}
+				<AppliedSkillsChip
+					appliedSkills={message.applied_skills ?? []}
+					onSkillClicked={onAppliedSkillClicked}
 				/>
-			{/if}
-			<AppliedSkillsChip
-				appliedSkills={message.applied_skills ?? []}
-				onSkillClicked={onAppliedSkillClicked}
-			/>
+			</div>
+			<div class="flex items-center gap-1">
+				{#if $captureAffordanceInline}
+					<button
+						type="button"
+						class="text-base leading-none px-2 py-1 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+						aria-label="Capture as skill"
+						title="Capture as skill"
+						data-testid="lq-ai-message-capture-inline"
+						on:click={() => (captureOpen = true)}
+					>📝</button>
+				{/if}
+				<MessageOverflowMenu
+					captureInOverflow={!$captureAffordanceInline}
+					onCapture={() => (captureOpen = true)}
+				/>
+			</div>
 		</div>
+
+		{#if captureOpen}
+			<CaptureSkillModal
+				sourceMessage={message}
+				onClose={() => (captureOpen = false)}
+			/>
+		{/if}
 
 		{#if tierDetailsOpen}
 			<TierDetailsPanel
