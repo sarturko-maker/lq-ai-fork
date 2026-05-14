@@ -19,68 +19,12 @@
 
 /// <reference types="cypress" />
 
+import { login, createSampleMatter, getBearerToken } from '../support/lq-ai-helpers';
+
 const ADMIN_EMAIL = () => Cypress.env('LQAI_ADMIN_EMAIL') || 'admin@lq.ai';
 const ADMIN_PASSWORD = () => Cypress.env('LQAI_ADMIN_PASSWORD') || 'LQ-AI-smoke-test-Pw1!';
 /** Direct API base — bypasses the SvelteKit web container. */
 const API_BASE = () => Cypress.env('LQAI_API_BASE') ?? 'http://localhost:8000';
-
-/**
- * Extract the bearer token from localStorage. LQ.AI auth store writes the
- * session under `lq_ai_auth` as a JSON object with an `access_token` field
- * (matches wave-d2-skill-creator.cy.ts pattern exactly).
- */
-function getBearerToken(cb: (token: string) => void): void {
-	cy.window().then((win) => {
-		let token: string | null = null;
-		try {
-			const raw = win.localStorage.getItem('lq_ai_auth');
-			if (raw) {
-				const parsed = JSON.parse(raw) as { access_token?: string };
-				token = parsed.access_token ?? null;
-			}
-		} catch {
-			token = null;
-		}
-		expect(token, 'auth token must exist after login').to.be.a('string');
-		cb(token as string);
-	});
-}
-
-/**
- * Inline login — mirrors wave-d2-skill-creator.cy.ts beforeEach pattern.
- */
-function login(email: string, password: string) {
-	cy.visit('/lq-ai/login');
-	cy.get('input[type="email"]').type(email);
-	cy.get('input[type="password"]').type(password);
-	cy.get('button[type="submit"]').click();
-	cy.url({ timeout: 15000 }).should('not.include', '/login');
-}
-
-/**
- * Create a fresh matter, click + New Chat to seed an active chat, and wait
- * for the composer to render. Mirrors wave-d2-skill-creator.cy.ts exactly.
- */
-function createSampleMatter(prefix = 'Cypress M1 Final') {
-	const matterName = `${prefix} ${Date.now()}`;
-	cy.visit('/lq-ai/matters');
-
-	cy.intercept('POST', '/api/v1/projects').as('createMatter');
-
-	cy.contains('button', '+ New matter').first().click();
-	cy.get('[role="dialog"]').should('exist');
-	cy.get('[role="dialog"]').find('input[type="text"]').first().clear().type(matterName);
-	cy.contains('button', 'Create matter').click();
-
-	cy.wait('@createMatter').its('response.statusCode').should('eq', 201);
-	cy.url({ timeout: 15000 }).should('match', /\/lq-ai\/matters\/[a-f0-9-]+$/);
-	cy.get('[data-testid="lq-ai-chat-shell"]', { timeout: 10000 }).should('exist');
-
-	cy.get('[data-testid="lq-ai-new-chat-btn"]').click();
-	cy.get('[data-testid="lq-ai-composer-input"]', { timeout: 10000 }).should('be.visible');
-
-	cy.wrap(matterName).as('matterName');
-}
 
 describe('Wave M1-final — Saved Prompts + Knowledge + Receipts source', () => {
 	beforeEach(() => {

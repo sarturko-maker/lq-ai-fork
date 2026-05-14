@@ -19,98 +19,12 @@
 
 /// <reference types="cypress" />
 
+import { login, createSampleMatter, getBearerToken } from '../support/lq-ai-helpers';
+
 const ADMIN_EMAIL = () => Cypress.env('LQAI_ADMIN_EMAIL') || 'admin@lq.ai';
 const ADMIN_PASSWORD = () => Cypress.env('LQAI_ADMIN_PASSWORD') || 'LQ-AI-smoke-test-Pw1!';
 /** Direct API base — bypasses the SvelteKit web container which has no POST proxy for user-skills routes. */
 const API_BASE = () => Cypress.env('LQAI_API_BASE') ?? 'http://localhost:8000';
-
-/**
- * Extract the bearer token from localStorage. LQ.AI auth store writes the
- * session under `lq_ai_auth` as a JSON object with an `access_token` field
- * (api/client.ts + auth/store.ts).
- *
- * Accepts a callback that receives the token string. Usage pattern:
- *
- *   getBearerToken((token) => {
- *     cy.request({ headers: { Authorization: `Bearer ${token}` }, ... });
- *   });
- *
- * Extracted per Task 8.3 code-review feedback: the auth extraction block was
- * duplicated in Test 6 inline; Tests 4 and 5 also need it, so a shared helper
- * is cleaner than repeating the pattern a third and fourth time.
- */
-function getBearerToken(cb: (token: string) => void): void {
-	cy.window().then((win) => {
-		let token: string | null = null;
-		try {
-			const raw = win.localStorage.getItem('lq_ai_auth');
-			if (raw) {
-				const parsed = JSON.parse(raw) as { access_token?: string };
-				token = parsed.access_token ?? null;
-			}
-		} catch {
-			token = null;
-		}
-		expect(token, 'auth token must exist after login').to.be.a('string');
-		cb(token as string);
-	});
-}
-
-/**
- * Inline login — mirrors wave-d1-power-features.cy.ts beforeEach pattern.
- * Wave D.1 did not extract a custom command for this; we follow the same shape
- * so anyone reading the suite sees a single consistent login flow.
- */
-function login(email: string, password: string) {
-	cy.visit('/lq-ai/login');
-	cy.get('input[type="email"]').type(email);
-	cy.get('input[type="password"]').type(password);
-	cy.get('button[type="submit"]').click();
-	// Login can take longer after real LLM round-trips (~30-60s) —
-	// the api briefly backlogs incoming requests. Default cy.url retry is
-	// 4s; 15s absorbs the post-LLM-test recovery window.
-	cy.url({ timeout: 15000 }).should('not.include', '/login');
-}
-
-/**
- * Create a fresh non-privileged matter, click + New Chat to seed an active
- * chat, and wait for the composer to render. The composer is gated on
- * `{#if activeChat}` in ChatPanel.svelte, so without this step every test
- * times out looking for `lq-ai-composer-input`.
- *
- * Returns the matter name via Cypress alias `@matterName` so tests can assert
- * on it later. Mirrors wave-d1-power-features.cy.ts createSampleMatter.
- */
-function createSampleMatter(prefix = 'Cypress Wave D.2') {
-	const matterName = `${prefix} ${Date.now()}`;
-	cy.visit('/lq-ai/matters');
-
-	// Intercept the create-matter POST so we can wait for the response
-	// BEFORE asserting on the URL change. NewMatterModal calls onCreated()
-	// (parent state refresh) then goto(); under SvelteKit's microtask
-	// queue these sometimes race — refresh re-paints before goto resolves,
-	// and the URL change is delayed past Cypress' default 4s retry.
-	cy.intercept('POST', '/api/v1/projects').as('createMatter');
-
-	cy.contains('button', '+ New matter').first().click();
-	cy.get('[role="dialog"]').should('exist');
-	cy.get('[role="dialog"]').find('input[type="text"]').first().clear().type(matterName);
-	cy.contains('button', 'Create matter').click();
-
-	// Wait for the create POST to land, then for the goto-driven URL change.
-	// 15s URL timeout absorbs the SvelteKit micro-task drift after refresh().
-	cy.wait('@createMatter').its('response.statusCode').should('eq', 201);
-	cy.url({ timeout: 15000 }).should('match', /\/lq-ai\/matters\/[a-f0-9-]+$/);
-	cy.get('[data-testid="lq-ai-chat-shell"]', { timeout: 10000 }).should('exist');
-
-	// + New Chat → auto-selects → composer mounts. createNewChat passes the
-	// matter id through as project_id so composerProjectId is set and the
-	// skill-creator affordances render.
-	cy.get('[data-testid="lq-ai-new-chat-btn"]').click();
-	cy.get('[data-testid="lq-ai-composer-input"]', { timeout: 10000 }).should('be.visible');
-
-	cy.wrap(matterName).as('matterName');
-}
 
 describe('Wave D.2 — Skill Creator', () => {
 	beforeEach(() => {
