@@ -150,13 +150,22 @@
 	 * it to WizardInitial, and seeds the wizard's ``initial`` prop. Renaming
 	 * any field here breaks the handoff silently (no type error at the cast
 	 * site). Defaults: scope=user, version=1.0.0, forkedFrom=null.
+	 *
+	 * ``sourceMessage`` is consulted only as a fallback for ``body``: if the
+	 * user blanked the body field before clicking "Edit in wizard", we
+	 * preserve their original intent ("refine this exchange in the wizard")
+	 * by stashing the captured message content instead of an empty string.
 	 */
-	export function stashForWizard(state: CaptureFormState): CaptureStash {
+	export function stashForWizard(
+		state: CaptureFormState,
+		sourceMessage: Message
+	): CaptureStash {
+		const body = state.body.trim() ? state.body : sourceMessage.content;
 		return {
 			slug: state.slug.trim(),
 			displayName: state.name.trim(),
 			description: state.description.trim(),
-			body: state.body,
+			body,
 			scope: 'user',
 			version: '1.0.0',
 			forkedFrom: null
@@ -176,6 +185,7 @@
 	export let sourceMessage: Message;
 	export let onClose: () => void;
 
+	// Derive once on open. Modal is mounted per-message; reopen to re-derive.
 	const derived = derive(sourceMessage);
 
 	let name = derived.name;
@@ -184,6 +194,10 @@
 	let body = sourceMessage.content;
 	let saving = false;
 	let error: string | null = null;
+
+	// Auto-focus the Name input on open (mirrors NewMatterModal pattern).
+	let nameInput: HTMLInputElement;
+	$: if (nameInput) nameInput.focus();
 
 	$: formState = { name, slug, description, body, saving } as CaptureFormState;
 	$: saveable = canSave(formState);
@@ -212,28 +226,33 @@
 		return `capture-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 	}
 
-	function editInWizard(): void {
+	async function editInWizard(): Promise<void> {
 		const captureId = newCaptureId();
 		try {
 			localStorage.setItem(
 				stashStorageKey(captureId),
-				JSON.stringify(stashForWizard(formState))
+				JSON.stringify(stashForWizard(formState, sourceMessage))
 			);
 		} catch {
 			// Storage quota / disabled — the wizard route falls through to a
 			// blank wizard when the stash is missing, so this is non-fatal.
 		}
 		onClose();
-		goto(`/lq-ai/skills/new?capture=${captureId}`);
+		await goto(`/lq-ai/skills/new?capture=${captureId}`);
 	}
 
-	function handleKeydown(event: KeyboardEvent): void {
+	// Window-level keydown so Escape works regardless of focus location.
+	// (The panel uses on:click|stopPropagation so click-outside still closes,
+	// but we deliberately do NOT stop keydown propagation on the panel —
+	// doing so previously swallowed Escape when focus was inside an input.)
+	function handleWindowKeydown(event: KeyboardEvent): void {
 		if (event.key === 'Escape') {
-			event.stopPropagation();
 			onClose();
 		}
 	}
 </script>
+
+<svelte:window on:keydown={handleWindowKeydown} />
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
 <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -244,14 +263,12 @@
 	aria-labelledby="csm-title"
 	tabindex="-1"
 	on:click={onClose}
-	on:keydown={handleKeydown}
 >
 	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
 		class="csm-panel"
 		on:click|stopPropagation
-		on:keydown|stopPropagation
 		data-testid="lq-ai-capture-skill-modal"
 	>
 		<header class="csm-header">
@@ -270,6 +287,7 @@
 			<input
 				type="text"
 				bind:value={name}
+				bind:this={nameInput}
 				aria-label="name"
 				data-testid="lq-ai-capture-name"
 				maxlength="200"

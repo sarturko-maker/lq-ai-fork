@@ -259,7 +259,7 @@ describe('CaptureSkillModal.stashForWizard', () => {
 	 * These assertions pin the camelCase field names and the defaults.
 	 */
 	it('returns the camelCase WizardInitial-shaped snapshot the wizard route expects', () => {
-		const stash = stashForWizard(makeState());
+		const stash = stashForWizard(makeState(), makeMessage());
 		expect(stash).toEqual({
 			slug: 'nda-review',
 			displayName: 'NDA Review',
@@ -272,7 +272,7 @@ describe('CaptureSkillModal.stashForWizard', () => {
 	});
 
 	it('uses camelCase field names (NOT snake_case API names)', () => {
-		const stash = stashForWizard(makeState());
+		const stash = stashForWizard(makeState(), makeMessage());
 		const asRecord = stash as unknown as Record<string, unknown>;
 		expect(asRecord.display_name).toBeUndefined();
 		expect(asRecord.owner_team_id).toBeUndefined();
@@ -286,7 +286,8 @@ describe('CaptureSkillModal.stashForWizard', () => {
 				name: '  Padded  ',
 				slug: '  nda-review  ',
 				description: '  desc  '
-			})
+			}),
+			makeMessage()
 		);
 		expect(stash.displayName).toBe('Padded');
 		expect(stash.slug).toBe('nda-review');
@@ -295,17 +296,42 @@ describe('CaptureSkillModal.stashForWizard', () => {
 
 	it('preserves body verbatim (no trimming) so the wizard sees the captured exchange unchanged', () => {
 		const body = '\n  preserved + trailing\nwhitespace\n  ';
-		expect(stashForWizard(makeState({ body })).body).toBe(body);
+		expect(stashForWizard(makeState({ body }), makeMessage()).body).toBe(body);
+	});
+
+	it('falls back to sourceMessage.content when body is empty (preserves user intent on accidental delete)', () => {
+		// User opened the modal, blanked the body field, then clicked
+		// "Edit in wizard". Their intent ("refine this exchange") is
+		// preserved by stashing the original captured message content
+		// rather than an empty string.
+		const source = makeMessage({ content: '# Original\nThe captured exchange body.' });
+		const stash = stashForWizard(makeState({ body: '' }), source);
+		expect(stash.body).toBe('# Original\nThe captured exchange body.');
+	});
+
+	it('falls back to sourceMessage.content when body is whitespace only', () => {
+		// trim()-empty body counts as blanked too — same fallback.
+		const source = makeMessage({ content: 'Captured content here.' });
+		const stash = stashForWizard(makeState({ body: '   \n  \t  ' }), source);
+		expect(stash.body).toBe('Captured content here.');
+	});
+
+	it('does NOT fall back when body has any non-whitespace content (preserves user edits)', () => {
+		// If the user has typed anything meaningful, that's what they want
+		// in the wizard — even if surrounded by whitespace.
+		const source = makeMessage({ content: 'Original content.' });
+		const stash = stashForWizard(makeState({ body: '\n  edited body  \n' }), source);
+		expect(stash.body).toBe('\n  edited body  \n');
 	});
 
 	it('round-trips through JSON without losing fields', () => {
-		const stash = stashForWizard(makeState());
+		const stash = stashForWizard(makeState(), makeMessage());
 		const restored = JSON.parse(JSON.stringify(stash));
 		expect(restored).toEqual(stash);
 	});
 
 	it('defaults forkedFrom=null, scope=user, version="1.0.0"', () => {
-		const stash = stashForWizard(makeState());
+		const stash = stashForWizard(makeState(), makeMessage());
 		expect(stash.scope).toBe('user');
 		expect(stash.version).toBe('1.0.0');
 		expect(stash.forkedFrom).toBe(null);
