@@ -78,6 +78,35 @@
 	}
 
 	/**
+	 * Human-readable label for the Action column. Maps the raw audit-log
+	 * action strings (e.g. ``user_skill.updated``) to brief display labels.
+	 *
+	 * The raw action string is preserved in a ``data-action`` attribute on
+	 * the table cell so Cypress tests that assert on the raw string value
+	 * (wave-d2 Test 6 asserts ``user_skill.created`` / ``user_skill.updated``)
+	 * remain green without modification.
+	 *
+	 * Fallback: action strings not in the map are humanised by replacing
+	 * dots and underscores with spaces and title-casing the first word
+	 * (e.g. ``user_skill.foo_bar`` → ``Foo bar``).
+	 */
+	const ACTION_LABELS: Record<string, string> = {
+		'user_skill.created': 'Created',
+		'user_skill.updated': 'Updated',
+		'user_skill.deleted': 'Archived'
+	};
+
+	export function formatAction(v: UserSkillVersion): string {
+		if (ACTION_LABELS[v.action]) return ACTION_LABELS[v.action];
+		// Humanise unknown action strings: take the part after the last dot
+		// (or the whole string), replace underscores/dots with spaces, and
+		// capitalise the first character.
+		const tail = v.action.includes('.') ? v.action.split('.').pop()! : v.action;
+		const humanised = tail.replace(/[_]+/g, ' ').trim();
+		return humanised.charAt(0).toUpperCase() + humanised.slice(1);
+	}
+
+	/**
 	 * Submit-gate analog for the empty-history state: shown after a
 	 * successful load that returned zero rows. Loading + error states have
 	 * their own branches, so this is specifically the "no history yet"
@@ -156,7 +185,7 @@
 					<tr>
 						<td>{formatTimestamp(v)}</td>
 						<td>{formatActor(v)}</td>
-						<td>{v.action}</td>
+						<td data-action={v.action}>{formatAction(v)}</td>
 						<td>{formatVersion(v)}</td>
 					</tr>
 				{/each}
