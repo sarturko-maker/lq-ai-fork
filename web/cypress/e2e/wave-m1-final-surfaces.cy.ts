@@ -176,7 +176,7 @@ describe('Wave M1-final — Saved Prompts + Knowledge + Receipts source', () => 
 		}).should('have.length.gte', 2);
 	});
 
-	it('Knowledge: create KB → upload PDF → doc row present', () => {
+	it('Knowledge: create KB → upload PDF → ingest reaches ready status', () => {
 		const ts = Date.now();
 		const kbName = `M1 KB Test ${ts}`;
 		const kbDesc = `Cypress fixture KB created at ${ts}`;
@@ -212,9 +212,10 @@ describe('Wave M1-final — Saved Prompts + Knowledge + Receipts source', () => 
 		cy.intercept('POST', '/api/v1/files').as('uploadFile');
 
 		// Select file on the hidden input directly (force: true bypasses display:none).
-		cy.get('input[type="file"][accept*="pdf"]').selectFile('cypress/fixtures/sample.pdf', {
-			force: true
-		});
+		cy.get('[data-testid="lq-ai-knowledge-upload-btn"]')
+			.closest('section')
+			.find('input[type="file"]')
+			.selectFile('cypress/fixtures/sample.pdf', { force: true });
 
 		// Wait for the upload POST to land.
 		cy.wait('@uploadFile', { timeout: 30000 }).its('response.statusCode').should('eq', 201);
