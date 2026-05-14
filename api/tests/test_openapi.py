@@ -80,6 +80,11 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # user skills (D8 — DB-backed user-scope skills per ADR 0012)
         "/api/v1/user-skills",
         "/api/v1/user-skills/{skill_id}",
+        # Wave D.2 — version audit feed + slash_alias autocomplete
+        "/api/v1/user-skills/{skill_id}/versions",
+        "/api/v1/skills/autocomplete",
+        # Wave D.2 Task 2.2 — sandbox matter find-or-create
+        "/api/v1/projects/sandbox/ensure",
         # teams (D8.1a — admin CRUD + user-facing read)
         "/api/v1/teams",
         "/api/v1/teams/{team_id}",
@@ -149,8 +154,10 @@ async def test_openapi_paths_match_sketch() -> None:
     # paths + D8.1a's six teams paths + Wave A's five paths +
     # Wave B's four paths + Wave C's /admin/users/{user_id}/role +
     # Wave B v2's /admin/users + Wave D.1's two matter <-> KB attach/detach paths
-    # + Wave D.1 T4's /inference/override-tier-floor.
-    assert len(actual) == 70
+    # + Wave D.1 T4's /inference/override-tier-floor
+    # + Wave D.2's three paths: /user-skills/{id}/versions,
+    # /skills/autocomplete, /projects/sandbox/ensure.
+    assert len(actual) == 73
 
 
 @pytest.mark.unit

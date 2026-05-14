@@ -711,6 +711,37 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
 
+  # ----------- PROJECTS SANDBOX (Wave D.2 Task 2.2) -----------
+  /api/v1/projects/sandbox/ensure:
+    post:
+      tags: [projects]
+      summary: Find or create the caller's try-it sandbox matter (Wave D.2)
+      description: |
+        Idempotent find-or-create for the per-user *try-it sandbox*
+        project. The sandbox is a system-managed matter (slug
+        ``__sandbox__``, ``is_sandbox=true``) used to scope skill try-it
+        conversations that should not count toward billable matter
+        activity.
+
+        * First call returns 201 with a fresh row.
+        * Subsequent calls return 200 with the same row.
+        * If the sandbox was previously soft-deleted, the next ensure
+          call recreates it (returns 201).
+
+        Concurrent callers are safe: the ``ON CONFLICT DO NOTHING`` path
+        ensures only one row is ever created per owner.
+      responses:
+        '200':
+          description: Existing sandbox (already existed)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+        '201':
+          description: Sandbox created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+
   # ----------- CHATS -----------
   /api/v1/chats/search:
     get:
@@ -1115,6 +1146,61 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
 
+  # ----------- SKILLS AUTOCOMPLETE (Wave D.2 Task 2.5) -----------
+  /api/v1/skills/autocomplete:
+    get:
+      tags: [skills]
+      summary: Typeahead for the chat composer's skill picker (Wave D.2)
+      description: |
+        Two modes based on the ``q`` query parameter:
+
+        * **Empty ``q``** — returns the caller's most-recently-used skills
+          (by ``messages.applied_skills``), filled out alphabetically to
+          ``limit`` when recents are fewer than ``limit``.
+        * **Non-empty ``q``** — ranks the merged catalog by three signals
+          (slash-alias prefix > slug prefix > title substring) and returns
+          up to ``limit`` non-zero matches.
+
+        Shadowing: a user-scope row at the same slug as a built-in hides
+        the built-in (ADR 0012). ``scope`` on each result distinguishes
+        user shadows from built-ins.
+
+        ``limit`` is hard-clamped at 25 — a request for ``limit=50``
+        returns 422 rather than silently truncating.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: {type: string, default: ''}
+          description: Substring to match. Empty returns recents.
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 25, default: 10}
+      responses:
+        '200':
+          description: Autocomplete results (may be empty)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [slug, title, scope]
+                      properties:
+                        slug: {type: string}
+                        slash_alias: {type: string, nullable: true}
+                        title: {type: string}
+                        description: {type: string, nullable: true}
+                        scope: {type: string, enum: [builtin, user, team]}
+                        icon: {type: string, nullable: true}
+        '422':
+          description: limit out of range (must be 1–25).
+
   # ----------- USER SKILLS (D8 — DB-backed CRUD per ADR 0012) -----------
   /api/v1/user-skills:
     get:
@@ -1436,6 +1522,58 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
         '410':
           description: Skill is already archived.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/user-skills/{skill_id}/versions:
+    parameters:
+      - name: skill_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [user-skills]
+      summary: Audit-log view of edits for this user-skill (Wave D.2)
+      description: |
+        Returns ``audit_log`` rows for ``resource_type='user_skill'``
+        keyed by this skill id, ordered ``timestamp DESC`` (newest first).
+        The timeline UI renders top-down so the most recent edit appears
+        at the top; ``user_skill.created`` lands last.
+
+        Access gate mirrors the mutable surface: owner-only for
+        ``scope='user'`` rows; team-admin-only for ``scope='team'`` rows.
+        404 conflates "no such id" and "not your skill" (id-probing-safe).
+        Active AND archived rows are accessible so a freshly-archived
+        skill's timeline can still be rendered.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        '200':
+          description: Version history items, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [timestamp, action]
+                      properties:
+                        timestamp: {type: string, format: date-time}
+                        actor_user_id: {type: string, format: uuid, nullable: true}
+                        actor_email: {type: string, nullable: true}
+                        action: {type: string, description: "e.g. 'user_skill.created' or 'user_skill.updated'"}
+                        version: {type: string, nullable: true}
+                        details: {type: object, additionalProperties: true, nullable: true}
+        '404':
+          description: Skill not found OR caller is not the owner / not a team-admin.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -2941,6 +3079,15 @@ components:
           type: array
           items: {type: string, format: uuid}
           description: "Files attached to this project, ordered by attachment time"
+        is_sandbox:
+          type: boolean
+          default: false
+          description: |
+            System-managed flag added by migration 0022. When true, this
+            project is the per-user try-it sandbox (slug ``__sandbox__``).
+            Sandbox projects are excluded from the default ``GET /projects``
+            list; pass ``include_sandbox=true`` or ``only_sandbox=true`` to
+            surface them. Created by ``POST /projects/sandbox/ensure``.
         archived_at:
           type: string
           format: date-time
@@ -3707,6 +3854,14 @@ components:
           additionalProperties: true
           description: Arbitrary ``lq_ai:`` extension keys (jurisdiction, output_format, minimum_inference_tier, etc.).
         body: {type: string}
+        slash_alias:
+          type: string
+          nullable: true
+          description: Chat-composer trigger alias (e.g. ``/nda``). Added by migration 0023.
+        forked_from:
+          type: string
+          nullable: true
+          description: Slug of the source skill when this row was forked. Added by migration 0023.
         archived_at: {type: string, format: date-time, nullable: true, description: Soft-delete timestamp; null when active.}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
@@ -3735,6 +3890,24 @@ components:
           format: uuid
           nullable: true
           description: Required when scope='team'; must be null when scope='user'. 422 if the combination is inconsistent. 404 if the caller is not a team-admin of the named team (id-probing-safe).
+        slash_alias:
+          type: string
+          nullable: true
+          pattern: '^/[a-z0-9-]{1,32}$'
+          description: |
+            Optional chat-composer trigger alias (e.g. ``/nda``). Must be
+            ``/`` followed by 1–32 lowercase alphanumeric-or-dash chars.
+            Unique per owner within the active (non-archived) set; 422 on
+            collision with ``"slash_alias '...' is already used by another
+            of your skills."``.
+        forked_from:
+          type: string
+          nullable: true
+          description: |
+            Slug of the source skill when this row was created by forking a
+            built-in or another skill via the detail-page fork button. Set
+            on create; read-only afterward. Stored as plain text (no FK —
+            the source may be a filesystem-canonical built-in with no DB row).
 
     UserSkillUpdate:
       type: object
@@ -3746,6 +3919,13 @@ components:
         version: {type: string, maxLength: 50}
         tags: {type: array, items: {type: string}, maxItems: 20}
         frontmatter_extra: {type: object, additionalProperties: true}
+        slash_alias:
+          type: string
+          nullable: true
+          pattern: '^/[a-z0-9-]{1,32}$'
+          description: |
+            Update the chat-composer trigger alias. Same validation and
+            uniqueness rules as on create. 422 on collision.
 
     # D8.1a — operator-admin-controlled teams. D8.1c adds caller_role.
     TeamSummary:
