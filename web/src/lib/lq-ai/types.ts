@@ -460,6 +460,28 @@ export interface FileMeta {
 	created_at: string;
 }
 
+/**
+ * One row of `GET /knowledge-bases/{kb_id}/files`. Mirrors `FileMeta`
+ * (the canonical `File` shape) plus `attached_at` from the join row.
+ * Drives the Knowledge surface's detail-page document list (Wave C of
+ * the M1 frontend redesign).
+ */
+export interface KnowledgeBaseFile {
+	id: string;
+	owner_id: string;
+	project_id?: string | null;
+	filename: string;
+	mime_type: string;
+	size_bytes: number;
+	hash_sha256: string;
+	ingestion_status: IngestionStatus;
+	ingestion_error?: string | null;
+	page_count?: number | null;
+	character_count?: number | null;
+	created_at: string;
+	attached_at: string;
+}
+
 // ----- Saved prompts (D7 / DE-013) -----
 
 /**

@@ -6,7 +6,11 @@
  * error translation. Owned-only (cross-user → 404 on either side).
  */
 import { apiRequest } from './client';
-import type { KnowledgeBase, KnowledgeBaseCreate } from '../types';
+import type {
+	KnowledgeBase,
+	KnowledgeBaseCreate,
+	KnowledgeBaseFile
+} from '../types';
 
 /**
  * GET /api/v1/knowledge-bases — list the caller's knowledge bases.
@@ -56,6 +60,19 @@ export async function attachFileToKB(
 			method: 'POST',
 			body: { file_id: fileId }
 		}
+	);
+}
+
+/**
+ * GET /api/v1/knowledge-bases/{kb_id}/files — list the files attached to
+ * a KB, with per-doc ingestion status + attached_at. Drives the
+ * Knowledge surface's detail-page document list (Wave C).
+ */
+export async function listKnowledgeBaseFiles(
+	kbId: string
+): Promise<KnowledgeBaseFile[]> {
+	return apiRequest<KnowledgeBaseFile[]>(
+		`/knowledge-bases/${encodeURIComponent(kbId)}/files`
 	);
 }
 
