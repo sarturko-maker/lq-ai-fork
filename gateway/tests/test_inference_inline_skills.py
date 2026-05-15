@@ -328,10 +328,11 @@ async def test_inline_body_tier_floor_honored(
     _mock_no_org_profile()
 
     # The smart alias resolves to anthropic/claude-opus-4-7 at tier 4 in
-    # gateway.yaml.example. An inline skill demanding tier 5 should
-    # therefore trigger a tier_below_minimum refusal — proving the
-    # inline ref's tier participates in the floor resolution exactly
-    # like a catalogue skill.
+    # gateway.yaml.example. Under PRD §1.5.2 (lower number = stronger),
+    # an inline skill declaring `minimum_inference_tier: 3` requires
+    # Tier 3 or stronger; Tier 4 is weaker, so the gateway must refuse
+    # (resolved=4 > floor=3) — proving the inline ref's tier
+    # participates in floor resolution exactly like a catalogue skill.
     response = await http_client.post(
         "/v1/chat/completions",
         json={
@@ -341,7 +342,7 @@ async def test_inline_body_tier_floor_honored(
                 {
                     "name": "__inline__floor",
                     "body": "Restricted skill",
-                    "minimum_inference_tier": 5,
+                    "minimum_inference_tier": 3,
                     "source": "wizard-tryout",
                 }
             ],
@@ -350,7 +351,7 @@ async def test_inline_body_tier_floor_honored(
     assert response.status_code == 403, response.text
     body = response.json()
     assert body["error"]["code"] == "tier_below_minimum"
-    assert body["error"]["details"]["required_tier"] == 5
+    assert body["error"]["details"]["required_tier"] == 3
 
 
 @pytest.mark.integration
