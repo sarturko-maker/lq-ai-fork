@@ -3241,6 +3241,16 @@ This subsection operationalizes the §1.9 engineering-discipline posture and the
 
 **Acceptance criteria:** `npm run check` (full-scope) exits 0; `tsconfig.lq-ai.json` can be retired; Silver OpenSSF Best Practices Badge tier is unblocked from the typecheck signal side.
 
+#### DE-263 — Community skill installer (admin UI)
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** M1 makes the [LegalQuants/lq-skills](https://github.com/LegalQuants/lq-skills) catalog available at deploy time via the `skills/community/` git submodule (commit `216d7ea`). Adding a new community skill after deployment requires updating the submodule on the host, rebuilding the api container, and restarting — friction even for technical operators, impossible for legal-team operators without shell access.
+
+**Specific scope:** Admin-only "Browse community skills" page that lists upstream skills, shows full SKILL.md contents in an install-confirm modal, and persists installed skills as user-scope rows with `forked_from = "lq-skills:<slug>@<commit-sha>"`. Reuses the existing `UserSkillCreate` Pydantic validators for safety. Audit log emits `community_skill.installed` action. See [mini-PRD](contribute/mini-prds/community-skill-installer-ui.md) for the contributor-facing spec.
+
+**Acceptance criteria:** mini-PRD's acceptance checklist is fully satisfied; Cypress e2e covers the install happy path; security review of the new admin endpoint complete.
+
 ### How to add to this list
 
 When new deferred items are identified during development, ongoing skill authoring, or community feedback:
