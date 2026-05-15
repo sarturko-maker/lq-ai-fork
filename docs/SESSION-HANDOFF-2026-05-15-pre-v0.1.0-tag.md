@@ -68,20 +68,30 @@ Root cause: the comparator in `gateway/app/tier_floor.py` was inverted relative 
 
 ## 4. Critical-Path Items Remaining for v0.1.0 Tag
 
-1. **CI green on latest main HEAD** (the messaging-broaden commit). Verify:
+1. **Fix gateway pytest fixture: `test_inline_body_tier_floor_honored`** — the only known CI blocker as of HEAD `234ac4c`.
+
+   - **File:** `gateway/tests/test_inference_inline_skills.py:335` — function `test_inline_body_tier_floor_honored`
+   - **Symptom:** `respx.models.AllMockedAssertionError: RESPX: <Request('POST', 'https://api.anthropic.com/v1/messages')> not mocked!`
+   - **Root cause:** test-fixture artifact of the tier-floor semantics fix (`9ca3d6c`). Under the old (inverted) comparator, this test's scenario triggered a refusal *before* any provider call, so no respx mock was needed. Under the corrected comparator, the same scenario now resolves to "allowed" and the gateway makes a real Anthropic call — which respx blocks.
+   - **Fix options:**
+     - **A (preferred):** Re-pick the test's tier values so the scenario *still triggers refusal* under corrected semantics. The test's intent is "tier-floor enforcement is honored," so the scenario should still produce a refusal — just with different numbers. E.g., set `floor=2` + `resolved=3` (currently it's probably `floor=2` + `resolved=1`, which used to refuse but now passes).
+     - **B (fallback):** Add `respx.post("https://api.anthropic.com/v1/messages").mock(return_value=httpx.Response(200, json={...}))` to the test so the provider call lands safely, then assert on a different signal (e.g., audit-log row, routing-log entry).
+   - **Acceptance:** `docker exec lq-ai-gateway-1 pytest tests/test_inference_inline_skills.py::test_inline_body_tier_floor_honored -xvs` passes. Then CI on the next push goes green.
+   - **CI state at handoff:** All 3 jobs ran on `f99f6b4`. Web: success ✓. API: was failing on mypy (`set[str]` vs `dict[Never,Never]`); **fixed in `234ac4c`** — will be confirmed by the next CI run. Gateway: this test failure.
+
+2. **Verify CI green on latest HEAD after the gateway test fix.**
    ```bash
    gh run list --branch main --workflow CI --limit 1 --json conclusion,status,headSha
    ```
-   If failure: investigate, fix, push. The most likely failure modes are ruff lint (new file touched) or typecheck (unlikely for doc-only changes).
 
-2. **Fresh-pull verification on a clean machine** (Kevin to do on second machine). Protocol:
+3. **Fresh-pull verification on a clean machine** (Kevin to do on second machine). Protocol:
    - `git clone --recurse-submodules https://github.com/LegalQuants/lq-ai.git`
    - Follow README Quick Start verbatim (Steps 1–5)
    - Smoke walk every M1 surface: Learn page (all 4 routes + 6 playgrounds), chat send, skill capture/fork, KB upload, saved prompts, receipts, privileged matter override
 
-3. **Final walkthrough with Kevin** (next session opening). Look for last UX nits.
+4. **Final walkthrough with Kevin** (next session). Look for last UX nits.
 
-4. **Once verified: tag and push.**
+5. **Once verified: tag and push.**
    ```bash
    git tag -s v0.1.0 -m "v0.1.0 — M1 Foundation release"
    git push origin v0.1.0
