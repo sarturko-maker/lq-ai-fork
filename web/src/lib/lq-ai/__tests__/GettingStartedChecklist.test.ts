@@ -123,7 +123,7 @@ describe('hasSavedSkill', () => {
     vi.spyOn(api.userSkillsApi, 'listUserSkills').mockResolvedValueOnce(
       [{ id: 's1', slug: 'my-skill', scope: 'user', owner_user_id: 'u1', owner_team_id: null,
          display_name: 'My Skill', description: '', version: '1.0.0', tags: [],
-         frontmatter_extra: {}, body: '', archived_at: null,
+         frontmatter_extra: {}, body: '', archived_at: null, slash_alias: null, forked_from: null,
          created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }]
     );
     expect(await hasSavedSkill()).toBe(true);

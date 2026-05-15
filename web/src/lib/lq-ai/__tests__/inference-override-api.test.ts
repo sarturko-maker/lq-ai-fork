@@ -67,7 +67,7 @@ describe('inferenceOverride api', () => {
 		expect(result.routing_log_id).toBe('rl-001');
 
 		// Check request shape
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toContain('/api/v1/inference/override-tier-floor');
 		expect(init.method).toBe('POST');
 		const body = JSON.parse(init.body as string);

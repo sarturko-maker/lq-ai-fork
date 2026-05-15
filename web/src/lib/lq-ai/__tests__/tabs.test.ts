@@ -5,9 +5,9 @@ describe('tabs', () => {
   const adminUser: User = { id: '1', email: 'a@x.io', is_admin: true, must_change_password: false, role: 'admin' };
   const memberUser: User = { id: '2', email: 'm@x.io', is_admin: false, must_change_password: false, role: 'member' };
 
-  it('defines six core tabs plus admin', () => {
+  it('defines seven core tabs plus admin (learn added in Wave C)', () => {
     const ids = TABS.map((t) => t.id);
-    expect(ids).toEqual(['home', 'chats', 'matters', 'skills', 'knowledge', 'saved-prompts', 'admin']);
+    expect(ids).toEqual(['home', 'chats', 'matters', 'skills', 'knowledge', 'saved-prompts', 'learn', 'admin']);
   });
 
   it('hides admin tab for non-admin users', () => {
@@ -33,6 +33,8 @@ describe('tabs', () => {
     expect(isTabAvailable('saved-prompts')).toBe(true);
     // Knowledge surface landed in Wave C — closes the last M1 placeholder.
     expect(isTabAvailable('knowledge')).toBe(true);
+    // Learn surface landed in Wave C alongside Knowledge.
+    expect(isTabAvailable('learn')).toBe(true);
   });
 
   it('derives active tab from pathname', () => {

@@ -64,7 +64,7 @@ describe('projectKnowledgeBases api', () => {
 		expect(result.attached_knowledge_base_ids).toContain('kb-001');
 
 		// Check request shape
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toContain('/api/v1/projects/proj-abc123/knowledge-bases');
 		expect(init.method).toBe('POST');
 		const body = JSON.parse(init.body as string);
@@ -81,7 +81,7 @@ describe('projectKnowledgeBases api', () => {
 		expect(result).toBeUndefined();
 
 		// Check request shape
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toContain('/api/v1/projects/proj-abc123/knowledge-bases/kb-001');
 		expect(init.method).toBe('DELETE');
 	});

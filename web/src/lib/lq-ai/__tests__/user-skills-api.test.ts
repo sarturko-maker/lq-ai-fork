@@ -45,6 +45,8 @@ const SAMPLE: UserSkill = {
 	frontmatter_extra: {},
 	body: 'You review NDAs with my house style.',
 	archived_at: null,
+	slash_alias: null,
+	forked_from: null,
 	created_at: '2026-05-10T22:07:37Z',
 	updated_at: '2026-05-10T22:07:37Z'
 };

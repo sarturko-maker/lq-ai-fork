@@ -40,7 +40,7 @@ describe('autocompleteSkills', () => {
 
 		await autocompleteSkills('nda', 5);
 
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toContain('/api/v1/skills/autocomplete?q=nda&limit=5');
 		expect(init.method ?? 'GET').toBe('GET');
 	});

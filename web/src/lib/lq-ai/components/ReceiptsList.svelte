@@ -111,7 +111,7 @@
       class:active={selectedKinds.length === ALL_KINDS.length}
       on:click={() => onFilterChange([...ALL_KINDS])}
     >all</button>
-    {#each ['message', 'retrieval', 'inference', 'audit', 'error'] as kind}
+    {#each (['message', 'retrieval', 'inference', 'audit', 'error'] as ReceiptEventKind[]) as kind}
       <button
         class:active={selectedKinds.includes(kind)}
         on:click={() => toggleKind(kind)}

@@ -45,7 +45,7 @@
 		loadError = null;
 		try {
 			const [skill, builtins, myTeams] = await Promise.all([
-				userSkillsApi.getUserSkill(skillId),
+				userSkillsApi.getUserSkill(skillId as string),
 				skillsApi.listSkills('builtin'),
 				teamsApi.listMyTeams()
 			]);

@@ -25,7 +25,7 @@ describe('triggerJsonlDownload', () => {
       if (tag === 'a') return fakeAnchor;
       return {} as any;
     });
-    createObjectURLSpy = vi.fn(() => 'blob:fake');
+    createObjectURLSpy = vi.fn(() => 'blob:fake') as unknown as ReturnType<typeof vi.fn>;
     revokeObjectURLSpy = vi.fn();
 
     (globalThis as any).document = {
