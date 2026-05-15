@@ -3251,6 +3251,16 @@ This subsection operationalizes the §1.9 engineering-discipline posture and the
 
 **Acceptance criteria:** mini-PRD's acceptance checklist is fully satisfied; Cypress e2e covers the install happy path; security review of the new admin endpoint complete.
 
+#### DE-264 — LegalQuants ecosystem integration (PrivacyQuant statutory graph + MCP path)
+
+**Priority:** P2 · **Effort:** L (split into M sub-task + L MCP follow-up)
+
+**Context:** [LegalQuants/privacyquant](https://github.com/LegalQuants/privacyquant) is a sibling MIT-licensed TypeScript project in the same GitHub org, exposing 146 versioned statutory nodes across 20 US state consumer privacy statutes (CCPA/CPRA, VCDPA, CPA, CTDPA, UCPA, TDPSA, OCPA, MCDPA, ICDPA, INCDPA, TIPA, DPDPA, NJDPA, NHDPA, NDPA, KCDPA, MODPA, MCDPA-MN, RIDTPPA, FDBR) via 18 MCP tools — 16 of them deterministic (no LLM, no external API). LQ.AI's M1 starter skill set includes a DPA Checklist Review (skill 4) that operates against general patterns rather than per-statute statutory text; PrivacyQuant's deterministic tools (`pq_check_clause`, `pq_check_applicability`, `pq_resolve_conflict`, `pq_dsar_router`, `pq_score_privacy_risk`) provide citation-grounded statutory checks the same skill can leverage. The integration pattern is the LQ.AI ecosystem play: same org, same transparency posture, complementary surfaces.
+
+**Specific scope:** Two-phase integration. **Phase A (~M2–M3):** port a subset of PrivacyQuant workflows as `skills/community/pq-*` entries (initial candidates: `pq-applicability-check`, `pq-multi-state-conflict-resolution`, `pq-dpa-clause-review`, `pq-dsar-router`). Each skill calls the appropriate PrivacyQuant tool via a documented interface — initially a thin Python shim wrapping the TypeScript MCP server's STDIO transport, eventually replaced by native MCP-client. Skills inherit PrivacyQuant's deterministic citation grounding posture. **Phase B (blocks on MCP-client subsystem from PRD §8.5, M5+):** PrivacyQuant runs as an MCP server in the LQ.AI deployment (Docker Compose service); skills consume it via the standard MCP tool-calling layer; statutory updates flow in via PrivacyQuant's release cadence the same way community skill updates flow in via the `lq-skills` submodule pattern. The pattern generalizes: any future LegalQuants MCP server can plug into the same boundary.
+
+**Acceptance criteria — Phase A:** at least one PrivacyQuant-backed community skill in `skills/community/` with a documented end-to-end path from skill invocation → PrivacyQuant tool call → citation-grounded output rendered in the LQ.AI UI; PrivacyQuant referenced in `README.md` as a LegalQuants ecosystem integration; `docs/skill-authoring-guide.md` updated with the MCP-tool-call skill pattern. **Acceptance criteria — Phase B:** revisit when MCP-client subsystem work begins.
+
 ### How to add to this list
 
 When new deferred items are identified during development, ongoing skill authoring, or community feedback:

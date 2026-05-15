@@ -33,6 +33,7 @@ This is the surface an in-house counsel touches every day: chat, matter workspac
 | Multi-turn chat with persistent history | M1 | `api/app/api/chats.py`; `web/cypress/e2e/chat.cy.ts` |
 | Matter (project) workspace with attached files / skills / KBs | M1 | `api/app/api/projects.py`; `web/src/routes/lq-ai/matters/[id]/+page.svelte` |
 | Slash-invoked skills with provenance pill | M1 | `web/cypress/e2e/wave-d2-skill-creator.cy.ts` Test 4 |
+| Community skill catalog via [`LegalQuants/lq-skills`](https://github.com/LegalQuants/lq-skills) submodule | M1 | `skills/community/` (30+ skills); loader walks both built-in + community paths with built-in winning on slug collision (`api/app/skills/loader.py`); operator refreshes via `git submodule update --remote skills/community` |
 | Skill capture from a chat reply | M1 | `web/cypress/e2e/wave-d2-skill-creator.cy.ts` Test 1 |
 | Wizard-based skill authoring (from scratch) | M1 | `web/cypress/e2e/wave-d2-skill-creator.cy.ts` Test 2 |
 | Fork built-in or team skills | M1 | `web/cypress/e2e/wave-d2-skill-creator.cy.ts` Test 3 |
