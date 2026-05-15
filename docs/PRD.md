@@ -3231,6 +3231,16 @@ This subsection operationalizes the §1.9 engineering-discipline posture and the
 
 **Acceptance criteria:** All three FastAPI detail shapes surface a meaningful message; existing handling of structured detail is unchanged; unit test passes.
 
+#### DE-262 — OpenWebUI fork TypeScript-check migration
+
+**Priority:** P3 · **Effort:** L (recurring, multi-milestone)
+
+**Context:** The LQ.AI web frontend is a fork of OpenWebUI (ADR 0001). When `svelte-check` runs against the full codebase, approximately 9,359 TypeScript errors surface — all in upstream OpenWebUI files inherited at fork time. None are in LQ.AI-owned code. For M1, CI scopes the typecheck to LQ.AI-owned paths (`src/lib/lq-ai/**`, `src/routes/lq-ai/**`) via `npm run check:lq-ai`, keeping the signal clean for new contributions. The full-scope check (`npm run check`) remains available for auditors. See `docs/HONEST-STATE.md §6.1` for the complete safety analysis.
+
+**Specific scope:** Systematically fix TypeScript strict-mode errors in upstream OpenWebUI files. Prioritize: auth and session code first (security-adjacent), chat shell second (user-facing), settings and utility files third, remaining long-tail last. Each batch should be a clean PR with zero LQ.AI regressions.
+
+**Acceptance criteria:** `npm run check` (full-scope) exits 0; `tsconfig.lq-ai.json` can be retired; Silver OpenSSF Best Practices Badge tier is unblocked from the typecheck signal side.
+
 ### How to add to this list
 
 When new deferred items are identified during development, ongoing skill authoring, or community feedback:
