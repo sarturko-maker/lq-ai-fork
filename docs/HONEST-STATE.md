@@ -175,6 +175,7 @@ The project's commitment is that engineering rigor is measurable, not asserted. 
 | Backend tests (pytest) | M1 | 70 test files in `api/tests/`; run via `cd api && pytest` |
 | Gateway tests (pytest) | M1 | 27 test files in `gateway/tests/`; run via `cd gateway && pytest` |
 | Cypress E2E (LQ.AI shell) | M1 | 6 LQ.AI specs in `web/cypress/e2e/` (`wave-a-chrome`, `wave-b-surfaces`, `wave-c-matters`, `wave-d1-power-features`, `wave-d2-skill-creator`, `wave-m1-final-surfaces`) plus 4 upstream OpenWebUI specs |
+| Documented E2E coverage matrix per surface (`docs/test-strategy.md`) | not yet | CLAUDE.md notes `docs/test-strategy.md` as an M1 deliverable; the file does not yet exist. The coverage signal today is the spec inventory above and the "tests as documentation" framing in PRD §5.8; the explicit per-surface coverage matrix (smoke / happy path / edge cases) with milestone tags is deferred. Closes the criticism that "tests as documentation" is overstated when 6 specs cover the M1 LQ.AI surfaces without an explicit per-surface contract. |
 | Coverage gate (PRD §5.8 target: 80% api / 90% gateway) | not enforced | `.github/workflows/ci.yml` runs pytest but does not fail below threshold; the gap is documented |
 | Ruff lint + format (Python) | M1 | `.github/workflows/ci.yml`; configured in each subsystem |
 | mypy type-checking (api: standard, gateway: strict) | M1 | Same |

@@ -2054,6 +2054,16 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 
 **Acceptance criteria:** Dictation works in Chrome and Safari; clearly disclaimed as browser-side.
 
+#### DE-265 — In-app "unverified citation" badging until Citation Engine ships
+
+**Priority:** P1 · **Effort:** S · **Target milestone:** M1 polish or M2 with Citation Engine
+
+**Context:** M1 ships the Citation Engine architectural slot but not the byte-level verification pipeline (`docs/HONEST-STATE.md` §3.1). Without an explicit in-app indicator, users may see model-generated text resembling a citation and assume it has been verified against source material when it has not. The HONEST-STATE doc is upfront about the gap; the chat UI is not.
+
+**Specific scope:** A visual "unverified" badge rendered next to any text in chat output that resembles a citation (a `[chunk-id]`-like reference, a quoted span attributed to a document, or a parenthesized section reference). The badge is hoverable / focusable with explanatory text — e.g., "This text looks like a citation but has not been verified. The Citation Engine ships in M2 (see HONEST-STATE.md §3.1). Until then, treat apparent citations as suggestions to verify, not as verified provenance." The badge is removed automatically when M2 Citation Engine renders verification metadata alongside the span. Implemented client-side on the rendered output; no backend schema change needed.
+
+**Acceptance criteria:** Citation-like spans show the badge in M1 chat output; the badge is keyboard-focusable and screen-reader-accessible (`role="status"` or `aria-label` + tooltip pattern); Cypress E2E exercises the badge on at least one starter-skill output that historically produces citation-like text.
+
 ### PRD-process and capability refinements
 
 #### DE-020 — Standardize the optional-input pattern across skills
@@ -2147,6 +2157,16 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 **Specific scope:** CLI tool that runs `pg_dump` plus MinIO snapshot, generates a versioned backup bundle, and a corresponding restore tool that handles version migration if needed.
 
 **Acceptance criteria:** Backup-restore round-trip tested in CI; documented procedure for upgrade-with-restore.
+
+#### DE-267 — Azure OpenAI provider adapter
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** Three provider adapters ship in M1 (Anthropic, OpenAI, Ollama); Vertex AI (DE-034) and AWS Bedrock (DE-035) are spec'd as M2 work. Microsoft Azure OpenAI is a significant gap: many enterprise legal teams hold existing Azure commitments (Azure's HIPAA BAA via the Online Services Subscription Agreement; FedRAMP High authorization; the EU AI Act-relevant DPA/SCC documentation Azure provides; an Enterprise Agreement that already covers their procurement budget). The Provider Compliance Matrix references Azure but no adapter ships in M1; operators on Microsoft-only procurement contracts cannot route through their existing stack.
+
+**Specific scope:** `gateway/app/providers/azure_openai.py` adapter implementing the same wire shape as the OpenAI adapter (`gateway/app/providers/openai.py`), with Azure-specific differences: authentication via Azure AD (managed identity / service principal) or API key; deployment-name resolution per Azure's `deployment-id`-not-`model`-name convention; endpoint-form URL handling (`https://<resource>.openai.azure.com/openai/deployments/<deployment-id>/chat/completions?api-version=<version>`); tier classification configurable in `gateway.yaml.example` (typically Tier 3 — Azure OpenAI under enterprise agreement carries ZDR and BAA terms). Mirrors the M1 OpenAI adapter feature set.
+
+**Acceptance criteria:** Adapter passes the gateway test suite shape used by the OpenAI adapter (chat completions, error mapping, tier-floor enforcement, fallback into the router); documented in the gateway provider table; example configuration appears in `gateway.yaml.example`; one Cypress E2E or gateway-integration test exercises an end-to-end Azure call (mocked).
 
 #### DE-034 — Google Vertex AI provider adapter (Anthropic on Vertex)
 
@@ -2631,6 +2651,46 @@ This subsection consolidates security and compliance enhancements deferred from 
 
 **Acceptance criteria:** VDP published; safe-harbor reviewed by counsel; first reported and fixed disclosure referenced.
 
+#### DE-266 — Tier-floor warning surface for privileged matters
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** `Project.privileged=true` forces a minimum inference tier (default Tier 2; configurable to Tier 1 — see §3.11). Tier 2 in PRD §1.5.2 means "enterprise managed inference with ZDR / no-training commitments." But "Tier 2" is shorthand for whichever provider the operator has configured as their Tier-2 routing target — and that provider may or may not have a BAA signed, may or may not have a confirmed ZDR commitment, and may or may not be configured in a HIPAA-eligible mode. Without an explicit warning surface, the operator can mark a Project `privileged: true` and assume the configured Tier 2 satisfies the implied compliance posture when the provider was in fact misconfigured. The audit log captures the routing but not the inconsistency.
+
+**Specific scope:** Admin-side warning in Project settings when a Project marked `privileged: true` would route to a provider whose Tier-2 configuration is incomplete: no `baa: true` flag in the provider config block; no `zdr_confirmed: true` annotation; no documented HIPAA-eligible operating mode (where relevant). The warning is a soft signal, not a block — the operator may have compensating controls (BAA executed out-of-band, for example) — but the warning surfaces the inconsistency so the operator can resolve it knowingly. Audit log captures the warning's display + the operator's acknowledgement with reason.
+
+**Acceptance criteria:** Warning fires for each misconfiguration pattern above; admin can acknowledge with a captured reason; audit log records both the warning event and the acknowledgement; documented in `docs/security/privileged-matter-configuration.md`; Cypress E2E covers the warning surface.
+
+#### DE-268 — Skill-capture prompt-injection sanitization
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** M1's skill-capture flow (per `web/cypress/e2e/wave-d2-skill-creator.cy.ts` Test 1) takes a user-selected chat message and persists it as a new user-scope skill. If the message originated from a counterparty document ingested into the chat (a PDF, DOCX, or pasted text), prompt-injection content embedded in that document could be captured into the user's persistent skill library — a quiet backdoor across sessions. The user-confirmation step exists but does not surface the injection pattern; the capture happens at face value.
+
+**Specific scope:** Capture-confirmation UI integrates the prompt-injection pattern library (DE-110) — when the captured text matches any high-confidence injection pattern (instruction-overriding phrases, role-hijack templates, encoded-instruction patterns from the Garak / PyRIT / MITRE ATLAS corpora), the confirmation dialog highlights the match and asks the user to review before saving. Optional structured-output gate: if the captured text contains content the schema would not validate (embedded `system:` markers, JSON instruction blocks), the capture is paused with a structured warning. Audit log row per capture event records a SHA-256 hash of the captured content + the injection-pattern match list (if any).
+
+**Acceptance criteria:** Capture of a chat reply containing a known injection pattern triggers the warning; the warning is keyboard-focusable; audit log captures the event with content hash + pattern matches; Cypress E2E covers both the clean-capture happy path and the warning-triggered review path.
+
+#### DE-270 — Cryptography review: Fernet vs modern AEAD
+
+**Priority:** P3 · **Effort:** S
+
+**Context:** Provider-key encryption at rest uses Fernet (AES-128-CBC + HMAC-SHA256) per `gateway/app/secrets.py` and ADR 0011. Fernet is robust (RFC-style spec, widely deployed, no known break) but is from the `cryptography` library's 0.6 release (2014) and is not a modern AEAD — it uses encrypt-then-MAC rather than a single-pass authenticated mode. Modern alternatives are AES-GCM, ChaCha20-Poly1305, and libsodium's secretbox. The current choice is defensible (Python ecosystem ubiquity, stable key format, well-understood migration path) but a security reviewer will ask the question.
+
+**Specific scope:** Update `docs/security/cryptography.md` and ADR 0011 to either (a) justify the Fernet choice explicitly with the comparison against modern AEADs and the trade-off articulated, or (b) migrate to a modern AEAD (e.g., AES-256-GCM via `cryptography.hazmat.primitives.ciphers.aead.AESGCM`) with a documented backward-compatible key-rotation procedure that re-encrypts existing master-key-wrapped provider keys at startup. Either path produces a defensible written record a procurement security team can cite.
+
+**Acceptance criteria:** Either Fernet is justified in writing with the comparison and trade-off articulated, or the migration is implemented with a migration ADR and a re-encryption procedure tested in CI; ADR 0011 reflects the resolved decision; cryptography reference (`docs/security/cryptography.md`) updated accordingly.
+
+#### DE-271 — Dependency-criticality matrix + fallback plan
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** The SBOM (per §7.8) enumerates all dependencies but does not classify them by criticality to the application, nor document a fallback plan if a critical dependency changes terms or is abandoned. The procurement question "if your dependency tree shifts under you, what's your plan?" currently has no anchor — particularly for the dependencies with structural risk: OpenWebUI fork (license/governance shift risk, per ADR 0001's pin-and-monitor posture), Docling (parser correctness; alternatives exist but with different output shapes), PyMuPDF (AGPL-3.0 boundary; if PyMuPDF's licensing changes, the project's distribution posture must adapt), pgvector (vector storage; tied to Postgres major-version compatibility), and Mistral OCR API (paid; not air-gappable).
+
+**Specific scope:** Publish `docs/security/dependency-criticality.md` with: per-dependency criticality tier (T1 critical = swap is months of work, T2 substantial = swap is weeks, T3 routine = swap is hours-to-days); license-change risk per dep (current license + history of license changes if any); abandonment risk per dep (maintainer count, commit cadence, last release); documented fallback per T1 dep ("if OpenWebUI re-licenses, fork pin at current commit + maintain delta; if PyMuPDF re-licenses, evaluate pikepdf as drop-in replacement with reduced byte-precision; if Docling is abandoned, fall back to Apache Tika + custom parser layer"). The matrix is verifiable against the SBOM and updated per release.
+
+**Acceptance criteria:** Document published at `docs/security/dependency-criticality.md`; every dependency in the SBOM classified to a tier; every T1 dependency has a documented fallback plan; document referenced from PRD §1.8, Appendix E, and the security pack README.
+
 ### Workflow intelligence
 
 This subsection captures the bounded items that operationalize the M5+ Forward-Looking Workflow Intelligence direction (§8.5). The items are bounded enough to be picked up by community contributors as the M5+ roadmap matures. The architectural slot for the MCP-client subsystem is already committed for M1–M2 (§8 M1) so this subsection's items can be implemented incrementally without core refactoring.
@@ -3053,9 +3113,9 @@ This subsection operationalizes the §1.9 engineering-discipline posture and the
 
 #### DE-244 — Signed commits enforced on the main branch
 
-**Priority:** P2 · **Effort:** S
+**Priority:** P2 · **Effort:** S · **Target milestone:** M2
 
-**Context:** Configure GitHub branch protection on `main` to require GPG- or Sigstore-signed commits, in addition to the existing DCO sign-off requirement (per §7.5). This is an OpenSSF Best Practices Badge Silver-tier requirement and a procurement signal of supply-chain seriousness.
+**Context:** Configure GitHub branch protection on `main` to require GPG- or Sigstore-signed commits, in addition to the existing DCO sign-off requirement (per §7.5). This is an OpenSSF Best Practices Badge Silver-tier requirement and a procurement signal of supply-chain seriousness. **M1 trust model is intentionally weaker on this axis:** DCO sign-off is enforced (any contributor can claim any name; the project does not verify identity), and cryptographic commit signing is not required. The M1 supply-chain signal is the **release-side** cryptographic surface (SLSA-3 provenance, Sigstore-signed container images, SBOM with every release per §7.8); the M2 add is **contributor-identity** cryptographic enforcement. Operators who require commit-signing enforcement before M2 ships can configure their fork's branch protection independently.
 
 **Specific scope:** Enable the branch-protection rule; document the contributor onboarding step for setting up commit signing in `CONTRIBUTING.md` and `docs/contribute/signing-commits.md`; include the Sigstore (gitsign) path alongside GPG.
 
