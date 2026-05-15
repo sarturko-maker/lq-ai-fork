@@ -100,10 +100,20 @@
 		</button>
 	</div>
 	<div class="pills">
-		<span class="pill pill-tier" data-testid="pill-tier-mismatch">
+		<span
+			class="pill pill-tier"
+			data-testid="pill-tier-mismatch"
+			title="Tier mismatch — your matter's policy required a stronger inference tier than the one this request would have routed to. The Inference Gateway refused before any provider call was made. Click 'Why am I seeing this?' for the full explanation."
+		>
 			🔒 tier mismatch (requested {requestedTier}, enforced {enforcedTier})
 		</span>
-		<span class="pill pill-audited" data-testid="pill-audited">📜 audited</span>
+		<span
+			class="pill pill-audited"
+			data-testid="pill-audited"
+			title="Audited — the refusal was recorded to the audit log with the requested tier, the enforced tier, and the policy basis. Admins can review this in the audit log surface."
+		>
+			📜 audited
+		</span>
 	</div>
 </div>
 
