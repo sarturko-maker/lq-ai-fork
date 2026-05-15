@@ -13,12 +13,17 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 RUN pip install --no-cache-dir .
 
-# Copy application code and migration files
+# Copy application code, migration files, and the entrypoint script
 COPY app/ ./app/
 COPY alembic.ini ./alembic.ini
 COPY alembic/ ./alembic/
+COPY entrypoint.sh /usr/local/bin/lq-ai-entrypoint
+RUN chmod +x /usr/local/bin/lq-ai-entrypoint
 
 EXPOSE 8000
 
-# uvicorn served directly; for production, front with a reverse proxy
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# The entrypoint runs `alembic upgrade head` before exec'ing uvicorn so a
+# fresh deployment lands a fully-migrated schema before the HTTP server
+# accepts traffic. Operators handling migrations out-of-band can set
+# LQ_AI_SKIP_MIGRATIONS=1 to bypass the step.
+ENTRYPOINT ["/usr/local/bin/lq-ai-entrypoint"]

@@ -113,6 +113,15 @@ async def _reset_admin_password(
             target.hashed_password = hash_password(new_password)
             target.must_change_password = force_change
 
+            # Self-healing fallback for the legacy bootstrap path: if the
+            # target user is_admin=True but role drifted to "member" (the
+            # pre-fix bootstrap left role unset, so the column default
+            # applied), re-sync role to "admin" here. New bootstraps set
+            # both fields correctly; this branch only matters for upgrades
+            # from pre-DE-272 deployments.
+            if target.is_admin and target.role != "admin":
+                target.role = "admin"
+
             # Revoke any active sessions so a stolen refresh token from before
             # the reset can't be used.
             await session.execute(
