@@ -235,3 +235,7 @@ pip-delete-this-directory.txt
 
 # Phase E Makefile sbom output (throwaway local-convenience artifacts)
 artifacts/
+
+# Launch announcement drafts (private — used in posts, not in the repo)
+ANNOUNCEMENT.md
+LAUNCH-POST.md
