@@ -190,7 +190,14 @@ def test_load_registry_skips_malformed_skills_and_warns(
 ) -> None:
     """One malformed sibling does not break the rest of the registry."""
 
-    with caplog.at_level(logging.WARNING, logger="app.skills.loader"):
+    # Force the loader logger to propagate + reach caplog regardless of
+    # what earlier tests in the session may have done to logging config.
+    # caplog's `logger=` filter argument silently no-ops if the named
+    # logger has been detached from the root in the same process; pinning
+    # propagation + level explicitly keeps this test order-independent.
+    loader_logger = logging.getLogger("app.skills.loader")
+    loader_logger.propagate = True
+    with caplog.at_level(logging.WARNING):
         registry = load_registry(MIXED_FIXTURES)
 
     # Only the well-formed `good-skill` makes it into the registry.
@@ -220,7 +227,12 @@ def test_load_registry_nonexistent_dir_returns_empty_with_warning(
     """Pointing at a nonexistent path produces an empty registry + WARNING."""
 
     target = tmp_path / "does-not-exist"
-    with caplog.at_level(logging.WARNING, logger="app.skills.loader"):
+    # Force propagation + root level so caplog captures regardless of
+    # session-order logging mutations (see notes on the malformed-skills
+    # test above).
+    loader_logger = logging.getLogger("app.skills.loader")
+    loader_logger.propagate = True
+    with caplog.at_level(logging.WARNING):
         registry = load_registry(target)
     assert registry.names() == []
     assert any("does not exist" in rec.getMessage() for rec in caplog.records)
