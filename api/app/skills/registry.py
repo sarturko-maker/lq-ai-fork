@@ -26,6 +26,7 @@ from app.skills.schema import (
     Skill,
     SkillFile,
     SkillFrontmatter,
+    SkillSource,
     SkillSummary,
     derive_summary,
 )
@@ -49,17 +50,23 @@ class SkillRecord:
     that want to round-trip skill content."""
     body: str
     """The body markdown — everything after the closing ``---``."""
+    source: SkillSource = "built-in"
+    """Origin of this skill: ``"built-in"`` for skills from ``skills/``;
+    ``"community"`` for skills from the lq-skills submodule at
+    ``skills/community/skills/``. Set by the loader; not parsed from
+    the frontmatter — the loader derives it from which directory the
+    skill was found in."""
     reference_paths: tuple[Path, ...] = field(default_factory=tuple)
     example_paths: tuple[Path, ...] = field(default_factory=tuple)
 
     def summary(self) -> SkillSummary:
-        return derive_summary(self.name, self.frontmatter)
+        return derive_summary(self.name, self.frontmatter, source=self.source)
 
     def materialise(self) -> Skill:
         """Build the full :class:`Skill` shape, loading reference and
         example file contents from disk lazily."""
 
-        summary = self.summary()
+        summary = self.summary()  # already carries source via derive_summary
         reference_files = tuple(_read_files(self.folder, self.reference_paths))
         example_files = tuple(_read_files(self.folder, self.example_paths))
         return Skill(

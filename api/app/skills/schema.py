@@ -32,6 +32,14 @@ from pydantic import BaseModel, ConfigDict, Field
 # delivers the ``builtin`` scope.
 SkillScope = Literal["builtin", "user", "team"]
 
+# ``source`` distinguishes skills loaded from the repo's own ``skills/``
+# directory ("built-in") from skills loaded from the community submodule
+# at ``skills/community/skills/`` ("community"). User/team-scope skills
+# (DB-backed forks) carry ``source: "user"`` or ``source: "team"`` which
+# mirrors their ``scope`` value — the frontend can use ``source`` for
+# badge rendering without inspecting ``scope``.
+SkillSource = Literal["built-in", "community", "user", "team"]
+
 
 class LQAIFrontmatter(BaseModel):
     """The ``lq_ai:`` namespace inside a SKILL.md's frontmatter.
@@ -116,6 +124,11 @@ class SkillSummary(BaseModel):
     version: str
     scope: SkillScope
     title: str
+    source: SkillSource = "built-in"
+    """Attribution field: ``"built-in"`` for skills from ``skills/``,
+    ``"community"`` for skills loaded via the lq-skills submodule at
+    ``skills/community/skills/``. User/team-scope DB-backed skills carry
+    ``"user"`` or ``"team"`` respectively."""
     description: str | None = None
     tags: list[str] = Field(default_factory=list)
     jurisdiction: str | None = None
@@ -268,12 +281,24 @@ def extract_inputs(name: str, frontmatter: SkillFrontmatter) -> SkillInputs:
 # --- Internal helpers --------------------------------------------------------
 
 
-def derive_summary(name: str, frontmatter: SkillFrontmatter) -> SkillSummary:
+def derive_summary(
+    name: str,
+    frontmatter: SkillFrontmatter,
+    *,
+    source: SkillSource = "built-in",
+) -> SkillSummary:
     """Build a :class:`SkillSummary` from parsed frontmatter.
 
     Applies the contract-completion defaults documented above so the
     OpenAPI ``required`` set is always satisfied even when the source
     frontmatter is sparse.
+
+    ``source`` distinguishes the origin of the skill:
+    * ``"built-in"`` — loaded from the repo's own ``skills/`` directory.
+    * ``"community"`` — loaded from ``skills/community/skills/`` (the
+      lq-skills submodule).
+    Callers that do not pass ``source`` get ``"built-in"`` to preserve
+    backward compatibility.
     """
 
     lq = frontmatter.lq_ai
@@ -283,6 +308,7 @@ def derive_summary(name: str, frontmatter: SkillFrontmatter) -> SkillSummary:
         name=name,
         version=version,
         scope="builtin",
+        source=source,
         title=title,
         description=frontmatter.description,
         tags=list(lq.tags),
@@ -310,6 +336,10 @@ def filter_summary_for_response(summary: SkillSummary) -> dict[str, Any]:
     ``minimum_inference_tier``, and ``output_format`` as optional. We
     omit them rather than emit ``null`` so the response stays compact
     and matches the sketch's "optional == may be absent" reading.
+
+    ``source`` is always present (it has a non-null default) so it is
+    never filtered out — the frontend can always read it for badge
+    rendering without a defensive check.
     """
 
     raw = summary.model_dump()
@@ -324,6 +354,7 @@ __all__ = [
     "SkillInputDef",
     "SkillInputs",
     "SkillScope",
+    "SkillSource",
     "SkillSummary",
     "derive_summary",
     "extract_inputs",

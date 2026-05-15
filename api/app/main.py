@@ -60,16 +60,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Startup must not crash the process — surface degradation via /ready.
         log.warning("ensure_bucket failed at startup: %s (continuing)", exc)
 
-    # Skill registry (Task C1). Walk the configured skills directory,
-    # parse + validate each SKILL.md's frontmatter, and register in
-    # memory. Per-skill failures emit WARNING and are skipped; the
-    # registry is built from whatever parses cleanly. The SIGHUP
-    # handler triggers an atomic-swap reload from disk on demand.
+    # Skill registry (Task C1). Walk the configured skills directory and
+    # the community submodule directory, parse + validate each SKILL.md's
+    # frontmatter, and register in memory. Built-in skills win on slug
+    # collision with community skills. Per-skill failures emit WARNING and
+    # are skipped; the registry is built from whatever parses cleanly.
+    # The SIGHUP handler triggers an atomic-swap reload from disk on demand,
+    # re-scanning both directories.
     skills_dir = Path(settings.skills_dir).resolve()
-    initial_registry = load_registry(skills_dir)
+    if settings.community_skills_dir:
+        community_skills_dir: Path | None = Path(settings.community_skills_dir).resolve()
+    else:
+        # Default: community submodule lives at skills/community/skills/ inside
+        # the repo root. skills_dir is the repo's skills/ directory, so the
+        # community path is skills_dir / community / skills.
+        candidate = skills_dir / "community" / "skills"
+        community_skills_dir = candidate if candidate.is_dir() else None
+    # Only pass community dir when it actually exists so startup does not
+    # warn loudly on fresh clones that omitted --recurse-submodules.
+    effective_community_dir = (
+        community_skills_dir
+        if community_skills_dir is not None and community_skills_dir.is_dir()
+        else None
+    )
+    initial_registry = load_registry(skills_dir, community_skills_dir=effective_community_dir)
     skill_registry_holder = MutableSkillRegistry(initial_registry)
     app.state.skill_registry = skill_registry_holder
-    install_sighup_reload(skill_registry_holder, skills_dir)
+    install_sighup_reload(
+        skill_registry_holder,
+        skills_dir,
+        community_skills_dir=effective_community_dir,
+    )
 
     # First-run admin bootstrap (Task B2). If the DB is unreachable at
     # startup we log and continue — the readiness probe will reflect the
