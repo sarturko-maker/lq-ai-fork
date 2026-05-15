@@ -700,11 +700,11 @@
         </button>
         <button class="matter-btn" data-matter="privileged">
           <span class="matter-label">Privileged matter</span>
-          <span class="matter-desc">Tier floor: Tier 4+ (operator-configured privileged providers only).</span>
+          <span class="matter-desc">Tier floor: Tier 2 — requires Tier 2 or stronger (Tier 1 local allowed; Tier 3+ refused).</span>
         </button>
         <button class="matter-btn dim" data-matter="restricted" title="Planned — not yet implemented">
           <span class="matter-label">Confidential matter</span>
-          <span class="matter-desc">Tier floor: Tier 5 (future — operator-restricted providers only).</span>
+          <span class="matter-desc">Tier floor: Tier 1 (future — local / air-gapped only).</span>
         </button>
       </div>
 
@@ -753,7 +753,7 @@
           <input type="checkbox" id="remap-smart">
           <span class="toggle-label">
             Operator remapped 'smart' to Tier 5
-            <span>Moves the smart alias to the highest-restriction provider in gateway.yaml.</span>
+            <span>Moves the smart alias to the weakest (consumer-tier) provider in gateway.yaml.</span>
           </span>
         </label>
         <label class="toggle">
@@ -771,23 +771,23 @@
       <div class="tier-legend">
         <div class="tier-legend-item">
           <div class="tl-num" style="color:var(--tier1)">Tier 1</div>
-          <div class="tl-label">Local / air-gapped (Ollama)</div>
+          <div class="tl-label">Local / air-gapped — most secure (Ollama)</div>
         </div>
         <div class="tier-legend-item">
           <div class="tl-num" style="color:var(--tier2)">Tier 2</div>
-          <div class="tl-label">Privacy cloud (data-retention limits)</div>
+          <div class="tl-label">Customer-hosted cloud (operator's VPC / Bedrock / Vertex)</div>
         </div>
         <div class="tier-legend-item">
           <div class="tl-num" style="color:var(--tier3)">Tier 3</div>
-          <div class="tl-label">Standard cloud (default non-privileged)</div>
+          <div class="tl-label">Enterprise cloud with ZDR / no-training commitment</div>
         </div>
         <div class="tier-legend-item">
           <div class="tl-num" style="color:var(--tier4)">Tier 4</div>
-          <div class="tl-label">Privileged cloud (BAA / operator agreement)</div>
+          <div class="tl-label">Standard commercial cloud (default; no ZDR)</div>
         </div>
         <div class="tier-legend-item">
           <div class="tl-num" style="color:var(--tier5)">Tier 5</div>
-          <div class="tl-label">Highly-restricted (operator-approved only)</div>
+          <div class="tl-label">Consumer / free tier — least secure</div>
         </div>
       </div>
 
@@ -838,10 +838,15 @@ const MODEL_PROVIDERS = {
   fast: 'Fast cloud provider (e.g. GPT-4o-mini)',
   local: 'Ollama (local)',
 };
+// Under PRD §1.5.2: lower tier number = stronger security.
+// MATTER_FLOORS[matter] = minimum_inference_tier value for that matter type.
+// A floor of N means "require Tier N or stronger (≤N)."
+// privileged: 2 → allows Tier 1 (local) and Tier 2 (VPC); refuses Tier 3-5.
+// restricted: 1 → local / air-gapped only (future).
 const MATTER_FLOORS = {
   standard: null,
-  privileged: 4,
-  restricted: 5,
+  privileged: 2,
+  restricted: 1,
 };
 const TIER_COLORS = {
   1: 'var(--tier1)',
@@ -887,8 +892,11 @@ function computeDecision() {
     };
   }
 
-  // Tier floor check
-  if (floor !== null && modelTier < floor) {
+  // Tier floor check: under PRD §1.5.2 (lower number = stronger security),
+  // refuse when the model's tier is WEAKER (higher-numbered) than the floor.
+  // floor=2 means "require Tier 2 or stronger"; modelTier=3 is weaker → refused.
+  // gateway/app/tier_floor.py:is_refused uses: resolved_tier > floor.value
+  if (floor !== null && modelTier > floor) {
     return {
       verdict: 'refused',
       reason: 'tier-floor',
@@ -1003,9 +1011,9 @@ function renderResult() {
   const area = document.getElementById('result-area');
 
   if (decision.verdict === 'allowed') {
-    // Allowed case
+    // Allowed case — under PRD §1.5.2, resolved tier ≤ floor means allowed.
     const reasonText = decision.floor
-      ? `Matter tier floor is ${decision.floor}. The requested alias "${decision.modelAlias}" resolves to ${tierBadge(decision.resolvedTier)}, which meets or exceeds the floor. The Gateway selects <strong>${escHtml(decision.provider)}</strong> and routes the request.`
+      ? `Matter tier floor is Tier ${decision.floor} or stronger. The requested alias "${decision.modelAlias}" resolves to ${tierBadge(decision.resolvedTier)}, which is at or stronger than the floor (Tier ${decision.resolvedTier} ≤ Tier ${decision.floor}). The Gateway selects <strong>${escHtml(decision.provider)}</strong> and routes the request.`
       : `This matter has no tier floor. The requested alias "${decision.modelAlias}" resolves to ${tierBadge(decision.resolvedTier)} — the Gateway routes directly to <strong>${escHtml(decision.provider)}</strong>.`;
 
     const receiptText = state.remapSmart && state.model === 'smart'
@@ -1030,7 +1038,7 @@ function renderResult() {
           </div>
           <div class="result-field">
             <div class="field-key">Matter floor</div>
-            <div class="field-val">${decision.floor ? 'Tier ' + decision.floor + '+' : '<span style="color:var(--text-faint)">None</span>'}</div>
+            <div class="field-val">${decision.floor ? (decision.floor === 1 ? 'Tier 1 only' : 'Tier ' + decision.floor + ' or stronger') : '<span style="color:var(--text-faint)">None</span>'}</div>
           </div>
           <div class="result-field">
             <div class="field-key">User role</div>
@@ -1054,11 +1062,11 @@ function renderResult() {
     // Refusal case
     const refusalReason = decision.reason === 'cloud-disabled'
       ? `Cloud providers are disabled by operator configuration. The requested alias "${decision.modelAlias}" resolves to ${tierBadge(decision.resolvedTier)}, which requires a cloud provider. Only Tier 1 (local) is reachable.`
-      : `Matter privilege floor is Tier ${decision.enforcedFloor}+. The requested alias "${decision.modelAlias}" resolves to ${tierBadge(decision.requestedTier)}, which is below the floor. The Gateway refuses before forwarding the request to any provider.`;
+      : `Matter privilege floor is Tier ${decision.enforcedFloor} or stronger. The requested alias "${decision.modelAlias}" resolves to ${tierBadge(decision.requestedTier)}, which is weaker than the floor (Tier ${decision.requestedTier} > Tier ${decision.enforcedFloor}). The Gateway refuses before forwarding the request to any provider.`;
 
     const enforcedLabel = decision.reason === 'cloud-disabled'
       ? 'Tier 1 (local only)'
-      : `Tier ${decision.enforcedFloor}+`;
+      : `Tier ${decision.enforcedFloor} or stronger`;
 
     const canOverride = state.role === 'admin';
 
@@ -1096,7 +1104,7 @@ function renderResult() {
             <div class="rb-icon">&#9888;</div>
             <div class="rb-title">Inference refused — tier floor not met</div>
           </div>
-          <p class="rb-body">This matter requires inference at <strong>${enforcedLabel}</strong>. The requested model alias resolves below that floor.</p>
+          <p class="rb-body">This matter requires inference at <strong>${enforcedLabel}</strong>. The requested model alias resolves to a weaker (higher-numbered) tier that does not meet the floor.</p>
           <div class="rb-tiers">
             <span class="rb-tier-chip requested">Requested: Tier ${decision.requestedTier}</span>
             <span class="rb-tier-chip enforced">Required: ${enforcedLabel}</span>
@@ -1205,12 +1213,13 @@ function renderResult() {
 }
 
 function costHint(tier) {
+  // Under PRD §1.5.2: Tier 1 = most secure / lowest privacy risk, Tier 5 = least secure.
   const hints = {
-    1: 'Lowest cost, lowest latency for typical workloads. No external API call.',
-    2: 'Low-to-moderate cost. External call to privacy-respecting cloud provider.',
-    3: 'Moderate cost. Standard cloud API pricing applies.',
-    4: 'Moderate-to-higher cost. Provider with BAA/operator agreement — may carry premium.',
-    5: 'Highest tier — operator-configured restricted provider. Cost varies by agreement.',
+    1: 'No external API call — lowest cost for air-gapped deployments. Performance bounded by local hardware.',
+    2: 'Low-to-moderate cost. Data stays in the operator\'s cloud account; provider DPA applies.',
+    3: 'Moderate cost. Enterprise ZDR / no-training terms in place. Standard enterprise API pricing.',
+    4: 'Standard commercial API pricing. No ZDR addendum; data retained per provider default window.',
+    5: 'Consumer / free tier — lowest cost but highest privacy risk. Not recommended for client-confidential work.',
   };
   return hints[tier] || 'Varies by provider configuration.';
 }
@@ -1246,7 +1255,7 @@ function renderOutputPanes() {
   const isRefused = decision.verdict === 'refused';
   const floor = MATTER_FLOORS[state.matter];
 
-  const p1 = `A <strong>tier floor</strong> is the minimum inference tier that the Gateway will accept for a given matter context. When a matter is marked as privileged, the operator's <code>gateway.yaml</code> specifies that only Tier 4+ providers — those with a signed BAA or equivalent operator agreement — may handle that request. The floor is enforced at the Gateway boundary, before any provider call is attempted. This is the security-boundary guarantee: a mis-configured client or a compromised API node cannot bypass it by selecting a lower-tier alias.`;
+  const p1 = `A <strong>tier floor</strong> is the strictest (lowest-numbered) tier the Gateway will accept for a given matter context. Under PRD §1.5.2, Tier 1 is the most secure (local / air-gapped) and Tier 5 is the least secure (consumer). When a matter is marked as privileged, the operator's <code>gateway.yaml</code> specifies a floor (e.g. <code>privileged_minimum_tier: 2</code>) — meaning only Tier 2 or stronger (Tier 1 and Tier 2) may handle that request; Tier 3–5 are refused. The floor is enforced at the Gateway boundary, before any provider call is attempted. This is the security-boundary guarantee: a mis-configured client or a compromised API node cannot bypass it by selecting a weaker (higher-numbered) alias.`;
 
   const p2 = `The enforcement is layered across three components: <strong>gateway/app/tier_floor.py</strong> evaluates the floor check against the operator's tier matrix; <strong>api/app/</strong> surfaces the refusal or receipt to the client; and <strong>web/src/lib/lq-ai/components/RefusalMessageBubble.svelte</strong> renders the result in the chat UI. The Gateway refuses before any token is sent to a provider, so there is no partial-request data leak.`;
 

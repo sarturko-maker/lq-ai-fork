@@ -101,6 +101,8 @@ In practice, the security posture varies along a five-tier spectrum. The tiers a
 
 When customer data privacy is a requirement but Tier 1 / Tier 2 is impractical, the Anonymization Layer (§4) offers a privacy fallback for Tier 3+: sensitive entities are pseudonymized prior to processing and rehydrated after. The Provider Compliance Matrix (`docs/compliance/provider-compliance-matrix.md`) details each supported provider's terms, certifications, and data-residency options for tier classification.
 
+**Floor semantics — how `minimum_inference_tier` works.** Tier values are security levels, not integer ranks. When a request, project, or skill declares `minimum_inference_tier: N`, the Inference Gateway requires at least Tier N security — allowing Tier N and any lower-numbered (stronger) tier, refusing any higher-numbered (weaker) tier. Concretely: `minimum_inference_tier: 2` allows Tier 1 (local Ollama, air-gapped) and Tier 2 (operator-hosted cloud), and refuses Tier 3–5 (managed enterprise cloud, standard commercial cloud, consumer). The combiner across multiple declarations (request + project + skill) is `min(all declared values)` — the declaration requiring the strongest (lowest-numbered) tier governs. The gateway refuses when `resolved_tier > floor.value`, i.e., the routed model's tier is weaker (higher-numbered) than the floor. This means a privileged project with `minimum_inference_tier: 2` can route to Tier 1 (local) as well as Tier 2 (VPC) — air-gap is always allowed when any secure floor is set, consistent with "air-gap is the most restrictive operational posture and satisfies any minimum tier requirement" (see PRD §1.8).
+
 ### 1.6 Out of Scope (v1)
 
 Explicitly not in scope for v1, to keep the initial release focused:
