@@ -103,12 +103,14 @@
     }
   }
 
+  // Under PRD §1.5.2, lower tier number = stronger security.
+  // "Tier N or stronger" means the floor is N; tiers 1..N are all allowed.
   const TIER_OPTIONS: { value: TierFloor; label: string }[] = [
-    { value: 1, label: 'Tier 1+' },
-    { value: 2, label: 'Tier 2+' },
-    { value: 3, label: 'Tier 3+' },
-    { value: 4, label: 'Tier 4+' },
-    { value: 5, label: 'Tier 5' }
+    { value: 1, label: 'Tier 1 only' },
+    { value: 2, label: 'Tier 2 or stronger' },
+    { value: 3, label: 'Tier 3 or stronger' },
+    { value: 4, label: 'Tier 4 or stronger' },
+    { value: 5, label: 'Tier 5 or stronger (any tier)' }
   ];
 </script>
 
