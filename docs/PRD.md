@@ -2701,6 +2701,18 @@ This subsection consolidates security and compliance enhancements deferred from 
 
 **Acceptance criteria:** Document published at `docs/security/dependency-criticality.md`; every dependency in the SBOM classified to a tier; every T1 dependency has a documented fallback plan; document referenced from PRD §1.8, Appendix E, and the security pack README.
 
+#### DE-273 — Audit log API: server-side actor enrichment
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** The audit log API (`GET /api/v1/admin/audit-log`) returns rows with `user_id` (UUID) but no actor enrichment — no email, no display_name. Any UI rendering audit entries must issue a second `/users/{id}` lookup per row to display "who did this" labels, producing an N+1 query pattern. Operators reading the raw JSON cannot tell who an entry refers to without joining manually against the `users` table.
+
+Surfaced in the fresh-install evaluation (2026-05-14) as a usability gap, not a security gap — the data is correct, just unfriendly.
+
+**Specific scope:** Either (a) server-side join — return `user: { id, email, display_name }` instead of (or alongside) bare `user_id`, so the response is self-contained; or (b) add a bulk `/api/v1/users?ids=...` endpoint so the frontend can batch the lookup. Path (a) is preferred for simplicity. Handle the soft-deleted user case explicitly — `user_id` pointing at a deleted row should still render something meaningful, e.g. `{ id, email: "<deleted user>", deleted_at: ... }`, rather than dropping the row or returning `null`.
+
+**Acceptance criteria:** The audit-log response renders actor labels without an additional round-trip; soft-deleted user references resolve to a stable display string; OpenAPI schema reflects the new shape; existing audit-log Cypress E2E updated to assert on the enriched shape.
+
 ### Workflow intelligence
 
 This subsection captures the bounded items that operationalize the M5+ Forward-Looking Workflow Intelligence direction (§8.5). The items are bounded enough to be picked up by community contributors as the M5+ roadmap matures. The architectural slot for the MCP-client subsystem is already committed for M1–M2 (§8 M1) so this subsection's items can be implemented incrementally without core refactoring.

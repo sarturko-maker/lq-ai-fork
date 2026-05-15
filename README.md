@@ -144,10 +144,10 @@ Open `.env` and set the four required secrets (the file explains each one):
 - `LQ_AI_GATEWAY_KEY` — any long random string
 - `JWT_SECRET` — any long random string
 
-Generate all four at once if you want a quick path:
+Generate all four at once, labelled and ready to paste into `.env`:
 
 ```bash
-python3 -c 'import secrets; [print(f"secret_{i}: {secrets.token_urlsafe(32)}") for i in range(4)]'
+python3 -c 'import secrets; [print(f"{name}={secrets.token_urlsafe(32)}") for name in ("POSTGRES_PASSWORD","MINIO_ROOT_PASSWORD","LQ_AI_GATEWAY_KEY","JWT_SECRET")]'
 ```
 
 Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are optional at this step. The stack starts without any; inference calls return "no provider configured" until you add at least one and restart the gateway.
@@ -158,11 +158,13 @@ Provider API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are optional at this s
 docker compose up -d
 ```
 
-Seven services start: postgres, redis, minio, gateway, api, ingest-worker, web. Wait ~60 seconds for the postgres healthcheck and database migrations to settle, then confirm:
+Seven services start: postgres, redis, minio, gateway, api, ingest-worker, web. The api container runs `alembic upgrade head` automatically as the first step of its entrypoint, so a fresh deployment lands a fully-migrated schema before uvicorn accepts traffic. Wait ~60 seconds for healthchecks, then confirm:
 
 ```bash
 docker compose ps   # all 7 services should show "healthy" or "running"
 ```
+
+> **First-run admin password.** On the first start (and only the first start), the api container's startup logs an auto-generated admin password — a one-time secret you can use if you skip Step 3. Grep `docker compose logs api` for `First-run admin password` to retrieve it. Most operators ignore this and just run Step 3 below, which sets a known password directly.
 
 ### Step 3 — Set the admin password
 
@@ -227,7 +229,21 @@ In this mode, inference runs entirely on the local host via Ollama. The Inferenc
 
 **Inference returns "no provider configured"** — add at least one provider key to `.env` (e.g., `ANTHROPIC_API_KEY=sk-...`), then `docker compose restart gateway`. The gateway reads provider keys from environment variables at startup.
 
-**Port 3000 already in use** — change the host-side port in `docker-compose.yml` under the `web` service: `"3000:8080"` → `"3001:8080"`, then update your login URL accordingly.
+**A host port is already in use** (`bind: address already in use`) — every host-side port the stack uses is configurable via a `*_HOST_PORT` variable in `.env` (the compose file reads them; see `docker-compose.yml`). Override the colliding port and `docker compose up -d` again. The defaults shipped in `.env.example`:
+
+```
+POSTGRES_HOST_PORT=5432    # collides with Homebrew Postgres on macOS — set to 15432 if needed
+WEB_HOST_PORT=3000         # change if another web app (Next.js dev, etc.) holds :3000
+API_HOST_PORT=8000         # change if a host service (Django, FastAPI) holds :8000
+GATEWAY_HOST_PORT=8001     # change if another service holds :8001
+REDIS_HOST_PORT=6379       # change if a host redis holds :6379
+MINIO_API_HOST_PORT=9000   # change if another service holds :9000
+MINIO_CONSOLE_HOST_PORT=9001  # change if Portainer/Console holds :9001
+```
+
+The most common Mac collision is `POSTGRES_HOST_PORT=5432` against a Homebrew Postgres. Either set `POSTGRES_HOST_PORT=15432` in your `.env` (the compose stack's internal traffic still uses 5432; services talk to each other unchanged — only the host-side mapping shifts), or stop the host postgres first (`brew services stop postgresql@<version>` on macOS).
+
+**Two clones of this repo sharing data** — Docker Compose derives its project name from the parent directory's basename. Two clones at `lq-ai/` will reuse each other's named volumes (`lq-ai_pgdata` etc.) — including the database, admin user, and MinIO objects — and `docker compose down` in one will tear down the shared stack. To isolate two parallel clones, set `COMPOSE_PROJECT_NAME` in each clone's `.env` to a unique name (e.g. `COMPOSE_PROJECT_NAME=lq-ai-dev` and `COMPOSE_PROJECT_NAME=lq-ai-prod-candidate`).
 
 ---
 
