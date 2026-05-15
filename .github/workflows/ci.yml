@@ -48,8 +48,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: svelte-check (typecheck)
-        run: npm run check
+      - name: svelte-check (typecheck — LQ.AI-owned code)
+        run: npm run check:lq-ai
 
       - name: Vitest (unit tests)
         run: npm run test:frontend -- --run
