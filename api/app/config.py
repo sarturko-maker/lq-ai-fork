@@ -271,6 +271,21 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Optional override for the community skills directory. When unset (the
+    # default), the loader auto-discovers the community submodule at
+    # ``<skills_dir>/community/skills/`` (i.e., ``skills/community/skills/``
+    # relative to the repo root). Set this to a different path if you mount
+    # the community corpus at a custom location. An empty string or a path
+    # that does not exist disables community skill loading silently.
+    community_skills_dir: str | None = Field(
+        default=None,
+        description=(
+            "Override for the community skills directory. Defaults to "
+            "`skills/community/skills/` relative to the repo root. "
+            "Set to an empty string to disable community skill loading."
+        ),
+    )
+
     # ----- Operational -----
     log_level: LogLevel = Field(default="info", description="Log level for the api/ service.")
     lq_ai_dev_mode: bool = Field(

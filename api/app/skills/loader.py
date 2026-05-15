@@ -2,16 +2,21 @@
 
 Public surface:
 
-* :func:`load_registry` — walk a directory of skill folders, parse each
-  ``SKILL.md``, and build a :class:`SkillRegistry`.
-* :func:`install_sighup_reload` — register a SIGHUP handler that rebuilds
-  the registry atomically when the operator signals the process.
+* :func:`load_registry` — walk a built-in skills directory and an
+  optional community skills directory, parse each ``SKILL.md``, and
+  build a :class:`SkillRegistry`. Built-in skills win on slug collision
+  with community skills; duplicate community slugs are logged and
+  skipped.
+* :func:`install_sighup_reload` — register a SIGHUP handler that
+  rebuilds the registry atomically when the operator signals the
+  process.
 
 Per ADR 0004 (skill-loader locus), the loader lives in the backend.
 The walk runs synchronously inside the FastAPI lifespan startup — the
-filesystem I/O is small and bounded (the M1 corpus is ~10 skills, each
-a few KB of frontmatter + body), and putting it on a thread pool would
-add complexity without measurable benefit.
+filesystem I/O is small and bounded (the M1 corpus is ~10 built-in +
+dozens of community skills, each a few KB of frontmatter + body), and
+putting it on a thread pool would add complexity without measurable
+benefit.
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ import yaml
 from pydantic import ValidationError
 
 from app.skills.registry import MutableSkillRegistry, SkillRecord, SkillRegistry
-from app.skills.schema import SkillFrontmatter
+from app.skills.schema import SkillFrontmatter, SkillSource
 
 log = logging.getLogger(__name__)
 
@@ -70,10 +75,25 @@ class LoaderError(Exception):
         self.skill_name = skill_name
 
 
-def load_registry(skills_dir: Path | str) -> SkillRegistry:
-    """Walk ``skills_dir`` and build a :class:`SkillRegistry`.
+def load_registry(
+    skills_dir: Path | str,
+    community_skills_dir: Path | str | None = None,
+) -> SkillRegistry:
+    """Walk ``skills_dir`` (and optionally ``community_skills_dir``) and
+    build a :class:`SkillRegistry`.
 
-    Returns an empty registry if the directory does not exist or
+    Two-pass walk:
+
+    1. Built-in skills from ``skills_dir`` — these are loaded first and
+       win unconditionally on slug collision. Each record gets
+       ``source="built-in"``.
+    2. Community skills from ``community_skills_dir`` (the lq-skills
+       submodule at ``skills/community/skills/``) — loaded second. Any
+       slug already present from pass 1 is skipped with a single INFO
+       log so operators can confirm the dedup is working. Each record
+       that makes it in gets ``source="community"``.
+
+    Returns an empty registry if ``skills_dir`` does not exist or
     contains no parseable skills (with a WARNING in either case).
     Per-skill failures emit a WARNING and are skipped; the rest of the
     registry still builds.
@@ -82,17 +102,81 @@ def load_registry(skills_dir: Path | str) -> SkillRegistry:
     fine; threadpool offload would add complexity without value.
     """
 
-    base = Path(skills_dir)
-    if not base.is_dir():
-        log.warning("skills directory does not exist or is not a directory: %s", base)
-        return SkillRegistry(records={})
-
     records: dict[str, SkillRecord] = {}
     failures: list[str] = []
 
+    # --- Pass 1: built-in skills --------------------------------------------
+    base = Path(skills_dir)
+    if not base.is_dir():
+        log.warning("skills directory does not exist or is not a directory: %s", base)
+    else:
+        _walk_into(base, source="built-in", records=records, failures=failures, existing={})
+
+    builtin_count = len(records)
+
+    # --- Pass 2: community skills -------------------------------------------
+    community_count = 0
+    if community_skills_dir is not None:
+        cbase = Path(community_skills_dir)
+        if not cbase.is_dir():
+            log.warning(
+                "community skills directory does not exist or is not a directory: %s",
+                cbase,
+            )
+        else:
+            before = len(records)
+            _walk_into(
+                cbase,
+                source="community",
+                records=records,
+                failures=failures,
+                existing=set(records.keys()),
+            )
+            community_count = len(records) - before
+
+    log.info(
+        "skill registry built: %d built-in + %d community skills loaded (from %s and %s)%s",
+        builtin_count,
+        community_count,
+        base,
+        community_skills_dir or "none",
+        f" ({len(failures)} failures: {failures})" if failures else "",
+    )
+    return SkillRegistry(records=records)
+
+
+def _walk_into(
+    base: Path,
+    *,
+    source: SkillSource,
+    records: dict[str, SkillRecord],
+    failures: list[str],
+    existing: set[str],
+) -> None:
+    """Walk ``base`` and load each skill folder into ``records``.
+
+    Shared by both passes of :func:`load_registry`.
+
+    * ``source`` — the attribution tag to stamp onto each loaded record.
+    * ``records`` — mutated in place; new records are added here.
+    * ``failures`` — mutated in place; parse errors are appended here.
+    * ``existing`` — slug names already present from a prior pass.
+      A community slug in ``existing`` is skipped with a single INFO
+      log (built-in wins). A within-pass duplicate is logged as WARNING.
+    """
+
     for folder in sorted(_iter_skill_folders(base)):
+        # Cross-pass dedup: built-in wins over community.
+        if folder.name in existing:
+            log.info(
+                "community skill %r skipped — a built-in skill with the same "
+                "slug already exists (built-in wins on collision)",
+                folder.name,
+            )
+            continue
+
         try:
-            record = _load_one(folder)
+            record = _load_one(folder, source=source)
         except LoaderError as exc:
             failures.append(str(exc))
             log.warning("skill load failed: %s", exc)
@@ -111,8 +195,8 @@ def load_registry(skills_dir: Path | str) -> SkillRegistry:
             continue
 
         if record.name in records:
-            # Sorted iteration ensures deterministic "first wins" ordering;
-            # we surface the duplicate as a warning so operators see it.
+            # Within-pass duplicate (two folders with the same frontmatter
+            # name). Sorted iteration ensures deterministic "first wins".
             log.warning(
                 "duplicate skill name %r — keeping the first occurrence (%s) "
                 "and skipping the duplicate (%s)",
@@ -124,14 +208,6 @@ def load_registry(skills_dir: Path | str) -> SkillRegistry:
             continue
 
         records[record.name] = record
-
-    log.info(
-        "skill registry built: %d skills loaded from %s%s",
-        len(records),
-        base,
-        f" ({len(failures)} failures: {failures})" if failures else "",
-    )
-    return SkillRegistry(records=records)
 
 
 def _iter_skill_folders(base: Path) -> Iterator[Path]:
@@ -156,8 +232,13 @@ def _iter_skill_folders(base: Path) -> Iterator[Path]:
         yield child
 
 
-def _load_one(folder: Path) -> SkillRecord:
-    """Load a single skill from its folder. Raises LoaderError on failure."""
+def _load_one(folder: Path, source: SkillSource = "built-in") -> SkillRecord:
+    """Load a single skill from its folder. Raises LoaderError on failure.
+
+    ``source`` is stamped onto the returned :class:`SkillRecord` so the
+    API can report attribution (``"built-in"`` vs ``"community"``) without
+    inspecting the folder path at query time.
+    """
 
     skill_md = folder / _SKILL_FILE_NAME
     try:
@@ -217,6 +298,7 @@ def _load_one(folder: Path) -> SkillRecord:
         frontmatter=frontmatter,
         raw_yaml=raw_yaml,
         body=body,
+        source=source,
         reference_paths=tuple(reference_paths),
         example_paths=tuple(example_paths),
     )
@@ -247,6 +329,7 @@ def _list_subfolder_files(subfolder: Path) -> list[Path]:
 def install_sighup_reload(
     holder: MutableSkillRegistry,
     skills_dir: Path | str,
+    community_skills_dir: Path | str | None = None,
 ) -> None:
     """Wire SIGHUP to atomically rebuild and swap the registry in ``holder``.
 
@@ -260,6 +343,10 @@ def install_sighup_reload(
 
     SIGHUP is unavailable on Windows; this function is a no-op there
     (with a debug log so operators on Windows know not to expect it).
+
+    ``community_skills_dir`` is forwarded to :func:`load_registry` on
+    each reload so the community submodule is re-scanned alongside the
+    built-in skills when the operator sends SIGHUP.
     """
 
     sighup = getattr(signal, "SIGHUP", None)
@@ -268,11 +355,16 @@ def install_sighup_reload(
         return
 
     base = Path(skills_dir)
+    cbase = Path(community_skills_dir) if community_skills_dir is not None else None
 
     def _handler(_signum: int, _frame: object) -> None:
-        log.info("SIGHUP received — reloading skill registry from %s", base)
+        log.info(
+            "SIGHUP received — reloading skill registry from %s (community: %s)",
+            base,
+            cbase or "none",
+        )
         try:
-            new_registry = load_registry(base)
+            new_registry = load_registry(base, community_skills_dir=cbase)
         except Exception as exc:
             # A catastrophic failure (e.g., the skills directory was
             # unmounted) should not crash the process. Log and keep
