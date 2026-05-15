@@ -45,11 +45,26 @@
 		5: 'red'
 	};
 
+	/**
+	 * Plain-English description per tier — surfaced in the hover title so
+	 * non-technical users learn what each tier means without having to
+	 * click through to the TierDetailsPanel. Matches the framing in PRD
+	 * §1.5.2 (lower number = stronger security).
+	 */
+	const tierDescription: Record<number, string> = {
+		1: 'Local-only inference — runs on this computer. Your data never leaves the deployment.',
+		2: 'Customer-hosted cloud inference — runs in your own cloud account.',
+		3: 'Enterprise managed inference — provider has signed ZDR / no-training commitments.',
+		4: 'Standard cloud API — provider terms govern data handling.',
+		5: 'Consumer or free tier — the provider may train on your data.'
+	};
+
 	$: label = tier ? `Tier ${tier}` : 'Tier ?';
 	$: tone = (tier ? tierTone[tier] : 'neutral') as TrustTone;
+	$: description = tier ? tierDescription[tier] : 'Tier unknown — routing source not yet resolved.';
 	$: title = provider
-		? `${label} — ${provider} (click for details)`
-		: `${label} — click for details`;
+		? `${label} — ${provider}\n${description}\n(click for details)`
+		: `${label}\n${description}\n(click for details)`;
 	$: handleClick = interactive ? () => dispatch('open') : undefined;
 </script>
 

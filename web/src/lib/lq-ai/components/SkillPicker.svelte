@@ -14,6 +14,7 @@
 	 */
 	import type { Skill, SkillSummary } from '../types';
 	import SkillInputForm from './SkillInputForm.svelte';
+	import InfoTip from './InfoTip.svelte';
 
 	export let availableSkills: SkillSummary[] = [];
 	export let selectedSkillNames: string[] = [];
@@ -43,7 +44,13 @@
 
 <div class="lq-panel rounded-md p-3 space-y-2" data-testid="lq-ai-skill-picker">
 	<div class="flex items-center justify-between">
-		<span class="text-sm font-medium lq-label">Skills</span>
+		<span class="text-sm font-medium lq-label inline-flex items-center gap-1">
+			Skills
+			<InfoTip
+				content="Skills are reusable structured prompts the AI uses to shape its answer. You can attach one or many per message; each skill's source is readable and forkable. Built-in skills ship with the app; community skills come from LegalQuants/lq-skills; user skills are yours."
+				placement="bottom"
+			/>
+		</span>
 		<button
 			type="button"
 			class="lq-btn-secondary"
