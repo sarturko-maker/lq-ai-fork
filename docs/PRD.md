@@ -2064,6 +2064,24 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 
 **Acceptance criteria:** Citation-like spans show the badge in M1 chat output; the badge is keyboard-focusable and screen-reader-accessible (`role="status"` or `aria-label` + tooltip pattern); Cypress E2E exercises the badge on at least one starter-skill output that historically produces citation-like text.
 
+#### DE-272 — Admin AliasForm: model dropdown population + light/dark consistency
+
+**Priority:** P2 · **Effort:** S + S (two sub-tasks)
+
+**Context:** The admin "Edit alias" form (`web/src/lib/lq-ai/components/AliasForm.svelte`, used in `/lq-ai/admin/models`) exhibits two related M1 known issues that affect operator UX when editing model aliases. Both surfaced during the v0.1.0 pre-tag walkthrough.
+
+**(a) Model dropdown shows only the currently-configured model.** The form already supports per-provider model autocomplete via `<datalist>` and a `providerModels: Record<string, string[]>` prop, but the parent admin page (`web/src/routes/lq-ai/admin/models/+page.svelte`) does not populate this map. The dropdown therefore lists only the model already saved on the alias being edited — changing models requires typing the model id from memory, which is brittle in practice. The field is still a free-text input so editing is *possible*, but the autocomplete is effectively missing.
+
+**(b) AliasForm renders in dark mode while the surrounding admin page is light.** The form uses Tailwind's `bg-white dark:bg-gray-900` pattern; somewhere in the admin route chain, the dark variant is being selectively applied even when the rest of the app is in light mode. The result is a low-contrast modal that is hard to read against the otherwise-light admin chrome.
+
+**Specific scope:** Two sub-tasks, pickable independently.
+
+**Sub-task A — model dropdown autocomplete:** Expose each provider's `models` list (already declared in `gateway.yaml.example` under `providers[].models`) via a new admin endpoint (or extend `GET /api/v1/admin/config` if it exists). The parent admin page builds the `providerModels` map from the response and passes it to `AliasForm`. The autocomplete then surfaces real choices per the currently-selected provider; the field remains free-text for partial / out-of-config models.
+
+**Sub-task B — light/dark consistency:** Either remove the `dark:` Tailwind variants from `AliasForm.svelte` (lock to light mode, matching the surrounding admin chrome at M1), or wire a proper site-wide dark-mode toggle so the form's dark variant only activates when the rest of the app is also in dark mode. The choice depends on whether DE-262 (OpenWebUI fork TypeScript-check migration) brings a coherent dark-mode posture forward; until then, locking AliasForm to light is the lower-risk path.
+
+**Acceptance criteria — A:** Model field offers autocomplete with the actual provider's model list when the provider is selected; the field remains free-text-editable. **Acceptance criteria — B:** AliasForm color scheme is visually consistent with the surrounding admin page (text contrast ≥ WCAG 2.1 AA). One Cypress E2E that opens the admin Edit-alias modal and asserts on the rendered colors / autocomplete list.
+
 ### PRD-process and capability refinements
 
 #### DE-020 — Standardize the optional-input pattern across skills
