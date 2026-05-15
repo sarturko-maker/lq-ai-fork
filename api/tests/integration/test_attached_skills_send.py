@@ -279,9 +279,7 @@ async def test_inline_body_oversize_error_does_not_echo_body_content(
 @pytest.mark.asyncio
 @pytest.mark.integration
 @respx.mock
-async def test_attached_skills_over_cap_returns_4xx(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_attached_skills_over_cap_returns_4xx(client: AsyncClient, db_user: User) -> None:
     """Wave D.2 Task 3.0 (I1) — ``attached_skills`` is capped at
     :data:`ATTACHED_SKILLS_MAX_LEN` entries.
 
@@ -302,9 +300,7 @@ async def test_attached_skills_over_cap_returns_4xx(
         headers=headers,
         json={
             "content": "hello",
-            "attached_skills": [
-                {"slug": f"skill-{i}"} for i in range(ATTACHED_SKILLS_MAX_LEN + 1)
-            ],
+            "attached_skills": [{"slug": f"skill-{i}"} for i in range(ATTACHED_SKILLS_MAX_LEN + 1)],
         },
     )
     # Schema validation failure wraps as 400 ``validation_error`` per
@@ -316,9 +312,7 @@ async def test_attached_skills_over_cap_returns_4xx(
 @pytest.mark.asyncio
 @pytest.mark.integration
 @respx.mock
-async def test_legacy_skills_over_cap_returns_4xx(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_legacy_skills_over_cap_returns_4xx(client: AsyncClient, db_user: User) -> None:
     """Wave D.2 Task 3.0 (I1) — the legacy ``skills`` list is also capped.
 
     Same DoS surface as ``attached_skills``; cap applied symmetrically
