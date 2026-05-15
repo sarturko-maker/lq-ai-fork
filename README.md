@@ -102,12 +102,24 @@ In addition to the 10 built-in starter skills in `skills/`, LQ.AI ships with a c
 - **Same open format.** Every community skill is a `SKILL.md` in the same `agentskills.io` format as the built-ins — readable, debuggable, and forkable in the application.
 - **Built-in wins on slug collision.** The 10 built-in skills always take precedence if their slug also appears in the community catalog; the community version is silently skipped (logged at INFO level for operator visibility).
 - **Attribution in the API.** Community skills carry `source: "community"` in the API response; built-ins carry `source: "built-in"`. The frontend can use this field to render an attribution badge.
+- **Upstream updates flow in.** New skills landed in [LegalQuants/lq-skills](https://github.com/LegalQuants/lq-skills) become available in any LQ.AI deployment on the next submodule update — operators do not rebuild the application to pick up new community skills. The relationship is intentionally a pull, not a push: each operator chooses when to refresh and which upstream commit to pin to.
 
 To update the community catalog to the latest upstream commit:
 
 ```bash
 git submodule update --remote skills/community
 ```
+
+**Authoring a new community skill?** Open a PR against [LegalQuants/lq-skills](https://github.com/LegalQuants/lq-skills) — skills merged there flow into every downstream LQ.AI deployment that refreshes the submodule. The contribution guide and review norms live in that repository; the substance bar (practicing-attorney attestation, peer review for skills containing legal substance) mirrors `skills/CONTRIBUTING.md` in this repo. The `lq-skills` repo is the right home for skills meant to be shared across operators; this repo's `skills/` directory is for the 10 starter skills that ship with the application.
+
+### LegalQuants ecosystem
+
+LQ.AI sits inside a broader [LegalQuants](https://github.com/LegalQuants) ecosystem of open-source legal-AI tooling. The integration pattern — open-source, MIT/Apache-compatible licensing, deterministic and citation-grounded where possible, MCP-friendly — is consistent across the org. Adjacent projects under active development:
+
+- **[LegalQuants/lq-skills](https://github.com/LegalQuants/lq-skills)** — the community skill catalog (already mounted as a submodule per the section above).
+- **[LegalQuants/privacyquant](https://github.com/LegalQuants/privacyquant)** — versioned statutory knowledge graph and MCP workflow layer for US state consumer privacy law (146 nodes across 20 statutes; 18 MCP tools, 16 of them deterministic). Integration path with LQ.AI is documented as [DE-264](docs/PRD.md#de-264--legalquants-ecosystem-integration-privacyquant-statutory-graph--mcp-path): near-term as PrivacyQuant-backed community skills (`skills/community/pq-*`), and long-term as a first-party MCP server inside the LQ.AI deployment once the MCP-client subsystem (PRD §8.5, M5+) lands.
+
+The shared posture across the ecosystem: substantive legal work product is open-source, citation-grounded, attorney-attested, and inspectable — the same posture LQ.AI takes with its starter skills, applied to a wider surface of legal-AI tooling.
 
 ---
 
