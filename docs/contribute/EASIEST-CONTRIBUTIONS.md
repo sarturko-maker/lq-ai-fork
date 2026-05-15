@@ -25,6 +25,7 @@ That is also the structural posture of the project. The work product an operator
 | 5 | [Air-gap install verification CI test](mini-prds/air-gap-install-verification.md) | Mid engineer w/ Docker networking | S-M | Medium-High |
 | 6 | [NIST AI RMF 1.0 Profile mapping](mini-prds/nist-ai-rmf-profile.md) | AI-governance / compliance professional | M | High |
 | 7 | [Reverse-proxy + TLS deployment recipes](mini-prds/reverse-proxy-tls-deployment-recipes.md) | Junior-to-mid DevOps | S | High |
+| 8 | [Community skill installer (admin UI)](mini-prds/community-skill-installer-ui.md) | Mid-level engineer (Svelte + FastAPI) | M | High |
 
 **Effort key:** S = under a day; M = a few days; L = more than a week.
 
