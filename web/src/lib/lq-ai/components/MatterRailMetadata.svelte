@@ -137,15 +137,19 @@
   // Reactive: hide tier floor when privileged is turned off in edit mode
   $: if (!editPrivileged) editTierFloor = null;
 
-  $: tierLabel = matter.minimum_inference_tier != null ? `Tier ${matter.minimum_inference_tier}+` : null;
+  // Under PRD §1.5.2, lower tier number = stronger security.
+  // "Tier N or stronger" means the floor is N; tiers 1..N are all allowed.
+  $: tierLabel = matter.minimum_inference_tier != null
+    ? (matter.minimum_inference_tier === 1 ? 'Tier 1 only' : `Tier ${matter.minimum_inference_tier} or stronger`)
+    : null;
   $: isArchived = !!matter.archived_at;
 
   const TIER_OPTIONS: { value: TierFloor; label: string }[] = [
-    { value: 1, label: 'Tier 1+' },
-    { value: 2, label: 'Tier 2+' },
-    { value: 3, label: 'Tier 3+' },
-    { value: 4, label: 'Tier 4+' },
-    { value: 5, label: 'Tier 5' }
+    { value: 1, label: 'Tier 1 only (local / air-gapped)' },
+    { value: 2, label: 'Tier 2 or stronger' },
+    { value: 3, label: 'Tier 3 or stronger' },
+    { value: 4, label: 'Tier 4 or stronger' },
+    { value: 5, label: 'Tier 5 (any tier)' }
   ];
 </script>
 

@@ -10,11 +10,13 @@
     fileCount: number;
     skillCount: number;
   } {
+    // Under PRD §1.5.2, lower tier number = stronger security.
+    // "Tier N or stronger" means the floor is N; tiers 1..N are all allowed.
+    const t = matter.minimum_inference_tier;
     return {
       showPrivileged: matter.privileged,
-      showTier: matter.minimum_inference_tier != null,
-      tierLabel:
-        matter.minimum_inference_tier != null ? `Tier ${matter.minimum_inference_tier}+` : null,
+      showTier: t != null,
+      tierLabel: t != null ? (t === 1 ? 'Tier 1 only' : `Tier ${t} or stronger`) : null,
       isArchived: !!matter.archived_at,
       fileCount: matter.attached_file_ids?.length ?? 0,
       skillCount: matter.attached_skill_names?.length ?? 0

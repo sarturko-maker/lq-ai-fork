@@ -35,9 +35,15 @@ describe('matterBadges', () => {
   });
 
   it('shows tier badge and formats label when minimum_inference_tier is set', () => {
+    // Under PRD §1.5.2 (lower = stricter), floor=3 means "Tier 3 or stronger."
     const badges = matterBadges(makeProject({ minimum_inference_tier: 3 }));
     expect(badges.showTier).toBe(true);
-    expect(badges.tierLabel).toBe('Tier 3+');
+    expect(badges.tierLabel).toBe('Tier 3 or stronger');
+  });
+
+  it('shows "Tier 1 only" label for the strictest floor', () => {
+    const badges = matterBadges(makeProject({ minimum_inference_tier: 1 }));
+    expect(badges.tierLabel).toBe('Tier 1 only');
   });
 
   it('marks matter as archived when archived_at is set', () => {

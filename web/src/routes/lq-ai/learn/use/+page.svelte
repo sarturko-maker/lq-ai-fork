@@ -263,7 +263,7 @@
 						<a href="https://github.com/LegalQuants/lq-ai/blob/main/web/cypress/e2e/wave-d1-power-features.cy.ts" class="lq-link" target="_blank" rel="noopener noreferrer">web/cypress/e2e/wave-d1-power-features.cy.ts</a>
 						Test 3 + Test 5
 					</p>
-					<p><strong>Audit action:</strong> <code>tier_override.granted</code></p>
+					<p><strong>Audit action:</strong> <code>inference.tier_floor_overridden</code></p>
 				</div>
 			</details>
 		</section>
