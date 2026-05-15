@@ -53,9 +53,7 @@ def upgrade() -> None:
         GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED
         """
     )
-    op.execute(
-        "CREATE INDEX idx_messages_content_tsv ON messages USING gin (content_tsv)"
-    )
+    op.execute("CREATE INDEX idx_messages_content_tsv ON messages USING gin (content_tsv)")
 
 
 def downgrade() -> None:

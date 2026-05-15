@@ -11,6 +11,11 @@ Two surface contracts to verify on the api/ side:
    ``error.code == "tier_below_minimum"``, the backend surfaces a 403
    to the API caller — code preserved, details preserved, status
    preserved, message preserved. No 500 morphing.
+
+Under PRD §1.5.2 lower tier number = stronger security. The project
+fixture uses ``minimum_inference_tier=3`` which means "require Tier 3
+or stronger." The gateway is authoritative on refusal direction; these
+tests only verify the forwarding and translation layers.
 """
 
 from __future__ import annotations
@@ -248,11 +253,12 @@ async def test_gateway_403_tier_below_minimum_surfaces_as_403(
                 "error": {
                     "code": "tier_below_minimum",
                     "message": (
-                        "Request requires Inference Tier 5 (source: project), "
-                        "but the routed model resolves to tier 4."
+                        "Request requires Inference Tier 3 or stronger "
+                        "(source: project), but the routed model resolves "
+                        "to tier 4, which is weaker."
                     ),
                     "details": {
-                        "required_tier": 5,
+                        "required_tier": 3,
                         "resolved_tier": 4,
                         "source": "project",
                         "requested_model": "smart",
@@ -276,7 +282,8 @@ async def test_gateway_403_tier_below_minimum_surfaces_as_403(
     assert body["detail"]["code"] == "tier_below_minimum"
     details = body["detail"]["details"]
     # The structured fields survive translation.
-    assert details["required_tier"] == 5
+    # required=3 (Tier 3 floor), resolved=4 (Tier 4 is weaker → refused)
+    assert details["required_tier"] == 3
     assert details["resolved_tier"] == 4
     assert details["source"] == "project"
     # The translator stamps the original gateway code for forensics.

@@ -387,6 +387,58 @@ Tracked-changes output for Word documents. Used by skills that produce direct re
 
 ---
 
+## User-scope skills: slash_alias, forked_from, and capture-from-chat (Wave D.2)
+
+This section documents features added in Wave D.2 for user-authored skills stored in the `user_skills` table (per ADR 0012). These features apply to skills created through the skill wizard UI or the `POST /api/v1/user-skills` endpoint — not to filesystem-canonical built-ins.
+
+### slash_alias semantics
+
+A `slash_alias` is an optional chat-composer trigger for a user skill. When set, the user can type the alias (e.g., `/nda`) in the chat input to attach the skill without typing the full slug.
+
+**Validation rules:**
+
+- Format: `/` followed by 1–32 lowercase alphanumeric or dash characters. Regex: `^/[a-z0-9-]{1,32}$`.
+- Unique per owner within the active (non-archived) set. Two different users may use the same alias; the constraint is per-owner.
+- Collision returns 422: `"slash_alias '<alias>' is already used by another of your skills."` The error is surfaced inline near the alias field in the wizard (`lq-ai-wizard-slash-alias`), not in the generic save-error banner.
+
+**Wizard field:** `data-testid="lq-ai-wizard-slash-alias"` (referenced in `wave-d2-skill-creator.cy.ts`).
+
+**Autocomplete behavior:** `GET /api/v1/skills/autocomplete?q=<prefix>` ranks matches with slash-alias prefix > slug prefix > title substring. An empty `q` returns the user's most-recently-used skills. See `docs/api/backend-openapi.yaml` (after Wave 9.1) for the full endpoint shape.
+
+### forked_from semantics
+
+`forked_from` records the slug of the source skill when a row was created by forking a built-in or another user skill via the skill detail page. It is:
+
+- Set on create only (from the fork request or the wizard's capture flow).
+- Read-only after creation.
+- Stored as plain text — the source may be a filesystem-canonical built-in with no corresponding DB row (per ADR 0004).
+- Displayed in the wizard and the skill detail page to communicate provenance.
+- Carried in the `POST /api/v1/user-skills` request body as `forked_from`.
+
+### source_message_id semantics
+
+`source_message_id` is a request-body field on `POST /api/v1/user-skills` used when a skill is created from the capture-from-chat flow (see below). It is not stored as a dedicated column; it is written into the `audit_log.details` bag as `user_message_id` on the `user_skill.created` action. This gives the audit trail provenance: the capture can be traced back to the assistant message that seeded it.
+
+The receipts builder (Wave 7.2) joins `audit_log` rows to `chat_messages` via `details->>'user_message_id'` to correlate receipt entries with their originating user message.
+
+### Capture-from-chat flow
+
+The capture-from-chat flow lets a user turn any assistant message into a new user skill without leaving the chat.
+
+**Entry point:** each assistant message in the chat view exposes an inline capture button (`data-testid="lq-ai-message-capture-inline"`). Clicking it opens the capture modal.
+
+**Modal (`data-testid="lq-ai-capture-skill-modal"`):**
+
+- Pre-populates the skill name and body from the assistant message content.
+- The user fills in a display name, optional slash alias, and optional description.
+- Two actions:
+  - **Save** — calls `POST /api/v1/user-skills` with `source_message_id` set to the assistant message's UUID; creates the skill immediately and closes the modal.
+  - **Edit in wizard** — carries the same draft to the full skill wizard (`/lq-ai/skills/new`) for further editing before saving.
+
+**Audit trail:** the created skill's audit row (`user_skill.created`) carries `user_message_id` in `details`, pointing to the originating assistant message. See the `audit_log` `details` JSONB conventions in `docs/db-schema.md`.
+
+**Endpoint reference:** `POST /api/v1/user-skills` — see `docs/api/backend-openapi.yaml` for the full request/response shape including `slash_alias`, `forked_from`, and `source_message_id` fields.
+
 ## Self-improvement (deferred)
 
 The frontmatter field `lq_ai.self_improvement` defaults to `false` for v1.0.0 skills. Self-improvement — skills that ask the user for feedback after execution and update themselves — is a deferred enhancement. The reasoning:

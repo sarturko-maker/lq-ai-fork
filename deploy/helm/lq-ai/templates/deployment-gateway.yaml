@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lq-ai.fullname" . }}-gateway
+  labels:
+    {{- include "lq-ai.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: {{ .Values.gateway.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "lq-ai.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        {{- include "lq-ai.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+    spec:
+      serviceAccountName: {{ include "lq-ai.serviceAccountName" . }}
+      containers:
+        - name: gateway
+          image: "{{ .Values.image.registry }}/{{ .Values.image.owner }}/lq-ai-gateway:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8001
+          env:
+            - name: LQ_AI_GATEWAY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gateway.authSecretRef.name }}
+                  key: {{ .Values.gateway.authSecretRef.gatewayKey }}
+            {{- range $envName, $ref := .Values.gateway.providerKeys }}
+            - name: {{ $envName }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $ref.secretName }}
+                  key: {{ $ref.key }}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/lq-ai/gateway.yaml
+              subPath: gateway.yaml
+              readOnly: true
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "lq-ai.fullname" . }}-gateway

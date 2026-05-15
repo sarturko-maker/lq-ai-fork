@@ -58,6 +58,7 @@ from app.config import (
     InferenceTiersConfig,
     ProviderConfig,
 )
+from app.observability import INFERENCE_REQUESTS_TOTAL
 from app.providers import (
     ChatCompletionChunk,
     ChatCompletionRequest,
@@ -68,7 +69,6 @@ from app.providers import (
     ProviderHTTPError,
     ProviderNetworkError,
 )
-from app.observability import INFERENCE_REQUESTS_TOTAL
 
 logger = logging.getLogger(__name__)
 

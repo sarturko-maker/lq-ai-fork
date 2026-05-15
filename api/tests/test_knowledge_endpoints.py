@@ -557,3 +557,135 @@ async def test_attach_to_cross_user_kb_404(
         json={"file_id": str(uuid.uuid4())},
     )
     assert response.status_code == 404
+
+
+# --- List attached files (Wave C — Knowledge surface) -------------------
+
+
+@pytest.mark.integration
+async def test_list_kb_files_returns_attached(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    db_user: User,
+) -> None:
+    """The Knowledge detail page consumes this endpoint; assert a happy
+    round-trip surfaces filename + ingestion_status + attached_at."""
+
+    kb = KnowledgeBase(owner_id=db_user.id, name="docs")
+    file_a = _make_ready_file(db_user.id, "alpha.pdf")
+    file_b = _make_ready_file(db_user.id, "beta.pdf")
+    db_session.add_all([kb, file_a, file_b])
+    await db_session.flush()
+
+    # Attach both via the API so attached_at gets a real timestamp + the
+    # join + audit row exercise the full path.
+    for f in (file_a, file_b):
+        attach = await client.post(
+            f"/api/v1/knowledge-bases/{kb.id}/files",
+            headers=_auth_headers(db_user),
+            json={"file_id": str(f.id)},
+        )
+        assert attach.status_code == 204
+
+    response = await client.get(
+        f"/api/v1/knowledge-bases/{kb.id}/files",
+        headers=_auth_headers(db_user),
+    )
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 2
+    by_name = {r["filename"]: r for r in rows}
+    assert set(by_name) == {"alpha.pdf", "beta.pdf"}
+    sample = by_name["alpha.pdf"]
+    assert sample["ingestion_status"] == "ready"
+    assert sample["mime_type"] == "application/pdf"
+    assert sample["size_bytes"] == 10
+    assert sample["owner_id"] == str(db_user.id)
+    assert sample["attached_at"] is not None
+    assert sample["created_at"] is not None
+    # page_count / character_count are populated by the C5 pipeline; the
+    # raw fixture has no Document row so they serialize as null.
+    assert sample["page_count"] is None
+    assert sample["character_count"] is None
+
+
+@pytest.mark.integration
+async def test_list_kb_files_empty(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    db_user: User,
+) -> None:
+    kb = KnowledgeBase(owner_id=db_user.id, name="empty")
+    db_session.add(kb)
+    await db_session.flush()
+    response = await client.get(
+        f"/api/v1/knowledge-bases/{kb.id}/files",
+        headers=_auth_headers(db_user),
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.integration
+async def test_list_kb_files_cross_user_404(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    db_user: User,
+    other_user: User,
+) -> None:
+    """Same posture as the rest of the KB surface — cross-user → 404."""
+
+    foreign = KnowledgeBase(owner_id=other_user.id, name="theirs")
+    db_session.add(foreign)
+    await db_session.flush()
+    response = await client.get(
+        f"/api/v1/knowledge-bases/{foreign.id}/files",
+        headers=_auth_headers(db_user),
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.integration
+async def test_list_kb_files_invalid_uuid_400(
+    client: AsyncClient,
+    db_user: User,
+) -> None:
+    response = await client.get(
+        "/api/v1/knowledge-bases/not-a-uuid/files",
+        headers=_auth_headers(db_user),
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.integration
+async def test_list_kb_files_excludes_soft_deleted(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    db_user: User,
+) -> None:
+    """Soft-deleted files (`deleted_at` set) drop out of the list even if
+    the join row still exists — keeps the detail page from rendering
+    rows for files the caller has already deleted."""
+
+    from datetime import UTC, datetime
+
+    kb = KnowledgeBase(owner_id=db_user.id, name="exclude-deleted")
+    keep = _make_ready_file(db_user.id, "keep.pdf")
+    drop = _make_ready_file(db_user.id, "drop.pdf")
+    db_session.add_all([kb, keep, drop])
+    await db_session.flush()
+
+    db_session.add_all([
+        KnowledgeBaseFile(kb_id=kb.id, file_id=keep.id),
+        KnowledgeBaseFile(kb_id=kb.id, file_id=drop.id),
+    ])
+    drop.deleted_at = datetime.now(tz=UTC)
+    await db_session.flush()
+
+    response = await client.get(
+        f"/api/v1/knowledge-bases/{kb.id}/files",
+        headers=_auth_headers(db_user),
+    )
+    assert response.status_code == 200
+    names = {row["filename"] for row in response.json()}
+    assert names == {"keep.pdf"}

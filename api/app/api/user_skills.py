@@ -28,11 +28,11 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +40,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import ActiveUser
 from app.audit import audit_action
 from app.db.session import get_db
+from app.models.audit import AuditLog
 from app.models.team import Team, TeamMember
+from app.models.user import User
 from app.models.user_skill import UserSkill
 
 router = APIRouter(prefix="/user-skills", tags=["user-skills"])
@@ -56,6 +58,12 @@ router = APIRouter(prefix="/user-skills", tags=["user-skills"])
 # the starter corpus and short enough to fit comfortably in UI chips.
 _SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$")
 
+# Slash-alias shape: leading slash, then 1-32 lowercase alphanumerics or
+# hyphens. Mirrors the DB-layer ``chk_user_skills_slash_alias_format``
+# CHECK constraint added in migration 0023. Matched at the Pydantic layer
+# so the API rejects malformed aliases with a 422 before they hit the DB.
+_SLASH_ALIAS_RE = re.compile(r"^/[a-z0-9-]{1,32}$")
+
 _NAME_MAX = 200
 _DESCRIPTION_MAX = 2_000
 _VERSION_MAX = 50
@@ -69,6 +77,29 @@ _BODY_MAX = 200_000
 # land in this JSONB column. 16KB is plenty for the corpus reality and
 # rejects pathological payloads.
 _FRONTMATTER_EXTRA_MAX_BYTES = 16_384
+
+
+# ---------------------------------------------------------------------------
+# Shared field validators
+# ---------------------------------------------------------------------------
+
+
+def _validate_slash_alias_value(v: str | None) -> str | None:
+    """Module-level slash_alias validator reused by UserSkillCreate and UserSkillUpdate.
+
+    Called from ``@field_validator("slash_alias")`` in both Pydantic models so
+    the body is not duplicated. Behaviour is identical in both callers: ``None``
+    passes through; a non-matching value raises ``ValueError`` with a descriptive
+    message; a matching value is returned unchanged.
+    """
+    if v is None:
+        return None
+    if not _SLASH_ALIAS_RE.match(v):
+        raise ValueError(
+            "slash_alias must match ^/[a-z0-9-]{1,32}$ "
+            "(leading slash, then 1-32 lowercase alphanumerics or hyphens)"
+        )
+    return v
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +131,8 @@ class UserSkillResponse(BaseModel):
     tags: list[str] = Field(default_factory=list)
     frontmatter_extra: dict[str, Any] = Field(default_factory=dict)
     body: str
+    slash_alias: str | None = None
+    forked_from: str | None = None
     archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -125,10 +158,37 @@ class UserSkillCreate(BaseModel):
     frontmatter_extra: dict[str, Any] = Field(default_factory=dict)
     scope: str = Field(default="user", pattern=r"^(user|team)$")
     owner_team_id: uuid.UUID | None = None
+    slash_alias: str | None = Field(
+        default=None,
+        description="Optional /slug invocation alias; ^/[a-z0-9-]{1,32}$.",
+    )
+    forked_from: str | None = Field(
+        default=None,
+        description="Documentary slug of the source skill if forked. Write-once.",
+    )
+    source_message_id: str | None = Field(
+        default=None,
+        description=(
+            "Capture metadata: source AI message id when this skill was distilled "
+            "from chat. Documentary only — not persisted as a column; rides the "
+            "create-time audit-log row."
+        ),
+    )
+
+    @field_validator("slash_alias")
+    @classmethod
+    def _validate_slash_alias(cls, v: str | None) -> str | None:
+        return _validate_slash_alias_value(v)
 
 
 class UserSkillUpdate(BaseModel):
-    """PATCH body. Every field is optional; only the supplied keys move."""
+    """PATCH body. Every field is optional; only the supplied keys move.
+
+    ``forked_from`` and ``source_message_id`` are intentionally absent —
+    they are write-once at create time so the documentary lineage cannot
+    be rewritten after creation. The audit log carries the actual lineage
+    record per ADR 0012 §5.
+    """
 
     display_name: str | None = Field(default=None, min_length=1, max_length=_NAME_MAX)
     description: str | None = Field(default=None, min_length=1, max_length=_DESCRIPTION_MAX)
@@ -136,6 +196,15 @@ class UserSkillUpdate(BaseModel):
     version: str | None = Field(default=None, min_length=1, max_length=_VERSION_MAX)
     tags: list[str] | None = Field(default=None, max_length=_MAX_TAGS)
     frontmatter_extra: dict[str, Any] | None = None
+    slash_alias: str | None = Field(
+        default=None,
+        description="Optional /slug invocation alias; ^/[a-z0-9-]{1,32}$.",
+    )
+
+    @field_validator("slash_alias")
+    @classmethod
+    def _validate_slash_alias(cls, v: str | None) -> str | None:
+        return _validate_slash_alias_value(v)
 
 
 # ---------------------------------------------------------------------------
@@ -214,15 +283,15 @@ def _to_response(row: UserSkill) -> UserSkillResponse:
         tags=list(row.tags or []),
         frontmatter_extra=dict(row.frontmatter_extra or {}),
         body=row.body,
+        slash_alias=row.slash_alias,
+        forked_from=row.forked_from,
         archived_at=row.archived_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
 
 
-async def _is_team_admin(
-    db: AsyncSession, *, team_id: uuid.UUID, user_id: uuid.UUID
-) -> bool:
+async def _is_team_admin(db: AsyncSession, *, team_id: uuid.UUID, user_id: uuid.UUID) -> bool:
     """Return whether ``user_id`` is an ``admin``-role member of ``team_id``.
 
     Mutate rights on team-scope skills require the team-admin role per
@@ -260,9 +329,7 @@ async def _load_mutable(
         stmt = stmt.where(UserSkill.archived_at.is_(None))
     row = (await db.execute(stmt)).scalar_one_or_none()
     if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found")
 
     if row.scope == "user":
         if row.owner_user_id != user_id:
@@ -277,9 +344,7 @@ async def _load_mutable(
                 status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
             )
     else:  # pragma: no cover — CHECK constraint blocks other values
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found")
     return row
 
 
@@ -413,6 +478,9 @@ async def create_user_skill(
     slug = _validate_slug(payload.slug)
     tags = _validate_tags(payload.tags)
     frontmatter_extra = _validate_frontmatter_extra(payload.frontmatter_extra)
+    slash_alias = payload.slash_alias  # already regex-validated at the Pydantic layer
+    forked_from = payload.forked_from
+    source_message_id = payload.source_message_id
 
     if payload.scope == "user":
         if payload.owner_team_id is not None:
@@ -430,6 +498,8 @@ async def create_user_skill(
             tags=tags,
             frontmatter_extra=frontmatter_extra,
             body=payload.body,
+            slash_alias=slash_alias,
+            forked_from=forked_from,
         )
         audit_details: dict[str, Any] = {
             "slug": slug,
@@ -460,6 +530,8 @@ async def create_user_skill(
             tags=tags,
             frontmatter_extra=frontmatter_extra,
             body=payload.body,
+            slash_alias=slash_alias,
+            forked_from=forked_from,
         )
         audit_details = {
             "slug": slug,
@@ -470,11 +542,31 @@ async def create_user_skill(
             "team_slug": team.slug,
         }
 
+    # Documentary capture metadata lands in the audit-log row instead of a
+    # dedicated column. Keeps the row schema tight and preserves the
+    # forensic trail per ADR 0012 §5.
+    if slash_alias is not None:
+        audit_details["slash_alias"] = slash_alias
+    if forked_from is not None:
+        audit_details["forked_from"] = forked_from
+    if source_message_id is not None:
+        audit_details["source_message_id"] = source_message_id
+
     db.add(row)
     try:
         await db.flush()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
+        # The two partial unique indexes that can fire here:
+        #   idx_user_skills_slash_alias_owner_active / _team_active
+        #   ix_user_skills_owner_slug_active (the existing slug index)
+        # Disambiguate via the error text so the right 4xx surfaces.
+        err_text = str(getattr(e, "orig", e)).lower()
+        if "slash_alias" in err_text:
+            raise HTTPException(
+                status_code=422,
+                detail=(f"slash_alias {slash_alias!r} is already used by another of your skills."),
+            ) from None
         owner_label = "team" if payload.scope == "team" else "user"
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -551,6 +643,10 @@ async def update_user_skill(
         if new_extra != dict(row.frontmatter_extra or {}):
             row.frontmatter_extra = new_extra
             changed["frontmatter_extra"] = new_extra
+    if payload.slash_alias is not None and payload.slash_alias != row.slash_alias:
+        # Pydantic already enforces the ``^/[a-z0-9-]{1,32}$`` shape.
+        row.slash_alias = payload.slash_alias
+        changed["slash_alias"] = payload.slash_alias
 
     if not changed:
         return _to_response(row)
@@ -575,10 +671,115 @@ async def update_user_skill(
         request=request,
         details=details,
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        err_text = str(getattr(e, "orig", e)).lower()
+        if "slash_alias" in err_text:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"slash_alias {payload.slash_alias!r} is already used by "
+                    "another of your skills."
+                ),
+            ) from None
+        raise
     await db.refresh(row)
 
     return _to_response(row)
+
+
+class UserSkillVersionItem(BaseModel):
+    """One audit-log row, projected onto the version-history view.
+
+    The ``details`` blob is the raw JSONB column from ``audit_log`` —
+    callers consuming this endpoint already trust the action vocabulary
+    so re-shaping per action would only add coupling. ``version`` is
+    surfaced as a top-level convenience because every create / update
+    row carries it and the timeline UI hangs the version pill off it.
+    """
+
+    timestamp: datetime
+    actor_user_id: uuid.UUID | None = None
+    actor_email: str | None = None
+    action: str
+    version: str | None = None
+    details: dict[str, Any] | None = None
+
+
+class UserSkillVersionsResponse(BaseModel):
+    """Wrapper so future cursors / counts can land without a breaking change."""
+
+    items: list[UserSkillVersionItem]
+
+
+@router.get(
+    "/{skill_id}/versions",
+    response_model=UserSkillVersionsResponse,
+    summary="Audit-log view of edits for this user-skill (Wave D.2)",
+    responses={404: {"description": "User skill not found"}},
+)
+async def list_user_skill_versions(
+    skill_id: uuid.UUID,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> UserSkillVersionsResponse:
+    """GET /api/v1/user-skills/{id}/versions — most-recent-first audit feed.
+
+    Returns the ``audit_log`` rows for ``resource_type='user_skill'``
+    keyed by this skill id. ``user_skill.created`` lands last in the
+    list because the result is ordered ``timestamp DESC`` — the timeline
+    UI renders top-down, newest at the top.
+
+    Access posture mirrors the mutable surface: user-scope rows are
+    visible only to the owner; team-scope rows only to team-admins.
+    Non-admin team members read the merged skill via ``GET /skills/{slug}``
+    but the audit feed is part of the management surface, not the
+    consumption surface, so the read gate is the mutate gate. 404 for
+    "no such id" and "exists but not yours" alike (id-probing-safe;
+    matches the load-mutable convention elsewhere in this router).
+
+    ``include_archived=True`` because a freshly-archived skill's
+    timeline still needs to render for the management UI; ``_load_mutable``
+    handles the auth check uniformly across active and archived rows.
+    """
+
+    # Reuse the mutable-access gate: read access to the audit timeline
+    # is the same as write access to the row (the timeline reveals
+    # body deltas via changed-field hints + version transitions).
+    await _load_mutable(db, skill_id=skill_id, user_id=user.id, include_archived=True)
+
+    # SELECT both AuditLog (the row) and User.email (the actor handle) in
+    # one query; ``db.scalars`` would only return the first entity, so we
+    # use ``db.execute(...).all()`` to get Row tuples accessible by
+    # attribute (Row.AuditLog, Row.email).
+    stmt = (
+        select(AuditLog, User.email)
+        .outerjoin(User, AuditLog.user_id == User.id)
+        .where(
+            AuditLog.resource_type == "user_skill",
+            AuditLog.resource_id == str(skill_id),
+        )
+        .order_by(AuditLog.timestamp.desc())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    items = [
+        UserSkillVersionItem(
+            timestamp=row.AuditLog.timestamp,
+            actor_user_id=row.AuditLog.user_id,
+            actor_email=row.email,
+            action=row.AuditLog.action,
+            version=(row.AuditLog.details or {}).get("version")
+            or (row.AuditLog.details or {}).get("version_after"),
+            details=row.AuditLog.details,
+        )
+        for row in rows
+    ]
+    return UserSkillVersionsResponse(items=items)
 
 
 @router.delete(
@@ -603,16 +804,14 @@ async def delete_user_skill(
     even after the slug has been reused.
     """
 
-    row = await _load_mutable(
-        db, skill_id=skill_id, user_id=user.id, include_archived=True
-    )
+    row = await _load_mutable(db, skill_id=skill_id, user_id=user.id, include_archived=True)
     if row.archived_at is not None:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="user skill is already archived",
         )
 
-    row.archived_at = datetime.now(timezone.utc)
+    row.archived_at = datetime.now(UTC)
 
     delete_details: dict[str, Any] = {
         "slug": row.slug,

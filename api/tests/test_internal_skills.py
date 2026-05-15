@@ -12,6 +12,7 @@ share fixture machinery.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -471,7 +472,7 @@ async def test_internal_skill_archived_shadow_falls_through(
     """Archived shadows are excluded from resolution; built-in wins."""
 
     import uuid as _uuid
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import User, UserSkill
     from app.security import hash_password
@@ -494,7 +495,7 @@ async def test_internal_skill_archived_shadow_falls_through(
             display_name="Archived",
             description="archived",
             body="ARCHIVED-BODY",
-            archived_at=datetime.now(timezone.utc),
+            archived_at=datetime.now(UTC),
         )
     )
     await db_session.flush()
@@ -682,7 +683,7 @@ async def test_internal_skill_multi_team_conflict_resolves_to_newest(
     SESSION-HANDOFF-2026-05-10e §"Design decisions Kevin confirmed".
     """
 
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from app.models import UserSkill
 
@@ -695,8 +696,8 @@ async def test_internal_skill_multi_team_conflict_resolves_to_newest(
     # is BEFORE UPDATE only — INSERTs sidestep it. Setting the column
     # post-flush would fire an UPDATE and lose the deterministic
     # ordering we're testing.
-    old_ts = datetime.now(timezone.utc) - timedelta(hours=2)
-    new_ts = datetime.now(timezone.utc)
+    old_ts = datetime.now(UTC) - timedelta(hours=2)
+    new_ts = datetime.now(UTC)
 
     db_session.add(
         UserSkill(
@@ -738,7 +739,7 @@ async def test_internal_skill_archived_team_shadow_falls_through(
 ) -> None:
     """An archived team-scope row is excluded from resolution — built-in wins."""
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.models import UserSkill
 
@@ -753,7 +754,7 @@ async def test_internal_skill_archived_team_shadow_falls_through(
             display_name="Archived Team Alpha",
             description="archived",
             body="ARCHIVED-TEAM-BODY",
-            archived_at=datetime.now(timezone.utc),
+            archived_at=datetime.now(UTC),
         )
     )
     await db_session.flush()

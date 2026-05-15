@@ -14,7 +14,12 @@
  * 404; failure paths use the standard ``LQAIApiError`` envelope.
  */
 import { apiRequest } from './client';
-import type { UserSkill, UserSkillCreate, UserSkillUpdate } from '../types';
+import type {
+	UserSkill,
+	UserSkillCreate,
+	UserSkillUpdate,
+	UserSkillVersionsResponse
+} from '../types';
 
 /**
  * GET /api/v1/user-skills — non-archived rows the caller can edit.
@@ -65,4 +70,21 @@ export async function updateUserSkill(id: string, body: UserSkillUpdate): Promis
  */
 export async function deleteUserSkill(id: string): Promise<void> {
 	await apiRequest<void>(`/user-skills/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/**
+ * GET /api/v1/user-skills/{id}/versions?limit= — Wave D.2 Task 2.6.
+ *
+ * Audit-log view of edits for this user-skill, ordered most-recent-first.
+ * Access posture mirrors the mutable surface: user-scope rows visible
+ * only to the owner; team-scope rows only to team-admins. 404 for
+ * non-owners. ``limit`` defaults to 50 (backend caps at 200).
+ */
+export async function listUserSkillVersions(
+	skillId: string,
+	limit: number = 50
+): Promise<UserSkillVersionsResponse> {
+	return apiRequest<UserSkillVersionsResponse>(
+		`/user-skills/${encodeURIComponent(skillId)}/versions?limit=${limit}`
+	);
 }

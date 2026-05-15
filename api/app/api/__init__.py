@@ -25,10 +25,12 @@ from fastapi import APIRouter, Depends
 from app.api import (
     admin,
     auth,
+    chat_receipts,
     chats,
     enhance_prompt,
     files,
     inference,
+    inference_override,
     internal,
     knowledge_bases,
     models,
@@ -59,6 +61,7 @@ api_router.include_router(internal.router)
 _active = [Depends(get_active_user)]
 api_router.include_router(projects.router, dependencies=_active)
 api_router.include_router(chats.router, dependencies=_active)
+api_router.include_router(chat_receipts.router, dependencies=_active)
 api_router.include_router(skills.router, dependencies=_active)
 api_router.include_router(models.router, dependencies=_active)
 api_router.include_router(files.router, dependencies=_active)
@@ -70,6 +73,7 @@ api_router.include_router(teams.user_router, dependencies=_active)
 api_router.include_router(teams.admin_router, dependencies=_active)
 api_router.include_router(enhance_prompt.router, dependencies=_active)
 api_router.include_router(inference.router, dependencies=_active)
+api_router.include_router(inference_override.router, dependencies=_active)
 api_router.include_router(admin.router, dependencies=_active)
 
 __all__ = ["api_router"]

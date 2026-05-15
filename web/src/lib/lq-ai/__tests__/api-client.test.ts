@@ -134,4 +134,45 @@ describe('apiRequest', () => {
 			expect((e as LQAIApiError).status).toBe(400);
 		}
 	});
+
+	it('surfaces the string detail message from { "detail": "string" } FastAPI shape (DE-261)', async () => {
+		// This is the plain HTTPException shape FastAPI produces when `detail` is a
+		// plain string (e.g. `raise HTTPException(status_code=422, detail="slug taken")`).
+		// Previously errorFor returned "Unknown error" because it assumed detail was always
+		// an object with .code / .message properties.
+		setSession({ access_token: 'tok', expires_in: 900 });
+		const fetchSpy = vi.fn(async () =>
+			mockResponse(422, { detail: "slug 'my-skill' is already used by another of your skills" })
+		);
+		global.fetch = fetchSpy as unknown as typeof fetch;
+
+		try {
+			await apiRequest('/user-skills', { method: 'POST', body: {} });
+			throw new Error('expected throw');
+		} catch (e) {
+			expect(e).toBeInstanceOf(LQAIApiError);
+			expect((e as LQAIApiError).status).toBe(422);
+			expect((e as LQAIApiError).message).toContain("slug 'my-skill' is already used");
+		}
+	});
+
+	it('surfaces the msg field from Pydantic ValidationError array detail shape', async () => {
+		// FastAPI 422 from Pydantic field validation: detail is an array of { msg, type, loc }.
+		setSession({ access_token: 'tok', expires_in: 900 });
+		const fetchSpy = vi.fn(async () =>
+			mockResponse(422, {
+				detail: [{ msg: 'value is not a valid uuid', type: 'uuid_parsing', loc: ['body', 'id'] }]
+			})
+		);
+		global.fetch = fetchSpy as unknown as typeof fetch;
+
+		try {
+			await apiRequest('/projects', { method: 'POST', body: {} });
+			throw new Error('expected throw');
+		} catch (e) {
+			expect(e).toBeInstanceOf(LQAIApiError);
+			expect((e as LQAIApiError).status).toBe(422);
+			expect((e as LQAIApiError).message).toBe('value is not a valid uuid');
+		}
+	});
 });

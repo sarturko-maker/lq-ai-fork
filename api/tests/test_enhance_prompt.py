@@ -27,13 +27,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.gateway import GatewayClient, get_gateway_client
@@ -118,9 +116,7 @@ def _bearer(user: User) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _client_with(
-    *, db_session: AsyncSession, gateway_mock: AsyncMock
-) -> AsyncClient:
+def _client_with(*, db_session: AsyncSession, gateway_mock: AsyncMock) -> AsyncClient:
     app.dependency_overrides[get_db] = _override_get_db(db_session)
     app.dependency_overrides[get_gateway_client] = lambda: gateway_mock
     holder = MutableSkillRegistry(load_registry(FIXTURES_DIR))
@@ -184,9 +180,7 @@ async def test_enhance_prompt_happy_path_persists_and_returns_expansion(
     assert body["interaction_id"]
 
     # Row persisted.
-    row = await db_session.get(
-        EnhancePromptInteraction, uuid.UUID(body["interaction_id"])
-    )
+    row = await db_session.get(EnhancePromptInteraction, uuid.UUID(body["interaction_id"]))
     assert row is not None
     assert row.user_id == caller.id
     assert row.expansion_applied is True
@@ -235,9 +229,7 @@ async def test_enhance_prompt_skip_decision_persists_with_reason(
     # Echo back the original so the frontend can keep its existing flow.
     assert body["expanded_prompt"] == "thanks"
 
-    row = await db_session.get(
-        EnhancePromptInteraction, uuid.UUID(body["interaction_id"])
-    )
+    row = await db_session.get(EnhancePromptInteraction, uuid.UUID(body["interaction_id"]))
     assert row is not None
     assert row.expansion_applied is False
     assert row.expanded_output is None
@@ -393,9 +385,7 @@ async def test_enhance_prompt_ignores_chat_belonging_to_other_user(
 
 
 @pytest.mark.integration
-async def test_enhance_prompt_patch_used_flips(
-    db_session: AsyncSession, caller: User
-) -> None:
+async def test_enhance_prompt_patch_used_flips(db_session: AsyncSession, caller: User) -> None:
     gateway = _mock_gateway(YAML_EXPANSION)
     try:
         async with _client_with(db_session=db_session, gateway_mock=gateway) as client:

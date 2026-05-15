@@ -1,0 +1,18 @@
+apiVersion: v2
+name: lq-ai
+description: LQ.AI — open-source AI platform for in-house legal teams.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - legal
+  - ai
+  - llm
+  - rag
+home: https://github.com/legalquants/lq-ai
+sources:
+  - https://github.com/legalquants/lq-ai
+maintainers:
+  - name: LegalQuants
+    url: https://github.com/legalquants
+icon: https://raw.githubusercontent.com/legalquants/lq-ai/main/docs/assets/logo.png

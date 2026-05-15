@@ -88,9 +88,7 @@ def upgrade() -> None:
         "saved_prompts",
         [sa.text("user_id"), sa.text("updated_at DESC")],
     )
-    op.execute(
-        "CREATE INDEX idx_saved_prompts_tags ON saved_prompts USING gin (tags)"
-    )
+    op.execute("CREATE INDEX idx_saved_prompts_tags ON saved_prompts USING gin (tags)")
 
     op.execute(
         "CREATE TRIGGER trg_saved_prompts_updated_at "

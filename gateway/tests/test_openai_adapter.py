@@ -461,11 +461,74 @@ async def test_chat_completion_strips_lq_ai_extension_keys() -> None:
         "anonymize",
         "lq_ai_skills",
         "lq_ai_skill_inputs",
+        "lq_ai_inline_skills",
         "lq_ai_chat_id",
         "lq_ai_message_id",
         "lq_ai_user_id",
     ):
         assert forbidden not in sent, f"LQ.AI extension {forbidden!r} leaked to OpenAI"
+
+
+@pytest.mark.unit
+async def test_chat_completion_inline_skill_body_does_not_leak_to_openai() -> None:
+    """Wave D.2 Task 3.0 security — ``lq_ai_inline_skills`` (and the
+    verbatim user-drafted body inside it) must NEVER reach OpenAI.
+
+    Regression for the C1 finding in the Task 3.0 code+security review:
+    ``lq_ai_inline_skills`` was missing from ``_LQ_AI_EXTENSION_KEYS`` so
+    a chat routed through an openai-protocol provider transmitted the
+    inline body to ``api.openai.com``. OpenAI 400s on unknown fields but
+    the body has already left our gateway by then and lands in OpenAI's
+    request logs / error telemetry.
+    """
+
+    from app.providers.openai_schema import InlineSkillRef
+
+    payload = {
+        "id": "x",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gpt-4o",
+        "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": ""}, "finish_reason": "stop"}
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 0, "total_tokens": 1},
+    }
+    sentinel = "THIS-MUST-NOT-LEAK-TO-OPENAI-INLINE-BODY-SENTINEL"
+    request = ChatCompletionRequest(
+        model="gpt-4o",
+        messages=[ChatCompletionMessage(role="user", content="hi")],
+        lq_ai_inline_skills=[
+            InlineSkillRef(name="__inline__deadbeef", body=sentinel, source="wizard-tryout")
+        ],
+    )
+    with respx.mock(base_url="https://api.openai.com/v1") as router:
+        route = router.post("/chat/completions").mock(
+            return_value=httpx.Response(200, json=payload)
+        )
+        client = httpx.AsyncClient(base_url="https://api.openai.com/v1")
+        try:
+            adapter = OpenAIAdapter(
+                name="openai-prod",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+                client=client,
+            )
+            await adapter.chat_completion(request, model="gpt-4o", stream=False)
+        finally:
+            await client.aclose()
+
+    sent_raw = route.calls.last.request.content
+    sent = json.loads(sent_raw)
+    assert "lq_ai_inline_skills" not in sent, (
+        "lq_ai_inline_skills leaked to OpenAI provider request body"
+    )
+    # Defense-in-depth: the inline-body sentinel must not appear ANYWHERE
+    # in the serialized outbound payload, regardless of which key it
+    # nested under.
+    assert sentinel not in sent_raw.decode("utf-8"), (
+        "verbatim inline_body content leaked to OpenAI provider request body"
+    )
 
 
 @pytest.mark.unit
@@ -586,9 +649,7 @@ async def test_chat_completion_401_translates_to_auth_error() -> None:
                 client=client,
             )
             with pytest.raises(ProviderAuthError) as excinfo:
-                await adapter.chat_completion(
-                    _basic_chat_request(), model="gpt-4o", stream=False
-                )
+                await adapter.chat_completion(_basic_chat_request(), model="gpt-4o", stream=False)
         finally:
             await client.aclose()
     serialized = json.dumps(excinfo.value.to_envelope())
@@ -613,9 +674,7 @@ async def test_chat_completion_500_translates_to_http_error() -> None:
                 client=client,
             )
             with pytest.raises(ProviderHTTPError) as excinfo:
-                await adapter.chat_completion(
-                    _basic_chat_request(), model="gpt-4o", stream=False
-                )
+                await adapter.chat_completion(_basic_chat_request(), model="gpt-4o", stream=False)
         finally:
             await client.aclose()
     assert excinfo.value.upstream_status == 500
@@ -636,9 +695,7 @@ async def test_chat_completion_network_error_translates() -> None:
                 client=client,
             )
             with pytest.raises(ProviderNetworkError):
-                await adapter.chat_completion(
-                    _basic_chat_request(), model="gpt-4o", stream=False
-                )
+                await adapter.chat_completion(_basic_chat_request(), model="gpt-4o", stream=False)
         finally:
             await client.aclose()
 

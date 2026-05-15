@@ -24,9 +24,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
-
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
@@ -82,6 +80,14 @@ class DeleteScheduledResponse(BaseModel):
 # PRD §3.2 — Enhance Prompt reasoning visibility values.
 ReasoningVisibility = Literal["always_show", "disclosure", "on_request"]
 
+# PRD §3.2.1 + frontend spec §4.3 (Wave B v2) — personalization preference types.
+# Defaults are the "brave choices": more visible, more orienting; veterans dial
+# back via the Settings/Appearance page.
+FeaturedTools = Literal["prominent", "inline"]
+WorkspaceLayout = Literal["three_pane", "two_pane", "one_pane"]
+TrustPills = Literal["labels", "dots"]
+ProvenancePills = Literal["always", "collapsed"]
+
 
 class UserPreferencesUpdate(BaseModel):
     """PATCH body for ``/users/me/preferences`` — all fields optional.
@@ -92,6 +98,11 @@ class UserPreferencesUpdate(BaseModel):
     """
 
     reasoning_visibility: ReasoningVisibility | None = None
+    # Wave B v2 personalization fields (frontend spec §4.3 / PRD §3.2.1)
+    featured_tools: FeaturedTools | None = None
+    workspace_layout: WorkspaceLayout | None = None
+    trust_pills: TrustPills | None = None
+    provenance_pills: ProvenancePills | None = None
 
 
 class UserPreferencesResponse(BaseModel):
@@ -102,6 +113,11 @@ class UserPreferencesResponse(BaseModel):
     """
 
     reasoning_visibility: ReasoningVisibility
+    # Wave B v2 personalization fields (frontend spec §4.3 / PRD §3.2.1)
+    featured_tools: FeaturedTools
+    workspace_layout: WorkspaceLayout
+    trust_pills: TrustPills
+    provenance_pills: ProvenancePills
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +156,10 @@ async def get_me_preferences(user: ActiveUser) -> UserPreferencesResponse:
 
     return UserPreferencesResponse(
         reasoning_visibility=getattr(user, "reasoning_visibility", "disclosure"),
+        featured_tools=getattr(user, "featured_tools", "prominent"),
+        workspace_layout=getattr(user, "workspace_layout", "three_pane"),
+        trust_pills=getattr(user, "trust_pills", "labels"),
+        provenance_pills=getattr(user, "provenance_pills", "always"),
     )
 
 
@@ -174,7 +194,12 @@ async def patch_me_preferences(
     if row is None:  # pragma: no cover — dependency would have already 401d
         raise HTTPException(status_code=404, detail="user not found")
 
+    # Annotate `before`/`after` as `str` so mypy doesn't narrow them to
+    # the first block's Literal type and then reject subsequent blocks.
+    # The DB CHECK enforces the actual enum.
     changed: dict[str, dict[str, str]] = {}
+    before: str
+    after: str
     if payload.reasoning_visibility is not None:
         before = row.reasoning_visibility
         after = payload.reasoning_visibility
@@ -182,9 +207,41 @@ async def patch_me_preferences(
             row.reasoning_visibility = after
             changed["reasoning_visibility"] = {"before": before, "after": after}
 
+    if payload.featured_tools is not None:
+        before = row.featured_tools
+        after = payload.featured_tools
+        if before != after:
+            row.featured_tools = after
+            changed["featured_tools"] = {"before": before, "after": after}
+
+    if payload.workspace_layout is not None:
+        before = row.workspace_layout
+        after = payload.workspace_layout
+        if before != after:
+            row.workspace_layout = after
+            changed["workspace_layout"] = {"before": before, "after": after}
+
+    if payload.trust_pills is not None:
+        before = row.trust_pills
+        after = payload.trust_pills
+        if before != after:
+            row.trust_pills = after
+            changed["trust_pills"] = {"before": before, "after": after}
+
+    if payload.provenance_pills is not None:
+        before = row.provenance_pills
+        after = payload.provenance_pills
+        if before != after:
+            row.provenance_pills = after
+            changed["provenance_pills"] = {"before": before, "after": after}
+
     if not changed:
         return UserPreferencesResponse(
             reasoning_visibility=row.reasoning_visibility,
+            featured_tools=row.featured_tools,
+            workspace_layout=row.workspace_layout,
+            trust_pills=row.trust_pills,
+            provenance_pills=row.provenance_pills,
         )
 
     await audit_action(
@@ -201,6 +258,10 @@ async def patch_me_preferences(
 
     return UserPreferencesResponse(
         reasoning_visibility=row.reasoning_visibility,
+        featured_tools=row.featured_tools,
+        workspace_layout=row.workspace_layout,
+        trust_pills=row.trust_pills,
+        provenance_pills=row.provenance_pills,
     )
 
 

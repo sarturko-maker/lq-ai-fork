@@ -184,8 +184,8 @@
 <div class="p-6 max-w-4xl mx-auto space-y-4" data-testid="lq-ai-admin-models">
 	<div class="flex items-center justify-between">
 		<div>
-			<h1 class="text-lg font-semibold">Settings — Models</h1>
-			<p class="text-sm text-gray-500 mt-1">
+			<h1 class="lq-text-page-h">Settings — Models</h1>
+			<p class="lq-text-body mt-1" style="color: var(--lq-text-secondary);">
 				Edit the model aliases that skills and the chat picker use. Changes take effect
 				immediately for new requests; in-flight requests finish on the prior config.
 			</p>
@@ -193,7 +193,7 @@
 		{#if editing === null}
 			<button
 				type="button"
-				class="text-sm px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+				class="lq-btn-primary lq-text-body-sm"
 				on:click={() => (editing = 'new')}
 				disabled={loading}
 				data-testid="lq-ai-admin-new-alias"
@@ -204,13 +204,13 @@
 	</div>
 
 	{#if listError}
-		<div class="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded px-3 py-2">
+		<div class="lq-text-body-sm" style="color: var(--lq-error); background: var(--lq-error-soft); border: 1px solid var(--lq-error); border-radius: var(--lq-radius); padding: var(--lq-space-2) var(--lq-space-3);">
 			{listError}
 		</div>
 	{/if}
 
 	{#if loading}
-		<div class="text-sm text-gray-500">Loading…</div>
+		<div class="lq-text-body" style="color: var(--lq-text-secondary);">Loading…</div>
 	{:else}
 		<AliasTable
 			{aliases}
@@ -248,3 +248,17 @@
 		/>
 	{/if}
 </div>
+
+<style>
+	.lq-btn-primary {
+		background: var(--lq-accent);
+		color: white;
+		border: 0;
+		border-radius: var(--lq-radius);
+		padding: 8px 16px;
+		font-size: 14px;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.lq-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>

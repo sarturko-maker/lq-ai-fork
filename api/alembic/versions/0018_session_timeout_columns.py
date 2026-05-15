@@ -79,11 +79,7 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
-    op.execute(
-        "UPDATE user_sessions "
-        "SET last_active_at = created_at "
-        "WHERE last_active_at IS NULL"
-    )
+    op.execute("UPDATE user_sessions SET last_active_at = created_at WHERE last_active_at IS NULL")
     op.alter_column("user_sessions", "last_active_at", nullable=False)
 
 

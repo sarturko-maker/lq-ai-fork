@@ -140,8 +140,16 @@ class Skill(SkillSummary):
     the raw frontmatter block (re-emitted, not the source bytes), and
     ``content_md`` is the body markdown. Reference and example files
     are loaded lazily — only when this shape is materialised.
+
+    Wave D.2 — ``id`` surfaces the underlying ``user_skills.id`` row UUID
+    when the resolved scope is ``user`` or ``team``. Built-in
+    (filesystem-canonical) skills have no DB row and return ``None``.
+    The skill detail page's Versions tab needs this id to call the
+    audit-history endpoint; surfacing it on the detail GET avoids a
+    second round-trip to look it up by slug.
     """
 
+    id: str | None = None
     content_yaml: str
     content_md: str
     reference_files: list[SkillFile] = Field(default_factory=list)

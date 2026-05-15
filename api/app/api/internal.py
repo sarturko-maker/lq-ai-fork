@@ -176,9 +176,7 @@ async def get_skill_internal(
         if shadow is not None:
             return JSONResponse(content=_skill_from_user_skill(shadow))
 
-        team_shadow = await _load_team_shadow(
-            db, user_id=user_id, slug=skill_name
-        )
+        team_shadow = await _load_team_shadow(db, user_id=user_id, slug=skill_name)
         if team_shadow is not None:
             return JSONResponse(content=_skill_from_user_skill(team_shadow))
 

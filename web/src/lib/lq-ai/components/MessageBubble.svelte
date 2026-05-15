@@ -7,14 +7,25 @@
 	 * - Applied-skills chips on assistant messages.
 	 * - Tier badge on assistant messages.
 	 * - error_code surfaces as a red-line banner (per Task C8 spec).
-	 * - Citations render as a "M2: citations coming soon" placeholder when
-	 *   the array is empty (M1 backend ships [] per `MessagePostResponse`).
+	 * - Citations: when the array is non-empty, render a count summary;
+	 *   when empty, render nothing (the citation engine lands in a future
+	 *   release — until then we don't telegraph a roadmap to users).
+	 * - Wave D.1 T15: when `message.kind === 'refusal'` the bubble dispatches
+	 *   to `RefusalMessageBubble` and forwards the rerun / override /
+	 *   explainer callbacks; the default rendering below is skipped.
 	 */
 	import DOMPurify from 'dompurify';
 	import { marked } from 'marked';
 
+	import { captureAffordanceInline } from '$lib/lq-ai/preferences/capture-affordance';
+
 	import type { Message } from '../types';
 	import AppliedSkillsChip from './AppliedSkillsChip.svelte';
+	import CaptureSkillModal from './CaptureSkillModal.svelte';
+	import EnhancedDiffModal from './EnhancedDiffModal.svelte';
+	import MessageOverflowMenu from './MessageOverflowMenu.svelte';
+	import ProvenancePill from './ProvenancePill.svelte';
+	import RefusalMessageBubble from './RefusalMessageBubble.svelte';
 	import TierBadge from './TierBadge.svelte';
 	import TierDetailsPanel from './TierDetailsPanel.svelte';
 
@@ -22,12 +33,44 @@
 	export let isStreaming: boolean = false;
 	export let onAppliedSkillClicked: ((name: string) => void) | undefined = undefined;
 
+	// Wave D.1 T20 follow-on — the original prompt the operator typed
+	// before clicking "Use enhanced" on the EnhancePromptExpansion panel.
+	// Session scope (in-memory, not persisted server-side); undefined when
+	// this is a historical message from a prior session. The ✨ pill is
+	// still rendered when `message.is_enhanced` is true even if the
+	// original is missing — the modal then shows a "not preserved"
+	// fallback so the operator gets the right transparency signal.
+	export let originalEnhancedPrompt: string | undefined = undefined;
+
+	// Wave D.1 T15 — refusal-bubble plumbing. Defaults are no-ops so the
+	// chat surface keeps working when the parent doesn't wire these (e.g.
+	// historical chats with no refusal rows). ChatPanel owns the modal +
+	// re-run state; this component only forwards the per-message callback.
+	export let currentUserRole: 'admin' | 'member' | 'viewer' = 'member';
+	export let onRefusalRerun: (msg: Message) => void = () => {};
+	export let onRefusalOverrideRequested: (msg: Message) => void = () => {};
+	export let onRefusalExplainerRequested: (msg: Message) => void = () => {};
+
 	// D2: tier badge opens a click-for-details panel surfacing the
 	// resolved provider/model + token usage. Per PRD §1.3 the user
 	// can always answer "what just ran?" from the message they
 	// received. State stays local to this bubble so multiple open
 	// panels are not possible (the modal is exclusive).
 	let tierDetailsOpen = false;
+
+	// Wave D.1 T20 follow-on — ✨ enhanced pill state. Per-message-local
+	// so the diff modal is exclusive: clicking the pill on one message
+	// does not surface another message's diff.
+	let enhancedDiffOpen = false;
+
+	// Wave D.2 Task 5.3 — capture-as-skill modal trigger. Per-message-local
+	// so each bubble owns its own modal instance and the right
+	// `sourceMessage` is captured in the closure. The inline 📝 / overflow
+	// "Capture as skill" item are conditional on the
+	// `captureAffordanceInline` preference (Wave D.2 Task 5.1) — auto-
+	// subscribed in the template via `$captureAffordanceInline` so Svelte
+	// handles teardown.
+	let captureOpen = false;
 
 	$: bubbleClasses =
 		message.role === 'user'
@@ -42,6 +85,20 @@
 			: '';
 </script>
 
+{#if message.kind === 'refusal'}
+	<div
+		class="flex flex-col max-w-3xl items-start mb-3"
+		data-testid={`lq-ai-message-${message.id}`}
+	>
+		<RefusalMessageBubble
+			{message}
+			{currentUserRole}
+			onRerun={() => onRefusalRerun(message)}
+			onOverrideRequested={() => onRefusalOverrideRequested(message)}
+			onExplainerRequested={() => onRefusalExplainerRequested(message)}
+		/>
+	</div>
+{:else}
 <div class="flex flex-col max-w-3xl {message.role === 'user' ? 'items-end' : 'items-start'} mb-3" data-testid={`lq-ai-message-${message.id}`}>
 	<div class="rounded-lg px-3 py-2 {bubbleClasses} max-w-full">
 		{#if message.role === 'assistant'}
@@ -61,20 +118,71 @@
 		{/if}
 	</div>
 
-	{#if message.role === 'assistant'}
-		<div class="mt-1 flex items-center gap-2 flex-wrap">
-			{#if message.routed_inference_tier}
-				<TierBadge
-					tier={message.routed_inference_tier}
-					provider={message.routed_provider ?? null}
-					on:open={() => (tierDetailsOpen = true)}
-				/>
-			{/if}
-			<AppliedSkillsChip
-				appliedSkills={message.applied_skills ?? []}
-				onSkillClicked={onAppliedSkillClicked}
+	{#if message.role === 'user' && message.is_enhanced}
+		<div
+			class="mt-1 flex items-center gap-2 flex-wrap justify-end"
+			data-testid="provenance-pill-enhanced"
+		>
+			<ProvenancePill
+				kind="enhanced"
+				summary="enhanced"
+				onTap={() => (enhancedDiffOpen = true)}
 			/>
 		</div>
+		{#if enhancedDiffOpen}
+			<EnhancedDiffModal
+				original={originalEnhancedPrompt}
+				enhanced={message.content}
+				on:close={() => (enhancedDiffOpen = false)}
+			/>
+		{/if}
+	{/if}
+
+	{#if message.role === 'assistant'}
+		<div class="mt-1 flex items-center gap-2 flex-wrap justify-start w-full">
+			<div class="flex items-center gap-2 flex-wrap">
+				{#if message.routed_inference_tier}
+					<TierBadge
+						tier={message.routed_inference_tier}
+						provider={message.routed_provider ?? null}
+						on:open={() => (tierDetailsOpen = true)}
+					/>
+				{/if}
+				<AppliedSkillsChip
+					appliedSkills={message.applied_skills ?? []}
+					onSkillClicked={onAppliedSkillClicked}
+				/>
+			</div>
+			<div class="flex items-center gap-1">
+				{#if $captureAffordanceInline}
+					<button
+						type="button"
+						class="text-base leading-none px-2 py-1 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+						aria-label={isStreaming
+							? 'Capture as skill (available when streaming completes)'
+							: 'Capture as skill'}
+						title={isStreaming
+							? 'Capture as skill (available when streaming completes)'
+							: 'Capture as skill'}
+						disabled={isStreaming}
+						data-testid="lq-ai-message-capture-inline"
+						on:click={() => (captureOpen = true)}
+					>📝</button>
+				{/if}
+				<MessageOverflowMenu
+					captureInOverflow={!$captureAffordanceInline}
+					captureDisabled={isStreaming}
+					onCapture={() => (captureOpen = true)}
+				/>
+			</div>
+		</div>
+
+		{#if captureOpen}
+			<CaptureSkillModal
+				sourceMessage={message}
+				onClose={() => (captureOpen = false)}
+			/>
+		{/if}
 
 		{#if tierDetailsOpen}
 			<TierDetailsPanel
@@ -99,10 +207,18 @@
 			</div>
 		{/if}
 
-		{#if message.citations && message.citations.length === 0}
-			<div class="mt-1 text-xs text-gray-400 italic">
-				M2: citation links will land in this message footer.
+		<!--
+			Citations footer intentionally omitted when the array is empty —
+			the placeholder text leaked the M1/M2 internal vocabulary to
+			users. The real citation engine lands in a future release; until
+			then we render nothing rather than telegraph a roadmap.
+		-->
+		{#if message.citations && message.citations.length > 0}
+			<div class="mt-1 text-xs text-gray-500" data-testid="lq-ai-message-citations">
+				{message.citations.length}
+				{message.citations.length === 1 ? 'citation' : 'citations'}
 			</div>
 		{/if}
 	{/if}
 </div>
+{/if}

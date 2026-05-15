@@ -165,10 +165,47 @@ async function parseErrorBody(res: Response): Promise<ErrorBody | null> {
 	}
 }
 
+/**
+ * Extract a human-readable error message + code from the three FastAPI
+ * detail shapes:
+ *
+ *   1. String:   `{ "detail": "some message" }` — the common plain-text shape.
+ *   2. Object:   `{ "detail": { "code": "...", "message": "...", "details": {} } }`
+ *                — LQ.AI structured error shape.
+ *   3. Array:    `{ "detail": [{ "msg": "...", "type": "...", "loc": [...] }] }`
+ *                — Pydantic ValidationError shape (FastAPI 422 responses).
+ *
+ * Falls back to a generic "Request failed with status N" message when none of
+ * the above shapes match.
+ */
 function errorFor(status: number, body: ErrorBody | null): LQAIApiError {
-	const code = body?.detail?.code ?? `http_${status}`;
-	const message = body?.detail?.message ?? `Request failed with status ${status}`;
-	const details = body?.detail?.details;
+	const detail = body?.detail;
+
+	let code = `http_${status}`;
+	let message = `Request failed with status ${status}`;
+	let details: Record<string, unknown> | undefined;
+
+	if (detail !== null && detail !== undefined) {
+		if (typeof detail === 'string') {
+			// Shape 1: { "detail": "some message" }
+			message = detail;
+		} else if (Array.isArray(detail)) {
+			// Shape 3: Pydantic ValidationError — [{ "msg": "...", ... }, ...]
+			const first = detail[0];
+			if (first && typeof first === 'object' && 'msg' in first) {
+				message = String((first as { msg: unknown }).msg);
+			}
+		} else if (typeof detail === 'object') {
+			// Shape 2: LQ.AI structured error — { "code": "...", "message": "...", ... }
+			const d = detail as Record<string, unknown>;
+			if (typeof d.code === 'string') code = d.code;
+			if (typeof d.message === 'string') message = d.message;
+			if (d.details && typeof d.details === 'object' && !Array.isArray(d.details)) {
+				details = d.details as Record<string, unknown>;
+			}
+		}
+	}
+
 	if (status === 401) {
 		return new UnauthorizedError(message, details);
 	}

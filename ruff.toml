@@ -38,11 +38,19 @@ ignore = [
     "E501",
     # Allow assert in tests
     "B011",
+    # B008: FastAPI's `Depends(...)` / `Query(...)` / `Header(...)` are
+    # idiomatic in function-argument defaults. The rule fires falsely on
+    # every endpoint signature; disabling project-wide matches FastAPI
+    # community consensus.
+    "B008",
 ]
 
 [lint.per-file-ignores]
-# Tests can use assertions and unused fixtures freely
-"**/tests/**" = ["S101", "ARG", "B011"]
+# Tests can use assertions and unused fixtures freely.
+# B017 — pytest.raises(Exception) is intentional in schema-validation
+# tests that assert *any* failure (the schema-layer error path is what
+# matters, not which subclass).
+"**/tests/**" = ["S101", "ARG", "B011", "B017"]
 # __init__.py files commonly re-export symbols
 "**/__init__.py" = ["F401"]
 

@@ -785,11 +785,28 @@ async def test_list_messages_returns_persisted_rows_oldest_first(
     db_session.add(chat)
     await db_session.flush()
 
+    # Stagger created_at so the handler's secondary sort (Message.id ASC,
+    # a random UUID) doesn't drive the ordering. The handler sorts by
+    # (created_at ASC, id ASC); without explicit timestamps three rows in
+    # the same flush share now() and tie-break on UUID.
+    from datetime import UTC, datetime, timedelta
+
+    base = datetime.now(tz=UTC)
     db_session.add_all(
         [
-            Message(chat_id=chat.id, role="user", content="first"),
-            Message(chat_id=chat.id, role="assistant", content="second"),
-            Message(chat_id=chat.id, role="user", content="third"),
+            Message(chat_id=chat.id, role="user", content="first", created_at=base),
+            Message(
+                chat_id=chat.id,
+                role="assistant",
+                content="second",
+                created_at=base + timedelta(seconds=1),
+            ),
+            Message(
+                chat_id=chat.id,
+                role="user",
+                content="third",
+                created_at=base + timedelta(seconds=2),
+            ),
         ]
     )
     await db_session.flush()

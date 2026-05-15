@@ -120,20 +120,20 @@
 
 <div class="p-4 max-w-7xl mx-auto" data-testid="lq-ai-admin-audit-log">
 	<header class="mb-4">
-		<h1 class="text-xl font-semibold text-gray-900 dark:text-gray-100">Audit log</h1>
-		<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+		<h1 class="lq-text-page-h">Audit log</h1>
+		<p class="lq-text-caption mt-1" style="color: var(--lq-text-tertiary);">
 			Every state-changing API call writes one row here (PRD §5.3). Filters compose with AND;
 			leaving a field blank means "any". Most-recent rows first.
 		</p>
 	</header>
 
 	<form
-		class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4 p-3 rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900"
+		class="lq-filter-bar grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4"
 		on:submit|preventDefault={applyFilters}
 		data-testid="lq-ai-admin-audit-log-filters"
 	>
-		<label class="flex flex-col text-xs">
-			<span class="text-gray-500 mb-1">Privilege</span>
+		<label class="flex flex-col">
+			<span class="lq-text-label mb-1">Privilege</span>
 			<select
 				bind:value={privilegeMarked}
 				class="rounded border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm"
@@ -145,8 +145,8 @@
 			</select>
 		</label>
 
-		<label class="flex flex-col text-xs">
-			<span class="text-gray-500 mb-1">Routed tier</span>
+		<label class="flex flex-col">
+			<span class="lq-text-label mb-1">Routed tier</span>
 			<select
 				bind:value={routedTier}
 				class="rounded border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm"
@@ -161,8 +161,8 @@
 			</select>
 		</label>
 
-		<label class="flex flex-col text-xs">
-			<span class="text-gray-500 mb-1">Action (exact)</span>
+		<label class="flex flex-col">
+			<span class="lq-text-label mb-1">Action (exact)</span>
 			<input
 				type="text"
 				placeholder="e.g. chat.message_sent"
@@ -172,8 +172,8 @@
 			/>
 		</label>
 
-		<label class="flex flex-col text-xs">
-			<span class="text-gray-500 mb-1">User ID (UUID)</span>
+		<label class="flex flex-col">
+			<span class="lq-text-label mb-1">User ID (UUID)</span>
 			<input
 				type="text"
 				placeholder="00000000-0000-…"
@@ -183,8 +183,8 @@
 			/>
 		</label>
 
-		<label class="flex flex-col text-xs">
-			<span class="text-gray-500 mb-1">Since</span>
+		<label class="flex flex-col">
+			<span class="lq-text-label mb-1">Since</span>
 			<input
 				type="datetime-local"
 				bind:value={since}
@@ -193,8 +193,8 @@
 			/>
 		</label>
 
-		<label class="flex flex-col text-xs">
-			<span class="text-gray-500 mb-1">Until</span>
+		<label class="flex flex-col">
+			<span class="lq-text-label mb-1">Until</span>
 			<input
 				type="datetime-local"
 				bind:value={until}
@@ -206,7 +206,7 @@
 		<div class="col-span-full flex items-center gap-2 justify-end">
 			<button
 				type="button"
-				class="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+				class="lq-btn-secondary lq-text-body-sm"
 				on:click={resetFilters}
 				data-testid="lq-ai-audit-filter-reset"
 			>
@@ -214,7 +214,7 @@
 			</button>
 			<button
 				type="submit"
-				class="px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+				class="lq-btn-primary lq-text-body-sm"
 				disabled={loading}
 				data-testid="lq-ai-audit-filter-apply"
 			>
@@ -232,33 +232,33 @@
 		</div>
 	{/if}
 
-	<div class="overflow-x-auto rounded border border-gray-200 dark:border-gray-700">
-		<table class="min-w-full text-xs" data-testid="lq-ai-admin-audit-log-table">
-			<thead class="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200">
+	<div class="lq-table-wrap overflow-x-auto">
+		<table class="min-w-full lq-text-body" data-testid="lq-ai-admin-audit-log-table">
+			<thead class="lq-thead">
 				<tr>
-					<th class="px-2 py-1 text-left">Timestamp</th>
-					<th class="px-2 py-1 text-left">Action</th>
-					<th class="px-2 py-1 text-left">User</th>
-					<th class="px-2 py-1 text-left">Resource</th>
-					<th class="px-2 py-1 text-left">Priv</th>
-					<th class="px-2 py-1 text-left">Tier</th>
-					<th class="px-2 py-1 text-left">Provider</th>
-					<th class="px-2 py-1 text-left">IP</th>
-					<th class="px-2 py-1 text-left">Details</th>
+					<th class="px-2 py-1 text-left lq-text-label">Timestamp</th>
+					<th class="px-2 py-1 text-left lq-text-label">Action</th>
+					<th class="px-2 py-1 text-left lq-text-label">User</th>
+					<th class="px-2 py-1 text-left lq-text-label">Resource</th>
+					<th class="px-2 py-1 text-left lq-text-label">Priv</th>
+					<th class="px-2 py-1 text-left lq-text-label">Tier</th>
+					<th class="px-2 py-1 text-left lq-text-label">Provider</th>
+					<th class="px-2 py-1 text-left lq-text-label">IP</th>
+					<th class="px-2 py-1 text-left lq-text-label">Details</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#each rows as r (r.id)}
 					<tr
-						class="border-t border-gray-100 dark:border-gray-800 align-top"
+						class="lq-row align-top"
 						class:bg-amber-50={r.privilege_marked}
 					>
-						<td class="px-2 py-1 font-mono whitespace-nowrap">{formatTimestamp(r.timestamp)}</td>
-						<td class="px-2 py-1 font-mono">{r.action}</td>
-						<td class="px-2 py-1 font-mono truncate max-w-[12ch]" title={r.user_id ?? ''}>
+						<td class="px-2 py-1 font-mono whitespace-nowrap lq-text-caption" style="color: var(--lq-text-tertiary);">{formatTimestamp(r.timestamp)}</td>
+						<td class="px-2 py-1 font-mono lq-text-body">{r.action}</td>
+						<td class="px-2 py-1 font-mono truncate max-w-[12ch] lq-text-body" title={r.user_id ?? ''}>
 							{r.user_id ?? '—'}
 						</td>
-						<td class="px-2 py-1">
+						<td class="px-2 py-1 lq-text-body">
 							{r.resource_type}{r.resource_id ? `/${r.resource_id.slice(0, 8)}…` : ''}
 						</td>
 						<td class="px-2 py-1">
@@ -270,16 +270,16 @@
 								—
 							{/if}
 						</td>
-						<td class="px-2 py-1">{r.routed_inference_tier ?? '—'}</td>
-						<td class="px-2 py-1 font-mono">{r.routed_provider ?? '—'}</td>
-						<td class="px-2 py-1 font-mono">{r.ip_address ?? '—'}</td>
-						<td class="px-2 py-1 font-mono truncate max-w-[28ch]" title={formatDetails(r.details)}>
+						<td class="px-2 py-1 lq-text-body">{r.routed_inference_tier ?? '—'}</td>
+						<td class="px-2 py-1 font-mono lq-text-body">{r.routed_provider ?? '—'}</td>
+						<td class="px-2 py-1 font-mono lq-text-body">{r.ip_address ?? '—'}</td>
+						<td class="px-2 py-1 font-mono truncate max-w-[28ch] lq-text-body" title={formatDetails(r.details)}>
 							{formatDetails(r.details)}
 						</td>
 					</tr>
 				{:else}
 					<tr>
-						<td colspan="9" class="px-2 py-6 text-center text-gray-500">
+						<td colspan="9" class="px-2 py-6 text-center lq-text-body" style="color: var(--lq-text-tertiary);">
 							{loading ? 'Loading…' : 'No audit entries match.'}
 						</td>
 					</tr>
@@ -292,7 +292,7 @@
 		<div class="flex justify-center mt-3">
 			<button
 				type="button"
-				class="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+				class="lq-btn-secondary lq-text-body-sm"
 				on:click={loadMore}
 				disabled={loading}
 				data-testid="lq-ai-admin-audit-log-load-more"
@@ -302,3 +302,50 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.lq-filter-bar {
+		padding: var(--lq-space-3);
+		border-radius: var(--lq-radius);
+		border: 1px solid var(--lq-border);
+		background: var(--lq-inset);
+	}
+
+	.lq-table-wrap {
+		border-radius: var(--lq-radius);
+		border: 1px solid var(--lq-border);
+	}
+
+	.lq-thead {
+		background: var(--lq-inset);
+		color: var(--lq-text-secondary);
+	}
+
+	.lq-row {
+		border-top: 1px solid var(--lq-border);
+	}
+
+	.lq-btn-primary {
+		background: var(--lq-accent);
+		color: white;
+		border: 0;
+		border-radius: var(--lq-radius);
+		padding: 6px 12px;
+		font-size: 14px;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.lq-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+	.lq-btn-secondary {
+		background: transparent;
+		color: var(--lq-text-secondary);
+		border: 1px solid var(--lq-border);
+		border-radius: var(--lq-radius);
+		padding: 6px 12px;
+		font-size: 13.5px;
+		cursor: pointer;
+	}
+	.lq-btn-secondary:hover { background: var(--lq-inset); }
+	.lq-btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>

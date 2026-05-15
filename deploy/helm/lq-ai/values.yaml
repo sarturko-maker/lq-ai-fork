@@ -1,0 +1,96 @@
+# LQ.AI Helm chart — defaults
+# Operators copy values-example.yaml to a local file, edit, and pass via
+# helm install lq-ai ./deploy/helm/lq-ai -f my-values.yaml.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: ghcr.io
+  owner: legalquants
+  tag: ""              # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+# Postgres
+postgres:
+  enabled: true
+  image: pgvector/pgvector:pg16
+  storage: 20Gi
+  storageClass: ""     # use cluster default if empty
+  database: lq_ai
+  user: lq_ai
+  # Reference an existing Secret with key POSTGRES_PASSWORD; do NOT inline.
+  passwordSecretRef:
+    name: lq-ai-postgres
+    key: password
+
+# Redis
+redis:
+  enabled: true
+  image: redis:7-alpine
+  storage: 5Gi
+  storageClass: ""
+
+# MinIO
+minio:
+  enabled: true
+  image: minio/minio:latest
+  storage: 50Gi
+  storageClass: ""
+  rootUser: lq_ai
+  rootPasswordSecretRef:
+    name: lq-ai-minio
+    key: password
+
+# Gateway
+gateway:
+  replicaCount: 1
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+    limits:   { cpu: 1000m, memory: 1Gi }
+  # Inline gateway.yaml. Operators normally override via values-example.yaml.
+  config: |
+    providers: []
+  # Provider API keys are mounted as env-vars from a Secret the operator creates.
+  # Map env-var name -> secretRef.
+  providerKeys: {}
+    # Example:
+    # ANTHROPIC_API_KEY:
+    #   secretName: lq-ai-provider-keys
+    #   key: anthropic
+  # JWT signing secret + gateway shared secret
+  authSecretRef:
+    name: lq-ai-auth
+    jwtKey: jwt-secret
+    gatewayKey: gateway-key
+
+# API
+api:
+  replicaCount: 1
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+    limits:   { cpu: 1000m, memory: 2Gi }
+
+# Web
+web:
+  replicaCount: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 1Gi }
+
+# Ingress
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: lq-ai.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""

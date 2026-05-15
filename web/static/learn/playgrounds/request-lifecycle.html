@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LQ.AI — Request Lifecycle Walkthrough</title>
+<style>
+  :root {
+    --bg: #0c0f14;
+    --bg-elev: #151a23;
+    --bg-elev-2: #1d242f;
+    --border: #2a3340;
+    --border-hover: #3a4555;
+    --text: #e6ebf3;
+    --text-dim: #8a96a8;
+    --text-faint: #5a6578;
+    --accent: #7dd3fc;
+    --accent-dim: #38bdf8;
+    --web: #93c5fd;
+    --api: #fcd34d;
+    --gateway: #c4b5fd;
+    --data: #f9a8d4;
+    --workers: #86efac;
+    --providers: #fda4af;
+    --conn-data: #60a5fa;
+    --conn-audit: #f87171;
+    --conn-egress: #34d399;
+    --shadow: rgba(0,0,0,0.4);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+  header {
+    padding: 12px 20px;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px;
+  }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.01em; }
+  header .subtitle { color: var(--text-dim); font-size: 13px; }
+  header .spacer { flex: 1; }
+  header a {
+    color: var(--accent); text-decoration: none; font-size: 12px;
+    border: 1px solid var(--border); padding: 4px 10px; border-radius: 4px;
+  }
+  header a:hover { border-color: var(--border-hover); background: var(--bg-elev-2); }
+
+  .main { display: grid; grid-template-columns: 300px 1fr; overflow: hidden; }
+  .controls {
+    background: var(--bg-elev); border-right: 1px solid var(--border);
+    padding: 16px; overflow-y: auto; display: flex; flex-direction: column;
+  }
+  .controls h2 {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text-dim); margin: 16px 0 8px;
+  }
+  .controls h2:first-child { margin-top: 0; }
+  .presets { display: grid; grid-template-columns: 1fr; gap: 5px; }
+  .preset-btn {
+    background: var(--bg-elev-2); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 10px; border-radius: 4px;
+    cursor: pointer; font-size: 12px; text-align: left; transition: all 0.1s; line-height: 1.3;
+  }
+  .preset-btn:hover { border-color: var(--border-hover); }
+  .preset-btn.active { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+
+  .playback { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .pb-btn {
+    background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text);
+    width: 32px; height: 28px; border-radius: 4px; cursor: pointer; font-size: 13px;
+    display: flex; align-items: center; justify-content: center; transition: all 0.1s; flex-shrink: 0;
+  }
+  .pb-btn:hover { border-color: var(--border-hover); color: var(--accent); }
+  .pb-btn:disabled { opacity: 0.35; cursor: default; }
+  .pb-btn.play-active { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  .step-counter { font-size: 11px; color: var(--text-dim); font-family: ui-monospace, Menlo, monospace; margin-left: auto; white-space: nowrap; }
+  .step-slider { width: 100%; accent-color: var(--accent); margin-top: 6px; }
+
+  .step-list { overflow-y: auto; flex: 1; min-height: 0; margin-top: 4px; }
+  .step-item {
+    display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px;
+    border-radius: 4px; cursor: pointer; transition: background 0.1s; opacity: 0.65;
+  }
+  .step-item:hover { background: var(--bg-elev-2); opacity: 1; }
+  .step-item.active { background: rgba(125,211,252,0.10); opacity: 1; }
+  .step-item.past { opacity: 0.75; }
+  .step-num { font-size: 10px; font-family: ui-monospace, Menlo, monospace; color: var(--text-faint); min-width: 16px; text-align: right; padding-top: 2px; flex-shrink: 0; }
+  .step-item.active .step-num { color: var(--accent); }
+  .step-name { font-size: 12px; line-height: 1.35; color: var(--text-dim); }
+  .step-item.active .step-name { color: var(--text); }
+
+  .timeline-wrap {
+    overflow-y: auto; padding: 20px 24px;
+    background: radial-gradient(circle at 20% 20%, rgba(125,211,252,0.03), transparent 55%),
+      radial-gradient(circle at 80% 80%, rgba(196,181,253,0.03), transparent 55%), var(--bg);
+  }
+  .timeline { max-width: 680px; margin: 0 auto; position: relative; }
+  .timeline::before {
+    content: ''; position: absolute; left: 20px; top: 0; bottom: 0;
+    width: 2px; background: var(--border); border-radius: 1px;
+  }
+  .step-card {
+    position: relative; margin-left: 52px; margin-bottom: 12px;
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px 14px; transition: opacity 0.25s, border-color 0.2s, box-shadow 0.2s; cursor: pointer;
+  }
+  .step-card::before {
+    content: ''; position: absolute; left: -32px; top: 50%; transform: translateY(-50%);
+    width: 10px; height: 2px; background: var(--border);
+  }
+  .step-dot {
+    position: absolute; left: -44px; top: 50%; transform: translate(-50%, -50%);
+    width: 14px; height: 14px; border-radius: 50%; background: var(--bg-elev-2);
+    border: 2px solid var(--border); display: flex; align-items: center; justify-content: center;
+    font-size: 8px; font-family: ui-monospace, Menlo, monospace; color: var(--text-faint);
+    transition: background 0.2s, border-color 0.2s; z-index: 1;
+  }
+  .step-card.state-past { opacity: 0.72; }
+  .step-card.state-future { opacity: 0.78; }
+  .step-card.state-active {
+    opacity: 1; border-color: var(--accent);
+    box-shadow: 0 0 0 1px rgba(125,211,252,0.18), -3px 0 0 0 var(--accent), 0 4px 20px rgba(125,211,252,0.10);
+  }
+  .step-card.state-active .step-dot { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  .step-card.state-past .step-dot { border-color: var(--text-faint); color: var(--text-faint); }
+
+  .card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .card-num { font-size: 10px; font-family: ui-monospace, Menlo, monospace; color: var(--text-faint); min-width: 20px; }
+  .state-active .card-num { color: var(--accent); }
+  .badge {
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; padding: 2px 6px; border-radius: 3px; color: var(--bg); flex-shrink: 0;
+  }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+  .card-desc { font-size: 12px; color: var(--text-dim); line-height: 1.4; margin: 2px 0 6px; }
+  .card-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+  .meta-item { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--text-faint); }
+  .meta-item .v { color: var(--text-dim); }
+  .meta-item .v.method { padding: 1px 5px; border-radius: 3px; font-weight: 700; font-size: 9.5px; }
+  .method-POST { background: rgba(253,164,175,0.18); color: var(--providers); }
+  .method-GET  { background: rgba(147,197,253,0.18); color: var(--web); }
+  .method-SSE  { background: rgba(134,239,172,0.18); color: var(--workers); }
+  .card-file { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--accent); text-decoration: none; display: inline-block; margin-top: 4px; }
+  .card-file:hover { color: var(--accent-dim); text-decoration: underline; }
+
+  .badge-web      { background: var(--web); }
+  .badge-api      { background: var(--api); color: #1a1200 !important; }
+  .badge-gateway  { background: var(--gateway); }
+  .badge-db       { background: var(--data); color: #1a0012 !important; }
+  .badge-provider { background: var(--providers); color: #1a0008 !important; }
+
+  .output { background: var(--bg-elev); border-top: 1px solid var(--border); max-height: 210px; display: grid; grid-template-rows: auto 1fr; }
+  .output-tabs { display: flex; padding: 0 16px; border-bottom: 1px solid var(--border); gap: 4px; align-items: flex-end; }
+  .output-tab {
+    background: transparent; border: none; color: var(--text-dim);
+    padding: 10px 14px; cursor: pointer; font-size: 12px; font-weight: 500;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .output-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .output-tab:hover { color: var(--text); }
+  .output-actions { margin-left: auto; display: flex; align-items: center; padding: 6px 0; }
+  .copy-btn {
+    background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace; transition: all 0.15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .copy-btn.copied { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .output-body { padding: 12px 16px; overflow-y: auto; font-size: 12px; line-height: 1.6; color: var(--text); }
+  .output-body .pane { display: none; }
+  .output-body .pane.active { display: block; }
+  .output-body .file {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--accent);
+    text-decoration: none; display: inline-block; padding: 1px 4px; border-radius: 3px;
+    background: rgba(125,211,252,0.08);
+  }
+  .output-body .file:hover { background: rgba(125,211,252,0.16); }
+  .verify-row { margin: 4px 0; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .verify-k { color: var(--text-faint); font-family: ui-monospace, Menlo, monospace; font-size: 11px; min-width: 80px; }
+  .verify-v { font-size: 12px; color: var(--text-dim); }
+  .all-files { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .all-files-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-faint); margin-bottom: 4px; }
+  .file-chip { display: inline-block; margin: 2px 4px 2px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>LQ.AI — Request Lifecycle</h1>
+    <span class="subtitle">Step through what happens server-side when a chat message is sent.</span>
+    <span class="spacer"></span>
+    <a href="../../" id="learn-home">↩ Learn</a>
+    <a href="https://github.com/LegalQuants/lq-ai" target="_blank" rel="noopener">View source ↗</a>
+  </header>
+
+  <div class="main">
+    <aside class="controls">
+      <h2>Scenario</h2>
+      <div class="presets" id="presets">
+        <button class="preset-btn active" data-scenario="simple">Simple message</button>
+        <button class="preset-btn" data-scenario="slash-skill">With slash-invoked skill</button>
+        <button class="preset-btn" data-scenario="knowledge-base">With knowledge base attached</button>
+        <button class="preset-btn" data-scenario="tier-refused">Refused at tier floor</button>
+        <button class="preset-btn" data-scenario="cached">Cached / no LLM call</button>
+      </div>
+
+      <h2>Playback</h2>
+      <div class="playback">
+        <button class="pb-btn" id="btn-prev" title="Previous">&#8249;</button>
+        <button class="pb-btn" id="btn-play" title="Play / Pause">&#9654;</button>
+        <button class="pb-btn" id="btn-next" title="Next">&#8250;</button>
+        <button class="pb-btn" id="btn-reset" title="Reset" style="font-size:11px">&#8635;</button>
+        <span class="step-counter" id="step-counter">1 / 1</span>
+      </div>
+      <input type="range" class="step-slider" id="step-slider" min="0" value="0">
+
+      <h2>Steps</h2>
+      <div class="step-list" id="step-list"></div>
+    </aside>
+
+    <div class="timeline-wrap">
+      <div class="timeline" id="timeline"></div>
+    </div>
+  </div>
+
+  <div class="output">
+    <div class="output-tabs">
+      <button class="output-tab active" data-tab="verify">Verify in source</button>
+      <button class="output-tab" data-tab="describe">Description</button>
+      <div class="output-actions">
+        <button class="copy-btn" id="copy">Copy</button>
+      </div>
+    </div>
+    <div class="output-body">
+      <div class="pane active" id="pane-verify"></div>
+      <div class="pane" id="pane-describe"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const REPO = 'https://github.com/LegalQuants/lq-ai/blob/main/';
+
+const BADGE = {
+  web:      { label: 'Web',      cls: 'badge-web' },
+  api:      { label: 'API',      cls: 'badge-api' },
+  gateway:  { label: 'Gateway',  cls: 'badge-gateway' },
+  db:       { label: 'DB',       cls: 'badge-db' },
+  provider: { label: 'Provider', cls: 'badge-provider' },
+};
+
+// Step shape: component, title, desc (card), file, fn, http {method,path}, db_write, narrative (Description pane)
+const S = {
+  simple: { label: 'Simple message', steps: [
+    { c:'web', t:'User clicks Send', d:'Composer captures the typed message and fires a send action.',
+      f:'web/src/lib/lq-ai/components/ChatPanel.svelte', fn:null, http:null, dw:null,
+      n:'The Svelte composer reads the input value, packages it as a payload object, and dispatches a send event. Nothing has left the browser yet — the action is purely local state.' },
+    { c:'web', t:'Optimistic message added to UI', d:'Message appears immediately with a "pending" state.',
+      f:'web/src/lib/lq-ai/components/ChatPanel.svelte', fn:null, http:null, dw:null,
+      n:'Before making any network request the UI inserts the message into the local conversation store with a temporary ID and a pending status. This optimistic update is rolled back if the request fails.' },
+    { c:'web', t:'POST /api/v1/chats/{id}/messages', d:'HTTP request sent from Web to API with content, role, attached_skills, attached_files.',
+      f:'web/src/lib/lq-ai/components/ChatPanel.svelte', fn:null, http:{method:'POST',path:'/api/v1/chats/{chat_id}/messages'}, dw:null,
+      n:'The web layer issues a POST to the backend. The JSON body carries message content, role ("user"), any attached_skills, and any attached_files. The request proxies through the web container (:3000) to the API (:8000) with a JWT in the Authorization header.' },
+    { c:'api', t:'API validates auth and chat ownership', d:'JWT verified; chat confirmed as belonging to this user (404 on cross-user).',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:null,
+      n:'The FastAPI handler runs the active-user dependency to verify the JWT, then calls _load_visible_chat to confirm ownership. Cross-user access returns 404 (not 403) to avoid leaking existence. Archived chats also return 404 for send operations.' },
+    { c:'db', t:'API writes user message to DB', d:'chat_messages row inserted: role=user, applied_skills, user_message_id.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:'chat_messages',
+      n:'The user message is inserted into chat_messages before the gateway call. The row captures content, role, chat_id, owner_id, a fresh UUID, and the applied_skills list as JSONB. Even if downstream inference fails, the user\'s message is durably persisted.' },
+    { c:'db', t:'API writes audit log: chat.message_sent', d:'audit_log row: action=chat.message_sent, user_message_id included.',
+      f:'api/app/audit.py', fn:'audit_action()', http:null, dw:'audit_log',
+      n:'Every significant action is written to the append-only audit_log table. This entry records action="chat.message_sent", the actor (user_id), the chat_id, and the user message_id. The audit log cannot be modified or deleted by end users.' },
+    { c:'api', t:'API: skill resolution', d:'attached_skills slugs resolved against user_skills + built-in catalogue.',
+      f:'api/app/api/skills.py', fn:'_resolve_skill_for_user()', http:null, dw:null,
+      n:'If the request carries attached_skills, the API resolves each slug against the merged skill catalogue: built-in skills merged with the user\'s own user_skills rows. Resolved skills contribute system-prompt instructions. A send-time slash fallback also runs if the content starts with "/token ".' },
+    { c:'api', t:'API assembles inference request', d:'System prompt + conversation history + skill instructions composed into ChatCompletionRequest.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:null,
+      n:'The API builds the full ChatCompletionRequest: system prompt (platform + skill instructions), conversation history (prior messages oldest-first), and the current user message. This conforms to the OpenAI ChatCompletion schema so the gateway can route it to any provider.' },
+    { c:'gateway', t:'POST to Gateway /chat/completions', d:'API forwards the assembled inference request to the gateway at :8001.',
+      f:'api/app/clients/gateway.py', fn:'GatewayClient.chat_completion()', http:{method:'POST',path:'/chat/completions'}, dw:null,
+      n:'The API calls its GatewayClient, which POSTs to the Inference Gateway (:8001). The request is an OpenAI-style ChatCompletionRequest extended with lq_ai_chat_id, lq_ai_message_id (the pre-generated UUID), and lq_ai_inference_tier. The API container has no provider credentials.' },
+    { c:'gateway', t:'Gateway: tier-floor check', d:'Requested inference tier verified against the matter\'s tier_floor. Refuses if below.',
+      f:'gateway/app/tier_floor.py', fn:'resolve_tier_floor() / is_refused()', http:null, dw:null,
+      n:'The gateway checks whether the requested tier meets or exceeds the matter\'s declared tier_floor (1=local/air-gapped to 5=highest-capability external). If the request falls below the floor, the gateway returns a structured 4xx refusal before any provider call is made.' },
+    { c:'gateway', t:'Gateway: provider routing', d:'Model alias resolved to provider + native model; fallback chain evaluated.',
+      f:'gateway/app/router.py', fn:'InferenceRouter.resolve() / chat_completion()', http:null, dw:null,
+      n:'The gateway resolves the model alias (e.g. "smart" → Anthropic claude-3-5-sonnet) through the operator\'s gateway.yaml alias chain. If the primary target is unavailable, the fallback chain is walked. The derived inference tier is recorded in the routing log.' },
+    { c:'db', t:'Gateway writes routing log', d:'inference_routing_log row: provider, model, tier, tokens, cost, message_id.',
+      f:'gateway/app/routing_log.py', fn:null, http:null, dw:'inference_routing_log',
+      n:'The gateway is the canonical writer of inference_routing_log. The row captures provider, resolved model, effective tier, prompt + completion tokens, estimated cost in microdollars, and the lq_ai_message_id linking back to the chat_messages row. This closes the full audit chain.' },
+    { c:'provider', t:'Provider call: HTTPS streaming request', d:'Gateway sends the request to Anthropic / OpenAI / Ollama; receives SSE chunks.',
+      f:'gateway/app/providers/anthropic.py', fn:null, http:{method:'POST',path:'api.anthropic.com/v1/messages'}, dw:null,
+      n:'The gateway makes the outbound HTTPS request to the configured provider (Anthropic, OpenAI, or local Ollama). The gateway is the only component with network access to external providers; all others are isolated from external inference APIs.' },
+    { c:'api', t:'Gateway streams response to API (SSE)', d:'Server-Sent Events flow from Gateway → API as tokens arrive.',
+      f:'gateway/app/main.py', fn:null, http:{method:'SSE',path:'Gateway → API'}, dw:null,
+      n:'As the provider returns tokens, the gateway proxies each SSE chunk back to the waiting API. The API buffers chunks to reconstruct the full assistant message but does not persist the row until the stream completes.' },
+    { c:'api', t:'API streams to Web (SSE)', d:'API forwards SSE chunks to the browser over the open connection.',
+      f:'web/src/lib/lq-ai/sse/parser.ts', fn:null, http:{method:'SSE',path:'API → Browser'}, dw:null,
+      n:'The API passes the SSE stream through to the browser as a StreamingResponse. The web layer\'s SSE parser appends each delta to the in-progress assistant message bubble, so the response appears to type itself in real time.' },
+    { c:'db', t:'API persists assistant message', d:'chat_messages row written at end-of-stream: content, applied_skills, provider, tokens.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:'chat_messages',
+      n:'When the stream completes, the API inserts the assistant message row with the pre-generated UUID (same ID referenced in the routing log), full content, applied_skills, routed_provider, and token counts. Persistence at end-of-stream prevents exposing half-written rows to concurrent readers.' },
+    { c:'db', t:'API writes audit log: chat.message_received', d:'Audit entry: action=chat.message_received, assistant message_id recorded.',
+      f:'api/app/audit.py', fn:'audit_action()', http:null, dw:'audit_log',
+      n:'A second audit entry closes the round trip. Combined with the "chat.message_sent" entry, auditors have a complete record of every request-response cycle: who sent what, when, which model answered, and at what cost.' },
+    { c:'web', t:'Receipts drawer available', d:'User can open the Receipts drawer to inspect the full event chain for this message.',
+      f:'web/src/lib/lq-ai/components/ReceiptsList.svelte', fn:null, http:null, dw:null,
+      n:'The Receipts drawer shows applied skills, provider, tier, token count, and estimated cost for the completed message. This transparency layer is a first-class UI element, not a log visible only to admins.' },
+  ]},
+
+  'slash-skill': { label: 'With slash-invoked skill', steps: [
+    { c:'web', t:'User types "/" in composer', d:'Slash keystroke triggers the skill autocomplete popover.',
+      f:'web/src/lib/lq-ai/components/SlashPopover.svelte', fn:null, http:null, dw:null,
+      n:'When the user types "/" as the first character the SlashPopover opens, showing available skills filtered in real time. The popover is driven by the local skill catalogue store — no network request is needed.' },
+    { c:'web', t:'User selects skill; pill attached', d:'Skill pill added to composer with source:"slash". Popover closes.',
+      f:'web/src/lib/lq-ai/components/SkillPicker.svelte', fn:null, http:null, dw:null,
+      n:'Selecting a skill from the popover attaches a pill to the composer with source:"slash" as provenance. This source field flows to the audit log so reviewers can distinguish slash-invoked skills from sidebar-picker or default attachments.' },
+    { c:'web', t:'POST /api/v1/chats/{id}/messages', d:'Request body carries attached_skills[{slug, source:"slash"}].',
+      f:'web/src/lib/lq-ai/components/ChatPanel.svelte', fn:null, http:{method:'POST',path:'/api/v1/chats/{chat_id}/messages'}, dw:null,
+      n:'The POST body includes attached_skills with the slash-selected skill slug and source:"slash". A backend send-time fallback also resolves "/slug " prefixes if the frontend didn\'t pre-resolve them.' },
+    { c:'api', t:'API: skill resolution with slash provenance', d:'Skill resolved; source:"slash" captured in per-attachment provenance list.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:null,
+      n:'The API merges attached_skills into the effective_skills set and records each entry\'s provenance {name, source, kind}. This list is stored in the assistant message row\'s applied_skills JSONB and surfaced in the Receipts drawer.' },
+    { c:'db', t:'API writes user message (with skill ref)', d:'chat_messages row includes applied_skills with source:"slash".',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:'chat_messages',
+      n:'The user message row is inserted as in the simple flow, but applied_skills now carries the skill reference and its slash provenance, creating a durable pre-inference record of which skill was active.' },
+    { c:'db', t:'Audit log: chat.message_sent', d:'Audit entry includes skill provenance alongside user_message_id.',
+      f:'api/app/audit.py', fn:'audit_action()', http:null, dw:'audit_log',
+      n:'The audit entry details include the attached skill provenance list — "via slash command" is recorded as an explicit compliance fact, not inferred after the fact.' },
+    { c:'api', t:'API assembles inference request with skill instructions', d:'Skill\'s SKILL.md instructions injected into the system prompt.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:null,
+      n:'The resolved skill\'s system-prompt instructions are prepended to the ChatCompletionRequest. The gateway receives a standard request with a longer system prompt — it has no awareness of the skill resolution step.' },
+    { c:'gateway', t:'Gateway: tier-floor check + routing + streaming', d:'Standard gateway path; skill does not change tier requirements.',
+      f:'gateway/app/router.py', fn:'InferenceRouter.chat_completion()', http:{method:'SSE',path:'Provider → Gateway → API → Web'}, dw:null,
+      n:'The gateway flow is identical to the simple scenario. Skills affect only the system prompt assembled by the API; the gateway processes the request like any other ChatCompletionRequest.' },
+    { c:'db', t:'API persists assistant message (with skill ref)', d:'applied_skills stored; Receipts show "via slash command" for this message.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:'chat_messages',
+      n:'The assistant message row captures applied_skills with slash provenance alongside provider, model, and token counts. The Receipts drawer will label the skill as "via slash command".' },
+  ]},
+
+  'knowledge-base': { label: 'With knowledge base attached', steps: [
+    { c:'web', t:'POST /api/v1/chats/{id}/messages', d:'Standard POST; API handles KB retrieval automatically for KB-enabled projects.',
+      f:'web/src/lib/lq-ai/components/ChatPanel.svelte', fn:null, http:{method:'POST',path:'/api/v1/chats/{chat_id}/messages'}, dw:null,
+      n:'The POST request is structurally identical to the simple flow. The API determines whether knowledge retrieval is needed based on the project\'s linked knowledge bases — the web layer does not explicitly request RAG.' },
+    { c:'db', t:'API writes user message to DB', d:'chat_messages row inserted; KB retrieval runs after this.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:'chat_messages',
+      n:'The user message is persisted before knowledge retrieval, ensuring the query is durably recorded even if retrieval encounters an error.' },
+    { c:'api', t:'API: embed user query', d:'User message text sent to the embedding model to get a query vector.',
+      f:'api/app/knowledge/embed.py', fn:'request_embedding_vector()', http:null, dw:null,
+      n:'The API embeds the user\'s message using DEFAULT_EMBEDDING_MODEL to produce a query vector. This embedding request goes to the gateway using a lower-tier embedding-specific alias, so it too passes through tier-floor enforcement.' },
+    { c:'db', t:'API: hybrid search over document_chunks', d:'pgvector ANN + full-text search against document_chunks; top-k chunks retrieved.',
+      f:'api/app/knowledge/retrieval.py', fn:'hybrid_search()', http:null, dw:null,
+      n:'hybrid_search runs pgvector approximate nearest-neighbor search and Postgres full-text search in parallel, merges results using min-max normalized scores, and returns the top-k HybridSearchResult objects. This catches both semantic and lexical matches.' },
+    { c:'api', t:'API: inject retrieved chunks into prompt', d:'Top-k chunks formatted as context passages prepended to the system prompt.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:null,
+      n:'Retrieved chunks are formatted as numbered context passages and prepended to the system prompt. The model grounds its response in this retrieved text (RAG), reducing hallucination for document-specific questions. Note: which chunk IDs were injected is not yet stored on the message row — flagged as a future enhancement.' },
+    { c:'gateway', t:'Gateway: tier-floor check + routing + streaming', d:'KB-augmented prompt forwarded to gateway; rest of flow identical to simple.',
+      f:'gateway/app/router.py', fn:'InferenceRouter.chat_completion()', http:{method:'SSE',path:'Provider → Gateway → API → Web'}, dw:null,
+      n:'The gateway receives the fully assembled request (now including KB chunks in the system prompt) and processes it identically to the simple flow. It has no awareness of the retrieval step.' },
+    { c:'db', t:'API persists assistant message', d:'chat_messages row stored; Receipts show KB name and RAG was active.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:'chat_messages',
+      n:'The assistant message row is persisted at end-of-stream. The Receipts drawer shows the knowledge base name and that RAG was active. Individual chunk IDs used for this response are not yet enumerated in the receipt (planned enhancement).' },
+  ]},
+
+  'tier-refused': { label: 'Refused at tier floor', steps: [
+    { c:'web', t:'POST /api/v1/chats/{id}/messages', d:'Standard POST; the requested model tier is below the matter\'s tier_floor.',
+      f:'web/src/lib/lq-ai/components/ChatPanel.svelte', fn:null, http:{method:'POST',path:'/api/v1/chats/{chat_id}/messages'}, dw:null,
+      n:'The request is structurally identical to any other message send. The tier mismatch is invisible to the web layer and only detected when the gateway evaluates the request against the matter\'s configured floor.' },
+    { c:'db', t:'API writes user message to DB', d:'User message persisted before the refusal.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:'chat_messages',
+      n:'The user message is written to the database even in the refusal path. Audit completeness requires every attempted send to be preserved, whether or not inference succeeded.' },
+    { c:'gateway', t:'Gateway: tier-floor check FAILS', d:'Requested tier < matter\'s tier_floor. Gateway returns 4xx refusal payload — no provider call made.',
+      f:'gateway/app/tier_floor.py', fn:'is_refused()', http:null, dw:null,
+      n:'is_refused() returns true and the gateway returns HTTP 4xx with {"error":{"code":"tier_floor_refused",...}}. No data leaves the platform — the refusal happens entirely within the gateway before any outbound request.' },
+    { c:'db', t:'API persists refusal message', d:'chat_messages row inserted: kind=refusal, requested_tier and floor_tier in metadata.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:'chat_messages',
+      n:'When the API receives a tier-floor refusal it persists a refusal message row (kind="refusal") with the reason and tier values. The refusal is a visible, permanent record in the conversation — not a silent failure.' },
+    { c:'db', t:'API writes audit log: chat.refused', d:'Audit entry: action=chat.refused, requested_tier and floor_tier recorded.',
+      f:'api/app/audit.py', fn:'audit_action()', http:null, dw:'audit_log',
+      n:'A "chat.refused" audit entry is written with the requested tier, the matter\'s tier_floor, and the message_id of the refusal row — creating a clear compliance record for every tier-floor enforcement event.' },
+    { c:'web', t:'Web renders RefusalMessageBubble', d:'Refusal bubble shows reason; admin-only Override button displayed.',
+      f:'web/src/lib/lq-ai/components/RefusalMessageBubble.svelte', fn:null, http:null, dw:null,
+      n:'The web layer renders a RefusalMessageBubble explaining why the message was refused and what tier would be required. Admin users see an Override button that opens TierFloorOverrideModal — the override flow has its own audit record and is a separate action not covered here.' },
+  ]},
+
+  cached: { label: 'Cached / no LLM call', steps: [
+    { c:'web', t:'POST /api/v1/chats/{id}/messages', d:'Standard POST; provider will return a cache hit.',
+      f:'web/src/lib/lq-ai/components/ChatPanel.svelte', fn:null, http:{method:'POST',path:'/api/v1/chats/{chat_id}/messages'}, dw:null,
+      n:'The request is structurally identical to any other message POST. The cache hit occurs at the provider level (e.g. Anthropic prefix caching for repeated system prompt content) — there is no separate cache-lookup step in LQ.AI\'s API or gateway.' },
+    { c:'db', t:'API writes user message to DB', d:'User message persisted — identical to the live path.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:null, dw:'chat_messages',
+      n:'The user message row is written exactly as in the simple flow. Caching status doesn\'t affect persistence — every message is durably stored regardless of how it was served.' },
+    { c:'db', t:'Audit log: chat.message_sent', d:'Audit entry written as normal; cache status not visible to the API.',
+      f:'api/app/audit.py', fn:'audit_action()', http:null, dw:'audit_log',
+      n:'The audit log entry is written identically to the live path. Only the gateway and provider are aware a cache hit occurred.' },
+    { c:'gateway', t:'Gateway: tier-floor check + provider routing', d:'Standard checks run; provider request issued with prompt-caching headers.',
+      f:'gateway/app/router.py', fn:'InferenceRouter.chat_completion()', http:null, dw:null,
+      n:'The gateway performs its standard checks and includes the appropriate cache-control headers in the provider request (e.g. Anthropic\'s cache_control on the system prompt block). The provider recognizes the cached prefix and returns a response with lower latency and reduced token cost.' },
+    { c:'provider', t:'Provider: cache hit — response from cache', d:'Provider returns cached response; cache_read_input_tokens non-zero; cost lower.',
+      f:'gateway/app/providers/anthropic.py', fn:null, http:{method:'POST',path:'api.anthropic.com/v1/messages (cache_hit)'}, dw:null,
+      n:'The provider detects the system prompt prefix matches a previously cached computation and returns the response from cache. The usage object includes cache_read_input_tokens to distinguish cached from live tokens.' },
+    { c:'db', t:'Gateway writes routing log: cache_hit', d:'inference_routing_log row records cache_read_input_tokens and reduced cost.',
+      f:'gateway/app/routing_log.py', fn:null, http:null, dw:'inference_routing_log',
+      n:'The routing log row is written as in the live path, but token counts reflect the cache hit. Operators can audit cost savings from prompt caching activity directly from the routing log.' },
+    { c:'api', t:'API streams response + persists assistant message', d:'SSE stream completes; assistant message persisted with cache-hit token counts.',
+      f:'api/app/api/chats.py', fn:'send_message()', http:{method:'SSE',path:'Gateway → API → Web'}, dw:'chat_messages',
+      n:'The response flows back through the gateway to the API to the Web layer via SSE, as in the live path. The Receipts drawer will show the lower token cost, a transparent signal that this response was served from the provider\'s cache.' },
+  ]},
+};
+
+const state = { scenario: 'simple', step: 0, playing: false, playTimer: null };
+function steps() { return S[state.scenario].steps; }
+
+function renderStepList() {
+  const ss = steps();
+  const wrap = document.getElementById('step-list');
+  wrap.innerHTML = '';
+  ss.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'step-item' + (i === state.step ? ' active' : i < state.step ? ' past' : '');
+    div.innerHTML = `<span class="step-num">${i+1}</span><span class="step-name">${s.t}</span>`;
+    div.addEventListener('click', () => { state.step = i; updateAll(); });
+    wrap.appendChild(div);
+  });
+  const active = wrap.querySelector('.step-item.active');
+  if (active) active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function renderTimeline() {
+  const ss = steps();
+  const wrap = document.getElementById('timeline');
+  wrap.innerHTML = '';
+  ss.forEach((s, i) => {
+    const sc = i === state.step ? 'state-active' : i < state.step ? 'state-past' : 'state-future';
+    const b = BADGE[s.c];
+    const card = document.createElement('div');
+    card.className = `step-card ${sc}`;
+    let metaHtml = '';
+    if (s.http) {
+      metaHtml += `<span class="meta-item"><span class="v method method-${s.http.method}">${s.http.method}</span> <span class="v">${s.http.path}</span></span>`;
+    }
+    if (s.dw) metaHtml += `<span class="meta-item"><span class="k">DB write: </span><span class="v">${s.dw}</span></span>`;
+    if (s.fn) metaHtml += `<span class="meta-item"><span class="k">fn: </span><span class="v">${s.fn}</span></span>`;
+    const fileHtml = s.f ? `<a class="card-file" href="${REPO}${s.f}" target="_blank" rel="noopener">${s.f}</a>` : '';
+    card.innerHTML = `
+      <div class="step-dot">${i+1}</div>
+      <div class="card-header">
+        <span class="card-num">#${i+1}</span>
+        <span class="badge ${b.cls}">${b.label}</span>
+        <span class="card-title">${s.t}</span>
+      </div>
+      <div class="card-desc">${s.d}</div>
+      ${fileHtml}
+      ${metaHtml ? `<div class="card-meta">${metaHtml}</div>` : ''}
+    `;
+    card.addEventListener('click', () => { state.step = i; updateAll(); });
+    wrap.appendChild(card);
+  });
+  const activeCard = wrap.querySelector('.state-active');
+  if (activeCard) activeCard.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+function renderOutput() {
+  const ss = steps();
+  const s = ss[state.step];
+  const verifyEl = document.getElementById('pane-verify');
+  const describeEl = document.getElementById('pane-describe');
+
+  let vh = `<div class="verify-row"><span class="verify-k">Step:</span><span class="verify-v">${state.step+1} of ${ss.length} — ${s.t}</span></div>`;
+  vh += `<div class="verify-row"><span class="verify-k">Component:</span><span class="verify-v">${BADGE[s.c].label}</span></div>`;
+  if (s.f)  vh += `<div class="verify-row"><span class="verify-k">File:</span><a class="file" href="${REPO}${s.f}" target="_blank" rel="noopener">${s.f}</a></div>`;
+  if (s.fn) vh += `<div class="verify-row"><span class="verify-k">Function:</span><span class="verify-v">${s.fn}</span></div>`;
+  if (s.dw) vh += `<div class="verify-row"><span class="verify-k">DB table:</span><span class="verify-v">${s.dw}</span></div>`;
+  if (s.http) vh += `<div class="verify-row"><span class="verify-k">HTTP:</span><span class="verify-v">${s.http.method} ${s.http.path}</span></div>`;
+
+  const seen = new Set();
+  const allFiles = ss.filter(x => x.f && !seen.has(x.f) && seen.add(x.f)).map(x => x.f);
+  vh += `<div class="all-files"><div class="all-files-label">All files in this scenario</div>`;
+  allFiles.forEach(f => { vh += `<span class="file-chip"><a class="file" href="${REPO}${f}" target="_blank" rel="noopener">${f}</a></span>`; });
+  vh += '</div>';
+  verifyEl.innerHTML = vh;
+
+  const label = S[state.scenario].label;
+  describeEl.innerHTML = `<p style="margin:0 0 6px"><strong>Scenario:</strong> ${label} &nbsp;·&nbsp; <strong>Step ${state.step+1}/${ss.length}:</strong> ${s.t}</p><p style="color:var(--text-dim);margin:0;line-height:1.6">${s.n}</p>`;
+}
+
+function renderPlayback() {
+  const ss = steps();
+  const slider = document.getElementById('step-slider');
+  slider.max = ss.length - 1;
+  slider.value = state.step;
+  document.getElementById('step-counter').textContent = `${state.step+1} / ${ss.length}`;
+  document.getElementById('btn-prev').disabled = state.step === 0;
+  document.getElementById('btn-next').disabled = state.step === ss.length - 1;
+  const playBtn = document.getElementById('btn-play');
+  playBtn.innerHTML = state.playing ? '&#9646;&#9646;' : '&#9654;';
+  playBtn.classList.toggle('play-active', state.playing);
+}
+
+function updateAll() { renderStepList(); renderTimeline(); renderOutput(); renderPlayback(); }
+
+function stopPlay() {
+  state.playing = false;
+  if (state.playTimer) { clearTimeout(state.playTimer); state.playTimer = null; }
+}
+function advancePlay() {
+  if (!state.playing) return;
+  if (state.step >= steps().length - 1) { stopPlay(); updateAll(); return; }
+  state.step++;
+  updateAll();
+  state.playTimer = setTimeout(advancePlay, 2000);
+}
+
+document.getElementById('btn-prev').addEventListener('click', () => { stopPlay(); if (state.step > 0) { state.step--; updateAll(); } });
+document.getElementById('btn-next').addEventListener('click', () => { stopPlay(); if (state.step < steps().length - 1) { state.step++; updateAll(); } });
+document.getElementById('btn-play').addEventListener('click', () => {
+  if (state.playing) { stopPlay(); updateAll(); } else { state.playing = true; advancePlay(); }
+});
+document.getElementById('btn-reset').addEventListener('click', () => { stopPlay(); state.step = 0; updateAll(); });
+document.getElementById('step-slider').addEventListener('input', e => { stopPlay(); state.step = parseInt(e.target.value, 10); updateAll(); });
+
+document.getElementById('presets').addEventListener('click', e => {
+  if (!e.target.classList.contains('preset-btn')) return;
+  stopPlay();
+  state.scenario = e.target.dataset.scenario;
+  state.step = 0;
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.toggle('active', b.dataset.scenario === state.scenario));
+  updateAll();
+});
+
+document.querySelectorAll('.output-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.output-tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.output-body .pane').forEach(p => p.classList.toggle('active', p.id === `pane-${tab.dataset.tab}`));
+  });
+});
+
+document.getElementById('copy').addEventListener('click', () => {
+  const activeTab = document.querySelector('.output-tab.active').dataset.tab;
+  const text = document.getElementById(`pane-${activeTab}`).innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy');
+    btn.classList.add('copied'); btn.textContent = 'Copied!';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 1200);
+  });
+});
+
+updateAll();
+</script>
+</body>
+</html>

@@ -66,18 +66,27 @@ def _bearer(user: User) -> dict[str, str]:
 
 
 @pytest.mark.integration
-async def test_get_preferences_defaults_to_disclosure(
-    client: AsyncClient, caller: User
-) -> None:
+async def test_get_preferences_defaults_to_disclosure(client: AsyncClient, caller: User) -> None:
     resp = await client.get("/api/v1/users/me/preferences", headers=_bearer(caller))
     assert resp.status_code == 200
-    assert resp.json() == {"reasoning_visibility": "disclosure"}
+    assert resp.json()["reasoning_visibility"] == "disclosure"
 
 
 @pytest.mark.integration
-async def test_users_me_surfaces_reasoning_visibility(
-    client: AsyncClient, caller: User
-) -> None:
+async def test_get_preferences_defaults_full_snapshot(client: AsyncClient, caller: User) -> None:
+    """All 5 preference fields return their 'brave choice' server defaults."""
+    resp = await client.get("/api/v1/users/me/preferences", headers=_bearer(caller))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reasoning_visibility"] == "disclosure"
+    assert data["featured_tools"] == "prominent"
+    assert data["workspace_layout"] == "three_pane"
+    assert data["trust_pills"] == "labels"
+    assert data["provenance_pills"] == "always"
+
+
+@pytest.mark.integration
+async def test_users_me_surfaces_reasoning_visibility(client: AsyncClient, caller: User) -> None:
     resp = await client.get("/api/v1/users/me", headers=_bearer(caller))
     assert resp.status_code == 200
     assert resp.json()["reasoning_visibility"] == "disclosure"
@@ -93,7 +102,10 @@ async def test_patch_preferences_changes_value_and_writes_audit(
         json={"reasoning_visibility": "always_show"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"reasoning_visibility": "always_show"}
+    data = resp.json()
+    assert data["reasoning_visibility"] == "always_show"
+    # Other preferences untouched — still at defaults.
+    assert data["featured_tools"] == "prominent"
 
     # Audit row written with before/after.
     audit = (
@@ -122,27 +134,34 @@ async def test_patch_preferences_idempotent_no_audit(
     assert resp.status_code == 200
 
     audit = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.action == "user.preferences_updated",
-                AuditLog.resource_id == str(caller.id),
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "user.preferences_updated",
+                    AuditLog.resource_id == str(caller.id),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert audit == []
 
 
 @pytest.mark.integration
-async def test_patch_preferences_empty_body_is_noop(
-    client: AsyncClient, caller: User
-) -> None:
+async def test_patch_preferences_empty_body_is_noop(client: AsyncClient, caller: User) -> None:
     resp = await client.patch(
         "/api/v1/users/me/preferences",
         headers=_bearer(caller),
         json={},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"reasoning_visibility": "disclosure"}
+    data = resp.json()
+    assert data["reasoning_visibility"] == "disclosure"
+    assert data["featured_tools"] == "prominent"
+    assert data["workspace_layout"] == "three_pane"
+    assert data["trust_pills"] == "labels"
+    assert data["provenance_pills"] == "always"
 
 
 @pytest.mark.integration
@@ -170,3 +189,201 @@ async def test_users_check_constraint_blocks_invalid_value(
     with pytest.raises(IntegrityError):
         await db_session.flush()
     await db_session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Wave B v2 — PRD §3.2.1 personalization preference tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_patch_preferences_featured_tools_change_writes_audit(
+    client: AsyncClient, db_session: AsyncSession, caller: User
+) -> None:
+    resp = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=_bearer(caller),
+        json={"featured_tools": "inline"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["featured_tools"] == "inline"
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "user.preferences_updated",
+                AuditLog.resource_id == str(caller.id),
+            )
+        )
+    ).scalar_one()
+    changes = audit.details["changes"]
+    assert changes["featured_tools"]["before"] == "prominent"
+    assert changes["featured_tools"]["after"] == "inline"
+
+
+@pytest.mark.integration
+async def test_patch_preferences_workspace_layout_change_writes_audit(
+    client: AsyncClient, db_session: AsyncSession, caller: User
+) -> None:
+    resp = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=_bearer(caller),
+        json={"workspace_layout": "two_pane"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["workspace_layout"] == "two_pane"
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "user.preferences_updated",
+                AuditLog.resource_id == str(caller.id),
+            )
+        )
+    ).scalar_one()
+    changes = audit.details["changes"]
+    assert changes["workspace_layout"]["before"] == "three_pane"
+    assert changes["workspace_layout"]["after"] == "two_pane"
+
+
+@pytest.mark.integration
+async def test_patch_preferences_trust_pills_change_writes_audit(
+    client: AsyncClient, db_session: AsyncSession, caller: User
+) -> None:
+    resp = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=_bearer(caller),
+        json={"trust_pills": "dots"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["trust_pills"] == "dots"
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "user.preferences_updated",
+                AuditLog.resource_id == str(caller.id),
+            )
+        )
+    ).scalar_one()
+    changes = audit.details["changes"]
+    assert changes["trust_pills"]["before"] == "labels"
+    assert changes["trust_pills"]["after"] == "dots"
+
+
+@pytest.mark.integration
+async def test_patch_preferences_provenance_pills_change_writes_audit(
+    client: AsyncClient, db_session: AsyncSession, caller: User
+) -> None:
+    resp = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=_bearer(caller),
+        json={"provenance_pills": "collapsed"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["provenance_pills"] == "collapsed"
+
+    audit = (
+        await db_session.execute(
+            select(AuditLog).where(
+                AuditLog.action == "user.preferences_updated",
+                AuditLog.resource_id == str(caller.id),
+            )
+        )
+    ).scalar_one()
+    changes = audit.details["changes"]
+    assert changes["provenance_pills"]["before"] == "always"
+    assert changes["provenance_pills"]["after"] == "collapsed"
+
+
+@pytest.mark.integration
+async def test_patch_preferences_multi_field_change_single_audit_row(
+    client: AsyncClient, db_session: AsyncSession, caller: User
+) -> None:
+    """Changing 3 fields in one PATCH produces a single audit row listing all 3."""
+    resp = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=_bearer(caller),
+        json={
+            "featured_tools": "inline",
+            "trust_pills": "dots",
+            "provenance_pills": "collapsed",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["featured_tools"] == "inline"
+    assert data["trust_pills"] == "dots"
+    assert data["provenance_pills"] == "collapsed"
+    # Untouched fields stay at defaults.
+    assert data["workspace_layout"] == "three_pane"
+    assert data["reasoning_visibility"] == "disclosure"
+
+    audits = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "user.preferences_updated",
+                    AuditLog.resource_id == str(caller.id),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(audits) == 1
+    changes = audits[0].details["changes"]
+    assert set(changes.keys()) == {"featured_tools", "trust_pills", "provenance_pills"}
+
+
+@pytest.mark.integration
+async def test_patch_preferences_invalid_featured_tools_enum_returns_422(
+    client: AsyncClient, caller: User
+) -> None:
+    resp = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=_bearer(caller),
+        json={"featured_tools": "floating_panel"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.integration
+async def test_users_check_constraint_blocks_invalid_featured_tools_value(
+    db_session: AsyncSession, caller: User
+) -> None:
+    """DB-level CHECK is defense-in-depth for the new personalization fields."""
+
+    from sqlalchemy.exc import IntegrityError
+
+    caller.featured_tools = "not_a_valid_value"
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_idempotent_patch_no_audit_on_new_field(
+    client: AsyncClient, db_session: AsyncSession, caller: User
+) -> None:
+    """PATCH with the server-default value for a new field is a no-op — no audit row."""
+    resp = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=_bearer(caller),
+        json={"featured_tools": "prominent"},  # same as server default
+    )
+    assert resp.status_code == 200
+
+    audits = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "user.preferences_updated",
+                    AuditLog.resource_id == str(caller.id),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert audits == []

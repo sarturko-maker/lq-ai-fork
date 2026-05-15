@@ -1,13 +1,19 @@
 """Integration tests for D1 tier-floor refusal on the chat-completions surface.
 
-Maps to PRD §4.4 / D1 verification cases (a)-(d):
+Maps to PRD §4.4 / D1 verification cases (a)-(d).
 
-* (a) Request override: ``minimum_inference_tier=5`` against the ``smart``
-  alias (tier 4 in ``gateway.yaml.example``) → HTTP 403, structured
-  ``tier_below_minimum`` envelope, no upstream call.
-* (b) Skill floor: a skill with ``minimum_inference_tier=5`` attached to a
+Under PRD §1.5.2: lower tier number = stronger security.
+``minimum_inference_tier=N`` means "require Tier N or stronger (≤N)."
+A request is refused when the resolved tier is weaker (higher-numbered)
+than the declared floor.
+
+The ``smart`` alias resolves to Tier 4 in ``gateway.yaml.example``.
+
+* (a) Request override: ``minimum_inference_tier=3`` against ``smart``
+  (tier 4) → HTTP 403.  Tier 4 is weaker than the Tier 3 floor.
+* (b) Skill floor: a skill with ``minimum_inference_tier=3`` attached to a
   request routed to tier 4 → HTTP 403; ``details.source`` names the skill.
-* (c) Project floor: ``lq_ai_project_minimum_inference_tier=5`` against
+* (c) Project floor: ``lq_ai_project_minimum_inference_tier=3`` against
   tier-4 model → HTTP 403; ``details.source == "project"``.
 * (d) Audit log: a refused request writes a row with ``refused=True`` and
   ``refusal_reason`` carrying ``tier_below_minimum``.
@@ -152,10 +158,14 @@ def _mock_anthropic_success() -> respx.Route:
 
 @pytest.mark.integration
 @respx.mock
-async def test_a_request_override_below_resolved_tier_refuses(
+async def test_a_request_override_stricter_than_resolved_tier_refuses(
     http_client: tuple[AsyncClient, RecordingRoutingLogWriter],
 ) -> None:
-    """(a) Request floor 5 against tier-4 ``smart`` → 403 + tier_below_minimum."""
+    """(a) Request floor 3 against tier-4 ``smart`` → 403 + tier_below_minimum.
+
+    Under PRD §1.5.2, Tier 4 is weaker than the Tier 3 floor, so the
+    request is refused (resolved_tier=4 > floor=3).
+    """
 
     client, _recorder = http_client
     upstream = _mock_anthropic_success()
@@ -165,7 +175,7 @@ async def test_a_request_override_below_resolved_tier_refuses(
         json={
             "model": "smart",
             "messages": [{"role": "user", "content": "hi"}],
-            "minimum_inference_tier": 5,
+            "minimum_inference_tier": 3,
         },
     )
 
@@ -173,7 +183,7 @@ async def test_a_request_override_below_resolved_tier_refuses(
     body = response.json()
     assert body["error"]["code"] == "tier_below_minimum"
     details = body["error"]["details"]
-    assert details["required_tier"] == 5
+    assert details["required_tier"] == 3
     assert details["resolved_tier"] == 4
     assert details["source"] == "request"
     assert details["routed_provider"] == "anthropic-prod"
@@ -183,10 +193,14 @@ async def test_a_request_override_below_resolved_tier_refuses(
 
 @pytest.mark.integration
 @respx.mock
-async def test_a_request_override_above_resolved_tier_passes(
+async def test_a_request_override_weaker_floor_passes(
     http_client: tuple[AsyncClient, RecordingRoutingLogWriter],
 ) -> None:
-    """Request floor at 1 (loose) against tier-4 ``smart`` → 200 (no refusal)."""
+    """Request floor at 5 (weakest) against tier-4 ``smart`` → 200 (no refusal).
+
+    Under PRD §1.5.2, floor=5 means "Tier 5 or stronger is acceptable."
+    Tier 4 is stronger than Tier 5, so the request is allowed.
+    """
 
     client, recorder = http_client
     _mock_anthropic_success()
@@ -196,7 +210,7 @@ async def test_a_request_override_above_resolved_tier_passes(
         json={
             "model": "smart",
             "messages": [{"role": "user", "content": "hi"}],
-            "minimum_inference_tier": 1,
+            "minimum_inference_tier": 5,
         },
     )
     assert response.status_code == 200
@@ -210,7 +224,7 @@ async def test_a_request_override_above_resolved_tier_passes(
 async def test_a_request_override_equal_tier_passes(
     http_client: tuple[AsyncClient, RecordingRoutingLogWriter],
 ) -> None:
-    """Floor==resolved tier is a passing case (minimum, not exclusive bound)."""
+    """Floor==resolved tier is a passing case (floor is the weakest acceptable)."""
 
     client, _recorder = http_client
     _mock_anthropic_success()
@@ -231,13 +245,17 @@ async def test_a_request_override_equal_tier_passes(
 
 @pytest.mark.integration
 @respx.mock
-async def test_b_skill_floor_above_resolved_tier_refuses(
+async def test_b_skill_floor_stricter_than_resolved_tier_refuses(
     http_client: tuple[AsyncClient, RecordingRoutingLogWriter],
 ) -> None:
-    """(b) Skill with min_tier=5 attached to ``smart`` (tier 4) → 403."""
+    """(b) Skill with min_tier=3 attached to ``smart`` (tier 4) → 403.
+
+    Under PRD §1.5.2, the skill requires Tier 3 or stronger. The ``smart``
+    alias resolves to Tier 4 (weaker), so the request is refused.
+    """
 
     client, _recorder = http_client
-    _mock_skill("strict-skill", minimum_inference_tier=5)
+    _mock_skill("strict-skill", minimum_inference_tier=3)
     upstream = _mock_anthropic_success()
 
     response = await client.post(
@@ -253,7 +271,7 @@ async def test_b_skill_floor_above_resolved_tier_refuses(
     body = response.json()
     assert body["error"]["code"] == "tier_below_minimum"
     details = body["error"]["details"]
-    assert details["required_tier"] == 5
+    assert details["required_tier"] == 3
     assert details["resolved_tier"] == 4
     assert details["source"] == "skill:strict-skill"
     assert upstream.called is False
@@ -286,10 +304,14 @@ async def test_b_skill_without_floor_does_not_refuse(
 
 @pytest.mark.integration
 @respx.mock
-async def test_c_project_floor_above_resolved_tier_refuses(
+async def test_c_project_floor_stricter_than_resolved_tier_refuses(
     http_client: tuple[AsyncClient, RecordingRoutingLogWriter],
 ) -> None:
-    """(c) Project floor 5 against tier-4 ``smart`` → 403; source=project."""
+    """(c) Project floor 3 against tier-4 ``smart`` → 403; source=project.
+
+    Under PRD §1.5.2, a privileged project with floor=3 requires Tier 3
+    or stronger. Tier 4 (``smart``) is weaker — refused.
+    """
 
     client, _recorder = http_client
     upstream = _mock_anthropic_success()
@@ -299,7 +321,7 @@ async def test_c_project_floor_above_resolved_tier_refuses(
         json={
             "model": "smart",
             "messages": [{"role": "user", "content": "hi"}],
-            "lq_ai_project_minimum_inference_tier": 5,
+            "lq_ai_project_minimum_inference_tier": 3,
         },
     )
 
@@ -307,7 +329,7 @@ async def test_c_project_floor_above_resolved_tier_refuses(
     body = response.json()
     assert body["error"]["code"] == "tier_below_minimum"
     details = body["error"]["details"]
-    assert details["required_tier"] == 5
+    assert details["required_tier"] == 3
     assert details["resolved_tier"] == 4
     assert details["source"] == "project"
     assert upstream.called is False
@@ -321,7 +343,10 @@ async def test_c_project_floor_above_resolved_tier_refuses(
 async def test_d_refusal_writes_audit_row_with_refused_true(
     http_client: tuple[AsyncClient, RecordingRoutingLogWriter],
 ) -> None:
-    """(d) A refused request writes one row with ``refused=True`` and reason."""
+    """(d) A refused request writes one row with ``refused=True`` and reason.
+
+    floor=3 against tier-4 ``smart`` → refused (Tier 4 is weaker than Tier 3).
+    """
 
     client, recorder = http_client
     _mock_anthropic_success()
@@ -331,7 +356,7 @@ async def test_d_refusal_writes_audit_row_with_refused_true(
         json={
             "model": "smart",
             "messages": [{"role": "user", "content": "hi"}],
-            "minimum_inference_tier": 5,
+            "minimum_inference_tier": 3,
         },
     )
 
@@ -340,7 +365,7 @@ async def test_d_refusal_writes_audit_row_with_refused_true(
     assert row.refused is True
     assert row.refusal_reason is not None
     assert "tier_below_minimum" in row.refusal_reason
-    assert "required=5" in row.refusal_reason
+    assert "required=3" in row.refusal_reason
     assert "resolved=4" in row.refusal_reason
     assert "source=request" in row.refusal_reason
     # The row carries the *primary* candidate's tier so operators see
@@ -358,10 +383,15 @@ async def test_d_refusal_writes_audit_row_with_refused_true(
 async def test_most_restrictive_source_wins(
     http_client: tuple[AsyncClient, RecordingRoutingLogWriter],
 ) -> None:
-    """Request=2, project=3, skill=5 → max=5 wins; source=skill."""
+    """Request=4, project=3, skill=2 → min=2 wins; source=skill.
+
+    Under PRD §1.5.2, lower number = stricter. The skill's floor=2 is the
+    most restrictive, so it governs. Tier 4 (``smart``) is weaker than
+    floor=2 → 403.
+    """
 
     client, _recorder = http_client
-    _mock_skill("hot", minimum_inference_tier=5)
+    _mock_skill("strict", minimum_inference_tier=2)
     upstream = _mock_anthropic_success()
 
     response = await client.post(
@@ -369,15 +399,15 @@ async def test_most_restrictive_source_wins(
         json={
             "model": "smart",
             "messages": [{"role": "user", "content": "hi"}],
-            "minimum_inference_tier": 2,
+            "minimum_inference_tier": 4,
             "lq_ai_project_minimum_inference_tier": 3,
-            "lq_ai_skills": ["hot"],
+            "lq_ai_skills": ["strict"],
         },
     )
     assert response.status_code == 403
     details = response.json()["error"]["details"]
-    assert details["required_tier"] == 5
-    assert details["source"] == "skill:hot"
+    assert details["required_tier"] == 2
+    assert details["source"] == "skill:strict"
     assert upstream.called is False
 
 
@@ -403,7 +433,7 @@ async def test_streaming_refusal_returns_403_not_sse(
         json={
             "model": "smart",
             "messages": [{"role": "user", "content": "hi"}],
-            "minimum_inference_tier": 5,
+            "minimum_inference_tier": 3,
             "stream": True,
         },
     )

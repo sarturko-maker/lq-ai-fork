@@ -711,6 +711,37 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
 
+  # ----------- PROJECTS SANDBOX (Wave D.2 Task 2.2) -----------
+  /api/v1/projects/sandbox/ensure:
+    post:
+      tags: [projects]
+      summary: Find or create the caller's try-it sandbox matter (Wave D.2)
+      description: |
+        Idempotent find-or-create for the per-user *try-it sandbox*
+        project. The sandbox is a system-managed matter (slug
+        ``__sandbox__``, ``is_sandbox=true``) used to scope skill try-it
+        conversations that should not count toward billable matter
+        activity.
+
+        * First call returns 201 with a fresh row.
+        * Subsequent calls return 200 with the same row.
+        * If the sandbox was previously soft-deleted, the next ensure
+          call recreates it (returns 201).
+
+        Concurrent callers are safe: the ``ON CONFLICT DO NOTHING`` path
+        ensures only one row is ever created per owner.
+      responses:
+        '200':
+          description: Existing sandbox (already existed)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+        '201':
+          description: Sandbox created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Project'}
+
   # ----------- CHATS -----------
   /api/v1/chats/search:
     get:
@@ -1115,6 +1146,61 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
 
+  # ----------- SKILLS AUTOCOMPLETE (Wave D.2 Task 2.5) -----------
+  /api/v1/skills/autocomplete:
+    get:
+      tags: [skills]
+      summary: Typeahead for the chat composer's skill picker (Wave D.2)
+      description: |
+        Two modes based on the ``q`` query parameter:
+
+        * **Empty ``q``** — returns the caller's most-recently-used skills
+          (by ``messages.applied_skills``), filled out alphabetically to
+          ``limit`` when recents are fewer than ``limit``.
+        * **Non-empty ``q``** — ranks the merged catalog by three signals
+          (slash-alias prefix > slug prefix > title substring) and returns
+          up to ``limit`` non-zero matches.
+
+        Shadowing: a user-scope row at the same slug as a built-in hides
+        the built-in (ADR 0012). ``scope`` on each result distinguishes
+        user shadows from built-ins.
+
+        ``limit`` is hard-clamped at 25 — a request for ``limit=50``
+        returns 422 rather than silently truncating.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: {type: string, default: ''}
+          description: Substring to match. Empty returns recents.
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 25, default: 10}
+      responses:
+        '200':
+          description: Autocomplete results (may be empty)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [slug, title, scope]
+                      properties:
+                        slug: {type: string}
+                        slash_alias: {type: string, nullable: true}
+                        title: {type: string}
+                        description: {type: string, nullable: true}
+                        scope: {type: string, enum: [builtin, user, team]}
+                        icon: {type: string, nullable: true}
+        '422':
+          description: limit out of range (must be 1–25).
+
   # ----------- USER SKILLS (D8 — DB-backed CRUD per ADR 0012) -----------
   /api/v1/user-skills:
     get:
@@ -1436,6 +1522,58 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
         '410':
           description: Skill is already archived.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/user-skills/{skill_id}/versions:
+    parameters:
+      - name: skill_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [user-skills]
+      summary: Audit-log view of edits for this user-skill (Wave D.2)
+      description: |
+        Returns ``audit_log`` rows for ``resource_type='user_skill'``
+        keyed by this skill id, ordered ``timestamp DESC`` (newest first).
+        The timeline UI renders top-down so the most recent edit appears
+        at the top; ``user_skill.created`` lands last.
+
+        Access gate mirrors the mutable surface: owner-only for
+        ``scope='user'`` rows; team-admin-only for ``scope='team'`` rows.
+        404 conflates "no such id" and "not your skill" (id-probing-safe).
+        Active AND archived rows are accessible so a freshly-archived
+        skill's timeline can still be rendered.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        '200':
+          description: Version history items, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [timestamp, action]
+                      properties:
+                        timestamp: {type: string, format: date-time}
+                        actor_user_id: {type: string, format: uuid, nullable: true}
+                        actor_email: {type: string, nullable: true}
+                        action: {type: string, description: "e.g. 'user_skill.created' or 'user_skill.updated'"}
+                        version: {type: string, nullable: true}
+                        details: {type: object, additionalProperties: true, nullable: true}
+        '404':
+          description: Skill not found OR caller is not the owner / not a team-admin.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -1891,6 +2029,31 @@ paths:
         in: path
         required: true
         schema: {type: string, format: uuid}
+    get:
+      tags: [knowledge-bases]
+      summary: List the files attached to a knowledge base
+      description: |
+        Returns the files currently attached to the KB (the `File`
+        shape from `GET /files/{id}` plus the `attached_at` timestamp
+        from the join). Owner-scoped — cross-user / unknown KB id
+        returns 404. Soft-deleted files are excluded. Sorted by
+        `attached_at DESC` so the most recent uploads surface first.
+
+        Drives the Knowledge surface's detail-page document list per
+        the M1 frontend design spec (Wave C).
+      responses:
+        '200':
+          description: List of attached files
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/KBFile'}
+        '404':
+          description: KB not found / cross-user
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
     post:
       tags: [knowledge-bases]
       summary: Attach a file to a knowledge base
@@ -2292,6 +2455,39 @@ paths:
                 additionalProperties: true
 
   # ----------- ADMIN: USERS (Wave C — PRD §5.2) -----------
+  /api/v1/admin/users:
+    get:
+      tags: [admin]
+      summary: List users for RBAC administration (Wave B v2 — PRD §5.2)
+      description: |
+        Admin-only. Returns the full list of non-deleted users with
+        their role + auth state. Supports filtering by role, email
+        substring search, and pagination. Default sort is email ASC.
+        Used by /lq-ai/admin/developer's role-management card.
+      parameters:
+        - name: role
+          in: query
+          schema: {type: string, enum: [admin, member, viewer]}
+        - name: email_q
+          in: query
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+        - name: offset
+          in: query
+          schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        '200':
+          description: User list (paginated)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminUserListResponse'}
+        '400':
+          description: Invalid role filter
+        '403':
+          description: Caller is not admin
+
   /api/v1/admin/users/{user_id}/role:
     parameters:
       - name: user_id
@@ -2463,6 +2659,150 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/TierConfigResponse'}
 
+  /api/v1/inference/override-tier-floor:
+    post:
+      tags: [inference]
+      summary: Re-run a refused inference with the tier floor lifted (admin only)
+      description: |
+        Wave D.1 T4. Admin-only override that re-runs the original user
+        prompt with ``tier_floor=None`` for this turn. Looks up the
+        ``kind='refusal'`` message at ``message_id``, finds the
+        immediately preceding ``kind='user'`` message in the same chat,
+        and forwards both to the gateway with no project floor and no
+        per-call minimum. Persists a new ``kind='ai'`` ``Message`` row
+        and writes an ``audit_log`` row with the operator-supplied
+        ``reason``. Returns the new message + the routing-log row id
+        the gateway wrote.
+
+        M1 binds to the ``is_admin`` role. Per-user
+        ``override_tier_floor`` capability is deferred to v1.1+.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message_id, reason]
+              properties:
+                message_id:
+                  type: string
+                  format: uuid
+                reason:
+                  type: string
+                  minLength: 10
+                  maxLength: 500
+      responses:
+        '200':
+          description: Re-run completed; new ``kind='ai'`` message persisted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ai_message]
+                properties:
+                  ai_message: {$ref: '#/components/schemas/Message'}
+                  routing_log_id:
+                    type: string
+                    format: uuid
+                    nullable: true
+        '403':
+          description: Caller is not an admin.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: ``message_id`` does not resolve to a refusal row.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/chats/{chat_id}/receipts:
+    get:
+      tags: [chats]
+      summary: Chronological event log for a chat (replay-at-read)
+      description: |
+        Wave D.1 T5 (spec §7.6). Merges chronological events from four
+        source tables into a single timestamp-ordered stream:
+
+          * ``messages``                (``kind='message'``)
+          * ``messages.applied_skills`` (one event per skill name; ``kind='skill'``)
+          * ``inference_routing_log``   (``kind='inference'`` or ``kind='error'`` if ``refused=True``)
+          * ``audit_log``               (``kind='audit'`` or ``kind='retrieval'`` if ``action='inference.kb_chunks_retrieved'``)
+
+        Owner-of-chat or admin only. Replay-at-read for M1 — chats are
+        bounded (<100 events typical). A materialized ``chat_receipts``
+        projection is a v1.1+ candidate if latency degrades.
+      parameters:
+        - name: chat_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: event_kinds
+          in: query
+          required: false
+          schema: {type: string}
+          description: |
+            Comma-separated subset of: ``message``, ``inference``,
+            ``audit``, ``skill``, ``retrieval``, ``error``. Omit for
+            all kinds. Unknown tokens are silently ignored.
+      responses:
+        '200':
+          description: Chronological list of receipt events, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [ts, kind, detail]
+                  properties:
+                    ts:
+                      type: string
+                      format: date-time
+                    kind:
+                      type: string
+                      enum: [message, inference, audit, skill, retrieval, error]
+                    detail:
+                      type: object
+                      additionalProperties: true
+        '403':
+          description: Caller is not the chat owner or an admin.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Chat not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/chats/{chat_id}/receipts/export.jsonl:
+    get:
+      summary: Export receipts as JSONL (one event per line)
+      tags: [chats]
+      parameters:
+        - name: chat_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: event_kinds
+          in: query
+          required: false
+          schema: { type: string }
+          description: Comma-separated subset (same as the JSON endpoint)
+      responses:
+        '200':
+          description: JSONL stream — one event per line
+          content:
+            application/jsonl:
+              schema: { type: string }
+        '403':
+          description: Forbidden — not the owner or admin
+        '404':
+          description: Chat not found
+
 # ============================================================
 # COMPONENTS
 # ============================================================
@@ -2485,6 +2825,32 @@ components:
         gateway-side enforcement is a deferred D-phase item.
 
   schemas:
+    AdminUserRow:
+      type: object
+      required: [id, email, role, is_admin, mfa_enabled, must_change_password, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        display_name: {type: string, nullable: true}
+        role: {type: string, enum: [admin, member, viewer]}
+        is_admin: {type: boolean}
+        mfa_enabled: {type: boolean}
+        must_change_password: {type: boolean}
+        created_at: {type: string, format: date-time}
+        last_login_at: {type: string, format: date-time, nullable: true}
+        deletion_scheduled_at: {type: string, format: date-time, nullable: true}
+
+    AdminUserListResponse:
+      type: object
+      required: [users, total_count, limit, offset]
+      properties:
+        users:
+          type: array
+          items: {$ref: '#/components/schemas/AdminUserRow'}
+        total_count: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
+
     LoginRequest:
       type: object
       required: [email, password]
@@ -2583,24 +2949,91 @@ components:
             ``disclosure`` (collapsed behind a toggle; spec default),
             ``on_request`` (hidden until the user opens the skill
             inspector). Modifiable via ``PATCH /users/me/preferences``.
+        featured_tools:
+          type: string
+          enum: [prominent, inline]
+          default: prominent
+          description: |
+            Wave B v2 — PRD §3.2.1 / frontend spec §4.3. Where Enhance
+            Prompt, Skill Creator, KB, and Apply Skill surface:
+            ``prominent`` (dashboard cards; default) vs. ``inline``
+            (toolbar only for veterans).
+        workspace_layout:
+          type: string
+          enum: [three_pane, two_pane, one_pane]
+          default: three_pane
+          description: |
+            Wave B v2 — PRD §3.2.1 / frontend spec §4.3. Matter workspace
+            pane composition (Wave C surfaces): ``three_pane`` (default),
+            ``two_pane``, or ``one_pane``.
+        trust_pills:
+          type: string
+          enum: [labels, dots]
+          default: labels
+          description: |
+            Wave B v2 — PRD §3.2.1 / frontend spec §4.3. Ambient trust
+            pill format: ``labels`` (full text, e.g. "● self-hosted";
+            default) vs. ``dots`` (minimal dot only).
+        provenance_pills:
+          type: string
+          enum: [always, collapsed]
+          default: always
+          description: |
+            Wave B v2 — PRD §3.2.1 / frontend spec §4.3. Per-message
+            skill/tier/provider pill row visibility: ``always`` (visible
+            by default) vs. ``collapsed`` (hidden until expanded).
         created_at: {type: string, format: date-time}
         last_login_at: {type: string, format: date-time, nullable: true}
 
     UserPreferences:
       type: object
-      required: [reasoning_visibility]
+      description: |
+        All 5 personalization preference fields. Wave A (``reasoning_visibility``)
+        per PRD §3.2; Wave B v2 fields per PRD §3.2.1 and frontend spec §4.3.
+      required: [reasoning_visibility, featured_tools, workspace_layout, trust_pills, provenance_pills]
       properties:
         reasoning_visibility:
           type: string
           enum: [always_show, disclosure, on_request]
+          default: disclosure
+        featured_tools:
+          type: string
+          enum: [prominent, inline]
+          default: prominent
+        workspace_layout:
+          type: string
+          enum: [three_pane, two_pane, one_pane]
+          default: three_pane
+        trust_pills:
+          type: string
+          enum: [labels, dots]
+          default: labels
+        provenance_pills:
+          type: string
+          enum: [always, collapsed]
+          default: always
 
     UserPreferencesUpdate:
       type: object
-      description: All fields optional; only supplied keys are updated.
+      description: |
+        All fields optional; only supplied keys are updated. Wave B v2 adds
+        four personalization fields per PRD §3.2.1 and frontend spec §4.3.
       properties:
         reasoning_visibility:
           type: string
           enum: [always_show, disclosure, on_request]
+        featured_tools:
+          type: string
+          enum: [prominent, inline]
+        workspace_layout:
+          type: string
+          enum: [three_pane, two_pane, one_pane]
+        trust_pills:
+          type: string
+          enum: [labels, dots]
+        provenance_pills:
+          type: string
+          enum: [always, collapsed]
 
     Project:
       type: object
@@ -2646,6 +3079,15 @@ components:
           type: array
           items: {type: string, format: uuid}
           description: "Files attached to this project, ordered by attachment time"
+        is_sandbox:
+          type: boolean
+          default: false
+          description: |
+            System-managed flag added by migration 0022. When true, this
+            project is the per-user try-it sandbox (slug ``__sandbox__``).
+            Sandbox projects are excluded from the default ``GET /projects``
+            list; pass ``include_sandbox=true`` or ``only_sandbox=true`` to
+            surface them. Created by ``POST /projects/sandbox/ensure``.
         archived_at:
           type: string
           format: date-time
@@ -2986,6 +3428,18 @@ components:
         - type: object
           required: [content_yaml, content_md]
           properties:
+            id:
+              type: string
+              format: uuid
+              nullable: true
+              description: >-
+                Wave D.2 — underlying ``user_skills.id`` row UUID when the
+                resolved scope is ``user`` or ``team``. ``null`` for
+                built-in (filesystem-canonical) skills, which have no DB
+                row. The skill detail page's Versions tab needs this id
+                to call the audit-history endpoint; surfacing it on the
+                detail GET avoids a second round-trip to resolve
+                slug → id.
             content_yaml: {type: string, description: "Frontmatter YAML"}
             content_md: {type: string, description: "Body markdown"}
             reference_files:
@@ -3269,6 +3723,39 @@ components:
           maximum: 1.0
         archived: {type: boolean, description: "true to archive; false to unarchive"}
 
+    KBFile:
+      type: object
+      description: |
+        One row of `GET /api/v1/knowledge-bases/{kb_id}/files`. Mirrors
+        `File` (the wire shape returned by `POST /files` /
+        `GET /files/{id}`) and adds `attached_at` from the join row so
+        the Knowledge surface can sort by attach time.
+      required:
+        [id, owner_id, filename, mime_type, size_bytes, hash_sha256, ingestion_status, created_at, attached_at]
+      properties:
+        id: {type: string, format: uuid}
+        owner_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, nullable: true}
+        filename: {type: string}
+        mime_type: {type: string}
+        size_bytes: {type: integer}
+        hash_sha256: {type: string}
+        ingestion_status:
+          type: string
+          enum: [pending, processing, ready, failed]
+        ingestion_error:
+          type: string
+          nullable: true
+        page_count: {type: integer, nullable: true}
+        character_count: {type: integer, nullable: true}
+        created_at: {type: string, format: date-time}
+        attached_at:
+          type: string
+          format: date-time
+          description: |
+            When the file was attached to this KB (from
+            `knowledge_base_files.attached_at`).
+
     KBQueryRequest:
       type: object
       required: [query]
@@ -3367,6 +3854,14 @@ components:
           additionalProperties: true
           description: Arbitrary ``lq_ai:`` extension keys (jurisdiction, output_format, minimum_inference_tier, etc.).
         body: {type: string}
+        slash_alias:
+          type: string
+          nullable: true
+          description: Chat-composer trigger alias (e.g. ``/nda``). Added by migration 0023.
+        forked_from:
+          type: string
+          nullable: true
+          description: Slug of the source skill when this row was forked. Added by migration 0023.
         archived_at: {type: string, format: date-time, nullable: true, description: Soft-delete timestamp; null when active.}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
@@ -3395,6 +3890,24 @@ components:
           format: uuid
           nullable: true
           description: Required when scope='team'; must be null when scope='user'. 422 if the combination is inconsistent. 404 if the caller is not a team-admin of the named team (id-probing-safe).
+        slash_alias:
+          type: string
+          nullable: true
+          pattern: '^/[a-z0-9-]{1,32}$'
+          description: |
+            Optional chat-composer trigger alias (e.g. ``/nda``). Must be
+            ``/`` followed by 1–32 lowercase alphanumeric-or-dash chars.
+            Unique per owner within the active (non-archived) set; 422 on
+            collision with ``"slash_alias '...' is already used by another
+            of your skills."``.
+        forked_from:
+          type: string
+          nullable: true
+          description: |
+            Slug of the source skill when this row was created by forking a
+            built-in or another skill via the detail-page fork button. Set
+            on create; read-only afterward. Stored as plain text (no FK —
+            the source may be a filesystem-canonical built-in with no DB row).
 
     UserSkillUpdate:
       type: object
@@ -3406,6 +3919,13 @@ components:
         version: {type: string, maxLength: 50}
         tags: {type: array, items: {type: string}, maxItems: 20}
         frontmatter_extra: {type: object, additionalProperties: true}
+        slash_alias:
+          type: string
+          nullable: true
+          pattern: '^/[a-z0-9-]{1,32}$'
+          description: |
+            Update the chat-composer trigger alias. Same validation and
+            uniqueness rules as on create. 422 on collision.
 
     # D8.1a — operator-admin-controlled teams. D8.1c adds caller_role.
     TeamSummary:

@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LQ.AI — Data Residency Map</title>
+<style>
+  :root {
+    --bg: #0c0f14;
+    --bg-elev: #151a23;
+    --bg-elev-2: #1d242f;
+    --border: #2a3340;
+    --border-hover: #3a4555;
+    --text: #e6ebf3;
+    --text-dim: #8a96a8;
+    --text-faint: #5a6578;
+    --accent: #7dd3fc;
+    --accent-dim: #38bdf8;
+    --web: #93c5fd;
+    --api: #fcd34d;
+    --gateway: #c4b5fd;
+    --data: #f9a8d4;
+    --workers: #86efac;
+    --providers: #fda4af;
+    --conn-data: #60a5fa;
+    --conn-audit: #f87171;
+    --conn-egress: #34d399;
+    --shadow: rgba(0,0,0,0.4);
+    --store-postgres: #f9a8d4;
+    --store-minio: #93c5fd;
+    --store-redis: #fcd34d;
+    --store-gateway: #c4b5fd;
+    --store-external: #fda4af;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .app {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;
+  }
+  header {
+    padding: 12px 20px;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  header .subtitle {
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  header .spacer { flex: 1; }
+  header a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 4px;
+  }
+  header a:hover { border-color: var(--border-hover); background: var(--bg-elev-2); }
+
+  .main {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    overflow: hidden;
+  }
+  .controls {
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .controls h2 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 16px 0 8px;
+  }
+  .controls h2:first-child { margin-top: 0; }
+  .presets {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .preset-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    text-align: left;
+    transition: all 0.1s;
+  }
+  .preset-btn:hover { border-color: var(--border-hover); }
+  .preset-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+    font-weight: 600;
+  }
+  .preset-btn .mode-label {
+    font-weight: 600;
+    display: block;
+  }
+  .preset-btn .mode-sub {
+    display: block;
+    font-size: 10px;
+    margin-top: 2px;
+    opacity: 0.75;
+  }
+  .preset-btn.active .mode-sub { opacity: 0.7; }
+
+  .detail-panel {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    margin-top: 8px;
+  }
+  .detail-panel.empty {
+    color: var(--text-faint);
+    text-align: center;
+    font-size: 12px;
+    padding: 24px 14px;
+  }
+  .detail-panel h3 {
+    margin: 0 0 4px;
+    font-size: 14px;
+  }
+  .detail-panel .store-badge {
+    display: inline-block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .detail-panel p {
+    margin: 6px 0;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .detail-panel .meta {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--text);
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .detail-panel .meta div { margin: 3px 0; }
+  .detail-panel .meta .k { color: var(--text-faint); }
+  .detail-panel .files {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .detail-panel .files .file {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent);
+    display: block;
+    padding: 2px 0;
+    text-decoration: none;
+  }
+  .detail-panel .files .file:hover { color: var(--accent-dim); text-decoration: underline; }
+
+  .canvas-wrap {
+    position: relative;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(125,211,252,0.04), transparent 60%),
+      radial-gradient(circle at 80% 70%, rgba(196,181,253,0.04), transparent 60%),
+      var(--bg);
+    overflow: hidden;
+  }
+  svg.canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .legend {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(21,26,35,0.92);
+    backdrop-filter: blur(6px);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--text-dim);
+    pointer-events: none;
+  }
+  .legend .row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 3px 0;
+  }
+  .legend .swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+  .legend .swatch.line {
+    width: 18px; height: 3px; border-radius: 1px;
+  }
+  .legend .swatch.egress-line {
+    background: linear-gradient(to right, var(--conn-egress) 50%, transparent 50%);
+    background-size: 8px 100%;
+    background-color: var(--conn-egress);
+    width: 18px; height: 3px; border-radius: 1px;
+  }
+
+  /* Output panel */
+  .output {
+    background: var(--bg-elev);
+    border-top: 1px solid var(--border);
+    max-height: 220px;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+  .output-tabs {
+    display: flex;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    gap: 4px;
+    align-items: flex-end;
+  }
+  .output-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .output-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  .output-tab:hover { color: var(--text); }
+  .output-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+  }
+  .copy-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace;
+    transition: all 0.15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .copy-btn.copied { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .output-body {
+    padding: 14px 16px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .output-body .pane { display: none; }
+  .output-body .pane.active { display: block; }
+  .output-body .file {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent);
+    text-decoration: none;
+    display: inline-block;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(125,211,252,0.08);
+  }
+  .output-body .file:hover { background: rgba(125,211,252,0.16); }
+  .output-body ul { margin: 4px 0; padding-left: 18px; }
+  .output-body li { margin: 2px 0; }
+  .output-body .warn {
+    color: var(--api);
+    font-size: 11px;
+    background: rgba(252,211,77,0.06);
+    border: 1px solid rgba(252,211,77,0.2);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin: 8px 0;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>LQ.AI — Data Residency Map</h1>
+    <span class="subtitle">Click any data category to see what's stored, who can read it, and how to verify in source.</span>
+    <span class="spacer"></span>
+    <a href="../../" id="learn-home">&#8617; Learn</a>
+    <a href="https://github.com/LegalQuants/lq-ai" target="_blank" rel="noopener">View source &#8599;</a>
+  </header>
+
+  <div class="main">
+    <aside class="controls">
+      <h2>Operating mode</h2>
+      <div class="presets" id="presets">
+        <button class="preset-btn active" data-mode="self-hosted-cloud">
+          <span class="mode-label">Self-hosted with cloud inference</span>
+          <span class="mode-sub">Anthropic / OpenAI providers configured</span>
+        </button>
+        <button class="preset-btn" data-mode="air-gapped">
+          <span class="mode-label">Fully air-gapped (Tier 1 only)</span>
+          <span class="mode-sub">Ollama only — nothing leaves the deployment</span>
+        </button>
+        <button class="preset-btn" data-mode="hybrid">
+          <span class="mode-label">Hybrid — privileged matters air-gapped</span>
+          <span class="mode-sub">Tier floor enforced per project (privileged flag)</span>
+        </button>
+      </div>
+
+      <h2>Data category detail</h2>
+      <div class="detail-panel empty" id="detail">
+        Click a data category on the map.
+      </div>
+    </aside>
+
+    <div class="canvas-wrap">
+      <svg class="canvas" id="svg" viewBox="0 0 900 580" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <marker id="arrow-egress" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#34d399"/>
+          </marker>
+          <marker id="arrow-return" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#c4b5fd"/>
+          </marker>
+          <style>
+            @keyframes dash-flow {
+              to { stroke-dashoffset: -24; }
+            }
+            .flow-line {
+              animation: dash-flow 1.4s linear infinite;
+            }
+          </style>
+        </defs>
+
+        <!-- Zone backgrounds -->
+        <!-- Inside zone -->
+        <rect id="zone-inside" x="12" y="30" width="590" height="520" rx="14"
+          fill="rgba(125,211,252,0.04)" stroke="rgba(125,211,252,0.18)" stroke-width="1.5"/>
+        <text x="307" y="22" fill="#7dd3fc" font-size="10" font-weight="600"
+          text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif"
+          text-transform="uppercase" letter-spacing="0.08em">INSIDE YOUR DEPLOYMENT</text>
+
+        <!-- External zone -->
+        <rect id="zone-external" x="640" y="30" width="248" height="520" rx="14"
+          fill="rgba(253,164,175,0.04)" stroke="rgba(253,164,175,0.18)" stroke-width="1.5"
+          id="external-zone-rect"/>
+        <text x="764" y="22" fill="#fda4af" font-size="10" font-weight="600"
+          text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif">EXTERNAL — INFERENCE PROVIDERS</text>
+
+        <!-- Gateway (boundary) -->
+        <g id="gw-group">
+          <rect id="gw-rect" x="210" y="242" width="180" height="60" rx="8"
+            fill="#c4b5fd" fill-opacity="0.22" stroke="#c4b5fd" stroke-width="1.5"/>
+          <text x="300" y="266" fill="#e6ebf3" font-size="12" font-weight="700"
+            text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif">Inference Gateway</text>
+          <text x="300" y="283" fill="#8a96a8" font-size="10"
+            text-anchor="middle" font-family="ui-monospace,Menlo,monospace">gateway container · :8001</text>
+        </g>
+
+        <!-- Boundary line -->
+        <line x1="620" y1="30" x2="620" y2="550"
+          stroke="rgba(230,235,243,0.12)" stroke-width="1" stroke-dasharray="5,4"/>
+        <text x="621" y="290" fill="#5a6578" font-size="9"
+          font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif"
+          transform="rotate(90,621,290)">deployment boundary</text>
+
+        <!-- Flow lines (egress) -->
+        <g id="flow-lines"></g>
+
+        <!-- Boundary enforcement callout -->
+        <g id="boundary-callout">
+          <rect x="645" y="242" width="232" height="58" rx="6"
+            fill="rgba(52,211,153,0.08)" stroke="rgba(52,211,153,0.3)" stroke-width="1"/>
+          <text x="761" y="258" fill="#34d399" font-size="10" font-weight="600"
+            text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif">Boundary enforcement</text>
+          <text x="761" y="272" fill="#8a96a8" font-size="9"
+            text-anchor="middle" font-family="ui-monospace,Menlo,monospace">gateway/app/router.py</text>
+          <text x="761" y="284" fill="#8a96a8" font-size="9"
+            text-anchor="middle" font-family="ui-monospace,Menlo,monospace">gateway/app/providers/*.py</text>
+          <text x="761" y="296" fill="#5a6578" font-size="8.5"
+            text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif">Only exit point. Read to verify.</text>
+        </g>
+
+        <!-- Air-gapped callout (hidden by default) -->
+        <g id="airgapped-callout" style="display:none">
+          <rect x="645" y="242" width="232" height="68" rx="6"
+            fill="rgba(134,239,172,0.08)" stroke="rgba(134,239,172,0.3)" stroke-width="1"/>
+          <text x="761" y="258" fill="#86efac" font-size="10" font-weight="600"
+            text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif">No external network calls</text>
+          <text x="761" y="273" fill="#8a96a8" font-size="9"
+            text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif">in this mode. Verify by inspecting:</text>
+          <text x="761" y="287" fill="#8a96a8" font-size="9"
+            text-anchor="middle" font-family="ui-monospace,Menlo,monospace">docker-compose.yml --profile local</text>
+          <text x="761" y="300" fill="#5a6578" font-size="8.5"
+            text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,system-ui,sans-serif">No external services started.</text>
+        </g>
+
+        <!-- Data nodes rendered by JS -->
+        <g id="data-nodes"></g>
+
+        <!-- External provider nodes rendered by JS -->
+        <g id="provider-nodes"></g>
+      </svg>
+
+      <div class="legend" id="legend">
+        <div class="row"><span class="swatch" style="background:var(--store-postgres)"></span> Postgres (pgvector)</div>
+        <div class="row"><span class="swatch" style="background:var(--store-minio)"></span> MinIO (blob store)</div>
+        <div class="row"><span class="swatch" style="background:var(--store-redis)"></span> Redis (queue/cache)</div>
+        <div class="row"><span class="swatch" style="background:var(--store-gateway)"></span> Gateway memory only</div>
+        <div class="row"><span class="swatch egress-line"></span> Inference egress</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="output">
+    <div class="output-tabs">
+      <button class="output-tab active" data-tab="verify">Verify in source</button>
+      <button class="output-tab" data-tab="describe">Description</button>
+      <div class="output-actions">
+        <button class="copy-btn" id="copy">Copy</button>
+      </div>
+    </div>
+    <div class="output-body">
+      <div class="pane active" id="pane-verify"></div>
+      <div class="pane" id="pane-describe"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const REPO = 'https://github.com/LegalQuants/lq-ai/blob/main/';
+
+// State
+const state = {
+  mode: 'self-hosted-cloud',
+  selectedNode: null,
+};
+
+// Data category definitions
+const DATA_NODES = [
+  // --- Postgres ---
+  {
+    id: 'chat-messages',
+    label: 'Chat messages',
+    sub: 'chat_messages table',
+    store: 'postgres',
+    zone: 'inside',
+    x: 60, y: 80,
+    what: 'Every user and assistant turn, keyed to a session. Stores role, content, model, routed_inference_tier, and token counts. The kind discriminator (migration 0020) distinguishes chat turns from skill invocations.',
+    retention: 'Until operator deletes the chat session (cascade) or purges the user.',
+    encryption: 'Postgres-level encryption at rest (TDE / encrypted volume). Column data travels over TLS between API and Postgres.',
+    access: 'Users read their own. Admins read all. API service account only.',
+    files: [
+      'api/alembic/versions/0006_create_chats_and_messages.py',
+      'api/alembic/versions/0020_messages_kind_discriminator.py',
+      'api/app/api/chats.py',
+    ],
+    meta: { table: 'chat_messages', migration: '0006 + 0020', store: 'Postgres' },
+  },
+  {
+    id: 'chat-sessions',
+    label: 'Chat sessions',
+    sub: 'chats table',
+    store: 'postgres',
+    zone: 'inside',
+    x: 60, y: 160,
+    what: 'Chat metadata: title, project association, created_at, updated_at, full-text search vector (migration 0016). Linked to projects via project_id.',
+    retention: 'Until operator or user deletes the session.',
+    encryption: 'Postgres at rest.',
+    access: 'Users read their own. Admins read all.',
+    files: [
+      'api/alembic/versions/0006_create_chats_and_messages.py',
+      'api/alembic/versions/0016_chat_search_fts.py',
+      'api/app/api/chats.py',
+    ],
+    meta: { table: 'chats', migration: '0006 + 0016', store: 'Postgres' },
+  },
+  {
+    id: 'projects',
+    label: 'Projects / matters',
+    sub: 'projects table · privileged flag',
+    store: 'postgres',
+    zone: 'inside',
+    x: 60, y: 240,
+    what: 'Matter workspaces: name, slug, context_md, privileged (bool), minimum_inference_tier (1-5). The CHECK constraint chk_projects_privileged_implies_tier enforces that privileged=true always has a non-NULL tier floor — this is the data-residency safety net for privileged matters.',
+    retention: 'Until operator or admin deletes the project (cascade to chats).',
+    encryption: 'Postgres at rest.',
+    access: 'Project members + admins. API service account only.',
+    files: [
+      'api/alembic/versions/0004_create_projects.py',
+      'api/app/api/projects.py',
+    ],
+    meta: { table: 'projects', migration: '0004', privileged_flag: 'enforces tier floor' },
+  },
+  {
+    id: 'knowledge',
+    label: 'Knowledge bases + chunks',
+    sub: 'knowledge_bases, documents, document_chunks',
+    store: 'postgres',
+    zone: 'inside',
+    x: 60, y: 330,
+    what: 'Knowledge base metadata, document records, and pgvector embeddings (VECTOR(1536) per chunk). Chunk text, page offsets, and character offsets are stored for retrieval-augmented generation. Embeddings are computed locally by the ingest worker.',
+    retention: 'Until the knowledge base or document is deleted (cascade).',
+    encryption: 'Postgres at rest; pgvector extension co-located.',
+    access: 'Users with KB access. Ingest worker service account.',
+    files: [
+      'api/alembic/versions/0005_create_documents_and_chunks.py',
+      'api/alembic/versions/0007_create_knowledge_bases.py',
+      'api/app/api/knowledge_bases.py',
+      'api/app/knowledge/retrieval.py',
+    ],
+    meta: { tables: 'knowledge_bases, documents, document_chunks', embedding: 'VECTOR(1536) via pgvector', migration: '0005 + 0007' },
+  },
+  {
+    id: 'audit-log',
+    label: 'Audit log',
+    sub: 'audit_log table',
+    store: 'postgres',
+    zone: 'inside',
+    x: 60, y: 420,
+    what: 'Append-only log of every sensitive action: event_type, user_id, resource_type, resource_id, inference_tier, privileged flag, legal_basis. Written by api/app/audit.py. Contains no message content — only event metadata.',
+    retention: 'Append-only; no TTL. Operator purges manually.',
+    encryption: 'Postgres at rest.',
+    access: 'Admin role only via read-back endpoint.',
+    files: [
+      'api/alembic/versions/0001_initial.py',
+      'api/app/audit.py',
+    ],
+    meta: { table: 'audit_log', migration: '0001', mode: 'append-only' },
+  },
+  {
+    id: 'routing-log',
+    label: 'Routing log',
+    sub: 'inference_routing_log table',
+    store: 'postgres',
+    zone: 'inside',
+    x: 310, y: 80,
+    what: 'Every inference routing decision: provider, model, tier, outcome, latency, token counts. Written by the Gateway (gateway/app/routing_log.py). Does NOT store the inference payload or response content.',
+    retention: 'Until operator purges.',
+    encryption: 'Postgres at rest.',
+    access: 'Admin role only.',
+    files: [
+      'api/alembic/versions/0001_initial.py',
+      'gateway/app/routing_log.py',
+      'gateway/app/router.py',
+    ],
+    meta: { table: 'inference_routing_log', migration: '0001', writer: 'Gateway service' },
+  },
+  {
+    id: 'users',
+    label: 'Users + roles',
+    sub: 'users table',
+    store: 'postgres',
+    zone: 'inside',
+    x: 310, y: 160,
+    what: 'User records: email, hashed password, role, preferences JSON (reasoning_visibility, featured_tools, workspace_layout, trust_pills, provenance_pills), session_timeout_minutes. Passwords are hashed; plaintext is never stored.',
+    retention: 'Until admin deletes the user.',
+    encryption: 'Passwords bcrypt-hashed. Postgres at rest.',
+    access: 'Each user reads their own profile. Admin reads all.',
+    files: [
+      'api/alembic/versions/0001_initial.py',
+      'api/alembic/versions/0015_enhance_prompt_and_user_prefs.py',
+      'api/alembic/versions/0019_user_preferences_extension.py',
+      'api/app/api/users.py',
+    ],
+    meta: { table: 'users', migration: '0001 + 0015 + 0019', passwords: 'bcrypt-hashed' },
+  },
+  {
+    id: 'skills',
+    label: 'Skills',
+    sub: 'user_skills table + skills/ filesystem',
+    store: 'postgres',
+    zone: 'inside',
+    x: 310, y: 240,
+    what: 'Built-in skills resolve from the skills/ directory at startup. User-authored and team skills live in the user_skills table with SKILL.md content, version history, and optional slash_alias. No external service resolves skills.',
+    retention: 'Until user or admin deletes the skill.',
+    encryption: 'Postgres at rest for user_skills.',
+    access: 'Skill owner + team members. Built-ins: all users.',
+    files: [
+      'api/alembic/versions/0013_create_user_skills.py',
+      'api/alembic/versions/0023_add_user_skills_slash_alias_and_forked_from.py',
+      'api/app/api/skills.py',
+      'api/app/api/user_skills.py',
+    ],
+    meta: { table: 'user_skills', migration: '0013 + 0023', built_ins: 'skills/ filesystem' },
+  },
+  {
+    id: 'saved-prompts',
+    label: 'Saved prompts',
+    sub: 'saved_prompts table',
+    store: 'postgres',
+    zone: 'inside',
+    x: 310, y: 330,
+    what: 'User-saved prompts: title, content, tags (GIN-indexed), pinned flag. Scoped to the creating user; no cross-user sharing in M1.',
+    retention: 'Until user or admin deletes (cascade on user delete).',
+    encryption: 'Postgres at rest.',
+    access: 'Creating user only.',
+    files: [
+      'api/alembic/versions/0011_create_saved_prompts.py',
+      'api/app/api/saved_prompts.py',
+    ],
+    meta: { table: 'saved_prompts', migration: '0011' },
+  },
+  // --- MinIO ---
+  {
+    id: 'uploaded-files',
+    label: 'Uploaded files',
+    sub: 'MinIO · PDFs, DOCX',
+    store: 'minio',
+    zone: 'inside',
+    x: 310, y: 420,
+    what: 'Raw file blobs uploaded by users. The API stores the blob in MinIO and writes a record to the documents table. The ingest worker reads from MinIO to parse and chunk. Files are never forwarded to inference providers; only the extracted text chunks are used in RAG context.',
+    retention: 'Until user or admin deletes the document.',
+    encryption: 'MinIO TLS in transit; operator configures at-rest encryption on the volume.',
+    access: 'Uploader + KB members. Ingest worker service account.',
+    files: [
+      'api/app/api/files.py',
+      'api/app/workers/document_pipeline.py',
+    ],
+    meta: { store: 'MinIO (S3-compatible)', port: '9000', container: 'lq-ai-minio-1' },
+  },
+  // --- Redis ---
+  {
+    id: 'redis',
+    label: 'Redis (queue + cache)',
+    sub: 'Redis · job queue, short-lived caches',
+    store: 'redis',
+    zone: 'inside',
+    x: 180, y: 490,
+    what: 'Job queue (arq) for the ingest worker. Short-lived caches and rate-limiter state. No primary application state is stored here — Redis is purely operational. Not used for chat history.',
+    retention: 'Job TTLs per arq config. Cache keys per TTL. No durable state.',
+    encryption: 'In-transit TLS optional per operator config.',
+    access: 'API and ingest worker service accounts.',
+    files: ['docker-compose.yml'],
+    meta: { store: 'Redis 7', container: 'lq-ai-redis-1', port: '6379', durable: 'no' },
+  },
+  // --- Gateway memory ---
+  {
+    id: 'provider-keys',
+    label: 'Provider API keys',
+    sub: 'Gateway memory · never persisted',
+    store: 'gateway',
+    zone: 'inside',
+    x: 420, y: 490,
+    what: 'Provider API keys are loaded from the operator\'s secret store at startup (either env var path api_key_env or encrypted-at-rest path api_key_encrypted). The Gateway decrypts to memory and never writes the plaintext key to disk, logs, or the database.',
+    retention: 'In-memory only; cleared on Gateway restart.',
+    encryption: 'api_key_encrypted uses Fernet symmetric encryption (cryptography library). The master key is operator-managed.',
+    access: 'Gateway process memory only. No API exposes the key value.',
+    files: [
+      'gateway/app/secrets.py',
+      'gateway/app/config.py',
+    ],
+    meta: { store: 'Gateway process memory', persisted: 'never', encryption: 'Fernet (api_key_encrypted path)' },
+  },
+];
+
+// Provider nodes (external zone)
+const PROVIDER_NODES = [
+  {
+    id: 'provider-anthropic',
+    label: 'Anthropic',
+    sub: 'api.anthropic.com',
+    x: 764, y: 130,
+    what: 'External inference provider. The Gateway sends the assembled inference payload (system prompt + user message) and receives the model response. No other data crosses to this endpoint.',
+    files: ['gateway/app/providers/anthropic.py'],
+  },
+  {
+    id: 'provider-openai',
+    label: 'OpenAI',
+    sub: 'api.openai.com/v1',
+    x: 764, y: 220,
+    what: 'External inference provider. Same egress model as Anthropic — assembled payload out, model response back.',
+    files: ['gateway/app/providers/openai.py'],
+  },
+  {
+    id: 'inference-payload',
+    label: 'What leaves the boundary',
+    sub: 'assembled prompt + user message',
+    x: 764, y: 370,
+    what: 'The ONLY data that crosses the deployment boundary: an assembled inference request containing (1) the resolved system prompt built from skills + project context, (2) relevant RAG chunks if a knowledge base is attached, and (3) the user\'s message. The response (model output) returns through the same channel and is persisted to chat_messages.',
+    files: [
+      'gateway/app/router.py',
+      'gateway/app/providers/anthropic.py',
+      'gateway/app/providers/openai.py',
+    ],
+  },
+  {
+    id: 'not-external',
+    label: 'Explicitly NOT sent externally',
+    sub: 'no analytics · no telemetry · no CDN',
+    x: 764, y: 460,
+    what: 'No analytics. No telemetry to LegalQuants. No phone-home. No CDN-served fonts or scripts in air-gapped deployment. Verify: (1) grep -r "analytics\|telemetry\|phone" gateway/app/ returns nothing; (2) docker-compose.yml defines no analytics services; (3) the web/ bundle serves all assets from the self-hosted container.',
+    files: [
+      'docker-compose.yml',
+      'gateway/app/router.py',
+    ],
+  },
+];
+
+const MODE_CONFIG = {
+  'self-hosted-cloud': {
+    label: 'Self-hosted with cloud inference',
+    externalDim: false,
+    flowVisible: true,
+    providers: ['provider-anthropic', 'provider-openai'],
+    boundaryCallout: 'cloud',
+    descExtra: 'Inference requests cross the deployment boundary to the configured cloud inference provider(s). The request payload is the assembled system prompt + user message only. All other data — chat history, uploaded files, audit log, embeddings — stays inside the deployment. The Gateway is the only exit point; reading gateway/app/router.py is sufficient to verify there is no other egress path.',
+  },
+  'air-gapped': {
+    label: 'Fully air-gapped (Tier 1 only)',
+    externalDim: true,
+    flowVisible: false,
+    providers: [],
+    boundaryCallout: 'airgap',
+    descExtra: 'Ollama is the only configured provider (started via docker compose --profile local up). No outbound inference calls are made. Nothing leaves the deployment. Verify by reading docker-compose.yml — the --profile local flag adds only the ollama and paddleocr containers; no external service endpoints are configured.',
+  },
+  'hybrid': {
+    label: 'Hybrid — privileged matters air-gapped',
+    externalDim: false,
+    flowVisible: true,
+    providers: ['provider-anthropic', 'provider-openai'],
+    boundaryCallout: 'cloud',
+    descExtra: 'Matters with privileged=true carry a minimum_inference_tier that the Gateway enforces. If the matter\'s tier floor is Tier 1, inference stays on Ollama regardless of the default provider. The CHECK constraint chk_projects_privileged_implies_tier (migration 0004) ensures privileged matters always have a non-NULL tier floor. Verify the enforcement at gateway/app/tier_floor.py and api/alembic/versions/0004_create_projects.py.',
+  },
+};
+
+// ---- Rendering ----
+
+function getStoreColor(store) {
+  return {
+    postgres: 'var(--store-postgres)',
+    minio: 'var(--store-minio)',
+    redis: 'var(--store-redis)',
+    gateway: 'var(--store-gateway)',
+    external: 'var(--store-external)',
+  }[store] || 'var(--text-dim)';
+}
+
+function getStoreLabel(store) {
+  return {
+    postgres: 'Postgres',
+    minio: 'MinIO',
+    redis: 'Redis',
+    gateway: 'Gateway memory',
+    external: 'External',
+  }[store] || store;
+}
+
+function svgNS(tag) {
+  return document.createElementNS('http://www.w3.org/2000/svg', tag);
+}
+
+function makeDataNode(n, isSelected) {
+  const g = svgNS('g');
+  g.setAttribute('class', 'data-node');
+  g.style.cursor = 'pointer';
+  g.dataset.id = n.id;
+
+  const W = 220, H = 42;
+  const color = getStoreColor(n.store);
+
+  const rect = svgNS('rect');
+  rect.setAttribute('x', n.x);
+  rect.setAttribute('y', n.y);
+  rect.setAttribute('width', W);
+  rect.setAttribute('height', H);
+  rect.setAttribute('rx', '6');
+  rect.setAttribute('fill', color);
+  rect.setAttribute('fill-opacity', isSelected ? '0.32' : '0.18');
+  rect.setAttribute('stroke', color);
+  rect.setAttribute('stroke-opacity', isSelected ? '1' : '0.5');
+  rect.setAttribute('stroke-width', isSelected ? '2' : '1');
+  g.appendChild(rect);
+
+  const t1 = svgNS('text');
+  t1.setAttribute('x', n.x + 10);
+  t1.setAttribute('y', n.y + 16);
+  t1.setAttribute('fill', 'var(--text)');
+  t1.setAttribute('font-size', '11');
+  t1.setAttribute('font-weight', '600');
+  t1.setAttribute('font-family', '-apple-system,BlinkMacSystemFont,system-ui,sans-serif');
+  t1.textContent = n.label;
+  g.appendChild(t1);
+
+  const t2 = svgNS('text');
+  t2.setAttribute('x', n.x + 10);
+  t2.setAttribute('y', n.y + 30);
+  t2.setAttribute('fill', 'var(--text-faint)');
+  t2.setAttribute('font-size', '9.5');
+  t2.setAttribute('font-family', 'ui-monospace,Menlo,monospace');
+  t2.textContent = n.sub;
+  g.appendChild(t2);
+
+  g.addEventListener('click', () => {
+    state.selectedNode = n.id;
+    updateAll();
+  });
+
+  return g;
+}
+
+function makeProviderNode(n, dimmed, isSelected) {
+  const g = svgNS('g');
+  g.style.cursor = 'pointer';
+  g.dataset.id = n.id;
+
+  const W = 200, H = 50;
+  const isPayload = n.id === 'inference-payload' || n.id === 'not-external';
+  const color = isPayload ? '#fda4af' : '#fda4af';
+
+  const rect = svgNS('rect');
+  rect.setAttribute('x', n.x - W / 2);
+  rect.setAttribute('y', n.y - H / 2);
+  rect.setAttribute('width', W);
+  rect.setAttribute('height', H);
+  rect.setAttribute('rx', '6');
+  rect.setAttribute('fill', color);
+  rect.setAttribute('fill-opacity', dimmed ? '0.04' : (isSelected ? '0.22' : '0.12'));
+  rect.setAttribute('stroke', color);
+  rect.setAttribute('stroke-opacity', dimmed ? '0.15' : (isSelected ? '0.9' : '0.4'));
+  rect.setAttribute('stroke-width', isSelected ? '2' : '1');
+  g.appendChild(rect);
+
+  const t1 = svgNS('text');
+  t1.setAttribute('x', n.x);
+  t1.setAttribute('y', n.y - 8);
+  t1.setAttribute('fill', dimmed ? 'var(--text-faint)' : 'var(--text)');
+  t1.setAttribute('font-size', '11');
+  t1.setAttribute('font-weight', '600');
+  t1.setAttribute('text-anchor', 'middle');
+  t1.setAttribute('font-family', '-apple-system,BlinkMacSystemFont,system-ui,sans-serif');
+  t1.textContent = n.label;
+  g.appendChild(t1);
+
+  const t2 = svgNS('text');
+  t2.setAttribute('x', n.x);
+  t2.setAttribute('y', n.y + 8);
+  t2.setAttribute('fill', dimmed ? 'var(--text-faint)' : 'var(--text-dim)');
+  t2.setAttribute('font-size', '9.5');
+  t2.setAttribute('text-anchor', 'middle');
+  t2.setAttribute('font-family', 'ui-monospace,Menlo,monospace');
+  t2.textContent = n.sub;
+  g.appendChild(t2);
+
+  g.addEventListener('click', () => {
+    state.selectedNode = n.id;
+    updateAll();
+  });
+
+  return g;
+}
+
+function renderCanvas() {
+  const cfg = MODE_CONFIG[state.mode];
+  const dataNodesG = document.getElementById('data-nodes');
+  const providerNodesG = document.getElementById('provider-nodes');
+  const flowLinesG = document.getElementById('flow-lines');
+  dataNodesG.innerHTML = '';
+  providerNodesG.innerHTML = '';
+  flowLinesG.innerHTML = '';
+
+  // Data nodes
+  DATA_NODES.forEach(n => {
+    const isSelected = state.selectedNode === n.id;
+    dataNodesG.appendChild(makeDataNode(n, isSelected));
+  });
+
+  // Provider nodes
+  PROVIDER_NODES.forEach(n => {
+    const dimmed = cfg.externalDim && (n.id === 'provider-anthropic' || n.id === 'provider-openai');
+    const isSelected = state.selectedNode === n.id;
+    providerNodesG.appendChild(makeProviderNode(n, dimmed, isSelected));
+  });
+
+  // Flow lines (egress animation)
+  if (cfg.flowVisible) {
+    // Line from Gateway to Anthropic
+    if (cfg.providers.includes('provider-anthropic')) {
+      appendFlowLine(flowLinesG, 390, 272, 664, 130, '#34d399', 'arrow-egress');
+    }
+    // Line from Gateway to OpenAI
+    if (cfg.providers.includes('provider-openai')) {
+      appendFlowLine(flowLinesG, 390, 272, 664, 220, '#34d399', 'arrow-egress');
+    }
+    // Return line from Anthropic/OpenAI back through gateway
+    if (cfg.providers.includes('provider-anthropic')) {
+      appendReturnLine(flowLinesG, 664, 135, 390, 278);
+    }
+  }
+
+  // External zone + callout visibility
+  const zoneRect = document.getElementById('zone-external');
+  const boundaryCallout = document.getElementById('boundary-callout');
+  const airgappedCallout = document.getElementById('airgapped-callout');
+
+  if (cfg.externalDim) {
+    zoneRect.setAttribute('fill', 'rgba(253,164,175,0.01)');
+    zoneRect.setAttribute('stroke', 'rgba(253,164,175,0.07)');
+    boundaryCallout.style.display = 'none';
+    airgappedCallout.style.display = '';
+  } else {
+    zoneRect.setAttribute('fill', 'rgba(253,164,175,0.04)');
+    zoneRect.setAttribute('stroke', 'rgba(253,164,175,0.18)');
+    boundaryCallout.style.display = '';
+    airgappedCallout.style.display = 'none';
+  }
+}
+
+function appendFlowLine(g, x1, y1, x2, y2, color, markerId) {
+  const path = svgNS('path');
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const cx1 = x1 + dx * 0.5;
+  const cy1 = y1;
+  const cx2 = x1 + dx * 0.5;
+  const cy2 = y2;
+  path.setAttribute('d', `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`);
+  path.setAttribute('stroke', color);
+  path.setAttribute('stroke-width', '1.5');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke-dasharray', '8 4');
+  path.setAttribute('stroke-dashoffset', '0');
+  path.setAttribute('class', 'flow-line');
+  path.setAttribute('marker-end', `url(#${markerId})`);
+  g.appendChild(path);
+}
+
+function appendReturnLine(g, x1, y1, x2, y2) {
+  const path = svgNS('path');
+  const dx = x2 - x1;
+  const cx1 = x1 + dx * 0.5;
+  const cx2 = x1 + dx * 0.5;
+  path.setAttribute('d', `M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}`);
+  path.setAttribute('stroke', '#c4b5fd');
+  path.setAttribute('stroke-width', '1');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke-dasharray', '4 4');
+  path.setAttribute('class', 'flow-line');
+  path.setAttribute('marker-end', 'url(#arrow-return)');
+  g.appendChild(path);
+}
+
+// ---- Detail panel ----
+
+function findNode(id) {
+  return DATA_NODES.find(n => n.id === id) || PROVIDER_NODES.find(n => n.id === id);
+}
+
+function renderDetail() {
+  const panel = document.getElementById('detail');
+  if (!state.selectedNode) {
+    panel.className = 'detail-panel empty';
+    panel.innerHTML = 'Click a data category on the map.';
+    return;
+  }
+  const n = findNode(state.selectedNode);
+  if (!n) return;
+
+  panel.className = 'detail-panel';
+
+  const isDataNode = DATA_NODES.includes(n);
+  const storeColor = isDataNode ? getStoreColor(n.store) : 'var(--store-external)';
+  const storeLabel = isDataNode ? getStoreLabel(n.store) : 'External';
+
+  const filesHtml = (n.files || []).length
+    ? `<div class="files">${n.files.map(f =>
+        f === 'docker-compose.yml'
+          ? `<a class="file" href="${REPO}${f}" target="_blank" rel="noopener">${f}</a>`
+          : `<a class="file" href="${REPO}${f}" target="_blank" rel="noopener">${f}</a>`
+      ).join('')}</div>`
+    : '';
+
+  const meta = n.meta || {};
+  const metaHtml = Object.entries(meta).map(([k, v]) =>
+    `<div><span class="k">${k}:</span> ${v}</div>`).join('');
+
+  const retainHtml = n.retention
+    ? `<div><span class="k">retention:</span> ${n.retention}</div>` : '';
+  const encHtml = n.encryption
+    ? `<div><span class="k">encryption:</span> ${n.encryption}</div>` : '';
+  const accessHtml = n.access
+    ? `<div><span class="k">access:</span> ${n.access}</div>` : '';
+
+  panel.innerHTML = `
+    <span class="store-badge" style="background:${storeColor};color:var(--bg)">${storeLabel}</span>
+    <h3>${n.label}</h3>
+    <p>${n.what}</p>
+    <div class="meta">
+      ${metaHtml}
+      ${retainHtml}
+      ${encHtml}
+      ${accessHtml}
+    </div>
+    ${filesHtml}
+  `;
+}
+
+// ---- Output panes ----
+
+function renderOutput() {
+  const cfg = MODE_CONFIG[state.mode];
+  const verifyEl = document.getElementById('pane-verify');
+  const describeEl = document.getElementById('pane-describe');
+
+  // Verify pane
+  let verifyHtml = `<p style="color:var(--text-dim);margin:0 0 10px">Key source paths for verifying data residency claims. Click any path to open on GitHub.</p>`;
+
+  const gatewayBoundary = `
+    <div style="margin:8px 0">
+      <strong style="color:var(--text);font-size:12px">Boundary enforcement (only exit point)</strong>
+      <ul style="list-style:none;padding-left:0;margin:4px 0">
+        <li><a class="file" href="${REPO}gateway/app/router.py" target="_blank" rel="noopener">gateway/app/router.py</a></li>
+        <li><a class="file" href="${REPO}gateway/app/providers/anthropic.py" target="_blank" rel="noopener">gateway/app/providers/anthropic.py</a></li>
+        <li><a class="file" href="${REPO}gateway/app/providers/openai.py" target="_blank" rel="noopener">gateway/app/providers/openai.py</a></li>
+        <li><a class="file" href="${REPO}gateway/app/providers/ollama.py" target="_blank" rel="noopener">gateway/app/providers/ollama.py</a></li>
+        <li><a class="file" href="${REPO}gateway/app/secrets.py" target="_blank" rel="noopener">gateway/app/secrets.py</a></li>
+      </ul>
+    </div>`;
+
+  const networkTopology = `
+    <div style="margin:8px 0">
+      <strong style="color:var(--text);font-size:12px">Network topology</strong>
+      <ul style="list-style:none;padding-left:0;margin:4px 0">
+        <li><a class="file" href="${REPO}docker-compose.yml" target="_blank" rel="noopener">docker-compose.yml</a>
+          <span style="color:var(--text-faint);font-size:10px;margin-left:6px">— which services are exposed vs internal-only</span></li>
+      </ul>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">
+        Default profile: cloud inference. <code style="color:var(--accent);font-size:10px">--profile local</code>: adds ollama + paddleocr only; no external services started.
+      </div>
+    </div>`;
+
+  const privacyHonest = `
+    <div class="warn">
+      <strong>Anonymization Layer (M2, not yet running):</strong> The PRD describes entity substitution on the request path — swapping named entities for stable placeholders before they leave the deployment. In M1, the config slot exists but the middleware does not run. Read <a class="file" href="${REPO}docs/HONEST-STATE.md" target="_blank" rel="noopener">docs/HONEST-STATE.md §3.2</a> and <a class="file" href="${REPO}gateway/app/api/admin.py" target="_blank" rel="noopener">gateway/app/api/admin.py:270-282</a> (returns 501) to verify.
+    </div>`;
+
+  verifyHtml += gatewayBoundary + networkTopology + privacyHonest;
+
+  if (state.selectedNode) {
+    const n = findNode(state.selectedNode);
+    if (n && n.files && n.files.length) {
+      verifyHtml += `<div style="margin:8px 0"><strong style="color:var(--text);font-size:12px">Selected: ${n.label}</strong><ul style="list-style:none;padding-left:0;margin:4px 0">`;
+      n.files.forEach(f => {
+        verifyHtml += `<li><a class="file" href="${REPO}${f}" target="_blank" rel="noopener">${f}</a></li>`;
+      });
+      verifyHtml += '</ul></div>';
+    }
+  }
+
+  verifyEl.innerHTML = verifyHtml;
+
+  // Describe pane
+  let describeHtml = `<p><strong>Mode:</strong> ${cfg.label}.</p>`;
+  describeHtml += `<p style="color:var(--text-dim)">${cfg.descExtra}</p>`;
+
+  if (state.mode === 'self-hosted-cloud' || state.mode === 'hybrid') {
+    describeHtml += `<p>The Inference Gateway (<a class="file" href="${REPO}gateway/app/router.py" target="_blank" rel="noopener">gateway/app/router.py</a>) is the ONLY component that makes outbound calls. A procurement team can read this file to verify there is no other egress path. Every other component — API, ingest worker, web, Postgres, MinIO, Redis — is strictly internal.</p>`;
+  }
+
+  describeHtml += `<p><strong>What stays inside:</strong> Chat messages, sessions, projects, skills, knowledge bases + embeddings, uploaded files, audit log, routing log, users, saved prompts, provider API keys.</p>`;
+
+  if (state.mode !== 'air-gapped') {
+    describeHtml += `<p><strong>What crosses the boundary:</strong> The assembled inference payload (system prompt from resolved skills + relevant RAG chunks + user message). The model response returns through the same channel and is persisted inside the deployment.</p>`;
+  } else {
+    describeHtml += `<p><strong>What crosses the boundary:</strong> Nothing. Ollama runs inside the deployment. No external network calls are made.</p>`;
+  }
+
+  describeHtml += `<p><strong>No phone-home, analytics, or telemetry.</strong> Verify: <a class="file" href="${REPO}docker-compose.yml" target="_blank" rel="noopener">docker-compose.yml</a> defines no analytics services. The <a class="file" href="${REPO}gateway/app/router.py" target="_blank" rel="noopener">gateway/app/router.py</a> makes no calls except to the configured inference providers. The web bundle is served from the self-hosted container — no CDN fonts or scripts in an air-gapped deployment.</p>`;
+
+  describeHtml += `<p style="color:var(--api);font-size:11px"><strong>M2 note:</strong> The Anonymization Layer (PRD §4.7) will add entity substitution on the request path. In M1 it is not running — the config slot exists but the middleware is absent. See <a class="file" href="${REPO}docs/HONEST-STATE.md" target="_blank" rel="noopener">HONEST-STATE.md §3.2</a>.</p>`;
+
+  if (state.selectedNode) {
+    const n = findNode(state.selectedNode);
+    if (n) {
+      describeHtml += `<p style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><strong>Selected:</strong> ${n.label}. ${n.what}</p>`;
+    }
+  }
+
+  describeEl.innerHTML = describeHtml;
+}
+
+// ---- Tabs ----
+document.querySelectorAll('.output-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.output-tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.output-body .pane').forEach(p => p.classList.toggle('active', p.id === `pane-${tab.dataset.tab}`));
+  });
+});
+
+// ---- Copy ----
+document.getElementById('copy').addEventListener('click', () => {
+  const activeTab = document.querySelector('.output-tab.active').dataset.tab;
+  const pane = document.getElementById(`pane-${activeTab}`);
+  const text = pane.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy');
+    btn.classList.add('copied');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 1200);
+  });
+});
+
+// ---- Mode selector ----
+document.getElementById('presets').addEventListener('click', e => {
+  const btn = e.target.closest('.preset-btn');
+  if (!btn) return;
+  state.mode = btn.dataset.mode;
+  state.selectedNode = null;
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.toggle('active', b === btn));
+  updateAll();
+});
+
+// ---- Master update ----
+function updateAll() {
+  renderCanvas();
+  renderDetail();
+  renderOutput();
+}
+
+// Init
+updateAll();
+</script>
+</body>
+</html>

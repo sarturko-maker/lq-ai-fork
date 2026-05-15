@@ -61,7 +61,6 @@ from typing import Any
 import httpx
 
 from app.config import ProviderConfig
-from app.secrets import ProviderKeyResolver
 from app.providers.base import (
     ProviderAdapter,
     ProviderAuthError,
@@ -78,6 +77,7 @@ from app.providers.openai_schema import (
     EmbeddingsResponse,
     EmbeddingsUsage,
 )
+from app.secrets import ProviderKeyResolver
 
 # Body keys that the gateway adds on top of OpenAI's schema (per
 # ``docs/api/gateway-openapi.yaml``) and that OpenAI itself rejects with
@@ -94,6 +94,7 @@ _LQ_AI_EXTENSION_KEYS = frozenset(
         "anonymize",
         "lq_ai_skills",
         "lq_ai_skill_inputs",
+        "lq_ai_inline_skills",
         "lq_ai_chat_id",
         "lq_ai_message_id",
         "lq_ai_user_id",
@@ -180,7 +181,8 @@ class OpenAIAdapter(ProviderAdapter):
         # env-named source is set; openai_compatible local servers may
         # legitimately have no key at all.
         effective_env = provider.api_key_env or (
-            None if (provider.api_key_encrypted or provider.type == "openai_compatible")
+            None
+            if (provider.api_key_encrypted or provider.type == "openai_compatible")
             else "OPENAI_API_KEY"
         )
         api_key = key_resolver.resolve(

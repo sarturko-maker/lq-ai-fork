@@ -73,6 +73,7 @@ from app.providers import (
     ChatCompletionUsage,
     EmbeddingsRequest,
     EmbeddingsResponse,
+    InlineSkillRef,
     ProviderAdapter,
     ProviderAdapterError,
     ProviderAuthError,
@@ -262,6 +263,33 @@ def _backend(request: Request) -> BackendClient:
     return get_backend_client()
 
 
+def _inline_ref_to_skill(ref: InlineSkillRef) -> Skill:
+    """Wave D.2 Task 3.0 — construct a :class:`Skill` from an inline ref.
+
+    No HTTP, no cache. The backend has already done the
+    authorization-equivalent step (the user couldn't have posted an
+    inline_body without being authenticated as themselves on
+    ``POST /chats/{id}/messages``); the gateway treats the body as
+    trusted-from-the-backend and assembles it the same way as a
+    catalogue skill.
+
+    The synthesized :class:`Skill` is intentionally minimal: ``name`` +
+    ``content_md`` + ``minimum_inference_tier`` is the field set the
+    assembler and tier-floor resolver actually consume. ``scope`` is
+    set to ``"inline"`` so any downstream introspection can identify
+    these without re-parsing the synthesized-name convention.
+    """
+
+    return Skill(
+        name=ref.name,
+        scope="inline",
+        title="",
+        content_md=ref.body,
+        content_yaml="",
+        minimum_inference_tier=ref.minimum_inference_tier,
+    )
+
+
 async def _apply_skill_prompt_assembly(
     chat_request: ChatCompletionRequest,
     *,
@@ -271,24 +299,34 @@ async def _apply_skill_prompt_assembly(
     """Mutate ``chat_request`` in place to include skill-assembled content.
 
     Returns the :class:`Skill` objects whose content was actually fetched
-    and assembled. The route handler reads ``[s.name for s in skills]``
-    for the ``lq_ai_applied_skills`` response field, and reads
-    ``s.minimum_inference_tier`` for D1 tier-floor enforcement.
+    OR built from an inline ref. The route handler reads
+    ``[s.name for s in skills]`` for the ``lq_ai_applied_skills``
+    response field, and reads ``s.minimum_inference_tier`` for D1
+    tier-floor enforcement.
 
-    No-ops when ``lq_ai_skills`` is empty.
+    No-ops when BOTH ``lq_ai_skills`` and ``lq_ai_inline_skills`` are
+    empty.
+
+    Order: catalogue skills first (in input order), then inline skills
+    (in input order). This is deterministic and matches the documented
+    contract on :attr:`ChatCompletionRequest.lq_ai_inline_skills`.
+
+    Inline bodies are NOT logged at INFO or above (PII risk — the body
+    may carry user-drafted prompt content). The synthesized name + tier
+    are safe to log.
 
     Raises :class:`LQAIError` subclasses on fetch failure / missing
     required input. The route handler's ``LQAIError`` handler in
     :mod:`app.main` translates them to the canonical envelope.
     """
 
-    if not chat_request.lq_ai_skills:
+    if not chat_request.lq_ai_skills and not chat_request.lq_ai_inline_skills:
         return []
 
-    # Fetch each skill (cache-aware). Fail-fast on the first failure;
-    # we don't try to dispatch a request with a partial skill block.
-    # ``lq_ai_user_id`` (set by the backend per ADR 0012) drives the
-    # user-scope shadow lookup at the internal endpoint — when
+    # Fetch each catalogue skill (cache-aware). Fail-fast on the first
+    # failure; we don't try to dispatch a request with a partial skill
+    # block. ``lq_ai_user_id`` (set by the backend per ADR 0012) drives
+    # the user-scope shadow lookup at the internal endpoint — when
     # present, the backend resolves the user's user_skills row first
     # before falling through to the filesystem registry.
     user_id = chat_request.lq_ai_user_id
@@ -296,6 +334,27 @@ async def _apply_skill_prompt_assembly(
     for name in chat_request.lq_ai_skills:
         skill = await backend.get_skill(name, request_id=request_id, user_id=user_id)
         skills.append(skill)
+
+    # Wave D.2 Task 3.0 — append inline-body skills after the
+    # catalogue-resolved set. No HTTP; the body is the source of truth.
+    # We DO honor per-ref inputs: merge them into the request's
+    # skill_inputs map under the synthesized name so the assembler's
+    # standard pipeline applies substitution uniformly.
+    if chat_request.lq_ai_inline_skills:
+        # Defensively copy the inputs map so we don't mutate the
+        # caller's dict (the request object is owned by the route
+        # handler; we are a hot-path helper called once per request).
+        inputs_map: dict[str, dict[str, Any]] = dict(chat_request.lq_ai_skill_inputs or {})
+        for inline_ref in chat_request.lq_ai_inline_skills:
+            skills.append(_inline_ref_to_skill(inline_ref))
+            if inline_ref.inputs:
+                # Caller may have already populated skill_inputs[name]
+                # via the top-level field; the ref-level inputs take
+                # precedence on key collision (most-specific intent).
+                merged = dict(inputs_map.get(inline_ref.name, {}))
+                merged.update(inline_ref.inputs)
+                inputs_map[inline_ref.name] = merged
+        chat_request.lq_ai_skill_inputs = inputs_map
 
     # Fetch the deployment's Organization Profile (D4). Returns None
     # when no Profile is set; the assembler omits Profile rendering
@@ -332,8 +391,8 @@ async def _apply_skill_prompt_assembly(
 
     # Audit-log tagging: surface the first attached skill in the
     # B3-era ``skill_name`` field if the caller didn't set it.
-    if not chat_request.skill_name and chat_request.lq_ai_skills:
-        chat_request.skill_name = chat_request.lq_ai_skills[0]
+    if not chat_request.skill_name and skills:
+        chat_request.skill_name = skills[0].name
 
     return skills
 
@@ -407,11 +466,26 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
     try:
         chat_request = ChatCompletionRequest.model_validate(raw)
     except ValidationError as exc:
+        # ``include_input=False`` strips pydantic's echo of the offending
+        # input payload. Without it, a ``string_too_long`` failure on a
+        # 64K+1-byte inline-skill ``body`` returns the FULL submitted
+        # body verbatim in the response envelope — leaking the
+        # user-drafted skill body back over the wire to the caller.
+        # ``include_context=False`` / ``include_url=False`` strip
+        # non-JSON-serializable exception instances and pydantic doc URLs
+        # the caller doesn't need. Regression in
+        # ``tests/test_inference_inline_skills.py``.
         return _gateway_error(
             code="invalid_request",
             message="Chat completion request failed schema validation",
             http_status=status.HTTP_400_BAD_REQUEST,
-            details={"errors": exc.errors()},
+            details={
+                "errors": exc.errors(
+                    include_context=False,
+                    include_url=False,
+                    include_input=False,
+                )
+            },
         )
 
     config = _config(request)
@@ -427,7 +501,10 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
     # let them propagate to the FastAPI handler so the canonical
     # envelope wraps them.
     applied_skill_objects: list[Skill] = []
-    if chat_request.lq_ai_skills:
+    # Wave D.2 Task 3.0 — kick off assembly when EITHER catalogue skills
+    # OR inline-body skills are attached. The assembler is a no-op when
+    # both lists are empty (preserves pre-D.2 wire shape).
+    if chat_request.lq_ai_skills or chat_request.lq_ai_inline_skills:
         backend = _backend(request)
         try:
             applied_skill_objects = await _apply_skill_prompt_assembly(
@@ -485,10 +562,11 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
         return _gateway_error(
             code="tier_below_minimum",
             message=(
-                f"Request requires Inference Tier {floor.value} "
+                f"Request requires Inference Tier {floor.value} or stronger "
                 f"(source: {floor.source}), but the routed model resolves "
-                f"to tier {primary.routed_inference_tier}. Pick a model "
-                "with an equal or stricter tier, or relax the floor."
+                f"to tier {primary.routed_inference_tier}, which is weaker. "
+                "Pick a model with an equal or lower-numbered (stronger) tier, "
+                "or relax the floor."
             ),
             http_status=status.HTTP_403_FORBIDDEN,
             details={

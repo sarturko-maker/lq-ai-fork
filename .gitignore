@@ -173,6 +173,13 @@ launch-staging/
 linkedin-*.md
 issues-staging/
 
+# Internal positioning + engineering-discipline reference docs.
+# Used to inform the *style* of public docs (transparent gap
+# framing, defensive posture against commercial comparisons) but
+# never published. Treat as operator-private.
+docs/PRD_Addendum_Engineering_Discipline.md
+docs/LaunchPositioning_TwoAxesOfTrust.md
+
 # ---------- Temporary / scratch ----------
 tmp/
 temp/
@@ -217,3 +224,9 @@ localhost.key
 # ---------- Cleanup pip / package manager artifacts ----------
 pip-log.txt
 pip-delete-this-directory.txt
+
+# Brainstorming mockups (visual companion)
+.superpowers/
+
+# Phase E Makefile sbom output (throwaway local-convenience artifacts)
+artifacts/

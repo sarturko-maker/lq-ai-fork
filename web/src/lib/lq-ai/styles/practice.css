@@ -1,0 +1,56 @@
+/*
+ * Practice — LQ.AI reference visual palette.
+ *
+ * Semantic tokens (--lq-*) so the open-source community can swap palette
+ * by overriding these variables without touching component logic.
+ * See docs/superpowers/specs/2026-05-10-m1-frontend-design.md §5.4 and §10.
+ */
+:root {
+  /* Canvas + surfaces */
+  --lq-canvas: #ffffff;
+  --lq-inset: #fafbfa;
+  --lq-inset-secure: #f7faf8;
+
+  /* Text */
+  --lq-text: #1a1a1a;
+  --lq-text-secondary: #4b5563;
+  --lq-text-tertiary: #9ca3af;
+
+  /* Sage primary (secure state, primary actions) */
+  --lq-accent: #1f7a6b;
+  --lq-accent-soft: #e8f4ec;
+  --lq-accent-border: #c5e6d1;
+
+  /* Slate (privilege / tier) */
+  --lq-tier: #355a82;
+  --lq-tier-soft: #e8eff7;
+  --lq-tier-border: #d4e2f1;
+
+  /* Amber (warning, tier-override, JIT pre-action) */
+  --lq-warn: #a16e1f;
+  --lq-warn-soft: #fdf3e2;
+  --lq-warn-border: #ead9c5;
+
+  /* Red (audit unhealthy, errors — rare) */
+  --lq-error: #b54848;
+  --lq-error-soft: #fbeaea;
+  --lq-error-border: #f1d2d2;
+
+  /* Neutral borders */
+  --lq-border: #e5e7eb;
+  --lq-border-strong: #d4d4d4;
+
+  /* Radii */
+  --lq-radius-sm: 4px;
+  --lq-radius: 6px;
+  --lq-radius-lg: 8px;
+  --lq-radius-pill: 999px;
+
+  /* Spacing scale (Inter-aligned) */
+  --lq-space-1: 4px;
+  --lq-space-2: 8px;
+  --lq-space-3: 12px;
+  --lq-space-4: 16px;
+  --lq-space-6: 24px;
+  --lq-space-8: 32px;
+}

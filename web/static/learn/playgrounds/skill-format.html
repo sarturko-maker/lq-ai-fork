@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LQ.AI — Skill Format Explorer</title>
+<style>
+  :root {
+    --bg: #0c0f14;
+    --bg-elev: #151a23;
+    --bg-elev-2: #1d242f;
+    --border: #2a3340;
+    --border-hover: #3a4555;
+    --text: #e6ebf3;
+    --text-dim: #8a96a8;
+    --text-faint: #5a6578;
+    --accent: #7dd3fc;
+    --accent-dim: #38bdf8;
+    --web: #93c5fd;
+    --api: #fcd34d;
+    --gateway: #c4b5fd;
+    --data: #f9a8d4;
+    --workers: #86efac;
+    --providers: #fda4af;
+    --conn-data: #60a5fa;
+    --conn-audit: #f87171;
+    --conn-egress: #34d399;
+    --shadow: rgba(0,0,0,0.4);
+    --ok: #86efac;
+    --warn: #fcd34d;
+    --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .app {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;
+  }
+  header {
+    padding: 12px 20px;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  header .subtitle {
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  header .spacer { flex: 1; }
+  header a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 4px;
+  }
+  header a:hover { border-color: var(--border-hover); background: var(--bg-elev-2); }
+
+  .main {
+    display: grid;
+    grid-template-columns: 280px 1fr 1fr;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* Left sidebar — controls */
+  .controls {
+    background: var(--bg-elev);
+    border-right: 1px solid var(--border);
+    padding: 14px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .controls h2 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 14px 0 6px;
+  }
+  .controls h2:first-child { margin-top: 0; }
+
+  .radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .radio-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+    color: var(--text-dim);
+    transition: background 0.1s;
+  }
+  .radio-row:hover { background: var(--bg-elev-2); color: var(--text); }
+  .radio-row.active { background: var(--bg-elev-2); color: var(--text); font-weight: 500; }
+  .radio-row input { margin: 0; cursor: pointer; accent-color: var(--accent); }
+
+  .sample-select {
+    width: 100%;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a96a8'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 26px;
+  }
+  .sample-select:hover { border-color: var(--border-hover); }
+
+  /* Validation badge in sidebar */
+  .validation-badge {
+    margin-top: 12px;
+    padding: 8px 10px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+  }
+  .validation-badge .badge-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-faint);
+    margin-bottom: 4px;
+  }
+  .badge-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 2px 0;
+    font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .dot-ok { background: var(--ok); }
+  .dot-warn { background: var(--warn); }
+  .dot-err { background: var(--err); }
+  .dot-dim { background: var(--text-faint); }
+
+  /* Editor pane */
+  .editor-pane {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .pane-header {
+    padding: 8px 14px;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .pane-header .spacer { flex: 1; }
+  .pane-header .counter {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: ui-monospace, Menlo, monospace;
+    font-weight: 400;
+  }
+
+  .editor-wrap { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+  #md-editor {
+    flex: 1;
+    width: 100%;
+    background: var(--bg);
+    border: none;
+    color: var(--text);
+    font: 12px/1.6 ui-monospace, Menlo, "SF Mono", monospace;
+    padding: 14px;
+    resize: none;
+    outline: none;
+    overflow-y: auto;
+    tab-size: 2;
+  }
+
+  .form-editor {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .field-group label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+  }
+  .field-group label .req { color: var(--err); margin-left: 2px; }
+  .field-group input, .field-group textarea, .field-group select {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font: 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    padding: 7px 10px;
+    border-radius: 4px;
+    outline: none;
+    transition: border-color 0.1s;
+  }
+  .field-group input:focus, .field-group textarea:focus {
+    border-color: var(--accent);
+  }
+  .field-group input.field-err, .field-group textarea.field-err {
+    border-color: var(--err);
+  }
+  .field-group .field-hint {
+    font-size: 10px;
+    color: var(--text-faint);
+    line-height: 1.4;
+  }
+  .field-group textarea {
+    resize: vertical;
+    min-height: 80px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+  }
+  .field-group textarea.body-area { min-height: 160px; }
+  .field-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 4px 0;
+  }
+
+  /* Preview pane */
+  .preview-pane {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .preview-tabs {
+    display: flex;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--border);
+    padding: 0 10px;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  .preview-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 9px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color 0.1s;
+  }
+  .preview-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .preview-tab:hover { color: var(--text); }
+
+  .preview-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  /* Skill card mock */
+  .skill-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    max-width: 480px;
+  }
+  .skill-card:hover { border-color: var(--border-hover); }
+  .skill-card-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .skill-icon {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--gateway));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700;
+    color: var(--bg);
+    flex-shrink: 0;
+    text-transform: uppercase;
+  }
+  .skill-title { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+  .skill-desc { font-size: 12px; color: var(--text-dim); margin: 0; line-height: 1.45; }
+  .skill-meta {
+    display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0;
+    align-items: center;
+  }
+  .tag-chip {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 12px;
+  }
+  .alias-chip {
+    background: rgba(125,211,252,0.08);
+    border: 1px solid rgba(125,211,252,0.2);
+    color: var(--accent);
+    font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace;
+    padding: 2px 8px;
+    border-radius: 12px;
+  }
+  .version-chip {
+    color: var(--text-faint);
+    font-size: 10px;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .skill-actions {
+    display: flex; gap: 8px; margin-top: 14px;
+  }
+  .btn-mock {
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: default;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    background: var(--bg-elev-2);
+  }
+  .btn-mock.primary {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+  .skill-body-preview {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .skill-body-preview h1, .skill-body-preview h2, .skill-body-preview h3 {
+    color: var(--text);
+    margin: 10px 0 4px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .skill-body-preview h1 { font-size: 14px; }
+  .skill-body-preview ul, .skill-body-preview ol {
+    padding-left: 18px; margin: 4px 0;
+  }
+  .skill-body-preview li { margin: 2px 0; }
+  .skill-body-preview p { margin: 4px 0; }
+  .skill-body-preview code {
+    background: var(--bg-elev-2);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent);
+  }
+  .skill-body-preview pre {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px;
+    overflow-x: auto;
+    font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace;
+    color: var(--text);
+  }
+  .skill-body-preview blockquote {
+    border-left: 2px solid var(--border-hover);
+    margin: 4px 0;
+    padding-left: 10px;
+    color: var(--text-faint);
+  }
+  .skill-body-preview strong { color: var(--text); }
+
+  .empty-card {
+    color: var(--text-faint);
+    font-size: 12px;
+    text-align: center;
+    padding: 32px;
+  }
+
+  /* Prompt section view */
+  .prompt-section {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+  }
+  .prompt-section .ps-heading { color: var(--accent); font-weight: 600; }
+  .prompt-section .ps-h2 { color: var(--web); }
+  .prompt-note {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: inherit;
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: var(--bg-elev);
+    border-radius: 4px;
+    border-left: 2px solid var(--text-faint);
+  }
+
+  /* Validation view */
+  .validation-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .val-section-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-faint);
+    margin: 10px 0 4px;
+    font-weight: 600;
+  }
+  .val-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 10px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .val-row.val-ok { border-color: rgba(134,239,172,0.2); }
+  .val-row.val-warn { border-color: rgba(252,211,77,0.25); }
+  .val-row.val-err { border-color: rgba(248,113,113,0.3); }
+  .val-icon { flex-shrink: 0; font-size: 13px; margin-top: 1px; }
+  .val-field {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 600;
+    min-width: 90px;
+  }
+  .val-msg { color: var(--text-dim); flex: 1; line-height: 1.4; }
+  .val-msg a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 10px;
+    margin-left: 4px;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .val-msg a:hover { text-decoration: underline; }
+  .val-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+  .val-summary .sum-ok { color: var(--ok); font-weight: 600; }
+  .val-summary .sum-err { color: var(--err); font-weight: 600; }
+  .val-summary .sum-warn { color: var(--warn); font-weight: 600; }
+
+  /* Output panel */
+  .output {
+    background: var(--bg-elev);
+    border-top: 1px solid var(--border);
+    max-height: 200px;
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+  .output-tabs {
+    display: flex;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    gap: 4px;
+    align-items: flex-end;
+  }
+  .output-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .output-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .output-tab:hover { color: var(--text); }
+  .output-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+  }
+  .copy-btn {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: ui-monospace, Menlo, monospace;
+    transition: all 0.15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .copy-btn.copied { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .output-body {
+    padding: 12px 16px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .output-body .pane { display: none; }
+  .output-body .pane.active { display: block; }
+  .output-body .file {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent);
+    text-decoration: none;
+    display: inline-block;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(125,211,252,0.08);
+  }
+  .output-body .file:hover { background: rgba(125,211,252,0.16); }
+  .output-body ul { margin: 4px 0; padding-left: 18px; }
+  .output-body li { margin: 2px 0; }
+  .output-body p { margin: 4px 0; }
+  .output-body strong { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>LQ.AI — Skill Format Explorer</h1>
+    <span class="subtitle">Compose a SKILL.md, see how it parses, validates, and renders in the Skill Library.</span>
+    <span class="spacer"></span>
+    <a href="../../" id="learn-home">↩ Learn</a>
+    <a href="https://github.com/LegalQuants/lq-ai" target="_blank" rel="noopener">View source ↗</a>
+  </header>
+
+  <div class="main">
+    <!-- Left: controls -->
+    <aside class="controls">
+      <h2>Edit mode</h2>
+      <div class="radio-group" id="edit-mode-group">
+        <label class="radio-row active" data-mode="markdown">
+          <input type="radio" name="editMode" value="markdown" checked> Markdown editor
+        </label>
+        <label class="radio-row" data-mode="form">
+          <input type="radio" name="editMode" value="form"> Form-based
+        </label>
+      </div>
+
+      <h2>Sample skills</h2>
+      <select class="sample-select" id="sample-select">
+        <option value="custom">— Custom (blank template) —</option>
+        <option value="nda" selected>NDA quick review (built-in)</option>
+        <option value="contract-qa">Contract QA (built-in)</option>
+      </select>
+
+      <h2>Quick stats</h2>
+      <div class="validation-badge" id="sidebar-stats">
+        <div class="badge-title">Frontmatter fields</div>
+        <div id="badge-rows"></div>
+      </div>
+    </aside>
+
+    <!-- Center: editor -->
+    <div class="editor-pane">
+      <div class="pane-header">
+        <span id="editor-mode-label">SKILL.md</span>
+        <span class="spacer"></span>
+        <span class="counter" id="char-counter">0 chars</span>
+      </div>
+      <div class="editor-wrap">
+        <textarea id="md-editor" spellcheck="false" autocomplete="off" autocorrect="off"></textarea>
+        <div class="form-editor" id="form-editor" style="display:none">
+          <div class="field-group">
+            <label>slug <span class="req">*</span></label>
+            <input type="text" id="f-slug" placeholder="my-skill-name" maxlength="80">
+            <span class="field-hint">Lowercase letters, digits, hyphens. Max 80 chars. Must start and end with alphanumeric.</span>
+          </div>
+          <div class="field-group">
+            <label>title <span class="req">*</span></label>
+            <input type="text" id="f-title" placeholder="My Skill Title" maxlength="100">
+          </div>
+          <div class="field-group">
+            <label>description <span class="req">*</span></label>
+            <textarea id="f-desc" placeholder="One-sentence description for the Skill Library card." maxlength="300"></textarea>
+            <span class="field-hint">Max 300 chars.</span>
+          </div>
+          <div class="field-group">
+            <label>slash_alias</label>
+            <input type="text" id="f-alias" placeholder="/my-skill" maxlength="33">
+            <span class="field-hint">Optional. Must start with /, then 1–32 lowercase alphanumerics or hyphens.</span>
+          </div>
+          <div class="field-group">
+            <label>version <span class="req">*</span></label>
+            <input type="text" id="f-version" value="1.0.0" maxlength="20">
+            <span class="field-hint">Semver shape: X.Y.Z</span>
+          </div>
+          <div class="field-group">
+            <label>tags</label>
+            <input type="text" id="f-tags" placeholder="contracts, nda, review">
+            <span class="field-hint">Comma-separated list.</span>
+          </div>
+          <hr class="field-divider">
+          <div class="field-group">
+            <label>body <span class="req">*</span></label>
+            <textarea id="f-body" class="body-area" placeholder="Write your skill body here in plain markdown. This is the system prompt section that gets attached to the chat."></textarea>
+            <span class="field-hint">Plain markdown. For attorneys: write your instructions as you'd brief a very careful paralegal.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: preview -->
+    <div class="preview-pane">
+      <div class="preview-tabs" id="preview-tabs">
+        <button class="preview-tab active" data-view="card">Skill Library card</button>
+        <button class="preview-tab" data-view="prompt">Assembled prompt</button>
+        <button class="preview-tab" data-view="validation">Validation</button>
+      </div>
+      <div class="preview-body" id="preview-body">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+  </div>
+
+  <div class="output">
+    <div class="output-tabs">
+      <button class="output-tab active" data-tab="verify">Verify in source</button>
+      <button class="output-tab" data-tab="describe">Description</button>
+      <div class="output-actions">
+        <button class="copy-btn" id="copy-btn">Copy</button>
+      </div>
+    </div>
+    <div class="output-body">
+      <div class="pane active" id="pane-verify">
+        <p><strong>Authoritative format spec:</strong>
+          <a class="file" href="https://github.com/LegalQuants/lq-ai/blob/main/docs/skill-authoring-guide.md" target="_blank" rel="noopener">docs/skill-authoring-guide.md</a>
+        </p>
+        <p><strong>Server-side validation:</strong>
+          <a class="file" href="https://github.com/LegalQuants/lq-ai/blob/main/api/app/api/user_skills.py" target="_blank" rel="noopener">api/app/api/user_skills.py</a>
+          — <code style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text-dim)">_SLUG_RE</code>,
+          <code style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text-dim)">_SLASH_ALIAS_RE</code>,
+          <code style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text-dim)">_validate_slash_alias_value()</code>
+        </p>
+        <p><strong>Prompt assembler:</strong>
+          <a class="file" href="https://github.com/LegalQuants/lq-ai/blob/main/gateway/app/skills/" target="_blank" rel="noopener">gateway/app/skills/</a>
+        </p>
+        <ul>
+          <li><a class="file" href="https://github.com/LegalQuants/lq-ai/blob/main/skills/nda-review/SKILL.md" target="_blank" rel="noopener">skills/nda-review/SKILL.md</a></li>
+          <li><a class="file" href="https://github.com/LegalQuants/lq-ai/blob/main/skills/contract-qa/SKILL.md" target="_blank" rel="noopener">skills/contract-qa/SKILL.md</a></li>
+          <li><a class="file" href="https://github.com/LegalQuants/lq-ai/blob/main/skills/CONTRIBUTING.md" target="_blank" rel="noopener">skills/CONTRIBUTING.md</a></li>
+          <li><a class="file" href="https://github.com/LegalQuants/lq-ai/blob/main/docs/contribute/mini-prds/skill-acceptance-tests.md" target="_blank" rel="noopener">docs/contribute/mini-prds/skill-acceptance-tests.md</a></li>
+        </ul>
+      </div>
+      <div class="pane" id="pane-describe">
+        <p><strong>What is a skill?</strong> A skill is an open-source, structured prompt artifact — a SKILL.md file containing a YAML frontmatter block and a plain-markdown body. The body becomes the system-prompt section injected into the chat when a user attaches the skill. Skills live in <code style="font-family:ui-monospace,Menlo,monospace;font-size:11px">skills/</code> in the repository and are visible, forkable, and auditable by any user.</p>
+        <p><strong>For attorneys:</strong> Write the body in plain English, as if briefing a careful paralegal — no programming required. The frontmatter fields (slug, title, description, version, tags) are mechanical labels; the only creative work is the body. The slash_alias field lets users invoke your skill by typing <code style="font-family:ui-monospace,Menlo,monospace;font-size:11px">/your-alias</code> in the chat input.</p>
+        <p><strong>Attestation step:</strong> Per <a class="file" href="https://github.com/LegalQuants/lq-ai/blob/main/skills/CONTRIBUTING.md" target="_blank" rel="noopener">skills/CONTRIBUTING.md</a>, every new skill PR requires a practicing-attorney attestation paragraph in the PR description — the human contributor is the attesting party. The skill must reflect that attorney's jurisdiction and practice area expertise.</p>
+        <p><strong>Fork affordance:</strong> Any logged-in user can fork a built-in skill from the Skill Library, edit the copy, and save it as their own user-scope skill. The fork is independent — changes to the built-in after forking do not propagate. See <a class="file" href="https://github.com/LegalQuants/lq-ai/blob/main/docs/contribute/mini-prds/skill-acceptance-tests.md" target="_blank" rel="noopener">skill-acceptance-tests.md</a> for the per-skill test corpus contribution path.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const REPO = 'https://github.com/LegalQuants/lq-ai/blob/main/';
+
+// ---------------------------------------------------------------------------
+// Sample SKILL.md content
+// NOTE: This is a minimal inline parser for the 6 supported frontmatter fields.
+// Production validation is server-side per api/app/api/user_skills.py.
+// ---------------------------------------------------------------------------
+
+const SAMPLES = {
+  nda: `---
+slug: my-nda-quick-review
+title: NDA quick review
+description: Fast first pass on an NDA from a counterparty — surfaces the 5-7 issues most worth a partner's attention before deep review.
+slash_alias: /nda-quick
+version: 1.0.0
+tags:
+  - contracts
+  - nda
+---
+
+You are reviewing an NDA from a counterparty. Your job is to surface the 5-7 issues most worth a partner's attention before they do their deep review.
+
+## What to flag
+
+- Mutual vs. one-way obligations
+- Term length and survival of confidentiality
+- Definition of "Confidential Information" — is it overbroad? Underbroad?
+- Permitted uses — narrow enough?
+- Marking requirements — practical or burdensome?
+- Carve-outs (already public, independently developed, etc.)
+- Remedies and injunctive relief language
+
+## Output format
+
+For each flagged issue:
+1. A one-line summary
+2. Why it matters in the operator's typical practice context
+3. A suggested response: accept / negotiate / hard-redline
+
+## What NOT to do
+
+- Don't rewrite the NDA — that's the partner's call.
+- Don't comment on every word; identify the 5-7 most consequential issues.
+- Don't speculate about counterparty intent.`,
+
+  'contract-qa': `---
+slug: contract-qa-quick
+title: Contract QA
+description: Answer a specific question about a loaded contract — clause meaning, unusual terms, what-if scenarios, and section summaries with verbatim citations.
+slash_alias: /contract-qa
+version: 1.0.0
+tags:
+  - contracts
+  - qa
+  - question-answering
+---
+
+Answer the user's specific question about a loaded contract. The answer is precise, cited to the document, and shaped by the question — not by a fixed template.
+
+## When this skill applies
+
+Apply when the user has loaded a contract and asks a specific question about its content, wants to know what a clause means, whether a provision is unusual, or what would happen in a specified scenario.
+
+## Workflow
+
+1. **Classify the question** — lookup, interpretation, comparison, scenario, or multi-issue.
+2. **Find the relevant clauses** in the document.
+3. **Produce the answer** — lead with the answer, cite with section references, quote verbatim.
+
+## What NOT to do
+
+- Don't produce a full review — for that, route to the NDA Review or MSA Review skills.
+- Don't speculate on enforceability without a jurisdiction qualifier.
+- Don't give strategy advice — the user owns business judgment.`,
+
+  custom: `---
+slug: my-skill
+title: My Skill
+description: One-sentence description for the Skill Library card.
+slash_alias: /my-skill
+version: 1.0.0
+tags:
+  - example
+---
+
+Write your skill body here in plain markdown.
+
+This is the system-prompt section that gets attached to the chat when a user activates the skill. Think of it as a standing brief to a very careful paralegal.
+
+## What to do
+
+- Describe the skill's task here.
+
+## What NOT to do
+
+- List exclusions here.`
+};
+
+// ---------------------------------------------------------------------------
+// Validation rules
+// Mirror api/app/api/user_skills.py exactly:
+//   _SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$")
+//   _SLASH_ALIAS_RE = re.compile(r"^/[a-z0-9-]{1,32}$")
+//   _NAME_MAX = 200 (display_name) — SKILL.md uses title; treat as 100 for UI
+//   _DESCRIPTION_MAX = 2000 (spec allows up to 300 chars in UI hint)
+//   version: must be semver-shaped (X.Y.Z) — validated as /^\d+\.\d+\.\d+/
+// ---------------------------------------------------------------------------
+const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$/;
+const SLASH_ALIAS_RE = /^\/[a-z0-9-]{1,32}$/;
+const SEMVER_RE = /^\d+\.\d+\.\d+/;
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+const state = {
+  markdown: '',
+  editMode: 'markdown',
+  previewView: 'card',
+  formFields: { slug: '', title: '', description: '', slash_alias: '', version: '', tags: [] },
+};
+
+// ---------------------------------------------------------------------------
+// Minimal YAML frontmatter parser for SKILL.md
+// Handles: string scalars (quoted or unquoted), inline lists [a,b,c],
+// block lists (- item), and the specific 6 frontmatter keys used here.
+// Production validation is server-side (api/app/api/user_skills.py).
+// ---------------------------------------------------------------------------
+function parseFrontmatter(markdown) {
+  const result = { slug: '', title: '', description: '', slash_alias: '', version: '', tags: [], body: '', parseError: null };
+  const trimmed = markdown.trim();
+  if (!trimmed.startsWith('---')) {
+    result.parseError = 'No frontmatter block found. Start your SKILL.md with ---';
+    result.body = markdown;
+    return result;
+  }
+  const endIdx = trimmed.indexOf('\n---', 3);
+  if (endIdx === -1) {
+    result.parseError = 'Frontmatter block not closed. Add a closing --- line.';
+    result.body = markdown;
+    return result;
+  }
+  const fmRaw = trimmed.slice(4, endIdx).trim();
+  const bodyRaw = trimmed.slice(endIdx + 4).trim();
+  result.body = bodyRaw;
+
+  // Parse line by line
+  const lines = fmRaw.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Check for block list under "tags:"
+    const tagBlockMatch = line.match(/^tags\s*:\s*$/);
+    if (tagBlockMatch) {
+      const items = [];
+      i++;
+      while (i < lines.length && lines[i].match(/^\s*-\s+/)) {
+        items.push(lines[i].replace(/^\s*-\s+/, '').trim().replace(/^['"]|['"]$/g, ''));
+        i++;
+      }
+      result.tags = items;
+      continue;
+    }
+    // Inline scalar
+    const scalarMatch = line.match(/^(\w[\w_-]*):\s*(.*)/);
+    if (scalarMatch) {
+      const key = scalarMatch[1];
+      let val = scalarMatch[2].trim();
+      // Strip surrounding quotes
+      val = val.replace(/^['"]|['"]$/g, '');
+      if (key === 'slug') result.slug = val;
+      else if (key === 'title') result.title = val;
+      else if (key === 'description') result.description = val;
+      else if (key === 'slash_alias') result.slash_alias = val;
+      else if (key === 'version') result.version = val;
+      else if (key === 'tags') {
+        // Inline array: [a, b, c]
+        const inner = val.replace(/^\[|\]$/g, '');
+        result.tags = inner ? inner.split(',').map(t => t.trim().replace(/^['"]|['"]$/g, '')) : [];
+      }
+    }
+    i++;
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+function runValidation(parsed) {
+  const checks = [];
+
+  // slug
+  if (!parsed.slug) {
+    checks.push({ field: 'slug', status: 'err', msg: 'Required field missing.' });
+  } else if (!SLUG_RE.test(parsed.slug)) {
+    checks.push({ field: 'slug', status: 'err', msg: 'Must match ^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$ — lowercase alphanumeric + hyphens, start/end with alphanumeric, max 80 chars.', ref: 'api/app/api/user_skills.py#_SLUG_RE' });
+  } else {
+    checks.push({ field: 'slug', status: 'ok', msg: `"${parsed.slug}" — valid.` });
+  }
+
+  // title
+  if (!parsed.title) {
+    checks.push({ field: 'title', status: 'err', msg: 'Required field missing.' });
+  } else if (parsed.title.length > 100) {
+    checks.push({ field: 'title', status: 'err', msg: `${parsed.title.length} chars — exceeds 100-char limit.` });
+  } else {
+    checks.push({ field: 'title', status: 'ok', msg: `"${parsed.title}" — ${parsed.title.length} chars.` });
+  }
+
+  // description
+  if (!parsed.description) {
+    checks.push({ field: 'description', status: 'err', msg: 'Required field missing.' });
+  } else if (parsed.description.length > 300) {
+    checks.push({ field: 'description', status: 'warn', msg: `${parsed.description.length} chars — recommended max 300 for card display. Server allows up to 2,000.` });
+  } else {
+    checks.push({ field: 'description', status: 'ok', msg: `${parsed.description.length} chars — valid.` });
+  }
+
+  // version
+  if (!parsed.version) {
+    checks.push({ field: 'version', status: 'err', msg: 'Required field missing. Use X.Y.Z semver format.' });
+  } else if (!SEMVER_RE.test(parsed.version)) {
+    checks.push({ field: 'version', status: 'warn', msg: `"${parsed.version}" — expected X.Y.Z semver shape (e.g. 1.0.0).` });
+  } else {
+    checks.push({ field: 'version', status: 'ok', msg: `"${parsed.version}" — valid semver.` });
+  }
+
+  // slash_alias (optional)
+  if (parsed.slash_alias) {
+    if (!SLASH_ALIAS_RE.test(parsed.slash_alias)) {
+      checks.push({ field: 'slash_alias', status: 'err', msg: `"${parsed.slash_alias}" — must match ^/[a-z0-9-]{1,32}$ (leading slash + 1–32 lowercase alphanumerics/hyphens).`, ref: 'api/app/api/user_skills.py#_SLASH_ALIAS_RE' });
+    } else {
+      checks.push({ field: 'slash_alias', status: 'ok', msg: `"${parsed.slash_alias}" — valid alias format.` });
+    }
+  } else {
+    checks.push({ field: 'slash_alias', status: 'dim', msg: 'Optional — not set. Users will find the skill by title.' });
+  }
+
+  // tags (optional)
+  if (parsed.tags && parsed.tags.length > 0) {
+    const badTag = parsed.tags.find(t => t.length > 50);
+    if (badTag) {
+      checks.push({ field: 'tags', status: 'warn', msg: `Tag "${badTag.slice(0, 20)}…" exceeds 50-char limit.` });
+    } else if (parsed.tags.length > 20) {
+      checks.push({ field: 'tags', status: 'warn', msg: `${parsed.tags.length} tags — maximum is 20.` });
+    } else {
+      checks.push({ field: 'tags', status: 'ok', msg: `[${parsed.tags.join(', ')}] — ${parsed.tags.length} tag${parsed.tags.length !== 1 ? 's' : ''}.` });
+    }
+  } else {
+    checks.push({ field: 'tags', status: 'dim', msg: 'Optional — not set.' });
+  }
+
+  // body
+  if (!parsed.body || !parsed.body.trim()) {
+    checks.push({ field: 'body', status: 'err', msg: 'Body is empty. The skill body is the system-prompt section — a skill without a body is not runnable.' });
+  } else {
+    const wc = parsed.body.trim().split(/\s+/).length;
+    checks.push({ field: 'body', status: 'ok', msg: `${parsed.body.length} chars, ~${wc} words.` });
+  }
+
+  // frontmatter parse error
+  if (parsed.parseError) {
+    checks.unshift({ field: 'frontmatter', status: 'err', msg: parsed.parseError });
+  }
+
+  return checks;
+}
+
+// ---------------------------------------------------------------------------
+// Minimal markdown-to-HTML renderer
+// ---------------------------------------------------------------------------
+function renderMarkdown(md) {
+  if (!md) return '<em style="color:var(--text-faint)">No body content.</em>';
+  let html = escapeHtml(md);
+  // Code blocks
+  html = html.replace(/```[\s\S]*?```/g, m => `<pre>${m.slice(3, -3)}</pre>`);
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Headings
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Bold
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+  // Italic
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  // Blockquote
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  // Unordered lists
+  html = html.replace(/^(\s*)- (.+)$/gm, '$1<li>$2</li>');
+  html = html.replace(/(<li>[\s\S]*?<\/li>(\s*<li>[\s\S]*?<\/li>)*)/g, '<ul>$1</ul>');
+  // Ordered lists
+  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  // Paragraphs (lines not already wrapped)
+  html = html.replace(/^(?!<[hupbl])(.+)$/gm, '<p>$1</p>');
+  // Clean up empty paragraphs
+  html = html.replace(/<p>\s*<\/p>/g, '');
+  return html;
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ---------------------------------------------------------------------------
+// Render: Skill Library card view
+// ---------------------------------------------------------------------------
+function renderCard(parsed) {
+  const title = parsed.title || 'Untitled Skill';
+  const desc = parsed.description || '<em style="color:var(--text-faint)">No description.</em>';
+  const iconLetter = (parsed.title || 'S').charAt(0).toUpperCase();
+  const tags = (parsed.tags || []).slice(0, 8);
+  const aliasHtml = parsed.slash_alias ? `<span class="alias-chip">${escapeHtml(parsed.slash_alias)}</span>` : '';
+  const versionHtml = parsed.version ? `<span class="version-chip">v${escapeHtml(parsed.version)}</span>` : '';
+  const tagsHtml = tags.map(t => `<span class="tag-chip">${escapeHtml(t)}</span>`).join('');
+  const bodyHtml = renderMarkdown(parsed.body);
+
+  return `
+    <div class="skill-card">
+      <div class="skill-card-top">
+        <div class="skill-icon">${iconLetter}</div>
+        <div>
+          <div class="skill-title">${escapeHtml(title)}</div>
+          <div class="skill-desc">${parsed.description ? escapeHtml(parsed.description) : '<em>No description.</em>'}</div>
+        </div>
+      </div>
+      <div class="skill-meta">
+        ${tagsHtml}
+        ${aliasHtml}
+        ${versionHtml}
+      </div>
+      <div class="skill-actions">
+        <button class="btn-mock">Fork as my own</button>
+        <button class="btn-mock primary">Use it</button>
+      </div>
+      <div class="skill-body-preview">${bodyHtml}</div>
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Render: Assembled prompt section view
+// ---------------------------------------------------------------------------
+function renderPrompt(parsed) {
+  const title = parsed.title || 'Untitled Skill';
+  const slug = parsed.slug || 'my-skill';
+  const body = parsed.body || '(empty body)';
+
+  // Build the assembled section the way the gateway assembler would produce it.
+  // This matches the pattern in gateway/app/skills/ — a ## heading block + the body verbatim.
+  const assembled = `## Skill: ${title} (${slug})\n\n${body}`;
+
+  // Syntax-highlight the heading tokens for readability
+  const lines = assembled.split('\n');
+  const highlighted = lines.map((line, idx) => {
+    if (idx === 0) return `<span class="ps-heading">${escapeHtml(line)}</span>`;
+    if (line.startsWith('## ')) return `<span class="ps-h2">${escapeHtml(line)}</span>`;
+    return escapeHtml(line);
+  }).join('\n');
+
+  return `
+    <div class="prompt-section">${highlighted}</div>
+    <div class="prompt-note">
+      This is the section inserted into the system message when this skill is attached to a chat.
+      The gateway assembler wraps the body verbatim under a <code style="font-family:ui-monospace,Menlo,monospace">## Skill: …</code> heading.
+      See <a href="${REPO}gateway/app/skills/" target="_blank" rel="noopener" style="color:var(--accent)">gateway/app/skills/</a> for the assembler.
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Render: Validation view
+// ---------------------------------------------------------------------------
+function renderValidation(parsed) {
+  const checks = runValidation(parsed);
+  const errors = checks.filter(c => c.status === 'err').length;
+  const warns = checks.filter(c => c.status === 'warn').length;
+
+  const statusIcon = { ok: '✓', err: '✕', warn: '⚠', dim: '·' };
+  const statusClass = { ok: 'val-ok', err: 'val-err', warn: 'val-warn', dim: '' };
+
+  let summaryHtml = '<div class="val-summary">';
+  if (errors === 0 && warns === 0) {
+    summaryHtml += '<span class="sum-ok">✓ Looks good</span><span style="color:var(--text-dim);font-size:12px">All required fields valid — ready to submit.</span>';
+  } else {
+    if (errors > 0) summaryHtml += `<span class="sum-err">${errors} error${errors > 1 ? 's' : ''}</span>`;
+    if (warns > 0) summaryHtml += `<span class="sum-warn">${warns} warning${warns > 1 ? 's' : ''}</span>`;
+    if (errors > 0) summaryHtml += '<span style="color:var(--text-dim);font-size:12px">Fix errors before the server will accept this skill.</span>';
+    else summaryHtml += '<span style="color:var(--text-dim);font-size:12px">Warnings are advisory; server will accept.</span>';
+  }
+  summaryHtml += '</div>';
+
+  const rowsHtml = checks.map(c => {
+    const refHtml = c.ref ? ` <a href="${REPO}${c.ref.split('#')[0]}" target="_blank" rel="noopener">${c.ref}</a>` : '';
+    return `
+      <div class="val-row ${statusClass[c.status] || ''}">
+        <span class="val-icon">${statusIcon[c.status] || '·'}</span>
+        <span class="val-field">${c.field}</span>
+        <span class="val-msg">${escapeHtml(c.msg)}${refHtml}</span>
+      </div>
+    `;
+  }).join('');
+
+  const sourceNote = `
+    <p style="font-size:11px;color:var(--text-faint);margin-top:10px">
+      Validation rules mirror
+      <a href="${REPO}api/app/api/user_skills.py" target="_blank" rel="noopener" style="color:var(--accent)">api/app/api/user_skills.py</a>:
+      <code style="font-family:ui-monospace,Menlo,monospace">_SLUG_RE = ^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$</code>,
+      <code style="font-family:ui-monospace,Menlo,monospace">_SLASH_ALIAS_RE = ^/[a-z0-9-]{1,32}$</code>,
+      <code style="font-family:ui-monospace,Menlo,monospace">_validate_slash_alias_value()</code>.
+      This playground uses a client-side JS mirror for instant feedback;
+      the server is the authority.
+    </p>
+  `;
+
+  return `<div class="validation-pane">${summaryHtml}${rowsHtml}${sourceNote}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Render sidebar stats
+// ---------------------------------------------------------------------------
+function renderSidebarStats(parsed) {
+  const fields = [
+    { key: 'slug', label: 'slug', val: parsed.slug },
+    { key: 'title', label: 'title', val: parsed.title },
+    { key: 'description', label: 'description', val: parsed.description },
+    { key: 'version', label: 'version', val: parsed.version },
+    { key: 'slash_alias', label: 'slash_alias', val: parsed.slash_alias, optional: true },
+    { key: 'tags', label: 'tags', val: parsed.tags && parsed.tags.length > 0 ? parsed.tags.join(', ') : null, optional: true },
+    { key: 'body', label: 'body', val: parsed.body },
+  ];
+
+  const wrap = document.getElementById('badge-rows');
+  wrap.innerHTML = fields.map(f => {
+    const hasVal = f.val && (typeof f.val === 'string' ? f.val.trim() : true);
+    let dotClass = 'dot-dim';
+    if (hasVal) {
+      if (f.key === 'slug' && !SLUG_RE.test(parsed.slug)) dotClass = 'dot-err';
+      else if (f.key === 'slash_alias' && parsed.slash_alias && !SLASH_ALIAS_RE.test(parsed.slash_alias)) dotClass = 'dot-err';
+      else dotClass = 'dot-ok';
+    } else if (!f.optional) {
+      dotClass = 'dot-err';
+    }
+    return `<div class="badge-row"><span class="dot ${dotClass}"></span><span>${f.label}</span></div>`;
+  }).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Master render
+// ---------------------------------------------------------------------------
+function renderPreview() {
+  const parsed = parseFrontmatter(state.markdown);
+  const body = document.getElementById('preview-body');
+
+  if (state.previewView === 'card') {
+    body.innerHTML = renderCard(parsed);
+  } else if (state.previewView === 'prompt') {
+    body.innerHTML = renderPrompt(parsed);
+  } else if (state.previewView === 'validation') {
+    body.innerHTML = renderValidation(parsed);
+  }
+
+  renderSidebarStats(parsed);
+
+  const counter = document.getElementById('char-counter');
+  if (counter) counter.textContent = `${state.markdown.length.toLocaleString()} chars`;
+}
+
+// ---------------------------------------------------------------------------
+// Form ↔ markdown sync
+// ---------------------------------------------------------------------------
+function formToMarkdown() {
+  const f = state.formFields;
+  const tagsYaml = f.tags.length > 0
+    ? 'tags:\n' + f.tags.map(t => `  - ${t}`).join('\n')
+    : 'tags: []';
+  const aliasLine = f.slash_alias ? `slash_alias: ${f.slash_alias}` : '';
+  const frontmatter = [
+    `slug: ${f.slug}`,
+    `title: ${f.title}`,
+    `description: ${f.description}`,
+    aliasLine,
+    `version: ${f.version || '1.0.0'}`,
+    tagsYaml,
+  ].filter(Boolean).join('\n');
+
+  return `---\n${frontmatter}\n---\n\n${f.body}`;
+}
+
+function markdownToForm(md) {
+  const parsed = parseFrontmatter(md);
+  state.formFields = {
+    slug: parsed.slug,
+    title: parsed.title,
+    description: parsed.description,
+    slash_alias: parsed.slash_alias,
+    version: parsed.version,
+    tags: parsed.tags || [],
+  };
+
+  document.getElementById('f-slug').value = parsed.slug;
+  document.getElementById('f-title').value = parsed.title;
+  document.getElementById('f-desc').value = parsed.description;
+  document.getElementById('f-alias').value = parsed.slash_alias;
+  document.getElementById('f-version').value = parsed.version;
+  document.getElementById('f-tags').value = (parsed.tags || []).join(', ');
+  document.getElementById('f-body').value = parsed.body;
+}
+
+function formFieldsToState() {
+  state.formFields = {
+    slug: document.getElementById('f-slug').value.trim(),
+    title: document.getElementById('f-title').value.trim(),
+    description: document.getElementById('f-desc').value.trim(),
+    slash_alias: document.getElementById('f-alias').value.trim(),
+    version: document.getElementById('f-version').value.trim(),
+    tags: document.getElementById('f-tags').value
+      .split(',').map(t => t.trim()).filter(Boolean),
+  };
+  // body in form
+  const bodyVal = document.getElementById('f-body').value;
+  state.markdown = formToMarkdown().replace(/\n\n[\s\S]*$/, '\n\n' + bodyVal);
+
+  // Also build a clean markdown from form
+  const tagsYaml = state.formFields.tags.length > 0
+    ? 'tags:\n' + state.formFields.tags.map(t => `  - ${t}`).join('\n')
+    : 'tags: []';
+  const aliasLine = state.formFields.slash_alias ? `slash_alias: ${state.formFields.slash_alias}` : '';
+  const frontmatter = [
+    `slug: ${state.formFields.slug}`,
+    `title: ${state.formFields.title}`,
+    `description: ${state.formFields.description}`,
+    aliasLine,
+    `version: ${state.formFields.version || '1.0.0'}`,
+    tagsYaml,
+  ].filter(Boolean).join('\n');
+  state.markdown = `---\n${frontmatter}\n---\n\n${bodyVal}`;
+}
+
+// ---------------------------------------------------------------------------
+// Edit mode switch
+// ---------------------------------------------------------------------------
+function setEditMode(mode) {
+  state.editMode = mode;
+  const mdEl = document.getElementById('md-editor');
+  const fEl = document.getElementById('form-editor');
+  const label = document.getElementById('editor-mode-label');
+  const modeGroup = document.getElementById('edit-mode-group');
+
+  document.querySelectorAll('#edit-mode-group .radio-row').forEach(r => {
+    r.classList.toggle('active', r.dataset.mode === mode);
+  });
+
+  if (mode === 'markdown') {
+    mdEl.style.display = 'flex';
+    fEl.style.display = 'none';
+    label.textContent = 'SKILL.md';
+    mdEl.value = state.markdown;
+  } else {
+    mdEl.style.display = 'none';
+    fEl.style.display = 'flex';
+    label.textContent = 'Form editor';
+    markdownToForm(state.markdown);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Preview tab switch
+// ---------------------------------------------------------------------------
+function setPreviewView(view) {
+  state.previewView = view;
+  document.querySelectorAll('.preview-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.view === view);
+  });
+  renderPreview();
+}
+
+// ---------------------------------------------------------------------------
+// Load sample
+// ---------------------------------------------------------------------------
+function loadSample(key) {
+  const content = SAMPLES[key] || SAMPLES['nda'];
+  state.markdown = content;
+  if (state.editMode === 'markdown') {
+    document.getElementById('md-editor').value = content;
+  } else {
+    markdownToForm(content);
+  }
+  renderPreview();
+}
+
+// ---------------------------------------------------------------------------
+// Wire events
+// ---------------------------------------------------------------------------
+
+// Edit mode radios
+document.getElementById('edit-mode-group').addEventListener('click', e => {
+  const row = e.target.closest('.radio-row');
+  if (!row) return;
+  const mode = row.dataset.mode;
+  if (mode && mode !== state.editMode) {
+    // Sync before switching
+    if (state.editMode === 'form') formFieldsToState();
+    setEditMode(mode);
+    renderPreview();
+  }
+});
+
+// Markdown editor
+document.getElementById('md-editor').addEventListener('input', e => {
+  state.markdown = e.target.value;
+  renderPreview();
+});
+
+// Form fields
+['f-slug', 'f-title', 'f-desc', 'f-alias', 'f-version', 'f-tags', 'f-body'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    formFieldsToState();
+    renderPreview();
+  });
+});
+
+// Sample select
+document.getElementById('sample-select').addEventListener('change', e => {
+  loadSample(e.target.value);
+});
+
+// Preview tabs
+document.querySelectorAll('.preview-tab').forEach(tab => {
+  tab.addEventListener('click', () => setPreviewView(tab.dataset.view));
+});
+
+// Output tabs
+document.querySelectorAll('.output-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.output-tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.output-body .pane').forEach(p => p.classList.toggle('active', p.id === `pane-${tab.dataset.tab}`));
+  });
+});
+
+// Copy
+document.getElementById('copy-btn').addEventListener('click', () => {
+  const activeTab = document.querySelector('.output-tab.active').dataset.tab;
+  const pane = document.getElementById(`pane-${activeTab}`);
+  const text = pane.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.classList.add('copied');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = 'Copy'; }, 1200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+loadSample('nda');
+setEditMode('markdown');
+setPreviewView('card');
+</script>
+</body>
+</html>

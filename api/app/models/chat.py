@@ -140,6 +140,10 @@ class Message(Base):
             name="chk_messages_role",
         ),
         CheckConstraint(
+            "kind IN ('user', 'ai', 'refusal', 'system')",
+            name="chk_messages_kind",
+        ),
+        CheckConstraint(
             "routed_inference_tier IS NULL OR (routed_inference_tier BETWEEN 1 AND 5)",
             name="chk_messages_tier_range",
         ),
@@ -164,6 +168,11 @@ class Message(Base):
         nullable=False,
     )
     role: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'user'"),
+    )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     applied_skills: Mapped[list[str]] = mapped_column(
         ARRAY(Text),

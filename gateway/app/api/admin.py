@@ -243,9 +243,7 @@ class TierPolicyPatch(BaseModel):
 
 
 @router.patch("/tier-config")
-async def patch_tier_config(
-    request: Request, body: TierPolicyPatch
-) -> dict[str, Any]:
+async def patch_tier_config(request: Request, body: TierPolicyPatch) -> dict[str, Any]:
     """Update the operator's ``tier_policy`` block (Wave B).
 
     Partial update — only supplied fields move. Writes through to

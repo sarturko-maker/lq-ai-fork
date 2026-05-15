@@ -43,9 +43,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ActiveUser
+from app.audit import audit_action
 from app.config import get_settings
 from app.db.session import get_db
-from app.audit import audit_action
 from app.errors import NotFound, ValidationError
 from app.models.file import File as FileModel
 from app.models.project import Project

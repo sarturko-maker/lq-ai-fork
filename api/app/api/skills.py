@@ -29,7 +29,8 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +38,8 @@ from app.api.dependencies import ActiveUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import NotFound
+from app.models.chat import Chat, Message
+from app.models.user import User
 from app.models.user_skill import UserSkill
 from app.skills.registry import MutableSkillRegistry
 from app.skills.schema import (
@@ -135,6 +138,11 @@ def _skill_from_user_skill(row: UserSkill) -> dict[str, Any]:
     content_yaml = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True)
 
     payload: dict[str, Any] = {
+        # Wave D.2 — surface the row UUID so the skill detail page's
+        # Versions tab can call the audit-history endpoint without a
+        # second round-trip to resolve slug → id. Built-ins (resolved
+        # via the registry path below) have no DB id and omit this key.
+        "id": str(row.id),
         **_summary_from_user_skill(row),
         "content_yaml": content_yaml,
         "content_md": row.body,
@@ -144,9 +152,7 @@ def _skill_from_user_skill(row: UserSkill) -> dict[str, Any]:
     return payload
 
 
-async def _load_user_shadow(
-    db: AsyncSession, *, user_id: uuid.UUID, slug: str
-) -> UserSkill | None:
+async def _load_user_shadow(db: AsyncSession, *, user_id: uuid.UUID, slug: str) -> UserSkill | None:
     """Return the caller's non-archived user-scope row for ``slug``, if any."""
 
     stmt = select(UserSkill).where(
@@ -158,9 +164,7 @@ async def _load_user_shadow(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def _load_team_shadow(
-    db: AsyncSession, *, user_id: uuid.UUID, slug: str
-) -> UserSkill | None:
+async def _load_team_shadow(db: AsyncSession, *, user_id: uuid.UUID, slug: str) -> UserSkill | None:
     """Return the newest non-archived team-scope row at ``slug`` the
     user has access to via team membership, if any (D8.1b).
 
@@ -199,9 +203,7 @@ async def _load_team_shadow(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def _list_user_shadows(
-    db: AsyncSession, *, user_id: uuid.UUID
-) -> list[UserSkill]:
+async def _list_user_shadows(db: AsyncSession, *, user_id: uuid.UUID) -> list[UserSkill]:
     """All non-archived user-scope rows owned by ``user_id``."""
 
     stmt = (
@@ -276,6 +278,278 @@ async def list_skills(
         return JSONResponse(content=builtin_summaries)
 
     return JSONResponse(content=user_summaries + builtin_summaries)
+
+
+# ---------------------------------------------------------------------------
+# Autocomplete (Wave D.2 / Task 2.5)
+# ---------------------------------------------------------------------------
+#
+# The chat composer needs a fast typeahead surface: type ``/``, see your
+# slash-aliased skills first; type ``/nda``, see ``/nda``-prefixed
+# aliases then ``nda``-prefixed slugs then titles that contain ``nda``.
+# This is implementation logic the registry doesn't know about — built-ins
+# have no ``slash_alias`` column — so we materialise a unified per-row
+# dict and rank in-process. The merged catalogue is small (M1 corpus is
+# ~10 built-ins plus a per-user handful of shadows), so an in-memory
+# scan is the right call. If the corpus ever exceeds the thousands a DB
+# fts index would be the right move (DE candidate).
+
+
+class SkillAutocompleteItem(BaseModel):
+    """One row in the autocomplete response.
+
+    Mirrors the shape the chat composer needs: ``slug`` to dispatch,
+    ``slash_alias`` to render the badge, ``title`` + ``description`` for
+    the picker, ``scope`` so the UI can disambiguate (a user shadow's
+    icon vs the built-in's icon, for example). ``icon`` is optional and
+    rides ``frontmatter_extra``-style — present for built-ins that ship
+    one, ``None`` otherwise.
+    """
+
+    slug: str
+    slash_alias: str | None = None
+    title: str
+    description: str | None = None
+    scope: str
+    icon: str | None = None
+
+
+class SkillAutocompleteResponse(BaseModel):
+    """The envelope. Always present, even when ``results`` is empty —
+    saves the frontend an existence check."""
+
+    results: list[SkillAutocompleteItem]
+
+
+def _rank_autocomplete_match(q: str, rows: list[dict]) -> list[dict]:
+    """Score and sort merged-skill dicts against a non-empty query.
+
+    Three signals (in descending priority):
+
+    * prefix on ``slash_alias`` (matched against ``/`` + ``q``) — score 3
+    * prefix on ``slug`` — score 2
+    * substring match in ``title`` — score 1
+
+    A row that matches more than one signal takes the highest. Ties keep
+    the input order (Python's ``sorted`` is stable). Rows that do not
+    match anything score 0 and stay at the tail — the caller is expected
+    to filter them out before responding.
+    """
+
+    q_lower = q.lower()
+
+    def score(r: dict) -> int:
+        s = 0
+        slash = r.get("slash_alias")
+        if isinstance(slash, str) and slash.lower().startswith("/" + q_lower):
+            s = max(s, 3)
+        if r.get("slug", "").lower().startswith(q_lower):
+            s = max(s, 2)
+        title = r.get("title") or ""
+        if q_lower and q_lower in title.lower():
+            s = max(s, 1)
+        return s
+
+    return sorted(rows, key=score, reverse=True)
+
+
+async def _list_merged_skills_for_user(
+    request: Request,
+    db: AsyncSession,
+    *,
+    user: User,
+) -> list[dict[str, object]]:
+    """Return the merged user + built-in catalog as plain dicts.
+
+    Shadow semantics mirror ``GET /skills`` — a user-scope row at the
+    same slug as a built-in hides the built-in from this listing.
+    The wire shape carries the autocomplete-relevant fields only:
+    ``slug``, ``slash_alias``, ``title``, ``description``, ``scope``,
+    plus an optional ``icon`` for built-ins that ship one in their
+    frontmatter.
+
+    Team-scope merging is deferred to D8.1 — currently only user-scope
+    shadows are layered onto the built-in catalog (matches the
+    ``GET /skills`` default-scope contract).
+    """
+
+    user_rows = await _list_user_shadows(db, user_id=user.id)
+    shadowed_slugs = {r.slug for r in user_rows}
+
+    out: list[dict[str, object]] = []
+    for row in user_rows:
+        extra = dict(row.frontmatter_extra or {})
+        out.append(
+            {
+                "slug": row.slug,
+                "slash_alias": row.slash_alias,
+                "title": row.display_name,
+                "description": row.description,
+                "scope": row.scope,
+                "icon": extra.get("icon"),
+            }
+        )
+
+    holder = _registry(request)
+    registry = holder.current()
+    for summary in registry.list_summaries():
+        if summary.name in shadowed_slugs:
+            continue
+        out.append(
+            {
+                "slug": summary.name,
+                # Built-ins have no slash_alias — that surface lives only on
+                # DB-backed user/team skills (ADR 0012; Wave D.2 Task 2.4).
+                "slash_alias": None,
+                "title": summary.title,
+                "description": summary.description,
+                "scope": summary.scope,
+                # ``icon`` rides extra frontmatter on built-ins; the
+                # SkillSummary pydantic model is ``extra='allow'`` upstream
+                # in SkillFrontmatter but the summary itself is locked-down
+                # — read from ``model_extra`` if present, else None.
+                "icon": (summary.model_extra or {}).get("icon")
+                if hasattr(summary, "model_extra")
+                else None,
+            }
+        )
+    return out
+
+
+async def _resolve_skill_for_user(
+    request: Request,
+    db: AsyncSession,
+    *,
+    user: User,
+    slug: str | None = None,
+    slash_alias: str | None = None,
+) -> dict[str, object] | None:
+    """Resolve a single skill from the caller's merged catalog.
+
+    Used by the send-message handler's slash-fallback path (Wave D.2
+    Task 2.7) — when a user types ``/foo ...`` and the frontend didn't
+    pre-resolve, the backend retries here. Returns the same dict shape
+    as :func:`_list_merged_skills_for_user` (``slug``, ``slash_alias``,
+    ``title``, ``description``, ``scope``, ``icon``) or ``None`` if no
+    row matches.
+
+    Exactly one of ``slug`` / ``slash_alias`` should be provided; if both
+    are given, the slug check wins (built-ins have no alias so a
+    slug-match is the more authoritative signal).
+    """
+
+    if slug is None and slash_alias is None:
+        return None
+    rows = await _list_merged_skills_for_user(request, db, user=user)
+    for r in rows:
+        if slug is not None and r.get("slug") == slug:
+            return r
+        if slash_alias is not None and r.get("slash_alias") == slash_alias:
+            return r
+    return None
+
+
+async def _recent_attached_skill_slugs(
+    db: AsyncSession,
+    *,
+    user_id: object,  # uuid.UUID — typed at call site
+    limit: int,
+) -> list[str]:
+    """Return the caller's N most-recently-used distinct skill slugs.
+
+    Reads from ``messages.applied_skills`` (text[]) joined to the chat's
+    owner. Skills are filesystem-canonical (ADR 0007) so this array column
+    captures the canonical run history without a join table. The query
+    unnests, groups by slug, and orders by the most-recent message
+    ``created_at`` per slug.
+
+    The result is **just slugs** — the caller maps them onto the merged
+    catalog to recover the title/scope/etc. shape autocomplete needs.
+    """
+
+    skill_col = func.unnest(Message.applied_skills).label("slug")
+    stmt = (
+        select(skill_col, func.max(Message.created_at).label("last_used"))
+        .join(Chat, Chat.id == Message.chat_id)
+        .where(Chat.owner_id == user_id)
+        .group_by(skill_col)
+        .order_by(func.max(Message.created_at).desc())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [r[0] for r in rows if r[0]]
+
+
+@router.get(
+    "/autocomplete",
+    response_model=SkillAutocompleteResponse,
+    summary="Autocomplete skills by /alias / slug / title (Wave D.2)",
+)
+async def autocomplete_skills(
+    request: Request,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    q: Annotated[str, Query(description="Substring to match. Empty = recents.")] = "",
+    limit: Annotated[int, Query(ge=1, le=25)] = 10,
+) -> SkillAutocompleteResponse:
+    """Typeahead for the chat composer's skill picker.
+
+    Two modes:
+
+    * **Empty ``q``** — return the caller's most-recently-used skills
+      (by ``messages.applied_skills``), capped at ``limit``. If the user
+      has fewer recents than ``limit``, fill the tail with the
+      alphabetical merged catalog (skipping anything already in the
+      recents block). Brand-new users with no chat activity see the
+      alphabetical fallback exclusively.
+    * **Non-empty ``q``** — rank the merged catalog by the three signals
+      in ``_rank_autocomplete_match`` (slash-alias prefix > slug prefix
+      > title substring) and return up to ``limit`` non-zero matches.
+
+    Shadowing: a user-scope row at the same slug as a built-in hides the
+    built-in from results (ADR 0012). The ``scope`` field on each result
+    lets the UI render the right affordance.
+
+    Bounds: ``limit`` is hard-clamped via FastAPI's ``Query(ge=1, le=25)``
+    — a request for ``limit=50`` returns 422 rather than silently
+    truncating, which keeps the contract explicit for the frontend.
+    """
+
+    merged = await _list_merged_skills_for_user(request, db, user=user)
+
+    if not q:
+        recent_slugs = await _recent_attached_skill_slugs(db, user_id=user.id, limit=limit)
+        recent_order = {slug: idx for idx, slug in enumerate(recent_slugs)}
+        slug_to_row = {row["slug"]: row for row in merged}
+        ordered: list[dict[str, object]] = [
+            slug_to_row[slug] for slug in recent_slugs if slug in slug_to_row
+        ]
+        if len(ordered) < limit:
+            tail = sorted(
+                (row for row in merged if row["slug"] not in recent_order),
+                key=lambda r: str(r["title"]).lower(),
+            )
+            ordered = ordered + tail
+        return SkillAutocompleteResponse(
+            results=[SkillAutocompleteItem(**row) for row in ordered[:limit]]  # type: ignore[arg-type]
+        )
+
+    ranked = _rank_autocomplete_match(q, merged)
+    q_lower = q.lower()
+
+    def matches(row: dict) -> bool:
+        slash = row.get("slash_alias")
+        if isinstance(slash, str) and slash.lower().startswith("/" + q_lower):
+            return True
+        if row.get("slug", "").lower().startswith(q_lower):
+            return True
+        title = row.get("title") or ""
+        return q_lower in title.lower()
+
+    filtered = [row for row in ranked if matches(row)]
+    return SkillAutocompleteResponse(
+        results=[SkillAutocompleteItem(**row) for row in filtered[:limit]]
+    )
 
 
 @router.get("/{skill_name}")
@@ -553,6 +827,4 @@ async def fork_skill(
     await db.commit()
     await db.refresh(row)
 
-    return JSONResponse(
-        content=_skill_from_user_skill(row), status_code=status.HTTP_201_CREATED
-    )
+    return JSONResponse(content=_skill_from_user_skill(row), status_code=status.HTTP_201_CREATED)
