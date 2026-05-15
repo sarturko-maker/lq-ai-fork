@@ -35,8 +35,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -63,7 +62,7 @@ router = APIRouter(prefix="/enhance-prompt", tags=["enhance-prompt"])
 DEFAULT_MODEL_ALIAS = "fast"
 
 # How many recent message turns to fold into ``chat_history`` when the
-# caller supplies a ``chat_id``. The spec says "typically last 4–8";
+# caller supplies a ``chat_id``. The spec says "typically last 4-8";
 # 8 is the upper bound that keeps the context useful without making
 # the enhancement call expensive.
 CHAT_HISTORY_TURNS = 8
@@ -275,9 +274,7 @@ def _format_skill_inputs(
 
     payload: dict[str, Any] = {"raw_input": raw_input}
     if attached_skills:
-        payload["attached_skills"] = [
-            s.model_dump(exclude_none=True) for s in attached_skills
-        ]
+        payload["attached_skills"] = [s.model_dump(exclude_none=True) for s in attached_skills]
     if attached_files:
         payload["attached_files"] = [
             f.model_dump(exclude_none=True, mode="json") for f in attached_files
@@ -350,9 +347,7 @@ async def enhance_prompt(
 
     chat_history: list[dict[str, str]] = []
     if payload.chat_id is not None:
-        chat_history = await _load_chat_history(
-            db, chat_id=payload.chat_id, user_id=user.id
-        )
+        chat_history = await _load_chat_history(db, chat_id=payload.chat_id, user_id=user.id)
 
     user_message_body = _format_skill_inputs(
         raw_input=payload.raw_input,

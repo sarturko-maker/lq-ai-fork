@@ -10,6 +10,7 @@ import type {
 	ChangePasswordRequest,
 	LoginRequest,
 	LoginResponse,
+	MfaSetupResponse,
 	TokenResponse,
 	User
 } from '../types';
@@ -72,4 +73,19 @@ export async function getCurrentUser(): Promise<User> {
 	const user = await apiRequest<User>('/users/me');
 	setUser(user);
 	return user;
+}
+
+/** POST /api/v1/auth/mfa/setup — issues a fresh TOTP secret + recovery codes. */
+export async function mfaSetup(): Promise<MfaSetupResponse> {
+	return apiRequest<MfaSetupResponse>('/auth/mfa/setup', { method: 'POST' });
+}
+
+/** POST /api/v1/auth/mfa/enable — verify code, flip mfa_enabled to true. */
+export async function mfaEnable(code: string): Promise<void> {
+	await apiRequest<void>('/auth/mfa/enable', { method: 'POST', body: { code } });
+}
+
+/** POST /api/v1/auth/mfa/disable — password + code; clears MFA state. */
+export async function mfaDisable(password: string, code: string): Promise<void> {
+	await apiRequest<void>('/auth/mfa/disable', { method: 'POST', body: { password, code } });
 }

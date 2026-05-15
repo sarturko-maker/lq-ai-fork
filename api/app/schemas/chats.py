@@ -38,6 +38,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    model_validator,
 )
 
 # --- Constants ---------------------------------------------------------------
@@ -56,6 +57,40 @@ LIST_LIMIT_DEFAULT: int = 20
 
 LIST_LIMIT_MAX: int = 100
 """Maximum page size accepted by the listing endpoints."""
+
+INLINE_SKILL_BODY_MAX_BYTES: int = 32 * 1024
+"""Wave D.2 Task 3.0 — hard cap on ``AttachedSkillRef.inline_body`` size.
+
+Inline-body skills become part of the system prompt without a catalog
+fetch. The body is fully user-controlled (the wizard's "Try it" mode
+sends the user's draft body verbatim) so we bound it server-side
+defensively: a 32 KB ceiling is roughly 8k tokens which comfortably
+covers a long skill body but cuts off pathological inputs (full
+documents pasted as a "skill"). 422 on overflow keeps the failure mode
+explicit rather than letting the gateway choke on a 1 MB system prompt."""
+
+ATTACHED_SKILLS_MAX_LEN: int = 16
+"""Wave D.2 Task 3.0 (I1) — hard cap on the length of
+``MessageCreateRequest.attached_skills`` and the legacy ``skills`` list.
+
+Each list entry can ship up to ``INLINE_SKILL_BODY_MAX_BYTES`` (32 KB)
+of verbatim body content plus an additional catalogue round-trip for
+slug entries. Without a cap, a single message could attach thousands
+of inline refs and force the gateway to assemble a multi-megabyte
+system prompt — workload-multiplication DoS available to any
+authenticated user. 16 is generous for realistic workflows: the slash
+path attaches exactly one skill, the wizard tryout attaches exactly
+one, and even an "attach multiple skills to a chat" UX rarely exceeds
+a handful. Requests with more than 16 attachments 422 at schema time."""
+
+KNOWN_ATTACHED_SKILL_SOURCES: frozenset[str] = frozenset(
+    {"slash", "wizard-tryout", "tryit-tab", "capture", "manual"}
+)
+"""Wave D.2 Task 3.0 — non-exhaustive list of recognized ``source``
+values. The field is intentionally NOT enum-validated so future surfaces
+(Word add-in, batch API, etc.) can introduce new sources without a
+schema migration. The set is published so callers know the canonical
+spellings."""
 
 
 # --- Type aliases ------------------------------------------------------------
@@ -223,13 +258,99 @@ class ChatUpdateRequest(BaseModel):
     archived: bool | None = None
 
 
-class MessageCreateRequest(BaseModel):
-    """``MessageCreate`` from backend-openapi.yaml (B5 + C2 + C3).
+class AttachedSkillRef(BaseModel):
+    """Wave D.2 Task 3.0 — one entry in ``MessageCreateRequest.attached_skills``.
 
-    C3 does not add new fields here — message persistence is server
-    side. The shape stays identical to the B5/C2 definition so any
-    client that worked against the stateless pass-through continues to
-    work after C3.
+    Carries either a ``slug`` (a saved skill in the merged catalogue —
+    built-in OR user-scoped shadow) OR an ``inline_body`` (a literal
+    skill body the caller is sending without a persisted skill row, e.g.,
+    the wizard's "Try it" preview). Exactly one of the two must be set;
+    a request with neither or both is 422.
+
+    ``source`` is optional provenance metadata so audit logs / receipts
+    can attribute the attachment to the surface that produced it. See
+    :data:`KNOWN_ATTACHED_SKILL_SOURCES` for the conventional spellings;
+    the field is intentionally unrestricted so future surfaces can
+    introduce new sources without a schema bump.
+
+    .. note::
+
+       OpenAPI sync deferred to Wave 9.1 — this shape is not yet in
+       ``docs/api/backend-openapi.yaml``. The doc pass at end-of-wave
+       picks it up.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    slug: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description="Canonical skill slug (built-in OR user-shadow). XOR with ``inline_body``.",
+    )
+    inline_body: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=INLINE_SKILL_BODY_MAX_BYTES,
+        description=(
+            "Verbatim skill body to inject without a catalogue fetch. "
+            f"Capped at {INLINE_SKILL_BODY_MAX_BYTES} bytes. XOR with ``slug``."
+        ),
+    )
+    source: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Optional provenance tag (e.g., 'slash', 'wizard-tryout', "
+            "'tryit-tab', 'capture'). Surfaced on audit log + receipts."
+        ),
+    )
+    inputs: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Per-attachment skill input bindings. For slug attachments these "
+            "merge into ``MessageCreateRequest.skill_inputs`` keyed by the slug; "
+            "for inline-body attachments they merge keyed by the synthesized "
+            "inline-skill name (see the chats handler)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_xor(self) -> AttachedSkillRef:
+        """Enforce: exactly one of slug / inline_body is set."""
+
+        has_slug = self.slug is not None and self.slug.strip() != ""
+        has_inline = self.inline_body is not None and self.inline_body != ""
+        if has_slug and has_inline:
+            raise ValueError(
+                "attached_skill must set exactly one of 'slug' or 'inline_body', not both"
+            )
+        if not has_slug and not has_inline:
+            raise ValueError("attached_skill must set exactly one of 'slug' or 'inline_body'")
+        return self
+
+
+class MessageCreateRequest(BaseModel):
+    """``MessageCreate`` from backend-openapi.yaml (B5 + C2 + C3 + D.2).
+
+    Wave D.2 Task 3.0 adds ``attached_skills``, a richer alternative to
+    the legacy ``skills: list[str]`` shape. Both continue to work in
+    parallel:
+
+    * ``skills`` — legacy slug-only list; each entry is treated as if it
+      were ``{slug: <name>}`` on an ``attached_skills`` entry. Forwarded
+      to the gateway as ``lq_ai_skills``.
+    * ``attached_skills`` — rich shape supporting both slug attachments
+      (resolve from catalogue) and inline-body attachments (literal body
+      forwarded to the gateway via ``lq_ai_inline_skills``, no catalogue
+      fetch). XOR'd per-entry; the wizard's "Try it" surface uses the
+      inline-body path so an unsaved draft can be tested.
+
+    Empty ``attached_skills`` preserves the pre-D.2 behavior exactly.
+
+    .. note::
+
+       OpenAPI sync deferred to Wave 9.1.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -238,12 +359,29 @@ class MessageCreateRequest(BaseModel):
     model: str = Field(default="smart")
     """Model alias (per the OpenAPI sketch). Defaults to ``smart``."""
 
-    skills: list[str] = Field(default_factory=list)
-    """C2: skill names to attach. Forwarded to the gateway as
-    ``lq_ai_skills``."""
+    skills: list[str] = Field(default_factory=list, max_length=ATTACHED_SKILLS_MAX_LEN)
+    """C2 (legacy): skill names to attach. Forwarded to the gateway as
+    ``lq_ai_skills``. Continues to work in parallel with
+    ``attached_skills``. Capped at :data:`ATTACHED_SKILLS_MAX_LEN`
+    entries to bound workload multiplication (Wave D.2 Task 3.0 I1)."""
+
+    attached_skills: list[AttachedSkillRef] = Field(
+        default_factory=list,
+        max_length=ATTACHED_SKILLS_MAX_LEN,
+    )
+    """Wave D.2 Task 3.0: rich attached-skill list. Each entry is XOR
+    of ``slug`` / ``inline_body``. Slug entries merge into the legacy
+    slug-resolved path; inline-body entries are forwarded as
+    ``lq_ai_inline_skills`` so the gateway can assemble them without a
+    catalogue fetch. Capped at :data:`ATTACHED_SKILLS_MAX_LEN` entries
+    to bound workload multiplication (I1 — a single message attaching
+    thousands of inline refs × 32 KB each is a DoS vector)."""
 
     skill_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    """C2: per-skill input bindings. Forwarded as ``lq_ai_skill_inputs``."""
+    """C2: per-skill input bindings, keyed by skill name. Forwarded as
+    ``lq_ai_skill_inputs``. Per-attachment ``inputs`` on
+    ``attached_skills`` entries are merged into this map at handler
+    time (the per-attachment value wins on key collision)."""
 
     stream: bool = False
     """Whether to stream the response as SSE. ``False`` returns a single
@@ -289,6 +427,13 @@ class MessageResponse(BaseModel):
     id: uuid.UUID
     chat_id: uuid.UUID
     role: Literal["user", "assistant", "system", "tool"]
+    kind: Literal["user", "ai", "refusal", "system"] = "user"
+    """Wave D.1 — distinguishes assistant rows that carry a model
+    response (``ai``) from refusal rows (``refusal``) emitted by the
+    gateway's tier-floor enforcement. Defaults to ``user`` to match the
+    DB column server default; the override-tier-floor flow writes
+    ``ai`` explicitly so the UI can tell a re-run apart from a refusal."""
+
     content: str
     applied_skills: list[str] = Field(default_factory=list)
     routed_inference_tier: int | None = None
@@ -308,6 +453,15 @@ class MessageResponse(BaseModel):
     citations: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
 
+    is_enhanced: bool = False
+    """Wave D.1 T20 follow-on — true when the row's ``applied_skills``
+    contains ``'enhance-prompt'`` (ADR 0007 denormalization). The
+    frontend renders a ``✨ enhanced`` provenance pill on user-message
+    bubbles where this is true so an operator can tell at a glance that
+    the prompt that was sent had been expanded by the Enhance Prompt
+    skill. Derived in :func:`message_to_response`; the field is not
+    settable on the wire."""
+
 
 def message_to_response(row: Any) -> MessageResponse:
     """Build a :class:`MessageResponse` from an ORM ``Message`` row.
@@ -318,12 +472,14 @@ def message_to_response(row: Any) -> MessageResponse:
     workable (we don't accept the micros column on the wire).
     """
 
+    applied_skills = list(row.applied_skills or [])
     return MessageResponse(
         id=row.id,
         chat_id=row.chat_id,
         role=row.role,
+        kind=row.kind,
         content=row.content,
-        applied_skills=list(row.applied_skills or []),
+        applied_skills=applied_skills,
         routed_inference_tier=row.routed_inference_tier,
         routed_provider=row.routed_provider,
         routed_model=row.routed_model,
@@ -334,6 +490,7 @@ def message_to_response(row: Any) -> MessageResponse:
         error_code=row.error_code,
         citations=list(row.citations or []),
         created_at=row.created_at,
+        is_enhanced="enhance-prompt" in applied_skills,
     )
 
 
@@ -366,6 +523,20 @@ class MessagePostResponse(BaseModel):
     routed_provider: str | None = None
     cost_estimate: float | None = None
     applied_skills: list[str] = Field(default_factory=list)
+    attached_skill_names: list[str] = Field(default_factory=list)
+    """Wave D.2 Task 2.7 — slugs the send-time slash fallback attached
+    on the caller's behalf. Distinct from ``applied_skills`` (the
+    gateway-reported list of skills that actually ran): this field
+    captures *what the backend resolved from the message body*, so the
+    frontend can render a chip / hint even before the gateway responds
+    or in the unresolved-slash branch where no skill actually ran."""
+
+    slash_unresolved: bool = False
+    """Wave D.2 Task 2.7 — set when the user's content started with
+    ``/<token>`` but no skill resolved against that token. The handler
+    still forwards the original content to the gateway as plain text;
+    this flag lets the UI surface a "couldn't resolve /foo" hint so
+    typos don't silently produce non-skill answers."""
 
 
 # --- Internal: helpers exposed for tests -------------------------------------
@@ -384,11 +555,15 @@ def decode_cursor(value: str) -> Cursor:
 
 
 __all__ = [
+    "ATTACHED_SKILLS_MAX_LEN",
     "AUTO_RENAME_MAX_CHARS",
     "CONTENT_MIN_LEN",
+    "INLINE_SKILL_BODY_MAX_BYTES",
+    "KNOWN_ATTACHED_SKILL_SOURCES",
     "LIST_LIMIT_DEFAULT",
     "LIST_LIMIT_MAX",
     "TITLE_MAX_LEN",
+    "AttachedSkillRef",
     "ChatCreateRequest",
     "ChatListResponse",
     "ChatResponse",

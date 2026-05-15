@@ -33,9 +33,17 @@
 	import type { SavedPrompt } from '$lib/lq-ai/types';
 
 	export let onInsert: (text: string) => void = () => undefined;
+	/** When true, the list is always rendered (no Show/Hide toggle) — used
+	 *  by the standalone /lq-ai/saved-prompts page. Default keeps the
+	 *  in-chat collapse behavior. */
+	export let alwaysOpen = false;
+	/** Label on the per-prompt insert button. The in-chat panel uses
+	 *  "Insert" (append to composer); the standalone page uses "Use in
+	 *  chat" (navigate to a fresh chat with the prompt prefilled). */
+	export let insertLabel = 'Insert';
 
 	let prompts: SavedPrompt[] = [];
-	let panelOpen = false;
+	let panelOpen = alwaysOpen;
 	let loading = false;
 	let loadError: string | null = null;
 
@@ -241,34 +249,36 @@
 </script>
 
 <div
-	class="border border-gray-200 dark:border-gray-800 rounded-md p-3 space-y-2"
+	class="lq-panel rounded-md p-3 space-y-2"
 	data-testid="lq-ai-saved-prompts"
 >
 	<div class="flex items-center justify-between">
-		<span class="text-sm font-medium text-gray-700 dark:text-gray-200">
+		<span class="text-sm font-medium lq-label">
 			Saved prompts
 			{#if !loading && prompts.length > 0}
-				<span class="text-xs text-gray-400">({prompts.length})</span>
+				<span class="text-xs lq-subtext">({prompts.length})</span>
 			{/if}
 		</span>
 		<div class="flex items-center gap-2">
 			<button
 				type="button"
-				class="text-xs px-2 py-1 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+				class="lq-btn-secondary disabled:opacity-50"
 				on:click={openCreate}
 				disabled={editing !== null && editing.id === null}
 				data-testid="lq-ai-saved-prompts-new"
 			>
 				+ New
 			</button>
-			<button
-				type="button"
-				class="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
-				on:click={() => (panelOpen = !panelOpen)}
-				data-testid="lq-ai-saved-prompts-toggle"
-			>
-				{panelOpen ? 'Hide' : 'Show'}
-			</button>
+			{#if !alwaysOpen}
+				<button
+					type="button"
+					class="lq-btn-ghost"
+					on:click={() => (panelOpen = !panelOpen)}
+					data-testid="lq-ai-saved-prompts-toggle"
+				>
+					{panelOpen ? 'Hide' : 'Show'}
+				</button>
+			{/if}
 		</div>
 	</div>
 
@@ -293,7 +303,7 @@
 
 	{#if editing}
 		<div
-			class="border border-indigo-200 dark:border-indigo-800 rounded-md p-2 space-y-2 bg-indigo-50/40 dark:bg-indigo-900/10"
+			class="lq-editor-card rounded-md p-2 space-y-2"
 			data-testid="lq-ai-saved-prompt-editor"
 		>
 			<input
@@ -332,7 +342,7 @@
 				</button>
 				<button
 					type="button"
-					class="text-xs px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+					class="lq-btn-primary disabled:opacity-50"
 					on:click={save}
 					disabled={saving}
 					data-testid="lq-ai-saved-prompt-save"
@@ -345,13 +355,13 @@
 
 	{#if panelOpen && !editing}
 		{#if loading}
-			<p class="text-xs text-gray-500 italic">Loading…</p>
+			<p class="text-xs italic lq-subtext">Loading…</p>
 		{:else if prompts.length === 0}
-			<p class="text-xs text-gray-500 italic" data-testid="lq-ai-saved-prompts-empty">
+			<p class="text-xs italic lq-subtext" data-testid="lq-ai-saved-prompts-empty">
 				No saved prompts yet. Click <strong>+ New</strong> to create your first one.
 			</p>
 		{:else}
-			<ul class="divide-y divide-gray-100 dark:divide-gray-800 max-h-72 overflow-y-auto">
+			<ul class="lq-list-divider max-h-72 overflow-y-auto">
 				{#each prompts as prompt (prompt.id)}
 					<li class="py-2" data-testid={`lq-ai-saved-prompt-${prompt.id}`}>
 						<div class="flex items-start justify-between gap-2">
@@ -375,11 +385,11 @@
 							<div class="flex flex-col items-end gap-1 shrink-0">
 								<button
 									type="button"
-									class="text-xs px-2 py-0.5 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+									class="lq-btn-secondary"
 									on:click={() => insert(prompt)}
 									data-testid={`lq-ai-saved-prompt-insert-${prompt.id}`}
 								>
-									Insert
+									{insertLabel}
 								</button>
 								<button
 									type="button"
@@ -422,3 +432,77 @@
 		{/if}
 	{/if}
 </div>
+
+<style>
+	@import '../styles/practice.css';
+
+	.lq-panel {
+		border: 1px solid var(--lq-border);
+		background: var(--lq-canvas);
+	}
+
+	.lq-label {
+		color: var(--lq-text);
+	}
+
+	.lq-subtext {
+		color: var(--lq-text-tertiary);
+	}
+
+	.lq-btn-primary {
+		background: var(--lq-accent);
+		color: white;
+		border: 0;
+		border-radius: var(--lq-radius);
+		padding: 4px 12px;
+		font-size: 12px;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.lq-btn-primary:hover {
+		filter: brightness(0.95);
+	}
+	.lq-btn-primary:focus-visible {
+		outline: 2px solid var(--lq-accent);
+		outline-offset: 2px;
+	}
+
+	.lq-btn-secondary {
+		background: white;
+		color: var(--lq-accent);
+		border: 1px solid var(--lq-accent-border);
+		border-radius: var(--lq-radius);
+		padding: 4px 10px;
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.lq-btn-secondary:hover {
+		background: var(--lq-accent-soft);
+	}
+	.lq-btn-secondary:focus-visible {
+		outline: 2px solid var(--lq-accent);
+		outline-offset: 2px;
+	}
+
+	.lq-btn-ghost {
+		background: transparent;
+		color: var(--lq-text-secondary);
+		border: 1px solid var(--lq-border);
+		border-radius: var(--lq-radius);
+		padding: 4px 10px;
+		font-size: 12px;
+		cursor: pointer;
+	}
+	.lq-btn-ghost:hover {
+		background: var(--lq-inset);
+	}
+
+	.lq-editor-card {
+		border: 1px solid var(--lq-accent-border);
+		background: var(--lq-accent-soft);
+	}
+
+	.lq-list-divider {
+		border-top: 1px solid var(--lq-border);
+	}
+</style>

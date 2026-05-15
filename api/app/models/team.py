@@ -109,7 +109,4 @@ class TeamMember(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<TeamMember team_id={self.team_id} user_id={self.user_id} "
-            f"role={self.role!r}>"
-        )
+        return f"<TeamMember team_id={self.team_id} user_id={self.user_id} role={self.role!r}>"

@@ -44,6 +44,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/projects/{project_id}/files",
         # C7 — detach file by id (extends the sketch).
         "/api/v1/projects/{project_id}/files/{file_id}",
+        # Wave D.1 T3 — matter <-> KB attach/detach (extends the sketch).
+        "/api/v1/projects/{project_id}/knowledge-bases",
+        "/api/v1/projects/{project_id}/knowledge-bases/{kb_id}",
         # chats + messages
         "/api/v1/chats",
         "/api/v1/chats/{chat_id}",
@@ -77,6 +80,11 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # user skills (D8 — DB-backed user-scope skills per ADR 0012)
         "/api/v1/user-skills",
         "/api/v1/user-skills/{skill_id}",
+        # Wave D.2 — version audit feed + slash_alias autocomplete
+        "/api/v1/user-skills/{skill_id}/versions",
+        "/api/v1/skills/autocomplete",
+        # Wave D.2 Task 2.2 — sandbox matter find-or-create
+        "/api/v1/projects/sandbox/ensure",
         # teams (D8.1a — admin CRUD + user-facing read)
         "/api/v1/teams",
         "/api/v1/teams/{team_id}",
@@ -98,6 +106,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/chats/search",
         # Wave C — RBAC role updates (PRD §5.2)
         "/api/v1/admin/users/{user_id}/role",
+        # Wave B v2 — admin user list for DevRoleManagementCard
+        "/api/v1/admin/users",
         # admin
         "/api/v1/admin/audit-log",
         "/api/v1/admin/tier-policy",
@@ -107,6 +117,12 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/admin/aliases/{name}",
         # D0 — model availability proxy
         "/api/v1/models",
+        # Wave D.1 T4 — admin tier-floor override re-run
+        "/api/v1/inference/override-tier-floor",
+        # Wave D.1 T5 — chat receipts (replay-at-read event log)
+        "/api/v1/chats/{chat_id}/receipts",
+        # Wave D.1 T6 — chat receipts JSONL export
+        "/api/v1/chats/{chat_id}/receipts/export.jsonl",
     }
 )
 
@@ -129,15 +145,19 @@ async def test_openapi_paths_match_sketch() -> None:
         f"OpenAPI surface drift. Missing: {EXPECTED_PATHS - actual}, "
         f"Extra: {actual - EXPECTED_PATHS}"
     )
-    # 64 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
+    # 67 distinct /api/v1 paths: D0's /api/v1/models + D0.5's three admin
     # alias endpoints + D5's two new MFA endpoints + D6's two new GDPR
     # endpoints (status-poll for /users/me/export/{job_id} and
     # /users/me/delete/cancel) + D4's /organization-profile/raw
     # convenience endpoint + D4-coverage's
     # /internal/organization-profile + D8's two /api/v1/user-skills
     # paths + D8.1a's six teams paths + Wave A's five paths +
-    # Wave B's four paths + Wave C's /admin/users/{user_id}/role.
-    assert len(actual) == 64
+    # Wave B's four paths + Wave C's /admin/users/{user_id}/role +
+    # Wave B v2's /admin/users + Wave D.1's two matter <-> KB attach/detach paths
+    # + Wave D.1 T4's /inference/override-tier-floor
+    # + Wave D.2's three paths: /user-skills/{id}/versions,
+    # /skills/autocomplete, /projects/sandbox/ensure.
+    assert len(actual) == 73
 
 
 @pytest.mark.unit

@@ -19,6 +19,7 @@ from app.models.inference import InferenceRoutingLog
 from app.models.knowledge import KnowledgeBase, KnowledgeBaseFile
 from app.models.organization_profile import OrganizationProfile
 from app.models.project import Project, ProjectFile, ProjectSkill
+from app.models.project_knowledge_base import ProjectKnowledgeBase
 from app.models.saved_prompt import SavedPrompt
 from app.models.team import Team, TeamMember
 from app.models.user import User, UserSession
@@ -40,6 +41,7 @@ __all__ = [
     "OrganizationProfile",
     "Project",
     "ProjectFile",
+    "ProjectKnowledgeBase",
     "ProjectSkill",
     "SavedPrompt",
     "Team",

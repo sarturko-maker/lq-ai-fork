@@ -707,9 +707,7 @@ async def test_org_profile_omitted_when_skill_opts_out(
                 "title": "Independent Skill",
                 "content_md": "Skill body without org-voice shaping.",
                 "content_yaml": (
-                    "name: independent-skill\n"
-                    "lq_ai:\n"
-                    "  use_organization_profile: false\n"
+                    "name: independent-skill\nlq_ai:\n  use_organization_profile: false\n"
                 ),
             },
         )
@@ -777,4 +775,3 @@ async def test_org_profile_absent_no_change_to_system_prompt(
     # Skill body is present; nothing else got prepended.
     assert "Alpha workflow" in system
     assert "Organization Profile" not in system
-

@@ -272,9 +272,7 @@ class ModelDiscoverer:
         if self.key_resolver is not None:
             return self.key_resolver
         env = self._env()
-        return ProviderKeyResolver(
-            master_key=env.get("LQ_AI_GATEWAY_MASTER_KEY") or None, env=env
-        )
+        return ProviderKeyResolver(master_key=env.get("LQ_AI_GATEWAY_MASTER_KEY") or None, env=env)
 
     # --- Per-source discovery -------------------------------------------------
 
@@ -503,7 +501,8 @@ class ModelDiscoverer:
         # OpenAI's default env name is OPENAI_API_KEY but openai_compatible
         # local servers may legitimately have no key.
         effective_env = provider.api_key_env or (
-            None if (provider.api_key_encrypted or provider.type == "openai_compatible")
+            None
+            if (provider.api_key_encrypted or provider.type == "openai_compatible")
             else "OPENAI_API_KEY"
         )
         try:

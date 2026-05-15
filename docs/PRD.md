@@ -14,11 +14,11 @@
 
 ## Table of Contents
 
-1. [Product Overview](#1-product-overview) (§1.1 Vision · §1.2 Positioning · §1.3 Transparency · §1.4 Target Users · §1.5 Deployment Modes and the Inference Choice Spectrum · §1.6 Out of Scope · §1.7 Success Criteria · §1.8 Security Posture)
+1. [Product Overview](#1-product-overview) (§1.1 Vision · §1.2 Positioning · §1.3 Transparency · §1.4 Target Users · §1.5 Deployment Modes and the Inference Choice Spectrum · §1.6 Out of Scope · §1.7 Success Criteria · §1.8 Security Posture · §1.9 Engineering Discipline Posture)
 2. [Architecture](#2-architecture)
 3. [Capability Specifications](#3-capability-specifications) (§3.1–3.10 plus new §3.11 Projects · §3.12 Organization Profile · §3.13 Inference Tier Awareness · §3.14 Tabular / Multi-Document Review · §3.15 Slack/Teams Light Intake Bridge · §3.16 Contract Repository — Auto-Relationship Detection)
 4. [The LQ.AI Inference Gateway](#4-the-lq-ai-inference-gateway) (now includes Anonymization Layer middleware)
-5. [Cross-Cutting Concerns](#5-cross-cutting-concerns)
+5. [Cross-Cutting Concerns](#5-cross-cutting-concerns) (§5.1–5.7 plus §5.8 Testing and Quality Engineering · §5.9 Reliability and Operations)
 6. [Deployment](#6-deployment)
 7. [Open Source Posture](#7-open-source-posture)
 8. [Roadmap](#8-roadmap) (M1–M4 plus M5+ Forward-Looking)
@@ -101,6 +101,8 @@ In practice, the security posture varies along a five-tier spectrum. The tiers a
 
 When customer data privacy is a requirement but Tier 1 / Tier 2 is impractical, the Anonymization Layer (§4) offers a privacy fallback for Tier 3+: sensitive entities are pseudonymized prior to processing and rehydrated after. The Provider Compliance Matrix (`docs/compliance/provider-compliance-matrix.md`) details each supported provider's terms, certifications, and data-residency options for tier classification.
 
+**Floor semantics — how `minimum_inference_tier` works.** Tier values are security levels, not integer ranks. When a request, project, or skill declares `minimum_inference_tier: N`, the Inference Gateway requires at least Tier N security — allowing Tier N and any lower-numbered (stronger) tier, refusing any higher-numbered (weaker) tier. Concretely: `minimum_inference_tier: 2` allows Tier 1 (local Ollama, air-gapped) and Tier 2 (operator-hosted cloud), and refuses Tier 3–5 (managed enterprise cloud, standard commercial cloud, consumer). The combiner across multiple declarations (request + project + skill) is `min(all declared values)` — the declaration requiring the strongest (lowest-numbered) tier governs. The gateway refuses when `resolved_tier > floor.value`, i.e., the routed model's tier is weaker (higher-numbered) than the floor. This means a privileged project with `minimum_inference_tier: 2` can route to Tier 1 (local) as well as Tier 2 (VPC) — air-gap is always allowed when any secure floor is set, consistent with "air-gap is the most restrictive operational posture and satisfies any minimum tier requirement" (see PRD §1.8).
+
 ### 1.6 Out of Scope (v1)
 
 Explicitly not in scope for v1, to keep the initial release focused:
@@ -135,7 +137,27 @@ LQ.AI's security posture is structurally different from the closed-source commer
 
 Procurement-defense materials, including a structured Pre-Empted Procurement Objections appendix (Appendix E) and the Compliance Alignment Pack (referenced above), are maintained in the repository and updated each release.
 
-Detailed cross-cutting security and compliance concerns are covered in §5; deployment-mode and inference-tier configuration in §1.5 and the Inference Gateway specification in §4; the deferred security and compliance enhancement roadmap in §9 (Security and Compliance subsection).
+**Additional security-posture commitments (Wave 9.C additions).** The three principles above are extended by three explicit commitments. They are recorded here so that each is independently verifiable against source rather than asserted in marketing copy.
+
+**Source verifiability as a complement to compliance attestation.** Compliance attestation — SOC 2 Type II, ISO 27001, ISO 42001, HIPAA, FedRAMP, and the EU AI Act conformity assessment — is one layer of assurance: a paid third party reviews the operator's controls against a framework during an observation window. The Compliance Alignment Pack (`docs/compliance/README.md`, with per-framework documents arriving across M1 and M2) is the project's contribution to that layer. Source inspectability is a second, structurally independent layer: every claim in every alignment document is verifiable against the source code in this repository, by the operator's security team or any third party the operator hires, on a timeline the operator sets, with no paid intermediary in the verification path. Compliance attestation in the absence of source verifiability is a single point of failure; the two layers reinforce each other. The Compliance Alignment Pack tells the operator's procurement team what to look for; the open-source release lets the operator's security team confirm what those documents claim. This dual posture is what `docs/HONEST-STATE.md` operationalizes for the M1 release.
+
+**OpenSSF Scorecard and OpenSSF Best Practices Badge.** The OpenSSF Scorecard tool computes objectively-measurable security-and-practice signals (branch protection, signed releases, dependency-update automation, fuzzing, etc.) and produces a score that any reviewer can independently verify in seconds. The OpenSSF Best Practices Badge encodes a layered checklist at Passing, Silver, and Gold tiers. Both badges presuppose source visibility — they are structurally unavailable to closed-source competitors. The project's commitment is the Passing tier at M1 release, the Silver tier at M2, and the Gold tier at M4, with the Scorecard score published in the README and refreshed continuously by automation. The contributor-friendly path to shipping the badges is documented at `docs/contribute/mini-prds/openssf-scorecard-and-badges.md`. **M1 status:** not yet shipped; see `docs/HONEST-STATE.md` §6.
+
+**Annual third-party review program (M1 commitment; first engagement targeted within 90 days of M1 release).** The project commits to two recurring third-party engagements: (a) an annual application penetration test by a recognized firm covering the FastAPI backend, the Inference Gateway, the OpenWebUI fork, the Word add-in (once shipped), and the reference deployment recipes; (b) an annual adversarial-AI red-team engagement against the inference path, the Citation Engine, the Anonymization Layer, and skill execution. Executive summaries are published in the repository (in `docs/security/releases/`) with finding count by severity, remediation status, and remediation timeline. Detailed findings are coordinated-disclosure-cycled per `SECURITY.md` before publication. Both engagements are funded by LegalQuants as a project investment; they are not contingent on community contribution. The first engagement of each kind is targeted within 90 days of the M1 release. This commitment is the structurally verifiable answer to the procurement objection "what independent review has this had?" — see Appendix E.
+
+Detailed cross-cutting security and compliance concerns are covered in §5; deployment-mode and inference-tier configuration in §1.5 and the Inference Gateway specification in §4; the deferred security and compliance enhancement roadmap in §9 (Security and Compliance subsection); the engineering-discipline posture in §1.9 with its testing-and-quality and reliability-and-operations workstreams in §5.8 and §5.9.
+
+### 1.9 Engineering Discipline Posture
+
+LQ.AI's engineering posture is the corollary of its security posture: the same source visibility that makes the security claims verifiable makes the engineering claims verifiable. Three principles shape this posture; each is operationalized in §5.8 (testing and quality engineering) and §5.9 (reliability and operations), with the deferred-enhancement roadmap in §9.
+
+**Engineering rigor is verifiable, not asserted.** The CI configuration that enforces coverage gates is in `.github/workflows/`; the test directories are in `api/tests/`, `gateway/tests/`, and `web/src/lib/lq-ai/__tests__/`; the release pipeline that produces signed container images is in `release.yml`. Where a closed-source vendor's marketing copy says "we test rigorously," LQ.AI shows the test report — the actual one, generated by CI on the actual code path. The OpenSSF Scorecard is computed continuously against the repository (§1.8 addition; mini-PRD at `docs/contribute/mini-prds/openssf-scorecard-and-badges.md`) and renders as a badge in the README a reviewer can click and verify. The mutation-testing score (§5.8) is published per release. Reviewers do not have to trust the project's representation of its engineering practices; they verify them in source. **M1 status:** the test surfaces are in place (`docs/HONEST-STATE.md` §6 catalogs counts and CI flags); the published-scoring practices (Scorecard badge, mutation score, per-release eval scores) are deferred enhancements (§9, Engineering Discipline subsection).
+
+**AI-specific quality is a measured discipline, not a hope.** Legal AI fails in ways traditional software does not: hallucinated citations, prompt injections that exfiltrate context from a malicious counterparty document, drift in skill output quality when a foundation model is upgraded, PII leakage through embeddings, jailbreak responses that violate the operator's risk posture. PRD §3.3 addresses the citation-hallucination failure mode structurally (a verification step that re-reads the cited substring against the source). This section commits to measuring the other failure modes — published per-skill eval scores against held-out test sets, published prompt-injection detection rates against industry attack corpora (Garak, PyRIT, MITRE ATLAS), published PII leakage rates per inference tier and per anonymization configuration, regression suites that block release when a model upgrade causes a skill's structural-output score to drop below threshold. The numbers are public per release; the methodology is documented; the test corpora are in the repository. **M1 status:** these measurement surfaces are not yet running — see `docs/HONEST-STATE.md` §6 for the gap catalog and §9 (Engineering Discipline subsection) for the roadmap. Operators evaluating M1 should read what is measured today (the unit and integration test suites; the Cypress E2E suites) and what is not (per-skill quality, prompt-injection detection rates, PII leakage rates).
+
+**Independent review is invited, not avoided.** Per §1.8's third commitment, the project budgets an annual application penetration test and an annual adversarial-AI red-team engagement, both with public executive summaries. Past disclosures and their fixes are published with credit to reporters (per §7.6). The OpenSSF Best Practices Badge requires public attestation of practices that any reviewer can independently challenge. OWASP ASVS Level 2 third-party verification is committed within 12 months of M1 (see §9). This is the structural inverse of the closed-source SaaS posture, where independent review is contractually restricted, the pen-test report is gated behind an NDA, the safe-harbor language for good-faith research is absent or narrow, and the operator must take the vendor's word for what was tested. The verification budget is the operator's to set; the verification scope is the operator's to define; the verification cadence is the operator's choice.
+
+Detailed testing and quality engineering commitments are in §5.8; reliability and operations commitments in §5.9; the deferred engineering-quality enhancement roadmap in §9 (Engineering Discipline subsection); pre-empted engineering-quality procurement objections in Appendix E.
 
 ---
 
@@ -278,6 +300,8 @@ This section specifies each major capability. Every capability section follows t
 
 ### 3.1 Conversational Core
 
+**M1 status:** Shipped. Multi-turn chat with persistent history, full-text search over chat history, streaming SSE responses, and matter (project) workspace at `/lq-ai/matters/[id]` are all wired end-to-end. An operator can verify the backend at `api/app/api/chats.py` and `api/app/api/projects.py`; the Cypress E2E suite covers the surface in `web/cypress/e2e/wave-a-chrome.cy.ts` and `web/cypress/e2e/wave-c-matters.cy.ts`. Note: share-with-group and playbook attachment are deferred; the section below describes the full v1 design. See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface) for the per-capability verification table.
+
 **Description.** Multi-turn chat with persistent history, organized in a sidebar grouped by recency. Users can rename, delete, search, and share chats. Each chat is associated with the user who created it and optionally shared with groups or the whole organization. Chats can have files, skills, and playbooks attached.
 
 **User stories.**
@@ -324,6 +348,8 @@ This section specifies each major capability. Every capability section follows t
 
 ### 3.2 Enhance Prompt
 
+**M1 status:** Shipped. The ⌘E button and the expand-before-submit flow are wired end-to-end. An operator can verify at `api/app/api/enhance_prompt.py`; the Cypress E2E suite covers the surface in `web/cypress/e2e/wave-d1-power-features.cy.ts` Test 1. The reasoning-visibility preference (`reasoning_visibility`) is wired and stored per §3.2.1. See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface).
+
 **Description.** A prompt-rewriting skill that runs as an optional pre-step. The user types a short, natural-language question; Enhance Prompt expands it into a structured legal prompt (role, jurisdiction, audience, scope, output format, constraints, citation expectations) and shows the user the expanded version before submission. The user can edit the expansion, submit as-is, or skip and submit the original. The skill is *itself* inspectable — the user can view the SKILL.md and supporting files driving the enhancement at any time.
 
 **User stories.**
@@ -358,7 +384,39 @@ This section specifies each major capability. Every capability section follows t
 
 **Open questions.** None blocking.
 
+### 3.2.1 User personalization preferences (M1)
+
+**M1 status:** Shipped. All five preference columns (`reasoning_visibility`, `featured_tools`, `workspace_layout`, `trust_pills`, `provenance_pills`) are in the `users` table with CHECK constraints and server defaults. The `GET /api/v1/users/me/preferences` and `PATCH /api/v1/users/me/preferences` endpoints are live. An operator can verify at `api/app/api/users.py` and migrations `0015` and `0019`. See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface).
+
+**Description.** LQ.AI's default experience is calibrated to teach: reasoning is disclosed, tools are prominent, all provenance context is visible. Personalization preferences are the mechanism by which veteran users dial back that explicitness without the platform assuming everyone is an expert. The five preferences shipped in M1 (one from §3.2 Wave A, four new in Wave B v2) are stored as columns on `users`, queryable at the relational level, and exposed through a single partial-update endpoint. They are per-user, not per-org — the operator cannot suppress them. Spec reference: frontend design §4.3 (Wave B v2).
+
+**Preference fields.**
+
+| Field | Type | Values | Default | Surface |
+|---|---|---|---|---|
+| `reasoning_visibility` | text | `always_show`, `disclosure`, `on_request` | `disclosure` | Enhance Prompt reasoning section (§3.2) |
+| `featured_tools` | text | `prominent`, `inline` | `prominent` | Dashboard — Enhance Prompt, Skill Creator, KB, Apply Skill shown as prominent cards vs. inline toolbar only |
+| `workspace_layout` | text | `three_pane`, `two_pane`, `one_pane` | `three_pane` | Matter workspace composition (Wave C surfaces) |
+| `trust_pills` | text | `labels`, `dots` | `labels` | Ambient trust pill format — full label `● self-hosted` vs. minimal dot only |
+| `provenance_pills` | text | `always`, `collapsed` | `always` | Per-message skill / tier / provider pill row visibility |
+
+**Non-functional requirements.**
+- All five columns are `NOT NULL` with a `server_default` equal to the "brave choice" default. New users get the full-disclosure experience without any explicit write.
+- Each column carries a DB-level `CHECK` constraint (named `chk_users_<field>_enum`) that mirrors the Pydantic `Literal` type enforcement in the API layer. This is defense-in-depth: invalid values are rejected at the storage layer even if they bypass the API validator.
+- Preferences are readable immediately after login via `GET /users/me` (full user profile) or `GET /users/me/preferences` (preferences slice only).
+- A `PATCH` that supplies the same value as the existing value is idempotent: it returns 200 but does not write an audit row.
+
+**API surface.**
+- `GET /api/v1/users/me/preferences` — returns all five preference fields for the calling user.
+- `PATCH /api/v1/users/me/preferences` — partial update; only supplied fields move. Writes a `user.preferences_updated` audit row (action on `audit_log`) when at least one field changes, with `details.changes` listing before/after for every changed field. A single PATCH call that changes multiple fields produces exactly one audit row.
+
+**Data model.** All five fields are columns on the `users` table — not a separate `user_preferences` table. This keeps the preferences queryable alongside auth fields (e.g., `WHERE role = 'member' AND workspace_layout = 'three_pane'`) without a join, and makes migration straightforward (add column + CHECK constraint per migration 0015 and 0019).
+
+**Future extensions.** Later milestones may add preferences for default jurisdiction, default model, notification frequency, and citation display density. These will ride the same `PATCH /users/me/preferences` endpoint without a new route — the endpoint is intentionally forward-compatible.
+
 ### 3.3 Citation Engine (Exact Quote)
+
+**M1 status.** The architectural slot exists in the codebase but the verification pipeline is not running in M1. The chunk-level provenance the engine will draw on is partially in place (page and character offsets per chunk, captured in `api/alembic/versions/0005_documents_and_chunks.py` and surfaced through hybrid retrieval in `api/app/knowledge/retrieval.py`), and the citations endpoint at `GET /api/v1/chats/{chat_id}/messages/{message_id}/citations` returns whatever the message row stores (M1 stores an empty set; the endpoint is forward-compatible). What is not in place is the verification step that re-reads the cited substring from the source document and confirms it appears verbatim before showing it in the rendered output, plus the side-panel viewer with bounding-box highlighting. See [`docs/HONEST-STATE.md` §3.1](HONEST-STATE.md#31-citation-engine--architectural-slot-not-wired) for what an operator can verify today (the endpoint stub, the chunk schema, the retrieval path) and the M2 milestone for when the pipeline begins running. The body of this section describes the full pipeline as designed; readers should interpret it as the M2 deliverable, not the M1 state.
 
 **Description.** End-to-end pipeline that guarantees character-fidelity from document → model context → cited output → rendered viewer. When the model produces a claim with a citation, the system can highlight the exact substring in the source document, in the original page, with character precision. Includes a verification step that fails the citation if the cited substring does not appear verbatim in the source.
 
@@ -442,6 +500,8 @@ This is the single most differentiated capability in the product. Specified in d
 - Side-panel viewer: PDF.js is the obvious choice for PDFs. For DOCX sources, do we render a synthesized PDF or a styled HTML view? Recommend HTML view for DOCX with span-level offset markers.
 
 ### 3.4 Skill Library and Skill Creator
+
+**M1 status:** Shipped. The Skill Library (browse built-in, user, and team scopes), Skill Creator (capture / wizard / fork), skill versions tab, per-version audit, Try-It sandbox, and slash-invoked skills with provenance pill are all wired end-to-end in Wave D.2. An operator can verify at `api/app/api/skills.py`; Cypress E2E coverage is in `web/cypress/e2e/wave-d2-skill-creator.cy.ts` (Tests 1–6). Skill script execution (`scripts/`) and autonomous skill self-improvement are deferred (M4). See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface).
 
 **Description.** Skills are reusable, structured prompt artifacts that users attach to chats. They follow the agentskills.io / Claude Skills format: a folder containing `SKILL.md` (with YAML frontmatter) and optional supporting files. Three tiers: built-in skills (ship with the product), user skills (created by the user), and shared skills (shared by other users in the organization).
 
@@ -560,6 +620,8 @@ The API endpoint `GET /api/v1/skills/{id}/inputs` returns the skill's input sche
 
 ### 3.5 Files / Knowledge Bases
 
+**M1 status:** Shipped. Knowledge base create, document attach, PDF upload, and ingest-to-`ready` (pgvector + FTS hybrid retrieval) are wired end-to-end. An operator can verify at `api/app/api/knowledge_bases.py`, `api/app/pipeline/ingest.py`, and `api/app/workers/document_pipeline.py`; Cypress E2E coverage is in `web/cypress/e2e/wave-m1-final-surfaces.cy.ts` Test 2. Note: the Citation Engine's verification step (byte-level citation confirmation) is not yet wired — uploaded files provide retrieval-grounded context but citations are not byte-verified at M1. See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface) and [HONEST-STATE.md §3.1](HONEST-STATE.md#31-citation-engine--architectural-slot-not-wired).
+
 **Description.** Persistent collections of documents accessible across chats. Files are uploaded once, ingested into the citation pipeline, and made available for retrieval. Knowledge Bases group files for shared access (e.g., "Privacy Compliance Library," "Standard Templates").
 
 **User stories.**
@@ -599,6 +661,8 @@ The API endpoint `GET /api/v1/skills/{id}/inputs` returns the skill's input sche
 
 ### 3.6 Research
 
+**M1 status:** Deferred-M2. No web-search backend or legal-source connector exists in the M1 codebase. `grep -r "research" api/app/api/` returns no research-specific handler; `api/alembic/versions/` has no `research_queries` migration. The capability is fully spec'd here and in [PRD §9](PRD.md#9-deferred-enhancements-and-identified-future-work); a contributor picking it up should open a discussion before starting because it depends on the Citation Engine pipeline (§3.3) landing in M2 first. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+
 **Description.** Real-time legal information retrieval from authoritative sources, with the same Citation Engine fidelity as document-based citations. Web sources are fetched, parsed, and treated as ephemeral documents in the citation pipeline.
 
 **User stories.**
@@ -635,6 +699,8 @@ The API endpoint `GET /api/v1/skills/{id}/inputs` returns the skill's input sche
 - Should research results be cached? Recommend: yes, with a configurable TTL (default 24h), and the cache is queryable as a "Research Cache" knowledge base.
 
 ### 3.7 Playbooks
+
+**M1 status:** Deferred-M3. No `playbooks` table exists in `api/alembic/versions/` (M1 head is migration 0023); no `playbook_executions` endpoint is registered. The `word-addin/` directory is absent. Playbook execution depends on the Citation Engine pipeline (§3.3) landing in M2 and the LangGraph executor landing in M3. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
 
 **Description.** Structured, reusable contract-review automation. A Playbook codifies an organization's standard positions and fallback positions on common contract issues. When applied to a contract, the Playbook produces a per-position assessment: matches standard, deviates (with severity), or missing entirely. Includes redline suggestions.
 
@@ -714,6 +780,8 @@ class Position(BaseModel):
 
 ### 3.8 Multi-Model Ensemble Verification
 
+**M1 status:** Deferred-M2. Ensemble verification is not running at M1. The gateway dispatches every request to exactly one provider; no parallel model calls or reconciliation step exists in `gateway/app/router.py` or `api/app/`. The capability depends on the Citation Engine pipeline (§3.3) that also lands in M2. No `ensemble-config` endpoint is registered. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+
 **Description.** GC.AI markets "multi-model RAG (calls 5 different AI models)" as an accuracy feature. LQ.AI implements this as an *optional* ensemble step where multiple models are queried in parallel and their outputs are reconciled. Off by default (cost reasons); on for specific high-stakes operations like Playbook execution and Citation Engine verification.
 
 **User stories.**
@@ -741,6 +809,8 @@ class Position(BaseModel):
 - **Inference tier exposure for multi-tier ensembles.** When the ensemble spans multiple Inference Tiers (a chat using Tier 3 cloud + Tier 1 local for cross-verification), how is the chat's effective tier represented in the UI (§3.13)? Recommended resolution: surface the *minimum* tier across the ensemble as the chat's effective tier, since that is the privacy posture that actually applies — every model in the ensemble has seen the data, so the chat's effective tier is the floor.
 
 ### 3.9 Word Add-In (M3)
+
+**M1 status:** Deferred-M3. The `word-addin/` directory is absent from the repository (`ls word-addin/` returns no such directory). No Office.js manifest, no Word-side JS bundle, no add-in-specific backend wiring. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
 
 **Description.** Microsoft Office.js add-in that brings LQ.AI capabilities directly into Word. Users can run skills, execute Playbooks, get redlines, ask questions about the document, and act on the assistant's suggestions — all without leaving Word.
 
@@ -782,6 +852,8 @@ class Position(BaseModel):
 
 ### 3.10 Autonomous Layer (M4)
 
+**M1 status:** Deferred-M4. No `autonomous_tasks`, `autonomous_schedules`, or `autonomous_watches` table exists in `api/alembic/versions/`. No per-user memory store. The architectural slot is committed; detailed M4 design is deferred. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+
 **Description.** Long-running per-user agents that observe activity, learn patterns, take proactive actions, and create skills autonomously. Runs as OpenWebUI Pipelines, off by default, opt-in per user.
 
 **User stories.**
@@ -816,6 +888,8 @@ class Position(BaseModel):
 ---
 
 ### 3.11 Projects (M1)
+
+**M1 status:** Shipped. Matter (project) workspaces are wired end-to-end: create, list, detail view at `/lq-ai/matters/[id]`, attached files/skills/knowledge bases, the `privileged` flag, and `minimum_inference_tier`. An operator can verify at `api/app/api/projects.py`; Cypress E2E coverage is in `web/cypress/e2e/wave-c-matters.cy.ts`. Note: playbook attachment lands when Playbooks ship (M3). See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface).
 
 **Description.** A Project is a user-curated container that scopes a set of chats, files, skills, playbooks, and a free-form context document around a single matter — a deal, a counterparty, a regulatory question, a policy refresh. Chats inside a Project automatically inherit the Project's attached files and skills. The Project's free-form context document ("we are the customer; counterparty is Acme; their counsel is Smith Crowell; we agreed to a 12-month liability cap last round") is read into every chat in the Project as context. Projects are the operational answer to the question "what about *this matter*?" — distinct from per-chat attachments (which solve "this conversation") and from autonomous-layer memory (which is system-curated rather than user-authored).
 
@@ -859,6 +933,8 @@ Persistent matter memory is the single most-cited capability across in-house use
 
 ### 3.12 Organization Profile (M1)
 
+**M1 status:** Shipped. The singleton skill pattern with `lq_ai: { is_organization_profile: true }` frontmatter is enforced by the Skill Service. Admins can create or edit the Organization Profile through the same Skill Library surface as any other skill. An operator can verify the singleton constraint at `api/app/api/skills.py`. See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface).
+
 **Description.** A singleton skill that captures the organization's voice, templates, and "what good looks like" reference, available as ambient context to every chat and skill execution in the deployment. The Organization Profile is implemented as a skill with `lq_ai: { is_organization_profile: true }` frontmatter — same skill format as everything else, same inspectability, same fork-and-replace pattern, but treated as a singleton by the Skill Service. Single-instance per deployment; admin-edited; user-readable.
 
 **Why a singleton skill (rather than a separate construct).** Treating the Organization Profile as a skill with special metadata preserves the architectural simplicity (one extensibility surface, not two) and the transparency principle (the Organization Profile is open source and inspectable like every other shaping artifact — see §1.3).
@@ -884,6 +960,8 @@ Persistent matter memory is the single most-cited capability across in-house use
 ---
 
 ### 3.13 Inference Tier Awareness (M1)
+
+**M1 status:** Shipped. The Inference Gateway annotates every request with `routed_inference_tier` (1–5) and enforces tier-floor refusal. The tier badge is present in the chat UI; admin tier-floor override is wired. An operator can verify the gateway enforcement at `gateway/app/tier_floor.py` (124 LOC) and `gateway/app/router.py`; Cypress E2E coverage is in `web/cypress/e2e/wave-d1-power-features.cy.ts` Tests 3 and 5. Note: `GET /api/v1/inference/current-tier` is not yet in code at M1 (it is in the gateway OpenAPI sketch as a deferred endpoint). See [HONEST-STATE.md §2](HONEST-STATE.md#2-inference-gateway-and-providers).
 
 **Description.** A persistent badge in the chat UI shows the current Inference Tier (1–5) and the specific provider routing for the current chat. A click on the badge opens a panel explaining what the tier implies: where the data is going, what the provider's retention policy is, whether the prompt is being logged in the operator's audit log, whether anonymization (§4) is on, and whether the deployment is air-gapped. The same panel is available in the Word add-in. This is the most important security-posture feature of the entire project and one of the smallest pieces of code: every chat already routes against an inference provider; the application already knows which one; surfacing that to the user is a UI affordance away. The transparency philosophy in §1.3 requires it.
 
@@ -926,6 +1004,8 @@ Persistent matter memory is the single most-cited capability across in-house use
 
 ### 3.14 Tabular / Multi-Document Review (M3)
 
+**M1 status:** Deferred-M3. No grid surface, no LangGraph Tabular Review workflow, and no `output_format: table` skill-mode handling exists in M1. The capability depends on the Citation Engine pipeline (§3.3) and the Playbook/LangGraph executor (§3.7), both of which land in M2–M3. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+
 **Description.** A view that takes (a) a set of documents (a Knowledge Base, a Project's files, a free selection) and (b) a set of questions or clauses to extract, and produces a row-per-document, column-per-question grid. Each cell is a citation-grounded answer that opens the side-panel viewer (§3.3) on click. The "compare clauses across N contracts in a grid" pattern (Legora Tabular Review, Harvey Vault, Ivo Repository columns) is a different UI shape than chat. In-house teams use it for due diligence, audits, portfolio-wide policy checks, and "what is market across the deals we have signed."
 
 **User stories.**
@@ -952,6 +1032,8 @@ Persistent matter memory is the single most-cited capability across in-house use
 
 ### 3.15 Slack / Teams Light Intake Bridge (M3)
 
+**M1 status:** Deferred-M3. No `/lq` slash-command handler, no bot manifest, no `slack-bridge` or `teams-bridge` Docker Compose service exists at M1. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+
 **Description.** A Slack and Teams bot that supports two flows: (1) **forward as a chat** — a user `/lq` slash-command on a message thread creates an LQ.AI chat with the thread's content as initial context; (2) **quick ask** — `/lq ask "is this an MSA or an order form?"` runs a short skill (configurable via Org Profile) and replies in-thread. Replies render in the Slack/Teams thread; deeper engagement opens the web app. No matter management, no triage, no SLA tracking — that is the boundary with Streamline AI's category, which is explicitly out of scope per §1.6.
 
 In-house teams report (across the competitive research) that the majority of incoming requests arrive via Slack, Teams, or email — not via direct visits to the legal portal. A web-only product structurally underweights the channels users live in. A *light* Slack/Teams bridge — not full intake/triage like Streamline AI — closes this gap with bounded scope.
@@ -969,6 +1051,8 @@ In-house teams report (across the competitive research) that the majority of inc
 ---
 
 ### 3.16 Contract Repository — Auto-Relationship Detection (M4)
+
+**M1 status:** Deferred-M4. No `contract_relationships` table exists in `api/alembic/versions/`; no relationship-detection pipeline or graph-query surface exists at M1. Depends on the Knowledge Service pgvector+FTS baseline (shipped M1) and on the Citation Engine pipeline (§3.3, M2). See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
 
 **Description.** A pipeline that runs over a Knowledge Base of contracts and produces a relationship graph: amendments (modifies-X), restatements (replaces-X), references (cross-references-X), and master/sub (parent-of-X) edges. The graph is queryable and visible in the UI as a sidebar on each document. Contracts about a counterparty rarely stand alone, and answering questions like "which liability cap actually governs?" requires knowing which document supersedes which. This is Ivo's positioning — that contracts are not isolated documents but a graph — and is not currently addressed in the PRD's flat Knowledge Base model.
 
@@ -1258,6 +1342,8 @@ Plus admin endpoints under `/admin/v1`:
 
 ### 4.7 Anonymization Layer (M2)
 
+**M1 status.** The configuration schema loads but the middleware does not run in M1. The gateway accepts an `anonymization:` block in `gateway.yaml` (schema at `gateway/app/config.py:250-251`, instantiated at `gateway/app/config.py:329`); the admin surface at `GET /admin/v1/anonymization-config` returns 501 with an explicit message naming M2 as the milestone where the underlying middleware enters the request pipeline (`gateway/app/api/admin.py:270-282`). The chat-completions handler in `gateway/app/api/inference.py` has no `anonymize_request` call before the provider dispatch and no `rehydrate_response` call after — an operator can verify the absence of the middleware in source. See [`docs/HONEST-STATE.md` §3.2](HONEST-STATE.md#32-anonymization-layer--config-slot-not-running) for what an operator can verify today and what M2 will add. Documents and entities are sent to the configured inference provider in full at M1 — the operator's bring-your-own-keys control is the in-place privacy posture for this milestone; deployments where entity substitution is a hard requirement should wait for M2 or run Tier 1 (Ollama) so the data never leaves the operator's environment regardless of substitution. The body of this section describes the full layer as designed; readers should interpret it as the M2 deliverable, not the M1 state.
+
 A pre-processing step in the Inference Gateway pipeline (per the architecture diagram in §4.3): configurable patterns and an entity-recognition pass identify sensitive spans, replace them with stable pseudonyms, send the anonymized text to the model, then post-process the response to rehydrate the pseudonyms. The mapping is held only in the deployment's process memory for the duration of the request and never persists.
 
 **Why include in v1.** Mode 2 (full local inference, Tier 1) is one answer to the data-sovereignty question; an anonymization-then-rehydrate layer for Mode 1 with Tier 3+ is the other answer, and it is what privacy-conscious enterprises that still want cloud-LLM quality reach for. Including it positions LQ.AI's Mode 1 at parity with privacy-first commercial tools without sacrificing the cloud-LLM choice. Legalfly built a defensible category position around this; the architectural placement is straightforward middleware in the Gateway.
@@ -1355,6 +1441,46 @@ The LQ.AI **backend (FastAPI) owns authentication**. The web client (the OpenWeb
 - The deployment emits no telemetry to LegalQuants or any third party by default.
 - Optional opt-in anonymous usage stats (version, deployment mode, capability counts; no content) via a clearly-disclosed flag.
 - Documented in privacy.md.
+
+### 5.8 Testing and Quality Engineering
+
+The Cross-Milestone Workstreams entry in §8 commits to "Pytest coverage target 80%, integration tests for every API endpoint, end-to-end tests for happy paths in every capability, fuzzing for the Inference Gateway's OpenAI compatibility." This section extends that commitment into the engineering-discipline practices that distinguish a maintainable production codebase from a working prototype. Many items below are deferred to later milestones; each has an explicit status marker so the M1 reader can tell what is running today and what is on the roadmap. The deferred-enhancement entries in §9 (Engineering Discipline subsection) are the unit of contributor pickup.
+
+**Coverage gates enforced as CI merge gates.** The target is 80% pytest coverage on the `api/` package and 90% on the `gateway/` package — the gateway's position in the trust path justifies the higher floor. Coverage is reported per-package and per-file in CI artifacts; the `coverage.xml` is uploaded to Codecov (or equivalent) for trend visibility across PRs. **Status: M1 partial — the test suites exist (70 backend pytest files; 27 gateway pytest files; 53 vitest specs; 10 Cypress specs per `docs/HONEST-STATE.md` §6) but `.github/workflows/ci.yml` does not yet fail builds below threshold. The CI gate is on the engineering-discipline roadmap (see §9, Engineering Discipline subsection).**
+
+**Property-based testing for invariants.** The Citation Engine, the Anonymization Layer, and the Inference Gateway router are the three components whose invariants are load-bearing for the product's correctness and security story. Property-based testing with Hypothesis expresses those invariants as properties tested across generated inputs: every claim emitted by the Citation Engine resolves to a verbatim quote in the cited chunk; every entity anonymized on the request path is rehydrated on the response path; every tier-routing decision is consistent with the operator's tier policy; no fallback path can promote a request above its allowed tier. Properties find the edge cases example-based tests miss. **Status: deferred (see §9 DE entry — Property-based testing). The architectural slots for the Citation Engine and Anonymization Layer are not yet wired (§3.3 M1 status; §4.7 M1 status); property tests land alongside the pipelines they exercise.**
+
+**Mutation testing with per-release scores published.** Mutation testing (mutmut for Python, Stryker for the TypeScript portions of the OpenWebUI fork) runs nightly against the critical-path packages and reports the mutation score per release. Mutation testing is the answer to the criticism that high coverage numbers can be achieved without meaningful assertions; a mutation-tested suite proves that the tests catch real defects, not just that the lines are executed. The mutation score is published per release in the security advisory feed and rendered as a badge alongside the OpenSSF Scorecard. **Status: deferred (see §9 DE entry — Mutation testing). M1 ships unit and integration tests; mutation testing lands on the roadmap.**
+
+**Snapshot / golden testing for skill outputs across the documented model matrix.** Every built-in skill ships with a held-out test corpus of input documents and structural-output golden snapshots (not exact wording, which varies with model and seed). The skill execution test runs against the documented multi-model matrix (Anthropic Claude latest two majors; OpenAI GPT latest two majors; one open-weight reference local model) and compares structural output to the snapshots with a documented similarity threshold — JSON-schema validity for tabular skills, section presence and ordering for report skills, issue count and category coverage for review skills. A drop below threshold on a model upgrade blocks release and files an issue. **Status: M1 partial — each starter skill ships with a `test-plan.md` in `skills/<skill>/test-plan.md`, but the harness that executes the plans is deferred (see `docs/HONEST-STATE.md` §6 and the mini-PRD at `docs/contribute/mini-prds/skill-acceptance-tests.md`).**
+
+**Performance regression with historical tracking.** Latency benchmarks (p50, p95, p99) for the conversational core, the Citation Engine, the Inference Gateway routing decision, and skill execution run per PR; results are committed to a benchmark history; regressions of more than a documented threshold are merge-blocked. Memory profiling runs nightly with leak detection. This catches the class of defects where a refactor functionally works but materially regresses production behavior — the class of defects that erodes operator trust over time. **Status: deferred (see §9 DE entry — Performance regression tracking). M1 ships OpenTelemetry instrumentation (§5.4) that supports operator-side measurement; project-side benchmark tracking is on the roadmap.**
+
+**Chaos and fault injection for the gateway and document pipeline.** The Inference Gateway is tested with provider-fault injection: provider returns 500; provider returns 429; provider hangs; provider returns malformed JSON; provider returns partial response. The tests assert that fallback behavior is correct, that the audit log records the fault accurately, that the operator's tier policy is preserved (no silent tier upgrade on fallback), and that cost accounting is consistent. The Document Pipeline is tested against a corpus of malformed documents (truncated PDFs, malformed DOCX, PDFs with embedded JavaScript, documents with unicode-direction-override attacks). **Status: deferred for the gateway-and-pipeline fault matrix as a structured suite (see §9 DE entry — Chaos and fault injection). The gateway's provider adapters have unit-level error-path tests today in `gateway/tests/`; a structured fault-injection suite is on the roadmap.**
+
+**Contract testing between services.** The boundary between `web/` (OpenWebUI fork), `api/` (FastAPI backend), `gateway/` (Inference Gateway), and the Word add-in (M3) is tested with consumer-driven contract tests (Pact or equivalent), versioned and committed to source. A breaking change at any of these boundaries is caught at PR time rather than at deployment time. This is especially important given the OpenWebUI fork relationship: contract tests ensure that an upstream OpenWebUI change cannot silently break a backend assumption. **Status: M1 partial — the OpenAPI 3.1 schema at `docs/api/backend-openapi.yaml` and `docs/api/gateway-openapi.yaml` is the source of truth and is verified against handler signatures by OpenAPI conformance tests in `api/tests/` and `gateway/tests/`. Consumer-driven contract testing (Pact) is on the roadmap — see §9 DE entry.**
+
+**Visual regression and accessibility testing.** The web UI ships with Playwright visual regression tests on a documented browser matrix and with axe-core accessibility tests enforcing WCAG 2.1 AA compliance as a merge gate. Accessibility is increasingly a procurement requirement in legal and regulated industries; shipping with verifiable WCAG 2.1 AA from M1 closes that objection. The accessibility audit report is published per release. **Status: M1 partial — design targets WCAG 2.1 AA per README; CI enforcement via axe-core merge gate is deferred (see §9 DE entry — WCAG 2.1 AA accessibility audit and CI gate, and `docs/HONEST-STATE.md` §6).**
+
+**Fuzz testing extended to document parsers and anonymization paths.** The Inference Gateway's OpenAI-compatibility surface is fuzzed at PR time. The Document Pipeline parsers are additionally fuzzed nightly against malformed-document corpora (libFuzzer-style harnesses for Docling input, PyMuPDF input, and OCR API response handling). The Anonymization Layer's regex and NER paths are fuzzed for ReDoS and adversarial-tokenization inputs. **Status: M1 partial — fuzzing of the OpenAI-compatibility surface is committed in the Cross-Milestone Workstreams. Document-parser fuzzing and anonymization-path fuzzing are deferred (see §9 DE entry — Fuzz testing extended).**
+
+**Adversarial-AI testing as a release gate.** A documented adversarial test suite runs per release against the inference path: prompt injection from a malicious counterparty document (covering the published Garak, PyRIT, and MITRE ATLAS attack corpora); jailbreak attempts targeting Tier 1 local-inference profiles; PII extraction attempts against the Anonymization Layer; citation-hallucination attempts (asking the model to cite a document that does not exist). Detection rates and mitigation effectiveness are published per release per skill. This is the AI-product-specific analog of a security regression suite — see also DE-110 (Prompt-injection pattern library) and the §9 DE entries for prompt-injection detection rates and PII leakage testing. **Status: deferred. The honest answer is that no public detection rates are measured for the M1 release; the path to shipping is in `docs/HONEST-STATE.md` §6.**
+
+### 5.9 Reliability and Operations
+
+PRD §5.4 commits to observability and §5.3 to audit logging. This section adds the reliability-engineering commitments operators of regulated production systems expect. As with §5.8, many items are deferred to later milestones; each has an explicit status marker. The deferred-enhancement entries in §9 are the unit of contributor pickup.
+
+**Published Service Level Objectives and Indicators.** The project publishes recommended SLOs and the corresponding SLIs for a reference deployment, with documented measurement methodology. The SLO set covers: API availability (target 99.9% monthly); p99 latency by capability (documented per capability in §3); inference-fallback success rate; audit-log durability (target zero loss). For each SLO, the SLI calculation is documented and the OpenTelemetry metrics that feed it (per §5.4) are named explicitly. Operators can use the published SLOs as starting points and tune to their own risk appetite. **Status: deferred (see §9 DE entry — Published SLOs / SLIs). OpenTelemetry instrumentation ships at M1; the SLO catalog is on the roadmap.**
+
+**Error budget policy.** A documented error budget policy describes how the project handles SLO breaches in releases: a budget breach triggers a release freeze on non-critical changes until the budget recovers. The policy is illustrative for operators who want to adopt the same discipline internally and operative for any future LegalQuants-managed-service offering. **Status: deferred (see §9 DE entry — Error budget policy). Conditional on the SLO catalog above.**
+
+**Public postmortems within 14 days.** Incidents in any LegalQuants-operated infrastructure (the project's hosted demo, the GitHub-issued artifacts, the LegalQuants-managed-service offering once it exists) are postmortem'd publicly within 14 days, in a documented template (timeline, root cause, contributing factors, remediation, action items, lessons learned). This is the discipline mature OSS projects (PostgreSQL, Kubernetes) and mature SaaS vendors (Stripe, Cloudflare) follow; publishing postmortems is a credibility multiplier. For self-hosted operator deployments, incident response is the operator's responsibility — the project supports the operator's investigation through the disclosure channel in `SECURITY.md` and through the audit log and OpenTelemetry traces (§5.3 and §5.4). **Status: deferred (see §9 DE entry — Public postmortems). No incidents in LegalQuants-operated infrastructure have occurred yet because no LegalQuants-operated infrastructure has been published; the template and the publication commitment land alongside the first hosted artifact.**
+
+**Disaster recovery test cadence.** The reference deployment recipes ship with a documented DR procedure (backup restore, secret rotation, key rotation, failover to a secondary region). The procedure is exercised quarterly against a clean test environment by the LegalQuants-managed-service operations function (when that function exists), with the test report published. The DR procedure is operator-runnable for any self-hosted deployment. **Status: deferred (see §9 DE entry — Disaster recovery test cadence). The Docker Compose deployment is documented at M1; the Helm chart is drafted (see `deploy/helm/` per `docs/HONEST-STATE.md` §7); a tested DR procedure is on the roadmap.**
+
+**Runbooks for every operational task.** Every operational task an operator might perform (deploying, upgrading, rotating credentials, responding to a security advisory, recovering from a corrupted vector index, migrating to a different inference provider, ingesting a backlog of documents) ships with a runbook in `docs/runbooks/`. Runbooks include estimated time, prerequisites, the exact commands, success-verification steps, and rollback procedure. This is the operational-maturity signal that lets a procurement security team check the box on "the vendor has documented operational procedures" — for an OSS project, the runbooks are the evidence. **Status: deferred. `ls docs/` shows no `runbooks/` directory at M1; the directory and the first runbooks are on the engineering-discipline roadmap (see §9 DE entry — Runbooks for operational tasks).**
+
+**Public status page for hosted artifacts.** When LegalQuants ships hosted artifacts (the project's hosted demo, the docs site, the container registry, the managed-service offering), each is tracked on a public status page with documented severity definitions and incident-response procedures. **Status: deferred. No hosted artifacts published yet at M1 — the project ships as software the operator runs; the status page lands with the first hosted artifact.**
 
 ---
 
@@ -1844,6 +1970,21 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 
 **Acceptance criteria:** Reference business-user NDA generator skill, with documentation for skill authors on how to build similar.
 
+#### DE-219 — Wave G community-skill installer + first port batch
+
+**Priority:** P1 · **Effort:** L
+
+**Context:** Per `docs/research/2026-05-12-claude-for-legal-review.md` §9 (Q6 decision), LQ.AI will adopt a `legal-builder-hub`-style community-skill installation surface in a v1.1+ Wave G. The pattern: allowlist via `gateway.yaml`, raw-Markdown display in `web/`, license-gate UI, `skills-qa`-style frontmatter + trigger-example evaluator before install commits the skill to disk.
+
+**Specific scope:**
+- **G.1 Installer infrastructure:** allowlist source registry, web skill-source browser, install/preview gate, raw-display viewer, license-gate UI, `skills-qa`-style evaluator (frontmatter validation + trigger-example sanity + body lint).
+- **G.2 First port batch:** the 10 skills identified in the research doc §5. Verbatim-with-attribution port (per Q4 decision), each going through the existing claim → draft → attest → review → merge pipeline. Skipped from this batch: HEAVY-effort `internal-investigation`, `worker-classification` (v1.2+); audience-mismatch `law-student`, `legal-clinic`, `cocounsel-legal`.
+- **G.3 NOTICES + attestation conventions** (per Q7 decision): `NOTICES.md` at repo root tracking upstream provenance per ported file; `lq_ai.author = "Anthropic PBC (upstream) and LegalQuants (adaptation)"` in ported-skill frontmatter; CONTRIBUTING.md adjustment with ported-skill attestation paragraph template.
+
+**Out of scope:** Tool-using skills that depend on MCP connectors (Ironclad, DocuSign, iManage, etc.) — per Q8 decision, those stay pinned to the deferral list and unblock alongside the broader tool-call ADR work.
+
+**Acceptance criteria:** Installer ships with the allowlist gated to `anthropics/claude-for-legal` initially; first port batch (10 skills) lands through the standard skill-authoring pipeline; `NOTICES.md` populated; updated `docs/skill-authoring-guide.md` reflects ported-skill conventions.
+
 ### Application UI enhancements
 
 #### DE-010 — Skill input form rendering for any skill
@@ -2279,6 +2420,26 @@ In v1, each contract-review skill carries its own copy of the shared infrastruct
 
 **Recommendation:** Wait for community demand. If demand materializes, consider PWA before native.
 
+#### DE-220 — Organization Profile singleton skill (per-firm playbook)
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** Per `docs/research/2026-05-12-claude-for-legal-review.md` §9 (Q5 decision), Anthropic's `claude-for-legal` skills heavily reference a team-specific `CLAUDE.md` playbook (GREEN/YELLOW/RED thresholds, escalation rules, house style). LQ.AI's nearest analog is the Organization Profile — a singleton skill that shapes every other skill's behavior. The Profile was deferred from M1; this entry surfaces it as a v1.1+ candidate that unblocks calibration-driven skills (`nda-review`, `msa-review`, etc.) and is a prerequisite for substantive fold-in from upstream (DE-219).
+
+**Specific scope:** Author the Organization Profile singleton skill (synthesized YAML, prepended to every other skill's system message at assembly time per ADR 0007). Authoring surface in `web/` (Settings → Organization Profile editor): house-style fields, jurisdiction defaults, escalation matrix, GREEN/YELLOW/RED threshold defaults, attorney-of-record. Per the input-default convention in `docs/skill-authoring-guide.md`, skills opt out via `lq_ai.use_organization_profile: false`; the Profile itself opts out so the assembler never recurses.
+
+**Acceptance criteria:** Profile is authorable through a web UI; renders correctly in every applicable skill's assembled system prompt; first ported skill (DE-219 G.2) that depends on calibration (e.g., `nda-review`) demonstrably reflects the Profile's GREEN/YELLOW/RED thresholds.
+
+#### DE-221 — Managed-Agents-equivalent (scheduled-agent runtime)
+
+**Priority:** P2 · **Effort:** L
+
+**Context:** Per `docs/research/2026-05-12-claude-for-legal-review.md` §9 (Q3 decision), several `claude-for-legal` plugins presuppose a scheduled-agent runtime that LQ.AI does not have: `renewal-watcher`, `docket-watcher`, `reg-feed-watcher`, `dataroom-watcher`, `launch-watcher`. The reference design exists in Anthropic's `managed-agent-cookbooks/` (`agent.yaml` + `subagents/*.yaml` + `steering-examples.json`). Per the decision, this is out of M1 scope and unlikely to land before v1.2+; filed here so the architectural shape can be referenced when scheduled-watcher demand materializes.
+
+**Specific scope:** A scheduled-agent surface in LQ.AI is a cron + recurrence + handoff layer on top of the existing Inference Gateway. Multi-Wave investment, not a fold-in. Out of scope for the v1.1+ Wave G (which is the skill-installer + first port batch).
+
+**Acceptance criteria:** Reference the Anthropic `managed-agent-cookbooks/` design for scope-shaping when this lands; LQ.AI's surface should support headless agents with cron triggers, recurrence rules, and a structured handoff format. The ported `*-watcher` skills from `claude-for-legal` are the natural first inhabitants.
+
 ### Process and project management
 
 #### DE-050 — Skill quality bar / review process for community contributions
@@ -2666,6 +2827,410 @@ Privacy and security implications dominate this entire subsection. Most items be
 
 **Acceptance criteria:** Brief is useful for an unfamiliar reviewer; reviewed by practicing attorneys for completeness; tested on real OOO scenarios.
 
+### Engineering discipline
+
+This subsection operationalizes the §1.9 engineering-discipline posture and the §5.8 / §5.9 cross-cutting commitments. Each entry is a deferred enhancement whose architectural slot exists (or is documented as a gap in `docs/HONEST-STATE.md` §6) and whose path-to-shipping is bounded. Several entries have a corresponding mini-PRD under `docs/contribute/mini-prds/` — these are the contributor-friendly first PRs that close the M1 gap.
+
+#### DE-222 — OpenSSF Scorecard published in README and automated in CI
+
+**Priority:** P1 · **Effort:** S
+
+**Context:** Per §1.8 addition and §1.9. The OpenSSF Scorecard tool computes 18 objective security-and-practice signals (branch protection, signed releases, dependency-update automation, fuzzing, etc.) and produces a score 0–10. The score is verifiable independently by any reviewer; it makes the engineering-discipline claim concrete and measurable. Closed-source vendors cannot earn this badge because the criteria presuppose source visibility.
+
+**Specific scope:** A `scorecard-action` workflow committed to `.github/workflows/scorecard.yml` running weekly; a `SECURITY-INSIGHTS.yml` at repo root; badges added to README; `docs/security/scorecard-targets.md` documenting the target floor. See the mini-PRD at `docs/contribute/mini-prds/openssf-scorecard-and-badges.md`.
+
+**Acceptance criteria:** Scorecard score published in README and refreshed continuously; initial target ≥7.0; M2 target ≥8.5; M4 target ≥9.0; documented gap-closure plan for any criterion that is not yet met.
+
+#### DE-223 — OpenSSF Best Practices Badge: Passing → Silver → Gold
+
+**Priority:** P1 · **Effort:** M (cumulative across milestones)
+
+**Context:** The OpenSSF Best Practices Badge has Passing, Silver, and Gold tiers, each with explicit criteria (Gold requires multi-factor authentication for committers, signed commits, two-person review of substantive changes, public reproducible build, etc.). Each tier transition is publicly announced and added to the README. The criteria checklist for each tier is itself a useful project-discipline planning artifact.
+
+**Specific scope:** Submit and maintain the badge through the OpenSSF self-attestation site; commit the badge link to README; document the criteria-by-criteria status in `docs/security/best-practices-badge-status.md`.
+
+**Acceptance criteria:** Passing tier achieved by M1 release; Silver tier by M2; Gold tier by M4. Each tier transition produces a public announcement and a documented evidence trail.
+
+#### DE-224 — OWASP LLM Top 10 mitigation mapping
+
+**Priority:** P1 · **Effort:** S
+
+**Context:** The OWASP LLM Top 10 (LLM01 Prompt Injection through LLM10 Model Theft) is the de facto procurement framework for AI-product security review. Closed-source vendors typically do not publish this mapping because they cannot cite their architecture. The mini-PRD is at `docs/contribute/mini-prds/owasp-llm-top10-mapping.md`.
+
+**Specific scope:** A new document `docs/compliance/owasp-llm-top10.md` covering each LLM0X risk in five columns — threat description, applicability to LQ.AI architecture, project mitigations (with citations into `gateway/`, `api/`, `skills/`, or `docs/security/`), residual risk, and operator responsibility. Each row's "project mitigations" column cites at least one specific file path so a reviewer can verify in source. The Citation Engine (§3.3) and Anonymization Layer (§4.7) M1-status notes are reflected accurately.
+
+**Acceptance criteria:** All 10 risks have substantive entries; every cited file path resolves; the doc is referenced from Appendix E (objection on prompt injection); a non-maintainer security architect can read it without producing a "marketing copy" complaint.
+
+#### DE-225 — NIST AI RMF 1.0 Profile commitments
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** The NIST AI Risk Management Framework 1.0 (with the Generative AI Profile NIST AI 600-1) is the U.S. federal-aligned framework for AI risk governance. This is the document a federal procurement team (or a federal-adjacent enterprise) will look for first. The mini-PRD is at `docs/contribute/mini-prds/nist-ai-rmf-profile.md`.
+
+**Specific scope:** A new document `docs/compliance/nist-ai-rmf-alignment.md` structured as the four AI RMF functions (Govern / Map / Measure / Manage) plus the Generative AI Profile additions. Each function maps to a row of "subcategory → LQ.AI design choice or operational practice → code citation or PRD section reference → residual operator responsibility." The Generative AI Profile additions emphasize prompt-injection, data-poisoning, and confabulation rows specifically.
+
+**Acceptance criteria:** Every subcategory is addressed; Govern subcategories that are operator-only are explicitly marked as such; the doc is referenced from the README under compliance and governance; a federal-procurement reviewer can produce a substantive list of gaps rather than a "this is marketing" rejection.
+
+#### DE-226 — MITRE ATLAS threat-model mapping
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** MITRE ATLAS is the adversarial-ML analog of MITRE ATT&CK: a structured matrix of known adversarial-ML tactics, techniques, and case studies. Closed-source vendors typically do not publish an ATLAS mapping because they cannot cite their architecture.
+
+**Specific scope:** A new document `docs/security/atlas-mapping.md` identifying which ATLAS techniques apply to LQ.AI's architecture, what mitigations are in place, what residual risk remains, and what techniques are out of scope (e.g., model-theft techniques largely do not apply to a project that does not train models). Cross-references the STRIDE threat model at `docs/security/threat-model.md`.
+
+**Acceptance criteria:** Every applicable ATLAS technique has a row; mitigations cite into source; out-of-scope techniques are explicitly named as such with rationale.
+
+#### DE-227 — Annual third-party penetration test with public summary
+
+**Priority:** P1 · **Effort:** L (recurring)
+
+**Context:** Per §1.8 addition. A recurring application penetration test by a recognized firm closes the procurement objection "what independent review has this had?" with a verifiable yes rather than the closed-source standard answer of "we have an internal security team." The first engagement is targeted within 90 days of M1 release; the engagement is LegalQuants-funded and not contingent on community contribution.
+
+**Specific scope:** Annual engagement covering the FastAPI surface, the Inference Gateway, the OpenWebUI fork, the Word add-in (once shipped), and the documented reference deployment. Public deliverable: executive summary in `docs/security/releases/pen-test/<year>.md` with finding count by severity, remediation status, and remediation timeline. Detailed findings are coordinated-disclosure-cycled per `SECURITY.md` before publication.
+
+**Acceptance criteria:** First engagement scheduled within 90 days of M1; executive summary published within 30 days of the engagement's conclusion; remediation tracker updated through the disclosure window.
+
+#### DE-228 — Annual adversarial-AI red-team engagement
+
+**Priority:** P1 · **Effort:** L (recurring)
+
+**Context:** Per §1.8 addition. The AI-product-specific analog of the application penetration test. Very few legal-tech competitors commission this; doing so is the structural signal that the project takes AI-specific failure modes seriously.
+
+**Specific scope:** Annual engagement with a recognized AI-security firm or a documented community red team. Scope: prompt injection from malicious documents, jailbreak resistance, citation-hallucination resistance, PII extraction from the Anonymization Layer, skill subversion, autonomous-layer trust-boundary testing (once M4 ships). Public deliverable: methodology document, attack categories tested, detection rates, mitigation effectiveness, residual risk. Published at `docs/security/releases/ai-red-team/<year>.md`.
+
+**Acceptance criteria:** First engagement scheduled within 90 days of M1; methodology and aggregate results published within 30 days of conclusion.
+
+#### DE-229 — Mutation testing in CI with per-release scores published
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** Per §5.8. Mutation testing is the answer to the criticism that coverage percentages can be gamed. The published mutation score per release proves that the test suite catches real defects, not just that the lines are executed.
+
+**Specific scope:** Configure mutmut (Python) and Stryker (TypeScript) to run nightly on the critical-path packages: Inference Gateway, Citation Engine (once wired), Anonymization Layer (once wired), the FastAPI authentication and authorization surface, the audit-log writer. Publish the mutation score per release. Set a target floor (e.g., ≥80% on the Gateway and Citation Engine).
+
+**Acceptance criteria:** Mutation testing runs nightly; per-release mutation score is published in the release notes and rendered as a README badge alongside the OpenSSF Scorecard.
+
+#### DE-230 — Property-based testing for Citation Engine and Anonymization Layer invariants
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** Per §5.8. The Citation Engine, the Anonymization Layer, and the Inference Gateway router are the three components whose invariants are load-bearing for the product's correctness and security story. Properties find the edge cases example-based tests miss.
+
+**Specific scope:** Use Hypothesis (Python property-based testing) to express invariants as properties tested across generated inputs. Citation Engine: every emitted citation resolves to a verbatim quote in the cited chunk; no citation references a chunk not in the retrieval set. Anonymization Layer: every anonymized entity on the request path is rehydrated on the response path; entity identifiers are stable across retries; the anonymization map for one chat is never reused for another. Gateway router: no fallback path can promote a request above its allowed tier.
+
+**Acceptance criteria:** Property tests in `api/tests/property/` and `gateway/tests/property/`; CI runs them with a documented time budget; properties are documented in `docs/security/property-tests.md`. Depends on the underlying pipelines being wired (§3.3 Citation Engine and §4.7 Anonymization Layer at M2).
+
+#### DE-231 — Golden / snapshot testing for built-in skills with model-version regression
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** Per §5.8. The LLM-product analog of regression testing. When a model upgrade causes a skill's structural-output score to drop below threshold, the release-blocking issue is auto-filed. The contributor-friendly path is the skill-acceptance-tests mini-PRD at `docs/contribute/mini-prds/skill-acceptance-tests.md`.
+
+**Specific scope:** Each built-in skill ships with a `skills/<skill>/acceptance/` directory containing 3–5 anonymized real-document inputs and structural-output golden snapshots. The CI runs the skill against the documented multi-model matrix (Anthropic Claude latest two majors; OpenAI GPT latest two majors; one open-weight reference local model) and compares structural output to the snapshots with a documented similarity threshold. A drop below threshold blocks release.
+
+**Acceptance criteria:** All 10 starter skills have populated acceptance directories; CI job runs nightly against the model matrix; structural-similarity threshold is documented; first regression-blocked release demonstrates the gate works as designed.
+
+#### DE-232 — WCAG 2.1 AA accessibility audit and CI gate
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** Per §5.8. Accessibility is increasingly a procurement requirement in legal and regulated industries; shipping with verifiable WCAG 2.1 AA from M1 closes the objection without requiring a separate compliance workstream later.
+
+**Specific scope:** Run axe-core (or pa11y) against the web UI on every PR with WCAG 2.1 AA as the merge gate. Commission a one-time third-party manual accessibility audit at M2 and publish the report at `docs/compliance/accessibility-audit.md`. The Word add-in (M3) follows Microsoft's Office add-in accessibility guidelines and is tested with the Office Accessibility Checker.
+
+**Acceptance criteria:** axe-core CI gate is green on `main`; gate fails PRs with new WCAG 2.1 AA violations; third-party audit at M2 produces a public report with all critical findings remediated or documented.
+
+#### DE-233 — Air-gap install verification CI test
+
+**Priority:** P1 · **Effort:** S
+
+**Context:** Mode 2 (full local inference, Tier 1) is documented in §6.4; nothing currently asserts it. Operators in regulated industries (defense, healthcare on-prem, EU sovereign cloud) gate adoption on this verification. The mini-PRD is at `docs/contribute/mini-prds/air-gap-install-verification.md`.
+
+**Specific scope:** A new CI job (in `ci.yml` or a dedicated `air-gap.yml`) that brings up the stack with `docker compose --profile local up -d`, asserts the compose network has zero outbound NAT, drives a complete chat through the local-Ollama path (login → send → receive), and fails the build if any container makes an outbound DNS query to a non-private address during the test window. The job also asserts the gateway routing-log records `provider: ollama` and `tier: 1` exclusively.
+
+**Acceptance criteria:** CI job is green on PRs that don't touch the egress path; fails when a cloud-provider adapter is accidentally re-enabled in Mode 2; the test is documented in `docs/security/air-gap-verification.md` so operators can re-run it against their own deployment.
+
+#### DE-234 — Reverse-proxy and TLS deployment recipes (Caddy, Traefik, nginx)
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** §6.3 mentions Caddy, Traefik, and nginx as reverse-proxy options; no concrete configurations ship with M1. The mini-PRD is at `docs/contribute/mini-prds/reverse-proxy-tls-deployment-recipes.md`.
+
+**Specific scope:** Three compose overlays and READMEs in `deploy/reverse-proxy/{caddy,traefik,nginx}/`. Each overlays the base `docker-compose.yml`, terminates TLS at the proxy, exposes `web` and `api` on the standard ports, and handles Let's Encrypt automation for Caddy and Traefik (and documents the cert-manager path for nginx). Each recipe is tested end-to-end against a test FQDN.
+
+**Acceptance criteria:** A non-maintainer operator can clone the repo, follow one recipe, and have a TLS-terminated deployment on a real domain in under 30 minutes. CI smoke-tests at least the Caddy recipe.
+
+#### DE-235 — Procurement-Readiness Pack (SIG Lite + CAIQ)
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** The stub at `docs/procurement/README.md` documents the structure and the `[OPERATOR-CONFIGURABLE]` marker pattern. PRD Appendix E (17 pre-empted objections) is the substantive content the questionnaires need; the work is reformatting the existing prose into SIG Lite and CAIQ row shapes. The mini-PRD is at `docs/contribute/mini-prds/procurement-readiness-pack.md`.
+
+**Specific scope:** Three new documents in `docs/procurement/`: `sig-lite.md` (pre-filled SIG Lite responses with `[OPERATOR-CONFIGURABLE]` markers); `caiq.md` (pre-filled CAIQ Lite mapped to CSA Cloud Controls Matrix); `cover-letter.md` (sample procurement-team cover letter explaining why the project is an unusual procurement — self-hosted, no SaaS data residency to verify, source verifiability instead of compliance attestation).
+
+**Acceptance criteria:** A second in-house counsel can take the pack into their procurement team and answer ≥80% of the standard intake questions without writing new prose; `[OPERATOR-CONFIGURABLE]` markers cover only items that genuinely vary across deployments.
+
+#### DE-236 — Acceptance tests for the 10 starter skills
+
+**Priority:** P1 · **Effort:** M (cumulative across skills)
+
+**Context:** Each starter skill has a `test-plan.md`; no harness executes the plans yet. Per `docs/HONEST-STATE.md` §6 and the mini-PRD at `docs/contribute/mini-prds/skill-acceptance-tests.md`. Distinct from DE-231 (which is the regression harness): this is the first contributor-attorney-verified evidence the skills work on real documents.
+
+**Specific scope:** A new directory `skills/<skill>/acceptance/` per skill containing 3–5 anonymized real-document inputs, expected-output golden notes (structural — issue list expected, severity range expected, citation count expected, not exact wording), and a `results.md` summarizing the skill's behavior on each input. Tests run by hand at first (no eval harness yet — see DE-237) but the structured-output format anticipates the harness.
+
+**Acceptance criteria:** Each starter skill has a populated `acceptance/` directory; identified issues from the acceptance pass are filed as GitHub issues; the README links to the acceptance directory as verifiable signal of skill quality.
+
+#### DE-237 — Eval harness with held-out test sets and inter-rater agreement
+
+**Priority:** P1 · **Effort:** L
+
+**Context:** Per §5.8 and `docs/HONEST-STATE.md` §6. The eval harness is itself an open-source artifact reviewers can run and challenge. Supersedes the partial coverage in DE-022 (skill performance and quality measurement) with a structured, multi-judge implementation.
+
+**Specific scope:** Build `tests/eval/` and `docs/quality/eval-methodology.md` such that each built-in skill runs against a held-out corpus with grading rubrics that produce a per-skill quality score. For skills whose evaluation requires legal judgment ("did the redline correctly identify the unusual provision?"), build the grading rubric in a structured form and use multi-judge LLM grading with inter-rater agreement (Cohen's kappa) reported alongside the score.
+
+**Acceptance criteria:** Methodology document published; per-skill quality scores published per release; inter-rater kappa is reported for any subjective rubric; the harness is runnable by any contributor with API access to the documented model matrix.
+
+#### DE-238 — Public skill-quality leaderboard
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** Per §5.8. The leaderboard answers two questions operators care about and competitors cannot: which model should I run this skill with, and is the project's quality improving release over release. Depends on DE-237 (the eval harness).
+
+**Specific scope:** A per-release leaderboard at `docs/quality/leaderboard.md` of built-in skills × inference models × quality score (from DE-237), with historical trend lines. Also a strong recruiting signal for community skill contributors who want their work measured against a clear bar.
+
+**Acceptance criteria:** Leaderboard refreshed per release; historical trend visible; each row links to the underlying eval run and corpus.
+
+#### DE-239 — Prompt-injection detection rates published per skill and per release
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** Per §5.8. Building on DE-110 (Prompt-injection pattern library). Publishing the actual rates is a stronger trust signal than claiming the rates are high.
+
+**Specific scope:** Per-skill detection rates against documented attack corpora (Garak, PyRIT, MITRE ATLAS). The Citation Engine's verification step (§3.3), the structured-output schemas (DE-111), and skill-specific defenses each get a measured detection rate. Published at `docs/quality/prompt-injection-rates.md` and updated per release.
+
+**Acceptance criteria:** Rates measured against the three documented corpora; published per skill and per release; methodology documents which attacks are in scope and which are out of scope.
+
+#### DE-240 — PII leakage testing with measurable rates
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** Per §5.8. The measurable analog of the privacy claim. Depends on the Anonymization Layer being wired (§4.7 at M2).
+
+**Specific scope:** Test the Anonymization Layer against a documented PII corpus: each entity class × each NER backend × each inference tier × each adversarial-extraction technique. Publish a per-release "PII leakage probability" rate per configuration in `docs/quality/pii-leakage-rates.md` with the test methodology.
+
+**Acceptance criteria:** Rates measured for the documented configurations; published per release; the methodology is reproducible by an independent reviewer.
+
+#### DE-241 — Distroless / minimal container base images
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** Distroless images contain only the application runtime and direct dependencies — no shell, no package manager, no commonly-exploited utilities — which materially shrinks the CVE attack surface per image.
+
+**Specific scope:** Migrate the api, gateway, and ingest-worker containers to Google's distroless base images or Chainguard's wolfi-based equivalents. Document the rationale and the rebuild process in `docs/security/container-baseimages.md`.
+
+**Acceptance criteria:** Released images use distroless bases; CVE scan diffs documented before/after; container size reduction recorded.
+
+#### DE-242 — mTLS between internal services
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** For high-assurance deployments where the operator wants to assert "no plaintext traffic anywhere in the deployment," this closes the gap.
+
+**Specific scope:** Configure mTLS for service-to-service traffic in the reference Docker Compose and the Helm chart: api ↔ gateway, api ↔ postgres, api ↔ redis, api ↔ minio. Certificate issuance via cert-manager (Kubernetes) or step-ca (Compose). Documented at `docs/security/internal-mtls.md`.
+
+**Acceptance criteria:** mTLS configurable via a documented flag in `docker-compose.yml` and the Helm chart; reference deployment is tested with mTLS on; the path is documented for operator-side customization.
+
+#### DE-243 — Pod Security Standards (Restricted) profile for the Helm chart
+
+**Priority:** P1 · **Effort:** S
+
+**Context:** The Kubernetes Pod Security Standard Restricted profile is the table-stakes deployment-security posture; shipping it from the first Helm chart release means operators do not have to harden the chart themselves.
+
+**Specific scope:** The Helm chart ships with manifests compliant with the Restricted profile: non-root container users (UID ≥ 10000); read-only root filesystems; dropped capabilities (drop ALL, add only what is required); seccomp profile set to RuntimeDefault; AppArmor profile referenced; resource limits enforced; no host-path mounts; service accounts with minimal RBAC. Depends on DE-030 (Helm chart).
+
+**Acceptance criteria:** Helm chart manifests pass `kubectl --warnings-as-errors` against the Restricted profile; reference deployment runs cleanly under Pod Security admission with `enforce: restricted`.
+
+#### DE-244 — Signed commits enforced on the main branch
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** Configure GitHub branch protection on `main` to require GPG- or Sigstore-signed commits, in addition to the existing DCO sign-off requirement (per §7.5). This is an OpenSSF Best Practices Badge Silver-tier requirement and a procurement signal of supply-chain seriousness.
+
+**Specific scope:** Enable the branch-protection rule; document the contributor onboarding step for setting up commit signing in `CONTRIBUTING.md` and `docs/contribute/signing-commits.md`; include the Sigstore (gitsign) path alongside GPG.
+
+**Acceptance criteria:** Unsigned commits cannot land on `main`; documented onboarding produces a working signing setup for both GPG and Sigstore paths.
+
+#### DE-245 — Published Service Level Objectives and Indicators
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** Per §5.9. Operators of regulated production systems expect a documented SLO catalog and the corresponding SLI calculations. The reference SLOs are starting points; operators tune to their own risk appetite.
+
+**Specific scope:** A new document `docs/operations/slos.md` covering API availability (target 99.9% monthly), p99 latency by capability (per §3), inference-fallback success rate, audit-log durability. For each SLO, document the SLI calculation and the OpenTelemetry metric (per §5.4) that feeds it.
+
+**Acceptance criteria:** SLO catalog published; SLI calculations are reproducible against the OpenTelemetry instrumentation that ships at M1; reference dashboards in Grafana JSON committed to the repository.
+
+#### DE-246 — Error budget policy
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** Per §5.9. Documents how the project handles SLO breaches in releases. Operative for any future LegalQuants-managed-service offering and illustrative for operators who want to adopt the same discipline. Depends on DE-245 (SLO catalog).
+
+**Specific scope:** A documented error budget policy in `docs/operations/error-budget.md`: budget calculation per SLO; what triggers a release freeze on non-critical changes; what recovery looks like.
+
+**Acceptance criteria:** Policy is documented; the freeze-trigger condition is concrete and testable; the policy is referenced from the release procedure runbook.
+
+#### DE-247 — Public postmortems within 14 days
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** Per §5.9. The discipline mature OSS projects and mature SaaS vendors follow. Publishing postmortems is a credibility multiplier. For self-hosted operator deployments, incident response is the operator's responsibility — this commitment is for incidents in any LegalQuants-operated infrastructure.
+
+**Specific scope:** A documented template at `docs/operations/postmortem-template.md` (timeline, root cause, contributing factors, remediation, action items, lessons learned). Publication committed within 14 days of any incident in LegalQuants-operated infrastructure (the project's hosted demo, GitHub-issued artifacts, the managed-service offering once it exists).
+
+**Acceptance criteria:** Template published; commitment recorded in the release procedure runbook; first postmortem (when an incident occurs) is published within 14 days.
+
+#### DE-248 — Disaster recovery test cadence
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** Per §5.9. The DR procedure is operator-runnable for any self-hosted deployment; the quarterly cadence applies to LegalQuants-managed-service operations.
+
+**Specific scope:** A documented DR procedure (backup restore, secret rotation, key rotation, failover to a secondary region) at `docs/operations/disaster-recovery.md`. Quarterly test cadence with published reports for LegalQuants-managed environments.
+
+**Acceptance criteria:** Procedure is operator-runnable; the test cadence is documented; first quarterly test (when LegalQuants-managed infrastructure exists) is published.
+
+#### DE-249 — Runbooks for operational tasks
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** Per §5.9. The operational-maturity signal that lets a procurement security team check the box on "the vendor has documented operational procedures." For an OSS project, the runbooks are the evidence.
+
+**Specific scope:** A `docs/runbooks/` directory with runbooks for: deploying, upgrading, rotating credentials, responding to a security advisory, recovering from a corrupted vector index, migrating to a different inference provider, ingesting a backlog of documents. Each runbook includes estimated time, prerequisites, the exact commands, success-verification steps, and rollback procedure.
+
+**Acceptance criteria:** Each operational task has a runbook; runbooks are tested against the reference deployment; the first runbook (deploying) is referenced from the README quickstart.
+
+#### DE-250 — Performance regression with historical tracking
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** Per §5.8. Catches the class of defects where a refactor functionally works but materially regresses production behavior.
+
+**Specific scope:** Latency benchmarks (p50, p95, p99) for the conversational core, the Citation Engine (once wired), the Inference Gateway routing decision, and skill execution, run per PR via a CI job. Results committed to a benchmark history in `docs/quality/perf-history.md`. Regressions of more than a documented threshold merge-block.
+
+**Acceptance criteria:** Per-PR benchmark job runs in CI; threshold is documented; first merge-block from a regression demonstrates the gate works as designed.
+
+#### DE-251 — Chaos and fault injection for the gateway and document pipeline
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** Per §5.8. Structured fault testing of the gateway's provider-fault behavior and the document pipeline's malformed-document handling.
+
+**Specific scope:** Provider-fault injection harness for the Inference Gateway (provider returns 500, 429, hangs, returns malformed JSON, returns partial response); document-pipeline harness for malformed inputs (truncated PDFs, malformed DOCX, PDFs with embedded JavaScript, unicode-direction-override attacks). Documented at `docs/quality/chaos-testing.md`.
+
+**Acceptance criteria:** Harness runs in CI nightly; fallback behavior is asserted correct under every documented fault; audit log captures faults accurately; cost accounting remains consistent under fallback.
+
+#### DE-252 — Fuzz testing extended to document parsers and anonymization paths
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** Per §5.8. Extends the Cross-Milestone fuzzing commitment beyond the OpenAI-compatibility surface to the document-pipeline parsers and the Anonymization Layer's regex and NER paths.
+
+**Specific scope:** libFuzzer-style harnesses for Docling input, PyMuPDF input, and OCR API response handling. ReDoS and adversarial-tokenization fuzzing for the Anonymization Layer's regex and NER paths (once §4.7 is wired). Documented at `docs/security/fuzz-testing.md`.
+
+**Acceptance criteria:** Nightly fuzz job runs in CI; first crash report (from any fuzzed surface) is triaged and either fixed or documented as out-of-scope; the fuzzing methodology is referenced from the security policy.
+
+#### DE-253 — Consumer-driven contract testing between services
+
+**Priority:** P2 · **Effort:** M
+
+**Context:** Per §5.8. Especially important given the OpenWebUI fork relationship: contract tests ensure that an upstream OpenWebUI change cannot silently break a backend assumption.
+
+**Specific scope:** Pact (or equivalent) contract tests for the boundaries between `web/`, `api/`, `gateway/`, and the Word add-in (M3). Versioned and committed to source; CI catches breaking changes at PR time.
+
+**Acceptance criteria:** Contract tests in place for the three current boundaries; first breaking change caught at PR time demonstrates the gate works as designed; the test surface is documented for contributor pickup.
+
+#### DE-254 — Cypress shared helpers extracted to `support/`
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** Wave 8 cleanup. The Cypress LQ.AI specs (`wave-d1-power-features`, `wave-d2-skill-creator`, `wave-m1-final-surfaces`) currently duplicate setup helpers (login, KB create, skill fork, etc.) inline. As specs accumulate, the duplication accumulates with them; the next spec should be able to import helpers rather than reproduce them.
+
+**Specific scope:** Move shared helpers to `web/cypress/support/lq-ai/` and refactor the three spec files to import. Each helper has a docstring; the support module is the documented surface for future spec authors.
+
+**Acceptance criteria:** No helper logic duplicated across specs; new spec authors import from the support module; CI run time is unchanged or improved.
+
+#### DE-255 — Add `responseTimeout: 90000` to `cypress.config.ts`
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** Wave 8 cleanup. KB-attach interactions and document ingestion can exceed the Cypress default response timeout under realistic conditions; intermittent flakes have surfaced. The fix is a one-line config change with a documented rationale.
+
+**Specific scope:** Set `responseTimeout: 90000` in `web/cypress.config.ts` with an inline comment naming the failure mode (KB ingest under load).
+
+**Acceptance criteria:** Configuration committed; intermittent timeout-related Cypress flakes are eliminated across three consecutive nightly runs.
+
+#### DE-256 — KB attach interceptor added to `wave-m1-final-surfaces.cy.ts` Test 2
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** Wave 8 cleanup. The current spec asserts post-condition state but not the intermediate KB-attach network call, which makes diagnosis of failures slower than it should be. Adding a `cy.intercept` for the attach endpoint surfaces the failure mode immediately.
+
+**Specific scope:** Add `cy.intercept('POST', '/api/v1/knowledge-bases/*/attach').as('kbAttach')` and `cy.wait('@kbAttach')` with an explicit assertion on the response payload in `web/cypress/e2e/wave-m1-final-surfaces.cy.ts` Test 2.
+
+**Acceptance criteria:** The intercept is in place; a deliberately-broken backend produces a clear assertion failure rather than a timeout in three consecutive runs.
+
+#### DE-257 — `/api/v1/audit-health` endpoint for AmbientFooter signal
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** Per the Wave 8 handoff §3. The AmbientFooter in `web/src/lib/lq-ai/components/AmbientFooter.svelte` polls a backend signal to render the "audit log is healthy" indicator; the endpoint currently does not exist and the component falls back to optimistic rendering.
+
+**Specific scope:** New endpoint `GET /api/v1/audit-health` returning a small payload: `{ ok: true, last_write_at, lag_seconds, ring_buffer_depth }`. Wired to the audit-log writer in `api/app/audit.py`. AmbientFooter consumes the payload directly and renders the corresponding state.
+
+**Acceptance criteria:** Endpoint is in the OpenAPI sketch; backed by a unit test; AmbientFooter renders the correct state in both healthy and degraded conditions; documented in `docs/api/backend-openapi.yaml`.
+
+#### DE-258 — KB embedding-progress percentage aggregation
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** Per the Wave 8 handoff §3. The KB document table currently shows per-document status (`pending` / `ready` / `failed`) but does not aggregate to a KB-level progress percentage, which is the surface users want when an ingest batch is in flight.
+
+**Specific scope:** Extend the `GET /api/v1/knowledge-bases/{id}` response with an `embedding_progress: { ready, total, percent }` block computed at query time from the `documents` table. Render in `web/src/routes/lq-ai/knowledge/[id]/+page.svelte`.
+
+**Acceptance criteria:** Percentage renders correctly during a batch ingest; updates on document-state transitions; covered by a unit test in `api/tests/`.
+
+#### DE-259 — KB attached-matters reverse-lookup
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** Per the Wave 8 handoff §3 and `docs/HONEST-STATE.md` §3. Operators ask "which matters use this KB?" — the forward lookup (matter → KBs) exists; the reverse lookup does not.
+
+**Specific scope:** New endpoint `GET /api/v1/knowledge-bases/{id}/attachments` returning the list of matters/projects that have the KB attached. Render in the KB detail page sidebar.
+
+**Acceptance criteria:** Endpoint returns the correct set in the test fixture; documented in OpenAPI; rendered in the KB detail page; covered by a unit test.
+
+#### DE-260 — Receipts assistant-side skill event deduplication
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** Per the Wave 8 handoff §3. The assistant message carries skill events; the receipts drawer occasionally renders duplicate entries when the same skill is invoked twice on the same turn. The dedupe key is `(kind, skill_id, started_at)`.
+
+**Specific scope:** Fix in `web/src/lib/lq-ai/ReceiptsList.svelte` (or the upstream data source). Cover with a unit test exercising the duplicate-input case.
+
+**Acceptance criteria:** Duplicates do not render; existing single-event behavior is unchanged; unit test passes.
+
+#### DE-261 — `api/client.ts` `errorFor` swallows string-shaped FastAPI detail bodies
+
+**Priority:** P1 · **Effort:** S
+
+**Context:** Prior handoff finding (carried forward as Wave 8 root cause). FastAPI error responses can come as `{ "detail": "string" }`, `{ "detail": { ... } }`, or `{ "detail": [ { ... } ] }`. The current `errorFor` helper handles the second and third forms but silently drops the first, producing the unhelpful "Unknown error" surface to users when the most informative shape is in play. This is the leaf cause behind several user-reported "I don't know what went wrong" reports.
+
+**Specific scope:** Fix in `web/src/lib/lq-ai/api/client.ts`: when `detail` is a string, surface it as the error message. Cover all three shapes with a unit test in `web/src/lib/lq-ai/__tests__/`.
+
+**Acceptance criteria:** All three FastAPI detail shapes surface a meaningful message; existing handling of structured detail is unchanged; unit test passes.
+
 ### How to add to this list
 
 When new deferred items are identified during development, ongoing skill authoring, or community feedback:
@@ -2763,7 +3328,11 @@ This appendix addresses common objections an information-security or legal-opera
 
 #### Objection: "Is LQ.AI SOC 2 Type II certified?"
 
-**Response.** SOC 2 Type II is an attestation issued to an operating organization, not to a software product. LQ.AI is software you run; the operator (your organization, or a hosting provider you select) is the entity that would receive a SOC 2 attestation for its operating environment. We provide a SOC 2 alignment document (`docs/compliance/soc2-alignment.md`) that maps each Trust Services Criterion to LQ.AI's design choices and configuration options, identifying which controls are project-provided, operator-provided, or joint. An operator following the alignment document's recommendations and operating the deployment in a SOC 2-compliant environment can pursue SOC 2 Type II certification of *that* environment with significantly reduced documentation effort. Closed-source vendors who claim SOC 2 are certifying their own SaaS environment, which is a different question than whether the software is suitable for your environment.
+**Response.** SOC 2 Type II is an attestation issued to an operating organization, not to a software product. LQ.AI is software you run; the operator (your organization, or a hosting provider you select) is the entity that would receive a SOC 2 attestation for its operating environment. We provide a SOC 2 alignment document (`docs/compliance/soc2-alignment.md`) that maps each Trust Services Criterion to LQ.AI's design choices and configuration options, identifying which controls are project-provided, operator-provided, or joint. An operator following the alignment document's recommendations and operating the deployment in a SOC 2-compliant environment can pursue SOC 2 Type II certification of *that* environment with significantly reduced documentation effort. Closed-source vendors who claim SOC 2 are certifying their own SaaS environment, which is a different question than whether the software is suitable for your environment. The complementary point per §1.8 is that compliance attestation in the absence of source verifiability is a single point of failure: the operator's procurement team is asked to trust an auditor's report it cannot independently verify. LQ.AI ships both layers — the alignment documents that operators use with their procurement teams, and the source that operators (or any third party they hire) use to verify the alignment documents.
+
+#### Objection: "How do we know your compliance alignment documents are not just marketing?"
+
+**Response.** Every claim in every compliance alignment document is verifiable against the source code in this repository. The SOC 2 alignment document cites specific code modules; the OWASP LLM Top 10 mapping (per §9 DE entry) cites specific defenses; the GDPR readiness document cites specific API endpoints; the threat model at `docs/security/threat-model.md` cites trust boundaries that are reified in `api/` and `gateway/`. The operator's security team — or any third party the operator hires — can independently confirm each citation. This is a structurally stronger verification path than the standard closed-source SaaS approach of providing a SOC 2 report and a procurement questionnaire response, because the verification does not terminate in a paid intermediary. We invite verification, first-party (operator security team reads the source) and third-party (operator hires an independent reviewer of their choice). The verification budget is the operator's to set, on a timeline the operator chooses, with a scope the operator defines — none of which is true for closed-source attestation. The `docs/HONEST-STATE.md` document is itself part of this commitment: it names what is shipped, what is deferred, and the verification path for each, so the operator does not have to take any marketing claim on faith.
 
 #### Objection: "Has LQ.AI been pen-tested?"
 
@@ -2824,6 +3393,18 @@ This appendix addresses common objections an information-security or legal-opera
 #### Objection: "Is this under support?"
 
 **Response.** The open-source project is supported by the LegalQuants-led maintainer team and the broader community. Support cadence: minor releases every 6–8 weeks; LTS designation for one minor version per year with security backports for 12 months; coordinated disclosure with response-time commitments. For organizations that require commercial support, LegalQuants offers managed services (hosted deployments, custom skill authoring, training, support) — the software remains open source and self-hostable; the services are paid (§7.1).
+
+#### Objection: "How do we know your tests are actually testing anything meaningful?"
+
+**Response.** Three structural answers. First, the test surfaces are readable in source: 70 backend pytest files, 27 gateway pytest files, 53 Vitest specs, 10 Cypress E2E specs at M1 (per `docs/HONEST-STATE.md` §6). Any reviewer can read them and assess what they exercise. Second, mutation testing (per §5.8 and §9 DE entry — Mutation testing) will publish a per-release mutation score that proves the tests catch real defects, not just that the lines are executed; the score will render as a README badge alongside the OpenSSF Scorecard. Third, property-based tests for the Citation Engine, the Anonymization Layer, and the Inference Gateway router (per §9 DE entry — Property-based testing) will express load-bearing invariants as properties tested across generated inputs, catching the edge cases example-based tests miss. **M1 status:** the unit and integration suites are in place; mutation and property tests are deferred per §9. The honest answer is that today a reviewer evaluates the engineering-rigor claim from the unit and integration suites plus the OpenSSF Scorecard once it ships; the mutation and property surfaces close the gap on the M2–M4 timeline.
+
+#### Objection: "Has anyone independently reviewed this?"
+
+**Response.** Per §1.8 addition and §9 DE entries 227 and 228: the project commits to an annual third-party penetration test with public executive summary and an annual adversarial-AI red-team engagement with published methodology, attack categories, detection rates, and residual risk. The first engagement of each kind is targeted within 90 days of M1 release, funded by LegalQuants as a project investment. The OpenSSF Best Practices Badge (§9 DE entry — OpenSSF Best Practices Badge: Passing → Silver → Gold) requires public attestation of practices that any reviewer can independently challenge. OWASP ASVS Level 2 third-party verification is committed within 12 months of M1 (per the existing DE-118 commitment). Past disclosures and their remediations are published with credit to reporters (per §7.6). Closed-source vendors typically restrict independent review contractually and gate pen-test reports behind NDAs; the LQ.AI posture is the structural inverse: independent review is invited, scheduled, and published. Reports land in `docs/security/releases/`; readers can verify the commitment becomes evidence as the engagements complete.
+
+#### Objection: "What is your reliability story for a production deployment?"
+
+**Response.** Per §5.9: published Service Level Objectives and the corresponding Service Level Indicators for a reference deployment with documented measurement methodology (API availability target 99.9% monthly; p99 latency by capability; inference-fallback success rate; audit-log durability); a documented error budget policy; public postmortems within 14 days for any incidents in LegalQuants-operated infrastructure; quarterly disaster-recovery test cadence with published reports for LegalQuants-managed environments; runbooks in `docs/runbooks/` for every operational task. Performance regression with historical tracking (per §5.8 and §9 DE entry — Performance regression) proves no PR materially regresses production behavior. **M1 status:** the OpenTelemetry instrumentation (§5.4) and the audit log (§5.3) are in place at M1; the SLO catalog, the error budget policy, the runbook directory, and the postmortem template are deferred per §9. The reliability commitments are structural — they describe how the project handles production maturation rather than asserting it has been reached.
 
 #### Objection: "What if LegalQuants disappears?"
 

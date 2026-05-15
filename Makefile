@@ -168,3 +168,29 @@ web-lint:
 	else \
 		echo "web/ not yet imported (Task A1.d)."; \
 	fi
+
+# ----------------------------------------------------------------------
+# Release-readiness (Phase E)
+# ----------------------------------------------------------------------
+
+.PHONY: release-dryrun
+release-dryrun:
+	@echo "Trigger the release workflow on workflow_dispatch with dry_run=true to test locally."
+	@echo "gh workflow run release.yml -f dry_run=true"
+
+.PHONY: helm-lint
+helm-lint:
+	helm lint deploy/helm/lq-ai
+
+.PHONY: helm-template
+helm-template:
+	helm template lq-ai deploy/helm/lq-ai \
+		--values deploy/helm/lq-ai/values-example.yaml
+
+.PHONY: sbom
+sbom:
+	@mkdir -p artifacts/sbom
+	syft scan dir:./api -o spdx-json=artifacts/sbom/api.spdx.json
+	syft scan dir:./gateway -o spdx-json=artifacts/sbom/gateway.spdx.json
+	syft scan dir:./web -o spdx-json=artifacts/sbom/web.spdx.json
+	@echo "SBOMs written to artifacts/sbom/*.spdx.json"

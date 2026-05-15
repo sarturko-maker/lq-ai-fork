@@ -441,9 +441,7 @@ def test_consumes_org_profile_default_true_when_unset() -> None:
 
 @pytest.mark.unit
 def test_consumes_org_profile_false_when_lq_ai_block_opts_out() -> None:
-    skill = _skill_with_yaml(
-        "name: alpha\nlq_ai:\n  use_organization_profile: false\n"
-    )
+    skill = _skill_with_yaml("name: alpha\nlq_ai:\n  use_organization_profile: false\n")
     assert consumes_organization_profile(skill) is False
 
 

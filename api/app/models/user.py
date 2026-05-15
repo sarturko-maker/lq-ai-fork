@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import ARRAY, CITEXT, INET, UUID
@@ -36,9 +37,7 @@ class User(Base):
     # the enum at the storage layer; the existing ``is_admin`` flag stays
     # as a convenience and is kept in sync by app code that changes role
     # (see app.api.admin.update_user_role).
-    role: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'member'")
-    )
+    role: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'member'"))
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     # B2 — first-run admin is created with must_change_password=TRUE; the
     # `/auth/change-password` endpoint flips it back to FALSE once the
@@ -55,8 +54,25 @@ class User(Base):
     # toggle). ``always_show`` makes reasoning visible by default;
     # ``on_request`` hides it until the user opens the skill inspector.
     # The CHECK constraint enforces the enum at the DB layer.
-    reasoning_visibility: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'disclosure'")
+    reasoning_visibility: Mapped[Literal["always_show", "disclosure", "on_request"]] = (
+        mapped_column(String, nullable=False, server_default=text("'disclosure'"))
+    )
+
+    # PRD §3.2.1 + frontend spec §4.3 (Wave B v2) — personalization prefs.
+    # Defaults are the "brave choices": more visible, more orienting; veterans
+    # dial back via the Settings/Appearance page. CHECK constraints enforced
+    # at the DB layer in migration 0019.
+    featured_tools: Mapped[Literal["prominent", "inline"]] = mapped_column(
+        String, nullable=False, server_default=text("'prominent'")
+    )
+    workspace_layout: Mapped[Literal["three_pane", "two_pane", "one_pane"]] = mapped_column(
+        String, nullable=False, server_default=text("'three_pane'")
+    )
+    trust_pills: Mapped[Literal["labels", "dots"]] = mapped_column(
+        String, nullable=False, server_default=text("'labels'")
+    )
+    provenance_pills: Mapped[Literal["always", "collapsed"]] = mapped_column(
+        String, nullable=False, server_default=text("'always'")
     )
 
     created_at: Mapped[datetime] = mapped_column(

@@ -152,6 +152,15 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("DELETE", "/api/v1/projects/{project_id}/files/{file_id}"),
     ("POST", "/api/v1/projects/{project_id}/skills"),
     ("DELETE", "/api/v1/projects/{project_id}/skills/{skill_name}"),
+    # Wave D.1 T3 — matter <-> KB attach/detach
+    ("POST", "/api/v1/projects/{project_id}/knowledge-bases"),
+    ("DELETE", "/api/v1/projects/{project_id}/knowledge-bases/{kb_id}"),
+    # Wave D.1 T4 — admin tier-floor override re-run
+    ("POST", "/api/v1/inference/override-tier-floor"),
+    # Wave D.1 T5 — chat receipts (replay-at-read event log)
+    ("GET", "/api/v1/chats/{chat_id}/receipts"),
+    # Wave D.1 T6 — chat receipts JSONL export
+    ("GET", "/api/v1/chats/{chat_id}/receipts/export.jsonl"),
     # D0 — Model availability (proxy to gateway /v1/models)
     ("GET", "/api/v1/models"),
     # D0.5 — Admin alias CRUD proxy
@@ -203,6 +212,13 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/chats/search"),
     # Wave C — RBAC role updates (PRD §5.2)
     ("PATCH", "/api/v1/admin/users/{user_id}/role"),
+    # Wave B v2 — admin user list for DevRoleManagementCard (PRD §5.2)
+    ("GET", "/api/v1/admin/users"),
+    # Wave D.2 — sandbox ensure, skills autocomplete, user-skill versions, KB files
+    ("POST", "/api/v1/projects/sandbox/ensure"),
+    ("GET", "/api/v1/skills/autocomplete"),
+    ("GET", "/api/v1/user-skills/{skill_id}/versions"),
+    ("GET", "/api/v1/knowledge-bases/{kb_id}/files"),
 }
 
 

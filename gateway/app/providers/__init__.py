@@ -40,6 +40,7 @@ from app.providers.openai_schema import (
     EmbeddingsRequest,
     EmbeddingsResponse,
     EmbeddingsUsage,
+    InlineSkillRef,
 )
 
 __all__ = [
@@ -56,6 +57,7 @@ __all__ = [
     "EmbeddingsRequest",
     "EmbeddingsResponse",
     "EmbeddingsUsage",
+    "InlineSkillRef",
     "OllamaAdapter",
     "OpenAIAdapter",
     "ProviderAdapter",

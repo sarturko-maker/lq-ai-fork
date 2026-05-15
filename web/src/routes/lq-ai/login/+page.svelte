@@ -40,7 +40,7 @@
 >
 	<main class="flex-1 flex items-center justify-center">
 		<form
-			class="max-w-sm w-full p-6 rounded-lg shadow border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 space-y-3"
+			class="lq-form-card max-w-sm w-full space-y-3"
 			on:submit|preventDefault={submit}
 		>
 			<div class="flex items-center gap-2">
@@ -50,13 +50,13 @@
 					LQ
 				</span>
 				<div>
-					<h1 class="text-lg font-semibold">Sign in to LQ.AI</h1>
-					<p class="text-xs text-gray-500">Open-source legal AI for in-house teams.</p>
+					<h1 class="lq-text-page-h">Sign in to LQ.AI</h1>
+					<p class="lq-text-caption" style="color: var(--lq-text-tertiary);">Open-source legal AI for in-house teams.</p>
 				</div>
 			</div>
 
 			<label class="block">
-				<span class="text-sm">Email</span>
+				<span class="lq-text-label">Email</span>
 				<input
 					type="email"
 					autocomplete="username"
@@ -68,7 +68,7 @@
 			</label>
 
 			<label class="block">
-				<span class="text-sm">Password</span>
+				<span class="lq-text-label">Password</span>
 				<input
 					type="password"
 					autocomplete="current-password"
@@ -90,14 +90,14 @@
 
 			<button
 				type="submit"
-				class="w-full px-3 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
+				class="lq-btn-primary w-full"
 				disabled={busy}
 				data-testid="lq-ai-login-submit"
 			>
 				{busy ? 'Signing in…' : 'Sign in'}
 			</button>
 
-			<p class="text-xs text-gray-500 text-center">
+			<p class="lq-text-caption text-center" style="color: var(--lq-text-tertiary);">
 				First-run? Check the API logs for the auto-generated admin password (per Quickstart Step
 				2).
 			</p>
@@ -105,3 +105,30 @@
 	</main>
 	<DualBrandingFooter />
 </div>
+
+<style>
+	.lq-form-card {
+		padding: var(--lq-space-6);
+		border-radius: var(--lq-radius-lg);
+		border: 1px solid var(--lq-border);
+		background: var(--lq-canvas);
+		box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+	}
+
+	.lq-btn-primary {
+		background: var(--lq-accent);
+		color: white;
+		border: 0;
+		border-radius: var(--lq-radius);
+		padding: 8px 16px;
+		font-size: 14px;
+		font-weight: 500;
+		cursor: pointer;
+		display: block;
+	}
+
+	.lq-btn-primary:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+</style>

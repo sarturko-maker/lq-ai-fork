@@ -51,9 +51,7 @@ def upgrade() -> None:
         ),
     )
     # Backfill from is_admin so existing rows map cleanly.
-    op.execute(
-        "UPDATE users SET role = CASE WHEN is_admin THEN 'admin' ELSE 'member' END"
-    )
+    op.execute("UPDATE users SET role = CASE WHEN is_admin THEN 'admin' ELSE 'member' END")
     op.create_check_constraint(
         "chk_users_role_enum",
         "users",
@@ -151,9 +149,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("idx_work_product_chat", table_name="work_product_attribution")
-    op.drop_index(
-        "idx_work_product_user_timestamp", table_name="work_product_attribution"
-    )
+    op.drop_index("idx_work_product_user_timestamp", table_name="work_product_attribution")
     op.drop_table("work_product_attribution")
     op.drop_constraint("chk_users_role_enum", "users", type_="check")
     op.drop_column("users", "role")

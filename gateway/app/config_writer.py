@@ -38,6 +38,7 @@ limitation. Single-replica deployments (the M1 default) are unaffected.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import tempfile
@@ -98,18 +99,18 @@ def _atomic_write_yaml(config_path: Path, data: dict[str, Any]) -> None:
 
     target_dir = config_path.parent
     target_dir.mkdir(parents=True, exist_ok=True)
-    # ``delete=False`` so we can rename it ourselves; the explicit
-    # cleanup-on-failure block below ensures we never leak temp files.
-    tmp = tempfile.NamedTemporaryFile(
+    # ``delete=False`` so the file persists after the `with` block — we
+    # rename it onto config_path ourselves below, and the suppress-on-
+    # failure block handles cleanup so we never leak temp files.
+    with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
         suffix=".tmp",
         prefix=f".{config_path.name}.",
         dir=str(target_dir),
         delete=False,
-    )
-    tmp_path = Path(tmp.name)
-    try:
+    ) as tmp:
+        tmp_path = Path(tmp.name)
         # ``sort_keys=False`` preserves the operator's section ordering
         # (providers → model_aliases → inference_tiers → ...) so a diff
         # against the prior file is small and reviewable.
@@ -122,18 +123,14 @@ def _atomic_write_yaml(config_path: Path, data: dict[str, Any]) -> None:
         )
         tmp.flush()
         os.fsync(tmp.fileno())
-    finally:
-        tmp.close()
 
     try:
         os.replace(tmp_path, config_path)
     except OSError:
         # Replace failed — clean up the orphaned temp file before
         # surfacing the error.
-        try:
+        with contextlib.suppress(OSError):  # pragma: no cover - cleanup best-effort
             tmp_path.unlink()
-        except OSError:  # pragma: no cover - cleanup best-effort
-            pass
         raise
 
 

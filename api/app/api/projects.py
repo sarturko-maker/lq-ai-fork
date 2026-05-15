@@ -22,6 +22,12 @@ Surface (per ``docs/api/backend-openapi.yaml``):
   by name; validates the skill exists in the in-memory registry.
 * ``DELETE /api/v1/projects/{project_id}/skills/{skill_name}`` — detach.
 
+* ``POST   /api/v1/projects/{project_id}/knowledge-bases`` — attach a KB
+  by id (body: ``{knowledge_base_id}``). Idempotent — re-attaching is a
+  no-op 200. Owner-only on both project and KB.
+* ``DELETE /api/v1/projects/{project_id}/knowledge-bases/{kb_id}`` — detach.
+  Idempotent — detaching a non-attached KB returns 204.
+
 All endpoints inherit the auth+gate from the router-level
 ``Depends(get_active_user)`` in ``app.api.__init__`` (B2 pattern). Each
 handler also takes ``ActiveUser`` directly so the user object is
@@ -44,20 +50,26 @@ handler validates the merged state; (3) the DB CHECK constraint
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text as sql_text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import ColumnElement
 
 from app.api.dependencies import ActiveUser
+from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import Conflict, NotFound, ValidationError
 from app.models.file import File as FileModel
+from app.models.knowledge import KnowledgeBase
 from app.models.project import Project, ProjectFile, ProjectSkill
+from app.models.project_knowledge_base import ProjectKnowledgeBase
 from app.schemas.projects import (
     SLUG_RE,
     ProjectCreateRequest,
@@ -69,6 +81,13 @@ from app.skills.registry import MutableSkillRegistry
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 log = logging.getLogger(__name__)
+
+# Wave D.2 Task 2.1 — slugs matching ``^__[a-z0-9-]+__$`` are reserved for
+# system-managed matters (sandbox today; potentially other internal scopes
+# later). User-supplied slugs in this family are rejected with 422 in the
+# create handler. The sandbox-ensure endpoint (Task 2.2) constructs its
+# slug internally and bypasses this check.
+_RESERVED_SLUG_RE: re.Pattern[str] = re.compile(r"^__[a-z0-9-]+__$")
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +105,12 @@ class AttachSkillRequest(BaseModel):
     """``POST /api/v1/projects/{id}/skills`` body."""
 
     skill_name: str = Field(min_length=1, max_length=200)
+
+
+class AttachKnowledgeBaseRequest(BaseModel):
+    """``POST /api/v1/projects/{id}/knowledge-bases`` body."""
+
+    knowledge_base_id: uuid.UUID
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +212,18 @@ async def _load_attached_skill_names(db: AsyncSession, project_id: uuid.UUID) ->
     return list(result.scalars().all())
 
 
+async def _load_attached_kb_ids(db: AsyncSession, project_id: uuid.UUID) -> list[uuid.UUID]:
+    """Return knowledge-base ids attached to a project, ordered by ``attached_at``."""
+
+    stmt = (
+        select(ProjectKnowledgeBase.knowledge_base_id)
+        .where(ProjectKnowledgeBase.project_id == project_id)
+        .order_by(ProjectKnowledgeBase.attached_at)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def _serialize_project(db: AsyncSession, project: Project) -> ProjectResponse:
     """Build the ``ProjectResponse`` shape for a row.
 
@@ -198,6 +235,7 @@ async def _serialize_project(db: AsyncSession, project: Project) -> ProjectRespo
 
     file_ids = await _load_attached_file_ids(db, project.id)
     skill_names = await _load_attached_skill_names(db, project.id)
+    kb_ids = await _load_attached_kb_ids(db, project.id)
     return ProjectResponse(
         id=project.id,
         owner_id=project.owner_id,
@@ -207,8 +245,10 @@ async def _serialize_project(db: AsyncSession, project: Project) -> ProjectRespo
         context_md=project.context_md,
         privileged=project.privileged,
         minimum_inference_tier=project.minimum_inference_tier,
+        is_sandbox=project.is_sandbox,
         attached_file_ids=file_ids,
         attached_skill_names=skill_names,
+        attached_knowledge_base_ids=kb_ids,
         archived_at=project.archived_at,
         created_at=project.created_at,
         updated_at=project.updated_at,
@@ -248,6 +288,29 @@ async def _resolve_unique_slug(
         head = desired[: SLUG_MAX_LEN - len(suffix_str)]
         candidate = f"{head}{suffix_str}"
         suffix += 1
+
+
+def _check_slug_not_reserved(slug: str) -> None:
+    """Reject slugs matching the reserved ``__*__`` family with 422.
+
+    Wave D.2 Task 2.1. The reservation is enforced on user-driven create
+    paths only — system-managed scopes (e.g., the per-user try-it sandbox
+    created by ``POST /projects/sandbox/ensure``) construct their slug
+    internally and don't call this helper.
+
+    Raises a plain :class:`fastapi.HTTPException` rather than an
+    :class:`app.errors.LQAIError` subclass so the response body renders
+    as the conventional ``{"detail": "<message>"}`` string shape that the
+    Wave D.2 frontend wizard expects when surfacing the error inline.
+    """
+
+    if _RESERVED_SLUG_RE.match(slug):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Slug pattern '__*__' is reserved for system-managed matters; '{slug}' rejected."
+            ),
+        )
 
 
 def _registry(request: Request) -> MutableSkillRegistry:
@@ -292,6 +355,11 @@ async def create_project(
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProjectResponse:
+    # Wave D.2 Task 2.1 — reject the reserved ``__*__`` slug family before
+    # we generate or resolve a slug. Only user-supplied slugs can land in
+    # the reserved family; ``slugify`` itself never emits underscores.
+    if payload.slug is not None:
+        _check_slug_not_reserved(payload.slug)
     desired_slug = payload.slug or slugify(payload.name)
     final_slug = await _resolve_unique_slug(db, owner_id=user.id, desired=desired_slug)
 
@@ -341,7 +409,11 @@ async def create_project(
     description=(
         "Returns the caller's active projects by default. "
         "``archived=true`` returns archived projects only; "
-        "``archived=false`` is equivalent to omitting the parameter."
+        "``archived=false`` is equivalent to omitting the parameter. "
+        "Sandbox matters (``is_sandbox=true``) are excluded by default; "
+        "pass ``include_sandbox=true`` to surface them alongside regular "
+        "matters, or ``only_sandbox=true`` to return only sandboxes "
+        "(Wave D.2 Task 2.3)."
     ),
     response_model=list[ProjectResponse],
 )
@@ -352,14 +424,30 @@ async def list_projects(
         default=None,
         description="When true, return only archived projects.",
     ),
+    include_sandbox: Annotated[
+        bool,
+        Query(description="Include sandbox matters in results."),
+    ] = False,
+    only_sandbox: Annotated[
+        bool,
+        Query(description="Return only sandbox matters."),
+    ] = False,
 ) -> list[ProjectResponse]:
-    stmt = select(Project).where(Project.owner_id == user.id)
+    conditions: list[ColumnElement[bool]] = [Project.owner_id == user.id]
     if archived is True:
-        stmt = stmt.where(Project.archived_at.is_not(None))
+        conditions.append(Project.archived_at.is_not(None))
     else:
         # Default and ``archived=false`` both exclude archived rows.
-        stmt = stmt.where(Project.archived_at.is_(None))
-    stmt = stmt.order_by(Project.created_at.desc())
+        conditions.append(Project.archived_at.is_(None))
+
+    # Wave D.2 Task 2.3 — sandbox filter. ``only_sandbox`` wins over
+    # ``include_sandbox`` if both are passed (the more specific request).
+    if only_sandbox:
+        conditions.append(Project.is_sandbox.is_(True))
+    elif not include_sandbox:
+        conditions.append(Project.is_sandbox.is_(False))
+
+    stmt = select(Project).where(*conditions).order_by(Project.created_at.desc())
 
     result = await db.execute(stmt)
     rows = list(result.scalars().all())
@@ -527,6 +615,108 @@ async def delete_project(
     )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Sandbox endpoint (Wave D.2 Task 2.2)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/sandbox/ensure",
+    response_model=ProjectResponse,
+    summary="Find or create the caller's try-it sandbox matter (Wave D.2)",
+    description=(
+        "Idempotent find-or-create for the per-user *try-it sandbox* "
+        "project. The sandbox is a system-managed matter (slug "
+        "``__sandbox__``) used to scope skill try-it conversations that "
+        "should not count toward billable matter activity. First call "
+        "returns 201 with a fresh row; subsequent calls return 200 with "
+        "the same row. After the sandbox is soft-deleted via the normal "
+        "DELETE endpoint, the next ensure call recreates it. Concurrent "
+        "callers see the same row — the per-owner-active partial unique "
+        "index on ``slug`` plus ``ON CONFLICT DO NOTHING`` make this "
+        "race-free."
+    ),
+)
+async def ensure_sandbox(
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    response: Response,
+) -> ProjectResponse:
+    """Idempotent find-or-create of the per-user sandbox project."""
+
+    # Fast path: look up an existing non-archived sandbox first. The
+    # vast majority of calls hit this branch (the row is created once
+    # per user and reused indefinitely).
+    existing = await db.scalar(
+        select(Project).where(
+            Project.owner_id == user.id,
+            Project.is_sandbox.is_(True),
+            Project.archived_at.is_(None),
+        )
+    )
+    if existing is not None:
+        response.status_code = status.HTTP_200_OK
+        return await _serialize_project(db, existing)
+
+    # Insert with ON CONFLICT DO NOTHING in case of concurrent ensures.
+    # The unique partial index ``idx_projects_slug_owner_active`` on
+    # ``(owner_id, slug) WHERE archived_at IS NULL`` (migration 0004)
+    # is the arbiter — when two concurrent callers both reach this
+    # INSERT, the second one's row is dropped and ``row`` comes back
+    # ``None`` so we re-read the winner.
+    stmt = (
+        pg_insert(Project)
+        .values(
+            owner_id=user.id,
+            name="Try-it sandbox",
+            slug="__sandbox__",
+            description=(
+                "Auto-created sandbox for skill try-it. Conversations here are non-billable."
+            ),
+            privileged=False,
+            minimum_inference_tier=None,
+            is_sandbox=True,
+        )
+        .on_conflict_do_nothing(
+            index_elements=["owner_id", "slug"],
+            index_where=sql_text("archived_at IS NULL"),
+        )
+        .returning(Project)
+    )
+    row = await db.scalar(stmt)
+
+    if row is None:
+        # Another concurrent caller won the race; re-read the winner.
+        row = await db.scalar(
+            select(Project).where(
+                Project.owner_id == user.id,
+                Project.is_sandbox.is_(True),
+                Project.archived_at.is_(None),
+            )
+        )
+        await db.commit()
+        response.status_code = status.HTTP_200_OK
+    else:
+        await db.commit()
+        response.status_code = status.HTTP_201_CREATED
+
+    # Invariant: post-insert (or post-race re-read) there's always a row.
+    # If this assertion ever fires it means the unique-index covering
+    # ``(owner_id, slug) WHERE archived_at IS NULL`` is missing/wrong.
+    assert row is not None
+    await db.refresh(row)
+    log.info(
+        "sandbox ensured",
+        extra={
+            "event": "project_sandbox_ensured",
+            "user_id": str(user.id),
+            "project_id": str(row.id),
+            "created": response.status_code == status.HTTP_201_CREATED,
+        },
+    )
+    return await _serialize_project(db, row)
 
 
 # ---------------------------------------------------------------------------
@@ -767,13 +957,201 @@ async def detach_skill(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+# ---------------------------------------------------------------------------
+# Attachment endpoints — knowledge bases (Wave D.1 T3)
+# ---------------------------------------------------------------------------
+
+
+async def _load_visible_kb(
+    db: AsyncSession,
+    kb_id: uuid.UUID,
+    owner_id: uuid.UUID,
+) -> KnowledgeBase:
+    """Load a KB row scoped to the caller; 404 on miss / cross-user / archived.
+
+    Same posture as ``_load_visible_file``: cross-user collapses to 404 to
+    avoid leaking existence. Archived KBs are invisible.
+    """
+
+    stmt = select(KnowledgeBase).where(
+        KnowledgeBase.id == kb_id,
+        KnowledgeBase.owner_id == owner_id,
+        KnowledgeBase.archived_at.is_(None),
+    )
+    result = await db.execute(stmt)
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise NotFound(
+            f"Knowledge base {kb_id} not found.",
+            details={"knowledge_base_id": str(kb_id)},
+        )
+    return row
+
+
+@router.post(
+    "/{project_id}/knowledge-bases",
+    response_model=ProjectResponse,
+    summary="Attach a knowledge base to a matter",
+    description=(
+        "Body: ``{knowledge_base_id}``. The caller must own both the "
+        "project and the KB (cross-user → 404 on either side). "
+        "Idempotent — re-attaching an already-attached KB returns 200 "
+        "with the current project state. Audit action: "
+        "``project.knowledge_base_attached``."
+    ),
+)
+async def attach_knowledge_base(
+    project_id: str,
+    payload: AttachKnowledgeBaseRequest,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> ProjectResponse:
+    pid = _validate_project_id(project_id)
+    project = await _load_visible_project(db, pid, user.id)
+    kb = await _load_visible_kb(db, payload.knowledge_base_id, user.id)
+
+    # Capture as plain UUIDs before any write — see ``attach_file`` for
+    # the post-rollback ORM lazy-load rationale.
+    project_uuid = project.id
+    kb_uuid = kb.id
+
+    existing_stmt = select(ProjectKnowledgeBase).where(
+        ProjectKnowledgeBase.project_id == project_uuid,
+        ProjectKnowledgeBase.knowledge_base_id == kb_uuid,
+    )
+    existing = (await db.execute(existing_stmt)).scalar_one_or_none()
+
+    if existing is None:
+        join = ProjectKnowledgeBase(
+            project_id=project_uuid,
+            knowledge_base_id=kb_uuid,
+            attached_by_user_id=user.id,
+        )
+        db.add(join)
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            await db.rollback()
+            # Race: another request created the same join between the
+            # SELECT and INSERT. Idempotency means we treat this as
+            # success — re-fetch and fall through.
+            existing_stmt = select(ProjectKnowledgeBase).where(
+                ProjectKnowledgeBase.project_id == project_uuid,
+                ProjectKnowledgeBase.knowledge_base_id == kb_uuid,
+            )
+            if (await db.execute(existing_stmt)).scalar_one_or_none() is None:
+                raise Conflict(
+                    "Failed to attach knowledge base.",
+                    details={
+                        "project_id": str(project_uuid),
+                        "knowledge_base_id": str(kb_uuid),
+                    },
+                ) from exc
+
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="project.knowledge_base_attached",
+            resource_type="project",
+            resource_id=str(project_uuid),
+            project=project,
+            request=request,
+            details={"knowledge_base_id": str(kb_uuid)},
+        )
+        await db.commit()
+
+        log.info(
+            "project kb attached",
+            extra={
+                "event": "project_kb_attached",
+                "user_id": str(user.id),
+                "project_id": str(project_uuid),
+                "knowledge_base_id": str(kb_uuid),
+            },
+        )
+
+    return await _serialize_project(db, project)
+
+
+@router.delete(
+    "/{project_id}/knowledge-bases/{kb_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Detach a knowledge base from a matter",
+    description=(
+        "Idempotent — detaching a KB that is not attached returns 204. "
+        "The KB row itself is untouched (use "
+        "``DELETE /api/v1/knowledge-bases/{id}`` for the KB). "
+        "Audit action: ``project.knowledge_base_detached`` (only "
+        "written when a join row is actually removed)."
+    ),
+    response_class=Response,
+)
+async def detach_knowledge_base(
+    project_id: str,
+    kb_id: str,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> Response:
+    pid = _validate_project_id(project_id)
+    try:
+        kid = uuid.UUID(kb_id)
+    except ValueError as exc:
+        raise ValidationError(
+            "kb_id must be a UUID",
+            details={"kb_id": kb_id},
+        ) from exc
+
+    # Verify the project is visible to the caller before peeking at the
+    # join — otherwise cross-user could distinguish "kb exists but not
+    # attached" from "project exists but not yours."
+    project = await _load_visible_project(db, pid, user.id)
+
+    stmt = select(ProjectKnowledgeBase).where(
+        ProjectKnowledgeBase.project_id == pid,
+        ProjectKnowledgeBase.knowledge_base_id == kid,
+    )
+    result = await db.execute(stmt)
+    join = result.scalar_one_or_none()
+
+    if join is not None:
+        await db.delete(join)
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="project.knowledge_base_detached",
+            resource_type="project",
+            resource_id=str(pid),
+            project=project,
+            request=request,
+            details={"knowledge_base_id": str(kid)},
+        )
+        await db.commit()
+
+        log.info(
+            "project kb detached",
+            extra={
+                "event": "project_kb_detached",
+                "user_id": str(user.id),
+                "project_id": str(pid),
+                "knowledge_base_id": str(kid),
+            },
+        )
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 __all__ = [
     "attach_file",
+    "attach_knowledge_base",
     "attach_skill",
     "create_project",
     "delete_project",
     "detach_file",
+    "detach_knowledge_base",
     "detach_skill",
+    "ensure_sandbox",
     "get_project",
     "list_projects",
     "router",

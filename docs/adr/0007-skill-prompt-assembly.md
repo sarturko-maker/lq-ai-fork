@@ -98,3 +98,49 @@ We deliberately avoid Redis here. The gateway already touches Redis via the `api
 - **Long-running skill execution.** The current shape is request-scoped: skill content is fetched, prompt is assembled, request is dispatched, response returns. Future capability for skills to run multi-turn (e.g., a skill that fetches additional reference material based on the model's first turn) is out of scope for C2 and would warrant its own ADR.
 - **Skill versioning at request time.** Skills carry a free-form `version` field (`"1.0.1"`). C2 attaches whatever version is currently in the registry. Pinning a request to a specific version is a future enhancement (filed as a candidate DE-XXX in PRD §9 if/when it surfaces).
 - **Skill-output post-processing.** The skill `output_format` field is informational; the gateway does not enforce a particular output shape. Post-processing the model's response per the declared format is a future skill-execution-engine concern.
+
+---
+
+## Amendment — 2026-05-14: Dual-Invocation Model (Wave D.2)
+
+**Status:** Accepted addendum.
+**Decision-maker:** Kevin Keller.
+**Implementing commits:** Wave D.2 Tasks 3–6 (slash-command popover, capture-as-skill modal, audit-log versions endpoint, SkillWizard).
+
+### Context
+
+ADR 0007 was written for the C2 gateway path: a single, server-side invocation of a skill by name embedded in a `lq_ai_skills` request body field. Wave D.2 shipped two additional, user-facing invocation paths that ride the same skill-provenance model but expose it through different UI surfaces.
+
+### New invocation paths
+
+**Path A — Slash command (`/skill-alias` in the composer).**
+
+The user types `/` followed by a skill's `slash_alias` in the chat composer. `ChatPanel.svelte` detects the leading slash, opens the `SlashPopover` (skill typeahead), and — on selection — calls `GET /api/v1/skills/autocomplete` to narrow the results. On pick, the selected skill is attached to the outgoing `POST /api/v1/chats/{id}/messages` body as:
+
+```json
+{ "attached_skills": [{ "slug": "<slug>", "source": "slash" }] }
+```
+
+The gateway receives this and routes the request through the C2 prompt-assembly pipeline. The `source: "slash"` tag flows through the backend receipt event log so the Receipts drawer can surface "Skill applied: … (via slash command)" for transparency (PRD §1.3).
+
+**Path B — Capture-as-skill modal.**
+
+After an AI message arrives, the user clicks the inline 📝 button (or the overflow menu "Capture as skill" item). The `CaptureSkillModal` pre-populates name/slug/description from the message content and offers two sub-paths:
+
+- **Save** — calls `POST /api/v1/user-skills` with `source_message_id` set to the source message's id. The `source_message_id` value is documentary (it rides the `user_skill.created` audit-log row; there is no `source_message_id` column on `user_skills`). This preserves forensic lineage: any skill created from a chat can be traced back to the specific message that inspired it.
+- **Edit in wizard** — stashes a `CaptureStash` JSON snapshot in `localStorage` under `lq-ai:capture-stash:<uuid>` (key format owned by `stashStorageKey()` in `CaptureSkillModal.svelte`) then navigates to `/lq-ai/skills/new?capture=<uuid>`. The `/skills/new` page reads the stash on mount and seeds the `SkillWizard` with it.
+
+### How skill provenance flows through both paths
+
+The provenance record for a skill invocation or creation consists of three elements:
+
+1. **The skill row itself** — `user_skills` table, with `forked_from` (source built-in slug) and `slash_alias` (invocation handle). Both are write-once at create time; subsequent edits cannot overwrite them.
+2. **The audit-log row** — `audit_log` table, `resource_type = 'user_skill'`. Every state change (created / updated / deleted) writes an audit row. The `details` JSONB column on `user_skill.created` rows carries `forked_from`, `slash_alias`, and `source_message_id` when those fields were set at creation.
+3. **The receipt event** — for slash-invoked skills, the receipt event log (per PRD §1.7) records `kind = 'skill'` with `source = 'slash'`. This lets users answer "which skill was used, and how was it invoked?" for any historical chat turn without reading raw DB records.
+
+### What this amendment does not change
+
+- The C2 gateway-side assembly pipeline is unchanged. Both new UI paths ultimately produce the same `attached_skills` list in the message POST body that the gateway already processes.
+- The `{{var}}` templating mechanism (ADR 0007 §2) is unchanged.
+- The cache TTL (ADR 0007 §4) is unchanged.
+- Skill versioning at request time remains a future enhancement (the `version` field is still documentary-only at invocation).

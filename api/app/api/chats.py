@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import json as _json
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -66,12 +67,18 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ActiveUser
+from app.api.skills import _resolve_skill_for_user
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
 from app.errors import LQAIError, NotFound, ValidationError
+from app.knowledge.embed import DEFAULT_EMBEDDING_MODEL, request_embedding_vector
+from app.knowledge.retrieval import HybridSearchResult, hybrid_search
 from app.models.chat import Chat, Message
+from app.models.inference import InferenceRoutingLog
+from app.models.knowledge import KnowledgeBase
 from app.models.project import Project
+from app.models.project_knowledge_base import ProjectKnowledgeBase
 from app.models.user import User
 from app.schemas.chats import (
     LIST_LIMIT_DEFAULT,
@@ -93,10 +100,65 @@ from app.schemas.chats import (
 from app.schemas.gateway import (
     ChatCompletionMessage,
     ChatCompletionRequest,
+    InlineSkillRef,
 )
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 log = logging.getLogger(__name__)
+
+
+# Wave D.2 Task 2.7 — send-time slash fallback. If the user's content
+# starts with ``/<token>`` and the frontend didn't pre-resolve it, the
+# backend retries against the merged catalogue. Token grammar matches
+# the autocomplete + ``user_skills.slash_alias`` shape: lowercase
+# alphanumerics or hyphens, 1-64 chars (slugs can be slightly longer
+# than aliases — the check that follows is by-value, not by-length, so
+# being a touch permissive here is fine), followed by whitespace.
+_LEADING_SLASH_RE = re.compile(r"^/([a-z0-9-]{1,64})\s")
+
+
+async def _maybe_resolve_leading_slash(
+    request: Request, db: AsyncSession, user: User, content: str
+) -> tuple[str | None, str, bool]:
+    """If ``content`` starts with ``/slug ``, try to resolve it to a skill.
+
+    Returns a 3-tuple ``(resolved_slug, content, slash_unresolved)``:
+
+    * ``resolved_slug`` — the canonical skill slug if resolution
+      succeeded, else ``None``.
+    * ``content`` — the original content with the leading ``/slug ``
+      token stripped *only when resolution succeeded*; otherwise
+      unchanged (the user's typo is forwarded verbatim so they still
+      get a real LLM answer).
+    * ``slash_unresolved`` — ``True`` when the regex matched but no row
+      resolved (either slug or slash_alias). The handler uses this to
+      flip the matching flag on the response body so the UI can hint.
+
+    The function is no-op when ``content`` doesn't start with
+    ``/<token><whitespace>`` — returns ``(None, content, False)``.
+    """
+
+    m = _LEADING_SLASH_RE.match(content)
+    if not m:
+        return None, content, False
+
+    token = m.group(1)
+    # Try slug match first (built-ins and user-shadows), then alias
+    # match against ``slash_alias`` (user/team rows only — built-ins
+    # don't carry an alias column per ADR 0012 / Wave D.2 Task 2.4).
+    resolved = await _resolve_skill_for_user(request, db, user=user, slug=token)
+    if resolved is None:
+        resolved = await _resolve_skill_for_user(request, db, user=user, slash_alias="/" + token)
+
+    if resolved is None:
+        return None, content, True
+    slug_value = resolved.get("slug")
+    if not isinstance(slug_value, str):
+        # Defensive: the merged-catalogue dict always carries ``slug``,
+        # but if it ever doesn't, treat as unresolved rather than
+        # crashing the send path.
+        return None, content, True
+    return slug_value, content[m.end() :], False
 
 
 # ---------------------------------------------------------------------------
@@ -313,9 +375,7 @@ async def search_chats(
             Chat.title.label("title"),
             Chat.title.label("snippet"),
             literal("title").label("match_source"),
-            func.ts_rank_cd(
-                sa_text("chats.title_tsv"), tsquery
-            ).label("rank"),
+            func.ts_rank_cd(sa_text("chats.title_tsv"), tsquery).label("rank"),
             Chat.created_at.label("created_at"),
             Chat.updated_at.label("updated_at"),
         )
@@ -341,9 +401,7 @@ async def search_chats(
                 "MaxFragments=2, MinWords=5, MaxWords=20",
             ).label("snippet"),
             literal("message").label("match_source"),
-            func.ts_rank_cd(
-                sa_text("messages.content_tsv"), tsquery
-            ).label("rank"),
+            func.ts_rank_cd(sa_text("messages.content_tsv"), tsquery).label("rank"),
             Chat.created_at.label("created_at"),
             Chat.updated_at.label("updated_at"),
         )
@@ -357,9 +415,7 @@ async def search_chats(
     )
 
     union = title_subq.union_all(message_subq).subquery()
-    stmt = (
-        select(union).order_by(union.c.rank.desc(), union.c.created_at.desc()).limit(limit)
-    )
+    stmt = select(union).order_by(union.c.rank.desc(), union.c.created_at.desc()).limit(limit)
 
     result = await db.execute(stmt)
     rows = result.mappings().all()
@@ -605,6 +661,178 @@ async def list_messages(
 
 
 # ---------------------------------------------------------------------------
+# Wave D.1 T7b: RAG step for the chat-send path
+# ---------------------------------------------------------------------------
+
+
+# Number of chunks retrieved per attached KB. Conservative default —
+# the model sees k chunks per KB summed across attachments. T7b does
+# not surface this in the request payload; a future task may expose
+# it on MessageCreateRequest if Kevin wants per-call tuning.
+RAG_TOP_K_PER_KB: int = 5
+
+# Maximum total chunks injected into the gateway request. Bounds the
+# context-prepend size when many KBs are attached.
+RAG_MAX_TOTAL_CHUNKS: int = 10
+
+
+async def _load_attached_kb_ids_for_chat(
+    db: AsyncSession, project_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Return the KB ids attached to the chat's project via the T2 junction.
+
+    Mirrors :func:`app.api.projects._load_attached_kb_ids`. Inlined here
+    rather than imported to keep the chat surface free of a reverse
+    dependency on the projects router module — both helpers are
+    one-statement SELECTs against the junction table.
+    """
+
+    stmt = (
+        select(ProjectKnowledgeBase.knowledge_base_id)
+        .where(ProjectKnowledgeBase.project_id == project_id)
+        .order_by(ProjectKnowledgeBase.attached_at)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def _retrieve_kb_context_for_chat(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    query: str,
+    gateway: GatewayClient,
+    request_id: str | None,
+) -> tuple[list[HybridSearchResult], list[uuid.UUID]]:
+    """Run hybrid search across every KB attached to the chat's project.
+
+    Returns a 2-tuple ``(chunks, kb_ids_searched)`` where ``chunks`` is
+    the merged-then-truncated list of :class:`HybridSearchResult`
+    ordered by descending ``hybrid_score`` (capped at
+    :data:`RAG_MAX_TOTAL_CHUNKS`) and ``kb_ids_searched`` is the list of
+    KB ids we actually queried (empty if the chat has no project or the
+    project has no KBs attached).
+
+    The embedding for ``query`` is computed once and reused across every
+    KB call — embed-on-read is the same shape as ``query_kb``. If the
+    embed fetch fails we downgrade to FTS-only retrieval per KB (the
+    same fallback ``query_kb`` uses).
+
+    The audit-row write is the caller's responsibility — this helper
+    only does retrieval. Empty-result handling is the caller's too
+    (T7 contract: no audit row when results are empty).
+    """
+
+    if chat.project_id is None:
+        return [], []
+
+    kb_ids = await _load_attached_kb_ids_for_chat(db, chat.project_id)
+    if not kb_ids:
+        return [], []
+
+    # Load KB rows (for hybrid_alpha per KB). One SELECT for the set.
+    kb_stmt = select(KnowledgeBase).where(KnowledgeBase.id.in_(kb_ids))
+    kb_rows = (await db.execute(kb_stmt)).scalars().all()
+
+    # Embed the query once (reused across every KB). Mirrors the
+    # alpha<1.0 gate in query_kb: if every attached KB is FTS-only
+    # (hybrid_alpha == 1.0) we skip the embed call entirely. We also
+    # tolerate embed-fetch failure by downgrading to FTS-only.
+    needs_embedding = any(float(kb.hybrid_alpha) < 1.0 for kb in kb_rows)
+    query_embedding: list[float] | None = None
+    if needs_embedding:
+        try:
+            query_embedding = await request_embedding_vector(
+                query,
+                model=DEFAULT_EMBEDDING_MODEL,
+                gateway=gateway,
+                request_id=request_id,
+            )
+        except LQAIError as exc:
+            log.warning(
+                "chat-send RAG: query-embedding fetch failed; FTS-only fallback",
+                extra={
+                    "event": "chat_rag_embed_fetch_failed",
+                    "chat_id": str(chat.id),
+                    "error_code": exc.effective_code,
+                },
+            )
+            query_embedding = None
+
+    # Iterate every attached KB. hybrid_search is single-KB by
+    # signature (C6 / ADR 0008); a multi-KB primitive is a v1.1+
+    # refinement candidate. For M1 the per-call cost is small —
+    # legal users attach a handful of KBs, not hundreds.
+    merged: list[HybridSearchResult] = []
+    for kb in kb_rows:
+        alpha = float(kb.hybrid_alpha)
+        try:
+            results = await hybrid_search(
+                db,
+                kb_id=kb.id,
+                query=query,
+                query_embedding=query_embedding,
+                top_k=RAG_TOP_K_PER_KB,
+                alpha=alpha,
+            )
+        except Exception:
+            log.exception(
+                "chat-send RAG: hybrid_search failed for KB; skipping",
+                extra={
+                    "event": "chat_rag_kb_search_failed",
+                    "chat_id": str(chat.id),
+                    "kb_id": str(kb.id),
+                },
+            )
+            continue
+        merged.extend(results)
+
+    if not merged:
+        return [], [kb.id for kb in kb_rows]
+
+    merged.sort(key=lambda r: r.hybrid_score, reverse=True)
+    top = merged[:RAG_MAX_TOTAL_CHUNKS]
+    return top, [kb.id for kb in kb_rows]
+
+
+def _format_retrieval_context_block(
+    chunks: list[HybridSearchResult],
+) -> str:
+    """Render retrieved chunks as a Markdown system-message context block.
+
+    The shape is intentionally lightweight — a header line so the LLM
+    can recognize the block as retrieved context, then one Markdown
+    list item per chunk with a short header (``file_name``, optional
+    page range) and the chunk text. The block is prepended to the
+    gateway request as a ``system`` message so the LLM treats it as
+    grounding rather than user turn content.
+
+    Chunk text is included verbatim. We do not truncate at the
+    character level (the LLM's tokenizer will window if the request is
+    oversized); :data:`RAG_MAX_TOTAL_CHUNKS` upstream is the bound.
+    """
+
+    lines: list[str] = [
+        "Retrieved context from your matter's knowledge bases. "
+        "Cite these sources when they bear on the user's question; "
+        "ignore them if they are not relevant.",
+        "",
+    ]
+    for idx, chunk in enumerate(chunks, start=1):
+        location = ""
+        if chunk.page_start is not None:
+            if chunk.page_end is not None and chunk.page_end != chunk.page_start:
+                location = f" (pp. {chunk.page_start}-{chunk.page_end})"
+            else:
+                location = f" (p. {chunk.page_start})"
+        header = f"[{idx}] {chunk.file_name}{location}"
+        lines.append(f"{header}:")
+        lines.append(chunk.content)
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+# ---------------------------------------------------------------------------
 # Messages: post (the keystone)
 # ---------------------------------------------------------------------------
 
@@ -637,9 +865,32 @@ async def send_message(
     try:
         payload = MessageCreateRequest.model_validate(raw_body)
     except PydanticValidationError as exc:
+        # ``include_context=False`` strips the raw exception instance
+        # pydantic stashes in ``ctx.error`` for ``value_error`` failures —
+        # those instances aren't JSON-serializable and the canonical
+        # error envelope is JSON-encoded. Wave D.2 Task 3.0's
+        # ``AttachedSkillRef`` XOR validator raises ``ValueError`` which
+        # surfaces this; previously all the schema's failures were
+        # type/missing-style which don't carry a ctx.error so the issue
+        # was latent.
+        #
+        # ``include_input=False`` strips pydantic's echo of the offending
+        # input payload. Without it, a ``string_too_long`` failure on a
+        # 32K+1-byte ``inline_body`` returns the FULL submitted body
+        # verbatim in the response envelope — leaking the user-drafted
+        # skill body back over the wire and violating the
+        # ``LQAIError.details MUST NOT contain secrets or PII`` contract
+        # (per ``api/app/errors.py``). Regression in
+        # ``tests/integration/test_attached_skills_send.py``.
         raise ValidationError(
             "Request body failed schema validation",
-            details={"errors": exc.errors()},
+            details={
+                "errors": exc.errors(
+                    include_context=False,
+                    include_url=False,
+                    include_input=False,
+                )
+            },
         ) from exc
 
     # Auth + ownership: load the chat (visible to caller, not
@@ -647,14 +898,120 @@ async def send_message(
     # must explicitly unarchive (PATCH archived=false) before posting.
     chat = await _load_visible_chat(db, cid, user.id, include_archived=False)
 
+    # Wave D.2 Task 3.0 — merge legacy ``skills`` with new
+    # ``attached_skills``. Each ``attached_skills`` entry is XOR'd at
+    # schema time: ``slug`` entries roll into the legacy slug path
+    # (forwarded as ``lq_ai_skills`` to the gateway), ``inline_body``
+    # entries roll into a separate inline-body list forwarded as
+    # ``lq_ai_inline_skills``. Per-entry ``inputs`` merge into the
+    # combined ``skill_inputs`` map keyed by slug (catalogue) or the
+    # synthesized name (inline). Per-entry ``source`` is captured for
+    # audit-log provenance below.
+    effective_skills: list[str] = list(payload.skills)
+    effective_skill_inputs: dict[str, dict[str, Any]] = {
+        k: dict(v) for k, v in payload.skill_inputs.items()
+    }
+    inline_skill_refs: list[InlineSkillRef] = []
+    # Per-attachment provenance for the audit log. Each entry is
+    # ``{"name": <slug or synthesized>, "source": <str|null>,
+    #   "kind": "slug"|"inline"}``.
+    attached_skill_provenance: list[dict[str, str | None]] = [
+        {"name": slug, "source": None, "kind": "slug"} for slug in payload.skills
+    ]
+    for entry in payload.attached_skills:
+        if entry.slug is not None:
+            effective_skills.append(entry.slug)
+            if entry.inputs:
+                # Per-attachment inputs win on collision with the
+                # top-level skill_inputs[<slug>] (the caller's
+                # most-specific intent for *this* attachment).
+                merged = dict(effective_skill_inputs.get(entry.slug, {}))
+                merged.update(entry.inputs)
+                effective_skill_inputs[entry.slug] = merged
+            attached_skill_provenance.append(
+                {"name": entry.slug, "source": entry.source, "kind": "slug"}
+            )
+        else:
+            # inline_body — XOR validator guarantees it's non-empty here.
+            assert entry.inline_body is not None
+            # Synthesized name: opaque + collision-free against real
+            # slugs (real slugs are lowercase-kebab; ``__inline__`` uses
+            # underscores which the slug pattern rejects). Hex tail keeps
+            # it unique within a single request so two inline entries
+            # don't collide in the gateway's per-skill inputs map.
+            inline_name = f"__inline__{uuid.uuid4().hex[:8]}"
+            inline_skill_refs.append(
+                InlineSkillRef(
+                    name=inline_name,
+                    body=entry.inline_body,
+                    inputs=entry.inputs,
+                    source=entry.source,
+                )
+            )
+            if entry.inputs:
+                effective_skill_inputs[inline_name] = dict(entry.inputs)
+            attached_skill_provenance.append(
+                {"name": inline_name, "source": entry.source, "kind": "inline"}
+            )
+
+    # Wave D.2 Task 2.7 — send-time slash fallback. If the caller
+    # didn't pre-attach any skills (legacy OR new attached_skills)
+    # AND the content starts with ``/<token> ``, try to resolve the
+    # token against the merged catalogue. On hit: append the slug to
+    # ``applied_skills`` for this turn and strip the leading token
+    # from the content so the gateway sees the same body the user
+    # would type without the ``/foo`` prefix. On miss: set
+    # ``slash_unresolved=True`` on the response so the UI can render
+    # a hint, but forward the original content as plain text — the
+    # user still gets an answer, the typo just doesn't activate a
+    # skill.
+    effective_content: str = payload.content
+    slash_unresolved = False
+    attached_skill_names: list[str] = list(payload.skills)
+    # Surface slug attachments (not inline ones) in
+    # ``attached_skill_names`` — the field is documented as "slugs the
+    # send-time slash fallback attached on the caller's behalf" and is
+    # consumed by the UI to render chips; inline skills don't have a
+    # browsable slug to chip.
+    attached_skill_names.extend(
+        # ``name`` is always a non-empty str on a slug-kind row (we
+        # construct it from ``payload.skills`` / ``entry.slug`` /
+        # resolved slash slugs). The ``cast`` keeps mypy honest given
+        # the ``str | None`` value-type on the provenance dict.
+        str(e["name"])
+        for e in attached_skill_provenance
+        if e["kind"] == "slug" and e["name"] is not None and e["name"] not in attached_skill_names
+    )
+    have_any_attached = bool(payload.skills) or bool(payload.attached_skills)
+    if not have_any_attached and payload.content.startswith("/"):
+        resolved_slug, effective_content, slash_unresolved = await _maybe_resolve_leading_slash(
+            request, db, user, payload.content
+        )
+        if resolved_slug is not None:
+            effective_skills.append(resolved_slug)
+            attached_skill_names.append(resolved_slug)
+            attached_skill_provenance.append(
+                {"name": resolved_slug, "source": "slash", "kind": "slug"}
+            )
+
     # Persist the user message FIRST. This is unconditionally written,
     # even if the gateway call ultimately fails — the user did say
     # something and the audit trail must reflect that.
+    #
+    # Wave D.2 Task 3.0 — the user-message ``applied_skills`` column
+    # records *both* slug attachments AND synthesized inline-skill
+    # names. The synthesized name is opaque (``__inline__<hex>``); the
+    # audit-log row written later carries the full per-attachment
+    # provenance (kind/source) so receipts can render "from wizard
+    # tryout" instead of an inscrutable hex blob.
+    user_applied_skills: list[str] = [
+        e["name"] for e in attached_skill_provenance if e["name"] is not None
+    ]
     user_message = Message(
         chat_id=cid,
         role="user",
-        content=payload.content,
-        applied_skills=list(payload.skills),
+        content=effective_content,
+        applied_skills=user_applied_skills,
     )
     db.add(user_message)
 
@@ -662,9 +1019,11 @@ async def send_message(
     # same transaction so the rename and the user message land
     # atomically. ``derive_chat_title`` returns "New chat" for empty
     # input, so a degenerate first message keeps the default rather
-    # than blanking the title.
+    # than blanking the title. We derive from ``effective_content`` so a
+    # resolved-slash send (``/foo go``) names the chat ``go`` rather
+    # than ``/foo go`` — matching what the user actually asked.
     if chat.title == "New chat":
-        chat.title = derive_chat_title(payload.content)
+        chat.title = derive_chat_title(effective_content)
 
     await db.flush()
     await db.commit()
@@ -693,20 +1052,78 @@ async def send_message(
         project_result = await db.execute(project_stmt)
         project_floor = project_result.scalar_one_or_none()
 
+    # Wave D.1 T7b — RAG step: when the chat's project has KBs attached,
+    # run hybrid_search across all of them for the user's just-sent
+    # message, write the T7-shape audit row so Receipts surfaces the
+    # 📎 KB retrieval event, and prepend the retrieved chunks as a
+    # ``system`` message to the gateway request so the LLM actually
+    # sees them. Empty results → no audit row, no context injection
+    # (same guard as T7's query_kb path).
+    retrieved_chunks, kb_ids_searched = await _retrieve_kb_context_for_chat(
+        db,
+        chat=chat,
+        query=effective_content,
+        gateway=gateway,
+        request_id=request.headers.get("x-request-id"),
+    )
+
+    # Build the gateway messages list. T7b prepends a ``system``-role
+    # context block when we have retrieved chunks; this is the
+    # least-invasive injection point — the gateway treats it as a
+    # system message and the C2 / ADR 0007 prompt-assembly logic still
+    # runs on top (the gateway concatenates its own system messages
+    # before the user turn, so the retrieved context shows up at the
+    # very front of the prompt). The user's just-sent message
+    # remains the last entry, unchanged.
+    gw_messages: list[ChatCompletionMessage] = []
+    if retrieved_chunks:
+        context_block = _format_retrieval_context_block(retrieved_chunks)
+        gw_messages.append(ChatCompletionMessage(role="system", content=context_block))
+        # T7-shape audit row. Same details schema as query_kb (kb_ids
+        # plural here; query_kb is single-KB). The row commits with
+        # its own boundary so it's durable even if the gateway call
+        # later fails — Receipts must show retrieval happened
+        # regardless of LLM-call outcome.
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="inference.kb_chunks_retrieved",
+            resource_type="chat",
+            resource_id=str(cid),
+            project_id=chat.project_id,
+            request=request,
+            details={
+                "kb_ids": [str(k) for k in kb_ids_searched],
+                "chunk_count": len(retrieved_chunks),
+                "chunk_ids": [str(c.chunk_id) for c in retrieved_chunks],
+                "query_token_estimate": len(effective_content.split()),
+            },
+        )
+        await db.commit()
+    gw_messages.append(ChatCompletionMessage(role="user", content=effective_content))
+
     # Build the gateway request. C3 still sends a single-turn request
     # (the user's content as one ``user`` message); a future task may
     # widen this to include prior history. The gateway does the skill
-    # prompt assembly per ADR 0007.
+    # prompt assembly per ADR 0007. T7b prepends a system context
+    # block when KB retrieval returned chunks (see above).
+    #
+    # Wave D.2 Task 3.0 — ``lq_ai_inline_skills`` carries inline-body
+    # attachments. The gateway assembles them alongside ``lq_ai_skills``
+    # without a backend round-trip; ``effective_skill_inputs`` is the
+    # merged-and-flattened map keyed by both slug AND synthesized
+    # inline-skill name.
     gw_request = ChatCompletionRequest(
         model=payload.model,
-        messages=[ChatCompletionMessage(role="user", content=payload.content)],
+        messages=gw_messages,
         stream=payload.stream,
         chat_id=str(cid),
         lq_ai_chat_id=str(cid),
         lq_ai_message_id=str(assistant_message_id),
         lq_ai_user_id=str(user.id),
-        lq_ai_skills=list(payload.skills),
-        lq_ai_skill_inputs=dict(payload.skill_inputs),
+        lq_ai_skills=list(effective_skills),
+        lq_ai_skill_inputs=dict(effective_skill_inputs),
+        lq_ai_inline_skills=list(inline_skill_refs),
         lq_ai_project_minimum_inference_tier=project_floor,
     )
 
@@ -732,8 +1149,10 @@ async def send_message(
             request=gw_request,
             chat=chat,
             assistant_message_id=assistant_message_id,
+            user_message_id=user_message.id,
             request_id=request_id,
             http_request=request,
+            attached_skill_provenance=attached_skill_provenance,
         )
     return await _non_streaming_response(
         db=db,
@@ -742,8 +1161,12 @@ async def send_message(
         request=gw_request,
         chat=chat,
         assistant_message_id=assistant_message_id,
+        user_message_id=user_message.id,
         request_id=request_id,
         http_request=request,
+        attached_skill_names=attached_skill_names,
+        slash_unresolved=slash_unresolved,
+        attached_skill_provenance=attached_skill_provenance,
     )
 
 
@@ -799,11 +1222,13 @@ async def _audit_message_sent(
     user: User,
     chat: Chat,
     assistant_message_id: uuid.UUID,
+    user_message_id: uuid.UUID,
     routed_inference_tier: int | None,
     routed_provider: str | None,
     applied_skills: list[str],
     error_code: str | None,
     request: Request | None,
+    attached_skill_provenance: list[dict[str, str | None]] | None = None,
 ) -> None:
     """Write the D3 audit row for a completed chat-message exchange.
 
@@ -811,6 +1236,13 @@ async def _audit_message_sent(
     chat exchanges in privileged projects must mark the row privileged
     and capture the routed inference tier so admins can audit which
     matters routed to which providers.
+
+    Wave D.2 Task 3.0 — ``attached_skill_provenance`` carries
+    per-attachment ``{name, source, kind}`` so receipts can render
+    "from wizard tryout" / "from slash" instead of an opaque list of
+    slugs and ``__inline__`` synthesized names. Inline-body content is
+    NOT recorded here (PII risk); only the synthesized name + provenance
+    tag travel through the log.
 
     The privilege resolution walks ``chat.project_id`` to read the
     project's ``privileged`` flag. The audit row commits with the
@@ -823,6 +1255,21 @@ async def _audit_message_sent(
     if chat.project_id is not None:
         project = await db.get(Project, chat.project_id)
 
+    details: dict[str, Any] = {
+        "chat_id": str(chat.id),
+        "user_message_id": str(user_message_id),
+        "applied_skills": list(applied_skills),
+        "error_code": error_code,
+    }
+    if attached_skill_provenance:
+        # Filter null-source entries to keep the row tidy when no
+        # surface tagged itself. Inline-body content is intentionally
+        # not included.
+        details["attached_skills"] = [
+            {"name": e["name"], "source": e["source"], "kind": e["kind"]}
+            for e in attached_skill_provenance
+        ]
+
     await audit_action(
         db,
         user_id=user.id,
@@ -833,11 +1280,7 @@ async def _audit_message_sent(
         routed_inference_tier=routed_inference_tier,
         routed_provider=routed_provider,
         request=request,
-        details={
-            "chat_id": str(chat.id),
-            "applied_skills": list(applied_skills),
-            "error_code": error_code,
-        },
+        details=details,
     )
     await db.commit()
 
@@ -857,6 +1300,7 @@ async def _persist_assistant_message(
     cost_estimate_usd: float | None,
     applied_skills: list[str],
     error_code: str | None,
+    kind: str = "ai",
 ) -> Message:
     """Insert one assistant message row in its own transaction.
 
@@ -870,12 +1314,19 @@ async def _persist_assistant_message(
     ``ChatCompletionRequest.model`` (ADR 0011 follow-on). It may match
     the ``routed_*`` pair (direct dispatch) or differ (alias resolved
     server-side); persisting both lets the UI explain the difference.
+
+    ``kind`` is the messages.kind discriminator (T1). Defaults to
+    ``'ai'`` because this helper exclusively persists assistant rows;
+    callers can override (e.g., to ``'refusal'`` if a future surface
+    needs it) but should never let the DB default of ``'user'`` leak
+    in — that's the latent T1 bug this parameter exists to prevent.
     """
 
     row = Message(
         id=message_id,
         chat_id=chat_id,
         role="assistant",
+        kind=kind,
         content=content,
         applied_skills=list(applied_skills),
         routed_inference_tier=routed_inference_tier,
@@ -938,9 +1389,7 @@ async def _write_work_product_attribution(
     if chat_row is None:  # pragma: no cover — message FK guarantees existence
         return
 
-    content_hash = hashlib.sha256(
-        (message.content or "").encode("utf-8")
-    ).hexdigest()
+    content_hash = hashlib.sha256((message.content or "").encode("utf-8")).hexdigest()
 
     attribution = WorkProductAttribution(
         message_id=message.id,
@@ -967,10 +1416,19 @@ async def _non_streaming_response(
     request: ChatCompletionRequest,
     chat: Chat,
     assistant_message_id: uuid.UUID,
+    user_message_id: uuid.UUID,
     request_id: str,
     http_request: Request | None = None,
+    attached_skill_names: list[str] | None = None,
+    slash_unresolved: bool = False,
+    attached_skill_provenance: list[dict[str, str | None]] | None = None,
 ) -> JSONResponse:
-    """Run the non-streaming path: forward, persist, return JSON."""
+    """Run the non-streaming path: forward, persist, return JSON.
+
+    Wave D.2 Task 2.7 — ``attached_skill_names`` and ``slash_unresolved``
+    are propagated from :func:`send_message`'s slash-fallback path.
+    Defaults preserve the pre-Task-2.7 wire contract for any caller
+    that doesn't pass them in."""
 
     try:
         response = await gateway.chat_completion(request, request_id=request_id)
@@ -1021,11 +1479,13 @@ async def _non_streaming_response(
         user=user,
         chat=chat,
         assistant_message_id=assistant_message_id,
+        user_message_id=user_message_id,
         routed_inference_tier=response.routed_inference_tier,
         routed_provider=response.routed_provider,
         applied_skills=applied_skills,
         error_code=None,
         request=http_request,
+        attached_skill_provenance=attached_skill_provenance,
     )
 
     body = MessagePostResponse(
@@ -1035,6 +1495,8 @@ async def _non_streaming_response(
         routed_provider=response.routed_provider,
         cost_estimate=response.cost_estimate,
         applied_skills=applied_skills,
+        attached_skill_names=list(attached_skill_names or []),
+        slash_unresolved=slash_unresolved,
     )
 
     headers: dict[str, str] = {}
@@ -1058,8 +1520,10 @@ async def _stream_response(
     request: ChatCompletionRequest,
     chat: Chat,
     assistant_message_id: uuid.UUID,
+    user_message_id: uuid.UUID,
     request_id: str,
     http_request: Request | None = None,
+    attached_skill_provenance: list[dict[str, str | None]] | None = None,
 ) -> StreamingResponse:
     """Run the streaming path: forward, stream SSE, persist at end."""
 
@@ -1165,11 +1629,13 @@ async def _stream_response(
                     user=user,
                     chat=chat,
                     assistant_message_id=assistant_message_id,
+                    user_message_id=user_message_id,
                     routed_inference_tier=last_tier,
                     routed_provider=last_provider,
                     applied_skills=last_applied_skills or [],
                     error_code=error_code,
                     request=http_request,
+                    attached_skill_provenance=attached_skill_provenance,
                 )
             except Exception as audit_exc:
                 log.warning(
@@ -1232,6 +1698,127 @@ async def _stream_response(
     )
 
 
+# ---------------------------------------------------------------------------
+# Wave D.1 T4 — admin tier-floor override helper
+# ---------------------------------------------------------------------------
+
+
+async def run_inference_override(
+    *,
+    db: AsyncSession,
+    gateway: GatewayClient,
+    chat: Chat,
+    user: User,
+    user_msg: Message,
+    refusal_msg: Message,
+    override_reason: str,
+    request: Request | None = None,
+) -> tuple[Message, uuid.UUID | None]:
+    """Re-run a refused inference with the tier floor lifted.
+
+    Wave D.1 T4. Admin-only re-run of a refused user message: the
+    backend forwards the original user prompt to the gateway with both
+    ``minimum_inference_tier`` and ``lq_ai_project_minimum_inference_tier``
+    set to ``None`` so no tier floor binds for this turn. The new
+    assistant row is persisted with ``kind='ai'`` on initial INSERT
+    (via the ``kind`` parameter on :func:`_persist_assistant_message`)
+    so the UI can tell it apart from the refusal it supersedes, and so
+    the row's kind never disagrees with the audit row written by the
+    caller.
+
+    Mirrors the synchronous, non-streaming branch of ``send_message``
+    (no SSE; one-shot JSON) — the override surface is admin-driven and
+    doesn't require streaming. Returns the persisted assistant
+    :class:`Message` plus the gateway-written
+    ``inference_routing_log`` row id (lookup by ``message_id``; the
+    gateway is still the canonical writer per B4).
+
+    ``override_reason`` is captured in the request log envelope; the
+    caller writes the audit row (we keep audit + commit in the
+    handler so the handler's transaction boundary is explicit).
+    """
+
+    assistant_message_id = uuid.uuid4()
+    request_id = (
+        (request.headers.get("x-request-id") if request else None)
+        or (request.headers.get("x-correlation-id") if request else None)
+        or f"req_{uuid.uuid4().hex}"
+    )
+
+    # Build the gateway request. Critically: do NOT forward the
+    # project floor and do NOT set a per-call minimum — both are None
+    # for this turn so the gateway routes without a tier floor.
+    gw_request = ChatCompletionRequest(
+        model="smart",
+        messages=[ChatCompletionMessage(role="user", content=user_msg.content)],
+        stream=False,
+        chat_id=str(chat.id),
+        lq_ai_chat_id=str(chat.id),
+        lq_ai_message_id=str(assistant_message_id),
+        lq_ai_user_id=str(user.id),
+        lq_ai_skills=list(user_msg.applied_skills or []),
+        minimum_inference_tier=None,
+        lq_ai_project_minimum_inference_tier=None,
+    )
+
+    log.info(
+        "inference override re-run",
+        extra={
+            "event": "inference_tier_floor_override",
+            "user_id": str(user.id),
+            "chat_id": str(chat.id),
+            "refusal_message_id": str(refusal_msg.id),
+            "assistant_message_id": str(assistant_message_id),
+            "request_id": request_id,
+            # ``override_reason`` is recorded on the audit row by the
+            # caller; we log presence here but not the prose so the
+            # operator log stays terse.
+            "override_reason_present": bool(override_reason),
+        },
+    )
+
+    response = await gateway.chat_completion(gw_request, request_id=request_id)
+
+    assistant_text = ""
+    if response.choices:
+        assistant_text = response.choices[0].message.content or ""
+
+    applied_skills = list(response.lq_ai_applied_skills or [])
+
+    # Persist the assistant message with ``kind='ai'`` (the new row is
+    # a successful AI response, not a refusal). The helper writes
+    # ``kind`` on initial INSERT so the message + audit row never
+    # disagree about what kind of row this is (T1 + T4).
+    persisted = await _persist_assistant_message(
+        db,
+        message_id=assistant_message_id,
+        chat_id=chat.id,
+        content=assistant_text,
+        requested_model=gw_request.model,
+        routed_provider=response.routed_provider,
+        routed_model=response.model,
+        routed_inference_tier=response.routed_inference_tier,
+        prompt_tokens=response.usage.prompt_tokens if response.usage else None,
+        completion_tokens=response.usage.completion_tokens if response.usage else None,
+        cost_estimate_usd=response.cost_estimate,
+        applied_skills=applied_skills,
+        error_code=None,
+        kind="ai",
+    )
+
+    # Look up the gateway-written routing log row by message_id. The
+    # gateway is the canonical writer (B4); the row exists by the time
+    # ``chat_completion`` returns. Returns None if the gateway did not
+    # write one (defensive — keeps the helper testable when the test
+    # stubs respx and doesn't write to the routing-log table).
+    routing_log_row = await db.execute(
+        select(InferenceRoutingLog.id).where(InferenceRoutingLog.message_id == assistant_message_id)
+    )
+    routing_log_id = routing_log_row.scalar_one_or_none()
+
+    return persisted, routing_log_id
+
+
 __all__ = [
     "create_chat",
     "delete_chat",
@@ -1240,6 +1827,7 @@ __all__ = [
     "list_chats",
     "list_messages",
     "router",
+    "run_inference_override",
     "send_message",
     "update_chat",
 ]

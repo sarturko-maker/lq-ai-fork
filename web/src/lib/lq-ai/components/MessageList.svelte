@@ -8,6 +8,21 @@
 	export let streamingMessageId: string | null = null;
 	export let onAppliedSkillClicked: ((name: string) => void) | undefined = undefined;
 
+	// Wave D.1 T15 — refusal-bubble forwarding. ChatPanel owns the modal +
+	// re-run state; MessageList is a pure pass-through so the bubble can fire
+	// the three callbacks per refusal row.
+	export let currentUserRole: 'admin' | 'member' | 'viewer' = 'member';
+	export let onRefusalRerun: (msg: Message) => void = () => {};
+	export let onRefusalOverrideRequested: (msg: Message) => void = () => {};
+	export let onRefusalExplainerRequested: (msg: Message) => void = () => {};
+
+	// Wave D.1 T20 follow-on — map of enhanced-prompt content → original
+	// prompt text the user typed before clicking "Use enhanced". Session
+	// scope only (server stores only the enhanced text; the original is
+	// not currently persisted — see EnhancedDiffModal docstring). Empty
+	// map is fine: MessageBubble renders a graceful fallback.
+	export let enhancementOriginals: Record<string, string> = {};
+
 	let scroller: HTMLDivElement;
 
 	afterUpdate(() => {
@@ -30,6 +45,11 @@
 			message={msg}
 			isStreaming={streamingMessageId === msg.id}
 			{onAppliedSkillClicked}
+			{currentUserRole}
+			{onRefusalRerun}
+			{onRefusalOverrideRequested}
+			{onRefusalExplainerRequested}
+			originalEnhancedPrompt={enhancementOriginals[msg.content]}
 		/>
 	{/each}
 

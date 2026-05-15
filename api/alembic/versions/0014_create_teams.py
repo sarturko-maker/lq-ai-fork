@@ -164,9 +164,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "fk_user_skills_team", "user_skills", type_="foreignkey"
-    )
+    op.drop_constraint("fk_user_skills_team", "user_skills", type_="foreignkey")
     op.drop_index("idx_team_members_user", table_name="team_members")
     op.drop_table("team_members")
     op.execute("DROP TRIGGER IF EXISTS trg_teams_updated_at ON teams")

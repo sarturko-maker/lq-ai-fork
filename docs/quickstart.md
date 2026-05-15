@@ -240,9 +240,11 @@ If you want to verify against the audit log, navigate to **Admin → Audit Log**
 
 If your team's matter requires a tier floor (e.g., privileged matters require Tier 1 or 2), you can:
 
-- Set `minimum_inference_tier` on the Project — every chat in the Project then refuses to run below that floor.
-- Set `minimum_inference_tier` on a specific skill — the skill refuses to run if routed below its declared floor.
+- Set `minimum_inference_tier` on the Project — every chat in the Project then refuses to route to a weaker (higher-numbered) tier than the floor.
+- Set `minimum_inference_tier` on a specific skill — the skill refuses to run if the routed tier is weaker than its declared floor.
 - Configure `allowed_tiers_global` in `gateway.yaml` to disallow tiers globally.
+
+Under PRD §1.5.2, lower tier numbers are stronger: `minimum_inference_tier: 2` requires Tier 2 or stronger (Tier 1 and Tier 2 are allowed; Tier 3–5 are refused).
 
 The PRD's [Inference Choice Spectrum (§1.5.2)](PRD.md#15-deployment-modes-and-the-inference-choice-spectrum) and [Security Posture (§1.8)](PRD.md#18-security-posture) cover the model in detail.
 

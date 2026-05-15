@@ -7,7 +7,7 @@
 To report a vulnerability:
 
 - **Email:** security@legalquants.com
-- **GPG key:** Available at [URL TBD — published before v1 release]
+- **GPG key:** A GPG key for encrypted reports will be published before v1 release. Until then, please prefer GitHub Security Advisories (which encrypt in transit and at rest within GitHub's infrastructure).
 - **GitHub Security Advisory:** Alternatively, you can report privately through GitHub's [Security Advisories](https://github.com/legalquants/lq-ai/security/advisories/new) feature.
 
 Please include:

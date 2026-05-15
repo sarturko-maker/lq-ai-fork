@@ -98,6 +98,12 @@ class Project(Base):
     context_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     privileged: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     minimum_inference_tier: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    is_sandbox: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        default=False,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

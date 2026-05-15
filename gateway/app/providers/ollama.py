@@ -83,7 +83,6 @@ from typing import Any
 import httpx
 
 from app.config import ProviderConfig
-from app.secrets import ProviderKeyResolver
 from app.providers.base import (
     ProviderAdapter,
     ProviderHealth,
@@ -104,6 +103,7 @@ from app.providers.openai_schema import (
     EmbeddingsResponse,
     FinishReason,
 )
+from app.secrets import ProviderKeyResolver
 
 logger = logging.getLogger(__name__)
 

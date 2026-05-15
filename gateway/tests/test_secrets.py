@@ -19,9 +19,7 @@ def test_generate_master_key_returns_fernet_compatible_value() -> None:
     key = generate_master_key()
     token = encrypt_value("test-secret", master_key=key)
     resolver = ProviderKeyResolver(master_key=key, env={})
-    out = resolver.resolve(
-        provider_name="p", api_key_env=None, api_key_encrypted=token
-    )
+    out = resolver.resolve(provider_name="p", api_key_env=None, api_key_encrypted=token)
     assert out == "test-secret"
 
 
@@ -51,9 +49,7 @@ def test_resolver_prefers_encrypted_over_env() -> None:
     """
     key = generate_master_key()
     token = encrypt_value("from-encrypted", master_key=key)
-    resolver = ProviderKeyResolver(
-        master_key=key, env={"ANTHROPIC_API_KEY": "from-env"}
-    )
+    resolver = ProviderKeyResolver(master_key=key, env={"ANTHROPIC_API_KEY": "from-env"})
     out = resolver.resolve(
         provider_name="anthropic-prod",
         api_key_env="ANTHROPIC_API_KEY",
@@ -64,9 +60,7 @@ def test_resolver_prefers_encrypted_over_env() -> None:
 
 @pytest.mark.unit
 def test_resolver_falls_back_to_env() -> None:
-    resolver = ProviderKeyResolver(
-        master_key=None, env={"OPENAI_API_KEY": "from-env"}
-    )
+    resolver = ProviderKeyResolver(master_key=None, env={"OPENAI_API_KEY": "from-env"})
     out = resolver.resolve(
         provider_name="openai-prod",
         api_key_env="OPENAI_API_KEY",
@@ -105,9 +99,7 @@ def test_resolver_raises_master_key_missing_when_unset() -> None:
     token = encrypt_value("v", master_key=key)
     resolver = ProviderKeyResolver(master_key=None, env={})
     with pytest.raises(MasterKeyMissing):
-        resolver.resolve(
-            provider_name="p", api_key_env=None, api_key_encrypted=token
-        )
+        resolver.resolve(provider_name="p", api_key_env=None, api_key_encrypted=token)
 
 
 @pytest.mark.unit
@@ -159,9 +151,7 @@ def test_resolver_raises_decrypt_error_on_corrupted_token() -> None:
     corrupted = "".join(body)
     resolver = ProviderKeyResolver(master_key=key, env={})
     with pytest.raises(DecryptError):
-        resolver.resolve(
-            provider_name="p", api_key_env=None, api_key_encrypted=corrupted
-        )
+        resolver.resolve(provider_name="p", api_key_env=None, api_key_encrypted=corrupted)
 
 
 @pytest.mark.unit

@@ -23,9 +23,12 @@ CLAUDE.md
 static/pyodide/*
 !static/pyodide/pyodide-lock.json
 
-# Distribution / packaging
+# Distribution / packaging (Python — inherited from upstream OpenWebUI gitignore)
+# Note: SvelteKit's build dir is covered by /build at the top of this file;
+# do NOT re-add an un-anchored `build/` here — it matches any build/ directory
+# anywhere in the tree, silently dropping any future route or subdir named build
+# (e.g., /lq-ai/learn/build).
 .Python
-build/
 develop-eggs/
 dist/
 downloads/

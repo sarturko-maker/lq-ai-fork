@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -79,9 +78,7 @@ class EnhancePromptInteraction(Base):
     """The reason from the skill's skip-conditions list. Non-null when
     ``expansion_applied=False`` (enforced by DB CHECK)."""
 
-    used: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false")
-    )
+    used: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     """Updated when the user clicks Submit on the review screen (or when
     the application auto-submits an expansion the user didn't touch).
     Stays ``false`` if the user skips or backs out."""
@@ -93,9 +90,7 @@ class EnhancePromptInteraction(Base):
     screen before submitting. Used to surface which model/skill
     combinations produce expansions the user accepts versus rewrites."""
 
-    routed_inference_tier: Mapped[int | None] = mapped_column(
-        Integer, nullable=True
-    )
+    routed_inference_tier: Mapped[int | None] = mapped_column(Integer, nullable=True)
     routed_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
     routed_model: Mapped[str | None] = mapped_column(Text, nullable=True)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)

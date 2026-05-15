@@ -90,12 +90,8 @@ async def test_login_stamps_absolute_and_idle_columns(
     session = sessions[0]
 
     # absolute_expires_at = now + 8h (default). Allow a few seconds of slack.
-    expected_absolute = before + timedelta(
-        seconds=settings.session_absolute_timeout_seconds
-    )
-    expected_absolute_after = after + timedelta(
-        seconds=settings.session_absolute_timeout_seconds
-    )
+    expected_absolute = before + timedelta(seconds=settings.session_absolute_timeout_seconds)
+    expected_absolute_after = after + timedelta(seconds=settings.session_absolute_timeout_seconds)
     assert expected_absolute - timedelta(seconds=2) <= session.absolute_expires_at
     assert session.absolute_expires_at <= expected_absolute_after + timedelta(seconds=2)
 

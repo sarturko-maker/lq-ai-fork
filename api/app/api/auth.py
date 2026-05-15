@@ -101,6 +101,11 @@ class UserPublic(BaseModel):
     mfa_enabled: bool
     must_change_password: bool = False
     reasoning_visibility: str = "disclosure"
+    # PRD §3.2.1 + frontend spec §4.3 (Wave B v2) — personalization prefs.
+    featured_tools: str = "prominent"
+    workspace_layout: str = "three_pane"
+    trust_pills: str = "labels"
+    provenance_pills: str = "always"
     created_at: datetime
     last_login_at: datetime | None = None
 
@@ -115,6 +120,10 @@ class UserPublic(BaseModel):
             mfa_enabled=user.mfa_enabled,
             must_change_password=user.must_change_password,
             reasoning_visibility=getattr(user, "reasoning_visibility", "disclosure"),
+            featured_tools=getattr(user, "featured_tools", "prominent"),
+            workspace_layout=getattr(user, "workspace_layout", "three_pane"),
+            trust_pills=getattr(user, "trust_pills", "labels"),
+            provenance_pills=getattr(user, "provenance_pills", "always"),
             created_at=user.created_at,
             last_login_at=user.last_login_at,
         )

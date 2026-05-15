@@ -56,7 +56,9 @@ const register = (name: string, email: string, password: string) => {
 			failOnStatusCode: false
 		})
 		.then((response) => {
-			expect(response.status).to.be.oneOf([200, 400]);
+			// 403 = signup disabled (LQ.AI deployments). The LQ.AI specs don't
+			// depend on this bootstrap user — they login as admin@lq.ai directly.
+			expect(response.status).to.be.oneOf([200, 400, 403]);
 		});
 };
 
@@ -74,5 +76,16 @@ Cypress.Commands.add('registerAdmin', () => registerAdmin());
 Cypress.Commands.add('loginAdmin', () => loginAdmin());
 
 before(() => {
-	cy.registerAdmin();
+	// OpenWebUI-upstream bootstrap: register a default admin@example.com so
+	// the chat/settings/registration specs have an account to login with.
+	// LQ.AI specs use the seeded admin@lq.ai account (set via
+	// `python -m app.cli reset-admin-password --password ...`) and creating
+	// a second user pollutes the LQ.AI users table, which then triggers
+	// OpenWebUI's auth-redirect on /lq-ai/login. Scope the bootstrap to
+	// upstream-OpenWebUI spec files only.
+	const spec = (Cypress.spec && Cypress.spec.name) || '';
+	const isLqAiSpec = spec.startsWith('wave-') || spec.startsWith('lq-ai-');
+	if (!isLqAiSpec) {
+		cy.registerAdmin();
+	}
 });

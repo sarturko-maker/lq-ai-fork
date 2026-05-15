@@ -110,6 +110,23 @@ class UserSkill(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     """The Markdown body — becomes the skill chunk during prompt assembly."""
 
+    slash_alias: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """Optional ``/slash`` invocation alias. Format ``^/[a-z0-9-]{1,32}$``
+    enforced at the DB layer via ``chk_user_skills_slash_alias_format`` and
+    at the API layer via the Pydantic create/update schemas (Wave D.2).
+
+    Uniqueness scope: per owner (user *or* team) among non-archived rows
+    of the matching scope — mirrors the slug-uniqueness pattern.
+    """
+
+    forked_from: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """Documentary slug of the source skill if this skill was forked.
+
+    No FK — built-in skills are filesystem-canonical (ADR 0004) so there
+    is no target row in the DB to reference. Write-once at create time;
+    PATCH must not change it. The audit-log carries the actual lineage.
+    """
+
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

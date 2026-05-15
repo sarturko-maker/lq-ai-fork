@@ -74,10 +74,14 @@ def upgrade() -> None:
         sa.Column("raw_input", sa.Text(), nullable=False),
         sa.Column("expansion_applied", sa.Boolean(), nullable=False),
         sa.Column("expanded_output", sa.Text(), nullable=True),
-        sa.Column("reasoning", postgresql.JSONB(), nullable=False, server_default=sa.text("'[]'::jsonb")),
+        sa.Column(
+            "reasoning", postgresql.JSONB(), nullable=False, server_default=sa.text("'[]'::jsonb")
+        ),
         sa.Column("skip_reason", sa.Text(), nullable=True),
         sa.Column("used", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-        sa.Column("edited_before_use", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column(
+            "edited_before_use", sa.Boolean(), nullable=False, server_default=sa.text("false")
+        ),
         sa.Column(
             "routed_inference_tier",
             sa.Integer(),

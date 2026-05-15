@@ -2,6 +2,8 @@
 
 > **Visual companion to [PRD v0.2](PRD.md).** This document renders the v1 architecture as a Mermaid diagram and walks through the architectural choices for contributors and procurement evaluators. The diagram below covers the full M1–M4 target architecture with M5+ forward-looking elements drawn as dashed slots; what runs at the M1 baseline is a strict subset, called out in the milestone breakdown further down.
 
+For a per-capability shipped-vs-deferred catalog with verification paths, see [HONEST-STATE.md](HONEST-STATE.md).
+
 ---
 
 ## System diagram
@@ -199,20 +201,35 @@ The diagram is the M1–M4 target architecture; the milestone-by-milestone break
 
 ### M1 — Foundation
 
-**Lands in M1:**
+M1 is the foundation release: a self-hostable deployment that delivers conversational legal AI on top of the ten starter skills, with the engineering surfaces that M2–M4 capability work builds on. The surfaces below are wired end-to-end and covered by Cypress E2E; for the authoritative per-capability shipped-vs-deferred catalog with verification paths, see [HONEST-STATE.md](HONEST-STATE.md) §§1–6.
+
+**User-facing surfaces that ship in M1:**
+- **Conversational core:** multi-turn chat with persistent history, full-text search across chat history, streaming SSE responses, matter (project) workspaces at `/lq-ai/matters/[id]` with inherited files/skills/knowledge bases.
+- **Skill library and Skill Creator:** browse built-in, user, and team skills; capture a chat reply as a skill; wizard-based authoring from scratch; fork built-in or team skills; skill versions tab with per-version audit; Try-It sandbox per skill. Slash-invoked skills render a provenance pill on every response.
+- **Knowledge bases:** create knowledge bases, attach documents, upload PDFs, ingest to `ready` state (pgvector + FTS hybrid retrieval; full Citation Engine pipeline lands M2).
+- **Saved Prompts:** standalone library surface with one-click "Use in chat."
+- **Receipts drawer:** per-event provenance drawer in chat, including Wave 7.2 source enrichment. Available on every chat message.
+- **Enhance Prompt (⌘E):** prompt-expansion skill available per-chat.
+- **Tier-floor refusal + admin override:** tier enforcement UI with admin-only override for privileged matters.
+- **Audit log and admin viewer:** all sensitive actions logged; admin surface at `/lq-ai/admin/audit-log`.
+- **GDPR-aligned export and account deletion:** per-user data export and account deletion flows.
+
+**Engineering infrastructure that ships in M1:**
 - Web App (OpenWebUI fork) and FastAPI backend.
 - Project Service (matter-scoped containers, including the optional `privileged: true` flag).
 - Skill Service, including the Organization Profile as a singleton skill.
 - Knowledge Service (pgvector + FTS hybrid retrieval, baseline; contract-relationship graph follows in M4).
-- Inference Gateway core: Auth, Router, Rate Limit, **Tier Derivation**, Provider Adapters, Cost Tracker, Telemetry.
-- Inference Tier Awareness UI (badge in chat header; click for tier-detail panel).
+- Inference Gateway core: Auth, Router, Rate Limit, **Tier Derivation**, Provider Adapters (Anthropic, OpenAI, Ollama), Cost Tracker, Telemetry.
 - Privilege-aware Audit Log fields (`privilege_marked`, `privilege_basis`, `routed_inference_tier`).
-- Per-user data export and deletion (GDPR Article 17 baseline).
 - MFA-mandatory option and session-timeout defaults.
 - Compliance Alignment Pack documentation (`docs/compliance/`).
 - Code & Supply-Chain Transparency artifacts (SBOM, signed images, SLSA-3 build provenance, public threat model).
+- **Cypress E2E:** 6 LQ.AI specs (`wave-a-chrome`, `wave-b-surfaces`, `wave-c-matters`, `wave-d1-power-features`, `wave-d2-skill-creator`, `wave-m1-final-surfaces`) covering all user-facing surfaces listed above.
 
-**Not in M1 (deferred to M2):** MCP-Client Subsystem architectural slot — moved to M2 during M1 planning to keep the M1 scope focused on quickstart-shipping capabilities.
+**Not in M1 (deferred to M2):**
+- Citation Engine verification pipeline (architectural slot exists; endpoint stub returns `[]`; see [HONEST-STATE.md §3.1](HONEST-STATE.md#31-citation-engine--architectural-slot-not-wired)).
+- Anonymization Layer middleware (config slot loads; request pipeline does not run it; see [HONEST-STATE.md §3.2](HONEST-STATE.md#32-anonymization-layer--config-slot-not-running)).
+- MCP-Client Subsystem architectural slot — moved to M2 during M1 planning to keep the M1 scope focused on quickstart-shipping capabilities.
 
 **Storage and providers** stand up in M1; both deployment modes (Mode 1 cloud, Mode 2 local) are operational.
 

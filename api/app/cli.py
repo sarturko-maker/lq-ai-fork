@@ -2,14 +2,19 @@
 
 Usage (from inside the API container; matches docs/quickstart.md):
 
-    docker compose exec api python -m app.cli reset-admin-password [--email EMAIL]
+    docker compose exec api python -m app.cli reset-admin-password \
+        [--email EMAIL] [--password VALUE] [--no-force-change]
 
 Subcommands:
     reset-admin-password
-        Reset the admin user's password. Generates a fresh random
-        password, prints it to stdout, marks `must_change_password=True`
-        on the user, and revokes all active sessions. Used by an
-        operator who has lost access to the deployment.
+        Reset the admin user's password and revoke all active sessions.
+
+        Two postures:
+        - Operator recovery (default): generate a random password, print
+          it, and set `must_change_password=True`. Used when access is lost.
+        - Dev/test fixture: pass `--password VALUE --no-force-change` to
+          set a known password the user can login with directly. Used for
+          reproducible Cypress fixtures and scripted re-deploys.
 
 The CLI shares the runtime configuration (DATABASE_URL, BCRYPT_ROUNDS,
 etc.) from `app.config`, so it works against the same Postgres the API
@@ -39,14 +44,35 @@ from app.security import hash_password
 log = logging.getLogger("app.cli")
 
 
-async def _reset_admin_password(email: str | None) -> int:
+async def _reset_admin_password(
+    email: str | None,
+    password: str | None = None,
+    force_change: bool = True,
+) -> int:
     """Reset the admin password and return a CLI exit code.
 
     If `email` is None, target the user with `is_admin=True`. If multiple
     admins exist, fail loudly and tell the operator which to target via
     --email.
+
+    If `password` is None, generate a fresh random password and print it
+    to stdout (operator-recovery flow). If `password` is provided, use it
+    as-is — useful for reproducible dev/test fixtures and scripted re-
+    deploys. The supplied password must satisfy `password_min_length`.
+
+    `force_change` controls `must_change_password`. True (default) is the
+    operator-recovery posture; False is the dev/test fixture posture.
     """
     settings = get_settings()
+
+    if password is not None and len(password) < settings.password_min_length:
+        print(
+            f"error: supplied password is shorter than the configured minimum "
+            f"({settings.password_min_length} chars).",
+            file=sys.stderr,
+        )
+        return 2
+
     engine = create_async_engine(settings.database_url, future=True)
     factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -83,9 +109,9 @@ async def _reset_admin_password(email: str | None) -> int:
                     return 2
                 target = admins[0]
 
-            new_password = generate_password()
+            new_password = password if password is not None else generate_password()
             target.hashed_password = hash_password(new_password)
-            target.must_change_password = True
+            target.must_change_password = force_change
 
             # Revoke any active sessions so a stolen refresh token from before
             # the reset can't be used.
@@ -97,12 +123,23 @@ async def _reset_admin_password(email: str | None) -> int:
 
             await session.commit()
 
-            # Print to stdout so the operator can capture it in a pipeline.
-            print(f"Reset password for {target.email}: {new_password}")
-            print(
-                "must_change_password is now true; the user will be forced to "
-                "set a new password on next login."
-            )
+            if password is None:
+                # Print to stdout so the operator can capture it in a pipeline.
+                print(f"Reset password for {target.email}: {new_password}")
+            else:
+                # Don't echo an operator-supplied password — it may be in
+                # shell history and re-echoing it widens the leak surface.
+                print(f"Reset password for {target.email} to the supplied value.")
+            if force_change:
+                print(
+                    "must_change_password is now true; the user will be forced to "
+                    "set a new password on next login."
+                )
+            else:
+                print(
+                    "must_change_password is now false; the user can login with "
+                    "the new password directly."
+                )
             return 0
     finally:
         await engine.dispose()
@@ -128,13 +165,39 @@ def main(argv: list[str] | None = None) -> int:
             "admin user; required if multiple admins exist."
         ),
     )
+    reset.add_argument(
+        "--password",
+        default=None,
+        help=(
+            "Explicit password to set. Omit (default) to generate a random "
+            "password and print it. Useful for reproducible dev/test "
+            "fixtures and scripted re-deploys."
+        ),
+    )
+    reset.add_argument(
+        "--no-force-change",
+        dest="force_change",
+        action="store_false",
+        default=True,
+        help=(
+            "Do not force the user to change the password on next login. "
+            "Default is to force a change (operator-recovery posture); "
+            "pair with --password for a login-ready fixture."
+        ),
+    )
 
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     if args.command == "reset-admin-password":
-        return asyncio.run(_reset_admin_password(args.email))
+        return asyncio.run(
+            _reset_admin_password(
+                email=args.email,
+                password=args.password,
+                force_change=args.force_change,
+            )
+        )
 
     parser.error(f"unknown command: {args.command}")
     return 2  # unreachable; argparse exits

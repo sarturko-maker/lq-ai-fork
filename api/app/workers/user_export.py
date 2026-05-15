@@ -69,6 +69,7 @@ log = logging.getLogger(__name__)
 # accumulating GBs of stale exports.
 _EXPORT_TTL = timedelta(days=7)
 
+
 def _utcnow() -> datetime:
     return datetime.now(tz=UTC)
 
@@ -345,9 +346,7 @@ async def _build_zip(session: AsyncSession, user: User) -> bytes:
         attrib_rows = (
             (
                 await session.execute(
-                    select(WorkProductAttribution).where(
-                        WorkProductAttribution.user_id == user.id
-                    )
+                    select(WorkProductAttribution).where(WorkProductAttribution.user_id == user.id)
                 )
             )
             .scalars()

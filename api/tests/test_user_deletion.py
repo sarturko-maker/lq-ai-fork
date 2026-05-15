@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -75,10 +75,13 @@ async def test_delete_schedules_deletion_and_revokes_sessions(
 ) -> None:
     """Schedules deletion, revokes existing sessions, audit-logs the request."""
     # Pretend the user has an existing active session.
+    now = datetime.now(tz=UTC)
     sess = UserSession(
         user_id=seed_user.id,
         refresh_token_hash="x" * 60,
-        expires_at=datetime.now(tz=UTC),
+        expires_at=now,
+        absolute_expires_at=now + timedelta(hours=8),
+        last_active_at=now,
     )
     db_session.add(sess)
     await db_session.flush()

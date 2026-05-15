@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC
 
 import pytest
 import pytest_asyncio
@@ -102,9 +103,9 @@ async def test_list_returns_only_callers_prompts_newest_first(
     explicitly on the rows guarantees the comparison is meaningful.
     """
 
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    base = datetime.now(timezone.utc)
+    base = datetime.now(UTC)
     older = SavedPrompt(
         user_id=user_a.id,
         name="Older",
@@ -157,9 +158,7 @@ async def test_create_returns_201_and_persists(
         "prompt_text": "Summarize the attached document for a CEO audience.",
         "tags": ["summary", "exec"],
     }
-    resp = await client.post(
-        "/api/v1/saved-prompts", headers=_bearer(user_a), json=body
-    )
+    resp = await client.post("/api/v1/saved-prompts", headers=_bearer(user_a), json=body)
     assert resp.status_code == 201, resp.text
     payload = resp.json()
     assert payload["name"] == "Executive summary"
@@ -176,21 +175,23 @@ async def test_create_returns_201_and_persists(
     assert persisted.tags == ["summary", "exec"]
 
     audits = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.user_id == user_a.id,
-                AuditLog.action == "saved_prompt.create",
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.user_id == user_a.id,
+                    AuditLog.action == "saved_prompt.create",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(audits) == 1
     assert audits[0].resource_id == str(new_id)
 
 
 @pytest.mark.integration
-async def test_create_dedupes_tags_preserving_order(
-    client: AsyncClient, user_a: User
-) -> None:
+async def test_create_dedupes_tags_preserving_order(client: AsyncClient, user_a: User) -> None:
     resp = await client.post(
         "/api/v1/saved-prompts",
         headers=_bearer(user_a),
@@ -217,16 +218,12 @@ async def test_create_dedupes_tags_preserving_order(
 async def test_create_rejects_invalid_payloads(
     client: AsyncClient, user_a: User, bad_payload: dict
 ) -> None:
-    resp = await client.post(
-        "/api/v1/saved-prompts", headers=_bearer(user_a), json=bad_payload
-    )
+    resp = await client.post("/api/v1/saved-prompts", headers=_bearer(user_a), json=bad_payload)
     assert resp.status_code in (400, 422), resp.text
 
 
 @pytest.mark.integration
-async def test_create_rejects_empty_or_whitespace_tag(
-    client: AsyncClient, user_a: User
-) -> None:
+async def test_create_rejects_empty_or_whitespace_tag(client: AsyncClient, user_a: User) -> None:
     resp = await client.post(
         "/api/v1/saved-prompts",
         headers=_bearer(user_a),
@@ -244,15 +241,11 @@ async def test_create_rejects_empty_or_whitespace_tag(
 async def test_get_returns_owners_prompt(
     client: AsyncClient, db_session: AsyncSession, user_a: User
 ) -> None:
-    prompt = SavedPrompt(
-        user_id=user_a.id, name="One", prompt_text="alpha", tags=["t"]
-    )
+    prompt = SavedPrompt(user_id=user_a.id, name="One", prompt_text="alpha", tags=["t"])
     db_session.add(prompt)
     await db_session.flush()
 
-    resp = await client.get(
-        f"/api/v1/saved-prompts/{prompt.id}", headers=_bearer(user_a)
-    )
+    resp = await client.get(f"/api/v1/saved-prompts/{prompt.id}", headers=_bearer(user_a))
     assert resp.status_code == 200, resp.text
     assert resp.json()["id"] == str(prompt.id)
 
@@ -267,17 +260,13 @@ async def test_get_other_users_prompt_returns_404(
     db_session.add(prompt)
     await db_session.flush()
 
-    resp = await client.get(
-        f"/api/v1/saved-prompts/{prompt.id}", headers=_bearer(user_a)
-    )
+    resp = await client.get(f"/api/v1/saved-prompts/{prompt.id}", headers=_bearer(user_a))
     assert resp.status_code == 404, resp.text
 
 
 @pytest.mark.integration
 async def test_get_unknown_id_returns_404(client: AsyncClient, user_a: User) -> None:
-    resp = await client.get(
-        f"/api/v1/saved-prompts/{uuid.uuid4()}", headers=_bearer(user_a)
-    )
+    resp = await client.get(f"/api/v1/saved-prompts/{uuid.uuid4()}", headers=_bearer(user_a))
     assert resp.status_code == 404
 
 
@@ -290,9 +279,7 @@ async def test_get_unknown_id_returns_404(client: AsyncClient, user_a: User) -> 
 async def test_patch_updates_partial_fields(
     client: AsyncClient, db_session: AsyncSession, user_a: User
 ) -> None:
-    prompt = SavedPrompt(
-        user_id=user_a.id, name="Original", prompt_text="alpha", tags=["a"]
-    )
+    prompt = SavedPrompt(user_id=user_a.id, name="Original", prompt_text="alpha", tags=["a"])
     db_session.add(prompt)
     await db_session.flush()
 
@@ -314,9 +301,7 @@ async def test_patch_no_changes_skips_audit_row(
 ) -> None:
     """Idempotent PATCH (same values) returns 200 but does not write an audit row."""
 
-    prompt = SavedPrompt(
-        user_id=user_a.id, name="Stable", prompt_text="body", tags=["t"]
-    )
+    prompt = SavedPrompt(user_id=user_a.id, name="Stable", prompt_text="body", tags=["t"])
     db_session.add(prompt)
     await db_session.flush()
 
@@ -328,13 +313,17 @@ async def test_patch_no_changes_skips_audit_row(
     assert resp.status_code == 200, resp.text
 
     audits = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.user_id == user_a.id,
-                AuditLog.action == "saved_prompt.update",
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.user_id == user_a.id,
+                    AuditLog.action == "saved_prompt.update",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert audits == []
 
 
@@ -342,9 +331,7 @@ async def test_patch_no_changes_skips_audit_row(
 async def test_patch_writes_audit_row_on_change(
     client: AsyncClient, db_session: AsyncSession, user_a: User
 ) -> None:
-    prompt = SavedPrompt(
-        user_id=user_a.id, name="Before", prompt_text="x", tags=[]
-    )
+    prompt = SavedPrompt(user_id=user_a.id, name="Before", prompt_text="x", tags=[])
     db_session.add(prompt)
     await db_session.flush()
 
@@ -356,13 +343,17 @@ async def test_patch_writes_audit_row_on_change(
     assert resp.status_code == 200, resp.text
 
     audits = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.user_id == user_a.id,
-                AuditLog.action == "saved_prompt.update",
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.user_id == user_a.id,
+                    AuditLog.action == "saved_prompt.update",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(audits) == 1
     assert audits[0].resource_id == str(prompt.id)
     assert "changed_fields" in (audits[0].details or {})
@@ -399,33 +390,31 @@ async def test_patch_other_users_prompt_returns_404(
 async def test_delete_removes_row_and_writes_audit(
     client: AsyncClient, db_session: AsyncSession, user_a: User
 ) -> None:
-    prompt = SavedPrompt(
-        user_id=user_a.id, name="Doomed", prompt_text="x", tags=[]
-    )
+    prompt = SavedPrompt(user_id=user_a.id, name="Doomed", prompt_text="x", tags=[])
     db_session.add(prompt)
     await db_session.flush()
     prompt_id = prompt.id
 
-    resp = await client.delete(
-        f"/api/v1/saved-prompts/{prompt_id}", headers=_bearer(user_a)
-    )
+    resp = await client.delete(f"/api/v1/saved-prompts/{prompt_id}", headers=_bearer(user_a))
     assert resp.status_code == 204, resp.text
 
     persisted = (
-        await db_session.execute(
-            select(SavedPrompt).where(SavedPrompt.id == prompt_id)
-        )
+        await db_session.execute(select(SavedPrompt).where(SavedPrompt.id == prompt_id))
     ).scalar_one_or_none()
     assert persisted is None
 
     audits = (
-        await db_session.execute(
-            select(AuditLog).where(
-                AuditLog.user_id == user_a.id,
-                AuditLog.action == "saved_prompt.delete",
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.user_id == user_a.id,
+                    AuditLog.action == "saved_prompt.delete",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(audits) == 1
     assert audits[0].resource_id == str(prompt_id)
 
@@ -438,24 +427,16 @@ async def test_delete_other_users_prompt_returns_404(
     db_session.add(prompt)
     await db_session.flush()
 
-    resp = await client.delete(
-        f"/api/v1/saved-prompts/{prompt.id}", headers=_bearer(user_a)
-    )
+    resp = await client.delete(f"/api/v1/saved-prompts/{prompt.id}", headers=_bearer(user_a))
     assert resp.status_code == 404, resp.text
 
     persisted = (
-        await db_session.execute(
-            select(SavedPrompt).where(SavedPrompt.id == prompt.id)
-        )
+        await db_session.execute(select(SavedPrompt).where(SavedPrompt.id == prompt.id))
     ).scalar_one_or_none()
     assert persisted is not None  # still there
 
 
 @pytest.mark.integration
-async def test_delete_unknown_id_returns_404(
-    client: AsyncClient, user_a: User
-) -> None:
-    resp = await client.delete(
-        f"/api/v1/saved-prompts/{uuid.uuid4()}", headers=_bearer(user_a)
-    )
+async def test_delete_unknown_id_returns_404(client: AsyncClient, user_a: User) -> None:
+    resp = await client.delete(f"/api/v1/saved-prompts/{uuid.uuid4()}", headers=_bearer(user_a))
     assert resp.status_code == 404

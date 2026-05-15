@@ -142,10 +142,7 @@ def consumes_organization_profile(skill: Skill) -> bool:
     if isinstance(nested, dict):
         candidates.append(nested.get("use_organization_profile"))
 
-    for value in candidates:
-        if value is False:
-            return False
-    return True
+    return all(value is not False for value in candidates)
 
 
 def extract_required_inputs(skill: Skill) -> list[str]:
@@ -311,9 +308,7 @@ def assemble_skill_prompt(
     #    skills means it picks up the same header / formatting / input
     #    substitution treatment without a special-case codepath.
     rendered: list[_AssembledSkill] = []
-    if organization_profile is not None and any(
-        consumes_organization_profile(s) for s in skills
-    ):
+    if organization_profile is not None and any(consumes_organization_profile(s) for s in skills):
         # Profile uses no caller-supplied inputs (its content is the
         # operator-edited Markdown body); pass an empty bindings dict.
         rendered.append(_render_skill(organization_profile, inputs={}))
