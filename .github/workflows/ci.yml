@@ -63,9 +63,12 @@ jobs:
 
     # Postgres service container — api/tests/conftest.py creates a fresh
     # per-run database from this connection (see DATABASE_URL below).
+    # Image matches docker-compose.yml: pgvector/pgvector:pg16 carries the
+    # pgvector extension binary that migrations require (CREATE EXTENSION
+    # IF NOT EXISTS vector). Plain postgres:16-alpine omits it.
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: lq_ai
           POSTGRES_PASSWORD: lq_ai
