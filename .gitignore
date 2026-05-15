@@ -180,6 +180,11 @@ issues-staging/
 docs/PRD_Addendum_Engineering_Discipline.md
 docs/LaunchPositioning_TwoAxesOfTrust.md
 
+# Internal planning artifacts (audit reports, foundation-readiness
+# analyses, backlog inventories produced by `.planning/` workflows).
+# These are working notes by definition — never published.
+.planning/
+
 # ---------- Temporary / scratch ----------
 tmp/
 temp/

@@ -243,7 +243,9 @@ class TierPolicyPatch(BaseModel):
 
 
 @router.patch("/tier-config")
-async def patch_tier_config(request: Request, body: TierPolicyPatch) -> dict[str, Any]:
+async def patch_tier_config(
+    request: Request, body: TierPolicyPatch
+) -> dict[str, Any] | JSONResponse:
     """Update the operator's ``tier_policy`` block (Wave B).
 
     Partial update — only supplied fields move. Writes through to
@@ -262,7 +264,7 @@ async def patch_tier_config(request: Request, body: TierPolicyPatch) -> dict[str
         return _gateway_error(
             code="invalid_tier_policy",
             message=str(exc),
-            status_code=exc.http_status,
+            http_status=exc.http_status,
         )
     return {"tier_policy": updated}
 

@@ -675,10 +675,12 @@ async def test_list_kb_files_excludes_soft_deleted(
     db_session.add_all([kb, keep, drop])
     await db_session.flush()
 
-    db_session.add_all([
-        KnowledgeBaseFile(kb_id=kb.id, file_id=keep.id),
-        KnowledgeBaseFile(kb_id=kb.id, file_id=drop.id),
-    ])
+    db_session.add_all(
+        [
+            KnowledgeBaseFile(kb_id=kb.id, file_id=keep.id),
+            KnowledgeBaseFile(kb_id=kb.id, file_id=drop.id),
+        ]
+    )
     drop.deleted_at = datetime.now(tz=UTC)
     await db_session.flush()
 
