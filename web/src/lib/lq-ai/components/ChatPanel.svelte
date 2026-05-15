@@ -840,7 +840,7 @@
 	$: enhanceButtonAriaLabel = enhanceIsRefine ? 'Refine prompt' : 'Enhance prompt';
 </script>
 
-<div class="flex flex-1 overflow-hidden" data-testid="lq-ai-chat-shell">
+<div class="flex flex-1 h-full min-h-0 overflow-hidden" data-testid="lq-ai-chat-shell">
 	<ChatSidebar
 		groups={filteredGroups}
 		activeChatId={activeChat?.id ?? null}
