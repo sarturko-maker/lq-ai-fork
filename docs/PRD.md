@@ -31,15 +31,15 @@
 
 ### 1.1 Vision
 
-LQ.AI is an open-source AI platform purpose-built for in-house legal teams. It delivers the core capabilities of commercial in-house legal AI products — fast, accurate contract drafting and review, verifiable citations, reusable workflow skills, playbook-driven contract analysis, and a Microsoft Word integration — as a fully self-hostable system that runs on a laptop, an internal server, or a cloud VM.
+LQ.AI is an open-source AI platform purpose-built for legal teams. It delivers the core capabilities of commercial legal AI products — fast, accurate contract drafting and review, verifiable citations, reusable workflow skills, playbook-driven contract analysis, and a Microsoft Word integration — as a fully self-hostable system that runs on a laptop, an internal server, or a cloud VM.
 
-The project's reason for existing is simple: in-house legal teams should not have to choose between AI assistance and data sovereignty. Every other capable tool in this category is a closed-source SaaS that requires sending privileged information to a third-party vendor. LQ.AI runs in the customer's environment, with the customer's keys, against the customer's choice of model — including fully air-gapped deployments using local inference.
+The project's reason for existing is simple: legal teams should not have to choose between AI assistance and data sovereignty. Every other capable tool in this category is a closed-source SaaS that requires sending privileged information to a third-party vendor. LQ.AI runs in the customer's environment, with the customer's keys, against the customer's choice of model — including fully air-gapped deployments using local inference.
 
 The longer-term ambition extends beyond the core capability set. Over time, LQ.AI is intended to evolve from a tool the user reaches for into a workflow-aware context layer that integrates with the email, calendar, task systems, and document stores the user already lives in — surfacing the right matter at the right moment, with rationale, with one-click actions, with full transparency about what the system is doing on the user's behalf. That evolution is forward-looking and out of scope for v1; the M5+ Forward-Looking Roadmap (§8.5) names the trajectory so that v1 architectural choices leave room for it rather than painting the project into a corner.
 
 ### 1.2 Positioning
 
-> **LQ.AI** — open-source AI for in-house legal teams. Bring your own keys, run it where you want, own your data.
+> **LQ.AI** — open-source AI for legal teams. Bring your own keys, run it where you want, own your data.
 
 The product positions against three categories:
 
@@ -1630,7 +1630,7 @@ Open source is therefore not a distribution choice. It is a fitness-for-purpose 
 This philosophy carries operational consequences worth naming explicitly:
 
 - **Substantive contributions are welcome and credited.** Skills, playbooks, jurisdictional adaptations, and verification heuristics contributed by practicing lawyers carry the same weight in the project as code contributed by engineers. Both are work product. Both deserve attribution.
-- **No "open core" gating.** Features useful to in-house legal teams are in the open-source release. We will not move features behind a paid offering as the project matures. (LegalQuants may build commercial *services* — hosted deployments, custom skill authoring, training, support — but the software itself stays whole.)
+- **No "open core" gating.** Features useful to legal teams are in the open-source release. We will not move features behind a paid offering as the project matures. (LegalQuants may build commercial *services* — hosted deployments, custom skill authoring, training, support — but the software itself stays whole.)
 - **Forks are encouraged, not resisted.** If a customer or a community wants to build a derivative product that incorporates their proprietary improvements, the Apache 2.0 license permits it. We treat that as ecosystem health, not competition.
 - **Skills are the canonical artifact of value.** When the project produces a wrong answer, the answer to "why" is almost always in a SKILL.md. Improving LQ.AI is mostly improving skills, which is mostly within reach of any practicing lawyer with a few hours and a clear view of what the right answer should have been.
 
@@ -1648,13 +1648,13 @@ PyMuPDF (AGPL) is used server-side only and not redistributed as a library; the 
 
 - **LQ.AI** is the project name, descriptive enough that strong trademark protection is unlikely.
 - **LegalQuants** is the protectable mark; remains LegalQuants' property.
-- Tagline: *"LQ.AI — open-source AI for in-house legal teams, by LegalQuants."*
+- Tagline: *"LQ.AI — open-source AI for legal teams, by LegalQuants."*
 
 ### 7.4 Governance
 
 - **Initial model: BDFL.** Kevin Keller is the initial maintainer.
 - LegalQuants stewards the project (owns the GitHub org, controls trademark, employs maintainer).
-- Documented commitment to community contribution: "LQ.AI welcomes contributions from any in-house counsel, legal-ops practitioner, or engineer who wants to advance open legal AI."
+- Documented commitment to community contribution: "LQ.AI welcomes contributions from any lawyer, legal-ops practitioner, or engineer who wants to advance open legal AI."
 - Path to broader governance documented but not implemented in v1: as the project matures, consider transition to a maintainer team and formal governance (see CNCF or Apache Software Foundation models).
 
 ### 7.5 Contribution Model
@@ -1789,7 +1789,7 @@ Milestone-based delivery. Each milestone is a public release.
 
 ### M3 — Playbooks, Word Add-In, Tabular Review, and Slack/Teams (~8 weeks after M2)
 
-**Theme:** Feature parity with commercial in-house legal AI; surface coverage beyond the web.
+**Theme:** Feature parity with commercial legal AI; surface coverage beyond the web.
 
 **Deliverables:**
 - Playbook schema and execution engine (LangGraph workflow).
@@ -2096,7 +2096,7 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 
 **Priority:** P3 · **Effort:** L
 
-**Context:** Many in-house teams' real workflow includes a law firm partner. Legora's Portal addresses this. The PRD's positioning is "open-source AI for in-house legal teams" — explicitly not firm-side — but the firm/in-house collaboration boundary is a real workflow.
+**Context:** Many legal teams' real workflow includes a law firm partner. Legora's Portal addresses this. The PRD's positioning is "open-source AI for legal teams" — covering in-house, firm, and solo practitioners — but the firm/in-house collaboration boundary is a real workflow.
 
 **Specific recommendation:** Treat as an open question for the project's future direction, not a v1 commitment. The simplest path is per-user external-collaborator licensing within an LQ.AI deployment (the firm's lawyer is granted scoped access to a Project, per §3.11). The harder path is a federation protocol between two LQ.AI deployments.
 

@@ -1,15 +1,15 @@
 # LQ.AI
 
-> **Open-source AI for in-house legal teams. Bring your own keys, run it where you want, own your data.**
+> **Open-source AI for legal teams. Bring your own keys, run it where you want, own your data.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![PRD](https://img.shields.io/badge/PRD-v0.2-green.svg)](docs/PRD.md)
 [![Status](https://img.shields.io/badge/Status-Pre--Release-orange.svg)](#project-status)
 [![SLSA 3](https://img.shields.io/badge/SLSA-Level%203-green)](https://slsa.dev) [![Security Policy](https://img.shields.io/badge/Security-Policy-blue)](./SECURITY.md)
 
-LQ.AI is a self-hosted AI platform purpose-built for in-house legal teams. It delivers fast contract drafting and review, verifiable citations, reusable workflow skills, playbook-driven contract analysis, a Microsoft Word integration, and a curated library of starter skills for the everyday work in-house counsel actually do — running on a laptop, an internal server, or a cloud VM, against the customer's choice of model, with zero license fees.
+LQ.AI is a self-hosted AI platform purpose-built for legal teams. It delivers fast contract drafting and review, verifiable citations, reusable workflow skills, playbook-driven contract analysis, a Microsoft Word integration, and a curated library of starter skills for the everyday work lawyers actually do — running on a laptop, an internal server, or a cloud VM, against the customer's choice of model, with zero license fees.
 
-The project's reason for existing is simple: **in-house legal teams should not have to choose between AI assistance and data sovereignty.** Every other capable tool in this category is a closed-source SaaS that requires sending privileged information to a third-party vendor. LQ.AI runs in your environment, with your keys, against your choice of model — including fully air-gapped deployments using local inference.
+The project's reason for existing is simple: **legal teams should not have to choose between AI assistance and data sovereignty.** Every other capable tool in this category is a closed-source SaaS that requires sending privileged information to a third-party vendor. LQ.AI runs in your environment, with your keys, against your choice of model — including fully air-gapped deployments using local inference.
 
 ---
 
@@ -33,7 +33,7 @@ The trust model for a self-hosted, open-source legal AI product is structurally 
 
 ## What it does
 
-LQ.AI ships with a curated set of capabilities calibrated to in-house counsel work. The capability set in v1 (M1–M4):
+LQ.AI ships with a curated set of capabilities calibrated to legal work. The capability set in v1 (M1–M4):
 
 **Conversational core with persistent history.** Multi-turn chat organized in a sidebar, with skills and files attached per chat. Search across all chat history. Streaming responses with markdown rendering. Export to Markdown, plain text, or DOCX.
 
@@ -73,7 +73,7 @@ The full capability specification is in [PRD §3](docs/PRD.md#3-capability-speci
 
 ## Starter skills (ship with M1)
 
-Ten starter skills ship with the M1 release, calibrated to the everyday work an in-house lawyer actually does:
+Ten starter skills ship with the M1 release, calibrated to the everyday work lawyers actually do:
 
 | # | Skill | What it does |
 |---|---|---|
@@ -345,7 +345,7 @@ Accessibility findings are treated as defects, not nice-to-haves. If you find on
 |---|---|---|
 | M1 — Foundation | Working self-hostable release with 10 starter skills, Projects, Organization Profile, Inference Tier Awareness, Compliance Alignment Pack, Code & Supply-Chain Transparency, MFA option, per-user export/delete | ~6 weeks |
 | M2 — Citation Engine and Anonymization | Verifiable citations with character-level fidelity; Anonymization Layer in the Gateway | ~6 weeks after M1 |
-| M3 — Playbooks, Word Add-In, Tabular Review, Slack/Teams | Feature parity with commercial in-house legal AI; surface coverage beyond the web | ~8 weeks after M2 |
+| M3 — Playbooks, Word Add-In, Tabular Review, Slack/Teams | Feature parity with commercial legal AI; surface coverage beyond the web | ~8 weeks after M2 |
 | M4 — Autonomous Layer and Contract Repository | Background agents, watches, scheduled tasks; contract relationship graph | ~8 weeks after M3 |
 | M5–M7 — Forward-Looking Workflow Intelligence | Community-driven; not committed. MCP-client subsystem operationalized; Signal Aggregation Service; Today view with prioritization; agent execution framework with human-in-the-loop guardrails. | TBD |
 
@@ -390,11 +390,11 @@ PyMuPDF (AGPL-3.0) is used server-side only and not redistributed as a library; 
 
 **Initial model: BDFL.** Kevin Keller is the initial maintainer. LegalQuants stewards the project: owns the GitHub org, controls the trademark, employs the maintainer.
 
-The project's commitment to community contribution: *"LQ.AI welcomes contributions from any in-house counsel, legal-ops practitioner, or engineer who wants to advance open legal AI."*
+The project's commitment to community contribution: *"LQ.AI welcomes contributions from any lawyer, legal-ops practitioner, or engineer who wants to advance open legal AI."*
 
 Path to broader governance is documented but not implemented in v1: as the project matures, transition to a maintainer team and formal governance (CNCF or Apache Software Foundation models). See [PRD §7.4 Governance](docs/PRD.md#74-governance).
 
-**No "open core" gating.** Features useful to in-house legal teams are in the open-source release. We will not move features behind a paid offering as the project matures. (LegalQuants may build commercial *services* — hosted deployments, custom skill authoring, training, support — but the software itself stays whole. See [PRD §7.1 Project Philosophy](docs/PRD.md#71-project-philosophy).)
+**No "open core" gating.** Features useful to legal teams are in the open-source release. We will not move features behind a paid offering as the project matures. (LegalQuants may build commercial *services* — hosted deployments, custom skill authoring, training, support — but the software itself stays whole. See [PRD §7.1 Project Philosophy](docs/PRD.md#71-project-philosophy).)
 
 ---
 

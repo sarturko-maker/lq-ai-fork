@@ -242,7 +242,7 @@ class TierPolicyPatch(BaseModel):
     warn_on_tiers: list[int] | None = Field(default=None)
 
 
-@router.patch("/tier-config")
+@router.patch("/tier-config", response_model=None)
 async def patch_tier_config(
     request: Request, body: TierPolicyPatch
 ) -> dict[str, Any] | JSONResponse:
