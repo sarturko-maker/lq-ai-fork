@@ -29,7 +29,7 @@ floor applies and the request is never refused on this axis.
 
 Worked example: a project marked ``privileged: true`` defaults to
 ``minimum_inference_tier: 2``. The gateway allows Tier 1 (stronger) and
-Tier 2 (the floor), and refuses Tier 3–5 (weaker than the floor).
+Tier 2 (the floor), and refuses Tier 3-5 (weaker than the floor).
 
 When the resolved routed tier is weaker than the effective floor (i.e.,
 ``resolved_tier > floor.value``), the gateway responds **HTTP 403** with
@@ -58,7 +58,7 @@ class TierFloor:
 
     Under PRD §1.5.2, a lower tier number means stronger security.
     A floor of ``value=2`` allows Tier 1 (stronger than the floor) and
-    Tier 2 (the floor itself) and refuses Tier 3–5 (weaker than the
+    Tier 2 (the floor itself) and refuses Tier 3-5 (weaker than the
     floor).  The gateway refuses a request when
     ``resolved_tier > floor.value`` — i.e., the routed tier is weaker
     (higher-numbered) than the declared floor.
