@@ -465,7 +465,7 @@ async def test_lq_ai_inline_skills_over_cap_returns_4xx(
     """Wave D.2 Task 3.0 (I1) — ``lq_ai_inline_skills`` list is capped at 16.
 
     Regression for the I1 finding: without a cap, a single chat
-    completion could attach thousands of inline refs × 64 KB each and
+    completion could attach thousands of inline refs x 64 KB each and
     force the gateway to assemble a multi-megabyte system prompt
     (workload-multiplication DoS).
     """

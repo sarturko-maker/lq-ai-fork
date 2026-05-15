@@ -140,7 +140,7 @@ class ChatCompletionRequest(BaseModel):
     :attr:`gateway.app.providers.openai_schema.ChatCompletionRequest.lq_ai_inline_skills`.
     Empty list (default) preserves pre-D.2 wire shape exactly. Capped at
     16 entries (I1) to bound the workload-multiplication DoS surface —
-    each entry can carry up to 64 KB of body content × catalogue
+    each entry can carry up to 64 KB of body content x catalogue
     round-trips for slug entries on the parallel list."""
 
     # --- C3 (chat / message identity for routing-log correlation) ------------

@@ -375,7 +375,7 @@ class MessageCreateRequest(BaseModel):
     ``lq_ai_inline_skills`` so the gateway can assemble them without a
     catalogue fetch. Capped at :data:`ATTACHED_SKILLS_MAX_LEN` entries
     to bound workload multiplication (I1 — a single message attaching
-    thousands of inline refs × 32 KB each is a DoS vector)."""
+    thousands of inline refs x 32 KB each is a DoS vector)."""
 
     skill_inputs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """C2: per-skill input bindings, keyed by skill name. Forwarded as
