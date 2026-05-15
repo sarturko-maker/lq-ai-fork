@@ -1,0 +1,3 @@
+[submodule "skills/community"]
+	path = skills/community
+	url = https://github.com/LegalQuants/lq-skills.git
