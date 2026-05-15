@@ -38,6 +38,45 @@ from app.skills.schema import (
 )
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
+
+class _LoaderWarningCapture:
+    """Direct-handler replacement for ``caplog`` on the loader logger.
+
+    ``pytest``'s ``caplog`` fixture is order-dependent in this suite —
+    earlier tests trigger the FastAPI lifespan, which calls
+    ``logging.basicConfig()`` in ``app/main.py``. Under pytest-asyncio's
+    session-scoped loop, that interaction can mute caplog for subsequent
+    tests in the run. Attaching a handler directly to the loader logger
+    bypasses the contention entirely.
+    """
+
+    def __init__(self) -> None:
+        self.records: list[logging.LogRecord] = []
+        self._logger = logging.getLogger("app.skills.loader")
+        self._handler = logging.Handler(level=logging.WARNING)
+        # ``emit`` is the spelled-out hook; routing it to ``records.append``
+        # is simpler than subclassing and avoids type-checker noise on
+        # the ``handle`` override path.
+        self._handler.emit = self.records.append  # type: ignore[method-assign]
+        self._saved_level = self._logger.level
+        self._saved_propagate = self._logger.propagate
+        self._logger.setLevel(logging.WARNING)
+        self._logger.propagate = True
+        self._logger.addHandler(self._handler)
+
+    def detach(self) -> None:
+        self._logger.removeHandler(self._handler)
+        self._logger.setLevel(self._saved_level)
+        self._logger.propagate = self._saved_propagate
+
+
+def _capture_loader_warnings() -> _LoaderWarningCapture:
+    """Install a temporary handler that captures WARNING+ records on the
+    skill-loader logger. Caller must invoke ``.detach()`` to clean up."""
+    return _LoaderWarningCapture()
+
+
 GOOD_FIXTURES = FIXTURES_DIR / "skills"
 MIXED_FIXTURES = FIXTURES_DIR / "skills_with_bad"
 REAL_SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
@@ -185,26 +224,28 @@ def test_load_registry_happy_path() -> None:
 
 
 @pytest.mark.unit
-def test_load_registry_skips_malformed_skills_and_warns(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_load_registry_skips_malformed_skills_and_warns() -> None:
     """One malformed sibling does not break the rest of the registry."""
 
-    # Force the loader logger to propagate + reach caplog regardless of
-    # what earlier tests in the session may have done to logging config.
-    # caplog's `logger=` filter argument silently no-ops if the named
-    # logger has been detached from the root in the same process; pinning
-    # propagation + level explicitly keeps this test order-independent.
-    loader_logger = logging.getLogger("app.skills.loader")
-    loader_logger.propagate = True
-    with caplog.at_level(logging.WARNING):
+    # pytest's `caplog` fixture is order-dependent in this suite: earlier
+    # tests trigger the FastAPI lifespan, which calls
+    # ``logging.basicConfig()`` in ``app/main.py``. Once basicConfig
+    # installs a root handler with a non-WARNING level, ``caplog.at_level``
+    # cannot reliably re-route the loader's warnings into ``caplog.records``
+    # under pytest-asyncio's session-scoped loop. Bypass caplog: attach a
+    # local handler directly to the loader logger so the test is robust
+    # regardless of full-suite execution order.
+    records = _capture_loader_warnings()
+    try:
         registry = load_registry(MIXED_FIXTURES)
+    finally:
+        records.detach()
 
     # Only the well-formed `good-skill` makes it into the registry.
     assert registry.names() == ["good-skill"]
 
     # Each malformed fixture surfaces a WARNING line.
-    messages = " | ".join(rec.getMessage() for rec in caplog.records)
+    messages = " | ".join(rec.getMessage() for rec in records.records)
     assert "missing-name" in messages
     assert "no-frontmatter" in messages
     assert "bad-yaml" in messages
@@ -222,20 +263,18 @@ def test_load_registry_empty_dir_returns_empty_registry(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_load_registry_nonexistent_dir_returns_empty_with_warning(
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Pointing at a nonexistent path produces an empty registry + WARNING."""
 
     target = tmp_path / "does-not-exist"
-    # Force propagation + root level so caplog captures regardless of
-    # session-order logging mutations (see notes on the malformed-skills
-    # test above).
-    loader_logger = logging.getLogger("app.skills.loader")
-    loader_logger.propagate = True
-    with caplog.at_level(logging.WARNING):
+    # caplog bypass — see notes on test_load_registry_skips_malformed_skills_and_warns.
+    records = _capture_loader_warnings()
+    try:
         registry = load_registry(target)
+    finally:
+        records.detach()
     assert registry.names() == []
-    assert any("does not exist" in rec.getMessage() for rec in caplog.records)
+    assert any("does not exist" in rec.getMessage() for rec in records.records)
 
 
 @pytest.mark.unit
