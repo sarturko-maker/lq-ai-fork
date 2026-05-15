@@ -144,7 +144,7 @@ async def sample_refusal_message(db_session: AsyncSession, admin_user: User) -> 
         chat_id=chat.id,
         role="assistant",
         kind="refusal",
-        content="Refused: routed tier 4 is below the project floor of tier 3.",
+        content="Refused: routed tier 4 is weaker than the project floor of tier 3.",
         applied_skills=[],
         error_code="tier_below_minimum",
         created_at=base,
