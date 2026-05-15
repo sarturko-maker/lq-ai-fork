@@ -59,7 +59,7 @@ describe('ensureSandbox', () => {
 		expect(result.id).toBe('proj-sandbox-001');
 		expect(result.is_sandbox).toBe(true);
 
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toContain('/api/v1/projects/sandbox/ensure');
 		expect(init.method).toBe('POST');
 	});

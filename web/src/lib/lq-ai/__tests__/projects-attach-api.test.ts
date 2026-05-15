@@ -59,7 +59,7 @@ describe('projects attach/detach API', () => {
 		expect(result.attached_file_ids).toContain('file-002');
 
 		// Check request shape
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toContain('/projects/proj-abc123/files');
 		expect(init.method).toBe('POST');
 		const body = JSON.parse(init.body as string);
@@ -77,7 +77,7 @@ describe('projects attach/detach API', () => {
 		expect(result.attached_file_ids).toHaveLength(0);
 
 		// Check request shape
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toContain('/projects/proj-abc123/files/file-001');
 		expect(init.method).toBe('DELETE');
 	});
@@ -95,7 +95,7 @@ describe('projects attach/detach API', () => {
 		expect(result.id).toBe('proj-abc123');
 		expect(result.attached_skill_names).toContain('msa-review');
 
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toContain('/projects/proj-abc123/skills');
 		expect(init.method).toBe('POST');
 		const body = JSON.parse(init.body as string);
@@ -114,7 +114,7 @@ describe('projects attach/detach API', () => {
 		expect(result.id).toBe('proj-abc123');
 		expect(result.attached_skill_names).toHaveLength(0);
 
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		// encodeURIComponent('team/nda-review') === 'team%2Fnda-review'
 		expect(url).toContain('/projects/proj-abc123/skills/team%2Fnda-review');
 		expect(init.method).toBe('DELETE');

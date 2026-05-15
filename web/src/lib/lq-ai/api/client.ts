@@ -38,17 +38,17 @@ const browser =
  * it into the build via the PUBLIC_LQ_AI_API_BASE_URL build arg passed
  * through docker-compose.yml.
  */
-// SvelteKit's canonical static-public env import. Vite replaces this
-// reference with a string literal at build time. The web Dockerfile
-// writes PUBLIC_LQ_AI_API_BASE_URL into `.env` from the docker-compose
-// build arg before `npm run build` runs.
+// SvelteKit's dynamic-public env import. Unlike $env/static/public, the
+// dynamic variant does not require the variable to be declared at build time,
+// so CI svelte-check passes even when no .env is present. At runtime Vite
+// (and the web Dockerfile build arg) still injects the value correctly.
 //
 // Production: PUBLIC_LQ_AI_API_BASE_URL is unset → defaults to /api/v1
 // (same-origin behind a reverse proxy). Local Compose dev: set via
 // .env to http://localhost:8000/api/v1.
-import { PUBLIC_LQ_AI_API_BASE_URL } from '$env/static/public';
+import { env } from '$env/dynamic/public';
 
-export const LQ_AI_API_BASE_URL: string = PUBLIC_LQ_AI_API_BASE_URL || '/api/v1';
+export const LQ_AI_API_BASE_URL: string = env.PUBLIC_LQ_AI_API_BASE_URL || '/api/v1';
 
 export class LQAIApiError extends Error {
 	readonly status: number;

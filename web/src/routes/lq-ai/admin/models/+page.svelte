@@ -233,14 +233,14 @@
 				serverError = null;
 			}}
 		/>
-	{:else if editing && editing !== 'new'}
+	{:else if editing && typeof editing !== 'string'}
 		<AliasForm
 			alias={editing}
 			{availableProviders}
 			{providerModels}
 			submitting={busy}
 			{serverError}
-			onSubmit={(p) => editing && editing !== 'new' && handleUpdate(editing, p)}
+			onSubmit={(p) => editing && typeof editing !== 'string' && handleUpdate(editing, p)}
 			onCancel={() => {
 				editing = null;
 				serverError = null;

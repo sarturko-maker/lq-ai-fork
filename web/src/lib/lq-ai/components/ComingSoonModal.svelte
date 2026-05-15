@@ -13,6 +13,7 @@
     skills: 'Skills',
     knowledge: 'Knowledge',
     'saved-prompts': 'Saved Prompts',
+    learn: 'Learn',
     admin: 'Admin'
   };
 
@@ -26,8 +27,6 @@
 </script>
 
 <script lang="ts">
-  import type { TabId } from '../tabs';
-
   export let open: boolean;
   export let tabId: TabId;
   export let wave: string | undefined;

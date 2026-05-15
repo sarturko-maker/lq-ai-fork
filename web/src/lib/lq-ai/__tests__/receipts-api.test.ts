@@ -80,7 +80,7 @@ describe('receipts api', () => {
 		expect(result[1].kind).toBe('inference');
 
 		// Request shape
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toContain('/api/v1/chats/chat-c1/receipts');
 		expect(url).not.toContain('event_kinds');
 		expect(init.method).toBe('GET');
@@ -92,7 +92,7 @@ describe('receipts api', () => {
 
 		await listChatReceipts('chat-c1', ['message', 'inference']);
 
-		const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		// encodeURIComponent('message,inference') === 'message%2Cinference'
 		expect(url).toContain('/api/v1/chats/chat-c1/receipts?event_kinds=message%2Cinference');
 	});
@@ -113,7 +113,7 @@ describe('receipts api', () => {
 		expect(result.jsonl).toBe(jsonlBody);
 		expect(result.filename).toBe('chat-c1-receipts.jsonl');
 
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toContain('/api/v1/chats/chat-c1/receipts/export.jsonl');
 		expect(init.method).toBe('GET');
 		const reqHeaders = (init.headers ?? {}) as Record<string, string>;
