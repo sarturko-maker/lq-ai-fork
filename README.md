@@ -94,6 +94,23 @@ The next layer of skills is on the deferred-enhancement list and welcomes commun
 
 ---
 
+## Community skills
+
+In addition to the 10 built-in starter skills in `skills/`, LQ.AI ships with a community skill catalog via the [LegalQuants/lq-skills](https://github.com/LegalQuants/lq-skills) git submodule, mounted at `skills/community/`.
+
+- **30+ additional skills** authored by lawyer-builders across 17+ jurisdictions — covering areas like UK litigation, US state privacy law, corporate governance, statutory analysis, and more.
+- **Same open format.** Every community skill is a `SKILL.md` in the same `agentskills.io` format as the built-ins — readable, debuggable, and forkable in the application.
+- **Built-in wins on slug collision.** The 10 built-in skills always take precedence if their slug also appears in the community catalog; the community version is silently skipped (logged at INFO level for operator visibility).
+- **Attribution in the API.** Community skills carry `source: "community"` in the API response; built-ins carry `source: "built-in"`. The frontend can use this field to render an attribution badge.
+
+To update the community catalog to the latest upstream commit:
+
+```bash
+git submodule update --remote skills/community
+```
+
+---
+
 ## Quick Start
 
 **Prerequisites:** [Docker Desktop 4.x+](https://www.docker.com/products/docker-desktop) (or Docker Engine 24+ on Linux) and `git`. No other host tooling required — no Python, no Node, no language-specific runtimes. Plan for ~8 GB of free disk space and ~6 GB of RAM available to Docker.
@@ -101,10 +118,12 @@ The next layer of skills is on the deferred-enhancement list and welcomes commun
 ### Step 1 — Clone and configure
 
 ```bash
-git clone https://github.com/LegalQuants/lq-ai.git
+git clone --recurse-submodules https://github.com/LegalQuants/lq-ai.git
 cd lq-ai
 cp .env.example .env
 ```
+
+> `--recurse-submodules` pulls in the [LegalQuants/lq-skills](https://github.com/LegalQuants/lq-skills) community skills catalog (30+ skills authored by lawyer-builders across 17+ jurisdictions). If you forgot the flag, run `git submodule update --init --recursive` from inside the cloned repo.
 
 Open `.env` and set the four required secrets (the file explains each one):
 

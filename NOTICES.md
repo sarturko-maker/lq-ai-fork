@@ -19,9 +19,9 @@
 
 ## Ported Skills
 
-| Skill slug | Upstream source | License | Attribution requirement | Notes |
+| Skill scope | Upstream source | License | Attribution requirement | Notes |
 |---|---|---|---|---|
-| *(no ported skills yet)* | — | — | — | — |
+| `skills/community/**` | https://github.com/LegalQuants/lq-skills | Per-skill LICENSE in each skill folder | Authors named in SKILL.md frontmatter `author` field | Git submodule pinned to a specific commit; bump via `git submodule update --remote skills/community` |
 
 ---
 
