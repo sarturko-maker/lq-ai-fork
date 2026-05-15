@@ -27,9 +27,12 @@
 	export let availableProviders: Array<{ name: string; type: string }> = [];
 	/** Optional autocomplete map: provider → list of native models. */
 	export let providerModels: Record<string, string[]> = {};
-	export let onSubmit: (
-		next: { name: string; provider: string; model: string; fallback: AliasFallback[] }
-	) => void = () => undefined;
+	export let onSubmit: (next: {
+		name: string;
+		provider: string;
+		model: string;
+		fallback: AliasFallback[];
+	}) => void = () => undefined;
 	export let onCancel: () => void = () => undefined;
 	export let submitting: boolean = false;
 	export let serverError: string | null = null;
@@ -89,11 +92,11 @@
 </script>
 
 <form
-	class="space-y-3 p-4 border border-gray-200 dark:border-gray-700 rounded-md bg-white dark:bg-gray-900"
+	class="space-y-3 p-4 border border-gray-200 rounded-md bg-white"
 	on:submit|preventDefault={submit}
 	data-testid="lq-ai-alias-form"
 >
-	<div class="text-sm font-semibold text-gray-800 dark:text-gray-100">
+	<div class="text-sm font-semibold text-gray-800">
 		{isEdit ? `Edit alias “${alias?.name}”` : 'New alias'}
 	</div>
 
@@ -112,7 +115,7 @@
 			<input
 				id="alias-name"
 				type="text"
-				class="w-full text-sm border border-gray-300 rounded px-2 py-1 dark:bg-gray-800"
+				class="w-full text-sm border border-gray-300 rounded px-2 py-1"
 				bind:value={name}
 				placeholder="smart, fast, my-budget-alias"
 				data-testid="lq-ai-alias-form-name"
@@ -127,7 +130,7 @@
 		<label for="alias-provider" class="text-xs font-medium text-gray-600">Provider</label>
 		<select
 			id="alias-provider"
-			class="w-full text-sm border border-gray-300 rounded px-2 py-1 dark:bg-gray-800"
+			class="w-full text-sm border border-gray-300 rounded px-2 py-1"
 			bind:value={provider}
 			data-testid="lq-ai-alias-form-provider"
 		>
@@ -146,7 +149,7 @@
 		<input
 			id="alias-model"
 			type="text"
-			class="w-full text-sm border border-gray-300 rounded px-2 py-1 dark:bg-gray-800 font-mono"
+			class="w-full text-sm border border-gray-300 rounded px-2 py-1 font-mono"
 			bind:value={model}
 			placeholder="claude-sonnet-4-6, gpt-4o, llama3.1:8b"
 			list="alias-model-options"
@@ -180,7 +183,7 @@
 		{#each fallbacks as fb, idx}
 			<div class="flex items-center gap-2 mt-2" data-testid="lq-ai-alias-form-fallback-row">
 				<select
-					class="flex-1 text-xs border border-gray-300 rounded px-2 py-1 dark:bg-gray-800"
+					class="flex-1 text-xs border border-gray-300 rounded px-2 py-1"
 					bind:value={fb.provider}
 				>
 					<option value="">— provider —</option>
@@ -190,7 +193,7 @@
 				</select>
 				<input
 					type="text"
-					class="flex-1 text-xs border border-gray-300 rounded px-2 py-1 dark:bg-gray-800 font-mono"
+					class="flex-1 text-xs border border-gray-300 rounded px-2 py-1 font-mono"
 					bind:value={fb.model}
 					placeholder="model-id"
 				/>
