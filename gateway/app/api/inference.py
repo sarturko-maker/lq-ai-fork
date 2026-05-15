@@ -562,10 +562,11 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
         return _gateway_error(
             code="tier_below_minimum",
             message=(
-                f"Request requires Inference Tier {floor.value} "
+                f"Request requires Inference Tier {floor.value} or stronger "
                 f"(source: {floor.source}), but the routed model resolves "
-                f"to tier {primary.routed_inference_tier}. Pick a model "
-                "with an equal or stricter tier, or relax the floor."
+                f"to tier {primary.routed_inference_tier}, which is weaker. "
+                "Pick a model with an equal or lower-numbered (stronger) tier, "
+                "or relax the floor."
             ),
             http_status=status.HTTP_403_FORBIDDEN,
             details={
