@@ -25,11 +25,11 @@ B1 bearer-token check plus the B2 must-change-password gate.
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -723,13 +723,39 @@ def _inputs_from_user_skill_row(row: UserSkill) -> SkillInputs:
     return extract_inputs(row.slug, frontmatter)
 
 
+class SkillForkBody(BaseModel):
+    """Request body for ``POST /api/v1/skills/{skill_name}/fork``.
+
+    `extra="forbid"` rejects unknown fields with a 422 — so a typo like
+    ``{"name": "x"}`` (instead of ``new_name``) surfaces as a clear
+    validation error instead of silently falling back to the source
+    slug and 409ing on a collision the user never asked for.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    new_name: str | None = Field(
+        default=None,
+        description=(
+            "Slug for the forked user-scope skill. Omit to shadow the "
+            "source slug (same name; the user-scope copy wins on lookup)."
+        ),
+    )
+    scope: Literal["user", "team"] = Field(
+        default="user",
+        description=(
+            "Target scope. M1 only supports 'user'; 'team' returns 400 until D8.1 (ADR 0012)."
+        ),
+    )
+
+
 @router.post("/{skill_name}/fork", status_code=status.HTTP_201_CREATED)
 async def fork_skill(
     request: Request,
     skill_name: str,
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-    payload: dict[str, Any] | None = None,
+    payload: SkillForkBody | None = None,
 ) -> JSONResponse:
     """Fork a filesystem-canonical built-in into a new user-scope row.
 
@@ -741,10 +767,14 @@ async def fork_skill(
     409. If ``new_name`` is omitted or equals the source slug, the new
     row becomes a same-slug shadow — which is the expected "I want my
     own version of nda-review" UX.
+
+    Unknown body fields (e.g., ``{"name": "..."}`` instead of
+    ``{"new_name": "..."}``) are rejected with a 422 rather than
+    silently dropped — see :class:`SkillForkBody`.
     """
 
-    body = dict(payload or {})
-    scope = body.get("scope", "user")
+    body = payload or SkillForkBody()
+    scope = body.scope
     if scope == "team":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -752,11 +782,6 @@ async def fork_skill(
                 "team-scope skills are deferred to D8.1 (ADR 0012 §Out of scope). "
                 "Use scope='user' to fork into your personal scope."
             ),
-        )
-    if scope != "user":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="scope must be 'user' (team scope is deferred to D8.1)",
         )
 
     holder = _registry(request)
@@ -773,7 +798,7 @@ async def fork_skill(
     # without duplicating the bounds constants.
     from app.api.user_skills import _validate_slug, _validate_tags
 
-    new_slug = body.get("new_name") or source.name
+    new_slug = body.new_name or source.name
     new_slug = _validate_slug(new_slug)
     forked_tags = _validate_tags(list(source.tags or []))
 

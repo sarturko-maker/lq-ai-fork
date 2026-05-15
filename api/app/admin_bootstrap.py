@@ -98,6 +98,14 @@ async def ensure_first_run_admin(db: AsyncSession) -> str | None:
     # tell whether THIS call inserted; if it didn't, another worker won and
     # we discard the password we generated (it was never persisted) and
     # treat it as a no-op.
+    # `role="admin"` is set in addition to `is_admin=True` to keep the two
+    # admin signals in sync. `is_admin` is the legacy boolean (per the
+    # User model's history); `role` was introduced by migration 0017
+    # (`alembic/versions/0017_user_role.py`) and is the canonical field
+    # the frontend reads. If we only set `is_admin=True`, the user is an
+    # admin to the authorization layer but reports `role="member"` to the
+    # UI — subtle inconsistency that produces wrong role badges and
+    # conditional-nav decisions. Always seed both.
     stmt = (
         pg_insert(User)
         .values(
@@ -105,6 +113,7 @@ async def ensure_first_run_admin(db: AsyncSession) -> str | None:
             display_name="LQ.AI Administrator",
             hashed_password=hashed,
             is_admin=True,
+            role="admin",
             mfa_enabled=False,
             must_change_password=True,
         )
