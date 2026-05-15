@@ -16,7 +16,6 @@ human-attestation pipeline's domain (per CLAUDE.md and
 
 from __future__ import annotations
 
-import logging
 import signal
 from pathlib import Path
 
@@ -40,41 +39,39 @@ from app.skills.schema import (
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 
-class _LoaderWarningCapture:
-    """Direct-handler replacement for ``caplog`` on the loader logger.
+def _capture_loader_warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Capture WARNING calls on the skill-loader logger by monkey-patching
+    the module's ``log.warning`` method directly.
 
-    ``pytest``'s ``caplog`` fixture is order-dependent in this suite —
-    earlier tests trigger the FastAPI lifespan, which calls
-    ``logging.basicConfig()`` in ``app/main.py``. Under pytest-asyncio's
-    session-scoped loop, that interaction can mute caplog for subsequent
-    tests in the run. Attaching a handler directly to the loader logger
-    bypasses the contention entirely.
+    Why not ``caplog``: the FastAPI lifespan calls ``logging.basicConfig()``
+    in earlier suite tests (``app/main.py``); under pytest-asyncio's
+    session-scoped loop, that interaction has empirically muted caplog
+    in CI even when ``propagate=True`` and the logger's level is set
+    explicitly (see commits 50c631f and 8d1fff5 — both attempts failed
+    on CI while passing in isolation). Monkey-patching the bound
+    ``warning`` method bypasses every layer of the logging stack, so the
+    test is robust regardless of session-order state.
+
+    Returns the rendered-message list; the caller asserts on its
+    contents. ``monkeypatch`` undoes the patch at test teardown.
     """
+    import app.skills.loader as loader_mod
 
-    def __init__(self) -> None:
-        self.records: list[logging.LogRecord] = []
-        self._logger = logging.getLogger("app.skills.loader")
-        self._handler = logging.Handler(level=logging.WARNING)
-        # ``emit`` is the spelled-out hook; routing it to ``records.append``
-        # is simpler than subclassing and avoids type-checker noise on
-        # the ``handle`` override path.
-        self._handler.emit = self.records.append  # type: ignore[method-assign]
-        self._saved_level = self._logger.level
-        self._saved_propagate = self._logger.propagate
-        self._logger.setLevel(logging.WARNING)
-        self._logger.propagate = True
-        self._logger.addHandler(self._handler)
+    captured: list[str] = []
+    original_warning = loader_mod.log.warning
 
-    def detach(self) -> None:
-        self._logger.removeHandler(self._handler)
-        self._logger.setLevel(self._saved_level)
-        self._logger.propagate = self._saved_propagate
+    def _capture(msg: object, *args: object, **kwargs: object) -> None:
+        # Render the format string with the printf-style args the loader
+        # passes, so the test can grep for substrings like "missing-name".
+        try:
+            rendered = msg % args if args else str(msg)
+        except (TypeError, ValueError):
+            rendered = str(msg)
+        captured.append(rendered)
+        original_warning(msg, *args, **kwargs)
 
-
-def _capture_loader_warnings() -> _LoaderWarningCapture:
-    """Install a temporary handler that captures WARNING+ records on the
-    skill-loader logger. Caller must invoke ``.detach()`` to clean up."""
-    return _LoaderWarningCapture()
+    monkeypatch.setattr(loader_mod.log, "warning", _capture)
+    return captured
 
 
 GOOD_FIXTURES = FIXTURES_DIR / "skills"
@@ -224,28 +221,19 @@ def test_load_registry_happy_path() -> None:
 
 
 @pytest.mark.unit
-def test_load_registry_skips_malformed_skills_and_warns() -> None:
+def test_load_registry_skips_malformed_skills_and_warns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """One malformed sibling does not break the rest of the registry."""
 
-    # pytest's `caplog` fixture is order-dependent in this suite: earlier
-    # tests trigger the FastAPI lifespan, which calls
-    # ``logging.basicConfig()`` in ``app/main.py``. Once basicConfig
-    # installs a root handler with a non-WARNING level, ``caplog.at_level``
-    # cannot reliably re-route the loader's warnings into ``caplog.records``
-    # under pytest-asyncio's session-scoped loop. Bypass caplog: attach a
-    # local handler directly to the loader logger so the test is robust
-    # regardless of full-suite execution order.
-    records = _capture_loader_warnings()
-    try:
-        registry = load_registry(MIXED_FIXTURES)
-    finally:
-        records.detach()
+    captured = _capture_loader_warnings(monkeypatch)
+    registry = load_registry(MIXED_FIXTURES)
 
     # Only the well-formed `good-skill` makes it into the registry.
     assert registry.names() == ["good-skill"]
 
     # Each malformed fixture surfaces a WARNING line.
-    messages = " | ".join(rec.getMessage() for rec in records.records)
+    messages = " | ".join(captured)
     assert "missing-name" in messages
     assert "no-frontmatter" in messages
     assert "bad-yaml" in messages
@@ -263,18 +251,15 @@ def test_load_registry_empty_dir_returns_empty_registry(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_load_registry_nonexistent_dir_returns_empty_with_warning(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Pointing at a nonexistent path produces an empty registry + WARNING."""
 
     target = tmp_path / "does-not-exist"
-    # caplog bypass — see notes on test_load_registry_skips_malformed_skills_and_warns.
-    records = _capture_loader_warnings()
-    try:
-        registry = load_registry(target)
-    finally:
-        records.detach()
+    captured = _capture_loader_warnings(monkeypatch)
+    registry = load_registry(target)
     assert registry.names() == []
-    assert any("does not exist" in rec.getMessage() for rec in records.records)
+    assert any("does not exist" in msg for msg in captured)
 
 
 @pytest.mark.unit
