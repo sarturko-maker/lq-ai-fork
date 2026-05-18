@@ -61,6 +61,13 @@ from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
+from app.anonymization.engine import Anonymizer
+from app.anonymization.mapper import PseudonymMapper
+from app.anonymization.middleware import (
+    StreamingRehydrator,
+    post_anonymize_response,
+    pre_anonymize_request,
+)
 from app.clients.backend import BackendClient, Skill, get_backend_client
 from app.config import GatewayConfig
 from app.errors import LQAIError
@@ -89,6 +96,7 @@ from app.router import (
     RoutedProviderError,
     Router,
     estimate_cost,
+    resolve_alias_chain,
     synthesize_request_id,
 )
 from app.routing_log import (
@@ -261,6 +269,23 @@ def _backend(request: Request) -> BackendClient:
     if pre_built is not None:
         return pre_built
     return get_backend_client()
+
+
+def _anonymizer(request: Request) -> Anonymizer:
+    """Return the gateway's :class:`Anonymizer` (M2-B3).
+
+    The lifespan installs a process-global :class:`Anonymizer` on
+    ``app.state.anonymizer`` whose spaCy backbone loads lazily on the
+    first :meth:`Anonymizer.pseudonymize_into` call. Tests that bypass
+    lifespan (or want to inject a stub analyzer) can override
+    ``app.state.anonymizer`` directly — same pattern as
+    ``app.state.routing_log``.
+    """
+
+    pre_built: Anonymizer | None = getattr(request.app.state, "anonymizer", None)
+    if pre_built is not None:
+        return pre_built
+    return Anonymizer()
 
 
 def _inline_ref_to_skill(ref: InlineSkillRef) -> Skill:
@@ -579,6 +604,20 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
             },
         )
 
+    # --- Anonymization pre-middleware (M2-B3) -------------------------------
+    # Sits between Tier Derivation and Provider Adapter per PRD §4.3.
+    # Mutates chat_request.messages[*].content + lq_ai_skill_inputs in
+    # place. Returns the mapper used for response-path rehydration, or
+    # ``None`` when any skip condition fires (master disabled / tier
+    # outside apply_at_tiers / privileged chat / per-request opt-out).
+    anonymizer = _anonymizer(request)
+    anon_mapper: PseudonymMapper | None = pre_anonymize_request(
+        chat_request=chat_request,
+        config=config.anonymization,
+        routed_tier=primary.routed_inference_tier,
+        anonymizer=anonymizer,
+    )
+
     # --- Streaming path -----------------------------------------------------
     if chat_request.stream:
         return await _stream_with_fallback(
@@ -588,6 +627,8 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
             log_writer=log_writer,
             request_id=request_id,
             applied_skills=applied_skills,
+            anon_mapper=anon_mapper,
+            anonymizer=anonymizer,
         )
 
     # --- Non-streaming path -------------------------------------------------
@@ -605,6 +646,7 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
             request_id=request_id,
             error=wrapped.error,
             latency_ms=wrapped.latency_ms,
+            anonymization_applied=anon_mapper is not None,
         )
         return _map_provider_error_to_response(wrapped.error)
     except NoAdapterAvailableError as exc:
@@ -614,6 +656,7 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
             target=candidates[0],
             request_id=request_id,
             message=exc.message,
+            anonymization_applied=anon_mapper is not None,
         )
         return _gateway_error(
             code="provider_unavailable",
@@ -622,16 +665,25 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
             details={"provider": candidates[0].provider.name},
         )
 
+    # --- Anonymization post-middleware (non-streaming) ----------------------
+    # When the pre-middleware fired (mapper is non-None), rehydrate the
+    # provider's response content back to the originals. The mapper is
+    # then dropped on function exit — never persisted, never logged.
+    if anon_mapper is not None:
+        post_anonymize_response(response=result.response, mapper=anon_mapper, anonymizer=anonymizer)
+
     # --- Success: stamp tier on body, write log, return --------------------
     annotated = _annotate_response(result.response, target=result.target, config=config)
     if applied_skills:
         annotated.lq_ai_applied_skills = list(applied_skills)
+    annotated.anonymization_applied = anon_mapper is not None
     await _write_success(
         log_writer,
         chat_request=chat_request,
         result=result,
         request_id=request_id,
         cost_estimate=annotated.cost_estimate,
+        anonymization_applied=anon_mapper is not None,
     )
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -850,6 +902,74 @@ async def list_models(request: Request) -> dict[str, Any]:
     }
 
 
+@router.get("/citation-engine/config")
+async def citation_engine_config(request: Request) -> dict[str, Any]:
+    """Expose the citation_engine block for the api/'s Citation Engine (M2-C1 / M2-D1).
+
+    The api/ runs Stage 3 (LLM paraphrase judge) and Stage 4 (ensemble)
+    of the Citation Engine cascade and reads its configuration from
+    this endpoint at startup so the operator configures model choices
+    in one place (``gateway.yaml``) rather than mirroring them on the
+    api/ side.
+
+    Response shape (M2-D1):
+
+    .. code-block:: json
+
+       {
+         "judge_model": "fast",
+         "ensemble_verification": {
+           "default_enabled": false,
+           "judge_models": ["fast", "smart"],
+           "aggregation_rule": "strict",
+           "max_cost_per_message_usd": 0.05,
+           "envelope_tier": 3
+         }
+       }
+
+    ``ensemble_verification.envelope_tier`` is server-computed as
+    ``max(routed_inference_tier for each judge_model)`` using the
+    primary target of each alias (fallbacks could route weaker at
+    runtime, but the primary is the operator's intent; runtime
+    weakening is visible via per-call routing_log rows). NULL when
+    ``judge_models`` is empty.
+
+    The api/ caches the value for the process lifetime; restarting the
+    gateway after an alias change is the deployment story for now.
+    Hot-reload of this value lands when M2 needs it; today the alias
+    rarely changes outside scheduled maintenance.
+    """
+
+    config = _config(request)
+    ensemble = config.citation_engine.ensemble_verification
+
+    envelope_tier: int | None = None
+    if ensemble.judge_models:
+        tiers: list[int] = []
+        for judge in ensemble.judge_models:
+            try:
+                resolved = resolve_alias_chain(requested_model=judge, config=config)
+            except ModelResolutionError:
+                # Misconfigured judge alias — skip it for envelope
+                # computation; the dispatch-time error message will
+                # surface the typo when verification actually runs.
+                continue
+            if resolved:
+                tiers.append(resolved[0].routed_inference_tier)
+        envelope_tier = max(tiers) if tiers else None
+
+    return {
+        "judge_model": config.citation_engine.judge_model,
+        "ensemble_verification": {
+            "default_enabled": ensemble.default_enabled,
+            "judge_models": list(ensemble.judge_models),
+            "aggregation_rule": ensemble.aggregation_rule,
+            "max_cost_per_message_usd": ensemble.max_cost_per_message_usd,
+            "envelope_tier": envelope_tier,
+        },
+    }
+
+
 # --- Streaming helpers --------------------------------------------------------
 
 
@@ -861,6 +981,8 @@ async def _stream_with_fallback(
     log_writer: RoutingLogWriter,
     request_id: str,
     applied_skills: list[str] | None = None,
+    anon_mapper: PseudonymMapper | None = None,
+    anonymizer: Anonymizer | None = None,
 ) -> StreamingResponse:
     """Run the streaming path with primary + fallback chain.
 
@@ -902,6 +1024,7 @@ async def _stream_with_fallback(
             target=candidates[0],
             request_id=request_id,
             message="no adapter available for streaming",
+            anonymization_applied=anon_mapper is not None,
         )
         return StreamingResponse(
             _single_error_sse(
@@ -943,6 +1066,8 @@ async def _stream_with_fallback(
             log_writer=log_writer,
             request_id=request_id,
             applied_skills=applied_skills or [],
+            anon_mapper=anon_mapper,
+            anonymizer=anonymizer,
         ),
         media_type="text/event-stream",
         headers={
@@ -963,11 +1088,23 @@ async def _stream_openai_sse(
     log_writer: RoutingLogWriter,
     request_id: str,
     applied_skills: list[str] | None = None,
+    anon_mapper: PseudonymMapper | None = None,
+    anonymizer: Anonymizer | None = None,
 ) -> AsyncIterator[bytes]:
-    """Serialize chunks as OpenAI-format SSE frames; write log on completion."""
+    """Serialize chunks as OpenAI-format SSE frames; write log on completion.
 
-    final_usage: ChatCompletionRoutedResult | None = None  # noqa: F841
+    M2-B3: when ``anon_mapper`` is non-None, each chunk's
+    ``delta.content`` is fed through a per-stream
+    :class:`StreamingRehydrator` (Decision B (i)) so the bytes we
+    write to the wire contain only rehydrated text, never pseudonyms.
+    On stream completion, the rehydrator's buffer is flushed and
+    emitted as a synthesized terminal chunk if non-empty.
+    """
+
     last_chunk: ChatCompletionChunk | None = None
+    rehydrator: StreamingRehydrator | None = None
+    if anon_mapper is not None and anonymizer is not None:
+        rehydrator = StreamingRehydrator(mapper=anon_mapper, anonymizer=anonymizer)
 
     try:
         async for chunk in chunks:
@@ -975,6 +1112,11 @@ async def _stream_openai_sse(
             chunk.routed_inference_tier = target.routed_inference_tier
             if applied_skills:
                 chunk.lq_ai_applied_skills = list(applied_skills)
+            if rehydrator is not None:
+                for choice in chunk.choices:
+                    if choice.delta.content is None:
+                        continue
+                    choice.delta.content = rehydrator.process(choice.delta.content)
             last_chunk = chunk
             payload = chunk.model_dump(mode="json", exclude_none=True)
             yield f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode()
@@ -988,9 +1130,27 @@ async def _stream_openai_sse(
             request_id=request_id,
             error=exc,
             latency_ms=None,
+            anonymization_applied=anon_mapper is not None,
         )
         yield b"data: [DONE]\n\n"
         return
+
+    # M2-B3: flush any held tail before [DONE] so the caller doesn't
+    # lose the last fragment of a pseudonym that crystallized only at
+    # stream end. We attach it to a synthesized terminal chunk with
+    # ``choices=[{delta: {content: tail}}]`` if the tail is non-empty,
+    # so existing SSE consumers parse it as a normal content delta.
+    if rehydrator is not None and last_chunk is not None:
+        tail = rehydrator.flush()
+        if tail:
+            terminal = last_chunk.model_copy(deep=True)
+            for choice in terminal.choices:
+                choice.delta.content = tail
+                choice.delta.role = None
+                choice.finish_reason = None
+            terminal.lq_ai_applied_skills = None
+            payload = terminal.model_dump(mode="json", exclude_none=True)
+            yield f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode()
 
     yield b"data: [DONE]\n\n"
 
@@ -1017,9 +1177,11 @@ async def _stream_openai_sse(
             tokens_out=(usage.completion_tokens if usage is not None else None),
             cost_estimate=cost,
             latency_ms=None,  # streaming latency is wall-time; left null for now
+            anonymization_applied=anon_mapper is not None,
             request_id=request_id,
             chat_id=chat_id,
             message_id=message_id,
+            purpose=_purpose_from_request(chat_request),
         )
     )
 
@@ -1064,6 +1226,35 @@ def _correlation_ids(
     return chat_id, message_id
 
 
+# Known values for the ``inference_routing_log.purpose`` column. Values
+# outside this set fall back to ``'chat'`` in :func:`_purpose_from_request`
+# so an arbitrary caller can't pollute the column with free-form strings.
+_KNOWN_PURPOSES = frozenset({"chat", "judge_paraphrase", "embedding"})
+
+
+def _purpose_from_request(chat_request: ChatCompletionRequest) -> str:
+    """Resolve the routing-log ``purpose`` tag from the chat request envelope.
+
+    M2-E2 added ``lq_ai_purpose`` to :class:`ChatCompletionRequest`. The
+    Citation Engine sets it to ``'judge_paraphrase'`` on every Stage 3
+    / Stage 4 judge call so the api/ cost-calibration query can filter
+    routing-log rows down to judge traffic only. Other callers leave
+    it unset and the row records ``'chat'``.
+
+    Unknown values fall back to ``'chat'`` defensively — the column is
+    ``varchar(32)`` and downstream code expects one of the known
+    values.
+    """
+
+    raw = chat_request.lq_ai_purpose
+    if raw is None:
+        return "chat"
+    value = raw.strip()
+    if value in _KNOWN_PURPOSES:
+        return value
+    return "chat"
+
+
 def _annotate_response(
     response: ChatCompletionResponse,
     *,
@@ -1092,6 +1283,7 @@ async def _write_success(
     result: ChatCompletionRoutedResult,
     request_id: str,
     cost_estimate: float | None,
+    anonymization_applied: bool = False,
 ) -> None:
     from decimal import Decimal as _Decimal
 
@@ -1110,9 +1302,11 @@ async def _write_success(
             tokens_out=result.response.usage.completion_tokens,
             cost_estimate=cost,
             latency_ms=result.latency_ms,
+            anonymization_applied=anonymization_applied,
             request_id=request_id,
             chat_id=chat_id,
             message_id=message_id,
+            purpose=_purpose_from_request(chat_request),
         )
     )
 
@@ -1125,6 +1319,7 @@ async def _write_failure(
     request_id: str,
     error: ProviderAdapterError,
     latency_ms: int | None,
+    anonymization_applied: bool = False,
 ) -> None:
     """Write a routing-log row for a request that reached an adapter and failed.
 
@@ -1137,6 +1332,11 @@ async def _write_failure(
     row didn't carry usage data" — the schema's nullability accommodates
     that. D1 will tighten the semantics; we add a follow-up note in
     docs/M1-PROGRESS.md.
+
+    M2-B3: ``anonymization_applied`` records that the middleware fired
+    even though the upstream failed. The substitution happened on the
+    request path; auditors need to see that the provider received
+    pseudonymized content (it just then returned an error).
     """
 
     chat_id, message_id = _correlation_ids(chat_request)
@@ -1147,11 +1347,13 @@ async def _write_failure(
             routed_model=target.native_model,
             routed_inference_tier=target.routed_inference_tier,
             latency_ms=latency_ms,
+            anonymization_applied=anonymization_applied,
             refused=False,
             refusal_reason=f"upstream_error:{error.code}",
             request_id=request_id,
             chat_id=chat_id,
             message_id=message_id,
+            purpose=_purpose_from_request(chat_request),
         )
     )
 
@@ -1163,6 +1365,7 @@ async def _write_unavailable(
     target: ResolvedTarget,
     request_id: str,
     message: str,
+    anonymization_applied: bool = False,
 ) -> None:
     """Write a routing-log row when no adapter could handle the request."""
 
@@ -1173,11 +1376,13 @@ async def _write_unavailable(
             routed_provider=target.provider.name,
             routed_model=target.native_model,
             routed_inference_tier=target.routed_inference_tier,
+            anonymization_applied=anonymization_applied,
             refused=False,
             refusal_reason=f"adapter_unavailable:{message}",
             request_id=request_id,
             chat_id=chat_id,
             message_id=message_id,
+            purpose=_purpose_from_request(chat_request),
         )
     )
 
@@ -1216,6 +1421,7 @@ async def _write_refusal(
             request_id=request_id,
             chat_id=chat_id,
             message_id=message_id,
+            purpose=_purpose_from_request(chat_request),
         )
     )
 
@@ -1252,6 +1458,7 @@ async def _write_unresolved(
             request_id=request_id,
             chat_id=chat_id,
             message_id=message_id,
+            purpose=_purpose_from_request(chat_request),
         )
     )
 
@@ -1344,6 +1551,7 @@ async def _write_embeddings_success(
             cost_estimate=cost,
             latency_ms=latency_ms,
             request_id=request_id,
+            purpose="embedding",
         )
     )
 
@@ -1369,6 +1577,7 @@ async def _write_embeddings_failure(
             refused=False,
             refusal_reason=f"upstream_error:{error.code}",
             request_id=request_id,
+            purpose="embedding",
         )
     )
 
@@ -1392,6 +1601,7 @@ async def _write_embeddings_unavailable(
             refused=False,
             refusal_reason=f"adapter_unavailable:{message}",
             request_id=request_id,
+            purpose="embedding",
         )
     )
 
@@ -1414,5 +1624,6 @@ async def _write_unresolved_embeddings(
             refused=True,
             refusal_reason=f"invalid_model:{message}",
             request_id=request_id,
+            purpose="embedding",
         )
     )

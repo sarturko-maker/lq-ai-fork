@@ -248,11 +248,39 @@ class RateLimitsConfig(BaseModel):
 
 
 class AnonymizationConfig(BaseModel):
-    """``anonymization:`` block. M2 feature; A3 just loads it."""
+    """``anonymization:`` block. M2 feature.
+
+    Typed fields the M2-B3 middleware reads directly:
+
+    * :attr:`enabled` — master switch. ``False`` short-circuits the
+      pre/post middleware to a no-op regardless of per-request
+      ``anonymize`` flags or tier gating.
+    * :attr:`apply_at_tiers` — tier gate. The middleware fires only
+      when the request's routed tier is in this list. Tiers outside
+      ``[1, 5]`` raise a config-load error rather than silently
+      becoming a no-op.
+
+    Other keys from ``gateway.yaml.example`` (``entity_types`` etc.)
+    pass through under ``extra="allow"`` and are documented in
+    ``docs/security/anonymization.md``; M2-B3 does not depend on them
+    yet.
+    """
 
     model_config = ConfigDict(extra="allow")
 
     enabled: bool = False
+    apply_at_tiers: list[int] = Field(default_factory=list)
+
+    @field_validator("apply_at_tiers")
+    @classmethod
+    def _validate_tier_range(cls, value: list[int]) -> list[int]:
+        for tier in value:
+            if not 1 <= tier <= 5:
+                raise ValueError(
+                    f"apply_at_tiers entry {tier} is out of [1, 5] range; "
+                    "tiers run 1 (strongest) to 5 (weakest) per PRD §1.5.2."
+                )
+        return value
 
 
 class CostRateEntry(BaseModel):
@@ -307,6 +335,79 @@ class DevModeConfig(BaseModel):
     enabled: bool = False
 
 
+class EnsembleVerificationConfig(BaseModel):
+    """``citation_engine.ensemble_verification:`` block — M2-D1.
+
+    Stage 4 of the Citation Engine cascade. When activated (per-skill,
+    per-project, or per-deployment), the paraphrase judge runs in
+    parallel across :attr:`judge_models` and the verdicts aggregate
+    under :attr:`aggregation_rule`.
+
+    Activation is computed by the api/ at chat-send time: ``any()``
+    across the skill frontmatter ``ensemble_verification`` flag, the
+    project's ``ensemble_verification`` column, and this block's
+    :attr:`default_enabled`. The gateway exposes the resolved config
+    via ``GET /v1/citation-engine/config``; the api/ caches it for the
+    process and reads it on every verify() call.
+
+    :attr:`judge_models` is a list of aliases (or fully-qualified
+    ``provider/model``) the gateway's router can resolve. Three is the
+    canonical M2-D1 baseline (primary judge + 2 alternates from
+    different provider families); operators may choose more or fewer.
+    An empty list disables ensemble even when :attr:`default_enabled`
+    is True — defense-in-depth against misconfiguration.
+
+    :attr:`aggregation_rule` selects strict (all judges must verdict
+    ``"yes"``) or majority (simple majority wins). The persisted
+    ``message_citations.verification_method`` is
+    ``'ensemble_strict'`` or ``'ensemble_majority'`` accordingly.
+
+    :attr:`max_cost_per_message_usd` is the pre-flight budget cap. The
+    api/ estimates ``input_tokens * len(judge_models) * max_judge_rate``
+    before dispatch; if the estimate exceeds the cap, verification
+    falls back to a single Stage 3 judge call with a warning logged.
+    Default ``0.05`` is a conservative ceiling; operators tune per
+    their cost posture.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    default_enabled: bool = False
+    judge_models: list[str] = Field(default_factory=list)
+    aggregation_rule: Literal["strict", "majority"] = "strict"
+    max_cost_per_message_usd: float = Field(default=0.05, ge=0.0)
+
+
+class CitationEngineConfig(BaseModel):
+    """``citation_engine:`` block — M2-C1 / M2-D1.
+
+    The Citation Engine runs in the api/ but reads the *model name* it
+    should use for the Stage 3 (paraphrase) judge from the gateway's
+    config so the operator has one place to configure model choices.
+    The api/ pulls this over ``GET /v1/citation-engine/config`` at
+    startup (or on first need) and caches it for the process.
+
+    :attr:`judge_model` accepts any value the gateway's router can
+    resolve: an alias from ``model_aliases`` (``fast``, ``smart``,
+    ``budget``) or a fully-qualified provider/model form
+    (``anthropic-prod/claude-haiku-4-5``). Defaults to ``"fast"`` —
+    deliberately a smaller model than the typical citation-generating
+    model so the judge cost is bounded.
+
+    :attr:`ensemble_verification` (M2-D1) is the Stage 4 ensemble
+    block. See :class:`EnsembleVerificationConfig` for the per-field
+    contract. Default-constructed (``default_enabled=False``, empty
+    ``judge_models``) means Stage 4 is opt-in per skill or project.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    judge_model: str = Field(default="fast", min_length=1)
+    ensemble_verification: EnsembleVerificationConfig = Field(
+        default_factory=EnsembleVerificationConfig
+    )
+
+
 # --- Top-level config ---------------------------------------------------------
 
 
@@ -327,6 +428,7 @@ class GatewayConfig(BaseModel):
     tier_policy: TierPolicyConfig = Field(default_factory=TierPolicyConfig)
     rate_limits: RateLimitsConfig = Field(default_factory=RateLimitsConfig)
     anonymization: AnonymizationConfig = Field(default_factory=AnonymizationConfig)
+    citation_engine: CitationEngineConfig = Field(default_factory=CitationEngineConfig)
     cost_tracking: CostTrackingConfig = Field(default_factory=CostTrackingConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)

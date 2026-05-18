@@ -51,6 +51,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from app import __version__
+from app.anonymization.engine import Anonymizer
 from app.api import admin_router, inference_router
 from app.clients.backend import (
     BackendClient,
@@ -65,6 +66,7 @@ from app.errors import LQAIError
 from app.model_discovery import ModelDiscoverer
 from app.providers import (
     AnthropicAdapter,
+    AzureOpenAIAdapter,
     OllamaAdapter,
     OpenAIAdapter,
     ProviderAdapter,
@@ -163,6 +165,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     exc,
                 )
             continue
+        if provider.type == "azure_openai":
+            # M2-E1 (DE-267): Azure OpenAI mirrors the OpenAI wire shape
+            # with a different URL (deployment-scoped + api-version)
+            # and ``api-key`` auth. Missing key or missing api_version
+            # surfaces as a startup warning (skip provider) and a clean
+            # 503 at request time, matching OpenAI's lifespan posture.
+            try:
+                adapters[provider.name] = AzureOpenAIAdapter.from_config(provider)
+                logger.info(
+                    "instantiated Azure OpenAI adapter for provider %r",
+                    provider.name,
+                )
+            except ValueError as exc:
+                logger.warning(
+                    "skipping Azure OpenAI provider %r: %s",
+                    provider.name,
+                    exc,
+                )
+            continue
         if provider.type == "ollama":
             # B6 partial: Ollama is the Mode-2 (air-gapped local
             # inference) backbone per PRD §1.5.1 / §6.1. Chat
@@ -238,6 +259,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     model_discoverer = ModelDiscoverer()
     app.state.model_discoverer = model_discoverer
     logger.info("model discoverer wired (Ollama 60s TTL, Anthropic 300s TTL)")
+
+    # M2-B3: anonymization middleware façade. The Anonymizer is
+    # lightweight — instance state is just an analyzer reference —
+    # and the spaCy load is deferred to first use, so this is a
+    # no-cost startup hook even when the config disables the feature.
+    # Tests override ``app.state.anonymizer`` to inject a stub analyzer
+    # without touching the singleton.
+    app.state.anonymizer = Anonymizer()
+    logger.info("anonymization middleware wired (lazy analyzer load)")
 
     try:
         yield

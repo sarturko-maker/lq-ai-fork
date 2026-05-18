@@ -73,6 +73,17 @@ class ChatCompletionMessage(BaseModel):
     tool_call_id: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
 
+    # M2-D2: when True, the gateway's anonymization pre-middleware
+    # leaves this message's content unchanged even if anonymization
+    # is otherwise active for the request. Per Decision M2-1, the
+    # api/ sets this on the retrieval-context system message so
+    # source documents in retrieval are NOT pseudonymized before
+    # being sent to the provider — the model needs intact source
+    # quotes for citation grounding. The flag is api-internal
+    # (``lq_ai_`` prefix); it's stripped before the request leaves
+    # the gateway for any upstream provider.
+    lq_ai_skip_anonymization: bool = False
+
 
 class InlineSkillRef(BaseModel):
     """Wave D.2 Task 3.0 — one inline-body skill on a chat completion request.
@@ -177,6 +188,23 @@ class ChatCompletionRequest(BaseModel):
 
     chat_id: str | None = None
     anonymize: bool = True
+    """Per-request anonymization opt-out (M2-B3). ``True`` (the default)
+    lets the gateway middleware pseudonymize entities before the
+    provider call when the deployment-level ``anonymization.enabled``
+    flag and tier gating both permit. ``False`` is the per-request
+    escape hatch — operators send it when they need the raw text on
+    the upstream call (e.g. running an evaluation that compares
+    original vs. rehydrated)."""
+
+    lq_ai_privileged: bool = False
+    """M2-B3: the chat lives inside an attorney-client privileged
+    Project (``projects.privileged = true`` in the backend). The
+    anonymization middleware skips entirely for privileged chats —
+    pseudonym rewriting of a privileged communication risks corrupting
+    the work product that privilege protects, so the conservative
+    posture is "don't touch it." Backend resolves the flag from the
+    project row and forwards it; the gateway never queries the
+    backend for it."""
 
     # --- C2 (skill prompt assembly per ADR 0007) -----------------------------
     lq_ai_skills: list[str] = Field(default_factory=list, max_length=16)
@@ -238,6 +266,14 @@ class ChatCompletionRequest(BaseModel):
     so user-scope shadows resolve correctly. Omitted means
     "registry-only", which is the right behavior for non-user-bearing
     callers (smoke scripts, internal admin tooling, etc.)."""
+
+    lq_ai_purpose: str | None = None
+    """M2-E2: tag for the routing-log ``purpose`` column. Distinguishes
+    judge calls (Citation Engine Stage 3/4) from regular chat
+    completions so per-model cost calibration filters down to judge
+    traffic. Known values used in code: ``'judge_paraphrase'``;
+    ``None`` or any unknown value falls back to ``'chat'`` in the
+    persisted row. Stripped from the outbound provider body."""
 
 
 # --- Chat completion response -------------------------------------------------

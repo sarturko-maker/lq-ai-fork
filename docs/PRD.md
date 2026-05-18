@@ -416,7 +416,18 @@ This section specifies each major capability. Every capability section follows t
 
 ### 3.3 Citation Engine (Exact Quote)
 
-**M1 status.** The architectural slot exists in the codebase but the verification pipeline is not running in M1. The chunk-level provenance the engine will draw on is partially in place (page and character offsets per chunk, captured in `api/alembic/versions/0005_documents_and_chunks.py` and surfaced through hybrid retrieval in `api/app/knowledge/retrieval.py`), and the citations endpoint at `GET /api/v1/chats/{chat_id}/messages/{message_id}/citations` returns whatever the message row stores (M1 stores an empty set; the endpoint is forward-compatible). What is not in place is the verification step that re-reads the cited substring from the source document and confirms it appears verbatim before showing it in the rendered output, plus the side-panel viewer with bounding-box highlighting. See [`docs/HONEST-STATE.md` §3.1](HONEST-STATE.md#31-citation-engine--architectural-slot-not-wired) for what an operator can verify today (the endpoint stub, the chunk schema, the retrieval path) and the M2 milestone for when the pipeline begins running. The body of this section describes the full pipeline as designed; readers should interpret it as the M2 deliverable, not the M1 state.
+**M2 status: SHIPPED.** The full 4-stage verification cascade is wired end-to-end as of M2-A through M2-D:
+
+* **Stage 1 — `exact_match`** (M2-A2): byte-for-byte equality against `documents.normalized_content[offset_start:offset_end]`. Free; pure Python.
+* **Stage 2 — `tolerant_match`** (M2-B1): rapidfuzz ratio ≥ 95 after normalization (whitespace, smart quotes, OCR confusions on `was_ocrd=true` docs). Free.
+* **Stage 3 — `paraphrase_judge`** (M2-C1): LLM judge call through the gateway returning `yes` / `partial` / `no` with `high` / `medium` / `low` confidence mapped to 0.90 / 0.70 / 0.50. One judge call per citation; per-judge cost calibrated against the routing log per M2-E2.
+* **Stage 4 — `ensemble_strict` / `ensemble_majority`** (M2-D1): parallel judge dispatch across N configured models with strict (unanimous) or majority aggregation. Activated via `any()` across skill frontmatter, project flag, and gateway default; cost-budget pre-flight falls back to single-judge Stage 3 when the per-model estimate would exceed the cap. Tier envelope (max tier across the ensemble) persists per row.
+
+The verification entry point is [`api/app/citation/verification.py::verify`](../api/app/citation/verification.py); the M2-C2 UI rendering states are documented in [`docs/citation-engine.md`](citation-engine.md). Failed citations render as "unverified" rather than silently disappearing. The Anonymization Layer integration (M2-D2) skips pseudonymization on the retrieval-context system message so source quotes reach the model intact for citation grounding; see [§4.7](#47-anonymization-layer-m2) and [`docs/security/anonymization.md`](security/anonymization.md). Privileged-project audit-trail invariants are pinned in [`api/tests/test_chat_citations.py::test_chat_send_privileged_project_full_audit_trail`](../api/tests/test_chat_citations.py).
+
+The body of this section describes the design contract; deviations from the as-shipped pipeline (none currently known) would surface as PRD §9 entries.
+
+**Scope clarification (2026-05-17).** The Citation Engine validates **KB-quote accuracy** — the model's response is an accurate representation of cited knowledge-base documents. Two related citation-checking surfaces are explicitly out of scope and tracked separately: **case citation validation** (Bluebook resolution via CourtListener) at [DE-279](#de-279--case-citation-validation-bluebook-resolution-via-courtlistener), and **case-content accuracy** (statement vs judicial opinion) at [DE-280](#de-280--case-content-accuracy-statement-vs-judicial-opinion). The three are architecturally distinct; see [`docs/citation-engine.md` §Scope](citation-engine.md#scope) for the taxonomy.
 
 **Description.** End-to-end pipeline that guarantees character-fidelity from document → model context → cited output → rendered viewer. When the model produces a claim with a citation, the system can highlight the exact substring in the source document, in the original page, with character precision. Includes a verification step that fails the citation if the cited substring does not appear verbatim in the source.
 
@@ -620,7 +631,7 @@ The API endpoint `GET /api/v1/skills/{id}/inputs` returns the skill's input sche
 
 ### 3.5 Files / Knowledge Bases
 
-**M1 status:** Shipped. Knowledge base create, document attach, PDF upload, and ingest-to-`ready` (pgvector + FTS hybrid retrieval) are wired end-to-end. An operator can verify at `api/app/api/knowledge_bases.py`, `api/app/pipeline/ingest.py`, and `api/app/workers/document_pipeline.py`; Cypress E2E coverage is in `web/cypress/e2e/wave-m1-final-surfaces.cy.ts` Test 2. Note: the Citation Engine's verification step (byte-level citation confirmation) is not yet wired — uploaded files provide retrieval-grounded context but citations are not byte-verified at M1. See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface) and [HONEST-STATE.md §3.1](HONEST-STATE.md#31-citation-engine--architectural-slot-not-wired).
+**M1 + M2 status:** Shipped. Knowledge base create, document attach, PDF upload, and ingest-to-`ready` (pgvector + FTS hybrid retrieval) wired end-to-end in M1; the Citation Engine's byte-level verification step landed in M2-A through M2-D and now runs against every model-emitted citation per [§3.3](#33-citation-engine-exact-quote). An operator can verify at `api/app/api/knowledge_bases.py`, `api/app/pipeline/ingest.py`, `api/app/workers/document_pipeline.py`, and `api/app/citation/verification.py`; Cypress E2E coverage in `web/cypress/e2e/wave-m1-final-surfaces.cy.ts` Test 2 (M1 retrieval) and `web/cypress/e2e/m2-c2-citation-states.cy.ts` (M2 citation-rendering states). See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface) and [HONEST-STATE.md §3](HONEST-STATE.md#3-m2-shipped-capabilities--citation-engine-and-anonymization-layer).
 
 **Description.** Persistent collections of documents accessible across chats. Files are uploaded once, ingested into the citation pipeline, and made available for retrieval. Knowledge Bases group files for shared access (e.g., "Privacy Compliance Library," "Standard Templates").
 
@@ -661,7 +672,7 @@ The API endpoint `GET /api/v1/skills/{id}/inputs` returns the skill's input sche
 
 ### 3.6 Research
 
-**M1 status:** Deferred-M2. No web-search backend or legal-source connector exists in the M1 codebase. `grep -r "research" api/app/api/` returns no research-specific handler; `api/alembic/versions/` has no `research_queries` migration. The capability is fully spec'd here and in [PRD §9](PRD.md#9-deferred-enhancements-and-identified-future-work); a contributor picking it up should open a discussion before starting because it depends on the Citation Engine pipeline (§3.3) landing in M2 first. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+**M1+M2 status:** Not yet started in code. No web-search backend or legal-source connector exists in the codebase. `grep -r "research" api/app/api/` returns no research-specific handler; `api/alembic/versions/` has no `research_queries` migration. The Citation Engine pipeline dependency (§3.3) was met when M2 shipped — Research is now unblocked for contribution. The capability is fully spec'd here and in [PRD §9](PRD.md#9-deferred-enhancements-and-identified-future-work); a contributor picking it up should open a discussion before starting because the integration surface (citation-aware retrieval + ephemeral-document handling) is substantial. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
 
 **Description.** Real-time legal information retrieval from authoritative sources, with the same Citation Engine fidelity as document-based citations. Web sources are fetched, parsed, and treated as ephemeral documents in the citation pipeline.
 
@@ -700,7 +711,7 @@ The API endpoint `GET /api/v1/skills/{id}/inputs` returns the skill's input sche
 
 ### 3.7 Playbooks
 
-**M1 status:** Deferred-M3. No `playbooks` table exists in `api/alembic/versions/` (M1 head is migration 0023); no `playbook_executions` endpoint is registered. The `word-addin/` directory is absent. Playbook execution depends on the Citation Engine pipeline (§3.3) landing in M2 and the LangGraph executor landing in M3. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+**M1+M2 status:** Deferred-M3. No `playbooks` table exists in `api/alembic/versions/`; no `playbook_executions` endpoint is registered. The `word-addin/` directory is absent. The Citation Engine dependency (§3.3) was met when M2 shipped; the remaining dependency is the LangGraph executor landing in M3. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
 
 **Description.** Structured, reusable contract-review automation. A Playbook codifies an organization's standard positions and fallback positions on common contract issues. When applied to a contract, the Playbook produces a per-position assessment: matches standard, deviates (with severity), or missing entirely. Includes redline suggestions.
 
@@ -780,7 +791,9 @@ class Position(BaseModel):
 
 ### 3.8 Multi-Model Ensemble Verification
 
-**M1 status:** Deferred-M2. Ensemble verification is not running at M1. The gateway dispatches every request to exactly one provider; no parallel model calls or reconciliation step exists in `gateway/app/router.py` or `api/app/`. The capability depends on the Citation Engine pipeline (§3.3) that also lands in M2. No `ensemble-config` endpoint is registered. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+**M2 status: SHIPPED.** Ensemble verification ships as Stage 4 of the Citation Engine cascade — see [§3.3](#33-citation-engine-exact-quote). Activation `any()`s across the project's `ensemble_verification` column, any applied skill's `ensemble_verification: true` frontmatter, and the gateway's `citation_engine.ensemble_verification.default_enabled` config. Aggregation rule (`strict` requires unanimous agreement across N judges; `majority` needs N/2+1) is configurable in `gateway.yaml`. The per-message cost-budget pre-flight (M2-D1) falls back to single-judge Stage 3 if the per-model rolling-average estimate (M2-E2) would exceed the cap. The privacy envelope across the judges is computed eagerly at config-load and persisted per row as `message_citations.tier_envelope` so operators can audit which chats had citations sent to weaker tiers.
+
+The scope-as-shipped is narrower than the original "ensemble runs on the whole answer" framing: ensemble runs on Citation Engine verification specifically (the load-bearing high-stakes surface), not on every chat response. The "ensemble runs the full chat path with N parallel reconciled completions" surface is **not built** — operators wanting cross-model answer reconciliation today configure parallel chat sessions with different aliases.
 
 **Description.** GC.AI markets "multi-model RAG (calls 5 different AI models)" as an accuracy feature. LQ.AI implements this as an *optional* ensemble step where multiple models are queried in parallel and their outputs are reconciled. Off by default (cost reasons); on for specific high-stakes operations like Playbook execution and Citation Engine verification.
 
@@ -1004,7 +1017,7 @@ Persistent matter memory is the single most-cited capability across in-house use
 
 ### 3.14 Tabular / Multi-Document Review (M3)
 
-**M1 status:** Deferred-M3. No grid surface, no LangGraph Tabular Review workflow, and no `output_format: table` skill-mode handling exists in M1. The capability depends on the Citation Engine pipeline (§3.3) and the Playbook/LangGraph executor (§3.7), both of which land in M2–M3. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+**M1+M2 status:** Deferred-M3. No grid surface, no LangGraph Tabular Review workflow, and no `output_format: table` skill-mode handling. The Citation Engine dependency (§3.3) was met when M2 shipped; the remaining dependency is the Playbook/LangGraph executor (§3.7) which lands in M3. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
 
 **Description.** A view that takes (a) a set of documents (a Knowledge Base, a Project's files, a free selection) and (b) a set of questions or clauses to extract, and produces a row-per-document, column-per-question grid. Each cell is a citation-grounded answer that opens the side-panel viewer (§3.3) on click. The "compare clauses across N contracts in a grid" pattern (Legora Tabular Review, Harvey Vault, Ivo Repository columns) is a different UI shape than chat. In-house teams use it for due diligence, audits, portfolio-wide policy checks, and "what is market across the deals we have signed."
 
@@ -1052,7 +1065,7 @@ In-house teams report (across the competitive research) that the majority of inc
 
 ### 3.16 Contract Repository — Auto-Relationship Detection (M4)
 
-**M1 status:** Deferred-M4. No `contract_relationships` table exists in `api/alembic/versions/`; no relationship-detection pipeline or graph-query surface exists at M1. Depends on the Knowledge Service pgvector+FTS baseline (shipped M1) and on the Citation Engine pipeline (§3.3, M2). See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+**M1+M2 status:** Deferred-M4. No `contract_relationships` table exists in `api/alembic/versions/`; no relationship-detection pipeline or graph-query surface. Both upstream dependencies are met: the Knowledge Service pgvector+FTS baseline shipped in M1; the Citation Engine pipeline (§3.3) shipped in M2. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
 
 **Description.** A pipeline that runs over a Knowledge Base of contracts and produces a relationship graph: amendments (modifies-X), restatements (replaces-X), references (cross-references-X), and master/sub (parent-of-X) edges. The graph is queryable and visible in the UI as a sidebar on each document. Contracts about a counterparty rarely stand alone, and answering questions like "which liability cap actually governs?" requires knowing which document supersedes which. This is Ivo's positioning — that contracts are not isolated documents but a graph — and is not currently addressed in the PRD's flat Knowledge Base model.
 
@@ -1205,7 +1218,7 @@ models:
     cost_per_1k_output_tokens_usd: 0.004
   - alias: local
     provider: ollama
-    model: llama3.1:70b
+    model: qwen3.5:9b
 
 routing:
   default: smart
@@ -1342,7 +1355,16 @@ Plus admin endpoints under `/admin/v1`:
 
 ### 4.7 Anonymization Layer (M2)
 
-**M1 status.** The configuration schema loads but the middleware does not run in M1. The gateway accepts an `anonymization:` block in `gateway.yaml` (schema at `gateway/app/config.py:250-251`, instantiated at `gateway/app/config.py:329`); the admin surface at `GET /admin/v1/anonymization-config` returns 501 with an explicit message naming M2 as the milestone where the underlying middleware enters the request pipeline (`gateway/app/api/admin.py:270-282`). The chat-completions handler in `gateway/app/api/inference.py` has no `anonymize_request` call before the provider dispatch and no `rehydrate_response` call after — an operator can verify the absence of the middleware in source. See [`docs/HONEST-STATE.md` §3.2](HONEST-STATE.md#32-anonymization-layer--config-slot-not-running) for what an operator can verify today and what M2 will add. Documents and entities are sent to the configured inference provider in full at M1 — the operator's bring-your-own-keys control is the in-place privacy posture for this milestone; deployments where entity substitution is a hard requirement should wait for M2 or run Tier 1 (Ollama) so the data never leaves the operator's environment regardless of substitution. The body of this section describes the full layer as designed; readers should interpret it as the M2 deliverable, not the M1 state.
+**M2 status: SHIPPED.** The pre/post middleware runs in the Inference Gateway request pipeline as of M2-B3 and integrates with the Citation Engine per M2-D2:
+
+* **Pre-anonymization** (`pre_anonymize_request`) substitutes detected entities with stable per-request pseudonyms (`{ENTITY_TYPE}_{NNNN}`) before the request leaves the gateway. Custom legal recognizers (`CaseNumberRecognizer`, `MatterNumberRecognizer`) layer on Presidio + spaCy `en_core_web_lg`. The retrieval-context system message is marked with `lq_ai_skip_anonymization=True` so source quotes reach the model intact for citation grounding (M2-D2).
+* **Post-rehydration** (`post_anonymize_response` for unary, `StreamingRehydrator` for SSE) restores originals on the way back; the pseudonym table is held in process memory for the duration of the request and is never persisted.
+* **Privileged-project handling** (M2-D3) routes through the tier-floor enforcement so privileged matters retain Tier ≥ 3 routing alongside the pseudonymization.
+* **Audit-row stamp** sets `inference_routing_log.anonymization_applied = true` for every request that exercised the middleware.
+
+Implementation at [`gateway/app/anonymization/`](../gateway/app/anonymization/) — engine, mapper, middleware, streaming rehydrator, custom recognizers; integration end-to-end via [`api/tests/test_chat_citations.py::test_chat_send_privileged_project_full_audit_trail`](../api/tests/test_chat_citations.py). Configuration surface is documented in [`docs/security/anonymization.md`](security/anonymization.md).
+
+**Honest validation posture (per [DE-282](#de-282--anonymization-layer-empirical-validation-on-legal-document-corpus)).** The custom recognizers, middleware integration, round-trip correctness, and edge cases are exercised by ~24 unit + integration tests. The Presidio default-recognizer recall and precision **on legal-document corpus specifically** is empirically unmeasured — Presidio's published metrics target general English (news, social media), not legal prose. A miss is a silent confidentiality incident, not a visible failure mode. Operators with high-confidentiality requirements should read [`docs/security/anonymization.md` §"What's validated vs what's unvalidated"](security/anonymization.md#whats-validated-vs-whats-unvalidated) and consider Tier 1 (Ollama local) routing for matters where the unvalidated risk is unacceptable. Empirical validation on a curated legal-document corpus is welcomed as a community contribution per DE-282; the path is bounded and the contribution surface is documented.
 
 A pre-processing step in the Inference Gateway pipeline (per the architecture diagram in §4.3): configurable patterns and an entity-recognition pass identify sensitive spans, replace them with stable pseudonyms, send the anonymized text to the model, then post-process the response to rehydrate the pseudonyms. The mapping is held only in the deployment's process memory for the duration of the request and never persists.
 
@@ -2168,15 +2190,15 @@ Entries are tagged with priority (P1 = should be addressed in v1.5; P2 = good fo
 
 **Acceptance criteria:** Backup-restore round-trip tested in CI; documented procedure for upgrade-with-restore.
 
-#### DE-267 — Azure OpenAI provider adapter
+#### DE-267 — Azure OpenAI provider adapter — ✓ Closed in M2-E1 (2026-05-17)
 
-**Priority:** P1 · **Effort:** M
+**Status:** **✓ Closed in M2-E1** (2026-05-17). Shipped as `gateway/app/providers/azure_openai.py` (subclass of `OpenAIAdapter`) wired into the lifespan dispatch in `gateway/app/main.py`, with example configuration in `gateway.yaml.example` under the `azure-openai` provider entry. Unit-test parity with the OpenAI adapter lives at `gateway/tests/test_azure_openai_adapter.py` (14 tests); the mocked end-to-end gateway-integration test lives at `gateway/tests/test_inference_azure_openai.py` (routes a chat request through the full FastAPI stack to a respx-mocked Azure upstream). API-key auth ships; the Azure AD path (managed identity / service principal) was scoped out to keep M2-E1 at ~4 hr and is tracked at [DE-278](#de-278--azure-openai-ad-authentication-managed-identity--service-principal).
 
-**Context:** Three provider adapters ship in M1 (Anthropic, OpenAI, Ollama); Vertex AI (DE-034) and AWS Bedrock (DE-035) are spec'd as M2 work. Microsoft Azure OpenAI is a significant gap: many enterprise legal teams hold existing Azure commitments (Azure's HIPAA BAA via the Online Services Subscription Agreement; FedRAMP High authorization; the EU AI Act-relevant DPA/SCC documentation Azure provides; an Enterprise Agreement that already covers their procurement budget). The Provider Compliance Matrix references Azure but no adapter ships in M1; operators on Microsoft-only procurement contracts cannot route through their existing stack.
+**Historical context (pre-M2-E1):** Three provider adapters shipped in M1 (Anthropic, OpenAI, Ollama); Vertex AI (DE-034) and AWS Bedrock (DE-035) remained on the deferred-enhancement list as community-friendly work units. Microsoft Azure OpenAI was a significant gap: many enterprise legal teams hold existing Azure commitments (Azure's HIPAA BAA via the Online Services Subscription Agreement; FedRAMP High authorization; the EU AI Act-relevant DPA/SCC documentation Azure provides; an Enterprise Agreement that already covers their procurement budget). The Provider Compliance Matrix referenced Azure but no adapter shipped in M1; operators on Microsoft-only procurement contracts could not route through their existing stack until M2-E1.
 
-**Specific scope:** `gateway/app/providers/azure_openai.py` adapter implementing the same wire shape as the OpenAI adapter (`gateway/app/providers/openai.py`), with Azure-specific differences: authentication via Azure AD (managed identity / service principal) or API key; deployment-name resolution per Azure's `deployment-id`-not-`model`-name convention; endpoint-form URL handling (`https://<resource>.openai.azure.com/openai/deployments/<deployment-id>/chat/completions?api-version=<version>`); tier classification configurable in `gateway.yaml.example` (typically Tier 3 — Azure OpenAI under enterprise agreement carries ZDR and BAA terms). Mirrors the M1 OpenAI adapter feature set.
+**Scope as shipped:** `gateway/app/providers/azure_openai.py` mirrors the OpenAI wire format (request bodies, SSE streaming, error mapping, LQ.AI extension-key strip) via subclass inheritance, overriding only the differences: `api-key` auth header (vs OpenAI's `Authorization: Bearer`); deployment-scoped URL (`/openai/deployments/<deployment-id>/chat/completions?api-version=<version>`); required `api_version` field in the provider config (no silent default — Azure rolls features per api-version, so operators pin a version explicitly). The gateway's existing model-alias mechanism doubles as the deployment-id resolver: each alias's `model` field is the Azure deployment-id (operator-named), and the adapter substitutes it into the URL path. Default tier in `gateway.yaml.example` is Tier 3 (Azure OpenAI under enterprise agreement carries ZDR + BAA terms).
 
-**Acceptance criteria:** Adapter passes the gateway test suite shape used by the OpenAI adapter (chat completions, error mapping, tier-floor enforcement, fallback into the router); documented in the gateway provider table; example configuration appears in `gateway.yaml.example`; one Cypress E2E or gateway-integration test exercises an end-to-end Azure call (mocked).
+**Acceptance criteria met:** Adapter passes the gateway test suite shape used by the OpenAI adapter (chat completions, embeddings, streaming, error mapping for 401/500/network failures, health check); documented in the gateway provider entry; example configuration appears in `gateway.yaml.example`; one mocked gateway-integration test (`test_chat_completions_routes_to_azure_via_passthrough`) exercises an end-to-end Azure call through the running FastAPI lifespan.
 
 #### DE-034 — Google Vertex AI provider adapter (Anthropic on Vertex)
 
@@ -2681,6 +2703,26 @@ This subsection consolidates security and compliance enhancements deferred from 
 
 **Acceptance criteria:** Capture of a chat reply containing a known injection pattern triggers the warning; the warning is keyboard-focusable; audit log captures the event with content hash + pattern matches; Cypress E2E covers both the clean-capture happy path and the warning-triggered review path.
 
+#### DE-269 — Anonymization Option A: pseudonymize source documents too
+
+**Priority:** P3 · **Effort:** M
+
+**Context:** Per **Decision M2-1** (M2 plan kickoff), the Anonymization Layer (§4.7) pseudonymizes only chat and skill content sent to the model; retrieved source documents stay un-pseudonymized so the model sees intact source quotes for citation grounding (§3.3). M2-D2 implements this by marking the retrieval-context system message with `lq_ai_skip_anonymization=True` so the gateway's pre-middleware leaves the content unchanged. The provider therefore sees:
+
+- Pseudonymized user/assistant chat content (`PERSON_0001` etc.)
+- Un-pseudonymized retrieved source chunks (`John Smith ...` from the source file)
+
+If the source-document corpus contains entities the operator considers sensitive (counterparty names, deal amounts, regulated identifiers), those entities reach the provider in cleartext as part of the retrieval payload. **Option A** is the alternative architecture: pseudonymize the source-document corpus too, on a copy used only for inference; render originals to the user via the rehydrator on the response path.
+
+**Specific scope:** Trade-offs to resolve:
+
+- **Citation grounding.** Stage 1 (exact-match) and Stage 2 (tolerant-match) verifiers read `documents.normalized_content` (un-pseudonymized) and compare against the model's emitted quote. Under Option A the model would quote `PERSON_0001`-style strings; the post-rehydrator would substitute originals before citation extraction sees them. This works today (the M2-B3 + M2-C3 round-trip suite implies it), but introduces an extra translation hop in the citation correctness path. Calibration of the cascade thresholds (M2-E2) might need re-running.
+- **Per-request pseudonym stability across mappers.** The per-request mapper already produces stable assignments for the same `(entity_type, original)` pair across user turn + retrieval. Under Option A, the same entity in multiple source documents would consistently pseudonymize to the same value within one request — but pseudonyms drift across requests, which is fine for one-shot Q&A but might surprise users who follow-up with `"What about COMPANY_0001?"` in a subsequent turn. Probably needs a cross-conversation stability mechanism (DE-XXX).
+- **Audit-log shape.** `inference_routing_log.anonymization_applied=true` would now be the common case rather than the careful-case; the field becomes less informative. May want a more granular signal (`anonymization_scope = "chat" | "chat+sources"`).
+- **Model reasoning quality.** Empirical question: does the model produce worse outputs when it must reason against pseudonymized source content rather than originals? A spot-check on the NDA Review / MSA Review skills before deciding to ship Option A.
+
+**Acceptance criteria:** Spot-check empirical study comparing model output quality on Option A vs M2-1 for at least three skills (NDA Review, MSA Review SaaS, DPA Checklist Review); cross-conversation pseudonym stability decision documented or filed as DE-XXX; audit-log shape extended if needed; `docs/security/anonymization.md` and `docs/citation-engine.md` updated to reflect Option A as the new default; existing M2-B3 / M2-C3 / M2-D2 round-trip tests passing with the new shape.
+
 #### DE-270 — Cryptography review: Fernet vs modern AEAD
 
 **Priority:** P3 · **Effort:** S
@@ -2712,6 +2754,238 @@ Surfaced in the fresh-install evaluation (2026-05-14) as a usability gap, not a 
 **Specific scope:** Either (a) server-side join — return `user: { id, email, display_name }` instead of (or alongside) bare `user_id`, so the response is self-contained; or (b) add a bulk `/api/v1/users?ids=...` endpoint so the frontend can batch the lookup. Path (a) is preferred for simplicity. Handle the soft-deleted user case explicitly — `user_id` pointing at a deleted row should still render something meaningful, e.g. `{ id, email: "<deleted user>", deleted_at: ... }`, rather than dropping the row or returning `null`.
 
 **Acceptance criteria:** The audit-log response renders actor labels without an additional round-trip; soft-deleted user references resolve to a stable display string; OpenAPI schema reflects the new shape; existing audit-log Cypress E2E updated to assert on the enriched shape.
+
+#### DE-274 — Anonymization pseudonym-collision in source documents
+
+**Priority:** P3 · **Effort:** S
+
+**Context:** The Anonymization Layer (§4.7 / M2-B3) generates pseudonyms in the deterministic format `{ENTITY_TYPE}_{NNNN}` (e.g., `PERSON_0001`, `MATTER_NUMBER_0042`). On the response path, the rehydrator scans the model's output for these patterns and substitutes the originals back from the in-process mapper.
+
+Two distinct collision surfaces this format leaves open:
+
+1. **Source-doc collision.** If a source document happens to contain a literal string matching the pseudonym pattern (e.g., a contract template that literally uses `PERSON_0001` as a placeholder, or a procedural document that references `EMAIL_ADDRESS_0023` from a different system) — and the model's response quotes that string — the rehydrator today does nothing to it (no matching mapper entry, so `str.replace` is a no-op). The literal string is preserved on the way out — the **safe** path. The risk is that future rehydrator changes (e.g., logging unmatched patterns for operator debugging) could turn this into a (minor) leak path.
+
+2. **Cross-mapper collision** (surfaced by the M2-C3 round-trip suite). Because the format is `{ENTITY_TYPE}_{NNNN}` with no per-request salt, two parallel mappers both produce `PERSON_0001` for their respective first PERSON span. Production isolation works because mappers are per-request and dropped on function exit — there is no production path that rehydrates one request's output against another request's mapper. But the data structure offers no cryptographic distinctness; isolation is **scope-enforced**, not collision-prevented. A future architectural change (e.g., caching mappers across requests for any reason) would silently break isolation without surfacing as a test failure.
+
+Both surfaces are pinned by the M2-C3 round-trip test suite so a future change is visible in CI rather than silent. The current pinned behavior is documented in `docs/security/anonymization.md`.
+
+**Specific scope:** Two paths, either acceptable:
+
+- **(a) Per-request random salt on pseudonym generation.** Change `PseudonymMapper.assign` to produce `{ENTITY_TYPE}_{NNNN}_{salt}` where `salt` is a per-request short random suffix (e.g., 4-6 hex chars from `secrets.token_hex`). Source documents that happen to contain the bare `PERSON_0001` form would no longer collide; two parallel mappers would produce structurally distinct pseudonym strings even at the same counter slot, eliminating the cross-mapper collision surface as well. Cost: rehydrate's regex gets one more group; the pseudonym strings the provider sees are 5-7 chars longer.
+- **(b) Pre-scan source documents for pseudonym-shaped patterns at retrieval time, and either skip the request or escalate the pseudonym counter to a larger digit width when a collision is detected.** More complex; addresses only the source-doc collision, not the cross-mapper one; harder to compose with the cross-conversation stability invariant.
+
+Path (a) is recommended; the salt is the smaller change with cleaner round-trip semantics and closes both collision surfaces with one move.
+
+**Acceptance criteria:** No source document containing a literal pseudonym pattern can confuse the rehydrator's behavior; two parallel mappers produce structurally distinct pseudonym strings (verified by an updated round-trip test); the mapper's pseudonym format is updated; existing M2-B3 / M2-C3 tests pass with the new format (the cross-mapper test in `test_round_trip.py` flips its assertion when this lands — the test's docstring already calls this out); the change is documented in `docs/security/anonymization.md`.
+
+#### DE-275 — Embed M2 citations in chat-message envelope
+
+**Priority:** P3 · **Effort:** S
+
+**Context:** M2-C2 wires the frontend to `GET /api/v1/chats/{chat_id}/messages/{message_id}/citations` as a lazy fetch immediately after each assistant message renders. The endpoint already exists (M2-A2) and the lazy-fetch path is the smallest change to surface the five-state citation UI without disturbing the chat-streaming pipeline. The cost is one extra round-trip per assistant message; in practice it runs in parallel with the user typing their next message, so end-user-perceived latency is near-zero on a healthy network.
+
+The structural cost is a second request per message — more api/ load, more network traffic, and a small extra failure mode (the citations fetch could fail independently of the chat response). A future refactor could embed the citation rows directly in the assistant-message JSON envelope so they land alongside `content`, removing the second round-trip entirely. M2-D2 (Citation Engine integration with the chat-send path) is the natural moment to revisit this; if measured latency or backend load shows up as a concern in the M2-F2 acceptance corpus, this DE is the path forward.
+
+**Specific scope:** Extend the assistant-message response shape (the chat-send return value and the chat-message read endpoint) to include a `citations` field — same per-row schema as `GET /messages/{id}/citations` returns, including `partial`. Update the frontend renderer to prefer the embedded citations when present and fall back to the lazy GET for older messages (or when the field is absent — e.g., a skill that doesn't emit citations). Keep the GET endpoint operational regardless; it remains the canonical surface for direct citation lookup (audit-log deep-linking, debugging, future operator tooling).
+
+**Acceptance criteria:** New assistant-message responses include a `citations` array reflecting the same data the GET endpoint returns; the frontend renders citations from the embedded data without an additional fetch when present; messages persisted before this lands continue to render correctly via the GET fallback; existing M2-C2 component tests pass with both data paths; `GET /messages/{id}/citations` is unchanged and remains the canonical source-of-truth endpoint.
+
+#### DE-276 — Ingest observability: surface silent embed/parse failures
+
+**Priority:** P2 · **Effort:** S-M
+
+**Context:** During M2-C2 manual verification on 2026-05-16, a KB-grounded chat returned "I don't have any NDA document in our conversation" despite the KB showing a successfully-attached document. Investigation found the document had been chunked correctly (16 chunks of real NDA text) but every chunk's `embedding` was NULL. Root cause: the ingest worker's `embed_chunks_for_file_job` was failing with `KeyError: 'LQ_AI_GATEWAY_URL'` because the worker container was missing the gateway env vars in `docker-compose.yml`. The worker reported `chunks_embedded: 0` and ARQ logged a one-line truncated error, but no surface in the product (admin UI, document status field, /admin/ingest-health endpoint) escalated this to operator-visible state — the document continued to render as "ready" and KB-attach UI showed it as if it were searchable. The immediate root cause was patched in a follow-on commit; this DE captures the broader observability gap.
+
+The failure mode is structurally bad: a deployment misconfiguration (missing env var, gateway unreachable, embedding-model permissions revoked) silently degrades KB hybrid retrieval to FTS-only across the entire deployment. Operators have no in-product signal until an end-user reports "the AI can't see my documents". The current `documents` table has no embed-state column, and the ingest worker's structured logs are not surfaced anywhere an admin reads.
+
+**Specific scope:** Three paths, ideally landed together:
+
+- **(a) Document-level embed status.** Add `documents.embedding_status` (enum: `pending`, `embedded`, `failed`) populated by `embed_chunks_for_file_job` per its return value. `failed` rows carry a `last_error` text field (the same string the worker already returns). Default `pending` for legacy rows; backfill from a one-time sweep that checks `EXISTS (SELECT 1 FROM document_chunks WHERE document_id = d.id AND embedding IS NULL)`.
+
+- **(b) Admin-visible state.** Surface the new status in the admin KB-detail UI and a new `GET /api/v1/admin/ingest-health` summary endpoint. Failed-embed rows show up with their error text; the admin can decide to re-trigger the embed job per-document or per-KB. Per `[[reference_lq_ai_dev_quirks]]` the operator-facing audit-health pattern (DE-257) is the right precedent.
+
+- **(c) CI guard against the specific regression.** Add a fresh-install validation step (per `[[feedback_dry_run_value]]`) that uploads a small fixture document, waits for `documents.embedding_status='embedded'`, then asserts at least one chunk has a non-NULL `embedding`. This is the canonical guard against the env-var class of failure — it would have caught the present bug at deploy time, not at user-report time.
+
+**Acceptance criteria:** `documents.embedding_status` is populated for every newly-ingested document and updates correctly on retry; the admin UI surfaces failed-embed documents distinctly from ready ones; an end-to-end test against a fresh-install stack uploads a fixture document and asserts the chunks come back embedded (not FTS-only); the gateway-misconfigured-worker class of bug surfaces as a CI failure on PR review rather than a silent production degradation.
+
+#### DE-277 — Citation extractor: fallback to document scan on chunk-boundary miss
+
+**Priority:** P3 · **Effort:** S
+
+**Context:** Surfaced during the M2-D4 edge-case sweep. The Citation Engine's extractor (`app/citation/extraction.py::extract_citations`) locates each quote by calling `_locate_in_chunk(quote, chunk.content)` against the single chunk the model cited via `(Source: [N])`. If the quote spans the boundary between two adjacent retrieved chunks — i.e., the quote is present in `documents.normalized_content` but in neither chunk's individual content — the locator returns `None` and the candidate is dropped silently. No row is persisted; the M2-C2 UI renders the marker as "unverified" (red) even though the underlying document text matches.
+
+In practice the model usually picks the chunk containing the full quote (the retrieval-context block instructs it to). The gap surfaces on adversarial multi-chunk paraphrases or when the model genuinely needs to cite text crossing a chunk seam — both rare but not impossible.
+
+The verifier itself reads against `documents.normalized_content` (un-chunked) and would verify a spanning quote correctly if it ever saw the candidate. The fix is upstream in extraction.
+
+**Specific scope:** Extend `_locate_in_chunk` (or the surrounding loop in `extract_citations`) to fall back to a full-document scan when the chunk-local search misses. Two-stage logic, mirroring the within-chunk pattern:
+
+- **Stage A — chunk-local exact:** current behavior.
+- **Stage B — chunk-local fuzzy:** current behavior.
+- **Stage C — full-document exact:** if A and B both miss, FK-load the chunk's parent document and `_locate_in_chunk(quote, doc.normalized_content)`. Resolved offsets are document-absolute (no `chunk.char_offset_start` arithmetic needed).
+- **Stage D — full-document fuzzy:** if C misses, fuzzy-search the full document. Resolved offsets again document-absolute.
+
+The persisted citation row's `source_offset_start` / `source_offset_end` already index into `documents.normalized_content` (not the chunk), so the downstream Stages 1–4 verifier consumes the document-absolute offsets without any further change.
+
+**Edge case the fix introduces:** a quote that's NOT in the cited chunk but IS elsewhere in the document — possibly the model cited the wrong chunk index. Stage C/D would surface this as verified, masking the mis-cite. Two-option resolution: (a) accept this as a feature (the verification is what matters; chunk-index correctness is decorative); (b) when Stage C/D fires, log a `citation_chunk_mismatch` warning so operators can spot model-side drift. Recommend (b) for observability.
+
+**Acceptance criteria:** the existing `test_chunk_boundary_spanning_citation_does_not_extract_today` test flips its assertion (rows DO persist; `verification_method='exact_match'`); a new test pins the chunk-mismatch warning case; no regression in the existing extraction test suite; `docs/citation-engine.md` "Known limitations" entry on chunk-boundary spanning is updated to either remove the limitation or note the residual chunk-mismatch behavior.
+
+#### DE-278 — Azure OpenAI AD authentication (managed identity / service principal)
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** M2-E1 (DE-267) shipped the Azure OpenAI adapter with API-key authentication only, deferring the Azure AD path to keep the M2-E1 budget at ~4 hr. Many Azure-tenant enterprise deployments disable long-lived API keys entirely and require token-based auth through Azure AD: either a managed identity (when the gateway runs on Azure compute — VM, AKS, Container Apps) or a service principal (when the gateway runs anywhere else but the operator wants AD-mediated access to the Azure OpenAI resource). Operators in this posture currently either provision a long-lived API key (a workaround that contradicts their Azure governance), wait for this DE, or run a custom auth proxy in front of the gateway.
+
+**Specific scope:** Extend `gateway/app/providers/azure_openai.py` to accept an `auth_mode: ad` flag in the provider config (alongside the existing `auth_mode: api_key` default). When `ad` is set, the adapter uses `azure-identity` (the official Azure SDK auth library) to acquire a token via `DefaultAzureCredential` — which transparently tries managed identity, then a service-principal env-var triple (`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`/`AZURE_TENANT_ID`), then other AD sources. Tokens are scoped to `https://cognitiveservices.azure.com/.default` and cached in-memory with the SDK's built-in refresh handling. The `_auth_headers` override emits `Authorization: Bearer <token>` instead of `api-key: <key>`. The `azure-identity` dep adds ~3 MB of transitive packages (msal, msal-extensions, cryptography is already pinned); SBOM impact reviewed at PR time.
+
+**Edge cases to handle:**
+
+- **Token refresh under streaming.** SSE streams can outlast a token's 1-hour lifetime. The `azure-identity` cache returns a fresh token on each `get_token()` call so the streaming iterator must re-fetch the header per HTTP request, not cache it on the adapter instance.
+- **Missing AD environment when `auth_mode: ad`.** Construction surfaces a clear startup `ValueError` if the credential chain finds no usable source (e.g., the gateway is configured for AD but running locally with no service-principal vars set).
+- **Mixed-mode providers.** Some operators run multiple Azure providers — one AD-authenticated production tenant, one API-key dev tenant. The config takes `auth_mode` per-provider; no global toggle.
+
+**Acceptance criteria:** `auth_mode: ad` provider entries construct cleanly under managed identity (validated in a CI integration test that mocks `DefaultAzureCredential`); the `Authorization: Bearer <token>` header is set on chat/embeddings/health calls (mocked); a regression test pins that `api-key` is NOT set when `auth_mode: ad`; `gateway.yaml.example` documents both auth modes with a comment block; `azure-identity` added to the gateway's `pyproject.toml` with the same pin discipline as other deps; SBOM diff reviewed; one mocked integration test exercises the AD path end-to-end through the FastAPI lifespan.
+
+#### DE-279 — Case citation validation (Bluebook resolution via CourtListener)
+
+**Priority:** P1 · **Effort:** M
+
+**Context:** The M2 Citation Engine validates **type 1** of three distinct citation-checking surfaces ("KB-quote accuracy" — does a model's quote and the meaning it draws accurately represent a document in the operator's KB). The other two surfaces are not built and require architecturally distinct components:
+
+- **Type 2 (this DE) — case citation validation:** given a citation string in Bluebook form (e.g., `Smith v. Jones, 123 U.S. 456 (2020)`), verify that it refers to a real, resolvable judicial opinion. Catches the "the model fabricated a case" failure mode. Distinct from type 1 because the source-of-truth is not an operator-owned document but an external case database.
+- **Type 3 — case-content accuracy:** see [DE-280](#de-280--case-content-accuracy-statement-vs-judicial-opinion).
+
+Type 2 is high-priority for any deployment used in litigation work — a fabricated case citation in a brief or memo is the canonical embarrassment-and-sanctions story (e.g., the 2023 *Mata v. Avianca* sanctions). The architectural slot exists in the project's transparency posture (every model-emitted claim is checkable), and Tucuxi-Inc has reference prior art at [`Tucuxi-Inc/Legal-Week-Cite-Checker`](https://github.com/Tucuxi-Inc/Legal-Week-Cite-Checker) — a working implementation of Bluebook-citation detection + CourtListener resolution that can be ported and adapted to the LQ.AI stack.
+
+**Specific scope:**
+
+- New module `api/app/citation/case_resolver.py` with a Bluebook-citation detector (regex + parser; the Legal-Week-Cite-Checker port covers the common Bluebook forms: U.S. Supreme Court reporters, federal reporters F./F.2d/F.3d/F. Supp., state reporters, parallel citations) and a CourtListener client.
+- CourtListener resolution uses the public FreeLaw Foundation API (`https://www.courtlistener.com/api/rest/v3/`). Authentication via an operator-supplied API token (env `LQ_AI_COURTLISTENER_TOKEN`); the API is free for reasonable use but the token improves rate limits.
+- New `message_case_citations` table mirroring the shape of `message_citations` (id, message_id, citation_string, normalized_form, courtlistener_opinion_id, resolution_status, resolved_at). Migration follows the existing alembic versioning.
+- Detector runs on every chat response (parallel with type-1 verification — same pre-render guarantee). Failed resolutions surface in the UI as "unverified case citation — could not resolve" (same chip vocabulary as type 1 for UX consistency).
+- Configurable per-deployment: `citation_engine.case_validation.enabled: bool` in `gateway.yaml` so operators with no litigation use case can skip the CourtListener dependency.
+
+**Privacy + transparency implications:** the citation string itself is the only data sent to CourtListener — no claim text, no surrounding context, no user identifier. CourtListener is operated by the Free Law Project (501(c)(3) non-profit) which publishes a clear privacy posture; the request shape is auditable in the routing log.
+
+**Acceptance criteria:** detector recognizes ≥95% of citation strings in a curated test set covering the major Bluebook forms; resolution succeeds for ≥98% of real citations and ≤2% for fabricated citations (false-positive rate); a Cypress E2E exercises the failed-resolution UI state; CourtListener-down failure mode handled gracefully (citation marked "unverified — resolver unavailable", not blocked); documented end-to-end in `docs/citation-engine.md` under a new §2 "Case citation validation"; integration with the existing `message_citations`-style audit row in `api/app/api/chats.py`.
+
+#### DE-280 — Case-content accuracy (statement vs judicial opinion)
+
+**Priority:** P1 · **Effort:** L
+
+**Context:** **Type 3** of the three citation-checking surfaces (see [DE-279](#de-279--case-citation-validation-bluebook-resolution-via-courtlistener) for the taxonomy). Given a statement the model makes *about* a case — what it held, what its reasoning was, what facts it relied on — verify that the statement is an accurate, non-cherry-picked representation of the underlying judicial opinion. Hardest of the three because the source-of-truth (opinion full text) is long, the model's statement is short, and "accurate representation" is a paraphrase-semantics judgment that the existing Stage-3 paraphrase judge (type 1) handles only over short retrieved chunks.
+
+**Scope considerations:**
+
+- **Source-of-truth fetch.** Once a case citation resolves through DE-279, the full opinion text is retrievable from CourtListener (`/api/rest/v3/opinions/<id>/`). Opinions are often 10–50 pages; the judge must reason over the whole opinion, not a single chunk. This is a different verification surface than type 1's chunk-scoped paraphrase judge.
+- **Statement extraction.** The chat model emits statements about cases inline — `"the Smith court held that …"`. A detector pairs each statement with the case citation it references (the model is prompted to colocate them; absent colocation we fall back to nearest-citation heuristic).
+- **Paraphrase-vs-cherry-pick distinction.** A statement can be technically accurate (the opinion does say *X*) but misleading (the opinion's holding turned on a fact the statement omits). The judge prompt needs to evaluate both fidelity and completeness — a meaningful step beyond type 1's "does this quote support this claim" surface.
+- **Calibrated gold set.** Required for confidence thresholds. ~50 statement-vs-opinion pairs reviewed by an attorney for ground truth; calibrate the judge to ≥0.85 precision at recall ≥0.70 before declaring a verdict. This is the one place in the three-type taxonomy where attorney attestation in the contribution path is genuinely load-bearing (the gold set's quality determines what verdicts the system produces in production).
+
+**Specific scope (M4 target):**
+
+- New module `api/app/citation/case_content_judge.py` with a paraphrase-semantics judge over full opinion text. Uses the same gateway-judge surface as type 1's Stage 3 (`paraphrase_judge`), but with a longer-context model and a prompt structured for fidelity + completeness evaluation.
+- Token-cost handling: opinion full text + statement + judge prompt = ~10-30k input tokens per judgment. Pre-flight cost budget mirrors the existing M2-D1 ensemble pre-flight; falls back to "unverified — over-budget" when a deployment hits its cap.
+- Statement detector + citation pairing — built on top of DE-279's detector.
+- New `message_case_statements` table for the verdicts.
+- UI state: case-statement chips render alongside type-1 KB chips. Same hover/click affordances; same verbal vocabulary.
+- Calibrated gold set committed at `eval/case-content-accuracy/` with attorney-reviewed annotations.
+
+**Acceptance criteria:** judge calibrated against the gold set (≥0.85 precision @ ≥0.70 recall); end-to-end integration with DE-279 (a chat response with a case statement triggers DE-279 resolution + DE-280 content check in parallel); UI renders the case-statement verdict alongside KB-quote verdicts; cost-budget pre-flight handles long-opinion edge cases; documented end-to-end in `docs/citation-engine.md` under a new §3 "Case content accuracy"; depends on DE-279 landing first.
+
+#### DE-281 — Citation Engine operational-telemetry calibration (TOLERANT_MATCH_THRESHOLD + aggregation_rule)
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** M2-E2 calibrated the per-judge-call cost pre-flight against the routing log (replacing the M2-D1 flat `FLAT_PER_JUDGE_USD = 0.005` constant with per-model rolling averages). Two other Citation Engine constants were originally scoped for M2-E2 calibration in the M2 plan but were not addressed because they require empirical workload data the project did not collect (M2-F1 closed via scope reframe rather than building an annotated corpus):
+
+- **`TOLERANT_MATCH_THRESHOLD = 95.0`** at `api/app/citation/verification.py:138` — rapidfuzz threshold for Stage 2 (tolerant-match) acceptance. 95 catches normalization-only differences (smart quotes, whitespace collapse, OCR confusions) while rejecting genuine paraphrases (~70-90 range) that belong to Stage 3. The 95 boundary is plausible but empirically uncalibrated — a real workload might want 92 or 97 to land on the precision/recall sweet spot.
+- **`aggregation_rule: strict`** default in `gateway.yaml.example` and `gateway/app/config.py` — Stage 4 ensemble aggregation. Strict requires unanimous agreement across N judges; majority needs N/2+1. The "strict produces too many verified-with-caveats surfaces" vs "majority is too permissive" tradeoff is a UX-and-correctness call that depends on observed disagreement rates the project hasn't measured.
+
+**The M2-E2 substrate enables this:** the per-purpose routing-log column (added in migration 0029) and the rolling-average query infrastructure (`api/app/citation/cost.py`) generalize cleanly to per-stage verdict telemetry. The same machinery that calibrates cost can calibrate accuracy once production deployments accumulate enough chat-send → citation-verdict telemetry to compute disagreement rates and stage-pass distributions.
+
+**Specific scope:**
+
+- Extend `inference_routing_log` (or add a sibling `citation_verdict_log` table) to record per-citation Stage-1-vs-Stage-2-vs-Stage-3 outcomes when Stage 4 ensemble fired, including the per-judge verdict tuples. Lets operators see "of the last 1000 ensemble verifications, how often did the 3 judges agree?" without a synthetic corpus.
+- New admin endpoint `GET /admin/v1/citation-calibration` exposing rolling stats: Stage 1 pass rate, Stage 2 pass rate (of Stage 1 misses), Stage 3 pass rate (of Stage 2 misses for single-judge), Stage 4 disagreement rate (per-judge tuple distribution), per-stage average cost.
+- Calibration recommendations: when disagreement rate exceeds X%, the admin surface suggests flipping `aggregation_rule` to `majority`. When Stage 2 pass rate is near-zero, suggest lowering `TOLERANT_MATCH_THRESHOLD`. When near-100%, suggest raising it.
+- `gateway.yaml` accepts both constants as configurable values (operators can override the defaults per deployment based on the recommendations).
+
+**Why deferred:** the current values are conservative and operator-overridable; no production deployment has accumulated the telemetry needed to calibrate them. The M2-E2 cost calibration shipped because per-model judge cost has obvious order-of-magnitude variation that's measurable from published price sheets; threshold + aggregation calibration both require observing how operators' real workloads behave, which is post-v0.2 work.
+
+**Acceptance criteria:** admin endpoint surfaces per-stage rolling stats with at least 30 days of telemetry; calibration recommendations match the documented decision rules; `gateway.yaml.example` adds documented override knobs for both constants; integration test exercises the recommendation logic against seeded telemetry data; `docs/citation-engine.md` adds a "Calibration" section linking the constants to the telemetry surface.
+
+#### DE-282 — Anonymization Layer empirical validation on legal-document corpus
+
+**Priority:** P1 · **Effort:** M (10–14 hours of focused work; structured for incremental community contribution)
+
+**Status:** **Open — community contribution welcomed.** This DE captures the original [M2-F2 plan scope](M2-IMPLEMENTATION-PLAN.md#task-m2-f2--anonymization-acceptance-test-corpus) which the maintainers chose not to ship in v0.2 in favor of transparent disclosure of the validation gap (see [`docs/security/anonymization.md` §"What's validated vs what's unvalidated"](security/anonymization.md#whats-validated-vs-whats-unvalidated)). The choice keeps v0.2's ship cadence intact while inviting contributions from practitioners whose practice areas have specific recognizer needs.
+
+**Context:** The M2 Anonymization Layer (§4.7) enables 6 Presidio default recognizers (`PERSON`, `ORGANIZATION`, `EMAIL_ADDRESS`, `PHONE_NUMBER`, `US_BANK_NUMBER`, `LOCATION`) plus 2 custom legal recognizers (`CaseNumberRecognizer`, `MatterNumberRecognizer`), and disables 7 noisy defaults (`UsSsn`, `UsPassport`, `UsLicense`, `Crypto`, `Iban`, `Ip`, `MedicalLicense`). The enable/disable judgments reflect engineering reasoning about typical legal-document corpus — **not** empirical recall + precision measurements on a curated corpus of contracts, briefs, and correspondence.
+
+For citation verification, a recognizer miss surfaces visibly to the user as an "unverified" chip. For anonymization, **a miss is a silent confidentiality incident** — unredacted client data reaches the model provider before the operator has any signal something went wrong. Operational-telemetry calibration (the path used for cost in [DE-281](#de-281--citation-engine-operational-telemetry-calibration-tolerant_match_threshold--aggregation_rule)) can't address this because by the time a miss is observable, the leak has already happened. Pre-deployment empirical validation against representative legal-document corpus is the right shape of work.
+
+**Specific scope (port of the original M2-F2 plan):**
+
+- **Curate ~50 documents** with ground-truth entity annotations. Sources can mix:
+  - Anonymized real practice documents (operator/contributor-supplied; the corpus itself ships under whatever license the contributor specifies, including potentially a separate license tier from the main project).
+  - Public-domain legal documents (federal/state statutes via `uscode.house.gov`, court opinions from CourtListener, SEC EDGAR contract exhibits).
+  - Synthetic but representative documents authored under the project's license.
+- **Annotations format:** per entity type, list of `(text, start_offset, end_offset, type)` tuples. JSONL recommended for diff-friendliness in git.
+- **Build runner:** `scripts/run_anonymization_eval.py` that loads the corpus, runs each document through `get_analyzer_engine().analyze(...)`, computes per-entity-type recall / precision / F1 against ground truth, reports the aggregate baseline.
+- **Baseline targets** (restated from the original M2-F2 plan; revisit if contributor evidence suggests they need recalibration):
+  - `PERSON`, `ORGANIZATION`: recall ≥95%, precision ≥90%.
+  - `EMAIL_ADDRESS`, `PHONE_NUMBER`: recall ≥98%, precision ≥98% (regex-based; should be near-perfect).
+  - `LOCATION` (ADDRESS): recall ≥85%, precision ≥80%.
+  - `CASE_NUMBER`, `MATTER_NUMBER`: recall ≥70%, precision ≥75%.
+- **Document the corpus, runner, and baseline metrics** in `docs/security/anonymization.md`, replacing the "What's NOT validated" section's "Unknown" placeholders with measured values.
+- **Optional CI nightly** — informational, non-blocking. The corpus is stable enough that meaningful changes only happen when the recognizer set changes, so PR-time CI is sufficient to catch regressions for most contributors.
+
+**Practice-area sub-areas welcomed:**
+
+- **Personal-injury / employment / benefits / immigration practices** — re-evaluate the `UsSsnRecognizer` disable. These practices routinely handle real SSNs; the current disable is correct for general civil litigation but potentially wrong for these areas. Contribution shape: corpus subset that exercises real SSN density in representative documents, plus a measured FP-rate analysis for the case-number collision Presidio's SSN recognizer produces.
+- **Healthcare / regulated-industry practices** — re-evaluate `MedicalLicenseRecognizer`, possibly add new recognizers for DEA numbers, NPI numbers, NDC codes. Practice-specific entity types are valuable additions.
+- **International practices** — extend beyond Presidio's US-centric defaults. Foreign-language detection is a separate gap tracked in the [Foreign-language entities](security/anonymization.md#foreign-language-entities--out-of-scope-for-v1) section; recognizer-set extensions for non-US jurisdictions belong here.
+- **Document Bates numbering, account numbers, social media handles, date-of-birth patterns** — entity types not in the current set that operators have flagged or might flag.
+
+**Acceptance criteria:**
+
+- Corpus of at least 30 documents committed under `eval/anonymization/corpus/` (or a similar path), with documented sourcing and license per document.
+- Annotations file at `eval/anonymization/annotations.jsonl` with schema documented in `eval/anonymization/README.md`.
+- Eval runner at `scripts/run_anonymization_eval.py` produces per-entity-type metrics.
+- Measured baseline numbers replace the "Unknown" placeholders in `docs/security/anonymization.md` §"What's NOT validated".
+- If any recognizer-set changes are proposed alongside the corpus (e.g., re-enabling `UsSsn` for a practice-area variant), the corpus includes positive and negative examples justifying the change.
+- DCO sign-off + attestation per the project's [skill-contribution model](../skills/CONTRIBUTING.md): the contributor confirms the corpus and annotations were authored under their practice judgment.
+
+**Why this is the right kind of community contribution:**
+
+This DE intentionally combines bounded technical work with practice-specific judgment work. The technical pieces (runner, metrics, CI wiring) are picked up cleanly by any contributor familiar with Python + Presidio. The judgment pieces (which entity types matter, which disable choices to reconsider, which patterns are realistic) require the kind of practice-specific knowledge no single maintainer can supply across the diversity of in-house legal teams' workflows. Splitting the work across contributors who own their respective practice areas is the right shape — and the project's [transparency principle](#13-transparency-as-a-founding-principle) is what makes the invitation honest in the first place.
+
+#### DE-283 — Fresh-install login UX: surface the bootstrap-password path on first 401
+
+**Priority:** P2 · **Effort:** S (~30 min — community-friendly first PR)
+
+**Status:** Open — surfaced during the M2 pre-tag fresh-install validation (2026-05-17). The maintainer team hit it; an attentive quickstart reader would not, but the failure mode is undocumented at the point it actually happens (the login screen), only at the point a careful reader is meant to have already addressed it (the quickstart Step 4).
+
+**Context:** When an operator deploys a fresh stack (or wipes volumes and restarts), the bootstrap path in `api/app/admin_bootstrap.py` creates a default admin user `admin@lq.ai` with a randomly-generated password printed once to the API container's logs ("First-run admin password: …"). The [quickstart §Step 4](quickstart.md#step-4--sign-in-as-the-first-run-admin) tells operators to grep the logs. Three failure modes routinely reach the login screen instead:
+
+1. **Operators skim past Step 4** — the password is buried in a paragraph, not in a callout box; readers focused on "where do I sign in" miss the prerequisite step.
+2. **Operators who upgrade or wipe volumes mid-project** — they had a working admin from a prior install; the new bootstrap fires silently; their cached password no longer works; the error is a generic 401.
+3. **Operators who lost the printed password** — the docs document a CLI reset (`docker compose exec api python -m app.cli reset-admin-password`) but that's in a troubleshooting section the operator has to know to look for.
+
+In all three cases the user lands at the LQ.AI shell login form, types their best guess, and gets HTTP 401 with no actionable guidance about *why* the credentials don't match or *where* the right password lives.
+
+**Specific scope (pick whichever combination fits the contributor's interests):**
+
+- **(a) Improve the 401 response shape on the unauthenticated `/api/v1/auth/login` path.** When the request targets an account that was bootstrapped within the last ~24 hours and the operator has not yet completed the `must_change_password=true` flow, include a structured `hint` field in the response body pointing at the docs path — `{"detail": "...", "hint": "first_run_admin_password_in_logs", "docs_url": "https://github.com/LegalQuants/lq-ai/blob/main/docs/quickstart.md#step-4--sign-in-as-the-first-run-admin"}`. Conservative: only fire the hint for the bootstrapped admin email, not every 401 (to avoid leaking enumeration signal about which emails exist).
+- **(b) Surface the hint in the LQ.AI shell login UI.** When the login form receives a 401 with `hint=first_run_admin_password_in_logs`, render an explanatory banner: "First-run deployment? Your bootstrap password is in the API container logs — run `docker compose logs api | grep 'First-run admin password'` to retrieve it. See the quickstart for the full bootstrap flow." Single click-through to the docs.
+- **(c) Print the bootstrap password more prominently in the API container logs.** Currently the log line is a `WARNING` level emit; consider making it a visually-bracketed multi-line block (e.g., with `==========` separators) so it stands out in `docker compose logs api` output that's full of routine startup messages.
+- **(d) Docs-only refinement.** Add a callout box at the top of the quickstart "Sign in" step explicitly framing "if you see a 401 here, your password is probably in the API logs — see §Step 4". And cross-reference from the OpenWebUI shell login surface (since that's the first thing many operators hit) so they're directed to the LQ.AI flow if they bypassed it.
+
+**Why this is a good first contribution:** the issue is reproducible by anyone running through the quickstart; the surfaces touched are small (one endpoint, one Svelte component, or one docs section); the fix scope is bounded; the UX impact is meaningful for every new deployment.
+
+**Acceptance criteria:** an operator who wipes volumes and restarts the stack, then attempts to sign in with stale credentials, sees actionable guidance (in the API response, the UI banner, the docs, or some combination) that lets them retrieve the bootstrap password without searching the troubleshooting section. A regression test pins that the hint surfaces only for accounts within the bootstrap-recency window (defensive against enumeration). `docs/quickstart.md` Step 4 + the troubleshooting section updated for whichever scope landed.
 
 ### Workflow intelligence
 
