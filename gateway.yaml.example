@@ -126,15 +126,25 @@ providers:
 
   - name: azure-openai
     type: azure_openai
+    # M2-E1 (DE-267): Azure OpenAI adapter. Mirrors the OpenAI wire shape
+    # with a deployment-scoped URL and `api-key` auth.
+    #
     # `:-` default lets the gateway load without an Azure resource configured;
     # operators routing to Azure set AZURE_OPENAI_RESOURCE in their .env.
     base_url: https://${AZURE_OPENAI_RESOURCE:-disabled}.openai.azure.com
     api_key_env: AZURE_OPENAI_API_KEY
+    # api_version pins which Azure-side features are available (Azure rolls
+    # capabilities in/out per version). Bump to a newer GA version
+    # ('2024-10-21' or later) for current chat-completion features.
     api_version: '2024-08-01-preview'
-    tier: 3  # Azure OpenAI under customer's Azure subscription
+    tier: 3  # Azure OpenAI under enterprise agreement (ZDR + BAA)
+    # CRITICAL: each entry is the Azure DEPLOYMENT-ID (operator-named in
+    # the Azure portal), NOT the underlying model name. Many operators
+    # run multiple deployments of the same model with different SKUs;
+    # the gateway routes by deployment-id via the alias map below.
     models:
-      - gpt-4-turbo
-      - gpt-4o
+      - gpt-4-turbo-prod       # e.g., a deployment of gpt-4-turbo
+      - gpt-4o-prod            # e.g., a deployment of gpt-4o
 
   # --- Local providers (Tier 1) ---
 
@@ -151,10 +161,9 @@ providers:
     api_key_env: ''  # Ollama doesn't require an API key
     tier: 1  # Fully local; no data leaves the deployment
     models:
-      - llama3.1:70b
-      - llama3.1:8b
-      - mistral-large
-      - qwen2.5:72b
+      - qwen3.5:9b
+      - qwen3.5:4b-nvfp4
+      - gemma4:e4b
     enabled: ${LOCAL_INFERENCE_ENABLED:-true}
 
   - name: vllm-local
@@ -212,7 +221,7 @@ model_aliases:
   local:
     primary:
       provider: ollama-local
-      model: llama3.1:70b
+      model: qwen3.5:9b
     fallback: []  # No fallback for local — Tier 1 must stay Tier 1
 
   # Mode-2 friendly aliases (B6 partial). Skills and the chat UI ask
@@ -220,16 +229,23 @@ model_aliases:
   # the air-gapped local model. Both stay Tier 1 — the fallback list is
   # empty so a missing local provider surfaces as a clean 503 rather
   # than silently degrading to a cloud Tier 4 path.
+  #
+  # Default model choices reflect what a current Ollama install can
+  # actually serve well in 2026. Qwen3.5 is the family we ship behind
+  # the Mode-2 aliases (PRD §6.1); operators free to repoint at any
+  # ollama-served model by editing this section. The "fast" / "thinking"
+  # split mirrors the cloud split — 4b for low-latency, 9b when the
+  # quality lift is worth the wall-clock.
   local-fast:
     primary:
       provider: ollama-local
-      model: llama3.1:8b
+      model: qwen3.5:4b-nvfp4
     fallback: []
 
   local-thinking:
     primary:
       provider: ollama-local
-      model: llama3.1:70b
+      model: qwen3.5:9b
     fallback: []
 
   # The 'embedding' alias is the alias the backend's KB layer (C6)
@@ -382,6 +398,70 @@ anonymization:
   # before sending back to backend.
 
 # ============================================================
+# CITATION ENGINE (PRD §3.3 / M2-C1)
+# ============================================================
+# The api/ side runs the Citation Engine cascade (exact-match →
+# tolerant-match → LLM paraphrase judge → ensemble). Stage 3
+# dispatches a judge call through this gateway; ``judge_model`` is
+# the alias the gateway resolves for that call.
+#
+# Defaults to ``fast`` so the judge runs on a smaller, cheaper
+# model than whatever generated the citation. Operators who want a
+# different judge model should pick one weaker than the
+# citation-generating model (the plan's calibration intuition: the
+# judge shouldn't be smarter than the author, only different).
+# Accepts either an alias from ``model_aliases:`` above or a fully-
+# qualified ``provider-name/model-name`` form.
+
+citation_engine:
+  judge_model: fast
+
+  # ----------------------------------------------------------------
+  # Stage 4 — ensemble verification (M2-D1)
+  # ----------------------------------------------------------------
+  # When activated, the paraphrase judge runs in parallel across
+  # ``judge_models`` and the verdicts aggregate under
+  # ``aggregation_rule``. Activation is the OR of:
+  #
+  #   1. A skill's frontmatter ``ensemble_verification: true``
+  #   2. The chat's project ``ensemble_verification`` flag
+  #   3. ``default_enabled`` below
+  #
+  # Replaces Stage 3 (single-judge) when activated. Cost-budget
+  # pre-flight: the api/ estimates spend per message
+  # (citations × n_judges × ~$0.005); if the estimate exceeds
+  # ``max_cost_per_message_usd`` the cascade falls back to single-
+  # judge Stage 3 with a warning logged.
+  #
+  # PRIVACY NOTE: each judge dispatch is an inference request that
+  # routes through the gateway like any other. If judge_models
+  # spans multiple provider tiers, the verification's privacy
+  # envelope is the *weakest* (highest-numbered) tier across the
+  # ensemble — exposed on ``message_citations.tier_envelope`` per
+  # row so operators can audit ensemble exposure post-hoc.
+  #
+  # Default is fully opt-in: empty ``judge_models`` disables Stage 4
+  # even when ``default_enabled: true`` (defense in depth against
+  # misconfiguration).
+  ensemble_verification:
+    default_enabled: false
+    judge_models: []
+    # ``strict`` — every judge must verdict verified. Any miss → MISS.
+    # ``majority`` — simple majority of verified verdicts wins;
+    #   even-N ties (e.g., 2-of-4) miss conservatively. Dissent
+    #   surfaces via the ``partial=true`` flag on the persisted row.
+    aggregation_rule: strict
+    max_cost_per_message_usd: 0.05
+  #
+  # Example operator configuration (commented for safety):
+  #
+  # ensemble_verification:
+  #   default_enabled: true
+  #   judge_models: [fast, fast-anthropic, fast-vertex]
+  #   aggregation_rule: strict
+  #   max_cost_per_message_usd: 0.10
+
+# ============================================================
 # COST TRACKING
 # ============================================================
 # Per-model cost rates for the cost tracker. Updated as
@@ -411,19 +491,13 @@ cost_tracking:
     'openai-prod/gpt-4o-mini':
       input_per_mtok: 0.15
       output_per_mtok: 0.60
-    'ollama-local/llama3.1:70b':
+    'ollama-local/qwen3.5:9b':
       input_per_mtok: 0.0  # Local; no per-token cost
       output_per_mtok: 0.0
-    'ollama-local/llama3.1:8b':
+    'ollama-local/qwen3.5:4b-nvfp4':
       input_per_mtok: 0.0
       output_per_mtok: 0.0
-    'ollama-local/llama3.1':
-      input_per_mtok: 0.0
-      output_per_mtok: 0.0
-    'ollama-local/mistral-large':
-      input_per_mtok: 0.0
-      output_per_mtok: 0.0
-    'ollama-local/qwen2.5:72b':
+    'ollama-local/gemma4:e4b':
       input_per_mtok: 0.0
       output_per_mtok: 0.0
     # Embedding rates — OpenAI text-embedding-3-* charges only on

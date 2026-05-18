@@ -552,75 +552,64 @@ The Azure OpenAI adapter lands (small but strategically important); ensemble ver
 
 The trust-layer documentation lands. Acceptance test corpora are built for both Citation Engine and Anonymization. Procurement docs reflect M2 capabilities.
 
-### Task M2-F1 — Citation Engine acceptance test corpus
+### Task M2-F1 — Citation Engine acceptance test corpus — ✓ Closed (scope reframe, 2026-05-17)
 
-**Scope:**
+**Status:** **✓ Closed via scope reframe** rather than separate corpus build. During M2-F1 kickoff Kevin clarified the three-type citation taxonomy:
+
+1. **KB-quote accuracy** — verify the model's response accurately represents the cited KB document.
+2. **Case citation validation** — verify a case citation refers to a real opinion. *Not in M2 scope; tracked at [PRD §9 DE-279](PRD.md#de-279--case-citation-validation-bluebook-resolution-via-courtlistener).*
+3. **Case-content accuracy** — verify a statement about a case matches the holding. *Not in M2 scope; tracked at [PRD §9 DE-280](PRD.md#de-280--case-content-accuracy-statement-vs-judicial-opinion).*
+
+M2 shipped type 1 across Phases A–D. Verification of type-1 behavior already lives in:
+
+- `api/tests/citation/test_extraction.py` + `test_verification.py` + `test_verify_ensemble.py` — unit coverage for Stages 1–4 (exact-match, tolerant-match, paraphrase-judge, ensemble).
+- `api/tests/test_chat_citations.py` — integration coverage for the full chat-emits-citation → engine-verifies → message_citations row persisted path, including the privileged-project audit-trail integration test.
+- `api/tests/citation/test_round_trip_correctness.py` — round-trip invariants (M2-C3, 17 slow-marked tests).
+- `web/cypress/e2e/m2-c2-citation-states.cy.ts` — UI rendering states across the four verification verdicts.
+- `api/tests/citation/test_edge_cases.py` + `gateway/tests/anonymization/test_edge_cases.py` — M2-D4 edge-case sweep (14 tests; closed Phase D).
+- Real-stack browser verification on uploaded NDAs during M2-C2 (cascade fixes for ingest-worker env + entrypoint surfaced and merged).
+
+A separate annotated corpus + eval runner would duplicate the existing pin coverage for type-1 behavior and would not move the project closer to types 2 or 3 (those are different surfaces; see DE-279 / DE-280 for their distinct architectures). The plan-stated targets (Stage 1 ≥40%, Stage 1+2 ≥75%, FP <2%, FN <10%) are claims the existing tests assert at the per-case level rather than aggregate metrics — operators reading the test fixtures can see exactly what behaviors are pinned.
+
+**Original scope (preserved for historical reference; not built):**
+
 - Curate 30–50 documents with ground-truth citation annotations.
-  - Sources: anonymized real documents from the operator's practice; supplemented with public-domain documents (e.g., SEC EDGAR filings with NDA/MSA exhibits).
-  - Each document has 5–10 ground-truth citations authored by a reviewing attorney: claim, verbatim text, source file ID, offsets.
-- Build runner: `scripts/run_citation_engine_eval.py` that:
-  - Loads the ground-truth corpus.
-  - Runs each citation through the verification pipeline.
-  - Records verdict per stage (which stage passed, or final unverified).
-  - Reports metrics:
-    - Stage 1 pass rate.
-    - Stage 2 pass rate (of those that failed Stage 1).
-    - Stage 3 pass rate (of those that failed Stage 2).
-    - False-positive rate (claims marked verified that ground truth says shouldn't be).
-    - False-negative rate (ground-truth verifiable claims marked unverified).
-    - Cost per evaluation.
-- Baseline targets:
-  - Stage 1 catches ≥40% of verbatim citations.
-  - Stage 1+2 together ≥75% of legitimate citations.
-  - Stage 3 catches another ~15% (the paraphrase cases).
-  - End-to-end false-positive rate <2%.
-  - End-to-end false-negative rate <10%.
-- Document the corpus, the runner, and the baseline metrics in `docs/citation-engine.md`.
-- Add the eval to CI as a nightly job (not blocking; informational).
+- Build runner: `scripts/run_citation_engine_eval.py` reporting per-stage pass rates, false-positive rate, false-negative rate, cost per evaluation.
+- Baseline targets: Stage 1 ≥40%, Stage 1+2 ≥75%, Stage 3 +~15%, FP <2%, FN <10%.
+- Document corpus + runner + baseline in `docs/citation-engine.md`.
+- Add eval to CI as a nightly job (not blocking; informational).
 
-**Dependencies:** All of Phase A–D.
+This original scope can be revisited if/when type-2 or type-3 validation lands — at that point an aggregate empirical baseline across all three types makes sense.
 
-**Output:** Citation Engine has an empirical baseline; regressions are detectable.
-
-**Verification:**
-- Eval runs against the curated corpus successfully.
-- Baseline metrics meet or exceed targets above.
-- Eval runs in CI nightly (not blocking PR merges; surfaces in a project dashboard).
-
-**Effort:** 12–16 hours (the corpus curation is the bulk).
+**Closeout sequence updated** (Kevin, 2026-05-17): M2-E1 ✓ → ~~M2-F1~~ ✓ (scope reframe) → **M2-E2 (next)** → M2-F2 → M2-F3.
 
 ---
 
-### Task M2-F2 — Anonymization acceptance test corpus
+### Task M2-F2 — Anonymization acceptance test corpus — ✓ Closed (transparency-first deferral, 2026-05-17)
 
-**Scope:**
+**Status:** **✓ Closed via transparency-first deferral.** Unlike [M2-F1](#task-m2-f1--citation-engine-acceptance-test-corpus--closed-scope-reframe-2026-05-17) where the existing test coverage made the corpus redundant, M2-F2's underlying question is **genuinely open**: Presidio default-recognizer recall + precision on legal-document corpus is empirically unmeasured, and the maintainer team does not have the practice-specific judgment needed to author ground-truth annotations across the diversity of in-house legal workflows the project serves.
+
+The chosen response, per Kevin's framing on 2026-05-17:
+
+> "What we're shooting for is if we don't do something to the highest level of transparency, confidentiality and privilege we note it and ask for the community to contribute to accomplish it — honest, transparent and lets the user know where to trust and where to be careful — for example, absent this, a user might choose to use local inference to hedge against the risk — let's give them all the information they need to make the right professional decision — we win on transparency."
+
+Specifically:
+
+1. **`docs/security/anonymization.md` gained a top-level "What's validated vs what's unvalidated" section** that explicitly enumerates what the existing test coverage measures (custom recognizers, middleware integration, round-trip correctness, edge cases) and what it does not measure (Presidio default-recognizer recall + precision on legal corpus, disabled-recognizer trade-offs per practice area).
+2. **The risk framing is explicit**: a recognizer miss is a silent confidentiality incident, distinct from citation-verification misses which surface in the UI. Operational telemetry cannot recover the leak post-hoc — pre-deployment empirical validation is the right shape of work, but the project does not have the data to produce it.
+3. **Actionable guidance is provided**: practicing attorneys who cannot accept the unvalidated risk for a given matter are pointed to Tier 1 (fully local) inference, the explicit "disable anonymization" posture, pre-redaction at upload, or manual per-message review. The user has all the information they need to make the right professional decision.
+4. **The work is invited from the community via [PRD §9 / DE-282](PRD.md#de-282--anonymization-layer-empirical-validation-on-legal-document-corpus)**, structured to combine bounded technical work (runner + metrics + CI wiring) with practice-specific judgment work (entity-type prioritization, ground-truth annotations, recognizer-set re-evaluation per practice area). Personal-injury, employment, immigration, benefits, healthcare, and international-practice contributors are explicitly welcomed.
+
+The original M2-F2 scope (curate ~50 docs, build runner, hit baseline targets) is preserved verbatim in DE-282 — a contributor picking up the DE can execute against the same plan.
+
+**Original scope (preserved at DE-282 for contributors; not built by the maintainer team in v0.2):**
+
 - Curate ~50 legal documents with ground-truth entity annotations.
-  - Sources: anonymized real documents; supplemented with public-domain legal documents.
-  - Annotations: per entity type, list of (text, start_offset, end_offset, type) tuples.
-- Build runner: `scripts/run_anonymization_eval.py` that:
-  - Loads the corpus and ground-truth annotations.
-  - Runs each document through the Analyzer.
-  - Reports per-entity-type:
-    - Recall: % of ground-truth entities caught.
-    - Precision: % of caught entities that are actual entities.
-    - F1 score.
-- Baseline targets:
-  - PERSON, ORG: recall ≥95%, precision ≥90%.
-  - EMAIL, PHONE: recall ≥98%, precision ≥98% (regex-based, should be near-perfect).
-  - ADDRESS: recall ≥85%, precision ≥80% (variability is higher).
-  - CASE_NUMBER, MATTER_NUMBER: recall ≥70%, precision ≥75% (custom recognizers; harder).
-- Document the corpus, runner, and baseline metrics in `docs/security/anonymization.md`.
-- Add to CI as nightly.
+- Build runner: `scripts/run_anonymization_eval.py` reporting per-entity-type recall, precision, F1.
+- Baseline targets: PERSON / ORG ≥95% / ≥90%; EMAIL / PHONE ≥98% / ≥98%; ADDRESS ≥85% / ≥80%; CASE_NUMBER / MATTER_NUMBER ≥70% / ≥75%.
+- Document the baseline in `docs/security/anonymization.md`.
 
-**Dependencies:** All of Phase A–D.
-
-**Output:** Anonymization has an empirical baseline.
-
-**Verification:**
-- Eval runs successfully.
-- Baseline metrics meet or exceed targets above.
-
-**Effort:** 10–14 hours.
+**Closeout sequence final** (Kevin, 2026-05-17): M2-E1 ✓ → ~~M2-F1~~ ✓ (scope reframe; existing coverage is sufficient) → M2-E2 ✓ (cost calibration shipped) → ~~M2-F2~~ ✓ (transparency-first deferral; DE-282 invites community contribution) → **M2-F3 (next, final)**.
 
 ---
 
@@ -694,7 +683,7 @@ The recommended workflow mirrors the M1 implementation:
 | Anonymization recognizes too cautiously (false negatives) | Provide custom-recognizer pattern for matter-specific entities; document customization path; track recall in acceptance-test eval. |
 | Ensemble verification cost overruns | Configurable cost budget per message; fall back to single-judge with warning when exceeded; track cost-per-message in admin dashboard. |
 | Privileged-project handling has subtle bug (anonymization-applied when it shouldn't be, or tier-routing wrong) | Dedicated test coverage (M2-D3); periodic audit-log review by security reviewer. |
-| Citation Engine verification creates a perf bottleneck | Stages 1 and 2 are sub-millisecond; Stage 3+ are LLM calls (already async). Pipeline runs in parallel with response streaming where possible. Track P95 latency in M2-F1. |
+| Citation Engine verification creates a perf bottleneck | Stages 1 and 2 are sub-millisecond; Stage 3+ are LLM calls (already async). Pipeline runs in parallel with response streaming where possible. P95 latency tracked via OTel spans on `verify()` / `verify_ensemble()` in production rather than via a synthetic corpus run. |
 | OpenAI / Anthropic SDK changes break adapters | Pin SDK versions; track upstream releases; bug-fix releases for SDK updates ship as patch versions. |
 
 ---

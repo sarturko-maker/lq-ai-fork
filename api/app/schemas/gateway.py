@@ -45,6 +45,13 @@ class ChatCompletionMessage(BaseModel):
     tool_call_id: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
 
+    # M2-D2: when True, the gateway's anonymization pre-middleware
+    # leaves this message's content unchanged. The api/ sets this on
+    # the retrieval-context system message per Decision M2-1 so the
+    # model sees intact source quotes for citation grounding. Mirrors
+    # the gateway-side schema field of the same name.
+    lq_ai_skip_anonymization: bool = False
+
 
 class InlineSkillRef(BaseModel):
     """Wave D.2 Task 3.0 — one inline-body skill on a chat completion request.
@@ -122,6 +129,15 @@ class ChatCompletionRequest(BaseModel):
     chat_id: str | None = None
     anonymize: bool = True
 
+    lq_ai_privileged: bool = False
+    """M2-B3: backend forwards ``Project.privileged`` here when the chat
+    lives in a project. The gateway's anonymization middleware skips
+    entirely on ``True`` — rewriting attorney-client privileged work
+    product risks corrupting it, so the conservative posture is
+    "don't touch it." Defaults False so chats outside any project (and
+    chats whose project is non-privileged) get the normal middleware
+    behavior."""
+
     # --- C2 (skill prompt assembly per ADR 0007) -----------------------------
     lq_ai_skills: list[str] = Field(default_factory=list, max_length=16)
     """Skill names to attach. The gateway fetches each from
@@ -165,6 +181,15 @@ class ChatCompletionRequest(BaseModel):
     resolves to the user's row first and falls back to the
     filesystem-canonical built-in. Omitted means "registry-only",
     which is the right behavior for non-user-bearing callers."""
+
+    lq_ai_purpose: str | None = None
+    """M2-E2: tag for the gateway's routing-log ``purpose`` column.
+    Distinguishes Citation Engine Stage 3/4 judge calls from regular
+    chat completions so per-model cost calibration filters
+    routing-log rows down to judge traffic. Known values used in
+    code: ``'judge_paraphrase'``. ``None`` or any unknown value
+    records as ``'chat'`` on the gateway side. Stripped from the
+    outbound provider body."""
 
 
 # --- Chat completion response -------------------------------------------------

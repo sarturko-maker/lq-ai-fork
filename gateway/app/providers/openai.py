@@ -98,8 +98,15 @@ _LQ_AI_EXTENSION_KEYS = frozenset(
         "lq_ai_chat_id",
         "lq_ai_message_id",
         "lq_ai_user_id",
+        "lq_ai_purpose",
     }
 )
+
+# M2-D2: per-message LQ.AI extension keys that must not reach OpenAI.
+# Anthropic / Ollama adapters build message dicts field-by-field so
+# they ignore these implicitly; the OpenAI adapter uses ``model_dump``
+# and needs the explicit strip.
+_LQ_AI_MESSAGE_EXTENSION_KEYS = frozenset({"lq_ai_skip_anonymization"})
 
 logger = logging.getLogger(__name__)
 
@@ -476,6 +483,15 @@ def _to_openai_request(
     body = request.model_dump(mode="json", exclude_none=True)
     for key in _LQ_AI_EXTENSION_KEYS:
         body.pop(key, None)
+    # M2-D2: per-message LQ.AI keys (e.g., lq_ai_skip_anonymization)
+    # are api-internal markers; strip from each message so OpenAI's
+    # strict body validation doesn't reject the request.
+    messages = body.get("messages")
+    if isinstance(messages, list):
+        for msg in messages:
+            if isinstance(msg, dict):
+                for key in _LQ_AI_MESSAGE_EXTENSION_KEYS:
+                    msg.pop(key, None)
     body["model"] = model
     body["stream"] = stream
     # ``stream_options.include_usage`` is required for OpenAI to emit a
@@ -525,6 +541,7 @@ async def _openai_stream_iter(
     headers: dict[str, str],
     provider_name: str,
     requested_model: str,
+    path: str = "/chat/completions",
 ) -> AsyncIterator[ChatCompletionChunk]:
     """Stream OpenAI SSE and yield :class:`ChatCompletionChunk` objects.
 
@@ -537,14 +554,15 @@ async def _openai_stream_iter(
     handler's responsibility — the adapter only yields data chunks.
     Empty lines, ``:`` comments, and ``event:`` / ``id:`` / ``retry:``
     fields are ignored (we don't depend on them).
+
+    ``path`` defaults to OpenAI's ``/chat/completions``; Azure OpenAI
+    (M2-E1) reuses this iterator with its deployment-scoped path.
     """
 
     fallback_id = f"chatcmpl-{uuid.uuid4().hex}"
 
     try:
-        async with client.stream(
-            "POST", "/chat/completions", json=body, headers=headers
-        ) as response:
+        async with client.stream("POST", path, json=body, headers=headers) as response:
             if response.status_code >= 400:
                 error_body = await response.aread()
                 _raise_from_error_body(

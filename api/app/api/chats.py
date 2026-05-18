@@ -58,6 +58,7 @@ import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
@@ -69,12 +70,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import ActiveUser
 from app.api.skills import _resolve_skill_for_user
 from app.audit import audit_action
-from app.clients.gateway import GatewayClient, get_gateway_client
+from app.citation import extract_citations, verify
+from app.citation.cost import estimate_judge_call_cost_usd
+from app.clients.gateway import EnsembleConfig, GatewayClient, get_gateway_client
 from app.db.session import get_db
 from app.errors import LQAIError, NotFound, ValidationError
 from app.knowledge.embed import DEFAULT_EMBEDDING_MODEL, request_embedding_vector
 from app.knowledge.retrieval import HybridSearchResult, hybrid_search
-from app.models.chat import Chat, Message
+from app.models.chat import Chat, Message, MessageCitation
+from app.models.document import Document
 from app.models.inference import InferenceRoutingLog
 from app.models.knowledge import KnowledgeBase
 from app.models.project import Project
@@ -102,6 +106,7 @@ from app.schemas.gateway import (
     ChatCompletionRequest,
     InlineSkillRef,
 )
+from app.skills.registry import MutableSkillRegistry, SkillRegistry
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 log = logging.getLogger(__name__)
@@ -807,6 +812,16 @@ def _format_retrieval_context_block(
     gateway request as a ``system`` message so the LLM treats it as
     grounding rather than user turn content.
 
+    The header carries the M2 Citation Engine's citation contract: when
+    the model grounds a claim in a retrieved chunk, it must quote the
+    source verbatim in straight double quotes followed by
+    ``(Source: [N])`` where N matches the bracketed index of the chunk
+    below. The extractor (``app.citation.extraction``) parses that
+    shape; the Stage 1 verifier checks the quote byte-for-byte against
+    ``documents.normalized_content``. Paraphrases or smart-quoted
+    citations fail Stage 1 and fall through to later stages when those
+    ship (M2-B1 tolerant-match, M2-C1 LLM judge).
+
     Chunk text is included verbatim. We do not truncate at the
     character level (the LLM's tokenizer will window if the request is
     oversized); :data:`RAG_MAX_TOTAL_CHUNKS` upstream is the bound.
@@ -816,6 +831,14 @@ def _format_retrieval_context_block(
         "Retrieved context from your matter's knowledge bases. "
         "Cite these sources when they bear on the user's question; "
         "ignore them if they are not relevant.",
+        "",
+        "Citation format: when you ground a claim in a retrieved chunk, "
+        'quote the source passage VERBATIM in straight double quotes "..." '
+        "immediately followed by `(Source: [N])` where N is the bracketed "
+        "index of the chunk below. Quotes must be byte-for-byte exact - "
+        "do not paraphrase, summarize, or change punctuation, casing, or "
+        "whitespace inside quoted material. Use this format every time you "
+        "rely on a chunk; otherwise the citation will render as unverified.",
         "",
     ]
     for idx, chunk in enumerate(chunks, start=1):
@@ -1046,11 +1069,23 @@ async def send_message(
     # of a tier floor (per PRD §4.4 / D1). The backend is authoritative
     # on chat ↔ project; the gateway never queries projects directly,
     # so the value travels on the request envelope.
+    # M2-B3: also resolve ``Project.privileged`` so the gateway's
+    # anonymization middleware can short-circuit for privileged chats.
+    # Cheaper to fetch both in one SELECT than two round-trips.
     project_floor: int | None = None
+    project_privileged: bool = False
+    project_ensemble_verification: bool = False
     if chat.project_id is not None:
-        project_stmt = select(Project.minimum_inference_tier).where(Project.id == chat.project_id)
-        project_result = await db.execute(project_stmt)
-        project_floor = project_result.scalar_one_or_none()
+        project_stmt = select(
+            Project.minimum_inference_tier,
+            Project.privileged,
+            Project.ensemble_verification,
+        ).where(Project.id == chat.project_id)
+        project_row = (await db.execute(project_stmt)).one_or_none()
+        if project_row is not None:
+            project_floor = project_row[0]
+            project_privileged = bool(project_row[1])
+            project_ensemble_verification = bool(project_row[2])
 
     # Wave D.1 T7b — RAG step: when the chat's project has KBs attached,
     # run hybrid_search across all of them for the user's just-sent
@@ -1078,7 +1113,20 @@ async def send_message(
     gw_messages: list[ChatCompletionMessage] = []
     if retrieved_chunks:
         context_block = _format_retrieval_context_block(retrieved_chunks)
-        gw_messages.append(ChatCompletionMessage(role="system", content=context_block))
+        # M2-D2 / Decision M2-1: retrieved source documents are NOT
+        # pseudonymized when sent to the provider — the model needs
+        # intact source quotes for citation grounding. The skip flag
+        # tells the gateway's anonymization pre-middleware to leave
+        # this message's content unchanged even if the chat's other
+        # content is being pseudonymized. The pre-middleware still
+        # pseudonymizes the user turn + any chat-side system message.
+        gw_messages.append(
+            ChatCompletionMessage(
+                role="system",
+                content=context_block,
+                lq_ai_skip_anonymization=True,
+            )
+        )
         # T7-shape audit row. Same details schema as query_kb (kb_ids
         # plural here; query_kb is single-KB). The row commits with
         # its own boundary so it's durable even if the gateway call
@@ -1125,6 +1173,7 @@ async def send_message(
         lq_ai_skill_inputs=dict(effective_skill_inputs),
         lq_ai_inline_skills=list(inline_skill_refs),
         lq_ai_project_minimum_inference_tier=project_floor,
+        lq_ai_privileged=project_privileged,
     )
 
     log.info(
@@ -1151,8 +1200,10 @@ async def send_message(
             assistant_message_id=assistant_message_id,
             user_message_id=user_message.id,
             request_id=request_id,
+            retrieved_chunks=retrieved_chunks,
             http_request=request,
             attached_skill_provenance=attached_skill_provenance,
+            project_ensemble_verification=project_ensemble_verification,
         )
     return await _non_streaming_response(
         db=db,
@@ -1163,16 +1214,18 @@ async def send_message(
         assistant_message_id=assistant_message_id,
         user_message_id=user_message.id,
         request_id=request_id,
+        retrieved_chunks=retrieved_chunks,
         http_request=request,
         attached_skill_names=attached_skill_names,
         slash_unresolved=slash_unresolved,
         attached_skill_provenance=attached_skill_provenance,
+        project_ensemble_verification=project_ensemble_verification,
     )
 
 
 @router.get(
     "/{chat_id}/messages/{message_id}/citations",
-    summary="Get citations for a message (M2 — empty until citation engine ships)",
+    summary="Get citations for a message (M2-A2: relational message_citations rows)",
 )
 async def get_citations(
     chat_id: str,
@@ -1180,12 +1233,25 @@ async def get_citations(
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[dict[str, Any]]:
-    """Return persisted citations on the message row.
+    """Return citations persisted for a message.
 
-    M1 stores ``[]``; M2 populates the structured shape. C3 returns
-    whatever the row carries so this endpoint is forward-compatible
-    without an additional task. The chat ownership check is enforced
-    so a cross-user request can't enumerate message ids.
+    M2-A2 (this version) reads from ``message_citations`` (one row per
+    citation) rather than the legacy ``messages.citations`` JSONB
+    column. Each citation in the response carries the verifier's
+    verdict (``verified``, ``verification_method``,
+    ``verification_confidence``, ``partial``) so the UI (M2-C2) can
+    render the five citation states distinctly — including the
+    paraphrase-judge "partial" verdict surfaced via the ``partial``
+    flag (M2-C1).
+
+    The legacy JSONB column is kept at its ``'[]'`` default by the
+    chat-send path; readers should consume this endpoint, not the
+    column. The column itself remains for backward compatibility with
+    older clients and is slated for retirement by M2-C2.
+
+    Chat ownership is enforced so a cross-user request can't enumerate
+    message ids — the visibility check uses the same path as message
+    list reads.
     """
 
     cid = _validate_chat_id(chat_id)
@@ -1199,16 +1265,41 @@ async def get_citations(
 
     await _load_visible_chat(db, cid, user.id, include_archived=True)
 
-    stmt = select(Message).where(Message.id == mid, Message.chat_id == cid)
-    result = await db.execute(stmt)
-    row = result.scalar_one_or_none()
-    if row is None:
+    # Confirm the message exists (and belongs to the chat) before
+    # returning an empty list — distinguishes "no citations" from
+    # "no message" for the caller.
+    msg_stmt = select(Message.id).where(Message.id == mid, Message.chat_id == cid)
+    if (await db.execute(msg_stmt)).scalar_one_or_none() is None:
         raise NotFound(
             f"Message {mid} not found.",
             details={"message_id": str(mid)},
         )
-    citations: list[dict[str, Any]] = list(row.citations or [])
-    return citations
+
+    cite_stmt = (
+        select(MessageCitation)
+        .where(MessageCitation.message_id == mid)
+        .order_by(MessageCitation.created_at, MessageCitation.id)
+    )
+    rows = (await db.execute(cite_stmt)).scalars().all()
+
+    return [
+        {
+            "id": str(c.id),
+            "source_file_id": str(c.source_file_id),
+            "source_offset_start": c.source_offset_start,
+            "source_offset_end": c.source_offset_end,
+            "source_page": c.source_page,
+            "source_text": c.source_text,
+            "verified": c.verified,
+            "verification_method": c.verification_method,
+            "verification_confidence": (
+                float(c.verification_confidence) if c.verification_confidence is not None else None
+            ),
+            "partial": c.partial,
+            "created_at": c.created_at.isoformat(),
+        }
+        for c in rows
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1283,6 +1374,252 @@ async def _audit_message_sent(
         details=details,
     )
     await db.commit()
+
+
+def _skill_registry_from_request(http_request: Request | None) -> SkillRegistry | None:
+    """Return the current :class:`SkillRegistry` snapshot, or None.
+
+    The lifespan handler installs ``app.state.skill_registry`` as a
+    :class:`MutableSkillRegistry`. Tests may install nothing (the
+    registry is optional for the chat-send path on Stages 1-3) so we
+    return None on absence rather than raise — M2-D1 Stage 4 then
+    silently skips skill-frontmatter activation.
+    """
+
+    if http_request is None:
+        return None
+    holder: MutableSkillRegistry | None = getattr(http_request.app.state, "skill_registry", None)
+    if holder is None:
+        return None
+    return holder.current()
+
+
+async def _resolve_ensemble_config(
+    *,
+    gateway: GatewayClient | None,
+    applied_skills: list[str] | None,
+    project_ensemble_verification: bool,
+    skill_registry: SkillRegistry | None,
+    n_candidates: int,
+    message_id: uuid.UUID,
+    db: AsyncSession | None = None,
+) -> EnsembleConfig | None:
+    """Decide whether Stage 4 should run for this message — M2-D1.
+
+    Returns the resolved :class:`EnsembleConfig` when ensemble is
+    activated AND the per-message cost-budget pre-flight passes.
+    Returns ``None`` when ensemble is not activated, the gateway has
+    no ensemble configured, or the cost estimate exceeds the budget
+    (cost-budget fallback → cascade drops back to Stage 3).
+
+    Activation is ``any()`` across three sources:
+
+    * The project's ``ensemble_verification`` column.
+    * Any skill in ``applied_skills`` whose frontmatter declares
+      ``ensemble_verification: true``.
+    * The gateway's
+      ``citation_engine.ensemble_verification.default_enabled``.
+
+    Cost-budget pre-flight uses M2-E2 per-model calibration via
+    :func:`estimate_judge_call_cost_usd` — each configured judge
+    model's recent rolling-average cost from ``inference_routing_log``
+    rows tagged ``purpose='judge_paraphrase'``. Cold-start (a model
+    with fewer than 5 recent judge calls) falls back to the
+    conservative constant. The check errs toward dropping back to
+    single-judge Stage 3 rather than letting an ensemble silently
+    overrun.
+
+    ``db=None`` is honored by tests that don't exercise the cost-budget
+    path; in that case the estimator skips the DB query and uses the
+    cold-start default. Production callers always pass a real session.
+    """
+
+    if gateway is None:
+        return None
+
+    skill_activated = False
+    if applied_skills and skill_registry is not None:
+        for skill_name in applied_skills:
+            skill = skill_registry.get_skill(skill_name)
+            if skill is not None and skill.ensemble_verification:
+                skill_activated = True
+                break
+
+    config = await gateway.get_citation_engine_ensemble_config()
+    if config is None:
+        # Gateway has no ensemble configured (empty judge_models or
+        # endpoint unreachable). Whatever the activation flags say,
+        # Stage 4 cannot run.
+        return None
+
+    activated = skill_activated or project_ensemble_verification or config.default_enabled
+    if not activated:
+        return None
+
+    # Pre-flight cost-budget check. Per-message cap; if the estimated
+    # ensemble spend exceeds the cap, fall back to single-judge Stage 3
+    # by returning None (the cascade routes through verify_paraphrase
+    # instead). Logged so operators can see when the cap bites.
+    #
+    # M2-E2: sum per-model rolling-average judge costs rather than
+    # multiplying a single flat constant — accuracy matters because
+    # judge models span order-of-magnitude cost differences
+    # (haiku ~$0.001 vs opus ~$0.04 per call).
+    per_judge_costs = [
+        await estimate_judge_call_cost_usd(db, judge_model=judge_model)
+        for judge_model in config.judge_models
+    ]
+    estimated_usd = float(Decimal(n_candidates) * sum(per_judge_costs, Decimal("0")))
+    if estimated_usd > config.max_cost_per_message_usd:
+        log.warning(
+            "chat-send citations: ensemble budget exceeded, falling back to single judge",
+            extra={
+                "event": "chat_message_ensemble_budget_fallback",
+                "message_id": str(message_id),
+                "n_candidates": n_candidates,
+                "n_judges": len(config.judge_models),
+                "estimated_usd": round(estimated_usd, 4),
+                "max_cost_per_message_usd": config.max_cost_per_message_usd,
+                "per_judge_usd": [float(c) for c in per_judge_costs],
+            },
+        )
+        return None
+
+    return config
+
+
+async def _persist_message_citations(
+    db: AsyncSession,
+    *,
+    message_id: uuid.UUID,
+    assistant_text: str,
+    retrieved_chunks: list[HybridSearchResult],
+    gateway: GatewayClient | None = None,
+    applied_skills: list[str] | None = None,
+    project_ensemble_verification: bool = False,
+    skill_registry: SkillRegistry | None = None,
+) -> None:
+    """Extract, verify, and persist citations from an assistant message — M2-A2.
+
+    Runs after :func:`_persist_assistant_message` so ``message_id`` is
+    a real FK target. No-op when ``retrieved_chunks`` is empty
+    (no RAG context this turn → nothing to cite) or when extraction
+    finds no ``"..." (Source: [N])`` pairs.
+
+    Verifier cascade (per the M2 plan):
+
+    * Stage 1 (exact-match) — M2-A2.
+    * Stage 2 (tolerant-match) — M2-B1.
+    * Stage 3 (paraphrase judge) — M2-C1, runs only when ``gateway``
+      is supplied and ensemble is NOT activated. The judge model is
+      resolved via :meth:`GatewayClient.get_citation_engine_judge_model`
+      (cached for the process) so the operator configures it once in
+      ``gateway.yaml`` rather than on the api/ side.
+    * Stage 4 (ensemble) — M2-D1. Activated when any of:
+      ``applied_skills`` includes a skill whose frontmatter declares
+      ``ensemble_verification: true``, OR ``project_ensemble_verification``
+      is True, OR the gateway's ``default_enabled`` is True. Replaces
+      Stage 3 on activation. Falls back to Stage 3 if the per-message
+      cost-budget pre-flight estimate exceeds the configured cap.
+
+    Candidates that pass any stage persist with the stage's method
+    string and confidence. Stage 3 ``partial`` verdicts persist with
+    ``verified=true, partial=true`` — the M2-C2 UI renders these as
+    "verified with caveats". Stage 4 ``ensemble_strict`` /
+    ``ensemble_majority`` rows additionally carry ``tier_envelope``
+    (the maximum tier across the judge ensemble). Candidates that
+    miss every stage are NOT persisted; their absence is the
+    unverified signal the UI consumes.
+    """
+
+    if not retrieved_chunks:
+        return
+
+    candidates = extract_citations(assistant_text, retrieved_chunks)
+    if not candidates:
+        return
+
+    # Batch-load the documents the candidates point at so we don't
+    # round-trip the DB per citation. The verifier needs
+    # ``document.normalized_content`` to confirm the slice.
+    doc_ids = {c.source_document_id for c in candidates}
+    doc_rows = (await db.execute(select(Document).where(Document.id.in_(doc_ids)))).scalars().all()
+    docs_by_id = {d.id: d for d in doc_rows}
+
+    # M2-C1: resolve the Stage 3 judge model once per persist call.
+    # The lookup is process-cached on the GatewayClient, so the per-
+    # request cost is one Python-dict read after the first call.
+    judge_model = "fast"
+    if gateway is not None:
+        judge_model = await gateway.get_citation_engine_judge_model()
+
+    # M2-D1: resolve Stage 4 (ensemble) activation. The chat-send
+    # caller passes the project's flag + the applied skills + the
+    # skill registry; this function ORs them with the gateway's
+    # default to decide whether to dispatch ensemble verification.
+    ensemble_config = await _resolve_ensemble_config(
+        db=db,
+        gateway=gateway,
+        applied_skills=applied_skills,
+        project_ensemble_verification=project_ensemble_verification,
+        skill_registry=skill_registry,
+        n_candidates=len(candidates),
+        message_id=message_id,
+    )
+
+    new_rows: list[MessageCitation] = []
+    for cand in candidates:
+        doc = docs_by_id.get(cand.source_document_id)
+        if doc is None:
+            # Defensive: chunk pointed at a document that was deleted
+            # between retrieval and persistence. Skip; the schema's FK
+            # would reject anyway.
+            continue
+
+        result = await verify(
+            cand,
+            doc,
+            gateway=gateway,
+            judge_model=judge_model,
+            ensemble_config=ensemble_config,
+        )
+        if not result.verified:
+            # Every wired stage rejected the candidate. M2-C2's UI
+            # consumes the *absence* of a row as the unverified
+            # signal — no DB row for an emitted quote means "we
+            # couldn't verify it; render as unverified."
+            continue
+
+        new_rows.append(
+            MessageCitation(
+                message_id=message_id,
+                source_file_id=cand.source_file_id,
+                source_offset_start=cand.source_offset_start,
+                source_offset_end=cand.source_offset_end,
+                source_page=cand.source_page,
+                source_text=cand.source_text,
+                verified=True,
+                verification_method=result.method,
+                verification_confidence=result.confidence,
+                partial=result.partial,
+                tier_envelope=result.tier_envelope,
+            )
+        )
+
+    if not new_rows:
+        return
+
+    db.add_all(new_rows)
+    await db.commit()
+
+    log.info(
+        "chat-send citations: persisted",
+        extra={
+            "event": "chat_message_citations_persisted",
+            "message_id": str(message_id),
+            "citation_count": len(new_rows),
+        },
+    )
 
 
 async def _persist_assistant_message(
@@ -1418,10 +1755,12 @@ async def _non_streaming_response(
     assistant_message_id: uuid.UUID,
     user_message_id: uuid.UUID,
     request_id: str,
+    retrieved_chunks: list[HybridSearchResult] | None = None,
     http_request: Request | None = None,
     attached_skill_names: list[str] | None = None,
     slash_unresolved: bool = False,
     attached_skill_provenance: list[dict[str, str | None]] | None = None,
+    project_ensemble_verification: bool = False,
 ) -> JSONResponse:
     """Run the non-streaming path: forward, persist, return JSON.
 
@@ -1474,6 +1813,22 @@ async def _non_streaming_response(
         error_code=None,
     )
 
+    # M2-A2 / M2-B1 / M2-C1 / M2-D1: extract + verify + persist
+    # citations from the assistant response. Cascade: Stage 1
+    # (exact-match) → Stage 2 (tolerant-match) → Stage 3 (single
+    # paraphrase judge) OR Stage 4 (ensemble) when activated. No-op
+    # when no chunks were retrieved.
+    await _persist_message_citations(
+        db,
+        message_id=assistant_message_id,
+        assistant_text=assistant_text,
+        retrieved_chunks=retrieved_chunks or [],
+        gateway=gateway,
+        applied_skills=applied_skills,
+        project_ensemble_verification=project_ensemble_verification,
+        skill_registry=_skill_registry_from_request(http_request),
+    )
+
     await _audit_message_sent(
         db,
         user=user,
@@ -1522,8 +1877,10 @@ async def _stream_response(
     assistant_message_id: uuid.UUID,
     user_message_id: uuid.UUID,
     request_id: str,
+    retrieved_chunks: list[HybridSearchResult] | None = None,
     http_request: Request | None = None,
     attached_skill_provenance: list[dict[str, str | None]] | None = None,
+    project_ensemble_verification: bool = False,
 ) -> StreamingResponse:
     """Run the streaming path: forward, stream SSE, persist at end."""
 
@@ -1622,6 +1979,33 @@ async def _stream_response(
                 applied_skills=last_applied_skills or [],
                 error_code=error_code,
             )
+            # M2-A2 / M2-D1: citations from the streamed assistant
+            # content. Skipped on error_code (no full artifact to
+            # cite). Failures here must not block the stream; log
+            # and continue.
+            if error_code is None:
+                try:
+                    await _persist_message_citations(
+                        db,
+                        message_id=assistant_message_id,
+                        assistant_text="".join(accumulated),
+                        retrieved_chunks=retrieved_chunks or [],
+                        gateway=gateway,
+                        applied_skills=last_applied_skills,
+                        project_ensemble_verification=project_ensemble_verification,
+                        skill_registry=_skill_registry_from_request(http_request),
+                    )
+                except Exception as cite_exc:
+                    log.warning(
+                        "chat send_message: citation persistence failed",
+                        extra={
+                            "event": "chat_citation_persist_failed",
+                            "user_id": str(user.id),
+                            "chat_id": str(chat.id),
+                            "assistant_message_id": str(assistant_message_id),
+                            "error": str(cite_exc),
+                        },
+                    )
             # D3 audit row — best-effort, must not break the stream.
             try:
                 await _audit_message_sent(
