@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends
 from app.api import (
     admin,
     auth,
+    bootstrap,
     chat_receipts,
     chats,
     enhance_prompt,
@@ -35,6 +36,7 @@ from app.api import (
     knowledge_bases,
     models,
     organization_profile,
+    playbooks as playbooks_api,
     projects,
     saved_prompts,
     skills,
@@ -49,6 +51,11 @@ api_router = APIRouter(prefix="/api/v1")
 # Routers with mixed per-endpoint policies — see each module for details.
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
+
+# Unauthenticated probe used by the login UI to surface fresh-install hints
+# (M3-0.1 / DE-283). Mounted without `_active` because the login screen
+# consults it before the operator has credentials.
+api_router.include_router(bootstrap.router)
 
 # Service-to-service router (gateway → backend). Authenticated by the
 # shared X-LQ-AI-Gateway-Key header per ADR 0006, NOT by the user-token
@@ -75,5 +82,9 @@ api_router.include_router(enhance_prompt.router, dependencies=_active)
 api_router.include_router(inference.router, dependencies=_active)
 api_router.include_router(inference_override.router, dependencies=_active)
 api_router.include_router(admin.router, dependencies=_active)
+# M3-A2: Playbook executor — two endpoints under different prefixes
+# (``/playbooks/{id}/execute`` and ``/playbook-executions/{id}``) so
+# they live alongside the M3-A4 list/CRUD endpoints in the same module.
+api_router.include_router(playbooks_api.router, dependencies=_active)
 
 __all__ = ["api_router"]

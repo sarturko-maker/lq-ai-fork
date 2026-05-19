@@ -163,6 +163,8 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/chats/{chat_id}/receipts/export.jsonl"),
     # D0 — Model availability (proxy to gateway /v1/models)
     ("GET", "/api/v1/models"),
+    # M3-0.1 / DE-283 — unauthenticated fresh-install state probe
+    ("GET", "/api/v1/admin/bootstrap-status"),
     # D0.5 — Admin alias CRUD proxy
     ("GET", "/api/v1/admin/aliases"),
     ("GET", "/api/v1/admin/aliases/{name}"),
@@ -172,6 +174,14 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/admin/config"),
     # D3 — admin audit-log read endpoint
     ("GET", "/api/v1/admin/audit-log"),
+    # M3-0.3 / DE-276 — admin ingest-health aggregate
+    ("GET", "/api/v1/admin/ingest-health"),
+    # M3-A2 — Playbook executor surface
+    ("POST", "/api/v1/playbooks/{playbook_id}/execute"),
+    ("GET", "/api/v1/playbook-executions/{execution_id}"),
+    # M3-A4 — Playbook list + detail (GET-only; CRUD deferred to M3-A6)
+    ("GET", "/api/v1/playbooks"),
+    ("GET", "/api/v1/playbooks/{playbook_id}"),
     # D4 — Organization Profile singleton
     ("GET", "/api/v1/organization-profile"),
     ("PUT", "/api/v1/organization-profile"),
