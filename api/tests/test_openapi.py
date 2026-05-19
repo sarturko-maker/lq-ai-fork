@@ -111,6 +111,16 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # admin
         "/api/v1/admin/audit-log",
         "/api/v1/admin/tier-policy",
+        # M3-0.1 / DE-283 — unauthenticated fresh-install state probe
+        "/api/v1/admin/bootstrap-status",
+        # M3-0.3 / DE-276 — admin ingest-health aggregate
+        "/api/v1/admin/ingest-health",
+        # M3-A2 — Playbook executor surface
+        "/api/v1/playbooks/{playbook_id}/execute",
+        "/api/v1/playbook-executions/{execution_id}",
+        # M3-A4 — Playbook list + detail (GET-only; CRUD deferred to M3-A6)
+        "/api/v1/playbooks",
+        "/api/v1/playbooks/{playbook_id}",
         # D0.5 — model alias admin
         "/api/v1/admin/config",
         "/api/v1/admin/aliases",
@@ -157,7 +167,11 @@ async def test_openapi_paths_match_sketch() -> None:
     # + Wave D.1 T4's /inference/override-tier-floor
     # + Wave D.2's three paths: /user-skills/{id}/versions,
     # /skills/autocomplete, /projects/sandbox/ensure.
-    assert len(actual) == 73
+    # + M3-0.1's /admin/bootstrap-status.
+    # + M3-0.3's /admin/ingest-health.
+    # + M3-A2's two playbook-executor endpoints.
+    # + M3-A4's two playbook list/detail endpoints.
+    assert len(actual) == 79
 
 
 @pytest.mark.unit

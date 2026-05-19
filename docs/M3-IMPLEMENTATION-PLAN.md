@@ -113,19 +113,23 @@ Three deferred enhancements surfaced during M2 land before the M3 tracks begin. 
 
 ### Task M3-0.2 — DE-277: Citation extractor chunk-boundary fallback
 
-**Scope:**
-- Implement document-scan fallback in `api/app/citation/verification.py` for the case where a citation's offsets fall on a chunk boundary and the cited span is split across two chunks.
-- On a Stage 1 or Stage 2 miss where the citation's `chunk_id` is adjacent to the next chunk in the same document, reconstruct the spanning region from `documents.normalized_content` (M2-A1 surface) and re-run Stage 1/2 against the spanning region.
-- Add a `verification_method = 'exact_match_spanning'` / `'tolerant_match_spanning'` variant to record that the verification used the cross-boundary path. UI renders this identically to the regular variants.
-- Unit tests in `api/tests/citation/test_chunk_boundary.py` covering: citation spanning two chunks; citation spanning three chunks (rare but possible for long quotes); citation entirely within one chunk (regression test — unaffected).
+**Scope** (corrected to track [DE-277 in PRD §9](PRD.md#de-277--citation-extractor-fallback-to-document-scan-on-chunk-boundary-miss) verbatim — the plan's original task description placed the fix in `verification.py`, but the actual gap is in `extraction.py`'s locator):
+
+- Extend `app/citation/extraction.py::extract_citations` with a full-document fallback. When the chunk-local locator (`_locate_in_chunk(quote, chunk.content)`) misses but the caller supplies the chunk's parent document's `normalized_content` (M2-A1 surface), retry the same exact-then-fuzzy locator against the full document.
+- Resolved offsets from the document-level scan are document-absolute already (no `chunk.char_offset_start` arithmetic); the downstream verifier reads against `documents.normalized_content` so the Stage 1 / Stage 2 logic verifies spanning candidates with no change. **No new `verification_method` values are required.**
+- Wire the chat-send pipeline (`app/api/chats.py::_persist_message_citations`) to pre-load documents for the retrieved-chunk doc_ids and pass the normalized-content map to `extract_citations`. The same loaded docs are reused by the verifier (no duplicate DB roundtrip).
+- Emit a structured `citation_chunk_mismatch` warning when the fallback fires (per [DE-277](PRD.md#de-277--citation-extractor-fallback-to-document-scan-on-chunk-boundary-miss) option b) — the citation still verifies, but the mismatch signal is worth surfacing for aggregate observability.
+- Unit tests in `api/tests/citation/test_chunk_boundary.py` covering: citation spanning two chunks; citation spanning three chunks (rare but possible for long quotes); citation entirely within one chunk (regression test — unaffected); chunk-mismatch warning emitted only on fallback path; backward compatibility when `document_contents` is not supplied.
+- Flip the existing `test_edge_cases.py::test_chunk_boundary_spanning_citation_does_not_extract_today` to assert the new behavior (`verification_method='exact_match'`, document-absolute offsets persisted).
 
 **Dependencies:** M2-A1 (normalized_content); M2-A2 (Stage 1); M2-B1 (Stage 2). All shipped at v0.2.0.
 
-**Output:** Citations split across chunk boundaries no longer fall to Stage 3 (LLM judge) when they could be verified verbatim.
+**Output:** Citations split across chunk boundaries no longer fall to Stage 3 (LLM judge) when they could be verified verbatim against the source document.
 
 **Verification:**
-- Test corpus includes citations deliberately authored across chunk boundaries; new spanning paths verify them.
+- Test corpus includes citations deliberately authored across chunk boundaries; the spanning fallback resolves them.
 - No regression in single-chunk verification (existing test suite passes unchanged).
+- The `citation_chunk_mismatch` warning surfaces in logs / Langfuse spans when the fallback fires.
 
 **Effort:** 4–6 hours.
 
@@ -254,7 +258,7 @@ The Playbook engine is the load-bearing substrate for two M3 tracks (Word Add-In
 
 ---
 
-### Task M3-A4 — Playbook execution UI in web app
+### Task M3-A4 — Playbook execution UI in web app — **SHIPPED at M3-A4**
 
 **Scope:**
 - New SvelteKit route in `web/src/routes/lq-ai/playbooks/` for:
@@ -277,6 +281,20 @@ The Playbook engine is the load-bearing substrate for two M3 tracks (Word Add-In
 
 **Effort:** 12–16 hours.
 
+**Implementation deviations from original scope (recorded for M3 milestone summary):**
+- §5.1 — `GET /api/v1/playbooks` + `GET /api/v1/playbooks/{id}` ship with M3-A4; `POST/PATCH/DELETE` defer to M3-A6 alongside the Easy Playbook wizard's create flow.
+- §5.2 — Cost preview is client-side against a static `PER_MODEL_RATES` table (`web/src/lib/lq-ai/playbookCost.ts`); a server-side cost-estimate endpoint was not added.
+- §5.3 — `PlaybookDisclaimerBanner.svelte` ships in M3-A4 (Decision F implication); CONTRIBUTING.md + PRD §1.3 attestation refresh still defer to the M3-close docs batch.
+- §5.4 — Result view uses dense rows + expand-to-reveal (table-style), not full-width vertical cards.
+- Apply-Playbook entry point is from `/lq-ai/playbooks` (playbook → pick doc), not from a document's context menu. Doc-context entry point deferred to M3-A6.
+- Citation Engine integration: per-position `cited_chunk_ids` render as chunk-id pills; full Stage 1–4 5-state UI integration deferred (the existing Citation Engine UI uses continuous relevance percentage, not 5 discrete states — gap surfaced during reconnaissance).
+- Backend follow-on: exposed `KBFileResponse.document_id` (the parsed-content row UUID, distinct from File id) so the modal's KB→file picker can resolve `target_document_id` client-side. 4-file change covering schema, query, TS type, OpenAPI.
+
+**Deferred items filed as M3-A4 follow-ons** (track in M3 milestone summary):
+- DE — Playbook position citations: open-in-document drilldown (Citation Engine 5-state coloring against `cited_chunk_ids`).
+- DE — Apply-Playbook from document context menu (M3-A6 candidate).
+- DE — Automated WCAG audit tooling (no a11y ESLint plugin in the codebase today; M3-A4 verified manually via browser devtools).
+
 ---
 
 ### Task M3-A5 — Remaining 3 built-in playbooks (MSA-SaaS, DPA, Commercial MSA)
@@ -285,20 +303,20 @@ The Playbook engine is the load-bearing substrate for two M3 tracks (Word Add-In
 - Author `skills/playbooks/msa-saas/playbook.yaml` — Generic SaaS MSA playbook; covers SLA, security commitments, data handling, IP, limitation of liability, indemnification, termination, audit rights, payment terms, governing law, change management.
 - Author `skills/playbooks/dpa-gdpr/playbook.yaml` — DPA (GDPR-aligned) playbook; covers Art. 28 (processor obligations), Art. 32 (security), Art. 33 (breach notification), international transfers (SCCs / TIA), sub-processor handling, audit rights, deletion / return of personal data, DSAR cooperation.
 - Author `skills/playbooks/msa-commercial-purchase/playbook.yaml` — Commercial MSA from purchase side; covers acceptance, warranties, indemnification, limitation of liability, IP, change orders, payment, termination for cause/convenience, governing law.
-- Each playbook gets practicing-attorney attestation in PR description.
-- Seed migration `0033_seed_builtin_playbooks_msa_dpa.py` inserts all three at version `1.0.0`.
-- Each gets one integration test against a representative sample contract in `api/tests/fixtures/`.
+- Each playbook carries the standard not-legal-advice disclaimer in its `description` field (Decision F locked at M3-A3 kickoff; the `test_description_includes_not_legal_advice_disclaimer` pattern from M3-A3 generalizes to each new playbook).
+- Seed migration `0033_seed_builtin_playbooks_msa_dpa.py` inserts all three at version `1.0.0`, following the M3-A3 pattern of reading the YAML files at upgrade time.
+- Each gets one integration test against a representative sample contract in `api/tests/fixtures/`. Sample contracts sourced from public-domain templates (Common Paper CC-BY-4.0, EU Commission SCCs, etc.) with attribution.
 
 **Dependencies:** M3-A4 (validates the end-to-end flow before scaling).
 
-**Output:** 4 built-in playbooks total are available out-of-the-box.
+**Output:** 4 built-in playbooks total are available out-of-the-box (NDA × 2 from M3-A3 + MSA-SaaS + DPA-GDPR + MSA-Commercial-Purchase).
 
 **Verification:**
 - Each playbook integration test passes.
-- Practicing-attorney attestation on PR.
-- Manual walk-through by reviewing attorney against ≥2 real-world contracts per playbook; outcomes are sensible.
+- Each playbook's description includes the not-legal-advice disclaimer (pinned by test).
+- Manual sanity check by Kevin against ≥1 representative sample contract per playbook; outcomes are plausible. Not a formal practicing-attorney attestation per Decision F — the disclaimer-in-description is the canonical posture and operators are expected to apply their own professional judgment.
 
-**Effort:** 12–16 hours.
+**Effort:** 12–16 hours (~80% legal-content drafting, ~20% engineering scaffold).
 
 ---
 
