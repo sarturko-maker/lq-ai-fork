@@ -43,6 +43,7 @@ from app.api import (
     teams,
     user_skills,
     users,
+    word_addin,
 )
 from app.api.dependencies import get_active_user
 
@@ -61,6 +62,12 @@ api_router.include_router(bootstrap.router)
 # shared X-LQ-AI-Gateway-Key header per ADR 0006, NOT by the user-token
 # gate. Mounted without `_active` deliberately: the gateway has no user.
 api_router.include_router(internal.router)
+
+# M3-B8 — Word add-in version handshake. Unauthenticated: the task pane
+# calls this on mount BEFORE the user has signed in, so an out-of-date
+# add-in can surface an "Update needed" overlay before the OAuth dialog
+# even tries to load.
+api_router.include_router(word_addin.public_router)
 
 # Routers that uniformly require an authenticated, must_change_password=false
 # user. Applying this at the router level means every current stub and every
@@ -86,5 +93,10 @@ api_router.include_router(admin.router, dependencies=_active)
 # (``/playbooks/{id}/execute`` and ``/playbook-executions/{id}``) so
 # they live alongside the M3-A4 list/CRUD endpoints in the same module.
 api_router.include_router(playbooks_api.router, dependencies=_active)
+# M3-B1: Word add-in admin surface (manifest generation). Mounted with
+# the AdminUser dep at handler level. M3-B8's version-handshake route
+# lives in the same module but on a separate ``public_router`` mounted
+# above without the ``_active`` gate.
+api_router.include_router(word_addin.admin_router, dependencies=_active)
 
 __all__ = ["api_router"]
