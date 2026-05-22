@@ -122,9 +122,12 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # M3-A2 — Playbook executor surface
         "/api/v1/playbooks/{playbook_id}/execute",
         "/api/v1/playbook-executions/{execution_id}",
-        # M3-A4 — Playbook list + detail (GET-only; CRUD deferred to M3-A6)
+        # M3-A4 — Playbook list + detail
         "/api/v1/playbooks",
         "/api/v1/playbooks/{playbook_id}",
+        # M3-A6 — Easy Playbook wizard endpoints (Phase 5)
+        "/api/v1/playbooks/easy",
+        "/api/v1/playbooks/easy/{generation_id}",
         # D0.5 — model alias admin
         "/api/v1/admin/config",
         "/api/v1/admin/aliases",
@@ -175,9 +178,16 @@ async def test_openapi_paths_match_sketch() -> None:
     # + M3-0.3's /admin/ingest-health.
     # + M3-A2's two playbook-executor endpoints.
     # + M3-A4's two playbook list/detail endpoints.
+    # + M3-A6's Playbook CRUD adds POST/PATCH/DELETE methods on /playbooks +
+    #   /playbooks/{id} — paths already counted from M3-A4's GET endpoints, so
+    #   they contribute 0 new entries to this path-count assertion (the
+    #   method-tuple assertion in test_endpoints.py is the load-bearing check
+    #   for those).
+    # + M3-A6's two NEW paths for the Easy Playbook wizard
+    #   (POST /playbooks/easy + GET /playbooks/easy/{id}).
     # + M3-B1's /admin/word-addin/manifest.
     # + M3-B8's /word-addin/version.
-    assert len(actual) == 81
+    assert len(actual) == 83
 
 
 @pytest.mark.unit
