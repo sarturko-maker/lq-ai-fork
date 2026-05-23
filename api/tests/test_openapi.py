@@ -140,6 +140,12 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/chats/{chat_id}/receipts",
         # Wave D.1 T6 — chat receipts JSONL export
         "/api/v1/chats/{chat_id}/receipts/export.jsonl",
+        # M3-C2 — Tabular / Multi-Document Review surface
+        "/api/v1/tabular/preview-cost",
+        "/api/v1/tabular/execute",
+        "/api/v1/tabular/executions",
+        "/api/v1/tabular/executions/{execution_id}",
+        "/api/v1/tabular/executions/{execution_id}/cancel",
     }
 )
 
@@ -187,7 +193,12 @@ async def test_openapi_paths_match_sketch() -> None:
     #   (POST /playbooks/easy + GET /playbooks/easy/{id}).
     # + M3-B1's /admin/word-addin/manifest.
     # + M3-B8's /word-addin/version.
-    assert len(actual) == 83
+    # + M3-C2's five NEW paths for the Tabular surface
+    #   (/tabular/preview-cost, /tabular/execute, /tabular/executions,
+    #    /tabular/executions/{id}, /tabular/executions/{id}/cancel).
+    #   DELETE on /executions/{id} shares the GET path so it adds zero
+    #   new paths here; the method-tuple count is in test_endpoints.py.
+    assert len(actual) == 88
 
 
 @pytest.mark.unit

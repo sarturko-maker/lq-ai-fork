@@ -566,13 +566,16 @@ inputs:
     - jurisdiction
     - perspective  # "discloser"|"recipient"|"mutual"
 lq_ai:
-  output_format: report   # "report" | "table" | "issue_list" (table reserved for §3.14 Tabular Review)
+  output_format: report   # "report" | "table" | "issue_list" | "redline" | "markdown"
   minimum_inference_tier: 2   # optional; if set, skill refuses to run below this tier (per §3.13)
   is_organization_profile: false   # optional; true marks this skill as the singleton Org Profile (per §3.12)
+  # `columns:` required when output_format == "table" (M3-C1; see below).
 ---
 ```
 
 The `lq_ai:` namespace fields are the project-specific extensions to the agentskills.io standard frontmatter. Skills authored against the open standard work without them; the LQ.AI application uses them when present. See §3.13 for the inference-tier model and §3.14 for the tabular output mode.
+
+**Table mode (M3-C1).** When `output_format: table`, the frontmatter MUST carry a `columns: [{name, query, ensemble_verification?, minimum_inference_tier?}]` list. Each column is a per-row extraction query the Tabular Review LangGraph workflow (§3.14) dispatches against each document in the operator's selected set. The per-column overrides shadow the skill-level `ensemble_verification` and `minimum_inference_tier` — high-stakes columns can demand Tier 4+ or ensemble verification while routine columns inherit cheaper defaults. The skill loader rejects malformed table skills at load time (missing or empty `columns`); see [`docs/skill-authoring-guide.md`](skill-authoring-guide.md#table-mode-skills) for the worked example and the reference skill at [`skills/contract-snapshot/SKILL.md`](../skills/contract-snapshot/SKILL.md).
 
 *Skill chaining.* When multiple skills are attached, their `SKILL.md` instructions are concatenated in the order attached, with clear delimiters. The model is instructed to apply all skills.
 
@@ -3918,6 +3921,82 @@ When new deferred items are identified during development, ongoing skill authori
 4. Link from the relevant section of the PRD or skill where the decision was made.
 
 This section is mutable across PRD versions; updates do not require a PRD version bump unless they change priority on P1 items.
+
+#### DE-296 — Tabular Review document-source surface: Project-scoped + free-pick (deferred from M3-C3)
+
+**Priority:** P2 (discoverability / convenience; KB-scoped picker covers the v0.3.0 happy path) · **Effort:** M (Project picker reuses existing endpoints; free-pick requires a new backend list-files endpoint plus pagination/search frontend)
+
+**Context:** The M3 Phase C prep doc Decision C-7 specified three document sources for the Tabular Review wizard's Step 1 — KB-scoped, Project-scoped, and free-pick from the operator's library. At the M3-C3 implementation kickoff (2026-05-22), the wizard scoped to **KB-scoped only** for v0.3.0 to keep the surface tight. The Project + free-pick sources are deferred here.
+
+Rationale for scoping down: (a) the existing `PlaybookExecuteModal` already proves the KB-scoped picker pattern, so M3-C3 reuses a known-good UX rather than inventing two new ones; (b) the backend `api/app/api/files.py` surface has no `GET /api/v1/files` list endpoint today (only `POST`, `GET /{id}`, `GET /{id}/content`, `DELETE /{id}`), so free-pick would require new backend work beyond M3-C3's frontend scope; (c) the 5-NDA × 4-column happy path in the Phase C prep doc lives in a single KB, which the KB-scoped picker handles natively.
+
+**Specific scope:**
+
+*Project-scoped source (~30 min frontend work, no backend changes):*
+1. Add a "Project" radio/tab alongside "Knowledge base" in the wizard's Step 1.
+2. When selected, list the caller's projects via `listProjects()`; on project selection, list its files via the existing project file endpoints (mirrors the matter-files surface).
+3. Multi-select up to `TABULAR_MAX_DOCS` files; sum across all selected sources counts toward the cap.
+
+*Free-pick source (~1-2 hr frontend + backend work):*
+1. New backend `GET /api/v1/files` endpoint paginated + searchable by filename. Returns files where `owner_id == caller` (admins see all). Soft-deleted excluded.
+2. Frontend `listFiles({ page, search })` in `web/src/lib/lq-ai/api/files.ts` with the new endpoint client + 4-6 unit tests.
+3. Wizard adds a "Files" radio/tab with paginated search-and-select UX.
+
+**Acceptance criteria:**
+
+- Operator can pick documents from any combination of KB / Project / Files sources within a single tabular run.
+- Total selected document count is enforced against `TABULAR_MAX_DOCS` server-side (already true) and surfaced in the wizard's running count.
+- Files without a `document_id` (parse-pending) are visually marked as disabled across all three sources.
+
+**When to ship:** Bundle into the v0.3.1 quickstart-corpus-expansion patch alongside the DPA / MSA-Commercial-Purchase sample corpora (already DE-tracked per [`project_lq_ai_status.md`](#) memory). Project source on its own is a 30-min lift and may justify its own micro-PR if a Tabular operator surfaces the need before v0.3.1.
+
+#### DE-297 — Table-mode skill authoring UI in `/skills/new` (column editor) (deferred from M3-C3)
+
+**Priority:** P2 (operators can fork built-in reference skills via filesystem; in-app authoring is convenience, not capability) · **Effort:** M (a structured column editor with per-column query / `ensemble_verification` / `minimum_inference_tier` fields, save-back-to-user-scope flow)
+
+**Context:** M3-C3 ships three built-in reference table-mode skills (`contract-snapshot`, `nda-snapshot`, `msa-snapshot`) plus the runtime path that consumes their `lq_ai.columns` array. The `/skills/new` authoring surface, however, was built for markdown / structured / structured_checklist `output_format` modes — it has no column-editor UI and no awareness of the table-mode shape. Operators who want a custom table-mode skill today must either fork a built-in on the filesystem (engineer-friendly, not lawyer-friendly) or hand-author YAML in `frontmatter_extra` (worse). The wizard's "Switch to ad-hoc mode" path covers the one-off case but does not let the operator save the column spec for reuse.
+
+The M3-C3 surface explicitly scoped column-editor UI out of Phase C to keep the substrate-and-wizard work focused. The Skills page "Reference table-mode skills" section added in M3-C3 (showing built-in `output_format: table` skills) is the discoverability half of the story; in-app authoring is the creation half.
+
+**Specific scope:**
+
+1. `/skills/new` detects when the operator sets `output_format: table` (via a new mode selector at the top of the editor) and swaps the body editor for a structured column list.
+2. Each column row exposes: name (free text), query (multi-line textarea), `ensemble_verification` (checkbox), `minimum_inference_tier` (1–5 dropdown). Reorder via drag-handle.
+3. "Add column" / "Remove column" controls; minimum-one-column validation matching the backend's constraint on `lq_ai.columns`.
+4. Save path persists to `user_skills` with `frontmatter_extra.output_format = 'table'` and `frontmatter_extra.columns = [...]`; the registry's user-skill loader honors these fields on hydration (already implemented for built-ins; user-scope hydration path needs a small additive change).
+5. `/skills/[id]/edit` mirrors the same editor for table-mode user skills.
+6. Cypress E2E that walks "Create table-mode skill from /skills/new → pick it in Tabular Review wizard → run → verify it executed with the right columns".
+
+**Acceptance criteria:**
+
+- An in-house lawyer with no engineering help can create a custom table-mode skill, save it, and pick it from the Tabular Review wizard's Step-2 dropdown.
+- The created skill survives a SIGHUP / container restart (i.e. it persists in the DB, not just the in-memory registry).
+- Editing an existing table-mode skill preserves column ordering and per-column flags.
+- The editor refuses to save a column with an empty query (matches backend validation) and surfaces the error inline rather than via a generic 400.
+
+**When to ship:** v0.4 (the first post-M3 cycle that touches the Skills surface). The work is bounded but spans both the Skill Creator surface (D8 / D8.1c) and the registry's user-skill hydration path; it pairs naturally with whatever additional Skill Creator polish that cycle picks up.
+
+#### DE-298 — Tabular Review built-ins browser polish on `/skills` page (deferred from M3-C3)
+
+**Priority:** P3 (convenience polish; the current Skills-page "Reference table-mode skills" section is enough for v0.3.0 discoverability) · **Effort:** S
+
+**Context:** M3-C3 surfaces built-in table-mode skills via a small "Reference table-mode skills" section above the user-skills table on `/skills`. The section is unfiltered, unsorted beyond alphabetical-by-slug, and has no detail view. As the catalog of built-in table-mode skills grows (each new domain — DPA, employment agreements, vendor MSAs, etc. — may add one), the section will benefit from richer affordances.
+
+**Specific scope:**
+
+1. **Filter on `/skills` page**: a chip-row above the user-skills table with options "All / Table / Markdown / Structured / Checklist", filtering both the built-in section and the user-skill rows by `output_format`. Defaults to "All".
+2. **Sort by recently-used**: within each `output_format` bucket, surface skills the caller has executed recently (via `messages.applied_skills`, analogous to the autocomplete recents logic at `api/app/api/skills.py` lines 553+).
+3. **Skill detail page for built-ins**: a `/skills/[slug]` view that handles built-ins (today only user-scope rows have an edit page). The detail view shows the column spec, trigger examples, and a "Use in Tabular Review" CTA that pre-fills the wizard's Step-2 with the skill selected.
+4. **In-wizard "View skill" link**: when the operator selects a table-mode skill in the Tabular Review wizard, surface a small "View columns" link that opens the same detail page in a new tab.
+
+**Acceptance criteria:**
+
+- Filter chip persists across navigation (URL query param or localStorage).
+- Sort-by-recently-used reflects per-user execution history, not global popularity.
+- Skill detail page is read-only for built-ins (no edit affordance — built-ins are filesystem-canonical) but exposes a "Fork to my skills" button that pre-populates `/skills/new` with the built-in's column spec for tuning. (Pairs with DE-297's authoring UI.)
+- Wizard's "View columns" link works for both built-in and user-scope table-mode skills.
+
+**When to ship:** When the built-in table-mode catalog reaches ~5 skills (the threshold at which a flat list becomes noisy). Likely v0.4 or v0.5 as a Skills-surface polish PR.
 
 ---
 
