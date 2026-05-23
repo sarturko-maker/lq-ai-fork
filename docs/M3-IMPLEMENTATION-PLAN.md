@@ -819,17 +819,22 @@ The smallest and most independent track. Phase D's plumbing (M3-D1 slack-bridge 
   - `docs/word-addin.md` — Word Add-In documentation: architecture, installation (deployment-side + M365 Admin Center side), supported flows, manifest signing posture, threat model.
   - `docs/tabular-review.md` — Tabular Review documentation: skill `output_format: table` mode, LangGraph workflow, UI surface, export formats.
   - `docs/intake-bridges.md` — Slack and Teams bridge documentation: install flow, slash-command flows, configuration, security posture.
-- Two new Learn-tab playgrounds (per the M2 documentation convention):
-  - Playbook execution cascade — walks through how a playbook executes step-by-step against a sample contract.
-  - Tabular Review playground — interactive grid against a small sample document set.
+- Learn-tab playgrounds (per the M2 documentation convention — built with the `playground` skill, self-contained single-file explorers that render in `/lq-ai/learn`):
+  - **Playbook execution cascade** — walks an operator through how a playbook executes step-by-step against a sample contract: position-by-position extraction, classification, citation generation, and assembly into the final review. Uses one of the synthetic NDAs as the source document so the playground works offline.
+  - **Tabular Review interactive grid** — small N × M grid against a sample document set (e.g., 3 NDAs × 3 columns). Each cell click opens the citation modal so operators see the cell → citation flow. Pairs with the new `contract-snapshot` / `nda-snapshot` / `msa-snapshot` reference skills.
+  - **Word Add-In install + flow walkthrough** *(optional, "anything else from M3 worth visualizing")* — guided diagram of the unsigned-manifest sideload path, the OAuth flow between Word and the deployment, and the M3-B8 version-handshake interaction. Helpful because the Word add-in is the M3 surface most operators have not seen before (the chat surface, Knowledge, and Skills are M1 carryovers).
 - Updated documents:
   - `docs/PRD.md` — changelog entry for M3 release; §3.7 (Playbooks) and §3.14 (Tabular Review) statuses flipped from "Deferred-M3" to "SHIPPED"; §3.9 (Word Add-In) status flipped to "Plumbing shipped in M3 (unsigned-manifest path) — feature surface deferred to M4 (see DE-287); signed distribution community-led (see DE-295)"; §3.15 (Slack/Teams Bridge) status flipped to "Plumbing shipped in M3 — slash-command surface deferred to M4 (see DE-288)."
   - `docs/architecture.md` — Mermaid diagram updated with LangGraph runtime, Word add-in, tabular workflow, slack-bridge, teams-bridge components.
-  - `docs/quickstart.md` — new sections for Playbook execution, Word add-in install, Tabular review, Slack/Teams bridges.
-  - `README.md` — capability list updated to reflect M3 surfaces as shipped.
+  - `docs/quickstart.md` — new sections for Playbook execution, Word add-in install, Tabular review, Slack/Teams bridges. **Explicit developer onboarding pass:** the document must include a clean "I just cloned the repo — how do I pull dependencies, bring the stack up, log in, and verify the M3 surfaces are working?" path that a mid-level engineer can follow end-to-end without reading source. Includes the synthetic-corpus paths in `docs/quickstart/sample-ndas/` and `docs/quickstart/sample-msas/` as the worked examples for Playbook + Tabular Review.
+  - `README.md` — capability list updated to reflect M3 surfaces as shipped; "Getting started" section explicit about `git clone`, dependency install, `docker compose up`, first-login flow, and how to attach the synthetic corpus. The fresh-install verification path from M3-E1 doubles as the README's recommended walkthrough.
   - `docs/compliance/soc2-alignment.md` — controls updated for the new external trust boundaries (Word add-in OAuth, Slack/Teams bridges).
   - `docs/compliance/iso27001-alignment.md` — same.
   - `docs/procurement/sig-lite.md` — questions about Playbooks, Word add-in distribution, and Slack/Teams data-handling updated.
+- API documentation audit (covers OpenAPI sketches + db-schema + cross-references):
+  - `docs/api/backend-openapi.yaml` — every M3 endpoint (playbook CRUD + execute + executions; tabular preview-cost + execute + executions; word-addin OAuth + version + manifest-generate; slack-bridge + teams-bridge install + OAuth; any new admin-UI endpoints from M3-D4) reflects the shipped shape. Schema-conformance tests for each endpoint pass.
+  - `docs/db-schema.md` — every M3 migration's tables, columns, indexes, and constraints documented; foreign-key relationships diagrammed.
+  - PRD cross-references: every M3 task that landed should have a paragraph in the appropriate PRD §3 capability section linking back to the implementation; `grep -nE "M3-[A-Z][0-9]" docs/PRD.md` should return non-empty for every shipped M3 task.
 - New DE entries in `docs/PRD.md` §9:
   - DE-XXX (M3-1 alternative): separate `executor/` service for the LangGraph runtime.
   - DE-XXX: any other ideas surfaced during M3 build.
@@ -840,14 +845,75 @@ The smallest and most independent track. Phase D's plumbing (M3-D1 slack-bridge 
 
 **Dependencies:** M3-E1.
 
-**Output:** Documentation matches implementation.
+**Output:** Documentation matches implementation; a fresh developer cloning the repo can stand up the stack and walk all M3 surfaces using only the README, quickstart, and the three Learn-tab playgrounds; the API surface is fully documented and conformance-tested.
 
 **Verification:**
 - Reviewing-attorney walk-through against the quickstart passes.
 - Cross-reference audit: `grep -rn` of internal links resolves cleanly.
 - PRD changelog entry committed.
+- **Developer onboarding check:** a non-maintainer engineer follows the README's Getting Started + the docs/quickstart.md walkthrough and can: (a) bring the stack up via `docker compose`, (b) log in as the bootstrap admin, (c) attach the synthetic NDA + MSA corpora, (d) run a Playbook against one NDA, (e) run a Tabular Review across 5 NDAs, (f) install the Word add-in via the unsigned-manifest path. No questions to the maintainer team during the walkthrough.
+- All three Learn-tab playgrounds render correctly on a fresh build (svelte-check passes; visual smoke against `/lq-ai/learn` confirms each is reachable from the index).
+- API doc audit grep: `grep -rn "M3-[A-Z][0-9]" docs/PRD.md` returns at least one match per shipped M3 task.
 
-**Effort:** 10–14 hours.
+**Effort:** 14–18 hours (raised from 10–14 to reflect the explicit playground + onboarding + API-audit scope).
+
+---
+
+## Phase F — Observability deepening (post-acceptance)
+
+Added 2026-05-22 per the OpenTelemetry Deepening mini-PRD at [`docs/proposals/opentelemetry-deepening.md`](proposals/opentelemetry-deepening.md). Phase F lands the operator-facing observability story that the M1 OTel SDK shipped but did not complete: end-to-end trace correlation across the api → gateway → provider chain, manual domain spans on the four high-value LQ.AI operations (Citation Engine cascade, Anonymization middleware, Skill runner, Playbook + Tabular workflows) with explicit anonymization-of-attributes guarantees, and deployment recipes plus a `docs/observability.md` operator guide.
+
+Phase F runs **after** M3-E1 + M3-E2 — fresh-install verification (E1) gets the observability stack as a test target, and the docs finalization (E2) absorbs the new `docs/observability.md` cross-references. The three F tasks correspond 1:1 to the three PRs in the mini-PRD.
+
+### Task M3-F1 — Trace context propagation audit + regression test
+
+**Scope:** Verify W3C `traceparent` / `tracestate` propagation across the api → gateway → provider chain, fix any gaps the audit surfaces, and pin the behavior with regression tests in both `api/tests/test_trace_propagation.py` and `gateway/tests/test_trace_propagation.py`. Update [`docs/architecture.md`](architecture.md) §OBS to confirm end-to-end correlation.
+
+**Dependencies:** None (the existing M1 OTel SDK + httpx-auto-instrumentation are the substrate).
+
+**Verification:** Per the [mini-PRD's PR 1 acceptance criteria](proposals/opentelemetry-deepening.md#pr-1-acceptance) — regression test exists in both services, asserts a chat-send produces a single trace ID across api + gateway, and would fail without any fix applied.
+
+**Effort:** ~6–8 hours.
+
+### Task M3-F2 — Domain spans + rich attributes on the four high-value operations
+
+**Scope:** Manual instrumentation of Citation Engine cascade (`api/app/citation/verification.py`), Anonymization middleware (`gateway/app/anonymization/middleware.py`), Skill runner, Inference dispatch (`gateway/app/router.py`), and Playbook + Tabular executors. Each gets a top-level span with documented attributes, child spans per sub-operation, and span events for notable transitions. Anonymization-of-attributes guarantee enforced via test: span attributes carry counts and types, never raw entity values.
+
+**Dependencies:** M3-F1 (so the spans land on already-correlated traces). M3-C2 + M3-C3 (so the tabular executor exists to instrument); both have shipped.
+
+**Verification:** Per the [mini-PRD's PR 2 acceptance criteria](proposals/opentelemetry-deepening.md#pr-2-acceptance) — each documented span + attribute is emitted under expected code paths (in-memory OTel exporter tests); `gateway/tests/test_anonymization_observability.py` asserts no raw entity values appear in span attributes; no measurable p99 chat-send regression.
+
+**Effort:** ~14–18 hours.
+
+### Task M3-F3 — Deployment recipes + `docs/observability.md` + OTel-evaluation Learn-tab playground
+
+**Scope:** New `deploy/observability/` subtree with two recipes (Grafana Tempo + Loki + Prometheus stack, and standalone Collector for operators with existing backends). New `docs/observability.md` operator guide covering the env-var matrix, per-signal inventory, anonymization-and-telemetry posture, the no-telemetry-by-default promise, and what's not yet shipped (links to DE-299 through DE-303). Starter Grafana dashboard with three panels (tier mix, p99 by route, error rate).
+
+**OTel-evaluation Learn-tab playground:** A new Learn-tab playground (built with the `playground` skill, sitting alongside the Playbook + Tabular Review playgrounds added in M3-E2) that explains how to *use* the OTel signals for operator evaluations. Walks through:
+- The trace tree for a representative chat-send (api request → gateway dispatch → provider call → citation cascade child spans → anonymization child spans), with annotations explaining what each span's attributes tell the operator.
+- The five operator questions the trace + metric inventory answers: (1) "why was this chat slow?" (2) "how much did this cost?" (3) "did anonymization run on this request?" (4) "which provider+model did each tier route to?" (5) "what is the citation-cascade outcome distribution across my traffic?"
+- Sample TraceQL / LogQL / Prometheus PromQL queries that pull each answer from the appropriate signal.
+- The anonymization-of-attributes guarantee: a side-by-side showing the attributes that DO appear in spans (entity counts, types, tiers) vs the attributes that do NOT (raw PERSON names, MATTER_NUMBERs).
+
+The playground is the bridge between the implementation work in M3-F1 + M3-F2 and the operator's day-2 reality: "I have OTel; how do I get value from it?" It pairs with `docs/observability.md` as the visual / interactive companion to the prose operator guide.
+
+**Dependencies:** M3-F2 (the recipe README walks operators through verifying domain spans land in Tempo, so the spans need to exist; the playground's annotated trace tree references the spans M3-F2 emits).
+
+**Verification:** Per the [mini-PRD's PR 3 acceptance criteria](proposals/opentelemetry-deepening.md#pr-3-acceptance) — `docker compose -f docker-compose.yml -f deploy/observability/grafana-tempo-loki/docker-compose.observability.yml config` produces a valid merged config; a non-maintainer following the recipe README sees a chat-send trace in Tempo within 15 minutes; `docs/observability.md` is linked from README.md Quickstart and HONEST-STATE.md §6+§7; "no telemetry by default" regression pinned by a test in `api/tests/test_observability.py`. **Playground verification:** the OTel-evaluation playground renders at `/lq-ai/learn`, walks through the five operator questions with sample queries, and the annotated trace tree references the actual span / attribute names emitted by M3-F2 (no drift between docs and code).
+
+**Effort:** ~16–22 hours (raised from 12–16 to reflect the OTel-evaluation playground scope).
+
+### Phase F deferred surfaces
+
+Seven OTel-adjacent surfaces are filed as DEs rather than absorbed into Phase F (per the mini-PRD's framing — any one can be claimed independently by a community contributor):
+
+- [DE-299](PRD.md#de-299--otel-instrumentation-for-sqlalchemy--arq-workers-otel-deepening-de-a) — SQLAlchemy + ARQ worker instrumentation
+- [DE-300](PRD.md#de-300--log-trace-correlation-via-structured-logger-trace_id--span_id-injection-otel-deepening-de-b) — Log-trace correlation
+- [DE-301](PRD.md#de-301--otel-meterprovider-for-metrics-export-otel-deepening-de-c) — OTel MeterProvider for metrics export
+- [DE-302](PRD.md#de-302--reconcile-otel-with-the-openwebui-fork-s-inherited-telemetry-otel-deepening-de-d) — Reconcile with the OpenWebUI fork's inherited OTel
+- [DE-303](PRD.md#de-303--browser-rum-via-opentelemetry-sdk-trace-web-otel-deepening-de-e) — Browser RUM (opt-in, CSP-reviewed)
+- PRD §9 — Published SLO catalog (already on the deferred list; builds on the M3-F2 span inventory)
+- PRD §9 — Performance regression tracking (already on the deferred list; builds on the M3-F2 span inventory)
 
 ---
 
@@ -865,10 +931,11 @@ The original M3 estimate was ~227–302 hours across 27 tasks. Two rounds of sco
 | **B — Word Add-In** | 3 plumbing in M3 (B1 + B2 + B8); 4 descoped to M4 (B3/B4/B5/B6 → DE-287); 1 descoped to community (B7 → DE-295) | ~22–28 hours |
 | **C — Tabular / Multi-Document Review** | 4 | ~36–48 hours |
 | **D — Slack / Teams Light Intake Bridge** | 3 plumbing (D1 + D3 plumbing-only + D4 plumbing-only); 1 descoped (D2 → DE-288); D3's slash-command facet also descoped | ~12–20 hours |
-| **E — Acceptance + docs** | 2 | ~16–22 hours |
-| **Total (M3 scope)** | **~16 active + 7 descoped** | **~161–218 hours** |
+| **E — Acceptance + docs (3 playgrounds + onboarding + API audit)** | 2 | ~20–26 hours |
+| **F — Observability deepening (incl. OTel-eval playground)** | 3 | ~36–48 hours |
+| **Total (M3 scope)** | **~19 active + 7 descoped** | **~201–276 hours** |
 
-The revised range fits comfortably in a **~5-week M3 build** by a single contributor working full-time, or ~8–9 weeks part-time. The largest remaining track is Phase C (Tabular Review). Phase B's M3 work is now the smallest active track at ~22–28 hr; M3-B7 + its procurement timeline runs alongside on the community side.
+The revised range fits comfortably in a **~6-week M3 build** by a single contributor working full-time, or ~10 weeks part-time. The largest remaining tracks are Phase C (Tabular Review) and Phase F (Observability deepening, added 2026-05-22). M3-E2 + M3-F3 together carry the three Learn-tab playgrounds (Playbook execution cascade; Tabular Review interactive grid; OTel-evaluation walkthrough), the developer onboarding pass on README + quickstart, and the API documentation audit. Phase B's M3 work is the smallest active track at ~22–28 hr; M3-B7 + its procurement timeline runs alongside on the community side.
 
 ---
 
