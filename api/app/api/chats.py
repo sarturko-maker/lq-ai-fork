@@ -63,6 +63,9 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
+
+# `trace` is for add_event() on the active span; spans use app.observability_helpers.
+from opentelemetry import trace
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,6 +87,7 @@ from app.models.knowledge import KnowledgeBase
 from app.models.project import Project
 from app.models.project_knowledge_base import ProjectKnowledgeBase
 from app.models.user import User
+from app.observability_helpers import get_tracer, record_attributes
 from app.schemas.chats import (
     LIST_LIMIT_DEFAULT,
     LIST_LIMIT_MAX,
@@ -1176,6 +1180,26 @@ async def send_message(
         lq_ai_privileged=project_privileged,
     )
 
+    # M3-F2 / Task 6 — emit one ``skill.execute`` marker span per applied
+    # skill at the gateway-dispatch seam. The spans live under the same
+    # trace as the HTTP span auto-instrumented on the inbound request,
+    # giving operators a per-skill signal alongside the gateway's
+    # inference spans. Only slug-based skills are spanned here; inline-
+    # body skills (``__inline__<hex>``) are implementation artefacts, not
+    # catalogue entries, so they carry no registry metadata.
+    # Telemetry must never break a send: a failure emitting marker spans is
+    # logged and swallowed rather than propagated into the user's request.
+    try:
+        _emit_skill_spans(
+            list(effective_skills),
+            registry=_skill_registry_from_request(request),
+            project_id=chat.project_id,
+            project_privileged=project_privileged,
+            chat_id=cid,
+        )
+    except Exception:  # pragma: no cover - defensive telemetry guard
+        log.warning("skill_span_emit_failed", exc_info=True)
+
     log.info(
         "chat send_message",
         extra={
@@ -1394,6 +1418,48 @@ def _skill_registry_from_request(http_request: Request | None) -> SkillRegistry 
     return holder.current()
 
 
+def _emit_skill_spans(
+    skill_slugs: list[str],
+    *,
+    registry: SkillRegistry | None,
+    project_id: uuid.UUID | None,
+    project_privileged: bool,
+    chat_id: uuid.UUID,
+) -> None:
+    """Emit one ``skill.execute`` span per applied skill (M3-F2 / Task 6).
+
+    Marker spans recording which skills were applied to a send; the
+    actual prompt assembly + inference run in the gateway under the same
+    trace. ``version`` comes from :attr:`Skill.version` when the
+    registry resolves the slug. ``author`` comes from
+    :attr:`Skill.author` when present — note that ``author`` lives on
+    :class:`LQAIFrontmatter` and is NOT promoted to :class:`Skill` /
+    :class:`SkillSummary` in the current schema, so it will be ``None``
+    for built-in skills until that field is added to the wire shape
+    (DE-316). ``None`` attributes are silently dropped by
+    :func:`record_attributes` per the OTel attribute-hygiene contract.
+
+    No-op when ``skill_slugs`` is empty. Safe to call before or after
+    ``gw_request`` construction — it does not mutate any shared state.
+    """
+
+    tracer = get_tracer()
+    for slug in skill_slugs:
+        skill = registry.get_skill(slug) if registry is not None else None
+        with tracer.start_as_current_span("skill.execute") as span:
+            record_attributes(
+                span,
+                **{
+                    "skill.slug": slug,
+                    "skill.version": getattr(skill, "version", None),
+                    "skill.author": getattr(skill, "author", None),
+                    "project.id": str(project_id) if project_id is not None else None,
+                    "project.privileged": project_privileged,
+                    "chat.id": str(chat_id),
+                },
+            )
+
+
 async def _resolve_ensemble_config(
     *,
     gateway: GatewayClient | None,
@@ -1481,6 +1547,13 @@ async def _resolve_ensemble_config(
                 "estimated_usd": round(estimated_usd, 4),
                 "max_cost_per_message_usd": config.max_cost_per_message_usd,
                 "per_judge_usd": [float(c) for c in per_judge_costs],
+            },
+        )
+        trace.get_current_span().add_event(
+            "ensemble.budget_fallback",
+            attributes={
+                "estimated_usd": float(estimated_usd),
+                "budget_usd": float(config.max_cost_per_message_usd),
             },
         )
         return None

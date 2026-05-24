@@ -4249,6 +4249,56 @@ Two bulk operations as originally written in the M3-C4 spec:
 
 **When to ship:** With the SOC2/ISO27001 alignment-doc authoring effort (community-led, counsel-reviewed). Filing now so the M3 boundaries aren't forgotten when that work happens.
 
+#### DE-314 — Tabular executions have no skill linkage for the `tabular.skill_id` span attribute (OTel Deepening)
+
+**Priority:** P3 · **Effort:** S
+
+**Context:** The M3-F2 OTel-deepening plan proposed a `tabular.skill_id` attribute on the `tabular.execute` span, but `TabularExecution` (`api/app/models/tabular.py`) has no `skill_id`/`skill_ids` column — tabular columns each carry their own query, and the execution row is not associated with a single skill. So `tabular.skill_id` cannot be emitted; the span carries `tabular.document_count` + `tabular.column_count` instead.
+
+**Specific scope:** Decide whether tabular executions should carry a skill association (and add the column + emit `tabular.skill_id`), or document that columns — not executions — carry the skill reference and add a per-column `tabular.column.skill` attribute instead.
+
+**When to ship:** Opportunistically, alongside the next tabular-schema change.
+
+#### DE-315 — Streaming-rehydration per-chunk spans (OTel Deepening, anonymization)
+
+**Priority:** P3 · **Effort:** S
+
+**Context:** The `StreamingRehydrator.process()` / `flush()` path (`gateway/app/anonymization/middleware.py`) is not yet instrumented with OTel spans. The M3-F2 anonymization-span work (`anonymization.pre` / `anonymization.post`) deliberately excluded per-chunk spans: each SSE chunk is a high-frequency call and naive per-chunk span emission would produce unbounded span volume under a long streaming response.
+
+**Specific scope:** Add a single span around the rehydrator lifecycle (wrapping the first `process()` call through `flush()`) or sampled per-chunk events so operators can see streaming anonymization overhead without flooding the trace backend. A sampling/aggregation strategy (e.g., record only on the `flush()` call with a byte-count + chunk-count summary) should be designed before implementation. The invariant — that raw entity text never appears in any span attribute — extends to this work.
+
+**When to ship:** After DE-299 (structured log correlation) and DE-300 (log-trace injection) have stabilized; streaming spans are most useful when they can be correlated to the surrounding request trace.
+
+#### DE-316 — Promote skill `author` to the `Skill` / `SkillSummary` wire shape (OTel Deepening, skill spans)
+
+**Priority:** P3 · **Effort:** XS
+
+**Context:** The M3-F2 `skill.execute` spans (`api/app/api/chats.py::_emit_skill_spans`) record `skill.author`, but `author` lives only on `LQAIFrontmatter` (`api/app/skills/schema.py`) and is NOT promoted to `SkillSummary` / `Skill` — the wire shape `SkillRegistry.get_skill()` returns. As a result `skill.author` is `None` (silently dropped) for every built-in skill. `skill.version` is unaffected (it is a real field on `SkillSummary`).
+
+**Specific scope:** Add `author: str | None = None` to `SkillSummary` and pass `lq.author` in `derive_summary()` (`api/app/skills/schema.py`). Update the OpenAPI sketch + any skill-summary schema-conformance tests. Once landed, `skill.author` populates automatically (the span code already reads it via `getattr`).
+
+**When to ship:** Opportunistically — a one-field addition; bundle with the next skill-schema change or the M3-close documentation pass.
+
+#### DE-317 — `inference.dispatch` span on the streaming path (OTel Deepening)
+
+**Priority:** P3 · **Effort:** S
+
+**Context:** M3-F2 added the `inference.dispatch` span (provider/model/tier/tokens/cost/outcome) on the **non-streaming** `chat_completions` path only. The streaming path (`gateway/app/api/inference.py::_stream_with_fallback`) emits no `inference.dispatch` span, so an operator monitoring streaming chat requests sees no domain span for the dispatch (only the HTTP auto-instrumentation span). Distinct from DE-315, which covers streaming *anonymization-rehydration* spans, not inference dispatch.
+
+**Specific scope:** Wrap the streaming dispatch in an `inference.dispatch` span with the same attribute set. Tokens/cost arrive after the stream completes (in the routing-log write), so the span must stay open across the stream or set those attributes at flush; design the span lifecycle to cover the generator's lifetime.
+
+**When to ship:** Before v0.3.0 if streaming observability parity matters at tag; otherwise opportunistically with the streaming-rehydration spans (DE-315).
+
+#### DE-318 — `playbook.position` child spans on the redline node (OTel Deepening)
+
+**Priority:** P3 · **Effort:** XS
+
+**Context:** M3-F2 added `playbook.position` child spans in `classify_node`'s position loop, but not in `redline_node` (`api/app/playbooks/nodes.py`). `redline_node` dispatches a second gateway call per **deviating** position; those redline sub-calls currently produce no `playbook.position` span, so an operator can't separate classify latency from redline latency for deviating positions. `redline_node` iterates `per_position_results` (which carry `position_id` as a string ref), so the span is emittable.
+
+**Specific scope:** Wrap the redline per-position loop body in a `playbook.position` span keyed by `position_id` (optionally a distinct `playbook.position.redline` name to differentiate from the classify pass).
+
+**When to ship:** Opportunistically — small; bundle with the next playbook-executor change.
+
 ---
 
 ## 10. Appendices
