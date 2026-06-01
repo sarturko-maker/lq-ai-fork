@@ -156,6 +156,33 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/admin/intake-bridges",
         "/api/v1/admin/intake-bridges/slack/{workspace_id}",
         "/api/v1/admin/intake-bridges/teams/{tenant_id}",
+        # M4-A4-i — Autonomous sessions read/halt API (per-user)
+        "/api/v1/autonomous/sessions",
+        "/api/v1/autonomous/sessions/{session_id}",
+        "/api/v1/autonomous/sessions/{session_id}/halt",
+        # M4-B1 — per-user memory curation API (list, keep, dismiss, delete)
+        "/api/v1/autonomous/memory",
+        "/api/v1/autonomous/memory/{memory_id}/keep",
+        "/api/v1/autonomous/memory/{memory_id}/dismiss",
+        "/api/v1/autonomous/memory/{memory_id}",
+        # M4-B2 — precedent board + promote-to-Project proposal lifecycle
+        "/api/v1/autonomous/precedents",
+        "/api/v1/autonomous/precedents/{precedent_id}/dismiss",
+        "/api/v1/autonomous/precedents/{precedent_id}/promote",
+        "/api/v1/autonomous/project-context-proposals",
+        "/api/v1/autonomous/project-context-proposals/{proposal_id}/accept",
+        "/api/v1/autonomous/project-context-proposals/{proposal_id}/reject",
+        # M4-B3 — scheduled autonomous tasks (create/list/patch/delete)
+        "/api/v1/autonomous/schedules",
+        "/api/v1/autonomous/schedules/{schedule_id}",
+        # M4-B4 — KB-arrival watches (create/list/patch/delete)
+        "/api/v1/autonomous/watches",
+        "/api/v1/autonomous/watches/{watch_id}",
+        # M4-C1 — notification read/dismiss API (list + mark-read)
+        "/api/v1/autonomous/notifications",
+        "/api/v1/autonomous/notifications/{notification_id}/read",
+        # Phase 1 §4.4 — one-off manual session spawn (run a skill/playbook now)
+        "/api/v1/autonomous/run-now",
     }
 )
 
@@ -219,7 +246,34 @@ async def test_openapi_paths_match_sketch() -> None:
     # + M3-D4's three NEW paths for the admin intake-bridges surface
     #   (GET /admin/intake-bridges, DELETE /admin/intake-bridges/slack/{id},
     #   DELETE /admin/intake-bridges/teams/{id}). Admin-only.
-    assert len(actual) == 94
+    # M4-A4-i adds three new paths:
+    # /api/v1/autonomous/sessions
+    # /api/v1/autonomous/sessions/{session_id}
+    # /api/v1/autonomous/sessions/{session_id}/halt
+    # M4-B1 adds four new paths:
+    # /api/v1/autonomous/memory
+    # /api/v1/autonomous/memory/{memory_id}/keep
+    # /api/v1/autonomous/memory/{memory_id}/dismiss
+    # /api/v1/autonomous/memory/{memory_id}
+    # M4-B2 adds six new paths:
+    # /api/v1/autonomous/precedents
+    # /api/v1/autonomous/precedents/{precedent_id}/dismiss
+    # /api/v1/autonomous/precedents/{precedent_id}/promote
+    # /api/v1/autonomous/project-context-proposals
+    # /api/v1/autonomous/project-context-proposals/{proposal_id}/accept
+    # /api/v1/autonomous/project-context-proposals/{proposal_id}/reject
+    # M4-B3 adds two new paths:
+    # /api/v1/autonomous/schedules
+    # /api/v1/autonomous/schedules/{schedule_id}
+    # M4-B4 adds two new paths:
+    # /api/v1/autonomous/watches
+    # /api/v1/autonomous/watches/{watch_id}
+    # M4-C1 adds two new paths:
+    # /api/v1/autonomous/notifications
+    # /api/v1/autonomous/notifications/{notification_id}/read
+    # Phase 1 §4.4 adds one new path:
+    # /api/v1/autonomous/run-now
+    assert len(actual) == 114
 
 
 @pytest.mark.unit

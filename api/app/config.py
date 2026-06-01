@@ -12,10 +12,11 @@ clear the cache via `get_settings.cache_clear()` after monkeypatching env.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["debug", "info", "warning", "warn", "error", "critical"]
@@ -183,6 +184,37 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ----- Autonomous (M4) -----
+    # Global fallback cap on per-session cost for autonomous sessions
+    # whose spawning trigger (watch or schedule) did not specify
+    # ``max_cost_usd``. Mirrors the gateway.yaml default. R4 (the
+    # economic brake) trips when projected cost would exceed this cap.
+    autonomous_default_max_cost_usd: Decimal = Field(
+        default=Decimal("5.00"),
+        description=(
+            "Global default per-session cost cap (USD) for autonomous sessions "
+            "spawned by a watch or schedule that did not set max_cost_usd. "
+            "Mirrors the gateway.yaml default. R4 (economic brake) trips when "
+            "projected cost would exceed this cap."
+        ),
+        validation_alias=AliasChoices("LQ_AI_AUTONOMOUS_DEFAULT_MAX_COST_USD"),
+    )
+
+    # Default model the analysis node passes to the gateway when neither
+    # the spawning trigger (watch/schedule ``params["model"]``) nor the
+    # target skill/playbook pinned one. Mirrors the gateway.yaml deployment
+    # default. Operators may override via the env var; the value must be a
+    # model identifier the gateway recognises in its routing table.
+    autonomous_default_model: str = Field(
+        default="claude-opus-4-7",
+        description=(
+            "Fallback chat-completion model used by the autonomous "
+            "analysis node when ``params['model']`` is not set on the "
+            "session. Must be a model id the gateway can route."
+        ),
+        validation_alias=AliasChoices("LQ_AI_AUTONOMOUS_DEFAULT_MODEL"),
+    )
+
     # M-Sec.1 — MFA-mandatory deployment flag per PRD §5.1. When True,
     # the backend treats any authenticated user without MFA enrolled
     # as not-fully-authenticated for normal endpoints — they can only
@@ -316,6 +348,50 @@ class Settings(BaseSettings):
     lq_ai_dev_mode: bool = Field(
         default=False,
         description="When true, relax some safety checks for local development.",
+    )
+
+    # ----- SMTP / email transport (M4-C1) -----
+    # Optional best-effort email transport for autonomous notifications.
+    # Email is enabled IFF ``smtp_host`` is set; with it unset the notify
+    # handler's email step is a clean no-op (the durable in-app row is the
+    # record regardless). No new dependency — the sender uses stdlib
+    # ``smtplib`` run via ``asyncio.to_thread`` (CLAUDE.md SBOM posture).
+    smtp_host: str | None = Field(
+        default=None,
+        description=(
+            "SMTP server hostname for autonomous-notification email. "
+            "Unset disables email transport (in-app notifications still work)."
+        ),
+    )
+    smtp_port: int = Field(
+        default=587,
+        description="SMTP server port. Default 587 (STARTTLS submission).",
+    )
+    smtp_username: str | None = Field(
+        default=None,
+        description="SMTP auth username. Unset skips login (open relay / no auth).",
+    )
+    smtp_password: str | None = Field(
+        default=None,
+        description="SMTP auth password. Unset skips login.",
+    )
+    smtp_from: str | None = Field(
+        default=None,
+        description=(
+            "From address for notification email. Falls back to ``smtp_username`` when unset."
+        ),
+    )
+    smtp_use_tls: bool = Field(
+        default=True,
+        description="Issue STARTTLS after connecting. Default True.",
+    )
+    smtp_timeout: int = Field(
+        default=10,
+        description=(
+            "Socket timeout (seconds) for the SMTP connection — applies to "
+            "connect, STARTTLS, and send. Bounds the best-effort send so a "
+            "hung/black-holing mail server can't tie up a worker thread."
+        ),
     )
 
     # ----- CORS -----

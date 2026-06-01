@@ -62,6 +62,8 @@ tags:
     description: Inference tier policy configuration (admin only)
   - name: word-addin
     description: Word add-in unauthenticated handshake surfaces (M3-B8)
+  - name: autonomous
+    description: Per-user autonomous agent session management — read, halt (M4-A4-i)
 
 # ============================================================
 # PATHS
@@ -3680,6 +3682,804 @@ paths:
           description: Tenant not found or already disconnected
 
 # ============================================================
+# M4-A4-i — Autonomous sessions read/halt API
+# ============================================================
+
+  /api/v1/autonomous/sessions:
+    get:
+      tags: [autonomous]
+      summary: List the calling user's autonomous sessions (newest first, paginated)
+      description: |
+        Returns the caller's sessions ordered by ``created_at DESC``.
+        ``limit`` is clamped to [1, 200]; ``offset`` to [0, ∞).
+        Only the caller's own sessions are returned — cross-user isolation
+        is enforced at the query level.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, default: 50, minimum: 1, maximum: 200}
+          description: Maximum number of sessions to return (clamped to [1, 200]).
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer, default: 0, minimum: 0}
+          description: Zero-based index of the first result to return.
+      responses:
+        '200':
+          description: Paginated list of autonomous sessions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousSessionListResponse'
+        '401':
+          description: Not authenticated
+
+  /api/v1/autonomous/sessions/{session_id}:
+    get:
+      tags: [autonomous]
+      summary: Fetch a single autonomous session with its full receipt
+      description: |
+        Returns the session plus a live-reconstructed receipt built from
+        audit rows (works for running and completed sessions).  A completed
+        session also has the receipt persisted in ``result``.
+
+        Another user's ``session_id`` returns 404 (not 403) to avoid
+        existence disclosure.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Session detail with receipt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousSessionDetailResponse'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Session not found
+
+  /api/v1/autonomous/sessions/{session_id}/halt:
+    post:
+      tags: [autonomous]
+      summary: Request an immediate halt for an autonomous session (idempotent)
+      description: |
+        Sets ``halt_state = 'halt_requested'`` so the executor's R5 temporal
+        brake trips on the next tool call and transitions the session to
+        ``halted``.
+
+        **Idempotent:** if ``halt_state`` is already ``halt_requested`` or
+        ``halted``, the endpoint returns the current session state with 200
+        and writes no duplicate audit row.
+
+        Another user's ``session_id`` returns 404 (not 403).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: false
+      responses:
+        '200':
+          description: Updated session (halt requested or already halted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousSessionRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Session not found
+
+  # M4-B1 — per-user memory curation API
+
+  /api/v1/autonomous/memory:
+    get:
+      tags: [autonomous]
+      summary: List the calling user's autonomous memory entries (non-deleted, newest first)
+      description: |
+        Returns the caller's non-deleted memory entries ordered by
+        ``created_at DESC``.  Pass ``?state=proposed|kept|dismissed`` to
+        filter by review state; omitting ``state`` returns all non-deleted
+        entries.  ``limit`` is clamped to [1, 200]; ``offset`` to [0, ∞).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [proposed, kept, dismissed]
+          description: Filter by review state; omit to return all non-deleted entries.
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, default: 50, minimum: 1, maximum: 200}
+          description: Maximum number of entries to return (clamped to [1, 200]).
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer, default: 0, minimum: 0}
+          description: Zero-based index of the first result to return.
+      responses:
+        '200':
+          description: Paginated list of autonomous memory entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousMemoryListResponse'
+        '401':
+          description: Not authenticated
+
+  /api/v1/autonomous/memory/{memory_id}/keep:
+    post:
+      tags: [autonomous]
+      summary: Keep (approve) an autonomous memory entry; optional edit-on-keep
+      description: |
+        Transitions ``proposed`` or ``dismissed`` → ``kept``.  If the
+        optional body supplies ``content``, the entry's text is overwritten
+        (edit-on-keep).
+
+        **Re-keep semantics:** if the entry is already ``kept``, the action
+        is allowed — content is updated if provided; ``kept_at`` is
+        preserved.
+
+        Another user's ``memory_id`` returns 404.  Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: memory_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryKeepRequest'
+      responses:
+        '200':
+          description: Updated memory entry (now kept)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousMemoryRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Memory entry not found
+
+  /api/v1/autonomous/memory/{memory_id}/dismiss:
+    post:
+      tags: [autonomous]
+      summary: Dismiss an autonomous memory entry
+      description: |
+        Transitions ``proposed`` or ``kept`` → ``dismissed``.
+
+        Another user's ``memory_id`` returns 404.  Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: memory_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Updated memory entry (now dismissed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousMemoryRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Memory entry not found
+
+  /api/v1/autonomous/memory/{memory_id}:
+    delete:
+      tags: [autonomous]
+      summary: Soft-delete an autonomous memory entry (returns 200 with updated entry)
+      description: |
+        Soft-deletes the entry by setting ``deleted_at=now(UTC)``.
+        Returns **200** with the updated (deleted) entry — not 204 — to
+        avoid the FastAPI JSONResponse/204 assertion pitfall.
+
+        A subsequent GET excludes the entry; keep/dismiss/delete on a
+        deleted entry return 404.
+
+        Another user's ``memory_id`` returns 404.  Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: memory_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Soft-deleted memory entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousMemoryRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Memory entry not found
+
+  # ── M4-B2 — precedent board + promote-to-Project proposal lifecycle ──
+
+  /api/v1/autonomous/precedents:
+    get:
+      tags: [autonomous]
+      summary: List the calling user's precedent entries (non-dismissed, newest first)
+      description: |
+        Returns the caller's non-dismissed precedent entries
+        (``dismissed_at IS NULL``) ordered by ``created_at DESC``.  Pass
+        ``?pattern_kind=`` to filter to one classifier; omitting it returns
+        all non-dismissed entries.  ``limit`` is clamped to [1, 200];
+        ``offset`` to [0, ∞).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: pattern_kind
+          in: query
+          required: false
+          schema: {type: string}
+          description: Filter by precedent classifier; omit to return all non-dismissed entries.
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, default: 50, minimum: 1, maximum: 200}
+          description: Maximum number of entries to return (clamped to [1, 200]).
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer, default: 0, minimum: 0}
+          description: Zero-based index of the first result to return.
+      responses:
+        '200':
+          description: Paginated list of precedent entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrecedentEntryListResponse'
+        '401':
+          description: Not authenticated
+
+  /api/v1/autonomous/precedents/{precedent_id}/dismiss:
+    post:
+      tags: [autonomous]
+      summary: Dismiss a precedent entry (idempotent)
+      description: |
+        Sets ``dismissed_at=now(UTC)`` so the entry drops out of the board.
+        Re-dismissing leaves the original ``dismissed_at`` untouched.
+
+        Another user's ``precedent_id`` returns 404.  Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: precedent_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Updated precedent entry (now dismissed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrecedentEntryRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Precedent entry not found
+
+  /api/v1/autonomous/precedents/{precedent_id}/promote:
+    post:
+      tags: [autonomous]
+      summary: Propose promoting a precedent into a Project's context (proposal only)
+      description: |
+        Creates a ``proposed`` project-context proposal linking the
+        precedent to ``project_id``.  The ``suggested_md`` snippet is
+        derived server-side from the precedent's ``summary``.
+
+        This endpoint does **NOT** mutate ``projects.context_md`` —
+        promotion is a proposal only; the user accepting it performs the
+        authorized write (ADR 0013 D5).
+
+        Another user's ``precedent_id`` — or a ``project_id`` the caller
+        does not own — returns 404.  Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: precedent_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromotePrecedentRequest'
+      responses:
+        '201':
+          description: Proposal created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContextProposalRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Precedent or target project not found
+
+  /api/v1/autonomous/project-context-proposals:
+    get:
+      tags: [autonomous]
+      summary: List the calling user's project-context proposals (newest first)
+      description: |
+        Returns the caller's project-context proposals ordered by
+        ``created_at DESC``.  Pass ``?state=proposed|accepted|rejected``
+        and/or ``?project_id=`` to filter.  ``limit`` is clamped to
+        [1, 200]; ``offset`` to [0, ∞).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [proposed, accepted, rejected]
+          description: Filter by proposal state.
+        - name: project_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+          description: Filter to proposals targeting one Project.
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, default: 50, minimum: 1, maximum: 200}
+          description: Maximum number of proposals to return (clamped to [1, 200]).
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer, default: 0, minimum: 0}
+          description: Zero-based index of the first result to return.
+      responses:
+        '200':
+          description: Paginated list of project-context proposals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContextProposalListResponse'
+        '401':
+          description: Not authenticated
+
+  /api/v1/autonomous/project-context-proposals/{proposal_id}/accept:
+    post:
+      tags: [autonomous]
+      summary: Accept a proposal — append the suggested context to the Project (user-authorized write)
+      description: |
+        The user-authorized write (ADR 0013 D5): appends the proposal's
+        ``suggested_md`` to the target Project's ``context_md``
+        (initializing it if NULL), sets ``state='accepted'`` and
+        ``accepted_at``.
+
+        Idempotent on re-accept: if already ``accepted``, returns the
+        current state without re-appending.  A ``rejected`` proposal may be
+        accepted (rejected→accepted) and the append occurs.
+
+        Another user's ``proposal_id`` returns 404.  Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proposal_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Updated proposal (now accepted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContextProposalRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Proposal not found
+
+  /api/v1/autonomous/project-context-proposals/{proposal_id}/reject:
+    post:
+      tags: [autonomous]
+      summary: Reject a proposal (does not touch Project context)
+      description: |
+        Sets ``state='rejected'`` and ``rejected_at``.  Does NOT touch
+        ``projects.context_md``.
+
+        Another user's ``proposal_id`` returns 404.  Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: proposal_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Updated proposal (now rejected)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectContextProposalRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Proposal not found
+
+  # ------------------------------------------------------------
+  # M4-B3 — Scheduled autonomous tasks
+  # ------------------------------------------------------------
+  /api/v1/autonomous/schedules:
+    post:
+      tags: [autonomous]
+      summary: Create an autonomous schedule (cron-triggered run definition)
+      description: |
+        Validates ``cron_expr`` (a five-field cron string); invalid
+        expressions return 422.  Seeds ``next_run_at`` from the cron
+        expression so the dispatcher can pick it up.  Per-user isolated.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutonomousScheduleCreate'
+      responses:
+        '201':
+          description: Schedule created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousScheduleRead'
+        '401':
+          description: Not authenticated
+        '422':
+          description: Invalid cron expression
+    get:
+      tags: [autonomous]
+      summary: List the calling user's autonomous schedules (non-deleted, newest first)
+      description: |
+        Returns the caller's non-deleted schedules ordered by
+        ``created_at DESC``.  Optional ``?enabled=`` filter.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: enabled
+          in: query
+          required: false
+          schema: {type: boolean}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        '200':
+          description: Paginated list of schedules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousScheduleListResponse'
+        '401':
+          description: Not authenticated
+
+  /api/v1/autonomous/schedules/{schedule_id}:
+    patch:
+      tags: [autonomous]
+      summary: Partially update an autonomous schedule (edit / enable / disable)
+      description: |
+        Partial update.  If ``cron_expr`` changes it is re-validated (422
+        on invalid) and ``next_run_at`` is recomputed.  Another user's
+        ``schedule_id`` returns 404.  Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: schedule_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutonomousScheduleUpdate'
+      responses:
+        '200':
+          description: Updated schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousScheduleRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Schedule not found
+        '422':
+          description: Invalid cron expression
+    delete:
+      tags: [autonomous]
+      summary: Soft-delete an autonomous schedule (returns 200 with updated entity)
+      description: |
+        Soft-deletes by setting ``deleted_at``.  Returns 200 with the
+        updated entity (NOT 204 — FastAPI JSONResponse/204 pitfall).
+        A deleted schedule is excluded from list and the dispatcher;
+        re-delete returns 404.  Another user's ``schedule_id`` returns 404.
+        Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: schedule_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Updated schedule (now soft-deleted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousScheduleRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Schedule not found
+
+  /api/v1/autonomous/watches:
+    post:
+      tags: [autonomous]
+      summary: Create an autonomous watch (KB-arrival-triggered run definition)
+      description: |
+        Creates a watch on a knowledge base the caller owns; document
+        arrivals (KB attach) then spawn an autonomous session. The caller
+        must own the target ``knowledge_base_id`` — a KB they cannot see
+        returns 404 (KB-sharing is out of scope). Per-user isolated.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutonomousWatchCreate'
+      responses:
+        '201':
+          description: Watch created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousWatchRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Target knowledge base not found
+    get:
+      tags: [autonomous]
+      summary: List the calling user's autonomous watches (non-deleted, newest first)
+      description: |
+        Returns the caller's non-deleted watches ordered by
+        ``created_at DESC``.  Optional ``?enabled=`` and
+        ``?knowledge_base_id=`` filters.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: enabled
+          in: query
+          required: false
+          schema: {type: boolean}
+        - name: knowledge_base_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        '200':
+          description: Paginated list of watches
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousWatchListResponse'
+        '401':
+          description: Not authenticated
+
+  /api/v1/autonomous/watches/{watch_id}:
+    patch:
+      tags: [autonomous]
+      summary: Partially update an autonomous watch (enable / disable / retarget)
+      description: |
+        Partial update of ``enabled`` / ``playbook_id`` / ``skill_ref``.
+        The watch's ``knowledge_base_id`` is immutable. Another user's
+        ``watch_id`` returns 404.  Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: watch_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutonomousWatchUpdate'
+      responses:
+        '200':
+          description: Updated watch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousWatchRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Watch not found
+    delete:
+      tags: [autonomous]
+      summary: Soft-delete an autonomous watch (returns 200 with updated entity)
+      description: |
+        Soft-deletes by setting ``deleted_at``.  Returns 200 with the
+        updated entity (NOT 204 — FastAPI JSONResponse/204 pitfall).
+        A deleted watch is excluded from list and the KB-arrival trigger;
+        re-delete returns 404.  Another user's ``watch_id`` returns 404.
+        Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: watch_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Updated watch (now soft-deleted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousWatchRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Watch not found
+
+  /api/v1/autonomous/notifications:
+    get:
+      tags: [autonomous]
+      summary: List the calling user's autonomous notifications (newest first)
+      description: |
+        Returns the caller's notifications ordered by ``created_at DESC``.
+        Pass ``?unread=true`` to narrow to unread rows (``read_at IS
+        NULL``). Per-user isolated.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: unread
+          in: query
+          required: false
+          schema: {type: boolean}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        '200':
+          description: Paginated list of notifications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousNotificationListResponse'
+        '401':
+          description: Not authenticated
+
+  /api/v1/autonomous/notifications/{notification_id}/read:
+    post:
+      tags: [autonomous]
+      summary: Mark an autonomous notification read (the dismiss action; idempotent)
+      description: |
+        Sets ``read_at`` if currently NULL; idempotent (re-read preserves
+        the original timestamp). "Read" IS the dismiss action — a read
+        notification drops out of ``?unread=true``. Another user's
+        ``notification_id`` returns 404.  Audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: notification_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Updated notification (now read)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousNotificationRead'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Notification not found
+
+  /api/v1/autonomous/run-now:
+    post:
+      tags: [autonomous]
+      summary: Run a skill or playbook once now (one-off manual autonomous session)
+      description: |
+        Spawns a single ``trigger_kind='manual'`` autonomous session so a
+        user can test what a skill/playbook does — and inspect the
+        resulting receipt — before arming it as a schedule or watch.
+        Exactly one of ``playbook_id`` / ``skill_ref`` must be set (zero
+        or both → 422). ``target_kb_id`` / ``project_id`` are optional
+        scope; ``max_cost_usd`` is the per-run cap (NULL falls back to the
+        config default so R4 always arms). Gated by opt-in
+        (``autonomous_enabled``); the spawned session runs under the same
+        R4/R5/R6 brakes as every other session. Per-user isolated. Audited.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AutonomousManualRunRequest'
+      responses:
+        '201':
+          description: Session spawned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutonomousSessionRead'
+        '401':
+          description: Not authenticated
+        '403':
+          description: Autonomous layer not enabled for this user
+        '422':
+          description: Invalid target (need exactly one of playbook_id/skill_ref)
+
+# ============================================================
 # COMPONENTS
 # ============================================================
 components:
@@ -4387,6 +5187,423 @@ components:
         last_login_at: {type: string, format: date-time, nullable: true}
         deletion_scheduled_at: {type: string, format: date-time, nullable: true}
 
+    # M4-B1 — Autonomous memory curation schemas
+
+    AutonomousMemoryRead:
+      type: object
+      description: |
+        Read-only view of an ``autonomous_memory`` row.  Returned by the
+        list, keep, dismiss, and delete endpoints.
+      required:
+        - id
+        - user_id
+        - state
+        - category
+        - content
+        - created_at
+        - updated_at
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        state:
+          type: string
+          enum: [proposed, kept, dismissed]
+        category: {type: string}
+        content: {type: string}
+        source_session_id: {type: string, format: uuid, nullable: true}
+        kept_at: {type: string, format: date-time, nullable: true}
+        deleted_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    AutonomousMemoryListResponse:
+      type: object
+      description: Paginated list of autonomous memory entries (non-deleted, newest first).
+      required: [entries, total_count, limit, offset]
+      properties:
+        entries:
+          type: array
+          items: {$ref: '#/components/schemas/AutonomousMemoryRead'}
+        total_count: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
+
+    MemoryKeepRequest:
+      type: object
+      description: |
+        Optional request body for ``POST /autonomous/memory/{id}/keep``.
+        If ``content`` is provided, the memory entry's text is overwritten
+        on keep (edit-on-keep).
+      properties:
+        content: {type: string, nullable: true}
+
+    # M4-B2 — precedent board + promote-to-Project proposal schemas
+
+    PrecedentEntryRead:
+      type: object
+      description: |
+        Read-only view of a ``precedent_entries`` row.  Returned by the
+        list, dismiss endpoints.
+      required:
+        - id
+        - user_id
+        - pattern_kind
+        - summary
+        - observed_count
+        - created_at
+        - updated_at
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        pattern_kind: {type: string}
+        summary: {type: string}
+        observed_count: {type: integer, minimum: 1}
+        source_session_id: {type: string, format: uuid, nullable: true}
+        dismissed_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    PrecedentEntryListResponse:
+      type: object
+      description: Paginated list of precedent entries (non-dismissed, newest first).
+      required: [entries, total_count, limit, offset]
+      properties:
+        entries:
+          type: array
+          items: {$ref: '#/components/schemas/PrecedentEntryRead'}
+        total_count: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
+
+    PromotePrecedentRequest:
+      type: object
+      description: |
+        Request body for ``POST /autonomous/precedents/{id}/promote``.
+        ``project_id`` is the target Project; the caller must own it.
+      required: [project_id]
+      properties:
+        project_id: {type: string, format: uuid}
+
+    ProjectContextProposalRead:
+      type: object
+      description: |
+        Read-only view of a ``project_context_proposals`` row — a proposal
+        to promote a precedent into a Project's context document.  Only the
+        user accepting a proposal writes ``projects.context_md`` (ADR 0013 D5).
+      required:
+        - id
+        - user_id
+        - precedent_id
+        - project_id
+        - suggested_md
+        - state
+        - created_at
+        - updated_at
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        precedent_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        suggested_md: {type: string}
+        state:
+          type: string
+          enum: [proposed, accepted, rejected]
+        accepted_at: {type: string, format: date-time, nullable: true}
+        rejected_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    ProjectContextProposalListResponse:
+      type: object
+      description: Paginated list of project-context proposals (newest first).
+      required: [proposals, total_count, limit, offset]
+      properties:
+        proposals:
+          type: array
+          items: {$ref: '#/components/schemas/ProjectContextProposalRead'}
+        total_count: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
+
+    # M4-B3 — Scheduled-tasks schemas
+
+    AutonomousScheduleRead:
+      type: object
+      description: |
+        Read-only view of an ``autonomous_schedules`` row — a cron-triggered
+        run definition.
+      required:
+        - id
+        - user_id
+        - cron_expr
+        - enabled
+        - created_at
+        - updated_at
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, nullable: true}
+        name: {type: string, nullable: true}
+        cron_expr: {type: string}
+        playbook_id: {type: string, format: uuid, nullable: true}
+        skill_ref: {type: string, nullable: true}
+        target_kb_id: {type: string, format: uuid, nullable: true}
+        enabled: {type: boolean}
+        last_run_at: {type: string, format: date-time, nullable: true}
+        next_run_at: {type: string, format: date-time, nullable: true}
+        deleted_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    AutonomousScheduleCreate:
+      type: object
+      description: |
+        Request body for ``POST /autonomous/schedules``.  ``cron_expr`` is a
+        five-field cron string (minute hour day-of-month month day-of-week)
+        supporting ``*``, lists, ranges, and steps; invalid expressions
+        return 422.
+      required: [cron_expr]
+      properties:
+        cron_expr: {type: string}
+        name: {type: string, nullable: true}
+        playbook_id: {type: string, format: uuid, nullable: true}
+        skill_ref: {type: string, nullable: true}
+        target_kb_id: {type: string, format: uuid, nullable: true}
+        project_id: {type: string, format: uuid, nullable: true}
+        enabled: {type: boolean, default: true}
+
+    AutonomousScheduleUpdate:
+      type: object
+      description: |
+        Request body for ``PATCH /autonomous/schedules/{id}``.  All fields
+        optional.  Changing ``cron_expr`` re-validates (422) and recomputes
+        ``next_run_at``.
+      properties:
+        name: {type: string, nullable: true}
+        cron_expr: {type: string, nullable: true}
+        enabled: {type: boolean, nullable: true}
+        playbook_id: {type: string, format: uuid, nullable: true}
+        skill_ref: {type: string, nullable: true}
+        target_kb_id: {type: string, format: uuid, nullable: true}
+
+    AutonomousManualRunRequest:
+      type: object
+      description: |
+        Request body for ``POST /autonomous/run-now``.  Spawns one
+        ``trigger_kind='manual'`` session.  Exactly one of ``playbook_id``
+        / ``skill_ref`` must be set (zero or both → 422).  ``target_kb_id``
+        / ``project_id`` are optional scope.  ``max_cost_usd`` is the
+        per-run cap (NULL → fall back to the config default).
+      properties:
+        playbook_id: {type: string, format: uuid, nullable: true}
+        skill_ref: {type: string, nullable: true}
+        target_kb_id: {type: string, format: uuid, nullable: true}
+        project_id: {type: string, format: uuid, nullable: true}
+        max_cost_usd: {type: string, nullable: true}
+
+    AutonomousScheduleListResponse:
+      type: object
+      description: Paginated list of autonomous schedules (newest first).
+      required: [schedules, total_count, limit, offset]
+      properties:
+        schedules:
+          type: array
+          items: {$ref: '#/components/schemas/AutonomousScheduleRead'}
+        total_count: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
+
+    # M4-B4 — KB-arrival watch schemas
+
+    AutonomousWatchRead:
+      type: object
+      description: |
+        Read-only view of an ``autonomous_watches`` row — a KB-arrival-
+        triggered run definition. When a file is attached to
+        ``knowledge_base_id``, an autonomous session spawns.
+      required:
+        - id
+        - user_id
+        - knowledge_base_id
+        - enabled
+        - created_at
+        - updated_at
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, nullable: true}
+        knowledge_base_id: {type: string, format: uuid}
+        playbook_id: {type: string, format: uuid, nullable: true}
+        skill_ref: {type: string, nullable: true}
+        enabled: {type: boolean}
+        deleted_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    AutonomousWatchCreate:
+      type: object
+      description: |
+        Request body for ``POST /autonomous/watches``.  ``knowledge_base_id``
+        is required and must be owned by the caller (404 otherwise; KB-sharing
+        is out of scope).  The target (``playbook_id`` / ``skill_ref``) and
+        ``project_id`` are optional; ``enabled`` defaults to true.
+      required: [knowledge_base_id]
+      properties:
+        knowledge_base_id: {type: string, format: uuid}
+        playbook_id: {type: string, format: uuid, nullable: true}
+        skill_ref: {type: string, nullable: true}
+        project_id: {type: string, format: uuid, nullable: true}
+        enabled: {type: boolean, default: true}
+
+    AutonomousWatchUpdate:
+      type: object
+      description: |
+        Request body for ``PATCH /autonomous/watches/{id}``.  All fields
+        optional.  The watch's ``knowledge_base_id`` is immutable (not
+        present here) — a watch is bound to its KB.
+      properties:
+        enabled: {type: boolean, nullable: true}
+        playbook_id: {type: string, format: uuid, nullable: true}
+        skill_ref: {type: string, nullable: true}
+
+    AutonomousWatchListResponse:
+      type: object
+      description: Paginated list of autonomous watches (newest first).
+      required: [watches, total_count, limit, offset]
+      properties:
+        watches:
+          type: array
+          items: {$ref: '#/components/schemas/AutonomousWatchRead'}
+        total_count: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
+
+    # M4-C1 — Autonomous notification read/dismiss schemas
+
+    AutonomousNotificationRead:
+      type: object
+      description: |
+        Read-only view of an ``autonomous_notifications`` row. Written by
+        the ``notify`` chokepoint handler. ``read_at`` IS NULL = unread;
+        marking read is the dismiss action. ``channel`` is one of
+        ``in_app`` / ``email`` / ``webhook`` (``webhook`` reserved).
+        ``body``/``payload`` carry counts/IDs + a receipt link — never raw
+        entity values.
+      required:
+        - id
+        - user_id
+        - session_id
+        - channel
+        - title
+        - body
+        - created_at
+        - updated_at
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        channel: {type: string, enum: [in_app, email, webhook]}
+        title: {type: string}
+        body: {type: string}
+        payload: {type: object, nullable: true, additionalProperties: true}
+        read_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
+    AutonomousNotificationListResponse:
+      type: object
+      description: Paginated list of autonomous notifications (newest first).
+      required: [notifications, total_count, limit, offset]
+      properties:
+        notifications:
+          type: array
+          items: {$ref: '#/components/schemas/AutonomousNotificationRead'}
+        total_count: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
+
+    # M4-A4-i — Autonomous session response schemas
+
+    AutonomousSessionRead:
+      type: object
+      description: |
+        Read-only view of an ``autonomous_sessions`` row.  Returned by the
+        halt, list, and detail endpoints.
+      required:
+        - id
+        - user_id
+        - trigger_kind
+        - current_phase
+        - halt_state
+        - cost_total_usd
+        - cost_cap_reached
+        - idle_halt_minutes
+        - last_activity_at
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, nullable: true}
+        trigger_kind:
+          type: string
+          enum: [watch, schedule, suggestion, manual]
+        trigger_ref: {type: string, format: uuid, nullable: true}
+        current_phase:
+          type: string
+          enum: [intake, analysis, drafting, ethics_review, delivery]
+        halt_state:
+          type: string
+          enum: [running, halt_requested, halted, paused]
+        max_cost_usd: {type: number, format: decimal, nullable: true}
+        cost_total_usd: {type: number, format: decimal}
+        cost_cap_reached: {type: boolean}
+        idle_halt_minutes: {type: integer, minimum: 1}
+        last_activity_at: {type: string, format: date-time}
+        status:
+          type: string
+          enum: [running, completed, halted, failed]
+        params: {type: object, additionalProperties: true}
+        result: {type: object, additionalProperties: true, nullable: true}
+        error: {type: string, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time, nullable: true}
+
+    AutonomousSessionListResponse:
+      type: object
+      description: Paginated list of autonomous sessions (newest first).
+      required: [sessions, total_count, limit, offset]
+      properties:
+        sessions:
+          type: array
+          items: {$ref: '#/components/schemas/AutonomousSessionRead'}
+        total_count: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
+
+    AutonomousSessionDetailResponse:
+      type: object
+      description: |
+        Session detail view with live-reconstructed receipt.
+        The receipt is built from audit rows on every request and contains
+        phase transitions, tool calls, terminal reason, and session metadata.
+        No raw document text or entity values are included.
+      required: [session, receipt]
+      properties:
+        session:
+          $ref: '#/components/schemas/AutonomousSessionRead'
+        receipt:
+          type: object
+          additionalProperties: true
+          description: |
+            Audit-derived receipt: session_id, trigger_kind, status,
+            halt_state, current_phase, cost_total_usd, max_cost_usd,
+            cost_cap_reached, created_at, completed_at,
+            phase_transitions (list), tool_calls (list),
+            terminal_reason (string | null).
+
     AdminUserListResponse:
       type: object
       required: [users, total_count, limit, offset]
@@ -4535,9 +5752,10 @@ components:
     UserPreferences:
       type: object
       description: |
-        All 5 personalization preference fields. Wave A (``reasoning_visibility``)
-        per PRD §3.2; Wave B v2 fields per PRD §3.2.1 and frontend spec §4.3.
-      required: [reasoning_visibility, featured_tools, workspace_layout, trust_pills, provenance_pills]
+        All 6 personalization preference fields. Wave A (``reasoning_visibility``)
+        per PRD §3.2; Wave B v2 fields per PRD §3.2.1 and frontend spec §4.3;
+        ``autonomous_enabled`` per PRD §5 / M4-C2.
+      required: [reasoning_visibility, featured_tools, workspace_layout, trust_pills, provenance_pills, autonomous_enabled]
       properties:
         reasoning_visibility:
           type: string
@@ -4559,12 +5777,15 @@ components:
           type: string
           enum: [always, collapsed]
           default: always
+        autonomous_enabled:
+          type: boolean
 
     UserPreferencesUpdate:
       type: object
       description: |
         All fields optional; only supplied keys are updated. Wave B v2 adds
-        four personalization fields per PRD §3.2.1 and frontend spec §4.3.
+        four personalization fields per PRD §3.2.1 and frontend spec §4.3;
+        ``autonomous_enabled`` per PRD §5 / M4-C2.
       properties:
         reasoning_visibility:
           type: string
@@ -4581,6 +5802,8 @@ components:
         provenance_pills:
           type: string
           enum: [always, collapsed]
+        autonomous_enabled:
+          type: boolean
 
     Project:
       type: object

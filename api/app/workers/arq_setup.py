@@ -40,6 +40,20 @@ Registered functions:
   (M3-A6) — Easy Playbook generation pipeline.
 * :func:`app.workers.tabular_worker.tabular_execution_job`
   (M3-C2) — Tabular Review execution pipeline.
+* :func:`app.workers.autonomous_worker.autonomous_session_job`
+  (M4-A2) — Autonomous Session execution pipeline.
+
+Registered cron jobs:
+
+* :func:`app.workers.autonomous_worker.autonomous_idle_watchdog`
+  (M4-A4-ii) — Idle-halt watchdog; runs at the top of every minute
+  (``second=0``). Reaps sessions that have gone idle via a two-tick
+  ``running → paused → halted`` lifecycle.
+* :func:`app.workers.autonomous_worker.autonomous_schedule_dispatcher`
+  (M4-B3) — Schedule dispatcher; runs at the top of every minute
+  (``second=0``). Spawns one session per due schedule
+  (``enabled AND deleted_at IS NULL AND next_run_at <= now()``) and
+  advances ``next_run_at`` from the schedule's ``cron_expr``.
 
 Discovered by the ``arq`` CLI via::
 
@@ -56,6 +70,11 @@ from typing import Any, ClassVar
 
 from app.config import get_settings
 from app.db.session import dispose_engine
+from app.workers.autonomous_worker import (
+    autonomous_idle_watchdog,
+    autonomous_schedule_dispatcher,
+    autonomous_session_job,
+)
 from app.workers.easy_playbook_worker import easy_playbook_generation_job
 from app.workers.tabular_worker import tabular_execution_job
 
@@ -156,6 +175,24 @@ def _build_redis_settings() -> Any:
     return RedisSettings.from_dsn(get_settings().redis_url)
 
 
+def _build_cron_jobs() -> list[Any]:
+    """Build the arq cron_jobs list. Lazy import keeps arq optional at module load.
+
+    Mirrors the pattern in :mod:`app.workers.document_pipeline._build_cron_jobs`.
+    """
+
+    from arq import cron
+
+    return [
+        # Every minute at second=0: reap idle autonomous sessions via
+        # the two-tick running→paused→halted lifecycle (M4-A4-ii).
+        cron(autonomous_idle_watchdog, second=0),
+        # Every minute at second=0: spawn sessions for due schedules and
+        # advance next_run_at from each schedule's cron_expr (M4-B3).
+        cron(autonomous_schedule_dispatcher, second=0),
+    ]
+
+
 class WorkerSettings:
     """arq worker configuration discovered by the arq CLI.
 
@@ -166,6 +203,7 @@ class WorkerSettings:
         noop_job,
         easy_playbook_generation_job,
         tabular_execution_job,
+        autonomous_session_job,
     ]
     queue_name: ClassVar[str] = M3_PLAYBOOK_QUEUE_NAME
     # PRD §3.7 NFR caps generation at 10 min for a 10-doc corpus on the
@@ -179,11 +217,13 @@ class WorkerSettings:
 
 
 def _populate_class_attrs() -> None:
-    """Populate runtime-resolved class attrs (``redis_settings``).
+    """Populate runtime-resolved class attrs (``redis_settings``, ``cron_jobs``).
 
     arq reads class attributes directly. We populate the attributes
     that need runtime values lazily so the module import succeeds even
     when arq is absent.
+
+    Mirrors the pattern in :mod:`app.workers.document_pipeline._populate_class_attrs`.
     """
 
     # arq is a runtime dep but the import is deferred so this module loads
@@ -191,6 +231,7 @@ def _populate_class_attrs() -> None:
     # :mod:`app.workers.document_pipeline`).
     with contextlib.suppress(ImportError):  # pragma: no cover - arq missing in some envs
         WorkerSettings.redis_settings = _build_redis_settings()  # type: ignore[attr-defined]
+        WorkerSettings.cron_jobs = _build_cron_jobs()  # type: ignore[attr-defined]
 
 
 _populate_class_attrs()
