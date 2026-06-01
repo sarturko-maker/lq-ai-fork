@@ -249,6 +249,186 @@ def test_assemble_includes_reference_files_in_separate_blocks() -> None:
     assert "ref b" in out
 
 
+# --- DE-328: unconsumed inputs surfaced as a labelled block ------------------
+
+
+@pytest.mark.unit
+def test_assemble_surfaces_unconsumed_inputs_for_non_templated_skill() -> None:
+    """A non-templated body (no ``{{}}``) must not silently drop bound inputs.
+
+    None of the built-in skills use ``{{placeholder}}`` tokens, so without
+    DE-328 (Option A) the caller-bound inputs vanish before reaching the
+    model. The assembled prompt must carry each leftover input's name AND
+    value under a "Provided inputs" block.
+    """
+
+    skill = Skill(
+        name="comms-improver",
+        title="Comms Improver",
+        content_md="Improve the writing. No placeholders here.",
+        content_yaml="name: comms-improver\n",
+    )
+    out = assemble_skill_prompt(
+        [skill],
+        skill_inputs={
+            "comms-improver": {
+                "audience": "executives",
+                "text": "Our Q3 results",
+            }
+        },
+    )
+    assert "### Provided inputs for Comms Improver" in out
+    assert "audience" in out
+    assert "executives" in out
+    assert "text" in out
+    assert "Our Q3 results" in out
+
+
+@pytest.mark.unit
+def test_assemble_does_not_duplicate_consumed_templated_inputs() -> None:
+    """An input consumed by ``{{}}`` is substituted in-body, not re-listed.
+
+    A templated skill whose inputs are all consumed must get NO "Provided
+    inputs" block, so the value isn't duplicated (once in-body, once in the
+    block).
+    """
+
+    skill = Skill(
+        name="alpha",
+        title="Alpha",
+        content_md="Review {{document}} carefully.",
+        content_yaml="name: alpha\n",
+    )
+    out = assemble_skill_prompt(
+        [skill],
+        skill_inputs={"alpha": {"document": "the NDA"}},
+    )
+    assert "Review the NDA carefully." in out
+    assert "Provided inputs" not in out
+
+
+@pytest.mark.unit
+def test_assemble_block_only_lists_unconsumed_inputs() -> None:
+    """Mixed case: consumed inputs substitute in-body; only leftovers list."""
+
+    skill = Skill(
+        name="alpha",
+        title="Alpha",
+        content_md="Review {{document}} now.",
+        content_yaml="name: alpha\n",
+    )
+    out = assemble_skill_prompt(
+        [skill],
+        skill_inputs={"alpha": {"document": "the NDA", "audience": "the board"}},
+    )
+    assert "Review the NDA now." in out
+    assert "### Provided inputs for Alpha" in out
+    assert "audience" in out
+    assert "the board" in out
+    # The consumed input is not duplicated in the block.
+    assert out.count("the NDA") == 1
+
+
+@pytest.mark.unit
+def test_assemble_omits_empty_value_inputs_from_block() -> None:
+    """Leftover inputs whose value is None/empty-string are not listed."""
+
+    skill = Skill(
+        name="alpha",
+        title="Alpha",
+        content_md="No placeholders.",
+        content_yaml="name: alpha\n",
+    )
+    out = assemble_skill_prompt(
+        [skill],
+        skill_inputs={"alpha": {"audience": "execs", "blank": "", "missing": None}},
+    )
+    assert "### Provided inputs for Alpha" in out
+    assert "audience: execs" in out
+    assert "blank" not in out
+    assert "missing" not in out
+
+
+@pytest.mark.unit
+def test_interpolate_records_consumed_keys() -> None:
+    """The optional ``consumed`` out-param tracks substituted keys only."""
+
+    consumed: set[str] = set()
+    out = interpolate("hi {{name}}", {"name": "Ada", "unused": "x"}, consumed=consumed)
+    assert out == "hi Ada"
+    assert consumed == {"name"}
+
+
+@pytest.mark.unit
+def test_assemble_input_consumed_only_in_reference_is_not_relisted() -> None:
+    """A key consumed by a ``{{}}`` in a reference file (not the body) must not
+    reappear in the "Provided inputs" block — consumed-tracking unions the body
+    and every reference file, not just the body.
+    """
+
+    skill = Skill(
+        name="alpha",
+        title="Alpha",
+        content_md="No body placeholders.",
+        content_yaml="name: alpha\n",
+        reference_files=[
+            SkillFile(
+                path="reference/note.md",
+                content="For counterparty {{counterparty}}, proceed.",
+            )
+        ],
+    )
+    out = assemble_skill_prompt(
+        [skill],
+        skill_inputs={"alpha": {"counterparty": "Acme Corp"}},
+    )
+    # Substituted in the reference...
+    assert "For counterparty Acme Corp" in out
+    # ...and therefore NOT re-listed in a Provided-inputs block.
+    assert "Provided inputs" not in out
+    assert out.count("Acme Corp") == 1
+
+
+@pytest.mark.unit
+def test_assemble_provided_inputs_blocks_do_not_bleed_across_skills() -> None:
+    """Each skill's leftover-input block lists only that skill's bindings.
+
+    ``_render_skill`` scopes ``consumed``/``inputs`` per skill, so a multi-skill
+    assemble must keep each "Provided inputs" block under its own skill section
+    with no cross-skill bleed.
+    """
+
+    alpha = Skill(
+        name="alpha",
+        title="Alpha",
+        content_md="Alpha body, no placeholders.",
+        content_yaml="name: alpha\n",
+    )
+    beta = Skill(
+        name="beta",
+        title="Beta",
+        content_md="Beta body, no placeholders.",
+        content_yaml="name: beta\n",
+    )
+    out = assemble_skill_prompt(
+        [alpha, beta],
+        skill_inputs={
+            "alpha": {"audience": "the board"},
+            "beta": {"jurisdiction": "Delaware"},
+        },
+    )
+    assert "### Provided inputs for Alpha" in out
+    assert "### Provided inputs for Beta" in out
+    # Each value appears exactly once, under its own skill's block.
+    assert out.count("the board") == 1
+    assert out.count("Delaware") == 1
+    # Alpha's block precedes Beta's, and alpha's input is above the beta divider.
+    alpha_block = out.index("### Provided inputs for Alpha")
+    beta_header = out.index("# Skill: Beta")
+    assert alpha_block < beta_header
+    assert out.index("the board") < beta_header
+
+
 @pytest.mark.unit
 def test_assemble_concatenates_multiple_skills_with_separator() -> None:
     a = _basic_skill("alpha", body="Alpha body")
