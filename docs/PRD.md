@@ -145,7 +145,7 @@ Procurement-defense materials, including a structured Pre-Empted Procurement Obj
 
 **Annual third-party review program (M1 commitment; first engagement targeted within 90 days of M1 release).** The project commits to two recurring third-party engagements: (a) an annual application penetration test by a recognized firm covering the FastAPI backend, the Inference Gateway, the OpenWebUI fork, the Word add-in (once shipped), and the reference deployment recipes; (b) an annual adversarial-AI red-team engagement against the inference path, the Citation Engine, the Anonymization Layer, and skill execution. Executive summaries are published in the repository (in `docs/security/releases/`) with finding count by severity, remediation status, and remediation timeline. Detailed findings are coordinated-disclosure-cycled per `SECURITY.md` before publication. Both engagements are funded by LegalQuants as a project investment; they are not contingent on community contribution. The first engagement of each kind is targeted within 90 days of the M1 release. This commitment is the structurally verifiable answer to the procurement objection "what independent review has this had?" — see Appendix E.
 
-**The boundary-register catalog as the framework for restraint.** A useful framing of professional-services agent design, articulated by Dazza Greenwood in May 2026 ("The Most Interesting Thing in Claude for Legal Is the Lawyer/Agent Boundary"), classifies the restraints a serious agentic legal system needs into a small catalog of registers — three describing **how** a boundary is enforced (prompt-and-workflow, capability/tool-grant, code) and three describing **what else** needs restraining once autonomy exists (economic, temporal, contextual). LQ.AI adopts this catalog as the organizing framework for its boundary-enforcement work and tracks each register's state in [`docs/security/boundary-registers.md`](security/boundary-registers.md) (per DE-290), refreshed at every milestone close with line-level source citations. The catalog is expected to grow as community practice matures; the goal is not to ship "six of six" as a marketing claim but to make every register's state — implemented, partial, deferred-with-commitment, or rejected-with-reasoning — verifiable in source. Today the project ships R1 fully (the prompt-and-workflow surface, codification tracked by DE-291), R2 in an adapted form (the Inference Tier model is a capability boundary on the inference path rather than on per-agent tool grants; the agent-tool-grant facet retrofits the Playbook executor under DE-292), R3 partially (the gateway as a code-enforced security boundary in a separate process, the Citation Engine's deterministic substring verification, the Anonymization Layer's code-level entity rewriting, and the Playbook executor's Pydantic-typed step transitions; the closed-intent-enum + audit-log validation pattern retrofits under DE-292 for in-Playbook seams and DE-294 for any future multi-agent autonomous flows), and R4 partially (per-call cost tracking + the M2 ensemble per-message pre-flight budget; per-execution and per-session caps are tracked by DE-292 and DE-293 respectively). R5 (temporal) and R6 (contextual) attach to the autonomous-layer surface that lands in M4 (§3.10) — they are deferred-with-commitment, with DE-293 carrying the implementation specification. The Inference Choice Spectrum (§1.5.2) is a seventh boundary orthogonal to Greenwood's six: it restrains *where the data goes during inference* rather than *what the model may decide, spend, run, or touch*, and is the central security trade-off in any LQ.AI deployment.
+**The boundary-register catalog as the framework for restraint.** A useful framing of professional-services agent design, articulated by Dazza Greenwood in May 2026 ("The Most Interesting Thing in Claude for Legal Is the Lawyer/Agent Boundary"), classifies the restraints a serious agentic legal system needs into a small catalog of registers — three describing **how** a boundary is enforced (prompt-and-workflow, capability/tool-grant, code) and three describing **what else** needs restraining once autonomy exists (economic, temporal, contextual). LQ.AI adopts this catalog as the organizing framework for its boundary-enforcement work and tracks each register's state in [`docs/security/boundary-registers.md`](security/boundary-registers.md) (per DE-290), refreshed at every milestone close with line-level source citations. The catalog is expected to grow as community practice matures; the goal is not to ship "six of six" as a marketing claim but to make every register's state — implemented, partial, deferred-with-commitment, or rejected-with-reasoning — verifiable in source. Today the project ships R1 fully (the prompt-and-workflow surface, codification tracked by DE-291), R2 in an adapted form (the Inference Tier model is a capability boundary on the inference path rather than on per-agent tool grants; the agent-tool-grant facet retrofits the Playbook executor under DE-292), R3 partially (the gateway as a code-enforced security boundary in a separate process, the Citation Engine's deterministic substring verification, the Anonymization Layer's code-level entity rewriting, and the Playbook executor's Pydantic-typed step transitions; the closed-intent-enum + audit-log validation pattern retrofits under DE-292 for in-Playbook seams and DE-294 for any future multi-agent autonomous flows), and R4 (per-call cost tracking + the M2 ensemble per-message pre-flight budget; the per-session **and** per-trigger autonomous cost cap shipped in M4 at `api/app/autonomous/cost.py` + `guard.py` → `CostCapReached`; the per-execution Playbook cap is still tracked by DE-292). R5 (temporal) and R6 (contextual) ship in M4 on the autonomous-layer surface (§3.10): R5 is the external halt switch + idle watchdog (`POST /api/v1/autonomous/sessions/{id}/halt`, `guard.py` → `SessionHalted`) and R6 is the phase-gated `PHASE_GRANTS` tool-grant modulation (`api/app/autonomous/enums.py`, `guard.py` → `ToolNotGranted`). The Inference Choice Spectrum (§1.5.2) is a seventh boundary orthogonal to Greenwood's six: it restrains *where the data goes during inference* rather than *what the model may decide, spend, run, or touch*, and is the central security trade-off in any LQ.AI deployment.
 
 Detailed cross-cutting security and compliance concerns are covered in §5; deployment-mode and inference-tier configuration in §1.5 and the Inference Gateway specification in §4; the deferred security and compliance enhancement roadmap in §9 (Security and Compliance subsection); the engineering-discipline posture in §1.9 with its testing-and-quality and reliability-and-operations workstreams in §5.8 and §5.9.
 
@@ -636,7 +636,7 @@ The API endpoint `GET /api/v1/skills/{id}/inputs` returns the skill's input sche
 
 ### 3.5 Files / Knowledge Bases
 
-**M1 + M2 status:** Shipped. Knowledge base create, document attach, PDF upload, and ingest-to-`ready` (pgvector + FTS hybrid retrieval) wired end-to-end in M1; the Citation Engine's byte-level verification step landed in M2-A through M2-D and now runs against every model-emitted citation per [§3.3](#33-citation-engine-exact-quote). An operator can verify at `api/app/api/knowledge_bases.py`, `api/app/pipeline/ingest.py`, `api/app/workers/document_pipeline.py`, and `api/app/citation/verification.py`; Cypress E2E coverage in `web/cypress/e2e/wave-m1-final-surfaces.cy.ts` Test 2 (M1 retrieval) and `web/cypress/e2e/m2-c2-citation-states.cy.ts` (M2 citation-rendering states). See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface) and [HONEST-STATE.md §3](HONEST-STATE.md#3-m2-shipped-capabilities--citation-engine-and-anonymization-layer).
+**M1 + M2 status:** Shipped. Knowledge base create, document attach, PDF upload, and ingest-to-`ready` (pgvector + FTS hybrid retrieval) wired end-to-end in M1; the Citation Engine's byte-level verification step landed in M2-A through M2-D and now runs against every model-emitted citation per [§3.3](#33-citation-engine-exact-quote). An operator can verify at `api/app/api/knowledge_bases.py`, `api/app/pipeline/ingest.py`, `api/app/workers/document_pipeline.py`, and `api/app/citation/verification.py`; Cypress E2E coverage in `web/cypress/e2e/wave-m1-final-surfaces.cy.ts` Test 2 (M1 retrieval) and `web/cypress/e2e/m2-c2-citation-states.cy.ts` (M2 citation-rendering states). See [HONEST-STATE.md §1](HONEST-STATE.md#1-conversational-and-workspace-surface) and [HONEST-STATE.md §3](HONEST-STATE.md#3-m2--citation-engine-and-anonymization-layer).
 
 **Description.** Persistent collections of documents accessible across chats. Files are uploaded once, ingested into the citation pipeline, and made available for retrieval. Knowledge Bases group files for shared access (e.g., "Privacy Compliance Library," "Standard Templates").
 
@@ -677,7 +677,7 @@ The API endpoint `GET /api/v1/skills/{id}/inputs` returns the skill's input sche
 
 ### 3.6 Research
 
-**M1+M2 status:** Not yet started in code. No web-search backend or legal-source connector exists in the codebase. `grep -r "research" api/app/api/` returns no research-specific handler; `api/alembic/versions/` has no `research_queries` migration. The Citation Engine pipeline dependency (§3.3) was met when M2 shipped — Research is now unblocked for contribution. The capability is fully spec'd here and in [PRD §9](PRD.md#9-deferred-enhancements-and-identified-future-work); a contributor picking it up should open a discussion before starting because the integration surface (citation-aware retrieval + ephemeral-document handling) is substantial. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+**M1+M2 status:** Not yet started in code. No web-search backend or legal-source connector exists in the codebase. `grep -r "research" api/app/api/` returns no research-specific handler; `api/alembic/versions/` has no `research_queries` migration. The Citation Engine pipeline dependency (§3.3) was met when M2 shipped — Research is now unblocked for contribution. The capability is fully spec'd here and in [PRD §9](PRD.md#9-deferred-enhancements-and-identified-future-work); a contributor picking it up should open a discussion before starting because the integration surface (citation-aware retrieval + ephemeral-document handling) is substantial. See [HONEST-STATE.md §6](HONEST-STATE.md#6-capabilities-not-yet-started-in-source).
 
 **Description.** Real-time legal information retrieval from authoritative sources, with the same Citation Engine fidelity as document-based citations. Web sources are fetched, parsed, and treated as ephemeral documents in the citation pipeline.
 
@@ -828,7 +828,7 @@ The scope-as-shipped is narrower than the original "ensemble runs on the whole a
 
 ### 3.9 Word Add-In (M3)
 
-**M3 status: PLUMBING SHIPPED (v0.3.0) — feature surface deferred to M4.** Scaffold (M3-B1) + OAuth via Office.js Dialog API (M3-B2) + self-served bundle + version handshake (M3-B8) all shipped. The `word-addin/` directory holds the React 18 task pane, Office.js XML manifest template, admin manifest-generation endpoint (`GET /api/v1/admin/word-addin/manifest`), and the version-handshake endpoint (`GET /api/v1/word-addin/version`); the unsigned-manifest sideload path via Microsoft 365 Admin Center is the v0.3.0 install path. Implementation companion: [docs/word-addin.md](word-addin.md). Two parallel scope-reductions land at v0.3.0:
+**M3 status: PLUMBING SHIPPED (v0.3.0) — feature surface still deferred (M4 closed without it; now M4+ / community per DE-287).** Scaffold (M3-B1) + OAuth via Office.js Dialog API (M3-B2) + self-served bundle + version handshake (M3-B8) all shipped. The `word-addin/` directory holds the React 18 task pane, Office.js XML manifest template, admin manifest-generation endpoint (`GET /api/v1/admin/word-addin/manifest`), and the version-handshake endpoint (`GET /api/v1/word-addin/version`); the unsigned-manifest sideload path via Microsoft 365 Admin Center is the v0.3.0 install path. Implementation companion: [docs/word-addin.md](word-addin.md). Two parallel scope-reductions land at v0.3.0:
 
 - **Feature surface inside the task pane** (chat against the open document, skills with tracked-changes + comments rendering, playbook execution, Inference Tier badge) is descoped to M4 / community contribution per [§9 DE-287](#de-287--word-add-in-feature-surface-chat-skills-playbooks-tier-badge--deferred-to-m4--community-contribution). At v0.3.0 each tab renders a deep-link card to the equivalent web-app surface so the add-in is usable while the feature work is on the community track.
 - **Signed manifest + enterprise distribution package** (M3-B7) is descoped to a community-led effort per [§9 DE-295](#de-295--word-add-in-code-signing-certificate--signed-manifest-ci-community-led). v0.3.0 ships the unsigned-manifest sideload path (Microsoft 365 Admin Center will warn about the unsigned add-in during install); the signed `word-addin-v0.3.x.zip` distribution package lands as a community PR once the code-signing certificate procurement closes (SignPath open-source sponsorship is the recommended first path; community-funded DigiCert EV / Sectigo OV are alternatives).
@@ -873,7 +873,7 @@ The scope-as-shipped is narrower than the original "ensemble runs on the whole a
 
 ### 3.10 Autonomous Layer (M4)
 
-**M1 status:** Deferred-M4. No `autonomous_tasks`, `autonomous_schedules`, or `autonomous_watches` table exists in `api/alembic/versions/`. No per-user memory store. The architectural slot is committed; detailed M4 design is deferred. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+**M4 status: SHIPPED.** The opt-in background executor runs real in-loop work end-to-end. The five-phase LangGraph state machine (intake → analysis → drafting → ethics_review → delivery) lives in `api/app/autonomous/executor.py` (`run_autonomous_session`) + `nodes.py`; every external action routes through the single `guarded_tool_call` chokepoint (`api/app/autonomous/guard.py`) enforcing R5 (external halt + idle watchdog → `SessionHalted`), R6 (`PHASE_GRANTS` phase-gated tool grants → `ToolNotGranted`), and R4 (per-session **and** per-trigger cost cap → `CostCapReached`). The four primitives ship: watches (`api/app/autonomous/watch_trigger.py`, table `autonomous_watches` — migration `0039`), schedules (`api/app/autonomous/cron.py`, table `autonomous_schedules`), per-user memory (`autonomous_memory`), and the precedent board (`precedent_entries` — migration `0039`; `project_context_proposals` — migration `0041`). Honest per-session receipts carry `terminal_reason` (completed / cost_cap_reached / external_halt) via `api/app/autonomous/receipt.py` (`build_receipt` / `build_receipt_safe`). The layer is per-user opt-in, off by default (`User.autonomous_enabled` — migration `0044`), with a full web dashboard at `web/src/routes/lq-ai/autonomous/`. Migration head at M4 close is `0045`. See [HONEST-STATE.md §5](HONEST-STATE.md#5-m4--autonomous-layer-shipped). The **Contract Repository auto-relationship graph** (§3.16) and the MCP-client subsystem (§8.5) remain deferred.
 
 **Description.** Long-running per-user agents that observe activity, learn patterns, take proactive actions, and create skills autonomously. **Off by default, opt-in per user.** The autonomous executor runs in `api/app/autonomous/` on the existing **arq-worker** as a LangGraph state machine mirroring the Playbook executor (`api/app/playbooks/`), calling the gateway for inference exactly as playbooks do; it is **not** an OpenWebUI Pipeline (an earlier framing — superseded by [ADR 0013](adr/0013-autonomous-layer-design-influences.md), which pins the substrate). The web layer renders the dashboard and the per-session receipts; it does not run the agent loop. The detailed M4 design is pinned in **[ADR 0013 — Autonomous Layer design influences](adr/0013-autonomous-layer-design-influences.md)** (the DE-289 Phase 1 study).
 
@@ -902,7 +902,7 @@ The scope-as-shipped is narrower than the original "ensemble runs on the whole a
 
 **Alignment contract (non-optional — [ADR 0013](adr/0013-autonomous-layer-design-influences.md) D6; contributor how-to in [`docs/LQVern/agentic-flow-alignment-guide.md`](LQVern/agentic-flow-alignment-guide.md)).** Every autonomous flow, by construction: (a) emits OTel domain spans (`autonomous.session` + `autonomous.tool_call` children; attributes = cost/halt/phase/tool/outcome — **counts and types only, never raw entity values**, extending the M2 anonymization-span guarantee); (b) writes a closed-enum audit trail (`autonomous_session.{started,phase_transition,tool_call,halted,cost_cap_reached,completed}`); (c) produces a human-readable per-session receipt ("what the agent did and why" — every tool call, the inputs it saw, the cost, the phase, the gates passed), the §1.3 transparency principle applied to actions. Autonomous code that does not emit these is not done.
 
-**Boundary-register obligations for autonomous flows (M4 design surface).** The autonomous layer is the LQ.AI surface where Tier 2 of the boundary-register catalog (R4 economic, R5 temporal, R6 contextual — see §1.8 and [`docs/security/boundary-registers.md`](security/boundary-registers.md)) first attaches to running code. M4 design must discharge each: a per-session hard cost cap with halt-on-overrun and a structured `cost_cap_reached` final state (R4); an external halt switch checked before every tool call, with an idle-halt timeout that auto-transitions a paused session rather than bleeding resources (R5); per-workflow-phase tool-grant modulation that strips intake-time tools at the ethics-gate or delivery-phase boundary (R6). The implementation specification is tracked by DE-293. The design study comparing Lavern's `Clawern` pipeline (the most concrete prior art for all three Tier 2 registers) to LQ.AI's planned approach is tracked by DE-289 Phase 1; the design-influences ADR it produces is the input to the M4 implementation plan. If M4 ships *multi-agent* autonomous flows rather than only single-agent ones, the R3-for-cross-agent-handoffs facet (an `orchestrate.py`-equivalent with closed intent allowlist + typed-template prompt rendering + JSONL audit log) attaches alongside the Tier 2 work, tracked by DE-294; the single-agent vs. multi-agent pin is the first deliverable of DE-289 Phase 1.
+**Boundary-register obligations for autonomous flows (discharged in M4).** The autonomous layer is the LQ.AI surface where Tier 2 of the boundary-register catalog (R4 economic, R5 temporal, R6 contextual — see §1.8 and [`docs/security/boundary-registers.md`](security/boundary-registers.md)) first attaches to running code, and M4 discharges each through the single `guarded_tool_call` chokepoint (`api/app/autonomous/guard.py`): a per-session/per-trigger hard cost cap with halt-on-overrun and a structured `cost_cap_reached` final state (R4); an external halt switch checked before every tool call, with an idle-halt timeout that auto-transitions a paused session rather than bleeding resources (R5); per-workflow-phase tool-grant modulation (`PHASE_GRANTS`) that strips intake-time tools at the ethics-gate or delivery-phase boundary (R6). The implementation specification is tracked by DE-293. The design study comparing Lavern's `Clawern` pipeline (the most concrete prior art for all three Tier 2 registers) to LQ.AI's planned approach is tracked by DE-289 Phase 1; the design-influences ADR it produces is the input to the M4 implementation plan. If M4 ships *multi-agent* autonomous flows rather than only single-agent ones, the R3-for-cross-agent-handoffs facet (an `orchestrate.py`-equivalent with closed intent allowlist + typed-template prompt rendering + JSONL audit log) attaches alongside the Tier 2 work, tracked by DE-294; the single-agent vs. multi-agent pin is the first deliverable of DE-289 Phase 1.
 
 **Non-functional requirements.**
 - Autonomous activity must not interfere with interactive use; runs at lower priority.
@@ -915,7 +915,7 @@ The scope-as-shipped is narrower than the original "ensemble runs on the whole a
 - `POST /api/v1/autonomous/sessions/{id}/halt` — the external halt switch (R5; ADR 0013 D3).
 - `GET/POST /api/v1/autonomous/precedents` — view + dismiss precedent-board entries.
 
-**Dependencies.** All other capabilities. OpenWebUI Pipelines framework.
+**Dependencies.** All other capabilities. The arq-worker + LangGraph runtime (the executor substrate per ADR 0013 — **not** an OpenWebUI Pipeline; see the Description above).
 
 **Open questions — resolved in [ADR 0013](adr/0013-autonomous-layer-design-influences.md).** The detailed design is no longer deferred; the ADR + this build-out are the design, and the M4 implementation follows the writing-plans output on the `feat/lqvern-m4-autonomous` branch. The three prior open questions resolved as:
 - **Detailed design** — pinned (single-agent v1, api/arq executor, the four primitives, the brakes, the alignment contract). ADR 0013 D1–D6.
@@ -1071,7 +1071,7 @@ Persistent matter memory is the single most-cited capability across in-house use
 
 ### 3.15 Slack / Teams Light Intake Bridge (M3)
 
-**M3 status: PLUMBING SHIPPED (v0.3.0) — slash-command surface deferred to M4; OAuth E2E unverified.** The `slack-bridge` (M3-D1) and `teams-bridge` (M3-D3) standalone services, their OAuth handlers, the api-side persistence endpoints (bridge-bearer-authed, bot-token encrypted at rest), and the admin management surface (M3-D4) all shipped under the `slack`/`teams` Compose profiles. Implementation companion: [docs/intake-bridges.md](intake-bridges.md). **Honesty caveats:** the `/lq` slash-command quick-skill surface is descoped to M4 ([§9 DE-288](#9-deferred-enhancements-and-identified-future-work)) — only install + OAuth + identity-binding plumbing is in M3 scope; and that plumbing was verified **in isolation only** — a real OAuth round-trip against a public-URL tunnel has never been exercised ([§9 DE-312](#9-deferred-enhancements-and-identified-future-work), P1). Do not read this as a claim that the bridges work end-to-end.
+**M3 status: PLUMBING SHIPPED (v0.3.0) — slash-command surface still deferred (M4 closed without it; DE-288); OAuth E2E unverified.** The `slack-bridge` (M3-D1) and `teams-bridge` (M3-D3) standalone services, their OAuth handlers, the api-side persistence endpoints (bridge-bearer-authed, bot-token encrypted at rest), and the admin management surface (M3-D4) all shipped under the `slack`/`teams` Compose profiles. Implementation companion: [docs/intake-bridges.md](intake-bridges.md). **Honesty caveats:** the `/lq` slash-command quick-skill surface remains deferred — M4 closed without it ([§9 DE-288](#9-deferred-enhancements-and-identified-future-work)) — only install + OAuth + identity-binding plumbing is in M3 scope; and that plumbing was verified **in isolation only** — a real OAuth round-trip against a public-URL tunnel has never been exercised ([§9 DE-312](#9-deferred-enhancements-and-identified-future-work), P1). Do not read this as a claim that the bridges work end-to-end.
 
 **Description.** A Slack and Teams bot that supports two flows: (1) **forward as a chat** — a user `/lq` slash-command on a message thread creates an LQ.AI chat with the thread's content as initial context; (2) **quick ask** — `/lq ask "is this an MSA or an order form?"` runs a short skill (configurable via Org Profile) and replies in-thread. Replies render in the Slack/Teams thread; deeper engagement opens the web app. No matter management, no triage, no SLA tracking — that is the boundary with Streamline AI's category, which is explicitly out of scope per §1.6.
 
@@ -1091,7 +1091,7 @@ In-house teams report (across the competitive research) that the majority of inc
 
 ### 3.16 Contract Repository — Auto-Relationship Detection (M4)
 
-**M1+M2 status:** Deferred-M4. No `contract_relationships` table exists in `api/alembic/versions/`; no relationship-detection pipeline or graph-query surface. Both upstream dependencies are met: the Knowledge Service pgvector+FTS baseline shipped in M1; the Citation Engine pipeline (§3.3) shipped in M2. See [HONEST-STATE.md §4](HONEST-STATE.md#4-capabilities-not-yet-started-in-source).
+**M4 status: Deferred-M4+.** M4 closed without this capability — it was the one M4-roadmap item not built. No `contract_relationships` table exists in `api/alembic/versions/`; no relationship-detection pipeline or graph-query surface. Both upstream dependencies are met: the Knowledge Service pgvector+FTS baseline shipped in M1; the Citation Engine pipeline (§3.3) shipped in M2. See [HONEST-STATE.md §6](HONEST-STATE.md#6-capabilities-not-yet-started-in-source).
 
 **Description.** A pipeline that runs over a Knowledge Base of contracts and produces a relationship graph: amendments (modifies-X), restatements (replaces-X), references (cross-references-X), and master/sub (parent-of-X) edges. The graph is queryable and visible in the UI as a sidebar on each document. Contracts about a counterparty rarely stand alone, and answering questions like "which liability cap actually governs?" requires knowing which document supersedes which. This is Ivo's positioning — that contracts are not isolated documents but a graph — and is not currently addressed in the PRD's flat Knowledge Base model.
 
@@ -4321,6 +4321,18 @@ Two bulk operations as originally written in the M3-C4 spec:
 
 ---
 
+#### DE-319 — Migrate LangGraph 0.2 → 1.x (re-type the executors)
+
+**Priority:** P3 · **Effort:** S
+
+**Context:** M4-0.1 evaluated Dependabot #68 (which widened the `langgraph` constraint to admit a 1.x release) and held the project at `langgraph>=0.2.76,<0.3` for M4. LangGraph 1.x re-typed `StateGraph` as `Generic[StateT, ...]` and changed the `add_node` overload set; our node factories are annotated to return `Awaitable[dict[str, Any]]`, which matches no 1.x overload → mypy `[call-overload]` (7 errors across `api/app/playbooks/executor.py` + `api/app/tabular/executor.py`, the failure #68 tripped on). The break is **type-checking only** — every runtime API used (`StateGraph`, `add_node`/`add_edge`/`add_conditional_edges`, `set_entry_point`, `compile`, `ainvoke`, `END`/`START`) is unchanged in 1.x, and the M4 autonomous executor (which mirrors the playbook executor — a plain phase state-machine, no checkpointing, no prebuilt agents) needs no 1.x-only API. So migrating was not justified for M4 (CLAUDE.md dependency-justification rule).
+
+**Specific scope:** Re-type the ~7 `add_node` call sites across **all three** executors that share the runtime — `api/app/playbooks/executor.py`, `api/app/tabular/executor.py`, and `api/app/autonomous/executor.py` (lands in M4) — by annotating node-factory returns against the graph's state type (the `total=False` TypedDicts already permit partial returns) per 1.x's `State -> Partial<State>` contract, **or** parametrize `StateGraph[StateT, ...]`. Then bump the pin to `>=1,<2`, confirm the `langgraph-checkpoint` / `langgraph-sdk` transitive pins resolve (SBOM churn), and re-run `ruff` + `mypy` + `pytest` for `api/`. Note: `warn_unused_ignores=true` means a blanket `# type: ignore` is not a clean fix.
+
+**When to ship:** Post-M4, low priority. Do all three executors in one PR since they share the runtime. No runtime behavior change expected; the gate is the full api test+type matrix.
+
+---
+
 #### DE-320 — Scanned-PDF OCR for the ingestion pipeline
 
 **Priority:** P2 · **Effort:** M
@@ -4330,6 +4342,106 @@ Two bulk operations as originally written in the M3-C4 spec:
 **Specific scope:** Add a scanned-PDF OCR path so image-only PDFs produce a normalized character stream with `was_ocrd=True`. The Citation Engine's tolerant-match already gates OCR-confusion normalization on that flag (`app.citation.normalization.normalize`, see `docs/HONEST-STATE.md` §Citation Engine), so the downstream consumer is ready. Preferred approach: Docling's built-in OCR backend (EasyOCR is already cached in the `ingest-easyocr-cache` volume — no new sidecar, no new SBOM surface) rather than a separate OCR service, unless throughput demands process isolation. Re-confirm the air-gapped story end-to-end (OCR models present in the image / cached volume, no outbound calls). Update the README ingestion description and `HONEST-STATE` when shipped.
 
 **When to ship:** When a real scanned-PDF corpus is in scope; not blocking for text-bearing PDFs (the common case today).
+
+---
+
+#### DE-321 — Watch firing under a future KB-sharing model (M4-B4 finding)
+
+**Priority:** P3 · **Effort:** S
+
+**Context:** M4-B4 added KB-arrival watches: attaching a file to a watched KB spawns an autonomous session owned by the watch's user (`watch.user_id`). Today the knowledge-base model is strictly single-owner — `_load_visible_kb` / `_load_visible_file_for_kb` / `_load_visible_project_for_kb` (`api/app/api/knowledge_bases.py`) all filter `owner_id == user.id`, and `create_watch` validates KB ownership — so the attacher, KB owner, file owner, and watch owner are always the same user, and no cross-tenant path exists. **If** a KB-sharing / project-shared-write model is ever introduced (a plausible M4+ feature), this code would let watch-owner A's autonomous session retrieve a document that user B introduced into a shared KB — a cross-tenant retrieval the watch owner may not be entitled to.
+
+**Specific scope:** When/if shared-write KBs land, gate watch-firing on the *attacher's* (document introducer's) visibility, or scope the spawned session's `retrieve_chunks` to the watch owner's own files, rather than firing unconditionally for every enabled watch on the KB. Add a cross-tenant isolation test.
+
+**When to ship:** Only when a KB-sharing model is on the roadmap; no action while KBs remain single-owner.
+
+---
+
+#### DE-322 — Validate playbook/project FK ownership on schedule + watch create (M4-B3/B4 finding)
+
+**Priority:** P3 · **Effort:** S
+
+**Context:** `create_schedule` (M4-B3) and `create_watch` (M4-B4) in `api/app/api/autonomous.py` validate ownership of the target knowledge base (watch) but do **not** validate that a supplied `playbook_id` / `project_id` (and the schedule's `target_kb_id`) is owned by the caller. A user could attach an FK they don't own to a schedule/watch. Low impact today — the autonomous executor routes through the gateway/chokepoint which re-checks downstream, and the per-user session isolation holds — but the create surfaces should reject unowned FKs for defense-in-depth and a clearer 404/422 at write time.
+
+**Specific scope:** Add owner checks for `playbook_id`, `project_id`, and `target_kb_id` (schedules) / `playbook_id`, `project_id` (watches) in the two create handlers, mirroring the existing KB-ownership check; return 404 on an unowned FK (consistent with the 404-not-403 idiom). Add tests. Apply consistently across both primitives in one PR.
+
+**When to ship:** Post-Phase-B cleanup, low priority.
+
+---
+
+#### DE-323 — Surface autonomous context proposals on the Matter detail page (M4-C2 finding)
+
+**Priority:** P3 · **Effort:** S
+
+**Context:** M4-C2 built the precedent→Project promote loop entirely inside the Autonomous area: promoting a precedent creates a `project_context_proposals` row, which the user accepts/rejects on `/lq-ai/autonomous/proposals`. Accept appends the proposed text to the target Project's `context_md`. This is self-contained and shippable, but the *contextually honest* place to review a proposed addition to a matter's context is the matter itself — the user decides where context lands while looking at that matter.
+
+**Specific scope:** Surface pending `project_context_proposals` for a project as an inbox banner on the Matter detail page (`web/src/routes/lq-ai/matters/[id]/+page.svelte`) — "N proposed context additions" with inline Accept/Reject driving the same `/autonomous/project-context-proposals/{id}/{accept,reject}` endpoints. Complements (does not replace) the in-Autonomous Proposals surface. Gated on the per-user autonomous opt-in so it stays hidden for non-opted-in users.
+
+**When to ship:** A clean follow-on once C2 ships; it touches the Matters route on its own time.
+
+---
+
+#### DE-324 — Global-chrome notification bell for autonomous notifications (M4-C2 finding)
+
+**Priority:** P3 · **Effort:** M
+
+**Context:** M4-C2 surfaces autonomous in-app notifications as a rail page (`/lq-ai/autonomous/notifications`) with an unread badge on the rail item. Email is already sent server-side (M4-C1). A bell + unread badge in the shared OpenWebUI top chrome would make notifications glanceable from anywhere, not only inside the Autonomous area — but it is a cross-cutting change to chrome shown to ALL users (including non-opted-in), so it needs its own opt-in gating in the shell and must coexist with OpenWebUI's own conventions.
+
+**Specific scope:** Add a bell + unread-count indicator to the global `/lq-ai` shell chrome that derives the autonomous unread count (reusing `GET /autonomous/notifications?unread=true`), opens a recent-items dropdown, and links into the rail Notifications page. Gate its visibility on `autonomous_enabled`. Reconcile with the §3.15 Slack/Teams bridge webhook channel (DE-312) so the surfaces don't duplicate.
+
+**When to ship:** A later cross-cutting chrome pass; deferred from C2 to keep that task contained.
+
+---
+
+#### DE-325 — Harden `build_receipt` call sites against receipt-build failure (M4 finding)
+
+**Status:** ✅ RESOLVED (M4, commit `a012b6f`). Added `build_receipt_safe()` (`api/app/autonomous/receipt.py`) — a best-effort wrapper that calls `build_receipt()`, and on any exception logs (`autonomous_build_receipt_failed`, `exc_info`) and returns `None` instead of propagating. Both terminal call sites — `executor.py:174` and `nodes.py:565` — now go through it, so a malformed/exception receipt build degrades gracefully and the caller still persists the already-set terminal status.
+
+**Priority:** P2 · **Effort:** XS
+
+**Context:** The autonomous executor builds a structured receipt at the terminal transition. `build_receipt` does FK loads + JSON assembly and can raise; raising at that point would crash the autonomous worker *and* leave the session row non-terminal (status set but never committed), wedging the session. The caller has already chosen the terminal status — receipt assembly is supplementary and must not be able to take down the worker.
+
+**Specific scope:** Wrap `build_receipt` in a never-raises shim; on failure persist the terminal status without a receipt and log the failure. Route every terminal call site through the shim.
+
+**When to ship:** Done in M4.
+
+---
+
+#### DE-326 — Fresh-install worker/api alembic-migration race (M4 finding)
+
+**Status:** ✅ RESOLVED (M4, commit `5999832`). In `docker-compose.yml` the `ingest-worker` and `arq-worker` now set `LQ_AI_SKIP_MIGRATIONS: "1"` and `depends_on` the `api` with `condition: service_healthy`, so only the `api` runs migrations and the workers start after the schema is in place. Eliminates the fresh-install race where multiple alembic runners (workers vs. api, or worker vs. worker) could collide on an empty database.
+
+**Priority:** P2 · **Effort:** S
+
+**Context:** On a fresh install the api, ingest-worker, and arq-worker each ran alembic at startup. Against an empty database these runs raced one another (and the api's run), producing intermittent migration failures / crash-loops on first boot. The fix designates a single migrator (the api) and gates the workers on api health.
+
+**Specific scope:** Set `LQ_AI_SKIP_MIGRATIONS=1` on every api-derived worker and have them wait for the api's `service_healthy` condition; keep the api as the sole migration runner.
+
+**When to ship:** Done in M4.
+
+---
+
+#### DE-327 — Helm/k8s worker-migration parity (M4 finding)
+
+**Priority:** P3 · **Effort:** M · **Good first issue** (community-suitable)
+
+**Context:** The single-migrator fix from DE-326 lives only in `docker-compose.yml`. The Helm chart at `deploy/helm/lq-ai/` has no equivalent: it ships `deployment-{api,gateway,web}.yaml` only — there are no worker (ingest-worker / arq-worker) deployments yet, and no migration-ordering mechanism (no migration `Job`/init-container, no `LQ_AI_SKIP_MIGRATIONS` wiring) anywhere in the chart. When the chart grows worker deployments, it must carry the same guarantee compose now has: exactly one component runs migrations and workers wait for the api/schema to be ready, rather than every replica racing alembic on a fresh cluster.
+
+**Specific scope:** When worker deployments are added to the Helm chart, designate a single migrator — a one-shot pre-install/pre-upgrade migration `Job` (or an init-container on the api), set `LQ_AI_SKIP_MIGRATIONS=1` on the worker deployments, and order workers after the api/migration via readiness gating. Mirror the compose intent. A self-contained, contributor-friendly task once the chart's worker deployments land.
+
+**When to ship:** Alongside (or just after) the Helm chart gaining worker deployments; open for community pickup.
+
+---
+
+#### DE-328 — `skill_inputs` collected from the UI never reach the model for non-templated skills (M4-D2 finding)
+
+**Priority:** P2 · **Effort:** S · **Good first issue** (community-suitable)
+
+**Context:** `MessageCreate.skill_inputs` is accepted by the backend, anonymized, and forwarded to the gateway as `lq_ai_skill_inputs`, but the gateway assembler (`gateway/app/skills/assembler.py` — `interpolate` / `_render_skill` / `assemble_skill_prompt`) only substitutes `{{placeholder}}` tokens in a skill body and drops any bound input the body never references (its docstring notes "surplus inputs the body never references are tolerated"). None of the 14 built-in `skills/*/SKILL.md` bodies use `{{}}` placeholders, so collected inputs (jurisdiction, perspective, audience, …) silently vanish before reaching the model for every built-in skill. User-skill bodies that *do* contain `{{}}` interpolate correctly, confirming the mechanism works only for templated bodies.
+
+**Specific scope (recommended fix = Option A):** After interpolation in `_render_skill` / `assemble_skill_prompt`, take the bound inputs that were *not* consumed by a `{{placeholder}}` and append them per skill as a short labelled context block (e.g. `### Provided inputs for {skill}` / `- {name}: {value}`). This is backward-compatible — templated skills are unaffected, the block only carries the leftovers — and needs no corpus edits. Add a gateway test (e.g. in `gateway/tests/test_inference_skill_assembly.py`) asserting a non-templated skill's assembled prompt contains the bound input's name and value. Option B (the higher-fidelity alternative) is to add `{{}}` placeholders to every built-in `SKILL.md` body matching its declared `inputs`, but that touches every skill file and must stay in sync with the frontmatter; ship Option A as the safety net first and adopt B opportunistically.
+
+**When to ship:** Post-v0.4.0; well-scoped for community pickup (Option A is contained to the assembler plus one test).
 
 ---
 

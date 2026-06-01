@@ -11,6 +11,14 @@ declarative base, so Alembic's autogenerate (when used) sees them.
 from __future__ import annotations
 
 from app.models.audit import AuditLog
+from app.models.autonomous import (
+    AutonomousMemory,
+    AutonomousNotification,
+    AutonomousSchedule,
+    AutonomousSession,
+    AutonomousWatch,
+    PrecedentEntry,
+)
 from app.models.chat import Chat, Message
 from app.models.document import Document, DocumentChunk
 from app.models.enhance_prompt import EnhancePromptInteraction
@@ -33,6 +41,11 @@ from app.models.work_product import WorkProductAttribution
 
 __all__ = [
     "AuditLog",
+    "AutonomousMemory",
+    "AutonomousNotification",
+    "AutonomousSchedule",
+    "AutonomousSession",
+    "AutonomousWatch",
     "Chat",
     "Document",
     "DocumentChunk",
@@ -46,6 +59,7 @@ __all__ = [
     "Playbook",
     "PlaybookExecution",
     "PlaybookPosition",
+    "PrecedentEntry",
     "Project",
     "ProjectFile",
     "ProjectKnowledgeBase",
