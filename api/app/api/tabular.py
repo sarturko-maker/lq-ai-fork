@@ -62,6 +62,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ActiveUser
 from app.audit import audit_action
+from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
 from app.models.document import Document, DocumentChunk
 from app.models.tabular import TabularExecution
@@ -153,7 +154,19 @@ def _resolve_columns(
         # Re-validate through the wire-side ColumnSpec so any
         # skill-side fields the wire schema doesn't honor are
         # stripped consistently.
-        return skill_name, [ColumnSpec.model_validate(col.model_dump()) for col in skill_columns]
+        resolved = [ColumnSpec.model_validate(col.model_dump()) for col in skill_columns]
+        # Bake the skill-level ensemble_verification fallback into each
+        # column at this single resolution point (Decision C-1
+        # snapshotting posture) so both preview-cost and execute see a
+        # consistent snapshot. A column that didn't declare its own
+        # value (None) inherits the skill-level value; an explicit
+        # True/False per column is left untouched.
+        skill_ensemble = record.frontmatter.lq_ai.ensemble_verification
+        if skill_ensemble is not None:
+            for col in resolved:
+                if col.ensemble_verification is None:
+                    col.ensemble_verification = skill_ensemble
+        return skill_name, resolved
 
     # ad_hoc branch — the request-validation min_length=1 on columns
     # in TabularExecutionCreate already covers the empty case.
@@ -207,6 +220,7 @@ async def preview_tabular_cost(
     request: Request,
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> TabularPreviewCostResponse:
     """Synchronous cost preview — no execution row is created.
 
@@ -215,6 +229,15 @@ async def preview_tabular_cost(
     breakdown (Decision C-5). The estimator's rolling average
     (M2-E2 pattern) caches per ~5 minutes in-process; rapid re-previews
     during column-spec editing don't thrash the DB.
+
+    Ensemble columns preview higher (Donna #6): the estimator adds one
+    ensemble-pass cost (N judge calls) per ensemble cell. We fetch the
+    gateway's resolved ensemble config so the premium reflects the
+    deployment's actual judge models + default; the config is
+    process-cached and ``get_citation_engine_ensemble_config`` already
+    returns ``None`` on any gateway error / unreachable, so an
+    unconfigured or down gateway simply yields no premium (graceful
+    degrade — the preview stays a non-fatal pre-flight).
 
     Authorization is the router-level ``get_active_user`` gate — any
     authenticated caller may preview costs against their own document
@@ -230,10 +253,16 @@ async def preview_tabular_cost(
         ad_hoc=body.columns,
     )
 
+    # ``columns`` is the RESOLVED spec (skill-level ensemble fallback
+    # already baked in by ``_resolve_columns``); the estimator only needs
+    # to apply the column-value-or-deployment-default resolution on top.
+    ensemble_config = await gateway.get_citation_engine_ensemble_config()
+
     return await estimate_tabular_execution_cost(
         db,
         document_ids=list(body.document_ids),
         columns=columns,
+        ensemble_config=ensemble_config,
     )
 
 
