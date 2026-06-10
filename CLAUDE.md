@@ -23,9 +23,11 @@ the orchestration; we keep the substrate (gateway, brakes, audit, citations, ski
 
 ## State of the pivot (keep current — stale info here is worse than none)
 
-- Nothing migrated yet. All upstream code is LEGACY: bugfix only — no new features, no refactors,
-  unless the task IS the migration.
-- ADR-F001..F004 are `accepted` — read them before structural work.
+- F0-S1 done: langgraph 1.x + `deepagents==0.6.8` substrate landed; first model-driven tool loop
+  proven live through the gateway (MiniMax-M3). Upstream code remains LEGACY: bugfix only — no new
+  features, no refactors, unless the task IS the migration.
+- ADR-F001..F005 are `accepted` — read them before structural work. Current slice: see
+  `docs/fork/HANDOFF.md`.
 
 ## Architecture rules
 
@@ -117,6 +119,15 @@ StoreBackend namespaces keyed `(org_id, …)`; company and practice levels read-
 - Fresh-context review of the diff against the plan (correctness gaps only).
 - ADR drafted if the slice made an architectural call. If you can't verify it, don't ship it.
 - When the agent repeats a mistake, the retro action is editing this file (and keeping it short).
+
+### Merge policy (agent-merged — ADR-F005)
+- This project is fully agentically coded; the maintainer does not review code. The agent
+  squash-merges a PR when the FULL gate passes: (1) CI green; (2) containerized suites for every
+  touched service with counts quoted in the PR; (3) fresh-context adversarial review of the diff —
+  blockers/should-fixes fixed or explicitly deferred on record; (4) live verification on the dev
+  stack when behavior changes (provider tests / UI screenshot), evidence in the PR; (5) HANDOFF.md
+  updated. Security-sensitive paths (gateway, auth, audit, crypto, anonymization) get an extra
+  security-focused review pass.
 
 ### Fork discipline
 - Hard fork, upstream FROZEN (ADR-F001): no merges, no cherry-picks, nothing from upstream — and no
