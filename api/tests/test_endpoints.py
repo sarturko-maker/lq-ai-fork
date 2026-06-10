@@ -67,6 +67,8 @@ _PARAM_VALUES: dict[str, str] = {
     # M3-D4 — admin intake-bridges surface
     "workspace_id": _DUMMY_UUID,
     "tenant_id": _DUMMY_UUID,
+    # F0-S2 (fork) — agent-runs surface
+    "run_id": _DUMMY_UUID,
 }
 
 
@@ -301,6 +303,11 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/autonomous/watches"),
     ("DELETE", "/api/v1/autonomous/watches/{watch_id}"),
     ("PATCH", "/api/v1/autonomous/watches/{watch_id}"),
+    # F0-S2 (fork) — agent-run records (kick-off + polled reads). Dedicated
+    # coverage in tests/agents/test_agent_runs_api.py.
+    ("POST", "/api/v1/agents/runs"),
+    ("GET", "/api/v1/agents/runs"),
+    ("GET", "/api/v1/agents/runs/{run_id}"),
 }
 
 

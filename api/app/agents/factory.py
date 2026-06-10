@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
+import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
@@ -26,8 +27,10 @@ def build_gateway_chat_model(
     model_alias: str = "smart",
     gateway_url: str | None = None,
     gateway_key: str | None = None,
+    purpose: str = "agent_loop",
     temperature: float = 0.0,
     timeout: float = 120.0,
+    http_async_client: httpx.AsyncClient | None = None,
 ) -> BaseChatModel:
     """Chat model speaking the gateway's OpenAI-compatible surface.
 
@@ -35,6 +38,15 @@ def build_gateway_chat_model(
     ``X-LQ-AI-Gateway-Key`` header, not the OpenAI Authorization bearer.
     ``model_alias`` is a gateway alias (``smart``/``fast``/``budget``) so
     routing, tier floors, and the routing log all apply per request.
+
+    ``purpose`` rides ``extra_body`` — the openai SDK merges ``extra_body``
+    into the top-level request JSON (unknown *kwargs* to ``create()`` would
+    raise instead), so every request body carries ``lq_ai_purpose`` and the
+    gateway tags the routing-log row (F0-S2; ``_KNOWN_PURPOSES`` in
+    ``gateway/app/api/inference.py``).
+
+    ``http_async_client`` is an injection seam for tests (assert on the
+    outbound body via a mock transport without monkeypatching).
     """
     url = (gateway_url if gateway_url is not None else get_settings().lq_ai_gateway_url).rstrip("/")
     key = gateway_key if gateway_key is not None else get_settings().lq_ai_gateway_key
@@ -45,9 +57,11 @@ def build_gateway_chat_model(
         # value is still a placeholder — auth rides the gateway header.
         api_key=SecretStr("gateway-key-in-header"),
         default_headers={_GATEWAY_KEY_HEADER: key},
+        extra_body={"lq_ai_purpose": purpose},
         temperature=temperature,
         timeout=timeout,
         max_retries=1,
+        http_async_client=http_async_client,
     )
 
 
