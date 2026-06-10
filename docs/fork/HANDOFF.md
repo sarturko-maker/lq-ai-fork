@@ -4,7 +4,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (2026-06-10, end of F0-S1)
 
-- Branch `fork/f0-s1-deepagents-spike` → open PR (merge it first if still open); `main` base `94ee28b`
+- Branch `fork/f0-s1-deepagents-spike` → PR #24 (merge it first if still open); `main` base `94ee28b`
   (ADR-F001..F004 accepted).
 - Dev stack: `docker compose` 8 services healthy on the Chromebook. Gateway aliases
   `smart`/`fast`/`budget` → `minimax/MiniMax-M3` (tier 4). MiniMax key in `.env` (`MINIMAX_API_KEY`).
