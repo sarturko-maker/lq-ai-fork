@@ -58,3 +58,31 @@ def test_tools_and_tool_choice_forward_verbatim() -> None:
     assert body["tools"] == _TOOLS
     assert body["tool_choice"] == "auto"
     assert all(not key.startswith("lq_ai_") for key in body)
+
+
+def test_anthropic_adapter_reads_block_content_as_empty() -> None:
+    """B3 text-only posture: block content is not translated (S2)."""
+    from app.providers.anthropic import _to_anthropic_request
+
+    request = ChatCompletionRequest(
+        model="claude-x",
+        messages=[
+            ChatCompletionMessage(role="user", content="real text"),
+            ChatCompletionMessage(role="user", content=_BLOCKS),
+        ],
+    )
+    body = _to_anthropic_request(request, model="claude-x", stream=False)
+    contents = [m["content"] for m in body["messages"]]
+    assert any("real text" in str(c) for c in contents)
+    assert not any("liability" in str(c) for c in contents)
+
+
+def test_ollama_adapter_reads_block_content_as_empty() -> None:
+    from app.providers.ollama import _to_ollama_request
+
+    request = ChatCompletionRequest(
+        model="qwen3.5:9b",
+        messages=[ChatCompletionMessage(role="user", content=_BLOCKS)],
+    )
+    body = _to_ollama_request(request, model="qwen3.5:9b", stream=False)
+    assert body["messages"][0]["content"] == ""

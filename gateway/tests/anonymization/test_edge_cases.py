@@ -321,3 +321,54 @@ def test_streaming_rehydrator_handles_long_entity_across_chunks() -> None:
     out = "".join(r.process(p) for p in pieces) + r.flush()
 
     assert out == f"{long_name} is here."
+
+
+@pytest.mark.unit
+def test_pre_anonymize_all_block_content_returns_none_and_counts_skip() -> None:
+    """A request whose anonymized-role messages are ALL block-form must
+    return ``None`` (→ ``anonymization_applied=False`` downstream) — the
+    F0-S1 review found a fully-skipped request misreported as anonymized.
+    """
+
+    blocks = [{"type": "text", "text": "Acme Corp owes Jane Doe $5m."}]
+    req = _make_request(messages=[ChatCompletionMessage(role="user", content=blocks)])
+    config = AnonymizationConfig(enabled=True, apply_at_tiers=[3, 4, 5])
+
+    mapper = pre_anonymize_request(
+        chat_request=req,
+        config=config,
+        routed_tier=4,
+        anonymizer=Anonymizer(analyzer=_StubAnalyzer({})),
+    )
+
+    assert mapper is None
+    # Block content forwards untouched (S2 implements block pseudonymization).
+    assert req.messages[0].content == blocks
+
+
+@pytest.mark.unit
+def test_pre_anonymize_mixed_content_still_returns_mapper() -> None:
+    """String messages are pseudonymized even when block-form siblings
+    are skipped; the mapper is returned because real work happened."""
+
+    content = "Email Jane Doe today."
+    span_start = content.index("Jane Doe")
+    req = _make_request(
+        messages=[
+            ChatCompletionMessage(role="user", content=content),
+            ChatCompletionMessage(role="user", content=[{"type": "text", "text": "Acme Corp"}]),
+        ]
+    )
+    config = AnonymizationConfig(enabled=True, apply_at_tiers=[3, 4, 5])
+    analyzer = _StubAnalyzer({content: [_Span("PERSON", span_start, span_start + 8)]})
+
+    mapper = pre_anonymize_request(
+        chat_request=req,
+        config=config,
+        routed_tier=4,
+        anonymizer=Anonymizer(analyzer=analyzer),
+    )
+
+    assert mapper is not None
+    assert req.messages[0].content == "Email PERSON_0001 today."
+    assert req.messages[1].content == [{"type": "text", "text": "Acme Corp"}]

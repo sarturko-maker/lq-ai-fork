@@ -35,7 +35,12 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 - Streaming tool-calls end-to-end (delta frames carry `tool_calls` chunks) — prerequisite for SSE v2.
 - Anthropic adapter: `tool_use`/`tool_result` translation + block content (every `F0-S1` comment
   marker in `gateway/app` is an S2 entry point — `grep -rn "F0-S1" gateway/app`).
-- Decide anonymization coverage for block-form content (currently skipped with comment).
+- Decide anonymization coverage for block-form content (skip is now observable: span attr
+  `anonymization.block_content_skipped` + warning; fully-skipped requests report applied=False).
+- From the F0-S1 adversarial review (deferred notes): (a) factory key exposure — move the gateway
+  key out of `ChatOpenAI(default_headers=...)` into a pre-built httpx client so `repr()`/LangSmith
+  serialization can't leak it; (b) `build_deep_agent` must reject/wrap model-bearing subagent
+  specs so a subagent can't be given a provider-direct model that bypasses the gateway.
 - Then S3 multi-turn chat (`api/app/api/chats.py:~1370`), S4 SSE v2, S5 eval gate (ADR-F004: N≥20
   tool/subagent uptake, MiniMax-M3 + one second family).
 
@@ -58,7 +63,8 @@ docker run --rm --network lq-ai_default --entrypoint sh -v "$PWD":/repo -w /repo
   Fresh image builds are unaffected — rebuild `api` + `arq-worker` + `ingest-worker` together.
 - langgraph 1.x has no `__version__` (use `importlib.metadata`); `add_node` requires callback
   protocols with a NAMED `state` param (see `app/{autonomous,playbooks,tabular}/nodes.py`).
-- langchain-openai 1.x: `api_key` is `SecretStr`; clients send block-form content (gateway handles).
+- langchain-openai 1.x: `api_key` is `SecretStr`; clients send block-form content — the gateway's
+  OpenAI-compatible path forwards it; Anthropic/Ollama adapters read it as EMPTY until S2.
 - Host Python is 3.11; api/gateway need 3.12 — all tooling runs in containers (`--entrypoint sleep`,
   the api image's default entrypoint runs alembic and dies without `DATABASE_URL`).
 - Tests: NEVER against the live compose postgres — throwaway `pgvector/pgvector:pg16` with

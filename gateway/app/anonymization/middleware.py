@@ -37,6 +37,7 @@ audit log clean.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -45,6 +46,8 @@ from app.anonymization.mapper import PseudonymMapper
 from app.config import AnonymizationConfig
 from app.observability_helpers import get_tracer, record_attributes, traced
 from app.providers.openai_schema import ChatCompletionRequest, ChatCompletionResponse
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "StreamingRehydrator",
@@ -108,14 +111,20 @@ def pre_anonymize_request(
             return None
 
         mapper = PseudonymMapper()
+        processed = 0
+        block_skipped = 0
 
         for message in chat_request.messages:
             if message.role not in _ANONYMIZED_ROLES:
                 continue
             # F0-S1: block-form content (list of typed blocks) is left
-            # untouched — pseudonymization of block content is S2 work;
-            # anonymization-sensitive deployments use string content.
+            # untouched — pseudonymization of block content is S2 work.
+            # The skip MUST be observable, and a fully-skipped request
+            # must not report anonymization_applied=True (review F0-S1
+            # finding 1): see the block_skipped accounting below.
             if not isinstance(message.content, str):
+                if message.content is not None:
+                    block_skipped += 1
                 continue
             # M2-D2: per Decision M2-1, retrieved source documents stay
             # un-pseudonymized so the model sees intact source quotes for
@@ -127,6 +136,7 @@ def pre_anonymize_request(
             if getattr(message, "lq_ai_skip_anonymization", False):
                 continue
             message.content = anonymizer.pseudonymize_into(message.content, mapper)
+            processed += 1
 
         if chat_request.lq_ai_skill_inputs:
             for skill_name, inputs in chat_request.lq_ai_skill_inputs.items():
@@ -140,8 +150,21 @@ def pre_anonymize_request(
             **{
                 "anonymization.entity_count": sum(counts.values()),
                 "anonymization.entity_types": sorted(counts.keys()),
+                "anonymization.block_content_skipped": block_skipped,
             },
         )
+        if block_skipped:
+            logger.warning(
+                "anonymization skipped %d block-form message(s); block-content "
+                "pseudonymization is not implemented (F0-S2). processed=%d",
+                block_skipped,
+                processed,
+            )
+            span.add_event("anonymization.skip.block_content")
+            if processed == 0 and not chat_request.lq_ai_skill_inputs:
+                # Nothing was actually pseudonymized — report honestly:
+                # no mapper means anonymization_applied=False downstream.
+                return None
         return mapper
 
 

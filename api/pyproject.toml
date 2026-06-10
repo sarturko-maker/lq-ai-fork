@@ -143,6 +143,7 @@ dependencies = [
     "langchain-openai>=1.0,<2",
     # F0-S1 — langgraph-checkpoint-postgres: durable checkpointing for
     # deep-agent runs in the Postgres we already operate (pgvector image).
+    # Not wired yet — first consumer is the multi-turn slice (F0-S4+).
     # The 3.x line pairs with langgraph 1.x; psycopg is its transitive.
     "langgraph-checkpoint-postgres>=3.0,<4",
     # M3-C4 — openpyxl powers the Tabular Review XLSX export
