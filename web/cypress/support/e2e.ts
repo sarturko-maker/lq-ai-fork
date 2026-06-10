@@ -85,7 +85,11 @@ before(() => {
 	// upstream-OpenWebUI spec files only.
 	const spec = (Cypress.spec && Cypress.spec.name) || '';
 	const isLqAiSpec =
-		spec.startsWith('wave-') || spec.startsWith('lq-ai-') || /^m\d+-/.test(spec);
+		spec.startsWith('wave-') ||
+		spec.startsWith('lq-ai-') ||
+		/^m\d+-/.test(spec) ||
+		// Fork slices are F-numbered (f0-s3-agents-tab.cy.ts, …) — ADR-F001.
+		/^f\d+-/.test(spec);
 	if (!isLqAiSpec) {
 		cy.registerAdmin();
 	}
