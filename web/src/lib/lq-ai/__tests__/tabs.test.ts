@@ -5,10 +5,11 @@ describe('tabs', () => {
   const adminUser: User = { id: '1', email: 'a@x.io', is_admin: true, must_change_password: false, role: 'admin' };
   const memberUser: User = { id: '2', email: 'm@x.io', is_admin: false, must_change_password: false, role: 'member' };
 
-  it('defines nine core tabs plus autonomous (opt-in) and admin (tabular added in M3-C3, autonomous added in M4-C2)', () => {
+  it('defines ten core tabs plus autonomous (opt-in) and admin (tabular added in M3-C3, autonomous added in M4-C2, agents added in F0-S3)', () => {
     const ids = TABS.map((t) => t.id);
     expect(ids).toEqual([
       'home',
+      'agents',
       'chats',
       'matters',
       'skills',
@@ -41,6 +42,7 @@ describe('tabs', () => {
   it('shows core tabs to all users', () => {
     for (const id of [
       'home',
+      'agents',
       'chats',
       'matters',
       'skills',
@@ -56,6 +58,19 @@ describe('tabs', () => {
 
   it('marks tabular tab as available (M3-C3)', () => {
     expect(isTabAvailable('tabular')).toBe(true);
+  });
+
+  // Agents tab — F0-S3 (first visible deep agent; practice-area home in F1, ADR-F002)
+  it('marks agents tab as available and visible to all roles (F0-S3)', () => {
+    expect(isTabAvailable('agents')).toBe(true);
+    expect(isTabVisible('agents', memberUser)).toBe(true);
+    expect(isTabVisible('agents', adminUser)).toBe(true);
+    expect(isTabVisible('agents', null)).toBe(true);
+  });
+
+  it('activeTabFor recognises /lq-ai/agents subroutes', () => {
+    expect(activeTabFor('/lq-ai/agents')).toBe('agents');
+    expect(activeTabFor('/lq-ai/agents/some-run-id')).toBe('agents');
   });
 
   it('activeTabFor recognises /lq-ai/tabular subroutes', () => {
