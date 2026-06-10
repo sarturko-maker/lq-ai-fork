@@ -17,7 +17,13 @@ import os
 
 import pytest
 
-pytestmark = pytest.mark.provider
+pytestmark = [
+    pytest.mark.provider,
+    pytest.mark.skipif(
+        "LQ_AI_GATEWAY_KEY" not in os.environ,
+        reason="needs a live gateway (LQ_AI_GATEWAY_KEY unset)",
+    ),
+]
 
 _CLAUSE_TEXT = (
     "Clause 7.2 (Limitation of Liability): each party's aggregate liability "
