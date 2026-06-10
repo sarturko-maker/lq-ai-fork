@@ -2,8 +2,8 @@
 
 Outcome-based milestones, not calendar sprints. Each milestone breaks into vertical slices
 (end-to-end, runnable, testable, ≤2–3 days, one PR each). Re-plan at milestone boundaries.
-Status: agreed direction per ADR-F001/F002/F003 (F002/F003 `proposed`, content maintainer-agreed
-2026-06-10; formal acceptance with first implementing PR).
+Status: active — governed by accepted ADR-F001..F004.
+
 
 ## F0 — Agentic substrate (unblocks everything)
 

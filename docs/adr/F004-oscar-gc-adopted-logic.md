@@ -1,6 +1,6 @@
 # F004 — Logic adopted from oscar-gc (and what we deliberately do not adopt)
 
-Status: proposed
+Status: accepted (2026-06-10, maintainer agreement in session)
 Date: 2026-06-10
 
 ## Context and problem statement

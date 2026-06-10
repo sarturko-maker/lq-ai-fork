@@ -25,7 +25,7 @@ the orchestration; we keep the substrate (gateway, brakes, audit, citations, ski
 
 - Nothing migrated yet. All upstream code is LEGACY: bugfix only — no new features, no refactors,
   unless the task IS the migration.
-- ADR-F001 (fork charter) is `proposed` — read it before structural work.
+- ADR-F001..F004 are `accepted` — read them before structural work.
 
 ## Architecture rules
 
