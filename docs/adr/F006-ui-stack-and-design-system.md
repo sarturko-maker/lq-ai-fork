@@ -1,6 +1,6 @@
 # F006 — UI stack: extract the shell, adopt the AI SDK stream spec, build a legal-grade design system
 
-Status: proposed (maintainer accepts/rejects)
+Status: accepted (maintainer, 2026-06-10)
 Date: 2026-06-10
 Inputs: two research workflows (stack: 5 agents incl. repo audit; visual benchmark: legal-AI teardown +
 frontier design language), maintainer feedback on live F0-S3 ("the entire system looks really basic";
