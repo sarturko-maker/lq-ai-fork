@@ -2,8 +2,8 @@
 
 Outcome-based milestones, not calendar sprints. Each milestone breaks into vertical slices
 (end-to-end, runnable, testable, ≤2–3 days, one PR each). Re-plan at milestone boundaries.
-Status: agreed direction per ADR-F001/F002/F003 (F002/F003 `proposed`, content maintainer-agreed
-2026-06-10; formal acceptance with first implementing PR).
+Status: active — governed by accepted ADR-F001..F004.
+
 
 ## F0 — Agentic substrate (unblocks everything)
 
@@ -18,6 +18,9 @@ Outcome: a model can drive a real tool-calling loop through the gateway, in a mu
 - Multi-turn chat: send conversation history (replaces the single-turn request in `chats.py`).
 - SSE protocol v2: tool-call / subagent / plan / progress frame types, backend emitter → parser → UI
   (feeds the F1 capability rail and activity feed).
+- Eval substrate + acceptance gate (ADR-F004): tool-call and subagent uptake measured at N≥20 on
+  MiniMax-M3 plus one second model family (masked judge, pre-flight variance gate); subagent
+  dispatch designed as task-scoped procedures, not open-ended delegation.
 
 ## F1 — First practice area, end to end (ADR-F002)
 
@@ -27,6 +30,11 @@ type ("Matter") usable for a real task (e.g. NDA review), with visible agent wor
 - `practice_areas` schema + config/admin API (name, unit-of-work label, area profile, bound
   skills/playbooks/MCPs, default tier floor); `projects.practice_area_id` (nullable — legacy Matters
   unchanged); audit rows gain `practice_area_id`.
+- Area config is declarative shape data (subject type, counterparty role enums, kind options,
+  conditional extras, privileged defaults) consumed by one renderer — no per-area code branches;
+  user-added areas can host units of work from day one (ADR-F004).
+- Tool parameters classified A/B/C; matter/user/scope identifiers are B-class — runtime-injected,
+  never LLM-visible (ADR-F004). Capability rail renders from settled state records, not the stream.
 - **Agents tab = practice-area home**: area page with unit-of-work list, agent config, area memory,
   conversation surface. Conversations bind to (practice area, Matter) — no free-floating agent chat.
 - Deep Agent per area via `create_deep_agent`: area system prompt, area-scoped skills, subagent
@@ -56,6 +64,9 @@ compact, accumulate into Matter digests, and are searchable; agents propose, use
   tier-compliant embedding provider).
 - Wire kept user memory into prompts (today `load_kept_memory()` is uncalled); gentle memory UX —
   inline "keep / undo" + weekly batch review, never per-item nagging.
+- Runtime isolation acceptance tests, not design verification (ADR-F004): a fact told in Matter A
+  must not surface in Matter B; practice-area memory must not leak across areas; per-level
+  read/write policy exercised end-to-end against the live stack.
 
 ## F3 — Practice-area IA re-centre
 

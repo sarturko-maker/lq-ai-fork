@@ -1,6 +1,6 @@
 # F001 — Fork charter: pivot from tool surfaces to practice-area Deep Agents
 
-Status: proposed
+Status: accepted (2026-06-10, maintainer agreement in session)
 Date: 2026-06-10
 
 ## Context and problem statement

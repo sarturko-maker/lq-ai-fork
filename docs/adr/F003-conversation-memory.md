@@ -1,6 +1,6 @@
 # F003 — Conversation memory: matter-level chat history with compaction, digests, and search
 
-Status: proposed
+Status: accepted (2026-06-10, maintainer agreement in session)
 Date: 2026-06-10
 
 ## Context and problem statement
