@@ -77,6 +77,10 @@ curl -s -X POST http://localhost:8000/api/v1/agents/runs -H "Authorization: Bear
   otherwise). First boot of a fresh web image downloads HF models — takes minutes to healthy.
 - `gh pr create` defaults to the FROZEN upstream repo — always pass
   `--repo sarturko-maker/lq-ai-fork` (ADR-F001: no upstream interaction).
+- **Name fork Cypress specs `fN-…`** (or `lq-ai-…`): the support `before()` hook bootstraps an
+  OpenWebUI user for any other spec name, and that user BREAKS `/lq-ai/*` (OpenWebUI auth redirect
+  under `WEBUI_AUTH=false` once users exist in the web container's `webui.db`). If it happens:
+  delete the `admin@example.com` rows from `user` + `auth` in `/app/backend/data/webui.db`.
 - After any migration: rebuild `api` + `arq-worker` + `ingest-worker` together. After gateway code
   changes: rebuild `gateway`. In-place pip upgrades clobber langgraph-prebuilt (force-reinstall trio).
 - Host Python is 3.11; api/gateway need 3.12 — all py tooling in containers (`--entrypoint sleep`;
