@@ -8,9 +8,13 @@
  * `search_documents` against the matter's document — no demo tools exist
  * anywhere anymore.
  *
- * Run requires the live dev stack (api + ingest-worker + gateway model):
+ * Run requires the live dev stack (api + ingest-worker + gateway model).
+ * Disable video on the dev box — Cypress's ffmpeg encoding starves the
+ * box and crashes Postgres backends (SIGPIPE → crash recovery), which
+ * kills the in-flight ingest job:
  *   docker compose up -d
- *   cd web && npx cypress run --spec 'cypress/e2e/f0-s4-matter-tools.cy.ts'
+ *   cd web && npx cypress run --spec 'cypress/e2e/f0-s4-matter-tools.cy.ts' \
+ *     --config video=false
  *
  * Spec name MUST stay `f0-s4-*` (fork pattern in cypress/support/e2e.ts —
  * any other name bootstraps an OpenWebUI user that breaks /lq-ai/*).
@@ -28,7 +32,12 @@ const RUN_TIMEOUT_MS = 120_000;
 const INGEST_ATTEMPTS = 40;
 const INGEST_POLL_MS = 3_000;
 
-/** Recursively poll the file row until ingestion_status === 'ready'. */
+/** Recursively poll the file row until ingestion_status === 'ready'.
+
+ * A transient non-JSON response (e.g. a 500 while the dev box's
+ * Postgres finishes crash recovery) counts as "not ready yet" — only
+ * an explicit 'failed' status or exhausting the attempts fails the
+ * spec. */
 function waitForIngestion(token: string, fileId: string, attempt = 0): void {
 	if (attempt >= INGEST_ATTEMPTS) {
 		throw new Error(`file ${fileId} not ingested after ${INGEST_ATTEMPTS} polls`);
@@ -36,7 +45,12 @@ function waitForIngestion(token: string, fileId: string, attempt = 0): void {
 	cy.exec(`curl -s ${API}/files/${fileId} -H 'Authorization: Bearer ${token}'`, {
 		log: false
 	}).then((res) => {
-		const status = JSON.parse(res.stdout).ingestion_status;
+		let status: string | undefined;
+		try {
+			status = JSON.parse(res.stdout).ingestion_status;
+		} catch {
+			status = undefined; // transient API hiccup — retry
+		}
 		if (status === 'ready') return;
 		if (status === 'failed') throw new Error(`ingestion failed for file ${fileId}`);
 		cy.wait(INGEST_POLL_MS);
