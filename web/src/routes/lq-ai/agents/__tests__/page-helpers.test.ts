@@ -311,6 +311,17 @@ describe('visibleSteps', () => {
 		expect(visibleSteps(steps, run)).toHaveLength(3);
 	});
 
+	it('dedups astral-character answers (server bounds by code points, not UTF-16 units)', () => {
+		const long = '🎉'.repeat(STEP_SUMMARY_LIMIT + 100); // each emoji = 1 code point, 2 UTF-16 units
+		const serverBounded =
+			Array.from(long)
+				.slice(0, STEP_SUMMARY_LIMIT - 1)
+				.join('') + '…'; // exactly what the runner's _bounded persists
+		const steps = [...earlier, closing(serverBounded)];
+		const run = makeRun({ status: 'completed', final_answer: long });
+		expect(visibleSteps(steps, run)).toHaveLength(3);
+	});
+
 	it('keeps a closing turn that differs from the final answer', () => {
 		const steps = [...earlier, closing('something else entirely')];
 		const run = makeRun({ status: 'completed', final_answer: answer });

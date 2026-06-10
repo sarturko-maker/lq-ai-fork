@@ -53,12 +53,15 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 		);
 		cy.get('[data-testid="lq-ai-agents-composer"] button[type="submit"]').click();
 
-		// The run surface appears and steps stream in via polling.
+		// The run surface appears and activity settles in via polling. A
+		// single-turn direct answer dedups its only model turn out of the
+		// timeline (visibleSteps), so accept EITHER a step OR the answer —
+		// the comma selector is a union.
 		cy.get('[data-testid="lq-ai-agents-run"]').should('exist');
-		cy.get('[data-testid="lq-ai-agents-run"] .ag-steps li', { timeout: RUN_TIMEOUT_MS }).should(
-			'have.length.at.least',
-			1
-		);
+		cy.get(
+			'[data-testid="lq-ai-agents-run"] .ag-steps li, [data-testid="lq-ai-agents-answer"]',
+			{ timeout: RUN_TIMEOUT_MS }
+		).should('have.length.at.least', 1);
 		cy.screenshot('f0-s3-2-agent-working');
 
 		// No tool lighting is asserted on an UNBOUND run: with no matter there
@@ -66,8 +69,9 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 		// f0-s4 spec pins tool dispatch on a matter-bound run deterministically.
 
 		// Completion: badge flips and a non-empty final answer renders.
-		// (No assertion on model-chosen prose — that flakes; the deterministic
-		// clause text is already pinned by the tool-result step.)
+		// (No assertion on model-chosen prose — that flakes; on an unbound
+		// run there is nothing deterministic to pin. Grounded-content
+		// assertions live in the f0-s4 matter-bound spec.)
 		cy.get('[data-testid="lq-ai-agents-run"]')
 			.contains('.ag-badge', 'Completed', { timeout: RUN_TIMEOUT_MS })
 			.should('exist');

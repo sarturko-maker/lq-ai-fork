@@ -137,7 +137,12 @@ def _step_from_event(
     if kind == "on_tool_end":
         output = data.get("output")
         content = getattr(output, "content", output)
-        return AgentRunStepKind.tool_result, event.get("name"), _bounded(_text_of(content)), False
+        return (
+            AgentRunStepKind.tool_result,
+            event.get("name"),
+            _bounded(_text_of(content)),
+            False,
+        )
 
     return None
 
@@ -199,7 +204,11 @@ async def _drive_agent(
                 seq += 1
                 db.add(
                     AgentRunStep(
-                        run_id=run_id, seq=seq, kind=kind.value, name=name, summary=summary
+                        run_id=run_id,
+                        seq=seq,
+                        kind=kind.value,
+                        name=name,
+                        summary=summary,
                     )
                 )
                 await db.commit()
@@ -252,6 +261,45 @@ async def _finalize(
                 logger.exception(
                     "agent run terminal write failed twice; run left at 'running'",
                     extra={"event": "agent_run_finalize_failed", "run_id": str(run_id)},
+                )
+                return
+
+
+async def mark_run_failed(
+    session_factory: async_sessionmaker[AsyncSession],
+    run_id: uuid.UUID,
+    *,
+    error: str,
+) -> None:
+    """Public terminal-failure write for the composition point.
+
+    The api layer's ``_run_in_background`` assembles tools/model BEFORE
+    ``execute_agent_run`` takes over; a failure there must not strand
+    the run at ``'running'`` (the flood brake counts those forever —
+    F0-S4 review). Unlike ``_finalize`` this NEVER overwrites a settled
+    run (the caller's except block can also catch post-execution
+    cleanup errors). Fresh-session, retry-once, bounded error — never
+    a stack trace.
+    """
+    for attempt in (1, 2):
+        try:
+            async with session_factory() as db:
+                run = await db.get(AgentRun, run_id)
+                if run is None or run.status != AgentRunStatus.running.value:
+                    return  # gone, or already settled — leave the terminal state alone
+                run.status = AgentRunStatus.failed.value
+                run.error = _bounded(error, 500)
+                run.finished_at = datetime.now(UTC)
+                await db.commit()
+                return
+        except Exception:
+            if attempt == 2:
+                logger.exception(
+                    "composition-failure terminal write failed twice; run left at 'running'",
+                    extra={
+                        "event": "agent_run_mark_failed_failed",
+                        "run_id": str(run_id),
+                    },
                 )
                 return
 
@@ -311,7 +359,10 @@ async def execute_agent_run(
             )
         except TimeoutError:
             await _finalize(
-                db_session_factory, run_id, status=AgentRunStatus.failed, error="timeout"
+                db_session_factory,
+                run_id,
+                status=AgentRunStatus.failed,
+                error="timeout",
             )
             return
         except Exception as exc:

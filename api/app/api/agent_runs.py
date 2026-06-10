@@ -29,15 +29,18 @@ only. F1 extends the guard wrap to the full tool universe.
 
 from __future__ import annotations
 
+import logging
 import uuid
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
-from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
+from app.agents.runner import SYSTEM_PROMPT, execute_agent_run, mark_run_failed
 from app.agents.tools import MatterBinding, build_matter_tools
 from app.api.dependencies import ActiveUser
 from app.db.session import get_db, get_session_factory
@@ -51,6 +54,8 @@ from app.schemas.agent_runs import (
     AgentRunStatus,
     AgentRunStepRead,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agents", tags=["agent-runs"])
 
@@ -219,61 +224,93 @@ _MATTER_PROMPT = (
 )
 
 
-async def _run_in_background(*, run_id: uuid.UUID) -> None:
+def _system_prompt_for(binding: MatterBinding | None) -> str:
+    """The run's full system prompt — base + the matter addendum."""
+    if binding is None:
+        return SYSTEM_PROMPT
+    return SYSTEM_PROMPT + _MATTER_PROMPT.format(name=binding.name)
+
+
+async def _run_in_background(
+    *,
+    run_id: uuid.UUID,
+    model_builder: Callable[..., BaseChatModel] = build_gateway_chat_model,
+    session_factory_provider: Callable[[], async_sessionmaker[AsyncSession]] = get_session_factory,
+) -> None:
     """Background-task entry point — the run's composition point (F0-S4).
 
-    Loads the run's matter binding (if any), assembles the guarded
-    matter tools + matter-aware prompt + gateway model, and owns the
-    gateway http client's lifecycle (the key rides the client's
+    Loads the run's matter binding — the project is RE-validated against
+    the run's owner and ``archived_at`` here, not just at the 202
+    (binding facts must hold at execution time) — then assembles the
+    guarded matter tools + matter-aware prompt + gateway model, and owns
+    the gateway http client's lifecycle (the key rides the client's
     headers — see :func:`app.agents.factory.build_gateway_http_client`).
+    ``model_builder`` / ``session_factory_provider`` are injection
+    seams: tests drive the REAL composition with a scripted model and
+    the test DB, no gateway, no monkeypatching.
+
+    Any failure here finalizes the run as ``'failed'`` — a run must
+    never strand at ``'running'``: the flood brake counts those forever
+    and three of them lock the user out (F0-S4 review).
     """
-    session_factory = get_session_factory()
-
-    binding: MatterBinding | None = None
-    async with session_factory() as db:
-        run = await db.get(AgentRun, run_id)
-        if run is None:  # deleted underneath us (user cascade)
-            return
-        model_alias, purpose = run.model_alias, run.purpose
-        if run.project_id is not None:
-            project = await db.get(Project, run.project_id)
-            if project is not None:
-                binding = MatterBinding(
-                    project_id=project.id,
-                    user_id=run.user_id,
-                    name=project.name,
-                    privileged=project.privileged,
-                    minimum_inference_tier=project.minimum_inference_tier,
-                )
-
-    tools = (
-        build_matter_tools(session_factory, run_id=run_id, binding=binding)
-        if binding is not None
-        else []
-    )
-    system_prompt = (
-        SYSTEM_PROMPT + _MATTER_PROMPT.format(name=binding.name)
-        if binding is not None
-        else SYSTEM_PROMPT
-    )
-
-    http_client = build_gateway_http_client()
+    session_factory = session_factory_provider()
     try:
-        model = build_gateway_chat_model(
-            model_alias=model_alias,
-            purpose=purpose,
-            http_async_client=http_client,
-            project_minimum_inference_tier=(
-                binding.minimum_inference_tier if binding is not None else None
-            ),
-            privileged=binding.privileged if binding is not None else False,
+        binding: MatterBinding | None = None
+        async with session_factory() as db:
+            run = await db.get(AgentRun, run_id)
+            if run is None:  # deleted underneath us (user cascade)
+                return
+            model_alias, purpose = run.model_alias, run.purpose
+            if run.project_id is not None:
+                project = (
+                    await db.execute(
+                        select(Project).where(
+                            Project.id == run.project_id,
+                            Project.owner_id == run.user_id,
+                            Project.archived_at.is_(None),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if project is not None:
+                    binding = MatterBinding(
+                        project_id=project.id,
+                        user_id=run.user_id,
+                        name=project.name,
+                        privileged=project.privileged,
+                        minimum_inference_tier=project.minimum_inference_tier,
+                    )
+
+        tools = (
+            build_matter_tools(session_factory, run_id=run_id, binding=binding)
+            if binding is not None
+            else []
         )
-        await execute_agent_run(
-            run_id,
-            session_factory,
-            tools=tools,
-            model=model,
-            system_prompt=system_prompt,
+
+        http_client = build_gateway_http_client()
+        try:
+            model = model_builder(
+                model_alias=model_alias,
+                purpose=purpose,
+                http_async_client=http_client,
+                project_minimum_inference_tier=(
+                    binding.minimum_inference_tier if binding is not None else None
+                ),
+                privileged=binding.privileged if binding is not None else False,
+            )
+            await execute_agent_run(
+                run_id,
+                session_factory,
+                tools=tools,
+                model=model,
+                system_prompt=_system_prompt_for(binding),
+            )
+        finally:
+            await http_client.aclose()
+    except Exception as exc:
+        logger.exception(
+            "agent run composition failed",
+            extra={"event": "agent_run_composition_failed", "run_id": str(run_id)},
         )
-    finally:
-        await http_client.aclose()
+        # mark_run_failed never overwrites a settled run, so a cleanup
+        # error after a successful execution cannot flip 'completed'.
+        await mark_run_failed(session_factory, run_id, error=f"{type(exc).__name__}: {exc}")

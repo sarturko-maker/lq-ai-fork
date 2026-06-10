@@ -32,7 +32,11 @@ _CLAUSE_TEXT = (
 
 
 async def test_deep_agent_completes_tool_loop_through_gateway() -> None:
-    from app.agents import build_deep_agent, build_gateway_chat_model, build_gateway_http_client
+    from app.agents import (
+        build_deep_agent,
+        build_gateway_chat_model,
+        build_gateway_http_client,
+    )
 
     tool_calls: list[str] = []
 

@@ -5,7 +5,8 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 ## State (2026-06-10, end of F0-S4)
 
 - Merged to main through #29 (F0-S1 #24, governance #25, F0-S2 #26, F0-S3 #27, ADR-F006 #28/#29);
-  **F0-S4 on `fork/f0-s4-real-tools`** (this slice's PR). ADR-F001..F006 accepted. Merges follow
+  **F0-S4 = PR #30**. ADR-F001..F006 accepted; **ADR-F007 (matter document scope = attach join ∪
+  upload-time column) drafted in #30, status proposed — maintainer accepts**. Merges follow
   ADR-F005's 5-part gate — no exceptions.
 - Dev stack: 8 services healthy on the S4 images; DB at migration **0049**. Gateway aliases
   `smart`/`fast`/`budget` → `minimax/MiniMax-M3` (tier 4); key in `.env`.
@@ -50,11 +51,15 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   universe; natural-language step titles (UI-only; rows keep raw name + args verbatim); closing
   model turn deduplicated against `final_answer` by exact server-bound comparison
   (`visibleSteps`, pure + tested).
-- **Verification**: api agents suite **54 passed / 1 skipped** (containerized; alembic head incl.
-  0049 up/down/up on throwaway); web **0 svelte-check errors, 739/739 Vitest**; live Cypress
-  **f0-s4 1/1** (seeded matter + generated MSA PDF → model dispatched `search_documents` → answer
-  cites f0-s4-msa.pdf p.1 Clause 7.2) and **f0-s3 1/1**; screenshots in
-  `docs/fork/evidence/f0-s4/`. Live API run transcript in the PR.
+- **Adversarial review (48-agent workflow)** confirmed 20 findings (2 should-fix clusters + nits);
+  all fixed in-branch — most load-bearing: composition failures now FINALIZE the run as 'failed'
+  (`mark_run_failed`, never strands 'running'/flood-brake); guard's audit-failure path now rolls
+  back (a failed audit flush no longer masks the tool result); binding re-validated (owner +
+  archived) at execution time; `_run_in_background` got injection seams + real composition tests.
+- **Verification**: FULL api suite + mypy containerized (counts in PR #30); web **0 svelte-check
+  errors, 740/740 Vitest**; live Cypress **f0-s4 1/1** (seeded matter + generated MSA PDF → model
+  dispatched `search_documents` → answer cites f0-s4-msa.pdf p.1 Clause 7.2) and **f0-s3 1/1**;
+  screenshots in `docs/fork/evidence/f0-s4/`. Live API run transcript in the PR.
 
 ## Next slice: F0-S5 — multi-turn + new chat
 

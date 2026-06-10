@@ -26,7 +26,6 @@ import inspect
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -156,9 +155,7 @@ async def matter_env(
         await db.flush()
         user_ids += [user.id, stranger.id]
 
-        project = Project(
-            owner_id=user.id, name="Acme MSA", slug=f"acme-{uuid.uuid4().hex[:6]}"
-        )
+        project = Project(owner_id=user.id, name="Acme MSA", slug=f"acme-{uuid.uuid4().hex[:6]}")
         other_project = Project(
             owner_id=user.id, name="Northwind", slug=f"north-{uuid.uuid4().hex[:6]}"
         )
@@ -167,7 +164,12 @@ async def matter_env(
         project_ids += [project.id, other_project.id]
 
         msa = await _seed_file(
-            db, owner_id=user.id, filename="msa.pdf", body=_MSA_TEXT, page_start=7, page_end=8
+            db,
+            owner_id=user.id,
+            filename="msa.pdf",
+            body=_MSA_TEXT,
+            page_start=7,
+            page_end=8,
         )
         notes = await _seed_file(db, owner_id=user.id, filename="notes.pdf", body=_NOTES_TEXT)
         pending = await _seed_file(db, owner_id=user.id, filename="pending.pdf", body=None)
@@ -264,16 +266,20 @@ async def _audit_rows(env: MatterEnv) -> list[AuditLog]:
 # ---------------------------------------------------------------------------
 
 
-async def test_search_returns_passages_with_filename_and_pages(matter_env: MatterEnv) -> None:
+async def test_search_returns_passages_with_filename_and_pages(
+    matter_env: MatterEnv,
+) -> None:
     result = await matter_env.search("liability cap")
     assert "msa.pdf" in result
-    assert "pages 7–8" in result
+    assert "pages 7-8" in result
     assert "aggregate liability" in result
     # The other matter's and the foreign-owned content never surface.
     assert "merger" not in result and "zugzwang" not in result
 
 
-async def test_search_excludes_other_matters_of_the_same_owner(matter_env: MatterEnv) -> None:
+async def test_search_excludes_other_matters_of_the_same_owner(
+    matter_env: MatterEnv,
+) -> None:
     result = await matter_env.search("confidential merger Northwind")
     assert "No passages matched" in result
     assert "secret.pdf" not in result
@@ -295,7 +301,9 @@ async def test_search_empty_query_lists_the_inventory(matter_env: MatterEnv) -> 
     assert "foreign.pdf" not in result
 
 
-async def test_search_no_hits_is_honest_and_orients_the_model(matter_env: MatterEnv) -> None:
+async def test_search_no_hits_is_honest_and_orients_the_model(
+    matter_env: MatterEnv,
+) -> None:
     result = await matter_env.search("hovercraft eels")
     assert 'No passages matched "hovercraft eels"' in result
     assert "msa.pdf" in result  # inventory so the model can pivot to read_document
@@ -314,25 +322,33 @@ async def test_search_finds_upload_time_membership(matter_env: MatterEnv) -> Non
 # ---------------------------------------------------------------------------
 
 
-async def test_read_document_works_for_upload_time_membership(matter_env: MatterEnv) -> None:
+async def test_read_document_works_for_upload_time_membership(
+    matter_env: MatterEnv,
+) -> None:
     result = await matter_env.read("uploaded.pdf")
     assert "full text" in result
     assert _UPLOADED_TEXT in result
 
 
-async def test_read_document_returns_full_text_case_insensitive(matter_env: MatterEnv) -> None:
+async def test_read_document_returns_full_text_case_insensitive(
+    matter_env: MatterEnv,
+) -> None:
     result = await matter_env.read("MSA.PDF")
     assert "full text" in result
     assert _MSA_TEXT in result
 
 
-async def test_read_document_unknown_name_lists_inventory(matter_env: MatterEnv) -> None:
+async def test_read_document_unknown_name_lists_inventory(
+    matter_env: MatterEnv,
+) -> None:
     result = await matter_env.read("ghost.pdf")
     assert 'No document named "ghost.pdf"' in result
     assert "msa.pdf" in result
 
 
-async def test_read_document_foreign_owned_file_is_invisible(matter_env: MatterEnv) -> None:
+async def test_read_document_foreign_owned_file_is_invisible(
+    matter_env: MatterEnv,
+) -> None:
     result = await matter_env.read("foreign.pdf")
     assert 'No document named "foreign.pdf"' in result
     assert "zugzwang" not in result
@@ -359,6 +375,61 @@ async def test_read_document_truncates_long_documents(matter_env: MatterEnv) -> 
     finally:
         async with matter_env.factory() as db:
             await db.execute(delete(File).where(File.id == tome_id))
+            await db.commit()
+
+
+async def test_read_document_duplicates_prefer_newest_readable(
+    matter_env: MatterEnv,
+) -> None:
+    """Duplicate filenames resolve to the most recently ADDED readable
+    copy — attach time when a join row exists, upload time for
+    column-only members (which have no attached_at; F0-S4 review) —
+    and an unreadable (pending) newest copy never shadows a readable one."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    async with matter_env.factory() as db:
+        old_attached = await _seed_file(
+            db,
+            owner_id=matter_env.user_id,
+            filename="dup.pdf",
+            body="OLD attached copy.",
+        )
+        new_uploaded = await _seed_file(
+            db,
+            owner_id=matter_env.user_id,
+            filename="dup.pdf",
+            body="NEW uploaded copy.",
+            column_project_id=matter_env.project_id,
+        )
+        pending_newest = await _seed_file(
+            db,
+            owner_id=matter_env.user_id,
+            filename="dup.pdf",
+            body=None,  # not ingested — unreadable
+            column_project_id=matter_env.project_id,
+        )
+        old_attached.created_at = now - timedelta(days=3)
+        new_uploaded.created_at = now - timedelta(days=1)
+        pending_newest.created_at = now
+        db.add(
+            ProjectFile(
+                project_id=matter_env.project_id,
+                file_id=old_attached.id,
+                attached_at=now - timedelta(days=2),
+            )
+        )
+        await db.commit()
+        dup_ids = [old_attached.id, new_uploaded.id, pending_newest.id]
+
+    try:
+        result = await matter_env.read("dup.pdf")
+        assert "3 files in this matter share this name" in result
+        assert "NEW uploaded copy." in result  # readable beats pending; newest wins
+        assert "OLD attached copy." not in result
+    finally:
+        async with matter_env.factory() as db:
+            await db.execute(delete(File).where(File.id.in_(dup_ids)))
             await db.commit()
 
 
@@ -431,7 +502,11 @@ async def test_real_loop_dispatches_guarded_search_over_matter_documents(
     document name, and the dispatch left its audit row."""
     from app.agents.runner import execute_agent_run
     from app.models.agent_run import AgentRunStep
-    from tests.agents.fakes import ScriptedToolCallingModel, final_message, tool_call_message
+    from tests.agents.fakes import (
+        ScriptedToolCallingModel,
+        final_message,
+        tool_call_message,
+    )
 
     model = ScriptedToolCallingModel(
         responses=[

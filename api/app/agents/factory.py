@@ -39,7 +39,9 @@ def build_gateway_http_client(
     wire without monkeypatching).
     """
     key = gateway_key if gateway_key is not None else get_settings().lq_ai_gateway_key
-    return httpx.AsyncClient(headers={_GATEWAY_KEY_HEADER: key}, timeout=timeout, transport=transport)
+    return httpx.AsyncClient(
+        headers={_GATEWAY_KEY_HEADER: key}, timeout=timeout, transport=transport
+    )
 
 
 def build_gateway_chat_model(

@@ -249,8 +249,13 @@ export function stepDisplay(step: AgentRunStep): StepDisplay {
 export const STEP_SUMMARY_LIMIT = 2000;
 
 function boundedLikeServer(text: string): string {
-	if (text.length <= STEP_SUMMARY_LIMIT) return text;
-	return text.slice(0, STEP_SUMMARY_LIMIT - 1) + '…';
+	// Python's len/slicing count CODE POINTS; JS .length/.slice count
+	// UTF-16 units — astral chars (emoji) near the bound would desync the
+	// mirror and resurrect the duplicate (F0-S4 review). Array.from
+	// iterates code points, matching the server exactly.
+	const points = Array.from(text);
+	if (points.length <= STEP_SUMMARY_LIMIT) return text;
+	return points.slice(0, STEP_SUMMARY_LIMIT - 1).join('') + '…';
 }
 
 /**

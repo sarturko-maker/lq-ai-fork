@@ -41,7 +41,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import ColumnElement, and_, func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.selectable import Select
 
@@ -165,9 +165,8 @@ async def _search(db: AsyncSession, binding: MatterBinding, query: str) -> str:
         if len(snippet) > _SNIPPET_LIMIT:
             snippet = snippet[: _SNIPPET_LIMIT - 1] + "…"
         blocks.append(f"[{row.filename}{pages}]\n{snippet}")
-    return (
-        f"Top {len(rows)} matching passage(s) from this matter's documents:\n\n"
-        + "\n\n".join(blocks)
+    return f"Top {len(rows)} matching passage(s) from this matter's documents:\n\n" + "\n\n".join(
+        blocks
     )
 
 
@@ -176,7 +175,9 @@ async def _read(db: AsyncSession, binding: MatterBinding, name: str) -> str:
     wanted = name.strip()
     if not wanted:
         return await _inventory(
-            db, binding, header="Pass a document name. Documents attached to this matter:"
+            db,
+            binding,
+            header="Pass a document name. Documents attached to this matter:",
         )
 
     stmt = (
@@ -188,20 +189,25 @@ async def _read(db: AsyncSession, binding: MatterBinding, name: str) -> str:
             Document.page_count,
         )
         .where(func.lower(File.filename) == wanted.lower())
-        .order_by(ProjectFile.attached_at.desc().nulls_last(), File.created_at.desc())
+        # Duplicates: prefer a READABLE copy (ingested Document) over an
+        # unreadable one, then the most recently added — by attach time
+        # when a join row exists, else upload time (column-only members
+        # have no attached_at; F0-S4 review).
+        .order_by(
+            Document.id.is_(None),
+            func.coalesce(ProjectFile.attached_at, File.created_at).desc(),
+        )
     )
     rows = (await db.execute(stmt)).all()
 
     if not rows:
-        inventory = await _inventory(
-            db, binding, header="Documents attached to this matter:"
-        )
+        inventory = await _inventory(db, binding, header="Documents attached to this matter:")
         return f'No document named "{wanted}" in this matter.\n\n{inventory}'
 
     row = rows[0]
     note = (
-        f"Note: {len(rows)} attached files share this name; reading the most "
-        "recently attached.\n\n"
+        f"Note: {len(rows)} files in this matter share this name; reading the "
+        "most recently added readable copy.\n\n"
         if len(rows) > 1
         else ""
     )
@@ -224,15 +230,23 @@ async def _read(db: AsyncSession, binding: MatterBinding, name: str) -> str:
     return f"{note}[{row.filename}{pages} — full text]\n\n{content}"
 
 
-def _matter_files_query(binding: MatterBinding, *columns: ColumnElement[Any]) -> Select[Any]:
+def _matter_files_query(binding: MatterBinding, *columns: Any) -> Select[Any]:
     """SELECT ``columns`` over the matter's files (membership union +
-    owner re-assertion — module docstring)."""
+    owner re-assertion — module docstring).
+
+    ``columns`` are ORM-mapped attributes (``File.filename``, …) —
+    typed ``Any`` because SQLAlchemy's public stubs have no common
+    supertype covering ``InstrumentedAttribute`` columns here.
+    """
     return (
         select(*columns)
         .select_from(File)
         .outerjoin(
             ProjectFile,
-            and_(ProjectFile.file_id == File.id, ProjectFile.project_id == binding.project_id),
+            and_(
+                ProjectFile.file_id == File.id,
+                ProjectFile.project_id == binding.project_id,
+            ),
         )
         .outerjoin(Document, Document.file_id == File.id)
         .where(
@@ -271,4 +285,4 @@ def _page_range(start: int | None, end: int | None) -> str:
         return ""
     if end is None or end == start:
         return f" — page {start}"
-    return f" — pages {start}–{end}"
+    return f" — pages {start}-{end}"

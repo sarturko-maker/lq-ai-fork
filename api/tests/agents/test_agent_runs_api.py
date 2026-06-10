@@ -167,7 +167,11 @@ async def test_create_run_honours_model_alias_and_max_steps(
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
-            json={"prompt": "Summarise the indemnity.", "model_alias": "fast", "max_steps": 5},
+            json={
+                "prompt": "Summarise the indemnity.",
+                "model_alias": "fast",
+                "max_steps": 5,
+            },
         )
 
     assert resp.status_code == 202, resp.text
@@ -269,7 +273,10 @@ async def test_create_run_binds_owned_active_project(
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
-            json={"prompt": "What is the liability cap?", "project_id": str(project.id)},
+            json={
+                "prompt": "What is the liability cap?",
+                "project_id": str(project.id),
+            },
         )
 
     assert resp.status_code == 202, resp.text
@@ -378,7 +385,11 @@ async def test_get_run_returns_run_with_ordered_steps(
     assert body["run"]["id"] == str(run.id)
     assert body["run"]["status"] == "completed"
     assert [s["seq"] for s in body["steps"]] == [1, 2, 3]
-    assert [s["kind"] for s in body["steps"]] == ["model_turn", "tool_call", "tool_result"]
+    assert [s["kind"] for s in body["steps"]] == [
+        "model_turn",
+        "tool_call",
+        "tool_result",
+    ]
     assert body["steps"][1]["name"] == "read_clause"
 
 

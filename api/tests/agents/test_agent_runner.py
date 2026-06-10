@@ -379,7 +379,10 @@ async def test_subagent_final_turn_is_not_the_run_final_answer(
         responses=[
             tool_call_message(
                 "task",
-                {"description": "summarise the clause", "subagent_type": "general-purpose"},
+                {
+                    "description": "summarise the clause",
+                    "subagent_type": "general-purpose",
+                },
             ),
             final_message("SUBAGENT closing turn"),  # consumed by the subagent loop
             final_message("ROOT final answer"),
@@ -392,7 +395,13 @@ async def test_subagent_final_turn_is_not_the_run_final_answer(
     assert run.status == "completed"
     assert run.final_answer == "ROOT final answer"
     kinds = [s.kind for s in steps]
-    assert kinds == ["model_turn", "tool_call", "model_turn", "tool_result", "model_turn"]
+    assert kinds == [
+        "model_turn",
+        "tool_call",
+        "model_turn",
+        "tool_result",
+        "model_turn",
+    ]
     assert steps[1].name == "task"
     # The nested turn IS persisted as visible activity — just not as the answer.
     assert "SUBAGENT closing turn" in steps[2].summary
@@ -413,7 +422,10 @@ async def test_cap_during_subagent_leaves_final_answer_null(
         responses=[
             tool_call_message(
                 "task",
-                {"description": "summarise the clause", "subagent_type": "general-purpose"},
+                {
+                    "description": "summarise the clause",
+                    "subagent_type": "general-purpose",
+                },
             ),
             final_message("SUBAGENT closing turn"),
             final_message("ROOT final answer"),  # never reached — cap hits at step 4

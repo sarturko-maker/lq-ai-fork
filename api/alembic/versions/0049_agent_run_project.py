@@ -6,10 +6,13 @@ inject the matter's document tools (``search_documents`` /
 run's gateway envelope (ADR-F002; CLAUDE.md memory model — unit of work).
 
 Nullable: a run without a matter is a blank workspace (no document
-tools injected). ``ON DELETE SET NULL`` — deleting a project unbinds
-its runs but preserves the run records (projects soft-delete via
-``archived_at`` in normal operation; the hard-delete path only exists
-for cascades).
+tools injected). INTERIM F0 affordance — accepted ADR-F002 rules out
+free-floating agent chat once practice areas land ("it gives memory
+nowhere to accumulate"); F1 binds conversations to (practice area,
+Matter) and this column becomes effectively required at that surface.
+``ON DELETE SET NULL`` — deleting a project unbinds its runs but
+preserves the run records (projects soft-delete via ``archived_at`` in
+normal operation; the hard-delete path only exists for cascades).
 
 Partial index for the F1 matter-scoped run listing; cheap to carry now,
 saves a migration later.

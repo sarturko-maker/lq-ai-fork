@@ -82,7 +82,12 @@ async def guarded_dispatch(
     never shared with tool bodies). Brake order R6 → R5 mirrors the
     autonomous chokepoint's cheap-check-first ordering; every outcome —
     granted or denied — leaves an audit row in the same transaction
-    boundary as the dispatch.
+    boundary as the dispatch. One honest exception: a wall-clock
+    cancellation landing INSIDE ``op`` (``asyncio.CancelledError`` is a
+    BaseException) propagates without an outcome row — the runner's
+    ``tool_call`` step row and the run's terminal ``error='timeout'``
+    record that dispatch; a cancellation-safe audit write needs the
+    arq migration's job model.
     """
     async with ctx.session_factory() as db:
         if tool not in ctx.granted:
@@ -119,7 +124,12 @@ async def _audit(db: AsyncSession, ctx: GuardContext, *, tool: str, **details: o
 
     A lost audit row must not turn a successful tool result into a
     model-visible error (the dispatch already happened) — log loudly
-    and let the result stand.
+    and let the result stand. The rollback below is what makes that
+    true: ``audit_action`` flushes, and a failed flush leaves the
+    session pending-rollback — without the rollback, the caller's
+    ``commit()`` would raise and mask the result after all (F0-S4
+    review). Rolling back is safe here: the tool's reads are already
+    materialized into the result string.
     """
     try:
         await audit_action(
@@ -134,5 +144,19 @@ async def _audit(db: AsyncSession, ctx: GuardContext, *, tool: str, **details: o
     except Exception:
         logger.exception(
             "agent tool-call audit write failed",
-            extra={"event": "agent_tool_audit_failed", "run_id": str(ctx.run_id), "tool": tool},
+            extra={
+                "event": "agent_tool_audit_failed",
+                "run_id": str(ctx.run_id),
+                "tool": tool,
+            },
         )
+        try:
+            await db.rollback()
+        except Exception:
+            logger.exception(
+                "rollback after failed audit write also failed",
+                extra={
+                    "event": "agent_tool_audit_rollback_failed",
+                    "run_id": str(ctx.run_id),
+                },
+            )

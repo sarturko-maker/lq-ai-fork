@@ -45,9 +45,12 @@
     }
   }
 
+  // Honest fallback: a run can be bound to a matter that is no longer in
+  // the active dropdown list (archived since, or the sandbox) — say so
+  // rather than dressing the placeholder up as a name (F0-S4 review).
   function matterName(projectId: string | null): string | null {
     if (!projectId) return null;
-    return matters.find((m) => m.id === projectId)?.name ?? 'Matter';
+    return matters.find((m) => m.id === projectId)?.name ?? 'Matter (not in your active list)';
   }
 
   let run: AgentRun | null = null;
@@ -262,7 +265,7 @@
           <header class="ag-run__head">
             <p class="lq-text-body ag-run__prompt">
               {#if matterName(run.project_id)}
-                <span class="ag-chip" data-testid="lq-ai-agents-run-matter">
+                <span class="ag-chip" data-testid="lq-ai-agents-run-matter" title={run.project_id}>
                   {matterName(run.project_id)}
                 </span>
               {/if}

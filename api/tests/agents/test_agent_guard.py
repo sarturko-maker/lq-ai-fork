@@ -131,7 +131,9 @@ async def _audit_rows(env: GuardEnv) -> list[AuditLog]:
         return list(rows)
 
 
-async def test_granted_dispatch_returns_result_and_audits_success(guard_env: GuardEnv) -> None:
+async def test_granted_dispatch_returns_result_and_audits_success(
+    guard_env: GuardEnv,
+) -> None:
     ctx = guard_env.make_ctx(frozenset({"search_documents"}))
     result = await guarded_dispatch("search_documents", _op("found 3 passages"), ctx)
     assert result == "found 3 passages"
@@ -160,7 +162,10 @@ async def test_ungranted_tool_is_denied_and_audited(guard_env: GuardEnv) -> None
 
     assert executed == []
     rows = await _audit_rows(guard_env)
-    assert rows[-1].details == {"tool": "search_documents", "outcome": "tool_not_granted"}
+    assert rows[-1].details == {
+        "tool": "search_documents",
+        "outcome": "tool_not_granted",
+    }
 
 
 async def test_non_running_run_denies_dispatch(guard_env: GuardEnv) -> None:
@@ -179,7 +184,9 @@ async def test_non_running_run_denies_dispatch(guard_env: GuardEnv) -> None:
     assert rows[-1].details == {"tool": "search_documents", "outcome": "run_halted"}
 
 
-async def test_op_error_is_audited_with_type_only_and_reraised(guard_env: GuardEnv) -> None:
+async def test_op_error_is_audited_with_type_only_and_reraised(
+    guard_env: GuardEnv,
+) -> None:
     """Errors audit the exception TYPE, never the message (no content leaks)."""
 
     async def op(_db: AsyncSession) -> str:
@@ -205,3 +212,60 @@ async def test_privileged_matter_marks_the_audit_row(guard_env: GuardEnv) -> Non
 
     rows = await _audit_rows(guard_env)
     assert rows[-1].privilege_marked is True
+
+
+class _FlushPoisonedSession:
+    """Real session whose ``flush`` dies at the DB layer — and genuinely
+    poisons the transaction first (failed DBAPI statement), exactly the
+    audit-write failure mode the no-mask guarantee defends against.
+    Without the guard's rollback, the next ``commit`` would raise
+    PendingRollbackError and mask the tool result (F0-S4 review)."""
+
+    def __init__(self, real: AsyncSession) -> None:
+        self._real = real
+
+    async def __aenter__(self) -> _FlushPoisonedSession:
+        await self._real.__aenter__()
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        await self._real.__aexit__(*exc_info)
+
+    async def flush(self) -> None:
+        from sqlalchemy import text
+
+        await self._real.execute(text("SELECT 1/0"))  # raises; tx now failed
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._real, name)
+
+
+async def test_audit_failure_never_masks_the_tool_result(
+    guard_env: GuardEnv, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The documented no-mask guarantee, pinned: audit write fails at the
+    DB layer → logged loudly, session rolled back, the tool result
+    still returned to the model."""
+    import logging
+
+    factory = guard_env.factory
+
+    def poisoned_factory() -> _FlushPoisonedSession:
+        return _FlushPoisonedSession(factory())
+
+    ctx = GuardContext(
+        session_factory=poisoned_factory,  # type: ignore[arg-type]
+        run_id=guard_env.run_id,
+        user_id=guard_env.user_id,
+        project_id=guard_env.project_id,
+        granted=frozenset({"search_documents"}),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="app.agents.guard"):
+        result = await guarded_dispatch("search_documents", _op("the result stands"), ctx)
+
+    assert result == "the result stands"
+    assert any("audit write failed" in r.message for r in caplog.records)
+    # The row was genuinely lost — observability said so; nothing landed.
+    rows = await _audit_rows(guard_env)
+    assert rows == []
