@@ -41,6 +41,9 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 		cy.get('[data-testid="lq-ai-agents-rail"] li.ag-rail__tool--lit').should('have.length', 0);
 		cy.screenshot('f0-s3-1-agents-tab-idle');
 
+		// Count detail polls so we can prove polling stops after the run settles.
+		cy.intercept('GET', '**/api/v1/agents/runs/*').as('pollRun');
+
 		// Kick off a real run.
 		cy.get('[data-testid="lq-ai-agents-composer"] textarea').type(
 			'What is the liability cap under this contract? Use your tools.'
@@ -60,13 +63,32 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 			timeout: RUN_TIMEOUT_MS
 		}).should('not.have.class', 'ag-rail__tool--dim');
 
-		// Completion: badge flips, final answer renders, reasoning is collapsed.
+		// Completion: badge flips and a non-empty final answer renders.
+		// (No assertion on model-chosen prose — that flakes; the deterministic
+		// clause text is already pinned by the tool-result step.)
 		cy.get('[data-testid="lq-ai-agents-run"]')
 			.contains('.ag-badge', 'Completed', { timeout: RUN_TIMEOUT_MS })
 			.should('exist');
-		cy.get('[data-testid="lq-ai-agents-answer"]').should('contain.text', 'liability');
-		cy.get('[data-testid="lq-ai-agents-answer"]').should('not.contain.text', '<think>');
+		cy.get('[data-testid="lq-ai-agents-answer"] .prose')
+			.invoke('text')
+			.should('have.length.greaterThan', 20);
+		// Reasoning is collapsed behind the <details> affordance, not inlined.
+		// MiniMax-M3 reliably opens with a <think> block; if a future dev model
+		// stops emitting them, relax this to a conditional on the API record.
+		cy.get('[data-testid="lq-ai-agents-answer"] details.ag-thinking').should('exist');
+		cy.get('[data-testid="lq-ai-agents-answer"] .prose').should(($el) => {
+			expect($el.text()).not.to.contain('<think>');
+		});
 		cy.screenshot('f0-s3-3-agent-completed');
+
+		// Polling actually stops once the run settles (no zombie 2s loop).
+		cy.get('@pollRun.all').then((calls) => {
+			const settled = (calls as unknown as unknown[]).length;
+			cy.wait(5000);
+			cy.get('@pollRun.all').then((later) => {
+				expect((later as unknown as unknown[]).length).to.eq(settled);
+			});
+		});
 
 		// The settled run shows up in the previous-runs list.
 		cy.get('[data-testid="lq-ai-agents-runs-list"] li').should('have.length.at.least', 1);

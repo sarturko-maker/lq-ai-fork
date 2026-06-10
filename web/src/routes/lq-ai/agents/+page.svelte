@@ -3,8 +3,10 @@
   import DOMPurify from 'dompurify';
   import { marked } from 'marked';
   import { agentsApi } from '$lib/lq-ai/api';
+  import { LQAIApiError } from '$lib/lq-ai/api/client';
   import type { AgentRun, AgentRunStep } from '$lib/lq-ai/api/agents';
   import {
+    MAX_POLL_FAILURES,
     POLL_INTERVAL_MS,
     isStaleRunning,
     railItems,
@@ -15,6 +17,13 @@
     stepDisplay
   } from './page-helpers';
 
+  // Model output is untrusted input (CLAUDE.md): forbid media so a poisoned
+  // answer can't beacon data out via auto-fetched remote resources.
+  const SANITIZE_OPTS = {
+    FORBID_TAGS: ['img', 'picture', 'audio', 'video', 'source', 'track'],
+    FORBID_ATTR: ['srcset', 'ping']
+  };
+
   let prompt = '';
   let submitting = false;
   let submitError: string | null = null;
@@ -23,8 +32,13 @@
   let steps: AgentRunStep[] = [];
   let currentRunId: string | null = null;
   let pollError: string | null = null;
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  // Bumped on every start/stop; a settling response from an older generation
+  // is discarded, so stale snapshots can never overwrite a settled run.
+  let pollGeneration = 0;
+  let pollFailures = 0;
   let nowMs = Date.now();
+  let nowTimer: ReturnType<typeof setInterval> | null = null;
 
   let previousRuns: AgentRun[] = [];
   let runsLoading = true;
@@ -44,42 +58,74 @@
     }
   }
 
-  onMount(loadRuns);
+  onMount(() => {
+    loadRuns();
+    // Keep idle badges honest: a 'running' row must visually flip to Stale
+    // even when nothing is being polled.
+    nowTimer = setInterval(() => {
+      nowMs = Date.now();
+    }, 30_000);
+  });
 
   function stopPolling() {
+    pollGeneration += 1;
     if (pollTimer !== null) {
-      clearInterval(pollTimer);
+      clearTimeout(pollTimer);
       pollTimer = null;
     }
   }
 
-  onDestroy(stopPolling);
+  onDestroy(() => {
+    stopPolling();
+    if (nowTimer !== null) clearInterval(nowTimer);
+  });
 
-  async function poll(id: string) {
+  function schedulePoll(id: string, gen: number) {
+    pollTimer = setTimeout(() => {
+      void poll(id, gen);
+    }, POLL_INTERVAL_MS);
+  }
+
+  // Self-rescheduling: the next request is only issued after the previous
+  // one settles, so responses can never arrive out of order or pile up.
+  async function poll(id: string, gen: number) {
     try {
       const detail = await agentsApi.getRun(id);
-      if (currentRunId !== id) return; // user switched runs mid-flight
+      if (gen !== pollGeneration) return; // superseded: run switched or page left
       run = detail.run;
       steps = detail.steps;
+      pollFailures = 0;
       pollError = null;
       nowMs = Date.now();
-      if (!shouldContinuePolling(detail.run, nowMs)) {
-        stopPolling();
+      if (shouldContinuePolling(detail.run, nowMs)) {
+        schedulePoll(id, gen);
+      } else {
+        pollTimer = null;
         loadRuns();
       }
     } catch (e) {
-      if (currentRunId !== id) return;
-      stopPolling();
-      pollError = e instanceof Error ? e.message : 'Failed to poll the run';
+      if (gen !== pollGeneration) return;
+      pollFailures += 1;
+      if (pollFailures < MAX_POLL_FAILURES) {
+        schedulePoll(id, gen); // tolerate transient blips; the run is still live server-side
+      } else {
+        pollTimer = null;
+        pollError = e instanceof Error ? e.message : 'Failed to poll the run';
+      }
     }
   }
 
   function startPolling(id: string) {
     stopPolling();
+    const gen = pollGeneration;
     currentRunId = id;
+    pollFailures = 0;
     pollError = null;
-    poll(id);
-    pollTimer = setInterval(() => poll(id), POLL_INTERVAL_MS);
+    void poll(id, gen);
+  }
+
+  function retryPolling() {
+    if (currentRunId) startPolling(currentRunId);
   }
 
   async function submit() {
@@ -94,7 +140,12 @@
       steps = [];
       startPolling(created.id);
     } catch (e) {
-      submitError = e instanceof Error ? e.message : 'Failed to start the run';
+      submitError =
+        e instanceof LQAIApiError && e.status === 429
+          ? 'You already have runs in flight — wait for one to finish.'
+          : e instanceof Error
+            ? e.message
+            : 'Failed to start the run';
     } finally {
       submitting = false;
     }
@@ -108,11 +159,12 @@
 
   $: badge = run ? statusBadge(run, nowMs) : null;
   $: stale = run ? isStaleRunning(run, nowMs) : false;
-  $: rail = railStates(steps, run?.status ?? null);
+  // A stale run's dangling tool calls must not pulse forever — render settled.
+  $: rail = railStates(steps, stale ? 'failed' : (run?.status ?? null));
   $: tools = railItems(steps);
   $: answer = splitThink(run?.final_answer);
   $: answerHtml = answer.visible
-    ? DOMPurify.sanitize(marked.parse(answer.visible, { async: false }) as string)
+    ? DOMPurify.sanitize(marked.parse(answer.visible, { async: false }) as string, SANITIZE_OPTS)
     : '';
 </script>
 
@@ -162,12 +214,17 @@
           <header class="ag-run__head">
             <p class="lq-text-body ag-run__prompt">{run.prompt}</p>
             {#if badge}
-              <span class="ag-badge ag-badge--{badge.tone}">{badge.label}</span>
+              <span class="ag-badge ag-badge--{badge.tone}" role="status" aria-live="polite">
+                {badge.label}
+              </span>
             {/if}
           </header>
 
           {#if pollError}
-            <p class="lq-text-body-sm ag-error">Lost contact with the run: {pollError}</p>
+            <p class="lq-text-body-sm ag-error">
+              Lost contact with the run: {pollError}
+              <button type="button" class="ag-btn-ghost" on:click={retryPolling}>Retry</button>
+            </p>
           {/if}
           {#if stale}
             <p class="lq-text-body-sm ag-note">
@@ -202,19 +259,29 @@
             <p class="lq-text-body-sm ag-note">Waiting for the first step…</p>
           {/if}
 
-          {#if run.status === 'completed' && answerHtml}
-            <div class="ag-answer" data-testid="lq-ai-agents-answer">
-              {#if answer.thinking}
-                <details class="ag-thinking">
-                  <summary class="lq-text-caption">Reasoning</summary>
-                  <pre>{answer.thinking}</pre>
-                </details>
-              {/if}
-              <div class="prose prose-sm max-w-none">
-                <!-- eslint-disable-next-line svelte/no-at-html-tags — sanitized above -->
-                {@html answerHtml}
+          {#if run.status === 'completed'}
+            {#if answerHtml || answer.thinking}
+              <div class="ag-answer" data-testid="lq-ai-agents-answer">
+                {#if answer.thinking}
+                  <details class="ag-thinking">
+                    <summary class="lq-text-caption">Reasoning</summary>
+                    <pre>{answer.thinking}</pre>
+                  </details>
+                {/if}
+                {#if answerHtml}
+                  <div class="prose prose-sm max-w-none">
+                    <!-- eslint-disable-next-line svelte/no-at-html-tags — sanitized above -->
+                    {@html answerHtml}
+                  </div>
+                {:else}
+                  <p class="lq-text-body-sm ag-note">
+                    The model returned only reasoning — no final answer text.
+                  </p>
+                {/if}
               </div>
-            </div>
+            {:else}
+              <p class="lq-text-body-sm ag-note">The run completed without a final answer.</p>
+            {/if}
           {:else if run.status === 'cap_exceeded'}
             <p class="lq-text-body-sm ag-note">
               The run hit its step cap ({run.max_steps} steps) before finishing, so there is no
@@ -266,6 +333,9 @@
             <span class="ag-rail__text">
               <span class="lq-text-body-sm ag-rail__name">{tool.label}</span>
               <span class="lq-text-caption ag-rail__hint">{tool.hint}</span>
+              <span class="ag-sr-only">
+                {state === 'active' ? 'in use' : state === 'lit' ? 'used in this run' : 'not used yet'}
+              </span>
             </span>
           </li>
         {/each}
@@ -582,6 +652,35 @@
 
   .ag-rail__hint {
     color: var(--lq-text-tertiary);
+  }
+
+  .ag-btn-ghost {
+    background: none;
+    border: 1px solid var(--lq-border);
+    border-radius: var(--lq-radius-sm);
+    padding: 0 var(--lq-space-2);
+    margin-left: var(--lq-space-2);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    color: var(--lq-text-secondary);
+  }
+
+  .ag-btn-ghost:hover {
+    border-color: var(--lq-accent-border);
+    color: var(--lq-accent);
+  }
+
+  .ag-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .ag-error {

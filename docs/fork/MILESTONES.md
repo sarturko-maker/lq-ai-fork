@@ -20,10 +20,11 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
   from the S1 review: factory key exposure (httpx client, not `default_headers`), subagent
   model-bypass guard in `build_deep_agent`, Anthropic `tool_use`/block-content translation,
   anonymization decision for block content.
-- **S3 — first visible agent (Agents tab v0).** One hardcoded preview area ("Commercial — preview"),
-  one message box, capability rail v0: the agent's tools listed and lighting up as steps complete
-  (polling the run record — no SSE needed), tool calls + final answer rendered, artifacts
-  downloadable. Render-deterministic: the UI reads settled run records, never the stream.
+- **S3 ✓ done — first visible agent (Agents tab v0).** One hardcoded preview area ("Commercial —
+  preview"), one message box, capability rail v0: the agent's tools listed and lighting up as steps
+  complete (polling the run record — no SSE needed), tool calls + final answer rendered.
+  Render-deterministic: the UI reads settled run records, never the stream. (Artifact download
+  deferred — runs expose no artifact surface yet; see Backlog.)
 - **S4 — multi-turn chat.** Send conversation history (replaces the single-turn request in
   `chats.py`); wire the Postgres checkpointer (first consumer of langgraph-checkpoint-postgres).
 - **S5 — SSE v2.** Tool-call / subagent / plan / progress frame types end-to-end; upgrades the S3
@@ -104,3 +105,6 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 - Email-grade entry points: forward an email into a Matter; Word add-in revival.
 - Revisit third-party memory (Zep/Graphiti temporal graph) only if native consolidation proves
   insufficient (ADR-F003 option 3).
+- Run artifact surface: expose the deepagents workspace files a run produced (S3 deferral).
+- MessageBubble (upstream surface) shares the default-DOMPurify image-beacon exfil gap fixed on the
+  Agents tab — harden when next touched (CLAUDE.md: model output is untrusted).

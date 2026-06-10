@@ -9,6 +9,13 @@ import type { AgentRun, AgentRunStatus, AgentRunStep } from '$lib/lq-ai/api/agen
 export const POLL_INTERVAL_MS = 2000;
 
 /**
+ * Consecutive poll failures tolerated before the page gives up and offers
+ * a Retry — one dropped request must not orphan a run that is still
+ * progressing server-side.
+ */
+export const MAX_POLL_FAILURES = 3;
+
+/**
  * Cutoff for runs stuck at 'running': the runner's wall-clock budget is
  * 300 s (execute_agent_run default) plus slack for the failure write.
  * BackgroundTasks die with the api process and no recovery sweep exists yet
@@ -17,6 +24,9 @@ export const POLL_INTERVAL_MS = 2000;
  */
 export const STALE_RUNNING_AFTER_MS = 330_000;
 
+// TODO(F0-S5): nowMs is the client clock vs the server's started_at — a fast
+// client clock (>~5.5 min) would mark fresh runs stale. Acceptable for the
+// local-dev preview; derive 'now' from a response header when SSE lands.
 export function isStaleRunning(run: Pick<AgentRun, 'status' | 'started_at'>, nowMs: number): boolean {
 	if (run.status !== 'running') return false;
 	const startedMs = Date.parse(run.started_at);
@@ -56,6 +66,9 @@ export function splitThink(text: string | null | undefined): SplitThink {
 		parts.push(visible.slice(openIdx + '<think>'.length).trim());
 		visible = visible.slice(0, openIdx);
 	}
+	// Nested/duplicated openers can strand an orphan closer in the visible
+	// text (e.g. '<think>a<think>b</think>c</think>') — never show tag soup.
+	visible = visible.replace(/<\/think>/g, '');
 	const thinking = parts.filter(Boolean).join('\n\n');
 	return { thinking: thinking || null, visible: visible.trim() };
 }

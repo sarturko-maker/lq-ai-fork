@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentRun, AgentRunStep } from '$lib/lq-ai/api/agents';
 import {
+	MAX_POLL_FAILURES,
 	POLL_INTERVAL_MS,
 	RAIL_TOOLS,
 	STALE_RUNNING_AFTER_MS,
@@ -83,6 +84,13 @@ describe('splitThink', () => {
 		expect(thinking).toBe('only reasoning');
 		expect(visible).toBe('');
 	});
+
+	it('never leaks an orphan closer into visible text on nested openers', () => {
+		const { visible } = splitThink('<think>a<think>b</think>c</think>');
+		expect(visible).not.toContain('</think>');
+		expect(visible).not.toContain('<think>');
+		expect(visible).toBe('c');
+	});
 });
 
 describe('staleness', () => {
@@ -113,6 +121,10 @@ describe('staleness', () => {
 
 	it('poll cadence is ~2s per the F0-S3 spec', () => {
 		expect(POLL_INTERVAL_MS).toBe(2000);
+	});
+
+	it('tolerates transient poll failures before giving up', () => {
+		expect(MAX_POLL_FAILURES).toBeGreaterThanOrEqual(2);
 	});
 });
 

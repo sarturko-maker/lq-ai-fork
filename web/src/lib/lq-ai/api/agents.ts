@@ -38,7 +38,11 @@ export interface AgentRunStep {
 	kind: AgentRunStepKind;
 	/** Tool name; null for model turns. */
 	name: string | null;
-	/** Bounded digest (~2000 chars) of the turn / tool args / tool output. */
+	/**
+	 * Bounded digest (~2000 chars) of the turn / tool args / tool output.
+	 * Non-null on the wire today (NOT NULL column); kept nullable
+	 * deliberately so a future relaxation can't crash render paths.
+	 */
 	summary: string | null;
 	created_at: string;
 }

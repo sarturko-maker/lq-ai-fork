@@ -3,8 +3,8 @@
  *
  * Mocks ``globalThis.fetch`` so calls don't escape the test runner.
  * Mirrors the autonomous-api / playbooks-api test shape: regressions in the
- * shared ``apiRequest`` helper (auth header attachment, URL construction,
- * error translation) surface here too.
+ * shared ``apiRequest`` helper (URL construction, error translation)
+ * surface here too.
  *
  * Focus: URL construction + request-body serialization. Full schema
  * round-trip coverage lives in the API integration tests
@@ -94,15 +94,17 @@ describe('agents API client', () => {
 		expect(url).toMatch(/\/agents\/runs\?limit=20&offset=40$/);
 	});
 
-	it('translates a 429 flood-brake response into a typed error', async () => {
-		fetchMock.mockResolvedValueOnce(
-			jsonResponseLike(429, {
-				detail: { code: 'too_many_running_runs', message: 'Too many running runs' }
-			})
-		);
+	it('translates the 429 flood brake into a typed error (plain-string detail on the wire)', async () => {
+		// The backend raises HTTPException(429, detail="too_many_running_runs")
+		// — a STRING detail (api/app/api/agent_runs.py; pinned by the api's
+		// test_agent_runs_api.py). errorFor() maps string details to a
+		// synthetic http_NNN code with the string as the message. Do NOT
+		// branch on code === 'too_many_running_runs'; it never occurs.
+		fetchMock.mockResolvedValueOnce(jsonResponseLike(429, { detail: 'too_many_running_runs' }));
 		await expect(createRun({ prompt: 'p' })).rejects.toMatchObject({
 			status: 429,
-			code: 'too_many_running_runs'
+			code: 'http_429',
+			message: 'too_many_running_runs'
 		});
 	});
 });
