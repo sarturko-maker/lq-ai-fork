@@ -56,11 +56,11 @@ one maintainer + AI agents do all the work.
 ## Decision outcome
 
 Option 2, sequenced so nothing blocks current work: S4 (real tools) and S5 (multi-turn) proceed on
-the existing shell now → **extraction slice after S5** (the shell shed: new lean SvelteKit app, lq-ai
-code nearly verbatim, kills the husk + §4) → **S7 SSE v2 emits the AI SDK stream spec** onto the
-clean shell → design-system build-out runs with F1's practice-area home (left/right panels land on
-the new system, not the husk). The wire-spec decision is the time-critical one: it must be accepted
-before SSE v2 implementation starts.
+the existing shell now → **S6 — the shell shed** (new lean SvelteKit app, lq-ai code nearly
+verbatim, kills the husk + §4) → **S7 — SSE v2 emits the AI SDK stream spec** onto the clean shell
+→ design-system build-out runs with F1's practice-area home (left/right panels land on the new
+system, not the husk). The wire-spec decision is the time-critical one: it must be accepted before
+S7 implementation starts.
 
 ## Consequences
 

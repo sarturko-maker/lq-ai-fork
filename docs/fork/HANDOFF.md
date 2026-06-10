@@ -39,7 +39,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 self-described canned text; the run honestly answered "no contract attached"). Also: timeline
 shows raw JSON args and the closing model turn duplicates the final answer — polish in S4.
 (5) "The entire system looks really basic" → UI-stack research → ADR-F006 at F0→F1 boundary.
-(6) Stream chats + reasoning, UX like Claude Code → S6 SSE v2.
+(6) Stream chats + reasoning, UX like Claude Code → S7 SSE v2 (after the S6 shell shed).
 Round 2 (same day): (7) LEFT panel = practice areas → create/pick a Matter (F1 layout).
 (8) RIGHT panel = Skills / Playbooks / legal Tools (tabular review, Word redlining), utility tools
 collapsed; + a Claude.ai-style **Memory manager** (matter + practice-area memory) — F1/F2.
