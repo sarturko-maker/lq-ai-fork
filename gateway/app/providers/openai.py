@@ -99,6 +99,9 @@ _LQ_AI_EXTENSION_KEYS = frozenset(
         "lq_ai_message_id",
         "lq_ai_user_id",
         "lq_ai_purpose",
+        # F0-S1: defaults to False (not None), so ``exclude_none`` keeps
+        # it and it leaked into provider bodies — strict providers 400.
+        "lq_ai_privileged",
     }
 )
 

@@ -33,9 +33,9 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +51,22 @@ from app.playbooks.state import (
 from app.schemas.gateway import ChatCompletionMessage, ChatCompletionRequest
 
 logger = logging.getLogger(__name__)
+
+
+class PlaybookNode(Protocol):
+    """Callable shape of one workflow node, as langgraph 1.x types it.
+
+    F0-S1 (closes DE-319): langgraph 1.x types ``StateGraph.add_node``
+    against callback protocols whose ``state`` parameter is named
+    (positional-or-keyword). A plain
+    ``Callable[[PlaybookExecutionState], Awaitable[dict]]`` erases the
+    parameter name, so it matches no ``add_node`` overload (mypy
+    [call-overload]). The factories below return this protocol instead;
+    runtime behavior is unchanged.
+    """
+
+    def __call__(self, state: PlaybookExecutionState) -> Awaitable[dict[str, Any]]: ...
+
 
 # Top-k chunks retrieved per position. Keeps the classifier's context
 # window bounded — the Playbook executor calls the LLM N times (once
@@ -87,7 +103,7 @@ _CONFIDENCE_NUMERIC: dict[str, float] = {"high": 0.9, "medium": 0.7, "low": 0.5}
 
 def make_retrieve_node(
     db: AsyncSession,
-) -> Callable[[PlaybookExecutionState], Awaitable[dict[str, Any]]]:
+) -> PlaybookNode:
     """Build the retrieve node bound to a DB session."""
 
     async def retrieve_node(state: PlaybookExecutionState) -> dict[str, Any]:
@@ -270,7 +286,7 @@ def make_classify_node(
     *,
     gateway: GatewayClient,
     judge_model: str,
-) -> Callable[[PlaybookExecutionState], Awaitable[dict[str, Any]]]:
+) -> PlaybookNode:
     """Build the classify node bound to a gateway client + model alias."""
 
     async def classify_node(state: PlaybookExecutionState) -> dict[str, Any]:
@@ -406,7 +422,7 @@ def make_redline_node(
     *,
     gateway: GatewayClient,
     judge_model: str,
-) -> Callable[[PlaybookExecutionState], Awaitable[dict[str, Any]]]:
+) -> PlaybookNode:
     """Build the redline node bound to a gateway client + model alias.
 
     Iterates :func:`classify_node`'s ``per_position_results`` and runs a
@@ -487,7 +503,7 @@ def _build_redline_messages(
 
 def make_compile_node(
     db: AsyncSession,
-) -> Callable[[PlaybookExecutionState], Awaitable[dict[str, Any]]]:
+) -> PlaybookNode:
     """Build the compile node bound to a DB session.
 
     The compile node writes the assembled results into

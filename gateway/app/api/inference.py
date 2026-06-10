@@ -413,7 +413,9 @@ async def _apply_skill_prompt_assembly(
     system_chunks: list[str] = []
     non_system: list[ChatCompletionMessage] = []
     for msg in chat_request.messages:
-        if msg.role == "system" and msg.content:
+        # F0-S1: only string-form system content joins the skill-assembly
+        # block; block-form (list) system messages pass through untouched.
+        if msg.role == "system" and isinstance(msg.content, str) and msg.content:
             system_chunks.append(msg.content)
         else:
             non_system.append(msg)

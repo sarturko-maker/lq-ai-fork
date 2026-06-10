@@ -366,7 +366,9 @@ def _to_anthropic_request(
     system_chunks: list[str] = []
     chat_messages: list[dict[str, Any]] = []
     for msg in request.messages:
-        content = msg.content or ""
+        # B3 text-only posture: block-form content (list) is not yet
+        # translated to Anthropic content blocks; it reads as empty (S2).
+        content = msg.content if isinstance(msg.content, str) else ""
         if msg.role == "system":
             if content:
                 system_chunks.append(content)
