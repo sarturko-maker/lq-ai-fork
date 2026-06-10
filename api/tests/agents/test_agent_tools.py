@@ -49,6 +49,7 @@ _MSA_TEXT = (
     "is capped at the fees paid in the twelve (12) months preceding the claim."
 )
 _NOTES_TEXT = "Meeting notes: timeline review, renewal checkpoints, owner actions."
+_UPLOADED_TEXT = "Escrow arrangements for the source code deposit with Iron Mountain."
 _SECRET_TEXT = "Confidential merger arrangement discussions with Northwind."
 _FOREIGN_TEXT = "Foreign-owner dossier: zugzwang acquisition memorandum."
 
@@ -76,10 +77,17 @@ async def _seed_file(
     body: str | None,
     page_start: int | None = 1,
     page_end: int | None = 1,
+    column_project_id: uuid.UUID | None = None,
 ) -> File:
-    """File (+ Document + one chunk when ``body`` is given; None = pending)."""
+    """File (+ Document + one chunk when ``body`` is given; None = pending).
+
+    ``column_project_id`` sets the upload-time ``files.project_id``
+    column (the ``POST /files`` affordance) — membership without a
+    ``project_files`` join row.
+    """
     f = File(
         owner_id=owner_id,
+        project_id=column_project_id,
         filename=filename,
         mime_type="application/pdf",
         size_bytes=1024,
@@ -163,11 +171,26 @@ async def matter_env(
         )
         notes = await _seed_file(db, owner_id=user.id, filename="notes.pdf", body=_NOTES_TEXT)
         pending = await _seed_file(db, owner_id=user.id, filename="pending.pdf", body=None)
-        secret = await _seed_file(db, owner_id=user.id, filename="secret.pdf", body=_SECRET_TEXT)
-        foreign = await _seed_file(
-            db, owner_id=stranger.id, filename="foreign.pdf", body=_FOREIGN_TEXT
+        # Upload-time membership ONLY (files.project_id column, no join
+        # row) — exactly what POST /files with project_id produces.
+        uploaded = await _seed_file(
+            db,
+            owner_id=user.id,
+            filename="uploaded.pdf",
+            body=_UPLOADED_TEXT,
+            column_project_id=project.id,
         )
-        file_ids += [msa.id, notes.id, pending.id, secret.id, foreign.id]
+        secret = await _seed_file(db, owner_id=user.id, filename="secret.pdf", body=_SECRET_TEXT)
+        # Foreign-owned, with the column ALSO spoofed at our matter — the
+        # owner re-assertion must exclude it through both membership paths.
+        foreign = await _seed_file(
+            db,
+            owner_id=stranger.id,
+            filename="foreign.pdf",
+            body=_FOREIGN_TEXT,
+            column_project_id=project.id,
+        )
+        file_ids += [msa.id, notes.id, pending.id, uploaded.id, secret.id, foreign.id]
 
         db.add_all(
             [
@@ -268,6 +291,7 @@ async def test_search_empty_query_lists_the_inventory(matter_env: MatterEnv) -> 
     result = await matter_env.search("")
     assert "msa.pdf" in result and "notes.pdf" in result
     assert "pending.pdf" in result and "not ingested yet" in result
+    assert "uploaded.pdf" in result  # column-only membership counts
     assert "foreign.pdf" not in result
 
 
@@ -277,9 +301,23 @@ async def test_search_no_hits_is_honest_and_orients_the_model(matter_env: Matter
     assert "msa.pdf" in result  # inventory so the model can pivot to read_document
 
 
+async def test_search_finds_upload_time_membership(matter_env: MatterEnv) -> None:
+    """POST /files with project_id sets only files.project_id (no join
+    row) — those documents are still the matter's (verified live)."""
+    result = await matter_env.search("escrow source code deposit")
+    assert "uploaded.pdf" in result
+    assert "Iron Mountain" in result
+
+
 # ---------------------------------------------------------------------------
 # read_document
 # ---------------------------------------------------------------------------
+
+
+async def test_read_document_works_for_upload_time_membership(matter_env: MatterEnv) -> None:
+    result = await matter_env.read("uploaded.pdf")
+    assert "full text" in result
+    assert _UPLOADED_TEXT in result
 
 
 async def test_read_document_returns_full_text_case_insensitive(matter_env: MatterEnv) -> None:

@@ -36,8 +36,11 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 		cy.location('pathname').should('eq', '/lq-ai/agents');
 		cy.get('[data-testid="lq-ai-agents-area-card"]').should('contain.text', 'Commercial');
 
-		// Capability rail renders the honest tool universe, all dim.
-		cy.get('[data-testid="lq-ai-agents-rail"] li').should('have.length', 10);
+		// Capability rail renders the honest tool universe, all dim. With no
+		// matter selected this is the 9 deepagents builtins — the matter
+		// document tools only appear on matter-bound runs (F0-S4), and the
+		// demo tool is gone for good.
+		cy.get('[data-testid="lq-ai-agents-rail"] li').should('have.length', 9);
 		cy.get('[data-testid="lq-ai-agents-rail"] li.ag-rail__tool--lit').should('have.length', 0);
 		cy.screenshot('f0-s3-1-agents-tab-idle');
 
@@ -58,10 +61,9 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 		);
 		cy.screenshot('f0-s3-2-agent-working');
 
-		// The demo tool lights up once its call settles.
-		cy.get('[data-testid="lq-ai-agents-rail"] li[title="demo_read_clause"]', {
-			timeout: RUN_TIMEOUT_MS
-		}).should('not.have.class', 'ag-rail__tool--dim');
+		// No tool lighting is asserted on an UNBOUND run: with no matter there
+		// are no document tools and an honest agent may answer directly. The
+		// f0-s4 spec pins tool dispatch on a matter-bound run deterministically.
 
 		// Completion: badge flips and a non-empty final answer renders.
 		// (No assertion on model-chosen prose — that flakes; the deterministic

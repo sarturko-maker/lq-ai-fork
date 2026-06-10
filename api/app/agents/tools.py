@@ -12,11 +12,15 @@ gets two tools over the matter's ingested documents:
   (the canonical PyMuPDF text stream) for one file, by filename,
   bounded to ``_READ_LIMIT`` chars with an honest truncation notice.
 
-Scoping is the chats-path pattern (defense in depth): every query joins
-``project_files`` for matter membership AND re-asserts
-``files.owner_id == run.user_id`` + ``deleted_at IS NULL``. Matter and
-user identifiers are B-class parameters (ADR-F004) — closure-injected
-at :func:`build_matter_tools`, never model-visible; the model-facing
+Matter membership is the UNION of upstream's two file↔project
+affordances — the ``project_files`` join (the attach endpoint) and the
+upload-time ``files.project_id`` column (``POST /files`` with a
+``project_id`` form field sets only the column, no join row; verified
+live in F0-S4). Either one makes a document the matter's. Defense in
+depth on every query: ``files.owner_id == run.user_id`` re-asserted +
+``deleted_at IS NULL`` (the chats-path posture). Matter and user
+identifiers are B-class parameters (ADR-F004) — closure-injected at
+:func:`build_matter_tools`, never model-visible; the model-facing
 signatures carry only content arguments.
 
 Every dispatch passes the :mod:`app.agents.guard` chokepoint FIRST
@@ -37,8 +41,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import ColumnElement, and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.sql.selectable import Select
 
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.models.document import Document
@@ -55,14 +60,15 @@ _READ_LIMIT = 40_000
 
 MATTER_TOOL_NAMES = frozenset({"search_documents", "read_document"})
 
+# Matter membership = attach join OR upload-time column (module docstring).
 _FTS_SQL = text(
     "SELECT f.filename, dc.content, dc.page_start, dc.page_end, "
     "ts_rank_cd(dc.content_tsv, websearch_to_tsquery('english', :q)) AS rank "
     "FROM document_chunks dc "
     "JOIN documents d ON d.id = dc.document_id "
     "JOIN files f ON f.id = d.file_id "
-    "JOIN project_files pf ON pf.file_id = f.id "
-    "WHERE pf.project_id = :pid "
+    "LEFT JOIN project_files pf ON pf.file_id = f.id AND pf.project_id = :pid "
+    "WHERE (pf.project_id IS NOT NULL OR f.project_id = :pid) "
     "AND f.owner_id = :uid "
     "AND f.deleted_at IS NULL "
     "AND dc.content_tsv @@ websearch_to_tsquery('english', :q) "
@@ -174,17 +180,15 @@ async def _read(db: AsyncSession, binding: MatterBinding, name: str) -> str:
         )
 
     stmt = (
-        select(File.filename, Document.id, Document.normalized_content, Document.page_count)
-        .select_from(ProjectFile)
-        .join(File, File.id == ProjectFile.file_id)
-        .outerjoin(Document, Document.file_id == File.id)
-        .where(
-            ProjectFile.project_id == binding.project_id,
-            File.owner_id == binding.user_id,
-            File.deleted_at.is_(None),
-            func.lower(File.filename) == wanted.lower(),
+        _matter_files_query(
+            binding,
+            File.filename,
+            Document.id,
+            Document.normalized_content,
+            Document.page_count,
         )
-        .order_by(ProjectFile.attached_at.desc())
+        .where(func.lower(File.filename) == wanted.lower())
+        .order_by(ProjectFile.attached_at.desc().nulls_last(), File.created_at.desc())
     )
     rows = (await db.execute(stmt)).all()
 
@@ -220,20 +224,33 @@ async def _read(db: AsyncSession, binding: MatterBinding, name: str) -> str:
     return f"{note}[{row.filename}{pages} — full text]\n\n{content}"
 
 
-async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -> str:
-    """One line per attached file — name, pages, ingest readiness."""
-    stmt = (
-        select(File.filename, File.ingestion_status, Document.id, Document.page_count)
-        .select_from(ProjectFile)
-        .join(File, File.id == ProjectFile.file_id)
+def _matter_files_query(binding: MatterBinding, *columns: ColumnElement[Any]) -> Select[Any]:
+    """SELECT ``columns`` over the matter's files (membership union +
+    owner re-assertion — module docstring)."""
+    return (
+        select(*columns)
+        .select_from(File)
+        .outerjoin(
+            ProjectFile,
+            and_(ProjectFile.file_id == File.id, ProjectFile.project_id == binding.project_id),
+        )
         .outerjoin(Document, Document.file_id == File.id)
         .where(
-            ProjectFile.project_id == binding.project_id,
+            or_(
+                ProjectFile.project_id.is_not(None),
+                File.project_id == binding.project_id,
+            ),
             File.owner_id == binding.user_id,
             File.deleted_at.is_(None),
         )
-        .order_by(File.filename)
     )
+
+
+async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -> str:
+    """One line per attached file — name, pages, ingest readiness."""
+    stmt = _matter_files_query(
+        binding, File.filename, File.ingestion_status, Document.id, Document.page_count
+    ).order_by(File.filename)
     rows = (await db.execute(stmt)).all()
     if not rows:
         return f"{header}\n(no documents attached — answer from the prompt alone, honestly)"
