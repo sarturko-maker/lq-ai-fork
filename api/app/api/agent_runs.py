@@ -18,26 +18,34 @@ in :mod:`app.api` (bearer token + must-change-password gate). All reads
 are owner-scoped; another user's ``run_id`` returns 404 — never 403 —
 to avoid existence disclosure (CLAUDE.md house rule).
 
-Tool injection: F0-S2 wires the single demo ``read_clause`` capability
-into the runner here, at the caller. S3+ replaces this injection with
-the practice area's tool universe (and F1 wraps each tool in the
-``guarded_tool_call`` chokepoint per ADR-F002) without touching the
-runner seam.
+Tool injection: ``_run_in_background`` is the composition point
+(F0-S4). A matter-bound run gets the matter's document tools —
+pre-wrapped in the :mod:`app.agents.guard` chokepoint (ADR-F002) — a
+matter-aware system prompt, and a gateway model whose envelope carries
+the matter's tier floor + privilege flag (the chat path's D1 / M2-B3
+pattern). An unbound run is a blank workspace: deepagents builtins
+only. F1 extends the guard wrap to the full tool universe.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.runner import demo_read_clause, execute_agent_run
+from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
+from app.agents.runner import SYSTEM_PROMPT, execute_agent_run, mark_run_failed
+from app.agents.tools import MatterBinding, build_matter_tools
 from app.api.dependencies import ActiveUser
 from app.db.session import get_db, get_session_factory
 from app.models.agent_run import AgentRun, AgentRunStep
+from app.models.project import Project
 from app.schemas.agent_runs import (
     AgentRunCreate,
     AgentRunDetailResponse,
@@ -46,6 +54,8 @@ from app.schemas.agent_runs import (
     AgentRunStatus,
     AgentRunStepRead,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agents", tags=["agent-runs"])
 
@@ -78,7 +88,23 @@ async def create_agent_run(
 
     429 (``too_many_running_runs``) when the caller already has
     ``_MAX_CONCURRENT_RUNS_PER_USER`` runs at ``'running'``.
+
+    404 when ``project_id`` names a matter the caller does not own (or
+    an archived one) — never 403, no existence disclosure (F0-S4).
     """
+    if body.project_id is not None:
+        visible_project_id = (
+            await db.execute(
+                select(Project.id).where(
+                    Project.id == body.project_id,
+                    Project.owner_id == user.id,
+                    Project.archived_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if visible_project_id is None:
+            raise HTTPException(status_code=404, detail="project not found")
+
     # Flood brake — count via idx_agent_runs_user_started's user_id prefix.
     running_count: int = (
         await db.execute(
@@ -98,6 +124,7 @@ async def create_agent_run(
 
     run = AgentRun(
         user_id=user.id,
+        project_id=body.project_id,
         status=AgentRunStatus.running.value,
         prompt=body.prompt,
         model_alias=body.model_alias,
@@ -185,14 +212,105 @@ async def get_agent_run(
     )
 
 
-async def _run_in_background(*, run_id: uuid.UUID) -> None:
-    """Background-task entry point — fresh session factory for the runner.
+# Appended to SYSTEM_PROMPT for matter-bound runs. Transparency rule:
+# every agent instruction is readable in source (CLAUDE.md).
+_MATTER_PROMPT = (
+    '\n\nThis run is bound to the matter "{name}". Ground your answer in '
+    "the matter's documents: search_documents finds passages (an empty "
+    "query lists the documents); read_document fetches one document's "
+    "full text. Cite the document name and page for anything you take "
+    "from them, and say so plainly when the documents don't answer the "
+    "question."
+)
 
-    F0-S2 injects the single demo ``read_clause`` capability; S3+
-    injects the practice area's tool universe here (ADR-F002).
+
+def _system_prompt_for(binding: MatterBinding | None) -> str:
+    """The run's full system prompt — base + the matter addendum."""
+    if binding is None:
+        return SYSTEM_PROMPT
+    return SYSTEM_PROMPT + _MATTER_PROMPT.format(name=binding.name)
+
+
+async def _run_in_background(
+    *,
+    run_id: uuid.UUID,
+    model_builder: Callable[..., BaseChatModel] = build_gateway_chat_model,
+    session_factory_provider: Callable[[], async_sessionmaker[AsyncSession]] = get_session_factory,
+) -> None:
+    """Background-task entry point — the run's composition point (F0-S4).
+
+    Loads the run's matter binding — the project is RE-validated against
+    the run's owner and ``archived_at`` here, not just at the 202
+    (binding facts must hold at execution time) — then assembles the
+    guarded matter tools + matter-aware prompt + gateway model, and owns
+    the gateway http client's lifecycle (the key rides the client's
+    headers — see :func:`app.agents.factory.build_gateway_http_client`).
+    ``model_builder`` / ``session_factory_provider`` are injection
+    seams: tests drive the REAL composition with a scripted model and
+    the test DB, no gateway, no monkeypatching.
+
+    Any failure here finalizes the run as ``'failed'`` — a run must
+    never strand at ``'running'``: the flood brake counts those forever
+    and three of them lock the user out (F0-S4 review).
     """
-    await execute_agent_run(
-        run_id,
-        get_session_factory(),
-        tools=[demo_read_clause],
-    )
+    session_factory = session_factory_provider()
+    try:
+        binding: MatterBinding | None = None
+        async with session_factory() as db:
+            run = await db.get(AgentRun, run_id)
+            if run is None:  # deleted underneath us (user cascade)
+                return
+            model_alias, purpose = run.model_alias, run.purpose
+            if run.project_id is not None:
+                project = (
+                    await db.execute(
+                        select(Project).where(
+                            Project.id == run.project_id,
+                            Project.owner_id == run.user_id,
+                            Project.archived_at.is_(None),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if project is not None:
+                    binding = MatterBinding(
+                        project_id=project.id,
+                        user_id=run.user_id,
+                        name=project.name,
+                        privileged=project.privileged,
+                        minimum_inference_tier=project.minimum_inference_tier,
+                    )
+
+        tools = (
+            build_matter_tools(session_factory, run_id=run_id, binding=binding)
+            if binding is not None
+            else []
+        )
+
+        http_client = build_gateway_http_client()
+        try:
+            model = model_builder(
+                model_alias=model_alias,
+                purpose=purpose,
+                http_async_client=http_client,
+                project_minimum_inference_tier=(
+                    binding.minimum_inference_tier if binding is not None else None
+                ),
+                privileged=binding.privileged if binding is not None else False,
+            )
+            await execute_agent_run(
+                run_id,
+                session_factory,
+                tools=tools,
+                model=model,
+                system_prompt=_system_prompt_for(binding),
+            )
+        finally:
+            await http_client.aclose()
+    except Exception as exc:
+        logger.exception(
+            "agent run composition failed",
+            extra={"event": "agent_run_composition_failed", "run_id": str(run_id)},
+        )
+        # mark_run_failed never overwrites a settled run, so a cleanup
+        # error after a successful execution cannot flip 'completed'.
+        await mark_run_failed(session_factory, run_id, error=f"{type(exc).__name__}: {exc}")

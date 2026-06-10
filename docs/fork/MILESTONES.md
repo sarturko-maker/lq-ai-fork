@@ -28,12 +28,13 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
 (S4+ re-sequenced 2026-06-10 after maintainer feedback on live S3: real tools before anything else —
 "no point in testing demos"; the model itself refused the demo tool as self-described canned text.)
 
-- **S4 — real tools on real documents (kill the demo).** Bind a run to a Matter (optional dropdown;
-  none = blank workspace). Replace `demo_read_clause` with `search_documents`/`read_document` over
-  the matter's ingested documents (upstream ingest + KB substrate; matter privilege/tier floors
-  respected — pulls the minimal `guarded_tool_call` wrapper forward from F1 for these two tools).
-  Timeline polish from feedback: natural-language step titles ("Searching the matter's documents…",
-  not raw JSON-only), suppress the closing model turn that duplicates the final answer.
+- **S4 ✓ done — real tools on real documents (demo DELETED).** Matter binding on POST /agents/runs
+  (migration 0049); `search_documents` (FTS, embedding-free) + `read_document` over the matter's
+  documents — membership = attach join ∪ upload-time `files.project_id` (live-verified gap);
+  minimal `guarded_tool_call` chokepoint pulled forward (`agents/guard.py`: R6 grants, R5 status
+  re-read, audit row per dispatch); matter tier floor/privilege on the gateway envelope (D1/M2-B3);
+  factory key carry-over closed (key on the owned httpx client, never `default_headers`).
+  Natural-language step titles + closing-turn dedup are client-side (rows stay honest).
 - **S5 — multi-turn + new chat.** Conversations on the Postgres checkpointer (first consumer);
   follow-up composer on a settled run; "New chat" within the area; chat list on the area page.
   Replaces the single-turn request pattern (`chats.py:1370` stays legacy).
@@ -144,3 +145,7 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
   Agents tab — harden when next touched (CLAUDE.md: model output is untrusted).
 - File upload directly in the agent composer (S4 binds to existing matter documents first; drag-drop
   into the conversation is the follow-up).
+- Ingest-job robustness: a worker/DB hiccup mid-ingest strands files at `processing` forever (seen
+  live in S4) — retry/orphan sweep alongside the agent-run arq migration.
+- Reconcile upstream's two file↔project relations (`project_files` join vs upload-time
+  `files.project_id` column) — S4's matter tools honor the union; the Projects UI lists only the join.

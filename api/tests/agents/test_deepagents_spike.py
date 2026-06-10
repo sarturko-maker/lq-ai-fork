@@ -32,7 +32,11 @@ _CLAUSE_TEXT = (
 
 
 async def test_deep_agent_completes_tool_loop_through_gateway() -> None:
-    from app.agents import build_deep_agent, build_gateway_chat_model
+    from app.agents import (
+        build_deep_agent,
+        build_gateway_chat_model,
+        build_gateway_http_client,
+    )
 
     tool_calls: list[str] = []
 
@@ -41,30 +45,32 @@ async def test_deep_agent_completes_tool_loop_through_gateway() -> None:
         tool_calls.append(topic)
         return _CLAUSE_TEXT
 
-    model = build_gateway_chat_model(
-        model_alias=os.environ.get("LQ_AI_SPIKE_MODEL_ALIAS", "smart"),
-        gateway_url=os.environ.get("LQ_AI_GATEWAY_URL", "http://localhost:8001"),
-        gateway_key=os.environ["LQ_AI_GATEWAY_KEY"],
-    )
-    agent = build_deep_agent(
-        model=model,
-        tools=[read_clause],
-        system_prompt=(
-            "You are a commercial contracts assistant. To quote any clause you "
-            "MUST fetch it with the read_clause tool — never answer from memory."
-        ),
-    )
+    http_client = build_gateway_http_client(gateway_key=os.environ["LQ_AI_GATEWAY_KEY"])
+    async with http_client:
+        model = build_gateway_chat_model(
+            model_alias=os.environ.get("LQ_AI_SPIKE_MODEL_ALIAS", "smart"),
+            gateway_url=os.environ.get("LQ_AI_GATEWAY_URL", "http://localhost:8001"),
+            http_async_client=http_client,
+        )
+        agent = build_deep_agent(
+            model=model,
+            tools=[read_clause],
+            system_prompt=(
+                "You are a commercial contracts assistant. To quote any clause you "
+                "MUST fetch it with the read_clause tool — never answer from memory."
+            ),
+        )
 
-    result = await agent.ainvoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "What is the liability cap under this contract?",
-                }
-            ]
-        }
-    )
+        result = await agent.ainvoke(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "What is the liability cap under this contract?",
+                    }
+                ]
+            }
+        )
 
     assert tool_calls, "model never initiated a tool call through the gateway"
     final = str(result["messages"][-1].content)

@@ -34,7 +34,15 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, Text, UniqueConstraint, text
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -71,6 +79,14 @@ class AgentRun(Base):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE", name="fk_agent_runs_user_id"),
         nullable=False,
+    )
+    # F0-S4: the Matter this run is bound to (NULL = blank workspace, no
+    # document tools). SET NULL so deleting a project unbinds, never
+    # destroys, run records. Migration 0049.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL", name="fk_agent_runs_project_id"),
+        nullable=True,
     )
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'running'"))
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
