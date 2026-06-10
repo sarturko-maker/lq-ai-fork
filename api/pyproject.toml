@@ -120,13 +120,31 @@ dependencies = [
     # amortized across three features. MIT-licensed; transitive deps are
     # mostly LangChain-core types (already permissive licenses, no new
     # SBOM family beyond LangGraph + LangChain-core).
-    # M4-0.1 — held at 0.2 for M4. langgraph 1.x re-types StateGraph as
-    # generic, so our `add_node` node factories (typed -> Awaitable[dict])
-    # fail mypy [call-overload] (this is what dependabot #68 tripped on).
-    # The break is type-only — every runtime API we use is unchanged — and
-    # the autonomous executor needs no 1.x-only API. Migration of all three
-    # executors deferred to DE-319. Floor pinned to the validated 0.2.76.
-    "langgraph>=0.2.76,<0.3",
+    # F0-S1 — migrated to the 1.x line (closes DE-319, which the M4-0.1
+    # hold at 0.2.76 deferred). The 0.2 → 1.x break was type-only for us:
+    # `add_node` now types nodes as callback protocols with a named
+    # ``state`` parameter, which a plain Callable[...] annotation can't
+    # satisfy — the three executors' node factories now return matching
+    # protocols (no runtime changes). Validated against 1.2.4; ceiling at
+    # the next major.
+    "langgraph>=1.0,<2",
+    # F0-S1 — deepagents: LangChain's deep-agent harness (planning tool,
+    # filesystem-backed memory, sub-agent spawning) for the deep-agent
+    # spike. Pinned EXACT: the project is pre-1.0 and has broken its
+    # public surface across minor bumps, so each upgrade is revalidated
+    # deliberately rather than floated.
+    "deepagents==0.6.8",
+    # F0-S1 — langchain (1.x) + langchain-openai: deepagents builds on
+    # langchain 1.x agent/chat-model abstractions; langchain-openai
+    # supplies the ChatOpenAI binding used to point deepagents at the
+    # gateway's OpenAI-compatible endpoint. Same publisher family as
+    # langgraph — no new SBOM family beyond what deepagents pulls anyway.
+    "langchain>=1.0,<2",
+    "langchain-openai>=1.0,<2",
+    # F0-S1 — langgraph-checkpoint-postgres: durable checkpointing for
+    # deep-agent runs in the Postgres we already operate (pgvector image).
+    # The 3.x line pairs with langgraph 1.x; psycopg is its transitive.
+    "langgraph-checkpoint-postgres>=3.0,<4",
     # M3-C4 — openpyxl powers the Tabular Review XLSX export
     # (GET /tabular/executions/{id}/export?format=xlsx). Each grid cell
     # gets a Comment with its citation source so operators can pivot

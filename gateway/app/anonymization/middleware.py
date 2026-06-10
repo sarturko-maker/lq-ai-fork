@@ -112,7 +112,10 @@ def pre_anonymize_request(
         for message in chat_request.messages:
             if message.role not in _ANONYMIZED_ROLES:
                 continue
-            if message.content is None:
+            # F0-S1: block-form content (list of typed blocks) is left
+            # untouched — pseudonymization of block content is S2 work;
+            # anonymization-sensitive deployments use string content.
+            if not isinstance(message.content, str):
                 continue
             # M2-D2: per Decision M2-1, retrieved source documents stay
             # un-pseudonymized so the model sees intact source quotes for
@@ -246,7 +249,7 @@ def post_anonymize_response(
     """
 
     for choice in response.choices:
-        if choice.message.content is None:
+        if not isinstance(choice.message.content, str):
             continue
         choice.message.content = anonymizer.rehydrate(choice.message.content, mapper)
 

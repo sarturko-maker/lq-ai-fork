@@ -66,9 +66,13 @@ class ChatCompletionMessage(BaseModel):
 
     role: ChatRole
     # OpenAI permits ``content: null`` for assistant messages that have
-    # tool_calls but no text. Pre-B6 we accept the full union but only
-    # serialize the string case to providers.
-    content: str | None = None
+    # tool_calls but no text, and a list of typed content blocks
+    # (``[{"type": "text", "text": ...}, ...]``) as the rich form —
+    # langchain/langchain-openai 1.x clients emit the block form
+    # (F0-S1). Block content forwards verbatim to OpenAI-compatible
+    # providers; string-only consumers (anonymization, skill assembly)
+    # guard on isinstance and leave block content untouched.
+    content: str | list[dict[str, Any]] | None = None
     name: str | None = None
     tool_call_id: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
