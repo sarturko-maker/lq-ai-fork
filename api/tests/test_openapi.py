@@ -190,6 +190,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/autonomous/notifications/{notification_id}/read",
         # Phase 1 §4.4 — one-off manual session spawn (run a skill/playbook now)
         "/api/v1/autonomous/run-now",
+        # F0-S2 (fork) — agent-run records (kick-off + polled run/steps reads)
+        "/api/v1/agents/runs",
+        "/api/v1/agents/runs/{run_id}",
     }
 )
 
@@ -287,7 +290,10 @@ async def test_openapi_paths_match_sketch() -> None:
     # /api/v1/autonomous/sessions/{session_id}/findings
     # Artifacts read-model (Donna #8) adds one new path:
     # /api/v1/autonomous/sessions/{session_id}/artifacts
-    assert len(actual) == 118
+    # F0-S2 (fork) adds two new paths:
+    # /api/v1/agents/runs (POST kick-off + GET list)
+    # /api/v1/agents/runs/{run_id}
+    assert len(actual) == 120
 
 
 @pytest.mark.unit

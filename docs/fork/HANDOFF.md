@@ -2,72 +2,85 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (2026-06-10, end of F0-S1)
+## State (2026-06-10, end of F0-S2)
 
-- F0-S1 MERGED (PR #24, squash `816f5ac`); ADR-F001..F005 accepted (F005 = agent-merge policy with
-  hardened gates — read it before merging anything). F0 re-sequenced: visible agent at S3.
-- Dev stack: `docker compose` 8 services healthy on the Chromebook. Gateway aliases
-  `smart`/`fast`/`budget` → `minimax/MiniMax-M3` (tier 4). MiniMax key in `.env` (`MINIMAX_API_KEY`).
-  Gateway's LIVE config lives in a named volume — edit `gateway.yaml`, then copy into the container
-  (`docker exec lq-ai-gateway-1 cp /usr/share/lq-ai/gateway.yaml.example /etc/lq-ai/gateway.yaml`)
-  and `docker compose restart gateway` (SIGHUP reloads config but not adapters).
+- F0-S1 merged (#24, `816f5ac`); governance merged (#25, `39ba43f` — ADR-F005 agent-merge policy,
+  F0 re-sequenced). F0-S2 on branch `fork/f0-s2-agent-runs` → PR (merge it first if still open).
+- ADR-F001..F005 accepted. Merges follow ADR-F005's 5-part gate — no exceptions.
+- Dev stack: 8 services healthy; api/gateway/workers rebuilt from F0-S2 code; DB at migration 0048.
+  Gateway aliases `smart`/`fast`/`budget` → `minimax/MiniMax-M3` (tier 4); key in `.env`. Gateway
+  live config sits in a named volume (copy seed + `docker compose restart gateway` to change).
 - App login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
 
-## Done (F0-S1)
+## Done (F0-S2)
 
-- **Dependency migration** (closes DE-319): langgraph 1.2.4, langchain 1.3.6, langchain-openai 1.3.0,
-  langgraph-checkpoint-postgres 3.1.0, `deepagents==0.6.8` (EXACT). Three legacy executors re-typed
-  with per-module callback Protocols (type-only break, zero runtime changes). api suite: 1930 passed.
-- **Agent substrate**: `api/app/agents/factory.py` — `build_gateway_chat_model()` (gateway is the only
-  egress; auth via `X-LQ-AI-Gateway-Key` header) + `build_deep_agent()` (single deepagents import site).
-- **Gateway OpenAI-compat hardening**: block-form `messages[].content` accepted and forwarded
-  verbatim; `tools`/`tool_choice` passthrough covered by tests; fixed pre-existing `lq_ai_privileged`
-  leak into provider bodies; isinstance guards in anonymization/skill-assembly/anthropic (text-only
-  paths). Gateway: mypy --strict green, 566 passed.
-- **LIVE PROOF**: provider-marked spike passed — deep agent drove a model-initiated `read_clause`
-  tool call through the gateway on MiniMax-M3 and used the result (`inference_routing_log` rows
-  11:58:27 + 11:58:32, two loop steps). Run: `pytest -m provider api/tests/agents/`.
+- **Agent-run records**: `agent_runs` + `agent_run_steps` (migration 0048) — every loop step
+  persisted as it completes (`model_turn`/`tool_call`/`tool_result`, astream_events v2; one COMMIT
+  per step so pollers see live progress). Interim caps: `max_steps` (default 20), wall-clock 300s;
+  statuses running/completed/failed/cancelled/cap_exceeded. `guarded_tool_call`/R4 is F1 (seam
+  marked in `runner.py`, ADR-F002).
+- **Endpoints**: POST `/api/v1/agents/runs` (202, BackgroundTasks), GET `/agents/runs/{id}` →
+  `{run: {...}, steps: [...]}` ordered — **this is the S3 polling contract** — GET `/agents/runs`
+  paginated. Cross-user = 404.
+- **Gateway**: `tools`/`tool_choice` typed on the request schema (ollama adapter switched off
+  `model_extra` — regression caught by suite); `agent_loop` in `_KNOWN_PURPOSES`; streaming test
+  pins tool_call delta passthrough.
+- **LIVE PROOF**: run `de73320c…` completed via the real endpoint — 4 ordered steps, final answer
+  quotes Clause 7.2, routing-log rows tagged `purpose='agent_loop'` (after gateway rebuild — the
+  fallback-to-'chat' on unknown purpose worked as designed before it).
+- Evidence: api 1949 passed (+19) / mypy clean; gateway 571 passed / mypy --strict clean.
 
-## Next slice: F0-S2 — gateway tools formalization + agent-run records (see MILESTONES F0-S2)
+## Next slice: F0-S3 — FIRST VISIBLE AGENT (Agents tab v0)
 
-- Promote `tools`/`tool_choice` (request) and tool-call deltas (streaming) from `extra="allow"`
-  passthrough to typed schema fields; tag agent-loop steps in the routing log (`purpose`).
-- Streaming tool-calls end-to-end (delta frames carry `tool_calls` chunks) — prerequisite for SSE v2.
-- Anthropic adapter: `tool_use`/`tool_result` translation + block content (every `F0-S1` comment
-  marker in `gateway/app` is an S2 entry point — `grep -rn "F0-S1" gateway/app`).
-- Decide anonymization coverage for block-form content (skip is now observable: span attr
-  `anonymization.block_content_skipped` + warning; fully-skipped requests report applied=False).
-- From the F0-S1 adversarial review (deferred notes): (a) factory key exposure — move the gateway
-  key out of `ChatOpenAI(default_headers=...)` into a pre-built httpx client so `repr()`/LangSmith
-  serialization can't leak it; (b) `build_deep_agent` must reject/wrap model-bearing subagent
-  specs so a subagent can't be given a provider-direct model that bypasses the gateway.
-- NEW in S2 (re-sequence): `agent_runs` + `agent_run_steps` tables (steps persisted as they
-  complete — the S3 polling contract), POST/GET run endpoints, interim caps (max steps, wall-clock,
-  per-run cost via routing log). Then S3 = FIRST VISIBLE AGENT (Agents tab v0, polled capability
-  rail), S4 multi-turn (`chats.py:~1370`), S5 SSE v2, S6 eval gate (ADR-F004 N≥20).
+Per MILESTONES F0-S3: a new tab under `web/src/lib/lq-ai/` + route `/lq-ai/agents`:
+- One hardcoded preview area card ("Commercial — preview"). One message box → POST `/agents/runs`.
+- **Capability rail v0**: list the run's tools (for now: `demo_read_clause` + deepagents builtins),
+  dim → lit as steps complete; poll GET `/agents/runs/{id}` every ~2s while status=running
+  (render-deterministic: UI reads settled steps, never a stream). Tool calls + final answer
+  rendered; previous runs listed (GET `/agents/runs`).
+- MiniMax-M3 emits `<think>…</think>` in `final_answer` and step summaries — strip or collapse it
+  in the UI (do NOT strip in the API; the record keeps the honest full text).
+- The UI needs a staleness cutoff for runs stuck at `'running'` (e.g., started_at older than the
+  wall-clock budget → render as stale): there is no recovery sweep yet — BackgroundTasks die with
+  the process; the startup sweep is deferred to the arq migration.
+- Follow web house style: `web/src/lib/lq-ai/` isolation, typed API client (`api/client.ts`
+  patterns), tabs.ts entry + TopTabBar gate, Vitest for stores/parsing. Cypress optional this slice.
+- Defer: SSE (S5 upgrades polling to live), practice_areas schema (F1), auth-scoped area config (F1).
 
 ## Pick up exactly here
 
-1. Read CLAUDE.md → ADR-F001..F004 → this file. 2. Branch `fork/f0-s2-agent-runs` from main. 4. Sanity rerun of the live spike (one command):
+1. Read CLAUDE.md → this file → MILESTONES F0. 2. Merge the F0-S2 PR if still open (gate per
+   ADR-F005). 3. Branch `fork/f0-s3-agents-tab` from main. 4. Smoke the contract:
 
 ```bash
-GW_KEY=$(grep '^LQ_AI_GATEWAY_KEY=' .env | cut -d= -f2)
-docker run --rm --network lq-ai_default --entrypoint sh -v "$PWD":/repo -w /repo/api \
-  -e LQ_AI_GATEWAY_URL=http://gateway:8001 -e LQ_AI_GATEWAY_KEY="$GW_KEY" lq-ai-api:latest -c \
-  'pip install -q -e ".[dev]" && pip install -q --force-reinstall --no-deps langgraph langgraph-prebuilt langgraph-checkpoint && pytest -m provider tests/agents/ -v'
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"admin@lq.ai","password":"LQ-AI-local-Pw1!"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+curl -s -X POST http://localhost:8000/api/v1/agents/runs -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"prompt":"What is the liability cap? Use your tools."}'
+# then poll GET /api/v1/agents/runs/{id} — UI shape: {run:{status,final_answer,...}, steps:[{seq,kind,name,summary}]}
 ```
+
+5. Remember: rebuild `web` container to see UI changes (pre-built bundle, no HMR).
+
+## Carry-overs / review deferrals (S2 → later)
+
+- Factory key exposure: `http_async_client` seam added; FINISH by moving the gateway key fully out
+  of `default_headers` (repr/LangSmith leak surface) — S3 or S4.
+- `build_deep_agent` must reject model-bearing subagent specs (gateway bypass guard) — before F1
+  subagent fan-out.
+- Anthropic adapter: `tool_use`/`tool_result` + block-content translation — S4/S5 (`grep -rn F0-S1
+  gateway/app`); anonymization for block content — decision pending (skip is observable; fully
+  skipped requests report `anonymization_applied=False`).
+- No cancel endpoint yet (`cancelled` status reserved); `cost_usd` NULL until F1 R4; runs execute
+  in-process via BackgroundTasks (arq migration later); audit rows for run kick-off not yet written.
 
 ## Gotchas
 
-- **In-place pip upgrade clobbers langgraph-prebuilt** (0.2's uninstall removes 1.x files):
-  `pip install --force-reinstall --no-deps langgraph langgraph-prebuilt langgraph-checkpoint`.
-  Fresh image builds are unaffected — rebuild `api` + `arq-worker` + `ingest-worker` together.
-- langgraph 1.x has no `__version__` (use `importlib.metadata`); `add_node` requires callback
-  protocols with a NAMED `state` param (see `app/{autonomous,playbooks,tabular}/nodes.py`).
-- langchain-openai 1.x: `api_key` is `SecretStr`; clients send block-form content — the gateway's
-  OpenAI-compatible path forwards it; Anthropic/Ollama adapters read it as EMPTY until S2.
-- Host Python is 3.11; api/gateway need 3.12 — all tooling runs in containers (`--entrypoint sleep`,
-  the api image's default entrypoint runs alembic and dies without `DATABASE_URL`).
-- Tests: NEVER against the live compose postgres — throwaway `pgvector/pgvector:pg16` with
-  `DATABASE_URL=postgresql+asyncpg://lq_ai:lq_ai@<pg>:5432/lq_ai` (conftest auto-migrates).
-- MiniMax-M3 emits `<think>` blocks inline in chat (backlog: MessageBubble rendering).
+- **In-place pip upgrade clobbers langgraph-prebuilt**: `pip install --force-reinstall --no-deps
+  langgraph langgraph-prebuilt langgraph-checkpoint` (fresh image builds unaffected).
+- After any migration: rebuild `api` + `arq-worker` + `ingest-worker` together. After gateway code
+  changes: rebuild `gateway` (a stale gateway silently downgraded `agent_loop` → 'chat').
+- Host Python is 3.11; api/gateway need 3.12 — all tooling in containers (`--entrypoint sleep`;
+  the api image entrypoint runs alembic and dies without `DATABASE_URL`).
+- Tests: throwaway `pgvector/pgvector:pg16` only, never the live compose postgres.
+- langgraph 1.x: no `__version__`; `add_node` needs named-`state` callback protocols.

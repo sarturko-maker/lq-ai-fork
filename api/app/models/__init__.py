@@ -10,6 +10,7 @@ declarative base, so Alembic's autogenerate (when used) sees them.
 
 from __future__ import annotations
 
+from app.models.agent_run import AgentRun, AgentRunStep
 from app.models.audit import AuditLog
 from app.models.autonomous import (
     AutonomousMemory,
@@ -40,6 +41,8 @@ from app.models.user_skill import UserSkill
 from app.models.work_product import WorkProductAttribution
 
 __all__ = [
+    "AgentRun",
+    "AgentRunStep",
     "AuditLog",
     "AutonomousMemory",
     "AutonomousNotification",

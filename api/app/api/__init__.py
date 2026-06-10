@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends
 from app.api import (
     admin,
     admin_intake_bridges,
+    agent_runs,
     auth,
     autonomous,
     bootstrap,
@@ -113,6 +114,9 @@ api_router.include_router(admin.router, dependencies=_active)
 api_router.include_router(admin_intake_bridges.router, dependencies=_active)
 # M4-A4-i: Autonomous sessions read/halt API — per-user isolated, bearer-auth.
 api_router.include_router(autonomous.router, dependencies=_active)
+# F0-S2 (fork): deep-agent run records — kick-off + polled run/steps
+# reads for the ADR-F002 capability rail. Per-user isolated.
+api_router.include_router(agent_runs.router, dependencies=_active)
 # M3-A2: Playbook executor — two endpoints under different prefixes
 # (``/playbooks/{id}/execute`` and ``/playbook-executions/{id}``) so
 # they live alongside the M3-A4 list/CRUD endpoints in the same module.
