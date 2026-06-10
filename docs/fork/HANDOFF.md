@@ -4,8 +4,8 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (2026-06-10, end of F0-S1)
 
-- Branch `fork/f0-s1-deepagents-spike` → PR #24 (merge it first if still open); `main` base `94ee28b`
-  (ADR-F001..F004 accepted).
+- F0-S1 MERGED (PR #24, squash `816f5ac`); ADR-F001..F005 accepted (F005 = agent-merge policy with
+  hardened gates — read it before merging anything). F0 re-sequenced: visible agent at S3.
 - Dev stack: `docker compose` 8 services healthy on the Chromebook. Gateway aliases
   `smart`/`fast`/`budget` → `minimax/MiniMax-M3` (tier 4). MiniMax key in `.env` (`MINIMAX_API_KEY`).
   Gateway's LIVE config lives in a named volume — edit `gateway.yaml`, then copy into the container
@@ -28,7 +28,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   tool call through the gateway on MiniMax-M3 and used the result (`inference_routing_log` rows
   11:58:27 + 11:58:32, two loop steps). Run: `pytest -m provider api/tests/agents/`.
 
-## Next slice: F0-S2 — formalize tools at the gateway
+## Next slice: F0-S2 — gateway tools formalization + agent-run records (see MILESTONES F0-S2)
 
 - Promote `tools`/`tool_choice` (request) and tool-call deltas (streaming) from `extra="allow"`
   passthrough to typed schema fields; tag agent-loop steps in the routing log (`purpose`).
@@ -41,13 +41,14 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   key out of `ChatOpenAI(default_headers=...)` into a pre-built httpx client so `repr()`/LangSmith
   serialization can't leak it; (b) `build_deep_agent` must reject/wrap model-bearing subagent
   specs so a subagent can't be given a provider-direct model that bypasses the gateway.
-- Then S3 multi-turn chat (`api/app/api/chats.py:~1370`), S4 SSE v2, S5 eval gate (ADR-F004: N≥20
-  tool/subagent uptake, MiniMax-M3 + one second family).
+- NEW in S2 (re-sequence): `agent_runs` + `agent_run_steps` tables (steps persisted as they
+  complete — the S3 polling contract), POST/GET run endpoints, interim caps (max steps, wall-clock,
+  per-run cost via routing log). Then S3 = FIRST VISIBLE AGENT (Agents tab v0, polled capability
+  rail), S4 multi-turn (`chats.py:~1370`), S5 SSE v2, S6 eval gate (ADR-F004 N≥20).
 
 ## Pick up exactly here
 
-1. Read CLAUDE.md → ADR-F001..F004 → this file. 2. Merge the F0-S1 PR if open (CI must be green).
-3. Branch `fork/f0-s2-gateway-tools` from main. 4. Sanity rerun of the live spike (one command):
+1. Read CLAUDE.md → ADR-F001..F004 → this file. 2. Branch `fork/f0-s2-agent-runs` from main. 4. Sanity rerun of the live spike (one command):
 
 ```bash
 GW_KEY=$(grep '^LQ_AI_GATEWAY_KEY=' .env | cut -d= -f2)

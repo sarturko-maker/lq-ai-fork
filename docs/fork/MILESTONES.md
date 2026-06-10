@@ -2,25 +2,35 @@
 
 Outcome-based milestones, not calendar sprints. Each milestone breaks into vertical slices
 (end-to-end, runnable, testable, ≤2–3 days, one PR each). Re-plan at milestone boundaries.
-Status: active — governed by accepted ADR-F001..F004.
-
+Status: active — governed by accepted ADR-F001..F005. Merges per ADR-F005 (agent-merged, hardened gate).
 
 ## F0 — Agentic substrate (unblocks everything)
 
-Outcome: a model can drive a real tool-calling loop through the gateway, in a multi-turn conversation.
+Outcome: a model drives a real tool-calling loop through the gateway, in a multi-turn conversation —
+and the maintainer can SEE a deep agent working in the UI from S3 onward (re-sequenced 2026-06-10:
+visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2 upgrades it later).
 
-- Lift the langgraph pin: langgraph 1.x + langchain + deepagents (pinned exact version); keep the three
-  legacy executors compiling (frozen, bugfix only). Postgres checkpointer + BaseStore wired.
-- First-class `tools` through the gateway. Sequence: OpenAI-compatible adapter first (passes `tools`
-  through already — and MiniMax-M3, the current dev model, speaks it), then Anthropic
-  `tool_use`/`tool_result` translation. `tools`/`tool_choice` in the request schema; routing-log rows
-  per loop step.
-- Multi-turn chat: send conversation history (replaces the single-turn request in `chats.py`).
-- SSE protocol v2: tool-call / subagent / plan / progress frame types, backend emitter → parser → UI
-  (feeds the F1 capability rail and activity feed).
-- Eval substrate + acceptance gate (ADR-F004): tool-call and subagent uptake measured at N≥20 on
-  MiniMax-M3 plus one second model family (masked judge, pre-flight variance gate); subagent
-  dispatch designed as task-scoped procedures, not open-ended delegation.
+- **S1 ✓ done** — langgraph 1.2.4 + `deepagents==0.6.8` substrate; gateway block-content + tools
+  passthrough; live model-driven tool loop proven on MiniMax-M3 (PR #24).
+- **S2 — gateway tools formalization + agent-run records.** Promote `tools`/`tool_choice` to typed
+  request fields; streaming tool-call delta tests; routing-log `purpose='agent_loop'`. New
+  `agent_runs` + `agent_run_steps` tables — each loop step persisted as it completes (the UI
+  contract for S3 polling) — with POST/GET run endpoints and interim caps (max steps, wall-clock,
+  per-run cost from the routing log; full `guarded_tool_call` integration lands in F1). Carry-overs
+  from the S1 review: factory key exposure (httpx client, not `default_headers`), subagent
+  model-bypass guard in `build_deep_agent`, Anthropic `tool_use`/block-content translation,
+  anonymization decision for block content.
+- **S3 — first visible agent (Agents tab v0).** One hardcoded preview area ("Commercial — preview"),
+  one message box, capability rail v0: the agent's tools listed and lighting up as steps complete
+  (polling the run record — no SSE needed), tool calls + final answer rendered, artifacts
+  downloadable. Render-deterministic: the UI reads settled run records, never the stream.
+- **S4 — multi-turn chat.** Send conversation history (replaces the single-turn request in
+  `chats.py`); wire the Postgres checkpointer (first consumer of langgraph-checkpoint-postgres).
+- **S5 — SSE v2.** Tool-call / subagent / plan / progress frame types end-to-end; upgrades the S3
+  polled rail to live streaming.
+- **S6 — eval gate (ADR-F004).** Tool-call and subagent uptake at N≥20 on MiniMax-M3 plus one
+  second model family (masked judge, pre-flight variance gate); subagent dispatch as task-scoped
+  procedures, not open-ended delegation.
 
 ## F1 — First practice area, end to end (ADR-F002)
 
