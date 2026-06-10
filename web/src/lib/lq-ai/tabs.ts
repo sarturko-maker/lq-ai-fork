@@ -12,6 +12,7 @@
 
 export type TabId =
   | 'home'
+  | 'agents'
   | 'chats'
   | 'matters'
   | 'skills'
@@ -44,6 +45,8 @@ export interface User {
 
 export const TABS: readonly TabDef[] = [
   { id: 'home',          label: 'Home',          icon: '🏠', route: '/lq-ai',                available: true },
+  // Deep-agent home (F0-S3 preview; becomes the practice-area home in F1, ADR-F002).
+  { id: 'agents',        label: 'Agents',        icon: '⚖️', route: '/lq-ai/agents',         available: true },
   { id: 'chats',         label: 'Chats',         icon: '💬', route: '/lq-ai/chats',          available: true },
   { id: 'matters',       label: 'Matters',       icon: '📁', route: '/lq-ai/matters',        available: true },
   { id: 'skills',        label: 'Skills',        icon: '🛠️', route: '/lq-ai/skills',         available: true },
