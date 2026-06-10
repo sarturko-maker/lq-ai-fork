@@ -66,6 +66,16 @@ describe('agents API client', () => {
 		});
 	});
 
+	it('createRun forwards the matter binding (F0-S4)', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponseLike(202, { id: 'r3', status: 'running', project_id: 'proj-1' })
+		);
+		const run = await createRun({ prompt: 'p', project_id: 'proj-1' });
+		expect(run.project_id).toBe('proj-1');
+		const [, init] = firstCall(fetchMock);
+		expect(JSON.parse(init.body as string)).toEqual({ prompt: 'p', project_id: 'proj-1' });
+	});
+
 	it('getRun GETs /agents/runs/{id} with the id URL-encoded', async () => {
 		fetchMock.mockResolvedValueOnce(
 			jsonResponseLike(200, { run: { id: 'a/b', status: 'completed' }, steps: [] })

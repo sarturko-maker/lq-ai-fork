@@ -19,10 +19,13 @@ Interim caps (F0-S2): ``max_steps`` from the run row (exceeding →
 args/results are truncated and never carry raw secrets.
 
 Dependency injection per CLAUDE.md: the DB session factory, the tool
-set, and (for tests) the chat model are constructor arguments — tests
-substitute fakes through the same seams, no monkeypatching. The caller
-(``app.api.agent_runs``) injects the S2 demo tool; S3+ injects the
-practice-area tool universe through the same ``tools`` parameter.
+set, and the chat model are constructor arguments — tests substitute
+fakes through the same seams, no monkeypatching. The caller
+(``app.api.agent_runs._run_in_background``) is the composition point:
+it assembles the matter's guarded document tools (F0-S4,
+:mod:`app.agents.tools`), the gateway chat model (with the matter's
+tier-floor/privilege envelope), and the system prompt — this module
+only drives the loop and persists what happened.
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.factory import build_deep_agent, build_gateway_chat_model
+from app.agents.factory import build_deep_agent
 from app.models.agent_run import AgentRun, AgentRunStep
 from app.schemas.agent_runs import AgentRunStatus, AgentRunStepKind
 
@@ -50,28 +53,15 @@ DEFAULT_WALL_CLOCK_SECONDS = 300.0
 # args/results are truncated here, before they ever reach a row.
 _SUMMARY_LIMIT = 2000
 
-_SYSTEM_PROMPT = (
+# Default system prompt; the composition point appends the matter
+# addendum for matter-bound runs (F0-S4). Public so the caller extends
+# rather than restates it.
+SYSTEM_PROMPT = (
     "You are LQ.AI's in-house legal deep agent. Work the user's request "
     "step by step, using the available tools whenever they can ground "
     "your answer — never invent contract text you could fetch. Finish "
     "with a concise, complete answer."
 )
-
-_CLAUSE_TEXT = (
-    "Clause 7.2 (Limitation of Liability): each party's aggregate liability "
-    "is capped at the fees paid in the twelve (12) months preceding the claim."
-)
-
-
-def demo_read_clause(topic: str) -> str:
-    """Return the verbatim text of the contract clause covering ``topic``.
-
-    F0-S2 placeholder capability (the F0-S1 spike tool, promoted to the
-    run surface) so the run record has one real model-initiated tool to
-    persist. S3+ replaces this injection with the practice area's tool
-    universe.
-    """
-    return _CLAUSE_TEXT
 
 
 def _bounded(value: str, limit: int = _SUMMARY_LIMIT) -> str:
@@ -147,7 +137,12 @@ def _step_from_event(
     if kind == "on_tool_end":
         output = data.get("output")
         content = getattr(output, "content", output)
-        return AgentRunStepKind.tool_result, event.get("name"), _bounded(_text_of(content)), False
+        return (
+            AgentRunStepKind.tool_result,
+            event.get("name"),
+            _bounded(_text_of(content)),
+            False,
+        )
 
     return None
 
@@ -209,7 +204,11 @@ async def _drive_agent(
                 seq += 1
                 db.add(
                     AgentRunStep(
-                        run_id=run_id, seq=seq, kind=kind.value, name=name, summary=summary
+                        run_id=run_id,
+                        seq=seq,
+                        kind=kind.value,
+                        name=name,
+                        summary=summary,
                     )
                 )
                 await db.commit()
@@ -266,23 +265,63 @@ async def _finalize(
                 return
 
 
+async def mark_run_failed(
+    session_factory: async_sessionmaker[AsyncSession],
+    run_id: uuid.UUID,
+    *,
+    error: str,
+) -> None:
+    """Public terminal-failure write for the composition point.
+
+    The api layer's ``_run_in_background`` assembles tools/model BEFORE
+    ``execute_agent_run`` takes over; a failure there must not strand
+    the run at ``'running'`` (the flood brake counts those forever —
+    F0-S4 review). Unlike ``_finalize`` this NEVER overwrites a settled
+    run (the caller's except block can also catch post-execution
+    cleanup errors). Fresh-session, retry-once, bounded error — never
+    a stack trace.
+    """
+    for attempt in (1, 2):
+        try:
+            async with session_factory() as db:
+                run = await db.get(AgentRun, run_id)
+                if run is None or run.status != AgentRunStatus.running.value:
+                    return  # gone, or already settled — leave the terminal state alone
+                run.status = AgentRunStatus.failed.value
+                run.error = _bounded(error, 500)
+                run.finished_at = datetime.now(UTC)
+                await db.commit()
+                return
+        except Exception:
+            if attempt == 2:
+                logger.exception(
+                    "composition-failure terminal write failed twice; run left at 'running'",
+                    extra={
+                        "event": "agent_run_mark_failed_failed",
+                        "run_id": str(run_id),
+                    },
+                )
+                return
+
+
 async def execute_agent_run(
     run_id: uuid.UUID,
     db_session_factory: async_sessionmaker[AsyncSession],
     *,
     tools: Sequence[Callable[..., Any]],
-    model: BaseChatModel | None = None,
-    system_prompt: str = _SYSTEM_PROMPT,
+    model: BaseChatModel,
+    system_prompt: str = SYSTEM_PROMPT,
     wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS,
 ) -> None:
     """Execute one persisted agent run end to end.
 
     Opens its own DB session (the kick-off request's session closes when
-    the 202 returns — same model as the playbook executor). ``tools`` is
-    the injected capability set; ``model`` is an injection seam for
-    tests (None → gateway chat model for the run's ``model_alias``,
-    tagged with the run's ``purpose`` so the routing log separates
-    agent traffic).
+    the 202 returns — same model as the playbook executor). ``tools``
+    and ``model`` are injected by the composition point (F0-S4: the
+    matter tools arrive pre-wrapped in the :mod:`app.agents.guard`
+    chokepoint; the model carries the gateway envelope) — this function
+    never builds either, so tests drive the real loop with fakes
+    through the same seams.
 
     Terminal writes: ``completed`` (+ ``final_answer``), ``cap_exceeded``
     (step cap), or ``failed`` (``error='timeout'`` for the wall clock;
@@ -299,17 +338,14 @@ async def execute_agent_run(
         # Snapshot before the first commit — commits/rollbacks may expire
         # ORM instances depending on the injected factory's configuration.
         prompt, max_steps = run.prompt, run.max_steps
-        model_alias, purpose = run.model_alias, run.purpose
 
         try:
-            chat_model = model or build_gateway_chat_model(
-                model_alias=model_alias,
-                purpose=purpose,
-            )
-            # F1 wraps every tool in the guarded_tool_call chokepoint
-            # (R4 cost cap / R5 halt / R6 grants) per ADR-F002.
+            # ADR-F002 chokepoint: matter tools dispatch through
+            # app.agents.guard (F0-S4 minimal — R6 grants / R5 halt /
+            # audit). F1 extends the wrap to the full tool universe
+            # incl. the deepagents builtins, plus R4 budgets.
             agent = build_deep_agent(
-                model=chat_model,
+                model=model,
                 tools=tools,
                 system_prompt=system_prompt,
             )
@@ -323,7 +359,10 @@ async def execute_agent_run(
             )
         except TimeoutError:
             await _finalize(
-                db_session_factory, run_id, status=AgentRunStatus.failed, error="timeout"
+                db_session_factory,
+                run_id,
+                status=AgentRunStatus.failed,
+                error="timeout",
             )
             return
         except Exception as exc:

@@ -60,6 +60,11 @@ class AgentRunCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=32_768)
     model_alias: str = Field(default="smart", min_length=1, max_length=64)
     max_steps: int = Field(default=20, ge=1, le=100)
+    # F0-S4: optional Matter binding — the run's agent gets the matter's
+    # document tools and the gateway envelope carries the matter's
+    # privilege/tier floor. Validated against ownership at the endpoint
+    # (another user's project id → 404, never 403).
+    project_id: uuid.UUID | None = None
 
 
 class AgentRunRead(BaseModel):
@@ -69,6 +74,7 @@ class AgentRunRead(BaseModel):
 
     id: uuid.UUID
     user_id: uuid.UUID
+    project_id: uuid.UUID | None = None
     status: AgentRunStatus
     prompt: str
     final_answer: str | None = None

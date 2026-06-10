@@ -1,11 +1,13 @@
 """Runner tests — F0-S2: a fake tool-calling model drives the REAL deepagents loop.
 
 No provider, no gateway: :class:`ScriptedToolCallingModel` is injected
-through ``execute_agent_run``'s ``model`` seam, and the demo tool through
-``tools`` — the same seams S3+ uses for real capabilities. What's real
-here: ``build_deep_agent``, the langgraph loop, model-initiated tool
-dispatch, ``astream_events`` mapping, and the commit-per-step persistence
-a poller depends on (ADR-F004 render-deterministic).
+through ``execute_agent_run``'s ``model`` seam, and a test-local tool
+through ``tools`` (F0-S4 deleted the demo tool — the runner ships no
+capabilities of its own) — the same seams production uses for the real
+matter tools. What's real here: ``build_deep_agent``, the langgraph
+loop, model-initiated tool dispatch, ``astream_events`` mapping, and
+the commit-per-step persistence a poller depends on (ADR-F004
+render-deterministic).
 
 These tests COMMIT (the runner's contract is commit-per-step), so they
 use a plain session factory on the migrated per-run test DB instead of
@@ -26,7 +28,7 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.agents.runner import demo_read_clause, execute_agent_run
+from app.agents.runner import execute_agent_run
 from app.models.agent_run import AgentRun, AgentRunStep
 from app.models.user import User
 from app.security import hash_password
@@ -38,6 +40,16 @@ from tests.agents.fakes import (
 )
 
 pytestmark = pytest.mark.integration
+
+_CLAUSE_TEXT = (
+    "Clause 7.2 (Limitation of Liability): each party's aggregate liability "
+    "is capped at the fees paid in the twelve (12) months preceding the claim."
+)
+
+
+def read_clause(topic: str) -> str:
+    """Return the verbatim text of the contract clause covering ``topic``."""
+    return _CLAUSE_TEXT
 
 
 @pytest_asyncio.fixture
@@ -165,12 +177,12 @@ async def test_run_completes_with_ordered_steps(
     run_id = await make_run()
     model = ScriptedToolCallingModel(
         responses=[
-            tool_call_message("demo_read_clause", {"topic": "liability"}),
+            tool_call_message("read_clause", {"topic": "liability"}),
             final_message("The cap is the fees paid in the twelve months before the claim."),
         ]
     )
 
-    await execute_agent_run(run_id, commit_factory, tools=[demo_read_clause], model=model)
+    await execute_agent_run(run_id, commit_factory, tools=[read_clause], model=model)
 
     run, steps = await _load_run_and_steps(commit_factory, run_id)
     assert run.status == "completed"
@@ -183,14 +195,14 @@ async def test_run_completes_with_ordered_steps(
     assert kinds == ["model_turn", "tool_call", "tool_result", "model_turn"]
 
     # Tool steps carry the tool name; model turns don't.
-    assert steps[1].name == "demo_read_clause"
-    assert steps[2].name == "demo_read_clause"
+    assert steps[1].name == "read_clause"
+    assert steps[2].name == "read_clause"
     assert steps[0].name is None and steps[3].name is None
 
     # Bounded summaries: args on the call, output digest on the result.
     assert "liability" in steps[1].summary
     assert "twelve (12) months" in steps[2].summary
-    assert "demo_read_clause" in steps[0].summary  # "[requested tools: …]"
+    assert "read_clause" in steps[0].summary  # "[requested tools: …]"
     assert all(len(s.summary) <= 2000 for s in steps)
 
 
@@ -201,11 +213,11 @@ async def test_max_steps_cap_marks_cap_exceeded(
     """A model that never stops calling tools is cut off at max_steps."""
     run_id = await make_run(max_steps=4)
     model = ScriptedToolCallingModel(
-        responses=[tool_call_message("demo_read_clause", {"topic": "liability"})],
+        responses=[tool_call_message("read_clause", {"topic": "liability"})],
         loop_last=True,
     )
 
-    await execute_agent_run(run_id, commit_factory, tools=[demo_read_clause], model=model)
+    await execute_agent_run(run_id, commit_factory, tools=[read_clause], model=model)
 
     run, steps = await _load_run_and_steps(commit_factory, run_id)
     assert run.status == "cap_exceeded"
@@ -223,12 +235,12 @@ async def test_finishing_exactly_at_cap_is_completed_not_capped(
     run_id = await make_run(max_steps=4)  # mt, tc, tr, mt(final) = exactly 4
     model = ScriptedToolCallingModel(
         responses=[
-            tool_call_message("demo_read_clause", {"topic": "liability"}),
+            tool_call_message("read_clause", {"topic": "liability"}),
             final_message("Twelve months of fees."),
         ]
     )
 
-    await execute_agent_run(run_id, commit_factory, tools=[demo_read_clause], model=model)
+    await execute_agent_run(run_id, commit_factory, tools=[read_clause], model=model)
 
     run, steps = await _load_run_and_steps(commit_factory, run_id)
     assert run.status == "completed"
@@ -286,7 +298,7 @@ async def test_model_exception_fails_run_without_stack_trace(
     await execute_agent_run(
         run_id,
         commit_factory,
-        tools=[demo_read_clause],
+        tools=[read_clause],
         model=ExplodingModel(message="provider exploded"),
     )
 
@@ -313,12 +325,12 @@ async def test_finalize_survives_poisoned_session_with_fresh_retry(
     factory = _FlakySessionFactory(commit_factory, fail_on_calls={2})
     model = ScriptedToolCallingModel(
         responses=[
-            tool_call_message("demo_read_clause", {"topic": "liability"}),
+            tool_call_message("read_clause", {"topic": "liability"}),
             final_message("Twelve months of fees."),
         ]
     )
 
-    await execute_agent_run(run_id, factory, tools=[demo_read_clause], model=model)
+    await execute_agent_run(run_id, factory, tools=[read_clause], model=model)
 
     run, _steps = await _load_run_and_steps(commit_factory, run_id)
     assert run.status == "completed"
@@ -343,7 +355,7 @@ async def test_finalize_double_failure_logs_and_does_not_raise(
     model = ScriptedToolCallingModel(responses=[final_message("done")])
 
     with caplog.at_level(logging.ERROR, logger="app.agents.runner"):
-        await execute_agent_run(run_id, factory, tools=[demo_read_clause], model=model)
+        await execute_agent_run(run_id, factory, tools=[read_clause], model=model)
 
     run, _steps = await _load_run_and_steps(commit_factory, run_id)
     assert run.status == "running"
@@ -367,20 +379,29 @@ async def test_subagent_final_turn_is_not_the_run_final_answer(
         responses=[
             tool_call_message(
                 "task",
-                {"description": "summarise the clause", "subagent_type": "general-purpose"},
+                {
+                    "description": "summarise the clause",
+                    "subagent_type": "general-purpose",
+                },
             ),
             final_message("SUBAGENT closing turn"),  # consumed by the subagent loop
             final_message("ROOT final answer"),
         ]
     )
 
-    await execute_agent_run(run_id, commit_factory, tools=[demo_read_clause], model=model)
+    await execute_agent_run(run_id, commit_factory, tools=[read_clause], model=model)
 
     run, steps = await _load_run_and_steps(commit_factory, run_id)
     assert run.status == "completed"
     assert run.final_answer == "ROOT final answer"
     kinds = [s.kind for s in steps]
-    assert kinds == ["model_turn", "tool_call", "model_turn", "tool_result", "model_turn"]
+    assert kinds == [
+        "model_turn",
+        "tool_call",
+        "model_turn",
+        "tool_result",
+        "model_turn",
+    ]
     assert steps[1].name == "task"
     # The nested turn IS persisted as visible activity — just not as the answer.
     assert "SUBAGENT closing turn" in steps[2].summary
@@ -401,14 +422,17 @@ async def test_cap_during_subagent_leaves_final_answer_null(
         responses=[
             tool_call_message(
                 "task",
-                {"description": "summarise the clause", "subagent_type": "general-purpose"},
+                {
+                    "description": "summarise the clause",
+                    "subagent_type": "general-purpose",
+                },
             ),
             final_message("SUBAGENT closing turn"),
             final_message("ROOT final answer"),  # never reached — cap hits at step 4
         ]
     )
 
-    await execute_agent_run(run_id, commit_factory, tools=[demo_read_clause], model=model)
+    await execute_agent_run(run_id, commit_factory, tools=[read_clause], model=model)
 
     run, steps = await _load_run_and_steps(commit_factory, run_id)
     assert run.status == "cap_exceeded"
