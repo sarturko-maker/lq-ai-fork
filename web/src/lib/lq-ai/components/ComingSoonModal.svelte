@@ -8,6 +8,7 @@
 
   const TITLE: Record<TabId, string> = {
     home: 'Home',
+    agents: 'Agents',
     chats: 'Chats',
     matters: 'Matters',
     skills: 'Skills',
