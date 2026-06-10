@@ -1293,7 +1293,10 @@ def _correlation_ids(
 # Known values for the ``inference_routing_log.purpose`` column. Values
 # outside this set fall back to ``'chat'`` in :func:`_purpose_from_request`
 # so an arbitrary caller can't pollute the column with free-form strings.
-_KNOWN_PURPOSES = frozenset({"chat", "judge_paraphrase", "embedding"})
+# F0-S2: ``agent_loop`` tags deep-agent loop traffic (the api's agent
+# factory sets lq_ai_purpose on every agent chat call) so cost and
+# usage queries can separate agent runs from interactive chat.
+_KNOWN_PURPOSES = frozenset({"chat", "judge_paraphrase", "embedding", "agent_loop"})
 
 
 def _purpose_from_request(chat_request: ChatCompletionRequest) -> str:

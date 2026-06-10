@@ -158,6 +158,12 @@ class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     model: str = Field(min_length=1)
+    # F0-S2: tool-calling fields, previously riding ``extra="allow"``.
+    # Typed so the OpenAPI contract names them; forwarded verbatim to
+    # OpenAI-compatible providers (Anthropic translation is later S2/S3
+    # work; Ollama forwards them already).
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None
     messages: list[ChatCompletionMessage]
     max_tokens: int | None = Field(default=None, ge=1)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)

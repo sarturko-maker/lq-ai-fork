@@ -64,6 +64,8 @@ tags:
     description: Word add-in unauthenticated handshake surfaces (M3-B8)
   - name: autonomous
     description: Per-user autonomous agent session management — read, halt (M4-A4-i)
+  - name: agent-runs
+    description: Deep-agent run records — kick-off + polled run/steps reads (F0-S2 fork, ADR-F002)
 
 # ============================================================
 # PATHS
@@ -4748,6 +4750,106 @@ paths:
           description: Invalid target (need exactly one of playbook_id/skill_ref)
 
 # ============================================================
+# F0-S2 (fork) — agent-run records (ADR-F002 capability rail)
+# ============================================================
+
+  /api/v1/agents/runs:
+    post:
+      tags: [agent-runs]
+      summary: Kick off a deep-agent run
+      description: |
+        Creates an ``agent_runs`` row at status ``'running'`` and schedules
+        the runner as an in-process background task (playbook-executor
+        pattern; ARQ migration is a later slice). The runner appends
+        ``agent_run_steps`` rows — committed per step — so the run detail
+        endpoint shows live progress; poll it until a terminal status
+        (``completed`` / ``failed`` / ``cancelled`` / ``cap_exceeded``).
+        ``model_alias`` is a gateway alias (never a provider model id);
+        every model call routes through the Inference Gateway tagged
+        ``lq_ai_purpose='agent_loop'``.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRunCreate'
+      responses:
+        '202':
+          description: Run accepted and scheduled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunRead'
+        '401':
+          description: Not authenticated
+        '422':
+          description: Invalid body (empty prompt, max_steps out of [1, 100], …)
+    get:
+      tags: [agent-runs]
+      summary: List the calling user's agent runs (newest first, paginated)
+      description: |
+        Returns the caller's runs ordered by ``started_at DESC``.
+        ``limit`` is clamped to [1, 200]; ``offset`` to [0, ∞).
+        Only the caller's own runs are returned — cross-user isolation
+        is enforced at the query level.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, default: 50, minimum: 1, maximum: 200}
+          description: Maximum number of runs to return (clamped to [1, 200]).
+        - name: offset
+          in: query
+          required: false
+          schema: {type: integer, default: 0, minimum: 0}
+          description: Zero-based index of the first result to return.
+      responses:
+        '200':
+          description: Paginated list of agent runs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunListResponse'
+        '401':
+          description: Not authenticated
+
+  /api/v1/agents/runs/{run_id}:
+    get:
+      tags: [agent-runs]
+      summary: Fetch one agent run with its steps in order
+      description: |
+        Returns the run plus its steps ordered by ``seq`` — the settled
+        state records the capability rail renders (ADR-F004
+        render-deterministic; the UI never parses LLM turns). Step
+        summaries are bounded digests (~2000 chars); tool args/results
+        are truncated server-side before persisting.
+
+        Another user's ``run_id`` returns 404 (not 403) to avoid
+        existence disclosure.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Run detail with ordered steps
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunDetailResponse'
+        '401':
+          description: Not authenticated
+        '404':
+          description: Run not found
+
+# ============================================================
 # COMPONENTS
 # ============================================================
 components:
@@ -5999,6 +6101,94 @@ components:
         notifications:
           type: array
           items: {$ref: '#/components/schemas/AutonomousNotificationRead'}
+        total_count: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1, maximum: 200}
+        offset: {type: integer, minimum: 0}
+
+    # F0-S2 (fork) — agent-run schemas (ADR-F002 capability rail)
+
+    AgentRunCreate:
+      type: object
+      description: |
+        Request body for ``POST /agents/runs``. ``model_alias`` is a
+        gateway alias (``smart``/``fast``/``budget``) — never a provider
+        model id. ``max_steps`` is the interim step cap (full R4/R5/R6
+        brakes are F1 scope).
+      required: [prompt]
+      properties:
+        prompt: {type: string, minLength: 1, maxLength: 32768}
+        model_alias: {type: string, minLength: 1, maxLength: 64, default: smart}
+        max_steps: {type: integer, minimum: 1, maximum: 100, default: 20}
+
+    AgentRunRead:
+      type: object
+      description: |
+        Read-only view of an ``agent_runs`` row. ``cancelled`` is
+        RESERVED for the cancel endpoint (later slice). ``cost_usd``
+        stays null until the F1 cost-cap integration aggregates per-run
+        gateway cost.
+      required:
+        - id
+        - user_id
+        - status
+        - prompt
+        - model_alias
+        - purpose
+        - max_steps
+        - started_at
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        status:
+          type: string
+          enum: [running, completed, failed, cancelled, cap_exceeded]
+        prompt: {type: string}
+        final_answer: {type: string, nullable: true}
+        model_alias: {type: string}
+        purpose: {type: string}
+        max_steps: {type: integer, minimum: 1}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
+        error: {type: string, nullable: true}
+        cost_usd: {type: string, nullable: true}
+
+    AgentRunStepRead:
+      type: object
+      description: |
+        One persisted loop step. ``summary`` is a bounded digest (~2000
+        chars; tool args/results truncated server-side — no raw
+        secrets). ``name`` is the tool name (null for model turns).
+      required: [id, run_id, seq, kind, summary, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        seq: {type: integer, minimum: 1}
+        kind:
+          type: string
+          enum: [model_turn, tool_call, tool_result]
+        name: {type: string, nullable: true}
+        summary: {type: string}
+        created_at: {type: string, format: date-time}
+
+    AgentRunDetailResponse:
+      type: object
+      description: Run detail plus its steps in ``seq`` order (the polled contract).
+      required: [run, steps]
+      properties:
+        run:
+          $ref: '#/components/schemas/AgentRunRead'
+        steps:
+          type: array
+          items: {$ref: '#/components/schemas/AgentRunStepRead'}
+
+    AgentRunListResponse:
+      type: object
+      description: Paginated list of agent runs (newest first).
+      required: [runs, total_count, limit, offset]
+      properties:
+        runs:
+          type: array
+          items: {$ref: '#/components/schemas/AgentRunRead'}
         total_count: {type: integer, minimum: 0}
         limit: {type: integer, minimum: 1, maximum: 200}
         offset: {type: integer, minimum: 0}

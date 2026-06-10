@@ -86,3 +86,65 @@ def test_ollama_adapter_reads_block_content_as_empty() -> None:
     )
     body = _to_ollama_request(request, model="qwen3.5:9b", stream=False)
     assert body["messages"][0]["content"] == ""
+
+
+async def test_streaming_tool_call_deltas_pass_through() -> None:
+    """F0-S2: tool_call chunks in OpenAI SSE deltas survive translation —
+    the agent loop and (later) SSE v2 depend on them arriving intact."""
+    import httpx
+    import respx
+
+    from app.providers.openai import OpenAIAdapter
+
+    sse_body = (
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,'
+        '"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant",'
+        '"tool_calls":[{"index":0,"id":"call_1","type":"function",'
+        '"function":{"name":"read_clause","arguments":""}}]},'
+        '"finish_reason":null}]}\n\n'
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,'
+        '"model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":'
+        '[{"index":0,"function":{"arguments":"{\\"topic\\":\\"liability\\"}"}}]},'
+        '"finish_reason":null}]}\n\n'
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,'
+        '"model":"gpt-4o","choices":[{"index":0,"delta":{},'
+        '"finish_reason":"tool_calls"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    with respx.mock(base_url="https://api.openai.com/v1") as router:
+        router.post("/chat/completions").mock(
+            return_value=httpx.Response(
+                200, text=sse_body, headers={"content-type": "text/event-stream"}
+            )
+        )
+        client = httpx.AsyncClient(base_url="https://api.openai.com/v1")
+        try:
+            adapter = OpenAIAdapter(
+                name="openai-prod",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+                client=client,
+            )
+            request = ChatCompletionRequest.model_validate(
+                {
+                    "model": "gpt-4o",
+                    "messages": [{"role": "user", "content": "cap?"}],
+                    "tools": _TOOLS,
+                    "stream": True,
+                }
+            )
+            chunks = [
+                chunk
+                async for chunk in await adapter.chat_completion(
+                    request, model="gpt-4o", stream=True
+                )
+            ]
+        finally:
+            await client.aclose()
+
+    deltas = [c.choices[0].delta for c in chunks if c.choices]
+    tool_deltas = [d.tool_calls for d in deltas if d.tool_calls]
+    assert tool_deltas, "tool_call deltas were dropped in streaming translation"
+    assert tool_deltas[0][0]["function"]["name"] == "read_clause"
+    finish = [c.choices[0].finish_reason for c in chunks if c.choices]
+    assert "tool_calls" in finish

@@ -15,8 +15,8 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
 - **S2 — gateway tools formalization + agent-run records.** Promote `tools`/`tool_choice` to typed
   request fields; streaming tool-call delta tests; routing-log `purpose='agent_loop'`. New
   `agent_runs` + `agent_run_steps` tables — each loop step persisted as it completes (the UI
-  contract for S3 polling) — with POST/GET run endpoints and interim caps (max steps, wall-clock,
-  per-run cost from the routing log; full `guarded_tool_call` integration lands in F1). Carry-overs
+  contract for S3 polling) — with POST/GET run endpoints and interim caps (max steps + wall-clock
+  shipped; per-run cost caps land with F1 R4, full `guarded_tool_call` integration in F1). Carry-overs
   from the S1 review: factory key exposure (httpx client, not `default_headers`), subagent
   model-bypass guard in `build_deep_agent`, Anthropic `tool_use`/block-content translation,
   anonymization decision for block content.
