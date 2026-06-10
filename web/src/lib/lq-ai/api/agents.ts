@@ -18,6 +18,8 @@ export type AgentRunStepKind = 'model_turn' | 'tool_call' | 'tool_result';
 export interface AgentRun {
 	id: string;
 	user_id: string;
+	/** The Matter this run is bound to; null = blank workspace (F0-S4). */
+	project_id: string | null;
 	status: AgentRunStatus;
 	prompt: string;
 	final_answer: string | null;
@@ -63,6 +65,12 @@ export interface AgentRunCreate {
 	prompt: string;
 	model_alias?: string;
 	max_steps?: number;
+	/**
+	 * Bind the run to a Matter (F0-S4): the agent gets search_documents /
+	 * read_document over the matter's ingested files. Another user's
+	 * project id → 404 server-side, never 403.
+	 */
+	project_id?: string | null;
 }
 
 /** POST /api/v1/agents/runs — 202; the run executes in the background. */

@@ -6,6 +6,10 @@ keeps the Inference Gateway as the only egress (gateway carries the provider
 keys; agents authenticate with the shared gateway key header).
 """
 
-from app.agents.factory import build_deep_agent, build_gateway_chat_model
+from app.agents.factory import (
+    build_deep_agent,
+    build_gateway_chat_model,
+    build_gateway_http_client,
+)
 
-__all__ = ["build_deep_agent", "build_gateway_chat_model"]
+__all__ = ["build_deep_agent", "build_gateway_chat_model", "build_gateway_http_client"]

@@ -1,17 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentRun, AgentRunStep } from '$lib/lq-ai/api/agents';
 import {
+	MATTER_TOOLS,
 	MAX_POLL_FAILURES,
 	POLL_INTERVAL_MS,
 	RAIL_TOOLS,
 	STALE_RUNNING_AFTER_MS,
+	STEP_SUMMARY_LIMIT,
 	isStaleRunning,
 	railItems,
 	railStates,
 	shouldContinuePolling,
 	splitThink,
 	statusBadge,
-	stepDisplay
+	stepDisplay,
+	visibleSteps
 } from '../page-helpers';
 
 const T0 = Date.parse('2026-06-10T12:00:00.000Z');
@@ -20,6 +23,7 @@ function makeRun(overrides: Partial<AgentRun> = {}): AgentRun {
 	return {
 		id: 'run-1',
 		user_id: 'user-1',
+		project_id: null,
 		status: 'running',
 		prompt: 'What is the liability cap?',
 		final_answer: null,
@@ -134,21 +138,21 @@ describe('railStates', () => {
 	});
 
 	it('marks a tool active while its call has no result and the run is working', () => {
-		const steps = [makeStep({ seq: 1, kind: 'tool_call', name: 'demo_read_clause' })];
-		expect(railStates(steps, 'running')['demo_read_clause']).toBe('active');
+		const steps = [makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' })];
+		expect(railStates(steps, 'running')['search_documents']).toBe('active');
 	});
 
 	it('marks a tool lit once its result lands', () => {
 		const steps = [
-			makeStep({ seq: 1, kind: 'tool_call', name: 'demo_read_clause' }),
-			makeStep({ seq: 2, kind: 'tool_result', name: 'demo_read_clause' })
+			makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' }),
+			makeStep({ seq: 2, kind: 'tool_result', name: 'search_documents' })
 		];
-		expect(railStates(steps, 'running')['demo_read_clause']).toBe('lit');
+		expect(railStates(steps, 'running')['search_documents']).toBe('lit');
 	});
 
 	it('never shows active on a settled run, even with an unmatched call', () => {
-		const steps = [makeStep({ seq: 1, kind: 'tool_call', name: 'demo_read_clause' })];
-		expect(railStates(steps, 'failed')['demo_read_clause']).toBe('lit');
+		const steps = [makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' })];
+		expect(railStates(steps, 'failed')['search_documents']).toBe('lit');
 	});
 
 	it('keeps a tool active while one of two overlapping calls is open', () => {
@@ -166,26 +170,39 @@ describe('railStates', () => {
 });
 
 describe('railItems', () => {
-	it('returns the preview tool universe for an empty run', () => {
-		expect(railItems([])).toEqual([...RAIL_TOOLS]);
-		expect(RAIL_TOOLS.map((t) => t.name)).toContain('demo_read_clause');
-		expect(RAIL_TOOLS.map((t) => t.name)).toContain('task');
+	it('returns only the builtins for an unbound run — no demo, no matter tools', () => {
+		const names = railItems([], false).map((t) => t.name);
+		expect(names).toEqual(RAIL_TOOLS.map((t) => t.name));
+		expect(names).not.toContain('demo_read_clause');
+		expect(names).not.toContain('search_documents');
+		expect(names).toContain('task');
+	});
+
+	it('puts the matter document tools first when the run is matter-bound', () => {
+		const names = railItems([], true).map((t) => t.name);
+		expect(names.slice(0, MATTER_TOOLS.length)).toEqual(['search_documents', 'read_document']);
+		expect(names.length).toBe(MATTER_TOOLS.length + RAIL_TOOLS.length);
 	});
 
 	it('appends tools observed in steps that the universe did not predict', () => {
 		const steps = [makeStep({ seq: 1, kind: 'tool_call', name: 'surprise_tool' })];
-		const items = railItems(steps);
+		const items = railItems(steps, false);
 		expect(items.map((t) => t.name)).toContain('surprise_tool');
 		expect(items.length).toBe(RAIL_TOOLS.length + 1);
 	});
 
 	it('does not duplicate known or repeated tools', () => {
 		const steps = [
-			makeStep({ seq: 1, kind: 'tool_call', name: 'demo_read_clause' }),
+			makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' }),
 			makeStep({ seq: 2, kind: 'tool_call', name: 'surprise_tool' }),
 			makeStep({ seq: 3, kind: 'tool_call', name: 'surprise_tool' })
 		];
-		expect(railItems(steps).length).toBe(RAIL_TOOLS.length + 1);
+		expect(railItems(steps, true).length).toBe(MATTER_TOOLS.length + RAIL_TOOLS.length + 1);
+	});
+
+	it('an observed matter tool on an unbound run is still shown (never hide what ran)', () => {
+		const steps = [makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' })];
+		expect(railItems(steps, false).map((t) => t.name)).toContain('search_documents');
 	});
 });
 
@@ -226,22 +243,32 @@ describe('statusBadge', () => {
 });
 
 describe('stepDisplay', () => {
-	it('renders tool calls as monospace with the tool name in the title', () => {
+	it('renders known tool calls with a natural-language title; args stay verbatim', () => {
 		const d = stepDisplay(
-			makeStep({ kind: 'tool_call', name: 'demo_read_clause', summary: '{"topic": "cap"}' })
+			makeStep({ kind: 'tool_call', name: 'search_documents', summary: '{"query": "cap"}' })
 		);
-		expect(d.title).toBe('Tool call — demo_read_clause');
-		expect(d.body).toBe('{"topic": "cap"}');
+		expect(d.title).toBe("Searching the matter's documents…");
+		expect(d.body).toBe('{"query": "cap"}');
 		expect(d.mono).toBe(true);
 		expect(d.thinking).toBeNull();
 	});
 
-	it('renders tool results as monospace', () => {
+	it('falls back to the raw name for unknown tool calls (never hide what ran)', () => {
+		const d = stepDisplay(makeStep({ kind: 'tool_call', name: 'surprise_tool', summary: '{}' }));
+		expect(d.title).toBe('Calling surprise_tool…');
+	});
+
+	it('renders tool results as monospace with the tool label', () => {
 		const d = stepDisplay(
-			makeStep({ kind: 'tool_result', name: 'demo_read_clause', summary: 'Clause 7.2 …' })
+			makeStep({ kind: 'tool_result', name: 'search_documents', summary: 'Top 3 passages…' })
 		);
-		expect(d.title).toBe('Result — demo_read_clause');
+		expect(d.title).toBe('Search documents — result');
 		expect(d.mono).toBe(true);
+	});
+
+	it('uses the raw name for unknown tool results', () => {
+		const d = stepDisplay(makeStep({ kind: 'tool_result', name: 'surprise_tool', summary: 'x' }));
+		expect(d.title).toBe('surprise_tool — result');
 	});
 
 	it('splits reasoning out of model turns', () => {
@@ -258,5 +285,50 @@ describe('stepDisplay', () => {
 		const d = stepDisplay(makeStep({ kind: 'model_turn', summary: null }));
 		expect(d.body).toBe('');
 		expect(d.thinking).toBeNull();
+	});
+});
+
+describe('visibleSteps', () => {
+	const answer = 'The cap is twelve months of fees.';
+	const closing = (summary: string) => makeStep({ seq: 4, kind: 'model_turn', summary });
+	const earlier = [
+		makeStep({ seq: 1, kind: 'model_turn', summary: '[requested tools: search_documents]' }),
+		makeStep({ seq: 2, kind: 'tool_call', name: 'search_documents', summary: '{"query":"cap"}' }),
+		makeStep({ seq: 3, kind: 'tool_result', name: 'search_documents', summary: 'passages' })
+	];
+
+	it('drops the closing model turn when it duplicates the final answer', () => {
+		const steps = [...earlier, closing(answer)];
+		const run = makeRun({ status: 'completed', final_answer: answer });
+		expect(visibleSteps(steps, run).map((s) => s.seq)).toEqual([1, 2, 3]);
+	});
+
+	it('drops the bounded closing turn of a long final answer', () => {
+		const long = 'a'.repeat(STEP_SUMMARY_LIMIT + 500);
+		const bounded = long.slice(0, STEP_SUMMARY_LIMIT - 1) + '…';
+		const steps = [...earlier, closing(bounded)];
+		const run = makeRun({ status: 'completed', final_answer: long });
+		expect(visibleSteps(steps, run)).toHaveLength(3);
+	});
+
+	it('keeps a closing turn that differs from the final answer', () => {
+		const steps = [...earlier, closing('something else entirely')];
+		const run = makeRun({ status: 'completed', final_answer: answer });
+		expect(visibleSteps(steps, run)).toHaveLength(4);
+	});
+
+	it('keeps everything when the run is not completed or has no answer', () => {
+		const steps = [...earlier, closing(answer)];
+		expect(visibleSteps(steps, makeRun({ status: 'running' }))).toHaveLength(4);
+		expect(visibleSteps(steps, makeRun({ status: 'completed', final_answer: null }))).toHaveLength(
+			4
+		);
+		expect(visibleSteps(steps, null)).toHaveLength(4);
+	});
+
+	it('never drops a non-model-turn tail', () => {
+		const steps = [...earlier];
+		const run = makeRun({ status: 'completed', final_answer: 'passages' });
+		expect(visibleSteps(steps, run)).toHaveLength(3);
 	});
 });

@@ -30,6 +30,7 @@ from app.api import agent_runs as agent_runs_module
 from app.db.session import get_db
 from app.main import app
 from app.models.agent_run import AgentRun, AgentRunStep
+from app.models.project import Project
 from app.models.user import User
 from app.security import create_access_token, hash_password
 
@@ -106,6 +107,18 @@ async def _make_run(
 
 async def _noop_background(**_kwargs: Any) -> None:
     """Replaces ``_run_in_background`` so endpoint tests don't run the agent."""
+
+
+async def _make_project(db: AsyncSession, *, owner: User, archived: bool = False) -> Project:
+    project = Project(
+        owner_id=owner.id,
+        name=f"Matter {uuid.uuid4().hex[:6]}",
+        slug=f"matter-{uuid.uuid4().hex[:6]}",
+        archived_at=datetime.now(UTC) if archived else None,
+    )
+    db.add(project)
+    await db.flush()
+    return project
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +249,102 @@ async def test_create_run_cap_ignores_terminal_runs(
         )
 
     assert resp.status_code == 202, resp.text
+
+
+# ---------------------------------------------------------------------------
+# POST /agents/runs — matter binding (F0-S4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_create_run_binds_owned_active_project(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+) -> None:
+    """An owned, active matter binds: 202 with project_id persisted."""
+    project = await _make_project(db_session, owner=user_a)
+
+    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "What is the liability cap?", "project_id": str(project.id)},
+        )
+
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["project_id"] == str(project.id)
+    row = (
+        await db_session.execute(select(AgentRun).where(AgentRun.id == uuid.UUID(body["id"])))
+    ).scalar_one()
+    assert row.project_id == project.id
+
+
+@pytest.mark.integration
+async def test_create_run_without_project_id_is_unbound(
+    client: AsyncClient,
+    user_a: User,
+) -> None:
+    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "blank workspace"},
+        )
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["project_id"] is None
+
+
+@pytest.mark.integration
+async def test_create_run_cross_user_project_returns_404(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+    user_b: User,
+) -> None:
+    """Another user's matter id is 404 — never 403 (no existence leak)."""
+    project = await _make_project(db_session, owner=user_a)
+
+    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_b),
+            json={"prompt": "not my matter", "project_id": str(project.id)},
+        )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "project not found"
+
+
+@pytest.mark.integration
+async def test_create_run_archived_project_returns_404(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+) -> None:
+    project = await _make_project(db_session, owner=user_a, archived=True)
+
+    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "archived matter", "project_id": str(project.id)},
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_create_run_unknown_project_returns_404(
+    client: AsyncClient,
+    user_a: User,
+) -> None:
+    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "ghost matter", "project_id": str(uuid.uuid4())},
+        )
+    assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

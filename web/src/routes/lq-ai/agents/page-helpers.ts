@@ -81,14 +81,26 @@ export interface RailTool {
 }
 
 /**
- * The F0-S3 preview agent's tool universe: the one capability the API
- * injects (api/app/api/agent_runs.py) plus the deepagents 0.6.8 builtins.
- * Hardcoded this slice; F1 serves it from the practice-area config
+ * The matter document tools (F0-S4): injected by the API only when the
+ * run is bound to a Matter, so the rail shows them only then — the rail
+ * is the honest model-visible universe, never an aspiration.
+ */
+export const MATTER_TOOLS: readonly RailTool[] = [
+	{
+		name: 'search_documents',
+		label: 'Search documents',
+		hint: "Full-text search over the matter's documents"
+	},
+	{ name: 'read_document', label: 'Read document', hint: "One matter document's full text" }
+];
+
+/**
+ * The deepagents 0.6.8 builtins — always model-visible. Hardcoded this
+ * slice; F1 serves the universe from the practice-area config
  * (ADR-F002). Listing everything the model can call — including the
  * disabled shell — is deliberate (CLAUDE.md: transparency is load-bearing).
  */
 export const RAIL_TOOLS: readonly RailTool[] = [
-	{ name: 'demo_read_clause', label: 'Read clause', hint: 'Fetch contract clause text (preview capability)' },
 	{ name: 'write_todos', label: 'Plan', hint: 'Keep a working plan of subtasks' },
 	{ name: 'task', label: 'Subagents', hint: 'Fan work out to a subagent' },
 	{ name: 'ls', label: 'List files', hint: 'Agent workspace' },
@@ -101,18 +113,20 @@ export const RAIL_TOOLS: readonly RailTool[] = [
 ];
 
 /**
- * Rail items for a run: the known universe plus any tool name observed in
- * the steps that we did not predict — never hide what actually ran.
+ * Rail items for a run: the known universe (matter tools first when the
+ * run is matter-bound) plus any tool name observed in the steps that we
+ * did not predict — never hide what actually ran.
  */
-export function railItems(steps: AgentRunStep[]): RailTool[] {
-	const known = new Set(RAIL_TOOLS.map((t) => t.name));
+export function railItems(steps: AgentRunStep[], matterBound: boolean): RailTool[] {
+	const base = matterBound ? [...MATTER_TOOLS, ...RAIL_TOOLS] : [...RAIL_TOOLS];
+	const known = new Set(base.map((t) => t.name));
 	const extras: RailTool[] = [];
 	for (const step of steps) {
 		if (step.kind !== 'tool_call' || !step.name || known.has(step.name)) continue;
 		known.add(step.name);
 		extras.push({ name: step.name, label: step.name, hint: 'Tool observed in this run' });
 	}
-	return [...RAIL_TOOLS, ...extras];
+	return [...base, ...extras];
 }
 
 /** dim = never used · active = call in flight (run still working) · lit = used. */
@@ -179,13 +193,81 @@ export interface StepDisplay {
 	mono: boolean;
 }
 
+/**
+ * Natural-language tool-call titles (maintainer feedback on live S3:
+ * "tool calls should use natural language"). UI phrasing only — the raw
+ * tool name stays in the step row's `name` and the args in `summary`,
+ * shown verbatim in the mono body; the record stays honest.
+ */
+const TOOL_CALL_TITLES: Record<string, string> = {
+	search_documents: "Searching the matter's documents…",
+	read_document: 'Reading a matter document…',
+	write_todos: 'Updating the plan…',
+	task: 'Delegating to a subagent…',
+	ls: 'Listing workspace files…',
+	read_file: 'Reading a workspace file…',
+	write_file: 'Writing a workspace file…',
+	edit_file: 'Editing a workspace file…',
+	glob: 'Finding workspace files…',
+	grep: 'Searching workspace files…',
+	execute: 'Running a shell command…'
+};
+
+function toolLabel(name: string): string {
+	const known = [...MATTER_TOOLS, ...RAIL_TOOLS].find((t) => t.name === name);
+	return known?.label ?? name;
+}
+
 export function stepDisplay(step: AgentRunStep): StepDisplay {
 	if (step.kind === 'tool_call') {
-		return { title: `Tool call — ${step.name ?? 'unknown'}`, body: step.summary ?? '', thinking: null, mono: true };
+		const name = step.name ?? 'unknown';
+		return {
+			title: TOOL_CALL_TITLES[name] ?? `Calling ${name}…`,
+			body: step.summary ?? '',
+			thinking: null,
+			mono: true
+		};
 	}
 	if (step.kind === 'tool_result') {
-		return { title: `Result — ${step.name ?? 'unknown'}`, body: step.summary ?? '', thinking: null, mono: true };
+		const name = step.name ?? 'unknown';
+		return {
+			title: `${toolLabel(name)} — result`,
+			body: step.summary ?? '',
+			thinking: null,
+			mono: true
+		};
 	}
 	const { thinking, visible } = splitThink(step.summary);
 	return { title: 'Model turn', body: visible, thinking, mono: false };
+}
+
+/**
+ * Mirror of the runner's step-summary bound (`_SUMMARY_LIMIT` in
+ * api/app/agents/runner.py) — needed to recognise the closing model
+ * turn, whose summary is the BOUNDED final answer.
+ */
+export const STEP_SUMMARY_LIMIT = 2000;
+
+function boundedLikeServer(text: string): string {
+	if (text.length <= STEP_SUMMARY_LIMIT) return text;
+	return text.slice(0, STEP_SUMMARY_LIMIT - 1) + '…';
+}
+
+/**
+ * Steps to render: drops the closing model turn when it duplicates the
+ * final answer (maintainer feedback on live S3 — the same text rendered
+ * twice). UI-only de-dup; the API record keeps every step. The closing
+ * turn's summary is exactly the server-bounded final answer, so the
+ * comparison is exact, not fuzzy — anything else (e.g. a turn that
+ * differs from the answer) still renders.
+ */
+export function visibleSteps(
+	steps: AgentRunStep[],
+	run: Pick<AgentRun, 'status' | 'final_answer'> | null
+): AgentRunStep[] {
+	if (!run || run.status !== 'completed' || !run.final_answer) return steps;
+	const last = steps[steps.length - 1];
+	if (!last || last.kind !== 'model_turn' || last.summary === null) return steps;
+	if (last.summary === boundedLikeServer(run.final_answer)) return steps.slice(0, -1);
+	return steps;
 }

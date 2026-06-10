@@ -2,9 +2,10 @@
   import { onDestroy, onMount } from 'svelte';
   import DOMPurify from 'dompurify';
   import { marked } from 'marked';
-  import { agentsApi } from '$lib/lq-ai/api';
+  import { agentsApi, projectsApi } from '$lib/lq-ai/api';
   import { LQAIApiError } from '$lib/lq-ai/api/client';
   import type { AgentRun, AgentRunStep } from '$lib/lq-ai/api/agents';
+  import type { Project } from '$lib/lq-ai/types';
   import {
     MAX_POLL_FAILURES,
     POLL_INTERVAL_MS,
@@ -14,7 +15,8 @@
     shouldContinuePolling,
     splitThink,
     statusBadge,
-    stepDisplay
+    stepDisplay,
+    visibleSteps
   } from './page-helpers';
 
   // Model output is untrusted input (CLAUDE.md): forbid media so a poisoned
@@ -27,6 +29,26 @@
   let prompt = '';
   let submitting = false;
   let submitError: string | null = null;
+
+  // F0-S4: bind the run to a Matter so the agent gets the matter's
+  // document tools. '' = blank workspace (no binding).
+  let matters: Project[] = [];
+  let selectedMatterId = '';
+  let mattersError: string | null = null;
+
+  async function loadMatters() {
+    try {
+      matters = await projectsApi.listProjects(); // active, non-sandbox
+      mattersError = null;
+    } catch (e) {
+      mattersError = e instanceof Error ? e.message : 'Failed to load matters';
+    }
+  }
+
+  function matterName(projectId: string | null): string | null {
+    if (!projectId) return null;
+    return matters.find((m) => m.id === projectId)?.name ?? 'Matter';
+  }
 
   let run: AgentRun | null = null;
   let steps: AgentRunStep[] = [];
@@ -60,6 +82,7 @@
 
   onMount(() => {
     loadRuns();
+    loadMatters();
     // Keep idle badges honest: a 'running' row must visually flip to Stale
     // even when nothing is being polled.
     nowTimer = setInterval(() => {
@@ -134,7 +157,10 @@
     submitting = true;
     submitError = null;
     try {
-      const created = await agentsApi.createRun({ prompt: text });
+      const created = await agentsApi.createRun({
+        prompt: text,
+        project_id: selectedMatterId || undefined
+      });
       prompt = '';
       run = created;
       steps = [];
@@ -161,7 +187,12 @@
   $: stale = run ? isStaleRunning(run, nowMs) : false;
   // A stale run's dangling tool calls must not pulse forever — render settled.
   $: rail = railStates(steps, stale ? 'failed' : (run?.status ?? null));
-  $: tools = railItems(steps);
+  // The rail is the honest model-visible universe: matter tools appear
+  // only when the shown run is matter-bound (or, pre-run, when a matter
+  // is selected in the composer).
+  $: matterBound = run ? run.project_id !== null : selectedMatterId !== '';
+  $: tools = railItems(steps, matterBound);
+  $: displaySteps = visibleSteps(steps, run);
   $: answer = splitThink(run?.final_answer);
   $: answerHtml = answer.visible
     ? DOMPurify.sanitize(marked.parse(answer.visible, { async: false }) as string, SANITIZE_OPTS)
@@ -185,11 +216,28 @@
           <span class="ag-chip">preview</span>
         </div>
         <p class="lq-text-body-sm ag-area-card__copy">
-          Contract questions against a demo clause library. One hardcoded practice area this
-          preview; configurable areas land in F1.
+          Bind a matter to ground answers in its documents — the agent searches and reads them
+          itself. One hardcoded practice area this preview; configurable areas land in F1.
         </p>
 
         <form class="ag-composer" data-testid="lq-ai-agents-composer" on:submit|preventDefault={submit}>
+          <div class="ag-matter">
+            <label class="lq-text-label" for="ag-matter">Matter</label>
+            <select
+              id="ag-matter"
+              data-testid="lq-ai-agents-matter-select"
+              bind:value={selectedMatterId}
+              disabled={submitting}
+            >
+              <option value="">No matter — blank workspace</option>
+              {#each matters as m (m.id)}
+                <option value={m.id}>{m.name}</option>
+              {/each}
+            </select>
+            {#if mattersError}
+              <p class="lq-text-caption ag-error">Couldn't load matters: {mattersError}</p>
+            {/if}
+          </div>
           <label class="lq-text-label" for="ag-prompt">Ask the Commercial agent</label>
           <textarea
             id="ag-prompt"
@@ -212,7 +260,14 @@
       {#if run}
         <section class="ag-run" data-testid="lq-ai-agents-run">
           <header class="ag-run__head">
-            <p class="lq-text-body ag-run__prompt">{run.prompt}</p>
+            <p class="lq-text-body ag-run__prompt">
+              {#if matterName(run.project_id)}
+                <span class="ag-chip" data-testid="lq-ai-agents-run-matter">
+                  {matterName(run.project_id)}
+                </span>
+              {/if}
+              {run.prompt}
+            </p>
             {#if badge}
               <span class="ag-badge ag-badge--{badge.tone}" role="status" aria-live="polite">
                 {badge.label}
@@ -233,9 +288,9 @@
             </p>
           {/if}
 
-          {#if steps.length > 0}
+          {#if displaySteps.length > 0}
             <ol class="ag-steps">
-              {#each steps as step (step.id)}
+              {#each displaySteps as step (step.id)}
                 {@const d = stepDisplay(step)}
                 <li class="ag-step ag-step--{step.kind}">
                   <span class="ag-step__title lq-text-label">{d.title}</span>
@@ -420,6 +475,26 @@
   }
 
   .ag-composer textarea:focus-visible {
+    outline: 2px solid var(--lq-accent);
+    outline-offset: 1px;
+  }
+
+  .ag-matter {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-1);
+  }
+
+  .ag-matter select {
+    width: 100%;
+    border: 1px solid var(--lq-border);
+    border-radius: var(--lq-radius);
+    padding: var(--lq-space-1) var(--lq-space-2);
+    font: inherit;
+    background: var(--lq-inset);
+  }
+
+  .ag-matter select:focus-visible {
     outline: 2px solid var(--lq-accent);
     outline-offset: 1px;
   }
