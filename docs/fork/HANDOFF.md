@@ -31,21 +31,45 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 - Adversarial review (32-agent workflow): 23 confirmed findings fixed in-branch (1 blocker — this
   file; the rest should-fix/nit), 5 refuted; record on PR #27.
 
-## Next slice: F0-S4 — multi-turn chat + checkpointer
+## Maintainer feedback on live S3 (2026-06-10) — drove the F0 re-sequence
 
-Per MILESTONES F0-S4:
-- Agent runs become conversations: send prior turns (today `api/app/api/chats.py:1370` is
-  single-turn and `execute_agent_run` takes one prompt); wire `langgraph-checkpoint-postgres`
-  (pinned, unused — first consumer) so a deep agent resumes a thread across requests.
-- Decide: extend `agent_runs` with a thread/conversation id vs bind to existing `chats` — read
-  ADR-F002/F003 first; the Agents tab UI then gains a follow-up composer on a settled run.
-- Carry-over due this slice: finish factory key exposure fix (move gateway key fully out of
-  `default_headers` — repr/LangSmith leak surface; `http_async_client` seam already exists).
+(1) Agents tab auto-lands in Commercial → area picker, F1. (2) No new chat → S5 multi-turn.
+(3) No file attach → S4 binds runs to a Matter's documents; composer upload is Backlog.
+(4) **No demo tools — tools must be real** (the model itself refused `demo_read_clause` as
+self-described canned text; the run honestly answered "no contract attached"). Also: timeline
+shows raw JSON args and the closing model turn duplicates the final answer — polish in S4.
+(5) "The entire system looks really basic" → UI-stack research → ADR-F006 at F0→F1 boundary.
+(6) Stream chats + reasoning, UX like Claude Code → S7 SSE v2 (after the S6 shell shed).
+Round 2 (same day): (7) LEFT panel = practice areas → create/pick a Matter (F1 layout).
+(8) RIGHT panel = Skills / Playbooks / legal Tools (tabular review, Word redlining), utility tools
+collapsed; + a Claude.ai-style **Memory manager** (matter + practice-area memory) — F1/F2.
+(9) UI research must benchmark visually against top legal-AI platforms (Harvey, Legora…) and
+Claude.ai/Gemini — both research workflows completed same day; findings + decision in
+docs/adr/F006-ui-stack-and-design-system.md (proposed). Notable: Harvey's Matter OS pivot and
+Legora's aOS independently validate the fork's matter-centric deep-agent thesis; NO vendor has
+shipped a user-editable memory manager (Harvey co-building since Jan 2026) — F2's is differentiating.
+
+## Next slice: F0-S4 — real tools on real documents (kill the demo)
+
+Per re-sequenced MILESTONES F0-S4:
+- Optional Matter binding on POST `/agents/runs` (`project_id`); the run's agent gets
+  `search_documents`/`read_document` over that matter's ingested documents (upstream KB/ingest
+  substrate — find the existing retrieval path in `api/app/`); `demo_read_clause` DELETED.
+- Matter privilege/tier floors respected; wrap these two tools in the minimal `guarded_tool_call`
+  pattern (pulled forward from F1 — security-correct order; seam comment in `runner.py`).
+- UI: matter dropdown in the composer (existing matters), natural-language step titles, suppress
+  the duplicate closing model turn; rail entries for the two real tools.
+- Carry-over due this slice: finish factory key exposure fix (gateway key out of
+  `default_headers`; `http_async_client` seam exists).
+- Sequence after this slice: S5 multi-turn + checkpointer → S6 shell shed (extract lq-ai to a
+  standalone SvelteKit app) → S7 SSE v2 (AI SDK stream spec) → S8 eval gate — per **ADR-F006
+  (proposed — read it; maintainer must accept before S6/S7 build)**, which also fixes the design
+  system (shadcn-svelte, semantic tokens) and records the research behind it.
 
 ## Pick up exactly here
 
-1. Read CLAUDE.md → this file → MILESTONES F0 → ADR-F003. 2. Merge PR #27 if still open.
-3. Branch `fork/f0-s4-multi-turn` from main. 4. Smoke the stack:
+1. Read CLAUDE.md → this file → MILESTONES F0 → ADR-F002/F004. 2. Merge PR #27 if still open.
+3. Branch `fork/f0-s4-real-tools` from main. 4. Smoke the stack:
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login -H "Content-Type: application/json" \

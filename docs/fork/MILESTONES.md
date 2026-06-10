@@ -25,11 +25,29 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
   complete (polling the run record — no SSE needed), tool calls + final answer rendered.
   Render-deterministic: the UI reads settled run records, never the stream. (Artifact download
   deferred — runs expose no artifact surface yet; see Backlog.)
-- **S4 — multi-turn chat.** Send conversation history (replaces the single-turn request in
-  `chats.py`); wire the Postgres checkpointer (first consumer of langgraph-checkpoint-postgres).
-- **S5 — SSE v2.** Tool-call / subagent / plan / progress frame types end-to-end; upgrades the S3
-  polled rail to live streaming.
-- **S6 — eval gate (ADR-F004).** Tool-call and subagent uptake at N≥20 on MiniMax-M3 plus one
+(S4+ re-sequenced 2026-06-10 after maintainer feedback on live S3: real tools before anything else —
+"no point in testing demos"; the model itself refused the demo tool as self-described canned text.)
+
+- **S4 — real tools on real documents (kill the demo).** Bind a run to a Matter (optional dropdown;
+  none = blank workspace). Replace `demo_read_clause` with `search_documents`/`read_document` over
+  the matter's ingested documents (upstream ingest + KB substrate; matter privilege/tier floors
+  respected — pulls the minimal `guarded_tool_call` wrapper forward from F1 for these two tools).
+  Timeline polish from feedback: natural-language step titles ("Searching the matter's documents…",
+  not raw JSON-only), suppress the closing model turn that duplicates the final answer.
+- **S5 — multi-turn + new chat.** Conversations on the Postgres checkpointer (first consumer);
+  follow-up composer on a settled run; "New chat" within the area; chat list on the area page.
+  Replaces the single-turn request pattern (`chats.py:1370` stays legacy).
+- **S6 — the shell shed (ADR-F006, pending acceptance).** Extract the lq-ai code (zero
+  husk-imports, audited) into a standalone lean SvelteKit app; kill the OpenWebUI husk, its Python
+  backend container, and the §4 branding obligation. Includes the per-file provenance pass over
+  lq-ai `.svelte` components and the `app.html` theme-script rewrite. Verification: screenshot
+  diff + the f0-s3 Cypress spec green on the new shell.
+- **S7 — SSE v2: stream like Claude Code (ADR-F006 wire spec).** Emit the AI SDK UI Message Stream
+  v1 from FastAPI (hand-rolled emitter; `data-*` parts for subagent/interrupt/plan/receipt carrying
+  settled step-row ids — ADR-F004 intact). Reasoning deltas as a collapsed-by-default thinking
+  ribbon with shimmer status (the cross-product convention); tool/plan frames live; upgrades the S3
+  polled rail.
+- **S8 — eval gate (ADR-F004).** Tool-call and subagent uptake at N≥20 on MiniMax-M3 plus one
   second model family (masked judge, pre-flight variance gate); subagent dispatch as task-scoped
   procedures, not open-ended delegation.
 
@@ -37,6 +55,12 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
 
 Outcome: one configurable practice area (suggest: Commercial) with one Deep Agent and one unit-of-work
 type ("Matter") usable for a real task (e.g. NDA review), with visible agent work in the UI.
+
+- **Design system build-out (ADR-F006)** alongside the area home: shadcn-svelte + bits-ui +
+  paneforge + Tailwind v4; semantic intent tokens (the Harvey pattern), light+dark, denser
+  work-tool spacing; bespoke agent components (reasoning ribbon, plan/task/tool cards, subagent
+  tree) with AI Elements / deep-agents-ui as semantic references. Benchmark bar: Harvey/Legora
+  workspaces, Claude.ai thinking UX.
 
 - `practice_areas` schema + config/admin API (name, unit-of-work label, area profile, bound
   skills/playbooks/MCPs, default tier floor); `projects.practice_area_id` (nullable — legacy Matters
@@ -46,8 +70,15 @@ type ("Matter") usable for a real task (e.g. NDA review), with visible agent wor
   user-added areas can host units of work from day one (ADR-F004).
 - Tool parameters classified A/B/C; matter/user/scope identifiers are B-class — runtime-injected,
   never LLM-visible (ADR-F004). Capability rail renders from settled state records, not the stream.
-- **Agents tab = practice-area home**: area page with unit-of-work list, agent config, area memory,
-  conversation surface. Conversations bind to (practice area, Matter) — no free-floating agent chat.
+- **Agents tab = practice-area home** (maintainer layout, 2026-06-10): **LEFT panel = practice
+  areas** — click an area to create a Matter or pick an existing one (S3's auto-landing in
+  Commercial was flagged); CENTER = the conversation. Conversations bind to (practice area,
+  Matter) — no free-floating agent chat.
+- **RIGHT panel restructure** (replaces S3's flat "Capabilities" list): three sections — **Skills**
+  (existing LQ.AI skills bound to the area), **Playbooks** (existing LQ.AI playbooks), **Tools**
+  (real legal capabilities: tabular review, Word redlining as they hook up); utility/workspace
+  tools (file search, workspace ops) collapsed behind an expandable section. Dim → lit semantics
+  carry over per section.
 - Deep Agent per area via `create_deep_agent`: area system prompt, area-scoped skills, subagent
   fan-out; every tool dispatch through `guarded_tool_call` (R4/R5/R6 + audit preserved).
 - **Glass-cockpit UX v1**: one message box (no model/skill pickers); capability rail — area's skills,
@@ -75,6 +106,9 @@ compact, accumulate into Matter digests, and are searchable; agents propose, use
   tier-compliant embedding provider).
 - Wire kept user memory into prompts (today `load_kept_memory()` is uncalled); gentle memory UX —
   inline "keep / undo" + weekly batch review, never per-item nagging.
+- **Memory manager in the right panel** (maintainer, 2026-06-10 — Claude.ai-style): click Memory →
+  view/edit/delete matter memory and practice-area memory entries in place. "System proposes, user
+  owns" (ADR-0013 D4) becomes a first-class UI surface, not just an API.
 - Runtime isolation acceptance tests, not design verification (ADR-F004): a fact told in Matter A
   must not surface in Matter B; practice-area memory must not leak across areas; per-level
   read/write policy exercised end-to-end against the live stack.
@@ -108,3 +142,5 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 - Run artifact surface: expose the deepagents workspace files a run produced (S3 deferral).
 - MessageBubble (upstream surface) shares the default-DOMPurify image-beacon exfil gap fixed on the
   Agents tab — harden when next touched (CLAUDE.md: model output is untrusted).
+- File upload directly in the agent composer (S4 binds to existing matter documents first; drag-drop
+  into the conversation is the follow-up).
