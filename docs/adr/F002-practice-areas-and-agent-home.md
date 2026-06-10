@@ -1,6 +1,6 @@
 # F002 — Practice areas as backend entities; the Agents tab as practice-area home
 
-Status: proposed
+Status: accepted (2026-06-10, maintainer agreement in session)
 Date: 2026-06-10
 
 ## Context and problem statement
