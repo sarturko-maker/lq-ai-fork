@@ -4,9 +4,11 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (2026-06-10, end of F0-S3)
 
-- F0-S1 merged (#24), governance (#25), F0-S2 merged (#26). F0-S3 on branch
-  `fork/f0-s3-agents-tab` → PR #27 (merge it first if still open, gate per ADR-F005).
-- ADR-F001..F005 accepted. Merges follow ADR-F005's 5-part gate — no exceptions.
+- All merged to main: F0-S1 #24, governance #25, F0-S2 #26, **F0-S3 #27 (first visible agent —
+  Agents tab live)**, ADR-F006 docs #28, F006 acceptance PR.
+- **ADR-F001..F006 accepted** (F006 accepted by the maintainer 2026-06-10 — it governs the S6
+  shell shed and the S7 wire spec; read it before building either). Merges follow ADR-F005's
+  5-part gate — no exceptions.
 - Dev stack: 8 services healthy; `web` rebuilt from F0-S3 code; DB at migration 0048. Gateway
   aliases `smart`/`fast`/`budget` → `minimax/MiniMax-M3` (tier 4); key in `.env`.
 - App login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
@@ -63,13 +65,13 @@ Per re-sequenced MILESTONES F0-S4:
   `default_headers`; `http_async_client` seam exists).
 - Sequence after this slice: S5 multi-turn + checkpointer → S6 shell shed (extract lq-ai to a
   standalone SvelteKit app) → S7 SSE v2 (AI SDK stream spec) → S8 eval gate — per **ADR-F006
-  (proposed — read it; maintainer must accept before S6/S7 build)**, which also fixes the design
-  system (shadcn-svelte, semantic tokens) and records the research behind it.
+  (ACCEPTED 2026-06-10)**, which also fixes the design system (shadcn-svelte, semantic tokens)
+  and records the research behind it.
 
 ## Pick up exactly here
 
-1. Read CLAUDE.md → this file → MILESTONES F0 → ADR-F002/F004. 2. Merge PR #27 if still open.
-3. Branch `fork/f0-s4-real-tools` from main. 4. Smoke the stack:
+1. Read CLAUDE.md → this file → MILESTONES F0 → ADR-F006 + F002/F004 (nothing is left unmerged).
+2. Branch `fork/f0-s4-real-tools` from main. 3. Smoke the stack:
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login -H "Content-Type: application/json" \
