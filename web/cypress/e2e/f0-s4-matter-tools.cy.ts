@@ -16,6 +16,12 @@
  *   cd web && npx cypress run --spec 'cypress/e2e/f0-s4-matter-tools.cy.ts' \
  *     --config video=false
  *
+ * On a memory-constrained box even videoless Electron can trigger the
+ * Postgres crash window mid-ingest. PRE-SEED the matter before Cypress
+ * runs (upload + wait for ingestion with the browser closed), then:
+ *   CYPRESS_LQ_AI_MATTER_NAME="<matter name>" npx cypress run ...
+ * — the spec skips its own seeding and only drives the UI.
+ *
  * Spec name MUST stay `f0-s4-*` (fork pattern in cypress/support/e2e.ts —
  * any other name bootstraps an OpenWebUI user that breaks /lq-ai/*).
  */
@@ -60,42 +66,50 @@ function waitForIngestion(token: string, fileId: string, attempt = 0): void {
 
 describe('F0-S4 — matter-bound deep agent uses real document tools', () => {
 	it('seeds a matter, binds the run, and watches search_documents ground the answer', () => {
-		const matterName = `S4 Acme MSA ${Date.now()}`;
+		// Pre-seeded mode (constrained boxes — see header): the matter with
+		// the ingested fixture already exists; skip seeding entirely.
+		const preSeeded = Cypress.env('LQ_AI_MATTER_NAME') as string | undefined;
+		const matterName = preSeeded ?? `S4 Acme MSA ${Date.now()}`;
 
 		// ---- Seed through the API (curl: multipart upload stays binary-safe).
-		cy.exec(
-			`curl -s -X POST ${API}/auth/login -H 'Content-Type: application/json' ` +
-				`-d '{"email":"${EMAIL}","password":"${PASSWORD}"}'`,
-			{ log: false }
-		).then((login) => {
-			const token = JSON.parse(login.stdout).access_token as string;
-			expect(token, 'login token').to.be.a('string').and.not.be.empty;
-
+		if (!preSeeded) {
 			cy.exec(
-				`curl -s -X POST ${API}/projects -H 'Authorization: Bearer ${token}' ` +
-					`-H 'Content-Type: application/json' -d '{"name":"${matterName}"}'`,
+				`curl -s -X POST ${API}/auth/login -H 'Content-Type: application/json' ` +
+					`-d '{"email":"${EMAIL}","password":"${PASSWORD}"}'`,
 				{ log: false }
-			).then((created) => {
-				const project = JSON.parse(created.stdout);
-				expect(project.id, 'project id').to.be.a('string');
+			).then((login) => {
+				const token = JSON.parse(login.stdout).access_token as string;
+				expect(token, 'login token').to.be.a('string').and.not.be.empty;
 
-				// Upload + attach in one call (files API project_id form field).
 				cy.exec(
-					`curl -s -X POST ${API}/files -H 'Authorization: Bearer ${token}' ` +
-						`-F 'file=@cypress/fixtures/f0-s4-msa.pdf;type=application/pdf' ` +
-						`-F 'project_id=${project.id}'`,
+					`curl -s -X POST ${API}/projects -H 'Authorization: Bearer ${token}' ` +
+						`-H 'Content-Type: application/json' -d '{"name":"${matterName}"}'`,
 					{ log: false }
-				).then((uploaded) => {
-					const file = JSON.parse(uploaded.stdout);
-					expect(file.id, 'file id').to.be.a('string');
-					waitForIngestion(token, file.id);
+				).then((created) => {
+					const project = JSON.parse(created.stdout);
+					expect(project.id, 'project id').to.be.a('string');
+
+					// Upload + attach in one call (files API project_id form field).
+					cy.exec(
+						`curl -s -X POST ${API}/files -H 'Authorization: Bearer ${token}' ` +
+							`-F 'file=@cypress/fixtures/f0-s4-msa.pdf;type=application/pdf' ` +
+							`-F 'project_id=${project.id}'`,
+						{ log: false }
+					).then((uploaded) => {
+						const file = JSON.parse(uploaded.stdout);
+						expect(file.id, 'file id').to.be.a('string');
+						waitForIngestion(token, file.id);
+					});
 				});
 			});
-		});
+		}
 
 		// ---- UI: bind the matter and run the agent.
 		cy.visit('/lq-ai/login');
-		cy.get('[data-testid="lq-ai-login-email"]').type(EMAIL);
+		// Generous first-element timeout: right after an image rebuild the
+		// web container is still warming (HF downloads) and the SPA can
+		// take >4s to hydrate on this box.
+		cy.get('[data-testid="lq-ai-login-email"]', { timeout: 30_000 }).type(EMAIL);
 		cy.get('[data-testid="lq-ai-login-password"]').type(PASSWORD, { log: false });
 		cy.get('[data-testid="lq-ai-login-submit"]').click();
 

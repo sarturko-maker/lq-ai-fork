@@ -27,7 +27,9 @@ const RUN_TIMEOUT_MS = 90_000;
 describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 	it('logs in, runs the Commercial preview agent, and watches it work', () => {
 		cy.visit('/lq-ai/login');
-		cy.get('[data-testid="lq-ai-login-email"]').type(EMAIL);
+		// First element gets a warm-up window — a freshly rebuilt web
+		// container hydrates slowly on this box.
+		cy.get('[data-testid="lq-ai-login-email"]', { timeout: 30_000 }).type(EMAIL);
 		cy.get('[data-testid="lq-ai-login-password"]').type(PASSWORD, { log: false });
 		cy.get('[data-testid="lq-ai-login-submit"]').click();
 

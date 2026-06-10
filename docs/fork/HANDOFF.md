@@ -109,9 +109,12 @@ curl -s -X POST http://localhost:8000/api/v1/agents/runs -H "Authorization: Bear
 
 ## Gotchas
 
-- **Cypress on this box: always `--config video=false`** — ffmpeg encoding starves the 6.4GB VM and
-  postgres backends die with SIGPIPE (crash recovery kills in-flight ingest jobs; files stick at
-  `processing`). With video off: zero crashes, specs green.
+- **Cypress on this box: always `--config video=false`** — and even videoless Electron can trigger
+  postgres SIGPIPE crash-recovery windows that kill in-flight ingest jobs (files stick at
+  `processing`). For the f0-s4 spec, PRE-SEED with the browser closed and pass
+  `CYPRESS_LQ_AI_MATTER_NAME=…` (spec header has the steps). After postgres crash cycles the
+  WORKERS' DB pools can wedge ("connection is closed" on every job) —
+  `docker compose restart ingest-worker arq-worker` heals them.
 - **.env S3 keys**: the original `.env` set explicit `S3_ACCESS_KEY`/`S3_SECRET_KEY` that never
   existed in MinIO — every upload 500'd since first boot. They're now commented out so compose
   falls back to the MinIO root creds. If `.env` is ever regenerated, keep it that way (backup:
