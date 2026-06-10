@@ -191,6 +191,53 @@ async def test_create_run_requires_auth(client: AsyncClient) -> None:
     assert resp.status_code == 401
 
 
+@pytest.mark.integration
+async def test_create_run_429_at_concurrent_running_cap(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+) -> None:
+    """3 runs already at 'running' → 429 with detail 'too_many_running_runs'.
+
+    Interim flood brake (F1 R4 budgets + arq replace it); the cap is
+    per-user, so another user's running runs are irrelevant.
+    """
+    for _ in range(3):
+        await _make_run(db_session, user=user_a, status="running")
+
+    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "one too many"},
+        )
+
+    assert resp.status_code == 429, resp.text
+    assert resp.json()["detail"] == "too_many_running_runs"
+
+
+@pytest.mark.integration
+async def test_create_run_cap_ignores_terminal_runs(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+) -> None:
+    """Only status='running' counts toward the cap — terminal rows don't."""
+    for _ in range(2):
+        await _make_run(db_session, user=user_a, status="running")
+    for terminal in ("completed", "failed", "cap_exceeded"):
+        await _make_run(db_session, user=user_a, status=terminal)
+
+    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "third running run is fine"},
+        )
+
+    assert resp.status_code == 202, resp.text
+
+
 # ---------------------------------------------------------------------------
 # GET /agents/runs/{run_id}
 # ---------------------------------------------------------------------------

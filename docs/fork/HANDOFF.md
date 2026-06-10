@@ -40,6 +40,9 @@ Per MILESTONES F0-S3: a new tab under `web/src/lib/lq-ai/` + route `/lq-ai/agent
   rendered; previous runs listed (GET `/agents/runs`).
 - MiniMax-M3 emits `<think>…</think>` in `final_answer` and step summaries — strip or collapse it
   in the UI (do NOT strip in the API; the record keeps the honest full text).
+- The UI needs a staleness cutoff for runs stuck at `'running'` (e.g., started_at older than the
+  wall-clock budget → render as stale): there is no recovery sweep yet — BackgroundTasks die with
+  the process; the startup sweep is deferred to the arq migration.
 - Follow web house style: `web/src/lib/lq-ai/` isolation, typed API client (`api/client.ts`
   patterns), tabs.ts entry + TopTabBar gate, Vitest for stores/parsing. Cypress optional this slice.
 - Defer: SSE (S5 upgrades polling to live), practice_areas schema (F1), auth-scoped area config (F1).

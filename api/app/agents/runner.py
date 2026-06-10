@@ -112,11 +112,14 @@ def _message_from_chat_model_output(output: Any) -> Any:
 def _step_from_event(
     event: dict[str, Any],
 ) -> tuple[AgentRunStepKind, str | None, str, bool] | None:
-    """Map one astream_events v2 event to ``(kind, name, summary, is_final)``.
+    """Map one astream_events v2 event to ``(kind, name, summary, no_tools)``.
 
-    Returns None for events that are not persisted steps. ``is_final``
-    is True only for a model turn that requested no tools — the natural
-    end of the loop, whose text is the run's final answer.
+    Returns None for events that are not persisted steps. ``no_tools``
+    is True for a model turn that requested no tools — a CANDIDATE for
+    the run's final answer; :func:`_drive_agent` additionally requires
+    the turn to be top-level (not nested under a tool run, i.e. not a
+    subagent's or tool-wrapped middleware's turn) before treating it as
+    final (F4 fix).
     """
     kind = event.get("event")
     data = event.get("data") or {}
@@ -149,6 +152,19 @@ def _step_from_event(
     return None
 
 
+def _is_nested(event: dict[str, Any], tool_run_ids: set[str]) -> bool:
+    """True if ``event`` ran underneath any tool invocation.
+
+    astream_events v2 events carry ``parent_ids`` — the run-id chain
+    from the root graph down (verified against langchain-core 1.4.3).
+    A chat-model turn whose ancestry includes a tool run belongs to a
+    subagent (the deepagents ``task`` tool) or a tool-wrapped middleware
+    graph, never to the root loop — so its no-tool turn must not be
+    mistaken for the run's final answer.
+    """
+    return any(str(pid) in tool_run_ids for pid in event.get("parent_ids") or [])
+
+
 async def _drive_agent(
     agent: Any,
     *,
@@ -168,6 +184,10 @@ async def _drive_agent(
     seq = 0
     final_answer: str | None = None
     cap_hit = False
+    # Run ids of every dispatched tool — ancestry test for _is_nested.
+    # Never pruned: a finished tool's id cannot reappear in a later
+    # event's parent chain, and runs are bounded by max_steps anyway.
+    tool_run_ids: set[str] = set()
 
     stream = agent.astream_events(
         {"messages": [{"role": "user", "content": prompt}]},
@@ -176,10 +196,16 @@ async def _drive_agent(
     try:
         async with asyncio.timeout(wall_clock_seconds):
             async for event in stream:
+                if event.get("event") == "on_tool_start" and event.get("run_id"):
+                    tool_run_ids.add(str(event["run_id"]))
                 step = _step_from_event(event)
                 if step is None:
                     continue
-                kind, name, summary, is_final = step
+                kind, name, summary, no_tools = step
+                # Final = top-level model turn with no tool requests. A
+                # subagent's (or tool-wrapped middleware's) closing turn
+                # is nested under its tool run and is NOT the answer (F4).
+                is_final = no_tools and not _is_nested(event, tool_run_ids)
                 seq += 1
                 db.add(
                     AgentRunStep(
@@ -203,29 +229,41 @@ async def _drive_agent(
 
 
 async def _finalize(
-    db: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
     run_id: uuid.UUID,
     *,
     status: AgentRunStatus,
     final_answer: str | None = None,
     error: str | None = None,
 ) -> None:
-    """Write the terminal state in a fresh transaction.
+    """Write the terminal state in a FRESH session, retrying once.
 
-    Rolls back first so a failure mid-step never leaves the terminal
-    UPDATE entangled with a half-written step row, then re-fetches the
-    run (post-rollback instances are expired; ``Session.get`` refreshes
-    them safely under asyncio).
+    The driving session can be poisoned when the wall-clock cancellation
+    lands mid-commit (connection invalidated in flight), so the terminal
+    UPDATE never reuses it: a fresh session from the factory, with one
+    more fresh-session retry, keeps the run from being stuck at
+    ``'running'``. A double failure is logged, not raised — the runner
+    executes in a BackgroundTask with no caller to surface to.
     """
-    await db.rollback()
-    run = await db.get(AgentRun, run_id)
-    if run is None:  # deleted underneath us (user cascade) — nothing to write
-        return
-    run.status = status.value
-    run.final_answer = final_answer
-    run.error = error
-    run.finished_at = datetime.now(UTC)
-    await db.commit()
+    for attempt in (1, 2):
+        try:
+            async with session_factory() as db:
+                run = await db.get(AgentRun, run_id)
+                if run is None:  # deleted underneath us (user cascade)
+                    return
+                run.status = status.value
+                run.final_answer = final_answer
+                run.error = error
+                run.finished_at = datetime.now(UTC)
+                await db.commit()
+                return
+        except Exception:
+            if attempt == 2:
+                logger.exception(
+                    "agent run terminal write failed twice; run left at 'running'",
+                    extra={"event": "agent_run_finalize_failed", "run_id": str(run_id)},
+                )
+                return
 
 
 async def execute_agent_run(
@@ -284,7 +322,9 @@ async def execute_agent_run(
                 wall_clock_seconds=wall_clock_seconds,
             )
         except TimeoutError:
-            await _finalize(db, run_id, status=AgentRunStatus.failed, error="timeout")
+            await _finalize(
+                db_session_factory, run_id, status=AgentRunStatus.failed, error="timeout"
+            )
             return
         except Exception as exc:
             # Bounded type+message only — stack traces stay in logs.
@@ -293,7 +333,7 @@ async def execute_agent_run(
                 extra={"event": "agent_run_failed", "run_id": str(run_id)},
             )
             await _finalize(
-                db,
+                db_session_factory,
                 run_id,
                 status=AgentRunStatus.failed,
                 error=_bounded(f"{type(exc).__name__}: {exc}", 500),
@@ -301,8 +341,11 @@ async def execute_agent_run(
             return
 
         await _finalize(
-            db,
+            db_session_factory,
             run_id,
             status=AgentRunStatus.cap_exceeded if cap_hit else AgentRunStatus.completed,
-            final_answer=final_answer,
+            # A capped run has no deliverable: any captured answer text is
+            # incidental (e.g., a subagent's closing turn), not the run's
+            # final answer — leave it NULL (F4).
+            final_answer=None if cap_hit else final_answer,
         )

@@ -52,6 +52,10 @@ router = APIRouter(prefix="/agents", tags=["agent-runs"])
 _LIMIT_DEFAULT = 50
 _LIMIT_MAX = 200
 
+# Interim flood brake until F1 lands R4 budgets and the arq migration:
+# a caller may have at most this many runs at status='running' at once.
+_MAX_CONCURRENT_RUNS_PER_USER = 3
+
 
 @router.post(
     "/runs",
@@ -71,7 +75,27 @@ async def create_agent_run(
     runner appends :class:`AgentRunStep` rows (committed per step) and
     promotes the run to ``completed`` / ``failed`` / ``cap_exceeded``;
     poll ``GET /agents/runs/{run_id}`` for live progress.
+
+    429 (``too_many_running_runs``) when the caller already has
+    ``_MAX_CONCURRENT_RUNS_PER_USER`` runs at ``'running'``.
     """
+    # Flood brake — count via idx_agent_runs_user_started's user_id prefix.
+    running_count: int = (
+        await db.execute(
+            select(func.count())
+            .select_from(AgentRun)
+            .where(
+                AgentRun.user_id == user.id,
+                AgentRun.status == AgentRunStatus.running.value,
+            )
+        )
+    ).scalar_one()
+    if running_count >= _MAX_CONCURRENT_RUNS_PER_USER:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too_many_running_runs",
+        )
+
     run = AgentRun(
         user_id=user.id,
         status=AgentRunStatus.running.value,
