@@ -430,7 +430,9 @@ def _to_ollama_request(
 
     ollama_messages: list[dict[str, Any]] = []
     for msg in request.messages:
-        content = msg.content or ""
+        # Ollama types message.content as a string; block-form content
+        # (list) is not translated yet (F0-S2) and reads as empty here.
+        content = msg.content if isinstance(msg.content, str) else ""
         # Ollama accepts the four standard roles unchanged. We do not
         # collapse system messages (Ollama supports multiple, though
         # most operators consolidate upstream). Tool messages forward

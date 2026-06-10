@@ -105,6 +105,13 @@ StoreBackend namespaces keyed `(org_id, …)`; company and practice levels read-
 - Re-plan at milestone boundaries, not on a calendar. Out-of-scope ideas: one line in
   `docs/fork/MILESTONES.md` § Backlog — don't expand the task.
 
+### Session handoff (context-compaction discipline)
+- Sessions compact near 50% context. `docs/fork/HANDOFF.md` is the live pickup document:
+  overwritten at the END of every slice (and before any planned compaction), committed with the
+  slice's PR. Sections: State (branch / PR / stack), Done, Next slice, Pick up exactly here, Gotchas.
+- A fresh or compacted session reads HANDOFF.md FIRST, then this file, then the ADRs it names.
+- A slice is not finished until HANDOFF.md says where the next one starts.
+
 ### Definition of done
 - Build + lint + typecheck + tests pass and the output is SHOWN, not asserted. New behavior has tests.
 - Fresh-context review of the diff against the plan (correctness gaps only).
@@ -133,6 +140,7 @@ StoreBackend namespaces keyed `(org_id, …)`; company and practice levels read-
 - The `web` container serves a pre-built bundle — rebuild it before debugging a UI change.
 
 ## Where to look (read on demand — do not preload)
+- **Current state + where to pick up: `docs/fork/HANDOFF.md` — read first in every session**
 - Fork charter / divergence policy: `docs/adr/F001-fork-charter.md` · sync log: `UPSTREAM.md`
 - Milestones and backlog: `docs/fork/MILESTONES.md`
 - Upstream's shipped-vs-deferred catalog: `docs/HONEST-STATE.md` — code is canonical over all docs

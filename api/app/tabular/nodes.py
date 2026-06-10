@@ -34,11 +34,11 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,6 +57,21 @@ if TYPE_CHECKING:
     from app.clients.gateway import EnsembleConfig, GatewayClient
 
 logger = logging.getLogger(__name__)
+
+
+class TabularNode(Protocol):
+    """Callable shape of one workflow node, as langgraph 1.x types it.
+
+    F0-S1 (closes DE-319): langgraph 1.x types ``StateGraph.add_node``
+    against callback protocols whose ``state`` parameter is named
+    (positional-or-keyword). A plain
+    ``Callable[[TabularExecutionState], Awaitable[dict]]`` erases the
+    parameter name, so it matches no ``add_node`` overload (mypy
+    [call-overload]). The factories below return this protocol instead;
+    runtime behavior is unchanged.
+    """
+
+    def __call__(self, state: TabularExecutionState) -> Awaitable[dict[str, Any]]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +132,7 @@ _VALID_CONFIDENCES: frozenset[str] = frozenset({"high", "medium", "low", "failed
 def make_load_documents_node(
     db: AsyncSession,
     document_ids: list[uuid.UUID],
-) -> Callable[[TabularExecutionState], Awaitable[dict[str, Any]]]:
+) -> TabularNode:
     """Build the load-documents node bound to a DB session."""
 
     async def load_documents_node(state: TabularExecutionState) -> dict[str, Any]:
@@ -204,7 +219,7 @@ def make_extract_cells_node(
     db: AsyncSession,
     gateway: GatewayClient,
     judge_model: str,
-) -> Callable[[TabularExecutionState], Awaitable[dict[str, Any]]]:
+) -> TabularNode:
     """Build the cell-extraction node bound to a DB session + gateway.
 
     Walks ``documents x columns`` sequentially; per cell, fetches the
@@ -569,7 +584,7 @@ async def _fetch_first_chunks(
 
 def make_aggregate_node(
     db: AsyncSession,
-) -> Callable[[TabularExecutionState], Awaitable[dict[str, Any]]]:
+) -> TabularNode:
     """Build the aggregation node bound to a DB session.
 
     Groups ``state['per_cell_results']`` by document into the final

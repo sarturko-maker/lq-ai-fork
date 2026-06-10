@@ -35,9 +35,9 @@ LangGraph node functions remain pure-ish over the state dict and
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,6 +56,21 @@ from app.schemas.autonomous import Phase
 logger = logging.getLogger(__name__)
 
 
+class AutonomousNode(Protocol):
+    """Callable shape of one phase node, as langgraph 1.x types it.
+
+    F0-S1 (closes DE-319): langgraph 1.x types ``StateGraph.add_node``
+    against callback protocols whose ``state`` parameter is named
+    (positional-or-keyword). A plain
+    ``Callable[[AutonomousSessionState], Awaitable[dict]]`` erases the
+    parameter name, so it matches no ``add_node`` overload (mypy
+    [call-overload]). The factories below return this protocol instead;
+    runtime behavior is unchanged.
+    """
+
+    def __call__(self, state: AutonomousSessionState) -> Awaitable[dict[str, Any]]: ...
+
+
 # ---------------------------------------------------------------------------
 # Phase node factories
 # ---------------------------------------------------------------------------
@@ -64,7 +79,7 @@ logger = logging.getLogger(__name__)
 def make_intake_node(
     db: AsyncSession,
     gateway: Any = None,
-) -> Callable[[AutonomousSessionState], Awaitable[dict[str, Any]]]:
+) -> AutonomousNode:
     """Build the intake-phase node bound to a DB session.
 
     The intake node transitions the session to :attr:`Phase.intake`
@@ -155,7 +170,7 @@ def make_intake_node(
 def make_analysis_node(
     db: AsyncSession,
     gateway: Any = None,
-) -> Callable[[AutonomousSessionState], Awaitable[dict[str, Any]]]:
+) -> AutonomousNode:
     """Build the analysis-phase node bound to a DB session.
 
     The analysis node transitions the session to :attr:`Phase.analysis`
@@ -255,7 +270,7 @@ def make_analysis_node(
 def make_drafting_node(
     db: AsyncSession,
     gateway: Any = None,
-) -> Callable[[AutonomousSessionState], Awaitable[dict[str, Any]]]:
+) -> AutonomousNode:
     """Build the drafting-phase node bound to a DB session.
 
     The drafting node transitions the session to :attr:`Phase.drafting`,
@@ -531,7 +546,7 @@ def make_drafting_node(
 def make_ethics_review_node(
     db: AsyncSession,
     gateway: Any = None,
-) -> Callable[[AutonomousSessionState], Awaitable[dict[str, Any]]]:
+) -> AutonomousNode:
     """Build the ethics-review-phase node bound to a DB session.
 
     The ethics-review node transitions the session to
@@ -599,7 +614,7 @@ def make_ethics_review_node(
 def make_delivery_node(
     db: AsyncSession,
     gateway: Any = None,
-) -> Callable[[AutonomousSessionState], Awaitable[dict[str, Any]]]:
+) -> AutonomousNode:
     """Build the delivery-phase node bound to a DB session.
 
     The delivery node transitions the session to :attr:`Phase.delivery`,
