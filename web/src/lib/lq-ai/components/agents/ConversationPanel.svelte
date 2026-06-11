@@ -20,7 +20,7 @@
    * collapsed-by-default thinking ribbon; any stream failure falls
    * back to the poll loop; stream end triggers ONE reconcile fetch.
    */
-  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
   import DOMPurify from 'dompurify';
   import { marked } from 'marked';
   import { agentsApi, filesApi } from '$lib/lq-ai/api';
@@ -41,6 +41,7 @@
     shouldContinuePollingThread,
     splitThink,
     statusBadge,
+    stepDigest,
     stepDisplay,
     threadRailStates,
     threadRailSteps,
@@ -81,7 +82,10 @@
   export let matterBound = false;
   export let hasConversation = false;
 
-  const dispatch = createEventDispatcher<{ settled: void }>();
+  // `newmatter`: the user asked to create a matter from the composer —
+  // the HOST owns the modal (page chrome) and writes the created id back
+  // through the bound `selectedMatterId` (F0-S8).
+  const dispatch = createEventDispatcher<{ settled: void; newmatter: void }>();
 
   // Model output is untrusted input (CLAUDE.md): forbid media so a poisoned
   // answer can't beacon data out via auto-fetched remote resources — incl.
@@ -127,6 +131,69 @@
   // review).
   let destroyed = false;
 
+  // ---------------------------------------------------------------------
+  // Bottom-docked composer auto-scroll (F0-S8). The conversation reads
+  // top-down with the composer docked below it, so new content lands out
+  // of view: pin the viewport to the CONVERSATION'S tail while the user
+  // is already near it (force on the first snapshot — opening a thread
+  // should show its latest turn). Never fight a user who scrolled up.
+  //
+  // The target is the thread-end anchor offset by the composer's height,
+  // NOT the document bottom: the page's side column (rail + conversation
+  // list) is usually taller than the conversation, and scrolling to the
+  // document bottom would push the whole conversation off-screen.
+  // ---------------------------------------------------------------------
+
+  /** True until the first thread snapshot of this mount has rendered. */
+  let firstSnapshot = true;
+  /** In-flow marker between the thread and the docked composer. */
+  let threadEndEl: HTMLDivElement | null = null;
+  let composerEl: HTMLFormElement | null = null;
+
+  /**
+   * The element that actually scrolls this panel. NOT the document: the
+   * LQ.AI shell pins `html { overflow-y: hidden }` and scrolls its
+   * `<main id="lq-main">` — resolved generically (nearest scrollable
+   * ancestor) so the F1 cockpit can re-home the panel into any layout.
+   */
+  function scrollContainer(): HTMLElement | null {
+    let el: HTMLElement | null = threadEndEl?.parentElement ?? null;
+    while (el) {
+      if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) return el;
+      el = el.parentElement;
+    }
+    return document.scrollingElement as HTMLElement | null;
+  }
+
+  /** Container scrollTop that puts the thread's tail just above the composer. */
+  function tailScrollTop(container: HTMLElement): number | null {
+    if (!threadEndEl) return null;
+    const composerH = composerEl?.offsetHeight ?? 0;
+    // Rects are viewport-relative: for the root scroller the viewport IS
+    // the content origin minus scrollTop; for an inner container its own
+    // rect.top is the origin.
+    const anchorBottom =
+      container === document.scrollingElement
+        ? threadEndEl.getBoundingClientRect().bottom + container.scrollTop
+        : threadEndEl.getBoundingClientRect().bottom -
+          container.getBoundingClientRect().top +
+          container.scrollTop;
+    return Math.max(0, anchorBottom - container.clientHeight + composerH + 16);
+  }
+
+  async function autoScroll(force = false) {
+    if (destroyed || !threadEndEl) return;
+    const container = scrollContainer();
+    if (!container) return;
+    const before = tailScrollTop(container); // pre-render tail: were we reading it?
+    if (before === null) return;
+    if (!force && container.scrollTop < before - 240) return;
+    await tick(); // let the new content render before measuring the target
+    if (destroyed) return;
+    const target = tailScrollTop(container);
+    if (target !== null) container.scrollTop = target;
+  }
+
   onMount(() => {
     if (initialThreadId) startPolling(initialThreadId);
     // Keep idle badges honest: a 'running' row must visually flip to Stale
@@ -168,6 +235,8 @@
       pollFailures = 0;
       pollError = null;
       nowMs = serverNowMs();
+      void autoScroll(firstSnapshot);
+      firstSnapshot = false;
       if (shouldContinuePollingThread(next, nowMs)) {
         const latest = latestRunOf(next);
         if (latest && tryStartStream(latest.id, id, gen)) {
@@ -210,13 +279,20 @@
   async function submit() {
     const text = prompt.trim();
     if (!text || submitting) return;
+    // ADR-F002: free-floating chat is not offered — a new conversation
+    // needs a matter for its memory to accumulate into. The Run button
+    // is disabled in this state; this guard keeps Enter-to-submit honest.
+    if (!detail && !selectedMatterId) {
+      submitError = 'Select a matter first — conversations live inside a matter.';
+      return;
+    }
     submitting = true;
     submitError = null;
     try {
       const created = await agentsApi.createRun(
         detail
           ? { prompt: text, thread_id: detail.thread.id }
-          : { prompt: text, project_id: selectedMatterId || undefined }
+          : { prompt: text, project_id: selectedMatterId }
       );
       prompt = '';
       startPolling(created.thread_id);
@@ -327,6 +403,7 @@
         if (liveReasoningBlock !== blockId && liveReasoning) liveReasoning += '\n\n';
         liveReasoningBlock = blockId;
         liveReasoning += delta;
+        void autoScroll();
         return;
       }
       case 'data-step': {
@@ -339,6 +416,7 @@
           liveReasoning = '';
           liveReasoningBlock = null;
         }
+        void autoScroll();
         return;
       }
       case 'text-delta': {
@@ -352,6 +430,7 @@
         const text = blockId ? answerBuffers[blockId] : undefined;
         if (text && detail) detail = applyAnswerText(detail, runId, text);
         if (blockId) delete answerBuffers[blockId];
+        void autoScroll();
         return;
       }
       case 'data-run': {
@@ -479,6 +558,15 @@
   // Upload chips belong to the matter they filed into — switching the
   // Matter on a fresh chat clears them (a 'ready' chip must never imply
   // the NEW matter's agent can ground on that file — F0-S5 review).
+  // Watched reactively rather than via the select's change event so a
+  // PROGRAMMATIC write to the bound prop — the page binding a matter it
+  // just created through the modal (F0-S8) — clears them identically.
+  let prevMatterId = selectedMatterId;
+  $: if (selectedMatterId !== prevMatterId) {
+    prevMatterId = selectedMatterId;
+    onMatterChanged();
+  }
+
   function onMatterChanged() {
     stopUploadPolling();
     uploads = [];
@@ -522,10 +610,19 @@
   // Derived view state
   // ---------------------------------------------------------------------
 
+  /**
+   * Markdown → sanitized HTML for MODEL OUTPUT (untrusted input). One
+   * path for answers, settled reasoning, and the live ribbon (F0-S8:
+   * thinking rendered as raw text while the answer got markdown).
+   */
+  function mdSafe(text: string): string {
+    return DOMPurify.sanitize(marked.parse(text, { async: false }) as string, SANITIZE_OPTS);
+  }
+
   function answerHtmlFor(run: AgentRun): string {
     const visible = splitThink(run.final_answer).visible;
     if (!visible) return '';
-    return DOMPurify.sanitize(marked.parse(visible, { async: false }) as string, SANITIZE_OPTS);
+    return mdSafe(visible);
   }
 
   $: latestRun = latestRunOf(detail);
@@ -557,133 +654,35 @@
   // thread (F0-S5 review).
   $: threadOpening = currentThreadId !== null && detail === null;
   $: canSend = !threadOpening && composerEnabled(detail, nowMs);
+  // ADR-F002 (F0-S8): a NEW conversation requires a matter — the blank-
+  // workspace option is gone; create-in-place covers the zero-matter case.
+  $: needsMatter = !detail && !selectedMatterId;
+  // Live reasoning rendered as markdown, sanitized like any model output.
+  $: liveReasoningHtml = liveReasoning ? mdSafe(liveReasoning) : '';
 </script>
 
+<!-- Reading order (F0-S8, maintainer feedback: "chatbox at the top makes
+     it weird"): area header → conversation, top-down → composer DOCKED at
+     the bottom, like claude.ai / Claude Code. -->
 <section class="ag-area-card" data-testid="lq-ai-agents-area-card">
   <div class="ag-area-card__head">
     <slot name="head" />
   </div>
   <slot name="copy" />
-
-  <form class="ag-composer" data-testid="lq-ai-agents-composer" on:submit|preventDefault={submit}>
-    {#if detail}
-      <p class="lq-text-body-sm ag-thread-head">
-        {#if matterName(matters, detail.thread.project_id)}
-          <span
-            class="ag-chip"
-            data-testid="lq-ai-agents-run-matter"
-            title={detail.thread.project_id}
-          >
-            {matterName(matters, detail.thread.project_id)}
-          </span>
-        {/if}
-        <span class="ag-thread-head__title">{detail.thread.title}</span>
-      </p>
-    {:else}
-      <div class="ag-matter">
-        <label class="lq-text-label" for="ag-matter">Matter</label>
-        <select
-          id="ag-matter"
-          data-testid="lq-ai-agents-matter-select"
-          bind:value={selectedMatterId}
-          on:change={onMatterChanged}
-          disabled={submitting}
+  {#if detail}
+    <p class="lq-text-body-sm ag-thread-head">
+      {#if matterName(matters, detail.thread.project_id)}
+        <span
+          class="ag-chip"
+          data-testid="lq-ai-agents-run-matter"
+          title={detail.thread.project_id}
         >
-          <option value="">No matter — blank workspace</option>
-          {#each matters as m (m.id)}
-            <option value={m.id}>{m.name}</option>
-          {/each}
-        </select>
-        {#if mattersError}
-          <p class="lq-text-caption ag-error">Couldn't load matters: {mattersError}</p>
-        {/if}
-      </div>
-    {/if}
-
-    <label class="lq-text-label" for="ag-prompt">
-      {detail ? 'Continue the conversation' : 'Ask the Commercial agent'}
-    </label>
-    <div
-      class="ag-dropzone"
-      class:ag-dropzone--over={dragOver}
-      role="region"
-      aria-label="Message and file drop area"
-      on:dragover={handleDragOver}
-      on:dragleave={handleDragLeave}
-      on:drop={handleDrop}
-    >
-      <textarea
-        id="ag-prompt"
-        rows="3"
-        placeholder={detail
-          ? 'e.g. And what about the indemnity?'
-          : 'e.g. What is the liability cap under this contract?'}
-        bind:value={prompt}
-        disabled={submitting || !canSend}
-      ></textarea>
-      {#if dragOver}
-        <div class="ag-dropzone__hint lq-text-body-sm">Drop to upload into the matter</div>
+          {matterName(matters, detail.thread.project_id)}
+        </span>
       {/if}
-    </div>
-
-    {#if uploads.length > 0 || uploadError}
-      <ul class="ag-uploads" data-testid="lq-ai-agents-uploads">
-        {#each uploads as f (f.id)}
-          <li
-            class="ag-upload ag-upload--{f.ingestion_status ?? 'pending'}"
-            data-testid="lq-ai-agents-upload-chip"
-            title={f.ingestion_error ?? f.filename}
-          >
-            <span class="ag-upload__name">{f.filename}</span>
-            <span class="ag-upload__status lq-text-caption">{uploadStatusLabel(f)}</span>
-          </li>
-        {/each}
-        {#if uploadError}
-          <li class="lq-text-caption ag-error">{uploadError}</li>
-        {/if}
-      </ul>
-    {/if}
-
-    <div class="ag-composer__actions">
-      <input
-        bind:this={fileInput}
-        type="file"
-        class="ag-hidden-input"
-        multiple
-        on:change={handlePicked}
-        data-testid="lq-ai-agents-file-input"
-      />
-      <button
-        type="button"
-        class="ag-btn-ghost"
-        data-testid="lq-ai-agents-attach-btn"
-        disabled={!bindingProjectId || uploading || submitting}
-        title={bindingProjectId
-          ? 'Upload documents into the matter — the agent can search them once ready'
-          : 'Select a Matter first — an upload needs a home'}
-        on:click={() => fileInput?.click()}
-      >
-        {uploading ? 'Uploading…' : '+ Attach'}
-      </button>
-      <button
-        type="submit"
-        class="ag-btn-primary"
-        disabled={submitting || !canSend || !prompt.trim()}
-      >
-        {submitting ? 'Starting…' : detail ? 'Send' : 'Run'}
-      </button>
-    </div>
-    {#if detail && !detail.continuable && !shouldContinuePollingThread(detail, nowMs)}
-      <p class="lq-text-body-sm ag-note" data-testid="lq-ai-agents-not-continuable">
-        This conversation can't take a follow-up{latestRun && latestRun.status !== 'completed'
-          ? ` (last run ${latestRun.status === 'cap_exceeded' ? 'hit its step cap' : latestRun.status})`
-          : ''} — start a new chat.
-      </p>
-    {/if}
-    {#if submitError}
-      <p class="lq-text-body-sm ag-error">Couldn't start the run: {submitError}</p>
-    {/if}
-  </form>
+      <span class="ag-thread-head__title">{detail.thread.title}</span>
+    </p>
+  {/if}
 </section>
 
 {#if threadOpening}
@@ -732,17 +731,30 @@
             {#each turnSteps as step (step.id)}
               {@const d = stepDisplay(step)}
               <li class="ag-step ag-step--{step.kind}" class:ag-step--nested={step.parent_step_id}>
-                <span class="ag-step__title lq-text-label">{d.title}</span>
-                {#if d.thinking}
-                  <details class="ag-thinking">
-                    <summary class="lq-text-caption">Reasoning</summary>
-                    <pre>{d.thinking}</pre>
-                  </details>
-                {/if}
-                {#if d.body}
-                  {#if d.mono}
+                {#if d.mono && d.body}
+                  <!-- Tool calls/results collapse to a one-line digest
+                       (F0-S8 — always-expanded tool bodies drowned the
+                       conversation); the full args/output stay one
+                       click away. The record is untouched (ADR-F004). -->
+                  <details class="ag-step__fold">
+                    <summary>
+                      <span class="ag-step__title lq-text-label">{d.title}</span>
+                      <span class="ag-step__digest lq-text-caption">{stepDigest(d.body)}</span>
+                    </summary>
                     <pre class="ag-step__mono">{d.body}</pre>
-                  {:else}
+                  </details>
+                {:else}
+                  <span class="ag-step__title lq-text-label">{d.title}</span>
+                  {#if d.thinking}
+                    <details class="ag-thinking">
+                      <summary class="lq-text-caption">Reasoning</summary>
+                      <div class="ag-thinking__body prose prose-sm max-w-none">
+                        <!-- eslint-disable-next-line svelte/no-at-html-tags — mdSafe-sanitized -->
+                        {@html mdSafe(d.thinking)}
+                      </div>
+                    </details>
+                  {/if}
+                  {#if d.body}
                     <p class="lq-text-body-sm ag-step__body">{d.body}</p>
                   {/if}
                 {/if}
@@ -754,13 +766,23 @@
         {/if}
 
         {#if i === detail.runs.length - 1 && turn.run.status === 'running' && !stale && liveReasoning}
-          <!-- SSE v2 thinking ribbon (F0-S7): live reasoning deltas,
-               collapsed by default with a shimmer status — pure
-               animation; rows above are the record (ADR-F004). -->
-          <details class="ag-thinking ag-thinking--live" data-testid="lq-ai-agents-thinking-live">
-            <summary class="lq-text-caption"><span class="ag-shimmer">Thinking…</span></summary>
-            <pre>{liveReasoning}</pre>
-          </details>
+          <!-- SSE v2 thinking ribbon (F0-S7): live reasoning deltas. Since
+               F0-S8 it is AUTO-EXPANDED, markdown-rendered, and clamped to
+               a tail-anchored window like claude.ai (it used to need a
+               click). Pure animation; rows above are the record (ADR-F004)
+               — when the turn settles this collapses into the timeline's
+               one-line "Reasoning" row. -->
+          <div class="ag-thinking-live" data-testid="lq-ai-agents-thinking-live">
+            <p class="lq-text-caption ag-thinking-live__head">
+              <span class="ag-shimmer">Thinking…</span>
+            </p>
+            <div class="ag-thinking-live__tail">
+              <div class="prose prose-sm max-w-none">
+                <!-- eslint-disable-next-line svelte/no-at-html-tags — mdSafe-sanitized -->
+                {@html liveReasoningHtml}
+              </div>
+            </div>
+          </div>
         {/if}
 
         {#if turn.run.status === 'completed'}
@@ -769,7 +791,10 @@
               {#if turnAnswer.thinking}
                 <details class="ag-thinking">
                   <summary class="lq-text-caption">Reasoning</summary>
-                  <pre>{turnAnswer.thinking}</pre>
+                  <div class="ag-thinking__body prose prose-sm max-w-none">
+                    <!-- eslint-disable-next-line svelte/no-at-html-tags — mdSafe-sanitized -->
+                    {@html mdSafe(turnAnswer.thinking)}
+                  </div>
                 </details>
               {/if}
               {#if turnHtml}
@@ -801,6 +826,134 @@
   </section>
 {/if}
 
+<!-- Auto-scroll anchor: marks where the conversation ends in flow. -->
+<div bind:this={threadEndEl} aria-hidden="true"></div>
+
+<form
+  bind:this={composerEl}
+  class="ag-composer"
+  data-testid="lq-ai-agents-composer"
+  on:submit|preventDefault={submit}
+>
+  {#if !detail}
+    <div class="ag-matter">
+      <label class="lq-text-label" for="ag-matter">Matter</label>
+      <div class="ag-matter__row">
+        <select
+          id="ag-matter"
+          data-testid="lq-ai-agents-matter-select"
+          bind:value={selectedMatterId}
+          disabled={submitting}
+        >
+          <!-- ADR-F002 (F0-S8): no blank-workspace option — a conversation
+               needs a matter; "+ New matter" covers the zero-matter case. -->
+          <option value="" disabled>Select a matter…</option>
+          {#each matters as m (m.id)}
+            <option value={m.id}>{m.name}</option>
+          {/each}
+        </select>
+        <button
+          type="button"
+          class="ag-btn-ghost"
+          data-testid="lq-ai-agents-new-matter"
+          disabled={submitting}
+          on:click={() => dispatch('newmatter')}
+        >
+          + New matter
+        </button>
+      </div>
+      {#if mattersError}
+        <p class="lq-text-caption ag-error">Couldn't load matters: {mattersError}</p>
+      {/if}
+    </div>
+  {/if}
+
+  <label class="lq-text-label" for="ag-prompt">
+    {detail ? 'Continue the conversation' : 'Ask the Commercial agent'}
+  </label>
+  <div
+    class="ag-dropzone"
+    class:ag-dropzone--over={dragOver}
+    role="region"
+    aria-label="Message and file drop area"
+    on:dragover={handleDragOver}
+    on:dragleave={handleDragLeave}
+    on:drop={handleDrop}
+  >
+    <textarea
+      id="ag-prompt"
+      rows="3"
+      placeholder={detail
+        ? 'e.g. And what about the indemnity?'
+        : 'e.g. What is the liability cap under this contract?'}
+      bind:value={prompt}
+      disabled={submitting || !canSend}
+    ></textarea>
+    {#if dragOver}
+      <div class="ag-dropzone__hint lq-text-body-sm">Drop to upload into the matter</div>
+    {/if}
+  </div>
+
+  {#if uploads.length > 0 || uploadError}
+    <ul class="ag-uploads" data-testid="lq-ai-agents-uploads">
+      {#each uploads as f (f.id)}
+        <li
+          class="ag-upload ag-upload--{f.ingestion_status ?? 'pending'}"
+          data-testid="lq-ai-agents-upload-chip"
+          title={f.ingestion_error ?? f.filename}
+        >
+          <span class="ag-upload__name">{f.filename}</span>
+          <span class="ag-upload__status lq-text-caption">{uploadStatusLabel(f)}</span>
+        </li>
+      {/each}
+      {#if uploadError}
+        <li class="lq-text-caption ag-error">{uploadError}</li>
+      {/if}
+    </ul>
+  {/if}
+
+  <div class="ag-composer__actions">
+    <input
+      bind:this={fileInput}
+      type="file"
+      class="ag-hidden-input"
+      multiple
+      on:change={handlePicked}
+      data-testid="lq-ai-agents-file-input"
+    />
+    <button
+      type="button"
+      class="ag-btn-ghost"
+      data-testid="lq-ai-agents-attach-btn"
+      disabled={!bindingProjectId || uploading || submitting}
+      title={bindingProjectId
+        ? 'Upload documents into the matter — the agent can search them once ready'
+        : 'Select a Matter first — an upload needs a home'}
+      on:click={() => fileInput?.click()}
+    >
+      {uploading ? 'Uploading…' : '+ Attach'}
+    </button>
+    <button
+      type="submit"
+      class="ag-btn-primary"
+      title={needsMatter ? 'Select or create a matter first' : undefined}
+      disabled={submitting || !canSend || needsMatter || !prompt.trim()}
+    >
+      {submitting ? 'Starting…' : detail ? 'Send' : 'Run'}
+    </button>
+  </div>
+  {#if detail && !detail.continuable && !shouldContinuePollingThread(detail, nowMs)}
+    <p class="lq-text-body-sm ag-note" data-testid="lq-ai-agents-not-continuable">
+      This conversation can't take a follow-up{latestRun && latestRun.status !== 'completed'
+        ? ` (last run ${latestRun.status === 'cap_exceeded' ? 'hit its step cap' : latestRun.status})`
+        : ''} — start a new chat.
+    </p>
+  {/if}
+  {#if submitError}
+    <p class="lq-text-body-sm ag-error">Couldn't start the run: {submitError}</p>
+  {/if}
+</form>
+
 <style>
   .ag-area-card,
   .ag-thread {
@@ -826,10 +979,22 @@
     line-height: 18px;
   }
 
+  /* Docked composer (F0-S8): its own card, stuck to the viewport bottom
+     while the conversation scrolls above it — the claude.ai reading
+     order. The page scrolls; this never detaches from the bottom edge. */
   .ag-composer {
     display: flex;
     flex-direction: column;
     gap: var(--lq-space-2);
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    background: var(--lq-canvas);
+    border: 1px solid var(--lq-border);
+    border-radius: var(--lq-radius-lg);
+    padding: var(--lq-space-4);
+    margin-top: var(--lq-space-4);
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.06);
   }
 
   .ag-thread-head {
@@ -837,6 +1002,7 @@
     align-items: center;
     gap: var(--lq-space-2);
     min-width: 0;
+    margin-top: var(--lq-space-2);
   }
 
   .ag-thread-head__title {
@@ -886,6 +1052,21 @@
     display: flex;
     flex-direction: column;
     gap: var(--lq-space-1);
+  }
+
+  .ag-matter__row {
+    display: flex;
+    align-items: center;
+    gap: var(--lq-space-2);
+  }
+
+  .ag-matter__row select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .ag-matter__row .ag-btn-ghost {
+    white-space: nowrap;
   }
 
   .ag-matter select {
@@ -1083,8 +1264,7 @@
     margin-top: var(--lq-space-1);
   }
 
-  .ag-step__mono,
-  .ag-thinking pre {
+  .ag-step__mono {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px;
     background: var(--lq-inset);
@@ -1095,13 +1275,68 @@
     margin: var(--lq-space-1) 0 0;
   }
 
+  /* Collapsed tool step: title + one-line digest on the summary row. */
+  .ag-step__fold summary {
+    display: flex;
+    align-items: baseline;
+    gap: var(--lq-space-2);
+    cursor: pointer;
+    min-width: 0;
+  }
+
+  .ag-step__fold summary .ag-step__title {
+    display: inline;
+    white-space: nowrap;
+  }
+
+  .ag-step__digest {
+    color: var(--lq-text-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
   .ag-thinking summary {
     cursor: pointer;
     color: var(--lq-text-tertiary);
   }
 
-  .ag-thinking--live {
+  /* Settled reasoning, markdown-rendered (F0-S8) — quieter than the
+     answer prose: inset panel, smaller type. */
+  .ag-thinking__body {
+    background: var(--lq-inset);
+    border-radius: var(--lq-radius-sm);
+    padding: var(--lq-space-2) var(--lq-space-3);
+    margin-top: var(--lq-space-1);
+    font-size: 13px;
+    color: var(--lq-text-secondary);
+  }
+
+  /* Live ribbon (F0-S8): auto-expanded, clamped to a tail-anchored
+     window — the newest reasoning is always the visible part, the top
+     fades out, exactly the claude.ai affordance. */
+  .ag-thinking-live {
     margin-top: var(--lq-space-2);
+  }
+
+  .ag-thinking-live__head {
+    margin: 0 0 var(--lq-space-1);
+  }
+
+  .ag-thinking-live__tail {
+    max-height: 10.5em;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    background: var(--lq-inset);
+    border-radius: var(--lq-radius-sm);
+    padding: var(--lq-space-2) var(--lq-space-3);
+    font-size: 13px;
+    color: var(--lq-text-secondary);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 2.5em);
+    mask-image: linear-gradient(to bottom, transparent 0, black 2.5em);
   }
 
   .ag-shimmer {

@@ -60,13 +60,20 @@ describe('F0-S7 — SSE v2 streaming (live deep agent)', () => {
 		);
 		cy.get('[data-testid="lq-ai-agents-composer"] button[type="submit"]').click();
 
-		// Live reasoning deltas render as the collapsed thinking ribbon —
-		// only the stream can put it there (polling never feeds it).
+		// Live reasoning deltas render as the thinking ribbon — only the
+		// stream can put it there (polling never feeds it). Since F0-S8 the
+		// ribbon is AUTO-EXPANDED (claude.ai-style clamped tail), so assert
+		// the streamed reasoning text is actually visible, no click needed.
 		cy.get('[data-testid="lq-ai-agents-thinking-live"]', { timeout: RUN_TIMEOUT_MS }).should(
 			'exist'
 		);
-		cy.get('[data-testid="lq-ai-agents-thinking-live"]').should('not.have.attr', 'open');
-		cy.screenshot('f0-s7-1-thinking-ribbon-live');
+		cy.get('[data-testid="lq-ai-agents-thinking-live"] .ag-thinking-live__tail')
+			.invoke('text')
+			.should('have.length.greaterThan', 0);
+		// Viewport capture: full-page stitching renders the sticky bottom
+		// composer over the conversation and can hide the ribbon; the
+		// auto-scroll keeps the ribbon in the viewport, so capture that.
+		cy.screenshot('f0-s7-1-thinking-ribbon-live', { capture: 'viewport' });
 
 		// The run settles: badge flips, the answer renders from settled
 		// state, the ribbon is gone (rows decided).

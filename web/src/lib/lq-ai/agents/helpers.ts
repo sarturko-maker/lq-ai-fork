@@ -258,6 +258,26 @@ export function stepDisplay(step: AgentRunStep): StepDisplay {
 	return { title: 'Model turn', body: visible, thinking, mono: false };
 }
 
+/** Longest one-line digest shown in a collapsed step's summary row. */
+export const STEP_DIGEST_LIMIT = 96;
+
+/**
+ * One-line digest of a step body for the collapsed summary row (F0-S8,
+ * maintainer feedback: tool steps were always expanded and drowned the
+ * conversation). First non-empty line, code-point-truncated — the full
+ * body stays one click away inside the <details>.
+ */
+export function stepDigest(body: string): string {
+	const line = body
+		.split('\n')
+		.map((l) => l.trim())
+		.find((l) => l.length > 0);
+	if (!line) return '';
+	const points = Array.from(line);
+	if (points.length <= STEP_DIGEST_LIMIT) return line;
+	return points.slice(0, STEP_DIGEST_LIMIT - 1).join('') + '…';
+}
+
 /**
  * Mirror of the runner's step-summary bound (`_SUMMARY_LIMIT` in
  * api/app/agents/runner.py) — needed to recognise the closing model
