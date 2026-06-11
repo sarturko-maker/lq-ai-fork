@@ -1,6 +1,7 @@
 # ADR 0009 — LQ.AI web shell co-exists alongside the OpenWebUI shell (does not replace it)
 
-**Status:** Accepted (2026-05-08)
+**Status:** Accepted (2026-05-08) — superseded by [ADR-F006](F006-ui-stack-and-design-system.md):
+F0-S6 removed the OpenWebUI shell entirely; `/lq-ai` is the only shell (2026-06-11).
 **Decision-makers:** Kevin Keller (initial maintainer)
 **Affected components:** `web/`
 **Supersedes:** none. **Refers to:** [ADR 0001](0001-openwebui-fork-pin.md), [PRD §1.3](../PRD.md#13-transparency-as-a-founding-principle), [Task C8 spec](../M1-IMPLEMENTATION-ORDER.md#task-c8--web-ui-chat-experience-parallel-from-c3-onward).

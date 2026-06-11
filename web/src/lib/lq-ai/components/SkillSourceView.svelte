@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import DOMPurify from 'dompurify';
 	import { marked } from 'marked';
 	import { skillsApi } from '$lib/lq-ai/api';
 	import type { SkillInputs, SkillInputDef } from '$lib/lq-ai/types';
@@ -45,7 +46,9 @@
 		return def.type ?? 'string';
 	}
 
-	$: renderedMd = marked(contentMd ?? '', { breaks: true }) as string;
+	// Skill bodies are operator-authored but still untrusted rendered HTML
+	// (CLAUDE.md: validate at the boundary) — sanitize like MessageBubble does.
+	$: renderedMd = DOMPurify.sanitize(marked(contentMd ?? '', { breaks: true }) as string);
 
 	onMount(() => {
 		loadInputs();
