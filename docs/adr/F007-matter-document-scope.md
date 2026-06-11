@@ -1,7 +1,10 @@
 # F007 — Matter document scope for agent tools: attach join ∪ upload-time column
 
-Status: proposed
+Status: accepted (2026-06-11, maintainer)
 Date: 2026-06-10
+Note: F0-S5's composer upload (PR #32) became the first deliberate consumer of the upload-time
+path — `POST /files` with the bound matter's `project_id` makes a document agent-searchable with
+no extra wiring, exactly as decided here. The F1 reconciliation consequence stands.
 
 ## Context
 
