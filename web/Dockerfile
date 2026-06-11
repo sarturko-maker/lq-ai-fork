@@ -5,7 +5,6 @@
 # compose / helm / the caddy overlay keep working unchanged.
 
 FROM node:22-alpine AS build
-ARG BUILD_HASH=dev-build
 # Vite/SvelteKit bakes PUBLIC_* env vars into the static bundle at build
 # time. Production: leave unset (relative /api/v1 behind a reverse proxy).
 # Local Compose dev: passed via docker-compose.yml `args:` from .env's
@@ -19,13 +18,14 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-ENV APP_BUILD_HASH=${BUILD_HASH}
 # Writing the build arg into .env is the reliable substitution path for
 # Vite's static replacement of $env/dynamic/public reads in client code.
 RUN printf 'PUBLIC_LQ_AI_API_BASE_URL=%s\n' "${PUBLIC_LQ_AI_API_BASE_URL}" > .env \
     && npm run build
 
-FROM nginx:1.27-alpine
+# 1.28 is the maintained stable line (1.27 mainline stopped receiving
+# nginx/alpine patches when 1.28 shipped) — keep this on a supported tag.
+FROM nginx:1.28-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/build /usr/share/nginx/html
 

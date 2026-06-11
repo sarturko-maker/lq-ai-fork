@@ -449,17 +449,17 @@ const CHANGE_TYPES = [
     emoji: "🎨",
     label: "Frontend component",
     sub: "web/",
-    desc: "Svelte component / page in the OpenWebUI fork.",
+    desc: "Svelte component / page in the standalone LQ.AI web shell (ADR-F006).",
     ciJobs: ["web"],
     coverage: "Vitest covers LQ.AI-owned units; no global % gate on web/.",
     static: [
-      { name: "svelte-check (LQ.AI tsconfig)", cmd: "cd web && npm run check:lq-ai", note: "Typechecks LQ.AI-owned code against tsconfig.lq-ai.json. New files are TypeScript." }
+      { name: "svelte-check", cmd: "cd web && npm run check", note: "Typechecks the whole app (all LQ.AI-owned since F0-S6). New files are TypeScript." }
     ],
     tests: [
       { name: "Vitest (unit)", req: true, note: "Runs on the host against the source tree — no container rebuild needed.", cmd: "cd web && npm run test:frontend -- --run" },
       { name: "Cypress E2E", req: false, note: "Many LQ.AI specs are prefixed wave-* (others by milestone, e.g. m3-…). Run against a deployed stack — NOT in the per-PR CI job.", cmd: "cd web && npx cypress run" }
     ],
-    docs: [ "Use the design-system primitives; match OpenWebUI conventions for shared components." ],
+    docs: [ "Use the design-system primitives; match the existing src/lib/lq-ai component conventions." ],
     process: [],
     caveats: [
       "The Web CI job runs <code>svelte-check</code> + <code>Vitest</code> only. Cypress E2E is your responsibility to run locally / against a stack.",

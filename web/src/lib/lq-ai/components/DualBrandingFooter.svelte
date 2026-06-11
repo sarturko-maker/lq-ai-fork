@@ -14,5 +14,5 @@
 	<span>
 		<strong>LQ.AI</strong> — Open-Source Legal AI
 	</span>
-	<span> Apache-2.0 · standalone shell since F0-S6 (ADR&nbsp;F006). </span>
+	<span>Apache-2.0</span>
 </footer>

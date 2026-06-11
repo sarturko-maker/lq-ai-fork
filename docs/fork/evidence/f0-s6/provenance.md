@@ -34,6 +34,12 @@ per-file provenance pass** over the surviving lq-ai `.svelte` components. This i
 Consequently: **no heroicons attribution is required, no icon needs redrawing, and no
 surviving file carries OpenWebUI provenance.** The Apache-2.0 condition in ADR-F006 is met.
 
+Scope note: ADR-F006's condition names the `.svelte` components; those 123 files received
+full content matching against the husk. The other 131 surviving files (`.ts`/`.css`/tests)
+received the exhaustive import audit (zero out-of-tree imports) but not per-file content
+matching — they are LQ.AI-era modules (api clients, stores, parsers) with no husk
+counterparts by construction.
+
 ## What was rewritten vs carried
 
 - `src/app.html` — **rewritten from scratch** (ADR-F006 explicit condition) against a

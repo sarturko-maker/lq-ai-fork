@@ -45,11 +45,16 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
   from Backlog, 2026-06-11 — maintainer): attach + drop zone → `POST /files` with the bound
   matter's `project_id` (ADR-F007 path), ingestion chips pending → ready, Matter required.
   The legacy single-turn chat path (`chats.py:1370`) stays legacy.
-- **S6 — the shell shed (ADR-F006, pending acceptance).** Extract the lq-ai code (zero
-  husk-imports, audited) into a standalone lean SvelteKit app; kill the OpenWebUI husk, its Python
-  backend container, and the §4 branding obligation. Includes the per-file provenance pass over
-  lq-ai `.svelte` components and the `app.html` theme-script rewrite. Verification: screenshot
-  diff + the f0-s3 Cypress spec green on the new shell.
+- **S6 ✓ done — the shell shed (ADR-F006).** `web/` replaced in-place by a standalone lean
+  SvelteKit SPA: lq-ai code carried verbatim (paths unchanged — imports, vitest globs, tsconfig
+  intact), OpenWebUI husk + its Python backend + ~150 unused deps + the §4 branding obligation
+  gone (~490k lines deleted). Per-file provenance pass 123/123 clean incl. conclusive SVG-icon
+  checks (evidence: `docs/fork/evidence/f0-s6/provenance.md`); `app.html` theme script REWRITTEN;
+  `app.css`/configs written fresh (gray-ramp constants carried for pixel parity). Container:
+  node build → nginx on the same :8080 + `/health` contract; image builds in seconds (the
+  stop-the-stack OOM dance is dead). NOTICES.md records the lineage; ADR-0009 superseded.
+  Verified: svelte-check 0 errors, vitest 752/752, f0-s3 AND f0-s5 green on the new shell,
+  screenshot parity (one intended delta: footer attribution).
 - **S7 — SSE v2: stream like Claude Code (ADR-F006 wire spec).** Emit the AI SDK UI Message Stream
   v1 from FastAPI (hand-rolled emitter; `data-*` parts for subagent/interrupt/plan/receipt carrying
   settled step-row ids — ADR-F004 intact). Reasoning deltas as a collapsed-by-default thinking
@@ -160,5 +165,20 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
   `files.project_id` column) — S4's matter tools honor the union; the Projects UI lists only the join.
 - Checkpoint-row retention/cleanup (ADR-F008): user/thread deletes orphan langgraph checkpoint
   rows that carry conversation content; `adelete_thread` exists, no delete surface calls it — F1.
+- deploy/helm web values cleanup: the runtime `API_BASE_URL` env was always a no-op for the
+  static bundle (S6 kept the :8080 + /health contract so helm/caddy still work untouched).
+- Version-poll auto-reload died with the husk: a stale SPA persists until manual refresh after a
+  web rebuild — recreate on the new shell if it bites (S6 note).
+- wave-*/m*-* Cypress specs target legacy-executor surfaces that still render under /lq-ai —
+  retire each spec together with its surface during the practice-area pivot.
+- web lint harness is dead (pre-existing): `eslint .` crashes with a TypeError in
+  no-unused-vars on SkillWizard.svelte (eslint 8 legacy config + svelte parser; reproduced on
+  8.31 and 8.61) — migrate to eslint 9 flat config; lint is not a CI gate (S6 review deferral).
+- nginx serves no CSP/frame-ancestors/Referrer-Policy — needs a path-scoped design
+  (/word-addin/ must stay frameable by Office webviews); XSS defense is DOMPurify-only today
+  (S6 review deferral).
+- AliasForm/SkillInputForm bare `<select>`s render native UA chrome since S6 (the husk's
+  global select restyle was not carried) — F1's design system rebuilds all controls anyway
+  (S6 review deferral, accepted divergence).
 - `docs/api/backend-openapi.yaml` is stale for the agents surface (runs since S2, threads since
   S5) — regenerate or annotate when the surface settles (S7's SSE v2 reshapes it anyway).

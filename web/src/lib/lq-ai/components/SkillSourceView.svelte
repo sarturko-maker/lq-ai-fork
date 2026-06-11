@@ -46,9 +46,18 @@
 		return def.type ?? 'string';
 	}
 
-	// Skill bodies are operator-authored but still untrusted rendered HTML
-	// (CLAUDE.md: validate at the boundary) — sanitize like MessageBubble does.
-	$: renderedMd = DOMPurify.sanitize(marked(contentMd ?? '', { breaks: true }) as string);
+	// Skill bodies are untrusted rendered HTML: the capture-as-skill flow
+	// derives them from assistant output (CLAUDE.md: model output is
+	// untrusted). Same media-exfil hardening as the Agents tab — images and
+	// media can beacon out document content via URLs.
+	const SANITIZE_OPTS = {
+		FORBID_TAGS: ['img', 'picture', 'audio', 'video', 'source', 'track', 'svg', 'image', 'use'],
+		FORBID_ATTR: ['srcset', 'ping']
+	};
+	$: renderedMd = DOMPurify.sanitize(
+		marked(contentMd ?? '', { breaks: true }) as string,
+		SANITIZE_OPTS
+	);
 
 	onMount(() => {
 		loadInputs();

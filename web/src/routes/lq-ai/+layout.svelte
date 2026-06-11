@@ -108,8 +108,8 @@
 {/if}
 
 <style>
-	/* OpenWebUI's app.html pins html { overflow-y: hidden !important; } so
-	   the chat UI can manage its own scroll containers. The LQ.AI shell's
+	/* src/app.css pins html { overflow-y: hidden !important; } so the shell
+	   can manage its own scroll containers. The LQ.AI shell's
 	   non-chat surfaces (settings, admin sub-routes, trust page) need a
 	   scrollable main; the chat shell already wraps itself in flex+
 	   overflow-hidden and manages internal scroll, so adding overflow-y

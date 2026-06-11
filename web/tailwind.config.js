@@ -12,7 +12,8 @@ export default {
 				DEFAULT: {
 					css: {
 						// MessageBubble renders sanitized marked() output inside
-						// `prose`; code/pre styling is handled by the components.
+						// `prose`; pre/code behavior is owned by the base layer
+						// in app.css (pre-wrap + overflow), not by prose.
 						pre: false,
 						code: false,
 						'pre code': false,
@@ -20,12 +21,6 @@ export default {
 						'code::after': false
 					}
 				}
-			},
-			padding: {
-				'safe-bottom': 'env(safe-area-inset-bottom)'
-			},
-			transitionProperty: {
-				width: 'width'
 			}
 		}
 	},

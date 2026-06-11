@@ -58,8 +58,8 @@ stop-dev: ## Stop the dev stack (preserves volumes)
 	docker compose down
 
 .PHONY: clean
-clean: ## Tear down dev stack, volumes, and caches
-	docker compose down -v
+clean: ## Tear down dev stack and caches (volumes preserved — CLAUDE.md hard rule)
+	docker compose down
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 	find . -type d -name .pytest_cache -prune -exec rm -rf {} +
 	find . -type d -name .ruff_cache -prune -exec rm -rf {} +
