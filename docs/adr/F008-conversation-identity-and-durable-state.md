@@ -1,6 +1,6 @@
 # F008 — Conversation identity: `agent_threads` table + langgraph Postgres checkpointer
 
-Status: proposed
+Status: accepted (2026-06-11, maintainer)
 Date: 2026-06-11
 
 ## Context and problem statement
@@ -51,7 +51,10 @@ Option 3 for identity + the Postgres checkpointer for state.
   step cap, failure) can leave the checkpoint mid-tool-call — dangling `tool_calls` with no tool
   results, which OpenAI-compatible providers reject on the next turn. Until the cancel/repair
   pathway lands (carry-over), the API answers 409 `thread_not_continuable`; the UI offers
-  "New chat" instead.
+  "New chat" instead. Likewise **409 `matter_archived`** when the thread's Matter has been
+  archived since creation (F0-S5 review): accepting the follow-up would silently degrade the run
+  to a blank workspace while the UI still presents the binding — the same execution-time-binding
+  rule the new-thread path enforces with its 404.
 - **Durable state: `AsyncPostgresSaver`** in the Postgres we already operate, constructed and
   opened at the composition root (lifespan, mirroring `app/db/session.py`'s process-global
   pattern), injected into the run composition through a provider seam; tests substitute
