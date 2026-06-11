@@ -153,6 +153,8 @@ StoreBackend namespaces keyed `(org_id, …)`; company and practice levels read-
 ## Where to look (read on demand — do not preload)
 - **Current state + where to pick up: `docs/fork/HANDOFF.md` — read first in every session**
 - Fork charter / divergence policy: `docs/adr/F001-fork-charter.md` · sync log: `UPSTREAM.md`
+- North star (resident agents, forward deployment — check structural slices against its
+  keep-possible invariants): `docs/fork/NORTH-STAR.md`
 - Milestones and backlog: `docs/fork/MILESTONES.md`
 - Upstream's shipped-vs-deferred catalog: `docs/HONEST-STATE.md` — code is canonical over all docs
 - Architecture: `docs/architecture.md` · DB schema: `docs/db-schema.md` · ADR index: `docs/adr/`

@@ -4,10 +4,12 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (2026-06-11, end of F0-S5)
 
-- Merged to main through #31 (F0-S4 #30, S5 scope promotion #31); **F0-S5 = PR #32**.
-  ADR-F001..F006 accepted; **ADR-F007 (matter document scope) and ADR-F008 (conversation
-  identity: `agent_threads` + Postgres checkpointer) are `proposed` — maintainer accepts**.
-  Merges follow ADR-F005's 5-part gate — no exceptions.
+- Merged to main through #32 (F0-S4 #30, S5 scope promotion #31, F0-S5 #32). ADR-F001..F006 +
+  **F008 accepted** (F008 accepted by the maintainer 2026-06-11); **ADR-F007 (matter document
+  scope) is still `proposed` — maintainer accepts**. Merges follow ADR-F005's 5-part gate — no
+  exceptions. **`docs/fork/NORTH-STAR.md` (maintainer, 2026-06-11) now records the end state**
+  — resident agents, forward deployment, community repo — with four keep-possible invariants;
+  check structural slices against it.
 - Dev stack: 8 services healthy on the S5 images; DB at migration **0050**; the api log shows
   `agent checkpointer ready (AsyncPostgresSaver)` on boot (its tables are library-managed via
   `setup()`, NOT alembic — deliberate, ADR-F008). Gateway aliases `smart`/`fast`/`budget` →
