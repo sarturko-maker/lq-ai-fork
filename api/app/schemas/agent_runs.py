@@ -108,6 +108,10 @@ class AgentRunStepRead(BaseModel):
     kind: AgentRunStepKind
     name: str | None = None
     summary: str
+    # Innermost ancestor tool dispatch (F0-S7): NULL = root loop;
+    # set = this step ran inside that tool_call row's subagent /
+    # tool-wrapped graph. The UI groups, the eval gate measures, on it.
+    parent_step_id: uuid.UUID | None = None
     created_at: datetime
 
 

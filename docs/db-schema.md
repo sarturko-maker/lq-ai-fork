@@ -1812,6 +1812,88 @@ CREATE TABLE autonomous_artifacts (
 CREATE INDEX ix_autonomous_artifacts_session_id ON autonomous_artifacts(session_id);
 ```
 
+## Fork: deep-agent runs + conversations (F0, ADR-F002/F008)
+
+The fork's deepagents substrate records every agent run and its
+observable steps as settled rows (ADR-F004: the UI renders these, never
+parsed LLM turns). Landed across migrations `0048` (runs + steps),
+`0049` (matter binding), `0050` (threads + checkpointer identity),
+`0051` (subagent ancestry). The langgraph checkpointer's own tables are
+created by `AsyncPostgresSaver.setup()` and are deliberately NOT
+alembic-managed (the library migrates its own schema; alembic owns ours).
+
+### `agent_threads` (0050, ADR-F008)
+
+One row per conversation; the row id doubles as the langgraph
+checkpointer's `configurable.thread_id`. The THREAD owns the Matter
+binding; runs snapshot it.
+
+```sql
+CREATE TABLE agent_threads (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    project_id  UUID REFERENCES projects(id) ON DELETE SET NULL,
+    title       TEXT NOT NULL,            -- bounded first prompt (auto-titling F1/F2)
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_run_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_agent_threads_user_activity ON agent_threads(user_id, last_run_at DESC);
+```
+
+### `agent_runs` (0048–0050)
+
+```sql
+CREATE TABLE agent_runs (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    thread_id    UUID NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE,
+    project_id   UUID REFERENCES projects(id) ON DELETE SET NULL,  -- per-run snapshot of the thread binding
+    status       TEXT NOT NULL DEFAULT 'running'
+                 CHECK (status IN ('running','completed','failed','cancelled','cap_exceeded')),
+    prompt       TEXT NOT NULL,
+    final_answer TEXT,                    -- full, unbounded (the deliverable)
+    model_alias  TEXT NOT NULL DEFAULT 'smart',   -- gateway alias, never a provider id
+    purpose      TEXT NOT NULL DEFAULT 'agent_loop',
+    max_steps    INTEGER NOT NULL DEFAULT 20 CHECK (max_steps > 0),
+    started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at  TIMESTAMPTZ,
+    error        TEXT,                    -- bounded type+message, never a stack trace
+    cost_usd     NUMERIC(10,4)            -- NULL until the F1 R4 cost brake fills it
+);
+CREATE INDEX idx_agent_runs_user_started ON agent_runs(user_id, started_at DESC);
+CREATE INDEX idx_agent_runs_project ON agent_runs(project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX idx_agent_runs_thread_started ON agent_runs(thread_id, started_at);
+-- ADR-F008 brake: at most ONE running run per conversation (API maps to 409).
+CREATE UNIQUE INDEX uq_agent_runs_thread_running ON agent_runs(thread_id) WHERE status = 'running';
+```
+
+### `agent_run_steps` (0048, 0051)
+
+Committed per step as the loop progresses — the polled UI and the SSE v2
+stream both render these settled rows. `parent_step_id` (0051, F0-S7) is
+the settled `tool_call` row of the innermost tool this step ran
+underneath: NULL = root loop; set = a subagent's (deepagents `task`) or
+tool-wrapped graph's step. Pre-S7 rows are NULL (ancestry was never
+recorded; no backfill — inventing one would violate ADR-F004).
+
+```sql
+CREATE TABLE agent_run_steps (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id         UUID NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+    seq            INTEGER NOT NULL,      -- 1-based order within the run
+    kind           TEXT NOT NULL CHECK (kind IN ('model_turn','tool_call','tool_result')),
+    name           TEXT,                  -- tool name; NULL for model turns
+    summary        TEXT NOT NULL,         -- bounded digest (~2000 chars), never raw secrets
+    parent_step_id UUID REFERENCES agent_run_steps(id) ON DELETE CASCADE,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (run_id, seq)
+);
+CREATE INDEX idx_agent_run_steps_parent ON agent_run_steps(parent_step_id)
+    WHERE parent_step_id IS NOT NULL;
+```
+
+---
+
 ## M4+ tables (sketched, land at the indicated milestone)
 
 ### `autonomous_tasks` (M4 — **superseded**)

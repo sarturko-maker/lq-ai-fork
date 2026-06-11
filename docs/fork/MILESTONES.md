@@ -55,17 +55,28 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
   stop-the-stack OOM dance is dead). NOTICES.md records the lineage; ADR-0009 superseded.
   Verified: svelte-check 0 errors, vitest 752/752, f0-s3 AND f0-s5 green on the new shell,
   screenshot parity (one intended delta: footer attribution).
-- **S7 — SSE v2: stream like Claude Code (ADR-F006 wire spec).** Emit the AI SDK UI Message Stream
-  v1 from FastAPI (hand-rolled emitter; `data-*` parts for subagent/interrupt/plan/receipt carrying
-  settled step-row ids — ADR-F004 intact). Reasoning deltas as a collapsed-by-default thinking
-  ribbon with shimmer status (the cross-product convention); tool/plan frames live; upgrades the S3
-  polled rail. **Pulled forward into S7 (agentic-UX audit, 2026-06-11):** (a) persist subagent
-  identity on `agent_run_steps` — the runner computes the `parent_ids` chain and DROPS it at
-  persist time, so fan-out renders as an undifferentiated flat stream; S7 reshapes rows/wire/
-  openapi anyway, and without the linkage F1's subagent tree has no data and S9's subagent eval
-  nothing observable (reshaping later = a second breaking rework); (b) extract the conversation
-  surface (turns/steps/ribbon/composer) out of the 1215-line agents page into a layout-agnostic
-  component, so SSE streams into a component the F1 cockpit re-homes without re-touching wiring.
+- **S7 ✓ done — SSE v2: stream like Claude Code (ADR-F006 wire spec).**
+  `GET /agents/runs/{id}/stream` emits the AI SDK UI Message Stream v1 (hand-rolled emitter):
+  settled rows as `data-step` parts whose part id IS the row id (same-id reconciliation makes
+  replay/races idempotent), live reasoning deltas per model turn, tool frames keyed by the settled
+  `tool_call` row id, `write_todos` as `data-plan`, terminal text block = the settled
+  `final_answer` (ADR-F004 intact). In-process `RunStreamBroker` bridges runner → endpoint; a
+  DB-tail fallback serves subscribers with no live publisher, so the same stream survives the F1
+  arq migration unchanged; orphaned-at-'running' runs close the stream at the poller's 330s
+  cutoff. UI: collapsed-by-default thinking ribbon with shimmer fed only by reasoning deltas;
+  polling parks while the stream is healthy and stays the fallback + contract. **Both pulled-
+  forward MUSTs landed:** (a) migration 0051 `agent_run_steps.parent_step_id` — the runner
+  resolves each event's innermost enclosing tool dispatch to its settled row (subagent fan-out
+  no longer flat; nested steps render indented); (b) the conversation surface lives in
+  `ConversationPanel.svelte` (lib), thread switching by `{#key}` remount, draft/matter selection
+  survive as bound props — the agents route is chrome only. Server-clock skew (Date headers)
+  closed the F0-S3 staleness carry-over. Verified: api agents suite 102 passed (live broker,
+  DB-tail, orphan-cutoff, mid-run-attach seeding, wire-mirror through the real `task` subagent),
+  web 773/773 + svelte-check 0 errors, timestamped live wire capture (reasoning deltas over ~8s
+  of model time), NEW `f0-s7-stream` Cypress spec (ribbon live + polls parked, <5) + f0-s3 +
+  f0-s5 green; 30-agent adversarial review — 24 confirmed / 0 blockers, all fixed or deferred
+  on record. GOTCHA for spec authors: `cy.intercept` BUFFERS streamed responses — never
+  intercept the SSE route you're asserting liveness on.
 - **S8 — matters without leaving the agent (maintainer directive, 2026-06-11).** "+ New matter"
   on the Agents tab reusing the SAME plumbing as the Matters tab: `NewMatterModal` +
   `POST /projects`, full form — the privileged ⇒ tier-floor invariant (PRD §3.11, enforced in
@@ -257,4 +268,7 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
   global select restyle was not carried) — F1's design system rebuilds all controls anyway
   (S6 review deferral, accepted divergence).
 - `docs/api/backend-openapi.yaml` is stale for the agents surface (runs since S2, threads since
-  S5) — regenerate or annotate when the surface settles (S7's SSE v2 reshapes it anyway).
+  S5, the stream endpoint since S7) — regenerate or annotate when the surface settles.
+- Thinking ribbon under PARALLEL subagent fan-out: one shared buffer means a sibling's settling
+  model_turn wipes another sibling's live reasoning (animation-only loss; sequential fan-out today)
+  — per-block ribbons land with F1's subagent tree (S7 review deferral).
