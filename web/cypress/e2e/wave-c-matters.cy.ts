@@ -23,7 +23,9 @@ describe('Wave C — Matters surfaces', () => {
       Cypress.env('LQAI_ADMIN_PASSWORD') || 'LQ-AI-smoke-test-Pw1!'
     );
     cy.get('button[type="submit"]').click();
-    cy.url().should('not.include', '/login');
+    // 15s matches support/lq-ai-helpers.ts login(): the bare 4s default
+    // flakes on this box when several logins run back-to-back.
+    cy.url({ timeout: 15000 }).should('not.include', '/login');
   });
 
   // ── Test 1 ───────────────────────────────────────────────────────────────────
