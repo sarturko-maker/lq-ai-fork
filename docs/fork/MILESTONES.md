@@ -59,21 +59,61 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
   v1 from FastAPI (hand-rolled emitter; `data-*` parts for subagent/interrupt/plan/receipt carrying
   settled step-row ids — ADR-F004 intact). Reasoning deltas as a collapsed-by-default thinking
   ribbon with shimmer status (the cross-product convention); tool/plan frames live; upgrades the S3
-  polled rail.
-- **S8 — eval gate (ADR-F004).** Tool-call and subagent uptake at N≥20 on MiniMax-M3 plus one
+  polled rail. **Pulled forward into S7 (agentic-UX audit, 2026-06-11):** (a) persist subagent
+  identity on `agent_run_steps` — the runner computes the `parent_ids` chain and DROPS it at
+  persist time, so fan-out renders as an undifferentiated flat stream; S7 reshapes rows/wire/
+  openapi anyway, and without the linkage F1's subagent tree has no data and S9's subagent eval
+  nothing observable (reshaping later = a second breaking rework); (b) extract the conversation
+  surface (turns/steps/ribbon/composer) out of the 1215-line agents page into a layout-agnostic
+  component, so SSE streams into a component the F1 cockpit re-homes without re-touching wiring.
+- **S8 — matters without leaving the agent (maintainer directive, 2026-06-11).** "+ New matter"
+  on the Agents tab reusing the SAME plumbing as the Matters tab: `NewMatterModal` +
+  `POST /projects`, full form — the privileged ⇒ tier-floor invariant (PRD §3.11, enforced in
+  `ProjectCreateRequest`) must ride along; never a name-only quick-create. Prereq refactor: the
+  modal's hardcoded post-create `goto('/lq-ai/matters/{id}')` moves to the Matters page's
+  `onCreated` callback (the caller owns navigation — invoked from the Agents tab it would yank the
+  user out, defeating the directive). On create: bind the new matter, clear pending upload chips
+  (the F0-S5 honesty invariant — chips belong to the matter they filed into), refresh the matter
+  list. With create-in-place shipped, the free-floating "No matter — blank workspace" option is
+  REMOVED (ADR-F002: free-floating agent chat is not offered — memory has nowhere to accumulate).
+  Today's zero-matter first run is a hard dead end (no create affordance, attach disabled, no link
+  out) — this is the worst live first-impression and is independent of S7.
+- **S9 — eval gate (ADR-F004).** Tool-call and subagent uptake at N≥20 on MiniMax-M3 plus one
   second model family (masked judge, pre-flight variance gate); subagent dispatch as task-scoped
   procedures, not open-ended delegation.
 
 ## F1 — First practice area, end to end (ADR-F002)
 
 Outcome: one configurable practice area (suggest: Commercial) with one Deep Agent and one unit-of-work
-type ("Matter") usable for a real task (e.g. NDA review), with visible agent work in the UI.
+type ("Matter") usable for a real task (e.g. NDA review), with visible agent work in the UI — and
+**users LAND in a cockpit where they run their matters and programmes** (maintainer, 2026-06-11).
 
-- **Design system build-out (ADR-F006)** alongside the area home: shadcn-svelte + bits-ui +
-  paneforge + Tailwind v4; semantic intent tokens (the Harvey pattern), light+dark, denser
-  work-tool spacing; bespoke agent components (reasoning ribbon, plan/task/tool cards, subagent
-  tree) with AI Elements / deep-agents-ui as semantic references. Benchmark bar: Harvey/Legora
-  workspaces, Claude.ai thinking UX.
+- **F1 leads with Cockpit v0 — the landing IS the cockpit, built on the design system from day
+  one** (ADR-F006 sequencing: panels land on the new system, never the S6 ad-hoc CSS — building
+  cockpit panels pre-S7 on today's `ag-*` classes would mean a full rebuild here). Design-system
+  foundation lands WITH it: shadcn-svelte + bits-ui + paneforge + Tailwind v4; semantic intent
+  tokens (the Harvey pattern), light+dark, denser work-tool spacing; bespoke agent components
+  (reasoning ribbon, plan/task/tool cards, subagent tree) with AI Elements / deep-agents-ui as
+  semantic references. Benchmark bar: Harvey/Legora workspaces, Claude.ai thinking UX.
+  The cockpit: **LEFT panel = practice areas listed from day-one `practice_areas` rows** (ADR-F002
+  explicitly rejected frontend-only grouping) — the standard areas seeded with an honest
+  configured / not-yet-configured state (unconfigured areas are INERT cards: no composer, no rail,
+  no matter creation under them — the demo-tool rule applies to UI; only configured areas are
+  enterable, Commercial first). Under an area: **the user's matters/programmes with activity
+  rollups** (running / needs attention / last activity — `AgentThread` already carries
+  `project_id` + `last_run_status`, a group-by away), pick-or-create in place (S8's plumbing),
+  resume into the conversation. The unit-of-work noun renders from area config ("Matter" /
+  "Programme — GDPR" is data, not code — ADR-F002/F004; today it's hardcoded in 4 places in the
+  composer). An explicit "unfiled conversations" bucket holds legacy unbound threads (hiding them
+  loses data visibility; F2 memory scoping needs their story). Login lands HERE — the tool-centric
+  guided dashboard retires from `/`; F3 then only promotes routes, never rebuilds this surface.
+- **Run-lifecycle durability precedes the cockpit** (audit 2026-06-11 — currently owned by no
+  slice): agent runs move to arq with a startup sweep settling orphaned `running` runs (today a
+  stranded run deadlocks its thread FOREVER — 409 thread_busy, no sweep, no cancel), a cancel
+  endpoint, and thread repair for non-continuable threads (one failed/capped/timed-out turn
+  currently kills the whole matter conversation; with a 300s wall clock and step caps, failures
+  are routine — the opposite of a resident colleague). Without this the cockpit lands on zombie
+  "running" matters. Ingest-job orphan sweep rides along (same fragility family).
 
 - `practice_areas` schema + config/admin API (name, unit-of-work label, area profile, bound
   skills/playbooks/MCPs, default tier floor); `projects.practice_area_id` (nullable — legacy Matters
@@ -83,10 +123,10 @@ type ("Matter") usable for a real task (e.g. NDA review), with visible agent wor
   user-added areas can host units of work from day one (ADR-F004).
 - Tool parameters classified A/B/C; matter/user/scope identifiers are B-class — runtime-injected,
   never LLM-visible (ADR-F004). Capability rail renders from settled state records, not the stream.
-- **Agents tab = practice-area home** (maintainer layout, 2026-06-10): **LEFT panel = practice
-  areas** — click an area to create a Matter or pick an existing one (S3's auto-landing in
-  Commercial was flagged); CENTER = the conversation. Conversations bind to (practice area,
-  Matter) — no free-floating agent chat.
+- **Agents tab = practice-area home** (maintainer layout 2026-06-10; realized as Cockpit v0
+  above): LEFT areas → matters, CENTER conversation (the S7-extracted component re-homed),
+  conversations bind to (practice area, Matter) — no free-floating agent chat. The cockpit lands
+  on the AREA LIST, not auto-landed in Commercial (S3's auto-landing was flagged).
 - **RIGHT panel restructure** (replaces S3's flat "Capabilities" list): three sections — **Skills**
   (existing LQ.AI skills bound to the area), **Playbooks** (existing LQ.AI playbooks), **Tools**
   (real legal capabilities: tabular review, Word redlining as they hook up); utility/workspace
@@ -98,8 +138,21 @@ type ("Matter") usable for a real task (e.g. NDA review), with visible agent wor
   playbooks, tools, dim → lit when loaded → animated in use, click-through to inspect; live activity
   feed on SSE v2; tier badge + receipts drawer carried over.
 - **Decision inbox v1** on LangGraph interrupts: agent questions/approvals as cards, not chat scroll.
-- Auto-titling + auto-filing of chats to the inferred Matter (one-tap confirm when uncertain).
+- **Auto-titling + auto-filing as a service-side, channel-agnostic resolver** (one-tap confirm
+  when uncertain): inbound (message) → (practice area, unit of work, thread). North-star
+  invariant 2 names this the embryo of inbound channel routing — the Slack/Teams bridge stubs and
+  the `LQ_AI_BRIDGE_TOKEN` service-auth seam are its future callers; never web-UI-only logic.
 - Extend `work_product_attributions` to multi-inference agent runs (fan-out-safe chain of custody).
+- **Trust chrome reaches the agent surface** (audit 2026-06-11): the Citation Engine's only
+  consumers today are legacy chat + tabular — agent runs emit ZERO citation/receipt/attribution
+  records, while ADR-F002 requires tier badge, inline citations and a receipts drawer on this
+  surface and the north star sells the trust stack as the product. Ordered AFTER the
+  `work_product_attributions` extension above (receipts against the one-inference-per-message
+  schema would write wrong rows — blocker #6).
+- **Run artifact surface** (promoted from Backlog, audit 2026-06-11): ADR-F002 — "deliverables
+  are artifacts, not chat text"; the rail already lists write_file/edit_file but nothing a run
+  produces is user-visible. F1's real task (NDA review) must land its work product as files on
+  the Matter, or the deliverable is chat-scroll copy/paste.
 
 ## F2 — Memory: 4 levels + conversation memory (ADR-F003)
 
@@ -132,7 +185,17 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 
 - Promote area pages to the top-level IA (`/lq-ai/areas/:area/...`); area-scoped dashboards;
   matter-first navigation; Learn becomes per-area onboarding.
-- Playbooks + tabular review callable as agent tools inside a unit of work (unify the three substrates).
+- **Heartbeat absorption (north-star invariant 1 — MUST, audit 2026-06-11):** autonomous watches
+  (KB-attach events), schedules (arq cron), run-now, and the notification system (in-app + email
+  — the codebase's ONLY one) RETARGET to agent runs/threads; they must never retire with the
+  legacy autonomous surface (the retire-with-surface rule would otherwise silently delete the
+  fork's only event/cron/notification plumbing). System-initiated threads need an origin answer:
+  `agent_threads` bakes in a non-null `user_id` today and has no origin/trigger column.
+- Playbooks + tabular review callable as agent tools inside a unit of work (unify the three
+  substrates) — **absorbing the review/decision surfaces, not just the executors** (audit
+  2026-06-11): the per-position match/deviate review UX and the tabular grid + per-cell citation
+  modal are the legal decision surfaces lawyers actually use; wiring only executors while the
+  tabs retire degrades deliverables to chat text. They become unit-of-work panels.
 - MCP servers per practice area via `langchain-mcp-adapters` (scoped tool sets, not global).
 - One search box across chats, documents, memory — matter-scoped by default, privilege-scoped always.
 - Long tasks keep running when the laptop closes: background continuation + notification + finished
@@ -152,7 +215,20 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 - Email-grade entry points: forward an email into a Matter; Word add-in revival.
 - Revisit third-party memory (Zep/Graphiti temporal graph) only if native consolidation proves
   insufficient (ADR-F003 option 3).
-- Run artifact surface: expose the deepagents workspace files a run produced (S3 deferral).
+- ~~Run artifact surface~~ — PROMOTED into F1 (audit 2026-06-11).
+- Thread management: rename, delete (MUST call `adelete_thread` — checkpoint rows carry
+  conversation content; security-review path), pagination past the 20-thread list cap (a cockpit
+  grouping client-side from it under-reports older matters) — F1/F2.
+- Searchable recent-first matter picker with privileged marker (replaces the flat name-only
+  `<select>`; one of the S6 bare-select deferrals) — F1 design system.
+- Global notification bell in the chrome (DE-324 deferral) — cockpit-adjacent.
+- Declare the F3 retire list explicitly when the IA re-centres: saved-prompts, guided-dashboard
+  components, FeaturedToolsRow, learn-as-global-tab.
+- NewMatterModal's privileged InfoTip claims "defaults to Tier 2" — neither client nor server
+  implements a default (the field is simply required); fix the copy on next touch (transparency).
+- Pre-F1 guard: frontend-static practice-area identifiers must never leak into stored rows
+  (thread metadata, project fields) — area ids stay presentation-only until the schema lands, or
+  the F1 migration becomes a data-repair exercise.
 - MessageBubble (upstream surface) shares the default-DOMPurify image-beacon exfil gap fixed on the
   Agents tab — harden when next touched (CLAUDE.md: model output is untrusted).
 - ~~File upload directly in the agent composer~~ — PROMOTED into F0-S5 (2026-06-11).

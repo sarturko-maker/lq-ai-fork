@@ -61,6 +61,19 @@ Per MILESTONES F0-S7:
   (`grep -rn F0-S1 gateway/app`); anonymization decision for block content pending.
 - The legacy 4-frame SSE parser (`web/src/lib/lq-ai/sse/parser.ts`) serves the LEGACY chats
   path; the agents surface is polling-only today — S7 adds its stream on the clean shell.
+- **Pulled forward into S7 (agentic-UX audit + maintainer re-plan, 2026-06-11 — see MILESTONES):**
+  (a) persist subagent identity on `agent_run_steps` — `api/app/agents/runner.py` computes the
+  `parent_ids` chain and drops it at persist time; S7 reshapes rows/wire anyway, and flat rows
+  leave F1's subagent tree dataless and S9's subagent eval unobservable; (b) extract the
+  conversation surface out of the 1215-line `agents/+page.svelte` into a layout-agnostic
+  component (props: thread id; renders settled rows) so F1's cockpit re-homes it without
+  re-touching stream wiring.
+- After S7: **S8 = matter creation on the Agents tab** (maintainer directive — same
+  NewMatterModal/POST /projects plumbing, goto-lift prereq, bind+chips+refresh wiring, removes
+  the blank-workspace option per ADR-F002); S9 = eval gate. F1 now LEADS with Cockpit v0 on the
+  design system (landing = cockpit; practice areas listed from day-one `practice_areas` rows
+  with honest not-configured states) preceded by run-lifecycle durability — MILESTONES F1 has
+  the full re-scope.
 
 ## Pick up exactly here
 
