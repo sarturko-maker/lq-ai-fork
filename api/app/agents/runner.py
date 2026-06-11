@@ -34,7 +34,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -44,6 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import thread_config
 from app.agents.factory import build_deep_agent
+from app.agents.stream import RunStreamPublisher, step_payload
 from app.models.agent_run import AgentRun, AgentRunStep
 from app.schemas.agent_runs import AgentRunStatus, AgentRunStepKind
 
@@ -149,7 +150,7 @@ def _step_from_event(
     return None
 
 
-def _is_nested(event: dict[str, Any], tool_run_ids: set[str]) -> bool:
+def _is_nested(event: dict[str, Any], tool_run_ids: Collection[str]) -> bool:
     """True if ``event`` ran underneath any tool invocation.
 
     astream_events v2 events carry ``parent_ids`` — the run-id chain
@@ -162,14 +163,34 @@ def _is_nested(event: dict[str, Any], tool_run_ids: set[str]) -> bool:
     return any(str(pid) in tool_run_ids for pid in event.get("parent_ids") or [])
 
 
+def _innermost_tool_parent(
+    event: dict[str, Any], tool_step_ids: dict[str, uuid.UUID]
+) -> uuid.UUID | None:
+    """The settled ``tool_call`` row this event ran underneath, if any.
+
+    ``parent_ids`` orders the chain root-first, so the first match
+    scanning from the END is the innermost enclosing tool dispatch —
+    that row id becomes the step's ``parent_step_id`` (F0-S7: the
+    ancestry the loop always computed but dropped at persist time).
+    """
+    for pid in reversed(event.get("parent_ids") or []):
+        step_id = tool_step_ids.get(str(pid))
+        if step_id is not None:
+            return step_id
+    return None
+
+
 async def _persist_step(
     session_factory: async_sessionmaker[AsyncSession],
     *,
+    step_id: uuid.UUID,
     run_id: uuid.UUID,
     seq: int,
     kind: str,
     name: str | None,
     summary: str,
+    parent_step_id: uuid.UUID | None,
+    created_at: datetime,
 ) -> None:
     """Write one step row in its own short-lived session, retrying once.
 
@@ -182,11 +203,26 @@ async def _persist_step(
     crash-recovery window in progress — same fresh-session posture as
     :func:`_finalize` / :func:`mark_run_failed`. The ``(run_id, seq)``
     unique constraint makes a double write impossible.
+
+    ``step_id`` / ``created_at`` are caller-generated (F0-S7) so the
+    settled row and the wire's ``data-step`` mirror of it are built from
+    the same values without a post-commit refresh.
     """
     for attempt in (1, 2):
         try:
             async with session_factory() as db:
-                db.add(AgentRunStep(run_id=run_id, seq=seq, kind=kind, name=name, summary=summary))
+                db.add(
+                    AgentRunStep(
+                        id=step_id,
+                        run_id=run_id,
+                        seq=seq,
+                        kind=kind,
+                        name=name,
+                        summary=summary,
+                        parent_step_id=parent_step_id,
+                        created_at=created_at,
+                    )
+                )
                 await db.commit()
                 return
         except Exception:
@@ -204,6 +240,7 @@ async def _drive_agent(
     session_factory: async_sessionmaker[AsyncSession],
     wall_clock_seconds: float,
     thread_id: uuid.UUID | None = None,
+    publisher: RunStreamPublisher | None = None,
 ) -> tuple[str | None, bool]:
     """Stream the agent, persisting one step row + COMMIT per event.
 
@@ -216,14 +253,23 @@ async def _drive_agent(
     conversation's checkpoint lineage: the new user message is APPENDED
     to the thread's persisted state by the ``add_messages`` reducer, so
     a follow-up run continues the same conversation (ADR-F008).
+
+    With ``publisher`` set (F0-S7) the loop ALSO mirrors itself onto the
+    SSE v2 stream: every settled row right after its commit (settled
+    rows decide), plus live-only animation — model deltas as reasoning
+    blocks, top-level turn boundaries as step frames. Publishing is
+    fire-and-forget; the stream never gates or fails the run.
     """
     seq = 0
     final_answer: str | None = None
     cap_hit = False
-    # Run ids of every dispatched tool — ancestry test for _is_nested.
-    # Never pruned: a finished tool's id cannot reappear in a later
-    # event's parent chain, and runs are bounded by max_steps anyway.
-    tool_run_ids: set[str] = set()
+    # Settled tool_call row id per dispatched tool's langchain run id.
+    # The keys are the _is_nested ancestry test (F4); the values resolve
+    # each nested step's parent_step_id and each tool_result's wire
+    # toolCallId (F0-S7). Never pruned: a finished tool's id cannot
+    # reappear in a later event's parent chain, and runs are bounded by
+    # max_steps anyway.
+    tool_step_ids: dict[str, uuid.UUID] = {}
 
     stream = agent.astream_events(
         {"messages": [{"role": "user", "content": prompt}]},
@@ -233,25 +279,66 @@ async def _drive_agent(
     try:
         async with asyncio.timeout(wall_clock_seconds):
             async for event in stream:
-                if event.get("event") == "on_tool_start" and event.get("run_id"):
-                    tool_run_ids.add(str(event["run_id"]))
+                etype = event.get("event")
+                event_run_id = str(event.get("run_id") or "")
+                if publisher is not None:
+                    if etype == "on_chat_model_stream":
+                        chunk = (event.get("data") or {}).get("chunk")
+                        delta = _text_of(getattr(chunk, "content", ""))
+                        if delta:
+                            publisher.reasoning_delta(event_run_id, delta)
+                        continue  # never a persisted step
+                    if etype == "on_chat_model_start" and not _is_nested(event, tool_step_ids):
+                        publisher.turn_started()
                 step = _step_from_event(event)
                 if step is None:
                     continue
                 kind, name, summary, no_tools = step
+                nested = _is_nested(event, tool_step_ids)
                 # Final = top-level model turn with no tool requests. A
                 # subagent's (or tool-wrapped middleware's) closing turn
                 # is nested under its tool run and is NOT the answer (F4).
-                is_final = no_tools and not _is_nested(event, tool_run_ids)
+                is_final = no_tools and not nested
                 seq += 1
+                step_id = uuid.uuid4()
+                created_at = datetime.now(UTC)
+                parent_step_id = _innermost_tool_parent(event, tool_step_ids)
                 await _persist_step(
                     session_factory,
+                    step_id=step_id,
                     run_id=run_id,
                     seq=seq,
                     kind=kind.value,
                     name=name,
                     summary=summary,
+                    parent_step_id=parent_step_id,
+                    created_at=created_at,
                 )
+                if etype == "on_tool_start" and event_run_id:
+                    tool_step_ids[event_run_id] = step_id
+                if publisher is not None:
+                    if kind is AgentRunStepKind.model_turn:
+                        publisher.reasoning_end(event_run_id)
+                    publisher.step_settled(
+                        step_payload(
+                            step_id=step_id,
+                            run_id=run_id,
+                            seq=seq,
+                            kind=kind.value,
+                            name=name,
+                            summary=summary,
+                            parent_step_id=parent_step_id,
+                            created_at=created_at,
+                        ),
+                        tool_call_id=(
+                            str(tool_step_ids[event_run_id])
+                            if kind is AgentRunStepKind.tool_result
+                            and event_run_id in tool_step_ids
+                            else None
+                        ),
+                    )
+                    if kind is AgentRunStepKind.model_turn and not nested:
+                        publisher.turn_finished()
                 if is_final:
                     # The deliverable itself is the user's work product —
                     # persisted in full, not bounded like step digests.
@@ -354,6 +441,7 @@ async def execute_agent_run(
     wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS,
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: uuid.UUID | None = None,
+    publisher: RunStreamPublisher | None = None,
 ) -> None:
     """Execute one persisted agent run end to end.
 
@@ -371,6 +459,11 @@ async def execute_agent_run(
     checkpointer without a thread id would persist state nowhere
     addressable, a thread id without a checkpointer would silently
     drop history; the composition point passes both or neither.
+
+    ``publisher`` (F0-S7) mirrors the run onto the SSE v2 stream; every
+    terminal path below also closes the stream with the same settled
+    state it writes to the run row, AFTER the row is written — the wire
+    never announces a terminal state the DB doesn't have yet.
 
     Terminal writes: ``completed`` (+ ``final_answer``), ``cap_exceeded``
     (step cap), or ``failed`` (``error='timeout'`` for the wall clock;
@@ -409,6 +502,7 @@ async def execute_agent_run(
             session_factory=db_session_factory,
             wall_clock_seconds=wall_clock_seconds,
             thread_id=thread_id if checkpointer is not None else None,
+            publisher=publisher,
         )
     except TimeoutError:
         await _finalize(
@@ -417,6 +511,8 @@ async def execute_agent_run(
             status=AgentRunStatus.failed,
             error="timeout",
         )
+        if publisher is not None:
+            publisher.run_finished(status=AgentRunStatus.failed.value, error="timeout")
         return
     except Exception as exc:
         # Bounded type+message only — stack traces stay in logs.
@@ -424,20 +520,29 @@ async def execute_agent_run(
             "agent run failed",
             extra={"event": "agent_run_failed", "run_id": str(run_id)},
         )
+        error = _bounded(f"{type(exc).__name__}: {exc}", 500)
         await _finalize(
             db_session_factory,
             run_id,
             status=AgentRunStatus.failed,
-            error=_bounded(f"{type(exc).__name__}: {exc}", 500),
+            error=error,
         )
+        if publisher is not None:
+            publisher.run_finished(status=AgentRunStatus.failed.value, error=error)
         return
 
+    status = AgentRunStatus.cap_exceeded if cap_hit else AgentRunStatus.completed
     await _finalize(
         db_session_factory,
         run_id,
-        status=AgentRunStatus.cap_exceeded if cap_hit else AgentRunStatus.completed,
+        status=status,
         # A capped run has no deliverable: any captured answer text is
         # incidental (e.g., a subagent's closing turn), not the run's
         # final answer — leave it NULL (F4).
         final_answer=None if cap_hit else final_answer,
     )
+    if publisher is not None:
+        publisher.run_finished(
+            status=status.value,
+            final_answer=None if cap_hit else final_answer,
+        )

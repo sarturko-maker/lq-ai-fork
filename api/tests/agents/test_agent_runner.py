@@ -413,6 +413,14 @@ async def test_subagent_final_turn_is_not_the_run_final_answer(
     assert steps[1].name == "task"
     # The nested turn IS persisted as visible activity — just not as the answer.
     assert "SUBAGENT closing turn" in steps[2].summary
+    # F0-S7: the ancestry the loop always computed now PERSISTS — the
+    # subagent's turn points at the task dispatch's settled row; the
+    # root loop's own steps (and the task's result) stay parentless.
+    assert steps[2].parent_step_id == steps[1].id
+    assert steps[0].parent_step_id is None
+    assert steps[1].parent_step_id is None
+    assert steps[3].parent_step_id is None
+    assert steps[4].parent_step_id is None
 
 
 async def test_cap_during_subagent_leaves_final_answer_null(
@@ -447,6 +455,75 @@ async def test_cap_during_subagent_leaves_final_answer_null(
     assert run.final_answer is None
     # model_turn, tool_call(task), nested model_turn, tool_result(task) = cap at 4.
     assert len(steps) == 4
+
+
+async def test_publisher_mirrors_the_real_loop_onto_the_wire(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """F0-S7: the SSE v2 publisher sees the run exactly as the rows settle.
+
+    Drives the REAL deepagents loop (task subagent and all) with a
+    broker subscription attached and asserts the wire mirrors the DB:
+    data-step part ids == row ids in seq order, subagent ancestry on the
+    wire, toolCallId == the settled tool_call row id, and the terminal
+    text block == the persisted final answer.
+    """
+    from app.agents.stream import CHANNEL_CLOSED, RunStreamBroker
+
+    run_id = await make_run()
+    broker = RunStreamBroker()
+    queue = broker.subscribe(run_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message(
+                "task",
+                {
+                    "description": "summarise the clause",
+                    "subagent_type": "general-purpose",
+                },
+            ),
+            final_message("SUBAGENT closing turn"),
+            final_message("ROOT final answer"),
+        ]
+    )
+
+    await execute_agent_run(
+        run_id,
+        commit_factory,
+        tools=[read_clause],
+        model=model,
+        publisher=broker.publisher(run_id),
+    )
+
+    parts: list[Any] = []
+    while not queue.empty():
+        parts.append(queue.get_nowait())
+    assert parts[-1] is CHANNEL_CLOSED
+    parts = parts[:-1]
+
+    _run, steps = await _load_run_and_steps(commit_factory, run_id)
+
+    assert parts[0]["type"] == "start"
+    step_parts = [p for p in parts if p["type"] == "data-step"]
+    assert [p["data"]["seq"] for p in step_parts] == [s.seq for s in steps]
+    assert [p["id"] for p in step_parts] == [str(s.id) for s in steps]
+    # Subagent ancestry on the wire == in the rows.
+    nested = next(p for p in step_parts if p["data"]["seq"] == steps[2].seq)
+    assert nested["data"]["parent_step_id"] == str(steps[1].id)
+
+    tool_inputs = [p for p in parts if p["type"] == "tool-input-available"]
+    tool_outputs = [p for p in parts if p["type"] == "tool-output-available"]
+    assert [p["toolCallId"] for p in tool_inputs] == [str(steps[1].id)]
+    assert [p["toolCallId"] for p in tool_outputs] == [str(steps[1].id)]
+    assert tool_inputs[0]["toolName"] == "task"
+
+    types = [p["type"] for p in parts]
+    assert types[-4:] == ["text-delta", "text-end", "data-run", "finish"]
+    text_delta = next(p for p in parts if p["type"] == "text-delta")
+    assert text_delta["delta"] == "ROOT final answer"
+    data_run = next(p for p in parts if p["type"] == "data-run")
+    assert data_run["data"]["status"] == "completed"
 
 
 async def test_step_write_survives_a_transient_db_failure(
