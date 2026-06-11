@@ -303,6 +303,23 @@ export function threadRailSteps(detail: AgentThreadDetailResponse | null): Agent
 	return detail.runs.flatMap((r) => r.steps);
 }
 
+/**
+ * Rail states for a conversation: lit = used anywhere in the thread,
+ * but the ACTIVE pulse may only come from the NEWEST run — an unmatched
+ * tool_call in an earlier, settled turn must not pulse "in use" forever
+ * (F0-S5 review). ``latestStatus`` is the newest run's status with the
+ * page's staleness override already applied.
+ */
+export function threadRailStates(
+	detail: AgentThreadDetailResponse | null,
+	latestStatus: AgentRunStatus | null
+): Record<string, RailState> {
+	const lit = railStates(threadRailSteps(detail), null);
+	if (!detail || detail.runs.length === 0) return lit;
+	const latestSteps = detail.runs[detail.runs.length - 1].steps;
+	return { ...lit, ...railStates(latestSteps, latestStatus) };
+}
+
 /** Poll the thread while its newest run is still working (and not stale). */
 export function shouldContinuePollingThread(
 	detail: AgentThreadDetailResponse | null,

@@ -104,7 +104,14 @@ curl -s -X POST http://localhost:8000/api/v1/agents/runs -H "Authorization: Bear
   (Backlog line exists).
 - Runs in-process via BackgroundTasks (arq migration + startup sweep). **Ingest jobs share the
   fragility**: a worker/db hiccup mid-ingest strands files at `processing` forever — fold into
-  the arq/orphan-sweep work.
+  the arq/orphan-sweep work. NEW since S5: a stranded `running` run now also **deadlocks its
+  thread** (409 `thread_busy` forever; the UI offers New chat) — the startup sweep must settle
+  orphans. The per-user flood brake is also check-then-insert racy (pre-S2; bounded overshoot).
+- Long conversations will exceed the dev model's context BEFORE deepagents' default summarization
+  triggers (~170k tokens) — ADR-F003's budget-alias compaction lands in F2; until then a very long
+  thread eventually fails its runs honestly. Related latent nit: a summarization middleware model
+  turn would be top-level (not tool-nested) and could be mis-read as a final-answer candidate —
+  revisit `_is_nested` when compaction lands.
 - No audit rows for run kick-off (tool dispatches ARE audited since S4).
 - Rail "lit" wording diverges from ADR-F002 ("lit = loaded" vs "lit = used") — reconcile in F1.
 - MessageBubble (upstream surface) shares the image-exfil DOMPurify gap fixed on the Agents tab.

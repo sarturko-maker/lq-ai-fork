@@ -18,20 +18,22 @@
     isStaleRunning,
     latestRunOf,
     railItems,
-    railStates,
     shouldContinuePollingThread,
     splitThink,
     statusBadge,
     stepDisplay,
+    threadRailStates,
     threadRailSteps,
     uploadsSettled,
     visibleSteps
   } from './page-helpers';
 
   // Model output is untrusted input (CLAUDE.md): forbid media so a poisoned
-  // answer can't beacon data out via auto-fetched remote resources.
+  // answer can't beacon data out via auto-fetched remote resources — incl.
+  // the SVG image elements DOMPurify's defaults allow (F0-S5 review:
+  // <svg><image href>) auto-fetches exactly like <img src>).
   const SANITIZE_OPTS = {
-    FORBID_TAGS: ['img', 'picture', 'audio', 'video', 'source', 'track'],
+    FORBID_TAGS: ['img', 'picture', 'audio', 'video', 'source', 'track', 'svg', 'image', 'use'],
     FORBID_ATTR: ['srcset', 'ping']
   };
 
@@ -168,17 +170,24 @@
   }
 
   function openThread(t: AgentThread) {
+    // Upload chips belong to ONE conversation: stop the file poller's
+    // generation too, or an in-flight refresh resurrects the old chips
+    // into the newly opened thread (F0-S5 review).
+    stopUploadPolling();
     detail = null;
     uploads = [];
     uploadError = null;
+    submitError = null;
     startPolling(t.id);
   }
 
   function newChat() {
     stopPolling();
+    stopUploadPolling();
     detail = null;
     currentThreadId = null;
     pollError = null;
+    submitError = null;
     uploads = [];
     uploadError = null;
     prompt = '';
@@ -206,6 +215,11 @@
             : e instanceof Error
               ? e.message
               : 'Failed to start the run';
+      if (e instanceof LQAIApiError && e.status === 409 && detail) {
+        // The server refused on fresher state than our snapshot — re-sync
+        // so the composer greys out honestly instead of inviting retries.
+        startPolling(detail.thread.id);
+      }
     } finally {
       submitting = false;
     }
@@ -220,8 +234,14 @@
   let uploadError: string | null = null;
   let uploadPollTimer: ReturnType<typeof setTimeout> | null = null;
   let uploadPollGeneration = 0;
+  let uploadPollFailures = 0;
   let fileInput: HTMLInputElement | null = null;
   let dragOver = false;
+
+  // Ingestion can legitimately ride out a backend blip (the dev stack's
+  // crash-recovery windows run ~10-20s) — tolerate more consecutive poll
+  // failures than the thread poller before giving up honestly.
+  const UPLOAD_MAX_POLL_FAILURES = 10;
 
   function stopUploadPolling() {
     uploadPollGeneration += 1;
@@ -233,22 +253,30 @@
 
   // Poll unsettled uploads (pending/processing → ready/failed) so the user
   // knows when the agent can actually ground on the document. Settled rows
-  // only, same render-deterministic posture as the thread poll.
+  // only, same render-deterministic posture as the thread poll. Per-file
+  // failures keep the last snapshot (never lose a chip); consecutive
+  // all-failure rounds are capped so a dead backend can't fake 'pending…'
+  // forever (F0-S5 review).
   async function pollUploads(gen: number) {
-    try {
-      const refreshed = await Promise.all(
-        uploads.map((f) =>
-          f.ingestion_status === 'ready' || f.ingestion_status === 'failed'
-            ? Promise.resolve(f)
-            : filesApi.getFile(f.id)
-        )
-      );
-      if (gen !== uploadPollGeneration) return;
-      uploads = refreshed;
-    } catch {
-      // Transient: keep the last snapshot and try again on the next tick.
-    }
+    let anyFailure = false;
+    const refreshed = await Promise.all(
+      uploads.map((f) =>
+        f.ingestion_status === 'ready' || f.ingestion_status === 'failed'
+          ? Promise.resolve(f)
+          : filesApi.getFile(f.id).catch(() => {
+              anyFailure = true;
+              return f;
+            })
+      )
+    );
     if (gen !== uploadPollGeneration) return;
+    uploads = refreshed;
+    uploadPollFailures = anyFailure ? uploadPollFailures + 1 : 0;
+    if (uploadPollFailures >= UPLOAD_MAX_POLL_FAILURES) {
+      uploadPollTimer = null;
+      uploadError = 'Lost contact while checking ingestion — the statuses shown may be stale.';
+      return;
+    }
     if (!uploadsSettled(uploads)) {
       uploadPollTimer = setTimeout(() => {
         void pollUploads(gen);
@@ -260,6 +288,7 @@
 
   function startUploadPolling() {
     stopUploadPolling();
+    uploadPollFailures = 0;
     const gen = uploadPollGeneration;
     if (!uploadsSettled(uploads)) {
       uploadPollTimer = setTimeout(() => {
@@ -268,34 +297,55 @@
     }
   }
 
-  async function uploadOne(file: File) {
-    if (!bindingProjectId) return; // an unbound upload has no home (ADR-F002)
-    uploading = true;
+  // The whole batch files into the project captured at batch START — the
+  // user switching the Matter select mid-batch must not split the batch
+  // across matters (F0-S5 review).
+  async function uploadBatch(files: File[]) {
+    const target = bindingProjectId;
+    if (!target || files.length === 0) return;
     uploadError = null;
-    try {
-      // ADR-F007 upload-time membership: POST /files with the matter's
-      // project_id makes the document visible to search_documents /
-      // read_document with no extra wiring.
-      const uploaded = await filesApi.uploadFile(file, { project_id: bindingProjectId });
-      uploads = [...uploads, uploaded];
-      startUploadPolling();
-    } catch (e) {
-      uploadError = e instanceof Error ? e.message : `Upload failed: ${file.name}`;
-    } finally {
-      uploading = false;
+    for (const file of files) {
+      uploading = true;
+      try {
+        // ADR-F007 upload-time membership: POST /files with the matter's
+        // project_id makes the document visible to search_documents /
+        // read_document with no extra wiring.
+        const uploaded = await filesApi.uploadFile(file, { project_id: target });
+        uploads = [...uploads, uploaded];
+      } catch (e) {
+        // Accumulate — a later file's success must not erase an earlier
+        // file's failure (F0-S5 review).
+        const msg = e instanceof Error ? `${file.name}: ${e.message}` : `Upload failed: ${file.name}`;
+        uploadError = uploadError ? `${uploadError} · ${msg}` : msg;
+      } finally {
+        uploading = false;
+      }
     }
+    startUploadPolling();
   }
 
   async function handlePicked(event: Event) {
     const input = event.target as HTMLInputElement;
     const files = Array.from(input.files ?? []);
     input.value = '';
-    for (const f of files) await uploadOne(f);
+    await uploadBatch(files);
+  }
+
+  // Upload chips belong to the matter they filed into — switching the
+  // Matter on a fresh chat clears them (a 'ready' chip must never imply
+  // the NEW matter's agent can ground on that file — F0-S5 review).
+  function onMatterChanged() {
+    stopUploadPolling();
+    uploads = [];
+    uploadError = null;
   }
 
   function handleDragOver(event: DragEvent) {
-    if (!bindingProjectId) return;
+    // ALWAYS claim the drag: without preventDefault the browser handles
+    // the drop itself and navigates the tab to the dropped file,
+    // destroying the page state (F0-S5 review). Unbound = no-op target.
     event.preventDefault();
+    if (!bindingProjectId) return;
     dragOver = true;
   }
 
@@ -304,11 +354,10 @@
   }
 
   async function handleDrop(event: DragEvent) {
-    dragOver = false;
-    if (!bindingProjectId) return;
     event.preventDefault();
-    const files = Array.from(event.dataTransfer?.files ?? []);
-    for (const f of files) await uploadOne(f);
+    dragOver = false;
+    if (!bindingProjectId) return; // an unbound upload has no home (ADR-F002)
+    await uploadBatch(Array.from(event.dataTransfer?.files ?? []));
   }
 
   function uploadStatusLabel(f: FileMeta): string {
@@ -337,9 +386,10 @@
   $: latestRun = latestRunOf(detail);
   $: badge = latestRun ? statusBadge(latestRun, nowMs) : null;
   $: stale = latestRun ? isStaleRunning(latestRun, nowMs) : false;
-  // A stale run's dangling tool calls must not pulse forever — render settled.
+  // A stale run's dangling tool calls must not pulse forever — render
+  // settled; lit spans the conversation, the pulse only the newest run.
   $: railSteps = threadRailSteps(detail);
-  $: rail = railStates(railSteps, stale ? 'failed' : (latestRun?.status ?? null));
+  $: rail = threadRailStates(detail, stale ? 'failed' : (latestRun?.status ?? null));
   // The rail is the honest model-visible universe: matter tools appear
   // only when the open conversation is matter-bound (or, pre-chat, when
   // a matter is selected in the composer).
@@ -349,7 +399,11 @@
   // binding, or the selected matter for a new chat. null = no home → no
   // attach (ADR-F002).
   $: bindingProjectId = detail ? detail.thread.project_id : selectedMatterId || null;
-  $: canSend = composerEnabled(detail, nowMs);
+  // A clicked conversation that hasn't loaded yet must NOT show the
+  // new-chat composer — Send in that window would silently create a NEW
+  // thread (F0-S5 review).
+  $: threadOpening = currentThreadId !== null && detail === null;
+  $: canSend = !threadOpening && composerEnabled(detail, nowMs);
 </script>
 
 <main class="ag-page" data-testid="lq-ai-agents-page">
@@ -405,6 +459,7 @@
                 id="ag-matter"
                 data-testid="lq-ai-agents-matter-select"
                 bind:value={selectedMatterId}
+                on:change={onMatterChanged}
                 disabled={submitting}
               >
                 <option value="">No matter — blank workspace</option>
@@ -503,6 +558,18 @@
           {/if}
         </form>
       </section>
+
+      {#if threadOpening}
+        <p class="lq-text-body-sm ag-note">Loading the conversation…</p>
+        {#if pollError}
+          <!-- The FIRST fetch failing must not look like a silent no-op
+               (F0-S5 review): surface it even before any detail exists. -->
+          <p class="lq-text-body-sm ag-error">
+            Couldn't open the conversation: {pollError}
+            <button type="button" class="ag-btn-ghost" on:click={retryPolling}>Retry</button>
+          </p>
+        {/if}
+      {/if}
 
       {#if detail}
         <section class="ag-thread" data-testid="lq-ai-agents-thread">

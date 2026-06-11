@@ -158,3 +158,7 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
   live in S4) — retry/orphan sweep alongside the agent-run arq migration.
 - Reconcile upstream's two file↔project relations (`project_files` join vs upload-time
   `files.project_id` column) — S4's matter tools honor the union; the Projects UI lists only the join.
+- Checkpoint-row retention/cleanup (ADR-F008): user/thread deletes orphan langgraph checkpoint
+  rows that carry conversation content; `adelete_thread` exists, no delete surface calls it — F1.
+- `docs/api/backend-openapi.yaml` is stale for the agents surface (runs since S2, threads since
+  S5) — regenerate or annotate when the surface settles (S7's SSE v2 reshapes it anyway).

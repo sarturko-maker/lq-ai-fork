@@ -112,6 +112,28 @@ async def _latest_run_status(db: AsyncSession, thread_id: uuid.UUID) -> str | No
     ).scalar_one_or_none()
 
 
+async def _thread_matter_active(db: AsyncSession, thread: AgentThread) -> bool:
+    """True when the thread is unbound OR its Matter is still active.
+
+    A bound conversation whose Matter has been archived must not take
+    follow-ups: execution-time re-validation would silently drop the
+    binding (no document tools) while the UI still presents the matter —
+    a dishonest grounding claim (F0-S5 review). Owner re-asserted out of
+    habit; the thread row was already owner-scoped.
+    """
+    if thread.project_id is None:
+        return True
+    return (
+        await db.execute(
+            select(Project.id).where(
+                Project.id == thread.project_id,
+                Project.owner_id == thread.user_id,
+                Project.archived_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none() is not None
+
+
 @router.post(
     "/runs",
     response_model=AgentRunRead,
@@ -160,10 +182,17 @@ async def create_agent_run(
             )
         thread = (
             await db.execute(
-                select(AgentThread).where(
+                select(AgentThread)
+                .where(
                     AgentThread.id == body.thread_id,
                     AgentThread.user_id == user.id,
                 )
+                # Serialize follow-up admission per thread: a concurrent
+                # follow-up that committed-and-failed inside our check
+                # window would otherwise slip past the status read (the
+                # partial unique index only blocks two RUNNING rows —
+                # F0-S5 review).
+                .with_for_update()
             )
         ).scalar_one_or_none()
         if thread is None:
@@ -175,6 +204,13 @@ async def create_agent_run(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="thread_not_continuable"
             )
+        if not await _thread_matter_active(db, thread):
+            # The conversation's Matter was archived since the thread was
+            # created. Accepting the follow-up would silently degrade the
+            # run to a blank workspace while the UI still presents the
+            # matter binding — refuse honestly instead (F0-S5 review; the
+            # new-thread path 404s archived matters for the same reason).
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="matter_archived")
         if not await has_checkpoint(checkpointer, thread.id):
             # Honest refusal: without persisted state the agent would not
             # remember the conversation it claims to continue (pre-S5
@@ -437,8 +473,12 @@ async def get_agent_thread(
             steps_by_run[s.run_id].append(s)
 
     latest_status = runs[-1].status if runs else None
-    continuable = latest_status == AgentRunStatus.completed.value and await has_checkpoint(
-        checkpointer, thread.id
+    continuable = (
+        latest_status == AgentRunStatus.completed.value
+        # Mirrors the POST follow-up rules exactly — incl. an archived
+        # Matter (409 matter_archived there; greyed composer here).
+        and await _thread_matter_active(db, thread)
+        and await has_checkpoint(checkpointer, thread.id)
     )
 
     thread_read = AgentThreadRead.model_validate(thread)

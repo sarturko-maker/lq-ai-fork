@@ -658,6 +658,37 @@ async def test_follow_up_on_interrupted_thread_returns_409(
 
 
 @pytest.mark.integration
+async def test_follow_up_on_archived_matter_returns_409(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+    thread_saver: InMemorySaver,
+) -> None:
+    """Archiving the conversation's Matter after turn 1 must refuse the
+    follow-up (409 matter_archived) — accepting it would silently run
+    unbound while the UI still presents the binding (F0-S5 review)."""
+    project = await _make_project(db_session, owner=user_a)
+    thread = await _make_thread(db_session, user=user_a, project_id=project.id)
+    await _make_run(db_session, user=user_a, status="completed", thread=thread)
+    await _put_checkpoint(thread_saver, thread.id)
+    project.archived_at = datetime.now(UTC)
+    await db_session.flush()
+
+    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "still grounded?", "thread_id": str(thread.id)},
+        )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "matter_archived"
+
+    # The thread detail mirrors the refusal: composer greys out honestly.
+    detail = await client.get(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a))
+    assert detail.json()["continuable"] is False
+
+
+@pytest.mark.integration
 async def test_follow_up_without_checkpoint_returns_409(
     client: AsyncClient,
     db_session: AsyncSession,

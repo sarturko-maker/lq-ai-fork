@@ -82,12 +82,18 @@ async def init_agent_checkpointer() -> None:
             kwargs={"autocommit": True, "row_factory": dict_row, "prepare_threshold": 0},
         )
         await pool.open()
-        # The kwargs above make every pooled connection produce dict rows;
-        # the pool's generic parameter can't see that, so assert it here.
-        saver = AsyncPostgresSaver(
-            cast("AsyncConnectionPool[AsyncConnection[dict[str, Any]]]", pool)
-        )
-        await saver.setup()
+        try:
+            # The kwargs above make every pooled connection produce dict
+            # rows; the pool's generic parameter can't see that, so
+            # assert it here.
+            saver = AsyncPostgresSaver(
+                cast("AsyncConnectionPool[AsyncConnection[dict[str, Any]]]", pool)
+            )
+            await saver.setup()
+        except BaseException:
+            # Don't leak an opened pool when setup fails (F0-S5 review).
+            await pool.close()
+            raise
         _pool, _saver = pool, saver
         log.info("agent checkpointer ready (AsyncPostgresSaver)")
     except Exception:

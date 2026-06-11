@@ -15,6 +15,7 @@ import {
 	shouldContinuePolling,
 	shouldContinuePollingThread,
 	splitThink,
+	threadRailStates,
 	statusBadge,
 	stepDisplay,
 	threadRailSteps,
@@ -438,5 +439,55 @@ describe('conversations (F0-S5)', () => {
 		expect(uploadsSettled([{ ingestion_status: 'pending' }])).toBe(false);
 		// No status yet (fresh upload response without the field) = not settled.
 		expect(uploadsSettled([{ ingestion_status: undefined }])).toBe(false);
+	});
+});
+
+describe('threadRailStates (F0-S5 review)', () => {
+	function detail(
+		runs: { run: AgentRun; steps: AgentRunStep[] }[]
+	): AgentThreadDetailResponse {
+		return {
+			thread: {
+				id: 'thread-1',
+				user_id: 'user-1',
+				project_id: null,
+				title: 't',
+				created_at: new Date(T0).toISOString(),
+				last_run_at: new Date(T0).toISOString(),
+				last_run_status: null
+			},
+			runs,
+			continuable: false
+		};
+	}
+
+	it('an unmatched tool_call in an EARLIER settled turn stays lit, never pulses', () => {
+		const d = detail([
+			{
+				run: makeRun({ id: 'run-1', status: 'completed' }),
+				steps: [makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' })]
+			},
+			{
+				run: makeRun({ id: 'run-2', status: 'running' }),
+				steps: [makeStep({ seq: 1, kind: 'tool_call', name: 'read_document' })]
+			}
+		]);
+		const states = threadRailStates(d, 'running');
+		expect(states['search_documents']).toBe('lit');
+		expect(states['read_document']).toBe('active');
+	});
+
+	it('settled conversations show everything lit, nothing active', () => {
+		const d = detail([
+			{
+				run: makeRun({ id: 'run-1', status: 'completed' }),
+				steps: [makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' })]
+			}
+		]);
+		expect(threadRailStates(d, 'completed')['search_documents']).toBe('lit');
+	});
+
+	it('empty inputs yield no states', () => {
+		expect(threadRailStates(null, null)).toEqual({});
 	});
 });
