@@ -1,11 +1,15 @@
 /**
  * F0-S3 — Agents tab v0: the first visible deep agent.
+ * F0-S8 update: blank workspace is GONE (ADR-F002) — this spec now
+ * CREATES a matter through the in-place "+ New matter" modal and runs
+ * bound to it, doubling as the S8 create-in-place live evidence. It
+ * stays self-sufficient: no pre-seeded matter needed.
  *
  * Drives a REAL agent run end-to-end against the live dev stack: logs in
- * through the UI, opens the Agents tab, submits a prompt, watches the
- * capability rail light up as polled steps settle, and asserts the final
- * answer renders with reasoning collapsed. Screenshots double as the
- * ADR-F005 live-verification evidence.
+ * through the UI, opens the Agents tab, creates a matter without leaving
+ * the page, submits a prompt, and asserts the final answer renders with
+ * reasoning collapsed. Screenshots double as the ADR-F005
+ * live-verification evidence.
  *
  * Run requires a live stack (and a gateway model that answers):
  *   docker compose up -d
@@ -25,7 +29,9 @@ const PASSWORD = Cypress.env('LQ_AI_PASSWORD') ?? 'LQ-AI-local-Pw1!';
 const RUN_TIMEOUT_MS = 90_000;
 
 describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
-	it('logs in, runs the Commercial preview agent, and watches it work', () => {
+	it('logs in, creates a matter in place, runs the Commercial preview agent, and watches it work', () => {
+		const matterName = `S3 Spec ${Date.now()}`;
+
 		cy.visit('/lq-ai/login');
 		// First element gets a warm-up window — a freshly rebuilt web
 		// container hydrates slowly on this box.
@@ -40,20 +46,41 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 
 		// Capability rail renders the honest tool universe, all dim. With no
 		// matter selected this is the 9 deepagents builtins — the matter
-		// document tools only appear on matter-bound runs (F0-S4), and the
+		// document tools only appear once a matter is bound (F0-S4), and the
 		// demo tool is gone for good.
 		cy.get('[data-testid="lq-ai-agents-rail"] li').should('have.length', 9);
 		cy.get('[data-testid="lq-ai-agents-rail"] li.ag-rail__tool--lit').should('have.length', 0);
 		cy.screenshot('f0-s3-1-agents-tab-idle');
 
+		// ADR-F002 (F0-S8): no blank workspace — without a matter the Run
+		// button stays disabled even with a prompt typed.
+		cy.get('[data-testid="lq-ai-agents-composer"] textarea').type(
+			'What is the liability cap under this contract? Use your tools.'
+		);
+		cy.get('[data-testid="lq-ai-agents-composer"] button[type="submit"]').should('be.disabled');
+
+		// Create a matter WITHOUT leaving the agent (F0-S8): same modal +
+		// POST /projects plumbing as the Matters tab, full form.
+		cy.get('[data-testid="lq-ai-agents-new-matter"]').click();
+		cy.get('#nmm-name').type(matterName);
+		cy.contains('button', 'Create matter').click();
+
+		// The new matter binds in place: select shows it, the rail flips to
+		// the matter-bound universe (9 builtins + 2 document tools), and we
+		// never navigated away.
+		cy.location('pathname').should('eq', '/lq-ai/agents');
+		cy.get('[data-testid="lq-ai-agents-matter-select"]')
+			.find('option:selected')
+			.should('have.text', matterName);
+		cy.get('[data-testid="lq-ai-agents-rail"] li').should('have.length', 11);
+		cy.screenshot('f0-s3-1b-matter-created-bound');
+
 		// Count detail polls so we can prove polling stops after the run settles.
 		// Since F0-S5 the page polls the CONVERSATION, not the run (ADR-F008).
 		cy.intercept('GET', '**/api/v1/agents/threads/*').as('pollRun');
 
-		// Kick off a real run.
-		cy.get('[data-testid="lq-ai-agents-composer"] textarea').type(
-			'What is the liability cap under this contract? Use your tools.'
-		);
+		// Kick off a real run (the prompt typed above survived the modal).
+		cy.get('[data-testid="lq-ai-agents-composer"] button[type="submit"]').should('be.enabled');
 		cy.get('[data-testid="lq-ai-agents-composer"] button[type="submit"]').click();
 
 		// The run surface appears and activity settles in via polling. A
@@ -67,13 +94,14 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 		).should('have.length.at.least', 1);
 		cy.screenshot('f0-s3-2-agent-working');
 
-		// No tool lighting is asserted on an UNBOUND run: with no matter there
-		// are no document tools and an honest agent may answer directly. The
-		// f0-s4 spec pins tool dispatch on a matter-bound run deterministically.
+		// No tool lighting is asserted: the matter is freshly created and
+		// EMPTY, so an honest agent may search-and-find-nothing or answer
+		// directly. The f0-s4 spec pins tool dispatch deterministically on
+		// a matter with ingested documents.
 
 		// Completion: badge flips and a non-empty final answer renders.
-		// (No assertion on model-chosen prose — that flakes; on an unbound
-		// run there is nothing deterministic to pin. Grounded-content
+		// (No assertion on model-chosen prose — that flakes; on an empty
+		// matter there is nothing deterministic to pin. Grounded-content
 		// assertions live in the f0-s4 matter-bound spec.)
 		cy.get('[data-testid="lq-ai-agents-run"]')
 			.contains('.ag-badge', 'Completed', { timeout: RUN_TIMEOUT_MS })

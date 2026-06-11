@@ -40,12 +40,17 @@
 </script>
 
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { projectsApi } from '$lib/lq-ai/api';
 	import type { Project } from '$lib/lq-ai/types';
 	import InfoTip from './InfoTip.svelte';
 
 	export let onClose: () => void;
+	/**
+	 * The CALLER owns post-create navigation (F0-S8): the Matters page
+	 * routes to the new matter's detail; the Agents tab binds the matter
+	 * in place — a hardcoded goto here would yank the user out of the
+	 * conversation, defeating create-in-place.
+	 */
 	export let onCreated: (matter: Project) => void;
 
 	// Form state
@@ -96,7 +101,6 @@
 				minimum_inference_tier: tierFloor ?? undefined
 			});
 			onCreated(created);
-			goto(`/lq-ai/matters/${created.id}`);
 		} catch (e: unknown) {
 			if (e instanceof Error) {
 				submitError = e.message ?? "Couldn't reach the server. Try again.";
