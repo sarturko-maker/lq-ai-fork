@@ -35,14 +35,16 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
   re-read, audit row per dispatch); matter tier floor/privilege on the gateway envelope (D1/M2-B3);
   factory key carry-over closed (key on the owned httpx client, never `default_headers`).
   Natural-language step titles + closing-turn dedup are client-side (rows stay honest).
-- **S5 — multi-turn + new chat + composer upload.** Conversations on the Postgres checkpointer
-  (first consumer); follow-up composer on a settled run; "New chat" within the area; chat list on
-  the area page. Replaces the single-turn request pattern (`chats.py:1370` stays legacy).
-  **File upload in the agent composer** (promoted from Backlog, 2026-06-11 — maintainer): attach
-  button + drop zone uploading via `POST /files` with the bound matter's `project_id` (the
-  ADR-F007 upload-time membership path — S4's tools see the document with no extra wiring);
-  ingestion status visible in the composer (pending → ready) so the user knows when the agent can
-  ground on it; requires a Matter selected (an unbound upload has no home — ADR-F002).
+- **S5 ✓ done — multi-turn + new chat + composer upload (ADR-F008).** `agent_threads` =
+  conversation identity (migration 0050; thread id doubles as the langgraph checkpointer key);
+  `AsyncPostgresSaver` wired at the composition root — the codebase's first checkpointer consumer;
+  follow-ups continue the SAME agent state (`add_messages` appends onto the thread); follow-ups
+  only on completed+checkpointed threads (409 otherwise — interrupted loops strand dangling tool
+  calls); one running run per thread enforced by a partial unique index. UI: conversation view
+  (turns = runs), follow-up composer, "New chat", conversations list. **Composer upload** (promoted
+  from Backlog, 2026-06-11 — maintainer): attach + drop zone → `POST /files` with the bound
+  matter's `project_id` (ADR-F007 path), ingestion chips pending → ready, Matter required.
+  The legacy single-turn chat path (`chats.py:1370`) stays legacy.
 - **S6 — the shell shed (ADR-F006, pending acceptance).** Extract the lq-ai code (zero
   husk-imports, audited) into a standalone lean SvelteKit app; kill the OpenWebUI husk, its Python
   backend container, and the §4 branding obligation. Includes the per-file provenance pass over
@@ -156,3 +158,7 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
   live in S4) — retry/orphan sweep alongside the agent-run arq migration.
 - Reconcile upstream's two file↔project relations (`project_files` join vs upload-time
   `files.project_id` column) — S4's matter tools honor the union; the Projects UI lists only the join.
+- Checkpoint-row retention/cleanup (ADR-F008): user/thread deletes orphan langgraph checkpoint
+  rows that carry conversation content; `adelete_thread` exists, no delete surface calls it — F1.
+- `docs/api/backend-openapi.yaml` is stale for the agents surface (runs since S2, threads since
+  S5) — regenerate or annotate when the surface settles (S7's SSE v2 reshapes it anyway).

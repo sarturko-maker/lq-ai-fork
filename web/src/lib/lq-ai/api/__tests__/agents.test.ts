@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { createRun, getRun, listRuns } from '../agents';
+import { createRun, getRun, getThread, listRuns, listThreads } from '../agents';
 
 /** Minimal Response-shaped stub. apiRequest reads content-type to decide json/text. */
 function jsonResponseLike(status: number, body: unknown) {
@@ -102,6 +102,55 @@ describe('agents API client', () => {
 		await listRuns({ limit: 20, offset: 40 });
 		const [url] = firstCall(fetchMock);
 		expect(url).toMatch(/\/agents\/runs\?limit=20&offset=40$/);
+	});
+
+	it('createRun forwards thread_id for follow-ups (F0-S5)', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponseLike(202, { id: 'r4', status: 'running', thread_id: 't1' })
+		);
+		const run = await createRun({ prompt: 'and the indemnity?', thread_id: 't1' });
+		expect(run.thread_id).toBe('t1');
+		const [, init] = firstCall(fetchMock);
+		expect(JSON.parse(init.body as string)).toEqual({
+			prompt: 'and the indemnity?',
+			thread_id: 't1'
+		});
+	});
+
+	it('listThreads GETs /agents/threads with optional pagination', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponseLike(200, { threads: [], total_count: 0, limit: 50, offset: 0 })
+		);
+		await listThreads();
+		expect(firstCall(fetchMock)[0]).toMatch(/\/agents\/threads$/);
+
+		fetchMock.mockResolvedValueOnce(
+			jsonResponseLike(200, { threads: [], total_count: 0, limit: 20, offset: 40 })
+		);
+		await listThreads({ limit: 20, offset: 40 });
+		expect(fetchMock.mock.calls[1][0]).toMatch(/\/agents\/threads\?limit=20&offset=40$/);
+	});
+
+	it('getThread GETs /agents/threads/{id} with the id URL-encoded', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponseLike(200, {
+				thread: { id: 'a/b' },
+				runs: [],
+				continuable: false
+			})
+		);
+		const detail = await getThread('a/b');
+		expect(detail.continuable).toBe(false);
+		expect(firstCall(fetchMock)[0]).toMatch(/\/agents\/threads\/a%2Fb$/);
+	});
+
+	it('translates the 409 thread brakes into typed errors (plain-string detail)', async () => {
+		fetchMock.mockResolvedValueOnce(jsonResponseLike(409, { detail: 'thread_busy' }));
+		await expect(createRun({ prompt: 'p', thread_id: 't1' })).rejects.toMatchObject({
+			status: 409,
+			code: 'http_409',
+			message: 'thread_busy'
+		});
 	});
 
 	it('translates the 429 flood brake into a typed error (plain-string detail on the wire)', async () => {

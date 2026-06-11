@@ -47,7 +47,8 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 		cy.screenshot('f0-s3-1-agents-tab-idle');
 
 		// Count detail polls so we can prove polling stops after the run settles.
-		cy.intercept('GET', '**/api/v1/agents/runs/*').as('pollRun');
+		// Since F0-S5 the page polls the CONVERSATION, not the run (ADR-F008).
+		cy.intercept('GET', '**/api/v1/agents/threads/*').as('pollRun');
 
 		// Kick off a real run.
 		cy.get('[data-testid="lq-ai-agents-composer"] textarea').type(
@@ -98,7 +99,7 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 			});
 		});
 
-		// The settled run shows up in the previous-runs list.
+		// The settled conversation shows up in the conversations list (F0-S5).
 		cy.get('[data-testid="lq-ai-agents-runs-list"] li').should('have.length.at.least', 1);
 	});
 });

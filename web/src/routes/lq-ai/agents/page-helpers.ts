@@ -3,7 +3,13 @@
  * `.ts` file so vitest can exercise them without the svelte transformer
  * (the playbooks page-helpers pattern).
  */
-import type { AgentRun, AgentRunStatus, AgentRunStep } from '$lib/lq-ai/api/agents';
+import type {
+	AgentRun,
+	AgentRunStatus,
+	AgentRunStep,
+	AgentThreadDetailResponse
+} from '$lib/lq-ai/api/agents';
+import type { FileMeta } from '$lib/lq-ai/types';
 
 /** Poll cadence while a run is working (~2 s per F0-S3; SSE replaces this in S5). */
 export const POLL_INTERVAL_MS = 2000;
@@ -275,4 +281,71 @@ export function visibleSteps(
 	if (!last || last.kind !== 'model_turn' || last.summary === null) return steps;
 	if (last.summary === boundedLikeServer(run.final_answer)) return steps.slice(0, -1);
 	return steps;
+}
+
+// ---------------------------------------------------------------------------
+// Conversations (F0-S5, ADR-F008)
+// ---------------------------------------------------------------------------
+
+/** The conversation's newest run — drives the badge, polling, and the rail. */
+export function latestRunOf(detail: AgentThreadDetailResponse | null): AgentRun | null {
+	if (!detail || detail.runs.length === 0) return null;
+	return detail.runs[detail.runs.length - 1].run;
+}
+
+/**
+ * Every step across the conversation's runs, in order — the rail's
+ * "lit = used in this conversation" universe. The active pulse still
+ * comes from the latest run's status via railStates.
+ */
+export function threadRailSteps(detail: AgentThreadDetailResponse | null): AgentRunStep[] {
+	if (!detail) return [];
+	return detail.runs.flatMap((r) => r.steps);
+}
+
+/**
+ * Rail states for a conversation: lit = used anywhere in the thread,
+ * but the ACTIVE pulse may only come from the NEWEST run — an unmatched
+ * tool_call in an earlier, settled turn must not pulse "in use" forever
+ * (F0-S5 review). ``latestStatus`` is the newest run's status with the
+ * page's staleness override already applied.
+ */
+export function threadRailStates(
+	detail: AgentThreadDetailResponse | null,
+	latestStatus: AgentRunStatus | null
+): Record<string, RailState> {
+	const lit = railStates(threadRailSteps(detail), null);
+	if (!detail || detail.runs.length === 0) return lit;
+	const latestSteps = detail.runs[detail.runs.length - 1].steps;
+	return { ...lit, ...railStates(latestSteps, latestStatus) };
+}
+
+/** Poll the thread while its newest run is still working (and not stale). */
+export function shouldContinuePollingThread(
+	detail: AgentThreadDetailResponse | null,
+	nowMs: number
+): boolean {
+	const latest = latestRunOf(detail);
+	return latest !== null && shouldContinuePolling(latest, nowMs);
+}
+
+/**
+ * Whether the composer may send right now: a fresh page (no conversation
+ * open) always can; an open conversation only when the server says a
+ * follow-up would be accepted AND its newest run isn't still working
+ * (the advisory `continuable` flag — POST re-checks, ADR-F008).
+ */
+export function composerEnabled(
+	detail: AgentThreadDetailResponse | null,
+	nowMs: number
+): boolean {
+	if (detail === null) return true;
+	return detail.continuable && !shouldContinuePollingThread(detail, nowMs);
+}
+
+/** All composer uploads settled (ready or failed) — stop the file poller. */
+export function uploadsSettled(files: Pick<FileMeta, 'ingestion_status'>[]): boolean {
+	return files.every(
+		(f) => f.ingestion_status === 'ready' || f.ingestion_status === 'failed'
+	);
 }
