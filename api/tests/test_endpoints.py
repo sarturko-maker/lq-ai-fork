@@ -69,6 +69,8 @@ _PARAM_VALUES: dict[str, str] = {
     "tenant_id": _DUMMY_UUID,
     # F0-S2 (fork) — agent-runs surface
     "run_id": _DUMMY_UUID,
+    # F0-S5 (fork) — conversations (ADR-F008)
+    "thread_id": _DUMMY_UUID,
 }
 
 
@@ -308,6 +310,10 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/agents/runs"),
     ("GET", "/api/v1/agents/runs"),
     ("GET", "/api/v1/agents/runs/{run_id}"),
+    # F0-S5 (fork) — conversations (ADR-F008). Dedicated coverage in
+    # tests/agents/test_agent_runs_api.py.
+    ("GET", "/api/v1/agents/threads"),
+    ("GET", "/api/v1/agents/threads/{thread_id}"),
 }
 
 
