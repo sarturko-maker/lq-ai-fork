@@ -314,6 +314,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # tests/agents/test_agent_runs_api.py.
     ("GET", "/api/v1/agents/threads"),
     ("GET", "/api/v1/agents/threads/{thread_id}"),
+    # F0-S7 (fork) — SSE v2 run stream (ADR-F006). Dedicated coverage in
+    # tests/agents/test_agent_stream.py.
+    ("GET", "/api/v1/agents/runs/{run_id}/stream"),
 }
 
 
