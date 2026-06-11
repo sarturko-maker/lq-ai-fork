@@ -61,13 +61,20 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   dispatched `search_documents` → answer cites f0-s4-msa.pdf p.1 Clause 7.2) and **f0-s3 1/1**;
   screenshots in `docs/fork/evidence/f0-s4/`. Live API run transcript in the PR.
 
-## Next slice: F0-S5 — multi-turn + new chat
+## Next slice: F0-S5 — multi-turn + new chat + composer upload
 
 Per MILESTONES F0-S5:
 - Conversations on the **Postgres checkpointer** (langgraph; first consumer in the codebase) so a
   follow-up message continues the SAME agent state — tool results, todos, workspace files survive.
 - Follow-up composer on a settled run; "New chat" within the area; chat/run list grouped by
   conversation on the agents page. The legacy single-turn chat path (`chats.py:1370`) stays LEGACY.
+- **Composer file upload** (promoted from Backlog by the maintainer, 2026-06-11): attach button +
+  drop zone in the agent composer → `POST /files` with the bound matter's `project_id` — that's
+  ADR-F007's upload-time membership path, so S4's `search_documents`/`read_document` see the
+  document with zero extra wiring. Show ingestion status in the composer (pending → ready; poll
+  the file row). Requires a Matter selected — an unbound upload has no home (ADR-F002). Reuse
+  `ChatPanel.svelte`'s upload pattern (`filesApi.uploadFile(file, {project_id})`); note the
+  ingest-job fragility gotchas below when testing this live.
 - Watch blockers: the gateway Anthropic adapter still drops `tools` (irrelevant for MiniMax dev,
   prerequisite for any Anthropic model — pair with the S5/S7 block-content translation carry-over);
   `cancelled` status is still reserved — a cancel endpoint becomes meaningful now that R5 denies
