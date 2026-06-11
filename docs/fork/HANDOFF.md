@@ -53,20 +53,27 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   stack; evidence screenshots in `docs/fork/evidence/f0-s8/`; 27-agent adversarial review —
   22 findings raised, 0 confirmed (all refuted on the actual code).
 
-## Next slice: F0-S9 — eval gate (ADR-F004)
+## Next slice: F0-S9 — eval gate as MODEL QUALIFICATION (ADR-F004, re-scoped 2026-06-11)
 
-Per MILESTONES S9 (last F0 slice):
-- Tool-call and subagent uptake at **N≥20 runs** on MiniMax-M3 **plus one second model family**
-  (masked judge, pre-flight variance gate); subagent dispatch as task-scoped procedures, not
-  open-ended delegation.
-- Read ADR-F004 first — it defines what the eval gates and why (render-determinism was the
-  workaround; the eval is the proof the model-driven loop is real).
-- Needs: a second model family wired through the gateway (check `gateway/app/config*` for alias
-  plumbing; the Anthropic adapter still lacks tool_use translation — an OpenAI-compatible second
-  family avoids that blocker), an eval harness (likely `api/tests/agents/eval/` or a script —
-  decide and ADR if it crosses module boundaries), and seeded matters with documents for
-  grounded prompts.
-- Branch `fork/f0-s9-eval-gate` from main after the S8 PR merges.
+Maintainer directive: the model is DEPENDENCY INJECTION — Deep Agents must work with any good
+model; do NOT redo oscar-gc's eval work; lean on what the OSS ecosystem already provides.
+
+- **Read `docs/fork/research/f0-s9-eval-reuse.md` FIRST** (oscar-gc eval mining + ecosystem
+  survey + recommended L0/L1/L2 design). Then ADR-F004. The research doc's §4 lists the open
+  maintainer decisions — surface them in the plan, don't decide silently.
+- Headlines: oscar's `evals/matter-runtime` already proved the method AND the cross-family
+  doctrine reversal (+35pp MiniMax / −20pp Haiku, fixed by positive-imperative Candidate C);
+  open-ended delegation is settled capability-bound — S9 measures task-scoped COMPLIANCE only.
+  Capability priors are cited from BFCL V4 / tau2 leaderboards (MiniMax-M3 has NO independent
+  prior; no public benchmark measures subagent uptake — both measures are in-house by
+  necessity). Harness = plain pytest over settled `agent_run_steps` rows through our API; zero
+  new runtime deps. Second family: Kimi K2.x via OpenAI-compatible gateway provider (keys in
+  gateway only; avoids the Anthropic adapter tool_use blocker).
+- PREREQUISITE inside the slice: verify the gateway round-trips MiniMax `<think>` blocks
+  verbatim across tool turns before trusting any M3 number (low uptake indicts the adapter
+  first — the vLLM/K2 case showed <20% parse rates from serving bugs alone).
+- oscar-gc is AGPL: findings/method reuse freely, NEVER port code (clean-room ~600 LOC).
+- Branch `fork/f0-s9-eval-gate` from main.
 
 ## Pick up exactly here
 
