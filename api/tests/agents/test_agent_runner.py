@@ -29,7 +29,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.runner import execute_agent_run
-from app.models.agent_run import AgentRun, AgentRunStep
+from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
 from app.models.user import User
 from app.security import hash_password
 from tests.agents.fakes import (
@@ -82,8 +82,12 @@ async def make_run(
             db.add(user)
             await db.flush()
             user_ids.append(user.id)
+            thread = AgentThread(user_id=user.id, title=prompt[:120])
+            db.add(thread)
+            await db.flush()
             run = AgentRun(
                 user_id=user.id,
+                thread_id=thread.id,
                 status="running",
                 prompt=prompt,
                 model_alias="smart",

@@ -7,10 +7,13 @@ The UI's capability rail and activity feed poll these settled records —
 render-deterministic per ADR-F004 ("user-visible state derives from
 settled state records, never from parsing LLM turns").
 
-Two tables, migration ``0048_agent_runs.py``:
+Three tables (migrations ``0048_agent_runs.py``, ``0050_agent_threads.py``):
 
+* :class:`AgentThread` — one conversation (ADR-F008): identity, title,
+  Matter binding, activity timestamp. The row's id doubles as the
+  langgraph checkpointer's ``configurable.thread_id``.
 * :class:`AgentRun` — the run record (prompt, model alias, interim caps,
-  terminal status, final answer).
+  terminal status, final answer); every run belongs to one thread.
 * :class:`AgentRunStep` — one loop step (model turn, tool call, or tool
   result) with a bounded summary. Unique on ``(run_id, seq)`` so the
   poller's ordered read is deterministic.
@@ -49,6 +52,51 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
 
+class AgentThread(Base):
+    """One agent conversation — the unit the multi-turn UI lists (ADR-F008).
+
+    The id is the langgraph checkpointer thread key: durable agent state
+    (messages, todos, workspace files) for the conversation lives in the
+    checkpointer's own tables under ``configurable.thread_id = str(id)``.
+    Those tables are owned by ``AsyncPostgresSaver.setup()``, not alembic.
+
+    ``project_id`` is the conversation's Matter binding — the thread owns
+    it; each run snapshots it at creation (``AgentRun.project_id``) and
+    the composition point re-validates at execution time (F0-S4 rule).
+    ``title`` is the bounded first prompt until auto-titling (F1/F2).
+    ``last_run_at`` orders the conversation list; bumped when a run is
+    created on the thread.
+    """
+
+    __tablename__ = "agent_threads"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE", name="fk_agent_threads_user_id"),
+        nullable=False,
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL", name="fk_agent_threads_project_id"),
+        nullable=True,
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    last_run_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentThread id={self.id} user_id={self.user_id} title={self.title!r}>"
+
+
 class AgentRun(Base):
     """One deep-agent run — the record the capability rail polls.
 
@@ -80,9 +128,20 @@ class AgentRun(Base):
         ForeignKey("users.id", ondelete="CASCADE", name="fk_agent_runs_user_id"),
         nullable=False,
     )
+    # F0-S5 (ADR-F008): the conversation this run belongs to. NOT NULL —
+    # a first message creates its thread; pre-S5 runs were backfilled as
+    # one-run threads (thread_id = run id, migration 0050). A partial
+    # unique index (thread_id WHERE status='running') enforces at most
+    # one running run per thread at the storage layer.
+    thread_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_threads.id", ondelete="CASCADE", name="fk_agent_runs_thread_id"),
+        nullable=False,
+    )
     # F0-S4: the Matter this run is bound to (NULL = blank workspace, no
     # document tools). SET NULL so deleting a project unbinds, never
-    # destroys, run records. Migration 0049.
+    # destroys, run records. Migration 0049. Since F0-S5 this is the
+    # per-run SNAPSHOT of the owning thread's binding (ADR-F008).
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("projects.id", ondelete="SET NULL", name="fk_agent_runs_project_id"),
