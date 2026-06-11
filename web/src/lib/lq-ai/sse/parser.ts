@@ -7,9 +7,9 @@
  * backend OpenAPI sketch (`MessageStart` / `MessageDelta` / `MessageComplete`
  * / `Error`).
  *
- * We use `eventsource-parser/stream` which is already a transitive dep via
- * the OpenWebUI shell's `lib/apis/streaming/`. The wrapper below is typed
- * and emits `MessageStreamEvent`s rather than raw strings.
+ * We use `eventsource-parser/stream` (a direct runtime dependency). The
+ * wrapper below is typed and emits `MessageStreamEvent`s rather than raw
+ * strings.
  */
 import { EventSourceParserStream } from 'eventsource-parser/stream';
 import type { ParsedEvent } from 'eventsource-parser';

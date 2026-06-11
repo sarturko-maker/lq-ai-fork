@@ -1,7 +1,18 @@
 {
-	"extends": "../tsconfig.json",
+	// Self-contained on purpose: the app tsconfig extends the GENERATED
+	// .svelte-kit/tsconfig.json, which doesn't exist on a fresh clone until
+	// `svelte-kit sync` runs — extending it here made `cypress run` fail
+	// with TS5083 before any dev command had been run.
 	"compilerOptions": {
+		"target": "es2020",
+		"lib": ["es2020", "dom"],
+		"types": ["cypress", "node"],
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"skipLibCheck": true,
+		"strict": true,
 		"inlineSourceMap": true,
 		"sourceMap": false
-	}
+	},
+	"include": ["**/*.ts"]
 }

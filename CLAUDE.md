@@ -134,8 +134,9 @@ StoreBackend namespaces keyed `(org_id, …)`; company and practice levels read-
   proposals/PRs to upstream — without the maintainer's explicit per-case approval. Upstream is not
   ours; we track it for awareness only. If approval is ever given, log the sync in `UPSTREAM.md`.
 - Keep the Apache-2.0 `LICENSE` and `NOTICES.md` intact; extend, never edit upstream entries. The
-  OpenWebUI license in `web/LICENSE` (branding clause §4 for >50 users) and the PyMuPDF AGPL
-  server-side-only boundary are obligations, not suggestions.
+  PyMuPDF AGPL server-side-only boundary is an obligation, not a suggestion. The OpenWebUI §4
+  branding obligation ended in F0-S6 (husk removed, ADR-F006); builds from pre-S6 commits remain
+  bound — see NOTICES.md § Web client provenance.
 
 ## Commands
 - Stack: `docker compose up -d` (8 services; api auto-migrates on boot)

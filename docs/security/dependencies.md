@@ -56,7 +56,7 @@ helm upgrade lq-ai ./deploy/helm/lq-ai \
 
 ## Known transitive risks
 
-- **OpenWebUI fork.** `web/` is forked from OpenWebUI at the version pinned in [ADR 0001](../adr/0001-openwebui-fork-pin.md). Upstream advisories affect us; we track them and pull fixes per the cadence above. The fork pin means we don't auto-update with upstream master.
+- **OpenWebUI fork — ENDED in F0-S6 (ADR-F006).** `web/` was forked from OpenWebUI at the version pinned in [ADR 0001](../adr/0001-openwebui-fork-pin.md); the husk (and its dependency surface) was removed in F0-S6, so OpenWebUI advisories no longer affect current builds — they continue to apply to deployments built from pre-S6 commits. The standalone shell's npm surface is 4 runtime deps + the SvelteKit toolchain (`web/package.json`).
 - **pgvector / Postgres.** Vector-index queries are powered by pgvector. Advisories against pgvector are uncommon (it's a thin C extension), but the Postgres major version (16 at M1) follows community LTS.
 
 ## Reporting a vulnerability in a dependency

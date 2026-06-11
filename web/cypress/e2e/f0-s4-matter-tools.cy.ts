@@ -22,8 +22,8 @@
  *   CYPRESS_LQ_AI_MATTER_NAME="<matter name>" npx cypress run ...
  * — the spec skips its own seeding and only drives the UI.
  *
- * Spec name MUST stay `f0-s4-*` (fork pattern in cypress/support/e2e.ts —
- * any other name bootstraps an OpenWebUI user that breaks /lq-ai/*).
+ * (The pre-S6 spec-name-pattern constraint is gone: the OpenWebUI
+ * bootstrap died with the husk in F0-S6.)
  */
 
 /// <reference types="cypress" />

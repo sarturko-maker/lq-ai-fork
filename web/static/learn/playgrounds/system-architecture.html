@@ -478,7 +478,7 @@ const NODES = [
   {
     id: 'web', layer: 'web', label: 'Web (SvelteKit)', sub: 'web container · :3000→:8080',
     x: 500, y: 130, w: 200, h: 56,
-    desc: 'OpenWebUI fork (per ADR 0001) carrying LQ.AI surfaces under /lq-ai/*. Routes, components, stores, and Cypress E2E live here. Proxies /api/v1/* to the API container.',
+    desc: 'Standalone LQ.AI SvelteKit app (ADR-F006; the OpenWebUI husk was removed in F0-S6) serving /lq-ai/*. Routes, components, stores, and Cypress E2E live here; the static bundle is served by nginx.',
     role: 'Web', roleColor: 'var(--web)',
     files: ['web/Dockerfile', 'web/svelte.config.js', 'web/src/routes/lq-ai/', 'web/src/lib/lq-ai/', 'web/cypress/e2e/'],
     meta: { container: 'lq-ai-web-1', port: '3000:8080', dependsOn: 'api' },
