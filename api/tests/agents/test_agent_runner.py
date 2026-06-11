@@ -29,7 +29,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.runner import execute_agent_run
-from app.models.agent_run import AgentRun, AgentRunStep
+from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
 from app.models.user import User
 from app.security import hash_password
 from tests.agents.fakes import (
@@ -82,8 +82,12 @@ async def make_run(
             db.add(user)
             await db.flush()
             user_ids.append(user.id)
+            thread = AgentThread(user_id=user.id, title=prompt[:120])
+            db.add(thread)
+            await db.flush()
             run = AgentRun(
                 user_id=user.id,
+                thread_id=thread.id,
                 status="running",
                 prompt=prompt,
                 model_alias="smart",
@@ -148,8 +152,10 @@ class _FlakySessionFactory:
     """Session factory whose Nth call(s) hand out poisoned sessions.
 
     Injected through ``execute_agent_run``'s ``db_session_factory`` seam
-    (no monkeypatching). Call 1 is the runner's driving session; calls
-    2+ are ``_finalize``'s fresh terminal-write sessions.
+    (no monkeypatching). Call sequence since F0-S5's per-step sessions:
+    call 1 loads the run's fields, calls 2..N+1 are the N step writes
+    (each step retries once on a fresh session), then ``_finalize``'s
+    terminal-write sessions follow.
     """
 
     def __init__(self, inner: async_sessionmaker[AsyncSession], fail_on_calls: set[int]) -> None:
@@ -317,12 +323,12 @@ async def test_finalize_survives_poisoned_session_with_fresh_retry(
 ) -> None:
     """F2: the first terminal-write session failing must not strand the run.
 
-    The factory poisons call 2 (``_finalize``'s first fresh session);
-    the retry (call 3) opens another fresh session and lands the
-    terminal state.
+    The 4-step run uses calls 1 (load) + 2-5 (step writes); the factory
+    poisons call 6 (``_finalize``'s first fresh session); the retry
+    (call 7) opens another fresh session and lands the terminal state.
     """
     run_id = await make_run()
-    factory = _FlakySessionFactory(commit_factory, fail_on_calls={2})
+    factory = _FlakySessionFactory(commit_factory, fail_on_calls={6})
     model = ScriptedToolCallingModel(
         responses=[
             tool_call_message("read_clause", {"topic": "liability"}),
@@ -336,7 +342,7 @@ async def test_finalize_survives_poisoned_session_with_fresh_retry(
     assert run.status == "completed"
     assert run.final_answer == "Twelve months of fees."
     assert run.finished_at is not None
-    assert factory.calls == 3  # driving session, poisoned finalize, fresh retry
+    assert factory.calls == 7  # load, 4 steps, poisoned finalize, fresh retry
 
 
 async def test_finalize_double_failure_logs_and_does_not_raise(
@@ -351,7 +357,9 @@ async def test_finalize_double_failure_logs_and_does_not_raise(
     the arq migration).
     """
     run_id = await make_run()
-    factory = _FlakySessionFactory(commit_factory, fail_on_calls={2, 3})
+    # 1-step run: call 1 loads, call 2 writes the step; calls 3 + 4 are
+    # BOTH of _finalize's fresh sessions — poisoned.
+    factory = _FlakySessionFactory(commit_factory, fail_on_calls={3, 4})
     model = ScriptedToolCallingModel(responses=[final_message("done")])
 
     with caplog.at_level(logging.ERROR, logger="app.agents.runner"):
@@ -439,3 +447,31 @@ async def test_cap_during_subagent_leaves_final_answer_null(
     assert run.final_answer is None
     # model_turn, tool_call(task), nested model_turn, tool_result(task) = cap at 4.
     assert len(steps) == 4
+
+
+async def test_step_write_survives_a_transient_db_failure(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A dying connection under ONE step write must not fail the run:
+    the write retries on a fresh session (F0-S5 — seen live when a
+    Postgres crash-recovery window hit an in-flight step INSERT)."""
+    run_id = await make_run()
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("read_clause", {"topic": "liability"}),
+            final_message("The cap is the fees paid in the twelve months before the claim."),
+        ]
+    )
+    # Call 1 = the run-fields load; call 2 = the FIRST step write's first
+    # attempt - poisoned. The retry (call 3) and everything after is real.
+    flaky = _FlakySessionFactory(commit_factory, fail_on_calls={2})
+
+    await execute_agent_run(run_id, flaky, tools=[read_clause], model=model)  # type: ignore[arg-type]
+
+    run, steps = await _load_run_and_steps(commit_factory, run_id)
+    assert run.status == "completed"
+    assert run.error is None
+    # Nothing lost and nothing doubled: the full ordered timeline exists.
+    assert [s.kind for s in steps] == ["model_turn", "tool_call", "tool_result", "model_turn"]
+    assert [s.seq for s in steps] == [1, 2, 3, 4]

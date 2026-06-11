@@ -33,7 +33,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.tools import MATTER_TOOL_NAMES, MatterBinding, build_matter_tools
-from app.models.agent_run import AgentRun
+from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.document import Document, DocumentChunk
 from app.models.file import File
@@ -207,8 +207,12 @@ async def matter_env(
             ]
         )
 
+        thread = AgentThread(user_id=user.id, project_id=project.id, title="tools tests")
+        db.add(thread)
+        await db.flush()
         run = AgentRun(
             user_id=user.id,
+            thread_id=thread.id,
             project_id=project.id,
             status="running",
             prompt="What is the liability cap?",
@@ -240,6 +244,7 @@ async def matter_env(
     async with commit_factory() as db:
         await db.execute(delete(AuditLog).where(AuditLog.user_id.in_(user_ids)))
         await db.execute(delete(AgentRun).where(AgentRun.user_id.in_(user_ids)))
+        await db.execute(delete(AgentThread).where(AgentThread.user_id.in_(user_ids)))
         await db.execute(delete(Project).where(Project.id.in_(project_ids)))
         await db.execute(delete(File).where(File.id.in_(file_ids)))
         await db.execute(delete(User).where(User.id.in_(user_ids)))

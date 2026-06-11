@@ -24,7 +24,7 @@ from app.agents.guard import (
     GuardContext,
     guarded_dispatch,
 )
-from app.models.agent_run import AgentRun
+from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.project import Project
 from app.models.user import User
@@ -72,8 +72,12 @@ async def guard_env(
         )
         db.add(project)
         await db.flush()
+        thread = AgentThread(user_id=user.id, project_id=project.id, title="guard tests")
+        db.add(thread)
+        await db.flush()
         run = AgentRun(
             user_id=user.id,
+            thread_id=thread.id,
             project_id=project.id,
             status="running",
             prompt="guard tests",
@@ -104,6 +108,7 @@ async def guard_env(
     async with commit_factory() as db:
         await db.execute(delete(AuditLog).where(AuditLog.user_id == user_id))
         await db.execute(delete(AgentRun).where(AgentRun.user_id == user_id))
+        await db.execute(delete(AgentThread).where(AgentThread.user_id == user_id))
         await db.execute(delete(Project).where(Project.id == project_id))
         await db.execute(delete(User).where(User.id == user_id))
         await db.commit()

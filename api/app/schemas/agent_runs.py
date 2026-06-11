@@ -55,6 +55,12 @@ class AgentRunCreate(BaseModel):
     apply per request (CLAUDE.md: every LLM call goes through the
     gateway). ``max_steps`` is the interim step cap (full R4/R5/R6
     brakes are F1 scope, ADR-F002).
+
+    F0-S5 (ADR-F008): ``thread_id`` continues an existing conversation —
+    the run inherits the THREAD's Matter binding, so ``project_id`` must
+    be omitted when ``thread_id`` is set (422 otherwise). Without
+    ``thread_id`` a new thread is created (optionally Matter-bound via
+    ``project_id``).
     """
 
     prompt: str = Field(min_length=1, max_length=32_768)
@@ -65,6 +71,9 @@ class AgentRunCreate(BaseModel):
     # privilege/tier floor. Validated against ownership at the endpoint
     # (another user's project id → 404, never 403).
     project_id: uuid.UUID | None = None
+    # F0-S5: continue this conversation (404 unowned; 409 when the
+    # thread is busy or not continuable — ADR-F008).
+    thread_id: uuid.UUID | None = None
 
 
 class AgentRunRead(BaseModel):
@@ -74,6 +83,7 @@ class AgentRunRead(BaseModel):
 
     id: uuid.UUID
     user_id: uuid.UUID
+    thread_id: uuid.UUID
     project_id: uuid.UUID | None = None
     status: AgentRunStatus
     prompt: str
@@ -123,3 +133,55 @@ class AgentRunListResponse(BaseModel):
     total_count: int
     limit: int
     offset: int
+
+
+class AgentThreadRead(BaseModel):
+    """ORM-read view of an :class:`~app.models.agent_run.AgentThread`.
+
+    ``last_run_status`` is computed by the endpoint (the newest run's
+    status) so the conversation list can badge threads without a second
+    round trip; it is None only for a thread whose runs were all deleted
+    underneath it (not a state the API produces itself).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    project_id: uuid.UUID | None = None
+    title: str
+    created_at: datetime
+    last_run_at: datetime
+    last_run_status: AgentRunStatus | None = None
+
+
+class AgentThreadListResponse(BaseModel):
+    """Paginated conversation list (newest activity first)."""
+
+    threads: list[AgentThreadRead]
+    total_count: int
+    limit: int
+    offset: int
+
+
+class AgentRunWithSteps(BaseModel):
+    """One conversation turn: the run plus its steps in ``seq`` order."""
+
+    run: AgentRunRead
+    steps: list[AgentRunStepRead]
+
+
+class AgentThreadDetailResponse(BaseModel):
+    """Thread detail: the conversation's runs (oldest first) with steps.
+
+    The multi-turn UI polls this while a run is live — same settled-rows
+    contract as :class:`AgentRunDetailResponse` (ADR-F004).
+    ``continuable`` tells the composer whether a follow-up would be
+    accepted (latest run ``completed`` AND checkpoint state exists —
+    ADR-F008); the POST endpoint re-checks, this flag is advisory UI
+    state, not authorization.
+    """
+
+    thread: AgentThreadRead
+    runs: list[AgentRunWithSteps]
+    continuable: bool

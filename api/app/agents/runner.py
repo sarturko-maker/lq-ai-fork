@@ -39,8 +39,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agents.checkpointer import thread_config
 from app.agents.factory import build_deep_agent
 from app.models.agent_run import AgentRun, AgentRunStep
 from app.schemas.agent_runs import AgentRunStatus, AgentRunStepKind
@@ -160,14 +162,48 @@ def _is_nested(event: dict[str, Any], tool_run_ids: set[str]) -> bool:
     return any(str(pid) in tool_run_ids for pid in event.get("parent_ids") or [])
 
 
+async def _persist_step(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    run_id: uuid.UUID,
+    seq: int,
+    kind: str,
+    name: str | None,
+    summary: str,
+) -> None:
+    """Write one step row in its own short-lived session, retrying once.
+
+    The loop used to hold ONE session for the whole run; a Postgres
+    restart mid-run (the dev box's crash-recovery gotcha — seen live in
+    the F0-S5 gate) then failed the run on the next INSERT ("connection
+    is closed") even though the loop itself was healthy. A fresh session
+    per step checks out a pre-pinged connection (``pool_pre_ping`` on
+    the engine), and one retry after a short pause rides out a
+    crash-recovery window in progress — same fresh-session posture as
+    :func:`_finalize` / :func:`mark_run_failed`. The ``(run_id, seq)``
+    unique constraint makes a double write impossible.
+    """
+    for attempt in (1, 2):
+        try:
+            async with session_factory() as db:
+                db.add(AgentRunStep(run_id=run_id, seq=seq, kind=kind, name=name, summary=summary))
+                await db.commit()
+                return
+        except Exception:
+            if attempt == 2:
+                raise
+            await asyncio.sleep(2.0)
+
+
 async def _drive_agent(
     agent: Any,
     *,
     run_id: uuid.UUID,
     prompt: str,
     max_steps: int,
-    db: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
     wall_clock_seconds: float,
+    thread_id: uuid.UUID | None = None,
 ) -> tuple[str | None, bool]:
     """Stream the agent, persisting one step row + COMMIT per event.
 
@@ -175,6 +211,11 @@ async def _drive_agent(
     run's progress is readable mid-flight (ADR-F002 live activity), and
     a crash loses at most the in-flight step. Returns
     ``(final_answer, cap_hit)``.
+
+    With ``thread_id`` set (F0-S5) the invocation addresses that
+    conversation's checkpoint lineage: the new user message is APPENDED
+    to the thread's persisted state by the ``add_messages`` reducer, so
+    a follow-up run continues the same conversation (ADR-F008).
     """
     seq = 0
     final_answer: str | None = None
@@ -186,6 +227,7 @@ async def _drive_agent(
 
     stream = agent.astream_events(
         {"messages": [{"role": "user", "content": prompt}]},
+        config=thread_config(thread_id) if thread_id is not None else None,
         version="v2",
     )
     try:
@@ -202,16 +244,14 @@ async def _drive_agent(
                 # is nested under its tool run and is NOT the answer (F4).
                 is_final = no_tools and not _is_nested(event, tool_run_ids)
                 seq += 1
-                db.add(
-                    AgentRunStep(
-                        run_id=run_id,
-                        seq=seq,
-                        kind=kind.value,
-                        name=name,
-                        summary=summary,
-                    )
+                await _persist_step(
+                    session_factory,
+                    run_id=run_id,
+                    seq=seq,
+                    kind=kind.value,
+                    name=name,
+                    summary=summary,
                 )
-                await db.commit()
                 if is_final:
                     # The deliverable itself is the user's work product —
                     # persisted in full, not bounded like step digests.
@@ -312,6 +352,8 @@ async def execute_agent_run(
     model: BaseChatModel,
     system_prompt: str = SYSTEM_PROMPT,
     wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS,
+    checkpointer: BaseCheckpointSaver | None = None,
+    thread_id: uuid.UUID | None = None,
 ) -> None:
     """Execute one persisted agent run end to end.
 
@@ -323,10 +365,21 @@ async def execute_agent_run(
     never builds either, so tests drive the real loop with fakes
     through the same seams.
 
+    ``checkpointer`` + ``thread_id`` (F0-S5, ADR-F008) make the run
+    multi-turn: state persists under the conversation's thread id and a
+    later run on the same thread continues it. Both-or-neither — a
+    checkpointer without a thread id would persist state nowhere
+    addressable, a thread id without a checkpointer would silently
+    drop history; the composition point passes both or neither.
+
     Terminal writes: ``completed`` (+ ``final_answer``), ``cap_exceeded``
     (step cap), or ``failed`` (``error='timeout'`` for the wall clock;
     otherwise a bounded exception summary — never a stack trace).
     """
+    # Load-then-release: the run's fields are snapshotted in a short
+    # session; the loop itself holds NO long-lived connection (each step
+    # write opens its own — see _persist_step). A Postgres restart
+    # mid-run can then only fail the single write in flight, not the run.
     async with db_session_factory() as db:
         run = await db.get(AgentRun, run_id)
         if run is None:
@@ -335,56 +388,56 @@ async def execute_agent_run(
                 extra={"event": "agent_run_missing", "run_id": str(run_id)},
             )
             return
-        # Snapshot before the first commit — commits/rollbacks may expire
-        # ORM instances depending on the injected factory's configuration.
         prompt, max_steps = run.prompt, run.max_steps
 
-        try:
-            # ADR-F002 chokepoint: matter tools dispatch through
-            # app.agents.guard (F0-S4 minimal — R6 grants / R5 halt /
-            # audit). F1 extends the wrap to the full tool universe
-            # incl. the deepagents builtins, plus R4 budgets.
-            agent = build_deep_agent(
-                model=model,
-                tools=tools,
-                system_prompt=system_prompt,
-            )
-            final_answer, cap_hit = await _drive_agent(
-                agent,
-                run_id=run_id,
-                prompt=prompt,
-                max_steps=max_steps,
-                db=db,
-                wall_clock_seconds=wall_clock_seconds,
-            )
-        except TimeoutError:
-            await _finalize(
-                db_session_factory,
-                run_id,
-                status=AgentRunStatus.failed,
-                error="timeout",
-            )
-            return
-        except Exception as exc:
-            # Bounded type+message only — stack traces stay in logs.
-            logger.exception(
-                "agent run failed",
-                extra={"event": "agent_run_failed", "run_id": str(run_id)},
-            )
-            await _finalize(
-                db_session_factory,
-                run_id,
-                status=AgentRunStatus.failed,
-                error=_bounded(f"{type(exc).__name__}: {exc}", 500),
-            )
-            return
-
+    try:
+        # ADR-F002 chokepoint: matter tools dispatch through
+        # app.agents.guard (F0-S4 minimal — R6 grants / R5 halt /
+        # audit). F1 extends the wrap to the full tool universe
+        # incl. the deepagents builtins, plus R4 budgets.
+        agent = build_deep_agent(
+            model=model,
+            tools=tools,
+            system_prompt=system_prompt,
+            checkpointer=checkpointer,
+        )
+        final_answer, cap_hit = await _drive_agent(
+            agent,
+            run_id=run_id,
+            prompt=prompt,
+            max_steps=max_steps,
+            session_factory=db_session_factory,
+            wall_clock_seconds=wall_clock_seconds,
+            thread_id=thread_id if checkpointer is not None else None,
+        )
+    except TimeoutError:
         await _finalize(
             db_session_factory,
             run_id,
-            status=AgentRunStatus.cap_exceeded if cap_hit else AgentRunStatus.completed,
-            # A capped run has no deliverable: any captured answer text is
-            # incidental (e.g., a subagent's closing turn), not the run's
-            # final answer — leave it NULL (F4).
-            final_answer=None if cap_hit else final_answer,
+            status=AgentRunStatus.failed,
+            error="timeout",
         )
+        return
+    except Exception as exc:
+        # Bounded type+message only — stack traces stay in logs.
+        logger.exception(
+            "agent run failed",
+            extra={"event": "agent_run_failed", "run_id": str(run_id)},
+        )
+        await _finalize(
+            db_session_factory,
+            run_id,
+            status=AgentRunStatus.failed,
+            error=_bounded(f"{type(exc).__name__}: {exc}", 500),
+        )
+        return
+
+    await _finalize(
+        db_session_factory,
+        run_id,
+        status=AgentRunStatus.cap_exceeded if cap_hit else AgentRunStatus.completed,
+        # A capped run has no deliverable: any captured answer text is
+        # incidental (e.g., a subagent's closing turn), not the run's
+        # final answer — leave it NULL (F4).
+        final_answer=None if cap_hit else final_answer,
+    )

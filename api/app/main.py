@@ -26,6 +26,7 @@ from fastapi.responses import JSONResponse
 
 from app import __version__
 from app.admin_bootstrap import ensure_first_run_admin
+from app.agents.checkpointer import close_agent_checkpointer, init_agent_checkpointer
 from app.api import api_router
 from app.cache import check_redis, close_redis
 from app.clients.gateway import close_gateway_client, get_gateway_client
@@ -95,6 +96,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         log.warning("first-run admin bootstrap failed: %s (continuing)", exc)
 
+    # Durable agent state (F0-S5, ADR-F008). Init failure is degraded
+    # service (no multi-turn persistence), never a crash — the function
+    # logs and leaves the saver unset; see app/agents/checkpointer.py.
+    await init_agent_checkpointer()
+
     try:
         yield
     finally:
@@ -102,6 +108,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Close clients in reverse order of dependency. Failures here are
         # logged but never propagate — shutdown is best-effort.
         for closer_name, closer in (
+            ("agent checkpointer", close_agent_checkpointer),
             ("gateway client", close_gateway_client),
             ("redis", close_redis),
             ("db engine", dispose_engine),

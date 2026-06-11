@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentRun, AgentRunStep } from '$lib/lq-ai/api/agents';
+import type { AgentRun, AgentRunStep, AgentThreadDetailResponse } from '$lib/lq-ai/api/agents';
 import {
 	MATTER_TOOLS,
 	MAX_POLL_FAILURES,
@@ -7,13 +7,19 @@ import {
 	RAIL_TOOLS,
 	STALE_RUNNING_AFTER_MS,
 	STEP_SUMMARY_LIMIT,
+	composerEnabled,
 	isStaleRunning,
+	latestRunOf,
 	railItems,
 	railStates,
 	shouldContinuePolling,
+	shouldContinuePollingThread,
 	splitThink,
+	threadRailStates,
 	statusBadge,
 	stepDisplay,
+	threadRailSteps,
+	uploadsSettled,
 	visibleSteps
 } from '../page-helpers';
 
@@ -23,6 +29,7 @@ function makeRun(overrides: Partial<AgentRun> = {}): AgentRun {
 	return {
 		id: 'run-1',
 		user_id: 'user-1',
+		thread_id: 'thread-1',
 		project_id: null,
 		status: 'running',
 		prompt: 'What is the liability cap?',
@@ -341,5 +348,146 @@ describe('visibleSteps', () => {
 		const steps = [...earlier];
 		const run = makeRun({ status: 'completed', final_answer: 'passages' });
 		expect(visibleSteps(steps, run)).toHaveLength(3);
+	});
+});
+
+describe('conversations (F0-S5)', () => {
+	function detailWith(
+		runs: { run: AgentRun; steps: AgentRunStep[] }[],
+		continuable: boolean
+	): AgentThreadDetailResponse {
+		return {
+			thread: {
+				id: 'thread-1',
+				user_id: 'user-1',
+				project_id: null,
+				title: 'What is the liability cap?',
+				created_at: new Date(T0).toISOString(),
+				last_run_at: new Date(T0).toISOString(),
+				last_run_status: runs.length ? runs[runs.length - 1].run.status : null
+			},
+			runs,
+			continuable
+		};
+	}
+
+	it('latestRunOf returns the last run, null for empty/none', () => {
+		expect(latestRunOf(null)).toBeNull();
+		expect(latestRunOf(detailWith([], false))).toBeNull();
+		const first = makeRun({ id: 'run-1', status: 'completed' });
+		const second = makeRun({ id: 'run-2' });
+		const d = detailWith(
+			[
+				{ run: first, steps: [] },
+				{ run: second, steps: [] }
+			],
+			false
+		);
+		expect(latestRunOf(d)?.id).toBe('run-2');
+	});
+
+	it('threadRailSteps concatenates steps across runs in conversation order', () => {
+		const d = detailWith(
+			[
+				{
+					run: makeRun({ id: 'run-1', status: 'completed' }),
+					steps: [makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' })]
+				},
+				{
+					run: makeRun({ id: 'run-2' }),
+					steps: [makeStep({ seq: 1, kind: 'tool_call', name: 'read_document' })]
+				}
+			],
+			false
+		);
+		expect(threadRailSteps(d).map((s) => s.name)).toEqual(['search_documents', 'read_document']);
+		expect(threadRailSteps(null)).toEqual([]);
+	});
+
+	it('shouldContinuePollingThread tracks only the newest run', () => {
+		const settled = { run: makeRun({ id: 'run-1', status: 'completed' }), steps: [] };
+		const live = { run: makeRun({ id: 'run-2', status: 'running' }), steps: [] };
+		expect(shouldContinuePollingThread(detailWith([settled, live], false), T0 + 1000)).toBe(true);
+		expect(shouldContinuePollingThread(detailWith([live, settled], false), T0 + 1000)).toBe(false);
+		expect(shouldContinuePollingThread(null, T0)).toBe(false);
+		// A stale 'running' run stops the poll (same cutoff as single runs).
+		expect(
+			shouldContinuePollingThread(
+				detailWith([live], false),
+				T0 + STALE_RUNNING_AFTER_MS + 1000
+			)
+		).toBe(false);
+	});
+
+	it('composerEnabled: new chat always; open thread only when continuable and settled', () => {
+		expect(composerEnabled(null, T0)).toBe(true);
+		const completed = { run: makeRun({ status: 'completed' }), steps: [] };
+		expect(composerEnabled(detailWith([completed], true), T0 + 1000)).toBe(true);
+		expect(composerEnabled(detailWith([completed], false), T0 + 1000)).toBe(false);
+		const running = { run: makeRun({ status: 'running' }), steps: [] };
+		expect(composerEnabled(detailWith([running], false), T0 + 1000)).toBe(false);
+	});
+
+	it('uploadsSettled is true only when every file is ready or failed', () => {
+		expect(uploadsSettled([])).toBe(true);
+		expect(
+			uploadsSettled([{ ingestion_status: 'ready' }, { ingestion_status: 'failed' }])
+		).toBe(true);
+		expect(uploadsSettled([{ ingestion_status: 'ready' }, { ingestion_status: 'processing' }])).toBe(
+			false
+		);
+		expect(uploadsSettled([{ ingestion_status: 'pending' }])).toBe(false);
+		// No status yet (fresh upload response without the field) = not settled.
+		expect(uploadsSettled([{ ingestion_status: undefined }])).toBe(false);
+	});
+});
+
+describe('threadRailStates (F0-S5 review)', () => {
+	function detail(
+		runs: { run: AgentRun; steps: AgentRunStep[] }[]
+	): AgentThreadDetailResponse {
+		return {
+			thread: {
+				id: 'thread-1',
+				user_id: 'user-1',
+				project_id: null,
+				title: 't',
+				created_at: new Date(T0).toISOString(),
+				last_run_at: new Date(T0).toISOString(),
+				last_run_status: null
+			},
+			runs,
+			continuable: false
+		};
+	}
+
+	it('an unmatched tool_call in an EARLIER settled turn stays lit, never pulses', () => {
+		const d = detail([
+			{
+				run: makeRun({ id: 'run-1', status: 'completed' }),
+				steps: [makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' })]
+			},
+			{
+				run: makeRun({ id: 'run-2', status: 'running' }),
+				steps: [makeStep({ seq: 1, kind: 'tool_call', name: 'read_document' })]
+			}
+		]);
+		const states = threadRailStates(d, 'running');
+		expect(states['search_documents']).toBe('lit');
+		expect(states['read_document']).toBe('active');
+	});
+
+	it('settled conversations show everything lit, nothing active', () => {
+		const d = detail([
+			{
+				run: makeRun({ id: 'run-1', status: 'completed' }),
+				steps: [makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' })]
+			}
+		]);
+		expect(threadRailStates(d, 'completed')['search_documents']).toBe('lit');
+	});
+
+	it('empty inputs yield no states', () => {
+		expect(threadRailStates(null, null)).toEqual({});
 	});
 });

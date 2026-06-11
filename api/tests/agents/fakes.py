@@ -43,12 +43,21 @@ class ScriptedToolCallingModel(BaseChatModel):
     (fresh tool-call ids each time) — used to trip the ``max_steps``
     cap. Without it, exhausting the script raises, which the runner
     records as a failed run.
+
+    ``seen_messages`` records every prompt the model received — the
+    F0-S5 multi-turn tests assert a follow-up run's model call contains
+    the FIRST run's conversation (the checkpointer's whole point).
     """
 
     responses: list[AIMessage]
     loop_last: bool = False
 
     _idx: int = PrivateAttr(default=0)
+    _seen: list[list[BaseMessage]] = PrivateAttr(default_factory=list)
+
+    @property
+    def seen_messages(self) -> list[list[BaseMessage]]:
+        return self._seen
 
     @property
     def _llm_type(self) -> str:
@@ -80,6 +89,7 @@ class ScriptedToolCallingModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
+        self._seen.append(list(messages))
         return ChatResult(generations=[ChatGeneration(message=self._next_message())])
 
 

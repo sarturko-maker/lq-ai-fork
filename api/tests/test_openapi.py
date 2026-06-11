@@ -193,6 +193,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # F0-S2 (fork) — agent-run records (kick-off + polled run/steps reads)
         "/api/v1/agents/runs",
         "/api/v1/agents/runs/{run_id}",
+        # F0-S5 (fork) — conversations (ADR-F008): list + polled detail
+        "/api/v1/agents/threads",
+        "/api/v1/agents/threads/{thread_id}",
     }
 )
 
@@ -293,7 +296,10 @@ async def test_openapi_paths_match_sketch() -> None:
     # F0-S2 (fork) adds two new paths:
     # /api/v1/agents/runs (POST kick-off + GET list)
     # /api/v1/agents/runs/{run_id}
-    assert len(actual) == 120
+    # F0-S5 (fork) adds two new paths (ADR-F008):
+    # /api/v1/agents/threads
+    # /api/v1/agents/threads/{thread_id}
+    assert len(actual) == 122
 
 
 @pytest.mark.unit
