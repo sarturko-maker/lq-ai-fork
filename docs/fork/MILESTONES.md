@@ -103,9 +103,36 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
   create→redirect) fails IDENTICALLY on main's build — pre-existing environmental hang (the
   AUT's POST /projects never leaves the browser under Cypress on that surface); its inline
   login got the helper's 15s timeout (tests 1–2 now reliable); Backlog item below.
-- **S9 — eval gate (ADR-F004).** Tool-call and subagent uptake at N≥20 on MiniMax-M3 plus one
-  second model family (masked judge, pre-flight variance gate); subagent dispatch as task-scoped
-  procedures, not open-ended delegation.
+- **S9 — eval gate as MODEL QUALIFICATION (ADR-F004; re-scoped per maintainer directive
+  2026-06-11: the model is dependency injection — Deep Agents must work with any good model; do
+  NOT redo oscar-gc's eval work; lean on existing OSS results).** Read
+  `docs/fork/research/f0-s9-eval-reuse.md` FIRST — oscar-gc eval mining + ecosystem survey,
+  synthesized; its §4 lists the open maintainer decisions (thresholds set AFTER the first
+  baseline — never tighter than the CI; model shortlist; dep approval; arg-digest source;
+  gateway pre-check scope; budget). Shape: **L0** serving conformance, zero-LLM (structural
+  tool-call frames — never regex over text; schema validity ≈100%; trigger-F1; the gateway
+  `<think>`-retention round-trip check is a PREREQUISITE to trusting any MiniMax-M3 number —
+  triage low scores against the adapter before the model). **L1** deterministic uptake scored
+  by plain Python over settled `agent_run_steps` rows: 4 scenarios (positive grounding,
+  batch/fan-out, negative control, MISMATCH — the negative-guard discriminator), paired
+  positive/noise fields per affordance, invoked vs invoked-correctly, S2N, task-scoped fan-out
+  compliance via `parent_step_id` (open-ended delegation is settled capability-bound — measure
+  compliance, never willingness). **L2** masked LLM judge ONLY for grounding substance
+  (doctrine/prompt masked from the judge; structural rubrics need no LLM at all). N=20 primary /
+  N=10 second family / pre-flight N=5 variance gate (≤1 verdict disagreement per metric;
+  parameterised cell); per-run assertion that a real assistant message or gateway error landed
+  (oscar's silent-403 lesson). Harness = plain pytest against our API through the gateway —
+  ZERO new runtime deps (at most `openevals`/`agentevals`, MIT, dev-only, for the judge call).
+  Capability priors are CITED from BFCL V4 (incl. relevance/irrelevance columns) + tau2
+  leaderboards, never re-run — noting MiniMax-M3 has NO independent tool-calling prior and no
+  public benchmark measures subagent uptake (both S9 measures are in-house by necessity).
+  Second family recommendation: Kimi K2.x via an OpenAI-compatible gateway provider (avoids the
+  Anthropic adapter tool_use blocker; thinking-style contrast isolates gateway confounds);
+  alternates GLM-4.7+/Qwen3.x; anti-pick DeepSeek. Inherited oscar constraints (do NOT
+  re-measure): doctrine wording = positive imperative + ≤1 collapsed exclusion (the +35pp/−20pp
+  cross-family reversal, fixed by Candidate C); placement at the trigger surface beats wording;
+  prompt iteration is subtractive-only. Output artifact = a model COMPATIBILITY MATRIX with
+  per-model config notes (Goose/OpenHands style), not a pass/fail leaderboard.
 
 ## F1 — First practice area, end to end (ADR-F002)
 
