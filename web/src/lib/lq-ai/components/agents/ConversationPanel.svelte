@@ -134,23 +134,64 @@
   // ---------------------------------------------------------------------
   // Bottom-docked composer auto-scroll (F0-S8). The conversation reads
   // top-down with the composer docked below it, so new content lands out
-  // of view: pin the viewport to the bottom while the user is already
-  // near it (force on the first snapshot — opening a thread should show
-  // its latest turn). Never fight a user who scrolled up to read.
+  // of view: pin the viewport to the CONVERSATION'S tail while the user
+  // is already near it (force on the first snapshot — opening a thread
+  // should show its latest turn). Never fight a user who scrolled up.
+  //
+  // The target is the thread-end anchor offset by the composer's height,
+  // NOT the document bottom: the page's side column (rail + conversation
+  // list) is usually taller than the conversation, and scrolling to the
+  // document bottom would push the whole conversation off-screen.
   // ---------------------------------------------------------------------
 
   /** True until the first thread snapshot of this mount has rendered. */
   let firstSnapshot = true;
+  /** In-flow marker between the thread and the docked composer. */
+  let threadEndEl: HTMLDivElement | null = null;
+  let composerEl: HTMLFormElement | null = null;
+
+  /**
+   * The element that actually scrolls this panel. NOT the document: the
+   * LQ.AI shell pins `html { overflow-y: hidden }` and scrolls its
+   * `<main id="lq-main">` — resolved generically (nearest scrollable
+   * ancestor) so the F1 cockpit can re-home the panel into any layout.
+   */
+  function scrollContainer(): HTMLElement | null {
+    let el: HTMLElement | null = threadEndEl?.parentElement ?? null;
+    while (el) {
+      if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) return el;
+      el = el.parentElement;
+    }
+    return document.scrollingElement as HTMLElement | null;
+  }
+
+  /** Container scrollTop that puts the thread's tail just above the composer. */
+  function tailScrollTop(container: HTMLElement): number | null {
+    if (!threadEndEl) return null;
+    const composerH = composerEl?.offsetHeight ?? 0;
+    // Rects are viewport-relative: for the root scroller the viewport IS
+    // the content origin minus scrollTop; for an inner container its own
+    // rect.top is the origin.
+    const anchorBottom =
+      container === document.scrollingElement
+        ? threadEndEl.getBoundingClientRect().bottom + container.scrollTop
+        : threadEndEl.getBoundingClientRect().bottom -
+          container.getBoundingClientRect().top +
+          container.scrollTop;
+    return Math.max(0, anchorBottom - container.clientHeight + composerH + 16);
+  }
 
   async function autoScroll(force = false) {
-    if (destroyed) return;
-    const el = document.scrollingElement;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
-    if (!force && !nearBottom) return;
+    if (destroyed || !threadEndEl) return;
+    const container = scrollContainer();
+    if (!container) return;
+    const before = tailScrollTop(container); // pre-render tail: were we reading it?
+    if (before === null) return;
+    if (!force && container.scrollTop < before - 240) return;
     await tick(); // let the new content render before measuring the target
     if (destroyed) return;
-    el.scrollTop = el.scrollHeight;
+    const target = tailScrollTop(container);
+    if (target !== null) container.scrollTop = target;
   }
 
   onMount(() => {
@@ -785,7 +826,15 @@
   </section>
 {/if}
 
-<form class="ag-composer" data-testid="lq-ai-agents-composer" on:submit|preventDefault={submit}>
+<!-- Auto-scroll anchor: marks where the conversation ends in flow. -->
+<div bind:this={threadEndEl} aria-hidden="true"></div>
+
+<form
+  bind:this={composerEl}
+  class="ag-composer"
+  data-testid="lq-ai-agents-composer"
+  on:submit|preventDefault={submit}
+>
   {#if !detail}
     <div class="ag-matter">
       <label class="lq-text-label" for="ag-matter">Matter</label>

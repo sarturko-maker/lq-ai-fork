@@ -50,7 +50,7 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 		// demo tool is gone for good.
 		cy.get('[data-testid="lq-ai-agents-rail"] li').should('have.length', 9);
 		cy.get('[data-testid="lq-ai-agents-rail"] li.ag-rail__tool--lit').should('have.length', 0);
-		cy.screenshot('f0-s3-1-agents-tab-idle');
+		cy.screenshot('f0-s3-1-agents-tab-idle', { capture: 'viewport' });
 
 		// ADR-F002 (F0-S8): no blank workspace — without a matter the Run
 		// button stays disabled even with a prompt typed.
@@ -73,7 +73,7 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 			.find('option:selected')
 			.should('have.text', matterName);
 		cy.get('[data-testid="lq-ai-agents-rail"] li').should('have.length', 11);
-		cy.screenshot('f0-s3-1b-matter-created-bound');
+		cy.screenshot('f0-s3-1b-matter-created-bound', { capture: 'viewport' });
 
 		// Count detail polls so we can prove polling stops after the run settles.
 		// Since F0-S5 the page polls the CONVERSATION, not the run (ADR-F008).
@@ -92,7 +92,7 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 			'[data-testid="lq-ai-agents-run"] .ag-steps li, [data-testid="lq-ai-agents-answer"]',
 			{ timeout: RUN_TIMEOUT_MS }
 		).should('have.length.at.least', 1);
-		cy.screenshot('f0-s3-2-agent-working');
+		cy.screenshot('f0-s3-2-agent-working', { capture: 'viewport' });
 
 		// No tool lighting is asserted: the matter is freshly created and
 		// EMPTY, so an honest agent may search-and-find-nothing or answer
@@ -116,7 +116,7 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 		cy.get('[data-testid="lq-ai-agents-answer"] .prose').should(($el) => {
 			expect($el.text()).not.to.contain('<think>');
 		});
-		cy.screenshot('f0-s3-3-agent-completed');
+		cy.screenshot('f0-s3-3-agent-completed', { capture: 'viewport' });
 
 		// Polling actually stops once the run settles (no zombie 2s loop).
 		cy.get('@pollRun.all').then((calls) => {
