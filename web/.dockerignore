@@ -1,27 +1,7 @@
-.github
-.DS_Store
-docs
-kubernetes
 node_modules
-/.svelte-kit
-/package
+.svelte-kit
+build
+cypress
 .env
 .env.*
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
-__pycache__
-.idea
-venv
-_old
-uploads
-.ipynb_checkpoints
-**/*.db
-_test
-backend/data/*
-
-# macOS Finder duplicate files (autonomously created on iCloud-synced trees;
-# named "foo 2.ts", "foo 3.svelte", etc.). They break Vite imports + svelte-check
-# when they sneak into the docker build context.
-**/* [0-9].*
-**/* [0-9][0-9].*
-**/._*
+README.md

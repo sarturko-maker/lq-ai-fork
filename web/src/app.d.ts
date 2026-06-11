@@ -1,5 +1,4 @@
-// See https://kit.svelte.dev/docs/types#app
-// for information about these interfaces
+// Ambient SvelteKit app types for the LQ.AI shell.
 declare global {
 	namespace App {
 		// interface Error {}
