@@ -100,7 +100,9 @@ describe('F0-S5 — multi-turn conversation with composer upload', () => {
 		cy.get('[data-testid="lq-ai-login-password"]').type(PASSWORD, { log: false });
 		cy.get('[data-testid="lq-ai-login-submit"]').click();
 
-		cy.contains('[role="tab"]', 'Agents', { timeout: 15_000 }).click();
+		// 30s: a postgres crash-recovery window (the dev-box gotcha) can stall
+		// the login POST past the default — seen live during this slice's gate.
+		cy.contains('[role="tab"]', 'Agents', { timeout: 30_000 }).click();
 		cy.location('pathname').should('eq', '/lq-ai/agents');
 
 		cy.get('[data-testid="lq-ai-agents-matter-select"] option', { timeout: 15_000 }).contains(
