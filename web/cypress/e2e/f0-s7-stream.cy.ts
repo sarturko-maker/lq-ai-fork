@@ -80,10 +80,11 @@ describe('F0-S7 — SSE v2 streaming (live deep agent)', () => {
 		cy.get('[data-testid="lq-ai-agents-thinking-live"]').should('not.exist');
 		cy.screenshot('f0-s7-2-settled-answer');
 
-		// Streaming parked the poller: at most the initial poll(s) + the
-		// post-stream reconcile — a broken handoff would show one poll per
-		// 2s of run time (a 40s run ≈ 20 polls).
-		cy.get('@pollThread.all').its('length').should('be.lessThan', 8);
+		// Streaming parked the poller: the handoff poll, the post-stream
+		// reconcile, and slack for one retry. A broken handoff polls every
+		// 2s, so even a short ~10s run would blow this bound (review: the
+		// earlier <8 only discriminated for runs longer than ~14s).
+		cy.get('@pollThread.all').its('length').should('be.lessThan', 5);
 
 		// Steps still render from settled rows — the timeline survived the
 		// streaming upgrade byte-for-byte.

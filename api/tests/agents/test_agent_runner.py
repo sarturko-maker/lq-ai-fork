@@ -28,7 +28,7 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.agents.runner import execute_agent_run
+from app.agents.runner import _innermost_tool_parent, execute_agent_run
 from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
 from app.models.user import User
 from app.security import hash_password
@@ -457,6 +457,26 @@ async def test_cap_during_subagent_leaves_final_answer_null(
     assert len(steps) == 4
 
 
+def test_innermost_tool_parent_picks_the_nearest_enclosing_dispatch() -> None:
+    """parent_ids orders root-first, so the INNERMOST enclosing tool is
+    the LAST match — a deep step under nested dispatches must link to
+    its nearest ancestor, not the outermost (S7 review: reversing the
+    scan direction would otherwise pass the whole suite).
+    """
+    outer_step = uuid.uuid4()
+    inner_step = uuid.uuid4()
+    tool_step_ids = {"run-outer": outer_step, "run-inner": inner_step}
+
+    nested_event = {"parent_ids": ["run-root", "run-outer", "run-mid", "run-inner"]}
+    assert _innermost_tool_parent(nested_event, tool_step_ids) == inner_step
+
+    outer_only = {"parent_ids": ["run-root", "run-outer", "run-mid"]}
+    assert _innermost_tool_parent(outer_only, tool_step_ids) == outer_step
+
+    assert _innermost_tool_parent({"parent_ids": ["run-root"]}, tool_step_ids) is None
+    assert _innermost_tool_parent({}, tool_step_ids) is None
+
+
 async def test_publisher_mirrors_the_real_loop_onto_the_wire(
     make_run: Callable[..., Awaitable[uuid.UUID]],
     commit_factory: async_sessionmaker[AsyncSession],
@@ -517,6 +537,30 @@ async def test_publisher_mirrors_the_real_loop_onto_the_wire(
     assert [p["toolCallId"] for p in tool_inputs] == [str(steps[1].id)]
     assert [p["toolCallId"] for p in tool_outputs] == [str(steps[1].id)]
     assert tool_inputs[0]["toolName"] == "task"
+
+    # The thinking ribbon's feed: model output rides as reasoning blocks
+    # (start before delta before end, correlated by id), including the
+    # NESTED subagent turn — and top-level turn boundaries frame as
+    # start-step/finish-step (S7 review: this branch had no CI coverage).
+    reasoning_deltas = [p for p in parts if p["type"] == "reasoning-delta"]
+    blocks: dict[str, str] = {}
+    for p in reasoning_deltas:
+        blocks[p["id"]] = blocks.get(p["id"], "") + p["delta"]
+    joined = list(blocks.values())
+    assert any("SUBAGENT closing turn" in text for text in joined)
+    assert any("ROOT final answer" in text for text in joined)
+    for delta in reasoning_deltas:
+        block_id = delta["id"]
+        started = parts.index(
+            next(p for p in parts if p["type"] == "reasoning-start" and p["id"] == block_id)
+        )
+        assert started < parts.index(delta)
+    assert {p["id"] for p in parts if p["type"] == "reasoning-end"} >= {
+        p["id"] for p in reasoning_deltas
+    }
+    # Three model turns total, ONE nested: exactly two top-level frames.
+    assert sum(1 for p in parts if p["type"] == "start-step") == 2
+    assert sum(1 for p in parts if p["type"] == "finish-step") == 2
 
     types = [p["type"] for p in parts]
     assert types[-4:] == ["text-delta", "text-end", "data-run", "finish"]

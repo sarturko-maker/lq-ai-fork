@@ -65,6 +65,14 @@
   export let initialThreadId: string | null = null;
   export let matters: Project[] = [];
   export let mattersError: string | null = null;
+  /**
+   * Composer draft + matter selection are PROPS (two-way bound by the
+   * host) so they survive the {#key} remounts that switch threads —
+   * the pre-S7 single-instance page never reset them on New chat /
+   * open-thread, and neither must the remount design (S7 review).
+   */
+  export let prompt = '';
+  export let selectedMatterId = '';
 
   // Bound OUT to the host (read-only there): the capability rail lives
   // in page chrome but derives from this conversation's settled steps.
@@ -84,14 +92,13 @@
     FORBID_ATTR: ['srcset', 'ping']
   };
 
-  let prompt = '';
   let submitting = false;
   let submitError: string | null = null;
 
-  // F0-S4: bind the conversation to a Matter so the agent gets the
-  // matter's document tools. '' = blank workspace. Fixed at thread
-  // creation — follow-ups inherit the thread's binding (ADR-F008).
-  let selectedMatterId = '';
+  // F0-S4: selectedMatterId (prop above) binds the conversation to a
+  // Matter so the agent gets the matter's document tools. '' = blank
+  // workspace. Fixed at thread creation — follow-ups inherit the
+  // thread's binding (ADR-F008).
 
   // ---------------------------------------------------------------------
   // Conversation (thread) state + polling — F0-S5 (ADR-F008)
@@ -109,6 +116,16 @@
   // skew — every API response's Date header feeds serverNowMs().
   let nowMs = serverNowMs();
   let nowTimer: ReturnType<typeof setInterval> | null = null;
+
+  // Set at teardown; post-await continuations (submit's startPolling,
+  // uploadBatch's poller re-arm) must check it. The per-instance
+  // generation counters CANNOT protect them: startPolling re-baselines
+  // the very counter the guards compare against, so a continuation
+  // resolving after destroy would otherwise re-arm timers — and open an
+  // orphan stream — in a dead instance. Remount-based thread switching
+  // makes destroy-mid-await an ordinary click, not an edge case (S7
+  // review).
+  let destroyed = false;
 
   onMount(() => {
     if (initialThreadId) startPolling(initialThreadId);
@@ -128,6 +145,7 @@
   }
 
   onDestroy(() => {
+    destroyed = true;
     stopPolling();
     stopUploadPolling();
     stopStream();
@@ -175,6 +193,7 @@
   }
 
   function startPolling(id: string) {
+    if (destroyed) return;
     stopPolling();
     stopStream();
     const gen = pollGeneration;
@@ -246,6 +265,7 @@
 
   /** Open the run's stream once; true = streaming (caller stops polling). */
   function tryStartStream(runId: string, threadId: string, gen: number): boolean {
+    if (destroyed) return false;
     if (streamRunId === runId) return true;
     stopStream();
     streamRunId = runId;
@@ -411,6 +431,7 @@
   }
 
   function startUploadPolling() {
+    if (destroyed) return;
     stopUploadPolling();
     uploadPollFailures = 0;
     const gen = uploadPollGeneration;
@@ -510,6 +531,14 @@
   $: latestRun = latestRunOf(detail);
   $: badge = latestRun ? statusBadge(latestRun, nowMs) : null;
   $: stale = latestRun ? isStaleRunning(latestRun, nowMs) : false;
+  // The staleness cutoff must end the STREAM exactly as it ends the
+  // poll loop — otherwise a zombie SSE (plus the server's DB tail)
+  // outlives the Stale badge (S7 review; the server applies the same
+  // 330s cutoff from its side).
+  $: if (stale && streamRunId !== null) {
+    stopStream();
+    dispatch('settled');
+  }
   // A stale run's dangling tool calls must not pulse forever — render
   // settled; lit spans the conversation, the pulse only the newest run.
   $: railSteps = threadRailSteps(detail);

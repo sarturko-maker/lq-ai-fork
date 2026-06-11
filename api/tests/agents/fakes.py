@@ -13,13 +13,15 @@ rule (substitute fakes through seams; don't monkeypatch).
 from __future__ import annotations
 
 import copy
+import json
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import PrivateAttr
 
 
@@ -91,6 +93,47 @@ class ScriptedToolCallingModel(BaseChatModel):
     ) -> ChatResult:
         self._seen.append(list(messages))
         return ChatResult(generations=[ChatGeneration(message=self._next_message())])
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        """Stream the scripted turn (F0-S7).
+
+        langchain auto-upgrades ``invoke`` to streaming only for models
+        that implement ``_stream`` — exactly how the production
+        ChatOpenAI path feeds ``on_chat_model_stream`` events, which the
+        runner forwards as the thinking ribbon's reasoning deltas. Text
+        turns stream in two chunks so delta accumulation is exercised;
+        the aggregated message is identical to the non-streamed one.
+        """
+        self._seen.append(list(messages))
+        message = self._next_message()
+        if message.tool_calls:
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(
+                    content=message.content,
+                    tool_call_chunks=[
+                        {
+                            "name": call["name"],
+                            "args": json.dumps(call["args"]),
+                            "id": call["id"],
+                            "index": i,
+                            "type": "tool_call_chunk",
+                        }
+                        for i, call in enumerate(message.tool_calls)
+                    ],
+                )
+            )
+            return
+        text = message.content if isinstance(message.content, str) else ""
+        mid = max(1, len(text) // 2)
+        yield ChatGenerationChunk(message=AIMessageChunk(content=text[:mid]))
+        if text[mid:]:
+            yield ChatGenerationChunk(message=AIMessageChunk(content=text[mid:]))
 
 
 class ExplodingModel(BaseChatModel):

@@ -41,9 +41,9 @@ export const MAX_POLL_FAILURES = 3;
  */
 export const STALE_RUNNING_AFTER_MS = 330_000;
 
-// TODO(F0-S5): nowMs is the client clock vs the server's started_at — a fast
-// client clock (>~5.5 min) would mark fresh runs stale. Acceptable for the
-// local-dev preview; derive 'now' from a response header when SSE lands.
+// nowMs vs the server's started_at: since F0-S7 callers pass a
+// server-derived 'now' (serverNowMs() in ./server-clock, fed by every API
+// response's Date header), so client clock skew no longer fakes staleness.
 export function isStaleRunning(run: Pick<AgentRun, 'status' | 'started_at'>, nowMs: number): boolean {
 	if (run.status !== 'running') return false;
 	const startedMs = Date.parse(run.started_at);

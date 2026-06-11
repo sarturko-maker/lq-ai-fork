@@ -156,6 +156,21 @@ StreamSessionFactory = Annotated[
 _STREAM_DB_POLL_SECONDS = 2.0
 _STREAM_HEARTBEAT_SECONDS = 15.0
 
+# A run still 'running' this long after start is ORPHANED (the runner's
+# wall clock is 300s and _finalize always follows; BackgroundTasks die
+# with the api process and no recovery sweep exists until the F1 arq
+# migration). The stream must not heartbeat such a run open forever —
+# mirrors the web poller's STALE_RUNNING_AFTER_MS (lib/lq-ai/agents/helpers.ts).
+_STREAM_STALE_AFTER_SECONDS = 330.0
+
+
+def _run_is_orphaned(run: AgentRun) -> bool:
+    """True for a 'running' row whose runner can no longer settle it."""
+    if run.status != AgentRunStatus.running.value:
+        return False
+    age = (datetime.now(UTC) - run.started_at).total_seconds()
+    return age > _STREAM_STALE_AFTER_SECONDS
+
 
 async def _latest_run_status(db: AsyncSession, thread_id: uuid.UUID) -> str | None:
     """The newest run's status for one thread (None = no runs)."""
@@ -479,8 +494,14 @@ async def _stream_run_events(
     2. the broker's live parts — reasoning deltas, tool frames, step
        mirrors — published by the runner in this process.
 
-    Every exit emits the terminal parts (built from the SETTLED run row,
-    ADR-F004) followed by the spec's ``[DONE]`` marker.
+    Every exit ends the message before ``[DONE]``: the terminal parts
+    (built from the SETTLED run row, ADR-F004) when the run settled, a
+    bare ``finish`` when there is nothing settled to report (run row
+    vanished under a user-cascade delete), or an ``error`` + ``finish``
+    when the run is ORPHANED at 'running' (process died; no recovery
+    sweep until F1 arq) — the stream must never heartbeat a dead run
+    open forever, and the client's polling path applies the same 330s
+    cutoff.
     """
     yield encode_sse({"type": "start", "messageId": str(run_id)})
     queue = broker.subscribe(run_id)
@@ -491,6 +512,7 @@ async def _stream_run_events(
             max_seq = max(max_seq, row.seq)
             yield encode_sse(_row_part(row))
         if run is None:  # deleted underneath us (user cascade)
+            yield encode_sse({"type": "finish"})
             yield SSE_DONE
             return
         if run.status != AgentRunStatus.running.value:
@@ -501,6 +523,13 @@ async def _stream_run_events(
                 error=run.error,
             ):
                 yield encode_sse(part)
+            yield SSE_DONE
+            return
+        if _run_is_orphaned(run):
+            yield encode_sse(
+                {"type": "error", "errorText": "run never settled (orphaned at 'running')"}
+            )
+            yield encode_sse({"type": "finish"})
             yield SSE_DONE
             return
 
@@ -516,6 +545,7 @@ async def _stream_run_events(
                     max_seq = max(max_seq, row.seq)
                     yield encode_sse(_row_part(row))
                 if run is None:
+                    yield encode_sse({"type": "finish"})
                     yield SSE_DONE
                     return
                 if run.status != AgentRunStatus.running.value:
@@ -526,6 +556,16 @@ async def _stream_run_events(
                         error=run.error,
                     ):
                         yield encode_sse(tpart)
+                    yield SSE_DONE
+                    return
+                if _run_is_orphaned(run):
+                    yield encode_sse(
+                        {
+                            "type": "error",
+                            "errorText": "run never settled (orphaned at 'running')",
+                        }
+                    )
+                    yield encode_sse({"type": "finish"})
                     yield SSE_DONE
                     return
                 if steps:
@@ -552,6 +592,8 @@ async def _stream_run_events(
                         error=run.error,
                     ):
                         yield encode_sse(tpart)
+                else:
+                    yield encode_sse({"type": "finish"})
                 yield SSE_DONE
                 return
             if part.get("type") == "start":

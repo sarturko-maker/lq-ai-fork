@@ -92,10 +92,90 @@ async def test_broker_drops_wedged_subscriber_without_raising() -> None:
         queue.put_nowait({"type": "reasoning-delta", "id": "r", "delta": str(i)})
     broker.publish(run_id, {"type": "start-step"})  # overflows q → dropped
 
-    # The healthy subscriber still receives; the wedged one was closed.
+    # The healthy subscriber still receives; the wedged one was closed —
+    # and its close SENTINEL actually arrives (one buffered part is
+    # sacrificed to make room; a sentinel that never lands would leave
+    # the consumer waiting on a dead queue — S7 review).
     assert _drain(healthy) == [{"type": "start-step"}]
+    assert _drain(queue)[-1] is CHANNEL_CLOSED
     broker.publish(run_id, {"type": "finish-step"})
     assert _drain(healthy) == [{"type": "finish-step"}]
+
+
+async def test_broker_releases_channel_when_last_subscriber_leaves() -> None:
+    """Replay-only streams (terminal runs, DB-tail) must not leak channels.
+
+    No publisher ever closes those channels; the unsubscribe of the last
+    subscriber is the only lifecycle event they get (S7 review — the
+    leak was one retained channel per streamed run, forever).
+    """
+    broker = RunStreamBroker()
+    run_id = uuid.uuid4()
+    for _ in range(5):
+        queue = broker.subscribe(run_id)
+        broker.unsubscribe(run_id, queue)
+    assert broker._channels == {}
+
+
+async def test_broker_caps_subscribers_per_run() -> None:
+    broker = RunStreamBroker()
+    run_id = uuid.uuid4()
+    queues = [broker.subscribe(run_id) for _ in range(8)]
+    overflow = broker.subscribe(run_id)
+    # The 9th gets an immediate close (its client falls back to polling).
+    assert _drain(overflow) == [CHANNEL_CLOSED]
+    broker.publish(run_id, {"type": "start-step"})
+    assert all(_drain(q) == [{"type": "start-step"}] for q in queues)
+
+
+async def test_mid_run_subscriber_is_seeded_with_open_block_openers() -> None:
+    """Wire-spec conformance for mid-run attach (S7 review).
+
+    A conformant AI SDK consumer crashes on a reasoning-delta whose
+    reasoning-start it never saw, and on a tool-output for a toolCallId
+    never introduced — the broker seeds new subscribers with the openers
+    of every block still in flight.
+    """
+    broker = RunStreamBroker()
+    run_id = uuid.uuid4()
+    publisher = broker.publisher(run_id)
+    early = broker.subscribe(run_id)
+
+    publisher.reasoning_delta("r1", "thinking…")  # opens block r1
+    call_payload = step_payload(
+        step_id=uuid.uuid4(),
+        run_id=run_id,
+        seq=1,
+        kind="tool_call",
+        name="search_documents",
+        summary='{"query": "cap"}',
+        parent_step_id=None,
+        created_at=datetime.now(UTC),
+    )
+    publisher.step_settled(call_payload)  # tool input published, output pending
+
+    late = broker.subscribe(run_id)
+    seeded = _drain(late)
+    assert [p["type"] for p in seeded] == ["reasoning-start", "tool-input-available"]
+    assert seeded[0]["id"] == "r1"
+    assert seeded[1]["toolCallId"] == call_payload["id"]
+
+    # Both blocks close → a third subscriber gets no stale openers.
+    publisher.reasoning_end("r1")
+    result_payload = step_payload(
+        step_id=uuid.uuid4(),
+        run_id=run_id,
+        seq=2,
+        kind="tool_result",
+        name="search_documents",
+        summary="hit",
+        parent_step_id=None,
+        created_at=datetime.now(UTC),
+    )
+    publisher.step_settled(result_payload, tool_call_id=call_payload["id"])
+    latest = broker.subscribe(run_id)
+    assert _drain(latest) == []
+    assert _drain(early)  # the early subscriber saw the full sequence
 
 
 async def test_publisher_reasoning_blocks_open_lazily_and_close_once() -> None:
@@ -480,6 +560,75 @@ async def test_stream_serves_live_broker_parts(
     assert "reasoning-delta" in types
     assert types[-2:] == ["data-run", "finish"]
     assert frames[-1] == "[DONE]"
+
+
+@pytest.mark.integration
+async def test_stream_ends_for_run_orphaned_at_running(
+    stream_client: AsyncClient,
+    stream_user: User,
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A run stuck at 'running' past the wall clock must not hold the
+    stream open forever (S7 review): the endpoint applies the same 330s
+    cutoff as the web poller and closes with error + finish + [DONE].
+    """
+    from datetime import timedelta
+
+    run = await _make_thread_run(commit_factory, stream_user, status="running")
+    async with commit_factory() as db:
+        row = await db.get(AgentRun, run.id)
+        assert row is not None
+        row.started_at = datetime.now(UTC) - timedelta(seconds=400)
+        await db.commit()
+
+    response = await stream_client.get(
+        f"/api/v1/agents/runs/{run.id}/stream", headers=_auth(stream_user)
+    )
+    frames = _parse_sse(response.text)
+    types = [f["type"] for f in frames if isinstance(f, dict)]
+    assert "error" in types
+    assert types[-1] == "finish"
+    assert frames[-1] == "[DONE]"
+
+
+@pytest.mark.integration
+async def test_composition_failure_closes_the_stream(
+    stream_user: User,
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A failure BEFORE the runner takes over must still end the wire:
+    _run_in_background's failure path publishes the failed terminal
+    parts through the same publisher the runner would have used.
+    """
+    from app.api.agent_runs import _run_in_background
+
+    run = await _make_thread_run(commit_factory, stream_user, status="running")
+    broker = RunStreamBroker()
+    queue = broker.subscribe(run.id)
+
+    def _exploding_builder(**_kwargs: Any) -> Any:
+        raise RuntimeError("model build exploded")
+
+    await _run_in_background(
+        run_id=run.id,
+        broker=broker,
+        model_builder=_exploding_builder,
+        session_factory_provider=lambda: commit_factory,
+        checkpointer_provider=lambda: None,
+    )
+
+    parts = _drain(queue)
+    assert parts[-1] is CHANNEL_CLOSED
+    types = [p["type"] for p in parts[:-1]]
+    assert types[-1] == "finish"
+    assert "error" in types
+    error_part = next(p for p in parts if isinstance(p, dict) and p["type"] == "error")
+    assert "RuntimeError" in error_part["errorText"]
+    assert "Traceback" not in error_part["errorText"]
+
+    async with commit_factory() as db:
+        row = await db.get(AgentRun, run.id)
+        assert row is not None and row.status == "failed"
 
 
 @pytest.mark.integration

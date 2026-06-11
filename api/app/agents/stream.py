@@ -142,22 +142,37 @@ def terminal_parts(
 
 
 class _RunChannel:
-    """Fan-out state for one run: subscriber queues + closed flag."""
+    """Fan-out state for one run: subscriber queues, closed flag, and the
+    open live blocks a mid-run subscriber must have synthesized openers
+    for (spec conformance — see :meth:`RunStreamBroker.subscribe`)."""
 
-    __slots__ = ("closed", "subscribers")
+    __slots__ = ("closed", "open_reasoning", "open_tool_inputs", "subscribers")
 
     def __init__(self) -> None:
         self.subscribers: list[asyncio.Queue[Any]] = []
         self.closed = False
+        # block id → its reasoning-start part (currently streaming).
+        self.open_reasoning: dict[str, dict[str, Any]] = {}
+        # toolCallId → its tool-input-available part (output not yet in).
+        self.open_tool_inputs: dict[str, dict[str, Any]] = {}
+
+
+# A run is watched by one user in practice; this cap only exists so a
+# misbehaving client can't fan one run out to unbounded queues.
+_MAX_SUBSCRIBERS_PER_RUN = 8
 
 
 class RunStreamBroker:
     """Process-local pub/sub keyed by run id.
 
     No replay buffer on purpose: settled rows are the replay source
-    (ADR-F004), the endpoint reads them itself. Publishing never raises
-    into the runner — a wedged subscriber is closed and dropped, the
-    run is never the stream's hostage.
+    (ADR-F004), the endpoint reads them itself. The ONLY live state kept
+    is the set of open blocks (reasoning / pending tool inputs) so a
+    mid-run subscriber's stream still satisfies the wire spec's
+    start-before-delta and input-before-output correlation rules — a
+    conformant AI SDK consumer crashes on a delta for an unknown id.
+    Publishing never raises into the runner — a wedged subscriber is
+    closed and dropped, the run is never the stream's hostage.
     """
 
     def __init__(self) -> None:
@@ -169,15 +184,20 @@ class RunStreamBroker:
     def subscribe(self, run_id: uuid.UUID) -> asyncio.Queue[Any]:
         """A live queue for ``run_id`` (created lazily from either side).
 
-        Subscribing to an already-closed channel yields a queue with the
-        close sentinel pre-queued — the caller falls through to its
-        settled-rows path immediately.
+        Subscribing to an already-closed (or subscriber-capped) channel
+        yields a queue with the close sentinel pre-queued — the caller
+        falls through to its settled-rows path immediately. A mid-run
+        subscriber's queue is seeded with the openers of every block
+        still in flight (synchronous with the event loop, so no part can
+        interleave between seeding and registration).
         """
         queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=_SUBSCRIBER_QUEUE_MAX)
         channel = self._channels.setdefault(run_id, _RunChannel())
-        if channel.closed:
+        if channel.closed or len(channel.subscribers) >= _MAX_SUBSCRIBERS_PER_RUN:
             queue.put_nowait(CHANNEL_CLOSED)
             return queue
+        for opener in (*channel.open_reasoning.values(), *channel.open_tool_inputs.values()):
+            queue.put_nowait(opener)
         channel.subscribers.append(queue)
         return queue
 
@@ -187,13 +207,20 @@ class RunStreamBroker:
             return
         with contextlib.suppress(ValueError):
             channel.subscribers.remove(queue)
-        if not channel.subscribers and channel.closed:
+        if not channel.subscribers:
+            # Last subscriber gone: drop the channel even when no
+            # publisher ever closed it (terminal replays, DB-tail-only
+            # runs) — otherwise every streamed run leaks a channel for
+            # the process lifetime. publish()/close() no-op on a missing
+            # channel and a live publisher's next part simply recreates
+            # nothing (no subscribers = nobody to tell).
             self._channels.pop(run_id, None)
 
     def publish(self, run_id: uuid.UUID, part: dict[str, Any]) -> None:
         channel = self._channels.get(run_id)
         if channel is None or channel.closed:
             return
+        self._track_open_blocks(channel, part)
         for queue in list(channel.subscribers):
             try:
                 queue.put_nowait(part)
@@ -207,6 +234,19 @@ class RunStreamBroker:
                     extra={"event": "agent_stream_publish_failed", "run_id": str(run_id)},
                 )
                 self._drop_subscriber(channel, queue)
+
+    @staticmethod
+    def _track_open_blocks(channel: _RunChannel, part: dict[str, Any]) -> None:
+        """Maintain the open-block state mid-run subscribers are seeded with."""
+        part_type = part.get("type")
+        if part_type == "reasoning-start":
+            channel.open_reasoning[str(part.get("id"))] = part
+        elif part_type == "reasoning-end":
+            channel.open_reasoning.pop(str(part.get("id")), None)
+        elif part_type == "tool-input-available":
+            channel.open_tool_inputs[str(part.get("toolCallId"))] = part
+        elif part_type == "tool-output-available":
+            channel.open_tool_inputs.pop(str(part.get("toolCallId")), None)
 
     def close(self, run_id: uuid.UUID) -> None:
         """Mark the run's channel closed and wake every subscriber.
@@ -240,7 +280,11 @@ class RunStreamBroker:
             channel.subscribers.remove(queue)
         except ValueError:
             return
-        # Best effort: tell the consumer it was closed.
+        # Tell the consumer it was closed. The queue is full by
+        # construction (that's why it was dropped), so make room first —
+        # losing one animation part beats a sentinel that never arrives.
+        with contextlib.suppress(asyncio.QueueEmpty):
+            queue.get_nowait()
         with contextlib.suppress(asyncio.QueueFull):
             queue.put_nowait(CHANNEL_CLOSED)
 

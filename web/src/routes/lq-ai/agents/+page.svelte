@@ -31,20 +31,27 @@
   let threads: AgentThread[] = [];
   let threadsLoading = true;
   let threadsError: string | null = null;
+  let threadsGeneration = 0;
   let nowMs = serverNowMs();
   let nowTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Generation-guarded: settle events and onMount can overlap, and the
+  // older response must never overwrite the fresher list (same posture
+  // as the panel's pollGeneration).
   async function loadThreads() {
+    const gen = ++threadsGeneration;
     threadsLoading = true;
     try {
       const page = await agentsApi.listThreads({ limit: 20 });
+      if (gen !== threadsGeneration) return;
       threads = page.threads;
       threadsError = null;
       nowMs = serverNowMs();
     } catch (e) {
+      if (gen !== threadsGeneration) return;
       threadsError = e instanceof Error ? e.message : 'Failed to load conversations';
     } finally {
-      threadsLoading = false;
+      if (gen === threadsGeneration) threadsLoading = false;
     }
   }
 
@@ -85,6 +92,12 @@
   let matterBound = false;
   let hasConversation = false;
 
+  // Bound BOTH WAYS: draft + matter selection live here so they survive
+  // the {#key} remounts (the pre-S7 page never reset them on New chat /
+  // open-thread — S7 review).
+  let draftPrompt = '';
+  let selectedMatterId = '';
+
   $: tools = railItems(railSteps, matterBound);
 </script>
 
@@ -104,6 +117,8 @@
           initialThreadId={requestedThreadId}
           {matters}
           {mattersError}
+          bind:prompt={draftPrompt}
+          bind:selectedMatterId
           bind:railSteps
           bind:rail
           bind:matterBound

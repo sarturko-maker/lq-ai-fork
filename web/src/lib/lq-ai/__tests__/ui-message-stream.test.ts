@@ -68,4 +68,20 @@ describe('consumeUIMessageStream', () => {
 		});
 		expect(parts).toEqual([{ type: 'start-step' }]);
 	});
+
+	it('REJECTS on a transport failure — the contract the polling fallback relies on', async () => {
+		const encoder = new TextEncoder();
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(encoder.encode('data: {"type":"reasoning-delta","id":"b","delta":"x"}\n\n'));
+				controller.error(new Error('connection reset'));
+			}
+		});
+		// The rejection is the load-bearing contract (the component's catch
+		// falls back to polling on it). Whether parts enqueued just before
+		// the cut still flush is up to the decoder pipeline — not asserted.
+		await expect(
+			consumeUIMessageStream(body, { onPart: () => undefined })
+		).rejects.toThrow('connection reset');
+	});
 });
