@@ -1,7 +1,8 @@
 /**
- * Pure helpers for the `/lq-ai/agents` page (F0-S3), extracted to a sibling
- * `.ts` file so vitest can exercise them without the svelte transformer
- * (the playbooks page-helpers pattern).
+ * Pure helpers for the agents conversation surface (F0-S3), in lib since
+ * F0-S7 so both the route page and the extracted ConversationPanel
+ * component import them; vitest exercises them without the svelte
+ * transformer (the playbooks page-helpers pattern).
  */
 import type {
 	AgentRun,
@@ -9,7 +10,17 @@ import type {
 	AgentRunStep,
 	AgentThreadDetailResponse
 } from '$lib/lq-ai/api/agents';
-import type { FileMeta } from '$lib/lq-ai/types';
+import type { FileMeta, Project } from '$lib/lq-ai/types';
+
+/**
+ * Honest fallback: a conversation can be bound to a matter that is no
+ * longer in the active dropdown list (archived since, or the sandbox) —
+ * say so rather than dressing the placeholder up as a name (F0-S4 review).
+ */
+export function matterName(matters: Project[], projectId: string | null): string | null {
+	if (!projectId) return null;
+	return matters.find((m) => m.id === projectId)?.name ?? 'Matter (not in your active list)';
+}
 
 /** Poll cadence while a run is working (~2 s per F0-S3; SSE replaces this in S5). */
 export const POLL_INTERVAL_MS = 2000;

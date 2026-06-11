@@ -21,7 +21,7 @@ import {
 	threadRailSteps,
 	uploadsSettled,
 	visibleSteps
-} from '../page-helpers';
+} from '../helpers';
 
 const T0 = Date.parse('2026-06-10T12:00:00.000Z');
 
@@ -53,6 +53,7 @@ function makeStep(overrides: Partial<AgentRunStep> = {}): AgentRunStep {
 		kind: 'model_turn',
 		name: null,
 		summary: null,
+		parent_step_id: null,
 		created_at: new Date(T0).toISOString(),
 		...overrides
 	};

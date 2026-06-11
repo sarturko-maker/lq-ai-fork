@@ -17,6 +17,7 @@ import {
 	getRefreshToken,
 	setSession
 } from '../auth/store';
+import { noteServerDate } from '../agents/server-clock';
 import type { TokenResponse, ErrorBody } from '../types';
 import { get } from 'svelte/store';
 
@@ -131,7 +132,12 @@ async function rawRequest(path: string, options: RequestOptions): Promise<Respon
 		init.body = JSON.stringify(options.body);
 	}
 
-	return fetch(`${LQ_AI_API_BASE_URL}${path}`, init);
+	const res = await fetch(`${LQ_AI_API_BASE_URL}${path}`, init);
+	// Server-clock skew tracking (F0-S7): staleness cutoffs compare the
+	// client clock to server timestamps — keep them honest from any
+	// response that carries Date (exposed cross-origin by the api CORS).
+	noteServerDate(res.headers.get('date'));
+	return res;
 }
 
 async function refreshOnce(): Promise<boolean> {
