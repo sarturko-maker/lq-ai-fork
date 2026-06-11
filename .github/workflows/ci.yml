@@ -48,8 +48,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: svelte-check (typecheck — LQ.AI-owned code)
-        run: npm run check:lq-ai
+      - name: svelte-check (typecheck)
+        # Post-F0-S6 the whole app is LQ.AI-owned code; the scoped
+        # tsconfig.lq-ai.json gate is retired (check:lq-ai aliases check).
+        run: npm run check
 
       - name: Vitest (unit tests)
         run: npm run test:frontend -- --run

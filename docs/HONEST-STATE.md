@@ -39,7 +39,7 @@ The surface in-house counsel touches every day. Every row is wired end-to-end in
 
 | Capability | Status | Verification |
 |---|---|---|
-| Multi-turn chat with persistent history | M1 | `api/app/api/chats.py`; `web/cypress/e2e/chat.cy.ts` |
+| Multi-turn chat with persistent history | M1 | `api/app/api/chats.py` (the OpenWebUI `chat.cy.ts` spec was removed with the husk in F0-S6) |
 | Matter (project) workspace with attached files / skills / KBs | M1 | `api/app/api/projects.py`; `web/src/routes/lq-ai/matters/[id]/+page.svelte` |
 | Slash-invoked skills with provenance pill | M1 | `web/cypress/e2e/wave-d2-skill-creator.cy.ts` Test 4 |
 | Built-in starter skills | M1 | `skills/*/SKILL.md` (read every prompt — no hidden instructions) |
@@ -220,7 +220,7 @@ Engineering rigor is measurable, not asserted. Test **file** counts below are ve
 | Backend tests (pytest, live Postgres) | M1–M4 | 144 `test_*.py` files in `api/tests/` (incl. `tests/autonomous/` — 361 passing at M4 close, pre-Donna-run; refresh at next tag); `cd api && DATABASE_URL=… pytest` |
 | Gateway tests (pytest) | M1–M4 | 41 `test_*.py` files in `gateway/tests/` (pre-Donna-run; refresh at next tag); `cd gateway && pytest` |
 | Frontend unit tests (Vitest) | M1–M4 | 71 spec files in `web/src/`; `cd web && npx vitest run` |
-| Cypress E2E (LQ.AI shell) | M1–M4 | 17 specs in `web/cypress/e2e/` |
+| Cypress E2E (LQ.AI shell) | M1–M4 | 16 specs in `web/cypress/e2e/` (the 4 OpenWebUI husk specs were removed in F0-S6) |
 | Ruff lint + format (Python) | M1–M4 | `.github/workflows/ci.yml`: `ruff check api scripts` + `ruff format --check` |
 | mypy (api standard, gateway strict) | M1–M4 | CI `mypy app` per subsystem |
 | svelte-check (LQ.AI-owned code) | M1–M4 | `cd web && npm run check:lq-ai` (0 errors on `src/{lib,routes}/lq-ai/**`); inherited OpenWebUI debt tracked as DE-262 (§8.1) |

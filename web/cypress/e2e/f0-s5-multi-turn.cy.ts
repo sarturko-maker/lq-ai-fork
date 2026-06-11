@@ -22,7 +22,8 @@
  * under test. If the ingest worker wedges ("connection is closed"),
  * `docker compose restart ingest-worker arq-worker` and re-run.
  *
- * Spec name MUST stay `f0-s5-*` (fork pattern in cypress/support/e2e.ts).
+ * (The pre-S6 spec-name-pattern constraint is gone: the OpenWebUI
+ * bootstrap died with the husk in F0-S6.)
  */
 
 /// <reference types="cypress" />

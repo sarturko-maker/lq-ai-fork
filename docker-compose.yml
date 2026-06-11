@@ -351,19 +351,16 @@ services:
       retries: 6
 
   web:
-    # OpenWebUI fork imported at v0.9.2 per ADR 0001 (Task A1.d).
-    # Customizations land progressively: A5 (branding + delegated-auth wiring),
-    # D2 (tier badge), and others. The container builds upstream-as-is in M1's
-    # initial state.
+    # LQ.AI web shell — standalone SvelteKit SPA served by nginx on :8080
+    # (F0-S6, ADR-F006). The OpenWebUI husk and its Python backend were
+    # removed; the pre-S6 port + /health contract is unchanged.
     #
     # Word add-in (M3-B1) integration: the webpack build at
     # `word-addin/` outputs to `web/static/word-addin/` which the web
     # Dockerfile's `COPY . .` in the SvelteKit build stage picks up
     # automatically. Run `cd word-addin && npm install && npm run build`
     # once before `docker compose up --build` to populate the directory;
-    # see `word-addin/README.md` for the full build flow. A future DE
-    # may add an automated build stage to this compose file or to the
-    # web Dockerfile so the manual step is no longer required.
+    # see `word-addin/README.md` for the full build flow.
     build:
       context: ./web
       dockerfile: Dockerfile
@@ -378,19 +375,11 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    environment:
-      # Backend delegation (per ADR 0002 — backend owns auth)
-      LQ_AI_API_URL: ${LQ_AI_API_URL:-http://api:8000}
-      WEBUI_AUTH: ${WEBUI_AUTH:-false}
-      WEBUI_NAME: ${WEBUI_NAME:-LQ.AI}
-      WEBUI_URL: ${WEBUI_URL:-http://localhost:3000}
-      # OpenWebUI's full env-var surface (DATABASE_URL, OLLAMA_BASE_URL,
-      # ENABLE_*, etc.) lands when Task A1.d imports the fork and we know
-      # the exact set to override vs. default.
     ports:
       - "${WEB_BIND_ADDR:-127.0.0.1}:${WEB_HOST_PORT:-3000}:8080"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      # nginx:alpine ships busybox wget, not curl.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10

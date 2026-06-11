@@ -43,3 +43,15 @@ To update a row (e.g., if a upstream source moves or a licence changes):
 1. Open a PR with the updated NOTICES.md row.
 2. Include the reason for the change in the PR description.
 3. If the licence change is restrictive (e.g., the upstream relicensed from permissive to copyleft), flag the maintainer team for review before merging.
+
+---
+
+## Web client provenance
+
+> Added in F0-S6 (ADR-F006). The sections above are skill provenance and are
+> governed by their own procedure; this section records the web client's lineage.
+
+| Component | Upstream source | License | Status / Notes |
+|---|---|---|---|
+| `web/` OpenWebUI husk (fork of open-webui v0.9.2 per ADR-0001) | https://github.com/open-webui/open-webui @ v0.9.2 | Open WebUI License (BSD-3-Clause + §4 branding clause); earlier ranges MIT / BSD-3-Clause per the removed `web/LICENSE_HISTORY` | **REMOVED in F0-S6** (commit `8ec1fca`). Full license texts preserved in git history at `8ec1fca^`. The §4 branding obligation applies to any build from pre-removal commits or tags; it does not apply to the standalone app. |
+| `web/` standalone SvelteKit app (post-F0-S6) | Original LQ.AI work; per-file provenance pass over all 123 surviving `src/{lib,routes}/lq-ai` components completed 2026-06-11 (`docs/fork/evidence/f0-s6/provenance.md`) — none OpenWebUI-derived; `app.html` theme script rewritten, not copied | Apache-2.0 (repo-root `LICENSE`) | Bundled third-party assets: Inter Variable font via `@fontsource-variable/inter` (**OFL-1.1** — the published npm package self-declares OFL-1.1 and ships the license text alongside the font files); remaining runtime deps (marked MIT, dompurify Apache-2.0/MPL-2.0 — Apache-2.0 terms elected, eventsource-parser MIT) ship per their permissive licenses, recorded in `web/package.json` + lockfile (the runtime image carries only the built bundle — generate source-level SBOMs from the repo, e.g. `make sbom`, not from the image). |

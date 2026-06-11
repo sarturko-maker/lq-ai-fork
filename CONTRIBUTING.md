@@ -45,7 +45,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 uvicorn app.main:app --reload --port 8001
 
-# Web (OpenWebUI fork)
+# Web (standalone LQ.AI shell — F0-S6, ADR-F006)
 cd web
 npm install
 npm run dev
@@ -62,9 +62,9 @@ ruff format --check .
 mypy .
 
 # JavaScript (web/)
-npm test
+npm run test:frontend -- --run
 npm run lint
-npm run typecheck
+npm run check
 ```
 
 ---
@@ -148,8 +148,8 @@ git rebase --signoff main                 # all commits since main diverged
 - **Formatter:** Prettier with the project's `.prettierrc`. CI rejects unformatted code.
 - **Linter:** ESLint with the project's `.eslintrc`. TypeScript-specific rules enforced for `.ts` files; Svelte rules for `.svelte` files.
 - **TypeScript:** required for new files; gradual migration of legacy `.js` files welcome but not required for unrelated changes.
-- **Framework:** SvelteKit. The `web/` codebase is a fork of OpenWebUI, which is a SvelteKit app — extensions and customizations stay in Svelte. Do **not** introduce React into `web/`. The Word add-in (`word-addin/`, M3) uses Office.js with React; the `web/` codebase does not.
-- **Component conventions:** match the OpenWebUI conventions for shared components; use the project's design system primitives rather than ad-hoc Tailwind.
+- **Framework:** SvelteKit. Since F0-S6 (ADR-F006) `web/` is a standalone LQ.AI SvelteKit app (the OpenWebUI fork it grew out of was removed) — extensions and customizations stay in Svelte. Do **not** introduce React into `web/`. The Word add-in (`word-addin/`, M3) uses Office.js with React; the `web/` codebase does not.
+- **Component conventions:** match the existing `src/lib/lq-ai/components` conventions; use the project's design system primitives rather than ad-hoc Tailwind.
 
 ### Configuration files
 
@@ -210,10 +210,10 @@ Standard markers — declared in each subsystem's `pyproject.toml` so `pytest --
 
 ### JavaScript/TypeScript tests (`web/`)
 
-The OpenWebUI fork is SvelteKit. New tests use **Vitest** (Svelte's standard) for unit and component tests; Playwright for end-to-end. Don't introduce Jest unless there's a concrete reason — Vitest is closer to SvelteKit's tooling and has fewer ESM-vs-CJS pitfalls.
+The web shell is SvelteKit. New tests use **Vitest** (Svelte's standard) for unit and component tests; Cypress for end-to-end. Don't introduce Jest unless there's a concrete reason — Vitest is closer to SvelteKit's tooling and has fewer ESM-vs-CJS pitfalls.
 
-- **Component tests:** `@testing-library/svelte` with Vitest.
-- **Type checking in tests:** test files are `.ts` / `.svelte` and pass `npm run typecheck`.
+- **Component tests:** pure helper functions exported from `<script context="module">` blocks, tested with Vitest (no DOM mounting today).
+- **Type checking in tests:** test files are `.ts` / `.svelte` and pass `npm run check`.
 - **Snapshot testing:** discouraged for component output; preferred for stable structured data (e.g., backend-returned shapes).
 
 ### When to write what kind of test
