@@ -35,9 +35,14 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
   re-read, audit row per dispatch); matter tier floor/privilege on the gateway envelope (D1/M2-B3);
   factory key carry-over closed (key on the owned httpx client, never `default_headers`).
   Natural-language step titles + closing-turn dedup are client-side (rows stay honest).
-- **S5 — multi-turn + new chat.** Conversations on the Postgres checkpointer (first consumer);
-  follow-up composer on a settled run; "New chat" within the area; chat list on the area page.
-  Replaces the single-turn request pattern (`chats.py:1370` stays legacy).
+- **S5 — multi-turn + new chat + composer upload.** Conversations on the Postgres checkpointer
+  (first consumer); follow-up composer on a settled run; "New chat" within the area; chat list on
+  the area page. Replaces the single-turn request pattern (`chats.py:1370` stays legacy).
+  **File upload in the agent composer** (promoted from Backlog, 2026-06-11 — maintainer): attach
+  button + drop zone uploading via `POST /files` with the bound matter's `project_id` (the
+  ADR-F007 upload-time membership path — S4's tools see the document with no extra wiring);
+  ingestion status visible in the composer (pending → ready) so the user knows when the agent can
+  ground on it; requires a Matter selected (an unbound upload has no home — ADR-F002).
 - **S6 — the shell shed (ADR-F006, pending acceptance).** Extract the lq-ai code (zero
   husk-imports, audited) into a standalone lean SvelteKit app; kill the OpenWebUI husk, its Python
   backend container, and the §4 branding obligation. Includes the per-file provenance pass over
@@ -143,8 +148,10 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 - Run artifact surface: expose the deepagents workspace files a run produced (S3 deferral).
 - MessageBubble (upstream surface) shares the default-DOMPurify image-beacon exfil gap fixed on the
   Agents tab — harden when next touched (CLAUDE.md: model output is untrusted).
-- File upload directly in the agent composer (S4 binds to existing matter documents first; drag-drop
-  into the conversation is the follow-up).
+- ~~File upload directly in the agent composer~~ — PROMOTED into F0-S5 (2026-06-11).
+- Matters-page file management: the Matter detail page has NO upload/attach UI at all today (the
+  attach endpoint exists API-side only; only Chats/Knowledge/Playbooks surfaces upload) — proper
+  file management belongs to F1's left-panel Matter view.
 - Ingest-job robustness: a worker/DB hiccup mid-ingest strands files at `processing` forever (seen
   live in S4) — retry/orphan sweep alongside the agent-run arq migration.
 - Reconcile upstream's two file↔project relations (`project_files` join vs upload-time
