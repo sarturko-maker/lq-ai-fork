@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import ConversationPanel from '$lib/lq-ai/components/agents/ConversationPanel.svelte';
+  import NewMatterModal from '$lib/lq-ai/components/NewMatterModal.svelte';
   import { agentsApi, projectsApi } from '$lib/lq-ai/api';
   import type { AgentRunStep, AgentThread } from '$lib/lq-ai/api/agents';
   import type { Project } from '$lib/lq-ai/types';
@@ -98,6 +99,22 @@
   let draftPrompt = '';
   let selectedMatterId = '';
 
+  // "+ New matter" without leaving the agent (F0-S8): the SAME modal +
+  // POST /projects plumbing as the Matters tab — full form, so the
+  // privileged ⇒ tier-floor invariant rides along. This page owns the
+  // overlay; the panel only requests it.
+  let showNewMatter = false;
+
+  function onMatterCreated(m: Project) {
+    showNewMatter = false;
+    // Bind immediately — the authoritative list refresh follows. Writing
+    // the bound prop also clears any pending upload chips in the panel
+    // (they belonged to the previously selected matter — F0-S5 invariant).
+    matters = [...matters, m];
+    selectedMatterId = m.id;
+    void loadMatters();
+  }
+
   $: tools = railItems(railSteps, matterBound);
 </script>
 
@@ -124,6 +141,7 @@
           bind:matterBound
           bind:hasConversation
           on:settled={loadThreads}
+          on:newmatter={() => (showNewMatter = true)}
         >
           <svelte:fragment slot="head">
             <h2 class="lq-text-panel-h">Commercial</h2>
@@ -148,6 +166,37 @@
           </svelte:fragment>
         </ConversationPanel>
       {/key}
+    </section>
+
+    <!-- Side column (F0-S8): the main column is the CONVERSATION —
+         capability rail and the conversations list live beside it, so
+         the timeline reads top-down into the docked composer. -->
+    <div class="ag-side">
+      <aside class="ag-rail" data-testid="lq-ai-agents-rail">
+        <h2 class="lq-text-panel-h">Capabilities</h2>
+        <p class="lq-text-caption ag-rail__sub">
+          Everything the agent can call. Lights up as it works.
+        </p>
+        <ul>
+          {#each tools as tool (tool.name)}
+            {@const state = rail[tool.name] ?? 'dim'}
+            <li class="ag-rail__tool ag-rail__tool--{state}" title={tool.name}>
+              <span class="ag-rail__dot" aria-hidden="true"></span>
+              <span class="ag-rail__text">
+                <span class="lq-text-body-sm ag-rail__name">{tool.label}</span>
+                <span class="lq-text-caption ag-rail__hint">{tool.hint}</span>
+                <span class="ag-sr-only">
+                  {state === 'active'
+                    ? 'in use'
+                    : state === 'lit'
+                      ? 'used in this conversation'
+                      : 'not used yet'}
+                </span>
+              </span>
+            </li>
+          {/each}
+        </ul>
+      </aside>
 
       <section class="ag-previous">
         <h2 class="lq-text-panel-h">Conversations</h2>
@@ -156,7 +205,7 @@
         {:else if threadsError}
           <p class="lq-text-body-sm ag-error">Couldn't load conversations: {threadsError}</p>
         {:else if threads.length === 0}
-          <p class="lq-text-body-sm ag-note">No conversations yet — ask the agent something above.</p>
+          <p class="lq-text-body-sm ag-note">No conversations yet — ask the agent something.</p>
         {:else}
           <ul class="ag-runs-list" data-testid="lq-ai-agents-runs-list">
             {#each threads as t (t.id)}
@@ -184,35 +233,13 @@
           </ul>
         {/if}
       </section>
-    </section>
-
-    <aside class="ag-rail" data-testid="lq-ai-agents-rail">
-      <h2 class="lq-text-panel-h">Capabilities</h2>
-      <p class="lq-text-caption ag-rail__sub">
-        Everything the agent can call. Lights up as it works.
-      </p>
-      <ul>
-        {#each tools as tool (tool.name)}
-          {@const state = rail[tool.name] ?? 'dim'}
-          <li class="ag-rail__tool ag-rail__tool--{state}" title={tool.name}>
-            <span class="ag-rail__dot" aria-hidden="true"></span>
-            <span class="ag-rail__text">
-              <span class="lq-text-body-sm ag-rail__name">{tool.label}</span>
-              <span class="lq-text-caption ag-rail__hint">{tool.hint}</span>
-              <span class="ag-sr-only">
-                {state === 'active'
-                  ? 'in use'
-                  : state === 'lit'
-                    ? 'used in this conversation'
-                    : 'not used yet'}
-              </span>
-            </span>
-          </li>
-        {/each}
-      </ul>
-    </aside>
+    </div>
   </div>
 </main>
+
+{#if showNewMatter}
+  <NewMatterModal onClose={() => (showNewMatter = false)} onCreated={onMatterCreated} />
+{/if}
 
 <style>
   .ag-page {
@@ -243,7 +270,15 @@
     }
   }
 
-  .ag-rail {
+  .ag-side {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-4);
+    min-width: 0;
+  }
+
+  .ag-rail,
+  .ag-previous {
     background: var(--lq-canvas);
     border: 1px solid var(--lq-border);
     border-radius: var(--lq-radius-lg);
@@ -305,10 +340,6 @@
     color: var(--lq-error);
   }
 
-  .ag-previous {
-    margin-top: var(--lq-space-6);
-  }
-
   .ag-runs-list {
     list-style: none;
     margin: var(--lq-space-2) 0 0;
@@ -318,10 +349,13 @@
     gap: var(--lq-space-1);
   }
 
+  /* Narrow side-column rows (F0-S8): title on top, badge + timestamp
+     wrap beneath — the old 3-column grid presumed main-column width. */
   .ag-runs-list__row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    gap: var(--lq-space-3);
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: var(--lq-space-2);
+    row-gap: 2px;
     align-items: center;
     width: 100%;
     text-align: left;
@@ -339,9 +373,11 @@
   }
 
   .ag-runs-list__prompt {
+    flex: 1 1 100%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
   }
 
   .ag-runs-list__when {

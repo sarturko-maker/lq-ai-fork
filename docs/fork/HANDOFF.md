@@ -2,115 +2,108 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (2026-06-11, end of F0-S7)
+## State (2026-06-11, end of F0-S8)
 
-- Merged to main through #36; **F0-S7 (SSE v2 + subagent identity + conversation extraction) is
-  PR #37** — merges on green via the ADR-F005 gate, full evidence in the PR. All fork ADRs
-  F001..F008 `accepted`.
-- **The agents surface streams like Claude Code** (ADR-F006 wire spec):
-  `GET /api/v1/agents/runs/{run_id}/stream` emits the AI SDK UI Message Stream v1 — settled rows
-  as `data-step` parts (part id = row id, same-id reconciliation), live reasoning deltas, tool
-  frames keyed by settled `tool_call` row ids, `data-plan` for `write_todos`, terminal text block
-  = settled `final_answer`. `RunStreamBroker` (in-process, lifespan-owned) bridges runner →
-  endpoint; the DB-tail fallback alone is a complete stream (arq-migration-proof). Polling stays
-  the contract and the fallback.
-- **Subagent identity persists**: migration **0051** added `agent_run_steps.parent_step_id`
-  (innermost enclosing tool dispatch; NULL = root loop; pre-S7 rows honestly NULL). The UI indents
-  nested steps; F1's subagent tree and S9's eval read this column.
-- **The conversation surface is a component**:
-  `web/src/lib/lq-ai/components/agents/ConversationPanel.svelte` (composer, turns/steps, thinking
-  ribbon, uploads, polling + stream). The agents route is chrome (header, conversations list,
-  capability rail via bound props, head/copy slots). Thread switching = `{#key}` remount;
-  draft prompt + matter selection survive as two-way-bound props. Helpers moved to
-  `web/src/lib/lq-ai/agents/helpers.ts` (lib components must not import from routes).
-- Dev stack: 8 services healthy; DB at migration **0051**; api boot logs
-  `agent checkpointer ready (AsyncPostgresSaver)`. Gateway aliases `smart`/`fast`/`budget` →
-  `minimax/MiniMax-M3`; key in `.env`.
+- Merged to main through #37; **F0-S8 (matter create-in-place + conversation readability) is the
+  current PR** off `fork/f0-s8-matter-create` — merges on green via the ADR-F005 gate, evidence in
+  the PR + `docs/fork/evidence/f0-s8/`. All fork ADRs F001..F008 `accepted`.
+- **The agents surface now reads like claude.ai/Claude Code** (maintainer feedback folded in):
+  composer DOCKED at the bottom (sticky card), conversation top-down above it, Conversations list
+  in the side column; thinking renders MARKDOWN (live ribbon + settled reasoning, same
+  marked+DOMPurify `SANITIZE_OPTS` path as the answer); tool calls/results collapse to one-line
+  `stepDigest` rows; the live ribbon is auto-expanded, tail-anchored, clamped — collapses into the
+  settled "Reasoning" row when the turn lands.
+- **Matters create in place** (ADR-F002 closed out): "+ New matter" beside the matter select opens
+  the page-hosted `NewMatterModal` (full form, privileged ⇒ tier-floor invariant); on create the
+  page appends to `matters`, writes the bound `selectedMatterId` (the panel's reactive watcher
+  clears stale upload chips), and refreshes the list. The modal's old hardcoded post-create goto
+  moved to the Matters page's `onCreated`. **"No matter — blank workspace" is GONE** — Run stays
+  disabled until a matter is selected/created; POST /agents/runs still accepts null project_id
+  (server unchanged).
+- Auto-scroll pins to the conversation tail inside the **nearest scrollable ancestor** — the shell
+  scrolls `<main id="lq-main">` (`html` is overflow-hidden), so document scrolling silently no-ops,
+  and document-bottom would over-scroll past the conversation (side column is taller). See
+  `scrollContainer()`/`tailScrollTop()` in ConversationPanel.
+- Dev stack: 8 services healthy; DB at migration **0051**. Gateway aliases `smart`/`fast`/`budget`
+  → `minimax/MiniMax-M3`; key in `.env`.
 - App login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
 - Web gates (host, node 20): `cd web && npm run check` (0 errors) +
-  `npm run test:frontend -- --run` (773/773).
-- API suites run containerized (no host 3.12): throwaway `pgvector/pgvector:pg16` + the api image
-  with the repo mounted — **and `skills/` mounted at `/skills`** (migration 0032 seeds from it):
+  `npm run test:frontend -- --run` (778/778). S8 touched ZERO api/gateway files.
+- API suites run containerized (no host 3.12) — see the F0-S7 snippet below (unchanged):
   ```bash
-  docker run -d --name s7pg -e POSTGRES_USER=lq -e POSTGRES_PASSWORD=lq -e POSTGRES_DB=lqtest pgvector/pgvector:pg16
-  docker run --rm --network container:s7pg -v $PWD/api:/work -v $PWD/skills:/skills:ro -w /work \
+  docker run -d --name s8pg -e POSTGRES_USER=lq -e POSTGRES_PASSWORD=lq -e POSTGRES_DB=lqtest pgvector/pgvector:pg16
+  docker run --rm --network container:s8pg -v $PWD/api:/work -v $PWD/skills:/skills:ro -w /work \
     -e PYTHONPATH=/work -e DATABASE_URL=postgresql+asyncpg://lq:lq@localhost:5432/lqtest \
     --entrypoint bash lq-ai-api:latest -c "pip install -q pytest pytest-asyncio respx; pytest tests/ -q"
   ```
 
-## Done (F0-S7) — SSE v2 + the two pulled-forward MUSTs
+## Done (F0-S8)
 
-- Emitter (`api/app/agents/stream.py` + endpoint in `api/app/api/agent_runs.py`): broker pub/sub
-  with subscriber cap + mid-run-attach seeding (openers of in-flight reasoning/tool blocks, spec
-  conformance), channel released when the last subscriber leaves (no leak), orphaned-at-'running'
-  runs end the stream at the poller's 330s cutoff, every exit ends the message before `[DONE]`.
-  The request session closes BEFORE streaming (a 300s stream must not pin a pool connection);
-  the generator reads through `get_stream_session_factory` (a Depends seam — tests bind it to
-  the migrated test DB).
-- Runner: forwards `on_chat_model_stream` deltas as reasoning blocks; persists
-  `parent_step_id` via the `tool_step_ids` map (langchain run id → settled row id); wire
-  `toolCallId` IS the settled `tool_call` row id.
-- Web: `sse/ui-message-stream.ts` (v1 consumer), `agents/run-stream.ts` (pure reducers — stream
-  parts upsert the SAME detail shape polling fills), `agents/server-clock.ts` (Date-header skew;
-  closes the F0-S3 staleness carry-over; api CORS now exposes `Date`). Stream failure falls back
-  to polling; stream end triggers ONE reconcile fetch.
-- Gate: api agents suite 102 passed / 1 skipped; full api suite green (the two OpenAPI contract
-  tests now register the stream path, count 123); gateway 572 passed + mypy --strict clean; web
-  773/773 + svelte-check 0 errors; live timestamped wire capture + idempotent replay capture in
-  `docs/fork/evidence/f0-s7/`; Cypress f0-s7-stream + f0-s3 + f0-s5 green on the rebuilt stack;
-  30-agent adversarial review — 24 confirmed / 0 blockers, fixed or deferred on record.
+- Web-only slice; 4 commits. Components: `ConversationPanel.svelte` (layout reorder, `mdSafe`,
+  step folding, live ribbon, auto-scroll, ADR-F002 submit guard, `newmatter` event),
+  `agents/+page.svelte` (modal host, `onMatterCreated`, side column), `NewMatterModal.svelte`
+  (goto lifted), `matters/+page.svelte` (owns navigation), `helpers.ts` (`stepDigest` +
+  `STEP_DIGEST_LIMIT`, 5 new vitest cases).
+- Specs: **f0-s3 REWRITTEN** — creates its matter through the new modal (self-sufficient again,
+  doubles as S8 live evidence; asserts Run disabled pre-matter, rail 9→11 flip on bind);
+  f0-s7's ribbon assertion now proves VISIBLE streamed text (auto-expanded ribbon); all
+  screenshots are `capture: 'viewport'` (full-page stitching renders the sticky composer over
+  the conversation).
+- Gate: web 778/778 + svelte-check 0 errors; f0-s3 + f0-s4 + f0-s5 + f0-s7 green on the rebuilt
+  stack; evidence screenshots in `docs/fork/evidence/f0-s8/`; 27-agent adversarial review —
+  22 findings raised, 0 confirmed (all refuted on the actual code).
 
-## Next slice: F0-S8 — matters without leaving the agent (maintainer directive)
+## Next slice: F0-S9 — eval gate (ADR-F004)
 
-Per MILESTONES F0-S8:
-- "+ New matter" on the Agents tab reusing the SAME plumbing as the Matters tab:
-  `NewMatterModal` + `POST /projects`, full form — the privileged ⇒ tier-floor invariant
-  (`ProjectCreateRequest`, api/app/schemas/projects.py ~163-175, `extra='forbid'`) must ride
-  along; never a name-only quick-create.
-- Prereq refactor FIRST: the modal's hardcoded post-create `goto('/lq-ai/matters/{id}')` moves to
-  the Matters page's `onCreated` callback (the caller owns navigation) — find it in
-  `web/src/lib/lq-ai/components/NewMatterModal.svelte` (~line 98).
-- On create from the Agents tab: bind the new matter (the panel's `selectedMatterId` is now a
-  two-way-bound prop on ConversationPanel — set it from the page), clear pending upload chips
-  (F0-S5 honesty invariant), refresh the matter list.
-- With create-in-place shipped, REMOVE the "No matter — blank workspace" option (ADR-F002:
-  free-floating chat is not offered). Mind f0-s3's spec: it currently runs UNBOUND (9 builtin
-  rail items) — removing blank workspace changes that spec's setup; update it in the same PR.
-- Branch `fork/f0-s8-matter-create` from main (after PR #37 merges).
+Per MILESTONES S9 (last F0 slice):
+- Tool-call and subagent uptake at **N≥20 runs** on MiniMax-M3 **plus one second model family**
+  (masked judge, pre-flight variance gate); subagent dispatch as task-scoped procedures, not
+  open-ended delegation.
+- Read ADR-F004 first — it defines what the eval gates and why (render-determinism was the
+  workaround; the eval is the proof the model-driven loop is real).
+- Needs: a second model family wired through the gateway (check `gateway/app/config*` for alias
+  plumbing; the Anthropic adapter still lacks tool_use translation — an OpenAI-compatible second
+  family avoids that blocker), an eval harness (likely `api/tests/agents/eval/` or a script —
+  decide and ADR if it crosses module boundaries), and seeded matters with documents for
+  grounded prompts.
+- Branch `fork/f0-s9-eval-gate` from main after the S8 PR merges.
 
 ## Pick up exactly here
 
-1. Read CLAUDE.md → this file → MILESTONES F0-S8 → ADR-F002.
-2. Smoke the stack (the F0-S5 snippet still works; note `runs[-1]` is `{run, steps}`):
-   POST /agents/runs → poll `GET /agents/threads/{tid}` until `completed True` → follow-up.
-3. To see the stream itself:
-   `curl -sN http://localhost:8000/api/v1/agents/runs/$RID/stream -H "Authorization: Bearer $TOKEN"`
-   — expect `data-step` parts then `text-*`/`data-run`/`finish`/`[DONE]`.
+1. Read CLAUDE.md → this file → MILESTONES S9 → ADR-F004.
+2. Smoke the stack: login at the URL above, Agents tab → "+ New matter" → run a prompt — you
+   should see the bottom composer, live markdown thinking, collapsed tool rows.
+3. `cd web && npm run check && npm run test:frontend -- --run` to confirm the baseline.
 
 ## Carry-overs / review deferrals
 
 - `build_deep_agent` must reject model-bearing subagent specs (gateway bypass) — before F1 fan-out.
 - Anthropic adapter: `tool_use`/`tool_result` + block-content translation still pending
-  (`grep -rn F0-S1 gateway/app`); anonymization decision for block content pending. Dev model is
-  MiniMax (OpenAI-compatible), so nothing blocks F0 on it.
+  (`grep -rn F0-S1 gateway/app`); anonymization decision for block content pending. Matters for
+  S9 if the second model family is Anthropic — prefer OpenAI-compatible to avoid the blocker.
 - No cancel endpoint (`cancelled` reserved). A stranded `running` run deadlocks its thread
-  (409 thread_busy; UI offers New chat); S7 bounded the STREAM for orphans (330s cutoff both
-  sides) but the row itself still needs the arq startup sweep (F1 run-lifecycle durability).
+  (409 thread_busy; UI offers New chat); the arq startup sweep is F1 run-lifecycle durability.
 - Checkpoint rows invisible to alembic, not cleaned on delete (`adelete_thread` uncalled) — F1.
 - Long conversations exceed the dev model's context before deepagents' summarization triggers —
   ADR-F003 compaction lands F2.
 - No audit rows for run kick-off (tool dispatches ARE audited).
 - MessageBubble still sanitizes with DEFAULT DOMPurify (legacy surface) — harden when next touched.
-- Thinking ribbon under PARALLEL subagent fan-out shares one buffer (S7 review deferral —
-  per-block ribbons land with F1's subagent tree).
+- Thinking ribbon under PARALLEL subagent fan-out shares one buffer (S7 deferral — per-block
+  ribbons land with F1's subagent tree).
+- wave-c-matters test 3 hangs PRE-EXISTING on this box (fails identically on main's build; the
+  AUT's POST /projects never leaves the browser under Cypress on that surface) — Backlog.
 - S6 deferrals unchanged (Backlog): eslint-9 flat-config migration; path-scoped CSP;
   bare-`<select>` restyle; version-poll auto-reload.
 
 ## Gotchas
 
-- **`cy.intercept` BUFFERS streamed responses** — intercepting the SSE route delivers the whole
-  stream in one burst and erases the liveness under test (cost a debugging round in S7). Assert
-  streaming via its UI effects (the thinking ribbon) instead.
+- **`cy.intercept` BUFFERS streamed responses** — never intercept the SSE route you assert
+  liveness on; the thinking ribbon is the streaming evidence (polling can never feed it).
+- **The shell scrolls `#lq-main`, NOT the document** (`html{overflow-y:hidden}` in app.css).
+  Anything that programmatically scrolls the agents surface must resolve the scroll container
+  (see `scrollContainer()` in ConversationPanel) — `document.scrollingElement` no-ops silently.
+- **Cypress screenshots on the agents surface: use `capture: 'viewport'`** — full-page stitching
+  interacts with the sticky composer and hides the conversation.
 - **Cypress on this box — memory-pressure discipline (zero pg crashes with it):**
   ```bash
   docker stop lq-ai-arq-worker-1   # not needed by the specs; frees ~500MB
@@ -119,14 +112,17 @@ Per MILESTONES F0-S8:
     npx cypress run --spec '…' --config video=false,numTestsKeptInMemory=0
   docker start lq-ai-arq-worker-1
   ```
-  PRE-SEED matters with the browser closed (spec headers have the steps). If workers wedge
-  ("connection is closed" on every job): `docker compose restart ingest-worker arq-worker`.
+  f0-s3 no longer needs a pre-seed (it creates its own matter); f0-s4/s5/s7 still do.
+  If workers wedge ("connection is closed" on every job): `docker compose restart ingest-worker arq-worker`.
 - The web image builds in seconds with the stack UP; the container serves a pre-built bundle, so
   `docker compose build web && docker compose up -d web` before debugging a UI change.
 - `gh pr create` defaults to the FROZEN upstream repo — always pass
   `--repo sarturko-maker/lq-ai-fork` AND `--head <branch>` (ADR-F001).
+- `gh pr checks | awk '{print $2}'` breaks on check names containing spaces — parse with
+  `--json` or verify checks manually before declaring red.
 - Background merge-watchers end with `git checkout main` — verify the current branch before
-  committing slice work (bit us in S5).
+  committing slice work. ALSO: switching branches with uncommitted spec edits then
+  `git checkout -- <file>` on the other branch DESTROYS the edit (bit us in S8 — recommitted).
 - **.env S3 keys**: explicit `S3_ACCESS_KEY`/`S3_SECRET_KEY` never existed in MinIO — they stay
   commented out so compose falls back to MinIO root creds (backup: `.env.bak-f0-s4`).
 - After any migration: rebuild `api` + `arq-worker` + `ingest-worker` together. Containerized

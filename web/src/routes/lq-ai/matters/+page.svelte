@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { projectsApi } from '$lib/lq-ai/api';
   import type { Project } from '$lib/lq-ai/types';
   import MatterCard from '$lib/lq-ai/components/MatterCard.svelte';
@@ -71,9 +72,15 @@
 </main>
 
 {#if showNewModal}
+  <!-- Navigation moved here from the modal (F0-S8): this page routes to
+       the new matter; the Agents tab binds it in place instead. -->
   <NewMatterModal
     onClose={() => (showNewModal = false)}
-    onCreated={() => { showNewModal = false; refresh(); }}
+    onCreated={(m) => {
+      showNewModal = false;
+      refresh();
+      goto(`/lq-ai/matters/${m.id}`);
+    }}
   />
 {/if}
 

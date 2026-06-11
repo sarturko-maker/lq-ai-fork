@@ -6,6 +6,7 @@ import {
 	POLL_INTERVAL_MS,
 	RAIL_TOOLS,
 	STALE_RUNNING_AFTER_MS,
+	STEP_DIGEST_LIMIT,
 	STEP_SUMMARY_LIMIT,
 	composerEnabled,
 	isStaleRunning,
@@ -17,6 +18,7 @@ import {
 	splitThink,
 	threadRailStates,
 	statusBadge,
+	stepDigest,
 	stepDisplay,
 	threadRailSteps,
 	uploadsSettled,
@@ -293,6 +295,32 @@ describe('stepDisplay', () => {
 		const d = stepDisplay(makeStep({ kind: 'model_turn', summary: null }));
 		expect(d.body).toBe('');
 		expect(d.thinking).toBeNull();
+	});
+});
+
+describe('stepDigest (F0-S8 collapsed tool rows)', () => {
+	it('returns a short body unchanged', () => {
+		expect(stepDigest('{"query": "cap"}')).toBe('{"query": "cap"}');
+	});
+
+	it('takes the first NON-EMPTY line and trims it', () => {
+		expect(stepDigest('\n\n   first real line  \nsecond line')).toBe('first real line');
+	});
+
+	it('returns empty for whitespace-only bodies', () => {
+		expect(stepDigest('  \n \n')).toBe('');
+	});
+
+	it('truncates long lines to the digest limit with an ellipsis', () => {
+		const digest = stepDigest('x'.repeat(STEP_DIGEST_LIMIT + 50));
+		expect(digest).toBe('x'.repeat(STEP_DIGEST_LIMIT - 1) + '…');
+		expect(Array.from(digest).length).toBe(STEP_DIGEST_LIMIT);
+	});
+
+	it('truncates by code points, not UTF-16 units (astral chars near the bound)', () => {
+		const digest = stepDigest('🎉'.repeat(STEP_DIGEST_LIMIT + 10));
+		expect(digest).toBe('🎉'.repeat(STEP_DIGEST_LIMIT - 1) + '…');
+		expect(Array.from(digest).length).toBe(STEP_DIGEST_LIMIT);
 	});
 });
 

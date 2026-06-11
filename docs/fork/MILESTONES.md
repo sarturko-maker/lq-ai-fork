@@ -77,18 +77,32 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
   f0-s5 green; 30-agent adversarial review — 24 confirmed / 0 blockers, all fixed or deferred
   on record. GOTCHA for spec authors: `cy.intercept` BUFFERS streamed responses — never
   intercept the SSE route you're asserting liveness on.
-- **S8 — matters without leaving the agent (maintainer directive, 2026-06-11).** "+ New matter"
-  on the Agents tab reusing the SAME plumbing as the Matters tab: `NewMatterModal` +
-  `POST /projects`, full form — the privileged ⇒ tier-floor invariant (PRD §3.11, enforced in
-  `ProjectCreateRequest`) must ride along; never a name-only quick-create. Prereq refactor: the
-  modal's hardcoded post-create `goto('/lq-ai/matters/{id}')` moves to the Matters page's
-  `onCreated` callback (the caller owns navigation — invoked from the Agents tab it would yank the
-  user out, defeating the directive). On create: bind the new matter, clear pending upload chips
-  (the F0-S5 honesty invariant — chips belong to the matter they filed into), refresh the matter
-  list. With create-in-place shipped, the free-floating "No matter — blank workspace" option is
-  REMOVED (ADR-F002: free-floating agent chat is not offered — memory has nowhere to accumulate).
-  Today's zero-matter first run is a hard dead end (no create affordance, attach disabled, no link
-  out) — this is the worst live first-impression and is independent of S7.
+- **S8 ✓ done — matters without leaving the agent + conversation readability (maintainer
+  directives, 2026-06-11).** "+ New matter" on the Agents tab reuses the SAME plumbing as the
+  Matters tab: page-hosted `NewMatterModal` + `POST /projects`, full form (privileged ⇒
+  tier-floor invariant rides along). Prereq landed: the modal's hardcoded post-create
+  `goto('/lq-ai/matters/{id}')` moved to the Matters page's `onCreated` (the caller owns
+  navigation); the Agents page binds the created matter in place through the bound
+  `selectedMatterId` prop, whose reactive watcher also clears pending upload chips (F0-S5
+  honesty invariant). "No matter — blank workspace" REMOVED (ADR-F002): Run stays disabled
+  until a matter is selected or created; the server API is unchanged. **Folded-in readability
+  feedback (maintainer, live on S7):** composer DOCKED at the bottom (sticky card), the
+  conversation reads top-down above it, Conversations list moved to the side column; auto-scroll
+  pins to the conversation tail inside the nearest scrollable ancestor (the shell scrolls
+  `#lq-main`, html is overflow-hidden — document scrolling is a silent no-op, and the document
+  bottom would over-scroll past the conversation since the side column is taller); thinking
+  renders MARKDOWN (live ribbon + settled reasoning) through the same marked+DOMPurify
+  `SANITIZE_OPTS` path as the answer; tool calls/results collapse to one-line `stepDigest`
+  rows (full args/output one click away); the live ribbon is auto-expanded, tail-anchored and
+  clamped like claude.ai, collapsing into the settled "Reasoning" row when the turn lands.
+  Verified: web 778/778 + svelte-check 0 errors; f0-s3 (REWRITTEN: creates its matter through
+  the new modal — self-sufficient again and the S8 live evidence), f0-s4, f0-s5, f0-s7 (ribbon
+  assertion now proves VISIBLE streamed text) all green on the rebuilt stack; evidence
+  screenshots in docs/fork/evidence/f0-s8/; 27-agent adversarial review — 22 findings raised,
+  0 confirmed (all refuted on the actual code). NOTE: wave-c-matters test 3 (Matters-page
+  create→redirect) fails IDENTICALLY on main's build — pre-existing environmental hang (the
+  AUT's POST /projects never leaves the browser under Cypress on that surface); its inline
+  login got the helper's 15s timeout (tests 1–2 now reliable); Backlog item below.
 - **S9 — eval gate (ADR-F004).** Tool-call and subagent uptake at N≥20 on MiniMax-M3 plus one
   second model family (masked judge, pre-flight variance gate); subagent dispatch as task-scoped
   procedures, not open-ended delegation.
@@ -272,3 +286,8 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 - Thinking ribbon under PARALLEL subagent fan-out: one shared buffer means a sibling's settling
   model_turn wipes another sibling's live reasoning (animation-only loss; sequential fan-out today)
   — per-block ribbons land with F1's subagent tree (S7 review deferral).
+- wave-c-matters test 3 (Matters-page create→redirect) hangs pre-existing on this box: the
+  AUT's POST /projects (and the list GET) never leaves the browser under Cypress on that
+  surface, while curl and the agents-page modal flow (f0-s3) work — fails identically on
+  main's build (verified S8). Diagnose with the surface's pivot retirement or earlier if a
+  REAL browser ever reproduces it.
