@@ -122,12 +122,20 @@ curl -s -X POST http://localhost:8000/api/v1/agents/runs -H "Authorization: Bear
 
 ## Gotchas
 
-- **Cypress on this box: always `--config video=false`** — and even videoless Electron can trigger
-  postgres SIGPIPE crash-recovery windows that kill in-flight ingest jobs (files stick at
-  `processing`). For f0-s4/f0-s5, PRE-SEED with the browser closed and pass
-  `CYPRESS_LQ_AI_MATTER_NAME=…` (spec headers have the steps; f0-s5's composer upload can't be
-  pre-seeded — it IS the test). After postgres crash cycles the WORKERS' DB pools can wedge
-  ("connection is closed" on every job) — `docker compose restart ingest-worker arq-worker` heals.
+- **Cypress on this box — the full memory-pressure discipline (found in the S5 gate; with it,
+  ZERO postgres crashes across three specs):**
+  ```bash
+  docker stop lq-ai-arq-worker-1   # not needed by the specs; frees ~500MB
+  ELECTRON_EXTRA_LAUNCH_ARGS='--js-flags=--max-old-space-size=512' \
+    CYPRESS_LQ_AI_MATTER_NAME="<pre-seeded matter>" \
+    npx cypress run --spec '…' --config video=false,numTestsKeptInMemory=0
+  docker start lq-ai-arq-worker-1
+  ```
+  Without it, Electron's memory spikes SIGPIPE-crash postgres backends mid-run: in-flight ingest
+  jobs die (files stick at `processing`) and worker DB pools wedge ("connection is closed" on
+  every job — `docker compose restart ingest-worker arq-worker` heals). PRE-SEED matters with the
+  browser closed (spec headers have the steps; f0-s5's composer upload can't be pre-seeded — it
+  IS the test). Agent runs themselves now SURVIVE a pg crash window (per-step sessions, S5).
 - **.env S3 keys**: explicit `S3_ACCESS_KEY`/`S3_SECRET_KEY` never existed in MinIO — they're
   commented out so compose falls back to the MinIO root creds. Keep it that way
   (backup: `.env.bak-f0-s4`).

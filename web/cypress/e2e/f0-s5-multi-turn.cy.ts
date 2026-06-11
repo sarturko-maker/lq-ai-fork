@@ -116,7 +116,7 @@ describe('F0-S5 — multi-turn conversation with composer upload', () => {
 		cy.get('[data-testid="lq-ai-agents-composer"] button[type="submit"]').click();
 
 		// The conversation opens: matter chip on the thread head, one turn.
-		cy.get('[data-testid="lq-ai-agents-run"]').should('have.length', 1);
+		cy.get('[data-testid="lq-ai-agents-run"]', { timeout: 30_000 }).should('have.length', 1);
 		cy.get('[data-testid="lq-ai-agents-run-matter"]').should('contain.text', matterName);
 		cy.get('[data-testid="lq-ai-agents-run"]')
 			.contains('.ag-badge', 'Completed', { timeout: RUN_TIMEOUT_MS })
@@ -134,7 +134,7 @@ describe('F0-S5 — multi-turn conversation with composer upload', () => {
 			);
 		cy.get('[data-testid="lq-ai-agents-composer"] button[type="submit"]').click();
 
-		cy.get('[data-testid="lq-ai-agents-run"]').should('have.length', 2);
+		cy.get('[data-testid="lq-ai-agents-run"]', { timeout: 30_000 }).should('have.length', 2);
 		cy.get('[data-testid="lq-ai-agents-run"]')
 			.last()
 			.contains('.ag-badge', 'Completed', { timeout: RUN_TIMEOUT_MS })
@@ -166,7 +166,7 @@ describe('F0-S5 — multi-turn conversation with composer upload', () => {
 			);
 		cy.get('[data-testid="lq-ai-agents-composer"] button[type="submit"]').click();
 
-		cy.get('[data-testid="lq-ai-agents-run"]').should('have.length', 3);
+		cy.get('[data-testid="lq-ai-agents-run"]', { timeout: 30_000 }).should('have.length', 3);
 		cy.get('[data-testid="lq-ai-agents-run"]')
 			.last()
 			.contains('.ag-badge', 'Completed', { timeout: RUN_TIMEOUT_MS })
