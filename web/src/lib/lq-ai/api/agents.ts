@@ -9,7 +9,7 @@
  * api/app/schemas/agent_runs.py; types are module-local because only the
  * Agents surface consumes them.
  */
-import { apiRequest } from './client';
+import { apiRequest, apiStreamRequest } from './client';
 
 /** Lifecycle of a run (CHECK constraint on agent_runs.status). */
 export type AgentRunStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'cap_exceeded';
@@ -50,6 +50,12 @@ export interface AgentRunStep {
 	 * deliberately so a future relaxation can't crash render paths.
 	 */
 	summary: string | null;
+	/**
+	 * The settled tool_call row this step ran underneath (F0-S7):
+	 * null = root loop; set = a subagent's (deepagents `task`) or
+	 * tool-wrapped graph's step. Pre-S7 rows are null (never recorded).
+	 */
+	parent_step_id: string | null;
 	created_at: string;
 }
 
@@ -156,4 +162,15 @@ export async function listThreads(
 /** GET /api/v1/agents/threads/{id} — the whole conversation (the polling contract). */
 export async function getThread(id: string): Promise<AgentThreadDetailResponse> {
 	return apiRequest<AgentThreadDetailResponse>(`/agents/threads/${encodeURIComponent(id)}`);
+}
+
+/**
+ * GET /api/v1/agents/runs/{id}/stream — SSE v2 (F0-S7, ADR-F006 wire
+ * spec). Returns the raw streaming Response (auth + refresh handled);
+ * pipe `response.body` through `consumeUIMessageStream`. The stream is
+ * ANIMATION over the polled contract above — any failure here means
+ * "go back to polling", never "the run is lost" (ADR-F004).
+ */
+export async function streamRun(id: string, signal?: AbortSignal): Promise<Response> {
+	return apiStreamRequest(`/agents/runs/${encodeURIComponent(id)}/stream`, { signal });
 }

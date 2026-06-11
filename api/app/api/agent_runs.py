@@ -20,6 +20,11 @@ these settled records — ADR-F004):
 * ``GET  /api/v1/agents/threads/{thread_id}`` — the whole conversation:
   runs oldest-first, each with its steps; ``continuable`` advises the
   composer. Clients poll this while a run is live.
+* ``GET  /api/v1/agents/runs/{run_id}/stream`` — SSE v2 (F0-S7): the
+  run as an AI SDK UI Message Stream v1 (ADR-F006 wire spec). Settled
+  step rows ride as ``data-step`` parts (id = row id, reconciling),
+  model deltas as reasoning blocks; the polled thread endpoint stays
+  the fallback and the durable truth (ADR-F004).
 
 Authorization: the router is registered under the ``_active`` dep group
 in :mod:`app.api` (bearer token + must-change-password gate). All reads
@@ -38,13 +43,15 @@ the checkpointer + thread id so state persists per conversation.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy import func, select
@@ -54,6 +61,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.checkpointer import get_agent_checkpointer, has_checkpoint
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.runner import SYSTEM_PROMPT, execute_agent_run, mark_run_failed
+from app.agents.stream import (
+    CHANNEL_CLOSED,
+    SSE_DONE,
+    SSE_PING,
+    UI_MESSAGE_STREAM_HEADERS,
+    RunStreamBroker,
+    encode_sse,
+    step_part,
+    step_payload,
+    terminal_parts,
+)
 from app.agents.tools import MatterBinding, build_matter_tools
 from app.api.dependencies import ActiveUser
 from app.db.session import get_db, get_session_factory
@@ -98,6 +116,60 @@ def get_checkpointer_dep() -> BaseCheckpointSaver | None:
 
 
 Checkpointer = Annotated[BaseCheckpointSaver | None, Depends(get_checkpointer_dep)]
+
+
+def get_stream_broker(request: Request) -> RunStreamBroker:
+    """FastAPI seam for the process-local run-stream broker (F0-S7).
+
+    The lifespan constructs it on ``app.state`` (the composition root);
+    the lazy fallback here covers bare test apps that skip the lifespan
+    — still one broker per app, never per request. Tests substitute via
+    ``app.dependency_overrides`` as usual.
+    """
+    broker = getattr(request.app.state, "agent_stream_broker", None)
+    if broker is None:
+        broker = RunStreamBroker()
+        request.app.state.agent_stream_broker = broker
+    return broker
+
+
+StreamBroker = Annotated[RunStreamBroker, Depends(get_stream_broker)]
+
+
+def get_stream_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Seam for the stream generator's short-lived read sessions.
+
+    The generator outlives the request-scoped ``get_db`` session (closed
+    before streaming starts — see :func:`stream_agent_run`), so it reads
+    through this factory instead; tests override it to bind the
+    generator to the migrated test DB (the house DI pattern).
+    """
+    return get_session_factory()
+
+
+StreamSessionFactory = Annotated[
+    async_sessionmaker[AsyncSession], Depends(get_stream_session_factory)
+]
+
+# DB-tail cadence for the stream's fallback path (matches the legacy
+# client poll), and how long a silent stream goes between SSE comments.
+_STREAM_DB_POLL_SECONDS = 2.0
+_STREAM_HEARTBEAT_SECONDS = 15.0
+
+# A run still 'running' this long after start is ORPHANED (the runner's
+# wall clock is 300s and _finalize always follows; BackgroundTasks die
+# with the api process and no recovery sweep exists until the F1 arq
+# migration). The stream must not heartbeat such a run open forever —
+# mirrors the web poller's STALE_RUNNING_AFTER_MS (lib/lq-ai/agents/helpers.ts).
+_STREAM_STALE_AFTER_SECONDS = 330.0
+
+
+def _run_is_orphaned(run: AgentRun) -> bool:
+    """True for a 'running' row whose runner can no longer settle it."""
+    if run.status != AgentRunStatus.running.value:
+        return False
+    age = (datetime.now(UTC) - run.started_at).total_seconds()
+    return age > _STREAM_STALE_AFTER_SECONDS
 
 
 async def _latest_run_status(db: AsyncSession, thread_id: uuid.UUID) -> str | None:
@@ -146,6 +218,7 @@ async def create_agent_run(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     checkpointer: Checkpointer,
+    broker: StreamBroker,
 ) -> AgentRunRead:
     """Create an :class:`AgentRun` row and schedule the runner.
 
@@ -282,7 +355,7 @@ async def create_agent_run(
 
     # The runner opens its own DB session so the per-request session can
     # close cleanly when we return 202 (playbook-executor pattern).
-    background.add_task(_run_in_background, run_id=run.id)
+    background.add_task(_run_in_background, run_id=run.id, broker=broker)
 
     return AgentRunRead.model_validate(run)
 
@@ -355,6 +428,222 @@ async def get_agent_run(
     return AgentRunDetailResponse(
         run=AgentRunRead.model_validate(run),
         steps=[AgentRunStepRead.model_validate(s) for s in steps],
+    )
+
+
+async def _read_stream_state(
+    session_factory: async_sessionmaker[AsyncSession],
+    run_id: uuid.UUID,
+    *,
+    after_seq: int,
+) -> tuple[AgentRun | None, list[AgentRunStep]]:
+    """Run row + its settled steps beyond ``after_seq``, short session.
+
+    The stream generator opens a FRESH short-lived session per read so a
+    long-lived stream never pins a pool connection (the same posture as
+    the runner's per-step sessions).
+    """
+    async with session_factory() as db:
+        run = await db.get(AgentRun, run_id)
+        if run is None:
+            return None, []
+        steps = (
+            (
+                await db.execute(
+                    select(AgentRunStep)
+                    .where(AgentRunStep.run_id == run_id, AgentRunStep.seq > after_seq)
+                    .order_by(AgentRunStep.seq.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return run, list(steps)
+
+
+def _row_part(step: AgentRunStep) -> dict[str, object]:
+    return step_part(
+        step_payload(
+            step_id=step.id,
+            run_id=step.run_id,
+            seq=step.seq,
+            kind=step.kind,
+            name=step.name,
+            summary=step.summary,
+            parent_step_id=step.parent_step_id,
+            created_at=step.created_at,
+        )
+    )
+
+
+async def _stream_run_events(
+    run_id: uuid.UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+    broker: RunStreamBroker,
+) -> AsyncIterator[str]:
+    """The SSE v2 frame source for one run (AI SDK UI Message Stream v1).
+
+    Two part sources, one wire, dedup by construction (same-id data
+    parts reconcile client-side — the spec's replacement rule):
+
+    1. settled rows — replayed up front, then DB-tailed whenever the
+       live queue is silent for ``_STREAM_DB_POLL_SECONDS``. This path
+       alone is a complete (animation-free) stream: it is what a
+       subscriber gets after an api restart or once execution moves out
+       of process (F1 arq migration).
+    2. the broker's live parts — reasoning deltas, tool frames, step
+       mirrors — published by the runner in this process.
+
+    Every exit ends the message before ``[DONE]``: the terminal parts
+    (built from the SETTLED run row, ADR-F004) when the run settled, a
+    bare ``finish`` when there is nothing settled to report (run row
+    vanished under a user-cascade delete), or an ``error`` + ``finish``
+    when the run is ORPHANED at 'running' (process died; no recovery
+    sweep until F1 arq) — the stream must never heartbeat a dead run
+    open forever, and the client's polling path applies the same 330s
+    cutoff.
+    """
+    yield encode_sse({"type": "start", "messageId": str(run_id)})
+    queue = broker.subscribe(run_id)
+    try:
+        max_seq = 0
+        run, steps = await _read_stream_state(session_factory, run_id, after_seq=0)
+        for row in steps:
+            max_seq = max(max_seq, row.seq)
+            yield encode_sse(_row_part(row))
+        if run is None:  # deleted underneath us (user cascade)
+            yield encode_sse({"type": "finish"})
+            yield SSE_DONE
+            return
+        if run.status != AgentRunStatus.running.value:
+            for part in terminal_parts(
+                run_id=run_id,
+                status=run.status,
+                final_answer=run.final_answer,
+                error=run.error,
+            ):
+                yield encode_sse(part)
+            yield SSE_DONE
+            return
+        if _run_is_orphaned(run):
+            yield encode_sse(
+                {"type": "error", "errorText": "run never settled (orphaned at 'running')"}
+            )
+            yield encode_sse({"type": "finish"})
+            yield SSE_DONE
+            return
+
+        idle_seconds = 0.0
+        while True:
+            try:
+                part = await asyncio.wait_for(queue.get(), timeout=_STREAM_DB_POLL_SECONDS)
+            except TimeoutError:
+                # Live queue silent — tail the settled rows (fallback
+                # path; emits nothing the client hasn't reconciled).
+                run, steps = await _read_stream_state(session_factory, run_id, after_seq=max_seq)
+                for row in steps:
+                    max_seq = max(max_seq, row.seq)
+                    yield encode_sse(_row_part(row))
+                if run is None:
+                    yield encode_sse({"type": "finish"})
+                    yield SSE_DONE
+                    return
+                if run.status != AgentRunStatus.running.value:
+                    for tpart in terminal_parts(
+                        run_id=run_id,
+                        status=run.status,
+                        final_answer=run.final_answer,
+                        error=run.error,
+                    ):
+                        yield encode_sse(tpart)
+                    yield SSE_DONE
+                    return
+                if _run_is_orphaned(run):
+                    yield encode_sse(
+                        {
+                            "type": "error",
+                            "errorText": "run never settled (orphaned at 'running')",
+                        }
+                    )
+                    yield encode_sse({"type": "finish"})
+                    yield SSE_DONE
+                    return
+                if steps:
+                    idle_seconds = 0.0
+                else:
+                    idle_seconds += _STREAM_DB_POLL_SECONDS
+                    if idle_seconds >= _STREAM_HEARTBEAT_SECONDS:
+                        idle_seconds = 0.0
+                        yield SSE_PING  # SSE comment — keeps proxies awake
+                continue
+
+            idle_seconds = 0.0
+            if part is CHANNEL_CLOSED:
+                # Finish raced past us (or the channel was evicted):
+                # flush the rows, end on the settled run state.
+                run, steps = await _read_stream_state(session_factory, run_id, after_seq=max_seq)
+                for row in steps:
+                    yield encode_sse(_row_part(row))
+                if run is not None and run.status != AgentRunStatus.running.value:
+                    for tpart in terminal_parts(
+                        run_id=run_id,
+                        status=run.status,
+                        final_answer=run.final_answer,
+                        error=run.error,
+                    ):
+                        yield encode_sse(tpart)
+                else:
+                    yield encode_sse({"type": "finish"})
+                yield SSE_DONE
+                return
+            if part.get("type") == "start":
+                continue  # the generator already opened the message
+            if part.get("type") == "data-step":
+                seq_value = (part.get("data") or {}).get("seq")
+                if isinstance(seq_value, int):
+                    max_seq = max(max_seq, seq_value)
+            yield encode_sse(part)
+            if part.get("type") == "finish":
+                yield SSE_DONE
+                return
+    finally:
+        broker.unsubscribe(run_id, queue)
+
+
+@router.get(
+    "/runs/{run_id}/stream",
+    summary="Stream one agent run as an AI SDK UI Message Stream v1 (SSE).",
+)
+async def stream_agent_run(
+    run_id: uuid.UUID,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    broker: StreamBroker,
+    session_factory: StreamSessionFactory,
+) -> StreamingResponse:
+    """GET /api/v1/agents/runs/{run_id}/stream — SSE v2 (F0-S7).
+
+    Emits the ADR-F006 wire spec for one run: replayed ``data-step``
+    parts for already-settled rows, then live parts while the run
+    executes, ending with the terminal parts + ``[DONE]``. A terminal
+    run streams its full replay and closes — the endpoint is idempotent
+    and safe to re-open (parts reconcile by id).
+
+    Another user's ``run_id`` returns 404 (not 403) — no existence
+    disclosure. The request-scoped session is explicitly closed before
+    streaming starts (FastAPI tears yield-deps down only after the
+    response body completes — a 300s stream must not pin a pool
+    connection); the generator reads through short-lived sessions.
+    """
+    run = await db.get(AgentRun, run_id)
+    if run is None or run.user_id != user.id:
+        raise HTTPException(status_code=404, detail="run not found")
+    await db.close()
+
+    return StreamingResponse(
+        _stream_run_events(run_id, session_factory, broker),
+        media_type="text/event-stream",
+        headers=UI_MESSAGE_STREAM_HEADERS,
     )
 
 
@@ -519,6 +808,7 @@ def _system_prompt_for(binding: MatterBinding | None) -> str:
 async def _run_in_background(
     *,
     run_id: uuid.UUID,
+    broker: RunStreamBroker | None = None,
     model_builder: Callable[..., BaseChatModel] = build_gateway_chat_model,
     session_factory_provider: Callable[[], async_sessionmaker[AsyncSession]] = get_session_factory,
     checkpointer_provider: Callable[[], BaseCheckpointSaver | None] = get_agent_checkpointer,
@@ -545,8 +835,15 @@ async def _run_in_background(
     Any failure here finalizes the run as ``'failed'`` — a run must
     never strand at ``'running'``: the flood brake counts those forever
     and three of them lock the user out (F0-S4 review).
+
+    ``broker`` (F0-S7): the runner mirrors the loop onto the SSE v2
+    stream through a per-run publisher; the failure path below also
+    closes that stream. ``None`` (older callers, tests without a
+    streaming concern) degrades to rows-only — the stream endpoint's
+    DB-tail still serves subscribers.
     """
     session_factory = session_factory_provider()
+    publisher = broker.publisher(run_id) if broker is not None else None
     try:
         binding: MatterBinding | None = None
         async with session_factory() as db:
@@ -599,6 +896,7 @@ async def _run_in_background(
                 system_prompt=_system_prompt_for(binding),
                 checkpointer=checkpointer_provider(),
                 thread_id=thread_id,
+                publisher=publisher,
             )
         finally:
             await http_client.aclose()
@@ -610,3 +908,11 @@ async def _run_in_background(
         # mark_run_failed never overwrites a settled run, so a cleanup
         # error after a successful execution cannot flip 'completed'.
         await mark_run_failed(session_factory, run_id, error=f"{type(exc).__name__}: {exc}")
+        if publisher is not None:
+            # No-op if the runner already closed the stream (broker
+            # closed-channel flag) — this only fires for failures BEFORE
+            # execute_agent_run took over, mirroring mark_run_failed.
+            publisher.run_finished(
+                status=AgentRunStatus.failed.value,
+                error=f"{type(exc).__name__}: {exc}"[:500],
+            )

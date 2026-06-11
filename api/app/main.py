@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.admin_bootstrap import ensure_first_run_admin
 from app.agents.checkpointer import close_agent_checkpointer, init_agent_checkpointer
+from app.agents.stream import RunStreamBroker
 from app.api import api_router
 from app.cache import check_redis, close_redis
 from app.clients.gateway import close_gateway_client, get_gateway_client
@@ -101,6 +102,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # logs and leaves the saver unset; see app/agents/checkpointer.py.
     await init_agent_checkpointer()
 
+    # SSE v2 run-stream broker (F0-S7, ADR-F006): process-local pub/sub
+    # between the runner and the stream endpoint. Composition root —
+    # endpoints reach it through get_stream_broker (app/api/agent_runs).
+    app.state.agent_stream_broker = RunStreamBroker()
+
     try:
         yield
     finally:
@@ -146,7 +152,10 @@ if _cors_origins:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Accept"],
-        expose_headers=["X-LQ-AI-Routed-Inference-Tier", "X-LQ-AI-Routed-Provider"],
+        # Date: the agents UI derives "server now" from it so staleness
+        # cutoffs survive client clock skew (F0-S7; same-origin deploys
+        # never needed the exposure).
+        expose_headers=["X-LQ-AI-Routed-Inference-Tier", "X-LQ-AI-Routed-Provider", "Date"],
         max_age=600,
     )
 

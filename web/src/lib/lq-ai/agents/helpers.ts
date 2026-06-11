@@ -1,7 +1,8 @@
 /**
- * Pure helpers for the `/lq-ai/agents` page (F0-S3), extracted to a sibling
- * `.ts` file so vitest can exercise them without the svelte transformer
- * (the playbooks page-helpers pattern).
+ * Pure helpers for the agents conversation surface (F0-S3), in lib since
+ * F0-S7 so both the route page and the extracted ConversationPanel
+ * component import them; vitest exercises them without the svelte
+ * transformer (the playbooks page-helpers pattern).
  */
 import type {
 	AgentRun,
@@ -9,7 +10,17 @@ import type {
 	AgentRunStep,
 	AgentThreadDetailResponse
 } from '$lib/lq-ai/api/agents';
-import type { FileMeta } from '$lib/lq-ai/types';
+import type { FileMeta, Project } from '$lib/lq-ai/types';
+
+/**
+ * Honest fallback: a conversation can be bound to a matter that is no
+ * longer in the active dropdown list (archived since, or the sandbox) —
+ * say so rather than dressing the placeholder up as a name (F0-S4 review).
+ */
+export function matterName(matters: Project[], projectId: string | null): string | null {
+	if (!projectId) return null;
+	return matters.find((m) => m.id === projectId)?.name ?? 'Matter (not in your active list)';
+}
 
 /** Poll cadence while a run is working (~2 s per F0-S3; SSE replaces this in S5). */
 export const POLL_INTERVAL_MS = 2000;
@@ -30,9 +41,9 @@ export const MAX_POLL_FAILURES = 3;
  */
 export const STALE_RUNNING_AFTER_MS = 330_000;
 
-// TODO(F0-S5): nowMs is the client clock vs the server's started_at — a fast
-// client clock (>~5.5 min) would mark fresh runs stale. Acceptable for the
-// local-dev preview; derive 'now' from a response header when SSE lands.
+// nowMs vs the server's started_at: since F0-S7 callers pass a
+// server-derived 'now' (serverNowMs() in ./server-clock, fed by every API
+// response's Date header), so client clock skew no longer fakes staleness.
 export function isStaleRunning(run: Pick<AgentRun, 'status' | 'started_at'>, nowMs: number): boolean {
 	if (run.status !== 'running') return false;
 	const startedMs = Date.parse(run.started_at);

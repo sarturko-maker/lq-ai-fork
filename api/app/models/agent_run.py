@@ -177,7 +177,11 @@ class AgentRunStep(Base):
     model dispatched a tool), ``tool_result`` (the tool returned).
     ``name`` is the tool name (NULL for model turns). ``summary`` is a
     bounded digest (~2000 chars) — tool args/results are truncated and
-    never carry raw secrets.
+    never carry raw secrets. ``parent_step_id`` (F0-S7) is the settled
+    ``tool_call`` row of the innermost tool this step ran underneath —
+    NULL for root-loop steps, set for a subagent's (deepagents ``task``)
+    or tool-wrapped middleware graph's steps; pre-S7 rows are NULL
+    because their ancestry was never recorded.
     """
 
     __tablename__ = "agent_run_steps"
@@ -201,6 +205,15 @@ class AgentRunStep(Base):
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_step_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "agent_run_steps.id",
+            ondelete="CASCADE",
+            name="fk_agent_run_steps_parent_step_id",
+        ),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
