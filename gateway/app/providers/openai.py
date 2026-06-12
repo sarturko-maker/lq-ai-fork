@@ -537,6 +537,60 @@ def _from_openai_chat_response(
 # --- Translation: OpenAI SSE -> gateway chunks -------------------------------
 
 
+def _ensure_stream_tool_call_ids(
+    parsed: dict[str, Any],
+    *,
+    synth_prefix: str,
+    opened_indexes: set[tuple[int, int]],
+) -> None:
+    """Synthesize ids for OPENING tool-call deltas that arrive without one.
+
+    F0-S9 gateway conformance: agent harnesses hard-fail on empty
+    streamed tool-call ids (deepagents' subagent dispatch raises
+    "Tool call ID is required for subagent invocation"; upstream closed
+    langchain-ai/deepagents#3587 as a gateway-side responsibility).
+
+    OpenAI streaming semantics key tool calls by ``index``: the FIRST
+    delta for an index opens the call; later deltas for the same index
+    are continuations and legitimately carry no ``id``. Nonconforming
+    providers — the only ones this path exists for — may repeat ``type``
+    or even ``function.name`` on continuations, so opening detection
+    must be STATEFUL, not shape-based (S9 review): ``opened_indexes``
+    is the per-stream set of ``(choice_index, tool_call_index)`` pairs
+    already seen; only the first sighting of an index may synthesize.
+    That makes the synthesized id stable for the call's lifetime by
+    construction. Provider-supplied ids always pass through untouched
+    (MiniMax-M3 emits real ids — verified live 2026-06-12).
+
+    Mutates ``parsed`` in place; never raises on malformed shapes (the
+    caller's pydantic validation is the arbiter of chunk validity).
+    """
+
+    choices = parsed.get("choices")
+    if not isinstance(choices, list):
+        return
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        delta = choice.get("delta")
+        if not isinstance(delta, dict):
+            continue
+        tool_calls = delta.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+        choice_index = choice.get("index")
+        choice_key = choice_index if isinstance(choice_index, int) else 0
+        for entry in tool_calls:
+            if not isinstance(entry, dict):
+                continue
+            index = entry.get("index")
+            entry_key = (choice_key, index if isinstance(index, int) else 0)
+            first_sighting = entry_key not in opened_indexes
+            opened_indexes.add(entry_key)
+            if first_sighting and not entry.get("id"):
+                entry["id"] = f"{synth_prefix}_{uuid.uuid4().hex[:12]}_{entry_key[1]}"
+
+
 async def _openai_stream_iter(
     *,
     client: httpx.AsyncClient,
@@ -563,6 +617,10 @@ async def _openai_stream_iter(
     """
 
     fallback_id = f"chatcmpl-{uuid.uuid4().hex}"
+    # Per-stream tool-call opening tracker (F0-S9): (choice, tool_call)
+    # index pairs already seen — only an index's first delta may receive
+    # a synthesized id (see _ensure_stream_tool_call_ids).
+    opened_tool_call_indexes: set[tuple[int, int]] = set()
 
     try:
         async with client.stream("POST", path, json=body, headers=headers) as response:
@@ -587,6 +645,13 @@ async def _openai_stream_iter(
                     parsed["model"] = requested_model
                 if not parsed.get("id"):
                     parsed["id"] = fallback_id
+                # F0-S9 conformance: opening tool-call deltas must carry a
+                # non-empty stable id (deepagents#3587 — gateway-owned fix).
+                _ensure_stream_tool_call_ids(
+                    parsed,
+                    synth_prefix="call_lqgw",
+                    opened_indexes=opened_tool_call_indexes,
+                )
                 try:
                     yield ChatCompletionChunk.model_validate(parsed)
                 except Exception:

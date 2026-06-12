@@ -830,3 +830,215 @@ async def test_health_check_auth_rejected() -> None:
             await client.aclose()
     assert health.reachable is True
     assert "auth" in (health.error or "").lower()
+
+
+# --- F0-S9 gateway conformance (agent-harness prerequisites) -------------
+#
+# Three properties every score in the model-qualification matrix depends
+# on (docs/fork/research/deepagents-ecosystem.md §1.3):
+#
+#   (a) opening tool-call deltas carry a non-empty, unique, stable id —
+#       synthesized by the gateway when the provider omits one
+#       (deepagents#3587 puts the fix on gateways);
+#   (b) reasoning content is never stripped from streamed deltas
+#       (MiniMax-M3 emits BOTH inline ``<think>`` in content AND a
+#       ``reasoning`` delta field — verified live 2026-06-12);
+#   (c) reasoning content survives the HISTORY direction — assistant
+#       messages with ``<think>`` text + tool_calls echoed back through
+#       ``_to_openai_request`` reach the provider verbatim (the risk is
+#       the resent history, not the response; deepagents#1630).
+
+
+def _stream_adapter_and_body(sse_body: str) -> tuple[OpenAIAdapter, respx.MockRouter]:
+    router = respx.mock(base_url="https://api.openai.com/v1")
+    router.post("/chat/completions").mock(
+        return_value=httpx.Response(
+            200, text=sse_body, headers={"content-type": "text/event-stream"}
+        )
+    )
+    return (
+        OpenAIAdapter(
+            name="openai-prod",
+            base_url="https://api.openai.com/v1",
+            api_key="sk-test",
+        ),
+        router,
+    )
+
+
+@pytest.mark.unit
+async def test_streaming_tool_call_opening_delta_without_id_synthesized() -> None:
+    """F0-S9 (a): a missing/empty id on an OPENING tool-call delta is
+    synthesized (non-empty, unique per call); continuation deltas — which
+    legitimately carry no id on the OpenAI wire — are left untouched."""
+
+    sse_body = (
+        # Opening delta, id MISSING entirely.
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m",'
+        '"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"type":"function",'
+        '"function":{"name":"get_weather","arguments":""},"index":0}]}}]}\n\n'
+        # Continuation delta: arguments only — must NOT get an id.
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m",'
+        '"choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\\"city\\":\\"Berlin\\"}"},'
+        '"index":0}]}}]}\n\n'
+        # Second tool call, id EMPTY STRING.
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m",'
+        '"choices":[{"index":0,"delta":{"tool_calls":[{"id":"","type":"function",'
+        '"function":{"name":"read_document","arguments":""},"index":1}]}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    adapter, router = _stream_adapter_and_body(sse_body)
+    with router:
+        result = await adapter.chat_completion(
+            _basic_chat_request(stream=True), model="m", stream=True
+        )
+        assert not isinstance(result, ChatCompletionResponse)
+        chunks = [c async for c in result]
+    await adapter.aclose()
+
+    first = (chunks[0].choices[0].delta.tool_calls or [])[0]
+    cont = (chunks[1].choices[0].delta.tool_calls or [])[0]
+    second = (chunks[2].choices[0].delta.tool_calls or [])[0]
+    assert first.get("id", "").startswith("call_lqgw_")
+    assert "id" not in cont  # continuation untouched
+    assert second.get("id", "").startswith("call_lqgw_")
+    assert first["id"] != second["id"]  # unique per call
+
+
+@pytest.mark.unit
+async def test_streaming_tool_call_provider_ids_pass_through() -> None:
+    """F0-S9 (a): provider-supplied ids are never rewritten. Shape is the
+    live MiniMax-M3 wire format captured through this gateway 2026-06-12."""
+
+    sse_body = (
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"MiniMax-M3",'
+        '"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"id":"call_function_xplk3zli8lqh_1",'
+        '"type":"function","function":{"name":"get_weather","arguments":""},"index":0}]}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    adapter, router = _stream_adapter_and_body(sse_body)
+    with router:
+        result = await adapter.chat_completion(
+            _basic_chat_request(stream=True), model="MiniMax-M3", stream=True
+        )
+        assert not isinstance(result, ChatCompletionResponse)
+        chunks = [c async for c in result]
+    await adapter.aclose()
+
+    entry = (chunks[0].choices[0].delta.tool_calls or [])[0]
+    assert entry["id"] == "call_function_xplk3zli8lqh_1"
+
+
+@pytest.mark.unit
+async def test_streaming_reasoning_content_round_trips() -> None:
+    """F0-S9 (b): inline ``<think>`` content AND the ``reasoning`` extra
+    delta field survive chunk validation and re-serialization — the route
+    handler re-emits via ``model_dump(exclude_none=True)``, so extras
+    surviving the dump is exactly what the wire needs."""
+
+    sse_body = (
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"MiniMax-M3",'
+        '"choices":[{"index":0,"delta":{"role":"assistant",'
+        '"content":"<think>\\nplanning\\n</think>\\nHello","reasoning":"planning"}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    adapter, router = _stream_adapter_and_body(sse_body)
+    with router:
+        result = await adapter.chat_completion(
+            _basic_chat_request(stream=True), model="MiniMax-M3", stream=True
+        )
+        assert not isinstance(result, ChatCompletionResponse)
+        chunks = [c async for c in result]
+    await adapter.aclose()
+
+    delta = chunks[0].choices[0].delta
+    assert delta.content == "<think>\nplanning\n</think>\nHello"
+    dumped = chunks[0].model_dump(mode="json", exclude_none=True)
+    assert dumped["choices"][0]["delta"]["reasoning"] == "planning"
+    assert "<think>" in dumped["choices"][0]["delta"]["content"]
+
+
+@pytest.mark.unit
+def test_request_preserves_think_history_and_strips_only_lq_ai_keys() -> None:
+    """F0-S9 (c): the HISTORY direction. An assistant message carrying
+    ``<think>`` text, tool_calls, and a ``reasoning_content`` extra field
+    must reach the provider body verbatim; only LQ.AI extension keys are
+    stripped. This is the resend path a multi-turn agent loop exercises
+    on every tool turn (verified live against MiniMax-M3 2026-06-12)."""
+
+    from app.providers.openai import _to_openai_request
+
+    request = ChatCompletionRequest.model_validate(
+        {
+            "model": "smart",
+            "lq_ai_purpose": "agent_loop",
+            "messages": [
+                {"role": "user", "content": "weather in Berlin?"},
+                {
+                    "role": "assistant",
+                    "content": "<think>\nuse the tool\n</think>\nChecking.",
+                    "reasoning_content": "use the tool",
+                    "tool_calls": [
+                        {
+                            "id": "call_function_xplk3zli8lqh_1",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": '{"city": "Berlin"}'},
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_function_xplk3zli8lqh_1",
+                    "content": '{"temp_c": 18}',
+                },
+            ],
+        }
+    )
+    body = _to_openai_request(request, model="MiniMax-M3", stream=False)
+
+    assistant = body["messages"][1]
+    assert assistant["content"] == "<think>\nuse the tool\n</think>\nChecking."
+    assert assistant["reasoning_content"] == "use the tool"
+    assert assistant["tool_calls"][0]["id"] == "call_function_xplk3zli8lqh_1"
+    assert body["messages"][2]["tool_call_id"] == "call_function_xplk3zli8lqh_1"
+    assert "lq_ai_purpose" not in body
+
+
+@pytest.mark.unit
+async def test_streaming_tool_call_repeated_type_continuations_not_resynthesized() -> None:
+    """F0-S9 review fix: some nonconforming providers repeat ``type`` (or
+    even ``function.name``) on CONTINUATION deltas. Opening detection is
+    stateful by (choice, tool_call) index — only an index's first delta
+    may synthesize, so continuations never get a fresh (call-splitting)
+    id, no matter what shape they arrive in."""
+
+    sse_body = (
+        # Opening delta, id missing — synthesize here.
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m",'
+        '"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"type":"function",'
+        '"function":{"name":"get_weather","arguments":""},"index":0}]}}]}\n\n'
+        # Continuation that REPEATS type — must NOT synthesize.
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m",'
+        '"choices":[{"index":0,"delta":{"tool_calls":[{"type":"function",'
+        '"function":{"arguments":"{\\"city\\""},"index":0}]}}]}\n\n'
+        # Continuation that repeats type AND name — must NOT synthesize.
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m",'
+        '"choices":[{"index":0,"delta":{"tool_calls":[{"type":"function",'
+        '"function":{"name":"get_weather","arguments":": \\"Berlin\\"}"},"index":0}]}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    adapter, router = _stream_adapter_and_body(sse_body)
+    with router:
+        result = await adapter.chat_completion(
+            _basic_chat_request(stream=True), model="m", stream=True
+        )
+        assert not isinstance(result, ChatCompletionResponse)
+        chunks = [c async for c in result]
+    await adapter.aclose()
+
+    opening = (chunks[0].choices[0].delta.tool_calls or [])[0]
+    cont1 = (chunks[1].choices[0].delta.tool_calls or [])[0]
+    cont2 = (chunks[2].choices[0].delta.tool_calls or [])[0]
+    assert opening.get("id", "").startswith("call_lqgw_")
+    assert "id" not in cont1
+    assert "id" not in cont2

@@ -127,7 +127,11 @@ dependencies = [
     # satisfy — the three executors' node factories now return matching
     # protocols (no runtime changes). Validated against 1.2.4; ceiling at
     # the next major.
-    "langgraph>=1.0,<2",
+    # F0-S9 — floor raised to 1.2.4: the subagent-interrupt-overwrites-
+    # parent-state fix needs deepagents 0.6.7 + langgraph 1.2.4 TOGETHER
+    # (deepagents#2781). We already run 1.2.4; the old >=1.0 floor could
+    # let a rebuild silently regress below it.
+    "langgraph>=1.2.4,<2",
     # F0-S1 — deepagents: LangChain's deep-agent harness (planning tool,
     # filesystem-backed memory, sub-agent spawning) for the deep-agent
     # spike. Pinned EXACT: the project is pre-1.0 and has broken its
@@ -202,6 +206,9 @@ asyncio_mode = "auto"
 # end up tied to a function-scoped loop that gets closed between tests.
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
+# Collection stays scoped to tests/ — api/evals/ (F0-S9 model-
+# qualification harness) drives the LIVE stack and spends provider
+# tokens; it only ever runs by explicit path (api/evals/README.md).
 testpaths = ["tests"]
 markers = [
     "unit: pure unit tests, no I/O",

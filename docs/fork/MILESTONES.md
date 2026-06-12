@@ -103,9 +103,27 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
   create→redirect) fails IDENTICALLY on main's build — pre-existing environmental hang (the
   AUT's POST /projects never leaves the browser under Cypress on that surface); its inline
   login got the helper's 15s timeout (tests 1–2 now reliable); Backlog item below.
-- **S9 — eval gate as MODEL QUALIFICATION (ADR-F004; re-scoped per maintainer directive
-  2026-06-11: the model is dependency injection — Deep Agents must work with any good model; do
-  NOT redo oscar-gc's eval work; lean on existing OSS results).** Read
+- ✓ **S9 — model qualification gate (ADR-F004) — DONE 2026-06-12 (overnight run)**: gateway
+  conformance verified LIVE first (streamed tool-call ids real+stable; `<think>` round-trips BOTH
+  directions incl. history resend; defensive id-synthesis added per deepagents#3587;
+  `use_responses_api=False`; `max_input_tokens` profile — the GATEWAY envelope binds, not M3's
+  native 1M window; langgraph floor →1.2.4; evidence
+  `docs/fork/evidence/f0-s9/gateway-conformance.md`). Harness `api/evals/` (plain pytest, ZERO
+  new deps, never CI-collected): 4 scenario JSONs over 2 seeded fixture matters; deterministic
+  L0/L1 scorers over settled `agent_run_steps`; runner-hygiene-only assertions; per-cycle
+  routing-log token accounting. Pre-flight N=5 variance gate: ZERO disagreements. **Baseline
+  MiniMax-M3 (empty harness profile), N=20×4, 80/80 cycles valid**: fan-out compliance 20/20
+  `one_per_item`; negative-control noise 0; grounding 20/20 with args 18/18; mismatch:
+  no-fabrication 20/20 but read-noise fired 19/20 (oscar's MiniMax wrong-grounding eagerness
+  replicated — the gate's one discriminating signal; threshold deferred to maintainer per
+  decision 1). Adversarial review (35 agents): 27 confirmed findings ALL fixed in-slice;
+  the 80 cycles RE-SCORED IDENTICALLY under the stricter post-review scoring (think-stripped
+  answers, distinct-call fan-out credit) — numbers robust. Session spend ~$1.69
+  standard-rate upper bound (corrected after the routing-window double-count fix). Output:
+  `docs/fork/model-compatibility.md` (per-model rows; Kimi K2.x row BLOCKED-ON-KEY with exact
+  gateway recipe) + generated `docs/fork/evidence/f0-s9/matrix.md`. Deferred axes recorded:
+  action-tool canary (no F0 action surface), compaction survival, L2 masked judge (budget rule).
+  Original spec (design retained for re-runs): read
   `docs/fork/research/f0-s9-eval-reuse.md` FIRST — oscar-gc eval mining + ecosystem survey,
   synthesized; its §4 lists the open maintainer decisions (thresholds set AFTER the first
   baseline — never tighter than the CI; model shortlist; dep approval; arg-digest source;
