@@ -152,9 +152,7 @@ async def test_purpose_filter_excludes_chat_rows(db_session: AsyncSession) -> No
 
 
 @pytest.mark.integration
-async def test_purpose_filter_excludes_null_purpose_rows(
-    db_session: AsyncSession,
-) -> None:
+async def test_purpose_filter_excludes_null_purpose_rows(db_session: AsyncSession) -> None:
     """Rows with NULL purpose (pre-0029 backfill) are excluded.
 
     Pre-migration rows don't have the column populated; treating them
@@ -247,9 +245,7 @@ async def test_stale_rows_excluded(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.integration
-async def test_cache_returns_same_value_without_db_hit(
-    db_session: AsyncSession,
-) -> None:
+async def test_cache_returns_same_value_without_db_hit(db_session: AsyncSession) -> None:
     """Second call within TTL returns cached value even if rows change.
 
     The cache is keyed by ``judge_model`` only. Inserting new rows after

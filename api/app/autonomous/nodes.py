@@ -110,10 +110,7 @@ def make_intake_node(
         if session is None:
             logger.error(
                 "autonomous.intake_node: session not found",
-                extra={
-                    "event": "autonomous_intake_session_missing",
-                    "session_id": session_id,
-                },
+                extra={"event": "autonomous_intake_session_missing", "session_id": session_id},
             )
             return {"error": f"session {session_id} not found in intake_node"}
 
@@ -667,10 +664,7 @@ def make_delivery_node(
             {
                 "title": "Autonomous session complete",
                 "body": body,
-                "payload": {
-                    "finding_count": findings_count,
-                    "artifact_count": artifact_count,
-                },
+                "payload": {"finding_count": findings_count, "artifact_count": artifact_count},
             },
             db,
             gateway,

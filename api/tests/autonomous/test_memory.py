@@ -232,9 +232,7 @@ async def test_list_memory_filter_by_state(
 
     # Filter proposed
     resp = await client.get(
-        "/api/v1/autonomous/memory",
-        headers=_bearer(user_a),
-        params={"state": "proposed"},
+        "/api/v1/autonomous/memory", headers=_bearer(user_a), params={"state": "proposed"}
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -256,9 +254,7 @@ async def test_list_memory_filter_by_state(
 
     # Filter dismissed
     resp = await client.get(
-        "/api/v1/autonomous/memory",
-        headers=_bearer(user_a),
-        params={"state": "dismissed"},
+        "/api/v1/autonomous/memory", headers=_bearer(user_a), params={"state": "dismissed"}
     )
     body = resp.json()
     ids = {e["id"] for e in body["entries"]}

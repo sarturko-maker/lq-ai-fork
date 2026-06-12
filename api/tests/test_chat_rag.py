@@ -378,11 +378,7 @@ async def test_chat_send_with_attached_kb_and_empty_results_writes_no_audit(
     # Gateway request has only the user turn.
     sent_body = _json.loads(route.calls[0].request.read())
     assert sent_body["messages"] == [
-        {
-            "role": "user",
-            "content": "needle no haystack",
-            "lq_ai_skip_anonymization": False,
-        }
+        {"role": "user", "content": "needle no haystack", "lq_ai_skip_anonymization": False}
     ]
 
 

@@ -417,10 +417,7 @@ async def test_list_chats_filter_by_project_id(
     from app.models.project import Project
 
     project = Project(
-        owner_id=db_user.id,
-        name="P1",
-        slug=f"p1-{uuid.uuid4().hex[:6]}",
-        privileged=False,
+        owner_id=db_user.id, name="P1", slug=f"p1-{uuid.uuid4().hex[:6]}", privileged=False
     )
     db_session.add(project)
     await db_session.flush()

@@ -52,16 +52,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import (
-    BigInteger,
-    Boolean,
-    DateTime,
-    ForeignKey,
-    Integer,
-    Numeric,
-    Text,
-    text,
-)
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Numeric, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -174,22 +165,14 @@ class AutonomousSchedule(Base):
     )
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "projects.id",
-            ondelete="SET NULL",
-            name="fk_autonomous_schedules_project_id",
-        ),
+        ForeignKey("projects.id", ondelete="SET NULL", name="fk_autonomous_schedules_project_id"),
         nullable=True,
     )
     name: Mapped[str | None] = mapped_column(Text, nullable=True)
     cron_expr: Mapped[str] = mapped_column(Text, nullable=False)
     playbook_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "playbooks.id",
-            ondelete="SET NULL",
-            name="fk_autonomous_schedules_playbook_id",
-        ),
+        ForeignKey("playbooks.id", ondelete="SET NULL", name="fk_autonomous_schedules_playbook_id"),
         nullable=True,
     )
     skill_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -263,11 +246,7 @@ class AutonomousWatch(Base):
     )
     playbook_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "playbooks.id",
-            ondelete="SET NULL",
-            name="fk_autonomous_watches_playbook_id",
-        ),
+        ForeignKey("playbooks.id", ondelete="SET NULL", name="fk_autonomous_watches_playbook_id"),
         nullable=True,
     )
     skill_ref: Mapped[str | None] = mapped_column(Text, nullable=True)

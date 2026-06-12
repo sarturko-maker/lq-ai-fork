@@ -38,11 +38,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.autonomous.enums import PHASE_GRANTS, Phase, ToolIntent
-from app.autonomous.guard import (
-    _ARTIFACT_MAX_CHARS,
-    _handle_retrieve_chunks,
-    guarded_tool_call,
-)
+from app.autonomous.guard import _ARTIFACT_MAX_CHARS, _handle_retrieve_chunks, guarded_tool_call
 from app.models.autonomous import AutonomousArtifact, AutonomousSession
 from app.models.document import Document, DocumentChunk
 from app.models.file import File as FileModel
@@ -173,13 +169,7 @@ async def test_emit_artifact_happy_path(
     assert result.cost_usd == Decimal("0")
     assert result.outcome == "success"
     data = result.data
-    assert set(data.keys()) == {
-        "artifact_id",
-        "file_id",
-        "document_id",
-        "name",
-        "size_bytes",
-    }
+    assert set(data.keys()) == {"artifact_id", "file_id", "document_id", "name", "size_bytes"}
 
     body = content.encode("utf-8")
 

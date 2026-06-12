@@ -155,11 +155,7 @@ if _cors_origins:
         # Date: the agents UI derives "server now" from it so staleness
         # cutoffs survive client clock skew (F0-S7; same-origin deploys
         # never needed the exposure).
-        expose_headers=[
-            "X-LQ-AI-Routed-Inference-Tier",
-            "X-LQ-AI-Routed-Provider",
-            "Date",
-        ],
+        expose_headers=["X-LQ-AI-Routed-Inference-Tier", "X-LQ-AI-Routed-Provider", "Date"],
         max_age=600,
     )
 

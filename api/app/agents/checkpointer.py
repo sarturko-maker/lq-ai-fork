@@ -80,11 +80,7 @@ async def init_agent_checkpointer() -> None:
             # otherwise wedge stale sockets into the pool forever.
             check=AsyncConnectionPool.check_connection,
             # AsyncPostgresSaver's documented connection requirements.
-            kwargs={
-                "autocommit": True,
-                "row_factory": dict_row,
-                "prepare_threshold": 0,
-            },
+            kwargs={"autocommit": True, "row_factory": dict_row, "prepare_threshold": 0},
         )
         await pool.open()
         try:

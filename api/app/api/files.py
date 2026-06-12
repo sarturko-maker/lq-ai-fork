@@ -36,16 +36,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    File,
-    Form,
-    Request,
-    Response,
-    UploadFile,
-    status,
-)
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError

@@ -29,10 +29,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.citation.cost import (
-    DEFAULT_PER_JUDGE_USD,
-    invalidate_cache as invalidate_judge_cache,
-)
+from app.citation.cost import DEFAULT_PER_JUDGE_USD, invalidate_cache as invalidate_judge_cache
 from app.clients.gateway import EnsembleConfig
 from app.models.inference import InferenceRoutingLog
 from app.schemas.tabular import ColumnSpec
@@ -116,9 +113,7 @@ async def test_per_cell_db_none_returns_default_without_query() -> None:
 
 
 @pytest.mark.integration
-async def test_per_cell_cold_start_no_rows_returns_default(
-    db_session: AsyncSession,
-) -> None:
+async def test_per_cell_cold_start_no_rows_returns_default(db_session: AsyncSession) -> None:
     """An empty routing log falls back to the conservative default."""
 
     estimate = await estimate_per_cell_cost_usd(db_session)
@@ -126,9 +121,7 @@ async def test_per_cell_cold_start_no_rows_returns_default(
 
 
 @pytest.mark.integration
-async def test_per_cell_below_min_samples_returns_default(
-    db_session: AsyncSession,
-) -> None:
+async def test_per_cell_below_min_samples_returns_default(db_session: AsyncSession) -> None:
     """Fewer than _MIN_SAMPLES tabular rows → fall back to default."""
 
     for _ in range(3):
@@ -143,9 +136,7 @@ async def test_per_cell_below_min_samples_returns_default(
 
 
 @pytest.mark.integration
-async def test_per_cell_rolling_average_computes_correctly(
-    db_session: AsyncSession,
-) -> None:
+async def test_per_cell_rolling_average_computes_correctly(db_session: AsyncSession) -> None:
     """5+ tabular rows → returns the average of cost_estimate."""
 
     prices = [
@@ -168,9 +159,7 @@ async def test_per_cell_rolling_average_computes_correctly(
 
 
 @pytest.mark.integration
-async def test_per_cell_purpose_filter_excludes_chat_rows(
-    db_session: AsyncSession,
-) -> None:
+async def test_per_cell_purpose_filter_excludes_chat_rows(db_session: AsyncSession) -> None:
     """Chat-purpose rows for the same model are ignored.
 
     Chat traffic has very different token distribution from tabular
@@ -224,9 +213,7 @@ async def test_per_cell_purpose_filter_excludes_judge_paraphrase_rows(
 
 
 @pytest.mark.integration
-async def test_per_cell_null_cost_estimate_rows_excluded(
-    db_session: AsyncSession,
-) -> None:
+async def test_per_cell_null_cost_estimate_rows_excluded(db_session: AsyncSession) -> None:
     """Tabular rows missing ``cost_estimate`` don't poison the average."""
 
     for _ in range(5):

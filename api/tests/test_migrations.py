@@ -712,9 +712,7 @@ async def test_messages_cascade_delete_on_chat(db_session: AsyncSession) -> None
 
 
 @pytest.mark.integration
-async def test_messages_applied_skills_default_empty_array(
-    db_session: AsyncSession,
-) -> None:
+async def test_messages_applied_skills_default_empty_array(db_session: AsyncSession) -> None:
     """C3: ``applied_skills`` defaults to an empty text[] when omitted."""
 
     from app.models.chat import Chat

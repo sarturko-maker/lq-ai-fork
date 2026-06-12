@@ -74,9 +74,7 @@ def test_psycopg_dsn_strips_the_asyncpg_dialect() -> None:
     assert _psycopg_dsn("postgresql://u:p@host/db") == "postgresql://u:p@host/db"
 
 
-async def test_has_checkpoint_false_for_unknown_thread(
-    pg_saver: AsyncPostgresSaver,
-) -> None:
+async def test_has_checkpoint_false_for_unknown_thread(pg_saver: AsyncPostgresSaver) -> None:
     assert await has_checkpoint(pg_saver, uuid.uuid4()) is False
     assert await has_checkpoint(None, uuid.uuid4()) is False  # degraded mode
 

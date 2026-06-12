@@ -521,9 +521,7 @@ class _StubGatewayForActivation:
         self._config = config
         self.fetch_count = 0
 
-    async def get_citation_engine_ensemble_config(
-        self,
-    ) -> _StubResolvedEnsembleConfig | None:
+    async def get_citation_engine_ensemble_config(self) -> _StubResolvedEnsembleConfig | None:
         self.fetch_count += 1
         return self._config
 

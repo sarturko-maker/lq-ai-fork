@@ -253,9 +253,7 @@ async def test_notification_channel_accepts_webhook(db_session: AsyncSession) ->
 
 
 @pytest.mark.integration
-async def test_notification_channel_check_rejects_bogus(
-    db_session: AsyncSession,
-) -> None:
+async def test_notification_channel_check_rejects_bogus(db_session: AsyncSession) -> None:
     """channel CHECK constraint rejects values outside the allowed set."""
     user = await _make_user(db_session)
     sess = await _make_session(db_session, owner=user)

@@ -72,10 +72,7 @@ def _bearer(user: User) -> dict[str, str]:
 
 @pytest.mark.integration
 async def test_export_post_inserts_queued_row(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    seed_user: User,
-    monkeypatch: pytest.MonkeyPatch,
+    client: AsyncClient, db_session: AsyncSession, seed_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """POST returns 202 with job_id + status='queued'; row persisted; audit row written."""
 

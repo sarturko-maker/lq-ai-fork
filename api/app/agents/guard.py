@@ -110,10 +110,7 @@ async def guarded_dispatch(
         # the run reports failed; the sweep also fires an abort).
         touched: CursorResult[Any] = await db.execute(  # type: ignore[assignment]
             sa_update(AgentRun)
-            .where(
-                AgentRun.id == ctx.run_id,
-                AgentRun.status == AgentRunStatus.running.value,
-            )
+            .where(AgentRun.id == ctx.run_id, AgentRun.status == AgentRunStatus.running.value)
             .values(heartbeat_at=func.now())
         )
         if touched.rowcount != 1:

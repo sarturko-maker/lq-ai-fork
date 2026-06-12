@@ -97,12 +97,7 @@ class FakeS3Client:
         self.events.append(
             (
                 "create_multipart_upload",
-                {
-                    "Bucket": Bucket,
-                    "Key": Key,
-                    "ContentType": ContentType,
-                    "UploadId": upload_id,
-                },
+                {"Bucket": Bucket, "Key": Key, "ContentType": ContentType, "UploadId": upload_id},
             )
         )
         return {"UploadId": upload_id}
@@ -243,9 +238,7 @@ async def test_stream_upload_records_size_and_sha256(fake_s3: FakeS3Client) -> N
 
 
 @pytest.mark.unit
-async def test_stream_upload_assembles_multiple_small_chunks(
-    fake_s3: FakeS3Client,
-) -> None:
+async def test_stream_upload_assembles_multiple_small_chunks(fake_s3: FakeS3Client) -> None:
     # Many small chunks across the part-size boundary should still
     # round-trip cleanly. Use 100 chunks of 100 bytes each = 10,000 bytes,
     # which is one part with the default 8 MiB part size.
@@ -288,9 +281,7 @@ async def test_stream_upload_rolls_over_part_boundary(fake_s3: FakeS3Client) -> 
 
 
 @pytest.mark.unit
-async def test_stream_upload_empty_body_writes_zero_byte_object(
-    fake_s3: FakeS3Client,
-) -> None:
+async def test_stream_upload_empty_body_writes_zero_byte_object(fake_s3: FakeS3Client) -> None:
     result = await stream_upload(
         storage_path="empty",
         chunks=_aiter(),
@@ -414,9 +405,7 @@ async def test_delete_object_removes_existing_key(fake_s3: FakeS3Client) -> None
 
 
 @pytest.mark.unit
-async def test_delete_object_is_idempotent_on_missing_key(
-    fake_s3: FakeS3Client,
-) -> None:
+async def test_delete_object_is_idempotent_on_missing_key(fake_s3: FakeS3Client) -> None:
     # No key uploaded; should NOT raise.
     await delete_object(storage_path="never-uploaded")
 

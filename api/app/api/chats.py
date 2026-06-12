@@ -1175,11 +1175,9 @@ async def send_message(
     )
     have_any_attached = bool(payload.skills) or bool(payload.attached_skills)
     if not have_any_attached and payload.content.startswith("/"):
-        (
-            resolved_slug,
-            effective_content,
-            slash_unresolved,
-        ) = await _maybe_resolve_leading_slash(request, db, user, payload.content)
+        resolved_slug, effective_content, slash_unresolved = await _maybe_resolve_leading_slash(
+            request, db, user, payload.content
+        )
         if resolved_slug is not None:
             effective_skills.append(resolved_slug)
             attached_skill_names.append(resolved_slug)

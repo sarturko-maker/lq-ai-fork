@@ -594,10 +594,5 @@ async def test_step_write_survives_a_transient_db_failure(
     assert run.status == "completed"
     assert run.error is None
     # Nothing lost and nothing doubled: the full ordered timeline exists.
-    assert [s.kind for s in steps] == [
-        "model_turn",
-        "tool_call",
-        "tool_result",
-        "model_turn",
-    ]
+    assert [s.kind for s in steps] == ["model_turn", "tool_call", "tool_result", "model_turn"]
     assert [s.seq for s in steps] == [1, 2, 3, 4]

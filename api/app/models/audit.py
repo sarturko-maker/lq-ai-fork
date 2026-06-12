@@ -11,15 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import (
-    Boolean,
-    CheckConstraint,
-    DateTime,
-    ForeignKey,
-    Integer,
-    String,
-    text,
-)
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, text
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 

@@ -170,9 +170,7 @@ async def test_schedule_sweep_skips_opted_out_owner(db_session: AsyncSession) ->
 
 
 @pytest.mark.integration
-async def test_schedule_sweep_fires_for_opted_in_owner(
-    db_session: AsyncSession,
-) -> None:
+async def test_schedule_sweep_fires_for_opted_in_owner(db_session: AsyncSession) -> None:
     """A due schedule whose owner has autonomous_enabled=True spawns one session."""
     from app.workers.autonomous_worker import _run_schedule_sweep
 

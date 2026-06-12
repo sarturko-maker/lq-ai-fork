@@ -346,10 +346,7 @@ async def test_ensemble_stage_emits_span(
     top_spans = _spans_by_name(span_exporter, "citation.verify")
     assert len(top_spans) == 1
     top = top_spans[0]
-    assert top.attributes.get("citation.method") in (
-        "ensemble_strict",
-        "ensemble_majority",
-    )
+    assert top.attributes.get("citation.method") in ("ensemble_strict", "ensemble_majority")
 
     ensemble_spans = _spans_by_name(span_exporter, "citation.stage.ensemble")
     assert len(ensemble_spans) == 1

@@ -348,9 +348,7 @@ async def test_sweep_fires_abort_for_stale_claimed_runs_only(
     await _age_row(commit_factory, stale_id, set_sql="heartbeat_at = now() - interval '10 minutes'")
     unclaimed_id = await make_run()
     await _age_row(
-        commit_factory,
-        unclaimed_id,
-        set_sql="started_at = now() - interval '30 minutes'",
+        commit_factory, unclaimed_id, set_sql="started_at = now() - interval '30 minutes'"
     )
     aborted: list[uuid.UUID] = []
 

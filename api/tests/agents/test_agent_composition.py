@@ -24,11 +24,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.agents.composition import (
-    MATTER_PROMPT,
-    compose_and_execute_run,
-    system_prompt_for,
-)
+from app.agents.composition import MATTER_PROMPT, compose_and_execute_run, system_prompt_for
 from app.agents.runner import SYSTEM_PROMPT
 from app.agents.tools import MatterBinding
 from app.models.agent_run import AgentRun, AgentThread
@@ -327,9 +323,7 @@ async def test_follow_up_run_continues_the_thread(comp_env: CompositionEnv) -> N
     assert joined.index("What is the liability cap?") < joined.index("What did I just ask you?")
 
 
-async def test_runs_on_different_threads_share_nothing(
-    comp_env: CompositionEnv,
-) -> None:
+async def test_runs_on_different_threads_share_nothing(comp_env: CompositionEnv) -> None:
     """Thread isolation (ADR-F008 / ADR-F004 runtime-verified isolation):
     a run on a DIFFERENT thread must not see another thread's history,
     even on the same checkpointer."""

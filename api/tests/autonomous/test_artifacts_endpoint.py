@@ -487,15 +487,7 @@ def test_openapi_artifact_schemas_in_components() -> None:
     assert "AutonomousArtifactListResponse" in schemas
 
     read_props = schemas["AutonomousArtifactRead"].get("properties", {})
-    for field in (
-        "id",
-        "name",
-        "mime",
-        "size_bytes",
-        "file_id",
-        "document_id",
-        "created_at",
-    ):
+    for field in ("id", "name", "mime", "size_bytes", "file_id", "document_id", "created_at"):
         assert field in read_props
 
     list_props = schemas["AutonomousArtifactListResponse"].get("properties", {})

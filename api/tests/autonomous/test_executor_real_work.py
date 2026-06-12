@@ -394,11 +394,7 @@ async def _make_drafting_session_with_kb(
     precedent) so the artifact persistence path has a real KB row to
     attach into.
     """
-    from tests.autonomous.conftest import (
-        _make_kb,
-        _make_optedin_user,
-        _make_running_session,
-    )
+    from tests.autonomous.conftest import _make_kb, _make_optedin_user, _make_running_session
 
     user = await _make_optedin_user(db_session)
     kb = await _make_kb(db_session, owner=user)

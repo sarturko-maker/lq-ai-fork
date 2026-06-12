@@ -290,11 +290,7 @@ async def test_multi_cluster_position_order_assigned_in_input_order() -> None:
         contract_type="NDA",
         gateway=gateway,  # type: ignore[arg-type]
     )
-    assert [p.issue for p in playbook.positions] == [
-        "Term",
-        "Governing Law",
-        "Audit Rights",
-    ]
+    assert [p.issue for p in playbook.positions] == ["Term", "Governing Law", "Audit Rights"]
     assert [p.position_order for p in playbook.positions] == [0, 1, 2]
 
 

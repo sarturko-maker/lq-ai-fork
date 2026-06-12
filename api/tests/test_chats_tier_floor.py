@@ -356,11 +356,7 @@ async def test_gateway_403_does_not_persist_assistant_message(
                 "error": {
                     "code": "tier_below_minimum",
                     "message": "below floor",
-                    "details": {
-                        "required_tier": 5,
-                        "resolved_tier": 4,
-                        "source": "request",
-                    },
+                    "details": {"required_tier": 5, "resolved_tier": 4, "source": "request"},
                 }
             },
         )

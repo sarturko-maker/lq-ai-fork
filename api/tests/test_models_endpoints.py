@@ -229,11 +229,7 @@ async def test_send_message_round_trips_raw_provider_model(
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {
-                    "prompt_tokens": 4,
-                    "completion_tokens": 2,
-                    "total_tokens": 6,
-                },
+                "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
                 "routed_inference_tier": 4,
                 "routed_provider": "anthropic-prod",
             },

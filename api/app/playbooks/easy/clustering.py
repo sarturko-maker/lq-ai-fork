@@ -341,9 +341,7 @@ def _normalize_issue_label(label: str) -> str:
     return _LABEL_WHITESPACE_RE.sub(" ", label.strip().lower())
 
 
-def _group_by_normalized_label(
-    clauses: list[ClauseInput],
-) -> dict[str, list[ClauseInput]]:
+def _group_by_normalized_label(clauses: list[ClauseInput]) -> dict[str, list[ClauseInput]]:
     """Group clauses by the normalized form of their issue label."""
 
     groups: dict[str, list[ClauseInput]] = defaultdict(list)

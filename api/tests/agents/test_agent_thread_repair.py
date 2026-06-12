@@ -69,9 +69,7 @@ async def make_thread_run(
     user_ids: list[uuid.UUID] = []
 
     async def _make(
-        *,
-        thread_id: uuid.UUID | None = None,
-        prompt: str = "What is the liability cap?",
+        *, thread_id: uuid.UUID | None = None, prompt: str = "What is the liability cap?"
     ) -> tuple[uuid.UUID, uuid.UUID]:
         async with commit_factory() as db:
             user = User(

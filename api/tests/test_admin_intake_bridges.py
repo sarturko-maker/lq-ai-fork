@@ -60,9 +60,7 @@ async def _make_user(
 
 
 @pytest_asyncio.fixture
-async def admin_client(
-    db_session: AsyncSession,
-) -> AsyncIterator[tuple[AsyncClient, str]]:
+async def admin_client(db_session: AsyncSession) -> AsyncIterator[tuple[AsyncClient, str]]:
     _user, token = await _make_user(
         db_session,
         email="admin-intake@example.com",
@@ -76,9 +74,7 @@ async def admin_client(
 
 
 @pytest_asyncio.fixture
-async def member_client(
-    db_session: AsyncSession,
-) -> AsyncIterator[tuple[AsyncClient, str]]:
+async def member_client(db_session: AsyncSession) -> AsyncIterator[tuple[AsyncClient, str]]:
     _user, token = await _make_user(
         db_session,
         email="member-intake@example.com",
@@ -209,10 +205,7 @@ async def test_list_sorts_by_installed_at_desc(
         headers={"Authorization": f"Bearer {token}"},
     )
     body = res.json()
-    assert [row["team_id"] for row in body["slack_workspaces"]] == [
-        "T-newer",
-        "T-older",
-    ]
+    assert [row["team_id"] for row in body["slack_workspaces"]] == ["T-newer", "T-older"]
 
 
 @pytest.mark.integration

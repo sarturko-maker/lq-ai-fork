@@ -268,10 +268,7 @@ async def test_embed_failure_with_zero_progress_marks_embed_failed(
     async def _raise(*_args: Any, **_kwargs: Any) -> list[list[float]]:
         raise RuntimeError("gateway unreachable")
 
-    with patch(
-        "app.knowledge.embed.request_embedding_vectors",
-        new=AsyncMock(side_effect=_raise),
-    ):
+    with patch("app.knowledge.embed.request_embedding_vectors", new=AsyncMock(side_effect=_raise)):
         result = await embed_chunks_for_file(db_session, f.id)
 
     assert result.chunks_embedded == 0
@@ -301,10 +298,7 @@ async def test_embed_failure_after_partial_progress_marks_partial(
             return _vectors(len(texts))
         raise RuntimeError("transient embedding error")
 
-    with patch(
-        "app.knowledge.embed.request_embedding_vectors",
-        new=AsyncMock(side_effect=_flaky),
-    ):
+    with patch("app.knowledge.embed.request_embedding_vectors", new=AsyncMock(side_effect=_flaky)):
         result = await embed_chunks_for_file(db_session, f.id)
 
     assert 0 < result.chunks_embedded < 150
@@ -334,8 +328,7 @@ async def test_embed_success_clears_prior_failure_back_to_ok(
         return _vectors(len(texts))
 
     with patch(
-        "app.knowledge.embed.request_embedding_vectors",
-        new=AsyncMock(side_effect=_succeed),
+        "app.knowledge.embed.request_embedding_vectors", new=AsyncMock(side_effect=_succeed)
     ):
         result = await embed_chunks_for_file(db_session, f.id)
 

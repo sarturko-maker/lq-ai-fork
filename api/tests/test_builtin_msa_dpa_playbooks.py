@@ -133,12 +133,9 @@ def test_each_position_has_required_string_fields(slug: str) -> None:
     for pos in parsed.get("positions") or []:
         assert pos.get("standard_language"), f"{slug}/{pos['issue']}: missing standard_language."
         assert pos.get("redline_strategy"), f"{slug}/{pos['issue']}: missing redline_strategy."
-        assert pos.get("severity_if_missing") in {
-            "critical",
-            "high",
-            "medium",
-            "low",
-        }, f"{slug}/{pos['issue']}: severity_if_missing not in canonical enum."
+        assert pos.get("severity_if_missing") in {"critical", "high", "medium", "low"}, (
+            f"{slug}/{pos['issue']}: severity_if_missing not in canonical enum."
+        )
         assert pos.get("detection_keywords"), (
             f"{slug}/{pos['issue']}: detection_keywords must be non-empty."
         )

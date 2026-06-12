@@ -402,11 +402,7 @@ def _stream_chunk(content: str) -> str:
         "created": 1_700_000_000,
         "model": "claude-sonnet-4-6",
         "choices": [
-            {
-                "index": 0,
-                "delta": {"role": "assistant", "content": content},
-                "finish_reason": None,
-            }
+            {"index": 0, "delta": {"role": "assistant", "content": content}, "finish_reason": None}
         ],
         "routed_inference_tier": 3,
         "routed_provider": "anthropic-prod",
@@ -464,11 +460,7 @@ async def test_file_ids_foreign_owner_404(
     token = _bearer_for(db_user)
     response = await client.post(
         f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
-        json={
-            "content": "summarize this",
-            "model": "smart",
-            "file_ids": [str(foreign.id)],
-        },
+        json={"content": "summarize this", "model": "smart", "file_ids": [str(foreign.id)]},
         headers={"Authorization": f"Bearer {token}"},
     )
 

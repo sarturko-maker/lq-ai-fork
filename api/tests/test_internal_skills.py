@@ -94,9 +94,7 @@ async def client_without_key(
 
 
 @pytest.mark.integration
-async def test_internal_skill_unauthenticated_returns_401(
-    client_with_key: AsyncClient,
-) -> None:
+async def test_internal_skill_unauthenticated_returns_401(client_with_key: AsyncClient) -> None:
     """No gateway-key header → 401 with structured envelope."""
 
     resp = await client_with_key.get("/api/v1/internal/skills/alpha-test-skill")
@@ -106,9 +104,7 @@ async def test_internal_skill_unauthenticated_returns_401(
 
 
 @pytest.mark.integration
-async def test_internal_skill_wrong_key_returns_401(
-    client_with_key: AsyncClient,
-) -> None:
+async def test_internal_skill_wrong_key_returns_401(client_with_key: AsyncClient) -> None:
     """Wrong gateway-key value → 401."""
 
     resp = await client_with_key.get(
@@ -170,9 +166,7 @@ async def test_internal_skill_no_configured_key_returns_500(
 
 
 @pytest.mark.integration
-async def test_internal_skill_constant_time_compare(
-    client_with_key: AsyncClient,
-) -> None:
+async def test_internal_skill_constant_time_compare(client_with_key: AsyncClient) -> None:
     """Even a key with the right prefix is rejected — no early-exit leak."""
 
     # Same prefix, but wrong tail.

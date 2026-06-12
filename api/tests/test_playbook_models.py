@@ -328,11 +328,7 @@ async def test_playbook_execution_results_jsonb_round_trip(
 
     payload = {
         "positions": [
-            {
-                "id": str(uuid.uuid4()),
-                "verdict": "matches_standard",
-                "confidence": 0.95,
-            },
+            {"id": str(uuid.uuid4()), "verdict": "matches_standard", "confidence": 0.95},
             {
                 "id": str(uuid.uuid4()),
                 "verdict": "deviates",

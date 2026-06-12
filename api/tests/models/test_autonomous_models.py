@@ -450,9 +450,7 @@ async def test_precedent_user_isolation(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.integration
-async def test_source_session_set_null_on_session_delete(
-    db_session: AsyncSession,
-) -> None:
+async def test_source_session_set_null_on_session_delete(db_session: AsyncSession) -> None:
     """Deleting the source session nulls source_session_id but keeps the rows.
 
     Contrast with test_session_cascade_on_user_delete: a user delete CASCADEs

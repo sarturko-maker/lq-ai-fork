@@ -539,12 +539,7 @@ async def test_receipt_assembles_phase_transitions_and_tool_calls(
     await autonomous_audit(db_session, sess, "phase_transition", to_phase="intake")
     await autonomous_audit(db_session, sess, "tool_call", tool="retrieve_chunks", outcome="started")
     await autonomous_audit(
-        db_session,
-        sess,
-        "tool_call",
-        tool="retrieve_chunks",
-        outcome="success",
-        cost_usd=0.0,
+        db_session, sess, "tool_call", tool="retrieve_chunks", outcome="success", cost_usd=0.0
     )
     await autonomous_audit(db_session, sess, "phase_transition", to_phase="analysis")
     await db_session.flush()

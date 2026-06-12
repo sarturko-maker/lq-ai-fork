@@ -927,11 +927,7 @@ async def test_accept_appends_to_context_md(
     prec = await _make_precedent(db_session, user=user_a)
     project = await _make_project(db_session, user=user_a, context_md="existing")
     proposal = await _make_proposal(
-        db_session,
-        user=user_a,
-        project=project,
-        precedent=prec,
-        suggested_md="- new line",
+        db_session, user=user_a, project=project, precedent=prec, suggested_md="- new line"
     )
 
     resp = await client.post(
@@ -956,11 +952,7 @@ async def test_accept_initializes_null_context_md(
     prec = await _make_precedent(db_session, user=user_a)
     project = await _make_project(db_session, user=user_a, context_md=None)
     proposal = await _make_proposal(
-        db_session,
-        user=user_a,
-        project=project,
-        precedent=prec,
-        suggested_md="- first context",
+        db_session, user=user_a, project=project, precedent=prec, suggested_md="- first context"
     )
 
     resp = await client.post(
@@ -1018,11 +1010,7 @@ async def test_accept_reject_accept_does_not_double_append(
     prec = await _make_precedent(db_session, user=user_a)
     project = await _make_project(db_session, user=user_a, context_md="base")
     proposal = await _make_proposal(
-        db_session,
-        user=user_a,
-        project=project,
-        precedent=prec,
-        suggested_md="- once-only",
+        db_session, user=user_a, project=project, precedent=prec, suggested_md="- once-only"
     )
 
     # First accept — appends once.
@@ -1132,11 +1120,7 @@ async def test_reject_sets_rejected_and_leaves_context(
     prec = await _make_precedent(db_session, user=user_a)
     project = await _make_project(db_session, user=user_a, context_md="keep me")
     proposal = await _make_proposal(
-        db_session,
-        user=user_a,
-        project=project,
-        precedent=prec,
-        suggested_md="- ignored",
+        db_session, user=user_a, project=project, precedent=prec, suggested_md="- ignored"
     )
 
     resp = await client.post(
@@ -1180,11 +1164,7 @@ async def test_reject_then_accept_appends(
     prec = await _make_precedent(db_session, user=user_a)
     project = await _make_project(db_session, user=user_a, context_md="base")
     proposal = await _make_proposal(
-        db_session,
-        user=user_a,
-        project=project,
-        precedent=prec,
-        suggested_md="- revived",
+        db_session, user=user_a, project=project, precedent=prec, suggested_md="- revived"
     )
 
     await client.post(
@@ -1305,12 +1285,5 @@ def test_openapi_b2_schemas_in_components() -> None:
     assert "PromotePrecedentRequest" in schemas
 
     prop = schemas["ProjectContextProposalRead"].get("properties", {})
-    for field in (
-        "id",
-        "user_id",
-        "precedent_id",
-        "project_id",
-        "suggested_md",
-        "state",
-    ):
+    for field in ("id", "user_id", "precedent_id", "project_id", "suggested_md", "state"):
         assert field in prop

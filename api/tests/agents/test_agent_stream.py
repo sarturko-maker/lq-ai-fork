@@ -459,12 +459,7 @@ async def test_stream_replays_terminal_run_and_closes(
         final_answer="The cap is twelve months of fees.",
     )
     call = await _add_step(
-        commit_factory,
-        run,
-        seq=1,
-        kind="tool_call",
-        name="task",
-        summary='{"description":"x"}',
+        commit_factory, run, seq=1, kind="tool_call", name="task", summary='{"description":"x"}'
     )
     await _add_step(
         commit_factory,
@@ -707,9 +702,7 @@ def test_run_is_orphaned_mirrors_the_sweep_rules() -> None:
 
     # Claimed + fresh heartbeat: alive, even if started long ago.
     alive = run_row(
-        started_at=now - timedelta(hours=2),
-        claimed_at=now - timedelta(hours=2),
-        heartbeat_at=now,
+        started_at=now - timedelta(hours=2), claimed_at=now - timedelta(hours=2), heartbeat_at=now
     )
     assert _run_is_orphaned(alive, now) is False
     # Claimed + heartbeat stale past orphan_after + slack: belt fires.

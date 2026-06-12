@@ -330,14 +330,8 @@ async def test_dissimilar_clause_centroids_stay_separate() -> None:
         ],
     )
     clauses = [
-        _mk(
-            "Confidential Information — Definition",
-            "Confidential Information includes [...]",
-        ),
-        _mk(
-            "Confidential Information — Exclusions",
-            "The obligations do not apply to [...]",
-        ),
+        _mk("Confidential Information — Definition", "Confidential Information includes [...]"),
+        _mk("Confidential Information — Exclusions", "The obligations do not apply to [...]"),
     ]
     clusters = await cluster_clauses_by_issue(
         clauses=clauses,

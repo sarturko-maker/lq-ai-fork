@@ -390,13 +390,7 @@ async def test_inputs_reads_from_user_skill_shadow(
             body="custom body",
             frontmatter_extra={
                 "inputs": {
-                    "required": [
-                        {
-                            "name": "override_required",
-                            "type": "enum",
-                            "enum": ["a", "b"],
-                        }
-                    ],
+                    "required": [{"name": "override_required", "type": "enum", "enum": ["a", "b"]}],
                     "optional": [{"name": "override_optional", "type": "text"}],
                 },
             },

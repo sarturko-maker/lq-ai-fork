@@ -151,10 +151,7 @@ async def run_playbook_execution(
         # The kick-off endpoint already returned 202; the client polls.
         logger.exception(
             "playbook executor crashed mid-graph",
-            extra={
-                "event": "playbook_executor_crash",
-                "execution_id": str(execution_id),
-            },
+            extra={"event": "playbook_executor_crash", "execution_id": str(execution_id)},
         )
         execution.status = "error"
         execution.error = f"{type(exc).__name__}: {exc}"[:2000]

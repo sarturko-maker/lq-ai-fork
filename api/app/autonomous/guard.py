@@ -235,12 +235,7 @@ async def guarded_tool_call(
         # ── dispatch ────────────────────────────────────────────────────────
         await autonomous_audit(db, session, "tool_call", tool=str(intent), outcome="started")
         result = await _dispatch(
-            intent,
-            params,
-            gateway=gateway,
-            db=db,
-            session=session,
-            estimated_cost=estimate,
+            intent, params, gateway=gateway, db=db, session=session, estimated_cost=estimate
         )
 
         # ── record cost + outcome ────────────────────────────────────────────
