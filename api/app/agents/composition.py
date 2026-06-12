@@ -89,12 +89,22 @@ async def compose_and_execute_run(
     publisher = broker.publisher(run_id) if broker is not None else None
     try:
         binding: MatterBinding | None = None
+        is_follow_up = False
         async with session_factory() as db:
             run = await db.get(AgentRun, run_id)
             if run is None:  # deleted underneath us (user cascade)
+                if publisher is not None:
+                    publisher.close()
                 return
             model_alias, purpose = run.model_alias, run.purpose
             thread_id = run.thread_id
+            is_follow_up = (
+                await db.execute(
+                    select(AgentRun.id)
+                    .where(AgentRun.thread_id == thread_id, AgentRun.id != run_id)
+                    .limit(1)
+                )
+            ).scalar_one_or_none() is not None
             if run.project_id is not None:
                 project = (
                     await db.execute(
@@ -113,6 +123,24 @@ async def compose_and_execute_run(
                         privileged=project.privileged,
                         minimum_inference_tier=project.minimum_inference_tier,
                     )
+
+        checkpointer = checkpointer_provider()
+        if checkpointer is None and is_follow_up:
+            # Honest refusal (review fix): admission promised continuation
+            # (has_checkpoint passed API-side), but THIS process cannot
+            # read the conversation — executing would silently answer
+            # with zero history while the UI presents a continuation.
+            # The api's degraded mode refuses follow-ups the same way.
+            await settle_run(
+                session_factory,
+                run_id,
+                status=AgentRunStatus.failed,
+                error="persistence degraded: checkpointer unavailable in worker",
+                lease_token=lease.token if lease is not None else None,
+            )
+            if publisher is not None:
+                publisher.close()
+            return
 
         tools = (
             build_matter_tools(session_factory, run_id=run_id, binding=binding)
@@ -137,7 +165,7 @@ async def compose_and_execute_run(
                 tools=tools,
                 model=model,
                 system_prompt=system_prompt_for(binding),
-                checkpointer=checkpointer_provider(),
+                checkpointer=checkpointer,
                 thread_id=thread_id,
                 publisher=publisher,
                 lease=lease,
@@ -163,3 +191,7 @@ async def compose_and_execute_run(
             # No-op if the runner already closed the stream — this only
             # fires for failures BEFORE execute_agent_run took over.
             publisher.run_finished(status=AgentRunStatus.failed.value, error=error)
+        elif publisher is not None:
+            # Our settle was fenced out (cancel/sweep won): end the
+            # channel on the DB truth, never on a state we didn't write.
+            publisher.close()

@@ -60,7 +60,8 @@ AGENT_RUN_JOB_TIMEOUT_SECONDS = 420
 # One tag per worker boot: host:pid:boot-uuid. The uuid component is
 # what makes the tag unique across PID recycling / container restarts —
 # the lease token (a fresh uuid per CLAIM) is the actual fencing value;
-# this tag is informational for operators reading swept-run errors.
+# this tag surfaces in LOGS, the DB column, and audit details only —
+# never in user-facing error strings (internal identity, review fix).
 _WORKER_BOOT_TAG = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
 
@@ -89,7 +90,19 @@ async def execute_run_job(
 
         compose = compose_and_execute_run
 
-    lease = await claim_run(session_factory, run_id, claimed_by=claimed_by)
+    try:
+        lease = await claim_run(session_factory, run_id, claimed_by=claimed_by)
+    except Exception as exc:
+        # Belt over claim_run's retry-once: surface a claim-time DB blip
+        # to the user NOW (settle is status-conditional, monotonic-safe)
+        # instead of after the claim-grace sweep minutes later.
+        await settle_run(
+            session_factory,
+            run_id,
+            status=AgentRunStatus.failed,
+            error=f"claim failed: {type(exc).__name__}",
+        )
+        raise
     if lease is None:
         logger.info(
             "agent run not claimable (settled while queued, or already claimed)",
@@ -103,7 +116,9 @@ async def execute_run_job(
             session_factory,
             run_id,
             status=AgentRunStatus.failed,
-            error=f"run interrupted: worker shutdown or abort ({type(exc).__name__})",
+            # Covers arq abort, worker SIGTERM shutdown, AND the arq
+            # job timeout (420s) — all delivered as CancelledError.
+            error=f"run interrupted: worker shutdown, abort, or job timeout ({type(exc).__name__})",
             lease_token=lease.token,
         )
         logger.warning(
@@ -127,6 +142,7 @@ async def run_orphan_sweep(
     *,
     orphan_after_seconds: float,
     claim_grace_seconds: float,
+    abort_job: Callable[[uuid.UUID], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Settle dead ``running`` runs as FAILED (core; ADR-F009).
 
@@ -136,24 +152,33 @@ async def run_orphan_sweep(
 
     * CLAIMED row whose ``heartbeat_at`` is stale → the worker died (or
       an event drought outlasted the threshold — fenced-safe, see
-      ADR-F009).
-    * UNCLAIMED row older than the claim grace → the enqueue was lost,
-      or the worker died before claiming, or the row predates F1-S1
-      (BackgroundTasks rows have no live runner by construction).
+      ADR-F009). ``abort_job`` is then fired per settled run: a
+      false-orphaned ZOMBIE is still executing and its checkpoint/step
+      writes are not lease-fenced — the abort kills it within delivery
+      latency instead of the 300s wall clock (review fix).
+    * UNCLAIMED row older than the claim grace → the enqueue was lost
+      after acceptance, the worker died between dequeue and claim, or
+      the row predates F1-S1 (BackgroundTasks rows have no live runner
+      by construction). The grace is sized ABOVE the shared queue's
+      worst-case pickup delay (legacy jobs run up to 900s) so a
+      legitimately queued run is never falsely failed.
 
-    One audit row per settled run (counts/types/IDs — the audit
-    contract); audit failure never masks the settle.
+    Settles are COMMITTED before any audit write: the audit rows ride a
+    second transaction with per-row rollback-on-failure (the guard's
+    F0-S4 lesson), so a poisoned audit insert can never roll back a
+    settle — "audit failure never masks the settle" holds structurally.
+    The user-visible error is a constant string; the worker identity
+    (``claimed_by``) stays on the row + log/audit surfaces only.
     """
-    swept: list[tuple[uuid.UUID, uuid.UUID, str]] = []
+    swept: list[tuple[uuid.UUID, uuid.UUID, str, str | None]] = []
     async with session_factory() as db:
         stale = await db.execute(
             text(
                 "UPDATE agent_runs SET status = :failed, finished_at = now(), "
-                "error = 'orphaned: worker heartbeat stale (claimed_by ' || "
-                "coalesce(claimed_by, '?') || ')' "
+                "error = 'orphaned: worker heartbeat stale' "
                 "WHERE status = :running AND claimed_at IS NOT NULL "
                 "AND heartbeat_at < now() - make_interval(secs => :orphan_after) "
-                "RETURNING id, user_id"
+                "RETURNING id, user_id, claimed_by"
             ),
             {
                 "failed": AgentRunStatus.failed.value,
@@ -161,14 +186,14 @@ async def run_orphan_sweep(
                 "orphan_after": orphan_after_seconds,
             },
         )
-        swept.extend((row[0], row[1], "stale_heartbeat") for row in stale.fetchall())
+        swept.extend((row[0], row[1], "stale_heartbeat", row[2]) for row in stale.fetchall())
         unclaimed = await db.execute(
             text(
                 "UPDATE agent_runs SET status = :failed, finished_at = now(), "
                 "error = 'orphaned: never claimed by a worker' "
                 "WHERE status = :running AND claimed_at IS NULL "
                 "AND started_at < now() - make_interval(secs => :claim_grace) "
-                "RETURNING id, user_id"
+                "RETURNING id, user_id, claimed_by"
             ),
             {
                 "failed": AgentRunStatus.failed.value,
@@ -176,8 +201,17 @@ async def run_orphan_sweep(
                 "claim_grace": claim_grace_seconds,
             },
         )
-        swept.extend((row[0], row[1], "never_claimed") for row in unclaimed.fetchall())
-        for swept_run_id, user_id, reason in swept:
+        swept.extend((row[0], row[1], "never_claimed", row[2]) for row in unclaimed.fetchall())
+        # The settles are durable BEFORE anything else can fail.
+        await db.commit()
+
+    if not swept:
+        return {"swept": 0}
+
+    # Audit pass — separate transaction; a failed insert rolls back ONLY
+    # itself (guard.py:_audit posture) and never the settles above.
+    async with session_factory() as db:
+        for swept_run_id, user_id, reason, claimed_by in swept:
             try:
                 await audit_action(
                     db,
@@ -185,8 +219,9 @@ async def run_orphan_sweep(
                     action="agent_run.orphan_settled",
                     resource_type="agent_run",
                     resource_id=str(swept_run_id),
-                    details={"reason": reason},
+                    details={"reason": reason, "claimed_by": claimed_by},
                 )
+                await db.commit()
             except Exception:
                 logger.exception(
                     "orphan-settle audit write failed (settle stands)",
@@ -195,27 +230,50 @@ async def run_orphan_sweep(
                         "run_id": str(swept_run_id),
                     },
                 )
-        await db.commit()
-    if swept:
-        logger.warning(
-            "orphan sweep settled %d agent run(s) as failed",
-            len(swept),
-            extra={
-                "event": "agent_run_orphans_swept",
-                "count": len(swept),
-                "run_ids": [str(r[0]) for r in swept],
-            },
-        )
+                try:
+                    await db.rollback()
+                except Exception:
+                    logger.exception("rollback after failed sweep audit also failed")
+
+    # Kill surviving zombies: a stale-heartbeat run may still be
+    # EXECUTING (false orphan / long event drought) — best-effort abort.
+    if abort_job is not None:
+        for swept_run_id, _, reason, _ in swept:
+            if reason == "stale_heartbeat":
+                try:
+                    await abort_job(swept_run_id)
+                except Exception:
+                    logger.exception(
+                        "post-sweep abort failed (zombie bounded by wall clock)",
+                        extra={
+                            "event": "agent_run_sweep_abort_failed",
+                            "run_id": str(swept_run_id),
+                        },
+                    )
+
+    logger.warning(
+        "orphan sweep settled %d agent run(s) as failed",
+        len(swept),
+        extra={
+            "event": "agent_run_orphans_swept",
+            "count": len(swept),
+            "run_ids": [str(r[0]) for r in swept],
+            "claimed_by": [r[3] for r in swept],
+        },
+    )
     return {"swept": len(swept)}
 
 
 async def agent_run_orphan_sweep(ctx: dict[str, Any]) -> dict[str, Any]:
     """arq cron/startup wrapper around :func:`run_orphan_sweep`."""
+    from app.workers.queue import abort_agent_run_job
+
     settings = get_settings()
     return await run_orphan_sweep(
         get_session_factory(),
         orphan_after_seconds=settings.agent_run_orphan_after_seconds,
         claim_grace_seconds=settings.agent_run_claim_grace_seconds,
+        abort_job=abort_agent_run_job,
     )
 
 

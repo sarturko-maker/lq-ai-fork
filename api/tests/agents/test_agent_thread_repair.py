@@ -25,14 +25,14 @@ import pytest
 import pytest_asyncio
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import thread_config
 from app.agents.factory import build_deep_agent
 from app.agents.lease import claim_run, settle_run
 from app.agents.runner import execute_agent_run, repair_dangling_tool_calls
-from app.models.agent_run import AgentRun, AgentThread
+from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
 from app.models.user import User
 from app.schemas.agent_runs import AgentRunStatus
 from app.security import hash_password
@@ -261,23 +261,142 @@ async def test_heartbeat_hard_stops_a_run_settled_elsewhere(
     # The cancel endpoint wins the row before the loop starts.
     assert await settle_run(commit_factory, run_id, status=AgentRunStatus.cancelled)
 
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("quick_clause_lookup", {"topic": "liability"}),
+            final_message("should never be written"),
+        ],
+        loop_last=True,
+    )
     await execute_agent_run(
         run_id,
         commit_factory,
         tools=[quick_clause_lookup],
-        model=ScriptedToolCallingModel(
-            responses=[
-                tool_call_message("quick_clause_lookup", {"topic": "liability"}),
-                final_message("should never be written"),
-            ],
-            loop_last=True,
-        ),
+        model=model,
         lease=lease,
         heartbeat_seconds=0.0,  # beat on every event — deterministic stop
     )
 
+    # The hard-stop itself, not just monotonicity (review fix): the loop
+    # stopped BEFORE any model call (no gateway spend) and persisted
+    # nothing.
+    assert model.seen_messages == []
     async with commit_factory() as db:
+        steps = (
+            (await db.execute(select(AgentRunStep).where(AgentRunStep.run_id == run_id)))
+            .scalars()
+            .all()
+        )
+        assert steps == []
         run = await db.get(AgentRun, run_id)
         assert run is not None
         assert run.status == AgentRunStatus.cancelled.value
         assert run.final_answer is None
+
+
+async def slow_clause_lookup(topic: str) -> str:
+    """Slower than the instant tool but still inside the wall clock."""
+    await asyncio.sleep(0.3)
+    return "Clause 9: governing law is Delaware."
+
+
+async def test_repair_sees_the_checkpoint_view_not_pending_writes(
+    commit_factory: async_sessionmaker[AsyncSession],
+    make_thread_run: Callable[..., Awaitable[tuple[uuid.UUID, uuid.UUID]]],
+) -> None:
+    """Review fix (#3789 window): a run can die AFTER one parallel
+    tool's result landed as a PENDING WRITE but BEFORE the superstep
+    checkpoint. An un-pinned aget_state shows that call answered; the
+    next invoke DISCARDS pending writes. Repair must use the pinned
+    (checkpoint-only) view, or the dangling call survives repair and
+    re-enters the middleware wedge path."""
+    saver = InMemorySaver()
+    thread_id, run_id = await make_thread_run()
+    # One AIMessage requesting TWO parallel tools: one finishes fast
+    # (its write can land as a pending write), one outlives the wall
+    # clock (kills the superstep before its checkpoint).
+    two_calls = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "slow_clause_lookup",
+                "args": {"topic": "law"},
+                "id": "call_fast",
+                "type": "tool_call",
+            },
+            {
+                "name": "hanging_clause_lookup",
+                "args": {"topic": "liability"},
+                "id": "call_hang",
+                "type": "tool_call",
+            },
+        ],
+    )
+    await execute_agent_run(
+        run_id,
+        commit_factory,
+        tools=[slow_clause_lookup, hanging_clause_lookup],
+        model=ScriptedToolCallingModel(responses=[two_calls]),
+        wall_clock_seconds=3.0,
+        checkpointer=saver,
+        thread_id=thread_id,
+    )
+
+    agent = build_deep_agent(
+        model=ScriptedToolCallingModel(responses=[final_message("unused")]),
+        tools=[slow_clause_lookup, hanging_clause_lookup],
+        system_prompt="test",
+        checkpointer=saver,
+    )
+    repaired = await repair_dangling_tool_calls(agent, thread_id)
+    # BOTH calls must be answered in the checkpoint view the next invoke
+    # uses — the fast call's ToolMessage existed (if at all) only as a
+    # pending write the invoke would discard.
+    assert repaired == 2
+
+    # And the follow-up completes — the actual user-facing guarantee.
+    _, run2_id = await make_thread_run(thread_id=thread_id, prompt="And the cap?")
+    await execute_agent_run(
+        run2_id,
+        commit_factory,
+        tools=[slow_clause_lookup, hanging_clause_lookup],
+        model=ScriptedToolCallingModel(responses=[final_message("Twelve months of fees.")]),
+        checkpointer=saver,
+        thread_id=thread_id,
+    )
+    async with commit_factory() as db:
+        run2 = await db.get(AgentRun, run2_id)
+        assert run2 is not None and run2.status == AgentRunStatus.completed.value
+
+
+async def test_follow_up_with_degraded_checkpointer_settles_failed(
+    commit_factory: async_sessionmaker[AsyncSession],
+    make_thread_run: Callable[..., Awaitable[tuple[uuid.UUID, uuid.UUID]]],
+) -> None:
+    """Review fix: admission promised continuation (API-side saver), but
+    the WORKER's checkpointer is degraded — executing would silently
+    answer with zero history while the UI presents a continuation.
+    Refuse honestly instead."""
+    from app.agents.composition import compose_and_execute_run
+
+    thread_id, first_run_id = await make_thread_run()
+    # Settle run 1 first — the partial unique index allows only one
+    # RUNNING run per thread (and a real follow-up is only admitted
+    # after the prior run settled anyway).
+    assert await settle_run(commit_factory, first_run_id, status=AgentRunStatus.failed, error="x")
+    _, run2_id = await make_thread_run(thread_id=thread_id, prompt="continue?")
+
+    model = ScriptedToolCallingModel(responses=[final_message("should never run")])
+    await compose_and_execute_run(
+        run_id=run2_id,
+        model_builder=lambda **_kw: model,
+        session_factory_provider=lambda: commit_factory,
+        checkpointer_provider=lambda: None,
+    )
+
+    assert model.seen_messages == []  # never invoked
+    async with commit_factory() as db:
+        run2 = await db.get(AgentRun, run2_id)
+        assert run2 is not None
+        assert run2.status == AgentRunStatus.failed.value
+        assert run2.error == "persistence degraded: checkpointer unavailable in worker"

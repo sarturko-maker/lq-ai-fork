@@ -62,12 +62,15 @@ run FAILED within ~2 minutes and the conversation continues.
   per 15s, AND `guarded_dispatch` touches the heartbeat per tool dispatch
   (the two-source pattern; tool-boundary-only and per-job-only granularities
   both false-orphan in the field — Hermes/#7417).
-- EVERY worker write is fenced: heartbeat and terminal UPDATEs carry
-  `WHERE status='running' AND lease_token=:mine`, rowcount-checked. Rowcount
-  0 on heartbeat → the run was settled elsewhere (sweep/cancel) → the runner
-  hard-stops (`RunSettledElsewhere`), skips finalize. First terminal writer
-  wins; a zombie's late write is rejected by SQL (terminal-status
-  monotonicity).
+- Fencing, precisely scoped (review fix): every `agent_runs`
+  status/heartbeat write is conditional on `status='running'`; worker
+  terminal writes + the runner's throttled heartbeat additionally carry
+  `AND lease_token=:mine` (rowcount-checked). The guard touch is
+  status-conditional only (claims are once-only, so no successor lease can
+  exist) and COMMITS BEFORE the tool body. Step/audit appends are unfenced
+  — bounded by the heartbeat window + the sweep's active `Job.abort`.
+  Rowcount 0 on heartbeat → settled elsewhere → the runner hard-stops
+  (`RunSettledElsewhere`), skips finalize. First terminal writer wins.
 
 ### Orphan sweep (startup + every-minute cron on the arq worker)
 
@@ -76,17 +79,24 @@ Settles as FAILED, never re-enqueues (ADR-F009). One conditional UPDATE
 WHERE clause:
 
 - claimed + `heartbeat_at < now() - 120s` → `failed`,
-  error `orphaned: worker heartbeat stale`.
-- unclaimed + `started_at < now() - 300s` (claim grace ≫ heartbeat threshold;
-  covers lost enqueues, dead workers before claim, and pre-migration legacy
-  rows) → `failed`, error `orphaned: never claimed by a worker`.
+  error `orphaned: worker heartbeat stale` (constant string — the worker
+  tag stays in logs/audit/DB, never user-visible), then best-effort
+  `Job.abort` to kill a still-executing zombie.
+- unclaimed + `started_at < now() - 1200s` (claim grace > the shared
+  queue's 900s legacy job ceiling, so queued runs are never falsely
+  failed; covers lost enqueues, dead workers before claim, and
+  pre-migration legacy rows) → `failed`, error
+  `orphaned: never claimed by a worker`.
+- Settles COMMIT before the audit pass (separate transaction, per-row
+  rollback on failure) — a poisoned audit insert can never roll back a
+  settle.
 
 The `orphaned:` error prefix keeps infra deaths separable from agent failures
 (OpenClaw's `lost` lesson) without a new status value. One audit row per
 settled run (`agent_run.orphan_settled`, counts/types/IDs). A false-orphan
 (event drought > 120s on a live run) is SAFE — fencing halts the zombie — just
 rude; the threshold is settings-overridable. 300s wall clock still bounds all
-runs. Thresholds: heartbeat 15s / orphan 120s (8 missed beats) / grace 300s.
+runs. Thresholds: heartbeat 15s / orphan 120s (8 missed beats) / grace 1200s.
 
 ### Cancel endpoint (settle-first, idempotent)
 

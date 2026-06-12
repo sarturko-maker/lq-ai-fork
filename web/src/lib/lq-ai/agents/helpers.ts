@@ -33,11 +33,15 @@ export const POLL_INTERVAL_MS = 2000;
 export const MAX_POLL_FAILURES = 3;
 
 /**
- * Cutoff for runs stuck at 'running': the runner's wall-clock budget is
- * 300 s (execute_agent_run default) plus slack for the failure write.
- * BackgroundTasks die with the api process and no recovery sweep exists yet
- * (deferred to the arq migration), so an older 'running' row will never
- * settle — render it stale and stop polling instead of waiting forever.
+ * Cutoff for runs stuck at 'running'. Since F1-S1 runs execute on the
+ * arq worker and a server-side orphan sweep settles crashed runs FAILED
+ * (heartbeat-based, ~2 min) — this client cutoff is only the belt for a
+ * dead sweep (worker down entirely). Honest approximation: started_at
+ * is now ENQUEUE time, so a run queued behind a long legacy job can
+ * exceed this cutoff while legitimately waiting; it renders stale here
+ * but settles correctly server-side (the run read model does not expose
+ * the lease columns the server's own belt reads — accepted trade-off,
+ * see api _run_is_orphaned).
  */
 export const STALE_RUNNING_AFTER_MS = 330_000;
 

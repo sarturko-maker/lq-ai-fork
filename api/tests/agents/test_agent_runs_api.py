@@ -863,3 +863,31 @@ async def test_one_running_run_per_thread_is_db_enforced(
     with pytest.raises(IntegrityError):
         await _make_run(db_session, user=user_a, status="running", thread=thread)
     await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_create_run_settles_failed_when_enqueue_fails(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+) -> None:
+    """ADR-F009 'never a silent zombie': an unqueued run has no executor —
+    the 202 must carry the SETTLED row, not a phantom 'running'."""
+
+    async def _enqueue_fails(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_enqueue_fails):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "will not be queued"},
+        )
+
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "failed"
+    assert body["error"] == "enqueue failed: no worker will execute this run"
+    assert body["finished_at"] is not None
+    run = await db_session.get(AgentRun, uuid.UUID(body["id"]))
+    assert run is not None and run.status == "failed"

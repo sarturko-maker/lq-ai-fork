@@ -120,8 +120,7 @@ async def test_sweep_settles_stale_heartbeat_run_with_audit(
     assert result["swept"] == 1
     row = await _row(commit_factory, run_id)
     assert row.status == AgentRunStatus.failed.value
-    assert row.error is not None and row.error.startswith("orphaned: worker heartbeat stale")
-    assert "dead-worker" in row.error
+    assert row.error == "orphaned: worker heartbeat stale"  # constant — no worker identity
     assert row.finished_at is not None
     async with commit_factory() as db:
         audit = (
@@ -133,6 +132,7 @@ async def test_sweep_settles_stale_heartbeat_run_with_audit(
             )
         ).scalar_one()
         assert audit.details is not None and audit.details["reason"] == "stale_heartbeat"
+        assert audit.details["claimed_by"] == "dead-worker"  # ops identity lives HERE, not in error
         await db.execute(delete(AuditLog).where(AuditLog.id == audit.id))
         await db.commit()
 
@@ -292,3 +292,132 @@ async def test_job_interruption_never_overwrites_a_cancel(
         )
 
     assert (await _row(commit_factory, run_id)).status == AgentRunStatus.cancelled.value
+
+
+async def test_sweep_settles_survive_a_failing_audit_write(
+    commit_factory: async_sessionmaker[AsyncSession],
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+) -> None:
+    """Review fix: settles COMMIT before the audit pass — a poisoned
+    audit insert must never roll back a settle ('audit failure never
+    masks the settle' is structural, not aspirational)."""
+    run_id = await make_run()
+    assert await claim_run(commit_factory, run_id, claimed_by="dead-worker") is not None
+    await _age_row(commit_factory, run_id, set_sql="heartbeat_at = now() - interval '10 minutes'")
+
+    class _AuditPoisoningFactory:
+        """First session (the settle) is real; later sessions (the audit
+        pass) get a session whose flush explodes."""
+
+        def __init__(self, inner: async_sessionmaker[AsyncSession]) -> None:
+            self._inner = inner
+            self.calls = 0
+
+        def __call__(self) -> Any:
+            self.calls += 1
+            session = self._inner()
+            if self.calls > 1:
+
+                async def _boom(*_a: Any, **_k: Any) -> None:
+                    raise RuntimeError("audit insert refused")
+
+                session.flush = _boom  # type: ignore[method-assign]
+            return session
+
+    poisoned = _AuditPoisoningFactory(commit_factory)
+    result = await run_orphan_sweep(
+        poisoned,  # type: ignore[arg-type]
+        orphan_after_seconds=120.0,
+        claim_grace_seconds=300.0,
+    )
+
+    assert result["swept"] == 1
+    row = await _row(commit_factory, run_id)
+    assert row.status == AgentRunStatus.failed.value  # the settle stands
+
+
+async def test_sweep_fires_abort_for_stale_claimed_runs_only(
+    commit_factory: async_sessionmaker[AsyncSession],
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+) -> None:
+    """A false-orphaned zombie may still be EXECUTING — the sweep must
+    actively abort it (review fix); never-claimed runs have no job
+    worth aborting once settled (arq settles them at redelivery)."""
+    stale_id = await make_run()
+    assert await claim_run(commit_factory, stale_id, claimed_by="dead") is not None
+    await _age_row(commit_factory, stale_id, set_sql="heartbeat_at = now() - interval '10 minutes'")
+    unclaimed_id = await make_run()
+    await _age_row(
+        commit_factory, unclaimed_id, set_sql="started_at = now() - interval '30 minutes'"
+    )
+    aborted: list[uuid.UUID] = []
+
+    async def fake_abort(run_id: uuid.UUID) -> None:
+        aborted.append(run_id)
+
+    result = await run_orphan_sweep(
+        commit_factory,
+        orphan_after_seconds=120.0,
+        claim_grace_seconds=300.0,
+        abort_job=fake_abort,
+    )
+
+    assert result["swept"] == 2
+    assert aborted == [stale_id]
+    async with commit_factory() as db:
+        await db.execute(
+            delete(AuditLog).where(AuditLog.resource_id.in_([str(stale_id), str(unclaimed_id)]))
+        )
+        await db.commit()
+
+
+async def test_claim_failure_settles_the_run_before_reraising(
+    commit_factory: async_sessionmaker[AsyncSession],
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+) -> None:
+    """A claim-time DB blip must surface to the user immediately, not
+    via the claim-grace sweep minutes later (review fix)."""
+    run_id = await make_run()
+
+    class _ClaimFailsFactory:
+        """Fails the first TWO sessions (claim attempt + its retry);
+        later sessions (the settle) are real."""
+
+        def __init__(self, inner: async_sessionmaker[AsyncSession]) -> None:
+            self._inner = inner
+            self.calls = 0
+
+        def __call__(self) -> Any:
+            self.calls += 1
+            if self.calls <= 2:
+                raise RuntimeError("connection refused")
+            return self._inner()
+
+    failing = _ClaimFailsFactory(commit_factory)
+    with pytest.raises(RuntimeError, match="connection refused"):
+        await execute_run_job(
+            failing,  # type: ignore[arg-type]
+            run_id,
+            claimed_by="w1",
+        )
+
+    row = await _row(commit_factory, run_id)
+    assert row.status == AgentRunStatus.failed.value
+    assert row.error == "claim failed: RuntimeError"
+
+
+async def test_arq_registration_pins_at_most_once() -> None:
+    """The slice's headline mechanism must not silently regress to the
+    worker defaults (max_tries=5 / timeout=900 — at-least-once)."""
+    pytest.importorskip("arq")
+    from app.workers.agent_run_worker import AGENT_RUN_JOB_TIMEOUT_SECONDS
+    from app.workers.arq_setup import WorkerSettings
+
+    agent_fns = [f for f in WorkerSettings.functions if getattr(f, "name", None) == "agent_run_job"]
+    assert len(agent_fns) == 1, "agent_run_job must be registered exactly once via func()"
+    fn = agent_fns[0]
+    assert fn.max_tries == 1  # ADR-F009: at-most-once
+    assert fn.timeout_s == AGENT_RUN_JOB_TIMEOUT_SECONDS
+    assert WorkerSettings.allow_abort_jobs is True
+    cron_names = {cj.coroutine.__name__ for cj in WorkerSettings.cron_jobs}  # type: ignore[attr-defined]
+    assert {"agent_run_orphan_sweep", "checkpoint_gc_job"} <= cron_names

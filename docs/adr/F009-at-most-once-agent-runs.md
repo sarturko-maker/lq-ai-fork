@@ -46,9 +46,17 @@ documents — an unacceptable trade for an in-house legal tool. Concretely:
   collision (`enqueue_job` → `None`) settles the run `failed` immediately.
 - Liveness is a positive signal: per-claim lease (`lease_token`) +
   `heartbeat_at` written from inside the stream loop (throttled) and at the
-  `guarded_tool_call` chokepoint. Every worker write is fenced
-  (`WHERE status='running' AND lease_token=:mine`, rowcount-checked) — the
-  first terminal writer wins; a zombie's late write is rejected by SQL.
+  `guarded_tool_call` chokepoint. The fencing invariant, precisely: every
+  `agent_runs` status/heartbeat write is conditional on `status='running'`
+  (terminal-status monotonicity — the first terminal writer wins); worker
+  terminal writes and the runner's throttled heartbeat are ADDITIONALLY
+  lease-fenced (`AND lease_token=:mine`, rowcount-checked). The guard's
+  tool-boundary touch is status-conditional only — safe because claims are
+  once-only (`claimed_by IS NULL`), so no successor lease can exist. Step
+  and audit APPENDS are unfenced: a zombie can accrue them (and gateway
+  spend) for up to one heartbeat interval before it hard-stops; the sweep
+  also fires `Job.abort` at every stale-heartbeat settle to kill zombies
+  actively.
 - A startup + every-minute sweep settles stale runs as `failed` with an
   `orphaned:` error prefix (infra deaths stay separable from agent errors).
   The sweep NEVER re-enqueues.
@@ -69,5 +77,19 @@ documents — an unacceptable trade for an in-house legal tool. Concretely:
 - False-orphans (heartbeat drought on a live run) are safe but rude — the
   fenced zombie halts; the run reports failed while having partially run.
   Threshold (120s) is settings-tunable; the 300s wall clock bounds all runs.
+  A single tool body longer than the threshold is the drought case: neither
+  liveness source fires inside one tool await.
+- Two-writers window: a settled run's zombie may write checkpoint/step
+  rows for up to one heartbeat interval (≤15s; sweep-abort shortens it)
+  while a follow-up is already admitted — the lineage can briefly fork.
+  Accepted: bounded, rare, and a per-thread write lock is F1-S5 territory
+  (the idempotency-ledger slice owns multi-writer semantics).
+- Queue wait counts as `running`: the row is created at POST, claimed at
+  pickup. The claim grace (1200s) exceeds the shared queue's worst-case
+  pickup delay (legacy jobs run 900s), so queued runs are never falsely
+  failed — at the cost of slow detection for the rare lost-enqueue zombie
+  (enqueue FAILURES settle immediately at POST). A worker outage holds the
+  user's flood-brake slots until the sweep clears them; cancel is the
+  escape hatch.
 - The arq in-progress key (timeout+10s, never renewed) makes arq's own
   recovery the slow backstop; our sweep is the fast path by design.

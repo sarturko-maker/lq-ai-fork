@@ -68,7 +68,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import get_agent_checkpointer, has_checkpoint
-from app.agents.lease import settle_run
 from app.agents.stream import (
     CHANNEL_CLOSED,
     SSE_DONE,
@@ -82,6 +81,7 @@ from app.agents.stream import (
 )
 from app.api.dependencies import ActiveUser
 from app.audit import audit_action
+from app.config import get_settings
 from app.db.session import get_db, get_session_factory
 from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
 from app.models.project import Project
@@ -178,22 +178,32 @@ StreamSessionFactory = Annotated[
 _STREAM_DB_POLL_SECONDS = 2.0
 _STREAM_HEARTBEAT_SECONDS = 15.0
 
-# A run still 'running' this long after start is ORPHANED (the runner's
-# wall clock is 300s and the terminal write always follows). Since
-# F1-S1 the worker-side orphan sweep settles such rows within ~2
-# minutes of heartbeat loss — this stream-side cutoff stays as the
-# belt for a dead SWEEP (worker down entirely): the stream must not
-# heartbeat a dead run open forever. Mirrors the web poller's
-# STALE_RUNNING_AFTER_MS (lib/lq-ai/agents/helpers.ts).
-_STREAM_STALE_AFTER_SECONDS = 330.0
+# Stream-side orphan belt (F1-S1 review fix): the worker-side sweep is
+# the authority — these cutoffs only close streams when the SWEEP
+# ITSELF is dead (worker down entirely), so they mirror the sweep's two
+# rules with generous slack on top, reading the lease columns. A run's
+# started_at is now ENQUEUE time, not execution start — a wall-age
+# cutoff would false-error queue-delayed runs. The web poller's
+# STALE_RUNNING_AFTER_MS stays a coarser client-side approximation.
+_STREAM_SWEEP_SLACK_SECONDS = 180.0
 
 
-def _run_is_orphaned(run: AgentRun) -> bool:
-    """True for a 'running' row whose runner can no longer settle it."""
+def _run_is_orphaned(run: AgentRun, db_now: datetime) -> bool:
+    """True for a 'running' row that the dead-sweep belt should close.
+
+    Compared against the DB clock (``db_now`` selected alongside the
+    row — one clock authority, matching the lease module).
+    """
     if run.status != AgentRunStatus.running.value:
         return False
-    age = (datetime.now(UTC) - run.started_at).total_seconds()
-    return age > _STREAM_STALE_AFTER_SECONDS
+    settings = get_settings()
+    if run.claimed_at is not None:
+        reference = run.heartbeat_at or run.claimed_at
+        threshold = settings.agent_run_orphan_after_seconds + _STREAM_SWEEP_SLACK_SECONDS
+    else:
+        reference = run.started_at
+        threshold = settings.agent_run_claim_grace_seconds + _STREAM_SWEEP_SLACK_SECONDS
+    return (db_now - reference).total_seconds() > threshold
 
 
 async def _latest_run_status(db: AsyncSession, thread_id: uuid.UUID) -> str | None:
@@ -388,14 +398,20 @@ async def create_agent_run(
     # F1-S1 (ADR-F009): execution happens on the arq worker. A run that
     # could not be queued has NO executor — settle it failed right here
     # (the sweep would catch it minutes later; the user shouldn't wait
-    # that long to learn nothing is running).
+    # that long to learn nothing is running). The settle uses THIS
+    # request's session (the DI seam tests drive), conditional on
+    # status='running' for monotonicity.
     if not await enqueue_agent_run_job(run.id):
-        await settle_run(
-            get_session_factory(),
-            run.id,
-            status=AgentRunStatus.failed,
-            error="enqueue failed: no worker will execute this run",
+        await db.execute(
+            sa_update(AgentRun)
+            .where(AgentRun.id == run.id, AgentRun.status == AgentRunStatus.running.value)
+            .values(
+                status=AgentRunStatus.failed.value,
+                error="enqueue failed: no worker will execute this run",
+                finished_at=func.now(),
+            )
         )
+        await db.commit()
         await db.refresh(run)
 
     return AgentRunRead.model_validate(run)
@@ -477,17 +493,19 @@ async def _read_stream_state(
     run_id: uuid.UUID,
     *,
     after_seq: int,
-) -> tuple[AgentRun | None, list[AgentRunStep]]:
-    """Run row + its settled steps beyond ``after_seq``, short session.
+) -> tuple[AgentRun | None, list[AgentRunStep], datetime]:
+    """Run row + settled steps beyond ``after_seq`` + the DB clock.
 
     The stream generator opens a FRESH short-lived session per read so a
     long-lived stream never pins a pool connection (the same posture as
-    the runner's per-step sessions).
+    the runner's per-step sessions). ``db_now`` rides along so the
+    orphan-belt comparison stays on the database clock (F1-S1).
     """
     async with session_factory() as db:
+        db_now: datetime = (await db.execute(select(func.now()))).scalar_one()
         run = await db.get(AgentRun, run_id)
         if run is None:
-            return None, []
+            return None, [], db_now
         steps = (
             (
                 await db.execute(
@@ -499,7 +517,7 @@ async def _read_stream_state(
             .scalars()
             .all()
         )
-        return run, list(steps)
+        return run, list(steps), db_now
 
 
 def _row_part(step: AgentRunStep) -> dict[str, object]:
@@ -548,7 +566,7 @@ async def _stream_run_events(
     queue = broker.subscribe(run_id)
     try:
         max_seq = 0
-        run, steps = await _read_stream_state(session_factory, run_id, after_seq=0)
+        run, steps, db_now = await _read_stream_state(session_factory, run_id, after_seq=0)
         for row in steps:
             max_seq = max(max_seq, row.seq)
             yield encode_sse(_row_part(row))
@@ -566,7 +584,7 @@ async def _stream_run_events(
                 yield encode_sse(part)
             yield SSE_DONE
             return
-        if _run_is_orphaned(run):
+        if _run_is_orphaned(run, db_now):
             yield encode_sse(
                 {"type": "error", "errorText": "run never settled (orphaned at 'running')"}
             )
@@ -581,7 +599,9 @@ async def _stream_run_events(
             except TimeoutError:
                 # Live queue silent — tail the settled rows (fallback
                 # path; emits nothing the client hasn't reconciled).
-                run, steps = await _read_stream_state(session_factory, run_id, after_seq=max_seq)
+                run, steps, db_now = await _read_stream_state(
+                    session_factory, run_id, after_seq=max_seq
+                )
                 for row in steps:
                     max_seq = max(max_seq, row.seq)
                     yield encode_sse(_row_part(row))
@@ -599,7 +619,7 @@ async def _stream_run_events(
                         yield encode_sse(tpart)
                     yield SSE_DONE
                     return
-                if _run_is_orphaned(run):
+                if _run_is_orphaned(run, db_now):
                     yield encode_sse(
                         {
                             "type": "error",
@@ -622,7 +642,9 @@ async def _stream_run_events(
             if part is CHANNEL_CLOSED:
                 # Finish raced past us (or the channel was evicted):
                 # flush the rows, end on the settled run state.
-                run, steps = await _read_stream_state(session_factory, run_id, after_seq=max_seq)
+                run, steps, db_now = await _read_stream_state(
+                    session_factory, run_id, after_seq=max_seq
+                )
                 for row in steps:
                     yield encode_sse(_row_part(row))
                 if run is not None and run.status != AgentRunStatus.running.value:
@@ -918,7 +940,13 @@ async def delete_agent_thread(
     """
     thread = (
         await db.execute(
-            select(AgentThread).where(AgentThread.id == thread_id, AgentThread.user_id == user.id)
+            select(AgentThread)
+            .where(AgentThread.id == thread_id, AgentThread.user_id == user.id)
+            # Serialize against follow-up admission (which takes the same
+            # lock): without it a concurrently admitted RUNNING run could
+            # be cascade-deleted mid-execution (review fix) — the
+            # thread_busy check below must be race-proof, not advisory.
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if thread is None:

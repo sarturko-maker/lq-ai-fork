@@ -97,9 +97,16 @@ async def guarded_dispatch(
 
         # R5 + liveness in one statement (F1-S1, ADR-F009): the UPDATE
         # only lands while the run is still 'running' — so a hit IS the
-        # status check, and the touched heartbeat is the second liveness
-        # source (tool-boundary cadence) beside the runner's throttled
-        # per-event beat. Long tool bodies keep the run visibly alive.
+        # status check, and the touched heartbeat is a second liveness
+        # source at tool-DISPATCH cadence beside the runner's throttled
+        # per-event beat. Committed IMMEDIATELY (before the tool body):
+        # the touch must be visible to the sweep while the body runs,
+        # must survive a tool-error rollback, and must not hold the
+        # agent_runs row lock under a slow tool (cancel/sweep would
+        # block behind it — review fix). Honest limit: a single tool
+        # body longer than agent_run_orphan_after_seconds can still be
+        # false-orphaned — fenced-safe per ADR-F009 (the zombie halts,
+        # the run reports failed; the sweep also fires an abort).
         touched = await db.execute(
             sa_update(AgentRun)
             .where(AgentRun.id == ctx.run_id, AgentRun.status == AgentRunStatus.running.value)
@@ -112,6 +119,7 @@ async def guarded_dispatch(
             await _audit(db, ctx, tool=tool, outcome="run_halted")
             await db.commit()
             raise AgentRunHalted(f"run is '{run_status}' — tool dispatch denied")
+        await db.commit()
 
         # R4: no-op — local DB reads, zero marginal inference cost.
         # Per-run budgets land with F1 (ADR-F002).

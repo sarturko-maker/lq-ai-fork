@@ -72,24 +72,31 @@ async def claim_run(
     re-enqueue under a fresh job id cannot double-execute a run.
     """
     token = uuid.uuid4()
-    async with session_factory() as db:
-        result = await db.execute(
-            text(
-                "UPDATE agent_runs SET claimed_by = :who, claimed_at = now(), "
-                "lease_token = :token, heartbeat_at = now() "
-                "WHERE id = :run_id AND status = :running AND claimed_by IS NULL"
-            ),
-            {
-                "who": claimed_by,
-                "token": token,
-                "run_id": run_id,
-                "running": AgentRunStatus.running.value,
-            },
-        )
-        await db.commit()
-        if result.rowcount != 1:
-            return None
-    return RunLease(run_id=run_id, token=token, claimed_by=claimed_by)
+    for attempt in (1, 2):
+        try:
+            async with session_factory() as db:
+                result = await db.execute(
+                    text(
+                        "UPDATE agent_runs SET claimed_by = :who, claimed_at = now(), "
+                        "lease_token = :token, heartbeat_at = now() "
+                        "WHERE id = :run_id AND status = :running AND claimed_by IS NULL"
+                    ),
+                    {
+                        "who": claimed_by,
+                        "token": token,
+                        "run_id": run_id,
+                        "running": AgentRunStatus.running.value,
+                    },
+                )
+                await db.commit()
+                if result.rowcount != 1:
+                    return None
+            return RunLease(run_id=run_id, token=token, claimed_by=claimed_by)
+        except Exception:
+            if attempt == 2:
+                raise
+            await asyncio.sleep(2.0)
+    return None  # pragma: no cover — loop always returns/raises
 
 
 async def heartbeat_run(

@@ -293,9 +293,13 @@ class Settings(BaseSettings):
     # runner heartbeats (throttled) from inside its stream loop and at the
     # guarded_tool_call chokepoint; the sweep settles stale runs as FAILED
     # (never re-enqueues). A false-orphan is fenced-safe but rude, so the
-    # orphan threshold is sized at 8 missed beats; the claim grace covers
-    # lost enqueues and queue backlog and must stay well above the orphan
-    # threshold (a queued-but-unclaimed run has no heartbeat to read).
+    # orphan threshold is sized at 8 missed beats. The claim grace must
+    # exceed the SHARED queue's worst-case pickup delay — legacy playbook/
+    # tabular jobs run up to 900s each, and a queued-but-unclaimed agent
+    # run has no heartbeat to read — so 1200s: a legitimately queued run
+    # behind a legacy burst is never falsely failed, at the cost of slow
+    # detection for the rare lost-enqueue zombie (the api already settles
+    # enqueue FAILURES immediately at POST time).
     agent_run_heartbeat_seconds: float = Field(
         default=15.0,
         gt=0,
@@ -310,12 +314,13 @@ class Settings(BaseSettings):
         ),
     )
     agent_run_claim_grace_seconds: float = Field(
-        default=300.0,
+        default=1200.0,
         gt=0,
         description=(
             "An unclaimed 'running' run older than this is settled FAILED "
             "by the orphan sweep (lost enqueue / worker died before claim / "
-            "pre-F1-S1 legacy rows)."
+            "pre-F1-S1 legacy rows). Must exceed the shared queue's "
+            "worst-case pickup delay (legacy job_timeout 900s)."
         ),
     )
 

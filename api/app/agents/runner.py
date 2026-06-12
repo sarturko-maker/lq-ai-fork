@@ -21,7 +21,7 @@ args/results are truncated and never carry raw secrets.
 Dependency injection per CLAUDE.md: the DB session factory, the tool
 set, and the chat model are constructor arguments — tests substitute
 fakes through the same seams, no monkeypatching. The caller
-(``app.api.agent_runs._run_in_background``) is the composition point:
+(:func:`app.agents.composition.compose_and_execute_run`) is the composition point:
 it assembles the matter's guarded document tools (F0-S4,
 :mod:`app.agents.tools`), the gateway chat model (with the matter's
 tier-floor/privilege envelope), and the system prompt — this module
@@ -203,7 +203,7 @@ async def _persist_step(
     per step checks out a pre-pinged connection (``pool_pre_ping`` on
     the engine), and one retry after a short pause rides out a
     crash-recovery window in progress — same fresh-session posture as
-    :func:`_finalize` / :func:`mark_run_failed`. The ``(run_id, seq)``
+    :func:`_finalize`. The ``(run_id, seq)``
     unique constraint makes a double write impossible.
 
     ``step_id`` / ``created_at`` are caller-generated (F0-S7) so the
@@ -423,27 +423,6 @@ async def _finalize(
     )
 
 
-async def mark_run_failed(
-    session_factory: async_sessionmaker[AsyncSession],
-    run_id: uuid.UUID,
-    *,
-    error: str,
-) -> None:
-    """Public terminal-failure write for composition-time failures.
-
-    A failure before the runner takes over must not strand the run at
-    ``'running'`` (the flood brake counts those forever — F0-S4 review).
-    Never overwrites a settled run (``settle_run``'s monotonicity).
-    Bounded error — never a stack trace.
-    """
-    await settle_run(
-        session_factory,
-        run_id,
-        status=AgentRunStatus.failed,
-        error=_bounded(error, 500),
-    )
-
-
 async def repair_dangling_tool_calls(agent: Any, thread_id: uuid.UUID) -> int:
     """Append synthetic ToolMessages for unanswered tool calls (F1-S1).
 
@@ -465,7 +444,17 @@ async def repair_dangling_tool_calls(agent: Any, thread_id: uuid.UUID) -> int:
     """
     config = thread_config(thread_id)
     state = await agent.aget_state(config)
-    messages = (state.values or {}).get("messages") if state is not None else None
+    if state is None or not (state.values or {}).get("messages"):
+        return 0
+    # Re-read PINNED to the snapshot's checkpoint id: an un-pinned
+    # aget_state applies the checkpoint's PENDING WRITES (langgraph
+    # 1.2.4), but the next invoke's input path DISCARDS those same
+    # writes — repair must see exactly what the invoke will see, or a
+    # tool call answered only in pending writes is skipped and the
+    # #3789 middleware path re-opens (review fix). state.config carries
+    # the checkpoint_id, which turns pending-write application off.
+    pinned = await agent.aget_state(state.config)
+    messages = (pinned.values or {}).get("messages") if pinned is not None else None
     if not messages:
         return 0
     answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage) and m.tool_call_id}

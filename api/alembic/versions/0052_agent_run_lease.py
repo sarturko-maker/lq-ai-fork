@@ -1,10 +1,11 @@
 """agent_runs lease + heartbeat columns — F1-S1 (fork, ADR-F009)
 
 Run-lifecycle durability: agent runs execute on the arq worker at-most-once;
-liveness is a positive signal (heartbeat) and every worker write is fenced by
-a per-claim lease token, so the orphan sweep and the cancel endpoint can
-settle a run with first-writer-wins semantics and a zombie worker's late
-writes are rejected by SQL.
+liveness is a positive signal (heartbeat). Every agent_runs status/heartbeat
+write is conditional on status='running' (first terminal writer wins); worker
+terminal writes and the runner's heartbeat are additionally fenced by the
+per-claim lease token, so a zombie worker's late run-row writes are rejected
+by SQL. (Step/audit APPENDS are unfenced — bounded by the heartbeat window.)
 
 * ``claimed_by``   — informational worker tag (host:pid:boot-uuid) for ops.
 * ``claimed_at``   — when the worker claimed the run (DB clock). NULL +

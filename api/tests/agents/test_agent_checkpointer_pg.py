@@ -146,6 +146,9 @@ async def test_follow_up_restores_state_through_postgres(
         joined = "\n".join(str(m.content) for m in second_model.seen_messages[0])
         assert "the password is swordfish" in joined  # state crossed Postgres
     finally:
+        # F1-S1 review fix: also delete the checkpoint lineage — leaking
+        # it couples the GC test below to this test's leftovers.
+        await pg_saver.adelete_thread(str(thread_id))
         async with factory() as db:
             await db.execute(delete(AuditLog).where(AuditLog.user_id == user_id))
             await db.execute(delete(AgentRun).where(AgentRun.user_id == user_id))
@@ -190,10 +193,13 @@ async def test_checkpoint_gc_deletes_only_orphaned_lineages(
     try:
         result = await run_checkpoint_gc(factory, pg_saver)
         assert result["skipped"] is False
-        assert result["deleted_threads"] >= 1
+        assert result["deleted_threads"] == 1  # exactly OUR orphan
         assert await pg_saver.aget_tuple(orphan_config) is None
         assert await pg_saver.aget_tuple(live_config) is not None
     finally:
+        # Idempotent — safe after GC already removed it; keeps an
+        # assertion failure from stranding the orphan for the session.
+        await pg_saver.adelete_thread(orphan_thread_id)
         await pg_saver.adelete_thread(str(live_thread_id))
         async with factory() as db:
             await db.execute(delete(AgentThread).where(AgentThread.user_id == user_id))

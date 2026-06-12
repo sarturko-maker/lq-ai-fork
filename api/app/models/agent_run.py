@@ -101,8 +101,8 @@ class AgentRun(Base):
     """One deep-agent run — the record the capability rail polls.
 
     ``status`` is the lifecycle (``running → completed | failed |
-    cancelled | cap_exceeded``). ``cancelled`` is RESERVED for the
-    cancel endpoint (later slice); no code sets it in F0-S2.
+    cancelled | cap_exceeded``). ``cancelled`` is written by the cancel
+    endpoint (F1-S1, settle-first) — first terminal writer wins.
 
     Interim caps (full guarded_tool_call/R4-R6 integration is F1, see
     ADR-F002): ``max_steps`` bounds the number of persisted steps;
@@ -161,8 +161,10 @@ class AgentRun(Base):
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     # F1-S1 lease/liveness (ADR-F009, migration 0052). ``lease_token`` is
     # the fencing value: a new uuid per worker claim, carried in the WHERE
-    # clause of every heartbeat/terminal write so the first terminal writer
-    # wins and a zombie worker's late writes are rejected by rowcount.
+    # clause of the worker's terminal writes and the runner's throttled
+    # heartbeat (the guard's tool-boundary touch is status-conditional
+    # only) so the first terminal writer wins and a zombie worker's late
+    # run-row writes are rejected by rowcount.
     # ``heartbeat_at`` is the positive liveness signal the orphan sweep
     # reads; ``claimed_by``/``claimed_at`` identify the claiming worker for
     # ops and the unclaimed-grace sweep rule.
