@@ -54,16 +54,25 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-1. Per the ratified re-plan: **F1-S2 — design-system foundation + Cockpit v0
-   shell** (the redesign the maintainer is keen on: practice areas lined up).
-   Read `docs/fork/plans/F1-replan.md` § F1-S2 + § Sequencing. The ONE open
-   maintainer decision is S2/S3 ordering (shell-first with seeded
-   practice-area rows in the same PR vs schema-first) — ask, or default to
-   shell-first with seeded rows (the re-plan's noted option) if authorized.
-2. shadcn-svelte + bits-ui + paneforge + Tailwind v4 are NEW dependencies —
+1. **ADR-F009 ACCEPTED by the maintainer (2026-06-12).** F1-S1 is fully closed.
+2. Next: **F1-S2 — design-system foundation + Cockpit v0 shell** (the redesign
+   the maintainer is keen on: practice areas lined up). Read
+   `docs/fork/plans/F1-replan.md` § F1-S2 + § Sequencing FIRST.
+3. **MAINTAINER DESIGN RULE (2026-06-12, verbatim, governs ALL UI work):**
+   "don't use black background, needs to be clean and professional, cutting
+   edge design." Read: light-first professional canvas (Harvey/Legora bar per
+   the re-plan), no black/near-black app background; cutting-edge polish.
+   This is his ONLY stated constraint — everything else is delegated.
+4. S2/S3 ordering: delegated by the maintainer ("my only rule is…") →
+   take the re-plan's noted option: SHELL-FIRST, with seeded standard
+   practice-area rows shipping in the same PR (real `practice_areas` schema
+   lands in S3).
+5. shadcn-svelte + bits-ui + paneforge + Tailwind v4 are NEW dependencies —
    SBOM justification per CLAUDE.md; ADR-F006 governs the design system.
-3. The cockpit's status rollups can now trust `last_run_status` — F1-S1's
-   whole point.
+   Web container serves a pre-built bundle — rebuild to see anything.
+6. The cockpit's status rollups can now trust `last_run_status` — F1-S1's
+   whole point. Multi-file slice: explore → written plan
+   (docs/fork/plans/F1-S2-…) → implement → full ADR-F005 gate.
 
 ## Carry-overs / review deferrals
 
