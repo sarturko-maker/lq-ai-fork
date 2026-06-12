@@ -1,6 +1,6 @@
 # F009 — Agent runs execute at-most-once; orphans settle FAILED, never auto-resume
 
-Status: proposed (drafted in F1-S1, 2026-06-12)
+Status: accepted (maintainer, 2026-06-12; drafted in F1-S1)
 
 ## Context
 
