@@ -1,0 +1,111 @@
+{
+  "scenario_id": "mismatch",
+  "model_alias": "smart",
+  "cycle": 11,
+  "run_id": "4d0eff9c-d6dd-4b0c-9163-5ed30ff0fd5e",
+  "thread_id": "05c6ba9a-05a1-4d28-9a59-ca838656035b",
+  "status": "completed",
+  "final_answer": "<think>\nThe only document in the matter is a Master Services Agreement between Northwind Customer GmbH and Vendor Analytics Ltd. It covers services, fees, term, confidentiality, liability, indemnification, and governing law. It contains nothing about an employee stock option plan, vesting, cliff, or exercise window.\n\nI should tell the user clearly that the matter does not contain an ESOP document.\n</think>\n\nThe matter \"S9 Eval \u2014 Single Doc 9001\" does not contain an employee stock option plan. The only document attached is:\n\n- **msa-vendor-services.txt** \u2014 a Master Services Agreement between Northwind Customer GmbH and Vendor Analytics Ltd covering services and fees, term and termination, confidentiality, limitation of liability, indemnification, and governing law (Delaware).\n\nIt contains no provisions on equity, stock options, vesting schedules, cliffs, or exercise windows. The matter's documents do not answer the question.\n\nIf you'd like, point me to the correct matter (or attach the ESOP/equity plan document) and I'll pull the vesting, cliff, and exercise-window terms.",
+  "error": null,
+  "valid": true,
+  "invalid_reason": null,
+  "steps": [
+    {
+      "seq": 1,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe user wants a summary of key terms of an employee stock option plan (ESOP) from the matter \"S9 Eval \u2014 Single Doc 9001\". I need to search the documents to find information about the ESOP, focusing on vesting, cliff, and exercise window. Let me start by listing the documents in the matter.\n</think> [requested tools: search_documents]",
+      "parent_step_id": null
+    },
+    {
+      "seq": 2,
+      "kind": "tool_call",
+      "name": "search_documents",
+      "summary": "{\"query\": \"\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 3,
+      "kind": "tool_result",
+      "name": "search_documents",
+      "summary": "Documents attached to this matter:\n- msa-vendor-services.txt (1 pages)",
+      "parent_step_id": null
+    },
+    {
+      "seq": 4,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nOnly one document is attached to this matter \u2014 an MSA (Master Services Agreement) for vendor services. This isn't likely to contain employee stock option plan terms. Let me confirm by searching for ESOP-related terms in the document.\n</think> [requested tools: search_documents, search_documents]",
+      "parent_step_id": null
+    },
+    {
+      "seq": 5,
+      "kind": "tool_call",
+      "name": "search_documents",
+      "summary": "{\"query\": \"stock option plan vesting cliff exercise\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 6,
+      "kind": "tool_call",
+      "name": "search_documents",
+      "summary": "{\"query\": \"ESOP employee equity grant\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 7,
+      "kind": "tool_result",
+      "name": "search_documents",
+      "summary": "No passages matched \"stock option plan vesting cliff exercise\". Try different terms, or read a document in full.\n\nDocuments attached to this matter (none matched):\n- msa-vendor-services.txt (1 pages)",
+      "parent_step_id": null
+    },
+    {
+      "seq": 8,
+      "kind": "tool_result",
+      "name": "search_documents",
+      "summary": "No passages matched \"ESOP employee equity grant\". Try different terms, or read a document in full.\n\nDocuments attached to this matter (none matched):\n- msa-vendor-services.txt (1 pages)",
+      "parent_step_id": null
+    },
+    {
+      "seq": 9,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nLet me read the actual document to confirm there's nothing about an employee stock option plan in it.\n</think> [requested tools: read_document]",
+      "parent_step_id": null
+    },
+    {
+      "seq": 10,
+      "kind": "tool_call",
+      "name": "read_document",
+      "summary": "{\"name\": \"msa-vendor-services.txt\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 11,
+      "kind": "tool_result",
+      "name": "read_document",
+      "summary": "[msa-vendor-services.txt (1 pages) \u2014 full text]\n\nMASTER SERVICES AGREEMENT\n\nThis Master Services Agreement (the \"Agreement\") is entered into between\nNorthwind Customer GmbH (\"Customer\") and Vendor Analytics Ltd (\"Vendor\").\n\n1. SERVICES AND FEES. Vendor shall provide the data-processing services\ndescribed in each Statement of Work. Customer shall pay Vendor a monthly\nservice fee of USD 25,000, invoiced in arrears with thirty (30) day\npayment terms.\n\n2. TERM AND TERMINATION. This Agreement runs for an initial term of\ntwenty-four (24) months and renews for successive twelve (12) month\nperiods unless either party gives sixty (60) days written notice of\nnon-renewal. Either party may terminate for material breach not cured\nwithin thirty (30) days of written notice.\n\n3. CONFIDENTIALITY. Each party shall protect the other party's\nConfidential Information with at least the care it applies to its own\nsimilar information, and never less than reasonable care, and shall use\nit solely to perform this Agreement.\n\n4. LIMITATION OF LIABILITY. Except for the Excluded Claims, each party's\naggregate liability arising out of or relating to this Agreement shall\nnot exceed the total fees paid or payable by Customer in the twelve (12)\nmonths preceding the first event giving rise to liability (the\n\"Liability Cap\"). \"Excluded Claims\" means (a) a breach of\nconfidentiality obligations under Section 3, (b) a party's\nindemnification obligations under Section 5, and (c) liability arising\nfrom gross negligence or willful misconduct; the Liability Cap does not\napply to the Excluded Claims. Neither party is liable for indirect,\nincidental, or consequential damages.\n\n5. INDEMNIFICATION. Vendor shall defend and indemnify Customer against\nthird-party claims alleging that the services infringe a third party's\nintellectual-property rights.\n\n6. GOVERNING LAW. This Agreement is governed by the laws of the State of\nDelaware, excluding its conflict-of-laws rules.\n",
+      "parent_step_id": null
+    },
+    {
+      "seq": 12,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe only document in the matter is a Master Services Agreement between Northwind Customer GmbH and Vendor Analytics Ltd. It covers services, fees, term, confidentiality, liability, indemnification, and governing law. It contains nothing about an employee stock option plan, vesting, cliff, or exercise window.\n\nI should tell the user clearly that the matter does not contain an ESOP document.\n</think>\n\nThe matter \"S9 Eval \u2014 Single Doc 9001\" does not contain an employee stock option plan. The only document attached is:\n\n- **msa-vendor-services.txt** \u2014 a Master Services Agreement between Northwind Customer GmbH and Vendor Analytics Ltd covering services and fees, term and termination, confidentiality, limitation of liability, indemnification, and governing law (Delaware).\n\nIt contains no provisions on equity, stock options, vesting schedules, cliffs, or exercise windows. The matter's documents do not answer the question.\n\nIf you'd like, point me to the correct matter (or attach the ESOP/equity plan document) and I'll pull the vesting, cliff, and exercise-window terms.",
+      "parent_step_id": null
+    }
+  ],
+  "metrics": {
+    "no_fabricated_esop_terms": true,
+    "read_noise_on_mismatch": false,
+    "task_noise_on_mismatch": true
+  },
+  "started_at": "2026-06-12T01:00:58.474083+00:00",
+  "finished_at": "2026-06-12T01:01:16.659499+00:00",
+  "duration_s": 18.2,
+  "tokens_in": 34610,
+  "tokens_out": 660,
+  "gateway_calls": 5,
+  "routed_model": "MiniMax-M3",
+  "cost_usd_estimate": 0.02235
+}

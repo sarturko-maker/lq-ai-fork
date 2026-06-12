@@ -1,0 +1,15 @@
+{
+  "started_at": "2026-06-12T00:58:26.773663+00:00",
+  "git_sha": "4d12310",
+  "instruction_sha": "caf47d05031a32e5687f82514b5af10eafe9e010107d1a5431dce1e74a87b511",
+  "models": [
+    "smart"
+  ],
+  "n": 20,
+  "scenarios": [
+    "mismatch",
+    "negative_control",
+    "positive_grounding"
+  ],
+  "api_url": "http://api:8000"
+}

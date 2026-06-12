@@ -41,8 +41,28 @@ benchmark measures subagent/task uptake; that axis is in-house by necessity.
   - `<think>` blocks must round-trip verbatim in history (verified live);
     never strip them api-side
   - deepagents system prompt overhead ≈ 6.5k input tokens per gateway call
-- **L1 uptake (settled `agent_run_steps`)**: see
-  `docs/fork/evidence/f0-s9/matrix.md` — numbers land with the baseline run.
+- **L1 uptake (settled `agent_run_steps`) — baseline 2026-06-12, N=20 per
+  scenario, 80/80 cycles valid** (full tables + telemetry:
+  `docs/fork/evidence/f0-s9/matrix.md`; raw cycles in `results/`):
+  - positive grounding: fired 20/20; `read_arg_correct` 18/18 (2 cycles
+    answered from search alone — n/a, not misses); cap + exclusions
+    quoted in the answer 20/20
+  - task-scoped fan-out: `task` fired 20/20, strategy `one_per_item`
+    20/20, all four laws AND terms assembled 20/20 — oscar's "prescribed
+    procedure works" finding replicated on our substrate at N=20
+  - negative control: ZERO noise across search/read/task, 20/20 each
+    (oscar's 0/80 noise gate replicated)
+  - **mismatch — the one discriminating signal**: `no_fabricated_esop_terms`
+    20/20 (answers honestly that no such document exists) BUT
+    `read_noise_on_mismatch` 1/20 — M3 read the irrelevant document in
+    19/20 cycles before declining. This is oscar's MiniMax wrong-grounding
+    eagerness (+25pp wrong-skill, MiniMax-only) replicated on M3: eager
+    verification, honest answers. No threshold set tonight (decision 1 —
+    bars never tighter than the CI and only after maintainer ratification);
+    flagged as the metric to watch when family #2 lands.
+  - durations: negative 6–18s, grounding 9–21s, mismatch 12–18s,
+    fan-out 27–58s; zero timeouts, zero stranded runs, zero hygiene
+    failures across 80 cycles.
 - **L2 grounding-substance judge**: deferred (budget rule 6) — the masked
   judge is designed (`f0-s9-eval-reuse.md` §3) and the harness leaves the
   seam; run it when the matrix re-runs with a topped-up plan.

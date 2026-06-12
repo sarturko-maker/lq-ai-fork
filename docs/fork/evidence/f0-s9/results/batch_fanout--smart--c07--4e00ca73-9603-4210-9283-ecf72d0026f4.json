@@ -1,0 +1,231 @@
+{
+  "scenario_id": "batch_fanout",
+  "model_alias": "smart",
+  "cycle": 7,
+  "run_id": "4e00ca73-9603-4210-9283-ecf72d0026f4",
+  "thread_id": "309299ff-ae09-4946-818f-65b6037bfe3b",
+  "status": "completed",
+  "final_answer": "<think>\nAll four subagents have reported. Now I'll present the summary table.\n</think>\n\n## NDA Summary\n\n| Document | Governing Law | Confidentiality Term |\n|---|---|---|\n| nda-alpha-systems.txt | State of Delaware | 3 years from Effective Date (trade secrets: as long as they qualify) |\n| nda-beta-logistics.txt | State of California | 2 years from Effective Date (trade secrets: as long as they qualify) |\n| nda-delta-marine.txt | England and Wales | 18 months from Effective Date (trade secrets: as long as they qualify) |\n| nda-gamma-labs.txt | State of New York | 5 years from Effective Date (trade secrets: as long as they qualify) |\n\nAll four NDAs share the same trade-secret carve-out structure: the stated term applies to confidential information generally, while trade secrets receive protection for as long as they qualify as trade secrets under applicable law.",
+  "error": null,
+  "valid": true,
+  "invalid_reason": null,
+  "steps": [
+    {
+      "seq": 1,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe user wants me to:\n1. Find the four NDA documents in this matter\n2. Dispatch one subagent per document to extract governing law and confidentiality term length\n3. Present a summary table\n\nLet me start by listing the documents in this matter.\n</think> [requested tools: search_documents]",
+      "parent_step_id": null
+    },
+    {
+      "seq": 2,
+      "kind": "tool_call",
+      "name": "search_documents",
+      "summary": "{\"query\": \"\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 3,
+      "kind": "tool_result",
+      "name": "search_documents",
+      "summary": "Documents attached to this matter:\n- nda-alpha-systems.txt (1 pages)\n- nda-beta-logistics.txt (1 pages)\n- nda-delta-marine.txt (1 pages)\n- nda-gamma-labs.txt (1 pages)",
+      "parent_step_id": null
+    },
+    {
+      "seq": 4,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nI have the four NDA documents. Now I'll dispatch four subagents in parallel, each scoped to one document, to extract governing law and confidentiality term length.\n</think> [requested tools: task, task, task, task]",
+      "parent_step_id": null
+    },
+    {
+      "seq": 5,
+      "kind": "tool_call",
+      "name": "task",
+      "summary": "{\"description\": \"Read the document \\\"nda-alpha-systems.txt\\\" using the read_document tool and extract two specific pieces of information:\\n\\n(a) Governing law \\u2014 the jurisdiction whose laws govern the agreement (e.g., \\\"State of Delaware\\\", \\\"New York\\\", \\\"England and Wales\\\"). Quote the exact clause.\\n\\n(b) Confidentiality term length \\u2014 the duration of the confidentiality obligation (e.g., \\\"3 years\\\", \\\"5 years from the Effective Date\\\", \\\"perpetual\\\"). Quote the exact clause.\\n\\nReturn a concise report with:\\n- Document name: nda-alpha-systems.txt\\n- Governing law: <jurisdiction>\\n- Governing law quote: \\\"...\\\"\\n- Confidentiality term: <duration description>\\n- Confidentiality term quote: \\\"...\\\"\\n\\nDo not analyze or interpret beyond what's written. Just extract and quote.\", \"subagent_type\": \"general-purpose\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 6,
+      "kind": "tool_call",
+      "name": "task",
+      "summary": "{\"description\": \"Read the document \\\"nda-beta-logistics.txt\\\" using the read_document tool and extract two specific pieces of information:\\n\\n(a) Governing law \\u2014 the jurisdiction whose laws govern the agreement (e.g., \\\"State of Delaware\\\", \\\"New York\\\", \\\"England and Wales\\\"). Quote the exact clause.\\n\\n(b) Confidentiality term length \\u2014 the duration of the confidentiality obligation (e.g., \\\"3 years\\\", \\\"5 years from the Effective Date\\\", \\\"perpetual\\\"). Quote the exact clause.\\n\\nReturn a concise report with:\\n- Document name: nda-beta-logistics.txt\\n- Governing law: <jurisdiction>\\n- Governing law quote: \\\"...\\\"\\n- Confidentiality term: <duration description>\\n- Confidentiality term quote: \\\"...\\\"\\n\\nDo not analyze or interpret beyond what's written. Just extract and quote.\", \"subagent_type\": \"general-purpose\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 7,
+      "kind": "tool_call",
+      "name": "task",
+      "summary": "{\"description\": \"Read the document \\\"nda-delta-marine.txt\\\" using the read_document tool and extract two specific pieces of information:\\n\\n(a) Governing law \\u2014 the jurisdiction whose laws govern the agreement (e.g., \\\"State of Delaware\\\", \\\"New York\\\", \\\"England and Wales\\\"). Quote the exact clause.\\n\\n(b) Confidentiality term length \\u2014 the duration of the confidentiality obligation (e.g., \\\"3 years\\\", \\\"5 years from the Effective Date\\\", \\\"perpetual\\\"). Quote the exact clause.\\n\\nReturn a concise report with:\\n- Document name: nda-delta-marine.txt\\n- Governing law: <jurisdiction>\\n- Governing law quote: \\\"...\\\"\\n- Confidentiality term: <duration description>\\n- Confidentiality term quote: \\\"...\\\"\\n\\nDo not analyze or interpret beyond what's written. Just extract and quote.\", \"subagent_type\": \"general-purpose\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 8,
+      "kind": "tool_call",
+      "name": "task",
+      "summary": "{\"description\": \"Read the document \\\"nda-gamma-labs.txt\\\" using the read_document tool and extract two specific pieces of information:\\n\\n(a) Governing law \\u2014 the jurisdiction whose laws govern the agreement (e.g., \\\"State of Delaware\\\", \\\"New York\\\", \\\"England and Wales\\\"). Quote the exact clause.\\n\\n(b) Confidentiality term length \\u2014 the duration of the confidentiality obligation (e.g., \\\"3 years\\\", \\\"5 years from the Effective Date\\\", \\\"perpetual\\\"). Quote the exact clause.\\n\\nReturn a concise report with:\\n- Document name: nda-gamma-labs.txt\\n- Governing law: <jurisdiction>\\n- Governing law quote: \\\"...\\\"\\n- Confidentiality term: <duration description>\\n- Confidentiality term quote: \\\"...\\\"\\n\\nDo not analyze or interpret beyond what's written. Just extract and quote.\", \"subagent_type\": \"general-purpose\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 9,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe user wants me to read a document and extract two specific pieces of information. Let me use the read_document tool to read the file.\n</think> [requested tools: read_document]",
+      "parent_step_id": "bb45b1f1-e697-4db7-aa6f-0e5656bf7850"
+    },
+    {
+      "seq": 10,
+      "kind": "tool_call",
+      "name": "read_document",
+      "summary": "{\"name\": \"nda-alpha-systems.txt\"}",
+      "parent_step_id": "bb45b1f1-e697-4db7-aa6f-0e5656bf7850"
+    },
+    {
+      "seq": 11,
+      "kind": "tool_result",
+      "name": "read_document",
+      "summary": "[nda-alpha-systems.txt (1 pages) \u2014 full text]\n\nMUTUAL NON-DISCLOSURE AGREEMENT\n\nThis Mutual Non-Disclosure Agreement is entered into between Northwind\nCustomer GmbH and Alpha Systems Inc. (together, the \"Parties\").\n\n1. PURPOSE. The Parties wish to explore a potential commercial\nrelationship and will exchange Confidential Information for that\npurpose only.\n\n2. OBLIGATIONS. Each Party shall hold the other Party's Confidential\nInformation in strict confidence, use it solely for the Purpose, and\ndisclose it only to representatives with a need to know who are bound\nby obligations at least as protective as this Agreement.\n\n3. TERM. The obligations in this Agreement run for three (3) years from the\nEffective Date, except trade secrets, which remain protected for as\nlong as they qualify as trade secrets under applicable law.\n\n4. GOVERNING LAW. This Agreement is governed by the laws of the State of Delaware.\n",
+      "parent_step_id": "bb45b1f1-e697-4db7-aa6f-0e5656bf7850"
+    },
+    {
+      "seq": 12,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe user wants me to read a document and extract specific information from it. Let me use the read_document tool to read the file.\n</think> [requested tools: read_document]",
+      "parent_step_id": "0af91b7f-bb31-473f-971f-4baa01a713bf"
+    },
+    {
+      "seq": 13,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe user wants me to read a document called \"nda-beta-logistics.txt\" and extract two specific pieces of information. Let me use the read_document tool to read it.\n</think> [requested tools: read_document]",
+      "parent_step_id": "3a2bc842-6335-4439-892c-2e392d893943"
+    },
+    {
+      "seq": 14,
+      "kind": "tool_call",
+      "name": "read_document",
+      "summary": "{\"name\": \"nda-gamma-labs.txt\"}",
+      "parent_step_id": "0af91b7f-bb31-473f-971f-4baa01a713bf"
+    },
+    {
+      "seq": 15,
+      "kind": "tool_call",
+      "name": "read_document",
+      "summary": "{\"name\": \"nda-beta-logistics.txt\"}",
+      "parent_step_id": "3a2bc842-6335-4439-892c-2e392d893943"
+    },
+    {
+      "seq": 16,
+      "kind": "tool_result",
+      "name": "read_document",
+      "summary": "[nda-gamma-labs.txt (1 pages) \u2014 full text]\n\nMUTUAL NON-DISCLOSURE AGREEMENT\n\nThis Mutual Non-Disclosure Agreement is entered into between Northwind\nCustomer GmbH and Gamma Labs Corp. (together, the \"Parties\").\n\n1. PURPOSE. The Parties wish to explore a potential commercial\nrelationship and will exchange Confidential Information for that\npurpose only.\n\n2. OBLIGATIONS. Each Party shall hold the other Party's Confidential\nInformation in strict confidence, use it solely for the Purpose, and\ndisclose it only to representatives with a need to know who are bound\nby obligations at least as protective as this Agreement.\n\n3. TERM. The obligations in this Agreement run for five (5) years from the\nEffective Date, except trade secrets, which remain protected for as\nlong as they qualify as trade secrets under applicable law.\n\n4. GOVERNING LAW. This Agreement is governed by the laws of the State of New York.\n",
+      "parent_step_id": "0af91b7f-bb31-473f-971f-4baa01a713bf"
+    },
+    {
+      "seq": 17,
+      "kind": "tool_result",
+      "name": "read_document",
+      "summary": "[nda-beta-logistics.txt (1 pages) \u2014 full text]\n\nMUTUAL NON-DISCLOSURE AGREEMENT\n\nThis Mutual Non-Disclosure Agreement is entered into between Northwind\nCustomer GmbH and Beta Logistics LLC (together, the \"Parties\").\n\n1. PURPOSE. The Parties wish to explore a potential commercial\nrelationship and will exchange Confidential Information for that\npurpose only.\n\n2. OBLIGATIONS. Each Party shall hold the other Party's Confidential\nInformation in strict confidence, use it solely for the Purpose, and\ndisclose it only to representatives with a need to know who are bound\nby obligations at least as protective as this Agreement.\n\n3. TERM. The obligations in this Agreement run for two (2) years from the\nEffective Date, except trade secrets, which remain protected for as\nlong as they qualify as trade secrets under applicable law.\n\n4. GOVERNING LAW. This Agreement is governed by the laws of the State of California.\n",
+      "parent_step_id": "3a2bc842-6335-4439-892c-2e392d893943"
+    },
+    {
+      "seq": 18,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe user wants me to read a specific document and extract two pieces of information. Let me use the read_document tool to read \"nda-delta-marine.txt\".\n</think> [requested tools: read_document]",
+      "parent_step_id": "36e1417d-b75b-4978-91a5-3025be2d7b87"
+    },
+    {
+      "seq": 19,
+      "kind": "tool_call",
+      "name": "read_document",
+      "summary": "{\"name\": \"nda-delta-marine.txt\"}",
+      "parent_step_id": "36e1417d-b75b-4978-91a5-3025be2d7b87"
+    },
+    {
+      "seq": 20,
+      "kind": "tool_result",
+      "name": "read_document",
+      "summary": "[nda-delta-marine.txt (1 pages) \u2014 full text]\n\nMUTUAL NON-DISCLOSURE AGREEMENT\n\nThis Mutual Non-Disclosure Agreement is entered into between Northwind\nCustomer GmbH and Delta Marine Ltd. (together, the \"Parties\").\n\n1. PURPOSE. The Parties wish to explore a potential commercial\nrelationship and will exchange Confidential Information for that\npurpose only.\n\n2. OBLIGATIONS. Each Party shall hold the other Party's Confidential\nInformation in strict confidence, use it solely for the Purpose, and\ndisclose it only to representatives with a need to know who are bound\nby obligations at least as protective as this Agreement.\n\n3. TERM. The obligations in this Agreement run for eighteen (18) months from the\nEffective Date, except trade secrets, which remain protected for as\nlong as they qualify as trade secrets under applicable law.\n\n4. GOVERNING LAW. This Agreement is governed by the laws of England and Wales.\n",
+      "parent_step_id": "36e1417d-b75b-4978-91a5-3025be2d7b87"
+    },
+    {
+      "seq": 21,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nLet me extract the two pieces of information:\n\n(a) Governing law \u2014 \"State of California\" per Section 4: \"This Agreement is governed by the laws of the State of California.\"\n\n(b) Confidentiality term \u2014 \"two (2) years from the Effective Date\" per Section 3: \"The obligations in this Agreement run for two (2) years from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"\n\nNow I'll provide the concise report.\n</think>\n\n# NDA Extraction Report\n\n- **Document name:** nda-beta-logistics.txt\n- **Governing law:** State of California\n- **Governing law quote:** \"This Agreement is governed by the laws of the State of California.\"\n- **Confidentiality term:** Two (2) years from the Effective Date (with trade secrets protected for as long as they qualify as trade secrets under applicable law)\n- **Confidentiality term quote:** \"The obligations in this Agreement run for two (2) years from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"",
+      "parent_step_id": "3a2bc842-6335-4439-892c-2e392d893943"
+    },
+    {
+      "seq": 22,
+      "kind": "tool_result",
+      "name": "task",
+      "summary": "Command(update={'files': {}, 'messages': [ToolMessage(content='<think>\\nLet me extract the two pieces of information:\\n\\n(a) Governing law \u2014 \"State of California\" per Section 4: \"This Agreement is governed by the laws of the State of California.\"\\n\\n(b) Confidentiality term \u2014 \"two (2) years from the Effective Date\" per Section 3: \"The obligations in this Agreement run for two (2) years from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"\\n\\nNow I\\'ll provide the concise report.\\n</think>\\n\\n# NDA Extraction Report\\n\\n- **Document name:** nda-beta-logistics.txt\\n- **Governing law:** State of California\\n- **Governing law quote:** \"This Agreement is governed by the laws of the State of California.\"\\n- **Confidentiality term:** Two (2) years from the Effective Date (with trade secrets protected for as long as they qualify as trade secrets under applicable law)\\n- **Confidentiality term quote:** \"The obligations in this Agreement run for two (2) years from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"', tool_call_id='call_function_rzpekjrsqps5_2')]})",
+      "parent_step_id": null
+    },
+    {
+      "seq": 23,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nI have the document text. Let me extract the two pieces of information requested:\n\n(a) Governing law: \"State of New York\" - Section 4\n(b) Confidentiality term length: \"five (5) years from the Effective Date\" - Section 3\n\nLet me format the report as requested.\n</think>\n\n# Document Extraction Report\n\n- **Document name:** nda-gamma-labs.txt\n- **Governing law:** State of New York\n- **Governing law quote:** \"This Agreement is governed by the laws of the State of New York.\"\n- **Confidentiality term:** Five (5) years from the Effective Date (with trade secrets protected for as long as they qualify as such under applicable law)\n- **Confidentiality term quote:** \"The obligations in this Agreement run for five (5) years from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"",
+      "parent_step_id": "0af91b7f-bb31-473f-971f-4baa01a713bf"
+    },
+    {
+      "seq": 24,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nI have the document. Let me extract the two pieces of information:\n\n(a) Governing law: \"State of Delaware\" - from clause 4\nQuote: \"This Agreement is governed by the laws of the State of Delaware.\"\n\n(b) Confidentiality term: \"three (3) years from the Effective Date\" (with exception for trade secrets)\nQuote: \"The obligations in this Agreement run for three (3) years from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"\n\nLet me provide the concise report.\n</think>\n\n**Document name:** nda-alpha-systems.txt\n\n**Governing law:** State of Delaware\n**Governing law quote:** \"This Agreement is governed by the laws of the State of Delaware.\"\n\n**Confidentiality term:** Three (3) years from the Effective Date (with a separate, indefinite term for trade secrets)\n**Confidentiality term quote:** \"The obligations in this Agreement run for three (3) years from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"",
+      "parent_step_id": "bb45b1f1-e697-4db7-aa6f-0e5656bf7850"
+    },
+    {
+      "seq": 25,
+      "kind": "tool_result",
+      "name": "task",
+      "summary": "Command(update={'files': {}, 'messages': [ToolMessage(content='<think>\\nI have the document text. Let me extract the two pieces of information requested:\\n\\n(a) Governing law: \"State of New York\" - Section 4\\n(b) Confidentiality term length: \"five (5) years from the Effective Date\" - Section 3\\n\\nLet me format the report as requested.\\n</think>\\n\\n# Document Extraction Report\\n\\n- **Document name:** nda-gamma-labs.txt\\n- **Governing law:** State of New York\\n- **Governing law quote:** \"This Agreement is governed by the laws of the State of New York.\"\\n- **Confidentiality term:** Five (5) years from the Effective Date (with trade secrets protected for as long as they qualify as such under applicable law)\\n- **Confidentiality term quote:** \"The obligations in this Agreement run for five (5) years from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"', tool_call_id='call_function_rzpekjrsqps5_4')]})",
+      "parent_step_id": null
+    },
+    {
+      "seq": 26,
+      "kind": "tool_result",
+      "name": "task",
+      "summary": "Command(update={'files': {}, 'messages': [ToolMessage(content='<think>\\nI have the document. Let me extract the two pieces of information:\\n\\n(a) Governing law: \"State of Delaware\" - from clause 4\\nQuote: \"This Agreement is governed by the laws of the State of Delaware.\"\\n\\n(b) Confidentiality term: \"three (3) years from the Effective Date\" (with exception for trade secrets)\\nQuote: \"The obligations in this Agreement run for three (3) years from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"\\n\\nLet me provide the concise report.\\n</think>\\n\\n**Document name:** nda-alpha-systems.txt\\n\\n**Governing law:** State of Delaware\\n**Governing law quote:** \"This Agreement is governed by the laws of the State of Delaware.\"\\n\\n**Confidentiality term:** Three (3) years from the Effective Date (with a separate, indefinite term for trade secrets)\\n**Confidentiality term quote:** \"The obligations in this Agreement run for three (3) years from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"', tool_call_id='call_function_rzpekjrsqps5_1')]})",
+      "parent_step_id": null
+    },
+    {
+      "seq": 27,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe user wants me to extract two specific pieces of information from the document:\n\n(a) Governing law \u2014 the jurisdiction whose laws govern the agreement\n(b) Confidentiality term length \u2014 the duration of the confidentiality obligation\n\nLet me extract them:\n\n(a) Governing law: England and Wales\nQuote: \"This Agreement is governed by the laws of England and Wales.\"\n\n(b) Confidentiality term: 18 months from the Effective Date\nQuote: \"The obligations in this Agreement run for eighteen (18) months from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"\n\nNow I need to provide a concise report with the requested format.\n</think>\n\n# Document Extract Report\n\n- **Document name:** nda-delta-marine.txt\n- **Governing law:** England and Wales\n- **Governing law quote:** \"This Agreement is governed by the laws of England and Wales.\"\n- **Confidentiality term:** 18 months from the Effective Date (with trade secrets protected for as long as they qualify as such under applicable law)\n- **Confidentiality term quote:** \"The obligations in this Agreement run for eighteen (18) months from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"",
+      "parent_step_id": "36e1417d-b75b-4978-91a5-3025be2d7b87"
+    },
+    {
+      "seq": 28,
+      "kind": "tool_result",
+      "name": "task",
+      "summary": "Command(update={'files': {}, 'messages': [ToolMessage(content='<think>\\nThe user wants me to extract two specific pieces of information from the document:\\n\\n(a) Governing law \u2014 the jurisdiction whose laws govern the agreement\\n(b) Confidentiality term length \u2014 the duration of the confidentiality obligation\\n\\nLet me extract them:\\n\\n(a) Governing law: England and Wales\\nQuote: \"This Agreement is governed by the laws of England and Wales.\"\\n\\n(b) Confidentiality term: 18 months from the Effective Date\\nQuote: \"The obligations in this Agreement run for eighteen (18) months from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"\\n\\nNow I need to provide a concise report with the requested format.\\n</think>\\n\\n# Document Extract Report\\n\\n- **Document name:** nda-delta-marine.txt\\n- **Governing law:** England and Wales\\n- **Governing law quote:** \"This Agreement is governed by the laws of England and Wales.\"\\n- **Confidentiality term:** 18 months from the Effective Date (with trade secrets protected for as long as they qualify as such under applicable law)\\n- **Confidentiality term quote:** \"The obligations in this Agreement run for eighteen (18) months from the Effective Date, except trade secrets, which remain protected for as long as they qualify as trade secrets under applicable law.\"', tool_call_id='call_function_rzpekjrsqps5_3')]})",
+      "parent_step_id": null
+    },
+    {
+      "seq": 29,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nAll four subagents have reported. Now I'll present the summary table.\n</think>\n\n## NDA Summary\n\n| Document | Governing Law | Confidentiality Term |\n|---|---|---|\n| nda-alpha-systems.txt | State of Delaware | 3 years from Effective Date (trade secrets: as long as they qualify) |\n| nda-beta-logistics.txt | State of California | 2 years from Effective Date (trade secrets: as long as they qualify) |\n| nda-delta-marine.txt | England and Wales | 18 months from Effective Date (trade secrets: as long as they qualify) |\n| nda-gamma-labs.txt | State of New York | 5 years from Effective Date (trade secrets: as long as they qualify) |\n\nAll four NDAs share the same trade-secret carve-out structure: the stated term applies to confidential information generally, while trade secrets receive protection for as long as they qualify as trade secrets under applicable law.",
+      "parent_step_id": null
+    }
+  ],
+  "metrics": {
+    "task_fired_on_batch": true,
+    "task_strategy": "one_per_item",
+    "all_laws_in_answer": true,
+    "all_terms_in_answer": true
+  },
+  "started_at": "2026-06-12T00:53:26.157997+00:00",
+  "finished_at": "2026-06-12T00:53:56.396192+00:00",
+  "duration_s": 30.2,
+  "tokens_in": 63769,
+  "tokens_out": 2580,
+  "gateway_calls": 12,
+  "routed_model": "MiniMax-M3",
+  "cost_usd_estimate": 0.044453
+}
