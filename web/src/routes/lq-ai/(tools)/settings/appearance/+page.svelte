@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { preferences, setPreference, initPreferences } from '$lib/lq-ai/stores/preferences';
 	import SettingsToggleGroup from '$lib/lq-ai/components/SettingsToggleGroup.svelte';
-	import type { FeaturedTools, WorkspaceLayout, TrustPills, ProvenancePills } from '$lib/lq-ai/types';
+	import type { WorkspaceLayout, TrustPills, ProvenancePills } from '$lib/lq-ai/types';
 	import {
 		AUTO_ENHANCE_STORAGE_KEY,
 		readAutoEnhance,
@@ -44,24 +44,10 @@
 	want less ceremony.
 </p>
 
-<SettingsToggleGroup
-	label="Featured tools"
-	description="Where Enhance Prompt, Skill Creator, and the launcher live."
-	value={$preferences.featured_tools}
-	options={[
-		{
-			value: 'prominent',
-			label: 'Prominent cards on dashboard',
-			description: 'Featured cards with descriptions, plus ⌘K launcher.'
-		},
-		{
-			value: 'inline',
-			label: 'Inline toolbar only',
-			description: 'Small button row on every composer; less ceremony.'
-		}
-	]}
-	onChange={(v) => setPreference('featured_tools', v as FeaturedTools)}
-/>
+<!-- The "Featured tools" toggle retired with F1-S2: its only consumer was
+     the guided dashboard's FeaturedToolsRow, which the cockpit replaced.
+     The `featured_tools` preference key stays server-side for API
+     compatibility. -->
 
 <SettingsToggleGroup
 	label="Workspace layout"
@@ -132,7 +118,10 @@
 	enabled) lands in v1.1+ once UX is settled for the implicit-confirm path.
 -->
 <div class="lq-auto-enhance" style="margin-top: var(--lq-space-6);">
-	<label class="lq-text-body" style="display: flex; gap: var(--lq-space-2); align-items: flex-start;">
+	<label
+		class="lq-text-body"
+		style="display: flex; gap: var(--lq-space-2); align-items: flex-start;"
+	>
 		<input
 			type="checkbox"
 			checked={autoEnhance}
@@ -142,8 +131,8 @@
 		<span>
 			<strong>Auto-enhance prompts on send</strong>
 			<span style="display: block; color: var(--lq-text-secondary); font-size: 12px;">
-				Run Enhance Prompt automatically before each send (preview-and-confirm UX
-				ships in v1.1+; setting is stored locally).
+				Run Enhance Prompt automatically before each send (preview-and-confirm UX ships in v1.1+;
+				setting is stored locally).
 			</span>
 		</span>
 	</label>
@@ -158,7 +147,10 @@
 	(commits 8ce9897 + 64ab0d9) for the storage layer + MessageBubble wiring.
 -->
 <div class="lq-capture-affordance" style="margin-top: var(--lq-space-6);">
-	<label class="lq-text-body" style="display: flex; gap: var(--lq-space-2); align-items: flex-start;">
+	<label
+		class="lq-text-body"
+		style="display: flex; gap: var(--lq-space-2); align-items: flex-start;"
+	>
 		<input
 			type="checkbox"
 			checked={captureInline}
@@ -168,8 +160,8 @@
 		<span>
 			<strong>Skill capture button</strong>
 			<span style="display: block; color: var(--lq-text-secondary); font-size: 12px;">
-				Show 📝 Capture-as-skill inline on every AI message. When off, the action
-				stays in the message's overflow (⋯) menu.
+				Show 📝 Capture-as-skill inline on every AI message. When off, the action stays in the
+				message's overflow (⋯) menu.
 			</span>
 		</span>
 	</label>

@@ -13,12 +13,10 @@ import {
 	formatBytes,
 	sortFiles,
 	type DocStatus
-} from '../../../routes/lq-ai/knowledge/[id]/+page.svelte';
+} from '../../../routes/lq-ai/(tools)/knowledge/[id]/+page.svelte';
 import type { KnowledgeBaseFile, IngestionStatus } from '../types';
 
-function makeFile(
-	overrides: Partial<KnowledgeBaseFile> = {}
-): KnowledgeBaseFile {
+function makeFile(overrides: Partial<KnowledgeBaseFile> = {}): KnowledgeBaseFile {
 	return {
 		id: 'f-default',
 		owner_id: 'u1',
@@ -74,9 +72,9 @@ describe('effectiveStatus (M3-0.3 / DE-276)', () => {
 		// document-row absent (parse pipeline mid-flight) still renders as ready when
 		// the file-level signal is ready — defensive but the realistic case is the
 		// embed worker has not yet been triggered.
-		expect(
-			effectiveStatus(makeFile({ ingestion_status: 'ready', ingest_status: null }))
-		).toBe('ready');
+		expect(effectiveStatus(makeFile({ ingestion_status: 'ready', ingest_status: null }))).toBe(
+			'ready'
+		);
 	});
 });
 

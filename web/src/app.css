@@ -5,6 +5,9 @@
  * docs/fork/evidence/f0-s6/provenance.md).
  */
 @import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn-svelte/tailwind.css';
+@import '@fontsource-variable/inter';
 @config '../tailwind.config.js';
 
 @custom-variant hover (&:hover);
@@ -25,6 +28,57 @@
 	--color-gray-850: oklch(0.27 0 0);
 	--color-gray-900: oklch(0.2 0 0);
 	--color-gray-950: oklch(0.16 0 0);
+	--font-sans:
+		'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+		sans-serif;
+	--color-status-running: var(--status-running);
+	--color-status-running-wash: var(--status-running-wash);
+	--color-status-completed: var(--status-completed);
+	--color-status-completed-wash: var(--status-completed-wash);
+	--color-status-failed: var(--status-failed);
+	--color-status-failed-wash: var(--status-failed-wash);
+	--color-status-cancelled: var(--status-cancelled);
+	--color-status-cancelled-wash: var(--status-cancelled-wash);
+	--color-status-attention: var(--status-attention);
+	--color-status-attention-wash: var(--status-attention-wash);
+	--color-sidebar-ring: var(--sidebar-ring);
+	--color-sidebar-border: var(--sidebar-border);
+	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+	--color-sidebar-accent: var(--sidebar-accent);
+	--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+	--color-sidebar-primary: var(--sidebar-primary);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-sidebar: var(--sidebar);
+	--color-chart-5: var(--chart-5);
+	--color-chart-4: var(--chart-4);
+	--color-chart-3: var(--chart-3);
+	--color-chart-2: var(--chart-2);
+	--color-chart-1: var(--chart-1);
+	--color-ring: var(--ring);
+	--color-input: var(--input);
+	--color-border: var(--border);
+	--color-destructive: var(--destructive);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-accent: var(--accent);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-muted: var(--muted);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-secondary: var(--secondary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-primary: var(--primary);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-popover: var(--popover);
+	--color-card-foreground: var(--card-foreground);
+	--color-card: var(--card);
+	--color-foreground: var(--foreground);
+	--color-background: var(--background);
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+	--radius-3xl: calc(var(--radius) * 2.2);
+	--radius-4xl: calc(var(--radius) * 2.6);
 }
 
 @layer base {
@@ -36,32 +90,22 @@
 		overscroll-behavior-y: none;
 		/* Long unbroken tokens (URLs, citation ids) must wrap, not overflow. */
 		overflow-wrap: break-word;
-		font-family:
-			'Inter Variable',
-			-apple-system,
-			BlinkMacSystemFont,
-			'Segoe UI',
-			Roboto,
-			Helvetica,
-			Arial,
-			sans-serif;
+		@apply font-sans;
 	}
 
+	/* Canvas/ink come from the semantic tokens (light + charcoal dark —
+	   never #000/#171717 hardcoded; F1-S2 token layer). */
 	body {
-		background-color: #fff;
-		color: #000;
+		@apply bg-background text-foreground;
 	}
 
-	.dark body {
-		background-color: #171717;
-		color: #eee;
-	}
-
-	/* Components were written against Tailwind v3's default border color. */
+	/* Default border/outline come from the intent tokens (legacy components
+	   were written against Tailwind v3's default border color; the warm
+	   --border token is visually equivalent in light mode). */
 	*,
 	::before,
 	::after {
-		border-color: var(--color-gray-200);
+		@apply border-border outline-ring/50;
 	}
 
 	button {
@@ -140,4 +184,116 @@
 
 ::-webkit-scrollbar-track {
 	background-color: transparent;
+}
+
+/*
+ * Semantic intent tokens — F1-S2 (ADR-F006: "semantic intent tokens, the
+ * Harvey pattern; light+dark; denser work-tool spacing").
+ *
+ * Maintainer design rule (verbatim, governs all UI work): "don't use black
+ * background, needs to be clean and professional, cutting edge design."
+ * Light-first: warm low-chroma neutrals (hue ≈90 — the Harvey warm-neutral
+ * pattern) on a near-white canvas; ONE deep indigo accent reserved for
+ * primary action / focus / active nav / running state; status colors live
+ * in their own intent tokens (soft wash + strong pair), so the accent
+ * stays scarce. The dark variant floors at L=0.23 (charcoal, never black)
+ * and is WCAG-checked like the light one (4.5:1 text, 3:1 UI).
+ *
+ * Vendored shadcn-svelte components consume the standard names below; the
+ * legacy --lq-* tokens (lib/lq-ai/styles/practice.css) are untouched —
+ * legacy surfaces keep their look until they migrate (plan § non-goals).
+ */
+
+:root {
+	--background: oklch(0.985 0.003 90);
+	--foreground: oklch(0.26 0.008 80);
+	--card: oklch(1 0 0);
+	--card-foreground: oklch(0.26 0.008 80);
+	--popover: oklch(1 0 0);
+	--popover-foreground: oklch(0.26 0.008 80);
+	--primary: oklch(0.47 0.15 262);
+	--primary-foreground: oklch(0.985 0.003 90);
+	--secondary: oklch(0.955 0.004 90);
+	--secondary-foreground: oklch(0.32 0.008 80);
+	--muted: oklch(0.955 0.004 90);
+	--muted-foreground: oklch(0.5 0.01 85);
+	--accent: oklch(0.96 0.02 262);
+	--accent-foreground: oklch(0.32 0.05 262);
+	--destructive: oklch(0.55 0.19 27);
+	--border: oklch(0.92 0.004 90);
+	--input: oklch(0.92 0.004 90);
+	--ring: oklch(0.47 0.15 262);
+	--chart-1: oklch(0.47 0.15 262);
+	--chart-2: oklch(0.55 0.12 155);
+	--chart-3: oklch(0.55 0.19 27);
+	--chart-4: oklch(0.5 0.01 85);
+	--chart-5: oklch(0.77 0.005 90);
+	--radius: 0.5rem;
+	--sidebar: oklch(0.972 0.004 90);
+	--sidebar-foreground: oklch(0.26 0.008 80);
+	--sidebar-primary: oklch(0.47 0.15 262);
+	--sidebar-primary-foreground: oklch(0.985 0.003 90);
+	--sidebar-accent: oklch(0.94 0.006 90);
+	--sidebar-accent-foreground: oklch(0.26 0.008 80);
+	--sidebar-border: oklch(0.92 0.004 90);
+	--sidebar-ring: oklch(0.47 0.15 262);
+	/* Run-status intents (settled-rows rollups, ADR-F004): strong color
+	   for dot/text, wash for the pill background — soft pastel pills,
+	   never saturated chips. */
+	--status-running: oklch(0.55 0.14 262);
+	--status-running-wash: oklch(0.96 0.02 262);
+	--status-completed: oklch(0.55 0.12 155);
+	--status-completed-wash: oklch(0.96 0.03 155);
+	--status-failed: oklch(0.55 0.19 27);
+	--status-failed-wash: oklch(0.96 0.02 27);
+	--status-cancelled: oklch(0.55 0.01 90);
+	--status-cancelled-wash: oklch(0.95 0.004 90);
+	--status-attention: oklch(0.55 0.12 75);
+	--status-attention-wash: oklch(0.96 0.04 85);
+}
+
+/* Charcoal dark — floors at L=0.23 (≈#1B1E24); never pure black per the
+   maintainer rule. Same accent hue, lightness raised for contrast. */
+.dark {
+	--background: oklch(0.23 0.006 262);
+	--foreground: oklch(0.93 0.004 90);
+	--card: oklch(0.27 0.006 262);
+	--card-foreground: oklch(0.93 0.004 90);
+	--popover: oklch(0.27 0.006 262);
+	--popover-foreground: oklch(0.93 0.004 90);
+	--primary: oklch(0.62 0.14 262);
+	--primary-foreground: oklch(0.985 0.003 90);
+	--secondary: oklch(0.31 0.006 262);
+	--secondary-foreground: oklch(0.93 0.004 90);
+	--muted: oklch(0.31 0.006 262);
+	--muted-foreground: oklch(0.68 0.008 90);
+	--accent: oklch(0.32 0.04 262);
+	--accent-foreground: oklch(0.9 0.02 262);
+	--destructive: oklch(0.65 0.18 27);
+	--border: oklch(0.36 0.006 262);
+	--input: oklch(0.36 0.006 262);
+	--ring: oklch(0.62 0.14 262);
+	--chart-1: oklch(0.62 0.14 262);
+	--chart-2: oklch(0.65 0.12 155);
+	--chart-3: oklch(0.65 0.18 27);
+	--chart-4: oklch(0.68 0.008 90);
+	--chart-5: oklch(0.47 0.006 262);
+	--sidebar: oklch(0.25 0.006 262);
+	--sidebar-foreground: oklch(0.93 0.004 90);
+	--sidebar-primary: oklch(0.62 0.14 262);
+	--sidebar-primary-foreground: oklch(0.985 0.003 90);
+	--sidebar-accent: oklch(0.3 0.006 262);
+	--sidebar-accent-foreground: oklch(0.93 0.004 90);
+	--sidebar-border: oklch(0.36 0.006 262);
+	--sidebar-ring: oklch(0.62 0.14 262);
+	--status-running: oklch(0.68 0.13 262);
+	--status-running-wash: oklch(0.32 0.04 262);
+	--status-completed: oklch(0.7 0.12 155);
+	--status-completed-wash: oklch(0.32 0.04 155);
+	--status-failed: oklch(0.68 0.17 27);
+	--status-failed-wash: oklch(0.32 0.04 27);
+	--status-cancelled: oklch(0.68 0.008 90);
+	--status-cancelled-wash: oklch(0.31 0.006 262);
+	--status-attention: oklch(0.72 0.12 80);
+	--status-attention-wash: oklch(0.3 0.04 80);
 }

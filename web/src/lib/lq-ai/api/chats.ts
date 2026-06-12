@@ -42,8 +42,7 @@ export async function listAllChats(opts: ListChatsOptions = {}): Promise<Chat[]>
  *
  * NOTE: The OpenAPI spec requires q with minLength=1, so an empty string
  * will be rejected. To list recent chats without a search term, use
- * listAllChats({ limit: 5 }) instead — see RecentActivity.svelte which
- * handles this fallback automatically.
+ * listAllChats({ limit: 5 }) instead.
  */
 export async function search(query: string, limit = 5): Promise<ChatSearchResponse> {
 	const params = new URLSearchParams({ q: query, limit: String(limit) });

@@ -200,6 +200,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/agents/runs/{run_id}/stream",
         # F1-S1 (fork) — run cancel (settle-first, ADR-F009)
         "/api/v1/agents/runs/{run_id}/cancel",
+        # F1-S2 (fork) — cockpit reads (ADR-F002): practice areas + matters rollup
+        "/api/v1/practice-areas",
+        "/api/v1/agents/matters",
     }
 )
 
@@ -305,7 +308,7 @@ async def test_openapi_paths_match_sketch() -> None:
     # /api/v1/agents/threads/{thread_id}
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
-    assert len(actual) == 124  # +1: F1-S1 cancel (ADR-F009)
+    assert len(actual) == 126  # +2: F1-S2 cockpit reads (ADR-F002)
 
 
 @pytest.mark.unit

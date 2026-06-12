@@ -28,6 +28,7 @@ from app.models.inference import InferenceRoutingLog
 from app.models.knowledge import KnowledgeBase, KnowledgeBaseFile
 from app.models.organization_profile import OrganizationProfile
 from app.models.playbook import Playbook, PlaybookExecution, PlaybookPosition
+from app.models.practice_area import PracticeArea
 from app.models.project import Project, ProjectFile, ProjectSkill
 from app.models.project_knowledge_base import ProjectKnowledgeBase
 from app.models.saved_prompt import SavedPrompt
@@ -62,6 +63,7 @@ __all__ = [
     "Playbook",
     "PlaybookExecution",
     "PlaybookPosition",
+    "PracticeArea",
     "PrecedentEntry",
     "Project",
     "ProjectFile",

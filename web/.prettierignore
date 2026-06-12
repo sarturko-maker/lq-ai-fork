@@ -7,3 +7,7 @@ cypress/videos/
 cypress/screenshots/
 cypress/downloads/
 cypress/fixtures/
+
+# F1-S2: vendored shadcn-svelte component source (upstream-formatted).
+src/lib/components/ui/
+src/lib/utils.ts

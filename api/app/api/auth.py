@@ -31,8 +31,10 @@ we don't reveal whether an email exists in the system.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -433,29 +435,64 @@ async def refresh(
     # count per user is tiny (a few devices); if this becomes hot, switch
     # to a deterministic HMAC index column. Tracked as DE candidate.
     result = await db.execute(
-        select(UserSession).where(
+        select(UserSession.id, UserSession.refresh_token_hash).where(
             UserSession.revoked_at.is_(None),
             UserSession.expires_at > now,
         )
     )
-    candidates = result.scalars().all()
+    candidates = result.tuples().all()
+    # (The request's read transaction — and its pooled connection — stays
+    # open across the scan, as it always has; releasing it mid-request
+    # would fight the session-per-request design. The HMAC index column
+    # is the real fix for the scan's duration.)
+
+    def _match_candidate() -> UUID | None:
+        for session_id, token_hash in candidates:
+            if refresh_token_matches(payload.refresh_token, token_hash):
+                return session_id
+        return None
+
+    # The scan is CPU-bound (one bcrypt compare per candidate, ~10²ms
+    # each): with accumulated sessions it reaches tens of seconds, and
+    # run inline it FREEZES the event loop — every concurrent request,
+    # including logins, stalls behind one refresh (found live in F1-S2
+    # verification with 186 dev sessions). Off-thread keeps the loop
+    # responsive; the deterministic index column above stays the real
+    # fix for the scan itself.
+    matched_id = await asyncio.to_thread(_match_candidate)
 
     matched: UserSession | None = None
-    for session in candidates:
-        if refresh_token_matches(payload.refresh_token, session.refresh_token_hash):
-            matched = session
-            break
+    if matched_id is not None:
+        # Re-acquire under lock and RE-CHECK liveness: the scan is a long
+        # await point — a concurrent presentation of the SAME token can
+        # have rotated the session meanwhile. Without this re-check the
+        # loser would blindly overwrite the revocation below (refresh
+        # double-spend: two live sessions from one token, and the theft
+        # signal rotation exists to provide — the loser's 401 — is lost).
+        matched = (
+            await db.execute(
+                select(UserSession)
+                .where(
+                    UserSession.id == matched_id,
+                    UserSession.revoked_at.is_(None),
+                    UserSession.expires_at > now,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
 
     if matched is None:
         # No user context (the presented token didn't match any active
         # session); the audit row records the *attempt* with no user id.
+        # Counts/types/IDs only — never the token.
+        reason = "no_matching_session" if matched_id is None else "concurrent_rotation"
         await audit_action(
             db,
             user_id=None,
             action="user.session_refresh_failed",
             resource_type="user_session",
             request=request,
-            details={"reason": "no_matching_session"},
+            details={"reason": reason},
         )
         await db.commit()
         raise HTTPException(
