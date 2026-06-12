@@ -43,7 +43,11 @@ async def list_practice_areas(
     ``key`` for deterministic rendering.
     """
     rows = (
-        (await db.execute(select(PracticeArea).order_by(PracticeArea.position, PracticeArea.key)))
+        (
+            await db.execute(
+                select(PracticeArea).order_by(PracticeArea.position, PracticeArea.key)
+            )
+        )
         .scalars()
         .all()
     )

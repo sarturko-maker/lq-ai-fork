@@ -152,7 +152,9 @@ class GatewayClient:
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             timeout=timeout,
-            headers={GATEWAY_KEY_HEADER: self._gateway_key} if self._gateway_key else {},
+            headers={GATEWAY_KEY_HEADER: self._gateway_key}
+            if self._gateway_key
+            else {},
         )
 
     @property
@@ -309,7 +311,9 @@ class GatewayClient:
             self._citation_engine_ensemble_loaded = True
             return None
 
-        ensemble_block = payload.get("ensemble_verification") if isinstance(payload, dict) else None
+        ensemble_block = (
+            payload.get("ensemble_verification") if isinstance(payload, dict) else None
+        )
         if not isinstance(ensemble_block, dict):
             # Older gateway predates M2-D1; treat as "no ensemble".
             self._citation_engine_ensemble_loaded = True
@@ -584,7 +588,9 @@ class GatewayClient:
         headers = self._build_headers(request_id=request_id)
 
         try:
-            response = await self._client.post("/v1/embeddings", json=body, headers=headers)
+            response = await self._client.post(
+                "/v1/embeddings", json=body, headers=headers
+            )
         except httpx.TimeoutException as exc:
             raise GatewayTimeout(
                 "Gateway embeddings did not respond within the configured timeout",

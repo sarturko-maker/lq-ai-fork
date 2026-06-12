@@ -30,7 +30,9 @@ def _build_app() -> FastAPI:
     async def hello() -> dict[str, str]:
         return {"hello": "world"}
 
-    install_observability(app, service_name="lq-ai-api-test", service_version="0.0.0-test")
+    install_observability(
+        app, service_name="lq-ai-api-test", service_version="0.0.0-test"
+    )
     return app
 
 

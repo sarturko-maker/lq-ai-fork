@@ -169,7 +169,9 @@ async def test_notification_user_isolation(db_session: AsyncSession) -> None:
     alice_rows = (
         (
             await db_session.execute(
-                select(AutonomousNotification).where(AutonomousNotification.user_id == alice.id)
+                select(AutonomousNotification).where(
+                    AutonomousNotification.user_id == alice.id
+                )
             )
         )
         .scalars()
@@ -178,7 +180,9 @@ async def test_notification_user_isolation(db_session: AsyncSession) -> None:
     bob_rows = (
         (
             await db_session.execute(
-                select(AutonomousNotification).where(AutonomousNotification.user_id == bob.id)
+                select(AutonomousNotification).where(
+                    AutonomousNotification.user_id == bob.id
+                )
             )
         )
         .scalars()
@@ -253,7 +257,9 @@ async def test_notification_channel_accepts_webhook(db_session: AsyncSession) ->
 
 
 @pytest.mark.integration
-async def test_notification_channel_check_rejects_bogus(db_session: AsyncSession) -> None:
+async def test_notification_channel_check_rejects_bogus(
+    db_session: AsyncSession,
+) -> None:
     """channel CHECK constraint rejects values outside the allowed set."""
     user = await _make_user(db_session)
     sess = await _make_session(db_session, owner=user)
@@ -298,7 +304,9 @@ async def test_notification_cascade_on_session_delete(db_session: AsyncSession) 
     remaining = (
         (
             await db_session.execute(
-                select(AutonomousNotification).where(AutonomousNotification.id == notif_id)
+                select(AutonomousNotification).where(
+                    AutonomousNotification.id == notif_id
+                )
             )
         )
         .scalars()
@@ -330,7 +338,9 @@ async def test_notification_cascade_on_user_delete(db_session: AsyncSession) -> 
     remaining = (
         (
             await db_session.execute(
-                select(AutonomousNotification).where(AutonomousNotification.id == notif_id)
+                select(AutonomousNotification).where(
+                    AutonomousNotification.id == notif_id
+                )
             )
         )
         .scalars()

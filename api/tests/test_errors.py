@@ -73,7 +73,9 @@ def test_envelope_uses_detail_wrapper_with_inner_code_message_details() -> None:
 @pytest.mark.unit
 def test_envelope_carries_empty_details_when_none_supplied() -> None:
     err = NotFound("nope")
-    assert err.to_envelope() == {"detail": {"code": "not_found", "message": "nope", "details": {}}}
+    assert err.to_envelope() == {
+        "detail": {"code": "not_found", "message": "nope", "details": {}}
+    }
 
 
 @pytest.mark.unit
@@ -105,12 +107,28 @@ def test_details_dict_is_copied_so_mutation_doesnt_leak_back() -> None:
         (ValidationError, status.HTTP_400_BAD_REQUEST, CODE_VALIDATION_ERROR),
         (RateLimited, status.HTTP_429_TOO_MANY_REQUESTS, CODE_RATE_LIMITED),
         (InternalError, status.HTTP_500_INTERNAL_SERVER_ERROR, CODE_INTERNAL_ERROR),
-        (PasswordChangeRequired, status.HTTP_403_FORBIDDEN, CODE_PASSWORD_CHANGE_REQUIRED),
-        (PayloadTooLarge, status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, CODE_PAYLOAD_TOO_LARGE),
+        (
+            PasswordChangeRequired,
+            status.HTTP_403_FORBIDDEN,
+            CODE_PASSWORD_CHANGE_REQUIRED,
+        ),
+        (
+            PayloadTooLarge,
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            CODE_PAYLOAD_TOO_LARGE,
+        ),
         (Conflict, status.HTTP_409_CONFLICT, CODE_CONFLICT),
-        (GatewayUnreachable, status.HTTP_503_SERVICE_UNAVAILABLE, CODE_GATEWAY_UNREACHABLE),
+        (
+            GatewayUnreachable,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            CODE_GATEWAY_UNREACHABLE,
+        ),
         (GatewayTimeout, status.HTTP_504_GATEWAY_TIMEOUT, CODE_GATEWAY_TIMEOUT),
-        (GatewayInvalidResponse, status.HTTP_502_BAD_GATEWAY, CODE_GATEWAY_INVALID_RESPONSE),
+        (
+            GatewayInvalidResponse,
+            status.HTTP_502_BAD_GATEWAY,
+            CODE_GATEWAY_INVALID_RESPONSE,
+        ),
         (ProviderUnavailable, status.HTTP_502_BAD_GATEWAY, CODE_PROVIDER_UNAVAILABLE),
         (TierBelowMinimum, status.HTTP_403_FORBIDDEN, CODE_TIER_BELOW_MINIMUM),
         (InvalidModel, status.HTTP_400_BAD_REQUEST, CODE_INVALID_MODEL),

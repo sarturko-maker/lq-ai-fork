@@ -86,7 +86,9 @@ REAL_SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 def test_frontmatter_minimal_valid() -> None:
     """Required fields only — `name` + `description`. `lq_ai:` defaults."""
 
-    fm = SkillFrontmatter.model_validate({"name": "x", "description": "A minimal skill."})
+    fm = SkillFrontmatter.model_validate(
+        {"name": "x", "description": "A minimal skill."}
+    )
     assert fm.name == "x"
     assert fm.description == "A minimal skill."
     assert isinstance(fm.lq_ai, LQAIFrontmatter)

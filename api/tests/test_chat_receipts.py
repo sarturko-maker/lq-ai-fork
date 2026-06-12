@@ -326,7 +326,10 @@ async def test_receipts_export_jsonl(
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("application/jsonl")
     assert "attachment" in response.headers["content-disposition"]
-    assert f"chat-{populated_chat.id}-receipts.jsonl" in response.headers["content-disposition"]
+    assert (
+        f"chat-{populated_chat.id}-receipts.jsonl"
+        in response.headers["content-disposition"]
+    )
 
     import json
 

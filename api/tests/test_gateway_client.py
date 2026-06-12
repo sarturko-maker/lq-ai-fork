@@ -129,7 +129,9 @@ async def test_chat_completion_sends_gateway_key_header(client: GatewayClient) -
 
 @pytest.mark.unit
 @respx.mock
-async def test_chat_completion_forwards_request_id_header(client: GatewayClient) -> None:
+async def test_chat_completion_forwards_request_id_header(
+    client: GatewayClient,
+) -> None:
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, json=_success_payload())
     )
@@ -167,7 +169,9 @@ async def test_chat_completion_backfills_tier_from_header_when_body_missing(
 
 @pytest.mark.unit
 @respx.mock
-async def test_chat_completion_overrides_stream_flag_to_false(client: GatewayClient) -> None:
+async def test_chat_completion_overrides_stream_flag_to_false(
+    client: GatewayClient,
+) -> None:
     """The non-streaming method must not send stream=True even if the request had it."""
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, json=_success_payload())
@@ -211,7 +215,9 @@ async def test_chat_completion_401_raises_gateway_unreachable_not_unauthorized(
     import logging as _logging
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
-        return_value=httpx.Response(401, json={"error": {"code": "unauthorized", "message": "x"}})
+        return_value=httpx.Response(
+            401, json={"error": {"code": "unauthorized", "message": "x"}}
+        )
     )
 
     # pytest's logging plugin can disable loggers between tests; re-enable
@@ -279,7 +285,9 @@ async def test_chat_completion_invalid_model_maps_to_invalid_model(
 
 @pytest.mark.unit
 @respx.mock
-async def test_chat_completion_rate_limit_maps_to_rate_limited(client: GatewayClient) -> None:
+async def test_chat_completion_rate_limit_maps_to_rate_limited(
+    client: GatewayClient,
+) -> None:
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(
             429,
@@ -367,7 +375,9 @@ async def test_chat_completion_unauthorized_from_provider_propagates_to_unauthor
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(
             502,
-            json={"error": {"code": "unauthorized", "message": "anthropic rejected key"}},
+            json={
+                "error": {"code": "unauthorized", "message": "anthropic rejected key"}
+            },
         )
     )
 
@@ -382,7 +392,9 @@ async def test_chat_completion_timeout_raises_gateway_timeout(
     """Use respx to simulate a timeout."""
 
     with respx.mock(base_url=GATEWAY_BASE) as router:
-        router.post("/v1/chat/completions").mock(side_effect=httpx.ReadTimeout("timeout"))
+        router.post("/v1/chat/completions").mock(
+            side_effect=httpx.ReadTimeout("timeout")
+        )
 
         with pytest.raises(GatewayTimeout) as exc_info:
             await client.chat_completion(_request())
@@ -395,7 +407,9 @@ async def test_chat_completion_network_error_raises_gateway_unreachable(
     client: GatewayClient,
 ) -> None:
     with respx.mock(base_url=GATEWAY_BASE) as router:
-        router.post("/v1/chat/completions").mock(side_effect=httpx.ConnectError("conn refused"))
+        router.post("/v1/chat/completions").mock(
+            side_effect=httpx.ConnectError("conn refused")
+        )
 
         with pytest.raises(GatewayUnreachable) as exc_info:
             await client.chat_completion(_request())
@@ -559,7 +573,9 @@ async def test_chat_completion_stream_timeout_raises_gateway_timeout(
     client: GatewayClient,
 ) -> None:
     with respx.mock(base_url=GATEWAY_BASE) as router:
-        router.post("/v1/chat/completions").mock(side_effect=httpx.ReadTimeout("timeout"))
+        router.post("/v1/chat/completions").mock(
+            side_effect=httpx.ReadTimeout("timeout")
+        )
 
         with pytest.raises(GatewayTimeout):
             async for _ in client.chat_completion_stream(_request()):
@@ -571,7 +587,9 @@ async def test_chat_completion_stream_timeout_raises_gateway_timeout(
 
 @pytest.mark.unit
 @respx.mock
-async def test_health_check_true_when_gateway_returns_200(client: GatewayClient) -> None:
+async def test_health_check_true_when_gateway_returns_200(
+    client: GatewayClient,
+) -> None:
     respx.get(f"{GATEWAY_BASE}/health").mock(return_value=httpx.Response(200, json={}))
 
     assert await client.health_check() is True
@@ -590,7 +608,9 @@ async def test_health_check_false_when_gateway_errors(client: GatewayClient) -> 
 
 @pytest.mark.unit
 @respx.mock
-async def test_embeddings_501_propagates_as_internal_error(client: GatewayClient) -> None:
+async def test_embeddings_501_propagates_as_internal_error(
+    client: GatewayClient,
+) -> None:
     """The gateway's /v1/embeddings is a 501 stub until B6.
 
     The client method exists so the future KB / RAG layer can compile
@@ -648,7 +668,9 @@ async def test_list_models_forwards_payload_verbatim(client: GatewayClient) -> N
             },
         ],
     }
-    respx.get(f"{GATEWAY_BASE}/v1/models").mock(return_value=httpx.Response(200, json=payload))
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
 
     result = await client.list_models()
     assert result == payload
@@ -656,7 +678,9 @@ async def test_list_models_forwards_payload_verbatim(client: GatewayClient) -> N
 
 @pytest.mark.unit
 @respx.mock
-async def test_list_models_401_raises_gateway_unreachable(client: GatewayClient) -> None:
+async def test_list_models_401_raises_gateway_unreachable(
+    client: GatewayClient,
+) -> None:
     """Gateway 401 must NOT leak through as Unauthorized — it's an operator
     misconfiguration that the user must not see."""
 
@@ -672,16 +696,24 @@ async def test_list_models_401_raises_gateway_unreachable(client: GatewayClient)
 
 @pytest.mark.unit
 @respx.mock
-async def test_list_models_5xx_raises_gateway_unreachable(client: GatewayClient) -> None:
-    respx.get(f"{GATEWAY_BASE}/v1/models").mock(return_value=httpx.Response(503, text="oops"))
+async def test_list_models_5xx_raises_gateway_unreachable(
+    client: GatewayClient,
+) -> None:
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(
+        return_value=httpx.Response(503, text="oops")
+    )
     with pytest.raises(GatewayUnreachable):
         await client.list_models()
 
 
 @pytest.mark.unit
 @respx.mock
-async def test_list_models_timeout_raises_gateway_timeout(client: GatewayClient) -> None:
-    respx.get(f"{GATEWAY_BASE}/v1/models").mock(side_effect=httpx.TimeoutException("slow"))
+async def test_list_models_timeout_raises_gateway_timeout(
+    client: GatewayClient,
+) -> None:
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(
+        side_effect=httpx.TimeoutException("slow")
+    )
     with pytest.raises(GatewayTimeout):
         await client.list_models()
 

@@ -137,7 +137,9 @@ class LQAIError(Exception):
         # We keep both attribute names usable so a handler can read the
         # effective values without remembering whether to consult the
         # instance or the class.
-        self._http_status = http_status if http_status is not None else self.__class__.http_status
+        self._http_status = (
+            http_status if http_status is not None else self.__class__.http_status
+        )
         self._code = code if code is not None else self.__class__.code
 
     @property

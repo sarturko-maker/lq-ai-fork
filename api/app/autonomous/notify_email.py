@@ -114,7 +114,10 @@ async def send_notification_email(
         # No usable From address — treat as unconfigured rather than guess.
         log.debug(
             "autonomous_notify_email_skipped",
-            extra={"event": "autonomous_notify_email_skipped", "reason": "no_from_addr"},
+            extra={
+                "event": "autonomous_notify_email_skipped",
+                "reason": "no_from_addr",
+            },
         )
         return False
 

@@ -127,7 +127,9 @@ def build_matter_tools(
         search_documents to locate specific passages instead of
         re-reading.
         """
-        return await guarded_dispatch("read_document", lambda db: _read(db, binding, name), ctx)
+        return await guarded_dispatch(
+            "read_document", lambda db: _read(db, binding, name), ctx
+        )
 
     return [search_documents, read_document]
 
@@ -135,7 +137,9 @@ def build_matter_tools(
 async def _search(db: AsyncSession, binding: MatterBinding, query: str) -> str:
     """FTS over the matter's chunks; empty query → document inventory."""
     if not query.strip():
-        return await _inventory(db, binding, header="Documents attached to this matter:")
+        return await _inventory(
+            db, binding, header="Documents attached to this matter:"
+        )
 
     rows = (
         await db.execute(
@@ -165,8 +169,9 @@ async def _search(db: AsyncSession, binding: MatterBinding, query: str) -> str:
         if len(snippet) > _SNIPPET_LIMIT:
             snippet = snippet[: _SNIPPET_LIMIT - 1] + "…"
         blocks.append(f"[{row.filename}{pages}]\n{snippet}")
-    return f"Top {len(rows)} matching passage(s) from this matter's documents:\n\n" + "\n\n".join(
-        blocks
+    return (
+        f"Top {len(rows)} matching passage(s) from this matter's documents:\n\n"
+        + "\n\n".join(blocks)
     )
 
 
@@ -201,7 +206,9 @@ async def _read(db: AsyncSession, binding: MatterBinding, name: str) -> str:
     rows = (await db.execute(stmt)).all()
 
     if not rows:
-        inventory = await _inventory(db, binding, header="Documents attached to this matter:")
+        inventory = await _inventory(
+            db, binding, header="Documents attached to this matter:"
+        )
         return f'No document named "{wanted}" in this matter.\n\n{inventory}'
 
     row = rows[0]
@@ -272,7 +279,9 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
     lines: list[str] = []
     for row in rows:
         if row.id is None:
-            lines.append(f"- {row.filename} (not ingested yet — status: {row.ingestion_status})")
+            lines.append(
+                f"- {row.filename} (not ingested yet — status: {row.ingestion_status})"
+            )
         elif row.page_count:
             lines.append(f"- {row.filename} ({row.page_count} pages)")
         else:

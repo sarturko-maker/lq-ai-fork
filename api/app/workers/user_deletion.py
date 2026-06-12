@@ -87,7 +87,11 @@ async def _hard_delete_user(session: AsyncSession, user: User) -> None:
     # Delete file bytes — including soft-deleted rows. The user's
     # right-to-erasure covers files they deleted previously but whose
     # bytes lingered under ADR 0005's deferred-GC posture.
-    files = (await session.execute(select(File).where(File.owner_id == user.id))).scalars().all()
+    files = (
+        (await session.execute(select(File).where(File.owner_id == user.id)))
+        .scalars()
+        .all()
+    )
     for file in files:
         try:
             await delete_object(storage_path=file.storage_path)
@@ -99,7 +103,9 @@ async def _hard_delete_user(session: AsyncSession, user: User) -> None:
             )
 
     # Knowledge bases — RESTRICT FK on owner; kb_files cascade.
-    await session.execute(delete(KnowledgeBase).where(KnowledgeBase.owner_id == user.id))
+    await session.execute(
+        delete(KnowledgeBase).where(KnowledgeBase.owner_id == user.id)
+    )
 
     # Chats — RESTRICT FK on owner; messages + chat_attached_skills/files
     # cascade on chat delete.

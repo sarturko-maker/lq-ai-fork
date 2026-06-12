@@ -32,7 +32,9 @@ pytestmark = pytest.mark.integration
 
 @pytest_asyncio.fixture
 async def commit_factory(test_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
+    return async_sessionmaker(
+        bind=test_engine, expire_on_commit=False, class_=AsyncSession
+    )
 
 
 @pytest_asyncio.fixture
@@ -77,7 +79,9 @@ async def make_run(
         await db.commit()
 
 
-async def _run_row(factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID) -> AgentRun:
+async def _run_row(
+    factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID
+) -> AgentRun:
     async with factory() as db:
         run = await db.get(AgentRun, run_id)
         assert run is not None

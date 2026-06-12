@@ -36,7 +36,16 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -394,7 +403,9 @@ async def get_file(
     # once the C5 parse pipeline has produced the row (M3-A6 Phase 6).
     document_id_stmt = select(Document.id).where(Document.file_id == row.id)
     document_id = (await db.execute(document_id_stmt)).scalar_one_or_none()
-    return FileMetadata.model_validate(row).model_copy(update={"document_id": document_id})
+    return FileMetadata.model_validate(row).model_copy(
+        update={"document_id": document_id}
+    )
 
 
 @router.get(

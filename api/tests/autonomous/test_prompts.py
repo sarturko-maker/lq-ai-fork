@@ -118,7 +118,9 @@ async def test_artifact_instruction_appended_when_opted_in(
     system = msgs[0]["content"]
     assert ARTIFACT_OUTPUT_INSTRUCTION in system
     # Ordering: artifact tail comes AFTER the structured-output tail.
-    assert system.index(ARTIFACT_OUTPUT_INSTRUCTION) > system.index(STRUCTURED_OUTPUT_INSTRUCTION)
+    assert system.index(ARTIFACT_OUTPUT_INSTRUCTION) > system.index(
+        STRUCTURED_OUTPUT_INSTRUCTION
+    )
 
 
 @pytest.mark.asyncio
@@ -149,7 +151,9 @@ async def test_assemble_messages_raises_when_playbook_soft_deleted(
     from app.models.playbook import Playbook
 
     pb_id = uuid.UUID(session_with_playbook_id.params["playbook_id"])
-    playbook = (await db_session.execute(select(Playbook).where(Playbook.id == pb_id))).scalar_one()
+    playbook = (
+        await db_session.execute(select(Playbook).where(Playbook.id == pb_id))
+    ).scalar_one()
     playbook.deleted_at = datetime.now(UTC)
     await db_session.flush()
 

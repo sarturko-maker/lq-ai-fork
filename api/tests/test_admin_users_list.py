@@ -86,7 +86,9 @@ async def admin_user(db_session: AsyncSession) -> User:
 @pytest_asyncio.fixture
 async def member_user(db_session: AsyncSession) -> User:
     suffix = uuid.uuid4().hex[:8]
-    user = _make_user(email=f"member-{suffix}@example.com", is_admin=False, role="member")
+    user = _make_user(
+        email=f"member-{suffix}@example.com", is_admin=False, role="member"
+    )
     db_session.add(user)
     await db_session.flush()
     return user

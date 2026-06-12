@@ -100,7 +100,9 @@ async def get_organization_profile(
 
     row = await _load_singleton(db)
     if row is None:
-        return OrganizationProfileResponse(content_md="", updated_at=None, updated_by=None)
+        return OrganizationProfileResponse(
+            content_md="", updated_at=None, updated_by=None
+        )
     return OrganizationProfileResponse(
         content_md=row.content_md,
         updated_at=row.updated_at,

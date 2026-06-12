@@ -10,6 +10,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { projectsApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
+	import { validateNewMatter } from '$lib/lq-ai/components/NewMatterModal.svelte';
 	import type { Project } from '$lib/lq-ai/types';
 
 	let {
@@ -28,17 +29,30 @@
 	let creating = $state(false);
 	let error = $state<string | null>(null);
 
+	// A reopened dialog starts clean — no stale error/draft from last time.
+	$effect(() => {
+		if (open) {
+			name = '';
+			error = null;
+		}
+	});
+
 	async function create(event: SubmitEvent) {
 		event.preventDefault();
+		// Same name rules as the Matters-page modal (shared validator —
+		// quick-create never sets privileged, so tier rules can't fire);
+		// only the noun is re-worded per the area's unit label.
+		const result = validateNewMatter({
+			name,
+			description: '',
+			privileged: false,
+			minimum_inference_tier: null
+		});
+		if (result.nameError) {
+			error = result.nameError.replace('Matter', unitLabel);
+			return;
+		}
 		const trimmed = name.trim();
-		if (!trimmed) {
-			error = `${unitLabel} name is required.`;
-			return;
-		}
-		if (trimmed.length > 200) {
-			error = `${unitLabel} name must be 200 characters or fewer.`;
-			return;
-		}
 		creating = true;
 		error = null;
 		try {

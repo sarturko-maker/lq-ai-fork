@@ -196,7 +196,10 @@ class RunStreamBroker:
         if channel.closed or len(channel.subscribers) >= _MAX_SUBSCRIBERS_PER_RUN:
             queue.put_nowait(CHANNEL_CLOSED)
             return queue
-        for opener in (*channel.open_reasoning.values(), *channel.open_tool_inputs.values()):
+        for opener in (
+            *channel.open_reasoning.values(),
+            *channel.open_tool_inputs.values(),
+        ):
             queue.put_nowait(opener)
         channel.subscribers.append(queue)
         return queue
@@ -231,7 +234,10 @@ class RunStreamBroker:
             except Exception:  # pragma: no cover - defensive
                 logger.exception(
                     "stream publish failed; dropping subscriber",
-                    extra={"event": "agent_stream_publish_failed", "run_id": str(run_id)},
+                    extra={
+                        "event": "agent_stream_publish_failed",
+                        "run_id": str(run_id),
+                    },
                 )
                 self._drop_subscriber(channel, queue)
 
@@ -307,7 +313,9 @@ class RunStreamPublisher:
     def _publish(self, part: dict[str, Any]) -> None:
         if not self._started:
             self._started = True
-            self._broker.publish(self._run_id, {"type": "start", "messageId": str(self._run_id)})
+            self._broker.publish(
+                self._run_id, {"type": "start", "messageId": str(self._run_id)}
+            )
         self._broker.publish(self._run_id, part)
 
     def turn_started(self) -> None:

@@ -65,7 +65,9 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     if registry_present:
         app.state.skill_registry = MutableSkillRegistry(load_registry(FIXTURES_DIR))
     elif prior_holder is None:
-        app.state.skill_registry = MutableSkillRegistry(load_registry(Path("/nonexistent")))
+        app.state.skill_registry = MutableSkillRegistry(
+            load_registry(Path("/nonexistent"))
+        )
 
     gw = GatewayClient(base_url=GATEWAY_BASE, gateway_key=GATEWAY_KEY)
     set_gateway_client(gw)

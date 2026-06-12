@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -406,7 +407,9 @@ async def login(
     await db.commit()
 
     body = _login_response(user, plaintext)
-    return JSONResponse(status_code=status.HTTP_200_OK, content=body.model_dump(mode="json"))
+    return JSONResponse(
+        status_code=status.HTTP_200_OK, content=body.model_dump(mode="json")
+    )
 
 
 @router.post(
@@ -434,17 +437,21 @@ async def refresh(
     # count per user is tiny (a few devices); if this becomes hot, switch
     # to a deterministic HMAC index column. Tracked as DE candidate.
     result = await db.execute(
-        select(UserSession).where(
+        select(UserSession.id, UserSession.refresh_token_hash).where(
             UserSession.revoked_at.is_(None),
             UserSession.expires_at > now,
         )
     )
-    candidates = result.scalars().all()
+    candidates = result.tuples().all()
+    # (The request's read transaction — and its pooled connection — stays
+    # open across the scan, as it always has; releasing it mid-request
+    # would fight the session-per-request design. The HMAC index column
+    # is the real fix for the scan's duration.)
 
-    def _match_candidate() -> UserSession | None:
-        for session in candidates:
-            if refresh_token_matches(payload.refresh_token, session.refresh_token_hash):
-                return session
+    def _match_candidate() -> UUID | None:
+        for session_id, token_hash in candidates:
+            if refresh_token_matches(payload.refresh_token, token_hash):
+                return session_id
         return None
 
     # The scan is CPU-bound (one bcrypt compare per candidate, ~10²ms
@@ -454,18 +461,40 @@ async def refresh(
     # verification with 186 dev sessions). Off-thread keeps the loop
     # responsive; the deterministic index column above stays the real
     # fix for the scan itself.
-    matched: UserSession | None = await asyncio.to_thread(_match_candidate)
+    matched_id = await asyncio.to_thread(_match_candidate)
+
+    matched: UserSession | None = None
+    if matched_id is not None:
+        # Re-acquire under lock and RE-CHECK liveness: the scan is a long
+        # await point — a concurrent presentation of the SAME token can
+        # have rotated the session meanwhile. Without this re-check the
+        # loser would blindly overwrite the revocation below (refresh
+        # double-spend: two live sessions from one token, and the theft
+        # signal rotation exists to provide — the loser's 401 — is lost).
+        matched = (
+            await db.execute(
+                select(UserSession)
+                .where(
+                    UserSession.id == matched_id,
+                    UserSession.revoked_at.is_(None),
+                    UserSession.expires_at > now,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
 
     if matched is None:
         # No user context (the presented token didn't match any active
         # session); the audit row records the *attempt* with no user id.
+        # Counts/types/IDs only — never the token.
+        reason = "no_matching_session" if matched_id is None else "concurrent_rotation"
         await audit_action(
             db,
             user_id=None,
             action="user.session_refresh_failed",
             resource_type="user_session",
             request=request,
-            details={"reason": "no_matching_session"},
+            details={"reason": reason},
         )
         await db.commit()
         raise HTTPException(
@@ -670,7 +699,9 @@ async def change_password(
     if len(new_password) < settings.password_min_length:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(f"New password must be at least {settings.password_min_length} characters."),
+            detail=(
+                f"New password must be at least {settings.password_min_length} characters."
+            ),
         )
 
     if new_password == payload.current_password:
@@ -951,7 +982,9 @@ async def mfa_verify(
     await db.commit()
 
     body = _login_response(user, plaintext)
-    return JSONResponse(status_code=status.HTTP_200_OK, content=body.model_dump(mode="json"))
+    return JSONResponse(
+        status_code=status.HTTP_200_OK, content=body.model_dump(mode="json")
+    )
 
 
 @router.post(
@@ -1004,7 +1037,9 @@ async def mfa_disable(
     code_ok = False
     if user.totp_secret and verify_totp(user.totp_secret, payload.code):
         code_ok = True
-    elif consume_recovery_code(payload.code, list(user.recovery_codes or [])) is not None:
+    elif (
+        consume_recovery_code(payload.code, list(user.recovery_codes or [])) is not None
+    ):
         # Recovery code is single-use, but since we're about to clear all
         # MFA state we don't need to persist the truncated list — the
         # code being burned just to disable MFA is the explicit intent.

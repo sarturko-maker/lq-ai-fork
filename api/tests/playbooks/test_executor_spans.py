@@ -79,7 +79,9 @@ class _StubGateway:
 
     async def chat_completion(self, request: Any) -> _StubResponse:
         if not self.payloads:
-            return _StubResponse(choices=[_StubChoice(message=_StubMessage(content=""))])
+            return _StubResponse(
+                choices=[_StubChoice(message=_StubMessage(content=""))]
+            )
         payload = self.payloads.pop(0)
         return _StubResponse(
             choices=[_StubChoice(message=_StubMessage(content=json.dumps(payload)))]
@@ -266,5 +268,7 @@ async def test_executor_emits_playbook_execute_and_position_spans(
     # the same trace). Catches a regression where positions become siblings
     # under a detached root.
     for pos_span in position_spans:
-        assert pos_span.parent is not None, "playbook.position span is a root — nesting broke"
+        assert pos_span.parent is not None, (
+            "playbook.position span is a root — nesting broke"
+        )
         assert pos_span.parent.span_id == exec_span.context.span_id

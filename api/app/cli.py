@@ -74,7 +74,9 @@ async def _reset_admin_password(
         return 2
 
     engine = create_async_engine(settings.database_url, future=True)
-    factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory = async_sessionmaker(
+        bind=engine, expire_on_commit=False, class_=AsyncSession
+    )
 
     try:
         async with factory() as session:
@@ -89,7 +91,9 @@ async def _reset_admin_password(
                     return 2
             else:
                 result = await session.execute(
-                    select(User).where(User.is_admin.is_(True), User.deleted_at.is_(None))
+                    select(User).where(
+                        User.is_admin.is_(True), User.deleted_at.is_(None)
+                    )
                 )
                 admins = result.scalars().all()
                 if not admins:
@@ -126,7 +130,9 @@ async def _reset_admin_password(
             # the reset can't be used.
             await session.execute(
                 update(UserSession)
-                .where(UserSession.user_id == target.id, UserSession.revoked_at.is_(None))
+                .where(
+                    UserSession.user_id == target.id, UserSession.revoked_at.is_(None)
+                )
                 .values(revoked_at=datetime.now(tz=UTC)),
             )
 

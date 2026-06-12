@@ -111,12 +111,36 @@
 		nav(cockpitUrl({ area: sel.area, matter: project.id }));
 	}
 
+	function onMatterCreatedInline(project: Project) {
+		// Quick-create from the composer: the select needs the option NOW —
+		// append optimistically, then reconcile from the server.
+		projects = [project, ...projects];
+		loadActivity();
+		loadProjects();
+	}
+
 	function selectThread(threadId: string | null) {
 		nav(
 			sel.unfiled
 				? cockpitUrl({ unfiled: true, thread: threadId })
 				: cockpitUrl({ area: sel.area, matter: sel.matter, thread: threadId })
 		);
+	}
+
+	function onThreadCreated(detail: { threadId: string; projectId: string | null }) {
+		// Sync the URL to the conversation the panel just created so the
+		// deep-link/reload contract holds for the primary flow. replaceState:
+		// the fresh-composer state isn't a history entry worth keeping. If
+		// the user re-pointed the composer's matter select, follow the REAL
+		// binding (the thread files under ITS matter, not the open one).
+		const matterId = sel.unfiled ? null : (detail.projectId ?? sel.matter);
+		goto(
+			sel.unfiled && detail.projectId === null
+				? cockpitUrl({ unfiled: true, thread: detail.threadId })
+				: cockpitUrl({ area: sel.area, matter: matterId, thread: detail.threadId }),
+			{ replaceState: true, keepFocus: true, noScroll: true }
+		);
+		loadActivity();
 	}
 </script>
 
@@ -166,6 +190,8 @@
 							{nowMs}
 							onBack={() => nav(cockpitUrl({ area: sel.area }))}
 							onSelectThread={selectThread}
+							{onThreadCreated}
+							onMatterCreated={onMatterCreatedInline}
 							onActivity={loadActivity}
 						/>
 					{/key}
@@ -178,6 +204,8 @@
 						{nowMs}
 						onBack={() => nav(cockpitUrl({}))}
 						onSelectThread={selectThread}
+						{onThreadCreated}
+						onMatterCreated={onMatterCreatedInline}
 						onActivity={loadActivity}
 					/>
 				{:else}

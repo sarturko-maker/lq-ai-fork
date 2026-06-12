@@ -93,7 +93,9 @@ def create_access_token(user_id: uuid.UUID, email: str, *, is_admin: bool) -> st
         "email": email,
         "is_admin": is_admin,
         "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(seconds=settings.jwt_access_token_ttl_seconds)).timestamp()),
+        "exp": int(
+            (now + timedelta(seconds=settings.jwt_access_token_ttl_seconds)).timestamp()
+        ),
         "typ": _TYPE_ACCESS,
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=_JWT_ALGORITHM)
@@ -155,7 +157,9 @@ def create_mfa_token(user_id: uuid.UUID) -> str:
     payload: dict[str, object] = {
         "sub": str(user_id),
         "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(seconds=settings.mfa_token_ttl_seconds)).timestamp()),
+        "exp": int(
+            (now + timedelta(seconds=settings.mfa_token_ttl_seconds)).timestamp()
+        ),
         "typ": _TYPE_MFA,
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=_JWT_ALGORITHM)

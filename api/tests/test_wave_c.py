@@ -225,7 +225,9 @@ async def test_update_user_role_invalid_value_returns_422(
 
 
 @pytest.mark.integration
-async def test_update_user_role_requires_admin(client: AsyncClient, member_user: User) -> None:
+async def test_update_user_role_requires_admin(
+    client: AsyncClient, member_user: User
+) -> None:
     resp = await client.patch(
         f"/api/v1/admin/users/{member_user.id}/role",
         headers=_bearer(member_user),

@@ -246,7 +246,9 @@ async def cluster_clauses_by_issue(
     # itself (proven by the post-smoke similarity probe). Skipped if
     # threshold is None, only one group exists, or embeddings failed.
     do_label_merge = (
-        label_merge_threshold is not None and len(groups) >= 2 and embeddings is not None
+        label_merge_threshold is not None
+        and len(groups) >= 2
+        and embeddings is not None
     )
     if do_label_merge:
         groups = _merge_groups_by_clause_centroid(
@@ -279,7 +281,9 @@ async def cluster_clauses_by_issue(
             group_vectors = [embeddings[i] for i in group_indices]
             modal_pos = _medoid_index(group_vectors)
             distances_from_modal = [
-                _cosine_distance(group_vectors[modal_pos], v) if i != modal_pos else float("-inf")
+                _cosine_distance(group_vectors[modal_pos], v)
+                if i != modal_pos
+                else float("-inf")
                 for i, v in enumerate(group_vectors)
             ]
         else:
@@ -293,7 +297,9 @@ async def cluster_clauses_by_issue(
                 ),
             )
             distances_from_modal = [
-                float("-inf") if i == modal_pos else float(len(group_clauses[i].clause_text))
+                float("-inf")
+                if i == modal_pos
+                else float(len(group_clauses[i].clause_text))
                 for i in range(len(group_clauses))
             ]
 
@@ -341,7 +347,9 @@ def _normalize_issue_label(label: str) -> str:
     return _LABEL_WHITESPACE_RE.sub(" ", label.strip().lower())
 
 
-def _group_by_normalized_label(clauses: list[ClauseInput]) -> dict[str, list[ClauseInput]]:
+def _group_by_normalized_label(
+    clauses: list[ClauseInput],
+) -> dict[str, list[ClauseInput]]:
     """Group clauses by the normalized form of their issue label."""
 
     groups: dict[str, list[ClauseInput]] = defaultdict(list)
@@ -484,7 +492,11 @@ def _pick_neighbors(
     """
 
     candidates = sorted(
-        ((i, distances_from_modal[i]) for i in range(len(group_clauses)) if i != modal_pos),
+        (
+            (i, distances_from_modal[i])
+            for i in range(len(group_clauses))
+            if i != modal_pos
+        ),
         key=lambda item: -item[1],
     )
 
@@ -542,7 +554,9 @@ def _cosine_distance(a: list[float], b: list[float]) -> float:
     """
 
     if len(a) != len(b):
-        raise ValueError(f"cosine_distance got mismatched dimensions: {len(a)} vs {len(b)}")
+        raise ValueError(
+            f"cosine_distance got mismatched dimensions: {len(a)} vs {len(b)}"
+        )
     dot = 0.0
     norm_a = 0.0
     norm_b = 0.0

@@ -60,7 +60,9 @@ async def cli_db_url(test_db_url: str, test_engine: AsyncEngine) -> AsyncIterato
 async def _seed_admin(test_db_url: str, email: str, plaintext: str) -> None:
     """Insert an admin row using a separate session (not the CLI's)."""
     engine = create_async_engine(test_db_url, future=True)
-    factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory = async_sessionmaker(
+        bind=engine, expire_on_commit=False, class_=AsyncSession
+    )
     try:
         async with factory() as s:
             s.add(
@@ -108,9 +110,13 @@ async def test_reset_admin_password_happy_path(
 
         # Verify state in DB.
         engine = create_async_engine(cli_db_url, future=True)
-        factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+        factory = async_sessionmaker(
+            bind=engine, expire_on_commit=False, class_=AsyncSession
+        )
         async with factory() as s:
-            row = (await s.execute(select(User).where(User.email == email))).scalar_one()
+            row = (
+                await s.execute(select(User).where(User.email == email))
+            ).scalar_one()
             assert row.must_change_password is True
             # Old password no longer verifies.
             assert verify_password("OldOldOldOldOld!", row.hashed_password) is False
@@ -181,9 +187,13 @@ async def test_reset_admin_password_with_explicit_password_sets_it(
 
         # The supplied value verifies; the old one does not.
         engine = create_async_engine(cli_db_url, future=True)
-        factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+        factory = async_sessionmaker(
+            bind=engine, expire_on_commit=False, class_=AsyncSession
+        )
         async with factory() as s:
-            row = (await s.execute(select(User).where(User.email == email))).scalar_one()
+            row = (
+                await s.execute(select(User).where(User.email == email))
+            ).scalar_one()
             assert verify_password(supplied, row.hashed_password) is True
             assert verify_password("OldOldOldOldOld!", row.hashed_password) is False
             # Default still forces a change.
@@ -202,16 +212,22 @@ async def test_reset_admin_password_no_force_change_leaves_flag_false(
     await _seed_admin(cli_db_url, email, "OldOldOldOldOld!")
     supplied = "FixtureSeedPw2026!"
     try:
-        rc = await _reset_admin_password(email=email, password=supplied, force_change=False)
+        rc = await _reset_admin_password(
+            email=email, password=supplied, force_change=False
+        )
         assert rc == 0
 
         captured = capsys.readouterr().out
         assert "must_change_password is now false" in captured
 
         engine = create_async_engine(cli_db_url, future=True)
-        factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+        factory = async_sessionmaker(
+            bind=engine, expire_on_commit=False, class_=AsyncSession
+        )
         async with factory() as s:
-            row = (await s.execute(select(User).where(User.email == email))).scalar_one()
+            row = (
+                await s.execute(select(User).where(User.email == email))
+            ).scalar_one()
             assert row.must_change_password is False
             assert verify_password(supplied, row.hashed_password) is True
         await engine.dispose()
@@ -234,9 +250,13 @@ async def test_reset_admin_password_rejects_short_explicit_password(
 
         # Old password still works — DB was not touched.
         engine = create_async_engine(cli_db_url, future=True)
-        factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+        factory = async_sessionmaker(
+            bind=engine, expire_on_commit=False, class_=AsyncSession
+        )
         async with factory() as s:
-            row = (await s.execute(select(User).where(User.email == email))).scalar_one()
+            row = (
+                await s.execute(select(User).where(User.email == email))
+            ).scalar_one()
             assert verify_password("OldOldOldOldOld!", row.hashed_password) is True
         await engine.dispose()
     finally:
@@ -251,12 +271,16 @@ async def test_reset_admin_password_revokes_active_sessions(cli_db_url: str) -> 
 
     # Insert an active session row by hand.
     engine = create_async_engine(cli_db_url, future=True)
-    factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory = async_sessionmaker(
+        bind=engine, expire_on_commit=False, class_=AsyncSession
+    )
     try:
         async with factory() as s:
             from datetime import UTC, datetime, timedelta
 
-            user = (await s.execute(select(User).where(User.email == email))).scalar_one()
+            user = (
+                await s.execute(select(User).where(User.email == email))
+            ).scalar_one()
             now = datetime.now(tz=UTC)
             s.add(
                 UserSession(
@@ -274,7 +298,11 @@ async def test_reset_admin_password_revokes_active_sessions(cli_db_url: str) -> 
 
         async with factory() as s:
             sessions = (
-                (await s.execute(select(UserSession).where(UserSession.user_id == user.id)))
+                (
+                    await s.execute(
+                        select(UserSession).where(UserSession.user_id == user.id)
+                    )
+                )
                 .scalars()
                 .all()
             )

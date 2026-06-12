@@ -47,7 +47,9 @@ logger = logging.getLogger(__name__)
 TABULAR_EXECUTION_JOB_NAME = "tabular_execution_job"
 
 
-async def tabular_execution_job(ctx: dict[str, Any], execution_id_str: str) -> dict[str, Any]:
+async def tabular_execution_job(
+    ctx: dict[str, Any], execution_id_str: str
+) -> dict[str, Any]:
     """ARQ job — run the Tabular Review pipeline for one execution row.
 
     Lifecycle (delegated to :func:`run_tabular_execution`):

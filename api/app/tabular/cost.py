@@ -238,7 +238,9 @@ async def estimate_tabular_execution_cost(
         columns=columns,
     )
 
-    ensemble_column_count = sum(1 for col in columns if _column_runs_ensemble(col, ensemble_config))
+    ensemble_column_count = sum(
+        1 for col in columns if _column_runs_ensemble(col, ensemble_config)
+    )
     ensemble_cells_count = len(document_ids) * ensemble_column_count
 
     ensemble_premium = Decimal("0")
@@ -336,7 +338,8 @@ async def _estimate_per_cell_metrics(
     stmt = select(
         func.avg(recent.c.cost_estimate),
         func.avg(
-            func.coalesce(recent.c.tokens_in, 0) + func.coalesce(recent.c.tokens_out, 0),
+            func.coalesce(recent.c.tokens_in, 0)
+            + func.coalesce(recent.c.tokens_out, 0),
         ),
         func.count(recent.c.cost_estimate),
     )
@@ -363,7 +366,9 @@ async def _estimate_per_cell_metrics(
         return DEFAULT_PER_CELL_USD, DEFAULT_TOKENS_PER_CELL
 
     cost_estimate = Decimal(str(avg_cost_raw))
-    tokens_estimate = int(avg_tokens_raw) if avg_tokens_raw is not None else DEFAULT_TOKENS_PER_CELL
+    tokens_estimate = (
+        int(avg_tokens_raw) if avg_tokens_raw is not None else DEFAULT_TOKENS_PER_CELL
+    )
 
     metrics: tuple[Decimal, int] = (cost_estimate, tokens_estimate)
     _cache[_CACHE_KEY] = (now, metrics)

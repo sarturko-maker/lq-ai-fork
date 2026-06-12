@@ -38,7 +38,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.autonomous.enums import PHASE_GRANTS, Phase, ToolIntent
-from app.autonomous.guard import _ARTIFACT_MAX_CHARS, _handle_retrieve_chunks, guarded_tool_call
+from app.autonomous.guard import (
+    _ARTIFACT_MAX_CHARS,
+    _handle_retrieve_chunks,
+    guarded_tool_call,
+)
 from app.models.autonomous import AutonomousArtifact, AutonomousSession
 from app.models.document import Document, DocumentChunk
 from app.models.file import File as FileModel
@@ -106,8 +110,12 @@ def _stub_storage(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """
     calls: list[dict[str, Any]] = []
 
-    async def _fake_upload(*, storage_path: str, body: bytes, content_type: str) -> None:
-        calls.append({"storage_path": storage_path, "body": body, "content_type": content_type})
+    async def _fake_upload(
+        *, storage_path: str, body: bytes, content_type: str
+    ) -> None:
+        calls.append(
+            {"storage_path": storage_path, "body": body, "content_type": content_type}
+        )
 
     monkeypatch.setattr("app.storage.upload_bytes", _fake_upload)
     return calls
@@ -169,7 +177,13 @@ async def test_emit_artifact_happy_path(
     assert result.cost_usd == Decimal("0")
     assert result.outcome == "success"
     data = result.data
-    assert set(data.keys()) == {"artifact_id", "file_id", "document_id", "name", "size_bytes"}
+    assert set(data.keys()) == {
+        "artifact_id",
+        "file_id",
+        "document_id",
+        "name",
+        "size_bytes",
+    }
 
     body = content.encode("utf-8")
 
@@ -202,14 +216,19 @@ async def test_emit_artifact_happy_path(
 
     # Chunks exist and uphold the M2-A1 re-read invariant.
     chunks = (
-        (await db_session.execute(select(DocumentChunk).where(DocumentChunk.document_id == doc.id)))
+        (
+            await db_session.execute(
+                select(DocumentChunk).where(DocumentChunk.document_id == doc.id)
+            )
+        )
         .scalars()
         .all()
     )
     assert len(chunks) >= 1
     for chunk in chunks:
         assert (
-            chunk.content == doc.normalized_content[chunk.char_offset_start : chunk.char_offset_end]
+            chunk.content
+            == doc.normalized_content[chunk.char_offset_start : chunk.char_offset_end]
         )
 
     # KB attach join row.
@@ -223,7 +242,9 @@ async def test_emit_artifact_happy_path(
     assert kbf is not None
 
     # Artifact reference row.
-    artifact_row = await db_session.get(AutonomousArtifact, uuid.UUID(data["artifact_id"]))
+    artifact_row = await db_session.get(
+        AutonomousArtifact, uuid.UUID(data["artifact_id"])
+    )
     assert artifact_row is not None
     assert artifact_row.session_id == sess.id
     assert artifact_row.file_id == file_row.id
@@ -321,7 +342,9 @@ async def test_emit_artifact_storage_failure_writes_no_rows(
     any of the four tables (the gateway_error honesty pattern)."""
     _stub_embed(monkeypatch)
 
-    async def _failing_upload(*, storage_path: str, body: bytes, content_type: str) -> None:
+    async def _failing_upload(
+        *, storage_path: str, body: bytes, content_type: str
+    ) -> None:
         raise RuntimeError("minio is down")
 
     monkeypatch.setattr("app.storage.upload_bytes", _failing_upload)
@@ -467,7 +490,9 @@ async def test_emit_artifact_rejected_at_ungranted_phase(
 
     user = await _make_user(db_session)
     kb = await _make_kb(db_session, owner=user)
-    sess = await _make_session(db_session, user=user, phase=phase, params={"kb_id": str(kb.id)})
+    sess = await _make_session(
+        db_session, user=user, phase=phase, params={"kb_id": str(kb.id)}
+    )
 
     with pytest.raises(ToolNotGranted):
         await guarded_tool_call(
@@ -516,7 +541,9 @@ async def test_retrieve_chunks_since_excludes_artifact_files(
     await db_session.flush()
 
     since = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
-    result = await _handle_retrieve_chunks({"since": since, "kb_id": str(kb.id)}, db=db_session)
+    result = await _handle_retrieve_chunks(
+        {"since": since, "kb_id": str(kb.id)}, db=db_session
+    )
 
     returned_file_ids = {c["file_id"] for c in result.data["chunks"]}
     assert str(ordinary_file.id) in returned_file_ids

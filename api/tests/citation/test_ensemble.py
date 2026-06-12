@@ -103,7 +103,9 @@ class _StubGateway:
                     finish_reason="stop",
                 )
             ],
-            usage=ChatCompletionUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+            usage=ChatCompletionUsage(
+                prompt_tokens=10, completion_tokens=20, total_tokens=30
+            ),
         )
 
 
@@ -186,7 +188,9 @@ async def test_strict_one_no_misses() -> None:
     cfg = _ensemble(n=3, rule="strict")
     doc = _doc()
 
-    result = await verify_ensemble(_candidate(doc), doc, gateway=gw, ensemble_config=cfg)
+    result = await verify_ensemble(
+        _candidate(doc), doc, gateway=gw, ensemble_config=cfg
+    )
 
     assert result.verified is False
     assert result.method is None
@@ -206,7 +210,9 @@ async def test_strict_all_yes_with_one_partial_persists_partial_flag() -> None:
     cfg = _ensemble(n=3, rule="strict")
     doc = _doc()
 
-    result = await verify_ensemble(_candidate(doc), doc, gateway=gw, ensemble_config=cfg)
+    result = await verify_ensemble(
+        _candidate(doc), doc, gateway=gw, ensemble_config=cfg
+    )
 
     assert result.verified is True
     assert result.partial is True
@@ -226,7 +232,9 @@ async def test_majority_three_of_three_verified_not_partial() -> None:
     cfg = _ensemble(n=3, rule="majority")
     doc = _doc()
 
-    result = await verify_ensemble(_candidate(doc), doc, gateway=gw, ensemble_config=cfg)
+    result = await verify_ensemble(
+        _candidate(doc), doc, gateway=gw, ensemble_config=cfg
+    )
 
     assert result.verified is True
     assert result.method == "ensemble_majority"
@@ -247,7 +255,9 @@ async def test_majority_two_of_three_verified_marks_partial_for_dissent() -> Non
     cfg = _ensemble(n=3, rule="majority")
     doc = _doc()
 
-    result = await verify_ensemble(_candidate(doc), doc, gateway=gw, ensemble_config=cfg)
+    result = await verify_ensemble(
+        _candidate(doc), doc, gateway=gw, ensemble_config=cfg
+    )
 
     assert result.verified is True
     assert result.method == "ensemble_majority"
@@ -271,7 +281,9 @@ async def test_majority_one_of_three_misses() -> None:
     cfg = _ensemble(n=3, rule="majority")
     doc = _doc()
 
-    result = await verify_ensemble(_candidate(doc), doc, gateway=gw, ensemble_config=cfg)
+    result = await verify_ensemble(
+        _candidate(doc), doc, gateway=gw, ensemble_config=cfg
+    )
 
     assert result.verified is False
 
@@ -291,7 +303,9 @@ async def test_majority_tied_two_of_four_misses() -> None:
     cfg = _ensemble(n=4, rule="majority")
     doc = _doc()
 
-    result = await verify_ensemble(_candidate(doc), doc, gateway=gw, ensemble_config=cfg)
+    result = await verify_ensemble(
+        _candidate(doc), doc, gateway=gw, ensemble_config=cfg
+    )
 
     assert result.verified is False
 
@@ -309,7 +323,9 @@ async def test_tier_envelope_propagates_when_verified() -> None:
     cfg = _ensemble(n=2, rule="strict", envelope_tier=4)
     doc = _doc()
 
-    result = await verify_ensemble(_candidate(doc), doc, gateway=gw, ensemble_config=cfg)
+    result = await verify_ensemble(
+        _candidate(doc), doc, gateway=gw, ensemble_config=cfg
+    )
 
     assert result.verified is True
     assert result.tier_envelope == 4
@@ -323,7 +339,9 @@ async def test_tier_envelope_null_when_gateway_reported_no_tier() -> None:
     cfg = _ensemble(n=2, rule="strict", envelope_tier=None)
     doc = _doc()
 
-    result = await verify_ensemble(_candidate(doc), doc, gateway=gw, ensemble_config=cfg)
+    result = await verify_ensemble(
+        _candidate(doc), doc, gateway=gw, ensemble_config=cfg
+    )
 
     assert result.verified is True
     assert result.tier_envelope is None
@@ -334,10 +352,14 @@ async def test_empty_judge_models_misses_without_calling_gateway() -> None:
     """No-judges config is a misconfiguration; short-circuit to MISS."""
 
     gw = _StubGateway(response_contents=[_judge_json(verdict="yes")])
-    cfg = _StubEnsembleConfig(judge_models=(), aggregation_rule="strict", envelope_tier=3)
+    cfg = _StubEnsembleConfig(
+        judge_models=(), aggregation_rule="strict", envelope_tier=3
+    )
     doc = _doc()
 
-    result = await verify_ensemble(_candidate(doc), doc, gateway=gw, ensemble_config=cfg)
+    result = await verify_ensemble(
+        _candidate(doc), doc, gateway=gw, ensemble_config=cfg
+    )
 
     assert result.verified is False
     assert gw.call_count == 0
@@ -370,7 +392,9 @@ async def test_ensemble_judge_calls_carry_anonymize_false_for_correctness() -> N
     cfg = _ensemble(n=3, rule="strict")
     doc = _doc()
 
-    result = await verify_ensemble(_candidate(doc), doc, gateway=gw, ensemble_config=cfg)
+    result = await verify_ensemble(
+        _candidate(doc), doc, gateway=gw, ensemble_config=cfg
+    )
 
     assert result.verified is True
     assert gw.call_count == 3
@@ -394,7 +418,9 @@ async def test_confidence_is_mean_of_verified_judges() -> None:
     cfg = _ensemble(n=2, rule="strict")
     doc = _doc()
 
-    result = await verify_ensemble(_candidate(doc), doc, gateway=gw, ensemble_config=cfg)
+    result = await verify_ensemble(
+        _candidate(doc), doc, gateway=gw, ensemble_config=cfg
+    )
 
     assert result.verified is True
     assert result.confidence == pytest.approx(0.80)
@@ -521,7 +547,9 @@ class _StubGatewayForActivation:
         self._config = config
         self.fetch_count = 0
 
-    async def get_citation_engine_ensemble_config(self) -> _StubResolvedEnsembleConfig | None:
+    async def get_citation_engine_ensemble_config(
+        self,
+    ) -> _StubResolvedEnsembleConfig | None:
         self.fetch_count += 1
         return self._config
 
@@ -565,7 +593,9 @@ async def test_resolve_activates_on_skill_flag(
     from app.api.chats import _resolve_ensemble_config
 
     gw = _StubGatewayForActivation(config=_activation_config_off)
-    registry = _StubSkillRegistry({"nda-review": _StubSkill(ensemble_verification=True)})
+    registry = _StubSkillRegistry(
+        {"nda-review": _StubSkill(ensemble_verification=True)}
+    )
 
     result = await _resolve_ensemble_config(
         gateway=gw,

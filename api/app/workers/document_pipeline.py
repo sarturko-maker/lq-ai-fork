@@ -100,7 +100,9 @@ async def ingest_file_job(ctx: dict[str, Any], file_id_str: str) -> dict[str, An
     return {
         "file_id": str(result.file_id),
         "status": result.status,
-        "document_id": (str(result.document_id) if result.document_id is not None else None),
+        "document_id": (
+            str(result.document_id) if result.document_id is not None else None
+        ),
         "chunk_count": result.chunk_count,
         "parser": result.parser,
         "error": result.error,

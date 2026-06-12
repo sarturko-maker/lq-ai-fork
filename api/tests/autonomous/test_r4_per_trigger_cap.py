@@ -109,7 +109,9 @@ async def test_r4_trips_on_low_per_trigger_max_cost_usd(
         )
     ).scalar_one()
     assert session.trigger_kind == "watch"
-    assert session.max_cost_usd == Decimal("0.001"), "session must inherit the per-trigger cap"
+    assert session.max_cost_usd == Decimal("0.001"), (
+        "session must inherit the per-trigger cap"
+    )
 
     # Mock gateway: chat_completion is a required arg but R4 trips pre-call,
     # so it should never be awaited.  A realistic usage payload is provided
@@ -120,8 +122,12 @@ async def test_r4_trips_on_low_per_trigger_max_cost_usd(
             "R",
             (),
             {
-                "choices": [type("C", (), {"message": type("M", (), {"content": "{}"})()})()],
-                "usage": type("U", (), {"prompt_tokens": 5000, "completion_tokens": 2000})(),
+                "choices": [
+                    type("C", (), {"message": type("M", (), {"content": "{}"})()})()
+                ],
+                "usage": type(
+                    "U", (), {"prompt_tokens": 5000, "completion_tokens": 2000}
+                )(),
             },
         )()
     )
@@ -165,7 +171,9 @@ async def test_r4_halt_populates_receipt_terminal_reason(
     await db_session.flush()
 
     enqueue = AsyncMock(return_value=True)
-    await fire_watches_for_kb(db_session, kb_id=kb.kb_id, file_id=kb.file_id, enqueue=enqueue)
+    await fire_watches_for_kb(
+        db_session, kb_id=kb.kb_id, file_id=kb.file_id, enqueue=enqueue
+    )
 
     session = (
         await db_session.execute(
@@ -179,8 +187,12 @@ async def test_r4_halt_populates_receipt_terminal_reason(
             "R",
             (),
             {
-                "choices": [type("C", (), {"message": type("M", (), {"content": "{}"})()})()],
-                "usage": type("U", (), {"prompt_tokens": 5000, "completion_tokens": 2000})(),
+                "choices": [
+                    type("C", (), {"message": type("M", (), {"content": "{}"})()})()
+                ],
+                "usage": type(
+                    "U", (), {"prompt_tokens": 5000, "completion_tokens": 2000}
+                )(),
             },
         )()
     )

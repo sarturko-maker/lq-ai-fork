@@ -211,7 +211,9 @@ async def test_publisher_step_settled_tool_parts_and_plan() -> None:
         seq=1,
         kind="tool_call",
         name="write_todos",
-        summary=json.dumps({"todos": [{"content": "review clause", "status": "pending"}]}),
+        summary=json.dumps(
+            {"todos": [{"content": "review clause", "status": "pending"}]}
+        ),
         parent_step_id=None,
         created_at=datetime.now(UTC),
     )
@@ -234,7 +236,10 @@ async def test_publisher_step_settled_tool_parts_and_plan() -> None:
     # tool_call → tool-input-available keyed by the SETTLED row id.
     assert by_type["tool-input-available"]["toolCallId"] == call_payload["id"]
     assert by_type["tool-input-available"]["toolName"] == "write_todos"
-    assert by_type["tool-input-available"]["input"]["todos"][0]["content"] == "review clause"
+    assert (
+        by_type["tool-input-available"]["input"]["todos"][0]["content"]
+        == "review clause"
+    )
     # write_todos additionally rides as a plan frame (rail label "Plan").
     assert by_type["data-plan"]["id"] == call_payload["id"]
     assert by_type["data-plan"]["data"]["todos"][0]["status"] == "pending"
@@ -278,8 +283,12 @@ async def test_publisher_run_finished_terminal_sequence_and_idempotency() -> Non
     publisher = broker.publisher(run_id)
 
     publisher.reasoning_delta("r1", "thinking")
-    publisher.run_finished(status="completed", final_answer="The cap is 12 months of fees.")
-    publisher.run_finished(status="failed", error="late duplicate")  # closed channel → no-op
+    publisher.run_finished(
+        status="completed", final_answer="The cap is 12 months of fees."
+    )
+    publisher.run_finished(
+        status="failed", error="late duplicate"
+    )  # closed channel → no-op
 
     parts = _drain(queue)
     assert parts[-1] is CHANNEL_CLOSED
@@ -307,7 +316,9 @@ async def test_publisher_run_finished_terminal_sequence_and_idempotency() -> Non
 
 
 def test_terminal_parts_failed_run_carries_error_no_text() -> None:
-    parts = terminal_parts(run_id=uuid.uuid4(), status="failed", final_answer=None, error="timeout")
+    parts = terminal_parts(
+        run_id=uuid.uuid4(), status="failed", final_answer=None, error="timeout"
+    )
     types = [p["type"] for p in parts]
     assert types == ["error", "data-run", "finish"]
     assert parts[0]["errorText"] == "timeout"
@@ -325,7 +336,9 @@ def test_encode_sse_is_one_compact_data_line() -> None:
 
 @pytest_asyncio.fixture
 async def commit_factory(test_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
+    return async_sessionmaker(
+        bind=test_engine, expire_on_commit=False, class_=AsyncSession
+    )
 
 
 @pytest_asyncio.fixture
@@ -459,7 +472,12 @@ async def test_stream_replays_terminal_run_and_closes(
         final_answer="The cap is twelve months of fees.",
     )
     call = await _add_step(
-        commit_factory, run, seq=1, kind="tool_call", name="task", summary='{"description":"x"}'
+        commit_factory,
+        run,
+        seq=1,
+        kind="tool_call",
+        name="task",
+        summary='{"description":"x"}',
     )
     await _add_step(
         commit_factory,
@@ -481,13 +499,19 @@ async def test_stream_replays_terminal_run_and_closes(
 
     frames = _parse_sse(response.text)
     assert frames[0] == {"type": "start", "messageId": str(run.id)}
-    step_frames = [f for f in frames if isinstance(f, dict) and f["type"] == "data-step"]
+    step_frames = [
+        f for f in frames if isinstance(f, dict) and f["type"] == "data-step"
+    ]
     assert [f["data"]["seq"] for f in step_frames] == [1, 2]
     # Subagent ancestry survives the wire (the S7 MUST).
     assert step_frames[1]["data"]["parent_step_id"] == str(call.id)
-    text_delta = next(f for f in frames if isinstance(f, dict) and f["type"] == "text-delta")
+    text_delta = next(
+        f for f in frames if isinstance(f, dict) and f["type"] == "text-delta"
+    )
     assert text_delta["delta"] == "The cap is twelve months of fees."
-    data_run = next(f for f in frames if isinstance(f, dict) and f["type"] == "data-run")
+    data_run = next(
+        f for f in frames if isinstance(f, dict) and f["type"] == "data-run"
+    )
     assert data_run["data"]["status"] == "completed"
     assert frames[-2] == {"type": "finish"}
     assert frames[-1] == "[DONE]"
@@ -516,7 +540,9 @@ async def test_stream_404_for_missing_and_cross_user_run(
         db.add(other)
         await db.commit()
     try:
-        run = await _make_thread_run(commit_factory, other, status="completed", final_answer="x")
+        run = await _make_thread_run(
+            commit_factory, other, status="completed", final_answer="x"
+        )
         cross = await stream_client.get(
             f"/api/v1/agents/runs/{run.id}/stream", headers=_auth(stream_user)
         )
@@ -538,7 +564,9 @@ async def test_stream_serves_live_broker_parts(
     broker: RunStreamBroker = app.state.agent_stream_broker
 
     request = asyncio.create_task(
-        stream_client.get(f"/api/v1/agents/runs/{run.id}/stream", headers=_auth(stream_user))
+        stream_client.get(
+            f"/api/v1/agents/runs/{run.id}/stream", headers=_auth(stream_user)
+        )
     )
     # Wait for the generator's subscription (deterministic, not sleep-tuned).
     for _ in range(500):
@@ -649,7 +677,9 @@ async def test_stream_db_tail_serves_run_without_live_publisher(
     broker: RunStreamBroker = app.state.agent_stream_broker
 
     request = asyncio.create_task(
-        stream_client.get(f"/api/v1/agents/runs/{run.id}/stream", headers=_auth(stream_user))
+        stream_client.get(
+            f"/api/v1/agents/runs/{run.id}/stream", headers=_auth(stream_user)
+        )
     )
     for _ in range(500):
         channel = broker._channels.get(run.id)
@@ -672,9 +702,13 @@ async def test_stream_db_tail_serves_run_without_live_publisher(
 
     response = await request
     frames = _parse_sse(response.text)
-    step_frames = [f for f in frames if isinstance(f, dict) and f["type"] == "data-step"]
+    step_frames = [
+        f for f in frames if isinstance(f, dict) and f["type"] == "data-step"
+    ]
     assert [f["data"]["seq"] for f in step_frames] == [1]
-    text_delta = next(f for f in frames if isinstance(f, dict) and f["type"] == "text-delta")
+    text_delta = next(
+        f for f in frames if isinstance(f, dict) and f["type"] == "text-delta"
+    )
     assert text_delta["delta"] == "Tail-served answer."
     assert frames[-1] == "[DONE]"
 
@@ -702,11 +736,15 @@ def test_run_is_orphaned_mirrors_the_sweep_rules() -> None:
 
     # Claimed + fresh heartbeat: alive, even if started long ago.
     alive = run_row(
-        started_at=now - timedelta(hours=2), claimed_at=now - timedelta(hours=2), heartbeat_at=now
+        started_at=now - timedelta(hours=2),
+        claimed_at=now - timedelta(hours=2),
+        heartbeat_at=now,
     )
     assert _run_is_orphaned(alive, now) is False
     # Claimed + heartbeat stale past orphan_after + slack: belt fires.
-    dead = run_row(claimed_at=now - timedelta(hours=1), heartbeat_at=now - timedelta(hours=1))
+    dead = run_row(
+        claimed_at=now - timedelta(hours=1), heartbeat_at=now - timedelta(hours=1)
+    )
     assert _run_is_orphaned(dead, now) is True
     # Unclaimed + young: queue wait is NOT an orphan.
     queued = run_row(started_at=now - timedelta(seconds=400))

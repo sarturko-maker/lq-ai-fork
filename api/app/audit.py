@@ -64,7 +64,9 @@ if TYPE_CHECKING:
     pass
 
 
-def _client_metadata(request: Request | None) -> tuple[str | None, str | None, str | None]:
+def _client_metadata(
+    request: Request | None,
+) -> tuple[str | None, str | None, str | None]:
     """Pull (ip_address, user_agent, request_id) off a Request, all nullable."""
 
     if request is None:

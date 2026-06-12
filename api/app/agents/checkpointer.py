@@ -80,7 +80,11 @@ async def init_agent_checkpointer() -> None:
             # otherwise wedge stale sockets into the pool forever.
             check=AsyncConnectionPool.check_connection,
             # AsyncPostgresSaver's documented connection requirements.
-            kwargs={"autocommit": True, "row_factory": dict_row, "prepare_threshold": 0},
+            kwargs={
+                "autocommit": True,
+                "row_factory": dict_row,
+                "prepare_threshold": 0,
+            },
         )
         await pool.open()
         try:
@@ -123,7 +127,9 @@ def thread_config(thread_id: uuid.UUID) -> RunnableConfig:
     return {"configurable": {"thread_id": str(thread_id)}}
 
 
-async def has_checkpoint(checkpointer: BaseCheckpointSaver | None, thread_id: uuid.UUID) -> bool:
+async def has_checkpoint(
+    checkpointer: BaseCheckpointSaver | None, thread_id: uuid.UUID
+) -> bool:
     """True when durable state exists for the thread (ADR-F008).
 
     Follow-ups REQUIRE this: a thread without checkpoint state (pre-S5

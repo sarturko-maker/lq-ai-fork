@@ -166,7 +166,11 @@ def test_parse_missing_artifacts_defaults_to_empty() -> None:
 
 def test_parse_non_list_artifacts_coerces_to_empty() -> None:
     """Non-list values for artifacts coerce to [] — never raise."""
-    for bad in ('{"artifacts": 42}', '{"artifacts": "memo"}', '{"artifacts": {"a": 1}}'):
+    for bad in (
+        '{"artifacts": 42}',
+        '{"artifacts": "memo"}',
+        '{"artifacts": {"a": 1}}',
+    ):
         r = parse_structured_output(bad)
         assert r.is_structured is True, f"Case {bad!r} should still be structured"
         assert r.artifacts == [], f"Case {bad!r} should produce artifacts=[]"

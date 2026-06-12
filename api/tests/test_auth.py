@@ -108,7 +108,9 @@ async def seed_mfa_user(db_session: AsyncSession) -> User:
 
 
 @pytest.mark.integration
-async def test_login_success_returns_tokens_and_user(client: AsyncClient, seed_user: User) -> None:
+async def test_login_success_returns_tokens_and_user(
+    client: AsyncClient, seed_user: User
+) -> None:
     """Successful login returns access + refresh tokens and the User payload."""
     resp = await client.post(
         "/api/v1/auth/login",
@@ -127,7 +129,9 @@ async def test_login_success_returns_tokens_and_user(client: AsyncClient, seed_u
 
 
 @pytest.mark.integration
-async def test_login_wrong_password_returns_401(client: AsyncClient, seed_user: User) -> None:
+async def test_login_wrong_password_returns_401(
+    client: AsyncClient, seed_user: User
+) -> None:
     resp = await client.post(
         "/api/v1/auth/login",
         json={"email": seed_user.email, "password": "totally-wrong"},
@@ -146,7 +150,9 @@ async def test_login_unknown_email_returns_401(client: AsyncClient) -> None:
 
 
 @pytest.mark.integration
-async def test_login_email_is_case_insensitive(client: AsyncClient, seed_user: User) -> None:
+async def test_login_email_is_case_insensitive(
+    client: AsyncClient, seed_user: User
+) -> None:
     """`users.email` is CITEXT — login works regardless of case."""
     resp = await client.post(
         "/api/v1/auth/login",
@@ -189,7 +195,11 @@ async def test_login_creates_session_row(
     assert resp.status_code == 200
 
     sessions = (
-        (await db_session.execute(select(UserSession).where(UserSession.user_id == seed_user.id)))
+        (
+            await db_session.execute(
+                select(UserSession).where(UserSession.user_id == seed_user.id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -354,7 +364,11 @@ async def test_refresh_with_valid_token_rotates_session(
     # Two session rows should now exist for this user — the old one revoked,
     # the new one active.
     sessions = (
-        (await db_session.execute(select(UserSession).where(UserSession.user_id == seed_user.id)))
+        (
+            await db_session.execute(
+                select(UserSession).where(UserSession.user_id == seed_user.id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -407,7 +421,11 @@ async def test_refresh_with_expired_session_returns_401(
 
     # Backdate the session's expiry.
     sessions = (
-        (await db_session.execute(select(UserSession).where(UserSession.user_id == seed_user.id)))
+        (
+            await db_session.execute(
+                select(UserSession).where(UserSession.user_id == seed_user.id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -438,7 +456,11 @@ async def test_logout_revokes_all_active_sessions(
     assert t1["refresh_token"] != t2["refresh_token"]
 
     sessions = (
-        (await db_session.execute(select(UserSession).where(UserSession.user_id == seed_user.id)))
+        (
+            await db_session.execute(
+                select(UserSession).where(UserSession.user_id == seed_user.id)
+            )
+        )
         .scalars()
         .all()
     )

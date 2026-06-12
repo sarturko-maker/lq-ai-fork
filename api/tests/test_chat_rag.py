@@ -295,7 +295,9 @@ async def test_chat_send_with_attached_kb_writes_audit_and_prepends_context(
         .scalars()
         .all()
     )
-    assert len(audits) == 1, f"Expected exactly one retrieval audit row, got {len(audits)}"
+    assert len(audits) == 1, (
+        f"Expected exactly one retrieval audit row, got {len(audits)}"
+    )
     row = audits[0]
     assert row.resource_type == "chat"
     assert row.user_id == owner_user.id
@@ -378,7 +380,11 @@ async def test_chat_send_with_attached_kb_and_empty_results_writes_no_audit(
     # Gateway request has only the user turn.
     sent_body = _json.loads(route.calls[0].request.read())
     assert sent_body["messages"] == [
-        {"role": "user", "content": "needle no haystack", "lq_ai_skip_anonymization": False}
+        {
+            "role": "user",
+            "content": "needle no haystack",
+            "lq_ai_skip_anonymization": False,
+        }
     ]
 
 
@@ -411,7 +417,9 @@ async def test_chat_send_with_project_but_no_kbs_skips_retrieval(
         )
 
     assert response.status_code == 200, response.text
-    assert not mock_search.called, "hybrid_search must NOT be called when no KBs attached"
+    assert not mock_search.called, (
+        "hybrid_search must NOT be called when no KBs attached"
+    )
 
     audits = (
         (

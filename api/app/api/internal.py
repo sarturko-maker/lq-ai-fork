@@ -107,7 +107,9 @@ def _registry(request: Request) -> MutableSkillRegistry:
     didn't run.
     """
 
-    holder: MutableSkillRegistry | None = getattr(request.app.state, "skill_registry", None)
+    holder: MutableSkillRegistry | None = getattr(
+        request.app.state, "skill_registry", None
+    )
     if holder is None:
         raise InternalError(
             message=(

@@ -936,7 +936,9 @@ async def dismiss_precedent(
 
     Another user's ``precedent_id`` returns 404.  Audited.
     """
-    precedent = await _load_owned_precedent(db, precedent_id=precedent_id, user_id=user.id)
+    precedent = await _load_owned_precedent(
+        db, precedent_id=precedent_id, user_id=user.id
+    )
 
     if precedent.dismissed_at is None:
         precedent.dismissed_at = datetime.now(UTC)
@@ -987,10 +989,14 @@ async def promote_precedent(
     Another user's ``precedent_id`` — or a ``project_id`` the caller does
     not own — returns 404.  Audited.
     """
-    precedent = await _load_owned_precedent(db, precedent_id=precedent_id, user_id=user.id)
+    precedent = await _load_owned_precedent(
+        db, precedent_id=precedent_id, user_id=user.id
+    )
     project = await _load_owned_project(db, project_id=body.project_id, user_id=user.id)
 
-    suggested_md = f"- Recurring precedent ({precedent.pattern_kind}): {precedent.summary}"
+    suggested_md = (
+        f"- Recurring precedent ({precedent.pattern_kind}): {precedent.summary}"
+    )
 
     proposal = ProjectContextProposal(
         user_id=user.id,
@@ -1053,7 +1059,9 @@ async def list_project_context_proposals(
     if project_id is not None:
         base_where.append(ProjectContextProposal.project_id == project_id)
 
-    count_stmt = select(func.count()).select_from(ProjectContextProposal).where(*base_where)
+    count_stmt = (
+        select(func.count()).select_from(ProjectContextProposal).where(*base_where)
+    )
     total_count: int = (await db.execute(count_stmt)).scalar_one()
 
     rows_stmt = (
@@ -1115,7 +1123,9 @@ async def accept_project_context_proposal(
         # The authorized append — fires at most once per proposal lifetime.
         # Load the target project (must still be the caller's; 404 if it
         # vanished or ownership changed).
-        project = await _load_owned_project(db, project_id=proposal.project_id, user_id=user.id)
+        project = await _load_owned_project(
+            db, project_id=proposal.project_id, user_id=user.id
+        )
         if project.context_md is None:
             project.context_md = proposal.suggested_md
         else:
@@ -1330,7 +1340,9 @@ async def _spawn_manual_session(
     responses={
         201: {"description": "Session spawned"},
         403: {"description": "Autonomous layer not enabled for this user"},
-        422: {"description": "Invalid target (need exactly one of playbook_id/skill_ref)"},
+        422: {
+            "description": "Invalid target (need exactly one of playbook_id/skill_ref)"
+        },
         404: {"description": "Referenced project not found"},
         401: {"description": "Not authenticated"},
     },
@@ -1824,7 +1836,9 @@ async def list_notifications(
     if unread:
         base_where.append(AutonomousNotification.read_at.is_(None))
 
-    count_stmt = select(func.count()).select_from(AutonomousNotification).where(*base_where)
+    count_stmt = (
+        select(func.count()).select_from(AutonomousNotification).where(*base_where)
+    )
     total_count: int = (await db.execute(count_stmt)).scalar_one()
 
     rows_stmt = (
@@ -1869,7 +1883,9 @@ async def read_notification(
     Another user's ``notification_id`` returns 404 (not 403) to avoid
     existence disclosure. Audited.
     """
-    note = await _load_owned_notification(db, notification_id=notification_id, user_id=user.id)
+    note = await _load_owned_notification(
+        db, notification_id=notification_id, user_id=user.id
+    )
 
     if note.read_at is None:
         note.read_at = datetime.now(UTC)

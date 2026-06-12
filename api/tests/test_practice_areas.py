@@ -51,7 +51,9 @@ async def user(db_session: AsyncSession) -> User:
     return await _make_user(db_session, suffix="practice-areas")
 
 
-async def test_seed_rows_present_once_with_expected_shape(db_session: AsyncSession) -> None:
+async def test_seed_rows_present_once_with_expected_shape(
+    db_session: AsyncSession,
+) -> None:
     """Migration 0053 seeded exactly the standard areas, exactly once."""
     rows = (
         (await db_session.execute(select(PracticeArea).order_by(PracticeArea.position)))
@@ -59,13 +61,17 @@ async def test_seed_rows_present_once_with_expected_shape(db_session: AsyncSessi
         .all()
     )
     seeded = [r for r in rows if r.key in {k for k, *_ in _EXPECTED_SEED}]
-    assert [(r.key, r.name, r.unit_label, r.configured) for r in seeded] == _EXPECTED_SEED
-    # Unique keys are DB-enforced; assert no duplicate seeding happened.
-    count = (await db_session.execute(select(func.count()).select_from(PracticeArea))).scalar_one()
-    assert count == len(rows)
+    assert [
+        (r.key, r.name, r.unit_label, r.configured) for r in seeded
+    ] == _EXPECTED_SEED
+    # The list-equality above is the duplicate guard (a re-seeded key
+    # would appear twice and break it); also pin key uniqueness directly.
+    assert len({r.key for r in rows}) == len(rows)
 
 
-async def test_seed_is_idempotent_on_a_seeded_database(db_session: AsyncSession) -> None:
+async def test_seed_is_idempotent_on_a_seeded_database(
+    db_session: AsyncSession,
+) -> None:
     """Re-running the 0053 seed against the already-seeded DB is a no-op."""
     versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
     spec = importlib.util.spec_from_file_location(
@@ -90,7 +96,9 @@ async def test_seed_is_idempotent_on_a_seeded_database(db_session: AsyncSession)
         sys.modules.pop("migration_0053", None)
 
 
-async def test_list_practice_areas_position_order(client: AsyncClient, user: User) -> None:
+async def test_list_practice_areas_position_order(
+    client: AsyncClient, user: User
+) -> None:
     resp = await client.get("/api/v1/practice-areas", headers=_bearer(user))
     assert resp.status_code == 200
     areas = resp.json()["practice_areas"]

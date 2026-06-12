@@ -110,7 +110,10 @@ def make_intake_node(
         if session is None:
             logger.error(
                 "autonomous.intake_node: session not found",
-                extra={"event": "autonomous_intake_session_missing", "session_id": session_id},
+                extra={
+                    "event": "autonomous_intake_session_missing",
+                    "session_id": session_id,
+                },
             )
             return {"error": f"session {session_id} not found in intake_node"}
 
@@ -140,7 +143,9 @@ def make_intake_node(
                 db,
                 gateway,
             )
-            updates["retrieved_chunks"] = result.data.get("chunks", []) if result.data else []
+            updates["retrieved_chunks"] = (
+                result.data.get("chunks", []) if result.data else []
+            )
         elif kb_id and since:
             # Schedule path: scope to docs attached after `since` (mode 3).
             result = await guarded_tool_call(
@@ -150,7 +155,9 @@ def make_intake_node(
                 db,
                 gateway,
             )
-            updates["retrieved_chunks"] = result.data.get("chunks", []) if result.data else []
+            updates["retrieved_chunks"] = (
+                result.data.get("chunks", []) if result.data else []
+            )
         elif kb_id and not since and not file_id:
             # First-tick schedule (last_run_at was NULL at spawn): no
             # baseline yet — record the marker and skip retrieval.
@@ -386,7 +393,9 @@ def make_drafting_node(
         if not parsed.is_structured:
             finding = {
                 "title": "Unstructured autonomous output",
-                "summary": parsed.raw_content[:8000] if parsed.raw_content else "(empty)",
+                "summary": parsed.raw_content[:8000]
+                if parsed.raw_content
+                else "(empty)",
                 "severity": "info",
             }
             await guarded_tool_call(
@@ -461,7 +470,9 @@ def make_drafting_node(
                             # the model to emit ``content_md``; the chokepoint
                             # handler takes ``content``. Tolerate both so a
                             # model that emits ``content`` anyway still lands.
-                            "content": artifact.get("content_md") or artifact.get("content") or "",
+                            "content": artifact.get("content_md")
+                            or artifact.get("content")
+                            or "",
                             "mime": "text/markdown",
                         }
                     },
@@ -664,7 +675,10 @@ def make_delivery_node(
             {
                 "title": "Autonomous session complete",
                 "body": body,
-                "payload": {"finding_count": findings_count, "artifact_count": artifact_count},
+                "payload": {
+                    "finding_count": findings_count,
+                    "artifact_count": artifact_count,
+                },
             },
             db,
             gateway,

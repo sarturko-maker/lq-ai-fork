@@ -90,13 +90,21 @@ async def test_login_stamps_absolute_and_idle_columns(
     session = sessions[0]
 
     # absolute_expires_at = now + 8h (default). Allow a few seconds of slack.
-    expected_absolute = before + timedelta(seconds=settings.session_absolute_timeout_seconds)
-    expected_absolute_after = after + timedelta(seconds=settings.session_absolute_timeout_seconds)
+    expected_absolute = before + timedelta(
+        seconds=settings.session_absolute_timeout_seconds
+    )
+    expected_absolute_after = after + timedelta(
+        seconds=settings.session_absolute_timeout_seconds
+    )
     assert expected_absolute - timedelta(seconds=2) <= session.absolute_expires_at
     assert session.absolute_expires_at <= expected_absolute_after + timedelta(seconds=2)
 
     # last_active_at is "now" at insert.
-    assert before - timedelta(seconds=2) <= session.last_active_at <= after + timedelta(seconds=2)
+    assert (
+        before - timedelta(seconds=2)
+        <= session.last_active_at
+        <= after + timedelta(seconds=2)
+    )
 
 
 # --- absolute-timeout enforcement at /auth/refresh --------------------------
@@ -122,7 +130,9 @@ async def test_refresh_rejects_when_absolute_timeout_exceeded(
     session.absolute_expires_at = datetime.now(tz=UTC) - timedelta(minutes=1)
     await db_session.flush()
 
-    resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    resp = await client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+    )
     assert resp.status_code == 401
     assert "absolute timeout" in resp.json()["detail"].lower()
 
@@ -153,7 +163,9 @@ async def test_refresh_rejects_when_idle_timeout_exceeded(
     )
     await db_session.flush()
 
-    resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    resp = await client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+    )
     assert resp.status_code == 401
     assert "idle" in resp.json()["detail"].lower()
 
@@ -181,7 +193,9 @@ async def test_refresh_preserves_absolute_expires_at_across_rotation(
     original_absolute = original.absolute_expires_at
 
     # Rotate. The new session should have the SAME absolute_expires_at.
-    resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    resp = await client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+    )
     assert resp.status_code == 200
 
     result = await db_session.execute(
@@ -228,7 +242,11 @@ async def test_mfa_mandatory_blocks_active_user_endpoints(
     body = resp.json()
     # The error envelope uses {"detail": {"code": ..., "message": ...}}
     # because LQAIError renders through the canonical exception handler.
-    detail = body.get("detail") if isinstance(body.get("detail"), dict) else body.get("error", {})
+    detail = (
+        body.get("detail")
+        if isinstance(body.get("detail"), dict)
+        else body.get("error", {})
+    )
     if isinstance(detail, dict):
         assert detail.get("code") == "mfa_enrollment_required"
     else:

@@ -422,7 +422,10 @@ async def test_success_propose_memory_writes_row_and_audits(
     result = await guarded_tool_call(
         sess,
         ToolIntent.propose_memory,
-        {"category": "drafting_preference", "content": "User prefers Delaware governing law."},
+        {
+            "category": "drafting_preference",
+            "content": "User prefers Delaware governing law.",
+        },
         db_session,
         gateway,
     )
@@ -501,7 +504,11 @@ async def test_success_notify_writes_notification_row(db_session: AsyncSession) 
     result = await guarded_tool_call(
         sess,
         ToolIntent.notify,
-        {"title": "Review complete", "body": "2 findings flagged.", "payload": {"count": 2}},
+        {
+            "title": "Review complete",
+            "body": "2 findings flagged.",
+            "payload": {"count": 2},
+        },
         db_session,
         gateway,
     )

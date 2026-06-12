@@ -186,7 +186,9 @@ async def run_orphan_sweep(
                 "orphan_after": orphan_after_seconds,
             },
         )
-        swept.extend((row[0], row[1], "stale_heartbeat", row[2]) for row in stale.fetchall())
+        swept.extend(
+            (row[0], row[1], "stale_heartbeat", row[2]) for row in stale.fetchall()
+        )
         unclaimed = await db.execute(
             text(
                 "UPDATE agent_runs SET status = :failed, finished_at = now(), "
@@ -201,7 +203,9 @@ async def run_orphan_sweep(
                 "claim_grace": claim_grace_seconds,
             },
         )
-        swept.extend((row[0], row[1], "never_claimed", row[2]) for row in unclaimed.fetchall())
+        swept.extend(
+            (row[0], row[1], "never_claimed", row[2]) for row in unclaimed.fetchall()
+        )
         # The settles are durable BEFORE anything else can fail.
         await db.commit()
 
@@ -298,7 +302,9 @@ async def run_checkpoint_gc(
         logger.info("checkpoint GC skipped: checkpointer not initialized")
         return {"deleted_threads": 0, "skipped": True}
     async with session_factory() as db:
-        exists = (await db.execute(text("SELECT to_regclass('checkpoints')"))).scalar_one()
+        exists = (
+            await db.execute(text("SELECT to_regclass('checkpoints')"))
+        ).scalar_one()
         if exists is None:
             return {"deleted_threads": 0, "skipped": True}
         rows = await db.execute(

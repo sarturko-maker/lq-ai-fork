@@ -144,7 +144,9 @@ async def test_create_kb_with_alpha(client: AsyncClient, db_user: User) -> None:
 
 
 @pytest.mark.integration
-async def test_create_kb_alpha_out_of_range_422(client: AsyncClient, db_user: User) -> None:
+async def test_create_kb_alpha_out_of_range_422(
+    client: AsyncClient, db_user: User
+) -> None:
     response = await client.post(
         "/api/v1/knowledge-bases",
         headers=_auth_headers(db_user),
@@ -154,7 +156,9 @@ async def test_create_kb_alpha_out_of_range_422(client: AsyncClient, db_user: Us
 
 
 @pytest.mark.integration
-async def test_create_kb_with_unknown_project_404(client: AsyncClient, db_user: User) -> None:
+async def test_create_kb_with_unknown_project_404(
+    client: AsyncClient, db_user: User
+) -> None:
     response = await client.post(
         "/api/v1/knowledge-bases",
         headers=_auth_headers(db_user),
@@ -198,7 +202,9 @@ async def test_list_kbs_active_only_by_default(
     db_session.add_all([active, archived])
     await db_session.flush()
 
-    response = await client.get("/api/v1/knowledge-bases", headers=_auth_headers(db_user))
+    response = await client.get(
+        "/api/v1/knowledge-bases", headers=_auth_headers(db_user)
+    )
     assert response.status_code == 200
     body = response.json()
     names = {kb["name"] for kb in body}
@@ -241,7 +247,9 @@ async def test_list_kbs_per_user_isolation(
     db_session.add_all([mine, theirs])
     await db_session.flush()
 
-    response = await client.get("/api/v1/knowledge-bases", headers=_auth_headers(db_user))
+    response = await client.get(
+        "/api/v1/knowledge-bases", headers=_auth_headers(db_user)
+    )
     assert response.status_code == 200
     names = {kb["name"] for kb in response.json()}
     assert names == {"mine"}

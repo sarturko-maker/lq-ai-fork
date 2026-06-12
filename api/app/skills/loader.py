@@ -110,7 +110,9 @@ def load_registry(
     if not base.is_dir():
         log.warning("skills directory does not exist or is not a directory: %s", base)
     else:
-        _walk_into(base, source="built-in", records=records, failures=failures, existing=set())
+        _walk_into(
+            base, source="built-in", records=records, failures=failures, existing=set()
+        )
 
     builtin_count = len(records)
 

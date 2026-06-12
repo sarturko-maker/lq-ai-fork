@@ -127,7 +127,9 @@ def _to_response(prompt: SavedPrompt) -> SavedPromptResponse:
     )
 
 
-async def _load_owned(db: AsyncSession, *, prompt_id: uuid.UUID, user_id: uuid.UUID) -> SavedPrompt:
+async def _load_owned(
+    db: AsyncSession, *, prompt_id: uuid.UUID, user_id: uuid.UUID
+) -> SavedPrompt:
     """Fetch a saved prompt by id; 404 if missing OR owned by another user.
 
     Conflating "doesn't exist" and "exists but belongs to someone else"
@@ -135,10 +137,14 @@ async def _load_owned(db: AsyncSession, *, prompt_id: uuid.UUID, user_id: uuid.U
     The chats/projects routers use the same pattern.
     """
 
-    stmt = select(SavedPrompt).where(SavedPrompt.id == prompt_id, SavedPrompt.user_id == user_id)
+    stmt = select(SavedPrompt).where(
+        SavedPrompt.id == prompt_id, SavedPrompt.user_id == user_id
+    )
     row = (await db.execute(stmt)).scalar_one_or_none()
     if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="saved prompt not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="saved prompt not found"
+        )
     return row
 
 

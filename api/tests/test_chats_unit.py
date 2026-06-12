@@ -165,7 +165,9 @@ class TestCursor:
     def test_decode_non_json_body_raises(self) -> None:
         import base64
 
-        garbled = base64.urlsafe_b64encode(b"not json at all").rstrip(b"=").decode("ascii")
+        garbled = (
+            base64.urlsafe_b64encode(b"not json at all").rstrip(b"=").decode("ascii")
+        )
         with pytest.raises(ValueError):
             decode_cursor(garbled)
 
@@ -261,7 +263,10 @@ def test_message_to_response_is_enhanced_true_when_skill_applied() -> None:
     # Only enhance-prompt → True.
     assert message_to_response(FakeRow(["enhance-prompt"])).is_enhanced is True
     # Mixed with other skills → still True.
-    assert message_to_response(FakeRow(["nda-review", "enhance-prompt"])).is_enhanced is True
+    assert (
+        message_to_response(FakeRow(["nda-review", "enhance-prompt"])).is_enhanced
+        is True
+    )
     # No skills at all → False.
     assert message_to_response(FakeRow([])).is_enhanced is False
     # Empty/None applied_skills column → False (guard against NULLs).

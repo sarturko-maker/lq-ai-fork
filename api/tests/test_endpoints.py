@@ -364,7 +364,9 @@ async def test_route_inventory_is_nonempty() -> None:
 
     from app.main import app as _app
 
-    api_routes = [r for r in _app.routes if getattr(r, "path", "").startswith("/api/v1")]
+    api_routes = [
+        r for r in _app.routes if getattr(r, "path", "").startswith("/api/v1")
+    ]
     assert len(api_routes) >= 50
 
 
@@ -423,7 +425,9 @@ async def test_endpoint_returns_canonical_501_body(
     endpoints (auth/login etc.) ignore the header.
     """
     client, token = stub_client
-    response = await client.request(method, path, headers={"Authorization": f"Bearer {token}"})
+    response = await client.request(
+        method, path, headers={"Authorization": f"Bearer {token}"}
+    )
 
     assert response.status_code == 501, (
         f"{method} {path} returned {response.status_code}, expected 501"

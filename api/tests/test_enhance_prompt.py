@@ -74,7 +74,9 @@ def _mock_gateway(model_text: str) -> AsyncMock:
                 finish_reason="stop",
             )
         ],
-        usage=ChatCompletionUsage(prompt_tokens=120, completion_tokens=80, total_tokens=200),
+        usage=ChatCompletionUsage(
+            prompt_tokens=120, completion_tokens=80, total_tokens=200
+        ),
         routed_inference_tier=3,
         routed_provider="anthropic-prod",
     )
@@ -180,7 +182,9 @@ async def test_enhance_prompt_happy_path_persists_and_returns_expansion(
     assert body["interaction_id"]
 
     # Row persisted.
-    row = await db_session.get(EnhancePromptInteraction, uuid.UUID(body["interaction_id"]))
+    row = await db_session.get(
+        EnhancePromptInteraction, uuid.UUID(body["interaction_id"])
+    )
     assert row is not None
     assert row.user_id == caller.id
     assert row.expansion_applied is True
@@ -229,7 +233,9 @@ async def test_enhance_prompt_skip_decision_persists_with_reason(
     # Echo back the original so the frontend can keep its existing flow.
     assert body["expanded_prompt"] == "thanks"
 
-    row = await db_session.get(EnhancePromptInteraction, uuid.UUID(body["interaction_id"]))
+    row = await db_session.get(
+        EnhancePromptInteraction, uuid.UUID(body["interaction_id"])
+    )
     assert row is not None
     assert row.expansion_applied is False
     assert row.expanded_output is None
@@ -324,7 +330,9 @@ async def test_enhance_prompt_threads_chat_history_for_owner(
         db_session.add(Message(chat_id=chat.id, role=role, content=content))
     await db_session.flush()
 
-    gateway = _mock_gateway(YAML_SKIP)  # response value doesn't matter; we check the call args
+    gateway = _mock_gateway(
+        YAML_SKIP
+    )  # response value doesn't matter; we check the call args
     try:
         async with _client_with(db_session=db_session, gateway_mock=gateway) as client:
             resp = await client.post(
@@ -359,7 +367,9 @@ async def test_enhance_prompt_ignores_chat_belonging_to_other_user(
     other_chat = Chat(owner_id=other_user.id, title="Other's chat")
     db_session.add(other_chat)
     await db_session.flush()
-    db_session.add(Message(chat_id=other_chat.id, role="user", content="secret content"))
+    db_session.add(
+        Message(chat_id=other_chat.id, role="user", content="secret content")
+    )
     await db_session.flush()
 
     gateway = _mock_gateway(YAML_SKIP)
@@ -385,7 +395,9 @@ async def test_enhance_prompt_ignores_chat_belonging_to_other_user(
 
 
 @pytest.mark.integration
-async def test_enhance_prompt_patch_used_flips(db_session: AsyncSession, caller: User) -> None:
+async def test_enhance_prompt_patch_used_flips(
+    db_session: AsyncSession, caller: User
+) -> None:
     gateway = _mock_gateway(YAML_EXPANSION)
     try:
         async with _client_with(db_session=db_session, gateway_mock=gateway) as client:

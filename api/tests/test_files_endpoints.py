@@ -64,7 +64,9 @@ async def fake_s3() -> FakeS3Client:
 
 
 @pytest_asyncio.fixture
-async def client(db_session: AsyncSession, fake_s3: FakeS3Client) -> AsyncIterator[AsyncClient]:
+async def client(
+    db_session: AsyncSession, fake_s3: FakeS3Client
+) -> AsyncIterator[AsyncClient]:
     """In-process AsyncClient with a fake S3 client patched in.
 
     Patches ``app.storage.s3_client`` to yield the in-memory fake. Note:
@@ -169,7 +171,9 @@ def _multipart_body(
 
 @pytest.mark.integration
 async def test_upload_unauthenticated_returns_401(client: AsyncClient) -> None:
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"x")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"x"
+    )
     response = await client.post("/api/v1/files", files=files)
     assert response.status_code == 401
 
@@ -179,7 +183,9 @@ async def test_upload_with_must_change_password_returns_403(
     client: AsyncClient, gated_user: User
 ) -> None:
     token = _bearer_for(gated_user)
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"x")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"x"
+    )
     response = await client.post(
         "/api/v1/files",
         files=files,
@@ -213,7 +219,9 @@ async def test_delete_unauthenticated_returns_401(client: AsyncClient) -> None:
 
 
 @pytest.mark.integration
-async def test_upload_without_file_part_returns_422(client: AsyncClient, db_user: User) -> None:
+async def test_upload_without_file_part_returns_422(
+    client: AsyncClient, db_user: User
+) -> None:
     """FastAPI's 422 (pydantic-driven) is fine here — no body, no file.
 
     422 comes from FastAPI's own form-parsing layer, not our typed
@@ -255,7 +263,9 @@ async def test_get_content_with_invalid_uuid_returns_400(
 
 
 @pytest.mark.integration
-async def test_delete_with_invalid_uuid_returns_400(client: AsyncClient, db_user: User) -> None:
+async def test_delete_with_invalid_uuid_returns_400(
+    client: AsyncClient, db_user: User
+) -> None:
     token = _bearer_for(db_user)
     response = await client.delete(
         "/api/v1/files/not-a-uuid",
@@ -341,15 +351,21 @@ async def test_round_trip_bytes_match_on_download(
     assert download.content == PDF_PAYLOAD
     assert download.headers["content-type"] == "application/pdf"
     # Content-Disposition is the canonical RFC 6266 attachment form.
-    assert download.headers["content-disposition"] == 'attachment; filename="contract.pdf"'
+    assert (
+        download.headers["content-disposition"] == 'attachment; filename="contract.pdf"'
+    )
     # Defensive header — clients must not sniff a different MIME.
     assert download.headers.get("x-content-type-options") == "nosniff"
 
 
 @pytest.mark.integration
-async def test_get_metadata_returns_pending_status(client: AsyncClient, db_user: User) -> None:
+async def test_get_metadata_returns_pending_status(
+    client: AsyncClient, db_user: User
+) -> None:
     token = _bearer_for(db_user)
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"abc")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"abc"
+    )
     upload = await client.post(
         "/api/v1/files",
         files=files,
@@ -379,7 +395,9 @@ async def test_other_user_cannot_get_metadata(
     token_a = _bearer_for(db_user)
     token_b = _bearer_for(other_user)
 
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"hi")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"hi"
+    )
     upload = await client.post(
         "/api/v1/files",
         files=files,
@@ -403,7 +421,9 @@ async def test_other_user_cannot_get_content(
     token_a = _bearer_for(db_user)
     token_b = _bearer_for(other_user)
 
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"hi")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"hi"
+    )
     upload = await client.post(
         "/api/v1/files",
         files=files,
@@ -425,7 +445,9 @@ async def test_other_user_cannot_delete(
     token_a = _bearer_for(db_user)
     token_b = _bearer_for(other_user)
 
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"hi")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"hi"
+    )
     upload = await client.post(
         "/api/v1/files",
         files=files,
@@ -446,9 +468,13 @@ async def test_other_user_cannot_delete(
 
 
 @pytest.mark.integration
-async def test_delete_returns_204_then_get_returns_404(client: AsyncClient, db_user: User) -> None:
+async def test_delete_returns_204_then_get_returns_404(
+    client: AsyncClient, db_user: User
+) -> None:
     token = _bearer_for(db_user)
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"hi")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"hi"
+    )
     upload = await client.post(
         "/api/v1/files",
         files=files,
@@ -474,7 +500,9 @@ async def test_delete_is_idempotent_on_already_deleted_file(
     client: AsyncClient, db_user: User
 ) -> None:
     token = _bearer_for(db_user)
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"hi")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"hi"
+    )
     upload = await client.post(
         "/api/v1/files",
         files=files,
@@ -503,7 +531,9 @@ async def test_soft_delete_preserves_minio_bytes(
     """ADR 0004: soft-delete leaves the MinIO bytes intact."""
 
     token = _bearer_for(db_user)
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"hi")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"hi"
+    )
     upload = await client.post(
         "/api/v1/files",
         files=files,
@@ -568,7 +598,9 @@ async def test_upload_oversized_body_returns_413(
 
 
 @pytest.mark.integration
-async def test_get_metadata_for_unknown_id_returns_404(client: AsyncClient, db_user: User) -> None:
+async def test_get_metadata_for_unknown_id_returns_404(
+    client: AsyncClient, db_user: User
+) -> None:
     token = _bearer_for(db_user)
     response = await client.get(
         f"/api/v1/files/{uuid.uuid4()}",
@@ -578,7 +610,9 @@ async def test_get_metadata_for_unknown_id_returns_404(client: AsyncClient, db_u
 
 
 @pytest.mark.integration
-async def test_get_content_for_unknown_id_returns_404(client: AsyncClient, db_user: User) -> None:
+async def test_get_content_for_unknown_id_returns_404(
+    client: AsyncClient, db_user: User
+) -> None:
     token = _bearer_for(db_user)
     response = await client.get(
         f"/api/v1/files/{uuid.uuid4()}/content",
@@ -588,7 +622,9 @@ async def test_get_content_for_unknown_id_returns_404(client: AsyncClient, db_us
 
 
 @pytest.mark.integration
-async def test_delete_for_unknown_id_returns_404(client: AsyncClient, db_user: User) -> None:
+async def test_delete_for_unknown_id_returns_404(
+    client: AsyncClient, db_user: User
+) -> None:
     token = _bearer_for(db_user)
     response = await client.delete(
         f"/api/v1/files/{uuid.uuid4()}",
@@ -611,7 +647,9 @@ async def test_download_sets_filename_star_for_non_ascii(
     token = _bearer_for(db_user)
     # "naïve résumé.pdf" — has accented letters that must be percent-encoded.
     fname = "naïve résumé.pdf"
-    files, _ = _multipart_body(filename=fname, content_type="application/pdf", payload=b"hi")
+    files, _ = _multipart_body(
+        filename=fname, content_type="application/pdf", payload=b"hi"
+    )
     upload = await client.post(
         "/api/v1/files",
         files=files,
@@ -644,7 +682,9 @@ async def test_inserted_row_has_storage_path_equal_to_id(
     """ADR 0004 — storage_path is the bare file UUID."""
 
     token = _bearer_for(db_user)
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"hi")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"hi"
+    )
     upload = await client.post(
         "/api/v1/files",
         files=files,
@@ -678,7 +718,9 @@ async def test_get_metadata_document_id_is_null_when_no_document_row(
     """
 
     token = _bearer_for(db_user)
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"hi")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"hi"
+    )
     upload = await client.post(
         "/api/v1/files",
         files=files,
@@ -708,7 +750,9 @@ async def test_get_metadata_includes_document_id_when_document_exists(
     from app.models.document import Document
 
     token = _bearer_for(db_user)
-    files, _ = _multipart_body(filename="x.pdf", content_type="application/pdf", payload=b"hi")
+    files, _ = _multipart_body(
+        filename="x.pdf", content_type="application/pdf", payload=b"hi"
+    )
     upload = await client.post(
         "/api/v1/files",
         files=files,

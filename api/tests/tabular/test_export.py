@@ -137,7 +137,9 @@ def test_xlsx_round_trips_via_openpyxl() -> None:
     # Second data row — both cells populated; only Term has a citation.
     assert ws.cell(row=3, column=1).value == "nda-2-cypress-delta.pdf"
     assert ws.cell(row=3, column=2).value == "5 years"
-    assert ws.cell(row=3, column=3).value == ("Confidentiality obligations survive indefinitely.")
+    assert ws.cell(row=3, column=3).value == (
+        "Confidentiality obligations survive indefinitely."
+    )
     assert ws.cell(row=3, column=2).comment is not None
     assert ws.cell(row=3, column=3).comment is None
 
@@ -207,7 +209,8 @@ def test_xlsx_comment_caps_at_five_citations() -> None:
     doc = uuid.uuid4()
     columns = [ColumnSpec(name="Term", query="What is the term?")]
     citations = [
-        Citation(citation_id=uuid.uuid4(), document_id=doc, confidence="high") for _ in range(7)
+        Citation(citation_id=uuid.uuid4(), document_id=doc, confidence="high")
+        for _ in range(7)
     ]
     results = TabularResults(
         rows=[

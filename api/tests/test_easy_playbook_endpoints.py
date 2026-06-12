@@ -373,7 +373,9 @@ async def test_get_easy_playbook_admin_can_read_any(
 
 
 @pytest.mark.integration
-async def test_get_easy_playbook_missing_404(client: AsyncClient, db_session: AsyncSession) -> None:
+async def test_get_easy_playbook_missing_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
     user = await _make_user(db_session)
     response = await client.get(
         f"/api/v1/playbooks/easy/{uuid.uuid4()}",
@@ -408,7 +410,9 @@ async def test_get_easy_playbook_completed_row_returns_draft_playbook(
             }
         ],
     }
-    row = await _make_generation(db_session, owner=user, status="completed", draft=draft)
+    row = await _make_generation(
+        db_session, owner=user, status="completed", draft=draft
+    )
     response = await client.get(
         f"/api/v1/playbooks/easy/{row.id}",
         headers=_bearer(user),

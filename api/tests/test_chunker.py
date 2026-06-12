@@ -82,7 +82,10 @@ def test_chunk_offsets_slice_back_short_input() -> None:
 
     assert len(chunks) == 1
     assert chunks[0].content == text
-    assert chunks[0].content == text[chunks[0].char_offset_start : chunks[0].char_offset_end]
+    assert (
+        chunks[0].content
+        == text[chunks[0].char_offset_start : chunks[0].char_offset_end]
+    )
     assert chunks[0].char_offset_start == 0
     assert chunks[0].char_offset_end == len(text)
 
@@ -209,7 +212,9 @@ def test_snap_to_paragraph_break_preferred_over_sentence() -> None:
         "And continues for a while past the chunker's lookback range. "
     )
     parsed = _make_parsed(text)
-    chunks = chunk_document(parsed, target_chars=chunk_target, overlap_chars=0, min_chars=20)
+    chunks = chunk_document(
+        parsed, target_chars=chunk_target, overlap_chars=0, min_chars=20
+    )
 
     # The first chunk should snap to the paragraph break in preference.
     # Slice fidelity must hold regardless.

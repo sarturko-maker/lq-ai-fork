@@ -79,7 +79,9 @@ class KnowledgeBase(Base):
     )
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("projects.id", ondelete="SET NULL", name="fk_knowledge_bases_project_id"),
+        ForeignKey(
+            "projects.id", ondelete="SET NULL", name="fk_knowledge_bases_project_id"
+        ),
         nullable=True,
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -99,7 +101,9 @@ class KnowledgeBase(Base):
         nullable=False,
         server_default=text("now()"),
     )
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     def __repr__(self) -> str:
         return (
@@ -119,7 +123,9 @@ class KnowledgeBaseFile(Base):
     """
 
     __tablename__ = "knowledge_base_files"
-    __table_args__ = (PrimaryKeyConstraint("kb_id", "file_id", name="pk_knowledge_base_files"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("kb_id", "file_id", name="pk_knowledge_base_files"),
+    )
 
     kb_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

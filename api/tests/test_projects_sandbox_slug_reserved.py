@@ -63,7 +63,9 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     elif prior_holder is None:
         # If the fixture dir was trimmed out of the container, fall back
         # to an empty mutable registry — this test only reserves slugs.
-        app.state.skill_registry = MutableSkillRegistry(load_registry(Path("/nonexistent")))
+        app.state.skill_registry = MutableSkillRegistry(
+            load_registry(Path("/nonexistent"))
+        )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -121,4 +123,6 @@ async def test_post_projects_rejects_any_double_underscore_pattern(
             headers=_h(db_user),
         )
         assert r.status_code == 422, f"slug {slug} should be reserved"
-        assert "reserved" in r.json()["detail"].lower(), f"slug {slug} detail must say 'reserved'"
+        assert "reserved" in r.json()["detail"].lower(), (
+            f"slug {slug} detail must say 'reserved'"
+        )

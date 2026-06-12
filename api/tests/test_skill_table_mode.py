@@ -23,7 +23,9 @@ class TestColumnSpec:
 
         from app.skills.schema import ColumnSpec
 
-        col = ColumnSpec(name="Term Length", query="What is the term length of this NDA?")
+        col = ColumnSpec(
+            name="Term Length", query="What is the term length of this NDA?"
+        )
 
         assert col.name == "Term Length"
         assert col.query == "What is the term length of this NDA?"

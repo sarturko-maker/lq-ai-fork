@@ -149,7 +149,9 @@ class UserProfileUpdate(BaseModel):
         if not trimmed:
             raise ValueError("display_name must not be empty or whitespace-only")
         if len(trimmed) > _DISPLAY_NAME_MAX_LEN:
-            raise ValueError(f"display_name must be at most {_DISPLAY_NAME_MAX_LEN} characters")
+            raise ValueError(
+                f"display_name must be at most {_DISPLAY_NAME_MAX_LEN} characters"
+            )
 
         # Persist the trimmed value so callers can't smuggle padding in.
         self.display_name = trimmed
@@ -460,7 +462,9 @@ async def get_export_job(
 
     job = await db.get(UserExportJob, job_uuid)
     if job is None or job.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export job not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Export job not found"
+        )
 
     download_url: str | None = None
     if job.status == "completed" and job.storage_key:

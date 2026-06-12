@@ -50,7 +50,9 @@ class PracticeArea(Base):
     # The unit-of-work noun the UI renders ("Matter" / "Programme" / "Deal")
     # — data, not code, per ADR-F004 (declarative area shapes, one renderer).
     unit_label: Mapped[str] = mapped_column(Text, nullable=False)
-    configured: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    configured: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

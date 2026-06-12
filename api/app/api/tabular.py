@@ -99,7 +99,9 @@ def _registry(request: Request) -> MutableSkillRegistry:
     AttributeError.
     """
 
-    holder: MutableSkillRegistry | None = getattr(request.app.state, "skill_registry", None)
+    holder: MutableSkillRegistry | None = getattr(
+        request.app.state, "skill_registry", None
+    )
     if holder is None:
         from app.errors import InternalError
 
@@ -144,7 +146,9 @@ def _resolve_columns(
     if skill_name:
         record = _registry(request).current().get(skill_name)
         if record is None:
-            raise HTTPException(status_code=404, detail=f"skill {skill_name!r} not found")
+            raise HTTPException(
+                status_code=404, detail=f"skill {skill_name!r} not found"
+            )
         skill_columns = record.frontmatter.lq_ai.columns
         if not skill_columns:
             raise HTTPException(
@@ -154,7 +158,9 @@ def _resolve_columns(
         # Re-validate through the wire-side ColumnSpec so any
         # skill-side fields the wire schema doesn't honor are
         # stripped consistently.
-        resolved = [ColumnSpec.model_validate(col.model_dump()) for col in skill_columns]
+        resolved = [
+            ColumnSpec.model_validate(col.model_dump()) for col in skill_columns
+        ]
         # Bake the skill-level ensemble_verification fallback into each
         # column at this single resolution point (Decision C-1
         # snapshotting posture) so both preview-cost and execute see a
@@ -339,7 +345,9 @@ async def create_tabular_execution(
             "column_count": len(columns),
             "skill_name": resolved_skill_name,
             "confirmed_cost_usd": (
-                str(body.confirmed_cost_usd) if body.confirmed_cost_usd is not None else None
+                str(body.confirmed_cost_usd)
+                if body.confirmed_cost_usd is not None
+                else None
             ),
         },
     )
@@ -553,7 +561,11 @@ async def export_tabular_execution(
         )
 
     columns = [ColumnSpec.model_validate(c) for c in (row.columns or [])]
-    results = TabularResults.model_validate(row.results) if row.results else TabularResults(rows=[])
+    results = (
+        TabularResults.model_validate(row.results)
+        if row.results
+        else TabularResults(rows=[])
+    )
 
     await audit_action(
         db,
@@ -648,7 +660,9 @@ def _build_csv(*, columns: list[ColumnSpec], results: TabularResults) -> str:
             cell_data = grid_row.cells.get(name)
             row_values.append(_cell_display_value(cell_data))
             if cell_data and cell_data.citations:
-                row_citations.extend(f"{name}:{c.citation_id}" for c in cell_data.citations)
+                row_citations.extend(
+                    f"{name}:{c.citation_id}" for c in cell_data.citations
+                )
         row_values.append(";".join(row_citations))
         writer.writerow(row_values)
 
@@ -742,7 +756,9 @@ async def _load_document_names(
     return {row.id: row.filename for row in rows}
 
 
-async def _to_response(db: AsyncSession, row: TabularExecution) -> TabularExecutionResponse:
+async def _to_response(
+    db: AsyncSession, row: TabularExecution
+) -> TabularExecutionResponse:
     """Convert the ORM row to the response wire shape.
 
     Async because the response includes a ``document_names`` field
@@ -774,7 +790,9 @@ async def _to_response(db: AsyncSession, row: TabularExecution) -> TabularExecut
     )
 
 
-async def _enrich_cell_citations(db: AsyncSession, response: TabularExecutionResponse) -> None:
+async def _enrich_cell_citations(
+    db: AsyncSession, response: TabularExecutionResponse
+) -> None:
     """Make tabular cell citations navigable by resolving their source.
 
     The schema-level ``_synthesize_cell_citations`` validator builds each
@@ -815,14 +833,20 @@ async def _enrich_cell_citations(db: AsyncSession, response: TabularExecutionRes
         DocumentChunk.content,
     ).where(DocumentChunk.id.in_(chunk_ids))
     chunk_rows = (await db.execute(chunk_stmt)).all()
-    chunk_by_id = {cr.id: (cr.document_id, cr.page_start, cr.content) for cr in chunk_rows}
+    chunk_by_id = {
+        cr.id: (cr.document_id, cr.page_start, cr.content) for cr in chunk_rows
+    }
 
     # Query 2: document id -> file_id.
     document_ids = {doc_id for (doc_id, _page, _content) in chunk_by_id.values()}
     file_by_document: dict[uuid.UUID, uuid.UUID] = {}
     if document_ids:
-        doc_stmt = select(Document.id, Document.file_id).where(Document.id.in_(document_ids))
-        file_by_document = {dr.id: dr.file_id for dr in (await db.execute(doc_stmt)).all()}
+        doc_stmt = select(Document.id, Document.file_id).where(
+            Document.id.in_(document_ids)
+        )
+        file_by_document = {
+            dr.id: dr.file_id for dr in (await db.execute(doc_stmt)).all()
+        }
 
     for citation in all_citations:
         if citation.chunk_id is None:

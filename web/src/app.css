@@ -5,9 +5,9 @@
  * docs/fork/evidence/f0-s6/provenance.md).
  */
 @import 'tailwindcss';
-@import "tw-animate-css";
-@import "shadcn-svelte/tailwind.css";
-@import "@fontsource-variable/inter";
+@import 'tw-animate-css';
+@import 'shadcn-svelte/tailwind.css';
+@import '@fontsource-variable/inter';
 @config '../tailwind.config.js';
 
 @custom-variant hover (&:hover);

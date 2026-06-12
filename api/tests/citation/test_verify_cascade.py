@@ -68,11 +68,15 @@ class _StubGateway:
             choices=[
                 ChatCompletionChoice(
                     index=0,
-                    message=ChatCompletionMessage(role="assistant", content=self._content),
+                    message=ChatCompletionMessage(
+                        role="assistant", content=self._content
+                    ),
                     finish_reason="stop",
                 )
             ],
-            usage=ChatCompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            usage=ChatCompletionUsage(
+                prompt_tokens=1, completion_tokens=1, total_tokens=2
+            ),
         )
 
 
@@ -161,7 +165,9 @@ async def test_stage_3_runs_when_1_and_2_miss() -> None:
     cand = _cand(doc, start=0, end=len(text), source_text=paraphrase)
 
     gw = _StubGateway(
-        json.dumps({"verdict": "yes", "confidence": "high", "justification": "supports"})
+        json.dumps(
+            {"verdict": "yes", "confidence": "high", "justification": "supports"}
+        )
     )
     result = await verify(cand, doc, gateway=gw, judge_model="fast")
 

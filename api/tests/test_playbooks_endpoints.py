@@ -64,7 +64,9 @@ async def _make_user(db: AsyncSession, *, is_admin: bool = False) -> User:
     return u
 
 
-async def _make_document(db: AsyncSession, *, owner: User) -> tuple[FileModel, Document]:
+async def _make_document(
+    db: AsyncSession, *, owner: User
+) -> tuple[FileModel, Document]:
     f = FileModel(
         owner_id=owner.id,
         filename=f"contract-{uuid.uuid4().hex[:6]}.pdf",
@@ -154,7 +156,9 @@ async def test_execute_returns_202_with_pending_execution(
 
 
 @pytest.mark.integration
-async def test_execute_requires_auth(client: AsyncClient, db_session: AsyncSession) -> None:
+async def test_execute_requires_auth(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
     owner = await _make_user(db_session)
     _file, doc = await _make_document(db_session, owner=owner)
     playbook = await _make_playbook(db_session, author=owner)
@@ -244,7 +248,9 @@ async def test_execute_admin_can_act_on_any_playbook(
 
 
 @pytest.mark.integration
-async def test_get_execution_returns_row(client: AsyncClient, db_session: AsyncSession) -> None:
+async def test_get_execution_returns_row(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
     owner = await _make_user(db_session)
     _file, doc = await _make_document(db_session, owner=owner)
     playbook = await _make_playbook(db_session, author=owner)

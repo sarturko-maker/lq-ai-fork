@@ -72,7 +72,10 @@ def _bearer(user: User) -> dict[str, str]:
 
 @pytest.mark.integration
 async def test_export_post_inserts_queued_row(
-    client: AsyncClient, db_session: AsyncSession, seed_user: User, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient,
+    db_session: AsyncSession,
+    seed_user: User,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """POST returns 202 with job_id + status='queued'; row persisted; audit row written."""
 
@@ -97,7 +100,11 @@ async def test_export_post_inserts_queued_row(
 
     # Audit-log row written for the request.
     rows = (
-        (await db_session.execute(select(AuditLog).where(AuditLog.user_id == seed_user.id)))
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.user_id == seed_user.id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -185,7 +192,9 @@ async def test_export_get_for_other_user_returns_404(
 
 
 @pytest.mark.integration
-async def test_export_get_with_garbage_id_returns_404(client: AsyncClient, seed_user: User) -> None:
+async def test_export_get_with_garbage_id_returns_404(
+    client: AsyncClient, seed_user: User
+) -> None:
     resp = await client.get(
         "/api/v1/users/me/export/not-a-uuid",
         headers=_bearer(seed_user),
@@ -290,7 +299,9 @@ async def test_export_gc_clears_expired_rows(
     def _factory_callable():
         return _factory_cm()
 
-    monkeypatch.setattr("app.workers.user_export.get_session_factory", lambda: _factory_callable)
+    monkeypatch.setattr(
+        "app.workers.user_export.get_session_factory", lambda: _factory_callable
+    )
 
     result = await export_gc_job({})
 

@@ -117,8 +117,14 @@ async def ingest_file(
     """
 
     settings = get_settings()
-    target = target_chars if target_chars is not None else settings.lq_ai_chunk_target_chars
-    overlap = overlap_chars if overlap_chars is not None else settings.lq_ai_chunk_overlap_chars
+    target = (
+        target_chars if target_chars is not None else settings.lq_ai_chunk_target_chars
+    )
+    overlap = (
+        overlap_chars
+        if overlap_chars is not None
+        else settings.lq_ai_chunk_overlap_chars
+    )
 
     # ---- Load the file row.
     stmt = select(FileModel).where(FileModel.id == file_id)
@@ -153,7 +159,9 @@ async def ingest_file(
 
     # ---- Reject unsupported types early.
     if not is_pdf_mime(row.mime_type):
-        await _mark_failed(db, row, error="unsupported_type", reason=f"mime={row.mime_type!r}")
+        await _mark_failed(
+            db, row, error="unsupported_type", reason=f"mime={row.mime_type!r}"
+        )
         return IngestResult(
             file_id=file_id,
             status="failed",
@@ -346,7 +354,9 @@ async def _persist_document_and_chunks(
         doc.was_ocrd = False
         # Delete prior chunks so the re-insert doesn't violate the
         # (document_id, chunk_index) UNIQUE constraint.
-        await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc.id))
+        await db.execute(
+            delete(DocumentChunk).where(DocumentChunk.document_id == doc.id)
+        )
         await db.flush()
 
     # ---- Insert chunks.

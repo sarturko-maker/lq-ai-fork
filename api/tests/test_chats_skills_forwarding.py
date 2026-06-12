@@ -182,7 +182,9 @@ async def test_forwards_skills_to_gateway(client: AsyncClient, db_user: User) ->
     """`skills` in MessageCreate becomes `lq_ai_skills` to the gateway."""
 
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json=_success_payload(applied_skills=["nda-review"]))
+        return_value=httpx.Response(
+            200, json=_success_payload(applied_skills=["nda-review"])
+        )
     )
     token = _bearer_for(db_user)
     await client.post(
@@ -202,11 +204,15 @@ async def test_forwards_skills_to_gateway(client: AsyncClient, db_user: User) ->
 
 @pytest.mark.integration
 @respx.mock
-async def test_forwards_skill_inputs_to_gateway(client: AsyncClient, db_user: User) -> None:
+async def test_forwards_skill_inputs_to_gateway(
+    client: AsyncClient, db_user: User
+) -> None:
     """`skill_inputs` in MessageCreate becomes `lq_ai_skill_inputs`."""
 
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json=_success_payload(applied_skills=["nda-review"]))
+        return_value=httpx.Response(
+            200, json=_success_payload(applied_skills=["nda-review"])
+        )
     )
     token = _bearer_for(db_user)
     await client.post(
@@ -215,7 +221,9 @@ async def test_forwards_skill_inputs_to_gateway(client: AsyncClient, db_user: Us
             "content": "review this NDA",
             "model": "smart",
             "skills": ["nda-review"],
-            "skill_inputs": {"nda-review": {"document": "<NDA text>", "perspective": "discloser"}},
+            "skill_inputs": {
+                "nda-review": {"document": "<NDA text>", "perspective": "discloser"}
+            },
         },
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -228,7 +236,9 @@ async def test_forwards_skill_inputs_to_gateway(client: AsyncClient, db_user: Us
 
 @pytest.mark.integration
 @respx.mock
-async def test_no_skills_means_empty_extension_fields(client: AsyncClient, db_user: User) -> None:
+async def test_no_skills_means_empty_extension_fields(
+    client: AsyncClient, db_user: User
+) -> None:
     """A request without `skills` sends empty `lq_ai_skills` to the gateway."""
 
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -254,7 +264,9 @@ async def test_no_skills_means_empty_extension_fields(client: AsyncClient, db_us
 
 @pytest.mark.integration
 @respx.mock
-async def test_applied_skills_surfaces_in_response(client: AsyncClient, db_user: User) -> None:
+async def test_applied_skills_surfaces_in_response(
+    client: AsyncClient, db_user: User
+) -> None:
     """The gateway's `lq_ai_applied_skills` lands in the response body's
     `applied_skills`."""
 
@@ -280,7 +292,9 @@ async def test_applied_skills_surfaces_in_response(client: AsyncClient, db_user:
 
 @pytest.mark.integration
 @respx.mock
-async def test_no_applied_skills_means_empty_list(client: AsyncClient, db_user: User) -> None:
+async def test_no_applied_skills_means_empty_list(
+    client: AsyncClient, db_user: User
+) -> None:
     """When the gateway doesn't surface applied_skills, the response shows []."""
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -302,7 +316,9 @@ async def test_no_applied_skills_means_empty_list(client: AsyncClient, db_user: 
 
 @pytest.mark.integration
 @respx.mock
-async def test_skill_not_found_propagates_to_404(client: AsyncClient, db_user: User) -> None:
+async def test_skill_not_found_propagates_to_404(
+    client: AsyncClient, db_user: User
+) -> None:
     """Gateway's `skill_not_found` (404) passes through as 404 to the API caller."""
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -334,7 +350,9 @@ async def test_skill_not_found_propagates_to_404(client: AsyncClient, db_user: U
 
 @pytest.mark.integration
 @respx.mock
-async def test_skill_fetch_failed_propagates_to_502(client: AsyncClient, db_user: User) -> None:
+async def test_skill_fetch_failed_propagates_to_502(
+    client: AsyncClient, db_user: User
+) -> None:
     """Gateway's `skill_fetch_failed` (502) passes through as 502."""
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -362,7 +380,9 @@ async def test_skill_fetch_failed_propagates_to_502(client: AsyncClient, db_user
 
 @pytest.mark.integration
 @respx.mock
-async def test_skill_input_missing_propagates_to_400(client: AsyncClient, db_user: User) -> None:
+async def test_skill_input_missing_propagates_to_400(
+    client: AsyncClient, db_user: User
+) -> None:
     """Gateway's `skill_input_missing` (400) passes through as 400."""
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -402,7 +422,11 @@ def _stream_chunk(content: str) -> str:
         "created": 1_700_000_000,
         "model": "claude-sonnet-4-6",
         "choices": [
-            {"index": 0, "delta": {"role": "assistant", "content": content}, "finish_reason": None}
+            {
+                "index": 0,
+                "delta": {"role": "assistant", "content": content},
+                "finish_reason": None,
+            }
         ],
         "routed_inference_tier": 3,
         "routed_provider": "anthropic-prod",
@@ -460,7 +484,11 @@ async def test_file_ids_foreign_owner_404(
     token = _bearer_for(db_user)
     response = await client.post(
         f"/api/v1/chats/{_DUMMY_CHAT_ID}/messages",
-        json={"content": "summarize this", "model": "smart", "file_ids": [str(foreign.id)]},
+        json={
+            "content": "summarize this",
+            "model": "smart",
+            "file_ids": [str(foreign.id)],
+        },
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -520,7 +548,9 @@ async def test_file_ids_soft_deleted_404(
 
 @pytest.mark.integration
 @respx.mock
-async def test_no_file_ids_means_empty_extension_field(client: AsyncClient, db_user: User) -> None:
+async def test_no_file_ids_means_empty_extension_field(
+    client: AsyncClient, db_user: User
+) -> None:
     """Omitted file_ids is back-compatible: empty/absent lq_ai_file_ids, empty echo."""
 
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
@@ -612,7 +642,10 @@ async def test_attached_file_content_injected_as_system_message_non_streaming(
     assert sys_msg["role"] == "system"
     assert "Attached documents for this turn" in sys_msg["content"]
     assert "nda.pdf" in sys_msg["content"]
-    assert "The receiving party shall not disclose Confidential Information." in sys_msg["content"]
+    assert (
+        "The receiving party shall not disclose Confidential Information."
+        in sys_msg["content"]
+    )
     # Decision M2-1: attached document content stays verbatim to the provider.
     assert sys_msg["lq_ai_skip_anonymization"] is True
     # User turn is still last, unchanged.
@@ -755,7 +788,9 @@ async def test_attached_file_with_no_document_is_omitted_gracefully(
 
 @pytest.mark.integration
 @respx.mock
-async def test_no_file_ids_means_no_attached_docs_block(client: AsyncClient, db_user: User) -> None:
+async def test_no_file_ids_means_no_attached_docs_block(
+    client: AsyncClient, db_user: User
+) -> None:
     """Omitted file_ids: back-compat, no attached-docs system message."""
 
     route = respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(

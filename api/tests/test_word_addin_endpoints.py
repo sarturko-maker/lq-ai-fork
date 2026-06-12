@@ -355,7 +355,10 @@ async def test_get_version_derives_bundle_url_from_request_origin(
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["taskpane_bundle_url"] == "https://lq.acme.example/word-addin/taskpane.html"
+    assert (
+        body["taskpane_bundle_url"]
+        == "https://lq.acme.example/word-addin/taskpane.html"
+    )
 
 
 @pytest.mark.integration

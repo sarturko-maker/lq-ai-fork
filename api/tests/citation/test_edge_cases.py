@@ -397,7 +397,9 @@ async def test_cross_document_citations_persist_one_row_per_verified_citation(
 
     quote_a = "the alpha clause"
     quote_b = "the beta clause"
-    assistant_text = f'Per doc A: "{quote_a}" (Source: [1]). Per doc B: "{quote_b}" (Source: [2]).'
+    assistant_text = (
+        f'Per doc A: "{quote_a}" (Source: [1]). Per doc B: "{quote_b}" (Source: [2]).'
+    )
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, json=_success_payload(assistant_text))
@@ -537,7 +539,9 @@ async def test_chunk_boundary_spanning_citation_verifies_via_full_doc_scan(
     rows = (
         (
             await db_session.execute(
-                select(MessageCitation).where(MessageCitation.source_file_id == file_.id)
+                select(MessageCitation).where(
+                    MessageCitation.source_file_id == file_.id
+                )
             )
         )
         .scalars()
@@ -600,9 +604,13 @@ async def test_deleted_source_file_handled_gracefully_no_row_written(
         # Mimic the race: doc gets deleted between retrieval and
         # citation persistence.
         await db_session.execute(
-            DocumentChunk.__table__.delete().where(DocumentChunk.document_id == deleted_doc_id)
+            DocumentChunk.__table__.delete().where(
+                DocumentChunk.document_id == deleted_doc_id
+            )
         )
-        await db_session.execute(Document.__table__.delete().where(Document.id == deleted_doc_id))
+        await db_session.execute(
+            Document.__table__.delete().where(Document.id == deleted_doc_id)
+        )
         await db_session.flush()
         return [captured_chunk_data]
 

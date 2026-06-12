@@ -82,9 +82,13 @@ async def test_list_playbooks_returns_builtins_for_non_admin(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     """Built-in playbooks (``created_by IS NULL``) are visible to all users."""
-    result = await db_session.execute(select(Playbook).where(Playbook.created_by.is_(None)))
+    result = await db_session.execute(
+        select(Playbook).where(Playbook.created_by.is_(None))
+    )
     builtin_count = len(result.scalars().all())
-    assert builtin_count >= 2, "seed migration 0032 should have created at least 2 NDA playbooks"
+    assert builtin_count >= 2, (
+        "seed migration 0032 should have created at least 2 NDA playbooks"
+    )
 
     user = await _make_user(db_session)
     response = await client.get("/api/v1/playbooks", headers=_bearer(user))
@@ -121,7 +125,9 @@ async def test_get_playbook_returns_full_positions(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     """Detail endpoint inlines the position list with fallback tiers."""
-    result = await db_session.execute(select(Playbook).where(Playbook.name == "NDA — Mutual"))
+    result = await db_session.execute(
+        select(Playbook).where(Playbook.name == "NDA — Mutual")
+    )
     playbook = result.scalar_one()
 
     user = await _make_user(db_session)

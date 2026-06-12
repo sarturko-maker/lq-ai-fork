@@ -84,7 +84,9 @@ async def build_receipt(
         suffix = row.action.removeprefix("autonomous_session.")
         details: dict[str, Any] = row.details or {}
 
-        at: str | None = row.timestamp.isoformat() if row.timestamp is not None else None
+        at: str | None = (
+            row.timestamp.isoformat() if row.timestamp is not None else None
+        )
 
         if suffix == "phase_transition":
             phase_transitions.append(
@@ -104,7 +106,10 @@ async def build_receipt(
                 entry["cost_usd"] = details["cost_usd"]
             tool_calls.append(entry)
 
-        elif suffix in ("halted", "cost_cap_reached", "completed") and terminal_reason is None:
+        elif (
+            suffix in ("halted", "cost_cap_reached", "completed")
+            and terminal_reason is None
+        ):
             # Use the first terminal row to determine the terminal reason.
             if suffix == "halted":
                 terminal_reason = details.get("reason", "external_halt")
@@ -119,13 +124,17 @@ async def build_receipt(
     # cost_total_usd may be a Decimal — convert to float for JSON safety.
     cost_total: float | None
     try:
-        cost_total = float(session.cost_total_usd) if session.cost_total_usd is not None else 0.0
+        cost_total = (
+            float(session.cost_total_usd) if session.cost_total_usd is not None else 0.0
+        )
     except (TypeError, ValueError):
         cost_total = 0.0
 
     max_cost: float | None
     try:
-        max_cost = float(session.max_cost_usd) if session.max_cost_usd is not None else None
+        max_cost = (
+            float(session.max_cost_usd) if session.max_cost_usd is not None else None
+        )
     except (TypeError, ValueError):
         max_cost = None
 
@@ -133,20 +142,28 @@ async def build_receipt(
         "session_id": str(session.id),
         "trigger_kind": str(session.trigger_kind),
         "status": status_str,
-        "halt_state": str(session.halt_state) if session.halt_state is not None else None,
-        "current_phase": str(session.current_phase) if session.current_phase is not None else None,
+        "halt_state": str(session.halt_state)
+        if session.halt_state is not None
+        else None,
+        "current_phase": str(session.current_phase)
+        if session.current_phase is not None
+        else None,
         "cost_total_usd": cost_total,
         "max_cost_usd": max_cost,
         "cost_cap_reached": bool(session.cost_cap_reached),
         "created_at": session.created_at.isoformat() if session.created_at else None,
-        "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+        "completed_at": session.completed_at.isoformat()
+        if session.completed_at
+        else None,
         "phase_transitions": phase_transitions,
         "tool_calls": tool_calls,
         "terminal_reason": terminal_reason,
     }
 
 
-async def build_receipt_safe(session: AutonomousSession, db: AsyncSession) -> dict[str, Any] | None:
+async def build_receipt_safe(
+    session: AutonomousSession, db: AsyncSession
+) -> dict[str, Any] | None:
     """Best-effort :func:`build_receipt` — NEVER raises.
 
     On any failure, logs and returns ``None`` so a receipt-build error can

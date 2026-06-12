@@ -94,7 +94,9 @@ async def _make_user(db: AsyncSession) -> User:
     return u
 
 
-async def _make_doc(db: AsyncSession, *, owner: User, text: str = "Some contract.") -> Document:
+async def _make_doc(
+    db: AsyncSession, *, owner: User, text: str = "Some contract."
+) -> Document:
     f = FileModel(
         owner_id=owner.id,
         filename=f"doc-{uuid.uuid4().hex[:6]}.pdf",

@@ -310,7 +310,9 @@ async def test_valid_event_writes_audit_row(db_session: AsyncSession) -> None:
     sess = await _make_session(db_session, user=user)
     session_id_str = str(sess.id)
 
-    await autonomous_audit(db_session, sess, "tool_call", tool="run_skill", phase="analysis")
+    await autonomous_audit(
+        db_session, sess, "tool_call", tool="run_skill", phase="analysis"
+    )
 
     rows = (
         (

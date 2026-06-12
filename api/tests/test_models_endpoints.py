@@ -138,7 +138,9 @@ async def test_list_models_gateway_5xx_returns_503(
     client: AsyncClient,
     db_user: User,
 ) -> None:
-    respx.get(f"{GATEWAY_BASE}/v1/models").mock(return_value=httpx.Response(503, text="oops"))
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(
+        return_value=httpx.Response(503, text="oops")
+    )
 
     response = await client.get(
         "/api/v1/models",
@@ -182,7 +184,9 @@ async def test_list_models_gateway_timeout_returns_504(
     client: AsyncClient,
     db_user: User,
 ) -> None:
-    respx.get(f"{GATEWAY_BASE}/v1/models").mock(side_effect=httpx.TimeoutException("slow"))
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(
+        side_effect=httpx.TimeoutException("slow")
+    )
 
     response = await client.get(
         "/api/v1/models",
@@ -229,7 +233,11 @@ async def test_send_message_round_trips_raw_provider_model(
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+                "usage": {
+                    "prompt_tokens": 4,
+                    "completion_tokens": 2,
+                    "total_tokens": 6,
+                },
                 "routed_inference_tier": 4,
                 "routed_provider": "anthropic-prod",
             },
@@ -255,7 +263,9 @@ async def test_send_message_round_trips_raw_provider_model(
     rows = (
         (
             await db_session.execute(
-                select(Message).where(Message.chat_id == chat_id, Message.role == "assistant")
+                select(Message).where(
+                    Message.chat_id == chat_id, Message.role == "assistant"
+                )
             )
         )
         .scalars()

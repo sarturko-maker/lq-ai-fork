@@ -223,7 +223,9 @@ async def _file_has_null_embedding_chunks(db: AsyncSession, file_id: uuid.UUID) 
         select(DocumentChunk.id)
         .join(Document, DocumentChunk.document_id == Document.id)
         .where(Document.file_id == file_id)
-        .where(DocumentChunk.tokens.is_(None))  # NULL tokens implies NULL embedding (we set both)
+        .where(
+            DocumentChunk.tokens.is_(None)
+        )  # NULL tokens implies NULL embedding (we set both)
         .limit(1)
     )
     result = await db.execute(stmt)
@@ -731,7 +733,11 @@ async def query_kb(
     kid = _validate_kb_id(kb_id)
     kb = await _load_visible_kb(db, kid, user.id)
 
-    alpha = payload.hybrid_alpha if payload.hybrid_alpha is not None else float(kb.hybrid_alpha)
+    alpha = (
+        payload.hybrid_alpha
+        if payload.hybrid_alpha is not None
+        else float(kb.hybrid_alpha)
+    )
 
     # Embed the query string for the vector side, unless alpha=1
     # (FTS-only). Failures here downgrade to FTS-only ranking — the

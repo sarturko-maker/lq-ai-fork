@@ -318,7 +318,9 @@ async def test_ingest_re_run_does_not_duplicate_chunks(
     chunks = (
         (
             await db_session.execute(
-                select(DocumentChunk).where(DocumentChunk.document_id == first.document_id)
+                select(DocumentChunk).where(
+                    DocumentChunk.document_id == first.document_id
+                )
             )
         )
         .scalars()
@@ -476,7 +478,9 @@ async def test_ingest_populates_normalized_content_and_was_ocrd(
     assert result.status == "ready"
 
     doc = (
-        await db_session.execute(select(Document).where(Document.file_id == file_row.id))
+        await db_session.execute(
+            select(Document).where(Document.file_id == file_row.id)
+        )
     ).scalar_one()
 
     # New columns are populated and have the expected M1 values.
@@ -538,7 +542,9 @@ async def test_ingest_re_run_refreshes_normalized_content(
     assert second.document_id == first.document_id  # same row, replaced chunks.
 
     doc = (
-        await db_session.execute(select(Document).where(Document.file_id == file_row.id))
+        await db_session.execute(
+            select(Document).where(Document.file_id == file_row.id)
+        )
     ).scalar_one()
 
     from app.pipeline.parsers import parse_pdf

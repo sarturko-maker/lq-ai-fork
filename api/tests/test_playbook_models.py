@@ -51,7 +51,9 @@ async def _make_user(db: AsyncSession, *, is_admin: bool = False) -> User:
     return user
 
 
-async def _make_document(db: AsyncSession, *, owner: User) -> tuple[FileModel, Document]:
+async def _make_document(
+    db: AsyncSession, *, owner: User
+) -> tuple[FileModel, Document]:
     f = FileModel(
         owner_id=owner.id,
         filename=f"playbook-target-{uuid.uuid4().hex[:8]}.pdf",
@@ -258,7 +260,9 @@ async def test_playbook_created_by_set_null_on_user_delete(
     # so the refetch reads from the DB.
     db_session.expire_all()
 
-    fetched = (await db_session.execute(select(Playbook).where(Playbook.id == pb_id))).scalar_one()
+    fetched = (
+        await db_session.execute(select(Playbook).where(Playbook.id == pb_id))
+    ).scalar_one()
     assert fetched.created_by is None
     assert fetched.name == "Author Survives"
 
@@ -328,7 +332,11 @@ async def test_playbook_execution_results_jsonb_round_trip(
 
     payload = {
         "positions": [
-            {"id": str(uuid.uuid4()), "verdict": "matches_standard", "confidence": 0.95},
+            {
+                "id": str(uuid.uuid4()),
+                "verdict": "matches_standard",
+                "confidence": 0.95,
+            },
             {
                 "id": str(uuid.uuid4()),
                 "verdict": "deviates",

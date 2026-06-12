@@ -7,14 +7,18 @@
 	 * skills, or context.
 	 */
 	import { goto } from '$app/navigation';
+	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
+	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import WrenchIcon from '@lucide/svelte/icons/wrench';
 
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { authApi } from '$lib/lq-ai/api';
+	import { clearSession } from '$lib/lq-ai/auth/store';
 	import AmbientTrustChrome from '$lib/lq-ai/components/AmbientTrustChrome.svelte';
 	import { visibleTabsFor } from '$lib/lq-ai/components/TopTabBar.svelte';
 	import type { User } from '$lib/lq-ai/tabs';
@@ -44,6 +48,17 @@
 		light: 'Theme: light',
 		dark: 'Theme: dark'
 	};
+
+	async function signOut() {
+		try {
+			await authApi.logout(); // best-effort server-side revocation
+		} catch {
+			// Local sign-out proceeds regardless — the refresh token expires
+			// server-side on its own.
+		}
+		clearSession();
+		goto('/lq-ai/login');
+	}
 </script>
 
 <header
@@ -71,6 +86,13 @@
 						{tab.label}
 					</DropdownMenu.Item>
 				{/each}
+				<DropdownMenu.Separator />
+				<!-- Transparency stays reachable from the landing chrome
+				     (PRD §1.3; the retired dashboard held the trust page link). -->
+				<DropdownMenu.Item onSelect={() => goto('/lq-ai/trust')}>
+					<ShieldCheckIcon class="size-4" aria-hidden="true" />
+					Trust &amp; transparency
+				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
 		<Button
@@ -98,6 +120,16 @@
 			onclick={() => goto('/lq-ai/settings/appearance')}
 		>
 			<SettingsIcon class="size-4" aria-hidden="true" />
+		</Button>
+		<Button
+			variant="ghost"
+			size="icon"
+			class="text-muted-foreground"
+			title="Sign out"
+			aria-label="Sign out"
+			onclick={signOut}
+		>
+			<LogOutIcon class="size-4" aria-hidden="true" />
 		</Button>
 	</div>
 </header>

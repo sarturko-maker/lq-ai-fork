@@ -363,7 +363,9 @@ async def test_dispatcher_future_schedule_not_picked_up(
     from app.workers.autonomous_worker import _run_schedule_sweep
 
     now = datetime(2026, 5, 25, 10, 0, 0, tzinfo=UTC)
-    await _make_schedule(db_session, user=user_a, next_run_at=now + timedelta(minutes=10))
+    await _make_schedule(
+        db_session, user=user_a, next_run_at=now + timedelta(minutes=10)
+    )
 
     enqueue = AsyncMock(return_value=True)
     result = await _run_schedule_sweep(db_session, now=now, enqueue=enqueue)
@@ -425,8 +427,12 @@ async def test_dispatcher_two_due_schedules_two_sessions(
     from app.workers.autonomous_worker import _run_schedule_sweep
 
     now = datetime(2026, 5, 25, 10, 0, 0, tzinfo=UTC)
-    await _make_schedule(db_session, user=user_a, next_run_at=now - timedelta(minutes=1))
-    await _make_schedule(db_session, user=user_b, next_run_at=now - timedelta(minutes=2))
+    await _make_schedule(
+        db_session, user=user_a, next_run_at=now - timedelta(minutes=1)
+    )
+    await _make_schedule(
+        db_session, user=user_b, next_run_at=now - timedelta(minutes=2)
+    )
 
     enqueue = AsyncMock(return_value=True)
     result = await _run_schedule_sweep(db_session, now=now, enqueue=enqueue)
@@ -653,7 +659,9 @@ async def test_create_schedule_unsatisfiable_cron_returns_422(
 
 @pytest.mark.integration
 async def test_create_schedule_unauth_returns_401(client: AsyncClient) -> None:
-    resp = await client.post("/api/v1/autonomous/schedules", json={"cron_expr": "*/5 * * * *"})
+    resp = await client.post(
+        "/api/v1/autonomous/schedules", json={"cron_expr": "*/5 * * * *"}
+    )
     assert resp.status_code == 401, resp.text
 
 
@@ -761,7 +769,9 @@ async def test_list_schedules_newest_first(
         await _make_schedule(db_session, user=user_a)
 
     resp = await client.get("/api/v1/autonomous/schedules", headers=_bearer(user_a))
-    created = [_dt.datetime.fromisoformat(s["created_at"]) for s in resp.json()["schedules"]]
+    created = [
+        _dt.datetime.fromisoformat(s["created_at"]) for s in resp.json()["schedules"]
+    ]
     for i in range(len(created) - 1):
         assert created[i] >= created[i + 1]
 
@@ -948,7 +958,9 @@ async def test_patch_schedule_unauth_returns_401(
     user_a: User,
 ) -> None:
     sched = await _make_schedule(db_session, user=user_a)
-    resp = await client.patch(f"/api/v1/autonomous/schedules/{sched.id}", json={"name": "x"})
+    resp = await client.patch(
+        f"/api/v1/autonomous/schedules/{sched.id}", json={"name": "x"}
+    )
     assert resp.status_code == 401, resp.text
 
 
@@ -965,7 +977,9 @@ async def test_delete_schedule_soft_deletes_returns_200(
 ) -> None:
     sched = await _make_schedule(db_session, user=user_a)
 
-    resp = await client.delete(f"/api/v1/autonomous/schedules/{sched.id}", headers=_bearer(user_a))
+    resp = await client.delete(
+        f"/api/v1/autonomous/schedules/{sched.id}", headers=_bearer(user_a)
+    )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["id"] == str(sched.id)
@@ -982,7 +996,9 @@ async def test_delete_schedule_excluded_from_list(
     user_a: User,
 ) -> None:
     sched = await _make_schedule(db_session, user=user_a)
-    await client.delete(f"/api/v1/autonomous/schedules/{sched.id}", headers=_bearer(user_a))
+    await client.delete(
+        f"/api/v1/autonomous/schedules/{sched.id}", headers=_bearer(user_a)
+    )
 
     resp = await client.get("/api/v1/autonomous/schedules", headers=_bearer(user_a))
     assert str(sched.id) not in {s["id"] for s in resp.json()["schedules"]}
@@ -996,9 +1012,13 @@ async def test_delete_schedule_redelete_returns_404(
     user_a: User,
 ) -> None:
     sched = await _make_schedule(db_session, user=user_a)
-    await client.delete(f"/api/v1/autonomous/schedules/{sched.id}", headers=_bearer(user_a))
+    await client.delete(
+        f"/api/v1/autonomous/schedules/{sched.id}", headers=_bearer(user_a)
+    )
 
-    resp = await client.delete(f"/api/v1/autonomous/schedules/{sched.id}", headers=_bearer(user_a))
+    resp = await client.delete(
+        f"/api/v1/autonomous/schedules/{sched.id}", headers=_bearer(user_a)
+    )
     assert resp.status_code == 404, resp.text
 
 
@@ -1025,7 +1045,9 @@ async def test_delete_schedule_writes_audit_row(
     from app.models.audit import AuditLog
 
     sched = await _make_schedule(db_session, user=user_a)
-    await client.delete(f"/api/v1/autonomous/schedules/{sched.id}", headers=_bearer(user_a))
+    await client.delete(
+        f"/api/v1/autonomous/schedules/{sched.id}", headers=_bearer(user_a)
+    )
 
     rows = (
         (

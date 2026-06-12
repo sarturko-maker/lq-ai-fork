@@ -139,7 +139,9 @@ async def get_current_tier(
     """
 
     try:
-        models_payload = await gateway.list_models(request_id=request.headers.get("x-request-id"))
+        models_payload = await gateway.list_models(
+            request_id=request.headers.get("x-request-id")
+        )
     except LQAIError:
         raise
 
@@ -215,7 +217,9 @@ async def get_tier_config(
     The admin-write surface lives at ``PATCH /api/v1/admin/tier-policy``.
     """
 
-    payload = await gateway.get_tier_config(request_id=request.headers.get("x-request-id"))
+    payload = await gateway.get_tier_config(
+        request_id=request.headers.get("x-request-id")
+    )
     policy = payload.get("tier_policy", {})
     return TierConfigResponse(
         allowed_tiers_global=list(policy.get("allowed_tiers_global") or [1, 2, 3, 4]),

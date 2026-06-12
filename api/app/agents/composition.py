@@ -70,8 +70,12 @@ async def compose_and_execute_run(
     lease: RunLease | None = None,
     broker: RunStreamBroker | None = None,
     model_builder: Callable[..., BaseChatModel] = build_gateway_chat_model,
-    session_factory_provider: Callable[[], async_sessionmaker[AsyncSession]] = get_session_factory,
-    checkpointer_provider: Callable[[], BaseCheckpointSaver | None] = get_agent_checkpointer,
+    session_factory_provider: Callable[
+        [], async_sessionmaker[AsyncSession]
+    ] = get_session_factory,
+    checkpointer_provider: Callable[
+        [], BaseCheckpointSaver | None
+    ] = get_agent_checkpointer,
 ) -> None:
     """Compose one run's dependencies and execute it end to end.
 

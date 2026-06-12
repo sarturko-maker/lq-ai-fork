@@ -162,7 +162,9 @@ async def _put_checkpoint(saver: InMemorySaver, thread_id: uuid.UUID) -> None:
     await saver.aput(config, empty_checkpoint(), {}, {})
 
 
-async def _make_project(db: AsyncSession, *, owner: User, archived: bool = False) -> Project:
+async def _make_project(
+    db: AsyncSession, *, owner: User, archived: bool = False
+) -> Project:
     project = Project(
         owner_id=owner.id,
         name=f"Matter {uuid.uuid4().hex[:6]}",
@@ -205,7 +207,9 @@ async def test_create_run_returns_202_with_running_row(
     assert body["user_id"] == str(user_a.id)
 
     row = (
-        await db_session.execute(select(AgentRun).where(AgentRun.id == uuid.UUID(body["id"])))
+        await db_session.execute(
+            select(AgentRun).where(AgentRun.id == uuid.UUID(body["id"]))
+        )
     ).scalar_one()
     assert row.user_id == user_a.id
     assert row.status == "running"
@@ -251,7 +255,9 @@ async def test_create_run_rejects_invalid_bodies(
 ) -> None:
     """Boundary validation: reject, don't sanitize (CLAUDE.md)."""
     with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
-        resp = await client.post("/api/v1/agents/runs", headers=_bearer(user_a), json=payload)
+        resp = await client.post(
+            "/api/v1/agents/runs", headers=_bearer(user_a), json=payload
+        )
     assert resp.status_code == 422, resp.text
 
 
@@ -336,7 +342,9 @@ async def test_create_run_binds_owned_active_project(
     body = resp.json()
     assert body["project_id"] == str(project.id)
     row = (
-        await db_session.execute(select(AgentRun).where(AgentRun.id == uuid.UUID(body["id"])))
+        await db_session.execute(
+            select(AgentRun).where(AgentRun.id == uuid.UUID(body["id"]))
+        )
     ).scalar_one()
     assert row.project_id == project.id
 
@@ -427,7 +435,9 @@ async def test_get_run_returns_run_with_ordered_steps(
         (2, "tool_call", "read_clause"),
     ]:
         db_session.add(
-            AgentRunStep(run_id=run.id, seq=seq, kind=kind, name=name, summary=f"step {seq}")
+            AgentRunStep(
+                run_id=run.id, seq=seq, kind=kind, name=name, summary=f"step {seq}"
+            )
         )
     await db_session.flush()
 
@@ -465,7 +475,9 @@ async def test_get_run_missing_returns_404(
     client: AsyncClient,
     user_a: User,
 ) -> None:
-    resp = await client.get(f"/api/v1/agents/runs/{uuid.uuid4()}", headers=_bearer(user_a))
+    resp = await client.get(
+        f"/api/v1/agents/runs/{uuid.uuid4()}", headers=_bearer(user_a)
+    )
     assert resp.status_code == 404
 
 
@@ -495,7 +507,9 @@ async def test_list_runs_newest_first_paginated_and_isolated(
     assert [r["id"] for r in body["runs"]] == [str(r.id) for r in runs]
 
     # Pagination envelope.
-    resp = await client.get("/api/v1/agents/runs?limit=1&offset=1", headers=_bearer(user_a))
+    resp = await client.get(
+        "/api/v1/agents/runs?limit=1&offset=1", headers=_bearer(user_a)
+    )
     body = resp.json()
     assert body["total_count"] == 3
     assert body["limit"] == 1 and body["offset"] == 1
@@ -656,7 +670,9 @@ async def test_follow_up_on_interrupted_thread_is_admitted(
     await _put_checkpoint(thread_saver, thread.id)
 
     # The thread detail advertises the admission (composer stays live).
-    detail = await client.get(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a))
+    detail = await client.get(
+        f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a)
+    )
     assert detail.json()["continuable"] is True
 
     with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
@@ -696,7 +712,9 @@ async def test_follow_up_on_archived_matter_returns_409(
     assert resp.json()["detail"] == "matter_archived"
 
     # The thread detail mirrors the refusal: composer greys out honestly.
-    detail = await client.get(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a))
+    detail = await client.get(
+        f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a)
+    )
     assert detail.json()["continuable"] is False
 
 
@@ -741,7 +759,9 @@ async def test_list_threads_newest_activity_first_with_status_badges(
         db_session, user=user_a, title="old chat", last_run_at=base - timedelta(hours=1)
     )
     await _make_run(db_session, user=user_a, status="completed", thread=old)
-    fresh = await _make_thread(db_session, user=user_a, title="fresh chat", last_run_at=base)
+    fresh = await _make_thread(
+        db_session, user=user_a, title="fresh chat", last_run_at=base
+    )
     await _make_run(
         db_session,
         user=user_a,
@@ -749,7 +769,9 @@ async def test_list_threads_newest_activity_first_with_status_badges(
         thread=fresh,
         started_at=base - timedelta(minutes=5),
     )
-    await _make_run(db_session, user=user_a, status="running", thread=fresh, started_at=base)
+    await _make_run(
+        db_session, user=user_a, status="running", thread=fresh, started_at=base
+    )
     await _make_thread(db_session, user=user_b, title="not yours")
 
     resp = await client.get("/api/v1/agents/threads", headers=_bearer(user_a))
@@ -797,15 +819,21 @@ async def test_get_thread_returns_runs_oldest_first_with_steps(
         db_session, user=user_a, status="completed", thread=thread, started_at=base
     )
     db_session.add(
-        AgentRunStep(run_id=run1.id, seq=1, kind="model_turn", name=None, summary="turn 1")
+        AgentRunStep(
+            run_id=run1.id, seq=1, kind="model_turn", name=None, summary="turn 1"
+        )
     )
     db_session.add(
-        AgentRunStep(run_id=run2.id, seq=1, kind="model_turn", name=None, summary="turn 2")
+        AgentRunStep(
+            run_id=run2.id, seq=1, kind="model_turn", name=None, summary="turn 2"
+        )
     )
     await db_session.flush()
     await _put_checkpoint(thread_saver, thread.id)
 
-    resp = await client.get(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a))
+    resp = await client.get(
+        f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a)
+    )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["thread"]["id"] == str(thread.id)
@@ -825,14 +853,18 @@ async def test_get_thread_not_continuable_while_running_or_without_checkpoint(
     # Completed but no checkpoint state → not continuable.
     no_state = await _make_thread(db_session, user=user_a)
     await _make_run(db_session, user=user_a, status="completed", thread=no_state)
-    resp = await client.get(f"/api/v1/agents/threads/{no_state.id}", headers=_bearer(user_a))
+    resp = await client.get(
+        f"/api/v1/agents/threads/{no_state.id}", headers=_bearer(user_a)
+    )
     assert resp.json()["continuable"] is False
 
     # Running → not continuable (even with state).
     busy = await _make_thread(db_session, user=user_a)
     await _make_run(db_session, user=user_a, status="running", thread=busy)
     await _put_checkpoint(thread_saver, busy.id)
-    resp = await client.get(f"/api/v1/agents/threads/{busy.id}", headers=_bearer(user_a))
+    resp = await client.get(
+        f"/api/v1/agents/threads/{busy.id}", headers=_bearer(user_a)
+    )
     assert resp.json()["continuable"] is False
 
 
@@ -844,7 +876,9 @@ async def test_get_thread_cross_user_returns_404(
     user_b: User,
 ) -> None:
     thread = await _make_thread(db_session, user=user_a)
-    resp = await client.get(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_b))
+    resp = await client.get(
+        f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_b)
+    )
     assert resp.status_code == 404
 
 

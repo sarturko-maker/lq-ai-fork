@@ -207,7 +207,9 @@ async def _ingest_then_clear_normalized(
     # Simulate pre-M2 state: the column existed (schema default '')
     # but no canonical text was written.
     await db.execute(
-        update(Document).where(Document.id == result.document_id).values(normalized_content="")
+        update(Document)
+        .where(Document.id == result.document_id)
+        .values(normalized_content="")
     )
     await db.commit()
     return result.document_id
@@ -228,7 +230,9 @@ async def test_backfill_populates_pre_m2_rows(
     settings = get_settings()
     monkeypatch.setattr(settings, "lq_ai_docling_enabled", False)
 
-    doc_id = await _ingest_then_clear_normalized(db_session, db_user, fake_s3, _make_simple_pdf())
+    doc_id = await _ingest_then_clear_normalized(
+        db_session, db_user, fake_s3, _make_simple_pdf()
+    )
 
     report = await backfill_documents(db_session)
 
@@ -238,7 +242,9 @@ async def test_backfill_populates_pre_m2_rows(
 
     # Reload and check fidelity: slicing at chunk offsets reproduces
     # chunk content byte-for-byte.
-    doc = (await db_session.execute(select(Document).where(Document.id == doc_id))).scalar_one()
+    doc = (
+        await db_session.execute(select(Document).where(Document.id == doc_id))
+    ).scalar_one()
     assert doc.normalized_content != ""
     assert doc.was_ocrd is False  # backfill must not touch this column
 
@@ -274,7 +280,9 @@ async def test_backfill_is_idempotent(
     settings = get_settings()
     monkeypatch.setattr(settings, "lq_ai_docling_enabled", False)
 
-    await _ingest_then_clear_normalized(db_session, db_user, fake_s3, _make_simple_pdf())
+    await _ingest_then_clear_normalized(
+        db_session, db_user, fake_s3, _make_simple_pdf()
+    )
 
     first = await backfill_documents(db_session)
     assert first.processed == 1
@@ -299,7 +307,9 @@ async def test_backfill_force_rewrites_populated_rows(
     settings = get_settings()
     monkeypatch.setattr(settings, "lq_ai_docling_enabled", False)
 
-    doc_id = await _ingest_then_clear_normalized(db_session, db_user, fake_s3, _make_simple_pdf())
+    doc_id = await _ingest_then_clear_normalized(
+        db_session, db_user, fake_s3, _make_simple_pdf()
+    )
 
     await backfill_documents(db_session)
 
@@ -312,17 +322,24 @@ async def test_backfill_force_rewrites_populated_rows(
     report = await backfill_documents(db_session, force=True)
     assert report.processed == 1
 
-    doc = (await db_session.execute(select(Document).where(Document.id == doc_id))).scalar_one()
+    doc = (
+        await db_session.execute(select(Document).where(Document.id == doc_id))
+    ).scalar_one()
     assert doc.normalized_content != "bogus"
     # Fidelity check after force re-run.
     chunks = (
-        (await db_session.execute(select(DocumentChunk).where(DocumentChunk.document_id == doc_id)))
+        (
+            await db_session.execute(
+                select(DocumentChunk).where(DocumentChunk.document_id == doc_id)
+            )
+        )
         .scalars()
         .all()
     )
     for chunk in chunks:
         assert (
-            doc.normalized_content[chunk.char_offset_start : chunk.char_offset_end] == chunk.content
+            doc.normalized_content[chunk.char_offset_start : chunk.char_offset_end]
+            == chunk.content
         )
 
 

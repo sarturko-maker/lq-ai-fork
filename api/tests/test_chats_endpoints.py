@@ -309,7 +309,9 @@ async def test_list_chats_default_excludes_archived(
     from datetime import UTC, datetime
 
     active = Chat(owner_id=db_user.id, title="Active")
-    archived = Chat(owner_id=db_user.id, title="Archived", archived_at=datetime.now(tz=UTC))
+    archived = Chat(
+        owner_id=db_user.id, title="Archived", archived_at=datetime.now(tz=UTC)
+    )
     db_session.add_all([active, archived])
     await db_session.flush()
     token = _bearer_for(db_user)
@@ -333,7 +335,9 @@ async def test_list_chats_archived_true_returns_archived_only(
     from datetime import UTC, datetime
 
     active = Chat(owner_id=db_user.id, title="Active")
-    archived = Chat(owner_id=db_user.id, title="Archived", archived_at=datetime.now(tz=UTC))
+    archived = Chat(
+        owner_id=db_user.id, title="Archived", archived_at=datetime.now(tz=UTC)
+    )
     db_session.add_all([active, archived])
     await db_session.flush()
     token = _bearer_for(db_user)
@@ -417,7 +421,10 @@ async def test_list_chats_filter_by_project_id(
     from app.models.project import Project
 
     project = Project(
-        owner_id=db_user.id, name="P1", slug=f"p1-{uuid.uuid4().hex[:6]}", privileged=False
+        owner_id=db_user.id,
+        name="P1",
+        slug=f"p1-{uuid.uuid4().hex[:6]}",
+        privileged=False,
     )
     db_session.add(project)
     await db_session.flush()
@@ -886,7 +893,9 @@ async def test_chat_cascade_delete_removes_messages(
 
     # Hard-delete via raw SQL (the API does soft-delete; this test
     # documents the underlying constraint behavior).
-    await db_session.execute(text("DELETE FROM chats WHERE id = :cid"), {"cid": chat_id})
+    await db_session.execute(
+        text("DELETE FROM chats WHERE id = :cid"), {"cid": chat_id}
+    )
     await db_session.flush()
 
     rows = await db_session.execute(

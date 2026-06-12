@@ -117,7 +117,9 @@ async def get_chat_receipts(
     # messages + denorm skill events
     if "message" in requested or "skill" in requested:
         msgs_result = await db.execute(
-            select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
+            select(Message)
+            .where(Message.chat_id == chat_id)
+            .order_by(Message.created_at)
         )
         msgs = list(msgs_result.scalars())
 
@@ -141,7 +143,10 @@ async def get_chat_receipts(
                 for row in provenance_rows.scalars():
                     details = row.details or {}
                     user_msg_id = details.get("user_message_id")
-                    if not isinstance(user_msg_id, str) or user_msg_id not in user_msg_ids:
+                    if (
+                        not isinstance(user_msg_id, str)
+                        or user_msg_id not in user_msg_ids
+                    ):
                         continue
                     attached = details.get("attached_skills") or []
                     skill_sources[user_msg_id] = {
@@ -207,7 +212,9 @@ async def get_chat_receipts(
                             # UI's anonymization indicator; message_id pins the
                             # indicator to the right assistant message bubble.
                             "anonymization_applied": log.anonymization_applied,
-                            "message_id": str(log.message_id) if log.message_id else None,
+                            "message_id": str(log.message_id)
+                            if log.message_id
+                            else None,
                         },
                     )
                 )
@@ -223,7 +230,9 @@ async def get_chat_receipts(
             .order_by(AuditLog.timestamp)
         )
         for a in audits_result.scalars():
-            kind = "retrieval" if a.action == "inference.kb_chunks_retrieved" else "audit"
+            kind = (
+                "retrieval" if a.action == "inference.kb_chunks_retrieved" else "audit"
+            )
             if kind in requested:
                 events.append(
                     ReceiptEvent(
@@ -268,7 +277,9 @@ async def export_chat_receipts(
         content=body,
         media_type="application/jsonl",
         headers={
-            "Content-Disposition": (f'attachment; filename="chat-{chat_id}-receipts.jsonl"'),
+            "Content-Disposition": (
+                f'attachment; filename="chat-{chat_id}-receipts.jsonl"'
+            ),
         },
     )
 

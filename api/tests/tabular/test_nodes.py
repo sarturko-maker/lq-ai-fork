@@ -66,12 +66,16 @@ class _StubGateway:
     async def chat_completion(self, request: Any) -> _StubResponse:
         self.calls_received.append(request)
         if not self.payloads:
-            return _StubResponse(choices=[_StubChoice(message=_StubMessage(content=""))])
+            return _StubResponse(
+                choices=[_StubChoice(message=_StubMessage(content=""))]
+            )
         payload = self.payloads.pop(0)
         if isinstance(payload, Exception):
             raise payload
         if isinstance(payload, str):
-            return _StubResponse(choices=[_StubChoice(message=_StubMessage(content=payload))])
+            return _StubResponse(
+                choices=[_StubChoice(message=_StubMessage(content=payload))]
+            )
         return _StubResponse(
             choices=[_StubChoice(message=_StubMessage(content=json.dumps(payload)))]
         )

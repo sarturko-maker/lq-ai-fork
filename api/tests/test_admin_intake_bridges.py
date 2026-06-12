@@ -55,12 +55,16 @@ async def _make_user(
     )
     db_session.add(user)
     await db_session.commit()
-    token = create_access_token(user_id=user.id, email=user.email, is_admin=user.is_admin)
+    token = create_access_token(
+        user_id=user.id, email=user.email, is_admin=user.is_admin
+    )
     return user, token
 
 
 @pytest_asyncio.fixture
-async def admin_client(db_session: AsyncSession) -> AsyncIterator[tuple[AsyncClient, str]]:
+async def admin_client(
+    db_session: AsyncSession,
+) -> AsyncIterator[tuple[AsyncClient, str]]:
     _user, token = await _make_user(
         db_session,
         email="admin-intake@example.com",
@@ -74,7 +78,9 @@ async def admin_client(db_session: AsyncSession) -> AsyncIterator[tuple[AsyncCli
 
 
 @pytest_asyncio.fixture
-async def member_client(db_session: AsyncSession) -> AsyncIterator[tuple[AsyncClient, str]]:
+async def member_client(
+    db_session: AsyncSession,
+) -> AsyncIterator[tuple[AsyncClient, str]]:
     _user, token = await _make_user(
         db_session,
         email="member-intake@example.com",
@@ -205,7 +211,10 @@ async def test_list_sorts_by_installed_at_desc(
         headers={"Authorization": f"Bearer {token}"},
     )
     body = res.json()
-    assert [row["team_id"] for row in body["slack_workspaces"]] == ["T-newer", "T-older"]
+    assert [row["team_id"] for row in body["slack_workspaces"]] == [
+        "T-newer",
+        "T-older",
+    ]
 
 
 @pytest.mark.integration
@@ -300,7 +309,9 @@ async def test_delete_teams_soft_deletes_row(
     db_session: AsyncSession,
 ) -> None:
     ac, token = admin_client
-    row = await _insert_teams(db_session, tenant_id="00000000-0000-0000-0000-eeeeeeeeeeee")
+    row = await _insert_teams(
+        db_session, tenant_id="00000000-0000-0000-0000-eeeeeeeeeeee"
+    )
 
     res = await ac.delete(
         f"/api/v1/admin/intake-bridges/teams/{row.id}",

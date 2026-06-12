@@ -44,7 +44,9 @@ async def sample_chat(db_session: AsyncSession, db_user: User) -> Chat:
     return chat
 
 
-async def test_kind_column_exists_with_check_constraint(db_session: AsyncSession) -> None:
+async def test_kind_column_exists_with_check_constraint(
+    db_session: AsyncSession,
+) -> None:
     """Column exists, is non-nullable text."""
     result = await db_session.execute(
         text(

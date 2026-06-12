@@ -87,7 +87,9 @@ async def test_cancel_settles_a_running_run_and_audits(
         aborted.append(run_id)
 
     with patch.object(agent_runs_module, "abort_agent_run_job", new=fake_abort):
-        resp = await client.post(f"/api/v1/agents/runs/{run.id}/cancel", headers=_bearer(user_a))
+        resp = await client.post(
+            f"/api/v1/agents/runs/{run.id}/cancel", headers=_bearer(user_a)
+        )
 
     assert resp.status_code == 200
     body = resp.json()
@@ -106,7 +108,9 @@ async def test_cancel_settles_a_running_run_and_audits(
     assert audit.details == {"from_status": "running"}
 
 
-@pytest.mark.parametrize("settled_status", ["completed", "failed", "cancelled", "cap_exceeded"])
+@pytest.mark.parametrize(
+    "settled_status", ["completed", "failed", "cancelled", "cap_exceeded"]
+)
 async def test_cancel_is_an_idempotent_noop_on_settled_runs(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -122,7 +126,9 @@ async def test_cancel_is_an_idempotent_noop_on_settled_runs(
         raise AssertionError("abort must not be signalled for a settled run")
 
     with patch.object(agent_runs_module, "abort_agent_run_job", new=exploding_abort):
-        resp = await client.post(f"/api/v1/agents/runs/{run.id}/cancel", headers=_bearer(user_a))
+        resp = await client.post(
+            f"/api/v1/agents/runs/{run.id}/cancel", headers=_bearer(user_a)
+        )
 
     assert resp.status_code == 200
     assert resp.json()["status"] == settled_status
@@ -145,9 +151,13 @@ async def test_cancel_cross_user_and_unknown_return_404(
     client: AsyncClient, db_session: AsyncSession, user_a: User, user_b: User
 ) -> None:
     run = await _make_run(db_session, user=user_a, status="running")
-    resp = await client.post(f"/api/v1/agents/runs/{run.id}/cancel", headers=_bearer(user_b))
+    resp = await client.post(
+        f"/api/v1/agents/runs/{run.id}/cancel", headers=_bearer(user_b)
+    )
     assert resp.status_code == 404  # never 403 — no existence disclosure
-    resp = await client.post(f"/api/v1/agents/runs/{uuid.uuid4()}/cancel", headers=_bearer(user_a))
+    resp = await client.post(
+        f"/api/v1/agents/runs/{uuid.uuid4()}/cancel", headers=_bearer(user_a)
+    )
     assert resp.status_code == 404
     # And the run is untouched.
     await db_session.refresh(run)
@@ -167,11 +177,15 @@ async def test_delete_thread_cascades_and_deletes_checkpoints(
 ) -> None:
     thread = await _make_thread(db_session, user=user_a)
     run = await _make_run(db_session, user=user_a, status="completed", thread=thread)
-    db_session.add(AgentRunStep(run_id=run.id, seq=1, kind="model_turn", summary="answer"))
+    db_session.add(
+        AgentRunStep(run_id=run.id, seq=1, kind="model_turn", summary="answer")
+    )
     await db_session.flush()
     await _put_checkpoint(thread_saver, thread.id)
 
-    resp = await client.delete(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a))
+    resp = await client.delete(
+        f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a)
+    )
 
     assert resp.status_code == 204
     # The DB-level cascade deleted rows the session's identity map still
@@ -182,7 +196,11 @@ async def test_delete_thread_cascades_and_deletes_checkpoints(
     assert (await db_session.get(AgentThread, thread_id)) is None
     assert (await db_session.get(AgentRun, run_id)) is None
     steps = (
-        (await db_session.execute(select(AgentRunStep).where(AgentRunStep.run_id == run_id)))
+        (
+            await db_session.execute(
+                select(AgentRunStep).where(AgentRunStep.run_id == run_id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -210,7 +228,9 @@ async def test_delete_thread_refuses_while_a_run_is_live(
     thread = await _make_thread(db_session, user=user_a)
     await _make_run(db_session, user=user_a, status="running", thread=thread)
 
-    resp = await client.delete(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a))
+    resp = await client.delete(
+        f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a)
+    )
 
     assert resp.status_code == 409
     assert resp.json()["detail"] == "thread_busy"
@@ -225,9 +245,13 @@ async def test_delete_thread_cross_user_and_unknown_return_404(
     thread_saver: InMemorySaver,
 ) -> None:
     thread = await _make_thread(db_session, user=user_a)
-    resp = await client.delete(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_b))
+    resp = await client.delete(
+        f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_b)
+    )
     assert resp.status_code == 404  # never 403
-    resp = await client.delete(f"/api/v1/agents/threads/{uuid.uuid4()}", headers=_bearer(user_a))
+    resp = await client.delete(
+        f"/api/v1/agents/threads/{uuid.uuid4()}", headers=_bearer(user_a)
+    )
     assert resp.status_code == 404
     assert (await db_session.get(AgentThread, thread.id)) is not None
 
@@ -249,7 +273,9 @@ async def test_delete_thread_survives_a_checkpoint_delete_failure(
     try:
         thread = await _make_thread(db_session, user=user_a)
         await _make_run(db_session, user=user_a, status="completed", thread=thread)
-        resp = await client.delete(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a))
+        resp = await client.delete(
+            f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a)
+        )
     finally:
         app.dependency_overrides.pop(agent_runs_module.get_checkpointer_dep, None)
 

@@ -77,7 +77,9 @@ def _load_manifest_template() -> str:
     the resource path if they need to exercise a different template.
     """
     return (
-        resources.files("app.data").joinpath("word_addin_manifest.xml").read_text(encoding="utf-8")
+        resources.files("app.data")
+        .joinpath("word_addin_manifest.xml")
+        .read_text(encoding="utf-8")
     )
 
 
@@ -230,7 +232,9 @@ async def get_manifest(
         media_type="application/xml",
         status_code=status.HTTP_200_OK,
         headers={
-            "Content-Disposition": ('attachment; filename="lq-ai-word-addin-manifest.xml"'),
+            "Content-Disposition": (
+                'attachment; filename="lq-ai-word-addin-manifest.xml"'
+            ),
             "Cache-Control": "no-store",
         },
     )

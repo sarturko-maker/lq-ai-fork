@@ -59,7 +59,9 @@ class Settings(BaseSettings):
     )
     s3_access_key: str = Field(default="", description="S3 access key.")
     s3_secret_key: str = Field(default="", description="S3 secret key.")
-    s3_bucket: str = Field(default="lq-ai-files", description="S3 bucket for uploaded files.")
+    s3_bucket: str = Field(
+        default="lq-ai-files", description="S3 bucket for uploaded files."
+    )
     s3_region: str = Field(default="us-east-1", description="S3 region.")
 
     # ----- File upload limits (Task C4) -----
@@ -380,7 +382,9 @@ class Settings(BaseSettings):
     )
 
     # ----- Operational -----
-    log_level: LogLevel = Field(default="info", description="Log level for the api/ service.")
+    log_level: LogLevel = Field(
+        default="info", description="Log level for the api/ service."
+    )
     lq_ai_dev_mode: bool = Field(
         default=False,
         description="When true, relax some safety checks for local development.",

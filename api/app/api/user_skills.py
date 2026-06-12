@@ -191,7 +191,9 @@ class UserSkillUpdate(BaseModel):
     """
 
     display_name: str | None = Field(default=None, min_length=1, max_length=_NAME_MAX)
-    description: str | None = Field(default=None, min_length=1, max_length=_DESCRIPTION_MAX)
+    description: str | None = Field(
+        default=None, min_length=1, max_length=_DESCRIPTION_MAX
+    )
     body: str | None = Field(default=None, min_length=1, max_length=_BODY_MAX)
     version: str | None = Field(default=None, min_length=1, max_length=_VERSION_MAX)
     tags: list[str] | None = Field(default=None, max_length=_MAX_TAGS)
@@ -291,7 +293,9 @@ def _to_response(row: UserSkill) -> UserSkillResponse:
     )
 
 
-async def _is_team_admin(db: AsyncSession, *, team_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+async def _is_team_admin(
+    db: AsyncSession, *, team_id: uuid.UUID, user_id: uuid.UUID
+) -> bool:
     """Return whether ``user_id`` is an ``admin``-role member of ``team_id``.
 
     Mutate rights on team-scope skills require the team-admin role per
@@ -329,7 +333,9 @@ async def _load_mutable(
         stmt = stmt.where(UserSkill.archived_at.is_(None))
     row = (await db.execute(stmt)).scalar_one_or_none()
     if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
+        )
 
     if row.scope == "user":
         if row.owner_user_id != user_id:
@@ -344,7 +350,9 @@ async def _load_mutable(
                 status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
             )
     else:  # pragma: no cover — CHECK constraint blocks other values
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="user skill not found"
+        )
     return row
 
 
@@ -565,7 +573,9 @@ async def create_user_skill(
         if "slash_alias" in err_text:
             raise HTTPException(
                 status_code=422,
-                detail=(f"slash_alias {slash_alias!r} is already used by another of your skills."),
+                detail=(
+                    f"slash_alias {slash_alias!r} is already used by another of your skills."
+                ),
             ) from None
         owner_label = "team" if payload.scope == "team" else "user"
         raise HTTPException(
@@ -804,7 +814,9 @@ async def delete_user_skill(
     even after the slug has been reused.
     """
 
-    row = await _load_mutable(db, skill_id=skill_id, user_id=user.id, include_archived=True)
+    row = await _load_mutable(
+        db, skill_id=skill_id, user_id=user.id, include_archived=True
+    )
     if row.archived_at is not None:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,

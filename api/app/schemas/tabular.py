@@ -36,7 +36,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # this id against the Citation Engine, so a synthetic id is safe.
 _TABULAR_CITATION_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "tabular-citation.lq.ai")
 
-TabularExecutionStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
+TabularExecutionStatus = Literal[
+    "pending", "running", "completed", "failed", "cancelled"
+]
 """Lifecycle states for a :class:`TabularExecution`. Matches the CHECK
 constraint on ``tabular_executions.status`` (migration 0036)."""
 
@@ -210,7 +212,9 @@ class TabularRow(BaseModel):
             verification_method = cell.get("verification_method")
             cell["citations"] = [
                 {
-                    "citation_id": str(uuid.uuid5(_TABULAR_CITATION_NAMESPACE, str(chunk_id))),
+                    "citation_id": str(
+                        uuid.uuid5(_TABULAR_CITATION_NAMESPACE, str(chunk_id))
+                    ),
                     "document_id": str(document_id),
                     "chunk_id": str(chunk_id),
                     "confidence": confidence,

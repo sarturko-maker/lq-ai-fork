@@ -263,10 +263,16 @@ def make_extract_cells_node(
                 effective = (
                     column.ensemble_verification
                     if column.ensemble_verification is not None
-                    else (ensemble_config.default_enabled if ensemble_config is not None else False)
+                    else (
+                        ensemble_config.default_enabled
+                        if ensemble_config is not None
+                        else False
+                    )
                 )
                 verify_ensemble_config = (
-                    ensemble_config if (effective and ensemble_config is not None) else None
+                    ensemble_config
+                    if (effective and ensemble_config is not None)
+                    else None
                 )
                 with tracer.start_as_current_span("tabular.cell") as cell_span:
                     record_attributes(
@@ -436,7 +442,9 @@ async def _verify_cell_ensemble(
 
     try:
         cited_set = set(cited_chunk_ids)
-        concat = "\n---\n".join(chunk["content"] for chunk in chunks if chunk["id"] in cited_set)
+        concat = "\n---\n".join(
+            chunk["content"] for chunk in chunks if chunk["id"] in cited_set
+        )
         # Deterministic synthetic ids — used only for a trace-span
         # attribute, so a stable uuid5 off the primary chunk id is
         # preferred over uuid4.
@@ -494,7 +502,8 @@ def _build_extract_messages(
     user_content = (
         f"DOCUMENT NAME: {document_name}\n\n"
         f"QUERY: {column.query}\n\n"
-        f"DOCUMENT EXCERPTS:\n" + ("\n\n".join(chunk_blocks) if chunk_blocks else "(none)")
+        f"DOCUMENT EXCERPTS:\n"
+        + ("\n\n".join(chunk_blocks) if chunk_blocks else "(none)")
     )
     return [
         ChatCompletionMessage(role="system", content=_EXTRACT_SYSTEM_PROMPT),
@@ -615,7 +624,9 @@ def make_aggregate_node(
             values["status"] = "completed"
 
         await db.execute(
-            update(TabularExecution).where(TabularExecution.id == execution_id).values(**values)
+            update(TabularExecution)
+            .where(TabularExecution.id == execution_id)
+            .values(**values)
         )
         await db.commit()
         return {}
@@ -754,7 +765,11 @@ def _coerce_chunk_indices(raw: Any, *, n_chunks: int) -> list[int]:
         return []
     out: list[int] = []
     for item in raw:
-        if isinstance(item, int) and not isinstance(item, bool) and 0 <= item < n_chunks:
+        if (
+            isinstance(item, int)
+            and not isinstance(item, bool)
+            and 0 <= item < n_chunks
+        ):
             out.append(item)
     return out
 

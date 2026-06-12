@@ -181,3 +181,30 @@ no registry/network access at build or CI time.
   ADR-conformance (F002 inert cards, F004 settled-rows rollups, 0011 tier
   disclosure untouched on the agent surface).
 - HANDOFF.md rewritten; squash-merge to `sarturko-maker/lq-ai-fork`.
+
+## Deviations (recorded at gate time, 2026-06-12)
+
+- **Filter semantics beat the plan's "all cross-user access 404s" line**: the
+  threads `project_id` filter returns an EMPTY 200 page for a foreign id —
+  a filter that 404'd would *confirm* foreign ids exist (the stricter
+  reading of the no-existence-leak rule). The rollup endpoint takes no id,
+  so no cross-user 404 case exists for it. Tests pin the empty-page
+  contract.
+- **Seed idempotency is tested as a seed re-run** (`_seed()` against a
+  seeded DB), not a literal double `upgrade()` (which would fail on
+  `create_table` — the 0033 precedent behaves the same).
+- **Cockpit helper tests** cover the URL codec, `timeAgo`, and the theme
+  cycle; "area state mapping / rollup presentation" live in markup and are
+  covered by the f1-s2 Cypress spec instead.
+- **Wider Cypress touch-set than planned**: the cockpit landing removed the
+  tab bar from `/lq-ai`, so f0-s3/s4/s5/s7 entry navigation, wave-a (2
+  point-in-time-stale tests retired), wave-c test 1, and m4's gating visit
+  were updated alongside the planned wave-b edits.
+- **Two found-live fixes rode along** (evidence doc § found-and-fixed):
+  the auth refresh event-loop freeze (legacy bugfix + double-spend
+  liveness re-check under lock) and the dark-token lightness bump.
+- **Adversarial-review fixes added** the `threadcreated` URL-sync contract
+  to ConversationPanel/cockpit, a sign-out control + Trust menu entry in
+  the cockpit header, the truncation row on the conversation list, and
+  retired the orphaned "Featured tools" settings toggle (its dashboard
+  consumer was deleted by this slice).

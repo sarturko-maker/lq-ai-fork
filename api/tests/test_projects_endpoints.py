@@ -64,7 +64,9 @@ async def fake_s3() -> FakeS3Client:
 
 
 @pytest_asyncio.fixture
-async def client(db_session: AsyncSession, fake_s3: FakeS3Client) -> AsyncIterator[AsyncClient]:
+async def client(
+    db_session: AsyncSession, fake_s3: FakeS3Client
+) -> AsyncIterator[AsyncClient]:
     """In-process AsyncClient with fixture skill registry + fake S3 patched in."""
 
     @asynccontextmanager
@@ -172,7 +174,9 @@ async def test_get_unauthenticated_returns_401(client: AsyncClient) -> None:
 async def test_create_with_must_change_password_returns_403(
     client: AsyncClient, gated_user: User
 ) -> None:
-    resp = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(gated_user))
+    resp = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(gated_user)
+    )
     assert resp.status_code == 403
     assert resp.json()["detail"]["code"] == "password_change_required"
 
@@ -204,7 +208,9 @@ async def test_create_project_minimal(client: AsyncClient, db_user: User) -> Non
 
 
 @pytest.mark.integration
-async def test_create_project_with_full_payload(client: AsyncClient, db_user: User) -> None:
+async def test_create_project_with_full_payload(
+    client: AsyncClient, db_user: User
+) -> None:
     resp = await client.post(
         "/api/v1/projects",
         json={
@@ -240,7 +246,9 @@ async def test_create_with_privileged_but_no_tier_returns_422(
 
 
 @pytest.mark.integration
-async def test_create_with_invalid_tier_returns_422(client: AsyncClient, db_user: User) -> None:
+async def test_create_with_invalid_tier_returns_422(
+    client: AsyncClient, db_user: User
+) -> None:
     resp = await client.post(
         "/api/v1/projects",
         json={"name": "X", "privileged": True, "minimum_inference_tier": 7},
@@ -251,7 +259,9 @@ async def test_create_with_invalid_tier_returns_422(client: AsyncClient, db_user
 
 @pytest.mark.integration
 async def test_get_project_round_trip(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "Project A"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "Project A"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     get = await client.get(f"/api/v1/projects/{pid}", headers=_h(db_user))
@@ -261,14 +271,18 @@ async def test_get_project_round_trip(client: AsyncClient, db_user: User) -> Non
 
 
 @pytest.mark.integration
-async def test_get_with_invalid_uuid_returns_400(client: AsyncClient, db_user: User) -> None:
+async def test_get_with_invalid_uuid_returns_400(
+    client: AsyncClient, db_user: User
+) -> None:
     resp = await client.get("/api/v1/projects/not-a-uuid", headers=_h(db_user))
     assert resp.status_code == 400
     assert resp.json()["detail"]["code"] == "validation_error"
 
 
 @pytest.mark.integration
-async def test_get_for_unknown_id_returns_404(client: AsyncClient, db_user: User) -> None:
+async def test_get_for_unknown_id_returns_404(
+    client: AsyncClient, db_user: User
+) -> None:
     resp = await client.get(f"/api/v1/projects/{uuid.uuid4()}", headers=_h(db_user))
     assert resp.status_code == 404
 
@@ -277,8 +291,12 @@ async def test_get_for_unknown_id_returns_404(client: AsyncClient, db_user: User
 async def test_list_projects_excludes_archived_by_default(
     client: AsyncClient, db_user: User
 ) -> None:
-    a = await client.post("/api/v1/projects", json={"name": "Active"}, headers=_h(db_user))
-    b = await client.post("/api/v1/projects", json={"name": "Archive me"}, headers=_h(db_user))
+    a = await client.post(
+        "/api/v1/projects", json={"name": "Active"}, headers=_h(db_user)
+    )
+    b = await client.post(
+        "/api/v1/projects", json={"name": "Archive me"}, headers=_h(db_user)
+    )
     archive_id = b.json()["id"]
     await client.delete(f"/api/v1/projects/{archive_id}", headers=_h(db_user))
 
@@ -293,8 +311,12 @@ async def test_list_projects_excludes_archived_by_default(
 async def test_list_projects_with_archived_true_returns_archived_only(
     client: AsyncClient, db_user: User
 ) -> None:
-    active = await client.post("/api/v1/projects", json={"name": "Active"}, headers=_h(db_user))
-    arch = await client.post("/api/v1/projects", json={"name": "Archive"}, headers=_h(db_user))
+    active = await client.post(
+        "/api/v1/projects", json={"name": "Active"}, headers=_h(db_user)
+    )
+    arch = await client.post(
+        "/api/v1/projects", json={"name": "Archive"}, headers=_h(db_user)
+    )
     arch_id = arch.json()["id"]
     await client.delete(f"/api/v1/projects/{arch_id}", headers=_h(db_user))
 
@@ -314,7 +336,9 @@ async def test_list_projects_with_archived_true_returns_archived_only(
 async def test_other_user_cannot_get_project(
     client: AsyncClient, db_user: User, other_user: User
 ) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "Mine"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "Mine"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     resp = await client.get(f"/api/v1/projects/{pid}", headers=_h(other_user))
@@ -327,7 +351,9 @@ async def test_other_user_cannot_get_project(
 async def test_other_user_cannot_patch_project(
     client: AsyncClient, db_user: User, other_user: User
 ) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "Mine"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "Mine"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     resp = await client.patch(
@@ -342,7 +368,9 @@ async def test_other_user_cannot_patch_project(
 async def test_other_user_cannot_delete_project(
     client: AsyncClient, db_user: User, other_user: User
 ) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "Mine"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "Mine"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     resp = await client.delete(f"/api/v1/projects/{pid}", headers=_h(other_user))
@@ -353,8 +381,12 @@ async def test_other_user_cannot_delete_project(
 async def test_list_only_returns_caller_projects(
     client: AsyncClient, db_user: User, other_user: User
 ) -> None:
-    mine = await client.post("/api/v1/projects", json={"name": "Mine"}, headers=_h(db_user))
-    theirs = await client.post("/api/v1/projects", json={"name": "Theirs"}, headers=_h(other_user))
+    mine = await client.post(
+        "/api/v1/projects", json={"name": "Mine"}, headers=_h(db_user)
+    )
+    theirs = await client.post(
+        "/api/v1/projects", json={"name": "Theirs"}, headers=_h(other_user)
+    )
 
     list_mine = await client.get("/api/v1/projects", headers=_h(db_user))
     ids = [p["id"] for p in list_mine.json()]
@@ -368,7 +400,9 @@ async def test_list_only_returns_caller_projects(
 
 
 @pytest.mark.integration
-async def test_patch_updates_name_and_context(client: AsyncClient, db_user: User) -> None:
+async def test_patch_updates_name_and_context(
+    client: AsyncClient, db_user: User
+) -> None:
     create = await client.post(
         "/api/v1/projects",
         json={"name": "Original"},
@@ -440,7 +474,9 @@ async def test_patch_clearing_tier_on_privileged_returns_400(
 async def test_patch_simultaneous_privileged_true_and_tier_succeeds(
     client: AsyncClient, db_user: User
 ) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     resp = await client.patch(
@@ -455,7 +491,9 @@ async def test_patch_simultaneous_privileged_true_and_tier_succeeds(
 
 @pytest.mark.integration
 async def test_patch_archive_via_flag(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     resp = await client.patch(
@@ -469,7 +507,9 @@ async def test_patch_archive_via_flag(client: AsyncClient, db_user: User) -> Non
 
 @pytest.mark.integration
 async def test_patch_unarchive_via_flag(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
     await client.delete(f"/api/v1/projects/{pid}", headers=_h(db_user))
 
@@ -489,8 +529,12 @@ async def test_patch_unarchive_via_flag(client: AsyncClient, db_user: User) -> N
 
 
 @pytest.mark.integration
-async def test_delete_returns_204_then_get_404(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+async def test_delete_returns_204_then_get_404(
+    client: AsyncClient, db_user: User
+) -> None:
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     delete = await client.delete(f"/api/v1/projects/{pid}", headers=_h(db_user))
@@ -504,8 +548,12 @@ async def test_delete_returns_204_then_get_404(client: AsyncClient, db_user: Use
 
 
 @pytest.mark.integration
-async def test_delete_idempotent_on_already_archived(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+async def test_delete_idempotent_on_already_archived(
+    client: AsyncClient, db_user: User
+) -> None:
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     first = await client.delete(f"/api/v1/projects/{pid}", headers=_h(db_user))
@@ -523,16 +571,24 @@ async def test_delete_idempotent_on_already_archived(client: AsyncClient, db_use
 
 @pytest.mark.integration
 async def test_slug_collision_suffixes(client: AsyncClient, db_user: User) -> None:
-    a = await client.post("/api/v1/projects", json={"name": "Acme MSA"}, headers=_h(db_user))
-    b = await client.post("/api/v1/projects", json={"name": "Acme MSA"}, headers=_h(db_user))
-    c = await client.post("/api/v1/projects", json={"name": "Acme MSA"}, headers=_h(db_user))
+    a = await client.post(
+        "/api/v1/projects", json={"name": "Acme MSA"}, headers=_h(db_user)
+    )
+    b = await client.post(
+        "/api/v1/projects", json={"name": "Acme MSA"}, headers=_h(db_user)
+    )
+    c = await client.post(
+        "/api/v1/projects", json={"name": "Acme MSA"}, headers=_h(db_user)
+    )
     assert a.json()["slug"] == "acme-msa"
     assert b.json()["slug"] == "acme-msa-2"
     assert c.json()["slug"] == "acme-msa-3"
 
 
 @pytest.mark.integration
-async def test_caller_slug_is_used_when_supplied(client: AsyncClient, db_user: User) -> None:
+async def test_caller_slug_is_used_when_supplied(
+    client: AsyncClient, db_user: User
+) -> None:
     resp = await client.post(
         "/api/v1/projects",
         json={"name": "Anything", "slug": "my-custom-slug"},
@@ -542,7 +598,9 @@ async def test_caller_slug_is_used_when_supplied(client: AsyncClient, db_user: U
 
 
 @pytest.mark.integration
-async def test_invalid_slug_pattern_returns_422(client: AsyncClient, db_user: User) -> None:
+async def test_invalid_slug_pattern_returns_422(
+    client: AsyncClient, db_user: User
+) -> None:
     resp = await client.post(
         "/api/v1/projects",
         json={"name": "X", "slug": "Invalid Slug!"},
@@ -581,7 +639,9 @@ async def test_archived_slug_can_be_reused(client: AsyncClient, db_user: User) -
 
 
 @pytest.mark.integration
-async def test_context_md_over_cap_returns_422(client: AsyncClient, db_user: User) -> None:
+async def test_context_md_over_cap_returns_422(
+    client: AsyncClient, db_user: User
+) -> None:
     big = "X" * (100 * 1024 + 1)
     resp = await client.post(
         "/api/v1/projects",
@@ -606,8 +666,12 @@ async def _upload_file(client: AsyncClient, user: User, *, name: str = "x.pdf") 
 
 
 @pytest.mark.integration
-async def test_attach_file_to_project_succeeds(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "Has Files"}, headers=_h(db_user))
+async def test_attach_file_to_project_succeeds(
+    client: AsyncClient, db_user: User
+) -> None:
+    create = await client.post(
+        "/api/v1/projects", json={"name": "Has Files"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
     fid = await _upload_file(client, db_user)
 
@@ -624,8 +688,12 @@ async def test_attach_file_to_project_succeeds(client: AsyncClient, db_user: Use
 
 
 @pytest.mark.integration
-async def test_attach_unknown_file_returns_404(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+async def test_attach_unknown_file_returns_404(
+    client: AsyncClient, db_user: User
+) -> None:
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     attach = await client.post(
@@ -642,7 +710,9 @@ async def test_attach_other_users_file_returns_404(
 ) -> None:
     """Cross-user file attachment fails — same posture as C4 (404 not 403)."""
 
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
     fid = await _upload_file(client, other_user)
 
@@ -658,7 +728,9 @@ async def test_attach_other_users_file_returns_404(
 async def test_attach_file_to_other_users_project_returns_404(
     client: AsyncClient, db_user: User, other_user: User
 ) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
     fid = await _upload_file(client, other_user)
 
@@ -671,8 +743,12 @@ async def test_attach_file_to_other_users_project_returns_404(
 
 
 @pytest.mark.integration
-async def test_attach_file_already_attached_returns_409(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+async def test_attach_file_already_attached_returns_409(
+    client: AsyncClient, db_user: User
+) -> None:
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
     fid = await _upload_file(client, db_user)
 
@@ -694,7 +770,9 @@ async def test_attach_file_already_attached_returns_409(client: AsyncClient, db_
 
 @pytest.mark.integration
 async def test_detach_file_succeeds(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
     fid = await _upload_file(client, db_user)
     await client.post(
@@ -703,7 +781,9 @@ async def test_detach_file_succeeds(client: AsyncClient, db_user: User) -> None:
         headers=_h(db_user),
     )
 
-    detach = await client.delete(f"/api/v1/projects/{pid}/files/{fid}", headers=_h(db_user))
+    detach = await client.delete(
+        f"/api/v1/projects/{pid}/files/{fid}", headers=_h(db_user)
+    )
     assert detach.status_code == 204
 
     get = await client.get(f"/api/v1/projects/{pid}", headers=_h(db_user))
@@ -711,12 +791,18 @@ async def test_detach_file_succeeds(client: AsyncClient, db_user: User) -> None:
 
 
 @pytest.mark.integration
-async def test_detach_file_not_attached_returns_404(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+async def test_detach_file_not_attached_returns_404(
+    client: AsyncClient, db_user: User
+) -> None:
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
     fid = await _upload_file(client, db_user)
     # Never attached.
-    resp = await client.delete(f"/api/v1/projects/{pid}/files/{fid}", headers=_h(db_user))
+    resp = await client.delete(
+        f"/api/v1/projects/{pid}/files/{fid}", headers=_h(db_user)
+    )
     assert resp.status_code == 404
 
 
@@ -726,8 +812,12 @@ async def test_detach_file_not_attached_returns_404(client: AsyncClient, db_user
 
 
 @pytest.mark.integration
-async def test_attach_skill_to_project_succeeds(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "Has Skills"}, headers=_h(db_user))
+async def test_attach_skill_to_project_succeeds(
+    client: AsyncClient, db_user: User
+) -> None:
+    create = await client.post(
+        "/api/v1/projects", json={"name": "Has Skills"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     attach = await client.post(
@@ -742,8 +832,12 @@ async def test_attach_skill_to_project_succeeds(client: AsyncClient, db_user: Us
 
 
 @pytest.mark.integration
-async def test_attach_unknown_skill_returns_404(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+async def test_attach_unknown_skill_returns_404(
+    client: AsyncClient, db_user: User
+) -> None:
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     attach = await client.post(
@@ -758,7 +852,9 @@ async def test_attach_unknown_skill_returns_404(client: AsyncClient, db_user: Us
 async def test_attach_skill_already_attached_returns_409(
     client: AsyncClient, db_user: User
 ) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     first = await client.post(
@@ -778,7 +874,9 @@ async def test_attach_skill_already_attached_returns_409(
 
 @pytest.mark.integration
 async def test_detach_skill_succeeds(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
     await client.post(
         f"/api/v1/projects/{pid}/skills",
@@ -797,8 +895,12 @@ async def test_detach_skill_succeeds(client: AsyncClient, db_user: User) -> None
 
 
 @pytest.mark.integration
-async def test_detach_skill_not_attached_returns_404(client: AsyncClient, db_user: User) -> None:
-    create = await client.post("/api/v1/projects", json={"name": "X"}, headers=_h(db_user))
+async def test_detach_skill_not_attached_returns_404(
+    client: AsyncClient, db_user: User
+) -> None:
+    create = await client.post(
+        "/api/v1/projects", json={"name": "X"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     resp = await client.delete(
@@ -819,7 +921,9 @@ async def test_upload_with_project_id_persists_attachment(
 ) -> None:
     """Closes the C4 deferred item: multipart project_id form field."""
 
-    create = await client.post("/api/v1/projects", json={"name": "With Files"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "With Files"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     files = _multipart(filename="x.pdf", content_type="application/pdf", payload=b"hi")
@@ -867,7 +971,9 @@ async def test_upload_with_other_users_project_id_returns_400(
 ) -> None:
     """Cross-user project_id is rejected (treated like unknown)."""
 
-    create = await client.post("/api/v1/projects", json={"name": "Theirs"}, headers=_h(other_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "Theirs"}, headers=_h(other_user)
+    )
     pid = create.json()["id"]
 
     files = _multipart(filename="x.pdf", content_type="application/pdf", payload=b"hi")
@@ -914,7 +1020,9 @@ async def test_uploaded_file_with_project_id_appears_in_attached_list(
       3. seeing the file in attached_file_ids
     """
 
-    create = await client.post("/api/v1/projects", json={"name": "P"}, headers=_h(db_user))
+    create = await client.post(
+        "/api/v1/projects", json={"name": "P"}, headers=_h(db_user)
+    )
     pid = create.json()["id"]
 
     files = _multipart(filename="x.pdf", content_type="application/pdf", payload=b"hi")
@@ -969,7 +1077,9 @@ async def test_c7_verification_contract(client: AsyncClient, db_user: User) -> N
     assert attach_skill.status_code == 204
 
     # 3. Attach file
-    files = _multipart(filename="contract.pdf", content_type="application/pdf", payload=b"hello")
+    files = _multipart(
+        filename="contract.pdf", content_type="application/pdf", payload=b"hello"
+    )
     upload = await client.post("/api/v1/files", files=files, headers=_h(db_user))
     fid = upload.json()["id"]
     attach_file = await client.post(

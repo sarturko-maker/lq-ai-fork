@@ -29,7 +29,10 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.citation.cost import DEFAULT_PER_JUDGE_USD, invalidate_cache as invalidate_judge_cache
+from app.citation.cost import (
+    DEFAULT_PER_JUDGE_USD,
+    invalidate_cache as invalidate_judge_cache,
+)
 from app.clients.gateway import EnsembleConfig
 from app.models.inference import InferenceRoutingLog
 from app.schemas.tabular import ColumnSpec
@@ -113,7 +116,9 @@ async def test_per_cell_db_none_returns_default_without_query() -> None:
 
 
 @pytest.mark.integration
-async def test_per_cell_cold_start_no_rows_returns_default(db_session: AsyncSession) -> None:
+async def test_per_cell_cold_start_no_rows_returns_default(
+    db_session: AsyncSession,
+) -> None:
     """An empty routing log falls back to the conservative default."""
 
     estimate = await estimate_per_cell_cost_usd(db_session)
@@ -121,7 +126,9 @@ async def test_per_cell_cold_start_no_rows_returns_default(db_session: AsyncSess
 
 
 @pytest.mark.integration
-async def test_per_cell_below_min_samples_returns_default(db_session: AsyncSession) -> None:
+async def test_per_cell_below_min_samples_returns_default(
+    db_session: AsyncSession,
+) -> None:
     """Fewer than _MIN_SAMPLES tabular rows → fall back to default."""
 
     for _ in range(3):
@@ -136,7 +143,9 @@ async def test_per_cell_below_min_samples_returns_default(db_session: AsyncSessi
 
 
 @pytest.mark.integration
-async def test_per_cell_rolling_average_computes_correctly(db_session: AsyncSession) -> None:
+async def test_per_cell_rolling_average_computes_correctly(
+    db_session: AsyncSession,
+) -> None:
     """5+ tabular rows → returns the average of cost_estimate."""
 
     prices = [
@@ -152,14 +161,18 @@ async def test_per_cell_rolling_average_computes_correctly(db_session: AsyncSess
 
     estimate = await estimate_per_cell_cost_usd(db_session)
     # average = 0.0030
-    assert estimate == Decimal("0.00300000000000000000") or estimate == Decimal("0.0030")
+    assert estimate == Decimal("0.00300000000000000000") or estimate == Decimal(
+        "0.0030"
+    )
 
 
 # --- Filter correctness -----------------------------------------------------
 
 
 @pytest.mark.integration
-async def test_per_cell_purpose_filter_excludes_chat_rows(db_session: AsyncSession) -> None:
+async def test_per_cell_purpose_filter_excludes_chat_rows(
+    db_session: AsyncSession,
+) -> None:
     """Chat-purpose rows for the same model are ignored.
 
     Chat traffic has very different token distribution from tabular
@@ -213,7 +226,9 @@ async def test_per_cell_purpose_filter_excludes_judge_paraphrase_rows(
 
 
 @pytest.mark.integration
-async def test_per_cell_null_cost_estimate_rows_excluded(db_session: AsyncSession) -> None:
+async def test_per_cell_null_cost_estimate_rows_excluded(
+    db_session: AsyncSession,
+) -> None:
     """Tabular rows missing ``cost_estimate`` don't poison the average."""
 
     for _ in range(5):
@@ -223,7 +238,9 @@ async def test_per_cell_null_cost_estimate_rows_excluded(db_session: AsyncSessio
     await db_session.flush()
 
     estimate = await estimate_per_cell_cost_usd(db_session)
-    assert estimate == Decimal("0.00100000000000000000") or estimate == Decimal("0.0010")
+    assert estimate == Decimal("0.00100000000000000000") or estimate == Decimal(
+        "0.0010"
+    )
 
 
 @pytest.mark.integration
@@ -443,7 +460,9 @@ async def test_execution_cost_ensemble_column_previews_higher() -> None:
     expected_premium = DEFAULT_PER_JUDGE_USD * Decimal(3) * Decimal(4)
     assert premium_preview.ensemble_premium_usd == expected_premium
     # estimated_cost_usd is the TOTAL: base extraction + premium.
-    assert premium_preview.estimated_cost_usd == base.estimated_cost_usd + expected_premium
+    assert (
+        premium_preview.estimated_cost_usd == base.estimated_cost_usd + expected_premium
+    )
 
 
 @pytest.mark.unit
@@ -511,7 +530,9 @@ async def test_execution_cost_deployment_default_activates_null_column() -> None
     )
 
     assert preview.ensemble_cells_count == 3
-    assert preview.ensemble_premium_usd == DEFAULT_PER_JUDGE_USD * Decimal(2) * Decimal(3)
+    assert preview.ensemble_premium_usd == DEFAULT_PER_JUDGE_USD * Decimal(2) * Decimal(
+        3
+    )
 
 
 @pytest.mark.unit

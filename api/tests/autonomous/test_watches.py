@@ -88,7 +88,9 @@ def _bearer(user: User) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _make_kb(db: AsyncSession, *, owner: User, name: str = "watched") -> KnowledgeBase:
+async def _make_kb(
+    db: AsyncSession, *, owner: User, name: str = "watched"
+) -> KnowledgeBase:
     kb = KnowledgeBase(owner_id=owner.id, name=name)
     db.add(kb)
     await db.flush()
@@ -151,7 +153,9 @@ async def test_fire_watches_spawns_one_session(
     file_id = uuid.uuid4()
 
     enqueue = AsyncMock(return_value=True)
-    count = await fire_watches_for_kb(db_session, kb_id=kb.id, file_id=file_id, enqueue=enqueue)
+    count = await fire_watches_for_kb(
+        db_session, kb_id=kb.id, file_id=file_id, enqueue=enqueue
+    )
 
     assert count == 1
 
@@ -319,7 +323,9 @@ async def test_fire_watches_session_owned_by_watch_user_not_attacher(
     watch = await _make_watch(db_session, user=user_a, kb=kb)
 
     enqueue = AsyncMock(return_value=True)
-    await fire_watches_for_kb(db_session, kb_id=kb.id, file_id=uuid.uuid4(), enqueue=enqueue)
+    await fire_watches_for_kb(
+        db_session, kb_id=kb.id, file_id=uuid.uuid4(), enqueue=enqueue
+    )
 
     sess = (await db_session.execute(select(AutonomousSession))).scalars().one()
     assert sess.user_id == watch.user_id == user_a.id
@@ -620,7 +626,9 @@ async def test_list_watches_newest_first(
         await _make_watch(db_session, user=user_a, kb=kb)
 
     resp = await client.get("/api/v1/autonomous/watches", headers=_bearer(user_a))
-    created = [_dt.datetime.fromisoformat(w["created_at"]) for w in resp.json()["watches"]]
+    created = [
+        _dt.datetime.fromisoformat(w["created_at"]) for w in resp.json()["watches"]
+    ]
     for i in range(len(created) - 1):
         assert created[i] >= created[i + 1]
 
@@ -774,7 +782,9 @@ async def test_patch_watch_unauth_returns_401(
 ) -> None:
     kb = await _make_kb(db_session, owner=user_a)
     watch = await _make_watch(db_session, user=user_a, kb=kb)
-    resp = await client.patch(f"/api/v1/autonomous/watches/{watch.id}", json={"enabled": False})
+    resp = await client.patch(
+        f"/api/v1/autonomous/watches/{watch.id}", json={"enabled": False}
+    )
     assert resp.status_code == 401, resp.text
 
 
@@ -792,7 +802,9 @@ async def test_delete_watch_soft_deletes_returns_200(
     kb = await _make_kb(db_session, owner=user_a)
     watch = await _make_watch(db_session, user=user_a, kb=kb)
 
-    resp = await client.delete(f"/api/v1/autonomous/watches/{watch.id}", headers=_bearer(user_a))
+    resp = await client.delete(
+        f"/api/v1/autonomous/watches/{watch.id}", headers=_bearer(user_a)
+    )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["id"] == str(watch.id)
@@ -810,7 +822,9 @@ async def test_delete_watch_excluded_from_list(
 ) -> None:
     kb = await _make_kb(db_session, owner=user_a)
     watch = await _make_watch(db_session, user=user_a, kb=kb)
-    await client.delete(f"/api/v1/autonomous/watches/{watch.id}", headers=_bearer(user_a))
+    await client.delete(
+        f"/api/v1/autonomous/watches/{watch.id}", headers=_bearer(user_a)
+    )
 
     resp = await client.get("/api/v1/autonomous/watches", headers=_bearer(user_a))
     assert str(watch.id) not in {w["id"] for w in resp.json()["watches"]}
@@ -825,9 +839,13 @@ async def test_delete_watch_redelete_returns_404(
 ) -> None:
     kb = await _make_kb(db_session, owner=user_a)
     watch = await _make_watch(db_session, user=user_a, kb=kb)
-    await client.delete(f"/api/v1/autonomous/watches/{watch.id}", headers=_bearer(user_a))
+    await client.delete(
+        f"/api/v1/autonomous/watches/{watch.id}", headers=_bearer(user_a)
+    )
 
-    resp = await client.delete(f"/api/v1/autonomous/watches/{watch.id}", headers=_bearer(user_a))
+    resp = await client.delete(
+        f"/api/v1/autonomous/watches/{watch.id}", headers=_bearer(user_a)
+    )
     assert resp.status_code == 404, resp.text
 
 
@@ -840,7 +858,9 @@ async def test_delete_watch_cross_user_returns_404(
 ) -> None:
     kb_b = await _make_kb(db_session, owner=user_b)
     watch_b = await _make_watch(db_session, user=user_b, kb=kb_b)
-    resp = await client.delete(f"/api/v1/autonomous/watches/{watch_b.id}", headers=_bearer(user_a))
+    resp = await client.delete(
+        f"/api/v1/autonomous/watches/{watch_b.id}", headers=_bearer(user_a)
+    )
     assert resp.status_code == 404, resp.text
 
 
@@ -854,7 +874,9 @@ async def test_delete_watch_writes_audit_row(
 
     kb = await _make_kb(db_session, owner=user_a)
     watch = await _make_watch(db_session, user=user_a, kb=kb)
-    await client.delete(f"/api/v1/autonomous/watches/{watch.id}", headers=_bearer(user_a))
+    await client.delete(
+        f"/api/v1/autonomous/watches/{watch.id}", headers=_bearer(user_a)
+    )
 
     rows = (
         (

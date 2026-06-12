@@ -18,7 +18,7 @@ slice code; **DB migrated 0052 → 0053 by the api's boot auto-migrate**
 | `f0-s5-multi-turn.cy.ts` | **1/1** | END-TO-END with the REAL model (MiniMax-M3 via the gateway): matter + composer upload + ingestion + a multi-turn agent run with document grounding, on the moved `(tools)` agents route |
 | `wave-a-chrome.cy.ts` | **3/3** | Legacy tab chrome intact on tools routes; trust chrome in the cockpit header (2 point-in-time-stale tests retired with dated comments: ComingSoonModal-on-Matters — red since Wave C; AmbientFooter-on-`/lq-ai` — asserted the pre-Wave-B chat-shell landing) |
 | `m4-autonomous.cy.ts` | **9/9** | Autonomous gating intact (tab gating asserted on a tools route) |
-| `wave-b-surfaces.cy.ts` | 5/7 | Cockpit landing + Tools-menu navigation pass. The 2 fails (Enhance-Prompt composer, skill-detail) **reproduce identically against the PRE-SLICE bundle** (control below) — pre-existing |
+| `wave-b-surfaces.cy.ts` | 4/6 | Cockpit landing, Tools-menu navigation, trust + developer cards pass (the featured-tools test retired with its dashboard consumer). The 2 fails (Enhance-Prompt composer, skill-detail) **reproduce identically against the PRE-SLICE bundle** (control below) — pre-existing |
 | `wave-c-matters.cy.ts` | 4/5 | Matters page + workspace pass. The 1 fail (chat-in-matter rail entry) likewise reproduces on the pre-slice bundle — pre-existing |
 
 **Control run:** `main` (`e788fc9`) web image built in a worktree and swapped
@@ -54,3 +54,13 @@ remaining failures are box/data-state issues that predate this slice.
   fragility the re-plan §S1 noted); worker restart's startup sweep
   requeued it → `ready`, f0-s5 then passed. No code change (ingest cron
   sweep stays a backlog item).
+
+## Post-review re-verification (final images)
+
+Adversarial review (32 verified findings: 26 confirmed in-slice — ALL
+fixed; 3 pre-existing recorded on HANDOFF; 3 refuted — plus the 2
+found-live entries above) triggered an api+web rebuild; on the FINAL images:
+`f1-s2-cockpit.cy.ts` 5/5 again (screenshots refreshed) and
+`wave-b-surfaces.cy.ts` 4/6 with only the two control-proven pre-existing
+failures. Full api suite re-run after the auth re-check fix: counts in
+the PR body.

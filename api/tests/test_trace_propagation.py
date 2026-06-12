@@ -127,8 +127,12 @@ async def test_chat_send_produces_single_trace_across_api_and_gateway(
         await send({"type": "http.response.body", "body": b"ok"})  # type: ignore[operator]
 
     api_transport = AsyncOpenTelemetryTransport(httpx.ASGITransport(app=wire_tap))
-    async with httpx.AsyncClient(transport=api_transport, base_url="http://gateway") as api_client:
-        with tracer.start_as_current_span("POST /api/v1/chats/{chat_id}/messages") as api_span:
+    async with httpx.AsyncClient(
+        transport=api_transport, base_url="http://gateway"
+    ) as api_client:
+        with tracer.start_as_current_span(
+            "POST /api/v1/chats/{chat_id}/messages"
+        ) as api_span:
             api_trace_id = api_span.get_span_context().trace_id
             await api_client.post(_GATEWAY_ROUTE, json={})
 
@@ -151,14 +155,18 @@ async def test_chat_send_produces_single_trace_across_api_and_gateway(
         )
         assert response.status_code == 200
 
-    gateway_span = _by_name(list(span_exporter.get_finished_spans()), f"POST {_GATEWAY_ROUTE}")
+    gateway_span = _by_name(
+        list(span_exporter.get_finished_spans()), f"POST {_GATEWAY_ROUTE}"
+    )
 
     # Headline contract: one trace across api + gateway, and the gateway
     # joined the api's span rather than starting a fresh root.
     assert gateway_span.context.trace_id == api_trace_id, (
         "gateway did not join the api trace — context was dropped on the hop"
     )
-    assert gateway_span.parent is not None, "gateway span is a root — extraction regressed"
+    assert gateway_span.parent is not None, (
+        "gateway span is a root — extraction regressed"
+    )
     assert gateway_span.parent.span_id == wire_parent_span_id
 
 
@@ -185,8 +193,12 @@ async def test_api_outbound_injects_w3c_traceparent(
 
     transport = AsyncOpenTelemetryTransport(httpx.ASGITransport(app=receiver))
     tracer = trace.get_tracer("lq-ai-api-test")
-    async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as client:
-        with tracer.start_as_current_span("POST /api/v1/chats/{chat_id}/messages") as span:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://gateway"
+    ) as client:
+        with tracer.start_as_current_span(
+            "POST /api/v1/chats/{chat_id}/messages"
+        ) as span:
             active_trace_id = span.get_span_context().trace_id
             await client.post(_GATEWAY_ROUTE, json={})
 

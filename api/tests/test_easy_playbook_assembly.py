@@ -61,12 +61,16 @@ class _StubChatGateway:
     async def chat_completion(self, request: Any) -> _StubResponse:
         self.calls_received.append(request)
         if not self.payloads:
-            return _StubResponse(choices=[_StubChoice(message=_StubMessage(content=""))])
+            return _StubResponse(
+                choices=[_StubChoice(message=_StubMessage(content=""))]
+            )
         payload = self.payloads.pop(0)
         if isinstance(payload, Exception):
             raise payload
         if isinstance(payload, str):
-            return _StubResponse(choices=[_StubChoice(message=_StubMessage(content=payload))])
+            return _StubResponse(
+                choices=[_StubChoice(message=_StubMessage(content=payload))]
+            )
         return _StubResponse(
             choices=[_StubChoice(message=_StubMessage(content=json.dumps(payload)))]
         )
@@ -186,7 +190,9 @@ async def test_empty_clusters_returns_valid_playbook_no_positions() -> None:
 
 
 @pytest.mark.unit
-async def test_one_cluster_with_two_neighbors_produces_one_position_with_two_tiers() -> None:
+async def test_one_cluster_with_two_neighbors_produces_one_position_with_two_tiers() -> (
+    None
+):
     cluster = _cluster(
         label="Limitation of Liability",
         modal_text="Total liability is capped at fees paid in the prior twelve months.",
@@ -228,7 +234,9 @@ async def test_one_cluster_with_two_neighbors_produces_one_position_with_two_tie
         == "Total liability is capped at fees paid in the prior twelve months."
     )
     assert position.severity_if_missing == "high"
-    assert position.description == "Caps the vendor's total liability at recent fees paid."
+    assert (
+        position.description == "Caps the vendor's total liability at recent fees paid."
+    )
     assert "12-month" in position.redline_strategy
     assert position.position_order == 0
 
@@ -237,10 +245,14 @@ async def test_one_cluster_with_two_neighbors_produces_one_position_with_two_tie
     assert position.fallback_tiers[0].rank == 1
     assert position.fallback_tiers[0].description == "No cap — full uncapped liability."
     assert (
-        position.fallback_tiers[0].language == "Liability uncapped; consequential damages excluded."
+        position.fallback_tiers[0].language
+        == "Liability uncapped; consequential damages excluded."
     )
     assert position.fallback_tiers[1].rank == 2
-    assert position.fallback_tiers[1].description == "Two-year cap instead of twelve months."
+    assert (
+        position.fallback_tiers[1].description
+        == "Two-year cap instead of twelve months."
+    )
 
     # detection_examples: modal first, then both neighbors.
     assert position.detection_examples[0] == cluster.modal_clause.clause_text
@@ -290,7 +302,11 @@ async def test_multi_cluster_position_order_assigned_in_input_order() -> None:
         contract_type="NDA",
         gateway=gateway,  # type: ignore[arg-type]
     )
-    assert [p.issue for p in playbook.positions] == ["Term", "Governing Law", "Audit Rights"]
+    assert [p.issue for p in playbook.positions] == [
+        "Term",
+        "Governing Law",
+        "Audit Rights",
+    ]
     assert [p.position_order for p in playbook.positions] == [0, 1, 2]
 
 
@@ -382,7 +398,10 @@ async def test_describe_tier_failure_uses_default_description() -> None:
     position = playbook.positions[0]
     assert len(position.fallback_tiers) == 1
     # Defensive default kicks in.
-    assert position.fallback_tiers[0].description == "Variant clause; review during playbook edit."
+    assert (
+        position.fallback_tiers[0].description
+        == "Variant clause; review during playbook edit."
+    )
     # Language still set to the neighbor's verbatim text.
     assert position.fallback_tiers[0].language == "Five years."
 
@@ -442,8 +461,14 @@ async def test_describe_tier_request_carries_distinct_audit_purpose() -> None:
         gateway=gateway,  # type: ignore[arg-type]
     )
     # Two requests: describe-position then describe-tier; distinct purposes.
-    assert gateway.calls_received[0].lq_ai_purpose == "playbook_easy_assemble_describe_position"
-    assert gateway.calls_received[1].lq_ai_purpose == "playbook_easy_assemble_describe_tier"
+    assert (
+        gateway.calls_received[0].lq_ai_purpose
+        == "playbook_easy_assemble_describe_position"
+    )
+    assert (
+        gateway.calls_received[1].lq_ai_purpose
+        == "playbook_easy_assemble_describe_tier"
+    )
 
 
 # ---------------------------------------------------------------------------

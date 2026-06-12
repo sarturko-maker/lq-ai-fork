@@ -188,7 +188,9 @@ async def _load_visible_file(
     return row
 
 
-async def _load_attached_file_ids(db: AsyncSession, project_id: uuid.UUID) -> list[uuid.UUID]:
+async def _load_attached_file_ids(
+    db: AsyncSession, project_id: uuid.UUID
+) -> list[uuid.UUID]:
     """Return file ids attached to a project, ordered by ``attached_at``."""
 
     stmt = (
@@ -200,7 +202,9 @@ async def _load_attached_file_ids(db: AsyncSession, project_id: uuid.UUID) -> li
     return list(result.scalars().all())
 
 
-async def _load_attached_skill_names(db: AsyncSession, project_id: uuid.UUID) -> list[str]:
+async def _load_attached_skill_names(
+    db: AsyncSession, project_id: uuid.UUID
+) -> list[str]:
     """Return skill names attached to a project, ordered by ``attached_at``."""
 
     stmt = (
@@ -212,7 +216,9 @@ async def _load_attached_skill_names(db: AsyncSession, project_id: uuid.UUID) ->
     return list(result.scalars().all())
 
 
-async def _load_attached_kb_ids(db: AsyncSession, project_id: uuid.UUID) -> list[uuid.UUID]:
+async def _load_attached_kb_ids(
+    db: AsyncSession, project_id: uuid.UUID
+) -> list[uuid.UUID]:
     """Return knowledge-base ids attached to a project, ordered by ``attached_at``."""
 
     stmt = (
@@ -321,7 +327,9 @@ def _registry(request: Request) -> MutableSkillRegistry:
     (this is a wiring bug, not a user error).
     """
 
-    holder: MutableSkillRegistry | None = getattr(request.app.state, "skill_registry", None)
+    holder: MutableSkillRegistry | None = getattr(
+        request.app.state, "skill_registry", None
+    )
     if holder is None:
         from app.errors import InternalError
 
@@ -522,9 +530,13 @@ async def update_project(
     # against the post-update values.
     privileged_set = "privileged" in update_fields
     tier_set = "minimum_inference_tier" in update_fields
-    new_privileged = update_fields["privileged"] if privileged_set else project.privileged
+    new_privileged = (
+        update_fields["privileged"] if privileged_set else project.privileged
+    )
     new_tier = (
-        update_fields["minimum_inference_tier"] if tier_set else project.minimum_inference_tier
+        update_fields["minimum_inference_tier"]
+        if tier_set
+        else project.minimum_inference_tier
     )
     if new_privileged and new_tier is None:
         raise ValidationError(

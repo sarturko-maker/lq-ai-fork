@@ -78,9 +78,21 @@ describe('F1-S2 — Cockpit v0', () => {
 		cy.get('button[aria-label^="Theme"]').click();
 		cy.get('button[aria-label^="Theme"]').click();
 		cy.get('html').should('have.class', 'dark');
-		cy.get('[data-testid="lq-cockpit"]')
-			.should('have.css', 'background-color')
-			.and('not.eq', 'rgb(0, 0, 0)');
+		// Pin the no-black rule with a real floor, not just ≠#000: accept
+		// either serialization (Chromium may return rgb() or oklch()) and
+		// require meaningfully-above-black lightness (token: oklch 0.23).
+		cy.get('[data-testid="lq-cockpit"]').should(($el) => {
+			const bg = getComputedStyle($el[0]).backgroundColor;
+			const rgb = bg.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+			const ok = bg.match(/^oklch\((\d*\.?\d+)/);
+			if (rgb) {
+				expect(Math.max(+rgb[1], +rgb[2], +rgb[3]), `dark canvas ${bg}`).to.be.greaterThan(20);
+			} else if (ok) {
+				expect(+ok[1], `dark canvas ${bg}`).to.be.greaterThan(0.2);
+			} else {
+				throw new Error(`unrecognized background-color serialization: ${bg}`);
+			}
+		});
 		cy.screenshot('f1-s2-4-dark-mode', { capture: 'viewport' });
 		// Back to system for the next spec.
 		cy.get('button[aria-label^="Theme"]').click();

@@ -91,7 +91,9 @@ async def test_get_returns_empty_when_no_profile_set(
 ) -> None:
     """No row yet → return empty content + null timestamps; never 404."""
 
-    resp = await client.get("/api/v1/organization-profile", headers=_bearer(regular_user))
+    resp = await client.get(
+        "/api/v1/organization-profile", headers=_bearer(regular_user)
+    )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["content_md"] == ""
@@ -116,7 +118,9 @@ async def test_get_returns_existing_profile(
     )
     await db_session.flush()
 
-    resp = await client.get("/api/v1/organization-profile", headers=_bearer(regular_user))
+    resp = await client.get(
+        "/api/v1/organization-profile", headers=_bearer(regular_user)
+    )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert "Delaware" in body["content_md"]
@@ -142,7 +146,9 @@ async def test_put_creates_profile_when_none_exists(
     admin_user: User,
 ) -> None:
     body = {"content_md": "# Voice\n\nWe always recommend Delaware as choice of law."}
-    resp = await client.put("/api/v1/organization-profile", headers=_bearer(admin_user), json=body)
+    resp = await client.put(
+        "/api/v1/organization-profile", headers=_bearer(admin_user), json=body
+    )
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     assert "Delaware" in payload["content_md"]
@@ -162,7 +168,9 @@ async def test_put_replaces_existing_profile(
 ) -> None:
     """PUT is idempotent / upsert — no second row, content replaced."""
 
-    db_session.add(OrganizationProfile(content_md="# Old voice", updated_by=admin_user.id))
+    db_session.add(
+        OrganizationProfile(content_md="# Old voice", updated_by=admin_user.id)
+    )
     await db_session.flush()
 
     resp = await client.put(
@@ -179,7 +187,9 @@ async def test_put_replaces_existing_profile(
 
 
 @pytest.mark.integration
-async def test_put_by_non_admin_returns_403(client: AsyncClient, regular_user: User) -> None:
+async def test_put_by_non_admin_returns_403(
+    client: AsyncClient, regular_user: User
+) -> None:
     resp = await client.put(
         "/api/v1/organization-profile",
         headers=_bearer(regular_user),
@@ -204,7 +214,11 @@ async def test_put_audit_logs_the_update(
     assert resp.status_code == 200, resp.text
 
     rows = (
-        (await db_session.execute(select(AuditLog).where(AuditLog.user_id == admin_user.id)))
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.user_id == admin_user.id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -219,7 +233,9 @@ async def test_put_accepts_empty_content(
 ) -> None:
     """Operators can clear the Profile to an empty body without deleting the row."""
 
-    db_session.add(OrganizationProfile(content_md="# Will be cleared", updated_by=admin_user.id))
+    db_session.add(
+        OrganizationProfile(content_md="# Will be cleared", updated_by=admin_user.id)
+    )
     await db_session.flush()
 
     resp = await client.put(
@@ -243,10 +259,14 @@ async def test_raw_endpoint_returns_markdown(
     admin_user: User,
     regular_user: User,
 ) -> None:
-    db_session.add(OrganizationProfile(content_md="# Raw markdown body", updated_by=admin_user.id))
+    db_session.add(
+        OrganizationProfile(content_md="# Raw markdown body", updated_by=admin_user.id)
+    )
     await db_session.flush()
 
-    resp = await client.get("/api/v1/organization-profile/raw", headers=_bearer(regular_user))
+    resp = await client.get(
+        "/api/v1/organization-profile/raw", headers=_bearer(regular_user)
+    )
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("text/markdown")
     assert resp.text == "# Raw markdown body"
@@ -256,6 +276,8 @@ async def test_raw_endpoint_returns_markdown(
 async def test_raw_endpoint_returns_empty_when_unset(
     client: AsyncClient, regular_user: User
 ) -> None:
-    resp = await client.get("/api/v1/organization-profile/raw", headers=_bearer(regular_user))
+    resp = await client.get(
+        "/api/v1/organization-profile/raw", headers=_bearer(regular_user)
+    )
     assert resp.status_code == 200, resp.text
     assert resp.text == ""

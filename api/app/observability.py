@@ -84,14 +84,16 @@ async def _metrics_middleware(
 
     route = _route_label(request)
     if route == "/metrics":
-        HTTP_REQUESTS_TOTAL.labels(method=method, route=route, status=status_label).inc()
+        HTTP_REQUESTS_TOTAL.labels(
+            method=method, route=route, status=status_label
+        ).inc()
         return response
 
     elapsed = time.monotonic() - start
     HTTP_REQUESTS_TOTAL.labels(method=method, route=route, status=status_label).inc()
-    HTTP_REQUEST_DURATION_SECONDS.labels(method=method, route=route, status=status_label).observe(
-        elapsed
-    )
+    HTTP_REQUEST_DURATION_SECONDS.labels(
+        method=method, route=route, status=status_label
+    ).observe(elapsed)
     return response
 
 

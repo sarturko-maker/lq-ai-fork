@@ -148,7 +148,9 @@ async def test_finding_cascade_deletes_with_session(db_session: AsyncSession) ->
     before = (
         (
             await db_session.execute(
-                select(AutonomousFinding).where(AutonomousFinding.session_id == session_id)
+                select(AutonomousFinding).where(
+                    AutonomousFinding.session_id == session_id
+                )
             )
         )
         .scalars()
@@ -163,7 +165,9 @@ async def test_finding_cascade_deletes_with_session(db_session: AsyncSession) ->
     after = (
         (
             await db_session.execute(
-                select(AutonomousFinding).where(AutonomousFinding.session_id == session_id)
+                select(AutonomousFinding).where(
+                    AutonomousFinding.session_id == session_id
+                )
             )
         )
         .scalars()

@@ -64,7 +64,9 @@ class InferenceRoutingLog(Base):
     # FK constraints to chats / messages added in a later migration when those
     # tables exist (Task C3). For now these are plain UUID columns.
     chat_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
 
     # What was asked vs. what was routed
     requested_model: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -82,7 +84,9 @@ class InferenceRoutingLog(Base):
     anonymization_applied: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
-    refused: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    refused: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     refusal_reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
     request_id: Mapped[str | None] = mapped_column(String, nullable=True)

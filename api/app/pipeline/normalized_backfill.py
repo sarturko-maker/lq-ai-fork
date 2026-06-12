@@ -159,7 +159,11 @@ async def backfill_documents(
             continue
 
         chunk_rows = (
-            (await db.execute(select(DocumentChunk).where(DocumentChunk.document_id == doc.id)))
+            (
+                await db.execute(
+                    select(DocumentChunk).where(DocumentChunk.document_id == doc.id)
+                )
+            )
             .scalars()
             .all()
         )

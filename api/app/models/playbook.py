@@ -124,7 +124,9 @@ class PlaybookPosition(Base):
     )
     playbook_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("playbooks.id", ondelete="CASCADE", name="fk_playbook_positions_playbook_id"),
+        ForeignKey(
+            "playbooks.id", ondelete="CASCADE", name="fk_playbook_positions_playbook_id"
+        ),
         nullable=False,
     )
     issue: Mapped[str] = mapped_column(Text, nullable=False)
@@ -135,7 +137,9 @@ class PlaybookPosition(Base):
         nullable=False,
         server_default=text("'[]'::jsonb"),
     )
-    redline_strategy: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    redline_strategy: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=""
+    )
     severity_if_missing: Mapped[str] = mapped_column(Text, nullable=False)
     detection_keywords: Mapped[list[str]] = mapped_column(
         ARRAY(Text),
@@ -147,7 +151,9 @@ class PlaybookPosition(Base):
         nullable=False,
         server_default=text("'{}'::text[]"),
     )
-    position_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    position_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
 
     playbook: Mapped[Playbook] = relationship("Playbook", back_populates="positions")
 
@@ -206,7 +212,9 @@ class PlaybookExecution(Base):
     )
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL", name="fk_playbook_executions_user_id"),
+        ForeignKey(
+            "users.id", ondelete="SET NULL", name="fk_playbook_executions_user_id"
+        ),
         nullable=True,
     )
     project_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -218,7 +226,9 @@ class PlaybookExecution(Base):
         ),
         nullable=True,
     )
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'")
+    )
     results: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

@@ -133,7 +133,9 @@ async def test_list_provider_keys_rejects_non_admin(
 
 
 @pytest.mark.unit
-async def test_set_provider_key_rejects_non_admin(client: AsyncClient, regular_user: User) -> None:
+async def test_set_provider_key_rejects_non_admin(
+    client: AsyncClient, regular_user: User
+) -> None:
     res = await client.post(
         "/api/v1/admin/provider-keys",
         headers={"Authorization": f"Bearer {_bearer_for(regular_user)}"},
@@ -172,7 +174,9 @@ async def test_revoke_provider_key_rejects_non_admin(
 
 
 @pytest.mark.unit
-async def test_list_provider_keys_proxies(client: AsyncClient, admin_user: User) -> None:
+async def test_list_provider_keys_proxies(
+    client: AsyncClient, admin_user: User
+) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.get("/admin/v1/provider-keys").mock(
             return_value=httpx.Response(
@@ -221,7 +225,9 @@ async def test_set_provider_key_proxies(client: AsyncClient, admin_user: User) -
 
 
 @pytest.mark.unit
-async def test_rotate_provider_key_proxies(client: AsyncClient, admin_user: User) -> None:
+async def test_rotate_provider_key_proxies(
+    client: AsyncClient, admin_user: User
+) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.patch("/admin/v1/provider-keys/anthropic").mock(
             return_value=httpx.Response(200, json=_STATUS_ROW)
@@ -242,7 +248,9 @@ async def test_revoke_provider_key_proxies_204_empty_body(
     client: AsyncClient, admin_user: User
 ) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
-        router.delete("/admin/v1/provider-keys/anthropic").mock(return_value=httpx.Response(204))
+        router.delete("/admin/v1/provider-keys/anthropic").mock(
+            return_value=httpx.Response(204)
+        )
         res = await client.delete(
             "/api/v1/admin/provider-keys/anthropic",
             headers={"Authorization": f"Bearer {_bearer_for(admin_user)}"},
@@ -287,7 +295,9 @@ async def test_set_provider_key_master_key_missing_400(
 
 
 @pytest.mark.unit
-async def test_set_provider_key_unknown_provider_404(client: AsyncClient, admin_user: User) -> None:
+async def test_set_provider_key_unknown_provider_404(
+    client: AsyncClient, admin_user: User
+) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.post("/admin/v1/provider-keys").mock(
             return_value=httpx.Response(
@@ -337,7 +347,9 @@ async def test_rotate_provider_key_master_key_missing_400(
 
 
 @pytest.mark.unit
-async def test_revoke_provider_key_env_only_409(client: AsyncClient, admin_user: User) -> None:
+async def test_revoke_provider_key_env_only_409(
+    client: AsyncClient, admin_user: User
+) -> None:
     with respx.mock(base_url=GATEWAY_BASE, assert_all_called=False) as router:
         router.delete("/admin/v1/provider-keys/anthropic").mock(
             return_value=httpx.Response(

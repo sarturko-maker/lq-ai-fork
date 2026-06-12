@@ -92,11 +92,15 @@ class _StubGateway:
             choices=[
                 ChatCompletionChoice(
                     index=0,
-                    message=ChatCompletionMessage(role="assistant", content=self._content),
+                    message=ChatCompletionMessage(
+                        role="assistant", content=self._content
+                    ),
                     finish_reason="stop",
                 )
             ],
-            usage=ChatCompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            usage=ChatCompletionUsage(
+                prompt_tokens=1, completion_tokens=1, total_tokens=2
+            ),
         )
 
 
@@ -252,7 +256,9 @@ async def test_miss_no_gateway_sets_top_span_attributes(
 
     text = "The plaintiff prevailed on the breach claim."
     doc = _doc(text)
-    cand = _cand(doc, start=0, end=len(text), source_text="completely different text here")
+    cand = _cand(
+        doc, start=0, end=len(text), source_text="completely different text here"
+    )
 
     result = await verify(cand, doc, gateway=None)
 
@@ -294,7 +300,9 @@ async def test_paraphrase_judge_stage_emits_span(
     cand = _cand(doc, start=0, end=len(text), source_text=paraphrase)
 
     gw = _StubGateway(
-        json.dumps({"verdict": "yes", "confidence": "high", "justification": "supports"})
+        json.dumps(
+            {"verdict": "yes", "confidence": "high", "justification": "supports"}
+        )
     )
     result = await verify(cand, doc, gateway=gw, judge_model="fast")
 
@@ -337,7 +345,9 @@ async def test_ensemble_stage_emits_span(
         aggregation_rule="strict",
         envelope_tier=3,
     )
-    gw = _StubGateway(json.dumps({"verdict": "yes", "confidence": "high", "justification": "ok"}))
+    gw = _StubGateway(
+        json.dumps({"verdict": "yes", "confidence": "high", "justification": "ok"})
+    )
     result = await verify(cand, doc, gateway=gw, ensemble_config=ensemble_cfg)
 
     assert result.verified is True
@@ -346,7 +356,10 @@ async def test_ensemble_stage_emits_span(
     top_spans = _spans_by_name(span_exporter, "citation.verify")
     assert len(top_spans) == 1
     top = top_spans[0]
-    assert top.attributes.get("citation.method") in ("ensemble_strict", "ensemble_majority")
+    assert top.attributes.get("citation.method") in (
+        "ensemble_strict",
+        "ensemble_majority",
+    )
 
     ensemble_spans = _spans_by_name(span_exporter, "citation.stage.ensemble")
     assert len(ensemble_spans) == 1

@@ -153,7 +153,9 @@ async def test_get_execution_enriches_citations_with_navigable_source(
 ) -> None:
     user = await _make_user(db_session)
     content = "The term of this Agreement is three (3) years from the Effective Date."
-    doc, chunk = await _make_doc_with_chunk(db_session, owner=user, content=content, page_start=2)
+    doc, chunk = await _make_doc_with_chunk(
+        db_session, owner=user, content=content, page_start=2
+    )
     execution = await _insert_execution(
         db_session,
         owner=user,
@@ -174,7 +176,9 @@ async def test_get_execution_enriches_citations_with_navigable_source(
         ],
     )
 
-    resp = await client.get(f"/api/v1/tabular/executions/{execution.id}", headers=_bearer(user))
+    resp = await client.get(
+        f"/api/v1/tabular/executions/{execution.id}", headers=_bearer(user)
+    )
     assert resp.status_code == 200, resp.text
     cell = resp.json()["results"]["rows"][0]["cells"]["Term"]
     citations = cell["citations"]
@@ -226,7 +230,9 @@ async def test_get_execution_empty_cited_chunk_ids_yields_no_citations(
         ],
     )
 
-    resp = await client.get(f"/api/v1/tabular/executions/{execution.id}", headers=_bearer(user))
+    resp = await client.get(
+        f"/api/v1/tabular/executions/{execution.id}", headers=_bearer(user)
+    )
     assert resp.status_code == 200, resp.text
     cell = resp.json()["results"]["rows"][0]["cells"]["Term"]
     assert cell["citations"] == []
@@ -262,7 +268,9 @@ async def test_get_execution_stale_chunk_id_leaves_nav_fields_null(
         ],
     )
 
-    resp = await client.get(f"/api/v1/tabular/executions/{execution.id}", headers=_bearer(user))
+    resp = await client.get(
+        f"/api/v1/tabular/executions/{execution.id}", headers=_bearer(user)
+    )
     assert resp.status_code == 200, resp.text
     cit = resp.json()["results"]["rows"][0]["cells"]["Term"]["citations"][0]
     assert cit["chunk_id"] == str(stale_chunk_id)
@@ -308,7 +316,9 @@ async def test_get_execution_batches_across_two_documents(
         ],
     )
 
-    resp = await client.get(f"/api/v1/tabular/executions/{execution.id}", headers=_bearer(user))
+    resp = await client.get(
+        f"/api/v1/tabular/executions/{execution.id}", headers=_bearer(user)
+    )
     assert resp.status_code == 200, resp.text
     citations = resp.json()["results"]["rows"][0]["cells"]["Term"]["citations"]
     by_chunk = {c["chunk_id"]: c for c in citations}

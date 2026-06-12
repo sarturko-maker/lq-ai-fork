@@ -21,7 +21,10 @@ from app.errors import ValidationError
 
 @pytest.mark.unit
 def test_content_disposition_simple_ascii() -> None:
-    assert _content_disposition_attachment("contract.pdf") == 'attachment; filename="contract.pdf"'
+    assert (
+        _content_disposition_attachment("contract.pdf")
+        == 'attachment; filename="contract.pdf"'
+    )
 
 
 @pytest.mark.unit
@@ -93,4 +96,6 @@ def test_validate_file_id_rejects_empty_string() -> None:
 @pytest.mark.unit
 def test_validate_file_id_rejects_truncated_uuid() -> None:
     with pytest.raises(ValidationError):
-        _validate_file_id("00000000-0000-4000-8000-00000000000")  # 11 hex digits in last group
+        _validate_file_id(
+            "00000000-0000-4000-8000-00000000000"
+        )  # 11 hex digits in last group

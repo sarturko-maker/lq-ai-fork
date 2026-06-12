@@ -91,7 +91,9 @@ async def test_delete_schedules_deletion_and_revokes_sessions(
 
     body = resp.json()
     assert body["grace_period_days"] >= 0
-    assert datetime.fromisoformat(body["scheduled_deletion_at"]) > datetime.now(tz=UTC) - (
+    assert datetime.fromisoformat(body["scheduled_deletion_at"]) > datetime.now(
+        tz=UTC
+    ) - (
         # generous tolerance — the schedule is now + grace days
         datetime.now(tz=UTC) - datetime.now(tz=UTC)
     )
@@ -103,7 +105,11 @@ async def test_delete_schedules_deletion_and_revokes_sessions(
     assert sess.revoked_at is not None
 
     rows = (
-        (await db_session.execute(select(AuditLog).where(AuditLog.user_id == seed_user.id)))
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.user_id == seed_user.id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -167,14 +173,20 @@ async def test_cancel_clears_pending_schedule(
     schedule = await client.post("/api/v1/users/me/delete", headers=_bearer(seed_user))
     assert schedule.status_code == 202
 
-    cancel = await client.post("/api/v1/users/me/delete/cancel", headers=_bearer(seed_user))
+    cancel = await client.post(
+        "/api/v1/users/me/delete/cancel", headers=_bearer(seed_user)
+    )
     assert cancel.status_code == 204
 
     await db_session.refresh(seed_user)
     assert seed_user.deletion_scheduled_at is None
 
     rows = (
-        (await db_session.execute(select(AuditLog).where(AuditLog.user_id == seed_user.id)))
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.user_id == seed_user.id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -182,6 +194,10 @@ async def test_cancel_clears_pending_schedule(
 
 
 @pytest.mark.integration
-async def test_cancel_without_pending_returns_400(client: AsyncClient, seed_user: User) -> None:
-    resp = await client.post("/api/v1/users/me/delete/cancel", headers=_bearer(seed_user))
+async def test_cancel_without_pending_returns_400(
+    client: AsyncClient, seed_user: User
+) -> None:
+    resp = await client.post(
+        "/api/v1/users/me/delete/cancel", headers=_bearer(seed_user)
+    )
     assert resp.status_code == 400

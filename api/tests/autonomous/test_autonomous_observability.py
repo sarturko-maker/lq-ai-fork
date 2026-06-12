@@ -316,8 +316,9 @@ async def test_retrieve_chunks_no_raw_entities_in_spans_or_audit(
     for span in auto_spans:
         violations.extend(_span_contains_entity(span, _SYNTHETIC_ENTITIES))
 
-    assert not violations, "Raw entity strings found in autonomous span attributes:\n" + "\n".join(
-        violations
+    assert not violations, (
+        "Raw entity strings found in autonomous span attributes:\n"
+        + "\n".join(violations)
     )
 
     # ── Happy-path span attributes ──────────────────────────────────────────
@@ -338,7 +339,11 @@ async def test_retrieve_chunks_no_raw_entities_in_spans_or_audit(
 
     # ── Privacy assertion: no synthetic entity in any audit row ─────────────
     audit_rows = (
-        (await db_session.execute(select(AuditLog).where(AuditLog.resource_id == str(sess.id))))
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.resource_id == str(sess.id))
+            )
+        )
         .scalars()
         .all()
     )
@@ -418,13 +423,18 @@ async def test_run_skill_no_raw_entities_in_spans_or_audit(
     for span in auto_spans:
         violations.extend(_span_contains_entity(span, _SYNTHETIC_ENTITIES))
 
-    assert not violations, "Raw entity strings found in autonomous span attributes:\n" + "\n".join(
-        violations
+    assert not violations, (
+        "Raw entity strings found in autonomous span attributes:\n"
+        + "\n".join(violations)
     )
 
     # ── Privacy assertion: no synthetic entity in any audit row ─────────────
     audit_rows = (
-        (await db_session.execute(select(AuditLog).where(AuditLog.resource_id == str(sess.id))))
+        (
+            await db_session.execute(
+                select(AuditLog).where(AuditLog.resource_id == str(sess.id))
+            )
+        )
         .scalars()
         .all()
     )
@@ -517,6 +527,6 @@ def test_no_provider_sdk_in_autonomous_package() -> None:
                 line_no = content[: match.start()].count("\n") + 1
                 violations.append(f"{fpath}:{line_no}: {match.group().strip()!r}")
 
-    assert not violations, "Provider SDK imports found in api/app/autonomous/:\n" + "\n".join(
-        violations
+    assert not violations, (
+        "Provider SDK imports found in api/app/autonomous/:\n" + "\n".join(violations)
     )

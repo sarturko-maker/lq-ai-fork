@@ -65,7 +65,9 @@ def _fernet_from(master_key: str | None) -> Fernet:
             f"print(generate_master_key())'` and export it before starting the api."
         )
     try:
-        return Fernet(master_key.encode("ascii") if isinstance(master_key, str) else master_key)
+        return Fernet(
+            master_key.encode("ascii") if isinstance(master_key, str) else master_key
+        )
     except (ValueError, TypeError) as exc:
         raise BridgeMasterKeyMissing(
             f"{BRIDGE_MASTER_KEY_ENV} is malformed (must be urlsafe-base64 of 32 bytes): {exc}"

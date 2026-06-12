@@ -34,6 +34,8 @@
 		nowMs,
 		onBack,
 		onSelectThread,
+		onThreadCreated,
+		onMatterCreated,
 		onActivity
 	}: {
 		/** null = the unfiled bucket (resume-only). */
@@ -45,11 +47,19 @@
 		nowMs: number;
 		onBack: () => void;
 		onSelectThread: (threadId: string | null) => void;
+		/** The composer created a NEW conversation — sync URL state (replaceState). */
+		onThreadCreated: (detail: { threadId: string; projectId: string | null }) => void;
+		/** A matter was quick-created from the composer — refresh the projects list. */
+		onMatterCreated: (project: Project) => void;
 		onActivity: () => void;
 	} = $props();
 
 	let threads = $state<AgentThread[] | null>(null);
+	let threadsTotal = $state(0);
 	let threadsError = $state<string | null>(null);
+	// Out-of-order guard: a slow onMount fetch must not clobber a fresher
+	// post-settle refresh (the legacy pages' generation pattern).
+	let threadsGeneration = 0;
 
 	// Composer draft + matter selection survive thread remounts (panel
 	// contract). The cockpit remounts THIS component per matter ({#key}),
@@ -62,14 +72,29 @@
 	let composerEpoch = $state(0);
 	let createOpen = $state(false);
 
+	// The thread the LIVE panel itself just created: when the URL catches
+	// up to it (asynchronously, via replaceState) the {#key} must stay
+	// STABLE — the panel is already showing that conversation mid-run and
+	// a remount would drop the live stream. Cleared on every explicit
+	// user selection (row click / New conversation), never reactively —
+	// the URL update races the prop change.
+	let panelOwnedThread = $state<string | null>(null);
+	const panelKey = $derived(
+		`${threadId !== null && threadId === panelOwnedThread ? 'live' : (threadId ?? 'fresh')}:${composerEpoch}`
+	);
+
 	async function loadThreads() {
+		const generation = ++threadsGeneration;
 		try {
 			const resp = matter
 				? await agentsApi.listThreads({ projectId: matter.project_id, limit: 100 })
 				: await agentsApi.listThreads({ unfiled: true, limit: 100 });
+			if (generation !== threadsGeneration) return;
 			threads = resp.threads;
+			threadsTotal = resp.total_count;
 			threadsError = null;
 		} catch (e: unknown) {
+			if (generation !== threadsGeneration) return;
 			threadsError = e instanceof LQAIApiError ? e.message : 'network error';
 		}
 	}
@@ -81,9 +106,21 @@
 		onActivity();
 	}
 
+	function selectThread(id: string | null) {
+		panelOwnedThread = null;
+		onSelectThread(id);
+	}
+
 	function newConversation() {
+		panelOwnedThread = null;
 		composerEpoch += 1;
 		onSelectThread(null);
+	}
+
+	function handleThreadCreated(event: CustomEvent<{ threadId: string; projectId: string | null }>) {
+		panelOwnedThread = event.detail.threadId;
+		onThreadCreated(event.detail);
+		loadThreads();
 	}
 </script>
 
@@ -155,7 +192,7 @@
 									? 'bg-accent'
 									: ''}"
 								data-testid="lq-cockpit-thread-row"
-								onclick={() => onSelectThread(t.id)}
+								onclick={() => selectThread(t.id)}
 							>
 								<span class="line-clamp-2 text-xs font-medium text-foreground">{t.title}</span>
 								<span class="flex items-center justify-between gap-2">
@@ -168,13 +205,19 @@
 						</li>
 					{/each}
 				</ul>
+				{#if threads !== null && threadsTotal > threads.length}
+					<p class="px-2.5 py-2 text-[11px] text-muted-foreground tabular-nums">
+						Showing {threads.length} of {threadsTotal} — older conversations are on the legacy agents
+						page.
+					</p>
+				{/if}
 			{/if}
 		</nav>
 	</aside>
 
 	<section class="min-w-0 flex-1 overflow-y-auto">
 		{#if matter || threadId}
-			{#key `${threadId ?? 'fresh'}:${composerEpoch}`}
+			{#key panelKey}
 				<ConversationPanel
 					initialThreadId={threadId}
 					matters={projects}
@@ -183,6 +226,7 @@
 					bind:selectedMatterId
 					on:settled={handleSettled}
 					on:newmatter={() => (createOpen = true)}
+					on:threadcreated={handleThreadCreated}
 				/>
 			{/key}
 		{:else}
@@ -203,6 +247,7 @@
 	{unitLabel}
 	onCreated={(project) => {
 		selectedMatterId = project.id;
+		onMatterCreated(project);
 		onActivity();
 	}}
 />

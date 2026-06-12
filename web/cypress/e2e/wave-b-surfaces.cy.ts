@@ -62,32 +62,9 @@ describe('Wave B v2 — new surfaces', () => {
 	});
 
 	// ── Test 3 ───────────────────────────────────────────────────────────────────
-	// /lq-ai/settings/appearance: toggling "Featured tools" to "Inline" persists
-	// across a full page reload (real backend PATCH via the T2 preferences store).
-	it('Featured tools toggle persists across reload', () => {
-		cy.visit('/lq-ai/settings/appearance');
-
-		// The SettingsToggleGroup for "Featured tools" renders a <fieldset> with
-		// <legend> text "Featured tools". Inside, each option is a <label> wrapping
-		// an <input type="radio">. We click the label whose text is "Inline toolbar only".
-		cy.contains('fieldset', 'Featured tools').within(() => {
-			cy.contains('label', 'Inline toolbar only').click();
-		});
-
-		cy.reload();
-
-		// After reload the radio for "Inline toolbar only" should be checked.
-		// (15s: the gate layout re-boots through /users/me + a possible token
-		// refresh after reload — the bare 4s default flakes under load.)
-		cy.contains('fieldset', 'Featured tools', { timeout: 15000 }).within(() => {
-			cy.contains('label', 'Inline toolbar only').find('input[type="radio"]').should('be.checked');
-		});
-
-		// Restore default (Prominent) so this test is idempotent.
-		cy.contains('fieldset', 'Featured tools').within(() => {
-			cy.contains('label', 'Prominent cards on dashboard').click();
-		});
-	});
+	// (Retired with F1-S2: the "Featured tools" toggle's only consumer was the
+	// guided dashboard's FeaturedToolsRow, which the cockpit replaced — the
+	// settings control was removed along with it.)
 
 	// ── Test 4 ───────────────────────────────────────────────────────────────────
 	// /lq-ai/trust renders all four trust cards using their actual h3 titles.

@@ -225,7 +225,9 @@ def _parse_skill_output(
     reasoning_block = parsed.get("reasoning", [])
 
     if isinstance(reasoning_block, list):
-        reasoning: list[str] = [str(item) for item in reasoning_block if item is not None]
+        reasoning: list[str] = [
+            str(item) for item in reasoning_block if item is not None
+        ]
     elif isinstance(reasoning_block, str):
         # Accept a single string as a one-bullet reasoning rather than
         # dropping it on the floor.
@@ -274,7 +276,9 @@ def _format_skill_inputs(
 
     payload: dict[str, Any] = {"raw_input": raw_input}
     if attached_skills:
-        payload["attached_skills"] = [s.model_dump(exclude_none=True) for s in attached_skills]
+        payload["attached_skills"] = [
+            s.model_dump(exclude_none=True) for s in attached_skills
+        ]
     if attached_files:
         payload["attached_files"] = [
             f.model_dump(exclude_none=True, mode="json") for f in attached_files
@@ -347,7 +351,9 @@ async def enhance_prompt(
 
     chat_history: list[dict[str, str]] = []
     if payload.chat_id is not None:
-        chat_history = await _load_chat_history(db, chat_id=payload.chat_id, user_id=user.id)
+        chat_history = await _load_chat_history(
+            db, chat_id=payload.chat_id, user_id=user.id
+        )
 
     user_message_body = _format_skill_inputs(
         raw_input=payload.raw_input,

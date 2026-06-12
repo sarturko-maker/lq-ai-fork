@@ -110,12 +110,17 @@ async def guarded_dispatch(
         # the run reports failed; the sweep also fires an abort).
         touched: CursorResult[Any] = await db.execute(  # type: ignore[assignment]
             sa_update(AgentRun)
-            .where(AgentRun.id == ctx.run_id, AgentRun.status == AgentRunStatus.running.value)
+            .where(
+                AgentRun.id == ctx.run_id,
+                AgentRun.status == AgentRunStatus.running.value,
+            )
             .values(heartbeat_at=func.now())
         )
         if touched.rowcount != 1:
             run_status = (
-                await db.execute(select(AgentRun.status).where(AgentRun.id == ctx.run_id))
+                await db.execute(
+                    select(AgentRun.status).where(AgentRun.id == ctx.run_id)
+                )
             ).scalar_one_or_none()
             await _audit(db, ctx, tool=tool, outcome="run_halted")
             await db.commit()
@@ -129,7 +134,9 @@ async def guarded_dispatch(
             result = await op(db)
         except Exception as exc:
             await db.rollback()  # op may have poisoned the transaction
-            await _audit(db, ctx, tool=tool, outcome="error", error_type=type(exc).__name__)
+            await _audit(
+                db, ctx, tool=tool, outcome="error", error_type=type(exc).__name__
+            )
             await db.commit()
             raise
 
@@ -138,7 +145,9 @@ async def guarded_dispatch(
         return result
 
 
-async def _audit(db: AsyncSession, ctx: GuardContext, *, tool: str, **details: object) -> None:
+async def _audit(
+    db: AsyncSession, ctx: GuardContext, *, tool: str, **details: object
+) -> None:
     """One audit row per dispatch outcome; failures log, never mask.
 
     A lost audit row must not turn a successful tool result into a

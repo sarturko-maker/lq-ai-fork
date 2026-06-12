@@ -29,7 +29,9 @@ def tool_call_message(name: str, args: dict[str, Any]) -> AIMessage:
     """An assistant turn that requests one tool call."""
     return AIMessage(
         content="",
-        tool_calls=[{"name": name, "args": args, "id": "call_scripted", "type": "tool_call"}],
+        tool_calls=[
+            {"name": name, "args": args, "id": "call_scripted", "type": "tool_call"}
+        ],
     )
 
 

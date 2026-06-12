@@ -103,7 +103,9 @@ async def _make_session(db: AsyncSession, *, user: User) -> AutonomousSession:
     return sess
 
 
-async def _make_file(db: AsyncSession, *, owner: User, name: str = "memo.md") -> FileModel:
+async def _make_file(
+    db: AsyncSession, *, owner: User, name: str = "memo.md"
+) -> FileModel:
     file_id = uuid.uuid4()
     file_row = FileModel(
         id=file_id,
@@ -392,7 +394,9 @@ async def test_list_artifacts_identical_created_at_pagination_is_stable(
     sess = await _make_session(db_session, user=user_a)
     shared = datetime.now(UTC)
     created = [
-        await _make_artifact(db_session, session=sess, name=f"memo-{i}.md", created_at=shared)
+        await _make_artifact(
+            db_session, session=sess, name=f"memo-{i}.md", created_at=shared
+        )
         for i in range(4)
     ]
     expected_ids = {str(a.id) for a in created}
@@ -487,7 +491,15 @@ def test_openapi_artifact_schemas_in_components() -> None:
     assert "AutonomousArtifactListResponse" in schemas
 
     read_props = schemas["AutonomousArtifactRead"].get("properties", {})
-    for field in ("id", "name", "mime", "size_bytes", "file_id", "document_id", "created_at"):
+    for field in (
+        "id",
+        "name",
+        "mime",
+        "size_bytes",
+        "file_id",
+        "document_id",
+        "created_at",
+    ):
         assert field in read_props
 
     list_props = schemas["AutonomousArtifactListResponse"].get("properties", {})

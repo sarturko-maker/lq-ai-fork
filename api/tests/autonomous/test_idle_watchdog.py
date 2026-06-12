@@ -182,7 +182,9 @@ async def test_paused_session_past_double_interval_becomes_halted(
 
 
 @pytest.mark.integration
-async def test_freshly_paused_is_not_halted_in_same_tick(db_session: AsyncSession) -> None:
+async def test_freshly_paused_is_not_halted_in_same_tick(
+    db_session: AsyncSession,
+) -> None:
     """A session paused in the running→paused scan is NOT halted in the same sweep.
 
     last_activity_at is backdated past 1x interval but NOT 2x — it would
@@ -306,7 +308,9 @@ async def test_failed_session_is_not_touched(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.integration
-async def test_single_sweep_does_not_take_running_to_halted(db_session: AsyncSession) -> None:
+async def test_single_sweep_does_not_take_running_to_halted(
+    db_session: AsyncSession,
+) -> None:
     """One sweep cannot transition a running session all the way to halted.
 
     Even if last_activity_at is backdated past 2x idle_halt_minutes, a
@@ -393,7 +397,9 @@ async def test_two_sweeps_takes_running_to_halted(db_session: AsyncSession) -> N
 
 
 @pytest.mark.integration
-async def test_per_session_idle_halt_minutes_respected(db_session: AsyncSession) -> None:
+async def test_per_session_idle_halt_minutes_respected(
+    db_session: AsyncSession,
+) -> None:
     """Each session's own idle_halt_minutes is used, not a global constant.
 
     Session A has idle_halt_minutes=2 — idle for 3 min → should be paused.
@@ -428,7 +434,9 @@ async def test_per_session_idle_halt_minutes_respected(db_session: AsyncSession)
     await db_session.refresh(sess_long)
 
     assert sess_short.halt_state == "paused", "short-threshold session should be paused"
-    assert sess_long.halt_state == "running", "long-threshold session should be untouched"
+    assert sess_long.halt_state == "running", (
+        "long-threshold session should be untouched"
+    )
 
 
 @pytest.mark.unit

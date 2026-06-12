@@ -101,7 +101,9 @@ def _bearer(user: User) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _make_project(db: AsyncSession, *, owner: User, name: str = "Acme Deal") -> Project:
+async def _make_project(
+    db: AsyncSession, *, owner: User, name: str = "Acme Deal"
+) -> Project:
     project = Project(
         owner_id=owner.id,
         name=name,
@@ -214,7 +216,9 @@ async def test_create_schedule_foreign_project_returns_404(
     rows = (
         (
             await db_session.execute(
-                select(AutonomousSchedule).where(AutonomousSchedule.user_id == user_a.id)
+                select(AutonomousSchedule).where(
+                    AutonomousSchedule.user_id == user_a.id
+                )
             )
         )
         .scalars()

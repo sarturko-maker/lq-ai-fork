@@ -52,7 +52,9 @@ async def real_session_factory(test_engine: AsyncEngine):
 async def seeded_user(test_engine: AsyncEngine) -> AsyncIterator[User]:
     """Commit a fresh user row visible to all per-request sessions; clean up after."""
 
-    factory = async_sessionmaker(test_engine, expire_on_commit=False, class_=AsyncSession)
+    factory = async_sessionmaker(
+        test_engine, expire_on_commit=False, class_=AsyncSession
+    )
     async with factory() as setup:
         user = User(
             email=f"sandbox-concurrency-{uuid.uuid4().hex[:8]}@example.com",
@@ -96,7 +98,9 @@ async def client(real_session_factory) -> AsyncIterator[AsyncClient]:
     if registry_present:
         app.state.skill_registry = MutableSkillRegistry(load_registry(FIXTURES_DIR))
     elif prior_holder is None:
-        app.state.skill_registry = MutableSkillRegistry(load_registry(Path("/nonexistent")))
+        app.state.skill_registry = MutableSkillRegistry(
+            load_registry(Path("/nonexistent"))
+        )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
