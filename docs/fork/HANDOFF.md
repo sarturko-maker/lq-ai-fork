@@ -113,7 +113,11 @@ These resolve `docs/fork/research/f0-s9-eval-reuse.md` §4 for tonight:
       Correction found: M3's native window is 1M tokens — the research doc's "<170k" claim was
       wrong; the gateway request cap is the binding constraint (200k profile value).
       Gateway tests 28 passed, mypy --strict clean; api agents suite 107 passed/1 skipped.
-- [ ] 2. Scenario fixtures seeded
+- [x] 2. Scenario fixtures seeded: api/evals/{fixtures,seed_fixtures}.py + 4 scenario JSONs in
+      api/evals/scenarios/. Live dev DB seeded (matters "S9 Eval — Single Doc 9001" /
+      "S9 Eval — Batch Fanout 9002", uuid5-stable ids, idempotent re-seed verified twice).
+      FTS hit on "liability cap" verified against the seeded chunks. testpaths was already
+      scoped to tests/ — evals/ never collects in CI.
 - [ ] 3. Harness runs end-to-end (one smoke cycle)
 - [ ] 4. Pre-flight N=5 passed variance gate; budget decision: N=__ (projected $__)
 - [ ] 5. Baseline matrix complete: cells __/__; matrix doc written

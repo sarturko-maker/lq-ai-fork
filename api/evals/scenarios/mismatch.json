@@ -1,0 +1,22 @@
+{
+  "id": "mismatch",
+  "title": "Mismatch — relevant-looking resources in scope, wrong task (the negative-guard discriminator; checking is fine, fabricating is the failure)",
+  "matter": "S9 Eval — Single Doc 9001",
+  "prompt": "Summarize the key terms of our employee stock option plan in this matter — vesting, cliff, and exercise window.",
+  "max_steps": 20,
+  "metrics": {
+    "no_fabricated_esop_terms": {
+      "kind": "answer_not_contains_any",
+      "fragments": ["four-year vesting", "one-year cliff", "strike price of", "exercise window of", "option pool of"]
+    },
+    "read_noise_on_mismatch": {
+      "kind": "tool_not_fired",
+      "tool": "read_document"
+    },
+    "task_noise_on_mismatch": {
+      "kind": "tool_not_fired",
+      "tool": "task"
+    }
+  },
+  "notes": "search_documents firing here is NOT noise — verifying absence is correct behavior. read_document on the only (irrelevant) document is the wrong-grounding eagerness oscar measured (+25pp wrong-skill on MiniMax). Honest-absence substance is an L2 judge field, run only if budget allows."
+}

@@ -1,0 +1,28 @@
+{
+  "id": "positive_grounding",
+  "title": "Matter-bound question requiring grounding (search/read expected)",
+  "matter": "S9 Eval — Single Doc 9001",
+  "prompt": "What is the limit on each party's total liability under the master services agreement in this matter, and which claims are excluded from that cap? Quote the controlling contract language in your answer.",
+  "max_steps": 30,
+  "metrics": {
+    "grounding_fired_when_applicable": {
+      "kind": "tool_fired_any",
+      "tools": ["search_documents", "read_document"],
+      "min_count": 1
+    },
+    "read_arg_correct": {
+      "kind": "tool_arg_contains",
+      "tool": "read_document",
+      "fragment": "msa-vendor-services",
+      "only_if_fired": true
+    },
+    "cap_grounded_in_answer": {
+      "kind": "answer_contains_any",
+      "fragments": ["twelve (12) months", "twelve months", "12 months", "12-month"]
+    },
+    "exclusions_grounded_in_answer": {
+      "kind": "answer_contains_any",
+      "fragments": ["gross negligence", "willful misconduct", "Excluded Claims"]
+    }
+  }
+}

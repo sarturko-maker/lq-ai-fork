@@ -206,6 +206,9 @@ asyncio_mode = "auto"
 # end up tied to a function-scoped loop that gets closed between tests.
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
+# Collection stays scoped to tests/ — api/evals/ (F0-S9 model-
+# qualification harness) drives the LIVE stack and spends provider
+# tokens; it only ever runs by explicit path (api/evals/README.md).
 testpaths = ["tests"]
 markers = [
     "unit: pure unit tests, no I/O",

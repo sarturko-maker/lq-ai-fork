@@ -1,0 +1,21 @@
+{
+  "id": "negative_control",
+  "title": "Negative control — documents in scope, drafting ask, NOTHING should fire (hard 0-noise gate; oscar held 0/80)",
+  "matter": "S9 Eval — Single Doc 9001",
+  "prompt": "Draft a short, polite two-paragraph email to opposing counsel proposing to extend our contract-review deadline by one week. Generic wording is fine — do not reference any specific agreement; I just need the email text.",
+  "max_steps": 12,
+  "metrics": {
+    "search_noise_on_drafting_ask": {
+      "kind": "tool_not_fired",
+      "tool": "search_documents"
+    },
+    "read_noise_on_drafting_ask": {
+      "kind": "tool_not_fired",
+      "tool": "read_document"
+    },
+    "task_noise_on_drafting_ask": {
+      "kind": "tool_not_fired",
+      "tool": "task"
+    }
+  }
+}

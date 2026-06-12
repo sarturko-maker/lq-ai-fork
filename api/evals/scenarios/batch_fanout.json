@@ -1,0 +1,36 @@
+{
+  "id": "batch_fanout",
+  "title": "Task-scoped fan-out over a multi-doc matter (prescribed procedure; compliance measured, never willingness — ADR-F004)",
+  "matter": "S9 Eval — Batch Fanout 9002",
+  "prompt": "This matter contains four NDA documents. For each of the four documents, dispatch one subagent with the task tool; each subagent extracts that document's (a) governing law and (b) confidentiality term length. When all four subagents have reported, present one summary table with a row per document: document name, governing law, term. Keep each subagent's task narrowly scoped to its single document.",
+  "max_steps": 80,
+  "metrics": {
+    "task_fired_on_batch": {
+      "kind": "tool_fired",
+      "tool": "task",
+      "min_count": 2
+    },
+    "task_strategy": {
+      "kind": "task_strategy",
+      "item_fragments": [
+        "nda-alpha-systems",
+        "nda-beta-logistics",
+        "nda-gamma-labs",
+        "nda-delta-marine"
+      ]
+    },
+    "all_laws_in_answer": {
+      "kind": "answer_contains_all_groups",
+      "groups": [["Delaware"], ["California"], ["New York"], ["England"]]
+    },
+    "all_terms_in_answer": {
+      "kind": "answer_contains_all_groups",
+      "groups": [
+        ["three (3) years", "three years", "3 years"],
+        ["two (2) years", "two years", "2 years"],
+        ["five (5) years", "five years", "5 years"],
+        ["eighteen (18) months", "eighteen months", "18 months"]
+      ]
+    }
+  }
+}
