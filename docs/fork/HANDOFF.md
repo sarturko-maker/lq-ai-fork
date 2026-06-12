@@ -39,7 +39,7 @@ behalf are flagged ⚖ and need morning ratification):
       re-derived; failed runs no longer scored; paraphrase fragment dropped; docs honesty
       pass) — and the 80-cycle baseline RE-SCORED IDENTICALLY under the stricter scoring
       (zero metric changes; corrected spend $1.69). Services rebuilt on slice code +
-      post-deploy spot-check. PR number recorded below when opened.
+      post-deploy spot-check. PR #41 — merged on green (see merge commit on main).
 - [ ] 7. F1 re-plan draft PR (drafted at /tmp/s9-overnight/F1-replan.md → own PR after S9 merge)
 - [ ] 8. F1-S1 exploration notes (only if context allows)
 - **Spend tonight: ≈$1.75 standard-rate upper bound (≈$0.88 at the current launch promo)**
@@ -59,7 +59,7 @@ behalf are flagged ⚖ and need morning ratification):
 
 ## State (end of F0-S9)
 
-- Branch `fork/f0-s9-eval-gate`; PR per § tracker above. F0 closes with S9 — F1 re-plan
+- S9 = PR #41 (merged; main carries the squash commit). F0 closes with S9 — F1 re-plan
   drafted for ratification (CLAUDE.md: re-plan at milestone boundaries).
 - Dev stack: 8 services healthy; DB at migration 0051 (NO migrations tonight — decision 4);
   eval fixture matters seeded in the dev DB ("S9 Eval — Single Doc 9001",
