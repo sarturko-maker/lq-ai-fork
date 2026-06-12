@@ -1,6 +1,6 @@
 """The composition point — F0-S4 review coverage.
 
-``_run_in_background`` is where the slice's headline wiring lives:
+``compose_and_execute_run`` is where the slice's headline wiring lives:
 matter binding → guarded tools + matter prompt + privilege/tier onto
 the model builder; no binding → blank workspace. The review found it
 entirely untested (every endpoint test no-ops it) and found the
@@ -24,9 +24,9 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from app.agents.composition import MATTER_PROMPT, compose_and_execute_run, system_prompt_for
 from app.agents.runner import SYSTEM_PROMPT
 from app.agents.tools import MatterBinding
-from app.api.agent_runs import _MATTER_PROMPT, _run_in_background, _system_prompt_for
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.project import Project
@@ -137,7 +137,7 @@ async def _run_row(env: CompositionEnv, run_id: uuid.UUID) -> AgentRun:
 
 
 def test_system_prompt_assembly() -> None:
-    assert _system_prompt_for(None) == SYSTEM_PROMPT
+    assert system_prompt_for(None) == SYSTEM_PROMPT
     binding = MatterBinding(
         project_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
@@ -145,10 +145,10 @@ def test_system_prompt_assembly() -> None:
         privileged=False,
         minimum_inference_tier=None,
     )
-    prompt = _system_prompt_for(binding)
+    prompt = system_prompt_for(binding)
     assert prompt.startswith(SYSTEM_PROMPT)
     assert 'the matter "Acme MSA"' in prompt
-    assert prompt.endswith(_MATTER_PROMPT.format(name="Acme MSA"))
+    assert prompt.endswith(MATTER_PROMPT.format(name="Acme MSA"))
 
 
 async def test_bound_run_composes_matter_tools_and_privilege_envelope(
@@ -167,7 +167,7 @@ async def test_bound_run_composes_matter_tools_and_privilege_envelope(
         )
     )
 
-    await _run_in_background(
+    await compose_and_execute_run(
         run_id=run_id,
         model_builder=builder,
         session_factory_provider=lambda: comp_env.factory,
@@ -206,7 +206,7 @@ async def test_unbound_run_gets_no_matter_tools_and_no_envelope(
     run_id = await comp_env.make_run(project_id_value=None)
     builder = CapturingBuilder(model=ScriptedToolCallingModel(responses=[final_message("done")]))
 
-    await _run_in_background(
+    await compose_and_execute_run(
         run_id=run_id,
         model_builder=builder,
         session_factory_provider=lambda: comp_env.factory,
@@ -246,7 +246,7 @@ async def test_archived_matter_executes_as_unbound(comp_env: CompositionEnv) -> 
 
     builder = CapturingBuilder(model=ScriptedToolCallingModel(responses=[final_message("ok")]))
     try:
-        await _run_in_background(
+        await compose_and_execute_run(
             run_id=run_id,
             model_builder=builder,
             session_factory_provider=lambda: comp_env.factory,
@@ -295,7 +295,7 @@ async def test_follow_up_run_continues_the_thread(comp_env: CompositionEnv) -> N
 
     first_model = ScriptedToolCallingModel(responses=[final_message("The cap is 12 months.")])
     run1 = await make_run_on_thread("What is the liability cap?")
-    await _run_in_background(
+    await compose_and_execute_run(
         run_id=run1,
         model_builder=CapturingBuilder(model=first_model),
         session_factory_provider=lambda: comp_env.factory,
@@ -305,7 +305,7 @@ async def test_follow_up_run_continues_the_thread(comp_env: CompositionEnv) -> N
 
     second_model = ScriptedToolCallingModel(responses=[final_message("You asked about the cap.")])
     run2 = await make_run_on_thread("What did I just ask you?")
-    await _run_in_background(
+    await compose_and_execute_run(
         run_id=run2,
         model_builder=CapturingBuilder(model=second_model),
         session_factory_provider=lambda: comp_env.factory,
@@ -348,7 +348,7 @@ async def test_runs_on_different_threads_share_nothing(comp_env: CompositionEnv)
             db.add(run)
             await db.commit()
             run_id = run.id
-        await _run_in_background(
+        await compose_and_execute_run(
             run_id=run_id,
             model_builder=CapturingBuilder(model=model),
             session_factory_provider=lambda: comp_env.factory,
@@ -379,7 +379,7 @@ async def test_composition_failure_finalizes_run_as_failed(
         boom=RuntimeError("model construction exploded"),
     )
 
-    await _run_in_background(
+    await compose_and_execute_run(
         run_id=run_id,
         model_builder=builder,
         session_factory_provider=lambda: comp_env.factory,

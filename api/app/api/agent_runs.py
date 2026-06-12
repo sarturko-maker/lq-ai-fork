@@ -7,10 +7,18 @@ these settled records — ADR-F004):
   ``thread_id`` a new conversation (:class:`AgentThread`) is created;
   with it, the run CONTINUES that conversation on the langgraph
   checkpointer (F0-S5, ADR-F008). Returns 202 with the new run row at
-  status ``'running'``; the runner executes in a FastAPI
-  ``BackgroundTask`` (same in-process pattern as the playbook executor —
-  ARQ migration is a later slice) and appends step rows as the loop
-  progresses.
+  status ``'running'``; execution happens on the arq worker (F1-S1,
+  ADR-F009 — at-most-once, lease-fenced, swept when orphaned), which
+  appends step rows as the loop progresses. A run that cannot be
+  enqueued is settled ``failed`` before the 202 returns — never a
+  silent zombie.
+* ``POST /api/v1/agents/runs/{run_id}/cancel`` — settle a running run
+  as ``cancelled`` (first-writer-wins; idempotent on settled runs),
+  then best-effort-abort the worker job (F1-S1).
+* ``DELETE /api/v1/agents/threads/{thread_id}`` — delete one
+  conversation: runs/steps cascade, the checkpoint lineage is deleted
+  through the saver's own API (F1-S1 retention; the daily GC cron is
+  the backstop).
 * ``GET  /api/v1/agents/runs/{run_id}`` — run detail + steps in ``seq``
   order.
 * ``GET  /api/v1/agents/runs`` — the caller's runs, newest first,
@@ -31,14 +39,16 @@ in :mod:`app.api` (bearer token + must-change-password gate). All reads
 are owner-scoped; another user's ``run_id``/``thread_id`` returns 404 —
 never 403 — to avoid existence disclosure (CLAUDE.md house rule).
 
-Tool injection: ``_run_in_background`` is the composition point
-(F0-S4). A matter-bound run gets the matter's document tools —
-pre-wrapped in the :mod:`app.agents.guard` chokepoint (ADR-F002) — a
-matter-aware system prompt, and a gateway model whose envelope carries
-the matter's tier floor + privilege flag (the chat path's D1 / M2-B3
-pattern). An unbound run is a blank workspace: deepagents builtins
-only. F1 extends the guard wrap to the full tool universe. F0-S5 adds
-the checkpointer + thread id so state persists per conversation.
+Tool injection: :func:`app.agents.composition.compose_and_execute_run`
+is the composition point (F0-S4; moved out of this module in F1-S1 so
+the arq worker owns execution). A matter-bound run gets the matter's
+document tools — pre-wrapped in the :mod:`app.agents.guard` chokepoint
+(ADR-F002) — a matter-aware system prompt, and a gateway model whose
+envelope carries the matter's tier floor + privilege flag (the chat
+path's D1 / M2-B3 pattern). An unbound run is a blank workspace:
+deepagents builtins only. F1 extends the guard wrap to the full tool
+universe. F0-S5 adds the checkpointer + thread id so state persists
+per conversation.
 """
 
 from __future__ import annotations
@@ -46,21 +56,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
-from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from sqlalchemy import func, select
+from sqlalchemy import CursorResult, func, select, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import get_agent_checkpointer, has_checkpoint
-from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
-from app.agents.runner import SYSTEM_PROMPT, execute_agent_run, mark_run_failed
 from app.agents.stream import (
     CHANNEL_CLOSED,
     SSE_DONE,
@@ -72,8 +79,9 @@ from app.agents.stream import (
     step_payload,
     terminal_parts,
 )
-from app.agents.tools import MatterBinding, build_matter_tools
 from app.api.dependencies import ActiveUser
+from app.audit import audit_action
+from app.config import get_settings
 from app.db.session import get_db, get_session_factory
 from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
 from app.models.project import Project
@@ -89,6 +97,7 @@ from app.schemas.agent_runs import (
     AgentThreadListResponse,
     AgentThreadRead,
 )
+from app.workers.queue import abort_agent_run_job, enqueue_agent_run_job
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +112,19 @@ _MAX_CONCURRENT_RUNS_PER_USER = 3
 
 # Thread titles are the bounded first prompt until auto-titling (F1/F2).
 _TITLE_LIMIT = 120
+
+# Follow-up admission set (F1-S1, ADR-F009): any settled run admits the
+# next turn — thread repair fixes dangling tool calls; checkpoint state
+# is still required (has_checkpoint) for honest continuation.
+_TERMINAL_STATUSES = frozenset(
+    s.value
+    for s in (
+        AgentRunStatus.completed,
+        AgentRunStatus.failed,
+        AgentRunStatus.cancelled,
+        AgentRunStatus.cap_exceeded,
+    )
+)
 
 
 def get_checkpointer_dep() -> BaseCheckpointSaver | None:
@@ -156,20 +178,32 @@ StreamSessionFactory = Annotated[
 _STREAM_DB_POLL_SECONDS = 2.0
 _STREAM_HEARTBEAT_SECONDS = 15.0
 
-# A run still 'running' this long after start is ORPHANED (the runner's
-# wall clock is 300s and _finalize always follows; BackgroundTasks die
-# with the api process and no recovery sweep exists until the F1 arq
-# migration). The stream must not heartbeat such a run open forever —
-# mirrors the web poller's STALE_RUNNING_AFTER_MS (lib/lq-ai/agents/helpers.ts).
-_STREAM_STALE_AFTER_SECONDS = 330.0
+# Stream-side orphan belt (F1-S1 review fix): the worker-side sweep is
+# the authority — these cutoffs only close streams when the SWEEP
+# ITSELF is dead (worker down entirely), so they mirror the sweep's two
+# rules with generous slack on top, reading the lease columns. A run's
+# started_at is now ENQUEUE time, not execution start — a wall-age
+# cutoff would false-error queue-delayed runs. The web poller's
+# STALE_RUNNING_AFTER_MS stays a coarser client-side approximation.
+_STREAM_SWEEP_SLACK_SECONDS = 180.0
 
 
-def _run_is_orphaned(run: AgentRun) -> bool:
-    """True for a 'running' row whose runner can no longer settle it."""
+def _run_is_orphaned(run: AgentRun, db_now: datetime) -> bool:
+    """True for a 'running' row that the dead-sweep belt should close.
+
+    Compared against the DB clock (``db_now`` selected alongside the
+    row — one clock authority, matching the lease module).
+    """
     if run.status != AgentRunStatus.running.value:
         return False
-    age = (datetime.now(UTC) - run.started_at).total_seconds()
-    return age > _STREAM_STALE_AFTER_SECONDS
+    settings = get_settings()
+    if run.claimed_at is not None:
+        reference = run.heartbeat_at or run.claimed_at
+        threshold = settings.agent_run_orphan_after_seconds + _STREAM_SWEEP_SLACK_SECONDS
+    else:
+        reference = run.started_at
+        threshold = settings.agent_run_claim_grace_seconds + _STREAM_SWEEP_SLACK_SECONDS
+    return (db_now - reference).total_seconds() > threshold
 
 
 async def _latest_run_status(db: AsyncSession, thread_id: uuid.UUID) -> str | None:
@@ -215,21 +249,22 @@ async def _thread_matter_active(db: AsyncSession, thread: AgentThread) -> bool:
 async def create_agent_run(
     body: AgentRunCreate,
     user: ActiveUser,
-    background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     checkpointer: Checkpointer,
-    broker: StreamBroker,
 ) -> AgentRunRead:
-    """Create an :class:`AgentRun` row and schedule the runner.
+    """Create an :class:`AgentRun` row and enqueue it on the arq worker.
 
     Without ``thread_id``: a new conversation is created (optionally
     Matter-bound). With it: the run continues that conversation — the
     Matter binding is the THREAD's (F0-S5, ADR-F008).
 
     Returns 202 immediately with the row at status ``'running'``. The
-    runner appends :class:`AgentRunStep` rows (committed per step) and
-    promotes the run to ``completed`` / ``failed`` / ``cap_exceeded``;
-    poll ``GET /agents/threads/{thread_id}`` for live progress.
+    worker (F1-S1, ADR-F009) appends :class:`AgentRunStep` rows
+    (committed per step) and promotes the run to ``completed`` /
+    ``failed`` / ``cancelled`` / ``cap_exceeded``; poll
+    ``GET /agents/threads/{thread_id}`` for live progress. An enqueue
+    failure settles the run ``failed`` before returning — the 202 then
+    carries the settled row, never a zombie.
 
     429 (``too_many_running_runs``) when the caller already has
     ``_MAX_CONCURRENT_RUNS_PER_USER`` runs at ``'running'``.
@@ -240,11 +275,13 @@ async def create_agent_run(
 
     409 ``thread_busy`` when the thread already has a running run
     (DB-enforced by a partial unique index — race-proof); 409
-    ``thread_not_continuable`` when its latest run is not ``completed``
-    or no checkpoint state exists (an interrupted loop can strand
-    dangling tool calls in checkpoint state; pre-S5 threads never had
-    state — ADR-F008). 422 when both ``thread_id`` and ``project_id``
-    are set.
+    ``thread_not_continuable`` when the thread has no settled run or no
+    checkpoint state exists (pre-S5 threads never had state; a thread
+    whose FIRST run failed before any checkpoint has nothing to
+    honestly continue — ADR-F008). Since F1-S1 ANY terminal latest
+    status admits a follow-up: dangling tool calls left by a failed/
+    cancelled run are repaired before the next invoke (ADR-F009). 422
+    when both ``thread_id`` and ``project_id`` are set.
     """
     thread: AgentThread | None = None
     if body.thread_id is not None:
@@ -273,7 +310,12 @@ async def create_agent_run(
         latest_status = await _latest_run_status(db, thread.id)
         if latest_status == AgentRunStatus.running.value:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="thread_busy")
-        if latest_status != AgentRunStatus.completed.value:
+        if latest_status not in _TERMINAL_STATUSES:
+            # No run ever settled on this thread (None) — nothing to
+            # honestly continue. Any TERMINAL status admits a follow-up
+            # since F1-S1: the runner repairs dangling tool calls left
+            # by a failed/cancelled/capped run before invoking
+            # (ADR-F009 thread repair).
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="thread_not_continuable"
             )
@@ -353,9 +395,24 @@ async def create_agent_run(
         raise
     await db.refresh(run)
 
-    # The runner opens its own DB session so the per-request session can
-    # close cleanly when we return 202 (playbook-executor pattern).
-    background.add_task(_run_in_background, run_id=run.id, broker=broker)
+    # F1-S1 (ADR-F009): execution happens on the arq worker. A run that
+    # could not be queued has NO executor — settle it failed right here
+    # (the sweep would catch it minutes later; the user shouldn't wait
+    # that long to learn nothing is running). The settle uses THIS
+    # request's session (the DI seam tests drive), conditional on
+    # status='running' for monotonicity.
+    if not await enqueue_agent_run_job(run.id):
+        await db.execute(
+            sa_update(AgentRun)
+            .where(AgentRun.id == run.id, AgentRun.status == AgentRunStatus.running.value)
+            .values(
+                status=AgentRunStatus.failed.value,
+                error="enqueue failed: no worker will execute this run",
+                finished_at=func.now(),
+            )
+        )
+        await db.commit()
+        await db.refresh(run)
 
     return AgentRunRead.model_validate(run)
 
@@ -436,17 +493,19 @@ async def _read_stream_state(
     run_id: uuid.UUID,
     *,
     after_seq: int,
-) -> tuple[AgentRun | None, list[AgentRunStep]]:
-    """Run row + its settled steps beyond ``after_seq``, short session.
+) -> tuple[AgentRun | None, list[AgentRunStep], datetime]:
+    """Run row + settled steps beyond ``after_seq`` + the DB clock.
 
     The stream generator opens a FRESH short-lived session per read so a
     long-lived stream never pins a pool connection (the same posture as
-    the runner's per-step sessions).
+    the runner's per-step sessions). ``db_now`` rides along so the
+    orphan-belt comparison stays on the database clock (F1-S1).
     """
     async with session_factory() as db:
+        db_now: datetime = (await db.execute(select(func.now()))).scalar_one()
         run = await db.get(AgentRun, run_id)
         if run is None:
-            return None, []
+            return None, [], db_now
         steps = (
             (
                 await db.execute(
@@ -458,7 +517,7 @@ async def _read_stream_state(
             .scalars()
             .all()
         )
-        return run, list(steps)
+        return run, list(steps), db_now
 
 
 def _row_part(step: AgentRunStep) -> dict[str, object]:
@@ -507,7 +566,7 @@ async def _stream_run_events(
     queue = broker.subscribe(run_id)
     try:
         max_seq = 0
-        run, steps = await _read_stream_state(session_factory, run_id, after_seq=0)
+        run, steps, db_now = await _read_stream_state(session_factory, run_id, after_seq=0)
         for row in steps:
             max_seq = max(max_seq, row.seq)
             yield encode_sse(_row_part(row))
@@ -525,7 +584,7 @@ async def _stream_run_events(
                 yield encode_sse(part)
             yield SSE_DONE
             return
-        if _run_is_orphaned(run):
+        if _run_is_orphaned(run, db_now):
             yield encode_sse(
                 {"type": "error", "errorText": "run never settled (orphaned at 'running')"}
             )
@@ -540,7 +599,9 @@ async def _stream_run_events(
             except TimeoutError:
                 # Live queue silent — tail the settled rows (fallback
                 # path; emits nothing the client hasn't reconciled).
-                run, steps = await _read_stream_state(session_factory, run_id, after_seq=max_seq)
+                run, steps, db_now = await _read_stream_state(
+                    session_factory, run_id, after_seq=max_seq
+                )
                 for row in steps:
                     max_seq = max(max_seq, row.seq)
                     yield encode_sse(_row_part(row))
@@ -558,7 +619,7 @@ async def _stream_run_events(
                         yield encode_sse(tpart)
                     yield SSE_DONE
                     return
-                if _run_is_orphaned(run):
+                if _run_is_orphaned(run, db_now):
                     yield encode_sse(
                         {
                             "type": "error",
@@ -581,7 +642,9 @@ async def _stream_run_events(
             if part is CHANNEL_CLOSED:
                 # Finish raced past us (or the channel was evicted):
                 # flush the rows, end on the settled run state.
-                run, steps = await _read_stream_state(session_factory, run_id, after_seq=max_seq)
+                run, steps, db_now = await _read_stream_state(
+                    session_factory, run_id, after_seq=max_seq
+                )
                 for row in steps:
                     yield encode_sse(_row_part(row))
                 if run is not None and run.status != AgentRunStatus.running.value:
@@ -763,9 +826,10 @@ async def get_agent_thread(
 
     latest_status = runs[-1].status if runs else None
     continuable = (
-        latest_status == AgentRunStatus.completed.value
+        latest_status in _TERMINAL_STATUSES
         # Mirrors the POST follow-up rules exactly — incl. an archived
         # Matter (409 matter_archived there; greyed composer here).
+        # Any terminal status since F1-S1 (thread repair, ADR-F009).
         and await _thread_matter_active(db, thread)
         and await has_checkpoint(checkpointer, thread.id)
     )
@@ -786,133 +850,134 @@ async def get_agent_thread(
     )
 
 
-# Appended to SYSTEM_PROMPT for matter-bound runs. Transparency rule:
-# every agent instruction is readable in source (CLAUDE.md).
-_MATTER_PROMPT = (
-    '\n\nThis run is bound to the matter "{name}". Ground your answer in '
-    "the matter's documents: search_documents finds passages (an empty "
-    "query lists the documents); read_document fetches one document's "
-    "full text. Cite the document name and page for anything you take "
-    "from them, and say so plainly when the documents don't answer the "
-    "question."
+@router.post(
+    "/runs/{run_id}/cancel",
+    response_model=AgentRunRead,
+    summary="Cancel a running agent run (idempotent).",
 )
-
-
-def _system_prompt_for(binding: MatterBinding | None) -> str:
-    """The run's full system prompt — base + the matter addendum."""
-    if binding is None:
-        return SYSTEM_PROMPT
-    return SYSTEM_PROMPT + _MATTER_PROMPT.format(name=binding.name)
-
-
-async def _run_in_background(
-    *,
+async def cancel_agent_run(
     run_id: uuid.UUID,
-    broker: RunStreamBroker | None = None,
-    model_builder: Callable[..., BaseChatModel] = build_gateway_chat_model,
-    session_factory_provider: Callable[[], async_sessionmaker[AsyncSession]] = get_session_factory,
-    checkpointer_provider: Callable[[], BaseCheckpointSaver | None] = get_agent_checkpointer,
-) -> None:
-    """Background-task entry point — the run's composition point (F0-S4).
+    request: Request,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentRunRead:
+    """POST /api/v1/agents/runs/{run_id}/cancel — F1-S1 (ADR-F009).
 
-    Loads the run's matter binding — the project is RE-validated against
-    the run's owner and ``archived_at`` here, not just at the 202
-    (binding facts must hold at execution time) — then assembles the
-    guarded matter tools + matter-aware prompt + gateway model, and owns
-    the gateway http client's lifecycle (the key rides the client's
-    headers — see :func:`app.agents.factory.build_gateway_http_client`).
-    ``model_builder`` / ``session_factory_provider`` /
-    ``checkpointer_provider`` are injection seams: tests drive the REAL
-    composition with a scripted model, the test DB, and an in-memory
-    checkpointer — no gateway, no monkeypatching.
+    Settle-first: the row is flipped ``running → cancelled`` by one
+    conditional UPDATE (first-writer-wins — a run that completed in the
+    race keeps its real terminal state), THEN the worker is signalled:
+    arq ``Job.abort`` as the impatient path, and the worker's own fenced
+    writes stop landing within one heartbeat anyway. Cancelling an
+    already-settled run is an explicit no-op returning the current row
+    (the finish-vs-cancel race is common and not an error).
 
-    F0-S5 (ADR-F008): the run executes against its conversation's
-    checkpoint lineage (``thread_id``), so capabilities are REBOUND per
-    run from the thread's current binding while the agent state
-    persists — resume-on-existing per ADR-F004. A ``None`` checkpointer
-    (init failed) degrades to the F0-S4 single-shot behavior.
-
-    Any failure here finalizes the run as ``'failed'`` — a run must
-    never strand at ``'running'``: the flood brake counts those forever
-    and three of them lock the user out (F0-S4 review).
-
-    ``broker`` (F0-S7): the runner mirrors the loop onto the SSE v2
-    stream through a per-run publisher; the failure path below also
-    closes that stream. ``None`` (older callers, tests without a
-    streaming concern) degrades to rows-only — the stream endpoint's
-    DB-tail still serves subscribers.
+    Another user's ``run_id`` returns 404 (not 403) — no existence
+    disclosure. One audit row per actual cancellation; none for the
+    idempotent no-op.
     """
-    session_factory = session_factory_provider()
-    publisher = broker.publisher(run_id) if broker is not None else None
-    try:
-        binding: MatterBinding | None = None
-        async with session_factory() as db:
-            run = await db.get(AgentRun, run_id)
-            if run is None:  # deleted underneath us (user cascade)
-                return
-            model_alias, purpose = run.model_alias, run.purpose
-            thread_id = run.thread_id
-            if run.project_id is not None:
-                project = (
-                    await db.execute(
-                        select(Project).where(
-                            Project.id == run.project_id,
-                            Project.owner_id == run.user_id,
-                            Project.archived_at.is_(None),
-                        )
-                    )
-                ).scalar_one_or_none()
-                if project is not None:
-                    binding = MatterBinding(
-                        project_id=project.id,
-                        user_id=run.user_id,
-                        name=project.name,
-                        privileged=project.privileged,
-                        minimum_inference_tier=project.minimum_inference_tier,
-                    )
+    run = await db.get(AgentRun, run_id)
+    if run is None or run.user_id != user.id:
+        raise HTTPException(status_code=404, detail="run not found")
 
-        tools = (
-            build_matter_tools(session_factory, run_id=run_id, binding=binding)
-            if binding is not None
-            else []
+    if run.status == AgentRunStatus.running.value:
+        result: CursorResult[Any] = await db.execute(  # type: ignore[assignment]
+            sa_update(AgentRun)
+            .where(AgentRun.id == run.id, AgentRun.status == AgentRunStatus.running.value)
+            .values(
+                status=AgentRunStatus.cancelled.value,
+                finished_at=func.now(),
+            )
         )
+        if result.rowcount == 1:
+            await audit_action(
+                db,
+                user_id=user.id,
+                action="agent_run.cancel",
+                resource_type="agent_run",
+                resource_id=str(run.id),
+                project_id=run.project_id,
+                request=request,
+                details={"from_status": AgentRunStatus.running.value},
+            )
+        await db.commit()
+        await db.refresh(run)
+        if run.status == AgentRunStatus.cancelled.value:
+            # Best-effort, AFTER the settle is durable: a queued job
+            # aborts before starting; a running one gets CancelledError.
+            await abort_agent_run_job(run.id)
 
-        http_client = build_gateway_http_client()
+    return AgentRunRead.model_validate(run)
+
+
+@router.delete(
+    "/threads/{thread_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    # The M3-C2 pattern: without response_class=Response, FastAPI's
+    # default JSONResponse fails the import-time "204 must not have
+    # body" assertion (see admin_intake_bridges).
+    response_class=Response,
+    summary="Delete one conversation, its runs, and its checkpoint state.",
+)
+async def delete_agent_thread(
+    thread_id: uuid.UUID,
+    request: Request,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    checkpointer: Checkpointer,
+) -> Response:
+    """DELETE /api/v1/agents/threads/{thread_id} — F1-S1 retention.
+
+    Runs/steps cascade from the thread row; the langgraph checkpoint
+    lineage (library-owned tables, no FK to ours) is deleted through
+    the saver's own ``adelete_thread`` AFTER the row delete commits —
+    best-effort, because the daily GC cron removes any lineage whose
+    thread row is gone (the durable backstop).
+
+    409 ``thread_busy`` while a run is live (cancel it first — deleting
+    the transcript under a writing runner would strand its fenced
+    writes pointlessly). Another user's ``thread_id`` returns 404 (not
+    403) — no existence disclosure.
+    """
+    thread = (
+        await db.execute(
+            select(AgentThread)
+            .where(AgentThread.id == thread_id, AgentThread.user_id == user.id)
+            # Serialize against follow-up admission (which takes the same
+            # lock): without it a concurrently admitted RUNNING run could
+            # be cascade-deleted mid-execution (review fix) — the
+            # thread_busy check below must be race-proof, not advisory.
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if thread is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    if await _latest_run_status(db, thread.id) == AgentRunStatus.running.value:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="thread_busy")
+
+    run_count: int = (
+        await db.execute(
+            select(func.count()).select_from(AgentRun).where(AgentRun.thread_id == thread.id)
+        )
+    ).scalar_one()
+    await db.delete(thread)
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="agent_thread.delete",
+        resource_type="agent_thread",
+        resource_id=str(thread_id),
+        project_id=thread.project_id,
+        request=request,
+        details={"runs_deleted": run_count},
+    )
+    await db.commit()
+
+    if checkpointer is not None:
         try:
-            model = model_builder(
-                model_alias=model_alias,
-                purpose=purpose,
-                http_async_client=http_client,
-                project_minimum_inference_tier=(
-                    binding.minimum_inference_tier if binding is not None else None
-                ),
-                privileged=binding.privileged if binding is not None else False,
+            await checkpointer.adelete_thread(str(thread_id))
+        except Exception:
+            logger.exception(
+                "thread checkpoint delete failed (daily GC will catch it)",
+                extra={"event": "thread_checkpoint_delete_failed", "thread_id": str(thread_id)},
             )
-            await execute_agent_run(
-                run_id,
-                session_factory,
-                tools=tools,
-                model=model,
-                system_prompt=_system_prompt_for(binding),
-                checkpointer=checkpointer_provider(),
-                thread_id=thread_id,
-                publisher=publisher,
-            )
-        finally:
-            await http_client.aclose()
-    except Exception as exc:
-        logger.exception(
-            "agent run composition failed",
-            extra={"event": "agent_run_composition_failed", "run_id": str(run_id)},
-        )
-        # mark_run_failed never overwrites a settled run, so a cleanup
-        # error after a successful execution cannot flip 'completed'.
-        await mark_run_failed(session_factory, run_id, error=f"{type(exc).__name__}: {exc}")
-        if publisher is not None:
-            # No-op if the runner already closed the stream (broker
-            # closed-channel flag) — this only fires for failures BEFORE
-            # execute_agent_run took over, mirroring mark_run_failed.
-            publisher.run_finished(
-                status=AgentRunStatus.failed.value,
-                error=f"{type(exc).__name__}: {exc}"[:500],
-            )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -58,6 +58,13 @@ playbook queue; the playbook worker consumes it and runs the session via
 the LangGraph executor under the brakes. Must match
 :data:`app.workers.autonomous_worker.AUTONOMOUS_SESSION_JOB_NAME`."""
 
+AGENT_RUN_JOB_NAME = "agent_run_job"
+"""F1-S1 (ADR-F009) — deep-agent run execution, at-most-once. Enqueued
+by ``POST /api/v1/agents/runs`` onto the shared playbook queue with a
+deterministic ``_job_id`` so the cancel endpoint can address the job
+without storing arq ids. Must match
+:data:`app.workers.agent_run_worker.AGENT_RUN_JOB_NAME`."""
+
 TABULAR_JOB_NAME = "tabular_execution_job"
 """M3-C2 — Tabular Review execution pipeline. Triggered by the API
 when a user calls ``POST /api/v1/tabular/execute``; the playbook
@@ -313,6 +320,90 @@ async def enqueue_autonomous_session_job(session_id: uuid.UUID) -> bool:
             },
         )
         return False
+
+
+def agent_run_job_id(run_id: uuid.UUID) -> str:
+    """The deterministic arq job id for one agent run."""
+
+    return f"agent-run:{run_id}"
+
+
+async def enqueue_agent_run_job(run_id: uuid.UUID) -> bool:
+    """Enqueue a deep-agent run job; return True ONLY when it is queued.
+
+    UNLIKE the other enqueue helpers, ``False`` here is fatal for the
+    caller: an unqueued run has no executor and would sit ``running``
+    until the sweep settles it minutes later — ``POST /agents/runs``
+    settles it ``failed`` immediately instead (ADR-F009: never a silent
+    zombie). ``enqueue_job`` returning ``None`` (a job/result key with
+    this id still exists — verified arq 0.26.3 behavior) is treated the
+    same as a transport failure.
+    """
+
+    try:
+        pool = await _get_m3a6_pool()
+        job = await pool.enqueue_job(
+            AGENT_RUN_JOB_NAME, str(run_id), _job_id=agent_run_job_id(run_id)
+        )
+        if job is None:
+            log.warning(
+                "enqueue_agent_run_job: job id collision; run will be settled failed",
+                extra={"event": "agent_run_enqueue_collision", "run_id": str(run_id)},
+            )
+            return False
+        log.info(
+            "enqueue_agent_run_job: enqueued",
+            extra={"event": "agent_run_enqueue", "run_id": str(run_id)},
+        )
+        return True
+    except Exception as exc:
+        log.warning(
+            "enqueue_agent_run_job: failed; caller settles the run",
+            extra={
+                "event": "agent_run_enqueue_failed",
+                "run_id": str(run_id),
+                "error": str(exc),
+            },
+        )
+        return False
+
+
+async def abort_agent_run_job(run_id: uuid.UUID) -> None:
+    """Best-effort arq ``Job.abort`` for a cancelled run (F1-S1).
+
+    The cancel endpoint already SETTLED the run row (first-writer-wins)
+    before calling this — abort is only the impatient path that frees
+    the worker sooner than its next fenced write would. Every failure
+    here is therefore log-and-continue: a queued job aborts before it
+    starts; a running job gets ``CancelledError``; a missing/finished
+    job is a no-op. The short timeout only bounds how long we WAIT for
+    confirmation — the abort flag itself is set before the wait.
+    """
+
+    try:
+        from arq.jobs import Job
+
+        pool = await _get_m3a6_pool()
+        job = Job(
+            agent_run_job_id(run_id),
+            redis=pool,
+            _queue_name=M3_PLAYBOOK_QUEUE_NAME,
+        )
+        await job.abort(timeout=2)
+    except TimeoutError:
+        log.info(
+            "abort_agent_run_job: no abort confirmation within 2s (flag is set)",
+            extra={"event": "agent_run_abort_unconfirmed", "run_id": str(run_id)},
+        )
+    except Exception as exc:
+        log.warning(
+            "abort_agent_run_job: failed (run row is already settled)",
+            extra={
+                "event": "agent_run_abort_failed",
+                "run_id": str(run_id),
+                "error": str(exc),
+            },
+        )
 
 
 async def enqueue_user_export_job(job_id: uuid.UUID) -> bool:

@@ -59,10 +59,12 @@ def instruction_sha() -> str:
     per-scenario prompt is stamped per cycle; deepagents' own harness
     prompts and tool descriptions are pinned by the package version +
     the manifest's git_sha, not hashed here (S9 review wording fix)."""
+    # F1-S1: the matter prompt moved with the composition point; the string
+    # body is byte-identical, so instruction_sha stays stable across the move.
+    from app.agents.composition import MATTER_PROMPT
     from app.agents.runner import SYSTEM_PROMPT
-    from app.api.agent_runs import _MATTER_PROMPT
 
-    return hashlib.sha256((SYSTEM_PROMPT + _MATTER_PROMPT).encode()).hexdigest()
+    return hashlib.sha256((SYSTEM_PROMPT + MATTER_PROMPT).encode()).hexdigest()
 
 
 @pytest.fixture(scope="session")

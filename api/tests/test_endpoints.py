@@ -317,6 +317,10 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # F0-S7 (fork) — SSE v2 run stream (ADR-F006). Dedicated coverage in
     # tests/agents/test_agent_stream.py.
     ("GET", "/api/v1/agents/runs/{run_id}/stream"),
+    # F1-S1 (fork) — cancel + thread delete (ADR-F009). Dedicated coverage
+    # in tests/agents/test_agent_lifecycle_api.py.
+    ("POST", "/api/v1/agents/runs/{run_id}/cancel"),
+    ("DELETE", "/api/v1/agents/threads/{thread_id}"),
 }
 
 

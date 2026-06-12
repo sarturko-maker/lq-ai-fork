@@ -396,6 +396,20 @@ class RunStreamPublisher:
             self._publish(part)
         self._broker.close(self._run_id)
 
+    def close(self) -> None:
+        """End the live channel WITHOUT terminal parts (F1-S1, ADR-F009).
+
+        For exits where another actor settled the run (cancel endpoint /
+        orphan sweep fenced our terminal write out): the wire must never
+        announce a state this process didn't write. Closing the channel
+        sends subscribers down the stream endpoint's ``CHANNEL_CLOSED``
+        path, which ends the stream on the SETTLED run row from the DB —
+        the durable truth (ADR-F004).
+        """
+        for block_id in list(self._open_reasoning):
+            self.reasoning_end(block_id)
+        self._broker.close(self._run_id)
+
 
 def _parsed_or_raw(summary: str | None) -> Any:
     """Tool args as an object when the bounded digest is still valid JSON.

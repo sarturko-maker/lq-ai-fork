@@ -274,3 +274,36 @@ async def test_audit_failure_never_masks_the_tool_result(
     # The row was genuinely lost — observability said so; nothing landed.
     rows = await _audit_rows(guard_env)
     assert rows == []
+
+
+async def test_granted_dispatch_touches_the_heartbeat(guard_env: GuardEnv) -> None:
+    """F1-S1 (ADR-F009): R5 is now a fenced heartbeat touch — a granted
+    dispatch proves liveness at tool-boundary cadence, the second
+    heartbeat source beside the runner's throttled per-event beat."""
+    ctx = guard_env.make_ctx(frozenset({"read_clause"}))
+    async with guard_env.factory() as db:
+        run = await db.get(AgentRun, guard_env.run_id)
+        assert run is not None and run.heartbeat_at is None
+
+    await guarded_dispatch("read_clause", _op("ok"), ctx)
+
+    async with guard_env.factory() as db:
+        run = await db.get(AgentRun, guard_env.run_id)
+        assert run is not None and run.heartbeat_at is not None
+
+
+async def test_heartbeat_touch_survives_a_tool_body_error(guard_env: GuardEnv) -> None:
+    """F1-S1 review fix: the touch COMMITS before the tool body, so a
+    body error (whole-dispatch rollback) cannot undo the liveness
+    signal — and the sweep can see it while a slow body runs."""
+    ctx = guard_env.make_ctx(frozenset({"read_clause"}))
+
+    async def exploding_op(_db: AsyncSession) -> str:
+        raise RuntimeError("tool body failed")
+
+    with pytest.raises(RuntimeError, match="tool body failed"):
+        await guarded_dispatch("read_clause", exploding_op, ctx)
+
+    async with guard_env.factory() as db:
+        run = await db.get(AgentRun, guard_env.run_id)
+        assert run is not None and run.heartbeat_at is not None
