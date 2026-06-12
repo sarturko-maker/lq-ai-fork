@@ -1,0 +1,16 @@
+data: {"id":"067a81ccff46de64d07bd935f974c26c","object":"chat.completion.chunk","created":1781223116,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","content":"<think>\nThe user is asking about","reasoning":"The user is asking about"}}],"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: {"id":"067a81ccff46de64d07bd935f974c26c","object":"chat.completion.chunk","created":1781223116,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","content":" the weather in Berlin. I'll use the get_weather tool to fetch this information.","reasoning":" the weather in Berlin. I'll use the get_weather tool to fetch this information."}}],"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: {"id":"067a81ccff46de64d07bd935f974c26c","object":"chat.completion.chunk","created":1781223116,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","content":"\n</think>\n\nI'll check the current weather in Berlin for you."}}],"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: {"id":"067a81ccff46de64d07bd935f974c26c","object":"chat.completion.chunk","created":1781223116,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"id":"call_function_xplk3zli8lqh_1","type":"function","function":{"name":"get_weather","arguments":""},"index":0}]}}],"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: {"id":"067a81ccff46de64d07bd935f974c26c","object":"chat.completion.chunk","created":1781223116,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"function":{"arguments":"{\"city\": \"Berlin\"}"},"index":0}]}}],"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: {"id":"067a81ccff46de64d07bd935f974c26c","object":"chat.completion.chunk","created":1781223116,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"tool_calls"}],"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: {"id":"067a81ccff46de64d07bd935f974c26c","object":"chat.completion.chunk","created":1781223116,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":419,"completion_tokens":61,"total_tokens":480,"total_characters":0,"completion_tokens_details":{"reasoning_tokens":26},"prompt_tokens_details":{"cached_tokens":114}},"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: [DONE]
+

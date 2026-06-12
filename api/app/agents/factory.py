@@ -21,6 +21,17 @@ from app.config import get_settings
 
 _GATEWAY_KEY_HEADER = "X-LQ-AI-Gateway-Key"
 
+# F0-S9: effective max input tokens THROUGH THE GATEWAY, for the model's
+# ``profile`` — deepagents' summarization middleware falls back to a fixed
+# 170k-token trigger for unprofiled models (compute_summarization_defaults);
+# with ``max_input_tokens`` set, compaction triggers at 0.85 x this value.
+# The binding constraint here is the gateway envelope, NOT the provider
+# model's native window (MiniMax-M3 is 1M tokens): the gateway's
+# ``request_validation.max_total_request_chars`` is 1e6 ≈ 250k tokens at
+# ~4 chars/token. 200k leaves headroom for char-dense legal text, so the
+# 0.85 trigger (170k tokens ≈ 680k chars) fires before the gateway cap.
+DEFAULT_MAX_INPUT_TOKENS = 200_000
+
 
 def build_gateway_http_client(
     *,
@@ -54,6 +65,7 @@ def build_gateway_chat_model(
     http_async_client: httpx.AsyncClient,
     project_minimum_inference_tier: int | None = None,
     privileged: bool = False,
+    max_input_tokens: int | None = DEFAULT_MAX_INPUT_TOKENS,
 ) -> BaseChatModel:
     """Chat model speaking the gateway's OpenAI-compatible surface.
 
@@ -90,6 +102,13 @@ def build_gateway_chat_model(
         timeout=timeout,
         max_retries=1,
         http_async_client=http_async_client,
+        # F0-S9 conformance: langchain-openai's Responses-API auto-detect
+        # breaks OpenAI-compatible endpoints ("No generations found in
+        # stream", deepagents#3190) — pin Chat Completions explicitly.
+        use_responses_api=False,
+        # F0-S9: without max_input_tokens deepagents never computes a
+        # window-relative compaction trigger (see DEFAULT_MAX_INPUT_TOKENS).
+        profile=({"max_input_tokens": max_input_tokens} if max_input_tokens is not None else None),
     )
 
 
@@ -105,6 +124,12 @@ def build_deep_agent(
     Single import site for ``deepagents``; absorb upstream API churn here.
     """
     from deepagents import create_deep_agent
+
+    from app.agents.profiles import ensure_harness_profiles_registered
+
+    # F0-S9: qualification is per-(model, harness-profile) — the registry
+    # must be populated before any agent resolves its profile.
+    ensure_harness_profiles_registered()
 
     return create_deep_agent(
         model=model,

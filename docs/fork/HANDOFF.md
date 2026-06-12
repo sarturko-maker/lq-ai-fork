@@ -105,8 +105,14 @@ These resolve `docs/fork/research/f0-s9-eval-reuse.md` §4 for tonight:
 
 ### Progress tracker (update after every step — the morning report reads this)
 
-- [ ] 0. Research docs + ADR-F004 read; branch created
-- [ ] 1. Gateway <think> round-trip: verified OK / fixed (which?)
+- [x] 0. Research docs + ADR-F004 read; branch `fork/f0-s9-eval-gate` created from `bfb82be`
+- [x] 1. Gateway <think> round-trip: VERIFIED OK live, both directions (probe evidence in
+      docs/fork/evidence/f0-s9/gateway-conformance.md). MiniMax-M3 supplies real tool-call ids;
+      defensive id-synthesis added anyway (deepagents#3587). use_responses_api=False +
+      max_input_tokens profile + empty MiniMax HarnessProfile + langgraph floor >=1.2.4 landed.
+      Correction found: M3's native window is 1M tokens — the research doc's "<170k" claim was
+      wrong; the gateway request cap is the binding constraint (200k profile value).
+      Gateway tests 28 passed, mypy --strict clean; api agents suite 107 passed/1 skipped.
 - [ ] 2. Scenario fixtures seeded
 - [ ] 3. Harness runs end-to-end (one smoke cycle)
 - [ ] 4. Pre-flight N=5 passed variance gate; budget decision: N=__ (projected $__)

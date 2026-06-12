@@ -537,6 +537,51 @@ def _from_openai_chat_response(
 # --- Translation: OpenAI SSE -> gateway chunks -------------------------------
 
 
+def _ensure_stream_tool_call_ids(parsed: dict[str, Any], *, synth_prefix: str) -> None:
+    """Synthesize ids for OPENING tool-call deltas that arrive without one.
+
+    F0-S9 gateway conformance: agent harnesses hard-fail on empty
+    streamed tool-call ids (deepagents' subagent dispatch raises
+    "Tool call ID is required for subagent invocation"; upstream closed
+    langchain-ai/deepagents#3587 as a gateway-side responsibility).
+    OpenAI streaming semantics: the FIRST delta of a tool call carries
+    ``id`` + ``type`` + ``function.name``; continuation deltas carry only
+    ``index`` + ``function.arguments`` and legitimately have no ``id``.
+    We therefore synthesize only on opening deltas (entries carrying a
+    function name or an explicit ``type``) — the id is stable for the
+    call's lifetime because an opening happens exactly once, and unique
+    because it embeds a fresh uuid. Provider-supplied ids always pass
+    through untouched (MiniMax-M3 emits real ids — verified live
+    2026-06-12; this is the defensive path for providers that don't).
+
+    Mutates ``parsed`` in place; never raises on malformed shapes (the
+    caller's pydantic validation is the arbiter of chunk validity).
+    """
+
+    choices = parsed.get("choices")
+    if not isinstance(choices, list):
+        return
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        delta = choice.get("delta")
+        if not isinstance(delta, dict):
+            continue
+        tool_calls = delta.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+        for entry in tool_calls:
+            if not isinstance(entry, dict):
+                continue
+            function = entry.get("function")
+            has_name = isinstance(function, dict) and bool(function.get("name"))
+            opening = has_name or bool(entry.get("type"))
+            if opening and not entry.get("id"):
+                index = entry.get("index")
+                suffix = index if isinstance(index, int) else 0
+                entry["id"] = f"{synth_prefix}_{uuid.uuid4().hex[:12]}_{suffix}"
+
+
 async def _openai_stream_iter(
     *,
     client: httpx.AsyncClient,
@@ -587,6 +632,9 @@ async def _openai_stream_iter(
                     parsed["model"] = requested_model
                 if not parsed.get("id"):
                     parsed["id"] = fallback_id
+                # F0-S9 conformance: opening tool-call deltas must carry a
+                # non-empty stable id (deepagents#3587 — gateway-owned fix).
+                _ensure_stream_tool_call_ids(parsed, synth_prefix="call_lqgw")
                 try:
                     yield ChatCompletionChunk.model_validate(parsed)
                 except Exception:
