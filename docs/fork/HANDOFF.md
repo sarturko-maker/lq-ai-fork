@@ -40,8 +40,9 @@ behalf are flagged ⚖ and need morning ratification):
       pass) — and the 80-cycle baseline RE-SCORED IDENTICALLY under the stricter scoring
       (zero metric changes; corrected spend $1.69). Services rebuilt on slice code +
       post-deploy spot-check. PR #41 — merged on green (see merge commit on main).
-- [ ] 7. F1 re-plan draft PR (drafted at /tmp/s9-overnight/F1-replan.md → own PR after S9 merge)
-- [ ] 8. F1-S1 exploration notes (only if context allows)
+- [x] 7. F1 re-plan draft PR #42 (DRAFT — docs/fork/plans/F1-replan.md; edit before any F1 work)
+- [x] 8. F1-S1 exploration notes appended to the re-plan (arq patterns, runner seams,
+      broker=None degradation path via the S7 DB-tail fallback)
 - **Spend tonight: ≈$1.75 standard-rate upper bound (≈$0.88 at the current launch promo)**
   of the $10 plan — probes $0.001 + smoke $0.004 + matrix $1.69 (corrected after the
   routing-window double-count fix) + post-deploy spot-check ~$0.05. Prior plan consumption

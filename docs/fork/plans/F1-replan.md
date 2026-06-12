@@ -161,3 +161,55 @@ continuable; checkpoint rows for a deleted thread are gone.
   no-SaaS).
 - Anthropic adapter tool_use translation (S9 avoided it; pulls in only if a
   Claude-family model is added to the matrix).
+
+---
+
+## Appendix — F1-S1 exploration notes (read-only, 2026-06-12 overnight run)
+
+### arq patterns already in the codebase
+
+- **Playbook worker**: `api/app/workers/arq_setup.py:226-247` — queue
+  `arq:m3a6` (shared with Tabular/Autonomous), `job_timeout: 900`, NO
+  explicit `max_tries` (arq default 5 — F1-S1 must set `max_tries=1`
+  explicitly), no `allow_abort_jobs` anywhere yet. Cron precedent exists:
+  `autonomous_idle_watchdog` + `autonomous_schedule_dispatcher`
+  (`arq_setup.py:216-223`, minute=0) — the run-orphan sweep can be a
+  third cron job in this shape.
+- **Ingest worker**: `api/app/workers/document_pipeline.py:240-273` —
+  default queue, `max_jobs` from `LQ_AI_INGEST_WORKER_CONCURRENCY`.
+- **Enqueue side**: `api/app/workers/queue.py` — module-global cached
+  pools (default + m3a6), `RedisSettings.from_dsn(settings.redis_url)`.
+- **Worker bootstrap**: both workers' `on_startup` install the skill
+  registry; the ingest worker ALSO runs a startup orphan sweep
+  (`find_orphaned_files()`, `api/app/pipeline/ingest.py:376-390` —
+  re-enqueues rows stuck at pending/processing). Precedent for the
+  agent-run sweep; difference: agent runs settle FAILED, never re-enqueue
+  (resume needs the S5 ledger).
+
+### Runner seams (what crosses the process boundary)
+
+- Kick-off today: `background.add_task(_run_in_background, run_id, broker)`
+  (`api/app/api/agent_runs.py:358`); composition point at
+  `agent_runs.py:808-919`.
+- **Clean seams** (already callables, work identically in a worker):
+  `session_factory_provider` (process-global factory,
+  `db/session.py:55-64`), `checkpointer_provider`
+  (`get_agent_checkpointer`, None degrades), gateway http client (built
+  + closed inside the composition point — no shared state).
+- **The one process-local piece**: `RunStreamBroker`
+  (`app.state.agent_stream_broker`, `main.py:108` — in-memory pub/sub
+  keyed by run_id). The S7 stream endpoint ALREADY serves subscribers
+  with no live publisher via the DB-tail fallback (poll every 2s,
+  `agent_runs.py:434-461,539-546`) and closes orphaned-at-running
+  streams at the 330s cutoff (`agent_runs.py:167-172`). So F1-S1 v1 can
+  run worker-side with `broker=None` and lose only live-delta animation
+  (settled rows still stream) — Redis pub/sub for live deltas is an
+  optional follow-up, exactly as ADR-F004 anticipated ("lossiness only
+  costs animation").
+
+### Ingest orphan story (rides along)
+
+- Parse failures set `files.ingestion_status='failed'` directly; storage
+  errors raise → arq visibility-timeout requeue (row stays 'processing');
+  recovery is STARTUP-ONLY sweep, no cron. F1-S1's cron sweep shape can
+  cover both families.
