@@ -88,9 +88,9 @@
 			data-testid="lq-cockpit-unfiled"
 			onclick={onSelectUnfiled}
 		>
-			<span class="flex items-center gap-2">
-				<InboxIcon class="size-4 text-muted-foreground" aria-hidden="true" />
-				Unfiled conversations
+			<span class="flex min-w-0 items-center gap-2">
+				<InboxIcon class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+				<span class="truncate">Unfiled conversations</span>
 			</span>
 			{#if unfiled && unfiled.thread_count > 0}
 				<span
@@ -100,7 +100,7 @@
 				</span>
 			{/if}
 		</button>
-		<p class="px-2.5 pt-2 text-[11px] text-muted-foreground">
+		<p class="truncate px-2.5 pt-2 text-[11px] text-muted-foreground">
 			<strong>LQ.AI</strong> — Open-Source Legal AI · Apache-2.0
 		</p>
 	</div>

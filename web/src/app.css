@@ -196,7 +196,7 @@
  * pattern) on a near-white canvas; ONE deep indigo accent reserved for
  * primary action / focus / active nav / running state; status colors live
  * in their own intent tokens (soft wash + strong pair), so the accent
- * stays scarce. The dark variant floors at L=0.21 (charcoal, never black)
+ * stays scarce. The dark variant floors at L=0.23 (charcoal, never black)
  * and is WCAG-checked like the light one (4.5:1 text, 3:1 UI).
  *
  * Vendored shadcn-svelte components consume the standard names below; the
@@ -252,48 +252,48 @@
 	--status-attention-wash: oklch(0.96 0.04 85);
 }
 
-/* Charcoal dark — floors at L=0.21 (≈#17191E); never pure black per the
+/* Charcoal dark — floors at L=0.23 (≈#1B1E24); never pure black per the
    maintainer rule. Same accent hue, lightness raised for contrast. */
 .dark {
-	--background: oklch(0.21 0.006 262);
+	--background: oklch(0.23 0.006 262);
 	--foreground: oklch(0.93 0.004 90);
-	--card: oklch(0.25 0.006 262);
+	--card: oklch(0.27 0.006 262);
 	--card-foreground: oklch(0.93 0.004 90);
-	--popover: oklch(0.25 0.006 262);
+	--popover: oklch(0.27 0.006 262);
 	--popover-foreground: oklch(0.93 0.004 90);
 	--primary: oklch(0.62 0.14 262);
 	--primary-foreground: oklch(0.985 0.003 90);
-	--secondary: oklch(0.29 0.006 262);
+	--secondary: oklch(0.31 0.006 262);
 	--secondary-foreground: oklch(0.93 0.004 90);
-	--muted: oklch(0.29 0.006 262);
+	--muted: oklch(0.31 0.006 262);
 	--muted-foreground: oklch(0.68 0.008 90);
-	--accent: oklch(0.3 0.04 262);
+	--accent: oklch(0.32 0.04 262);
 	--accent-foreground: oklch(0.9 0.02 262);
 	--destructive: oklch(0.65 0.18 27);
-	--border: oklch(0.33 0.006 262);
-	--input: oklch(0.33 0.006 262);
+	--border: oklch(0.36 0.006 262);
+	--input: oklch(0.36 0.006 262);
 	--ring: oklch(0.62 0.14 262);
 	--chart-1: oklch(0.62 0.14 262);
 	--chart-2: oklch(0.65 0.12 155);
 	--chart-3: oklch(0.65 0.18 27);
 	--chart-4: oklch(0.68 0.008 90);
-	--chart-5: oklch(0.45 0.006 262);
-	--sidebar: oklch(0.23 0.006 262);
+	--chart-5: oklch(0.47 0.006 262);
+	--sidebar: oklch(0.25 0.006 262);
 	--sidebar-foreground: oklch(0.93 0.004 90);
 	--sidebar-primary: oklch(0.62 0.14 262);
 	--sidebar-primary-foreground: oklch(0.985 0.003 90);
-	--sidebar-accent: oklch(0.28 0.006 262);
+	--sidebar-accent: oklch(0.3 0.006 262);
 	--sidebar-accent-foreground: oklch(0.93 0.004 90);
-	--sidebar-border: oklch(0.33 0.006 262);
+	--sidebar-border: oklch(0.36 0.006 262);
 	--sidebar-ring: oklch(0.62 0.14 262);
 	--status-running: oklch(0.68 0.13 262);
-	--status-running-wash: oklch(0.3 0.04 262);
+	--status-running-wash: oklch(0.32 0.04 262);
 	--status-completed: oklch(0.7 0.12 155);
-	--status-completed-wash: oklch(0.3 0.04 155);
+	--status-completed-wash: oklch(0.32 0.04 155);
 	--status-failed: oklch(0.68 0.17 27);
-	--status-failed-wash: oklch(0.3 0.04 27);
+	--status-failed-wash: oklch(0.32 0.04 27);
 	--status-cancelled: oklch(0.68 0.008 90);
-	--status-cancelled-wash: oklch(0.29 0.006 262);
+	--status-cancelled-wash: oklch(0.31 0.006 262);
 	--status-attention: oklch(0.72 0.12 80);
 	--status-attention-wash: oklch(0.3 0.04 80);
 }

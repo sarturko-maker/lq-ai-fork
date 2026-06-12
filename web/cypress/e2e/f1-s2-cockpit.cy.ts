@@ -8,9 +8,15 @@
  */
 import { login } from '../support/lq-ai-helpers';
 
+const ADMIN_EMAIL = () => Cypress.env('LQAI_ADMIN_EMAIL') || 'admin@lq.ai';
+const ADMIN_PASSWORD = () => Cypress.env('LQAI_ADMIN_PASSWORD') || 'LQ-AI-smoke-test-Pw1!';
+
 describe('F1-S2 — Cockpit v0', () => {
 	beforeEach(() => {
-		login();
+		// 1280x800: headless Electron's window is 1280 wide — a 1440 viewport
+		// gets CROPPED in viewport captures (evidence screenshots).
+		cy.viewport(1280, 800);
+		login(ADMIN_EMAIL(), ADMIN_PASSWORD());
 	});
 
 	it('lands in the cockpit: rail + area grid, Commercial enterable, others inert', () => {
@@ -19,10 +25,7 @@ describe('F1-S2 — Cockpit v0', () => {
 
 		// Rail: all five seeded areas, four honestly "Not configured".
 		cy.get('[data-testid="lq-cockpit-rail"]').within(() => {
-			cy.get('[data-testid="lq-cockpit-area-commercial"]').should(
-				'not.have.attr',
-				'aria-disabled'
-			);
+			cy.get('[data-testid="lq-cockpit-area-commercial"]').should('not.have.attr', 'aria-disabled');
 			for (const key of ['disputes', 'm-and-a', 'privacy', 'employment']) {
 				cy.get(`[data-testid="lq-cockpit-area-${key}"]`)
 					.should('have.attr', 'aria-disabled', 'true')

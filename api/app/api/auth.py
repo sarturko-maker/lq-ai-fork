@@ -31,6 +31,7 @@ we don't reveal whether an email exists in the system.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -440,11 +441,20 @@ async def refresh(
     )
     candidates = result.scalars().all()
 
-    matched: UserSession | None = None
-    for session in candidates:
-        if refresh_token_matches(payload.refresh_token, session.refresh_token_hash):
-            matched = session
-            break
+    def _match_candidate() -> UserSession | None:
+        for session in candidates:
+            if refresh_token_matches(payload.refresh_token, session.refresh_token_hash):
+                return session
+        return None
+
+    # The scan is CPU-bound (one bcrypt compare per candidate, ~10²ms
+    # each): with accumulated sessions it reaches tens of seconds, and
+    # run inline it FREEZES the event loop — every concurrent request,
+    # including logins, stalls behind one refresh (found live in F1-S2
+    # verification with 186 dev sessions). Off-thread keeps the loop
+    # responsive; the deterministic index column above stays the real
+    # fix for the scan itself.
+    matched: UserSession | None = await asyncio.to_thread(_match_candidate)
 
     if matched is None:
         # No user context (the presented token didn't match any active

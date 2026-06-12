@@ -110,5 +110,5 @@ export function applyTheme(theme: Theme): void {
 	root.classList.remove('dark', 'light');
 	root.classList.add(dark ? 'dark' : 'light');
 	const meta = document.querySelector('meta[name="theme-color"]');
-	if (meta) meta.setAttribute('content', dark ? '#17191e' : '#faf9f7');
+	if (meta) meta.setAttribute('content', dark ? '#1b1e24' : '#faf9f7');
 }

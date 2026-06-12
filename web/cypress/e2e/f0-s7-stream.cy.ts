@@ -40,7 +40,10 @@ describe('F0-S7 — SSE v2 streaming (live deep agent)', () => {
 		cy.get('[data-testid="lq-ai-login-submit"]').click();
 
 		// F1-S2: post-login lands in the cockpit (no tab bar) — the legacy
-		// agents tab keeps working at its URL; navigate directly.
+		// agents tab keeps working at its URL. Wait out the redirect first:
+		// visiting mid-login CANCELS the in-flight POST (the old tab-click
+		// waited implicitly).
+		cy.url({ timeout: 15_000 }).should('not.include', '/login');
 		cy.visit('/lq-ai/agents');
 		cy.location('pathname').should('eq', '/lq-ai/agents');
 
