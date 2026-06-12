@@ -1,0 +1,34 @@
+{
+  "scenario_id": "negative_control",
+  "model_alias": "smart",
+  "cycle": 15,
+  "run_id": "bc0fa250-1a5a-4988-a863-66cfb8c8c116",
+  "thread_id": "8a6073c2-5915-4d48-99ef-75e16815e64b",
+  "status": "completed",
+  "final_answer": "<think>\nThe user is asking for a generic email draft. They explicitly said generic wording is fine and to not reference any specific agreement. This doesn't require document lookup - it's a simple writing task. I'll just draft the email directly.\n</think>\n\nSubject: Request to Extend Contract-Review Deadline by One Week\n\nDear [Opposing Counsel],\n\nI hope this message finds you well. I am writing to request a brief extension of our current contract-review deadline by one week. A few additional items have come up on our end that would benefit from a bit more time, and we want to make sure our review is thorough before responding.\n\nPlease let me know at your earliest convenience whether this adjustment works for your schedule. We appreciate your flexibility and look forward to continuing to work together toward a productive resolution. Thank you for your time and consideration.\n\nBest regards,\n[Your Name]",
+  "error": null,
+  "valid": true,
+  "invalid_reason": null,
+  "steps": [
+    {
+      "seq": 1,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe user is asking for a generic email draft. They explicitly said generic wording is fine and to not reference any specific agreement. This doesn't require document lookup - it's a simple writing task. I'll just draft the email directly.\n</think>\n\nSubject: Request to Extend Contract-Review Deadline by One Week\n\nDear [Opposing Counsel],\n\nI hope this message finds you well. I am writing to request a brief extension of our current contract-review deadline by one week. A few additional items have come up on our end that would benefit from a bit more time, and we want to make sure our review is thorough before responding.\n\nPlease let me know at your earliest convenience whether this adjustment works for your schedule. We appreciate your flexibility and look forward to continuing to work together toward a productive resolution. Thank you for your time and consideration.\n\nBest regards,\n[Your Name]",
+      "parent_step_id": null
+    }
+  ],
+  "metrics": {
+    "search_noise_on_drafting_ask": true,
+    "read_noise_on_drafting_ask": true,
+    "task_noise_on_drafting_ask": true
+  },
+  "started_at": "2026-06-12T01:05:20.011977+00:00",
+  "finished_at": "2026-06-12T01:05:26.121992+00:00",
+  "duration_s": 6.1,
+  "tokens_in": 6553,
+  "tokens_out": 172,
+  "gateway_calls": 1,
+  "routed_model": "MiniMax-M3",
+  "cost_usd_estimate": 0.004345
+}

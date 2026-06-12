@@ -1,0 +1,76 @@
+{
+  "scenario_id": "mismatch",
+  "model_alias": "smart",
+  "cycle": 17,
+  "run_id": "5d3a038f-6e81-48eb-9c97-43f37b1a21a6",
+  "thread_id": "95ac2eaf-5be7-4da8-b088-56aad4e09aa5",
+  "status": "completed",
+  "final_answer": "<think>\nThe document is a Master Services Agreement between Northwind Customer GmbH and Vendor Analytics Ltd. It does not contain any employee stock option plan terms \u2014 no mention of vesting, cliff, or exercise window. The matter \"S9 Eval \u2014 Single Doc 9001\" only has this one document, which is unrelated to an employee stock option plan.\n\nI should be direct and tell the user the matter doesn't contain an employee stock option plan.\n</think>\n\nThe matter \"S9 Eval \u2014 Single Doc 9001\" does not contain an employee stock option plan. The only document attached is a **Master Services Agreement** between Northwind Customer GmbH and Vendor Analytics Ltd (`msa-vendor-services.txt`, 1 page), which covers services and fees, term/termination, confidentiality, limitation of liability, indemnification, and governing law. It has no provisions on equity, stock options, vesting, cliffs, or exercise windows, so I can't summarize those terms from the matter's documents.\n\nIf you intended to attach the ESOP (or a different matter is the right one), let me know and I'll re-pull. Otherwise, if you can share the plan document or point me to the correct matter, I'll ground the summary in it.",
+  "error": null,
+  "valid": true,
+  "invalid_reason": null,
+  "steps": [
+    {
+      "seq": 1,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe user wants a summary of the key terms of an employee stock option plan in the matter \"S9 Eval \u2014 Single Doc 9001\". I need to:\n1. List the documents in the matter\n2. Find the employee stock option plan\n3. Extract vesting, cliff, and exercise window terms\n4. Cite document name and page\n\nLet me start by listing the documents.\n</think> [requested tools: search_documents]",
+      "parent_step_id": null
+    },
+    {
+      "seq": 2,
+      "kind": "tool_call",
+      "name": "search_documents",
+      "summary": "{\"query\": \"\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 3,
+      "kind": "tool_result",
+      "name": "search_documents",
+      "summary": "Documents attached to this matter:\n- msa-vendor-services.txt (1 pages)",
+      "parent_step_id": null
+    },
+    {
+      "seq": 4,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nOnly one document \u2014 msa-vendor-services.txt. Let me check if it contains anything about stock options. It's a Master Services Agreement for vendor services, not an employee stock option plan. Let me read it to confirm.\n</think> [requested tools: read_document]",
+      "parent_step_id": null
+    },
+    {
+      "seq": 5,
+      "kind": "tool_call",
+      "name": "read_document",
+      "summary": "{\"name\": \"msa-vendor-services.txt\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 6,
+      "kind": "tool_result",
+      "name": "read_document",
+      "summary": "[msa-vendor-services.txt (1 pages) \u2014 full text]\n\nMASTER SERVICES AGREEMENT\n\nThis Master Services Agreement (the \"Agreement\") is entered into between\nNorthwind Customer GmbH (\"Customer\") and Vendor Analytics Ltd (\"Vendor\").\n\n1. SERVICES AND FEES. Vendor shall provide the data-processing services\ndescribed in each Statement of Work. Customer shall pay Vendor a monthly\nservice fee of USD 25,000, invoiced in arrears with thirty (30) day\npayment terms.\n\n2. TERM AND TERMINATION. This Agreement runs for an initial term of\ntwenty-four (24) months and renews for successive twelve (12) month\nperiods unless either party gives sixty (60) days written notice of\nnon-renewal. Either party may terminate for material breach not cured\nwithin thirty (30) days of written notice.\n\n3. CONFIDENTIALITY. Each party shall protect the other party's\nConfidential Information with at least the care it applies to its own\nsimilar information, and never less than reasonable care, and shall use\nit solely to perform this Agreement.\n\n4. LIMITATION OF LIABILITY. Except for the Excluded Claims, each party's\naggregate liability arising out of or relating to this Agreement shall\nnot exceed the total fees paid or payable by Customer in the twelve (12)\nmonths preceding the first event giving rise to liability (the\n\"Liability Cap\"). \"Excluded Claims\" means (a) a breach of\nconfidentiality obligations under Section 3, (b) a party's\nindemnification obligations under Section 5, and (c) liability arising\nfrom gross negligence or willful misconduct; the Liability Cap does not\napply to the Excluded Claims. Neither party is liable for indirect,\nincidental, or consequential damages.\n\n5. INDEMNIFICATION. Vendor shall defend and indemnify Customer against\nthird-party claims alleging that the services infringe a third party's\nintellectual-property rights.\n\n6. GOVERNING LAW. This Agreement is governed by the laws of the State of\nDelaware, excluding its conflict-of-laws rules.\n",
+      "parent_step_id": null
+    },
+    {
+      "seq": 7,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe document is a Master Services Agreement between Northwind Customer GmbH and Vendor Analytics Ltd. It does not contain any employee stock option plan terms \u2014 no mention of vesting, cliff, or exercise window. The matter \"S9 Eval \u2014 Single Doc 9001\" only has this one document, which is unrelated to an employee stock option plan.\n\nI should be direct and tell the user the matter doesn't contain an employee stock option plan.\n</think>\n\nThe matter \"S9 Eval \u2014 Single Doc 9001\" does not contain an employee stock option plan. The only document attached is a **Master Services Agreement** between Northwind Customer GmbH and Vendor Analytics Ltd (`msa-vendor-services.txt`, 1 page), which covers services and fees, term/termination, confidentiality, limitation of liability, indemnification, and governing law. It has no provisions on equity, stock options, vesting, cliffs, or exercise windows, so I can't summarize those terms from the matter's documents.\n\nIf you intended to attach the ESOP (or a different matter is the right one), let me know and I'll re-pull. Otherwise, if you can share the plan document or point me to the correct matter, I'll ground the summary in it.",
+      "parent_step_id": null
+    }
+  ],
+  "metrics": {
+    "no_fabricated_esop_terms": true,
+    "read_noise_on_mismatch": false,
+    "task_noise_on_mismatch": true
+  },
+  "started_at": "2026-06-12T01:02:26.510122+00:00",
+  "finished_at": "2026-06-12T01:02:38.660257+00:00",
+  "duration_s": 12.2,
+  "tokens_in": 26931,
+  "tokens_out": 543,
+  "gateway_calls": 4,
+  "routed_model": "MiniMax-M3",
+  "cost_usd_estimate": 0.017462
+}

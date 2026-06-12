@@ -1,0 +1,14 @@
+data: {"id":"067a9bfad87014a2f048f79754945a7c","object":"chat.completion.chunk","created":1781229818,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","content":"<think>\nThe user is asking for the","reasoning":"The user is asking for the"}}],"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: {"id":"067a9bfad87014a2f048f79754945a7c","object":"chat.completion.chunk","created":1781229818,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","content":" current weather in Berlin. I need to use the get_weather tool to fetch this information.","reasoning":" current weather in Berlin. I need to use the get_weather tool to fetch this information."}}],"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: {"id":"067a9bfad87014a2f048f79754945a7c","object":"chat.completion.chunk","created":1781229818,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"id":"call_function_0lqzsu9i099o_1","type":"function","function":{"name":"get_weather","arguments":""},"index":0}]}}],"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: {"id":"067a9bfad87014a2f048f79754945a7c","object":"chat.completion.chunk","created":1781229818,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"function":{"arguments":"{\"city\": \"Berlin\"}"},"index":0}]}}],"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: {"id":"067a9bfad87014a2f048f79754945a7c","object":"chat.completion.chunk","created":1781229818,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","content":"\n</think>\n"},"finish_reason":"tool_calls"}],"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: {"id":"067a9bfad87014a2f048f79754945a7c","object":"chat.completion.chunk","created":1781229818,"model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":419,"completion_tokens":54,"total_tokens":473,"total_characters":0,"completion_tokens_details":{"reasoning_tokens":29},"prompt_tokens_details":{"cached_tokens":114}},"routed_inference_tier":4,"routed_provider":"minimax","service_tier":"standard"}
+
+data: [DONE]
+
