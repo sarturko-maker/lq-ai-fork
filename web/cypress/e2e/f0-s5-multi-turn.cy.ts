@@ -103,7 +103,12 @@ describe('F0-S5 — multi-turn conversation with composer upload', () => {
 
 		// 30s: a postgres crash-recovery window (the dev-box gotcha) can stall
 		// the login POST past the default — seen live during this slice's gate.
-		cy.contains('[role="tab"]', 'Agents', { timeout: 30_000 }).click();
+		// F1-S2: post-login lands in the cockpit (no tab bar) — the legacy
+		// agents tab keeps working at its URL. Wait out the redirect first:
+		// visiting mid-login CANCELS the in-flight POST (the old tab-click
+		// waited implicitly).
+		cy.url({ timeout: 30_000 }).should('not.include', '/login');
+		cy.visit('/lq-ai/agents');
 		cy.location('pathname').should('eq', '/lq-ai/agents');
 
 		cy.get('[data-testid="lq-ai-agents-matter-select"] option', { timeout: 15_000 }).contains(

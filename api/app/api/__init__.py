@@ -42,6 +42,7 @@ from app.api import (
     models,
     organization_profile,
     playbooks as playbooks_api,
+    practice_areas,
     projects,
     saved_prompts,
     skills,
@@ -117,6 +118,8 @@ api_router.include_router(autonomous.router, dependencies=_active)
 # F0-S2 (fork): deep-agent run records — kick-off + polled run/steps
 # reads for the ADR-F002 capability rail. Per-user isolated.
 api_router.include_router(agent_runs.router, dependencies=_active)
+# F1-S2 (fork, ADR-F002): practice areas — curated cockpit left rail.
+api_router.include_router(practice_areas.router, dependencies=_active)
 # M3-A2: Playbook executor — two endpoints under different prefixes
 # (``/playbooks/{id}/execute`` and ``/playbook-executions/{id}``) so
 # they live alongside the M3-A4 list/CRUD endpoints in the same module.

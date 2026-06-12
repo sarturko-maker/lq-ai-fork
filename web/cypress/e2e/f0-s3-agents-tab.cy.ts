@@ -40,7 +40,12 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 		cy.get('[data-testid="lq-ai-login-submit"]').click();
 
 		// Tab is registered and reachable from the shell.
-		cy.contains('[role="tab"]', 'Agents', { timeout: 15_000 }).click();
+		// F1-S2: post-login lands in the cockpit (no tab bar) — the legacy
+		// agents tab keeps working at its URL. Wait out the redirect first:
+		// visiting mid-login CANCELS the in-flight POST (the old tab-click
+		// waited implicitly).
+		cy.url({ timeout: 15_000 }).should('not.include', '/login');
+		cy.visit('/lq-ai/agents');
 		cy.location('pathname').should('eq', '/lq-ai/agents');
 		cy.get('[data-testid="lq-ai-agents-area-card"]').should('contain.text', 'Commercial');
 
@@ -88,10 +93,9 @@ describe('F0-S3 — Agents tab v0 (live deep agent)', () => {
 		// timeline (visibleSteps), so accept EITHER a step OR the answer —
 		// the comma selector is a union.
 		cy.get('[data-testid="lq-ai-agents-run"]').should('exist');
-		cy.get(
-			'[data-testid="lq-ai-agents-run"] .ag-steps li, [data-testid="lq-ai-agents-answer"]',
-			{ timeout: RUN_TIMEOUT_MS }
-		).should('have.length.at.least', 1);
+		cy.get('[data-testid="lq-ai-agents-run"] .ag-steps li, [data-testid="lq-ai-agents-answer"]', {
+			timeout: RUN_TIMEOUT_MS
+		}).should('have.length.at.least', 1);
 		cy.screenshot('f0-s3-2-agent-working', { capture: 'viewport' });
 
 		// No tool lighting is asserted: the matter is freshly created and

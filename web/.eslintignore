@@ -3,3 +3,8 @@ node_modules/
 build/
 static/
 package-lock.json
+
+# F1-S2: vendored shadcn-svelte component source (upstream-formatted;
+# provenance in NOTICES.md) — exempt from house lint/format.
+src/lib/components/ui/
+src/lib/utils.ts

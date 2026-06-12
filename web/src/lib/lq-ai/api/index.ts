@@ -27,3 +27,4 @@ export * as usersApi from './users';
 export * as enhancePromptApi from './enhancePrompt';
 export * as autonomousApi from './autonomous';
 export * as agentsApi from './agents';
+export * as practiceAreasApi from './practiceAreas';

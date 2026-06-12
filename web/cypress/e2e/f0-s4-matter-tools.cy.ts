@@ -113,7 +113,12 @@ describe('F0-S4 — matter-bound deep agent uses real document tools', () => {
 		cy.get('[data-testid="lq-ai-login-password"]').type(PASSWORD, { log: false });
 		cy.get('[data-testid="lq-ai-login-submit"]').click();
 
-		cy.contains('[role="tab"]', 'Agents', { timeout: 15_000 }).click();
+		// F1-S2: post-login lands in the cockpit (no tab bar) — the legacy
+		// agents tab keeps working at its URL. Wait out the redirect first:
+		// visiting mid-login CANCELS the in-flight POST (the old tab-click
+		// waited implicitly).
+		cy.url({ timeout: 15_000 }).should('not.include', '/login');
+		cy.visit('/lq-ai/agents');
 		cy.location('pathname').should('eq', '/lq-ai/agents');
 
 		// Await the option, then bind. The rail flips to the matter universe:

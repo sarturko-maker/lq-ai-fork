@@ -98,7 +98,11 @@ const mockReceipt = {
 	terminal_reason: null
 };
 
-const mockHaltedSession = { ...mockSession, status: 'halted' as const, halt_state: 'halted' as const };
+const mockHaltedSession = {
+	...mockSession,
+	status: 'halted' as const,
+	halt_state: 'halted' as const
+};
 
 const mockMemoryEntry = {
 	id: MEMORY_ID,
@@ -113,7 +117,11 @@ const mockMemoryEntry = {
 	updated_at: '2026-05-27T10:00:00Z'
 };
 
-const mockKeptMemoryEntry = { ...mockMemoryEntry, state: 'kept' as const, kept_at: '2026-05-27T10:01:00Z' };
+const mockKeptMemoryEntry = {
+	...mockMemoryEntry,
+	state: 'kept' as const,
+	kept_at: '2026-05-27T10:01:00Z'
+};
 
 const mockPrecedentEntry = {
 	id: PRECEDENT_ID,
@@ -198,8 +206,12 @@ function interceptBaseRequests(autonomousEnabled: boolean): void {
 		statusCode: 200,
 		body: { items: [], next_cursor: null }
 	}).as('listChats');
-	cy.intercept('GET', '**/api/v1/user-skills**', { statusCode: 200, body: [] }).as('listUserSkills');
-	cy.intercept('GET', '**/api/v1/saved-prompts**', { statusCode: 200, body: [] }).as('listSavedPrompts');
+	cy.intercept('GET', '**/api/v1/user-skills**', { statusCode: 200, body: [] }).as(
+		'listUserSkills'
+	);
+	cy.intercept('GET', '**/api/v1/saved-prompts**', { statusCode: 200, body: [] }).as(
+		'listSavedPrompts'
+	);
 	cy.intercept('GET', '**/api/v1/teams**', { statusCode: 200, body: [] }).as('listTeams');
 	cy.intercept('GET', '**/api/v1/skills**', { statusCode: 200, body: [] }).as('listSkills');
 	// Autonomous sub-pages also hit notifications for the unread badge.
@@ -217,7 +229,9 @@ describe('M4-C2 — Scenario 1 + 5: opt-in gating and opt-out', () => {
 	it('1a: Autonomous tab is NOT present when autonomous_enabled=false', () => {
 		interceptBaseRequests(false);
 
-		cy.visit('/lq-ai', {
+		// F1-S2: /lq-ai is the cockpit (no tab bar) — the TopTabBar lives on
+		// the (tools) routes; gating is asserted there.
+		cy.visit('/lq-ai/chats', {
 			onBeforeLoad: (win) => setAuthStorage(win, { autonomousEnabled: false })
 		});
 
@@ -392,9 +406,13 @@ describe('M4-C2 — Scenario 2: receipt view and halt', () => {
 			getCount += 1;
 			req.reply({
 				statusCode: 200,
-				body: getCount === 1
-					? { session: mockSession, receipt: mockReceipt }
-					: { session: mockHaltedSession, receipt: { ...mockReceipt, status: 'halted', halt_state: 'halted' } }
+				body:
+					getCount === 1
+						? { session: mockSession, receipt: mockReceipt }
+						: {
+								session: mockHaltedSession,
+								receipt: { ...mockReceipt, status: 'halted', halt_state: 'halted' }
+							}
 			});
 		}).as('getSessionDynamic');
 
