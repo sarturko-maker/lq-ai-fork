@@ -154,6 +154,17 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
 
 ## F1 — First practice area, end to end (ADR-F002)
 
+- ✓ **F1-S1 — run-lifecycle durability (2026-06-12, PR #43, ADR-F009)**: runs execute on the arq
+  worker at-most-once (`max_tries=1` verified at arq 0.26.3); lease + heartbeat + fenced writes
+  (migration 0052); orphan sweep settles dead runs FAILED (stale heartbeat 120s + abort; unclaimed
+  grace 1200s) — never auto-resumes; cancel endpoint (settle-first, idempotent); thread repair
+  (pinned-checkpoint-view synthetic ToolMessages — deepagents #3789 regression-tested); any terminal
+  status admits a follow-up; DELETE thread + daily checkpoint GC. Gate: api 2084/3 containerized;
+  web 778/778; 44-agent adversarial review — 35 confirmed findings ALL fixed in-slice; live kill -9
+  → sweep settle (+2m12s) → follow-up completed; cancel 0.53s; checkpoint rows 0 after delete
+  (docs/fork/evidence/f1-s1/). Deferred on record: Redis pub/sub live deltas, flood-brake outage
+  semantics, two-writers window (F1-S5).
+
 Outcome: one configurable practice area (suggest: Commercial) with one Deep Agent and one unit-of-work
 type ("Matter") usable for a real task (e.g. NDA review), with visible agent work in the UI — and
 **users LAND in a cockpit where they run their matters and programmes** (maintainer, 2026-06-11).
