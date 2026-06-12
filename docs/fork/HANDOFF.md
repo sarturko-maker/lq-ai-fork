@@ -67,7 +67,33 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-1. Next: **F1-S3 — `practice_areas` config vocabulary + per-area Deep
+1. **MAINTAINER DESIGN FEEDBACK on the live F1-S2 cockpit (2026-06-12,
+   reviewed it himself — "very good starting point", then four points):**
+   (a) **Responsive breakdown**: at half-screen width the content squashes
+   — side panels should COLLAPSE below a width threshold (paneforge
+   supports `collapsible`/`collapsedSize`; also consider an off-canvas
+   rail at a md breakpoint).
+   (b) **Design depth**: "good baseline, but very little design done —
+   contrasts don't particularly make sense, no shades, no smooth
+   scrolling etc. We need to review best practice." Read: the token
+   layer needs a real elevation/shade SCALE (not flat single-step
+   neutrals), a contrast pass with intent (hierarchy, not just WCAG
+   floors), scroll behavior/motion polish (smooth scrolling, scroll
+   anchoring), and a best-practice review BEFORE more pixels — go back
+   to the Harvey/Legora/Linear/Attio benchmark with screenshots, not
+   text fetches, this time.
+   (c) **Scope**: once the design iteration lands, "the entire interface
+   will need to change, not just the agents tab" — the legacy `--lq-*`
+   surfaces (11 tool tabs) migrate onto the design system progressively;
+   plan the rollout order rather than one big-bang restyle.
+   He explicitly said NOT to do this immediately — it was rolled here for
+   the next session. **Treat this as the next slice: F1-S2.1 — design
+   iteration v2** (responsive collapse + shade/contrast system + motion +
+   best-practice review, cockpit first), with the legacy-surface rollout
+   sliced separately after it. The standing rule
+   ("don't use black background, needs to be clean and professional,
+   cutting edge design") is unchanged. F1-S3 (below) follows.
+2. Then: **F1-S3 — `practice_areas` config vocabulary + per-area Deep
    Agent** (`docs/fork/plans/F1-replan.md` § F1-S3): EXTEND the 0053 table
    (area profile md, bound skills/playbooks/MCPs, default tier floor),
    `projects.practice_area_id` (nullable), audit rows gain
@@ -77,15 +103,15 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
    subagent specs (gateway bypass); subagent permissions REPLACE, tools
    OVERRIDE, middleware does not inherit — emit complete per-subagent
    declarations.
-2. The cockpit consumes S3 directly: `configured` becomes derived from
+3. The cockpit consumes S3 directly: `configured` becomes derived from
    real config; matters file via `projects.practice_area_id` (today ALL
    matters render under Commercial, presentation-only); the unit-of-work
    noun already renders from `unit_label`. Cockpit URL state uses area
    KEYS — never written to stored rows yet (MILESTONES pre-F1 guard
    honored; S3's FK makes filing real).
-3. Qualification hook: any model/profile pair an area config names needs a
+4. Qualification hook: any model/profile pair an area config names needs a
    row in `docs/fork/model-compatibility.md` (S9 gate).
-4. Multi-file slice: explore → written plan (docs/fork/plans/F1-S3-…) →
+5. Every slice is multi-file: explore → written plan (docs/fork/plans/…) →
    implement → full ADR-F005 gate.
 
 ## Carry-overs / review deferrals
