@@ -181,9 +181,7 @@ async def test_propose_precedent_fresh_inserts_count_one(
     assert result.data["observed_count"] == 1
     prec_id = uuid.UUID(result.data["precedent_id"])
     row = (
-        await db_session.execute(
-            select(PrecedentEntry).where(PrecedentEntry.id == prec_id)
-        )
+        await db_session.execute(select(PrecedentEntry).where(PrecedentEntry.id == prec_id))
     ).scalar_one()
     assert row.observed_count == 1
     assert row.source_session_id == sess.id
@@ -386,9 +384,7 @@ async def test_propose_precedent_never_touches_projects(
     from app.autonomous.enums import ToolIntent
     from app.autonomous.guard import guarded_tool_call
 
-    project = await _make_project(
-        db_session, user=user_a, context_md="original context"
-    )
+    project = await _make_project(db_session, user=user_a, context_md="original context")
     before = project.context_md
 
     projects_before = (
@@ -407,9 +403,7 @@ async def test_propose_precedent_never_touches_projects(
     projects_after = (
         await db_session.execute(select(func.count()).select_from(Project))
     ).scalar_one()
-    assert projects_after == projects_before, (
-        "propose_precedent must not create projects rows"
-    )
+    assert projects_after == projects_before, "propose_precedent must not create projects rows"
 
     await db_session.refresh(project)
     assert project.context_md == before, "propose_precedent must not modify context_md"
@@ -441,9 +435,7 @@ async def test_list_precedents_excludes_dismissed(
     user_a: User,
 ) -> None:
     active = await _make_precedent(db_session, user=user_a, summary="active")
-    dismissed = await _make_precedent(
-        db_session, user=user_a, summary="gone", dismissed=True
-    )
+    dismissed = await _make_precedent(db_session, user=user_a, summary="gone", dismissed=True)
 
     resp = await client.get("/api/v1/autonomous/precedents", headers=_bearer(user_a))
     assert resp.status_code == 200, resp.text
@@ -581,9 +573,7 @@ async def test_dismiss_precedent_hides_from_list(
     user_a: User,
 ) -> None:
     prec = await _make_precedent(db_session, user=user_a)
-    await client.post(
-        f"/api/v1/autonomous/precedents/{prec.id}/dismiss", headers=_bearer(user_a)
-    )
+    await client.post(f"/api/v1/autonomous/precedents/{prec.id}/dismiss", headers=_bearer(user_a))
 
     resp = await client.get("/api/v1/autonomous/precedents", headers=_bearer(user_a))
     body = resp.json()
@@ -637,9 +627,7 @@ async def test_dismiss_precedent_writes_audit_row(
     from app.models.audit import AuditLog
 
     prec = await _make_precedent(db_session, user=user_a)
-    await client.post(
-        f"/api/v1/autonomous/precedents/{prec.id}/dismiss", headers=_bearer(user_a)
-    )
+    await client.post(f"/api/v1/autonomous/precedents/{prec.id}/dismiss", headers=_bearer(user_a))
 
     rows = (
         (
@@ -834,19 +822,13 @@ async def test_list_proposals_isolation(
 ) -> None:
     prec_a = await _make_precedent(db_session, user=user_a)
     proj_a = await _make_project(db_session, user=user_a)
-    prop_a = await _make_proposal(
-        db_session, user=user_a, project=proj_a, precedent=prec_a
-    )
+    prop_a = await _make_proposal(db_session, user=user_a, project=proj_a, precedent=prec_a)
 
     prec_b = await _make_precedent(db_session, user=user_b)
     proj_b = await _make_project(db_session, user=user_b)
-    prop_b = await _make_proposal(
-        db_session, user=user_b, project=proj_b, precedent=prec_b
-    )
+    prop_b = await _make_proposal(db_session, user=user_b, project=proj_b, precedent=prec_b)
 
-    resp = await client.get(
-        "/api/v1/autonomous/project-context-proposals", headers=_bearer(user_a)
-    )
+    resp = await client.get("/api/v1/autonomous/project-context-proposals", headers=_bearer(user_a))
     body = resp.json()
     ids = {p["id"] for p in body["proposals"]}
     assert str(prop_a.id) in ids
@@ -1083,9 +1065,7 @@ async def test_accept_cross_user_returns_404(
 ) -> None:
     prec_b = await _make_precedent(db_session, user=user_b)
     proj_b = await _make_project(db_session, user=user_b)
-    prop_b = await _make_proposal(
-        db_session, user=user_b, project=proj_b, precedent=prec_b
-    )
+    prop_b = await _make_proposal(db_session, user=user_b, project=proj_b, precedent=prec_b)
 
     resp = await client.post(
         f"/api/v1/autonomous/project-context-proposals/{prop_b.id}/accept",
@@ -1104,9 +1084,7 @@ async def test_accept_writes_audit_row(
 
     prec = await _make_precedent(db_session, user=user_a)
     project = await _make_project(db_session, user=user_a)
-    proposal = await _make_proposal(
-        db_session, user=user_a, project=project, precedent=prec
-    )
+    proposal = await _make_proposal(db_session, user=user_a, project=project, precedent=prec)
 
     await client.post(
         f"/api/v1/autonomous/project-context-proposals/{proposal.id}/accept",
@@ -1135,12 +1113,8 @@ async def test_accept_unauth_returns_401(
 ) -> None:
     prec = await _make_precedent(db_session, user=user_a)
     project = await _make_project(db_session, user=user_a)
-    proposal = await _make_proposal(
-        db_session, user=user_a, project=project, precedent=prec
-    )
-    resp = await client.post(
-        f"/api/v1/autonomous/project-context-proposals/{proposal.id}/accept"
-    )
+    proposal = await _make_proposal(db_session, user=user_a, project=project, precedent=prec)
+    resp = await client.post(f"/api/v1/autonomous/project-context-proposals/{proposal.id}/accept")
     assert resp.status_code == 401, resp.text
 
 
@@ -1187,9 +1161,7 @@ async def test_reject_cross_user_returns_404(
 ) -> None:
     prec_b = await _make_precedent(db_session, user=user_b)
     proj_b = await _make_project(db_session, user=user_b)
-    prop_b = await _make_proposal(
-        db_session, user=user_b, project=proj_b, precedent=prec_b
-    )
+    prop_b = await _make_proposal(db_session, user=user_b, project=proj_b, precedent=prec_b)
 
     resp = await client.post(
         f"/api/v1/autonomous/project-context-proposals/{prop_b.id}/reject",
@@ -1240,9 +1212,7 @@ async def test_reject_writes_audit_row(
 
     prec = await _make_precedent(db_session, user=user_a)
     project = await _make_project(db_session, user=user_a)
-    proposal = await _make_proposal(
-        db_session, user=user_a, project=project, precedent=prec
-    )
+    proposal = await _make_proposal(db_session, user=user_a, project=project, precedent=prec)
 
     await client.post(
         f"/api/v1/autonomous/project-context-proposals/{proposal.id}/reject",
@@ -1271,12 +1241,8 @@ async def test_reject_unauth_returns_401(
 ) -> None:
     prec = await _make_precedent(db_session, user=user_a)
     project = await _make_project(db_session, user=user_a)
-    proposal = await _make_proposal(
-        db_session, user=user_a, project=project, precedent=prec
-    )
-    resp = await client.post(
-        f"/api/v1/autonomous/project-context-proposals/{proposal.id}/reject"
-    )
+    proposal = await _make_proposal(db_session, user=user_a, project=project, precedent=prec)
+    resp = await client.post(f"/api/v1/autonomous/project-context-proposals/{proposal.id}/reject")
     assert resp.status_code == 401, resp.text
 
 
@@ -1303,20 +1269,14 @@ def test_openapi_precedent_list_response_schema() -> None:
     get_op = schema["paths"]["/api/v1/autonomous/precedents"]["get"]
     content = get_op["responses"]["200"]["content"]["application/json"]["schema"]
     ref = content.get("$ref", "")
-    assert "PrecedentEntryListResponse" in ref or "entries" in content.get(
-        "properties", {}
-    )
+    assert "PrecedentEntryListResponse" in ref or "entries" in content.get("properties", {})
 
 
 @pytest.mark.unit
 def test_openapi_promote_request_and_response_schema() -> None:
     schema = app.openapi()
-    post_op = schema["paths"]["/api/v1/autonomous/precedents/{precedent_id}/promote"][
-        "post"
-    ]
-    body_ref = post_op["requestBody"]["content"]["application/json"]["schema"].get(
-        "$ref", ""
-    )
+    post_op = schema["paths"]["/api/v1/autonomous/precedents/{precedent_id}/promote"]["post"]
+    body_ref = post_op["requestBody"]["content"]["application/json"]["schema"].get("$ref", "")
     assert "PromotePrecedentRequest" in body_ref
     resp = post_op["responses"]
     assert "201" in resp
@@ -1327,9 +1287,7 @@ def test_openapi_promote_request_and_response_schema() -> None:
 @pytest.mark.unit
 def test_openapi_proposal_list_filters_documented() -> None:
     schema = app.openapi()
-    params = schema["paths"]["/api/v1/autonomous/project-context-proposals"]["get"][
-        "parameters"
-    ]
+    params = schema["paths"]["/api/v1/autonomous/project-context-proposals"]["get"]["parameters"]
     names = {p["name"] for p in params}
     assert "state" in names
     assert "project_id" in names

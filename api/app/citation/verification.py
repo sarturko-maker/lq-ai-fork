@@ -172,9 +172,7 @@ def verify_exact_match(
         return _MISS
 
     if (
-        document.normalized_content[
-            candidate.source_offset_start : candidate.source_offset_end
-        ]
+        document.normalized_content[candidate.source_offset_start : candidate.source_offset_end]
         != quote
     ):
         return _MISS
@@ -337,9 +335,7 @@ def _source_chunk_with_context(
 
     content = document.normalized_content
     doc_len = len(content)
-    if not _slice_in_range(
-        candidate.source_offset_start, candidate.source_offset_end, doc_len
-    ):
+    if not _slice_in_range(candidate.source_offset_start, candidate.source_offset_end, doc_len):
         return None
     start = max(0, candidate.source_offset_start - _CONTEXT_WINDOW_CHARS)
     end = min(doc_len, candidate.source_offset_end + _CONTEXT_WINDOW_CHARS)
@@ -510,9 +506,7 @@ async def verify_ensemble(
         partial = any_dissent or any_partial
 
     mean_confidence = (
-        sum(v.confidence or 0.0 for v in verified_verdicts) / n_verified
-        if n_verified
-        else 0.0
+        sum(v.confidence or 0.0 for v in verified_verdicts) / n_verified if n_verified else 0.0
     )
 
     return VerificationResult(

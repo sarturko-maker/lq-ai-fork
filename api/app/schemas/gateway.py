@@ -161,9 +161,7 @@ class ChatCompletionRequest(BaseModel):
     pre-existing wire shape exactly. Capped server-side at the same
     bound as the request schema's ``file_ids``."""
 
-    lq_ai_inline_skills: list[InlineSkillRef] = Field(
-        default_factory=list, max_length=16
-    )
+    lq_ai_inline_skills: list[InlineSkillRef] = Field(default_factory=list, max_length=16)
     """Wave D.2 Task 3.0: inline-body skills the gateway assembles
     without a catalogue fetch. Mirrors
     :attr:`gateway.app.providers.openai_schema.ChatCompletionRequest.lq_ai_inline_skills`.

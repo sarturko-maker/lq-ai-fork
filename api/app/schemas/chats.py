@@ -216,9 +216,7 @@ class Cursor(BaseModel):
             {"created_at": self.created_at.isoformat(), "id": str(self.id)},
             separators=(",", ":"),
         )
-        return (
-            base64.urlsafe_b64encode(body.encode("utf-8")).rstrip(b"=").decode("ascii")
-        )
+        return base64.urlsafe_b64encode(body.encode("utf-8")).rstrip(b"=").decode("ascii")
 
     @classmethod
     def decode(cls, value: str) -> Cursor:
@@ -338,9 +336,7 @@ class AttachedSkillRef(BaseModel):
                 "attached_skill must set exactly one of 'slug' or 'inline_body', not both"
             )
         if not has_slug and not has_inline:
-            raise ValueError(
-                "attached_skill must set exactly one of 'slug' or 'inline_body'"
-            )
+            raise ValueError("attached_skill must set exactly one of 'slug' or 'inline_body'")
         return self
 
 
@@ -406,9 +402,7 @@ class MessageCreateRequest(BaseModel):
     text. To attach document context for a turn, use the separate
     :attr:`file_ids` channel below, not ``skill_inputs``."""
 
-    file_ids: list[str] = Field(
-        default_factory=list, max_length=MESSAGE_FILE_IDS_MAX_LEN
-    )
+    file_ids: list[str] = Field(default_factory=list, max_length=MESSAGE_FILE_IDS_MAX_LEN)
     """Donna: caller-owned file UUIDs supplying ephemeral, per-message
     document context for this one chat turn. Distinct from KB attach
     (which is project-scoped and persistent): these ids bind document

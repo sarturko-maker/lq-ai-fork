@@ -169,9 +169,7 @@ async def test_notification_user_isolation(db_session: AsyncSession) -> None:
     alice_rows = (
         (
             await db_session.execute(
-                select(AutonomousNotification).where(
-                    AutonomousNotification.user_id == alice.id
-                )
+                select(AutonomousNotification).where(AutonomousNotification.user_id == alice.id)
             )
         )
         .scalars()
@@ -180,9 +178,7 @@ async def test_notification_user_isolation(db_session: AsyncSession) -> None:
     bob_rows = (
         (
             await db_session.execute(
-                select(AutonomousNotification).where(
-                    AutonomousNotification.user_id == bob.id
-                )
+                select(AutonomousNotification).where(AutonomousNotification.user_id == bob.id)
             )
         )
         .scalars()
@@ -304,9 +300,7 @@ async def test_notification_cascade_on_session_delete(db_session: AsyncSession) 
     remaining = (
         (
             await db_session.execute(
-                select(AutonomousNotification).where(
-                    AutonomousNotification.id == notif_id
-                )
+                select(AutonomousNotification).where(AutonomousNotification.id == notif_id)
             )
         )
         .scalars()
@@ -338,9 +332,7 @@ async def test_notification_cascade_on_user_delete(db_session: AsyncSession) -> 
     remaining = (
         (
             await db_session.execute(
-                select(AutonomousNotification).where(
-                    AutonomousNotification.id == notif_id
-                )
+                select(AutonomousNotification).where(AutonomousNotification.id == notif_id)
             )
         )
         .scalars()

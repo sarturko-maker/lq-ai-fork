@@ -84,9 +84,7 @@ async def ensure_first_run_admin(db: AsyncSession) -> str | None:
     # than email so an operator who renamed the admin (via DB migration or
     # manual update) doesn't trigger a second bootstrap.
     existing = await db.execute(
-        select(User.id)
-        .where(User.is_admin.is_(True), User.deleted_at.is_(None))
-        .limit(1)
+        select(User.id).where(User.is_admin.is_(True), User.deleted_at.is_(None)).limit(1)
     )
     if existing.scalar_one_or_none() is not None:
         log.info("First-run admin bootstrap: admin user already exists; skipping.")

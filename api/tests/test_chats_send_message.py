@@ -402,9 +402,7 @@ async def test_send_message_gateway_401_returns_503_with_no_leak(
     """The user must not see 'wrong gateway key' — operator misconfig."""
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
-        return_value=httpx.Response(
-            401, json={"error": {"code": "unauthorized", "message": "x"}}
-        )
+        return_value=httpx.Response(401, json={"error": {"code": "unauthorized", "message": "x"}})
     )
     token = _bearer_for(db_user)
 
@@ -652,9 +650,7 @@ async def test_send_message_streaming_pre_frame_error_emits_error_frame(
     The HTTP status stays 200 (SSE convention: errors are in-band).
     """
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
-        return_value=httpx.Response(
-            400, json={"error": {"code": "invalid_model", "message": "no"}}
-        )
+        return_value=httpx.Response(400, json={"error": {"code": "invalid_model", "message": "no"}})
     )
     token = _bearer_for(db_user)
 
@@ -706,9 +702,7 @@ async def test_send_message_does_not_write_inference_routing_log_on_backend(
     token = _bearer_for(db_user)
 
     # Snapshot row count before.
-    rows_before = await db_session.execute(
-        text("SELECT count(*) FROM inference_routing_log")
-    )
+    rows_before = await db_session.execute(text("SELECT count(*) FROM inference_routing_log"))
     count_before = rows_before.scalar_one()
 
     response = await client.post(
@@ -718,9 +712,7 @@ async def test_send_message_does_not_write_inference_routing_log_on_backend(
     )
     assert response.status_code == 200
 
-    rows_after = await db_session.execute(
-        text("SELECT count(*) FROM inference_routing_log")
-    )
+    rows_after = await db_session.execute(text("SELECT count(*) FROM inference_routing_log"))
     count_after = rows_after.scalar_one()
     assert count_after == count_before, (
         "C3 must not write to inference_routing_log — the gateway does (B4)."

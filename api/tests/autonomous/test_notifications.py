@@ -174,9 +174,7 @@ async def test_notify_at_delivery_writes_in_app_row(
     all_rows = (
         (
             await db_session.execute(
-                select(AutonomousNotification).where(
-                    AutonomousNotification.session_id == sess.id
-                )
+                select(AutonomousNotification).where(AutonomousNotification.session_id == sess.id)
             )
         )
         .scalars()
@@ -371,9 +369,7 @@ async def test_send_notification_email_smtp_timeout_degrades_to_noop(
 
     monkeypatch.setattr("app.autonomous.notify_email.smtplib.SMTP", _HangSMTP)
 
-    sent = await send_notification_email(
-        to_addr="x@example.com", subject="hi", body="body"
-    )
+    sent = await send_notification_email(to_addr="x@example.com", subject="hi", body="body")
     assert sent is False
     # The configured timeout was forwarded to the SMTP constructor.
     assert captured["timeout"] == 7
@@ -626,9 +622,7 @@ async def test_list_notifications_newest_first(
     resp = await client.get("/api/v1/autonomous/notifications", headers=_bearer(user_a))
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    created_ats = [
-        _dt.datetime.fromisoformat(n["created_at"]) for n in body["notifications"]
-    ]
+    created_ats = [_dt.datetime.fromisoformat(n["created_at"]) for n in body["notifications"]]
     for i in range(len(created_ats) - 1):
         assert created_ats[i] >= created_ats[i + 1]
 

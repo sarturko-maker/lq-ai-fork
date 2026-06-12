@@ -247,9 +247,7 @@ def _run_pymupdf(pdf_bytes: bytes) -> tuple[str, list[PageSpan], str]:
     try:
         import fitz  # PyMuPDF
     except ImportError as exc:  # pragma: no cover — install-time error
-        raise ParserError(
-            "PyMuPDF (fitz) is not installed; document pipeline cannot run"
-        ) from exc
+        raise ParserError("PyMuPDF (fitz) is not installed; document pipeline cannot run") from exc
 
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")

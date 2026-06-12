@@ -90,9 +90,7 @@ async def privileged_project(db_session: AsyncSession, regular_user: User) -> Pr
 
 
 @pytest_asyncio.fixture
-async def non_privileged_project(
-    db_session: AsyncSession, regular_user: User
-) -> Project:
+async def non_privileged_project(db_session: AsyncSession, regular_user: User) -> Project:
     project = Project(
         owner_id=regular_user.id,
         name="Internal — research",
@@ -133,11 +131,7 @@ async def test_audit_action_marks_privileged_when_project_is_privileged(
     await db_session.flush()
 
     rows = (
-        (
-            await db_session.execute(
-                select(AuditLog).where(AuditLog.user_id == regular_user.id)
-            )
-        )
+        (await db_session.execute(select(AuditLog).where(AuditLog.user_id == regular_user.id)))
         .scalars()
         .all()
     )
@@ -166,11 +160,7 @@ async def test_audit_action_unmarked_when_project_is_not_privileged(
     await db_session.flush()
 
     rows = (
-        (
-            await db_session.execute(
-                select(AuditLog).where(AuditLog.user_id == regular_user.id)
-            )
-        )
+        (await db_session.execute(select(AuditLog).where(AuditLog.user_id == regular_user.id)))
         .scalars()
         .all()
     )
@@ -195,11 +185,7 @@ async def test_audit_action_unmarked_with_no_project(
     await db_session.flush()
 
     rows = (
-        (
-            await db_session.execute(
-                select(AuditLog).where(AuditLog.user_id == regular_user.id)
-            )
-        )
+        (await db_session.execute(select(AuditLog).where(AuditLog.user_id == regular_user.id)))
         .scalars()
         .all()
     )

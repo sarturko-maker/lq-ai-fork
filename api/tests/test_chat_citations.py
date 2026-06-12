@@ -186,9 +186,7 @@ async def source_document(db_session: AsyncSession, source_file: FileModel) -> D
 
 
 @pytest_asyncio.fixture
-async def source_chunk(
-    db_session: AsyncSession, source_document: Document
-) -> DocumentChunk:
+async def source_chunk(db_session: AsyncSession, source_document: Document) -> DocumentChunk:
     chunk = DocumentChunk(
         document_id=source_document.id,
         chunk_index=0,
@@ -291,9 +289,7 @@ async def test_chat_send_persists_verified_citation_from_verbatim_quote(
     with patch(
         "app.api.chats.hybrid_search",
         new=AsyncMock(
-            return_value=[
-                _hybrid_result_for(source_chunk, source_document, source_file)
-            ]
+            return_value=[_hybrid_result_for(source_chunk, source_document, source_file)]
         ),
     ):
         response = await client.post(
@@ -308,9 +304,7 @@ async def test_chat_send_persists_verified_citation_from_verbatim_quote(
     rows = (
         (
             await db_session.execute(
-                select(MessageCitation).where(
-                    MessageCitation.source_file_id == source_file.id
-                )
+                select(MessageCitation).where(MessageCitation.source_file_id == source_file.id)
             )
         )
         .scalars()
@@ -354,9 +348,7 @@ async def test_chat_send_whitespace_drift_quote_passes_tolerant_match(
     """
 
     body = "the employee  shall not  engage in any competing  business for two years."
-    drifted_quote = (
-        "the employee shall not engage in any competing business for two years."
-    )
+    drifted_quote = "the employee shall not engage in any competing business for two years."
 
     # Fresh fixtures so the chunk content has the whitespace-drift body
     # (avoids changing CHUNK_BODY used by other tests).
@@ -417,9 +409,7 @@ async def test_chat_send_whitespace_drift_quote_passes_tolerant_match(
     rows = (
         (
             await db_session.execute(
-                select(MessageCitation).where(
-                    MessageCitation.source_file_id == file_row.id
-                )
+                select(MessageCitation).where(MessageCitation.source_file_id == file_row.id)
             )
         )
         .scalars()
@@ -464,9 +454,7 @@ async def test_chat_send_paraphrased_quote_writes_no_citation(
     with patch(
         "app.api.chats.hybrid_search",
         new=AsyncMock(
-            return_value=[
-                _hybrid_result_for(source_chunk, source_document, source_file)
-            ]
+            return_value=[_hybrid_result_for(source_chunk, source_document, source_file)]
         ),
     ):
         response = await client.post(
@@ -508,9 +496,7 @@ async def test_chat_send_unmarked_quote_writes_no_citation(
     with patch(
         "app.api.chats.hybrid_search",
         new=AsyncMock(
-            return_value=[
-                _hybrid_result_for(source_chunk, source_document, source_file)
-            ]
+            return_value=[_hybrid_result_for(source_chunk, source_document, source_file)]
         ),
     ):
         response = await client.post(
@@ -552,9 +538,7 @@ async def test_get_citations_endpoint_returns_persisted_rows(
     with patch(
         "app.api.chats.hybrid_search",
         new=AsyncMock(
-            return_value=[
-                _hybrid_result_for(source_chunk, source_document, source_file)
-            ]
+            return_value=[_hybrid_result_for(source_chunk, source_document, source_file)]
         ),
     ):
         send = await client.post(
@@ -609,9 +593,7 @@ async def test_chat_send_out_of_range_source_writes_no_citation(
     with patch(
         "app.api.chats.hybrid_search",
         new=AsyncMock(
-            return_value=[
-                _hybrid_result_for(source_chunk, source_document, source_file)
-            ]
+            return_value=[_hybrid_result_for(source_chunk, source_document, source_file)]
         ),
     ):
         response = await client.post(
@@ -673,18 +655,14 @@ async def test_chat_send_paraphrased_quote_verified_by_stage_3_judge(
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         side_effect=[
             httpx.Response(200, json=_success_payload(assistant_text)),
-            httpx.Response(
-                200, json=_judge_response_payload(verdict="yes", confidence="high")
-            ),
+            httpx.Response(200, json=_judge_response_payload(verdict="yes", confidence="high")),
         ]
     )
 
     with patch(
         "app.api.chats.hybrid_search",
         new=AsyncMock(
-            return_value=[
-                _hybrid_result_for(source_chunk, source_document, source_file)
-            ]
+            return_value=[_hybrid_result_for(source_chunk, source_document, source_file)]
         ),
     ):
         response = await client.post(
@@ -698,9 +676,7 @@ async def test_chat_send_paraphrased_quote_verified_by_stage_3_judge(
     rows = (
         (
             await db_session.execute(
-                select(MessageCitation).where(
-                    MessageCitation.source_file_id == source_file.id
-                )
+                select(MessageCitation).where(MessageCitation.source_file_id == source_file.id)
             )
         )
         .scalars()
@@ -745,9 +721,7 @@ async def test_chat_send_partial_verdict_persists_with_partial_true(
     with patch(
         "app.api.chats.hybrid_search",
         new=AsyncMock(
-            return_value=[
-                _hybrid_result_for(source_chunk, source_document, source_file)
-            ]
+            return_value=[_hybrid_result_for(source_chunk, source_document, source_file)]
         ),
     ):
         response = await client.post(
@@ -795,9 +769,7 @@ async def test_get_citations_endpoint_exposes_partial_flag(
     with patch(
         "app.api.chats.hybrid_search",
         new=AsyncMock(
-            return_value=[
-                _hybrid_result_for(source_chunk, source_document, source_file)
-            ]
+            return_value=[_hybrid_result_for(source_chunk, source_document, source_file)]
         ),
     ):
         send = await client.post(
@@ -840,18 +812,14 @@ async def test_chat_send_judge_says_no_writes_no_citation(
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         side_effect=[
             httpx.Response(200, json=_success_payload(assistant_text)),
-            httpx.Response(
-                200, json=_judge_response_payload(verdict="no", confidence="high")
-            ),
+            httpx.Response(200, json=_judge_response_payload(verdict="no", confidence="high")),
         ]
     )
 
     with patch(
         "app.api.chats.hybrid_search",
         new=AsyncMock(
-            return_value=[
-                _hybrid_result_for(source_chunk, source_document, source_file)
-            ]
+            return_value=[_hybrid_result_for(source_chunk, source_document, source_file)]
         ),
     ):
         response = await client.post(
@@ -899,9 +867,7 @@ async def test_chat_send_marks_retrieval_context_skip_anonymization(
 
     import json as _stdlib_json
 
-    assistant_text = (
-        '"the employee shall not engage in any competing business" (Source: [1])'
-    )
+    assistant_text = '"the employee shall not engage in any competing business" (Source: [1])'
 
     captured_requests: list[dict[str, Any]] = []
 
@@ -914,9 +880,7 @@ async def test_chat_send_marks_retrieval_context_skip_anonymization(
     with patch(
         "app.api.chats.hybrid_search",
         new=AsyncMock(
-            return_value=[
-                _hybrid_result_for(source_chunk, source_document, source_file)
-            ]
+            return_value=[_hybrid_result_for(source_chunk, source_document, source_file)]
         ),
     ):
         response = await client.post(
@@ -933,9 +897,7 @@ async def test_chat_send_marks_retrieval_context_skip_anonymization(
     # the first messages-array entry. Confirm it carries the skip
     # marker.
     system_msgs = [m for m in sent["messages"] if m.get("role") == "system"]
-    assert len(system_msgs) >= 1, (
-        "expected at least one system message (retrieval context)"
-    )
+    assert len(system_msgs) >= 1, "expected at least one system message (retrieval context)"
     retrieval_msg = system_msgs[0]
     assert "Retrieved context" in retrieval_msg.get("content", ""), (
         "first system message should be the retrieval context block"
@@ -960,9 +922,7 @@ async def test_chat_send_marks_retrieval_context_skip_anonymization(
 
 
 @pytest_asyncio.fixture
-async def privileged_project_for_owner(
-    db_session: AsyncSession, owner_user: User
-) -> Project:
+async def privileged_project_for_owner(db_session: AsyncSession, owner_user: User) -> Project:
     """A privileged project — anonymization middleware skips its chats.
 
     The CHECK ``chk_projects_privileged_implies_tier`` requires a
@@ -1053,7 +1013,9 @@ async def test_chat_send_privileged_project_full_audit_trail(
 
     quote = "the employee shall not engage in any competing business"
     assert quote in source_chunk.content
-    assistant_text = f'Per the agreement, "{quote}" (Source: [1]). This is a privileged matter context.'
+    assistant_text = (
+        f'Per the agreement, "{quote}" (Source: [1]). This is a privileged matter context.'
+    )
 
     captured_requests: list[dict[str, Any]] = []
 
@@ -1066,9 +1028,7 @@ async def test_chat_send_privileged_project_full_audit_trail(
     with patch(
         "app.api.chats.hybrid_search",
         new=AsyncMock(
-            return_value=[
-                _hybrid_result_for(source_chunk, source_document, source_file)
-            ]
+            return_value=[_hybrid_result_for(source_chunk, source_document, source_file)]
         ),
     ):
         response = await client.post(
@@ -1105,9 +1065,7 @@ async def test_chat_send_privileged_project_full_audit_trail(
         .scalars()
         .all()
     )
-    assert len(audit_rows) == 1, (
-        f"expected one chat.message_sent row, got {len(audit_rows)}"
-    )
+    assert len(audit_rows) == 1, f"expected one chat.message_sent row, got {len(audit_rows)}"
     row = audit_rows[0]
     assert row.privilege_marked is True, "privileged-project actions must be marked"
     assert row.privilege_basis is not None
@@ -1124,9 +1082,7 @@ async def test_chat_send_privileged_project_full_audit_trail(
     citation_rows = (
         (
             await db_session.execute(
-                select(MessageCitation).where(
-                    MessageCitation.source_file_id == source_file.id
-                )
+                select(MessageCitation).where(MessageCitation.source_file_id == source_file.id)
             )
         )
         .scalars()

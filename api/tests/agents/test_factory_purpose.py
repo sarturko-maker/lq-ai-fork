@@ -92,9 +92,7 @@ async def test_unbound_run_sends_no_matter_envelope() -> None:
 
 
 async def test_matter_envelope_lands_in_request_body() -> None:
-    request = await _invoke_and_capture(
-        project_minimum_inference_tier=4, privileged=True
-    )
+    request = await _invoke_and_capture(project_minimum_inference_tier=4, privileged=True)
     body = json.loads(request.content)
     assert body["lq_ai_project_minimum_inference_tier"] == 4
     assert body["lq_ai_privileged"] is True

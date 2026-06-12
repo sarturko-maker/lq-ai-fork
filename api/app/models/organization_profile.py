@@ -45,9 +45,7 @@ class OrganizationProfile(Base):
         primary_key=True,
         server_default=text("gen_random_uuid()"),
     )
-    content_md: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''")
-    )
+    content_md: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -149,16 +149,10 @@ async def test_propose_memory_always_writes_proposed(
 
     # Find a phase that grants propose_memory.
     granting_phase = next(
-        (
-            p
-            for p, grants in PHASE_GRANTS.items()
-            if ToolIntent.propose_memory in grants
-        ),
+        (p for p, grants in PHASE_GRANTS.items() if ToolIntent.propose_memory in grants),
         None,
     )
-    assert granting_phase is not None, (
-        "propose_memory must be granted in at least one phase"
-    )
+    assert granting_phase is not None, "propose_memory must be granted in at least one phase"
     sess.current_phase = str(granting_phase)
     await db_session.flush()
 
@@ -175,9 +169,7 @@ async def test_propose_memory_always_writes_proposed(
 
     memory_id = uuid.UUID(result.data["memory_id"])
     row = (
-        await db_session.execute(
-            select(AutonomousMemory).where(AutonomousMemory.id == memory_id)
-        )
+        await db_session.execute(select(AutonomousMemory).where(AutonomousMemory.id == memory_id))
     ).scalar_one()
 
     assert row.state == "proposed", (
@@ -215,9 +207,7 @@ async def test_list_memory_excludes_soft_deleted(
 ) -> None:
     """Soft-deleted entries are excluded from list results."""
     _kept = await _make_memory(db_session, user=user_a, state="kept")
-    _deleted = await _make_memory(
-        db_session, user=user_a, state="proposed", deleted=True
-    )
+    _deleted = await _make_memory(db_session, user=user_a, state="proposed", deleted=True)
 
     resp = await client.get("/api/v1/autonomous/memory", headers=_bearer(user_a))
     assert resp.status_code == 200, resp.text
@@ -485,9 +475,7 @@ async def test_keep_edit_on_keep_overrides_content(
     user_a: User,
 ) -> None:
     """Edit-on-keep: providing content in the body overwrites the entry's text."""
-    mem = await _make_memory(
-        db_session, user=user_a, state="proposed", content="original"
-    )
+    mem = await _make_memory(db_session, user=user_a, state="proposed", content="original")
 
     resp = await client.post(
         f"/api/v1/autonomous/memory/{mem.id}/keep",
@@ -510,9 +498,7 @@ async def test_keep_no_body_preserves_content(
     user_a: User,
 ) -> None:
     """Keep without body leaves content unchanged."""
-    mem = await _make_memory(
-        db_session, user=user_a, state="proposed", content="preserve me"
-    )
+    mem = await _make_memory(db_session, user=user_a, state="proposed", content="preserve me")
 
     resp = await client.post(
         f"/api/v1/autonomous/memory/{mem.id}/keep",
@@ -530,9 +516,7 @@ async def test_keep_null_content_in_body_preserves_content(
     user_a: User,
 ) -> None:
     """Keep with content=null in body leaves content unchanged."""
-    mem = await _make_memory(
-        db_session, user=user_a, state="proposed", content="preserve me"
-    )
+    mem = await _make_memory(db_session, user=user_a, state="proposed", content="preserve me")
 
     resp = await client.post(
         f"/api/v1/autonomous/memory/{mem.id}/keep",
@@ -934,9 +918,7 @@ async def test_load_kept_memory_returns_only_kept_non_deleted(
     kept = await _make_memory(db_session, user=user_a, state="kept")
     _proposed = await _make_memory(db_session, user=user_a, state="proposed")
     _dismissed = await _make_memory(db_session, user=user_a, state="dismissed")
-    _kept_deleted = await _make_memory(
-        db_session, user=user_a, state="kept", deleted=True
-    )
+    _kept_deleted = await _make_memory(db_session, user=user_a, state="kept", deleted=True)
 
     result = await load_kept_memory(db_session, user_a.id)
     result_ids = {r.id for r in result}
@@ -944,9 +926,7 @@ async def test_load_kept_memory_returns_only_kept_non_deleted(
     assert kept.id in result_ids, "kept non-deleted entry must be included"
     assert _proposed.id not in result_ids, "proposed entry must be excluded"
     assert _dismissed.id not in result_ids, "dismissed entry must be excluded"
-    assert _kept_deleted.id not in result_ids, (
-        "soft-deleted kept entry must be excluded"
-    )
+    assert _kept_deleted.id not in result_ids, "soft-deleted kept entry must be excluded"
 
 
 @pytest.mark.integration
@@ -1005,9 +985,7 @@ def test_openapi_memory_list_response_schema() -> None:
     resp_200 = get_op["responses"]["200"]
     content = resp_200["content"]["application/json"]["schema"]
     ref = content.get("$ref", "")
-    assert "AutonomousMemoryListResponse" in ref or "entries" in content.get(
-        "properties", {}
-    )
+    assert "AutonomousMemoryListResponse" in ref or "entries" in content.get("properties", {})
 
 
 @pytest.mark.unit

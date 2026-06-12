@@ -35,9 +35,7 @@ pytestmark = pytest.mark.integration
 
 @pytest_asyncio.fixture
 async def commit_factory(test_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(
-        bind=test_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    return async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
 
 
 @pytest_asyncio.fixture
@@ -93,9 +91,7 @@ async def _age_row(
         await db.commit()
 
 
-async def _row(
-    factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID
-) -> AgentRun:
+async def _row(factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID) -> AgentRun:
     async with factory() as db:
         run = await db.get(AgentRun, run_id)
         assert run is not None
@@ -103,9 +99,7 @@ async def _row(
 
 
 async def _sweep(factory: async_sessionmaker[AsyncSession]) -> dict[str, Any]:
-    return await run_orphan_sweep(
-        factory, orphan_after_seconds=120.0, claim_grace_seconds=300.0
-    )
+    return await run_orphan_sweep(factory, orphan_after_seconds=120.0, claim_grace_seconds=300.0)
 
 
 # ---------------------------------------------------------------------------
@@ -119,18 +113,14 @@ async def test_sweep_settles_stale_heartbeat_run_with_audit(
 ) -> None:
     run_id = await make_run()
     assert await claim_run(commit_factory, run_id, claimed_by="dead-worker") is not None
-    await _age_row(
-        commit_factory, run_id, set_sql="heartbeat_at = now() - interval '10 minutes'"
-    )
+    await _age_row(commit_factory, run_id, set_sql="heartbeat_at = now() - interval '10 minutes'")
 
     result = await _sweep(commit_factory)
 
     assert result["swept"] == 1
     row = await _row(commit_factory, run_id)
     assert row.status == AgentRunStatus.failed.value
-    assert (
-        row.error == "orphaned: worker heartbeat stale"
-    )  # constant — no worker identity
+    assert row.error == "orphaned: worker heartbeat stale"  # constant — no worker identity
     assert row.finished_at is not None
     async with commit_factory() as db:
         audit = (
@@ -141,12 +131,8 @@ async def test_sweep_settles_stale_heartbeat_run_with_audit(
                 )
             )
         ).scalar_one()
-        assert (
-            audit.details is not None and audit.details["reason"] == "stale_heartbeat"
-        )
-        assert (
-            audit.details["claimed_by"] == "dead-worker"
-        )  # ops identity lives HERE, not in error
+        assert audit.details is not None and audit.details["reason"] == "stale_heartbeat"
+        assert audit.details["claimed_by"] == "dead-worker"  # ops identity lives HERE, not in error
         await db.execute(delete(AuditLog).where(AuditLog.id == audit.id))
         await db.commit()
 
@@ -171,9 +157,7 @@ async def test_sweep_settles_unclaimed_run_past_grace(
     """Lost enqueue / worker death before claim / pre-F1-S1 legacy rows:
     no heartbeat exists to read, so age-since-start decides."""
     run_id = await make_run()
-    await _age_row(
-        commit_factory, run_id, set_sql="started_at = now() - interval '10 minutes'"
-    )
+    await _age_row(commit_factory, run_id, set_sql="started_at = now() - interval '10 minutes'")
 
     result = await _sweep(commit_factory)
 
@@ -237,9 +221,7 @@ async def test_job_claims_then_composes_with_the_lease(
         seen["run_id"] = run_id
         seen["lease"] = lease
 
-    result = await execute_run_job(
-        commit_factory, run_id, claimed_by="w1", compose=fake_compose
-    )
+    result = await execute_run_job(commit_factory, run_id, claimed_by="w1", compose=fake_compose)
 
     assert result["executed"] is True
     assert seen["run_id"] == run_id
@@ -261,9 +243,7 @@ async def test_job_is_a_noop_when_the_run_was_settled_while_queued(
         nonlocal composed
         composed = True
 
-    result = await execute_run_job(
-        commit_factory, run_id, claimed_by="w1", compose=fake_compose
-    )
+    result = await execute_run_job(commit_factory, run_id, claimed_by="w1", compose=fake_compose)
 
     assert result["executed"] is False
     assert composed is False
@@ -283,9 +263,7 @@ async def test_job_settles_the_row_on_worker_interruption(
         raise asyncio.CancelledError
 
     with pytest.raises(asyncio.CancelledError):
-        await execute_run_job(
-            commit_factory, run_id, claimed_by="w1", compose=cancelled_compose
-        )
+        await execute_run_job(commit_factory, run_id, claimed_by="w1", compose=cancelled_compose)
 
     row = await _row(commit_factory, run_id)
     assert row.status == AgentRunStatus.failed.value
@@ -325,9 +303,7 @@ async def test_sweep_settles_survive_a_failing_audit_write(
     masks the settle' is structural, not aspirational)."""
     run_id = await make_run()
     assert await claim_run(commit_factory, run_id, claimed_by="dead-worker") is not None
-    await _age_row(
-        commit_factory, run_id, set_sql="heartbeat_at = now() - interval '10 minutes'"
-    )
+    await _age_row(commit_factory, run_id, set_sql="heartbeat_at = now() - interval '10 minutes'")
 
     class _AuditPoisoningFactory:
         """First session (the settle) is real; later sessions (the audit
@@ -369,9 +345,7 @@ async def test_sweep_fires_abort_for_stale_claimed_runs_only(
     worth aborting once settled (arq settles them at redelivery)."""
     stale_id = await make_run()
     assert await claim_run(commit_factory, stale_id, claimed_by="dead") is not None
-    await _age_row(
-        commit_factory, stale_id, set_sql="heartbeat_at = now() - interval '10 minutes'"
-    )
+    await _age_row(commit_factory, stale_id, set_sql="heartbeat_at = now() - interval '10 minutes'")
     unclaimed_id = await make_run()
     await _age_row(
         commit_factory,
@@ -394,9 +368,7 @@ async def test_sweep_fires_abort_for_stale_claimed_runs_only(
     assert aborted == [stale_id]
     async with commit_factory() as db:
         await db.execute(
-            delete(AuditLog).where(
-                AuditLog.resource_id.in_([str(stale_id), str(unclaimed_id)])
-            )
+            delete(AuditLog).where(AuditLog.resource_id.in_([str(stale_id), str(unclaimed_id)]))
         )
         await db.commit()
 
@@ -443,14 +415,8 @@ async def test_arq_registration_pins_at_most_once() -> None:
     from app.workers.agent_run_worker import AGENT_RUN_JOB_TIMEOUT_SECONDS
     from app.workers.arq_setup import WorkerSettings
 
-    agent_fns = [
-        f
-        for f in WorkerSettings.functions
-        if getattr(f, "name", None) == "agent_run_job"
-    ]
-    assert len(agent_fns) == 1, (
-        "agent_run_job must be registered exactly once via func()"
-    )
+    agent_fns = [f for f in WorkerSettings.functions if getattr(f, "name", None) == "agent_run_job"]
+    assert len(agent_fns) == 1, "agent_run_job must be registered exactly once via func()"
     fn = agent_fns[0]
     assert fn.max_tries == 1  # ADR-F009: at-most-once
     assert fn.timeout_s == AGENT_RUN_JOB_TIMEOUT_SECONDS

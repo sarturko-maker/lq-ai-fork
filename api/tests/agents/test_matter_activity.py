@@ -113,12 +113,8 @@ async def test_matters_includes_quiet_matters_after_active_ones(
     ordered after matters with activity."""
     quiet = await _make_project(db_session, owner=user_a)
     active = await _make_project(db_session, owner=user_a)
-    thread = await _make_thread(
-        db_session, user=user_a, project_id=active.id, last_run_at=_NOW
-    )
-    await _make_run(
-        db_session, user=user_a, status="running", thread=thread, started_at=_NOW
-    )
+    thread = await _make_thread(db_session, user=user_a, project_id=active.id, last_run_at=_NOW)
+    await _make_run(db_session, user=user_a, status="running", thread=thread, started_at=_NOW)
 
     resp = await client.get("/api/v1/agents/matters", headers=_bearer(user_a))
     assert resp.status_code == 200
@@ -190,9 +186,7 @@ async def test_matters_excludes_archived_and_sandbox(
 async def test_unfiled_summary_rolls_up_unbound_threads(
     client: AsyncClient, db_session: AsyncSession, user_a: User
 ) -> None:
-    t1 = await _make_thread(
-        db_session, user=user_a, last_run_at=_NOW - timedelta(hours=1)
-    )
+    t1 = await _make_thread(db_session, user=user_a, last_run_at=_NOW - timedelta(hours=1))
     t2 = await _make_thread(db_session, user=user_a, last_run_at=_NOW)
     await _make_run(
         db_session,
@@ -201,9 +195,7 @@ async def test_unfiled_summary_rolls_up_unbound_threads(
         thread=t1,
         started_at=_NOW - timedelta(hours=1),
     )
-    await _make_run(
-        db_session, user=user_a, status="cancelled", thread=t2, started_at=_NOW
-    )
+    await _make_run(db_session, user=user_a, status="cancelled", thread=t2, started_at=_NOW)
 
     resp = await client.get("/api/v1/agents/matters", headers=_bearer(user_a))
     assert resp.status_code == 200
@@ -268,9 +260,7 @@ async def test_threads_filter_unfiled(
     assert [t["id"] for t in body["threads"]] == [str(unbound.id)]
 
 
-async def test_threads_filters_are_mutually_exclusive(
-    client: AsyncClient, user_a: User
-) -> None:
+async def test_threads_filters_are_mutually_exclusive(client: AsyncClient, user_a: User) -> None:
     resp = await client.get(
         "/api/v1/agents/threads",
         params={"project_id": str(uuid.uuid4()), "unfiled": "true"},

@@ -120,9 +120,7 @@ async def test_partial_indexes_exist(db_session: AsyncSession) -> None:
 @pytest.mark.integration
 async def test_updated_at_trigger_on_users(db_session: AsyncSession) -> None:
     """users.updated_at is bumped by the trigger on UPDATE."""
-    user = User(
-        email=f"trigger-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h"
-    )
+    user = User(email=f"trigger-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
     db_session.add(user)
     await db_session.flush()
     initial_updated_at = user.updated_at
@@ -164,9 +162,7 @@ async def test_per_test_isolation_canary_gone(db_session: AsyncSession) -> None:
 async def test_files_table_exists(db_session: AsyncSession) -> None:
     """`files` table exists after the C4 migration runs."""
     result = await db_session.execute(
-        text(
-            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = 'files'"
-        )
+        text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = 'files'")
     )
     assert result.scalar_one_or_none() == "files"
 
@@ -198,9 +194,7 @@ async def test_files_ingestion_status_check(db_session: AsyncSession) -> None:
 
     from app.models import File, User
 
-    user = User(
-        email=f"file-chk-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h"
-    )
+    user = User(email=f"file-chk-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
     db_session.add(user)
     await db_session.flush()
 
@@ -226,9 +220,7 @@ async def test_files_size_nonneg_check(db_session: AsyncSession) -> None:
 
     from app.models import File, User
 
-    user = User(
-        email=f"file-neg-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h"
-    )
+    user = User(email=f"file-neg-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
     db_session.add(user)
     await db_session.flush()
 
@@ -305,9 +297,7 @@ async def test_projects_privileged_implies_tier_check(db_session: AsyncSession) 
 
     from app.models import Project, User
 
-    user = User(
-        email=f"proj-chk-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h"
-    )
+    user = User(email=f"proj-chk-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
     db_session.add(user)
     await db_session.flush()
 
@@ -332,9 +322,7 @@ async def test_projects_tier_range_check(db_session: AsyncSession) -> None:
 
     from app.models import Project, User
 
-    user = User(
-        email=f"proj-tier-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h"
-    )
+    user = User(email=f"proj-tier-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
     db_session.add(user)
     await db_session.flush()
 
@@ -558,9 +546,7 @@ async def test_documents_cascade_delete_via_file(db_session: AsyncSession) -> No
     """Hard-deleting a file cascades to document and chunks."""
     from app.models import Document, DocumentChunk, File, User
 
-    user = User(
-        email=f"cascade-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h"
-    )
+    user = User(email=f"cascade-{uuid.uuid4().hex[:8]}@example.com", hashed_password="h")
     db_session.add(user)
     await db_session.flush()
     file_row = File(
@@ -588,9 +574,7 @@ async def test_documents_cascade_delete_via_file(db_session: AsyncSession) -> No
     await db_session.flush()
 
     # Hard-delete the file (DELETE FROM files WHERE id = ...).
-    await db_session.execute(
-        text("DELETE FROM files WHERE id = :id"), {"id": file_row.id}
-    )
+    await db_session.execute(text("DELETE FROM files WHERE id = :id"), {"id": file_row.id})
     await db_session.flush()
 
     # The document and its chunks should be gone.
@@ -668,9 +652,7 @@ async def test_messages_role_check_fires(db_session: AsyncSession) -> None:
 
     with pytest.raises(Exception):
         await db_session.execute(
-            text(
-                "INSERT INTO messages (chat_id, role, content) VALUES (:cid, 'bogus_role', 'x')"
-            ),
+            text("INSERT INTO messages (chat_id, role, content) VALUES (:cid, 'bogus_role', 'x')"),
             {"cid": chat.id},
         )
         await db_session.flush()
@@ -705,9 +687,7 @@ async def test_messages_cascade_delete_on_chat(db_session: AsyncSession) -> None
     await db_session.flush()
 
     # Hard-delete the chat.
-    await db_session.execute(
-        text("DELETE FROM chats WHERE id = :cid"), {"cid": chat_id}
-    )
+    await db_session.execute(text("DELETE FROM chats WHERE id = :cid"), {"cid": chat_id})
     await db_session.flush()
 
     rows = await db_session.execute(
@@ -753,9 +733,7 @@ async def test_messages_applied_skills_default_empty_array(
     # Insert via raw SQL omitting applied_skills.
     msg_id = uuid.uuid4()
     await db_session.execute(
-        text(
-            "INSERT INTO messages (id, chat_id, role, content) VALUES (:mid, :cid, 'user', 'hi')"
-        ),
+        text("INSERT INTO messages (id, chat_id, role, content) VALUES (:mid, :cid, 'user', 'hi')"),
         {"mid": msg_id, "cid": chat.id},
     )
     await db_session.flush()

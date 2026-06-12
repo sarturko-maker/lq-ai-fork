@@ -144,9 +144,7 @@ app = FastAPI(
 # Local Compose dev needs CORS because web (:3000) and api (:8000) live
 # at different origins; the operator's .env sets the value.
 _settings = get_settings()
-_cors_origins = [
-    o.strip() for o in (_settings.lq_ai_cors_origins or "").split(",") if o.strip()
-]
+_cors_origins = [o.strip() for o in (_settings.lq_ai_cors_origins or "").split(",") if o.strip()]
 if _cors_origins:
     app.add_middleware(
         CORSMiddleware,
@@ -253,8 +251,6 @@ async def ready() -> JSONResponse:
         body["failed"] = failed
 
     return JSONResponse(
-        status_code=status.HTTP_200_OK
-        if all_ok
-        else status.HTTP_503_SERVICE_UNAVAILABLE,
+        status_code=status.HTTP_200_OK if all_ok else status.HTTP_503_SERVICE_UNAVAILABLE,
         content=body,
     )

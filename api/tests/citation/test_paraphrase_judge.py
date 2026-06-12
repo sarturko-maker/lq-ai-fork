@@ -96,9 +96,7 @@ class _StubGateway:
                     finish_reason="stop",
                 )
             ],
-            usage=ChatCompletionUsage(
-                prompt_tokens=10, completion_tokens=20, total_tokens=30
-            ),
+            usage=ChatCompletionUsage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
         )
 
 
@@ -190,9 +188,7 @@ async def test_yes_low_returns_confidence_0_50() -> None:
 async def test_partial_verdict_sets_partial_true() -> None:
     """partial verdict → verified=True (rendered as verified-with-caveats), partial=True."""
 
-    gw = _StubGateway(
-        response_content=_judge_json(verdict="partial", confidence="high")
-    )
+    gw = _StubGateway(response_content=_judge_json(verdict="partial", confidence="high"))
     doc = _doc()
     cand = _candidate(doc)
 
@@ -206,9 +202,7 @@ async def test_partial_verdict_sets_partial_true() -> None:
 
 @pytest.mark.unit
 async def test_partial_with_medium_confidence_maps_to_0_70() -> None:
-    gw = _StubGateway(
-        response_content=_judge_json(verdict="partial", confidence="medium")
-    )
+    gw = _StubGateway(response_content=_judge_json(verdict="partial", confidence="medium"))
     doc = _doc()
     cand = _candidate(doc)
 
@@ -326,9 +320,7 @@ async def test_unknown_confidence_returns_miss() -> None:
 async def test_missing_verdict_field_returns_miss() -> None:
     """JSON missing the verdict key → MISS."""
 
-    gw = _StubGateway(
-        response_content=json.dumps({"confidence": "high", "justification": "x"})
-    )
+    gw = _StubGateway(response_content=json.dumps({"confidence": "high", "justification": "x"}))
     doc = _doc()
     cand = _candidate(doc)
 

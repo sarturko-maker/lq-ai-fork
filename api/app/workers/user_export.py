@@ -86,13 +86,9 @@ def _serialize_user(user: User) -> dict[str, Any]:
         "must_change_password": user.must_change_password,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "updated_at": user.updated_at.isoformat() if user.updated_at else None,
-        "last_login_at": (
-            user.last_login_at.isoformat() if user.last_login_at else None
-        ),
+        "last_login_at": (user.last_login_at.isoformat() if user.last_login_at else None),
         "deletion_scheduled_at": (
-            user.deletion_scheduled_at.isoformat()
-            if user.deletion_scheduled_at
-            else None
+            user.deletion_scheduled_at.isoformat() if user.deletion_scheduled_at else None
         ),
     }
 
@@ -256,9 +252,7 @@ async def _build_zip(session: AsyncSession, user: User) -> bytes:
 
         # Chats + messages (messages indirected via chat_id).
         chats = (
-            (await session.execute(select(Chat).where(Chat.owner_id == user.id)))
-            .scalars()
-            .all()
+            (await session.execute(select(Chat).where(Chat.owner_id == user.id))).scalars().all()
         )
         zf.writestr(
             "chats.json",
@@ -267,11 +261,7 @@ async def _build_zip(session: AsyncSession, user: User) -> bytes:
         if chats:
             chat_ids = [c.id for c in chats]
             messages = (
-                (
-                    await session.execute(
-                        select(Message).where(Message.chat_id.in_(chat_ids))
-                    )
-                )
+                (await session.execute(select(Message).where(Message.chat_id.in_(chat_ids))))
                 .scalars()
                 .all()
             )
@@ -297,9 +287,7 @@ async def _build_zip(session: AsyncSession, user: User) -> bytes:
         files = (
             (
                 await session.execute(
-                    select(File).where(
-                        File.owner_id == user.id, File.deleted_at.is_(None)
-                    )
+                    select(File).where(File.owner_id == user.id, File.deleted_at.is_(None))
                 )
             )
             .scalars()
@@ -332,11 +320,7 @@ async def _build_zip(session: AsyncSession, user: User) -> bytes:
 
         # Knowledge bases.
         kbs = (
-            (
-                await session.execute(
-                    select(KnowledgeBase).where(KnowledgeBase.owner_id == user.id)
-                )
-            )
+            (await session.execute(select(KnowledgeBase).where(KnowledgeBase.owner_id == user.id)))
             .scalars()
             .all()
         )
@@ -362,9 +346,7 @@ async def _build_zip(session: AsyncSession, user: User) -> bytes:
         attrib_rows = (
             (
                 await session.execute(
-                    select(WorkProductAttribution).where(
-                        WorkProductAttribution.user_id == user.id
-                    )
+                    select(WorkProductAttribution).where(WorkProductAttribution.user_id == user.id)
                 )
             )
             .scalars()

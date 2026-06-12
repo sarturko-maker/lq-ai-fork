@@ -194,9 +194,7 @@ async def test_halt_idempotent_already_halted(
     user_a: User,
 ) -> None:
     """Second halt call when already halted: returns 200, no new audit row."""
-    sess = await _make_session(
-        db_session, user=user_a, halt_state="halted", status="halted"
-    )
+    sess = await _make_session(db_session, user=user_a, halt_state="halted", status="halted")
 
     resp = await client.post(
         f"/api/v1/autonomous/sessions/{sess.id}/halt",
@@ -216,9 +214,7 @@ async def test_halt_idempotent_already_halted(
         .scalars()
         .all()
     )
-    assert len(rows) == 0, (
-        "No audit rows should be written on idempotent halt (already halted)"
-    )
+    assert len(rows) == 0, "No audit rows should be written on idempotent halt (already halted)"
 
 
 @pytest.mark.integration
@@ -541,9 +537,7 @@ async def test_receipt_assembles_phase_transitions_and_tool_calls(
     sess = await _make_session(db_session, user=user_a)
 
     await autonomous_audit(db_session, sess, "phase_transition", to_phase="intake")
-    await autonomous_audit(
-        db_session, sess, "tool_call", tool="retrieve_chunks", outcome="started"
-    )
+    await autonomous_audit(db_session, sess, "tool_call", tool="retrieve_chunks", outcome="started")
     await autonomous_audit(
         db_session,
         sess,
@@ -583,9 +577,7 @@ async def test_receipt_terminal_reason_halted(
     from app.autonomous.audit import autonomous_audit
     from app.autonomous.receipt import build_receipt
 
-    sess = await _make_session(
-        db_session, user=user_a, halt_state="halted", status="halted"
-    )
+    sess = await _make_session(db_session, user=user_a, halt_state="halted", status="halted")
     await autonomous_audit(db_session, sess, "halted", reason="external_halt")
     await db_session.flush()
 
@@ -602,9 +594,7 @@ async def test_receipt_terminal_reason_cost_cap(
     from app.autonomous.audit import autonomous_audit
     from app.autonomous.receipt import build_receipt
 
-    sess = await _make_session(
-        db_session, user=user_a, halt_state="halted", status="halted"
-    )
+    sess = await _make_session(db_session, user=user_a, halt_state="halted", status="halted")
     await autonomous_audit(db_session, sess, "cost_cap_reached", projected_usd=0.25)
     await db_session.flush()
 
@@ -716,31 +706,21 @@ async def test_receipt_entries_carry_timestamps(
     sess = await _make_session(db_session, user=user_a)
 
     await autonomous_audit(db_session, sess, "phase_transition", to_phase="intake")
-    await autonomous_audit(
-        db_session, sess, "tool_call", tool="retrieve_chunks", outcome="success"
-    )
+    await autonomous_audit(db_session, sess, "tool_call", tool="retrieve_chunks", outcome="success")
     await db_session.flush()
 
     receipt = await build_receipt(sess, db_session)
 
-    assert len(receipt["phase_transitions"]) >= 1, (
-        "Expected at least one phase_transition"
-    )
+    assert len(receipt["phase_transitions"]) >= 1, "Expected at least one phase_transition"
     assert len(receipt["tool_calls"]) >= 1, "Expected at least one tool_call"
 
     for entry in receipt["phase_transitions"]:
-        assert "timestamp" in entry, (
-            f"phase_transition entry missing 'timestamp': {entry!r}"
-        )
-        assert entry["timestamp"] is not None, (
-            f"phase_transition entry null 'timestamp': {entry!r}"
-        )
+        assert "timestamp" in entry, f"phase_transition entry missing 'timestamp': {entry!r}"
+        assert entry["timestamp"] is not None, f"phase_transition entry null 'timestamp': {entry!r}"
 
     for entry in receipt["tool_calls"]:
         assert "timestamp" in entry, f"tool_call entry missing 'timestamp': {entry!r}"
-        assert entry["timestamp"] is not None, (
-            f"tool_call entry null 'timestamp': {entry!r}"
-        )
+        assert entry["timestamp"] is not None, f"tool_call entry null 'timestamp': {entry!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -767,9 +747,7 @@ def test_openapi_list_response_schema() -> None:
     content = resp_200["content"]["application/json"]["schema"]
     # The schema should reference AutonomousSessionListResponse (via $ref or inline).
     ref = content.get("$ref", "")
-    assert "AutonomousSessionListResponse" in ref or "sessions" in content.get(
-        "properties", {}
-    )
+    assert "AutonomousSessionListResponse" in ref or "sessions" in content.get("properties", {})
 
 
 @pytest.mark.unit
@@ -780,9 +758,7 @@ def test_openapi_detail_response_schema() -> None:
     resp_200 = get_op["responses"]["200"]
     content = resp_200["content"]["application/json"]["schema"]
     ref = content.get("$ref", "")
-    assert "AutonomousSessionDetailResponse" in ref or "receipt" in content.get(
-        "properties", {}
-    )
+    assert "AutonomousSessionDetailResponse" in ref or "receipt" in content.get("properties", {})
 
 
 @pytest.mark.unit

@@ -76,9 +76,7 @@ class TeamMember(Base):
     """
 
     __tablename__ = "team_members"
-    __table_args__ = (
-        PrimaryKeyConstraint("team_id", "user_id", name="pk_team_members"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("team_id", "user_id", name="pk_team_members"),)
 
     team_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

@@ -137,9 +137,7 @@ async def test_session_trigger_kind_check_constraint(db_session: AsyncSession) -
 @pytest.mark.integration
 async def test_session_phase_check_constraint(db_session: AsyncSession) -> None:
     user = await _make_user(db_session)
-    sess = AutonomousSession(
-        user_id=user.id, trigger_kind="manual", current_phase="wandering"
-    )
+    sess = AutonomousSession(user_id=user.id, trigger_kind="manual", current_phase="wandering")
     db_session.add(sess)
     with pytest.raises(IntegrityError):
         await db_session.flush()
@@ -148,9 +146,7 @@ async def test_session_phase_check_constraint(db_session: AsyncSession) -> None:
 @pytest.mark.integration
 async def test_session_halt_state_check_constraint(db_session: AsyncSession) -> None:
     user = await _make_user(db_session)
-    sess = AutonomousSession(
-        user_id=user.id, trigger_kind="manual", halt_state="exploded"
-    )
+    sess = AutonomousSession(user_id=user.id, trigger_kind="manual", halt_state="exploded")
     db_session.add(sess)
     with pytest.raises(IntegrityError):
         await db_session.flush()
@@ -159,9 +155,7 @@ async def test_session_halt_state_check_constraint(db_session: AsyncSession) -> 
 @pytest.mark.integration
 async def test_session_status_check_constraint(db_session: AsyncSession) -> None:
     user = await _make_user(db_session)
-    sess = AutonomousSession(
-        user_id=user.id, trigger_kind="manual", status="warp_speed"
-    )
+    sess = AutonomousSession(user_id=user.id, trigger_kind="manual", status="warp_speed")
     db_session.add(sess)
     with pytest.raises(IntegrityError):
         await db_session.flush()
@@ -238,11 +232,7 @@ async def test_session_cascade_on_user_delete(db_session: AsyncSession) -> None:
     db_session.expire_all()
 
     remaining = (
-        (
-            await db_session.execute(
-                select(AutonomousSession).where(AutonomousSession.id == sess_id)
-            )
-        )
+        (await db_session.execute(select(AutonomousSession).where(AutonomousSession.id == sess_id)))
         .scalars()
         .all()
     )
@@ -446,11 +436,7 @@ async def test_precedent_user_isolation(db_session: AsyncSession) -> None:
     )
     await db_session.flush()
     alice_rows = (
-        (
-            await db_session.execute(
-                select(PrecedentEntry).where(PrecedentEntry.user_id == alice.id)
-            )
-        )
+        (await db_session.execute(select(PrecedentEntry).where(PrecedentEntry.user_id == alice.id)))
         .scalars()
         .all()
     )
@@ -502,14 +488,10 @@ async def test_source_session_set_null_on_session_delete(
     db_session.expire_all()
 
     surviving_note = (
-        await db_session.execute(
-            select(AutonomousMemory).where(AutonomousMemory.id == note_id)
-        )
+        await db_session.execute(select(AutonomousMemory).where(AutonomousMemory.id == note_id))
     ).scalar_one()
     surviving_entry = (
-        await db_session.execute(
-            select(PrecedentEntry).where(PrecedentEntry.id == entry_id)
-        )
+        await db_session.execute(select(PrecedentEntry).where(PrecedentEntry.id == entry_id))
     ).scalar_one()
 
     assert surviving_note.source_session_id is None

@@ -203,9 +203,7 @@ def extract_citations(
             # full document is the substring search space) so no
             # ``chunk.char_offset_start`` arithmetic is applied.
             doc_content = (
-                document_contents.get(chunk.document_id)
-                if document_contents is not None
-                else None
+                document_contents.get(chunk.document_id) if document_contents is not None else None
             )
             if doc_content is None:
                 # No full-document text available — either the caller

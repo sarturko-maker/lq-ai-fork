@@ -228,9 +228,7 @@ def _started_tool_calls(rows: list[Any]) -> int:
     )
 
 
-async def _autonomous_audit_rows(
-    db_session: AsyncSession, session_id: str
-) -> list[Any]:
+async def _autonomous_audit_rows(db_session: AsyncSession, session_id: str) -> list[Any]:
     from sqlalchemy import select
 
     from app.models.audit import AuditLog
@@ -347,12 +345,8 @@ def _stub_storage(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     handler imports it locally at call time — the test_emit_artifact idiom)."""
     calls: list[dict[str, Any]] = []
 
-    async def _fake_upload(
-        *, storage_path: str, body: bytes, content_type: str
-    ) -> None:
-        calls.append(
-            {"storage_path": storage_path, "body": body, "content_type": content_type}
-        )
+    async def _fake_upload(*, storage_path: str, body: bytes, content_type: str) -> None:
+        calls.append({"storage_path": storage_path, "body": body, "content_type": content_type})
 
     monkeypatch.setattr("app.storage.upload_bytes", _fake_upload)
     return calls
@@ -411,9 +405,7 @@ async def _make_drafting_session_with_kb(
     params: dict[str, Any] = {"kb_id": str(kb.id)}
     if emit_artifacts:
         params["emit_artifacts"] = True
-    return await _make_running_session(
-        db_session, user=user, trigger_kind="watch", params=params
-    )
+    return await _make_running_session(db_session, user=user, trigger_kind="watch", params=params)
 
 
 @pytest.mark.integration
@@ -447,9 +439,7 @@ async def test_drafting_dispatches_artifacts_when_opted_in(
     artifact_rows = (
         (
             await db_session.execute(
-                select(AutonomousArtifact).where(
-                    AutonomousArtifact.session_id == session.id
-                )
+                select(AutonomousArtifact).where(AutonomousArtifact.session_id == session.id)
             )
         )
         .scalars()
@@ -492,9 +482,7 @@ async def test_drafting_ignores_artifacts_when_flag_off(
     artifact_rows = (
         (
             await db_session.execute(
-                select(AutonomousArtifact).where(
-                    AutonomousArtifact.session_id == session.id
-                )
+                select(AutonomousArtifact).where(AutonomousArtifact.session_id == session.id)
             )
         )
         .scalars()
@@ -533,9 +521,7 @@ async def test_drafting_no_target_kb_emits_one_info_finding_and_stops(
     assert result["artifacts_count"] == 0
     # Exactly ONE explanatory info finding, counted like any other finding.
     assert result["findings_count"] == 1
-    assert result["findings"][0]["title"] == (
-        "Artifact not persisted — no target knowledge base"
-    )
+    assert result["findings"][0]["title"] == ("Artifact not persisted — no target knowledge base")
     assert result["findings"][0]["severity"] == "info"
     assert upload_calls == []
 
@@ -551,9 +537,7 @@ async def test_drafting_storage_error_emits_warn_and_continues(
     _stub_embed(monkeypatch)
     calls = {"n": 0}
 
-    async def _flaky_upload(
-        *, storage_path: str, body: bytes, content_type: str
-    ) -> None:
+    async def _flaky_upload(*, storage_path: str, body: bytes, content_type: str) -> None:
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("minio is down")
@@ -595,9 +579,7 @@ async def _delivery_notification_row(db_session: AsyncSession, session_id: Any) 
 
     return (
         await db_session.execute(
-            select(AutonomousNotification).where(
-                AutonomousNotification.session_id == session_id
-            )
+            select(AutonomousNotification).where(AutonomousNotification.session_id == session_id)
         )
     ).scalar_one()
 

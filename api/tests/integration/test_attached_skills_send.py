@@ -69,9 +69,7 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     if FIXTURES_DIR.exists():
         app.state.skill_registry = MutableSkillRegistry(load_registry(FIXTURES_DIR))
     elif prior_holder is None:
-        app.state.skill_registry = MutableSkillRegistry(
-            load_registry(Path("/nonexistent"))
-        )
+        app.state.skill_registry = MutableSkillRegistry(load_registry(Path("/nonexistent")))
 
     gw = GatewayClient(base_url=GATEWAY_BASE, gateway_key=GATEWAY_KEY)
     set_gateway_client(gw)
@@ -187,9 +185,7 @@ async def test_attached_skills_both_slug_and_inline_returns_422(
         headers=headers,
         json={
             "content": "hello",
-            "attached_skills": [
-                {"slug": "nda-review", "inline_body": "x", "source": "slash"}
-            ],
+            "attached_skills": [{"slug": "nda-review", "inline_body": "x", "source": "slash"}],
         },
     )
     # The chats send handler wraps pydantic ValidationError in
@@ -202,9 +198,7 @@ async def test_attached_skills_both_slug_and_inline_returns_422(
 @pytest.mark.asyncio
 @pytest.mark.integration
 @respx.mock
-async def test_inline_body_oversize_returns_422(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_inline_body_oversize_returns_422(client: AsyncClient, db_user: User) -> None:
     """An inline_body exceeding the configured ceiling fails schema validation."""
 
     headers = _h(db_user)
@@ -216,9 +210,7 @@ async def test_inline_body_oversize_returns_422(
         headers=headers,
         json={
             "content": "hello",
-            "attached_skills": [
-                {"inline_body": "x" * (INLINE_SKILL_BODY_MAX_BYTES + 1)}
-            ],
+            "attached_skills": [{"inline_body": "x" * (INLINE_SKILL_BODY_MAX_BYTES + 1)}],
         },
     )
     # The chats send handler wraps pydantic ValidationError in
@@ -287,9 +279,7 @@ async def test_inline_body_oversize_error_does_not_echo_body_content(
 @pytest.mark.asyncio
 @pytest.mark.integration
 @respx.mock
-async def test_attached_skills_over_cap_returns_4xx(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_attached_skills_over_cap_returns_4xx(client: AsyncClient, db_user: User) -> None:
     """Wave D.2 Task 3.0 (I1) — ``attached_skills`` is capped at
     :data:`ATTACHED_SKILLS_MAX_LEN` entries.
 
@@ -310,9 +300,7 @@ async def test_attached_skills_over_cap_returns_4xx(
         headers=headers,
         json={
             "content": "hello",
-            "attached_skills": [
-                {"slug": f"skill-{i}"} for i in range(ATTACHED_SKILLS_MAX_LEN + 1)
-            ],
+            "attached_skills": [{"slug": f"skill-{i}"} for i in range(ATTACHED_SKILLS_MAX_LEN + 1)],
         },
     )
     # Schema validation failure wraps as 400 ``validation_error`` per
@@ -324,9 +312,7 @@ async def test_attached_skills_over_cap_returns_4xx(
 @pytest.mark.asyncio
 @pytest.mark.integration
 @respx.mock
-async def test_legacy_skills_over_cap_returns_4xx(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_legacy_skills_over_cap_returns_4xx(client: AsyncClient, db_user: User) -> None:
     """Wave D.2 Task 3.0 (I1) — the legacy ``skills`` list is also capped.
 
     Same DoS surface as ``attached_skills``; cap applied symmetrically
@@ -357,9 +343,7 @@ async def test_legacy_skills_over_cap_returns_4xx(
 @pytest.mark.asyncio
 @pytest.mark.integration
 @respx.mock
-async def test_legacy_skills_list_continues_to_work(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_legacy_skills_list_continues_to_work(client: AsyncClient, db_user: User) -> None:
     """``skills: ["foo"]`` forwards to the gateway as ``lq_ai_skills``."""
 
     captured: dict[str, object] = {}
@@ -481,9 +465,7 @@ async def test_attached_skills_inline_forwards_as_lq_ai_inline_skills(
         headers=headers,
         json={
             "content": "try it on this",
-            "attached_skills": [
-                {"inline_body": inline_body, "source": "wizard-tryout"}
-            ],
+            "attached_skills": [{"inline_body": inline_body, "source": "wizard-tryout"}],
         },
     )
     assert resp.status_code == 200, resp.text
@@ -521,11 +503,7 @@ async def test_attached_skills_inline_forwards_as_lq_ai_inline_skills(
 
     # Audit log carries per-attachment provenance.
     audit_rows = (
-        (
-            await db_session.execute(
-                select(AuditLog).where(AuditLog.action == "chat.message_sent")
-            )
-        )
+        (await db_session.execute(select(AuditLog).where(AuditLog.action == "chat.message_sent")))
         .scalars()
         .all()
     )
@@ -551,9 +529,7 @@ async def test_attached_skills_inline_forwards_as_lq_ai_inline_skills(
 @pytest.mark.asyncio
 @pytest.mark.integration
 @respx.mock
-async def test_attached_skills_mixed_slug_and_inline(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_attached_skills_mixed_slug_and_inline(client: AsyncClient, db_user: User) -> None:
     """Mixed payload forwards each branch to the appropriate gateway field."""
 
     captured: dict[str, object] = {}

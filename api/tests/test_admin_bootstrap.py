@@ -161,9 +161,7 @@ async def test_ensure_first_run_admin_logs_password_via_main_lifespan(
     prior_level = main_mod.log.level
     prior_disabled = main_mod.log.disabled
     main_mod.log.setLevel(logging.INFO)
-    main_mod.log.disabled = (
-        False  # pytest's logging plugin disables loggers between tests
-    )
+    main_mod.log.disabled = False  # pytest's logging plugin disables loggers between tests
     main_mod.log.addHandler(handler)
     try:
         # Drive the bootstrap directly via the main module's caller so
@@ -181,9 +179,7 @@ async def test_ensure_first_run_admin_logs_password_via_main_lifespan(
         main_mod.log.setLevel(prior_level)
         main_mod.log.disabled = prior_disabled
 
-    assert any("First-run admin password" in m for m in captured), (
-        f"records: {captured}"
-    )
+    assert any("First-run admin password" in m for m in captured), f"records: {captured}"
 
 
 @pytest.mark.integration
@@ -232,9 +228,7 @@ async def first_run_admin(db_session: AsyncSession) -> tuple[User, str]:
 
 
 async def _login(client: AsyncClient, email: str, password: str) -> dict:
-    resp = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": password}
-    )
+    resp = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -283,16 +277,11 @@ async def test_other_endpoints_403_while_must_change_password_true(
         resp = await client.request(
             method, path, headers={"Authorization": f"Bearer {tokens['access_token']}"}
         )
-        assert resp.status_code == 403, (
-            f"{method} {path}: expected 403, got {resp.status_code}"
-        )
+        assert resp.status_code == 403, f"{method} {path}: expected 403, got {resp.status_code}"
         body = resp.json()
         # FastAPI wraps HTTPException(detail=...) under the top-level "detail" key.
         detail = body.get("detail")
-        assert (
-            isinstance(detail, dict)
-            and detail.get("code") == "password_change_required"
-        ), body
+        assert isinstance(detail, dict) and detail.get("code") == "password_change_required", body
 
 
 @pytest.mark.integration
@@ -307,11 +296,7 @@ async def test_change_password_clears_flag_and_revokes_sessions(
 
     # Confirm there's exactly one active session for the user.
     pre = (
-        (
-            await db_session.execute(
-                select(UserSession).where(UserSession.user_id == user.id)
-            )
-        )
+        (await db_session.execute(select(UserSession).where(UserSession.user_id == user.id)))
         .scalars()
         .all()
     )

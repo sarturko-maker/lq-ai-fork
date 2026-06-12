@@ -215,9 +215,7 @@ async def test_chat_completion_401_raises_gateway_unreachable_not_unauthorized(
     import logging as _logging
 
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
-        return_value=httpx.Response(
-            401, json={"error": {"code": "unauthorized", "message": "x"}}
-        )
+        return_value=httpx.Response(401, json={"error": {"code": "unauthorized", "message": "x"}})
     )
 
     # pytest's logging plugin can disable loggers between tests; re-enable
@@ -375,9 +373,7 @@ async def test_chat_completion_unauthorized_from_provider_propagates_to_unauthor
     respx.post(f"{GATEWAY_BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(
             502,
-            json={
-                "error": {"code": "unauthorized", "message": "anthropic rejected key"}
-            },
+            json={"error": {"code": "unauthorized", "message": "anthropic rejected key"}},
         )
     )
 
@@ -392,9 +388,7 @@ async def test_chat_completion_timeout_raises_gateway_timeout(
     """Use respx to simulate a timeout."""
 
     with respx.mock(base_url=GATEWAY_BASE) as router:
-        router.post("/v1/chat/completions").mock(
-            side_effect=httpx.ReadTimeout("timeout")
-        )
+        router.post("/v1/chat/completions").mock(side_effect=httpx.ReadTimeout("timeout"))
 
         with pytest.raises(GatewayTimeout) as exc_info:
             await client.chat_completion(_request())
@@ -407,9 +401,7 @@ async def test_chat_completion_network_error_raises_gateway_unreachable(
     client: GatewayClient,
 ) -> None:
     with respx.mock(base_url=GATEWAY_BASE) as router:
-        router.post("/v1/chat/completions").mock(
-            side_effect=httpx.ConnectError("conn refused")
-        )
+        router.post("/v1/chat/completions").mock(side_effect=httpx.ConnectError("conn refused"))
 
         with pytest.raises(GatewayUnreachable) as exc_info:
             await client.chat_completion(_request())
@@ -573,9 +565,7 @@ async def test_chat_completion_stream_timeout_raises_gateway_timeout(
     client: GatewayClient,
 ) -> None:
     with respx.mock(base_url=GATEWAY_BASE) as router:
-        router.post("/v1/chat/completions").mock(
-            side_effect=httpx.ReadTimeout("timeout")
-        )
+        router.post("/v1/chat/completions").mock(side_effect=httpx.ReadTimeout("timeout"))
 
         with pytest.raises(GatewayTimeout):
             async for _ in client.chat_completion_stream(_request()):
@@ -668,9 +658,7 @@ async def test_list_models_forwards_payload_verbatim(client: GatewayClient) -> N
             },
         ],
     }
-    respx.get(f"{GATEWAY_BASE}/v1/models").mock(
-        return_value=httpx.Response(200, json=payload)
-    )
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(return_value=httpx.Response(200, json=payload))
 
     result = await client.list_models()
     assert result == payload
@@ -699,9 +687,7 @@ async def test_list_models_401_raises_gateway_unreachable(
 async def test_list_models_5xx_raises_gateway_unreachable(
     client: GatewayClient,
 ) -> None:
-    respx.get(f"{GATEWAY_BASE}/v1/models").mock(
-        return_value=httpx.Response(503, text="oops")
-    )
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(return_value=httpx.Response(503, text="oops"))
     with pytest.raises(GatewayUnreachable):
         await client.list_models()
 
@@ -711,9 +697,7 @@ async def test_list_models_5xx_raises_gateway_unreachable(
 async def test_list_models_timeout_raises_gateway_timeout(
     client: GatewayClient,
 ) -> None:
-    respx.get(f"{GATEWAY_BASE}/v1/models").mock(
-        side_effect=httpx.TimeoutException("slow")
-    )
+    respx.get(f"{GATEWAY_BASE}/v1/models").mock(side_effect=httpx.TimeoutException("slow"))
     with pytest.raises(GatewayTimeout):
         await client.list_models()
 

@@ -55,9 +55,7 @@ async def test_hard_delete_cascades_owned_rows_and_anonymizes_audit(
     user_id = user.id
 
     # Build a small graph of owned rows.
-    project = Project(
-        owner_id=user_id, name="Project", slug=f"p-{uuid.uuid4().hex[:6]}"
-    )
+    project = Project(owner_id=user_id, name="Project", slug=f"p-{uuid.uuid4().hex[:6]}")
     chat = Chat(owner_id=user_id, title="Pre-deletion chat")
     file_row = File(
         owner_id=user_id,
@@ -86,24 +84,12 @@ async def test_hard_delete_cascades_owned_rows_and_anonymizes_audit(
     # User row gone.
     assert (await db_session.get(User, user_id)) is None
     # Owned rows gone.
-    chats = (
-        (await db_session.execute(select(Chat).where(Chat.owner_id == user_id)))
-        .scalars()
-        .all()
-    )
+    chats = (await db_session.execute(select(Chat).where(Chat.owner_id == user_id))).scalars().all()
     assert chats == []
-    files = (
-        (await db_session.execute(select(File).where(File.owner_id == user_id)))
-        .scalars()
-        .all()
-    )
+    files = (await db_session.execute(select(File).where(File.owner_id == user_id))).scalars().all()
     assert files == []
     kbs = (
-        (
-            await db_session.execute(
-                select(KnowledgeBase).where(KnowledgeBase.owner_id == user_id)
-            )
-        )
+        (await db_session.execute(select(KnowledgeBase).where(KnowledgeBase.owner_id == user_id)))
         .scalars()
         .all()
     )

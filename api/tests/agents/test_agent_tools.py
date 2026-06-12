@@ -65,9 +65,7 @@ class MatterEnv:
 
 @pytest_asyncio.fixture
 async def commit_factory(test_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(
-        bind=test_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    return async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
 
 
 async def _seed_file(
@@ -157,9 +155,7 @@ async def matter_env(
         await db.flush()
         user_ids += [user.id, stranger.id]
 
-        project = Project(
-            owner_id=user.id, name="Acme MSA", slug=f"acme-{uuid.uuid4().hex[:6]}"
-        )
+        project = Project(owner_id=user.id, name="Acme MSA", slug=f"acme-{uuid.uuid4().hex[:6]}")
         other_project = Project(
             owner_id=user.id, name="Northwind", slug=f"north-{uuid.uuid4().hex[:6]}"
         )
@@ -175,12 +171,8 @@ async def matter_env(
             page_start=7,
             page_end=8,
         )
-        notes = await _seed_file(
-            db, owner_id=user.id, filename="notes.pdf", body=_NOTES_TEXT
-        )
-        pending = await _seed_file(
-            db, owner_id=user.id, filename="pending.pdf", body=None
-        )
+        notes = await _seed_file(db, owner_id=user.id, filename="notes.pdf", body=_NOTES_TEXT)
+        pending = await _seed_file(db, owner_id=user.id, filename="pending.pdf", body=None)
         # Upload-time membership ONLY (files.project_id column, no join
         # row) — exactly what POST /files with project_id produces.
         uploaded = await _seed_file(
@@ -190,9 +182,7 @@ async def matter_env(
             body=_UPLOADED_TEXT,
             column_project_id=project.id,
         )
-        secret = await _seed_file(
-            db, owner_id=user.id, filename="secret.pdf", body=_SECRET_TEXT
-        )
+        secret = await _seed_file(db, owner_id=user.id, filename="secret.pdf", body=_SECRET_TEXT)
         # Foreign-owned, with the column ALSO spoofed at our matter — the
         # owner re-assertion must exclude it through both membership paths.
         foreign = await _seed_file(
@@ -217,9 +207,7 @@ async def matter_env(
             ]
         )
 
-        thread = AgentThread(
-            user_id=user.id, project_id=project.id, title="tools tests"
-        )
+        thread = AgentThread(user_id=user.id, project_id=project.id, title="tools tests")
         db.add(thread)
         await db.flush()
         run = AgentRun(
@@ -241,9 +229,7 @@ async def matter_env(
             privileged=False,
             minimum_inference_tier=None,
         )
-        search, read = build_matter_tools(
-            commit_factory, run_id=run.id, binding=binding
-        )
+        search, read = build_matter_tools(commit_factory, run_id=run.id, binding=binding)
         env = MatterEnv(
             factory=commit_factory,
             user_id=user.id,
@@ -381,9 +367,7 @@ async def test_read_document_pending_ingestion_is_honest(matter_env: MatterEnv) 
 async def test_read_document_truncates_long_documents(matter_env: MatterEnv) -> None:
     long_body = "lorem ipsum dolor sit amet " * 2000  # ~54k chars
     async with matter_env.factory() as db:
-        f = await _seed_file(
-            db, owner_id=matter_env.user_id, filename="tome.pdf", body=long_body
-        )
+        f = await _seed_file(db, owner_id=matter_env.user_id, filename="tome.pdf", body=long_body)
         db.add(ProjectFile(project_id=matter_env.project_id, file_id=f.id))
         await db.commit()
         tome_id = f.id
@@ -532,9 +516,7 @@ async def test_real_loop_dispatches_guarded_search_over_matter_documents(
     model = ScriptedToolCallingModel(
         responses=[
             tool_call_message("search_documents", {"query": "liability cap"}),
-            final_message(
-                "The cap is the fees paid in the twelve months before the claim."
-            ),
+            final_message("The cap is the fees paid in the twelve months before the claim."),
         ]
     )
 

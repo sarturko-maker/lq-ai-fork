@@ -123,9 +123,7 @@ class SkillRegistry:
         for name in self.names():
             rec = self.records[name]
             summary = rec.summary()
-            if tag_lower is not None and not any(
-                t.lower() == tag_lower for t in summary.tags
-            ):
+            if tag_lower is not None and not any(t.lower() == tag_lower for t in summary.tags):
                 continue
             summaries.append(summary)
         return summaries

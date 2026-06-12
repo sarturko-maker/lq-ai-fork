@@ -193,9 +193,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     try:
         result = await agent_run_orphan_sweep(ctx)
         if result.get("swept"):
-            log.warning(
-                "arq-worker startup: orphan sweep settled %s run(s)", result["swept"]
-            )
+            log.warning("arq-worker startup: orphan sweep settled %s run(s)", result["swept"])
     except Exception:
         log.exception("arq-worker startup: orphan sweep failed (cron retries)")
 
@@ -315,17 +313,12 @@ def _populate_class_attrs() -> None:
     # arq is a runtime dep but the import is deferred so this module loads
     # cleanly in environments where arq is absent (matching the pattern in
     # :mod:`app.workers.document_pipeline`).
-    with contextlib.suppress(
-        ImportError
-    ):  # pragma: no cover - arq missing in some envs
+    with contextlib.suppress(ImportError):  # pragma: no cover - arq missing in some envs
         from arq.worker import func as arq_func
 
         WorkerSettings.redis_settings = _build_redis_settings()  # type: ignore[attr-defined]
         WorkerSettings.cron_jobs = _build_cron_jobs()  # type: ignore[attr-defined]
-        if not any(
-            getattr(f, "name", None) == "agent_run_job"
-            for f in WorkerSettings.functions
-        ):
+        if not any(getattr(f, "name", None) == "agent_run_job" for f in WorkerSettings.functions):
             WorkerSettings.functions.append(
                 # At-most-once (ADR-F009): max_tries=1 — verified at arq
                 # 0.26.3 that job_try is checked BEFORE the body runs, so

@@ -59,13 +59,10 @@ class _StubEmbeddingGateway:
             raise self.raise_on_call
         if self.return_wrong_count:
             data = [
-                {"index": i, "embedding": self.vectors[i]}
-                for i in range(max(len(inputs) - 1, 0))
+                {"index": i, "embedding": self.vectors[i]} for i in range(max(len(inputs) - 1, 0))
             ]
         else:
-            data = [
-                {"index": i, "embedding": self.vectors[i]} for i in range(len(inputs))
-            ]
+            data = [{"index": i, "embedding": self.vectors[i]} for i in range(len(inputs))]
         return {"data": data}
 
 
@@ -80,9 +77,7 @@ def _mk(issue: str, text: str) -> ClauseInput:
 
 @pytest.mark.unit
 def test_normalize_issue_label_lowercases_and_collapses_whitespace() -> None:
-    assert (
-        _normalize_issue_label("Limitation of Liability") == "limitation of liability"
-    )
+    assert _normalize_issue_label("Limitation of Liability") == "limitation of liability"
     assert _normalize_issue_label("  Governing   Law  ") == "governing law"
     assert _normalize_issue_label("MUTUAL\tINDEMNIFICATION") == "mutual indemnification"
 

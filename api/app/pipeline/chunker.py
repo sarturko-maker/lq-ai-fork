@@ -183,11 +183,7 @@ def chunk_document(
         page_start = _page_for_offset(pages, cursor)
         # page_end is the page of the LAST character — actual_end is
         # exclusive, so look up actual_end - 1.
-        page_end = (
-            _page_for_offset(pages, actual_end - 1)
-            if actual_end > cursor
-            else page_start
-        )
+        page_end = _page_for_offset(pages, actual_end - 1) if actual_end > cursor else page_start
 
         chunk = Chunk(
             chunk_index=chunk_idx,

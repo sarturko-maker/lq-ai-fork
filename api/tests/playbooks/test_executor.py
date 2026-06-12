@@ -157,9 +157,7 @@ class _StubGateway:
     async def chat_completion(self, request: Any) -> _StubResponse:
         self.calls_received.append(request)
         if not self.payloads:
-            return _StubResponse(
-                choices=[_StubChoice(message=_StubMessage(content=""))]
-            )
+            return _StubResponse(choices=[_StubChoice(message=_StubMessage(content=""))])
         payload = self.payloads.pop(0)
         return _StubResponse(
             choices=[_StubChoice(message=_StubMessage(content=json.dumps(payload)))]
@@ -410,9 +408,7 @@ async def test_executor_marks_missing_when_keyword_not_in_document(
         db_session,
         owner=owner,
         normalized_text="Section 1. Generic boilerplate without any confidentiality language.",
-        chunks_text=[
-            "Section 1. Generic boilerplate without any confidentiality language."
-        ],
+        chunks_text=["Section 1. Generic boilerplate without any confidentiality language."],
     )
     playbook = await _make_playbook_with_position(
         db_session,

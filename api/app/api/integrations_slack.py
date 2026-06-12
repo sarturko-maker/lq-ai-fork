@@ -76,15 +76,11 @@ async def upsert_slack_workspace(
         changing without the install timestamp moving.
     """
 
-    encryptor = BridgeTokenEncryptor(
-        master_key=settings.lq_ai_bridge_master_key or None
-    )
+    encryptor = BridgeTokenEncryptor(master_key=settings.lq_ai_bridge_master_key or None)
     bot_token_encrypted = encryptor.encrypt(body.bot_token)
 
     existing = (
-        await db.execute(
-            select(SlackWorkspace).where(SlackWorkspace.team_id == body.team_id)
-        )
+        await db.execute(select(SlackWorkspace).where(SlackWorkspace.team_id == body.team_id))
     ).scalar_one_or_none()
 
     if existing is None:

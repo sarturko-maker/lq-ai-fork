@@ -127,9 +127,7 @@ def thread_config(thread_id: uuid.UUID) -> RunnableConfig:
     return {"configurable": {"thread_id": str(thread_id)}}
 
 
-async def has_checkpoint(
-    checkpointer: BaseCheckpointSaver | None, thread_id: uuid.UUID
-) -> bool:
+async def has_checkpoint(checkpointer: BaseCheckpointSaver | None, thread_id: uuid.UUID) -> bool:
     """True when durable state exists for the thread (ADR-F008).
 
     Follow-ups REQUIRE this: a thread without checkpoint state (pre-S5

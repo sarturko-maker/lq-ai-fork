@@ -65,9 +65,7 @@ def _registry(request: Request) -> MutableSkillRegistry:
     lifespan), surface a clear error rather than ``AttributeError``.
     """
 
-    holder: MutableSkillRegistry | None = getattr(
-        request.app.state, "skill_registry", None
-    )
+    holder: MutableSkillRegistry | None = getattr(request.app.state, "skill_registry", None)
     if holder is None:
         from app.errors import InternalError
 
@@ -154,9 +152,7 @@ def _skill_from_user_skill(row: UserSkill) -> dict[str, Any]:
     return payload
 
 
-async def _load_user_shadow(
-    db: AsyncSession, *, user_id: uuid.UUID, slug: str
-) -> UserSkill | None:
+async def _load_user_shadow(db: AsyncSession, *, user_id: uuid.UUID, slug: str) -> UserSkill | None:
     """Return the caller's non-archived user-scope row for ``slug``, if any."""
 
     stmt = select(UserSkill).where(
@@ -168,9 +164,7 @@ async def _load_user_shadow(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def _load_team_shadow(
-    db: AsyncSession, *, user_id: uuid.UUID, slug: str
-) -> UserSkill | None:
+async def _load_team_shadow(db: AsyncSession, *, user_id: uuid.UUID, slug: str) -> UserSkill | None:
     """Return the newest non-archived team-scope row at ``slug`` the
     user has access to via team membership, if any (D8.1b).
 
@@ -209,9 +203,7 @@ async def _load_team_shadow(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def _list_user_shadows(
-    db: AsyncSession, *, user_id: uuid.UUID
-) -> list[UserSkill]:
+async def _list_user_shadows(db: AsyncSession, *, user_id: uuid.UUID) -> list[UserSkill]:
     """All non-archived user-scope rows owned by ``user_id``."""
 
     stmt = (
@@ -526,9 +518,7 @@ async def autocomplete_skills(
     merged = await _list_merged_skills_for_user(request, db, user=user)
 
     if not q:
-        recent_slugs = await _recent_attached_skill_slugs(
-            db, user_id=user.id, limit=limit
-        )
+        recent_slugs = await _recent_attached_skill_slugs(db, user_id=user.id, limit=limit)
         recent_order = {slug: idx for idx, slug in enumerate(recent_slugs)}
         slug_to_row = {row["slug"]: row for row in merged}
         ordered: list[dict[str, object]] = [
@@ -862,6 +852,4 @@ async def fork_skill(
     await db.commit()
     await db.refresh(row)
 
-    return JSONResponse(
-        content=_skill_from_user_skill(row), status_code=status.HTTP_201_CREATED
-    )
+    return JSONResponse(content=_skill_from_user_skill(row), status_code=status.HTTP_201_CREATED)

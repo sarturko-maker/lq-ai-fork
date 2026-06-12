@@ -28,9 +28,7 @@ class SlackWorkspaceCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     team_id: str = Field(..., min_length=1, description="Slack workspace id (T0...).")
-    team_name: str = Field(
-        ..., min_length=1, description="Workspace display name at install time."
-    )
+    team_name: str = Field(..., min_length=1, description="Workspace display name at install time.")
     bot_token: str = Field(
         ...,
         min_length=1,
@@ -39,9 +37,7 @@ class SlackWorkspaceCreate(BaseModel):
             "encrypted under LQ_AI_BRIDGE_MASTER_KEY before persistence."
         ),
     )
-    bot_user_id: str = Field(
-        ..., min_length=1, description="Slack user id of the bot user."
-    )
+    bot_user_id: str = Field(..., min_length=1, description="Slack user id of the bot user.")
     installer_slack_user_id: str = Field(
         ...,
         min_length=1,

@@ -53,9 +53,7 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     if registry_present:
         app.state.skill_registry = MutableSkillRegistry(load_registry(FIXTURES_DIR))
     elif prior_holder is None:
-        app.state.skill_registry = MutableSkillRegistry(
-            load_registry(Path("/nonexistent"))
-        )
+        app.state.skill_registry = MutableSkillRegistry(load_registry(Path("/nonexistent")))
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -144,9 +142,7 @@ async def test_create_user_skill_with_slash_alias_roundtrip(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_duplicate_slash_alias_returns_422(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_duplicate_slash_alias_returns_422(client: AsyncClient, db_user: User) -> None:
     first = await client.post(
         "/api/v1/user-skills",
         headers=_h(db_user),

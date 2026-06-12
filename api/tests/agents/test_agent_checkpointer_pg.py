@@ -69,10 +69,7 @@ async def pg_saver(test_db_url: str) -> AsyncIterator[AsyncPostgresSaver]:
 
 
 def test_psycopg_dsn_strips_the_asyncpg_dialect() -> None:
-    assert (
-        _psycopg_dsn("postgresql+asyncpg://u:p@host:5432/db")
-        == "postgresql://u:p@host:5432/db"
-    )
+    assert _psycopg_dsn("postgresql+asyncpg://u:p@host:5432/db") == "postgresql://u:p@host:5432/db"
     # Already-plain DSNs pass through untouched.
     assert _psycopg_dsn("postgresql://u:p@host/db") == "postgresql://u:p@host/db"
 
@@ -89,9 +86,7 @@ async def test_follow_up_restores_state_through_postgres(
 ) -> None:
     """End to end on the REAL saver: run 1 persists the conversation,
     run 2 (a fresh agent build) sees it after a Postgres round trip."""
-    factory = async_sessionmaker(
-        bind=test_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    factory = async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
     async with factory() as db:
         user = User(
             email=f"agent-pg-{uuid.uuid4().hex[:8]}@example.com",
@@ -145,11 +140,7 @@ async def test_follow_up_restores_state_through_postgres(
 
         async with factory() as db:
             statuses = (
-                (
-                    await db.execute(
-                        select(AgentRun.status).where(AgentRun.thread_id == thread_id)
-                    )
-                )
+                (await db.execute(select(AgentRun.status).where(AgentRun.thread_id == thread_id)))
                 .scalars()
                 .all()
             )
@@ -178,13 +169,9 @@ async def test_checkpoint_gc_deletes_only_orphaned_lineages(
 
     from app.workers.agent_run_worker import run_checkpoint_gc
 
-    factory = async_sessionmaker(
-        bind=test_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    factory = async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
     orphan_thread_id = str(uuid.uuid4())
-    orphan_config = {
-        "configurable": {"thread_id": orphan_thread_id, "checkpoint_ns": ""}
-    }
+    orphan_config = {"configurable": {"thread_id": orphan_thread_id, "checkpoint_ns": ""}}
     await pg_saver.aput(orphan_config, empty_checkpoint(), {}, {})
 
     async with factory() as db:
@@ -202,9 +189,7 @@ async def test_checkpoint_gc_deletes_only_orphaned_lineages(
         db.add(thread)
         await db.commit()
         user_id, live_thread_id = user.id, thread.id
-    live_config = {
-        "configurable": {"thread_id": str(live_thread_id), "checkpoint_ns": ""}
-    }
+    live_config = {"configurable": {"thread_id": str(live_thread_id), "checkpoint_ns": ""}}
     await pg_saver.aput(live_config, empty_checkpoint(), {}, {})
 
     try:

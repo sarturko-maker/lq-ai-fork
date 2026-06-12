@@ -158,9 +158,7 @@ class DocumentChunk(Base):
 
     __tablename__ = "document_chunks"
     __table_args__ = (
-        UniqueConstraint(
-            "document_id", "chunk_index", name="uq_document_chunks_doc_idx"
-        ),
+        UniqueConstraint("document_id", "chunk_index", name="uq_document_chunks_doc_idx"),
         CheckConstraint(
             "char_offset_start >= 0",
             name="chk_document_chunks_offset_start_nonneg",

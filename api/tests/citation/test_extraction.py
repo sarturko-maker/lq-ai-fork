@@ -62,9 +62,7 @@ def test_extract_single_citation_byte_precise_offsets() -> None:
         content="The contract term shall be five years.",
         char_offset_start=200,
     )
-    response = (
-        'The agreement says "The contract term shall be five years." (Source: [1]).'
-    )
+    response = 'The agreement says "The contract term shall be five years." (Source: [1]).'
 
     candidates = extract_citations(response, [chunk])
 
@@ -103,9 +101,7 @@ def test_extract_multiple_citations_resolve_independent_chunks() -> None:
     """Two quotes citing two chunks produce two candidates."""
 
     chunk1 = _chunk(content="First fact statement.", char_offset_start=0)
-    chunk2 = _chunk(
-        content="Second fact assertion.", char_offset_start=500, page_start=3
-    )
+    chunk2 = _chunk(content="Second fact assertion.", char_offset_start=500, page_start=3)
     response = (
         'He said "First fact statement." (Source: [1]) and '
         'also "Second fact assertion." (Source: [2]).'

@@ -158,9 +158,7 @@ async def _maybe_resolve_leading_slash(
     # don't carry an alias column per ADR 0012 / Wave D.2 Task 2.4).
     resolved = await _resolve_skill_for_user(request, db, user=user, slug=token)
     if resolved is None:
-        resolved = await _resolve_skill_for_user(
-            request, db, user=user, slash_alias="/" + token
-        )
+        resolved = await _resolve_skill_for_user(request, db, user=user, slash_alias="/" + token)
 
     if resolved is None:
         return None, content, True
@@ -348,9 +346,7 @@ async def _message_count(db: AsyncSession, chat_id: uuid.UUID) -> int:
     return int(result.scalar_one())
 
 
-async def _message_counts_for(
-    db: AsyncSession, chat_ids: list[uuid.UUID]
-) -> dict[uuid.UUID, int]:
+async def _message_counts_for(db: AsyncSession, chat_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
     """Return per-chat message counts in a single GROUP BY query."""
 
     if not chat_ids:
@@ -552,11 +548,7 @@ async def search_chats(
     )
 
     union = title_subq.union_all(message_subq).subquery()
-    stmt = (
-        select(union)
-        .order_by(union.c.rank.desc(), union.c.created_at.desc())
-        .limit(limit)
-    )
+    stmt = select(union).order_by(union.c.rank.desc(), union.c.created_at.desc()).limit(limit)
 
     result = await db.execute(stmt)
     rows = result.mappings().all()
@@ -646,10 +638,7 @@ async def list_chats(
         next_cursor = encode_cursor(last.created_at, last.id)
 
     counts = await _message_counts_for(db, [r.id for r in rows])
-    items = [
-        await _serialize_chat(db, row, message_count=counts.get(row.id, 0))
-        for row in rows
-    ]
+    items = [await _serialize_chat(db, row, message_count=counts.get(row.id, 0)) for row in rows]
 
     return ChatListResponse(items=items, next_cursor=next_cursor)
 
@@ -1182,9 +1171,7 @@ async def send_message(
         # the ``str | None`` value-type on the provenance dict.
         str(e["name"])
         for e in attached_skill_provenance
-        if e["kind"] == "slug"
-        and e["name"] is not None
-        and e["name"] not in attached_skill_names
+        if e["kind"] == "slug" and e["name"] is not None and e["name"] not in attached_skill_names
     )
     have_any_attached = bool(payload.skills) or bool(payload.attached_skills)
     if not have_any_attached and payload.content.startswith("/"):
@@ -1546,9 +1533,7 @@ async def get_citations(
             "verified": c.verified,
             "verification_method": c.verification_method,
             "verification_confidence": (
-                float(c.verification_confidence)
-                if c.verification_confidence is not None
-                else None
+                float(c.verification_confidence) if c.verification_confidence is not None else None
             ),
             "partial": c.partial,
             "created_at": c.created_at.isoformat(),
@@ -1643,9 +1628,7 @@ def _skill_registry_from_request(http_request: Request | None) -> SkillRegistry 
 
     if http_request is None:
         return None
-    holder: MutableSkillRegistry | None = getattr(
-        http_request.app.state, "skill_registry", None
-    )
+    holder: MutableSkillRegistry | None = getattr(http_request.app.state, "skill_registry", None)
     if holder is None:
         return None
     return holder.current()
@@ -1750,9 +1733,7 @@ async def _resolve_ensemble_config(
         # Stage 4 cannot run.
         return None
 
-    activated = (
-        skill_activated or project_ensemble_verification or config.default_enabled
-    )
+    activated = skill_activated or project_ensemble_verification or config.default_enabled
     if not activated:
         return None
 
@@ -1851,9 +1832,7 @@ async def _persist_message_citations(
     # extra documents the verifier never consults are negligible.
     chunk_doc_ids = {chunk.document_id for chunk in retrieved_chunks}
     doc_rows = (
-        (await db.execute(select(Document).where(Document.id.in_(chunk_doc_ids))))
-        .scalars()
-        .all()
+        (await db.execute(select(Document).where(Document.id.in_(chunk_doc_ids)))).scalars().all()
     )
     docs_by_id = {d.id: d for d in doc_rows}
     doc_contents = {d.id: d.normalized_content for d in doc_rows}
@@ -2222,9 +2201,7 @@ async def _stream_response(
         yield f"data: {_json.dumps(opening, separators=(',', ':'))}\n\n".encode()
 
         try:
-            async for chunk in gateway.chat_completion_stream(
-                request, request_id=request_id
-            ):
+            async for chunk in gateway.chat_completion_stream(request, request_id=request_id):
                 last_tier = chunk.routed_inference_tier or last_tier
                 last_provider = chunk.routed_provider or last_provider
                 last_model = chunk.model
@@ -2368,9 +2345,7 @@ async def _stream_response(
 
         # Final frames.
         if error_envelope is not None:
-            yield (
-                f"data: {_json.dumps(error_envelope, separators=(',', ':'))}\n\n".encode()
-            )
+            yield (f"data: {_json.dumps(error_envelope, separators=(',', ':'))}\n\n".encode())
         else:
             complete: dict[str, Any] = {
                 "type": "complete",
@@ -2521,9 +2496,7 @@ async def run_inference_override(
     # write one (defensive — keeps the helper testable when the test
     # stubs respx and doesn't write to the routing-log table).
     routing_log_row = await db.execute(
-        select(InferenceRoutingLog.id).where(
-            InferenceRoutingLog.message_id == assistant_message_id
-        )
+        select(InferenceRoutingLog.id).where(InferenceRoutingLog.message_id == assistant_message_id)
     )
     routing_log_id = routing_log_row.scalar_one_or_none()
 

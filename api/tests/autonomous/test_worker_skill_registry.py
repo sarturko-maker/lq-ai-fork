@@ -78,9 +78,7 @@ async def test_worker_on_startup_installs_registry_for_skill_ref_sessions(
     """
     from app.main import app
 
-    settings = get_settings().model_copy(
-        update={"skills_dir": str(_SKILL_FIXTURES_DIR)}
-    )
+    settings = get_settings().model_copy(update={"skills_dir": str(_SKILL_FIXTURES_DIR)})
     monkeypatch.setattr(arq_setup, "get_settings", lambda: settings)
 
     # Save/restore app.state hygiene — mirror _installed_skill_registry's

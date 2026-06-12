@@ -123,15 +123,11 @@ async def get_audit_log(
     ] = None,
     action: Annotated[
         str | None,
-        Query(
-            description="Exact-match filter on ``action`` (e.g., ``chat.message_sent``)."
-        ),
+        Query(description="Exact-match filter on ``action`` (e.g., ``chat.message_sent``)."),
     ] = None,
     user_id: Annotated[
         str | None,
-        Query(
-            description="Filter to entries authored by the given user (UUID string)."
-        ),
+        Query(description="Filter to entries authored by the given user (UUID string)."),
     ] = None,
     since: Annotated[
         datetime | None,
@@ -287,9 +283,7 @@ async def get_tier_policy(
     clean).
     """
 
-    payload = await gateway.get_tier_config(
-        request_id=request.headers.get("x-request-id")
-    )
+    payload = await gateway.get_tier_config(request_id=request.headers.get("x-request-id"))
     return _project_tier_policy(payload)
 
 
@@ -311,9 +305,7 @@ async def update_tier_policy(
 
     from app.audit import audit_action
 
-    before_payload = await gateway.get_tier_config(
-        request_id=request.headers.get("x-request-id")
-    )
+    before_payload = await gateway.get_tier_config(request_id=request.headers.get("x-request-id"))
     before = _project_tier_policy(before_payload)
 
     payload_to_send = body.model_dump(exclude_none=True)
@@ -440,12 +432,8 @@ async def get_usage(
         select(
             group_col.label("group_key"),
             func.count().label("request_count"),
-            func.coalesce(func.sum(InferenceRoutingLog.tokens_in), 0).label(
-                "tokens_in_sum"
-            ),
-            func.coalesce(func.sum(InferenceRoutingLog.tokens_out), 0).label(
-                "tokens_out_sum"
-            ),
+            func.coalesce(func.sum(InferenceRoutingLog.tokens_in), 0).label("tokens_in_sum"),
+            func.coalesce(func.sum(InferenceRoutingLog.tokens_out), 0).label("tokens_out_sum"),
             func.coalesce(func.sum(InferenceRoutingLog.cost_estimate), 0).label(
                 "cost_estimate_sum"
             ),

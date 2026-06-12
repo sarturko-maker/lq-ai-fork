@@ -64,16 +64,12 @@ class _StubGateway:
     async def chat_completion(self, request: Any) -> _StubResponse:
         self.calls_received.append(request)
         if not self.payloads:
-            return _StubResponse(
-                choices=[_StubChoice(message=_StubMessage(content=""))]
-            )
+            return _StubResponse(choices=[_StubChoice(message=_StubMessage(content=""))])
         payload = self.payloads.pop(0)
         if isinstance(payload, Exception):
             raise payload
         if isinstance(payload, str):
-            return _StubResponse(
-                choices=[_StubChoice(message=_StubMessage(content=payload))]
-            )
+            return _StubResponse(choices=[_StubChoice(message=_StubMessage(content=payload))])
         return _StubResponse(
             choices=[_StubChoice(message=_StubMessage(content=json.dumps(payload)))]
         )
@@ -296,7 +292,9 @@ async def test_gateway_exception_is_swallowed_returns_empty_list() -> None:
 async def test_markdown_fenced_json_is_unwrapped() -> None:
     """Some models wrap structured output in a ```json fence; the extractor tolerates it."""
 
-    fenced = '```json\n{"extracted_clauses": [{"issue": "Term", "clause_text": "Three years."}]}\n```'
+    fenced = (
+        '```json\n{"extracted_clauses": [{"issue": "Term", "clause_text": "Three years."}]}\n```'
+    )
     gateway = _StubGateway(payloads=[fenced])
     clauses = await extract_clauses_from_document(
         document=_make_doc("Three years."),

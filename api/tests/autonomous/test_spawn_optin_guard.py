@@ -46,9 +46,7 @@ async def _make_user(
     return user
 
 
-async def _make_kb(
-    db: AsyncSession, *, owner: User, name: str = "guarded"
-) -> KnowledgeBase:
+async def _make_kb(db: AsyncSession, *, owner: User, name: str = "guarded") -> KnowledgeBase:
     kb = KnowledgeBase(owner_id=owner.id, name=name)
     db.add(kb)
     await db.flush()

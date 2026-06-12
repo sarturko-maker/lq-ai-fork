@@ -49,9 +49,7 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     if registry_present:
         app.state.skill_registry = MutableSkillRegistry(load_registry(FIXTURES_DIR))
     elif prior_holder is None:
-        app.state.skill_registry = MutableSkillRegistry(
-            load_registry(Path("/nonexistent"))
-        )
+        app.state.skill_registry = MutableSkillRegistry(load_registry(Path("/nonexistent")))
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -87,9 +85,7 @@ def _h(user: User) -> dict[str, str]:
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_sandbox_ensure_creates_then_idempotent(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_sandbox_ensure_creates_then_idempotent(client: AsyncClient, db_user: User) -> None:
     r1 = await client.post("/api/v1/projects/sandbox/ensure", headers=_h(db_user))
     assert r1.status_code == 201, r1.text
     p1 = r1.json()
@@ -106,9 +102,7 @@ async def test_sandbox_ensure_creates_then_idempotent(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_sandbox_ensure_recreates_after_archive(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_sandbox_ensure_recreates_after_archive(client: AsyncClient, db_user: User) -> None:
     r1 = await client.post("/api/v1/projects/sandbox/ensure", headers=_h(db_user))
     assert r1.status_code == 201, r1.text
     pid1 = r1.json()["id"]
@@ -151,9 +145,7 @@ async def test_list_projects_excludes_sandbox_by_default(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_list_projects_include_sandbox(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_list_projects_include_sandbox(client: AsyncClient, db_user: User) -> None:
     await client.post("/api/v1/projects/sandbox/ensure", headers=_h(db_user))
     r = await client.get("/api/v1/projects?include_sandbox=true", headers=_h(db_user))
     assert r.status_code == 200, r.text

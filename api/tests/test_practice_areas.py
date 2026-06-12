@@ -61,9 +61,7 @@ async def test_seed_rows_present_once_with_expected_shape(
         .all()
     )
     seeded = [r for r in rows if r.key in {k for k, *_ in _EXPECTED_SEED}]
-    assert [
-        (r.key, r.name, r.unit_label, r.configured) for r in seeded
-    ] == _EXPECTED_SEED
+    assert [(r.key, r.name, r.unit_label, r.configured) for r in seeded] == _EXPECTED_SEED
     # The list-equality above is the duplicate guard (a re-seeded key
     # would appear twice and break it); also pin key uniqueness directly.
     assert len({r.key for r in rows}) == len(rows)
@@ -96,9 +94,7 @@ async def test_seed_is_idempotent_on_a_seeded_database(
         sys.modules.pop("migration_0053", None)
 
 
-async def test_list_practice_areas_position_order(
-    client: AsyncClient, user: User
-) -> None:
+async def test_list_practice_areas_position_order(client: AsyncClient, user: User) -> None:
     resp = await client.get("/api/v1/practice-areas", headers=_bearer(user))
     assert resp.status_code == 200
     areas = resp.json()["practice_areas"]

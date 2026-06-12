@@ -59,9 +59,7 @@ logger = logging.getLogger(__name__)
 AUTONOMOUS_SESSION_JOB_NAME = "autonomous_session_job"
 
 
-async def autonomous_session_job(
-    ctx: dict[str, Any], session_id: str
-) -> dict[str, Any]:
+async def autonomous_session_job(ctx: dict[str, Any], session_id: str) -> dict[str, Any]:
     """ARQ job — run the Autonomous Session pipeline for one session row.
 
     Lifecycle (delegated to :func:`~app.autonomous.executor.run_autonomous_session`):
@@ -234,8 +232,7 @@ async def _run_idle_sweep(
         AutonomousSession.status == "running",
         AutonomousSession.halt_state == "running",
         AutonomousSession.last_activity_at
-        < effective_now
-        - func.make_interval(0, 0, 0, 0, 0, AutonomousSession.idle_halt_minutes),
+        < effective_now - func.make_interval(0, 0, 0, 0, 0, AutonomousSession.idle_halt_minutes),
     )
     running_result = await db.execute(running_candidates_stmt)
     running_candidates = running_result.scalars().all()

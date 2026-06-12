@@ -277,11 +277,7 @@ async def _drive_agent(
     seq = 0
     final_answer: str | None = None
     cap_hit = False
-    interval = (
-        heartbeat_seconds
-        if heartbeat_seconds is not None
-        else _default_heartbeat_seconds()
-    )
+    interval = heartbeat_seconds if heartbeat_seconds is not None else _default_heartbeat_seconds()
     last_beat = asyncio.get_running_loop().time()
     # Settled tool_call row id per dispatched tool's langchain run id.
     # The keys are the _is_nested ancestry test (F4); the values resolve
@@ -324,9 +320,7 @@ async def _drive_agent(
                         if delta:
                             publisher.reasoning_delta(event_run_id, delta)
                         continue  # never a persisted step
-                    if etype == "on_chat_model_start" and not _is_nested(
-                        event, tool_step_ids
-                    ):
+                    if etype == "on_chat_model_start" and not _is_nested(event, tool_step_ids):
                         publisher.turn_started()
                 step = _step_from_event(event)
                 if step is None:
@@ -383,9 +377,7 @@ async def _drive_agent(
                     message = _message_from_chat_model_output(
                         (event.get("data") or {}).get("output")
                     )
-                    final_answer = (
-                        _text_of(getattr(message, "content", "")).strip() or None
-                    )
+                    final_answer = _text_of(getattr(message, "content", "")).strip() or None
                 if seq >= max_steps and not is_final:
                     cap_hit = True
                     break
@@ -465,11 +457,7 @@ async def repair_dangling_tool_calls(agent: Any, thread_id: uuid.UUID) -> int:
     messages = (pinned.values or {}).get("messages") if pinned is not None else None
     if not messages:
         return 0
-    answered = {
-        m.tool_call_id
-        for m in messages
-        if isinstance(m, ToolMessage) and m.tool_call_id
-    }
+    answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage) and m.tool_call_id}
     synthetic = [
         ToolMessage(
             content=(

@@ -57,9 +57,7 @@ async def commit_factory(
     test_engine: AsyncEngine,
 ) -> async_sessionmaker[AsyncSession]:
     """A real commit-capable factory — the runner's production session shape."""
-    return async_sessionmaker(
-        bind=test_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    return async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
 
 
 @pytest_asyncio.fixture
@@ -110,9 +108,7 @@ async def _load_run_and_steps(
     factory: async_sessionmaker[AsyncSession], run_id: uuid.UUID
 ) -> tuple[AgentRun, list[AgentRunStep]]:
     async with factory() as db:
-        run = (
-            await db.execute(select(AgentRun).where(AgentRun.id == run_id))
-        ).scalar_one()
+        run = (await db.execute(select(AgentRun).where(AgentRun.id == run_id))).scalar_one()
         steps = (
             (
                 await db.execute(
@@ -162,9 +158,7 @@ class _FlakySessionFactory:
     terminal-write sessions follow.
     """
 
-    def __init__(
-        self, inner: async_sessionmaker[AsyncSession], fail_on_calls: set[int]
-    ) -> None:
+    def __init__(self, inner: async_sessionmaker[AsyncSession], fail_on_calls: set[int]) -> None:
         self._inner = inner
         self._fail_on_calls = fail_on_calls
         self.calls = 0
@@ -190,9 +184,7 @@ async def test_run_completes_with_ordered_steps(
     model = ScriptedToolCallingModel(
         responses=[
             tool_call_message("read_clause", {"topic": "liability"}),
-            final_message(
-                "The cap is the fees paid in the twelve months before the claim."
-            ),
+            final_message("The cap is the fees paid in the twelve months before the claim."),
         ]
     )
 
@@ -560,11 +552,7 @@ async def test_publisher_mirrors_the_real_loop_onto_the_wire(
     for delta in reasoning_deltas:
         block_id = delta["id"]
         started = parts.index(
-            next(
-                p
-                for p in parts
-                if p["type"] == "reasoning-start" and p["id"] == block_id
-            )
+            next(p for p in parts if p["type"] == "reasoning-start" and p["id"] == block_id)
         )
         assert started < parts.index(delta)
     assert {p["id"] for p in parts if p["type"] == "reasoning-end"} >= {
@@ -593,9 +581,7 @@ async def test_step_write_survives_a_transient_db_failure(
     model = ScriptedToolCallingModel(
         responses=[
             tool_call_message("read_clause", {"topic": "liability"}),
-            final_message(
-                "The cap is the fees paid in the twelve months before the claim."
-            ),
+            final_message("The cap is the fees paid in the twelve months before the claim."),
         ]
     )
     # Call 1 = the run-fields load; call 2 = the FIRST step write's first

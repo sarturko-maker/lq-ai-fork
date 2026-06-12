@@ -76,9 +76,7 @@ def _bearer(user: User) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _client_with(
-    *, db_session: AsyncSession, gateway_mock: AsyncMock | None = None
-) -> AsyncClient:
+def _client_with(*, db_session: AsyncSession, gateway_mock: AsyncMock | None = None) -> AsyncClient:
     app.dependency_overrides[get_db] = _override_get_db(db_session)
     if gateway_mock is not None:
         app.dependency_overrides[get_gateway_client] = lambda: gateway_mock
@@ -97,9 +95,7 @@ def _cleanup() -> None:
 
 
 @pytest.mark.integration
-async def test_current_tier_returns_matching_entry(
-    db_session: AsyncSession, caller: User
-) -> None:
+async def test_current_tier_returns_matching_entry(db_session: AsyncSession, caller: User) -> None:
     gateway = AsyncMock(spec=GatewayClient)
     gateway.list_models.return_value = {
         "object": "list",
@@ -170,9 +166,7 @@ async def test_current_tier_unknown_pair_returns_404(
 
 
 @pytest.mark.integration
-async def test_tier_config_returns_policy(
-    db_session: AsyncSession, caller: User
-) -> None:
+async def test_tier_config_returns_policy(db_session: AsyncSession, caller: User) -> None:
     gateway = AsyncMock(spec=GatewayClient)
     gateway.get_tier_config.return_value = {
         "tier_policy": {
@@ -185,9 +179,7 @@ async def test_tier_config_returns_policy(
 
     try:
         async with _client_with(db_session=db_session, gateway_mock=gateway) as client:
-            resp = await client.get(
-                "/api/v1/inference/tier-config", headers=_bearer(caller)
-            )
+            resp = await client.get("/api/v1/inference/tier-config", headers=_bearer(caller))
     finally:
         _cleanup()
 
@@ -203,15 +195,11 @@ async def test_tier_config_returns_policy(
 
 
 @pytest.mark.integration
-async def test_admin_tier_policy_requires_admin(
-    db_session: AsyncSession, caller: User
-) -> None:
+async def test_admin_tier_policy_requires_admin(db_session: AsyncSession, caller: User) -> None:
     gateway = AsyncMock(spec=GatewayClient)
     try:
         async with _client_with(db_session=db_session, gateway_mock=gateway) as client:
-            resp = await client.get(
-                "/api/v1/admin/tier-policy", headers=_bearer(caller)
-            )
+            resp = await client.get("/api/v1/admin/tier-policy", headers=_bearer(caller))
     finally:
         _cleanup()
     assert resp.status_code == 403
@@ -258,9 +246,7 @@ async def test_admin_tier_policy_patch_writes_audit(
     assert body["default_minimum_tier"] == 3
 
     audit = (
-        await db_session.execute(
-            select(AuditLog).where(AuditLog.action == "tier_policy.updated")
-        )
+        await db_session.execute(select(AuditLog).where(AuditLog.action == "tier_policy.updated"))
     ).scalar_one()
     assert audit.details["before"]["default_minimum_tier"] == 4
     assert audit.details["after"]["default_minimum_tier"] == 3
@@ -296,11 +282,7 @@ async def test_admin_tier_policy_patch_noop_skips_audit(
     # patch_tier_config should NOT have been called.
     gateway.patch_tier_config.assert_not_called()
     audit = (
-        (
-            await db_session.execute(
-                select(AuditLog).where(AuditLog.action == "tier_policy.updated")
-            )
-        )
+        (await db_session.execute(select(AuditLog).where(AuditLog.action == "tier_policy.updated")))
         .scalars()
         .all()
     )
@@ -358,9 +340,7 @@ async def test_admin_usage_aggregates_by_provider(
 
 
 @pytest.mark.integration
-async def test_admin_usage_excludes_refused(
-    db_session: AsyncSession, admin_user: User
-) -> None:
+async def test_admin_usage_excludes_refused(db_session: AsyncSession, admin_user: User) -> None:
     db_session.add(
         InferenceRoutingLog(
             user_id=admin_user.id,
@@ -412,9 +392,7 @@ async def test_admin_usage_invalid_group_by_returns_422(
 
 
 @pytest.mark.integration
-async def test_admin_usage_requires_admin(
-    db_session: AsyncSession, caller: User
-) -> None:
+async def test_admin_usage_requires_admin(db_session: AsyncSession, caller: User) -> None:
     try:
         async with _client_with(db_session=db_session) as client:
             resp = await client.get("/api/v1/admin/usage", headers=_bearer(caller))
@@ -429,9 +407,7 @@ async def test_admin_usage_requires_admin(
 
 
 @pytest.mark.integration
-async def test_chats_search_title_and_message_hits(
-    db_session: AsyncSession, caller: User
-) -> None:
+async def test_chats_search_title_and_message_hits(db_session: AsyncSession, caller: User) -> None:
     """A title hit + a message hit both return. The message gets a snippet."""
 
     title_chat = Chat(owner_id=caller.id, title="Onboarding the contractor")
@@ -468,9 +444,7 @@ async def test_chats_search_title_and_message_hits(
 
 
 @pytest.mark.integration
-async def test_chats_search_excludes_archived(
-    db_session: AsyncSession, caller: User
-) -> None:
+async def test_chats_search_excludes_archived(db_session: AsyncSession, caller: User) -> None:
     chat = Chat(
         owner_id=caller.id,
         title="Archived NDA discussion",
@@ -494,9 +468,7 @@ async def test_chats_search_excludes_archived(
 
 
 @pytest.mark.integration
-async def test_chats_search_owner_scoped(
-    db_session: AsyncSession, caller: User
-) -> None:
+async def test_chats_search_owner_scoped(db_session: AsyncSession, caller: User) -> None:
     """Other user's chats should never appear in the caller's results."""
 
     other = User(

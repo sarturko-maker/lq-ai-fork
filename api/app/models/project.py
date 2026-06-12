@@ -96,12 +96,8 @@ class Project(Base):
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     context_md: Mapped[str | None] = mapped_column(Text, nullable=True)
-    privileged: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false")
-    )
-    minimum_inference_tier: Mapped[int | None] = mapped_column(
-        SmallInteger, nullable=True
-    )
+    privileged: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    minimum_inference_tier: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     is_sandbox: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -125,9 +121,7 @@ class Project(Base):
         nullable=False,
         server_default=text("now()"),
     )
-    archived_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return (
@@ -146,15 +140,11 @@ class ProjectFile(Base):
     """
 
     __tablename__ = "project_files"
-    __table_args__ = (
-        PrimaryKeyConstraint("project_id", "file_id", name="pk_project_files"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("project_id", "file_id", name="pk_project_files"),)
 
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "projects.id", ondelete="CASCADE", name="fk_project_files_project_id"
-        ),
+        ForeignKey("projects.id", ondelete="CASCADE", name="fk_project_files_project_id"),
         nullable=False,
     )
     file_id: Mapped[uuid.UUID] = mapped_column(
@@ -191,9 +181,7 @@ class ProjectSkill(Base):
 
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "projects.id", ondelete="CASCADE", name="fk_project_skills_project_id"
-        ),
+        ForeignKey("projects.id", ondelete="CASCADE", name="fk_project_skills_project_id"),
         nullable=False,
     )
     skill_name: Mapped[str] = mapped_column(String, nullable=False)

@@ -27,9 +27,7 @@ pytestmark = pytest.mark.unit
 
 
 class _FakePool:
-    def __init__(
-        self, *, result: Any = object(), boom: Exception | None = None
-    ) -> None:
+    def __init__(self, *, result: Any = object(), boom: Exception | None = None) -> None:
         self._result = result
         self._boom = boom
         self.calls: list[tuple[Any, ...]] = []

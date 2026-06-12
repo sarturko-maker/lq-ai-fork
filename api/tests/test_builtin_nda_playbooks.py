@@ -126,12 +126,8 @@ def test_each_position_has_required_string_fields(slug: str) -> None:
     """Standard language and redline_strategy are non-empty strings."""
     parsed = _load_yaml(slug)
     for pos in parsed.get("positions") or []:
-        assert pos.get("standard_language"), (
-            f"{slug}/{pos['issue']}: missing standard_language."
-        )
-        assert pos.get("redline_strategy"), (
-            f"{slug}/{pos['issue']}: missing redline_strategy."
-        )
+        assert pos.get("standard_language"), f"{slug}/{pos['issue']}: missing standard_language."
+        assert pos.get("redline_strategy"), f"{slug}/{pos['issue']}: missing redline_strategy."
         assert pos.get("severity_if_missing") in {
             "critical",
             "high",
@@ -170,17 +166,13 @@ def test_description_includes_not_legal_advice_disclaimer(slug: str) -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("slug", _BUILTIN_SLUGS)
-async def test_migration_seeded_playbook_row(
-    db_session: AsyncSession, slug: str
-) -> None:
+async def test_migration_seeded_playbook_row(db_session: AsyncSession, slug: str) -> None:
     """After migration 0032 runs, the playbook row exists with the YAML content."""
     parsed = _load_yaml(slug)
     expected_name = _EXPECTED_NAMES[slug]
 
     result = await db_session.execute(
-        select(Playbook).where(
-            Playbook.name == expected_name, Playbook.version == "1.0.0"
-        )
+        select(Playbook).where(Playbook.name == expected_name, Playbook.version == "1.0.0")
     )
     pb = result.scalar_one()
     assert pb.contract_type == parsed["contract_type"]
@@ -189,17 +181,13 @@ async def test_migration_seeded_playbook_row(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("slug", _BUILTIN_SLUGS)
-async def test_migration_seeded_positions_match_yaml(
-    db_session: AsyncSession, slug: str
-) -> None:
+async def test_migration_seeded_positions_match_yaml(db_session: AsyncSession, slug: str) -> None:
     """All eight positions are present after seeding with content matching the YAML."""
     parsed = _load_yaml(slug)
     expected_name = _EXPECTED_NAMES[slug]
 
     pb_result = await db_session.execute(
-        select(Playbook).where(
-            Playbook.name == expected_name, Playbook.version == "1.0.0"
-        )
+        select(Playbook).where(Playbook.name == expected_name, Playbook.version == "1.0.0")
     )
     pb = pb_result.scalar_one()
 
@@ -219,9 +207,7 @@ async def test_migration_seeded_positions_match_yaml(
         assert db_pos.standard_language == yaml_pos["standard_language"]
         assert db_pos.redline_strategy == yaml_pos["redline_strategy"]
         assert db_pos.severity_if_missing == yaml_pos["severity_if_missing"]
-        assert list(db_pos.detection_keywords) == list(
-            yaml_pos.get("detection_keywords") or []
-        )
+        assert list(db_pos.detection_keywords) == list(yaml_pos.get("detection_keywords") or [])
         assert db_pos.fallback_tiers == (yaml_pos.get("fallback_tiers") or [])
 
 
@@ -271,9 +257,7 @@ class _AllMissingGateway:
                 "justification": "Stubbed verdict for executor smoke test.",
             }
         )
-        return _StubResponse(
-            choices=[_StubChoice(message=_StubMessage(content=payload))]
-        )
+        return _StubResponse(choices=[_StubChoice(message=_StubMessage(content=payload))])
 
 
 async def _make_user(db: AsyncSession) -> User:

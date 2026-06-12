@@ -65,9 +65,7 @@ def resolve_skill_dirs(settings: Settings) -> tuple[Path, Path | None]:
     """
     skills_dir = Path(settings.skills_dir).resolve()
     if settings.community_skills_dir:
-        community_skills_dir: Path | None = Path(
-            settings.community_skills_dir
-        ).resolve()
+        community_skills_dir: Path | None = Path(settings.community_skills_dir).resolve()
     else:
         # Default: community submodule lives at skills/community/skills/ inside
         # the repo root. skills_dir is the repo's skills/ directory, so the
@@ -128,9 +126,7 @@ def install_skill_registry(
             f"skills directory does not exist or is not a directory: {skills_dir} "
             "(set SKILLS_DIR to the skill corpus location)"
         )
-    initial_registry = load_registry(
-        skills_dir, community_skills_dir=effective_community_dir
-    )
+    initial_registry = load_registry(skills_dir, community_skills_dir=effective_community_dir)
     holder = MutableSkillRegistry(initial_registry)
     app.state.skill_registry = holder
     return holder

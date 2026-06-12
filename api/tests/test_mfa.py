@@ -117,9 +117,7 @@ async def test_mfa_setup_returns_shape_and_persists_pending_state(
     assert seed_user.recovery_codes is not None
     assert len(seed_user.recovery_codes) == 10
     # Stored values are bcrypt hashes, not the plaintext codes.
-    for stored, plaintext in zip(
-        seed_user.recovery_codes, body["recovery_codes"], strict=True
-    ):
+    for stored, plaintext in zip(seed_user.recovery_codes, body["recovery_codes"], strict=True):
         assert stored != plaintext
         assert stored.startswith("$2")
     # mfa_enabled is NOT flipped until /mfa/enable.
@@ -131,12 +129,8 @@ async def test_mfa_setup_rerun_before_enable_overwrites_pending(
     client: AsyncClient, db_session: AsyncSession, seed_user: User
 ) -> None:
     """Re-running setup before enable replaces the pending secret + codes."""
-    first = (
-        await client.post("/api/v1/auth/mfa/setup", headers=_bearer(seed_user))
-    ).json()
-    second = (
-        await client.post("/api/v1/auth/mfa/setup", headers=_bearer(seed_user))
-    ).json()
+    first = (await client.post("/api/v1/auth/mfa/setup", headers=_bearer(seed_user))).json()
+    second = (await client.post("/api/v1/auth/mfa/setup", headers=_bearer(seed_user))).json()
 
     assert first["secret"] != second["secret"]
     assert first["recovery_codes"] != second["recovery_codes"]
@@ -173,9 +167,7 @@ async def test_mfa_setup_without_token_returns_401(client: AsyncClient) -> None:
 async def test_mfa_enable_with_valid_code_flips_flag(
     client: AsyncClient, db_session: AsyncSession, seed_user: User
 ) -> None:
-    setup = (
-        await client.post("/api/v1/auth/mfa/setup", headers=_bearer(seed_user))
-    ).json()
+    setup = (await client.post("/api/v1/auth/mfa/setup", headers=_bearer(seed_user))).json()
     code = pyotp.TOTP(setup["secret"]).now()
 
     resp = await client.post(
@@ -188,9 +180,7 @@ async def test_mfa_enable_with_valid_code_flips_flag(
 
 
 @pytest.mark.integration
-async def test_mfa_enable_without_setup_returns_400(
-    client: AsyncClient, seed_user: User
-) -> None:
+async def test_mfa_enable_without_setup_returns_400(client: AsyncClient, seed_user: User) -> None:
     """Calling enable before setup is a 400 — there is no pending secret."""
     resp = await client.post(
         "/api/v1/auth/mfa/enable", headers=_bearer(seed_user), json={"code": "123456"}
@@ -261,11 +251,7 @@ async def test_mfa_verify_with_totp_returns_login_response(
     assert body["user"]["mfa_enabled"] is True
 
     sessions = (
-        (
-            await db_session.execute(
-                select(UserSession).where(UserSession.user_id == seed_user.id)
-            )
-        )
+        (await db_session.execute(select(UserSession).where(UserSession.user_id == seed_user.id)))
         .scalars()
         .all()
     )

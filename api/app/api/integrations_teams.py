@@ -62,9 +62,7 @@ async def upsert_teams_tenant(
     """
 
     existing = (
-        await db.execute(
-            select(TeamsTenant).where(TeamsTenant.tenant_id == body.tenant_id)
-        )
+        await db.execute(select(TeamsTenant).where(TeamsTenant.tenant_id == body.tenant_id))
     ).scalar_one_or_none()
 
     if existing is None:

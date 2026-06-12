@@ -197,9 +197,7 @@ async def kb_with_one_indexed_file(db_session: AsyncSession) -> KbOneFile:
     kb = await _make_kb(db_session, owner=owner)
     f, doc, chunk = await _attach_file_with_chunk(db_session, owner=owner, kb=kb)
     # Force Postgres to compute the generated content_tsv column so FTS works.
-    await db_session.execute(
-        text("UPDATE document_chunks SET chunk_index = chunk_index")
-    )
+    await db_session.execute(text("UPDATE document_chunks SET chunk_index = chunk_index"))
     await db_session.flush()
     return KbOneFile(kb_id=kb.id, file_id=f.id, document_id=doc.id, chunk_id=chunk.id)
 
@@ -230,9 +228,7 @@ async def kb_with_old_and_new_files(db_session: AsyncSession) -> KbTwoFiles:
         chunk_text="Fresh contract uploaded today for the autonomous run.",
     )
 
-    await db_session.execute(
-        text("UPDATE document_chunks SET chunk_index = chunk_index")
-    )
+    await db_session.execute(text("UPDATE document_chunks SET chunk_index = chunk_index"))
     await db_session.flush()
 
     return KbTwoFiles(kb_id=kb.id, old_file_id=old_f.id, new_file_id=new_f.id)
@@ -351,9 +347,7 @@ async def session_with_playbook_id(
         detection_keywords=["confidence", "confidential"],
         detection_examples=[],
         redline_strategy="Tighten to the standard language above.",
-        fallback_tiers=[
-            {"rank": 1, "description": "Allow disclosure to professional advisors."}
-        ],
+        fallback_tiers=[{"rank": 1, "description": "Allow disclosure to professional advisors."}],
         position_order=0,
     )
     db_session.add(position)
@@ -611,27 +605,21 @@ async def running_session_at_drafting(db_session: AsyncSession) -> AutonomousSes
     ordering validation), then dispatches the per-item guarded calls.
     """
     user = await _make_optedin_user(db_session)
-    return await _make_running_session(
-        db_session, user=user, trigger_kind="watch", params={}
-    )
+    return await _make_running_session(db_session, user=user, trigger_kind="watch", params={})
 
 
 @pytest_asyncio.fixture
 async def running_session_at_ethics(db_session: AsyncSession) -> AutonomousSession:
     """Running session ready for the ethics-review node."""
     user = await _make_optedin_user(db_session)
-    return await _make_running_session(
-        db_session, user=user, trigger_kind="watch", params={}
-    )
+    return await _make_running_session(db_session, user=user, trigger_kind="watch", params={})
 
 
 @pytest_asyncio.fixture
 async def running_session_at_delivery(db_session: AsyncSession) -> AutonomousSession:
     """Running session ready for the delivery node (terminal_reason regression)."""
     user = await _make_optedin_user(db_session)
-    return await _make_running_session(
-        db_session, user=user, trigger_kind="watch", params={}
-    )
+    return await _make_running_session(db_session, user=user, trigger_kind="watch", params={})
 
 
 @pytest.fixture

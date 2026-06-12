@@ -97,9 +97,7 @@ def _parse_field(spec: str, lo: int, hi: int, *, field_name: str) -> set[int]:
         if start > end:
             raise ValueError(f"descending range in {field_name} field: {token!r}")
         if start < lo or end > hi:
-            raise ValueError(
-                f"{field_name} value out of bounds [{lo},{hi}] in {token!r}"
-            )
+            raise ValueError(f"{field_name} value out of bounds [{lo},{hi}] in {token!r}")
 
         matched.update(range(start, end + 1, step))
 
@@ -138,9 +136,7 @@ def _parse_cron_expr(cron_expr: str) -> _ParsedCron:
         )
     sets = tuple(
         _parse_field(spec, lo, hi, field_name=name)
-        for spec, (lo, hi), name in zip(
-            fields, _FIELD_BOUNDS, _FIELD_NAMES, strict=True
-        )
+        for spec, (lo, hi), name in zip(fields, _FIELD_BOUNDS, _FIELD_NAMES, strict=True)
     )
     # Index 2 = day-of-month, index 4 = day-of-week. A field is "restricted"
     # when its raw spec is not the bare wildcard ``*``.
@@ -227,6 +223,4 @@ def next_run_after(cron_expr: str, after: datetime) -> datetime:
             return candidate
         candidate += timedelta(minutes=1)
 
-    raise ValueError(
-        f"cron expression {cron_expr!r} produced no run time within the scan window"
-    )
+    raise ValueError(f"cron expression {cron_expr!r} produced no run time within the scan window")

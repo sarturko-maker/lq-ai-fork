@@ -44,9 +44,7 @@ class GuardEnv:
 
 @pytest_asyncio.fixture
 async def commit_factory(test_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(
-        bind=test_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    return async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
 
 
 @pytest_asyncio.fixture
@@ -74,9 +72,7 @@ async def guard_env(
         )
         db.add(project)
         await db.flush()
-        thread = AgentThread(
-            user_id=user.id, project_id=project.id, title="guard tests"
-        )
+        thread = AgentThread(user_id=user.id, project_id=project.id, title="guard tests")
         db.add(thread)
         await db.flush()
         run = AgentRun(
@@ -271,9 +267,7 @@ async def test_audit_failure_never_masks_the_tool_result(
     )
 
     with caplog.at_level(logging.ERROR, logger="app.agents.guard"):
-        result = await guarded_dispatch(
-            "search_documents", _op("the result stands"), ctx
-        )
+        result = await guarded_dispatch("search_documents", _op("the result stands"), ctx)
 
     assert result == "the result stands"
     assert any("audit write failed" in r.message for r in caplog.records)

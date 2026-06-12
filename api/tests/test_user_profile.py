@@ -102,9 +102,7 @@ async def test_patch_me_trims_whitespace(client: AsyncClient, caller: User) -> N
 
 
 @pytest.mark.integration
-async def test_patch_me_empty_display_name_returns_422(
-    client: AsyncClient, caller: User
-) -> None:
+async def test_patch_me_empty_display_name_returns_422(client: AsyncClient, caller: User) -> None:
     resp = await client.patch(
         "/api/v1/users/me",
         headers=_bearer(caller),
@@ -126,9 +124,7 @@ async def test_patch_me_whitespace_only_display_name_returns_422(
 
 
 @pytest.mark.integration
-async def test_patch_me_empty_body_returns_422(
-    client: AsyncClient, caller: User
-) -> None:
+async def test_patch_me_empty_body_returns_422(client: AsyncClient, caller: User) -> None:
     resp = await client.patch(
         "/api/v1/users/me",
         headers=_bearer(caller),

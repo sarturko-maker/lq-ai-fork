@@ -190,8 +190,6 @@ async def test_kb_owner_restrict(db_session: AsyncSession) -> None:
     await db_session.flush()
 
     with pytest.raises(Exception, match=r"(?i)foreign key"):
-        await db_session.execute(
-            text("DELETE FROM users WHERE id = :uid"), {"uid": str(user.id)}
-        )
+        await db_session.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": str(user.id)})
         await db_session.flush()
     await db_session.rollback()

@@ -230,9 +230,7 @@ async def test_request_embedding_vectors_sorts_by_index() -> None:
         "usage": {"prompt_tokens": 0, "total_tokens": 0},
     }
     with respx.mock(base_url=GATEWAY_BASE) as router:
-        router.post("/v1/embeddings").mock(
-            return_value=httpx.Response(200, json=payload)
-        )
+        router.post("/v1/embeddings").mock(return_value=httpx.Response(200, json=payload))
         gateway = GatewayClient(GATEWAY_BASE, GATEWAY_KEY)
         try:
             vectors = await request_embedding_vectors(["a", "b", "c"], gateway=gateway)

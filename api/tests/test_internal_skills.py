@@ -281,9 +281,7 @@ async def test_internal_org_profile_present_returns_skill_shape(
     re-prepends the Profile to itself.
     """
 
-    db_session.add(
-        OrganizationProfile(content_md="Always cite Delaware as choice of law.")
-    )
+    db_session.add(OrganizationProfile(content_md="Always cite Delaware as choice of law."))
     await db_session.commit()
 
     resp = await client_with_key.get(

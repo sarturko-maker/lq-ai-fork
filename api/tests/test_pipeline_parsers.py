@@ -226,9 +226,7 @@ def test_offset_fidelity_against_fixture_pdfs(fixture_builder, label) -> None:
     assert chunks, f"[{label}] chunker produced no chunks"
 
     for chunk in chunks:
-        canonical_slice = parsed.canonical_text[
-            chunk.char_offset_start : chunk.char_offset_end
-        ]
+        canonical_slice = parsed.canonical_text[chunk.char_offset_start : chunk.char_offset_end]
         assert canonical_slice == chunk.content, (
             f"[{label}] chunk {chunk.chunk_index} fidelity broken: "
             f"len(slice)={len(canonical_slice)} vs len(content)={len(chunk.content)}; "
@@ -245,9 +243,7 @@ def test_offset_fidelity_with_default_chunk_size() -> None:
     chunks = chunk_document(parsed)  # uses defaults
 
     for chunk in chunks:
-        canonical_slice = parsed.canonical_text[
-            chunk.char_offset_start : chunk.char_offset_end
-        ]
+        canonical_slice = parsed.canonical_text[chunk.char_offset_start : chunk.char_offset_end]
         assert canonical_slice == chunk.content
 
 

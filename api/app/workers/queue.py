@@ -156,9 +156,7 @@ async def _get_m3a6_pool() -> Any:
 
     settings = get_settings()
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    _m3a6_pool = await create_pool(
-        redis_settings, default_queue_name=M3_PLAYBOOK_QUEUE_NAME
-    )
+    _m3a6_pool = await create_pool(redis_settings, default_queue_name=M3_PLAYBOOK_QUEUE_NAME)
     return _m3a6_pool
 
 

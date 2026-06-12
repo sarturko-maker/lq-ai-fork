@@ -233,9 +233,7 @@ async def guarded_tool_call(
             )
 
         # ── dispatch ────────────────────────────────────────────────────────
-        await autonomous_audit(
-            db, session, "tool_call", tool=str(intent), outcome="started"
-        )
+        await autonomous_audit(db, session, "tool_call", tool=str(intent), outcome="started")
         result = await _dispatch(
             intent,
             params,
@@ -1059,10 +1057,7 @@ async def _handle_gateway_inference(
     max_tokens: int | None = params.get("max_tokens")
     anonymize: bool = bool(params.get("anonymize", True))
 
-    messages = [
-        ChatCompletionMessage(role=m["role"], content=m["content"])
-        for m in raw_messages
-    ]
+    messages = [ChatCompletionMessage(role=m["role"], content=m["content"]) for m in raw_messages]
 
     request = ChatCompletionRequest(
         model=model,

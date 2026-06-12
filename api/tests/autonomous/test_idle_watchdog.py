@@ -434,9 +434,7 @@ async def test_per_session_idle_halt_minutes_respected(
     await db_session.refresh(sess_long)
 
     assert sess_short.halt_state == "paused", "short-threshold session should be paused"
-    assert sess_long.halt_state == "running", (
-        "long-threshold session should be untouched"
-    )
+    assert sess_long.halt_state == "running", "long-threshold session should be untouched"
 
 
 @pytest.mark.unit

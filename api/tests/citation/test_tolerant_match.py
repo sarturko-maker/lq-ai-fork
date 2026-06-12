@@ -74,9 +74,7 @@ def test_tolerant_match_smart_quotes_pass() -> None:
     text = '"the agreement shall terminate after five years."'
     doc = _doc(text)
     smart_quoted = "“the agreement shall terminate after five years.”"
-    cand = _candidate(
-        doc, offset_start=0, offset_end=len(text), source_text=smart_quoted
-    )
+    cand = _candidate(doc, offset_start=0, offset_end=len(text), source_text=smart_quoted)
 
     result = verify_tolerant_match(cand, doc)
 

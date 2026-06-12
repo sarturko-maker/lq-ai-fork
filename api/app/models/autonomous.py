@@ -99,28 +99,20 @@ class AutonomousSession(Base):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "users.id", ondelete="CASCADE", name="fk_autonomous_sessions_user_id"
-        ),
+        ForeignKey("users.id", ondelete="CASCADE", name="fk_autonomous_sessions_user_id"),
         nullable=False,
     )
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "projects.id", ondelete="SET NULL", name="fk_autonomous_sessions_project_id"
-        ),
+        ForeignKey("projects.id", ondelete="SET NULL", name="fk_autonomous_sessions_project_id"),
         nullable=True,
     )
     trigger_kind: Mapped[str] = mapped_column(Text, nullable=False)
-    trigger_ref: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
+    trigger_ref: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     current_phase: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'intake'")
     )
-    halt_state: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'running'")
-    )
+    halt_state: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'running'"))
     max_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     cost_total_usd: Mapped[Decimal] = mapped_column(
         Numeric(10, 4), nullable=False, server_default=text("0")
@@ -134,9 +126,7 @@ class AutonomousSession(Base):
     last_activity_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'running'")
-    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'running'"))
     params: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
@@ -148,9 +138,7 @@ class AutonomousSession(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
-    completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return (
@@ -181,9 +169,7 @@ class AutonomousSchedule(Base):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "users.id", ondelete="CASCADE", name="fk_autonomous_schedules_user_id"
-        ),
+        ForeignKey("users.id", ondelete="CASCADE", name="fk_autonomous_schedules_user_id"),
         nullable=False,
     )
     project_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -216,22 +202,14 @@ class AutonomousSchedule(Base):
         ),
         nullable=True,
     )
-    enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true")
-    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     emit_artifacts: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
     max_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
-    last_run_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    next_run_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -266,16 +244,12 @@ class AutonomousWatch(Base):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "users.id", ondelete="CASCADE", name="fk_autonomous_watches_user_id"
-        ),
+        ForeignKey("users.id", ondelete="CASCADE", name="fk_autonomous_watches_user_id"),
         nullable=False,
     )
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "projects.id", ondelete="SET NULL", name="fk_autonomous_watches_project_id"
-        ),
+        ForeignKey("projects.id", ondelete="SET NULL", name="fk_autonomous_watches_project_id"),
         nullable=True,
     )
     knowledge_base_id: Mapped[uuid.UUID] = mapped_column(
@@ -297,16 +271,12 @@ class AutonomousWatch(Base):
         nullable=True,
     )
     skill_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
-    enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true")
-    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     emit_artifacts: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
     max_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -356,12 +326,8 @@ class AutonomousMemory(Base):
         ),
         nullable=True,
     )
-    kept_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    kept_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -400,9 +366,7 @@ class PrecedentEntry(Base):
     )
     pattern_kind: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
-    observed_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("1")
-    )
+    observed_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     source_session_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(
@@ -412,9 +376,7 @@ class PrecedentEntry(Base):
         ),
         nullable=True,
     )
-    dismissed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -485,15 +447,9 @@ class ProjectContextProposal(Base):
         nullable=False,
     )
     suggested_md: Mapped[str] = mapped_column(Text, nullable=False)
-    state: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'proposed'")
-    )
-    accepted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    rejected_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    state: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'proposed'"))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -674,15 +630,11 @@ class AutonomousNotification(Base):
         ),
         nullable=False,
     )
-    channel: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'in_app'")
-    )
+    channel: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'in_app'"))
     title: Mapped[str] = mapped_column(Text, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    read_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

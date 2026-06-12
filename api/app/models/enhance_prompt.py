@@ -78,9 +78,7 @@ class EnhancePromptInteraction(Base):
     """The reason from the skill's skip-conditions list. Non-null when
     ``expansion_applied=False`` (enforced by DB CHECK)."""
 
-    used: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false")
-    )
+    used: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     """Updated when the user clicks Submit on the review screen (or when
     the application auto-submits an expansion the user didn't touch).
     Stays ``false`` if the user skips or backs out."""

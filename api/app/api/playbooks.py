@@ -144,9 +144,7 @@ async def list_playbooks(
     """
     stmt = select(Playbook).where(Playbook.deleted_at.is_(None))
     if not user.is_admin:
-        stmt = stmt.where(
-            (Playbook.created_by == user.id) | (Playbook.created_by.is_(None))
-        )
+        stmt = stmt.where((Playbook.created_by == user.id) | (Playbook.created_by.is_(None)))
     stmt = stmt.order_by(Playbook.name)
     rows = (await db.execute(stmt)).scalars().all()
     return [
@@ -347,9 +345,7 @@ async def update_playbook(
                     issue=new_pos.issue,
                     description=new_pos.description,
                     standard_language=new_pos.standard_language,
-                    fallback_tiers=[
-                        tier.model_dump() for tier in new_pos.fallback_tiers
-                    ],
+                    fallback_tiers=[tier.model_dump() for tier in new_pos.fallback_tiers],
                     redline_strategy=new_pos.redline_strategy,
                     severity_if_missing=new_pos.severity_if_missing,
                     detection_keywords=list(new_pos.detection_keywords),
@@ -369,9 +365,7 @@ async def update_playbook(
         details={
             "fields_changed": sorted(update_data.keys()),
             "positions_replaced": position_payload is not None,
-            "new_position_count": (
-                len(position_payload) if position_payload is not None else None
-            ),
+            "new_position_count": (len(position_payload) if position_payload is not None else None),
         },
     )
     await db.commit()
@@ -490,9 +484,7 @@ async def execute_playbook(
     # the deployment level and admins act on operator-uploaded docs).
     file_row = await db.get(FileModel, document.file_id)
     file_missing_or_unowned = (
-        file_row is None
-        or file_row.deleted_at is not None
-        or file_row.owner_id != user.id
+        file_row is None or file_row.deleted_at is not None or file_row.owner_id != user.id
     )
     if file_missing_or_unowned and not user.is_admin:
         raise HTTPException(status_code=404, detail="target document not found")
@@ -500,9 +492,7 @@ async def execute_playbook(
     if body.project_id is not None:
         project = await db.get(Project, body.project_id)
         project_missing_or_unowned = (
-            project is None
-            or project.archived_at is not None
-            or project.owner_id != user.id
+            project is None or project.archived_at is not None or project.owner_id != user.id
         )
         if project_missing_or_unowned and not user.is_admin:
             raise HTTPException(status_code=404, detail="project not found")
@@ -732,11 +722,7 @@ async def _load_visible_playbook(
     playbook = await db.get(Playbook, playbook_id)
     if playbook is None or playbook.deleted_at is not None:
         raise HTTPException(status_code=404, detail="playbook not found")
-    if (
-        not user.is_admin
-        and playbook.created_by is not None
-        and playbook.created_by != user.id
-    ):
+    if not user.is_admin and playbook.created_by is not None and playbook.created_by != user.id:
         raise HTTPException(status_code=404, detail="playbook not found")
     return playbook
 

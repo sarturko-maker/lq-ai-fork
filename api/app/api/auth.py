@@ -407,9 +407,7 @@ async def login(
     await db.commit()
 
     body = _login_response(user, plaintext)
-    return JSONResponse(
-        status_code=status.HTTP_200_OK, content=body.model_dump(mode="json")
-    )
+    return JSONResponse(status_code=status.HTTP_200_OK, content=body.model_dump(mode="json"))
 
 
 @router.post(
@@ -699,9 +697,7 @@ async def change_password(
     if len(new_password) < settings.password_min_length:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"New password must be at least {settings.password_min_length} characters."
-            ),
+            detail=(f"New password must be at least {settings.password_min_length} characters."),
         )
 
     if new_password == payload.current_password:
@@ -982,9 +978,7 @@ async def mfa_verify(
     await db.commit()
 
     body = _login_response(user, plaintext)
-    return JSONResponse(
-        status_code=status.HTTP_200_OK, content=body.model_dump(mode="json")
-    )
+    return JSONResponse(status_code=status.HTTP_200_OK, content=body.model_dump(mode="json"))
 
 
 @router.post(
@@ -1037,9 +1031,7 @@ async def mfa_disable(
     code_ok = False
     if user.totp_secret and verify_totp(user.totp_secret, payload.code):
         code_ok = True
-    elif (
-        consume_recovery_code(payload.code, list(user.recovery_codes or [])) is not None
-    ):
+    elif consume_recovery_code(payload.code, list(user.recovery_codes or [])) is not None:
         # Recovery code is single-use, but since we're about to clear all
         # MFA state we don't need to persist the truncated list — the
         # code being burned just to disable MFA is the explicit intent.

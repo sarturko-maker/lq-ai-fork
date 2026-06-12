@@ -58,9 +58,7 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     if registry_present:
         app.state.skill_registry = MutableSkillRegistry(load_registry(FIXTURES_DIR))
     elif prior_holder is None:
-        app.state.skill_registry = MutableSkillRegistry(
-            load_registry(Path("/nonexistent"))
-        )
+        app.state.skill_registry = MutableSkillRegistry(load_registry(Path("/nonexistent")))
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -101,9 +99,7 @@ def _h(user: User) -> dict[str, str]:
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_empty_q_returns_results_shape(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_empty_q_returns_results_shape(client: AsyncClient, db_user: User) -> None:
     """For a brand-new user with no chat activity, the empty-``q`` branch
     falls back to alphabetical merged catalog up to ``limit`` rows.
     The response is always the ``{"results": [...]}`` envelope."""

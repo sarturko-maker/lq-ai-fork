@@ -161,9 +161,7 @@ async def test_per_cell_rolling_average_computes_correctly(
 
     estimate = await estimate_per_cell_cost_usd(db_session)
     # average = 0.0030
-    assert estimate == Decimal("0.00300000000000000000") or estimate == Decimal(
-        "0.0030"
-    )
+    assert estimate == Decimal("0.00300000000000000000") or estimate == Decimal("0.0030")
 
 
 # --- Filter correctness -----------------------------------------------------
@@ -238,9 +236,7 @@ async def test_per_cell_null_cost_estimate_rows_excluded(
     await db_session.flush()
 
     estimate = await estimate_per_cell_cost_usd(db_session)
-    assert estimate == Decimal("0.00100000000000000000") or estimate == Decimal(
-        "0.0010"
-    )
+    assert estimate == Decimal("0.00100000000000000000") or estimate == Decimal("0.0010")
 
 
 @pytest.mark.integration
@@ -460,9 +456,7 @@ async def test_execution_cost_ensemble_column_previews_higher() -> None:
     expected_premium = DEFAULT_PER_JUDGE_USD * Decimal(3) * Decimal(4)
     assert premium_preview.ensemble_premium_usd == expected_premium
     # estimated_cost_usd is the TOTAL: base extraction + premium.
-    assert (
-        premium_preview.estimated_cost_usd == base.estimated_cost_usd + expected_premium
-    )
+    assert premium_preview.estimated_cost_usd == base.estimated_cost_usd + expected_premium
 
 
 @pytest.mark.unit
@@ -530,9 +524,7 @@ async def test_execution_cost_deployment_default_activates_null_column() -> None
     )
 
     assert preview.ensemble_cells_count == 3
-    assert preview.ensemble_premium_usd == DEFAULT_PER_JUDGE_USD * Decimal(2) * Decimal(
-        3
-    )
+    assert preview.ensemble_premium_usd == DEFAULT_PER_JUDGE_USD * Decimal(2) * Decimal(3)
 
 
 @pytest.mark.unit

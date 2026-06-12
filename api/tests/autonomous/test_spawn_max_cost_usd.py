@@ -58,9 +58,7 @@ async def _make_user(db: AsyncSession, *, suffix: str = "") -> User:
     return user
 
 
-async def _make_kb(
-    db: AsyncSession, *, owner: User, name: str = "watched"
-) -> KnowledgeBase:
+async def _make_kb(db: AsyncSession, *, owner: User, name: str = "watched") -> KnowledgeBase:
     kb = KnowledgeBase(owner_id=owner.id, name=name)
     db.add(kb)
     await db.flush()
@@ -129,9 +127,7 @@ async def test_watch_spawn_falls_back_to_default_when_unset(
     await db_session.flush()
 
     enqueue = AsyncMock(return_value=True)
-    await fire_watches_for_kb(
-        db_session, kb_id=kb.id, file_id=uuid.uuid4(), enqueue=enqueue
-    )
+    await fire_watches_for_kb(db_session, kb_id=kb.id, file_id=uuid.uuid4(), enqueue=enqueue)
     session = (
         await db_session.execute(
             select(AutonomousSession).where(AutonomousSession.user_id == user.id)

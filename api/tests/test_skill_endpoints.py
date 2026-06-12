@@ -111,15 +111,11 @@ async def test_list_skills_unauthenticated_returns_401(client: AsyncClient) -> N
 
 
 @pytest.mark.integration
-async def test_list_skills_must_change_password_gate(
-    client: AsyncClient, gated_user: User
-) -> None:
+async def test_list_skills_must_change_password_gate(client: AsyncClient, gated_user: User) -> None:
     """`must_change_password=True` → 403 with `password_change_required`."""
 
     token = _bearer(gated_user)
-    resp = await client.get(
-        "/api/v1/skills", headers={"Authorization": f"Bearer {token}"}
-    )
+    resp = await client.get("/api/v1/skills", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 403
     body = resp.json()
     assert body["detail"]["code"] == "password_change_required"
@@ -130,9 +126,7 @@ async def test_list_skills_happy_path(client: AsyncClient, db_user: User) -> Non
     """Returns every fixture skill, sorted by name, with summary fields."""
 
     token = _bearer(db_user)
-    resp = await client.get(
-        "/api/v1/skills", headers={"Authorization": f"Bearer {token}"}
-    )
+    resp = await client.get("/api/v1/skills", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     body = resp.json()
     assert isinstance(body, list)
@@ -168,9 +162,7 @@ async def test_list_skills_filters_by_tag(client: AsyncClient, db_user: User) ->
 
 
 @pytest.mark.integration
-async def test_list_skills_scope_user_returns_empty(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_list_skills_scope_user_returns_empty(client: AsyncClient, db_user: User) -> None:
     """User-scope is empty until DB-backed forks land (post-C1)."""
 
     token = _bearer(db_user)
@@ -183,9 +175,7 @@ async def test_list_skills_scope_user_returns_empty(
 
 
 @pytest.mark.integration
-async def test_list_skills_scope_invalid_rejected(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_list_skills_scope_invalid_rejected(client: AsyncClient, db_user: User) -> None:
     """An out-of-enum `scope` returns 422 (FastAPI's pattern enforcement)."""
 
     token = _bearer(db_user)
@@ -197,15 +187,11 @@ async def test_list_skills_scope_invalid_rejected(
 
 
 @pytest.mark.integration
-async def test_list_skills_omits_empty_optional_fields(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_list_skills_omits_empty_optional_fields(client: AsyncClient, db_user: User) -> None:
     """Sparse-frontmatter skills omit `tags` / `jurisdiction` from the wire shape."""
 
     token = _bearer(db_user)
-    resp = await client.get(
-        "/api/v1/skills", headers={"Authorization": f"Bearer {token}"}
-    )
+    resp = await client.get("/api/v1/skills", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     body = resp.json()
     beta = next(item for item in body if item["name"] == "beta-minimal")
@@ -231,9 +217,7 @@ async def test_get_skill_unauthenticated_returns_401(client: AsyncClient) -> Non
 
 
 @pytest.mark.integration
-async def test_get_skill_must_change_password_gate(
-    client: AsyncClient, gated_user: User
-) -> None:
+async def test_get_skill_must_change_password_gate(client: AsyncClient, gated_user: User) -> None:
     token = _bearer(gated_user)
     resp = await client.get(
         "/api/v1/skills/alpha-test-skill",
@@ -278,9 +262,7 @@ async def test_get_skill_happy_path(client: AsyncClient, db_user: User) -> None:
 
 
 @pytest.mark.integration
-async def test_get_skill_unknown_name_returns_404(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_get_skill_unknown_name_returns_404(client: AsyncClient, db_user: User) -> None:
     """Unknown skill name → 404 with the structured `not_found` error envelope."""
 
     token = _bearer(db_user)
@@ -319,9 +301,7 @@ async def test_get_skill_minimal_skill_has_empty_reference_lists(
 
 
 @pytest.mark.integration
-async def test_contents_returns_same_shape_as_base_get(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_contents_returns_same_shape_as_base_get(client: AsyncClient, db_user: User) -> None:
     """``/skills/{name}/contents`` and ``/skills/{name}`` return the same
     payload — the contents URL is the frontend-targeted alias PRD §3.4
     names as the contract behind the skill inspector."""
@@ -330,18 +310,14 @@ async def test_contents_returns_same_shape_as_base_get(
     headers = {"Authorization": f"Bearer {token}"}
 
     base = await client.get("/api/v1/skills/alpha-test-skill", headers=headers)
-    contents = await client.get(
-        "/api/v1/skills/alpha-test-skill/contents", headers=headers
-    )
+    contents = await client.get("/api/v1/skills/alpha-test-skill/contents", headers=headers)
     assert base.status_code == 200
     assert contents.status_code == 200
     assert base.json() == contents.json()
 
 
 @pytest.mark.integration
-async def test_contents_404_for_unknown_skill(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_contents_404_for_unknown_skill(client: AsyncClient, db_user: User) -> None:
     token = _bearer(db_user)
     resp = await client.get(
         "/api/v1/skills/does-not-exist/contents",
@@ -351,9 +327,7 @@ async def test_contents_404_for_unknown_skill(
 
 
 @pytest.mark.integration
-async def test_inputs_returns_lq_ai_inputs_block(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_inputs_returns_lq_ai_inputs_block(client: AsyncClient, db_user: User) -> None:
     """alpha-test-skill declares ``input_a`` under ``lq_ai.inputs.required``;
     the endpoint surfaces it as a SkillInputDef in the form schema."""
 
@@ -373,9 +347,7 @@ async def test_inputs_returns_lq_ai_inputs_block(
 
 
 @pytest.mark.integration
-async def test_inputs_empty_for_skill_without_inputs(
-    client: AsyncClient, db_user: User
-) -> None:
+async def test_inputs_empty_for_skill_without_inputs(client: AsyncClient, db_user: User) -> None:
     """beta-minimal declares no inputs — endpoint returns a name-only stub."""
 
     token = _bearer(db_user)

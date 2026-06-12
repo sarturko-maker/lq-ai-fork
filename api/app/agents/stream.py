@@ -313,9 +313,7 @@ class RunStreamPublisher:
     def _publish(self, part: dict[str, Any]) -> None:
         if not self._started:
             self._started = True
-            self._broker.publish(
-                self._run_id, {"type": "start", "messageId": str(self._run_id)}
-            )
+            self._broker.publish(self._run_id, {"type": "start", "messageId": str(self._run_id)})
         self._broker.publish(self._run_id, part)
 
     def turn_started(self) -> None:

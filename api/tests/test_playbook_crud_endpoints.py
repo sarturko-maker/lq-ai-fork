@@ -385,9 +385,7 @@ async def test_patch_builtin_returns_403_for_anyone(
         select(Playbook).where(Playbook.created_by.is_(None)).limit(1)
     )
     builtin = result.scalar_one_or_none()
-    assert builtin is not None, (
-        "seed migration 0032 should have created builtin playbooks"
-    )
+    assert builtin is not None, "seed migration 0032 should have created builtin playbooks"
 
     user = await _make_user(db_session)
     admin = await _make_user(db_session, is_admin=True)
@@ -521,16 +519,12 @@ async def test_delete_playbook_other_user_gets_404(
 
 
 @pytest.mark.integration
-async def test_delete_builtin_returns_403(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_delete_builtin_returns_403(client: AsyncClient, db_session: AsyncSession) -> None:
     result = await db_session.execute(
         select(Playbook).where(Playbook.created_by.is_(None)).limit(1)
     )
     builtin = result.scalar_one_or_none()
-    assert builtin is not None, (
-        "seed migration 0032 should have created builtin playbooks"
-    )
+    assert builtin is not None, "seed migration 0032 should have created builtin playbooks"
 
     admin = await _make_user(db_session, is_admin=True)
     response = await client.delete(

@@ -141,9 +141,7 @@ async def _make_file_doc_chunks(
 
 
 @pytest.mark.integration
-async def test_ingest_health_requires_admin(
-    client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_ingest_health_requires_admin(client: AsyncClient, db_session: AsyncSession) -> None:
     """Non-admin caller gets 403; the endpoint is operator-only."""
     member = await _make_member(db_session)
     resp = await client.get("/api/v1/admin/ingest-health", headers=_bearer(member))
@@ -220,9 +218,7 @@ async def test_ingest_health_aggregates_mixed_states(
     assert body["partial"] >= 1
     assert body["parse_failed"] >= 1
     # The total reflects only document-level rows.
-    assert (
-        body["total_documents"] == body["ok"] + body["embed_failed"] + body["partial"]
-    )
+    assert body["total_documents"] == body["ok"] + body["embed_failed"] + body["partial"]
 
 
 @pytest.mark.integration
@@ -266,9 +262,7 @@ async def test_embed_failure_with_zero_progress_marks_embed_failed(
 ) -> None:
     """First-batch failure flips the document's ingest_status to ``embed_failed``."""
     admin = await _make_admin(db_session)
-    f, doc, _chunks = await _make_file_doc_chunks(
-        db_session, owner=admin, chunk_count=3
-    )
+    f, doc, _chunks = await _make_file_doc_chunks(db_session, owner=admin, chunk_count=3)
     assert doc.ingest_status == "ok"
 
     async def _raise(*_args: Any, **_kwargs: Any) -> list[list[float]]:
@@ -296,16 +290,12 @@ async def test_embed_failure_after_partial_progress_marks_partial(
     """Mid-batch failure with some chunks already embedded → ``partial``."""
     admin = await _make_admin(db_session)
     # Many chunks → multiple batches; first batch succeeds, second raises.
-    f, doc, _chunks = await _make_file_doc_chunks(
-        db_session, owner=admin, chunk_count=150
-    )
+    f, doc, _chunks = await _make_file_doc_chunks(db_session, owner=admin, chunk_count=150)
     assert doc.ingest_status == "ok"
 
     call_count = {"n": 0}
 
-    async def _flaky(
-        texts: list[str], *_args: Any, **_kwargs: Any
-    ) -> list[list[float]]:
+    async def _flaky(texts: list[str], *_args: Any, **_kwargs: Any) -> list[list[float]]:
         call_count["n"] += 1
         if call_count["n"] == 1:
             return _vectors(len(texts))
@@ -340,9 +330,7 @@ async def test_embed_success_clears_prior_failure_back_to_ok(
     )
     assert doc.ingest_status == "embed_failed"
 
-    async def _succeed(
-        texts: list[str], *_args: Any, **_kwargs: Any
-    ) -> list[list[float]]:
+    async def _succeed(texts: list[str], *_args: Any, **_kwargs: Any) -> list[list[float]]:
         return _vectors(len(texts))
 
     with patch(
@@ -379,9 +367,7 @@ async def test_embed_no_op_when_nothing_needs_embedding_preserves_status(
 
     for chunk in chunks:
         await db_session.execute(
-            sql_text(
-                "UPDATE document_chunks SET embedding = CAST(:vec AS vector) WHERE id = :id"
-            ),
+            sql_text("UPDATE document_chunks SET embedding = CAST(:vec AS vector) WHERE id = :id"),
             {"vec": "[" + ",".join(["0.5"] * 1536) + "]", "id": str(chunk.id)},
         )
     await db_session.commit()
@@ -404,9 +390,7 @@ async def test_ingest_status_check_constraint_rejects_unknown_value(
 ) -> None:
     """The CHECK constraint pins the enum — any value outside the four allowed is rejected."""
     admin = await _make_admin(db_session)
-    _f, doc, _chunks = await _make_file_doc_chunks(
-        db_session, owner=admin, chunk_count=1
-    )
+    _f, doc, _chunks = await _make_file_doc_chunks(db_session, owner=admin, chunk_count=1)
 
     from sqlalchemy.exc import IntegrityError
 

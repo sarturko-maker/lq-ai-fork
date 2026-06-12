@@ -18,9 +18,7 @@ async def test_autonomous_enabled_defaults_false(db_session: AsyncSession) -> No
 
 @pytest.mark.integration
 async def test_autonomous_enabled_persists_true(db_session: AsyncSession) -> None:
-    user = User(
-        email="optin2@example.com", hashed_password="x", autonomous_enabled=True
-    )
+    user = User(email="optin2@example.com", hashed_password="x", autonomous_enabled=True)
     db_session.add(user)
     await db_session.flush()
     fetched = (

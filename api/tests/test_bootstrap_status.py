@@ -69,9 +69,7 @@ async def test_bootstrap_status_active_when_admin_has_must_change_password(
     assert resp.status_code == 200
     body = resp.json()
     assert body["default_password_active"] is True
-    assert body["logs_hint"] == (
-        'docker compose logs api 2>&1 | grep "First-run admin password"'
-    )
+    assert body["logs_hint"] == ('docker compose logs api 2>&1 | grep "First-run admin password"')
 
 
 @pytest.mark.integration

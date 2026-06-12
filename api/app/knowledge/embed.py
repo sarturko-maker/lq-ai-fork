@@ -218,9 +218,7 @@ async def request_embedding_vectors(
     # explicitly says callers must use ``index``.
     sorted_entries = sorted(
         (entry for entry in data if isinstance(entry, dict)),
-        key=lambda e: (
-            int(e.get("index", 0)) if isinstance(e.get("index", 0), int) else 0
-        ),
+        key=lambda e: int(e.get("index", 0)) if isinstance(e.get("index", 0), int) else 0,
     )
     vectors: list[list[float]] = []
     for entry in sorted_entries:
@@ -254,8 +252,7 @@ def _batched(items: Sequence[DocumentChunk]) -> Iterable[list[DocumentChunk]]:
         # If a single chunk exceeds the soft cap we still send it
         # solo — better to exceed the soft cap than to skip a chunk.
         if current and (
-            len(current) >= EMBED_BATCH_SIZE
-            or current_chars + clen > EMBED_BATCH_INPUT_CHARS
+            len(current) >= EMBED_BATCH_SIZE or current_chars + clen > EMBED_BATCH_INPUT_CHARS
         ):
             yield current
             current = []

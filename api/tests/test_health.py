@@ -55,6 +55,4 @@ async def test_ready_reports_per_dependency_status() -> None:
     for name, dep in deps.items():
         assert "ok" in dep, f"dependency '{name}' missing 'ok' field"
     # Every failed dep appears in the failed list.
-    assert sorted(body["failed"]) == sorted(
-        name for name, dep in deps.items() if not dep["ok"]
-    )
+    assert sorted(body["failed"]) == sorted(name for name, dep in deps.items() if not dep["ok"])

@@ -85,14 +85,10 @@ def build_gateway_chat_model(
     chat path's envelope (D1 / M2-B3): the gateway enforces the floor
     and skips anonymization for privileged matters.
     """
-    url = (
-        gateway_url if gateway_url is not None else get_settings().lq_ai_gateway_url
-    ).rstrip("/")
+    url = (gateway_url if gateway_url is not None else get_settings().lq_ai_gateway_url).rstrip("/")
     extra_body: dict[str, Any] = {"lq_ai_purpose": purpose}
     if project_minimum_inference_tier is not None:
-        extra_body["lq_ai_project_minimum_inference_tier"] = (
-            project_minimum_inference_tier
-        )
+        extra_body["lq_ai_project_minimum_inference_tier"] = project_minimum_inference_tier
     if privileged:
         extra_body["lq_ai_privileged"] = True
     return ChatOpenAI(
@@ -112,11 +108,7 @@ def build_gateway_chat_model(
         use_responses_api=False,
         # F0-S9: without max_input_tokens deepagents never computes a
         # window-relative compaction trigger (see DEFAULT_MAX_INPUT_TOKENS).
-        profile=(
-            {"max_input_tokens": max_input_tokens}
-            if max_input_tokens is not None
-            else None
-        ),
+        profile=({"max_input_tokens": max_input_tokens} if max_input_tokens is not None else None),
     )
 
 

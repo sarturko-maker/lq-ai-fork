@@ -79,9 +79,7 @@ def provisioning_uri(secret: str, *, account_email: str) -> str:
     that authenticator apps consume.
     """
 
-    return pyotp.TOTP(
-        secret, digits=_TOTP_DIGITS, interval=_TOTP_INTERVAL
-    ).provisioning_uri(
+    return pyotp.TOTP(secret, digits=_TOTP_DIGITS, interval=_TOTP_INTERVAL).provisioning_uri(
         name=account_email,
         issuer_name=_PROVISIONING_ISSUER,
     )
@@ -118,8 +116,7 @@ def generate_recovery_codes() -> tuple[list[str], list[str]]:
     hashed: list[str] = []
     for _ in range(_RECOVERY_CODE_COUNT):
         code = "-".join(
-            secrets.token_hex(_RECOVERY_CODE_GROUP_LEN // 2)
-            for _ in range(_RECOVERY_CODE_GROUPS)
+            secrets.token_hex(_RECOVERY_CODE_GROUP_LEN // 2) for _ in range(_RECOVERY_CODE_GROUPS)
         )
         plaintext.append(code)
         hashed.append(hash_password(code))

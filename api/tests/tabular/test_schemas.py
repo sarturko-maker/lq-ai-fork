@@ -78,9 +78,7 @@ def test_synthesized_citation_id_is_deterministic() -> None:
         "document_id": str(document_id),
         "document_name": "x.pdf",
         "cells": {
-            "Col": _persisted_cell(
-                value="v", cited_chunk_ids=[str(chunk)], confidence="medium"
-            )
+            "Col": _persisted_cell(value="v", cited_chunk_ids=[str(chunk)], confidence="medium")
         },
     }
     first = TabularRow.model_validate(payload).cells["Col"].citations[0].citation_id

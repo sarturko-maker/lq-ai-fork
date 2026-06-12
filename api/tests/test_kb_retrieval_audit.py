@@ -181,9 +181,7 @@ async def test_chat_initiated_query_writes_retrieval_audit_row(
         .scalars()
         .all()
     )
-    assert len(audits) == 1, (
-        f"Expected exactly one retrieval audit row, got {len(audits)}"
-    )
+    assert len(audits) == 1, f"Expected exactly one retrieval audit row, got {len(audits)}"
     row = audits[0]
     assert row.resource_type == "chat"
     assert row.user_id == owner_user.id

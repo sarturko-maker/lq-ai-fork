@@ -82,9 +82,7 @@ class AgentThread(Base):
     )
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "projects.id", ondelete="SET NULL", name="fk_agent_threads_project_id"
-        ),
+        ForeignKey("projects.id", ondelete="SET NULL", name="fk_agent_threads_project_id"),
         nullable=True,
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
@@ -137,9 +135,7 @@ class AgentRun(Base):
     # one running run per thread at the storage layer.
     thread_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "agent_threads.id", ondelete="CASCADE", name="fk_agent_runs_thread_id"
-        ),
+        ForeignKey("agent_threads.id", ondelete="CASCADE", name="fk_agent_runs_thread_id"),
         nullable=False,
     )
     # F0-S4: the Matter this run is bound to (NULL = blank workspace, no
@@ -151,26 +147,16 @@ class AgentRun(Base):
         ForeignKey("projects.id", ondelete="SET NULL", name="fk_agent_runs_project_id"),
         nullable=True,
     )
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'running'")
-    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'running'"))
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     final_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
-    model_alias: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'smart'")
-    )
-    purpose: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'agent_loop'")
-    )
-    max_steps: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("20")
-    )
+    model_alias: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'smart'"))
+    purpose: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'agent_loop'"))
+    max_steps: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("20"))
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
-    finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     # F1-S1 lease/liveness (ADR-F009, migration 0052). ``lease_token`` is
@@ -183,15 +169,9 @@ class AgentRun(Base):
     # reads; ``claimed_by``/``claimed_at`` identify the claiming worker for
     # ops and the unclaimed-grace sweep rule.
     claimed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
-    claimed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    lease_token: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
-    heartbeat_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return (
@@ -231,9 +211,7 @@ class AgentRunStep(Base):
     )
     run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey(
-            "agent_runs.id", ondelete="CASCADE", name="fk_agent_run_steps_run_id"
-        ),
+        ForeignKey("agent_runs.id", ondelete="CASCADE", name="fk_agent_run_steps_run_id"),
         nullable=False,
     )
     seq: Mapped[int] = mapped_column(Integer, nullable=False)

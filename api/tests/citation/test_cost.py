@@ -72,9 +72,7 @@ async def test_db_none_returns_default_without_query() -> None:
 async def test_cold_start_no_rows_returns_default(db_session: AsyncSession) -> None:
     """A model with no routing-log rows at all falls back to the default."""
 
-    estimate = await estimate_judge_call_cost_usd(
-        db_session, judge_model="never-seen-judge"
-    )
+    estimate = await estimate_judge_call_cost_usd(db_session, judge_model="never-seen-judge")
     assert estimate == DEFAULT_PER_JUDGE_USD
 
 
@@ -92,9 +90,7 @@ async def test_below_min_samples_returns_default(db_session: AsyncSession) -> No
         )
     await db_session.flush()
 
-    estimate = await estimate_judge_call_cost_usd(
-        db_session, judge_model="claude-haiku-4-5"
-    )
+    estimate = await estimate_judge_call_cost_usd(db_session, judge_model="claude-haiku-4-5")
     assert estimate == DEFAULT_PER_JUDGE_USD
 
 
@@ -122,14 +118,10 @@ async def test_rolling_average_computes_correctly(db_session: AsyncSession) -> N
         )
     await db_session.flush()
 
-    estimate = await estimate_judge_call_cost_usd(
-        db_session, judge_model="claude-haiku-4-5"
-    )
+    estimate = await estimate_judge_call_cost_usd(db_session, judge_model="claude-haiku-4-5")
     # Allow tiny rounding tolerance — SQL AVG returns Numeric and we
     # convert through Decimal(str(...)) which preserves the printed form.
-    assert estimate == Decimal("0.00300000000000000000") or estimate == Decimal(
-        "0.0030"
-    )
+    assert estimate == Decimal("0.00300000000000000000") or estimate == Decimal("0.0030")
 
 
 # --- Filter correctness -----------------------------------------------------
@@ -154,9 +146,7 @@ async def test_purpose_filter_excludes_chat_rows(db_session: AsyncSession) -> No
         )
     await db_session.flush()
 
-    estimate = await estimate_judge_call_cost_usd(
-        db_session, judge_model="claude-haiku-4-5"
-    )
+    estimate = await estimate_judge_call_cost_usd(db_session, judge_model="claude-haiku-4-5")
     # No judge_paraphrase rows → fall back to default, NOT 0.020.
     assert estimate == DEFAULT_PER_JUDGE_USD
 
@@ -183,9 +173,7 @@ async def test_purpose_filter_excludes_null_purpose_rows(
         )
     await db_session.flush()
 
-    estimate = await estimate_judge_call_cost_usd(
-        db_session, judge_model="claude-haiku-4-5"
-    )
+    estimate = await estimate_judge_call_cost_usd(db_session, judge_model="claude-haiku-4-5")
     assert estimate == DEFAULT_PER_JUDGE_USD
 
 
@@ -215,12 +203,8 @@ async def test_null_cost_estimate_rows_excluded(db_session: AsyncSession) -> Non
         )
     await db_session.flush()
 
-    estimate = await estimate_judge_call_cost_usd(
-        db_session, judge_model="claude-haiku-4-5"
-    )
-    assert estimate == Decimal("0.00100000000000000000") or estimate == Decimal(
-        "0.0010"
-    )
+    estimate = await estimate_judge_call_cost_usd(db_session, judge_model="claude-haiku-4-5")
+    assert estimate == Decimal("0.00100000000000000000") or estimate == Decimal("0.0010")
 
 
 @pytest.mark.integration
@@ -253,14 +237,10 @@ async def test_stale_rows_excluded(db_session: AsyncSession) -> None:
         )
     await db_session.flush()
 
-    estimate = await estimate_judge_call_cost_usd(
-        db_session, judge_model="claude-haiku-4-5"
-    )
+    estimate = await estimate_judge_call_cost_usd(db_session, judge_model="claude-haiku-4-5")
     # If the stale rows weren't excluded, the average would be ~0.067.
     assert estimate < Decimal("0.005")
-    assert estimate == Decimal("0.00100000000000000000") or estimate == Decimal(
-        "0.0010"
-    )
+    assert estimate == Decimal("0.00100000000000000000") or estimate == Decimal("0.0010")
 
 
 # --- Cache ------------------------------------------------------------------
@@ -287,9 +267,7 @@ async def test_cache_returns_same_value_without_db_hit(
         )
     await db_session.flush()
 
-    first = await estimate_judge_call_cost_usd(
-        db_session, judge_model="claude-haiku-4-5"
-    )
+    first = await estimate_judge_call_cost_usd(db_session, judge_model="claude-haiku-4-5")
 
     # Add more expensive rows — would shift the average if cache miss.
     for _ in range(10):
@@ -301,9 +279,7 @@ async def test_cache_returns_same_value_without_db_hit(
         )
     await db_session.flush()
 
-    second = await estimate_judge_call_cost_usd(
-        db_session, judge_model="claude-haiku-4-5"
-    )
+    second = await estimate_judge_call_cost_usd(db_session, judge_model="claude-haiku-4-5")
     assert second == first
 
 
@@ -322,9 +298,7 @@ async def test_invalidate_cache_clears_specific_model(
         )
     await db_session.flush()
 
-    first = await estimate_judge_call_cost_usd(
-        db_session, judge_model="claude-haiku-4-5"
-    )
+    first = await estimate_judge_call_cost_usd(db_session, judge_model="claude-haiku-4-5")
     assert first != DEFAULT_PER_JUDGE_USD  # we got the calibrated value
 
     invalidate_cache("claude-haiku-4-5")
@@ -339,9 +313,7 @@ async def test_invalidate_cache_clears_specific_model(
         )
     await db_session.flush()
 
-    second = await estimate_judge_call_cost_usd(
-        db_session, judge_model="claude-haiku-4-5"
-    )
+    second = await estimate_judge_call_cost_usd(db_session, judge_model="claude-haiku-4-5")
     # New average over 10 rows = (5x0.001 + 5x0.010) / 10 = 0.0055
     assert second > first  # picked up the new expensive rows
 

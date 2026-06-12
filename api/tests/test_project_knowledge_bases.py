@@ -56,9 +56,7 @@ async def fake_s3() -> FakeS3Client:
 
 
 @pytest_asyncio.fixture
-async def client(
-    db_session: AsyncSession, fake_s3: FakeS3Client
-) -> AsyncIterator[AsyncClient]:
+async def client(db_session: AsyncSession, fake_s3: FakeS3Client) -> AsyncIterator[AsyncClient]:
     """In-process AsyncClient — same shape as test_projects_endpoints.py."""
 
     @asynccontextmanager
@@ -120,9 +118,7 @@ def _h(user: User) -> dict[str, str]:
     return {"Authorization": f"Bearer {_bearer(user)}"}
 
 
-async def _make_project(
-    db_session: AsyncSession, owner: User, name: str = "Matter"
-) -> Project:
+async def _make_project(db_session: AsyncSession, owner: User, name: str = "Matter") -> Project:
     """Create a project owned by ``owner`` directly via the ORM."""
 
     project = Project(
@@ -135,9 +131,7 @@ async def _make_project(
     return project
 
 
-async def _make_kb(
-    db_session: AsyncSession, owner: User, name: str = "KB"
-) -> KnowledgeBase:
+async def _make_kb(db_session: AsyncSession, owner: User, name: str = "KB") -> KnowledgeBase:
     """Create a knowledge base owned by ``owner`` directly via the ORM."""
 
     kb = KnowledgeBase(

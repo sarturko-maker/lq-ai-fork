@@ -92,9 +92,7 @@ class Chat(Base):
         nullable=False,
         server_default=text("'New chat'"),
     )
-    archived_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -184,9 +182,7 @@ class Message(Base):
         nullable=False,
         server_default=text("'{}'::text[]"),
     )
-    routed_inference_tier: Mapped[int | None] = mapped_column(
-        SmallInteger, nullable=True
-    )
+    routed_inference_tier: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     routed_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
     routed_model: Mapped[str | None] = mapped_column(Text, nullable=True)
     requested_model: Mapped[str | None] = mapped_column(Text, nullable=True)

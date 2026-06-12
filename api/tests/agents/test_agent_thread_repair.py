@@ -58,9 +58,7 @@ def quick_clause_lookup(topic: str) -> str:
 
 @pytest_asyncio.fixture
 async def commit_factory(test_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(
-        bind=test_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    return async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
 
 
 @pytest_asyncio.fixture
@@ -226,13 +224,9 @@ async def test_follow_up_after_interruption_completes(
     saver = InMemorySaver()
     thread_id, _ = await _damage_thread(commit_factory, make_thread_run, saver)
 
-    _, run2_id = await make_thread_run(
-        thread_id=thread_id, prompt="So what is the cap?"
-    )
+    _, run2_id = await make_thread_run(thread_id=thread_id, prompt="So what is the cap?")
     follow_up_model = ScriptedToolCallingModel(
-        responses=[
-            final_message("After the interruption: the cap is twelve months of fees.")
-        ]
+        responses=[final_message("After the interruption: the cap is twelve months of fees.")]
     )
     await execute_agent_run(
         run2_id,
@@ -251,13 +245,9 @@ async def test_follow_up_after_interruption_completes(
     # The follow-up's model call contained the synthetic repair message.
     seen = follow_up_model.seen_messages[0]
     repair_notices = [
-        m
-        for m in seen
-        if isinstance(m, ToolMessage) and "may or may not" in str(m.content)
+        m for m in seen if isinstance(m, ToolMessage) and "may or may not" in str(m.content)
     ]
-    assert repair_notices, (
-        "the repair ToolMessage must be part of the resumed transcript"
-    )
+    assert repair_notices, "the repair ToolMessage must be part of the resumed transcript"
 
 
 async def test_heartbeat_hard_stops_a_run_settled_elsewhere(
@@ -295,11 +285,7 @@ async def test_heartbeat_hard_stops_a_run_settled_elsewhere(
     assert model.seen_messages == []
     async with commit_factory() as db:
         steps = (
-            (
-                await db.execute(
-                    select(AgentRunStep).where(AgentRunStep.run_id == run_id)
-                )
-            )
+            (await db.execute(select(AgentRunStep).where(AgentRunStep.run_id == run_id)))
             .scalars()
             .all()
         )
@@ -376,9 +362,7 @@ async def test_repair_sees_the_checkpoint_view_not_pending_writes(
         run2_id,
         commit_factory,
         tools=[slow_clause_lookup, hanging_clause_lookup],
-        model=ScriptedToolCallingModel(
-            responses=[final_message("Twelve months of fees.")]
-        ),
+        model=ScriptedToolCallingModel(responses=[final_message("Twelve months of fees.")]),
         checkpointer=saver,
         thread_id=thread_id,
     )
@@ -401,9 +385,7 @@ async def test_follow_up_with_degraded_checkpointer_settles_failed(
     # Settle run 1 first — the partial unique index allows only one
     # RUNNING run per thread (and a real follow-up is only admitted
     # after the prior run settled anyway).
-    assert await settle_run(
-        commit_factory, first_run_id, status=AgentRunStatus.failed, error="x"
-    )
+    assert await settle_run(commit_factory, first_run_id, status=AgentRunStatus.failed, error="x")
     _, run2_id = await make_thread_run(thread_id=thread_id, prompt="continue?")
 
     model = ScriptedToolCallingModel(responses=[final_message("should never run")])

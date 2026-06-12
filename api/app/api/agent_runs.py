@@ -202,9 +202,7 @@ def _run_is_orphaned(run: AgentRun, db_now: datetime) -> bool:
     settings = get_settings()
     if run.claimed_at is not None:
         reference = run.heartbeat_at or run.claimed_at
-        threshold = (
-            settings.agent_run_orphan_after_seconds + _STREAM_SWEEP_SLACK_SECONDS
-        )
+        threshold = settings.agent_run_orphan_after_seconds + _STREAM_SWEEP_SLACK_SECONDS
     else:
         reference = run.started_at
         threshold = settings.agent_run_claim_grace_seconds + _STREAM_SWEEP_SLACK_SECONDS
@@ -314,9 +312,7 @@ async def create_agent_run(
             raise HTTPException(status_code=404, detail="thread not found")
         latest_status = await _latest_run_status(db, thread.id)
         if latest_status == AgentRunStatus.running.value:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="thread_busy"
-            )
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="thread_busy")
         if latest_status not in _TERMINAL_STATUSES:
             # No run ever settled on this thread (None) — nothing to
             # honestly continue. Any TERMINAL status admits a follow-up
@@ -332,9 +328,7 @@ async def create_agent_run(
             # run to a blank workspace while the UI still presents the
             # matter binding — refuse honestly instead (F0-S5 review; the
             # new-thread path 404s archived matters for the same reason).
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="matter_archived"
-            )
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="matter_archived")
         if not await has_checkpoint(checkpointer, thread.id):
             # Honest refusal: without persisted state the agent would not
             # remember the conversation it claims to continue (pre-S5
@@ -400,9 +394,7 @@ async def create_agent_run(
         # The partial unique index (one running run per thread) closes
         # the check-then-insert race between concurrent follow-ups.
         if "uq_agent_runs_thread_running" in str(exc.orig):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="thread_busy"
-            ) from exc
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="thread_busy") from exc
         raise
     await db.refresh(run)
 
@@ -415,9 +407,7 @@ async def create_agent_run(
     if not await enqueue_agent_run_job(run.id):
         await db.execute(
             sa_update(AgentRun)
-            .where(
-                AgentRun.id == run.id, AgentRun.status == AgentRunStatus.running.value
-            )
+            .where(AgentRun.id == run.id, AgentRun.status == AgentRunStatus.running.value)
             .values(
                 status=AgentRunStatus.failed.value,
                 error="enqueue failed: no worker will execute this run",
@@ -450,9 +440,7 @@ async def list_agent_runs(
     limit = max(1, min(limit, _LIMIT_MAX))
     offset = max(0, offset)
 
-    count_stmt = (
-        select(func.count()).select_from(AgentRun).where(AgentRun.user_id == user.id)
-    )
+    count_stmt = select(func.count()).select_from(AgentRun).where(AgentRun.user_id == user.id)
     total_count: int = (await db.execute(count_stmt)).scalar_one()
 
     rows_stmt = (
@@ -493,9 +481,7 @@ async def get_agent_run(
         raise HTTPException(status_code=404, detail="run not found")
 
     steps_stmt = (
-        select(AgentRunStep)
-        .where(AgentRunStep.run_id == run.id)
-        .order_by(AgentRunStep.seq.asc())
+        select(AgentRunStep).where(AgentRunStep.run_id == run.id).order_by(AgentRunStep.seq.asc())
     )
     steps = (await db.execute(steps_stmt)).scalars().all()
 
@@ -583,9 +569,7 @@ async def _stream_run_events(
     queue = broker.subscribe(run_id)
     try:
         max_seq = 0
-        run, steps, db_now = await _read_stream_state(
-            session_factory, run_id, after_seq=0
-        )
+        run, steps, db_now = await _read_stream_state(session_factory, run_id, after_seq=0)
         for row in steps:
             max_seq = max(max_seq, row.seq)
             yield encode_sse(_row_part(row))
@@ -617,9 +601,7 @@ async def _stream_run_events(
         idle_seconds = 0.0
         while True:
             try:
-                part = await asyncio.wait_for(
-                    queue.get(), timeout=_STREAM_DB_POLL_SECONDS
-                )
+                part = await asyncio.wait_for(queue.get(), timeout=_STREAM_DB_POLL_SECONDS)
             except TimeoutError:
                 # Live queue silent — tail the settled rows (fallback
                 # path; emits nothing the client hasn't reconciled).
@@ -799,9 +781,7 @@ async def list_matter_activity(
         .join(AgentRun, AgentRun.thread_id == AgentThread.id)
         .where(AgentThread.user_id == user.id)
         .distinct(AgentThread.project_id)
-        .order_by(
-            AgentThread.project_id, AgentRun.started_at.desc(), AgentRun.id.desc()
-        )
+        .order_by(AgentThread.project_id, AgentRun.started_at.desc(), AgentRun.id.desc())
     )
     statuses: dict[uuid.UUID | None, str] = dict(status_rows.tuples().all())
 
@@ -817,9 +797,7 @@ async def list_matter_activity(
                 created_at=created_at,
                 thread_count=thread_count,
                 last_run_at=last_run_at,
-                last_run_status=AgentRunStatus(statuses[pid])
-                if pid in statuses
-                else None,
+                last_run_status=AgentRunStatus(statuses[pid]) if pid in statuses else None,
             )
         )
     # Most recent activity first; matters without conversations follow,
@@ -900,18 +878,14 @@ async def list_agent_threads(
             select(AgentRun.thread_id, AgentRun.status)
             .where(AgentRun.thread_id.in_([t.id for t in rows]))
             .distinct(AgentRun.thread_id)
-            .order_by(
-                AgentRun.thread_id, AgentRun.started_at.desc(), AgentRun.id.desc()
-            )
+            .order_by(AgentRun.thread_id, AgentRun.started_at.desc(), AgentRun.id.desc())
         )
         statuses = dict(status_rows.tuples().all())
 
     threads = []
     for t in rows:
         read = AgentThreadRead.model_validate(t)
-        read.last_run_status = (
-            AgentRunStatus(statuses[t.id]) if t.id in statuses else None
-        )
+        read.last_run_status = AgentRunStatus(statuses[t.id]) if t.id in statuses else None
         threads.append(read)
 
     return AgentThreadListResponse(
@@ -939,9 +913,7 @@ async def get_agent_thread(
     """
     thread = (
         await db.execute(
-            select(AgentThread).where(
-                AgentThread.id == thread_id, AgentThread.user_id == user.id
-            )
+            select(AgentThread).where(AgentThread.id == thread_id, AgentThread.user_id == user.id)
         )
     ).scalar_one_or_none()
     if thread is None:
@@ -986,9 +958,7 @@ async def get_agent_thread(
     )
 
     thread_read = AgentThreadRead.model_validate(thread)
-    thread_read.last_run_status = (
-        AgentRunStatus(latest_status) if latest_status else None
-    )
+    thread_read.last_run_status = AgentRunStatus(latest_status) if latest_status else None
 
     return AgentThreadDetailResponse(
         thread=thread_read,
@@ -1035,9 +1005,7 @@ async def cancel_agent_run(
     if run.status == AgentRunStatus.running.value:
         result: CursorResult[Any] = await db.execute(  # type: ignore[assignment]
             sa_update(AgentRun)
-            .where(
-                AgentRun.id == run.id, AgentRun.status == AgentRunStatus.running.value
-            )
+            .where(AgentRun.id == run.id, AgentRun.status == AgentRunStatus.running.value)
             .values(
                 status=AgentRunStatus.cancelled.value,
                 finished_at=func.now(),
@@ -1111,9 +1079,7 @@ async def delete_agent_thread(
 
     run_count: int = (
         await db.execute(
-            select(func.count())
-            .select_from(AgentRun)
-            .where(AgentRun.thread_id == thread.id)
+            select(func.count()).select_from(AgentRun).where(AgentRun.thread_id == thread.id)
         )
     ).scalar_one()
     await db.delete(thread)

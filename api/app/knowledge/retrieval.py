@@ -261,9 +261,7 @@ async def _fts_candidates(
     treated as literal characters.
     """
 
-    result = await db.execute(
-        _FTS_SQL, {"kb_id": str(kb_id), "q": query, "limit": limit}
-    )
+    result = await db.execute(_FTS_SQL, {"kb_id": str(kb_id), "q": query, "limit": limit})
     rows = result.mappings().all()
     return [(uuid.UUID(str(row["chunk_id"])), float(row["fts_rank"])) for row in rows]
 
@@ -306,12 +304,8 @@ async def _hydrate_chunks(
                 "file_id": uuid.UUID(str(row["file_id"])),
                 "file_name": str(row["file_name"]),
                 "content": str(row["content"]),
-                "page_start": (
-                    int(row["page_start"]) if row["page_start"] is not None else None
-                ),
-                "page_end": int(row["page_end"])
-                if row["page_end"] is not None
-                else None,
+                "page_start": (int(row["page_start"]) if row["page_start"] is not None else None),
+                "page_end": int(row["page_end"]) if row["page_end"] is not None else None,
                 "char_offset_start": int(row["char_offset_start"]),
                 "char_offset_end": int(row["char_offset_end"]),
             }

@@ -70,9 +70,7 @@ MAX_KEYWORD_COUNT: Final[int] = 8
 uses these for lexical FTS retrieval; more than ~8 dilutes the
 signal (every clause matches at least one keyword on a long contract)."""
 
-_VALID_SEVERITIES: Final[frozenset[str]] = frozenset(
-    {"critical", "high", "medium", "low"}
-)
+_VALID_SEVERITIES: Final[frozenset[str]] = frozenset({"critical", "high", "medium", "low"})
 """Matches the CHECK constraint on ``playbook_positions.severity_if_missing``
 and the :class:`PositionSeverity` literal."""
 

@@ -70,9 +70,7 @@ class CompositionEnv:
 
 @pytest_asyncio.fixture
 async def commit_factory(test_engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(
-        bind=test_engine, expire_on_commit=False, class_=AsyncSession
-    )
+    return async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
 
 
 @pytest_asyncio.fixture
@@ -139,9 +137,7 @@ async def comp_env(
 
 async def _run_row(env: CompositionEnv, run_id: uuid.UUID) -> AgentRun:
     async with env.factory() as db:
-        return (
-            await db.execute(select(AgentRun).where(AgentRun.id == run_id))
-        ).scalar_one()
+        return (await db.execute(select(AgentRun).where(AgentRun.id == run_id))).scalar_one()
 
 
 def test_system_prompt_assembly() -> None:
@@ -212,9 +208,7 @@ async def test_unbound_run_gets_no_matter_tools_and_no_envelope(
     comp_env: CompositionEnv,
 ) -> None:
     run_id = await comp_env.make_run(project_id_value=None)
-    builder = CapturingBuilder(
-        model=ScriptedToolCallingModel(responses=[final_message("done")])
-    )
+    builder = CapturingBuilder(model=ScriptedToolCallingModel(responses=[final_message("done")]))
 
     await compose_and_execute_run(
         run_id=run_id,
@@ -254,9 +248,7 @@ async def test_archived_matter_executes_as_unbound(comp_env: CompositionEnv) -> 
         project.archived_at = datetime.now(UTC)
         await db.commit()
 
-    builder = CapturingBuilder(
-        model=ScriptedToolCallingModel(responses=[final_message("ok")])
-    )
+    builder = CapturingBuilder(model=ScriptedToolCallingModel(responses=[final_message("ok")]))
     try:
         await compose_and_execute_run(
             run_id=run_id,
@@ -285,9 +277,7 @@ async def test_follow_up_run_continues_the_thread(comp_env: CompositionEnv) -> N
     saver = InMemorySaver()
     thread_id: uuid.UUID
     async with comp_env.factory() as db:
-        thread = AgentThread(
-            user_id=comp_env.user_id, project_id=None, title="multi-turn"
-        )
+        thread = AgentThread(user_id=comp_env.user_id, project_id=None, title="multi-turn")
         db.add(thread)
         await db.commit()
         thread_id = thread.id
@@ -307,9 +297,7 @@ async def test_follow_up_run_continues_the_thread(comp_env: CompositionEnv) -> N
             await db.commit()
             return run.id
 
-    first_model = ScriptedToolCallingModel(
-        responses=[final_message("The cap is 12 months.")]
-    )
+    first_model = ScriptedToolCallingModel(responses=[final_message("The cap is 12 months.")])
     run1 = await make_run_on_thread("What is the liability cap?")
     await compose_and_execute_run(
         run_id=run1,
@@ -319,9 +307,7 @@ async def test_follow_up_run_continues_the_thread(comp_env: CompositionEnv) -> N
     )
     assert (await _run_row(comp_env, run1)).status == "completed"
 
-    second_model = ScriptedToolCallingModel(
-        responses=[final_message("You asked about the cap.")]
-    )
+    second_model = ScriptedToolCallingModel(responses=[final_message("You asked about the cap.")])
     run2 = await make_run_on_thread("What did I just ask you?")
     await compose_and_execute_run(
         run_id=run2,
@@ -338,9 +324,7 @@ async def test_follow_up_run_continues_the_thread(comp_env: CompositionEnv) -> N
     assert "What is the liability cap?" in joined
     assert "The cap is 12 months." in joined
     assert "What did I just ask you?" in joined
-    assert joined.index("What is the liability cap?") < joined.index(
-        "What did I just ask you?"
-    )
+    assert joined.index("What is the liability cap?") < joined.index("What did I just ask you?")
 
 
 async def test_runs_on_different_threads_share_nothing(
@@ -355,9 +339,7 @@ async def test_runs_on_different_threads_share_nothing(
 
     async def run_on_new_thread(prompt: str, model: ScriptedToolCallingModel) -> None:
         async with comp_env.factory() as db:
-            thread = AgentThread(
-                user_id=comp_env.user_id, project_id=None, title=prompt
-            )
+            thread = AgentThread(user_id=comp_env.user_id, project_id=None, title=prompt)
             db.add(thread)
             await db.flush()
             run = AgentRun(

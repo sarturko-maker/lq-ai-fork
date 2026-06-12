@@ -205,9 +205,7 @@ async def _load_playbook_with_positions(
     walk is deterministic.
     """
     stmt = (
-        select(Playbook)
-        .where(Playbook.id == playbook_id)
-        .options(selectinload(Playbook.positions))
+        select(Playbook).where(Playbook.id == playbook_id).options(selectinload(Playbook.positions))
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()

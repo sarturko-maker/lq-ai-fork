@@ -212,9 +212,7 @@ async def test_executor_drives_all_five_phases(db_session: AsyncSession) -> None
     # Current phase is 'delivery' after the full run.
     assert session.current_phase == str(Phase.delivery)
     # completed_at must be populated on success (Important-4 fix).
-    assert session.completed_at is not None, (
-        "completed_at must be set on successful run"
-    )
+    assert session.completed_at is not None, "completed_at must be set on successful run"
     # Commit must have been called at least once (Critical-1 fix).
     assert commit_call_count >= 1, (
         f"Expected db.commit() to be called at least once on success path, "
@@ -256,9 +254,7 @@ async def test_executor_writes_five_phase_transition_audit_rows(
     )
 
     # Expect exactly 5 transition rows (one per phase).
-    assert len(rows) == 5, (
-        f"Expected 5 audit rows, got {len(rows)}: {[r.details for r in rows]}"
-    )
+    assert len(rows) == 5, f"Expected 5 audit rows, got {len(rows)}: {[r.details for r in rows]}"
 
     # Verify the phase order is preserved.
     expected_phases = [
@@ -413,9 +409,7 @@ async def test_executor_persists_failed_status_on_state_dict_error(
     )
     assert session.error is not None
     assert "injected state-dict error" in session.error
-    assert session.completed_at is not None, (
-        "completed_at must be set on the error state-dict path"
-    )
+    assert session.completed_at is not None, "completed_at must be set on the error state-dict path"
 
 
 @pytest.mark.integration
@@ -461,9 +455,7 @@ async def test_no_tool_call_bypasses_chokepoint(db_session: AsyncSession) -> Non
     )
 
     # Not vacuously true: the session must produce at least one tool_call row.
-    assert len(rows) >= 1, (
-        "expected at least one tool_call audit row for a full session"
-    )
+    assert len(rows) >= 1, "expected at least one tool_call audit row for a full session"
 
     # Recognized intents: the full ToolIntent enum (the chokepoint only ever
     # stamps a valid ToolIntent value as details["tool"]).

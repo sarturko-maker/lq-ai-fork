@@ -134,9 +134,7 @@ def make_retrieve_node(
                         "issue": pos["issue"],
                     },
                 )
-                fallback = await _fetch_first_chunks(
-                    db, target_doc_id, limit=RETRIEVAL_TOP_K
-                )
+                fallback = await _fetch_first_chunks(db, target_doc_id, limit=RETRIEVAL_TOP_K)
                 retrievals.append({"position_id": pos["id"], "chunks": fallback})
                 continue
 
@@ -153,9 +151,7 @@ def make_retrieve_node(
                 # to evaluate. The classifier's verdict in this case
                 # will typically be ``missing`` (the position's clause
                 # isn't in the doc).
-                chunks = await _fetch_first_chunks(
-                    db, target_doc_id, limit=RETRIEVAL_TOP_K
-                )
+                chunks = await _fetch_first_chunks(db, target_doc_id, limit=RETRIEVAL_TOP_K)
             retrievals.append({"position_id": pos["id"], "chunks": chunks})
 
         return {"retrievals": retrievals}
@@ -326,16 +322,12 @@ def make_classify_node(
                 cited_indices = _coerce_chunk_indices(
                     verdict_data.get("cited_chunk_indices"), n_chunks=len(chunks)
                 )
-                cited_chunk_ids = (
-                    [chunks[i]["id"] for i in cited_indices] if chunks else []
-                )
+                cited_chunk_ids = [chunks[i]["id"] for i in cited_indices] if chunks else []
                 matched_text = str(verdict_data.get("matched_text") or "")
                 justification = str(verdict_data.get("justification") or "")
                 matched_fallback_rank_raw = verdict_data.get("matched_fallback_rank")
                 matched_fallback_rank: int | None
-                if verdict == "matches_fallback" and isinstance(
-                    matched_fallback_rank_raw, int
-                ):
+                if verdict == "matches_fallback" and isinstance(matched_fallback_rank_raw, int):
                     matched_fallback_rank = matched_fallback_rank_raw
                 else:
                     matched_fallback_rank = None

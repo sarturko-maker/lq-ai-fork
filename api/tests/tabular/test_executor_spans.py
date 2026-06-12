@@ -79,9 +79,7 @@ class _StubGateway:
 
     async def chat_completion(self, request: Any) -> _StubResponse:
         if not self.payloads:
-            return _StubResponse(
-                choices=[_StubChoice(message=_StubMessage(content=""))]
-            )
+            return _StubResponse(choices=[_StubChoice(message=_StubMessage(content=""))])
         payload = self.payloads.pop(0)
         return _StubResponse(
             choices=[_StubChoice(message=_StubMessage(content=json.dumps(payload)))]
@@ -244,9 +242,7 @@ async def test_executor_emits_tabular_execute_and_cell_spans(
     # --- strong nesting assertion: cell spans are DIRECT children of exec span ---
     assert exec_span.context is not None
     for cell_span in cell_spans:
-        assert cell_span.parent is not None, (
-            "tabular.cell span is a root span — nesting broke"
-        )
+        assert cell_span.parent is not None, "tabular.cell span is a root span — nesting broke"
         assert cell_span.parent.span_id == exec_span.context.span_id, (
             f"tabular.cell span.parent.span_id {cell_span.parent.span_id!r} != "
             f"tabular.execute span_id {exec_span.context.span_id!r} — "

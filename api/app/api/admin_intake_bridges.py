@@ -88,9 +88,7 @@ async def list_intake_bridges(
     )
 
     return IntakeBridgesList(
-        slack_workspaces=[
-            SlackWorkspaceSummary.model_validate(row) for row in slack_rows
-        ],
+        slack_workspaces=[SlackWorkspaceSummary.model_validate(row) for row in slack_rows],
         teams_tenants=[TeamsTenantSummary.model_validate(row) for row in teams_rows],
     )
 
@@ -118,9 +116,7 @@ async def soft_delete_slack_workspace(
     """
 
     row = (
-        await db.execute(
-            select(SlackWorkspace).where(SlackWorkspace.id == workspace_id)
-        )
+        await db.execute(select(SlackWorkspace).where(SlackWorkspace.id == workspace_id))
     ).scalar_one_or_none()
     if row is None or row.deleted_at is not None:
         raise NotFound(

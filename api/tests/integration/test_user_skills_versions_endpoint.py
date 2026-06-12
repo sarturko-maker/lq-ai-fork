@@ -53,9 +53,7 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     if registry_present:
         app.state.skill_registry = MutableSkillRegistry(load_registry(FIXTURES_DIR))
     elif prior_holder is None:
-        app.state.skill_registry = MutableSkillRegistry(
-            load_registry(Path("/nonexistent"))
-        )
+        app.state.skill_registry = MutableSkillRegistry(load_registry(Path("/nonexistent")))
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -147,9 +145,7 @@ async def test_versions_lists_create_and_updates(
 ) -> None:
     headers = _h(db_user)
 
-    created = await client.post(
-        "/api/v1/user-skills", headers=headers, json=_create_payload()
-    )
+    created = await client.post("/api/v1/user-skills", headers=headers, json=_create_payload())
     assert created.status_code == 201, created.text
     skill_id = created.json()["id"]
     # Distinguish the create row's timestamp from the patches that follow —

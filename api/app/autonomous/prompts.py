@@ -234,9 +234,7 @@ async def _load_skill_system_prompt(
         )
     skill = snapshot.get_skill(skill_ref)
     if skill is None:
-        raise ValueError(
-            f"assemble_analysis_messages: skill {skill_ref!r} not in the registry"
-        )
+        raise ValueError(f"assemble_analysis_messages: skill {skill_ref!r} not in the registry")
     return skill.content_md
 
 
@@ -270,9 +268,7 @@ def _registry_from_app_state() -> SkillRegistry | None:
 # ---------------------------------------------------------------------------
 
 
-async def _load_playbook_system_prompt(
-    playbook_id: uuid.UUID, *, db: AsyncSession
-) -> str:
+async def _load_playbook_system_prompt(playbook_id: uuid.UUID, *, db: AsyncSession) -> str:
     """Render the playbook + positions to a deterministic system prompt.
 
     Mirrors the eager-load pattern in
@@ -288,9 +284,7 @@ async def _load_playbook_system_prompt(
     )
     playbook = (await db.execute(stmt)).scalar_one_or_none()
     if playbook is None:
-        raise ValueError(
-            f"assemble_analysis_messages: playbook {playbook_id!s} not found"
-        )
+        raise ValueError(f"assemble_analysis_messages: playbook {playbook_id!s} not found")
 
     lines: list[str] = [
         f"# Playbook: {playbook.name}",
@@ -366,7 +360,9 @@ def _format_chunks_as_user_content(chunks: list[dict[str, Any]]) -> str:
         start = chunk.get("char_offset_start", "?")
         end = chunk.get("char_offset_end", "?")
         content = chunk.get("content", "")
-        header = f"[chunk_id {chunk_id} | file_id {file_id} | file {file_name} | offsets {start}-{end}]"
+        header = (
+            f"[chunk_id {chunk_id} | file_id {file_id} | file {file_name} | offsets {start}-{end}]"
+        )
         blocks.append(f"{header}\n{content}")
     return "\n\n".join(blocks)
 

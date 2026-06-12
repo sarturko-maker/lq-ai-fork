@@ -66,18 +66,14 @@ def _bearer(user: User) -> dict[str, str]:
 
 
 @pytest.mark.integration
-async def test_get_preferences_defaults_to_disclosure(
-    client: AsyncClient, caller: User
-) -> None:
+async def test_get_preferences_defaults_to_disclosure(client: AsyncClient, caller: User) -> None:
     resp = await client.get("/api/v1/users/me/preferences", headers=_bearer(caller))
     assert resp.status_code == 200
     assert resp.json()["reasoning_visibility"] == "disclosure"
 
 
 @pytest.mark.integration
-async def test_get_preferences_defaults_full_snapshot(
-    client: AsyncClient, caller: User
-) -> None:
+async def test_get_preferences_defaults_full_snapshot(client: AsyncClient, caller: User) -> None:
     """All 6 preference fields return their 'brave choice' server defaults."""
     resp = await client.get("/api/v1/users/me/preferences", headers=_bearer(caller))
     assert resp.status_code == 200
@@ -91,9 +87,7 @@ async def test_get_preferences_defaults_full_snapshot(
 
 
 @pytest.mark.integration
-async def test_users_me_surfaces_reasoning_visibility(
-    client: AsyncClient, caller: User
-) -> None:
+async def test_users_me_surfaces_reasoning_visibility(client: AsyncClient, caller: User) -> None:
     resp = await client.get("/api/v1/users/me", headers=_bearer(caller))
     assert resp.status_code == 200
     assert resp.json()["reasoning_visibility"] == "disclosure"
@@ -156,9 +150,7 @@ async def test_patch_preferences_idempotent_no_audit(
 
 
 @pytest.mark.integration
-async def test_patch_preferences_empty_body_is_noop(
-    client: AsyncClient, caller: User
-) -> None:
+async def test_patch_preferences_empty_body_is_noop(client: AsyncClient, caller: User) -> None:
     resp = await client.patch(
         "/api/v1/users/me/preferences",
         headers=_bearer(caller),
