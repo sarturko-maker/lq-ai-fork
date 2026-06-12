@@ -24,12 +24,12 @@ _GATEWAY_KEY_HEADER = "X-LQ-AI-Gateway-Key"
 # F0-S9: effective max input tokens THROUGH THE GATEWAY, for the model's
 # ``profile`` — deepagents' summarization middleware falls back to a fixed
 # 170k-token trigger for unprofiled models (compute_summarization_defaults);
-# with ``max_input_tokens`` set, compaction triggers at 0.85 x this value.
-# The binding constraint here is the gateway envelope, NOT the provider
-# model's native window (MiniMax-M3 is 1M tokens): the gateway's
-# ``request_validation.max_total_request_chars`` is 1e6 ≈ 250k tokens at
-# ~4 chars/token. 200k leaves headroom for char-dense legal text, so the
-# 0.85 trigger (170k tokens ≈ 680k chars) fires before the gateway cap.
+# with ``max_input_tokens`` set, compaction triggers at 0.85 x this value
+# (and post-compaction KEEP becomes fraction-based — intended). 200k is a
+# conservative operating point under the gateway's DECLARED request cap
+# (``request_validation.max_total_request_chars`` = 1e6 chars ≈ 250k tokens
+# at ~4 chars/token; the cap is config-only today — not yet enforced in
+# gateway/app), well inside MiniMax-M3's native 1M-token window.
 DEFAULT_MAX_INPUT_TOKENS = 200_000
 
 

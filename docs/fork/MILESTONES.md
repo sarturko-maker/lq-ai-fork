@@ -116,7 +116,10 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
   `one_per_item`; negative-control noise 0; grounding 20/20 with args 18/18; mismatch:
   no-fabrication 20/20 but read-noise fired 19/20 (oscar's MiniMax wrong-grounding eagerness
   replicated — the gate's one discriminating signal; threshold deferred to maintainer per
-  decision 1). Session spend ~$1.84 standard-rate upper bound. Output:
+  decision 1). Adversarial review (35 agents): 27 confirmed findings ALL fixed in-slice;
+  the 80 cycles RE-SCORED IDENTICALLY under the stricter post-review scoring (think-stripped
+  answers, distinct-call fan-out credit) — numbers robust. Session spend ~$1.69
+  standard-rate upper bound (corrected after the routing-window double-count fix). Output:
   `docs/fork/model-compatibility.md` (per-model rows; Kimi K2.x row BLOCKED-ON-KEY with exact
   gateway recipe) + generated `docs/fork/evidence/f0-s9/matrix.md`. Deferred axes recorded:
   action-tool canary (no F0 action surface), compaction survival, L2 masked judge (budget rule).

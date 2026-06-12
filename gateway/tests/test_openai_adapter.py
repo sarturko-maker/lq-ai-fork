@@ -1002,3 +1002,43 @@ def test_request_preserves_think_history_and_strips_only_lq_ai_keys() -> None:
     assert assistant["tool_calls"][0]["id"] == "call_function_xplk3zli8lqh_1"
     assert body["messages"][2]["tool_call_id"] == "call_function_xplk3zli8lqh_1"
     assert "lq_ai_purpose" not in body
+
+
+@pytest.mark.unit
+async def test_streaming_tool_call_repeated_type_continuations_not_resynthesized() -> None:
+    """F0-S9 review fix: some nonconforming providers repeat ``type`` (or
+    even ``function.name``) on CONTINUATION deltas. Opening detection is
+    stateful by (choice, tool_call) index — only an index's first delta
+    may synthesize, so continuations never get a fresh (call-splitting)
+    id, no matter what shape they arrive in."""
+
+    sse_body = (
+        # Opening delta, id missing — synthesize here.
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m",'
+        '"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"type":"function",'
+        '"function":{"name":"get_weather","arguments":""},"index":0}]}}]}\n\n'
+        # Continuation that REPEATS type — must NOT synthesize.
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m",'
+        '"choices":[{"index":0,"delta":{"tool_calls":[{"type":"function",'
+        '"function":{"arguments":"{\\"city\\""},"index":0}]}}]}\n\n'
+        # Continuation that repeats type AND name — must NOT synthesize.
+        'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m",'
+        '"choices":[{"index":0,"delta":{"tool_calls":[{"type":"function",'
+        '"function":{"name":"get_weather","arguments":": \\"Berlin\\"}"},"index":0}]}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+    adapter, router = _stream_adapter_and_body(sse_body)
+    with router:
+        result = await adapter.chat_completion(
+            _basic_chat_request(stream=True), model="m", stream=True
+        )
+        assert not isinstance(result, ChatCompletionResponse)
+        chunks = [c async for c in result]
+    await adapter.aclose()
+
+    opening = (chunks[0].choices[0].delta.tool_calls or [])[0]
+    cont1 = (chunks[1].choices[0].delta.tool_calls or [])[0]
+    cont2 = (chunks[2].choices[0].delta.tool_calls or [])[0]
+    assert opening.get("id", "").startswith("call_lqgw_")
+    assert "id" not in cont1
+    assert "id" not in cont2

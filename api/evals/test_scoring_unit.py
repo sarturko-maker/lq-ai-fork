@@ -141,3 +141,69 @@ def test_score_all_shapes() -> None:
 def test_unknown_kind_raises() -> None:
     with pytest.raises(ValueError, match="unknown metric kind"):
         score_metric({"kind": "nope"}, [], "")
+
+
+def test_answer_metrics_ignore_think_blocks() -> None:
+    """S9 review fix: fragments appearing ONLY inside <think> reasoning
+    must not count as a grounded answer; the visible deliverable decides."""
+    answer = "<think>\nthe cap is twelve (12) months, gross negligence excluded\n</think>\n\nI cannot find that."
+    assert (
+        score_metric(
+            {"kind": "answer_contains_any", "fragments": ["twelve (12) months"]}, [], answer
+        )
+        is False
+    )
+    # Unclosed think block (mid-stream truncation) strips to end.
+    assert (
+        score_metric({"kind": "answer_contains_any", "fragments": ["twelve"]}, [], "<think>twelve")
+        is False
+    )
+    # Fragment in the visible part still matches.
+    visible = "<think>x</think>The cap is twelve (12) months."
+    assert (
+        score_metric(
+            {"kind": "answer_contains_any", "fragments": ["twelve (12) months"]}, [], visible
+        )
+        is True
+    )
+    # answer_not_contains_any judges the visible part only: fabrication
+    # inside reasoning that the model then withholds is not a fabricated
+    # ANSWER.
+    assert (
+        score_metric(
+            {"kind": "answer_not_contains_any", "fragments": ["four-year vesting"]},
+            [],
+            "<think>maybe four-year vesting?</think>No such plan exists.",
+        )
+        is True
+    )
+
+
+def test_task_strategy_requires_distinct_calls_per_item() -> None:
+    """S9 review fix: N broad tasks that EACH name all items are not
+    itemized fan-out — every item must claim a distinct call."""
+    items = ["nda-alpha", "nda-beta", "nda-gamma", "nda-delta"]
+    broad = [
+        {
+            "seq": i,
+            "kind": "tool_call",
+            "name": "task",
+            "summary": '{"description": "extract from nda-alpha, nda-beta, nda-gamma, nda-delta"}',
+        }
+        for i in range(4)
+    ]
+    # 4 broad calls x 4 items: greedy matching claims a distinct call per
+    # item, so this still credits one_per_item (each call CAN serve one
+    # item) — but 4 broad calls naming only TWO items must not.
+    spec = {"kind": "task_strategy", "item_fragments": items}
+    assert score_metric(spec, broad, "") == "one_per_item"
+    two_named = [
+        {
+            "seq": i,
+            "kind": "tool_call",
+            "name": "task",
+            "summary": '{"description": "extract from nda-alpha and nda-beta"}',
+        }
+        for i in range(4)
+    ]
+    assert score_metric(spec, two_named, "") == "partition"

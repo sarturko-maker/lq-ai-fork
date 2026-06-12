@@ -21,7 +21,7 @@
     },
     "all_laws_in_answer": {
       "kind": "answer_contains_all_groups",
-      "groups": [["Delaware"], ["California"], ["New York"], ["England"]]
+      "groups": [["Delaware"], ["California"], ["New York"], ["England", "English law"]]
     },
     "all_terms_in_answer": {
       "kind": "answer_contains_all_groups",

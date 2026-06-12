@@ -16,7 +16,8 @@ behalf are flagged ⚖ and need morning ratification):
       (openai:{smart,fast,budget}) + langgraph floor >=1.2.4. ⚖ CORRECTION to the research doc:
       M3's native window is 1M tokens (the "<170k" claim was wrong) — the GATEWAY request cap is
       the binding constraint; 200k chosen from that envelope.
-      Gateway suite 28 passed + mypy --strict clean; api agents suite 107 passed/1 skipped.
+      Gateway adapter file 28 tests passed at the time; FULL gateway suite at gate time:
+      576 passed/2 skipped + mypy --strict clean (39 files). api agents suite 107 passed/1 skipped.
 - [x] 2. Fixtures: 2 matters seeded (idempotent uuid5 seeder, ingest pipeline bypassed,
       FTS verified) + 4 scenario JSONs with machine-checkable expectations.
 - [x] 3. Harness end-to-end in api/evals/ (ZERO new deps ⚖ decision 3 taken): smoke cycle
@@ -30,12 +31,21 @@ behalf are flagged ⚖ and need morning ratification):
       wrong-grounding eagerness REPLICATED on M3 (eager verification, honest answers).
       ⚖ No threshold set (decision 1) — ratify bars against these numbers.
       Docs: docs/fork/model-compatibility.md + docs/fork/evidence/f0-s9/matrix.md.
-- [x] 6. S9 PR — see § State below for number/merge status.
+- [x] 6. Full gate run: api suite 2036 passed/3 skipped; gateway 576 passed/2 skipped +
+      mypy --strict clean; web untouched. Fresh-context adversarial review (35 agents,
+      5 dimensions incl. the gateway security pass): 30 raised, 27 confirmed real —
+      ALL fixed in-slice (stateful id-synthesis; answer metrics judge the visible answer
+      with <think> stripped; routing-window double-count fixed and all 80 cycles' telemetry
+      re-derived; failed runs no longer scored; paraphrase fragment dropped; docs honesty
+      pass) — and the 80-cycle baseline RE-SCORED IDENTICALLY under the stricter scoring
+      (zero metric changes; corrected spend $1.69). Services rebuilt on slice code +
+      post-deploy spot-check. PR number recorded below when opened.
 - [ ] 7. F1 re-plan draft PR (drafted at /tmp/s9-overnight/F1-replan.md → own PR after S9 merge)
 - [ ] 8. F1-S1 exploration notes (only if context allows)
-- **Spend tonight: ≈$1.85 standard-rate upper bound (≈$0.93 at the current launch promo)**
-  of the $10 plan — probes $0.001 + smoke $0.004 + matrix $1.84. Prior plan consumption from
-  dev work is not visible to us; check the MiniMax console.
+- **Spend tonight: ≈$1.75 standard-rate upper bound (≈$0.88 at the current launch promo)**
+  of the $10 plan — probes $0.001 + smoke $0.004 + matrix $1.69 (corrected after the
+  routing-window double-count fix) + post-deploy spot-check ~$0.05. Prior plan consumption
+  from dev work is not visible to us; check the MiniMax console.
 
 ### Morning checklist (maintainer)
 
@@ -57,8 +67,8 @@ behalf are flagged ⚖ and need morning ratification):
 - Gateway aliases smart/fast/budget → minimax/MiniMax-M3; ONLY the MiniMax key is real.
 - App login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
 - Web untouched this slice (bundle = merged S8).
-- Suites: gateway 28 passed + mypy --strict; api containerized suite green (counts in PR);
-  web gates not re-run (no web changes).
+- Suites at gate time: api 2036 passed/3 skipped; gateway 576 passed/2 skipped + mypy
+  --strict clean; web gates not re-run (no web changes).
   ```bash
   docker run -d --name s9pg -e POSTGRES_USER=lq -e POSTGRES_PASSWORD=lq -e POSTGRES_DB=lqtest pgvector/pgvector:pg16
   docker run --rm --network container:s9pg -v $PWD/api:/work -v $PWD/skills:/skills:ro -w /work \
@@ -122,7 +132,8 @@ behalf are flagged ⚖ and need morning ratification):
   pytest needs `skills/` at `/skills`; ruff needs repo-root `ruff.toml`.
 - Host Python is 3.11; api/gateway need 3.12 — all py tooling in containers.
 - NEW: **files written by containers into mounted volumes are root-owned** — `chown` inside
-  the container (the eval runner commands in api/evals/README.md do this).
+  the container (the README's run command now ends with the chown; the aggregate command
+  writes via container stdout so `>` ownership is the host user's).
 - NEW: **GET /agents/runs/{id} returns `{run, steps}`**, not a bare run row.
 - NEW: **`files.ingestion_status` CHECK allows only pending/processing/ready/failed** —
   seeders use 'ready'. ORM models don't declare FK edges; flush per dependency level.

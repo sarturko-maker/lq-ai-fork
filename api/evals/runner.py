@@ -31,6 +31,9 @@ POLL_TIMEOUT_S = 420.0
 # this, so these are the conservative upper bound). gateway.yaml has no
 # cost_tracking rate for minimax, so cost_estimate is NULL on routing
 # rows and the harness computes spend from token counts itself.
+# HONESTY NOTE: these rates apply to the MiniMax-routed aliases only;
+# when a second family lands, add its rates keyed by routed_model (the
+# cycle JSON records routed_model precisely so this stays correctable).
 MINIMAX_M3_USD_PER_MTOK_IN = 0.60
 MINIMAX_M3_USD_PER_MTOK_OUT = 2.40
 
@@ -168,11 +171,16 @@ async def fetch_routing_window(
 ) -> tuple[int, int, int, str | None]:
     """(tokens_in, tokens_out, calls, routed_model) for the cycle window.
 
-    Correlation is purpose + timestamp window (±5s padding) — agent runs
-    don't stamp chat/message ids onto routing rows. Cycles run
-    SEQUENTIALLY and the matrix runs on an otherwise-idle dev stack, so
-    the window is unambiguous; concurrent foreign traffic would inflate
-    counts and is called out in the README.
+    Correlation is purpose + timestamp window — agent runs don't stamp
+    chat/message ids onto routing rows. Window = [started_at,
+    finished_at + 5s]: routing rows are stamped at WRITE time (after the
+    provider call completes), so every row of this cycle carries
+    timestamp >= started_at by construction — a leading pad would
+    double-count the PREVIOUS sequential cycle's final row (S9 review
+    fix; the trailing pad only covers a row committing while the run
+    settles, and the query runs before the next cycle starts). Cycles
+    run SEQUENTIALLY on an otherwise-idle dev stack; concurrent foreign
+    traffic would inflate counts and is called out in the README.
     """
     async with engine.connect() as conn:
         row = (
@@ -184,7 +192,7 @@ async def fetch_routing_window(
                 ),
                 {
                     "purpose": purpose,
-                    "t0": started_at - timedelta(seconds=5),
+                    "t0": started_at,
                     "t1": finished_at + timedelta(seconds=5),
                 },
             )
@@ -212,8 +220,11 @@ def validate_cycle(run: dict[str, Any]) -> tuple[bool, str | None]:
             return False, "completed run carries an empty final_answer"
         return True, None
     if status in ("failed", "cap_exceeded"):
-        # A surfaced failure is a VALID observation about the model/stack
-        # only when the error is present; score sheets carry it verbatim.
+        # A surfaced failure is a valid OBSERVATION (the cycle executed;
+        # the matrix reports it with its error string) — but it is NOT
+        # scored: tool_not_fired noise gates would auto-pass on a run
+        # that died before dispatching anything (S9 review). The scoring
+        # gate lives in test_qualification.py (status == "completed").
         return True, None
     return False, f"unknown terminal status {status!r}"
 

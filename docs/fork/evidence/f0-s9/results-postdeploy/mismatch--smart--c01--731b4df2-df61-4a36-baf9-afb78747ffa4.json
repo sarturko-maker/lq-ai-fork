@@ -1,0 +1,76 @@
+{
+  "scenario_id": "mismatch",
+  "model_alias": "smart",
+  "cycle": 1,
+  "run_id": "731b4df2-df61-4a36-baf9-afb78747ffa4",
+  "thread_id": "17a950b7-5cce-454c-9d45-6f8da6f58412",
+  "status": "completed",
+  "final_answer": "<think>\nConfirmed. There is no employee stock option plan in this matter \u2014 only a vendor services MSA. I should not fabricate terms. I'll tell the user clearly.\n</think>\n\nI can't summarize those terms \u2014 the matter \"S9 Eval \u2014 Single Doc 9001\" doesn't contain an employee stock option plan. The only document attached is `msa-vendor-services.txt` (1 page), a vendor services MSA, and a full-text search for \"stock option / vesting / cliff / exercise\" returned no matches in it.\n\nTo answer, I'd need the actual equity plan document(s) \u2014 typically one or more of:\n- Equity Incentive Plan (or Stock Option Plan) \u2014 sets the legal framework, share reserve, administration.\n- Grant agreement / stock option award notice \u2014 for the individual grant, this is where the **vesting schedule**, **cliff**, and **exercise window** are specified.\n- Where applicable, an exercise agreement and any addenda (e.g., early-exercise, post-termination exercise rules).\n\nOnce you attach the plan and the grant agreement, I can pull the specific provisions and cite the document and page for each term. Want me to also flag the usual places these terms hide if you upload them (e.g., \"Vesting Schedule\" exhibit, \"Termination\" / \"Post-Termination Exercise\" section, and the \"Exercise Period\" definition in the plan)?",
+  "error": null,
+  "valid": true,
+  "invalid_reason": null,
+  "steps": [
+    {
+      "seq": 1,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe user wants a summary of key terms of their employee stock option plan. I need to find the relevant document in the matter. Let me start by listing the documents in this matter.\n</think> [requested tools: search_documents]",
+      "parent_step_id": null
+    },
+    {
+      "seq": 2,
+      "kind": "tool_call",
+      "name": "search_documents",
+      "summary": "{\"query\": \"\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 3,
+      "kind": "tool_result",
+      "name": "search_documents",
+      "summary": "Documents attached to this matter:\n- msa-vendor-services.txt (1 pages)",
+      "parent_step_id": null
+    },
+    {
+      "seq": 4,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nThe matter only has one document: an MSA (Master Services Agreement) for vendor services. There is no employee stock option plan document attached. I should not invent terms. Let me quickly confirm by searching the document for any references to stock options just to be thorough.\n</think> [requested tools: search_documents]",
+      "parent_step_id": null
+    },
+    {
+      "seq": 5,
+      "kind": "tool_call",
+      "name": "search_documents",
+      "summary": "{\"query\": \"stock option vesting cliff exercise\"}",
+      "parent_step_id": null
+    },
+    {
+      "seq": 6,
+      "kind": "tool_result",
+      "name": "search_documents",
+      "summary": "No passages matched \"stock option vesting cliff exercise\". Try different terms, or read a document in full.\n\nDocuments attached to this matter (none matched):\n- msa-vendor-services.txt (1 pages)",
+      "parent_step_id": null
+    },
+    {
+      "seq": 7,
+      "kind": "model_turn",
+      "name": null,
+      "summary": "<think>\nConfirmed. There is no employee stock option plan in this matter \u2014 only a vendor services MSA. I should not fabricate terms. I'll tell the user clearly.\n</think>\n\nI can't summarize those terms \u2014 the matter \"S9 Eval \u2014 Single Doc 9001\" doesn't contain an employee stock option plan. The only document attached is `msa-vendor-services.txt` (1 page), a vendor services MSA, and a full-text search for \"stock option / vesting / cliff / exercise\" returned no matches in it.\n\nTo answer, I'd need the actual equity plan document(s) \u2014 typically one or more of:\n- Equity Incentive Plan (or Stock Option Plan) \u2014 sets the legal framework, share reserve, administration.\n- Grant agreement / stock option award notice \u2014 for the individual grant, this is where the **vesting schedule**, **cliff**, and **exercise window** are specified.\n- Where applicable, an exercise agreement and any addenda (e.g., early-exercise, post-termination exercise rules).\n\nOnce you attach the plan and the grant agreement, I can pull the specific provisions and cite the document and page for each term. Want me to also flag the usual places these terms hide if you upload them (e.g., \"Vesting Schedule\" exhibit, \"Termination\" / \"Post-Termination Exercise\" section, and the \"Exercise Period\" definition in the plan)?",
+      "parent_step_id": null
+    }
+  ],
+  "metrics": {
+    "no_fabricated_esop_terms": true,
+    "read_noise_on_mismatch": true,
+    "task_noise_on_mismatch": true
+  },
+  "started_at": "2026-06-12T02:04:56.890048+00:00",
+  "finished_at": "2026-06-12T02:05:18.105530+00:00",
+  "duration_s": 21.2,
+  "tokens_in": 19938,
+  "tokens_out": 429,
+  "gateway_calls": 3,
+  "routed_model": "MiniMax-M3",
+  "cost_usd_estimate": 0.012992
+}

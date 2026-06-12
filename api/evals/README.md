@@ -31,8 +31,13 @@ docker run --rm --network lq-ai_default \
   -e LQAI_EVAL_OUT=/repo/docs/fork/evidence/f0-s9/results \
   -e LQAI_EVAL_GIT_SHA=$(git rev-parse --short HEAD) \
   --entrypoint bash lq-ai-api:latest \
-  -c "pip install -q pytest pytest-asyncio && pytest evals/test_qualification.py -q -p no:cacheprovider"
+  -c "pip install -q pytest pytest-asyncio && pytest evals/test_qualification.py -q -p no:cacheprovider; chown -R $(id -u):$(id -g) /repo/docs/fork/evidence/f0-s9"
 ```
+
+Note: the password env values and the DB URL land on the docker CLI argv
+(visible in the host process list and `docker inspect` for the container's
+lifetime) — acceptable for the local dev stack's throwaway credentials,
+never for production secrets.
 
 Knobs: `LQAI_EVAL_MODELS` (csv of gateway aliases — a second model family
 is one new gateway provider entry + alias away, keys live ONLY in the
@@ -50,8 +55,14 @@ are set against the baseline, never a priori, never tighter than the CI
 
 ## Aggregate
 
+The report needs the api image's Python (host is 3.11) — and shell `>`
+truncates the target BEFORE python can fail, so always write via the
+container's stdout from the repo root:
+
 ```bash
-python -m evals.report docs/fork/evidence/f0-s9/results > docs/fork/evidence/f0-s9/matrix.md
+docker run --rm -v $PWD:/repo -w /repo/api -e PYTHONPATH=/repo/api \
+  --entrypoint python lq-ai-api:latest -m evals.report \
+  /repo/docs/fork/evidence/f0-s9/results > docs/fork/evidence/f0-s9/matrix.md
 ```
 
 ## Scorer unit tests (no stack, no tokens)

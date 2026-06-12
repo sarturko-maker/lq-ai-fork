@@ -35,12 +35,14 @@ SCENARIOS_DIR = Path(__file__).parent / "scenarios"
 
 def load_scenarios() -> list[dict[str, Any]]:
     wanted = {s.strip() for s in os.environ.get("LQAI_EVAL_SCENARIOS", "").split(",") if s.strip()}
-    out = []
-    for path in sorted(SCENARIOS_DIR.glob("*.json")):
-        scenario = json.loads(path.read_text())
-        if not wanted or scenario["id"] in wanted:
-            out.append(scenario)
-    return out
+    all_scenarios = [json.loads(path.read_text()) for path in sorted(SCENARIOS_DIR.glob("*.json"))]
+    known = {s["id"] for s in all_scenarios}
+    unknown = wanted - known
+    if unknown:
+        # A typo must never select zero scenarios and exit green with
+        # zero cycles (S9 review) — fail loudly at collection time.
+        raise RuntimeError(f"unknown scenario id(s) {sorted(unknown)}; known: {sorted(known)}")
+    return [s for s in all_scenarios if not wanted or s["id"] in wanted]
 
 
 def eval_models() -> list[str]:
@@ -52,9 +54,11 @@ def eval_n() -> int:
 
 
 def instruction_sha() -> str:
-    """Pin of every instruction surface the run sees (oscar's
-    variant-pinning): base system prompt + matter addendum template +
-    the per-scenario prompt is stamped per cycle separately."""
+    """Pin of the API-OWNED instruction surfaces (oscar's variant
+    pinning): base system prompt + matter addendum template. The
+    per-scenario prompt is stamped per cycle; deepagents' own harness
+    prompts and tool descriptions are pinned by the package version +
+    the manifest's git_sha, not hashed here (S9 review wording fix)."""
     from app.agents.runner import SYSTEM_PROMPT
     from app.api.agent_runs import _MATTER_PROMPT
 

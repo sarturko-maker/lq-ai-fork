@@ -27,9 +27,11 @@ def load_records(results_dir: Path) -> list[dict[str, Any]]:
 
 def _fraction(metric_values: list[Any]) -> str:
     judged = [v for v in metric_values if isinstance(v, bool)]
+    not_applicable = sum(1 for v in metric_values if v is None)
     if not judged:
         return "n/a"
-    return f"{sum(judged)}/{len(judged)}"
+    suffix = f" (n/a: {not_applicable})" if not_applicable else ""
+    return f"{sum(judged)}/{len(judged)}{suffix}"
 
 
 def _enum_distribution(metric_values: list[Any]) -> str:

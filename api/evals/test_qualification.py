@@ -60,7 +60,10 @@ async def test_cycle(scenario, model_alias, cycle, api_client, token, engine, ma
 
     record.valid, record.invalid_reason = eval_runner.validate_cycle(run)
     record.steps = await eval_runner.fetch_steps(engine, record.run_id)
-    if record.valid:
+    # Score COMPLETED runs only: a failed/cap_exceeded run is a valid
+    # observation (reported with its error string) but scoring it would
+    # hand free PASSes to every tool_not_fired noise gate (S9 review).
+    if record.valid and record.status == "completed":
         record.metrics = scoring.score_all(scenario["metrics"], record.steps, record.final_answer)
 
     tokens_in, tokens_out, calls, routed = await eval_runner.fetch_routing_window(

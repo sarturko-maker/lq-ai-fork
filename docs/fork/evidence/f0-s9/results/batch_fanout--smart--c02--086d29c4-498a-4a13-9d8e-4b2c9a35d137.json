@@ -223,9 +223,9 @@
   "started_at": "2026-06-12T00:46:03.942907+00:00",
   "finished_at": "2026-06-12T00:46:40.276975+00:00",
   "duration_s": 36.3,
-  "tokens_in": 64662,
-  "tokens_out": 3158,
+  "tokens_in": 62050,
+  "tokens_out": 2995,
   "gateway_calls": 12,
   "routed_model": "MiniMax-M3",
-  "cost_usd_estimate": 0.046376
+  "cost_usd_estimate": 0.044418
 }
