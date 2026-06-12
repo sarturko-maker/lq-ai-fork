@@ -58,12 +58,12 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from sqlalchemy import func, select, update as sa_update
+from sqlalchemy import CursorResult, func, select, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -880,7 +880,7 @@ async def cancel_agent_run(
         raise HTTPException(status_code=404, detail="run not found")
 
     if run.status == AgentRunStatus.running.value:
-        result = await db.execute(
+        result: CursorResult[Any] = await db.execute(  # type: ignore[assignment]
             sa_update(AgentRun)
             .where(AgentRun.id == run.id, AgentRun.status == AgentRunStatus.running.value)
             .values(

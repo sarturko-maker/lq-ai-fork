@@ -33,8 +33,9 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
-from sqlalchemy import func, select, update as sa_update
+from sqlalchemy import CursorResult, func, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.audit import audit_action
@@ -107,7 +108,7 @@ async def guarded_dispatch(
         # body longer than agent_run_orphan_after_seconds can still be
         # false-orphaned — fenced-safe per ADR-F009 (the zombie halts,
         # the run reports failed; the sweep also fires an abort).
-        touched = await db.execute(
+        touched: CursorResult[Any] = await db.execute(  # type: ignore[assignment]
             sa_update(AgentRun)
             .where(AgentRun.id == ctx.run_id, AgentRun.status == AgentRunStatus.running.value)
             .values(heartbeat_at=func.now())

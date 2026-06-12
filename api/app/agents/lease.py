@@ -29,8 +29,9 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import CursorResult, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.agent_runs import AgentRunStatus
@@ -75,7 +76,7 @@ async def claim_run(
     for attempt in (1, 2):
         try:
             async with session_factory() as db:
-                result = await db.execute(
+                result: CursorResult[Any] = await db.execute(  # type: ignore[assignment]
                     text(
                         "UPDATE agent_runs SET claimed_by = :who, claimed_at = now(), "
                         "lease_token = :token, heartbeat_at = now() "
@@ -112,7 +113,7 @@ async def heartbeat_run(
     """
     try:
         async with session_factory() as db:
-            result = await db.execute(
+            result: CursorResult[Any] = await db.execute(  # type: ignore[assignment]
                 text(
                     "UPDATE agent_runs SET heartbeat_at = now() "
                     "WHERE id = :run_id AND status = :running AND lease_token = :token"
@@ -166,7 +167,7 @@ async def settle_run(
     for attempt in (1, 2):
         try:
             async with session_factory() as db:
-                result = await db.execute(
+                result: CursorResult[Any] = await db.execute(  # type: ignore[assignment]
                     text(
                         "UPDATE agent_runs SET status = :status, "
                         "final_answer = :final_answer, error = :error, "
