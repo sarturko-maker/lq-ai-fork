@@ -61,3 +61,14 @@ Logs: `/tmp/f1s1-live-A-start.log`, `/tmp/f1s1-live-A-followup.log`
 Plus: migration `0052` confirmed via `alembic_version` and `\d agent_runs`
 (claimed_by / claimed_at / lease_token / heartbeat_at present); idle-stack
 sweep ticks return `{'swept': 0}`.
+
+## Post-review-fix deployment spot check (final images, c0f8405)
+
+The adversarial review's 35 confirmed findings were fixed and all three
+services rebuilt. Spot check on the final images: matter-bound run
+`018102cc` completed with a cited answer (Excluded Claims list,
+`msa-vendor-services.txt, p. 1`); a second run cancelled mid-flight
+(200 `cancelled`). The kill -9 / sweep scenario above exercised the
+stale-heartbeat rule (120s, unchanged by the fixes); the unclaimed
+grace changed 300s → 1200s after the review showed 300s could falsely
+fail runs queued behind 900s legacy jobs.

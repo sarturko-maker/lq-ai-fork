@@ -2,145 +2,137 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## MORNING REPORT — overnight autonomous run of 2026-06-12 (F0-S9)
+## State (end of F1-S1 — runs are unkillable)
 
-The maintainer authorized a 5–6h autonomous run executing F0-S9 end-to-end.
-Progress tracker (the run's own record; decisions taken on the maintainer's
-behalf are flagged ⚖ and need morning ratification):
-
-- [x] 0. Research docs + ADR-F004 read; branch `fork/f0-s9-eval-gate` from `bfb82be`
-- [x] 1. Gateway conformance VERIFIED LIVE, both directions (probes archived in
-      docs/fork/evidence/f0-s9/gateway-conformance.md). MiniMax-M3 supplies real stable
-      tool-call ids; defensive id-synthesis added anyway (deepagents#3587, gateway-owned fix).
-      `use_responses_api=False` + `max_input_tokens=200k` profile + empty MiniMax HarnessProfile
-      (openai:{smart,fast,budget}) + langgraph floor >=1.2.4. ⚖ CORRECTION to the research doc:
-      M3's native window is 1M tokens (the "<170k" claim was wrong) — the GATEWAY request cap is
-      the binding constraint; 200k chosen from that envelope.
-      Gateway adapter file 28 tests passed at the time; FULL gateway suite at gate time:
-      576 passed/2 skipped + mypy --strict clean (39 files). api agents suite 107 passed/1 skipped.
-- [x] 2. Fixtures: 2 matters seeded (idempotent uuid5 seeder, ingest pipeline bypassed,
-      FTS verified) + 4 scenario JSONs with machine-checkable expectations.
-- [x] 3. Harness end-to-end in api/evals/ (ZERO new deps ⚖ decision 3 taken): smoke cycle
-      6.2s/$0.004; scorer unit tests 11/11. Telemetry: deepagents system prompt ≈6.5k input
-      tokens per gateway call.
-- [x] 4. Pre-flight N=5 (batch_fanout): variance gate PASS, ZERO disagreements on all 4 metrics.
-      ⚖ BUDGET DECISION (rule 6c): full N=20x4 at projected ~$1.9 — authorized and run.
-- [x] 5. **Baseline matrix COMPLETE: 80/80 cycles valid, zero timeouts, zero stranded runs.**
-      fan-out 20/20 one_per_item · negative-control noise 0 · grounding 20/20 (args 18/18) ·
-      mismatch: no-fabrication 20/20 BUT read-noise fired 19/20 — oscar's MiniMax
-      wrong-grounding eagerness REPLICATED on M3 (eager verification, honest answers).
-      ⚖ No threshold set (decision 1) — ratify bars against these numbers.
-      Docs: docs/fork/model-compatibility.md + docs/fork/evidence/f0-s9/matrix.md.
-- [x] 6. Full gate run: api suite 2036 passed/3 skipped; gateway 576 passed/2 skipped +
-      mypy --strict clean; web untouched. Fresh-context adversarial review (35 agents,
-      5 dimensions incl. the gateway security pass): 30 raised, 27 confirmed real —
-      ALL fixed in-slice (stateful id-synthesis; answer metrics judge the visible answer
-      with <think> stripped; routing-window double-count fixed and all 80 cycles' telemetry
-      re-derived; failed runs no longer scored; paraphrase fragment dropped; docs honesty
-      pass) — and the 80-cycle baseline RE-SCORED IDENTICALLY under the stricter scoring
-      (zero metric changes; corrected spend $1.69). Services rebuilt on slice code +
-      post-deploy spot-check. PR #41 — merged on green (see merge commit on main).
-- [x] 7. F1 re-plan draft PR #42 (DRAFT — docs/fork/plans/F1-replan.md; edit before any F1 work)
-- [x] 8. F1-S1 exploration notes appended to the re-plan (arq patterns, runner seams,
-      broker=None degradation path via the S7 DB-tail fallback)
-- **Spend tonight: ≈$1.75 standard-rate upper bound (≈$0.88 at the current launch promo)**
-  of the $10 plan — probes $0.001 + smoke $0.004 + matrix $1.69 (corrected after the
-  routing-window double-count fix) + post-deploy spot-check ~$0.05. Prior plan consumption
-  from dev work is not visible to us; check the MiniMax console.
-
-### Morning checklist — RESOLVED by the maintainer (2026-06-12)
-
-1. ✓ All ⚖ pre-made decisions RATIFIED as taken (incl. empty-profile baseline,
-   thresholds-after-baseline; the 19/20 mismatch read-noise stays a watch metric, no bar).
-2. → Family #2 POSTPONED: an OpenRouter key will come later (maintainer will top up);
-   the Kimi/OpenRouter row fills then via the recipe in docs/fork/model-compatibility.md.
-3. ✓ F1 re-plan PR #42 ACCEPTED as-is (this PR) — the slice list below is the ratified F1 plan.
-4. ✓ BUDGET CORRECTION (maintainer): the MiniMax USD-10 plan is a TOKEN/CALL plan, not
-   pay-as-you-go — quota is per-call and generous, NOT $-per-token. The $-figures quoted in
-   the eval docs are PAYG-equivalent upper bounds for comparability, not actual spend; the
-   budget rules can relax for future matrix re-runs / the L2 judge.
-
-## State (end of F0-S9)
-
-- S9 = PR #41 (merged; main carries the squash commit). F0 closes with S9 — F1 re-plan
-  drafted for ratification (CLAUDE.md: re-plan at milestone boundaries).
-- Dev stack: 8 services healthy; DB at migration 0051 (NO migrations tonight — decision 4);
-  eval fixture matters seeded in the dev DB ("S9 Eval — Single Doc 9001",
-  "S9 Eval — Batch Fanout 9002" — re-seed anytime via `python -m evals.seed_fixtures`).
-- Gateway aliases smart/fast/budget → minimax/MiniMax-M3; ONLY the MiniMax key is real.
+- **F1-S1 merged via PR (see merge commit on main)**: run-lifecycle durability
+  per the ratified re-plan (`docs/fork/plans/F1-replan.md`) + ADR-F009
+  (at-most-once, settle-FAILED-never-auto-resume — read it before touching
+  the lease/sweep/cancel machinery).
+- Dev stack: 8 services healthy; **DB at migration 0052** (agent_runs lease
+  columns); api + arq-worker + ingest-worker rebuilt together on slice code;
+  eval fixture matters still seeded ("S9 Eval — Single Doc 9001" / "S9 Eval —
+  Batch Fanout 9002").
+- Gateway aliases smart/fast/budget → minimax/MiniMax-M3; ONLY the MiniMax
+  key is real (CALL-based token plan, not PAYG — budget rules relaxed).
 - App login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
-- Web untouched this slice (bundle = merged S8).
-- Suites at gate time: api 2036 passed/3 skipped; gateway 576 passed/2 skipped + mypy
-  --strict clean; web gates not re-run (no web changes).
+- Suites at gate time: **api 2084 passed / 3 skipped** (containerized,
+  throwaway pgvector, alembic head incl. 0052); gateway untouched (S9 counts
+  stand); web check 0 errors + 778/778 frontend tests (comment-only change).
+- Adversarial review (44 agents, 5 dimensions + security pass): 39 raised,
+  35 confirmed (1 blocker — evals conftest import — + 17 should-fix + 17
+  nits), ALL fixed in-slice, 4 refuted, 0 pre-existing. Live verification
+  (docs/fork/evidence/f1-s1/live-verification.md): kill -9 mid-run → sweep
+  settled FAILED at +2m12s → same thread completed a follow-up with context;
+  cancel 200 in 0.53s + arq abort delivered; thread delete → checkpoint rows
+  0/0/0; post-deploy spot check on final images.
+
+## Done (F1-S1, this slice)
+
+- **Execution moved to the arq worker** (`agent_run_job`, `max_tries=1`,
+  timeout 420s, deterministic job id `agent-run:{run_id}`,
+  `allow_abort_jobs=True`): BackgroundTasks is gone; enqueue failure settles
+  the run `failed` before the 202 returns.
+- **Lease + heartbeat + fencing** (`app/agents/lease.py`, migration 0052):
+  claim-once (`claimed_by IS NULL`), throttled per-event heartbeat (15s) +
+  guard-touch at tool dispatch (commits BEFORE the tool body), fenced
+  terminal writes (first writer wins; zombie writes rejected by rowcount;
+  runner hard-stops via `RunSettledElsewhere`).
+- **Orphan sweep** (startup + every-minute cron): stale heartbeat (120s) →
+  FAILED `orphaned: worker heartbeat stale` + active `Job.abort`; unclaimed
+  past grace (1200s — ABOVE the shared queue's 900s legacy ceiling) →
+  FAILED `orphaned: never claimed`. Settles commit before the audit pass.
+- **Cancel endpoint** (`POST /agents/runs/{id}/cancel`): settle-first,
+  idempotent, audited, then best-effort abort.
+- **Thread repair + admission**: any TERMINAL status admits a follow-up;
+  dangling tool_calls repaired pre-invoke from the PINNED checkpoint view
+  (deepagents #3789 + the pending-writes window); degraded worker
+  checkpointer refuses follow-ups honestly.
+- **Retention**: `DELETE /agents/threads/{id}` (+ `adelete_thread`), daily
+  checkpoint-GC cron for orphaned lineages; `durability="sync"` on
+  checkpointed runs.
+- Docs: ADR-F009, plan, research (`run-durability-landscape.md`), evidence.
+
+## Next slice — pick up exactly here
+
+1. Per the ratified re-plan: **F1-S2 — design-system foundation + Cockpit v0
+   shell** (the redesign the maintainer is keen on: practice areas lined up).
+   Read `docs/fork/plans/F1-replan.md` § F1-S2 + § Sequencing. The ONE open
+   maintainer decision is S2/S3 ordering (shell-first with seeded
+   practice-area rows in the same PR vs schema-first) — ask, or default to
+   shell-first with seeded rows (the re-plan's noted option) if authorized.
+2. shadcn-svelte + bits-ui + paneforge + Tailwind v4 are NEW dependencies —
+   SBOM justification per CLAUDE.md; ADR-F006 governs the design system.
+3. The cockpit's status rollups can now trust `last_run_status` — F1-S1's
+   whole point.
+
+## Carry-overs / review deferrals
+
+- Live SSE animation (token deltas) is DEAD in production until a Redis
+  pub/sub publisher lands (worker has no broker; DB-tail serves settled
+  rows every 2s) — explicit F1-S1 non-goal, backlogged; consider riding F1-S4.
+- Flood brake counts queued-but-unclaimed runs: a worker outage can 429 a
+  user until the sweep clears (cancel is the escape hatch) — on record in
+  ADR-F009; revisit with R4 budgets.
+- Two-writers window (zombie checkpoint writes ≤1 heartbeat interval vs an
+  immediately-admitted follow-up) — bounded + abort-shortened; proper fix is
+  F1-S5's ledger/locking territory.
+- Step/audit appends are unfenced (deliberate; ADR-F009 states the exact
+  invariant). Guard touch is status-conditional only.
+- web STALE_RUNNING_AFTER_MS (330s from started_at) can falsely render a
+  queue-delayed run stale (comment updated; run read model doesn't expose
+  lease columns) — fix when the cockpit redefines run presentation (S2).
+- Mismatch read-noise watch metric (19/20), L2 judge seam unrun, no
+  action-tool canary / compaction-survival eval scenarios — unchanged from S9.
+- `build_deep_agent` must reject model-bearing subagent specs — F1-S3/S4.
+- Anthropic adapter tool_use translation — only if a Claude family joins.
+- Conversation compaction (ADR-F003) — F2. MessageBubble legacy DOMPurify.
+  wave-c-matters test 3 pre-existing hang — Backlog.
+
+## Gotchas (carried + new)
+
+- **NEW: agent runs execute on the arq-worker** — restarting it mid-run is
+  safe (sweep settles, thread repairs) but kills live runs; eval cycles need
+  it healthy. After ANY migration: rebuild api + arq-worker + ingest-worker
+  together (0052 hit all three).
+- **NEW: the arq worker now inits the langgraph checkpointer at startup**
+  (degrades to None → follow-ups refused honestly worker-side).
+- **NEW: `Job.abort` semantics**: flag is set before the confirmation wait;
+  `abort(timeout=2)` + catch TimeoutError = fire-and-forget. arq settles a
+  redelivered `max_tries=1` job WITHOUT re-running the body (verified 0.26.3).
+- **NEW: langgraph kwarg trap**: `durability=` on `astream_events` CRASHES
+  without a checkpointer (`_put_checkpoint_fut` AttributeError) — only pass
+  it when thread_id+checkpointer exist (runner does this).
+- **NEW: aupdate_state on the deepagents graph needs `as_node="tools"`**
+  (plain update → InvalidUpdateError: ambiguous). Un-pinned aget_state
+  applies PENDING WRITES; the next invoke discards them — read the pinned
+  view (state.config) for repair decisions.
+- **NEW: FastAPI 204 routes need `response_class=Response`** (M3-C2 pattern)
+  or the suite dies at collection.
+- New API endpoints must be registered in tests/test_openapi.py (count
+  assert!) + tests/test_endpoints.py exclusion list.
+- `cy.intercept` BUFFERS streamed responses — never intercept the SSE route
+  under liveness test. The shell scrolls `#lq-main`, not the document.
+  Cypress on agents surface: `capture: 'viewport'`; memory-pressure recipe in
+  git history (S7 HANDOFF) if needed.
+- Web container serves a pre-built bundle — rebuild before debugging UI.
+- `gh pr create` defaults to the FROZEN upstream — always
+  `--repo sarturko-maker/lq-ai-fork` AND `--head <branch>` (ADR-F001).
+  jq is NOT installed — parse `gh --json` with python3.
+- Host Python is 3.11; api/gateway need 3.12 — all py tooling in containers.
+  Containerized pytest needs `skills/` at `/skills`; ruff needs repo-root
+  ruff.toml; container-written mounted files are root-owned (chown in-
+  container). Throwaway-pg test recipe: see git history or below.
   ```bash
   docker run -d --name s9pg -e POSTGRES_USER=lq -e POSTGRES_PASSWORD=lq -e POSTGRES_DB=lqtest pgvector/pgvector:pg16
   docker run --rm --network container:s9pg -v $PWD/api:/work -v $PWD/skills:/skills:ro -w /work \
     -e PYTHONPATH=/work -e DATABASE_URL=postgresql+asyncpg://lq:lq@localhost:5432/lqtest \
     --entrypoint bash lq-ai-api:latest -c "pip install -q pytest pytest-asyncio respx; pytest tests/ -q"
   ```
-
-## Done (F0-S9, this slice)
-
-- Gateway: defensive tool-call id synthesis for opening deltas (`_ensure_stream_tool_call_ids`),
-  4 conformance tests pinning id-synthesis/pass-through/reasoning-round-trip both directions.
-- api: `use_responses_api=False` + `profile={"max_input_tokens": 200k}` in
-  `build_gateway_chat_model`; `api/app/agents/profiles.py` (empty MiniMax-M3 HarnessProfile —
-  tuning enters this seam only WITH a measured delta); langgraph floor `>=1.2.4`.
-- `api/evals/`: fixtures + idempotent seeder, 4 scenarios, runner, deterministic scorers,
-  pytest driver, report generator, README. The model is a pytest parameter (DI).
-- Baseline matrix N=20x4 (above) + `docs/fork/model-compatibility.md` +
-  `docs/fork/evidence/f0-s9/` (probes, smoke, 80 cycle JSONs, matrix.md).
-
-## Next slice — pick up exactly here
-
-1. Maintainer ratifies morning checklist; F1 re-plan PR gets edited/merged.
-2. First F1 slice per the (edited) re-plan: **F1-S1 run-lifecycle durability**
-   (arq + `max_tries=1` + `durability="sync"` + heartbeat/lease + orphan sweep + cancel +
-   #3789 cancel-mid-tool-call regression + checkpoint retention). Read the re-plan draft
-   and `docs/fork/research/deepagents-ecosystem.md` §1.4 before planning it.
-3. If a Moonshot key landed: fill the Kimi K2.x matrix row first (one pytest command).
-
-## Carry-overs / review deferrals (unchanged from pre-S9 + new)
-
-- NEW: mismatch read-noise (19/20) — candidate doctrine/threshold work, measurement-first
-  (subtractive wording only, trigger-surface placement; ADR-F004).
-- NEW: L2 masked judge designed but not run (budget); seam exists in the harness.
-- NEW: eval scenarios cover no action-tool canary (no F0 action surface) and no compaction
-  survival — both join the suite when their substrate lands (F1).
-- `build_deep_agent` must reject model-bearing subagent specs (gateway bypass) — F1 fan-out.
-- Anthropic adapter: tool_use/tool_result translation pending — only matters if a Claude
-  family joins the matrix.
-- No cancel endpoint; stranded `running` runs deadlock threads — F1-S1 (first slice).
-- Checkpoint rows invisible to alembic, not cleaned on delete — F1-S1.
-- Conversation compaction (ADR-F003) — F2. No audit rows for run kick-off. MessageBubble
-  legacy default-DOMPurify. Parallel-fan-out ribbon shares one buffer — F1-S4.
-- wave-c-matters test 3 pre-existing hang — Backlog. S6 deferrals unchanged.
-
-## Gotchas (carried + new)
-
-- **`cy.intercept` BUFFERS streamed responses** — never intercept the SSE route under liveness test.
-- **The shell scrolls `#lq-main`, NOT the document** — resolve the scroll container.
-- **Cypress screenshots on the agents surface need `capture: 'viewport'`**.
-- **Cypress memory-pressure recipe**: stop arq-worker;
-  `ELECTRON_EXTRA_LAUNCH_ARGS='--js-flags=--max-old-space-size=512'`;
-  `CYPRESS_LQ_AI_MATTER_NAME="S5 PreSeed 1781169832"` for f0-s4/s5/s7 (f0-s3 self-seeds);
-  `--config video=false,numTestsKeptInMemory=0`; restart arq-worker after. Wedged workers:
-  `docker compose restart ingest-worker arq-worker`.
-- Web container serves a pre-built bundle — rebuild before debugging UI changes.
-- `gh pr create` defaults to the FROZEN upstream — always `--repo sarturko-maker/lq-ai-fork`
-  AND `--head <branch>` (ADR-F001). jq is NOT installed — parse `gh --json` with python3.
-- Branch switches with uncommitted edits destroy work; verify branch before committing.
-- **.env S3 keys** stay commented out (backup `.env.bak-f0-s4`).
-- After any migration: rebuild `api` + `arq-worker` + `ingest-worker` together. Containerized
-  pytest needs `skills/` at `/skills`; ruff needs repo-root `ruff.toml`.
-- Host Python is 3.11; api/gateway need 3.12 — all py tooling in containers.
-- NEW: **files written by containers into mounted volumes are root-owned** — `chown` inside
-  the container (the README's run command now ends with the chown; the aggregate command
-  writes via container stdout so `>` ownership is the host user's).
-- NEW: **GET /agents/runs/{id} returns `{run, steps}`**, not a bare run row.
-- NEW: **`files.ingestion_status` CHECK allows only pending/processing/ready/failed** —
-  seeders use 'ready'. ORM models don't declare FK edges; flush per dependency level.
-- NEW: eval runs and Cypress still never run simultaneously; eval cycles run SEQUENTIALLY
-  (flood brake = 3; routing-log window correlation needs an idle stack).
-- MiniMax-M3 emits `<think>` inline in content AND a `reasoning` delta field; both round-trip
-  the gateway VERBATIM (verified live + pinned by tests). `final_answer` retains `<think>`.
+- NEVER `docker compose down -v`; NEVER host-side alembic against the dev DB.
+- `.env` S3 keys stay commented out (backup `.env.bak-f0-s4`).
+- MiniMax-M3 emits `<think>` inline AND a `reasoning` delta field; both
+  round-trip the gateway verbatim. `final_answer` retains `<think>`.
+- GET /agents/runs/{id} returns `{run, steps}`; `files.ingestion_status`
+  CHECK allows pending/processing/ready/failed; ORM models don't declare FK
+  edges — flush per dependency level. Eval cycles run SEQUENTIALLY, never
+  with Cypress.
