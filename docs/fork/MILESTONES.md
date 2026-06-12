@@ -286,9 +286,15 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 - Revisit third-party memory (Zep/Graphiti temporal graph) only if native consolidation proves
   insufficient (ADR-F003 option 3).
 - ~~Run artifact surface~~ — PROMOTED into F1 (audit 2026-06-11).
-- Thread management: rename, delete (MUST call `adelete_thread` — checkpoint rows carry
-  conversation content; security-review path), pagination past the 20-thread list cap (a cockpit
-  grouping client-side from it under-reports older matters) — F1/F2.
+- Thread management: rename (delete SHIPPED in F1-S1 with `adelete_thread` + daily GC cron),
+  pagination past the 20-thread list cap (a cockpit grouping client-side from it under-reports
+  older matters) — F1/F2.
+- Redis pub/sub run-stream publisher (live token deltas across the api/worker boundary; F1-S1
+  moved execution to arq, so live streams currently degrade to the 2s DB-tail — animation only).
+- Checkpoint history pruning inside LIVE threads + ShallowPostgresSaver evaluation (needs a
+  measured bloat problem AND a legal-retention policy decision; F1-S1 ships orphan-lineage GC only).
+- Ingest-orphan cron (cut from F1-S1: `files` lacks `updated_at`, cron re-enqueue can race a live
+  job; startup sweep remains the recovery path — needs a migration if promoted).
 - Searchable recent-first matter picker with privileged marker (replaces the flat name-only
   `<select>`; one of the S6 bare-select deferrals) — F1 design system.
 - Global notification bell in the chrome (DE-324 deferral) — cockpit-adjacent.

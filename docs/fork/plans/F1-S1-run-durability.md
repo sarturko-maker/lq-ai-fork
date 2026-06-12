@@ -131,10 +131,12 @@ runs. Thresholds: heartbeat 15s / orphan 120s (8 missed beats) / grace 300s.
 - Daily GC cron: checkpoint lineages whose `thread_id` has no `agent_threads`
   row → `adelete_thread()` (covers user-cascade deletes, historical orphans,
   and failed best-effort endpoint deletes).
-- Ingest-orphan cron: rides along ONLY if `files` rows carry a usable
-  staleness timestamp — the startup sweep's no-age-filter query would
-  re-enqueue files legitimately processing if run on a cron. Decided at
-  implementation time; cut honestly if not safe.
+- Ingest-orphan cron: CUT at implementation time. `files` carries only
+  `created_at` (no `updated_at`), so a cron cannot distinguish stuck from
+  legitimately-processing without a new migration on a LEGACY pipeline
+  (bugfix-only per CLAUDE.md), and a cron re-enqueue can race a live job
+  in ways the boot-time startup sweep cannot. Startup sweep stays the
+  recovery path; backlogged.
 
 ## Files
 
