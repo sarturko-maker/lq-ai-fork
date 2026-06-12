@@ -39,6 +39,8 @@
 	--color-status-failed-wash: var(--status-failed-wash);
 	--color-status-cancelled: var(--status-cancelled);
 	--color-status-cancelled-wash: var(--status-cancelled-wash);
+	--color-status-attention: var(--status-attention);
+	--color-status-attention-wash: var(--status-attention-wash);
 	--color-sidebar-ring: var(--sidebar-ring);
 	--color-sidebar-border: var(--sidebar-border);
 	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -246,6 +248,8 @@
 	--status-failed-wash: oklch(0.96 0.02 27);
 	--status-cancelled: oklch(0.55 0.01 90);
 	--status-cancelled-wash: oklch(0.95 0.004 90);
+	--status-attention: oklch(0.55 0.12 75);
+	--status-attention-wash: oklch(0.96 0.04 85);
 }
 
 /* Charcoal dark — floors at L=0.21 (≈#17191E); never pure black per the
@@ -290,4 +294,6 @@
 	--status-failed-wash: oklch(0.3 0.04 27);
 	--status-cancelled: oklch(0.68 0.008 90);
 	--status-cancelled-wash: oklch(0.29 0.006 262);
+	--status-attention: oklch(0.72 0.12 80);
+	--status-attention-wash: oklch(0.3 0.04 80);
 }

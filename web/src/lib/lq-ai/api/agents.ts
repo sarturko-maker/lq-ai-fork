@@ -110,6 +110,35 @@ export interface AgentThreadListResponse {
 	offset: number;
 }
 
+/**
+ * One matter with its agent-conversation rollup — F1-S2 cockpit read
+ * model (settled rows only, ADR-F004). `last_run_status` is the newest
+ * run's status across ALL of the matter's threads.
+ */
+export interface MatterActivity {
+	project_id: string;
+	name: string;
+	slug: string;
+	privileged: boolean;
+	created_at: string;
+	thread_count: number;
+	last_run_at: string | null;
+	last_run_status: AgentRunStatus | null;
+}
+
+/** The "unfiled conversations" bucket summary (threads with no Matter). */
+export interface UnfiledThreadsSummary {
+	thread_count: number;
+	last_run_at: string | null;
+	last_run_status: AgentRunStatus | null;
+}
+
+export interface MatterActivityResponse {
+	/** Active matters, most recent activity first (quiet matters last). */
+	matters: MatterActivity[];
+	unfiled: UnfiledThreadsSummary;
+}
+
 /** One conversation turn: the run plus its steps in seq order. */
 export interface AgentRunWithSteps {
 	run: AgentRun;
@@ -148,15 +177,26 @@ export async function listRuns(
 	return apiRequest<AgentRunListResponse>(`/agents/runs${qs ? `?${qs}` : ''}`);
 }
 
-/** GET /api/v1/agents/threads — caller's conversations, newest activity first. */
+/**
+ * GET /api/v1/agents/threads — caller's conversations, newest activity
+ * first. F1-S2 filters (mutually exclusive): `projectId` narrows to one
+ * matter's conversations; `unfiled` to threads with no Matter binding.
+ */
 export async function listThreads(
-	opts: { limit?: number; offset?: number } = {}
+	opts: { limit?: number; offset?: number; projectId?: string; unfiled?: boolean } = {}
 ): Promise<AgentThreadListResponse> {
 	const params = new URLSearchParams();
 	if (opts.limit !== undefined) params.set('limit', String(opts.limit));
 	if (opts.offset !== undefined) params.set('offset', String(opts.offset));
+	if (opts.projectId !== undefined) params.set('project_id', opts.projectId);
+	if (opts.unfiled) params.set('unfiled', 'true');
 	const qs = params.toString();
 	return apiRequest<AgentThreadListResponse>(`/agents/threads${qs ? `?${qs}` : ''}`);
+}
+
+/** GET /api/v1/agents/matters — the cockpit's one-call matters rollup (F1-S2). */
+export async function listMatters(): Promise<MatterActivityResponse> {
+	return apiRequest<MatterActivityResponse>('/agents/matters');
 }
 
 /** GET /api/v1/agents/threads/{id} — the whole conversation (the polling contract). */

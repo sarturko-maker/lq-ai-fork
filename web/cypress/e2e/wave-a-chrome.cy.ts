@@ -22,6 +22,9 @@ describe('Wave A — LQ.AI chrome', () => {
   });
 
   it('renders the top tabs with role-aware visibility', () => {
+    // F1-S2: the tab bar lives on the (tools) routes — the cockpit at
+    // /lq-ai has its own chrome.
+    cy.visit('/lq-ai/chats');
     cy.get('nav[aria-label="Primary"]').within(() => {
       cy.contains('Home');
       cy.contains('Chats');
@@ -39,26 +42,17 @@ describe('Wave A — LQ.AI chrome', () => {
   });
 
   it('navigates to Skills when the tab is available', () => {
+    cy.visit('/lq-ai/chats');
     cy.contains('nav[aria-label="Primary"] button', 'Skills').click();
     cy.url().should('include', '/lq-ai/skills');
     cy.contains('nav[aria-label="Primary"] button[aria-selected="true"]', 'Skills');
   });
 
-  it('opens ComingSoonModal for not-yet-shipped tabs', () => {
-    cy.contains('nav[aria-label="Primary"] button', 'Matters').click();
-    cy.get('[role="dialog"]').within(() => {
-      cy.contains('Matters');
-      cy.contains('Wave C');
-      cy.contains('design spec');
-      cy.contains('Got it').click();
-    });
-    cy.get('[role="dialog"]').should('not.exist');
-    // URL didn't change because the modal was used:
-    cy.url().should('not.include', '/lq-ai/matters');
-  });
+  // (The ComingSoonModal-on-Matters test retired with F1-S2: it had been
+  // stale-red since Wave C made the Matters tab available:true.)
 
   it('AmbientFooter renders on the chat surface with provider + tier + audit pills', () => {
-    cy.visit('/lq-ai');
+    cy.visit('/lq-ai/chats');
     cy.get('footer[aria-label="Chat status"]').within(() => {
       cy.contains('audit on');
     });

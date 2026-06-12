@@ -39,7 +39,9 @@ describe('F0-S7 — SSE v2 streaming (live deep agent)', () => {
 		cy.get('[data-testid="lq-ai-login-password"]').type(PASSWORD, { log: false });
 		cy.get('[data-testid="lq-ai-login-submit"]').click();
 
-		cy.contains('[role="tab"]', 'Agents', { timeout: 15_000 }).click();
+		// F1-S2: post-login lands in the cockpit (no tab bar) — the legacy
+		// agents tab keeps working at its URL; navigate directly.
+		cy.visit('/lq-ai/agents');
 		cy.location('pathname').should('eq', '/lq-ai/agents');
 
 		// Polls must stay parked while the stream is healthy. NOTE: the

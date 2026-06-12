@@ -217,7 +217,9 @@ describe('M4-C2 — Scenario 1 + 5: opt-in gating and opt-out', () => {
 	it('1a: Autonomous tab is NOT present when autonomous_enabled=false', () => {
 		interceptBaseRequests(false);
 
-		cy.visit('/lq-ai', {
+		// F1-S2: /lq-ai is the cockpit (no tab bar) — the TopTabBar lives on
+		// the (tools) routes; gating is asserted there.
+		cy.visit('/lq-ai/chats', {
 			onBeforeLoad: (win) => setAuthStorage(win, { autonomousEnabled: false })
 		});
 

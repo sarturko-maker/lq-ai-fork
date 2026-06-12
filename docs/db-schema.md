@@ -1818,9 +1818,31 @@ The fork's deepagents substrate records every agent run and its
 observable steps as settled rows (ADR-F004: the UI renders these, never
 parsed LLM turns). Landed across migrations `0048` (runs + steps),
 `0049` (matter binding), `0050` (threads + checkpointer identity),
-`0051` (subagent ancestry). The langgraph checkpointer's own tables are
+`0051` (subagent ancestry), `0052` (lease/heartbeat, ADR-F009), `0053`
+(practice areas, ADR-F002). The langgraph checkpointer's own tables are
 created by `AsyncPostgresSaver.setup()` and are deliberately NOT
 alembic-managed (the library migrates its own schema; alembic owns ours).
+
+### `practice_areas` (0053, ADR-F002 — F1-S2 minimal shape)
+
+Practice areas are backend entities from day one (ADR-F002 rejected
+frontend-only grouping). F1-S2 ships only what the cockpit shell renders,
+seeded with the standard areas (Commercial configured, the rest inert);
+F1-S3 EXTENDS this table with the config vocabulary (area profile, bound
+skills/playbooks/MCPs, tier floor) plus `projects.practice_area_id`.
+
+```sql
+CREATE TABLE practice_areas (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key         TEXT NOT NULL UNIQUE,     -- stable machine key ('commercial', …)
+    name        TEXT NOT NULL,
+    unit_label  TEXT NOT NULL,            -- unit-of-work noun: 'Matter'/'Programme'/'Deal' (ADR-F004: data, not code)
+    configured  BOOLEAN NOT NULL DEFAULT false,  -- F002 inert-card switch (seed data until S3)
+    position    INTEGER NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
 
 ### `agent_threads` (0050, ADR-F008)
 
@@ -1840,7 +1862,7 @@ CREATE TABLE agent_threads (
 CREATE INDEX idx_agent_threads_user_activity ON agent_threads(user_id, last_run_at DESC);
 ```
 
-### `agent_runs` (0048–0050)
+### `agent_runs` (0048–0050, 0052)
 
 ```sql
 CREATE TABLE agent_runs (
@@ -1855,16 +1877,23 @@ CREATE TABLE agent_runs (
     model_alias  TEXT NOT NULL DEFAULT 'smart',   -- gateway alias, never a provider id
     purpose      TEXT NOT NULL DEFAULT 'agent_loop',
     max_steps    INTEGER NOT NULL DEFAULT 20 CHECK (max_steps > 0),
-    started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),  -- enqueue time since F1-S1 (claimed_at = pickup)
     finished_at  TIMESTAMPTZ,
     error        TEXT,                    -- bounded type+message, never a stack trace
-    cost_usd     NUMERIC(10,4)            -- NULL until the F1 R4 cost brake fills it
+    cost_usd     NUMERIC(10,4),           -- NULL until the F1 R4 cost brake fills it
+    -- 0052 (F1-S1, ADR-F009) — lease/heartbeat for at-most-once execution:
+    claimed_by   TEXT,                    -- worker tag (host:pid:boot-uuid), ops only
+    claimed_at   TIMESTAMPTZ,
+    lease_token  UUID,                    -- fencing value; terminal writes carry WHERE lease_token = :mine
+    heartbeat_at TIMESTAMPTZ              -- stale ⇒ orphan sweep settles FAILED
 );
 CREATE INDEX idx_agent_runs_user_started ON agent_runs(user_id, started_at DESC);
 CREATE INDEX idx_agent_runs_project ON agent_runs(project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX idx_agent_runs_thread_started ON agent_runs(thread_id, started_at);
 -- ADR-F008 brake: at most ONE running run per conversation (API maps to 409).
 CREATE UNIQUE INDEX uq_agent_runs_thread_running ON agent_runs(thread_id) WHERE status = 'running';
+-- ADR-F009: the orphan sweep's scan set (the running set is small; the table grows unboundedly).
+CREATE INDEX idx_agent_runs_running_sweep ON agent_runs(heartbeat_at) WHERE status = 'running';
 ```
 
 ### `agent_run_steps` (0048, 0051)

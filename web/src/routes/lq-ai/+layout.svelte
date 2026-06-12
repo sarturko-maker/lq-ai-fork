@@ -1,8 +1,10 @@
 <script lang="ts">
 	/**
-	 * LQ.AI shell layout. Acts as the auth gate + force-change-password gate
-	 * for every route under `/lq-ai/*` except `/lq-ai/login` and
-	 * `/lq-ai/change-password`.
+	 * LQ.AI gate layout — auth + force-change-password + idle tracking for
+	 * every route under `/lq-ai/*` except `/lq-ai/login` and
+	 * `/lq-ai/change-password` (F1-S2: chrome moved out — the cockpit at
+	 * `/lq-ai` owns its own viewport; legacy tool routes carry the tab
+	 * chrome via the `(tools)` group layout).
 	 *
 	 * - No access token → redirect to /lq-ai/login.
 	 * - Access token but `must_change_password` → redirect to /lq-ai/change-password.
@@ -16,8 +18,6 @@
 	import { authApi } from '$lib/lq-ai/api';
 	import { LQAIApiError, PasswordChangeRequiredError } from '$lib/lq-ai/api/client';
 	import DualBrandingFooter from '$lib/lq-ai/components/DualBrandingFooter.svelte';
-	import TopTabBar from '$lib/lq-ai/components/TopTabBar.svelte';
-	import AmbientTrustChrome from '$lib/lq-ai/components/AmbientTrustChrome.svelte';
 	import SessionTimeoutWarning from '$lib/lq-ai/components/SessionTimeoutWarning.svelte';
 	import { startTracker, stopTracker, noteActivity } from '$lib/lq-ai/stores/sessionActivity';
 	import '$lib/lq-ai/styles/practice.css';
@@ -86,47 +86,31 @@
 </script>
 
 {#if booted}
-	<div class="lq-shell">
-		{#if !isAuthExempt(pathname)}
-			<header class="lq-topbar">
-				<a class="lq-brand" href="/lq-ai">
-					<span class="lq-brand-lq">LQ</span>.AI
-				</a>
-				<div style="display: inline-flex; align-items: center; gap: var(--lq-space-3);">
-					<AmbientTrustChrome />
-					<a href="/lq-ai/settings/appearance" aria-label="Settings" title="Settings" style="color: var(--lq-text-secondary); text-decoration: none; padding: var(--lq-space-1) var(--lq-space-2); border-radius: var(--lq-radius-sm);">⚙</a>
-				</div>
-			</header>
-			<TopTabBar user={$auth.user ?? null} pathname={pathname} />
-		{/if}
-		<main id="lq-main">
-			<slot />
-		</main>
-		<DualBrandingFooter />
-		<SessionTimeoutWarning />
-	</div>
+	{#if isAuthExempt(pathname)}
+		<!-- Login / change-password keep the pre-S2 minimal shell. -->
+		<div class="lq-shell">
+			<main id="lq-main">
+				<slot />
+			</main>
+			<DualBrandingFooter />
+		</div>
+	{:else}
+		<slot />
+	{/if}
+	<SessionTimeoutWarning />
 {/if}
 
 <style>
-	/* src/app.css pins html { overflow-y: hidden !important; } so the shell
-	   can manage its own scroll containers. The LQ.AI shell's
-	   non-chat surfaces (settings, admin sub-routes, trust page) need a
-	   scrollable main; the chat shell already wraps itself in flex+
-	   overflow-hidden and manages internal scroll, so adding overflow-y
-	   here doesn't disturb it. min-height: 0 lets flex children shrink
-	   correctly inside the column. */
-	.lq-shell { background: var(--lq-canvas); color: var(--lq-text); height: 100vh; display: flex; flex-direction: column; }
-	.lq-topbar {
-		display: flex; align-items: center; justify-content: space-between;
-		padding: var(--lq-space-3) var(--lq-space-4);
-		border-bottom: 1px solid var(--lq-border);
+	.lq-shell {
 		background: var(--lq-canvas);
-		flex-shrink: 0;
+		color: var(--lq-text);
+		height: 100vh;
+		display: flex;
+		flex-direction: column;
 	}
-	.lq-brand {
-		font-size: 16px; font-weight: 600; color: var(--lq-text);
-		text-decoration: none;
+	main {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
 	}
-	.lq-brand-lq { color: var(--lq-accent); }
-	main { flex: 1; min-height: 0; overflow-y: auto; }
 </style>

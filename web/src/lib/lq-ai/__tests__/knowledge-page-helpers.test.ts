@@ -13,7 +13,7 @@ import {
 	kbListStatus,
 	kbStatusLabel,
 	type KBListStatus
-} from '../../../routes/lq-ai/knowledge/+page.svelte';
+} from '../../../routes/lq-ai/(tools)/knowledge/+page.svelte';
 import type { KnowledgeBase } from '../types';
 
 function makeKB(overrides: Partial<KnowledgeBase> = {}): KnowledgeBase {
@@ -49,15 +49,11 @@ describe('kbListStatus', () => {
 	});
 
 	it('falls back to "indexed" when chunks present and no rollup status', () => {
-		expect(
-			kbListStatus(makeKB({ file_count: 3, chunk_count: 200 }))
-		).toBe('indexed');
+		expect(kbListStatus(makeKB({ file_count: 3, chunk_count: 200 }))).toBe('indexed');
 	});
 
 	it('falls back to "indexing" when files present but no chunks yet', () => {
-		expect(
-			kbListStatus(makeKB({ file_count: 2, chunk_count: 0 }))
-		).toBe('indexing');
+		expect(kbListStatus(makeKB({ file_count: 2, chunk_count: 0 }))).toBe('indexing');
 	});
 });
 

@@ -29,10 +29,10 @@ describe('Wave C — Matters surfaces', () => {
   });
 
   // ── Test 1 ───────────────────────────────────────────────────────────────────
-  // Matters tab is now available=true; clicking it routes to /lq-ai/matters
-  // and shows the Matters page heading — no ComingSoonModal.
-  it('Matters tab routes to /lq-ai/matters with no ComingSoonModal', () => {
-    cy.contains('nav[aria-label="Primary"] button', 'Matters').click();
+  // /lq-ai/matters renders the Matters page — no ComingSoonModal. (F1-S2:
+  // post-login lands in the cockpit, which has no tab bar — navigate direct.)
+  it('Matters page renders at /lq-ai/matters with no ComingSoonModal', () => {
+    cy.visit('/lq-ai/matters');
     cy.url().should('include', '/lq-ai/matters');
     // No dialog should be present (was the ComingSoonModal path).
     cy.get('[role="dialog"]').should('not.exist');

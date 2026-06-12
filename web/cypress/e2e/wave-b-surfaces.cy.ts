@@ -38,18 +38,20 @@ describe('Wave B v2 — new surfaces', () => {
   });
 
   // ── Test 1 ───────────────────────────────────────────────────────────────────
-  // Post-login lands on the Guided Dashboard, not the chat shell.
-  it('post-login lands on Guided Dashboard at /lq-ai', () => {
+  // Post-login lands in the cockpit (F1-S2 — the guided dashboard retired).
+  it('post-login lands in the cockpit at /lq-ai', () => {
     cy.url().should('match', /\/lq-ai\/?$/);
-    // GuidedDashboardWelcome renders "Welcome back, <name>" — use partial match.
-    cy.contains(/Welcome back/i).should('be.visible');
+    cy.get('[data-testid="lq-cockpit"]').should('exist');
+    cy.get('[data-testid="lq-cockpit-rail"]').contains(/practice areas/i).should('be.visible');
   });
 
   // ── Test 2 ───────────────────────────────────────────────────────────────────
   // Chats tab is now available=true; clicking it routes to /lq-ai/chats and
   // the chat shell renders instead of ComingSoonModal.
-  it('Chats tab routes to /lq-ai/chats with no ComingSoonModal', () => {
-    cy.contains('nav[aria-label="Primary"] button', 'Chats').click();
+  it('Chats opens from the cockpit Tools menu with no ComingSoonModal', () => {
+    cy.get('[data-testid="lq-cockpit"]').should('exist');
+    cy.contains('button', 'Tools').click();
+    cy.contains('[role="menuitem"]', 'Chats').click();
     cy.url().should('include', '/lq-ai/chats');
     // No dialog should be present (was the ComingSoonModal path).
     cy.get('[role="dialog"]').should('not.exist');
