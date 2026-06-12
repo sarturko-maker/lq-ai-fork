@@ -288,6 +288,42 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ----- Agent-run durability (F1-S1, ADR-F009) -----
+    # Liveness/sweep thresholds for deep-agent runs on the arq worker. The
+    # runner heartbeats (throttled) from inside its stream loop and at the
+    # guarded_tool_call chokepoint; the sweep settles stale runs as FAILED
+    # (never re-enqueues). A false-orphan is fenced-safe but rude, so the
+    # orphan threshold is sized at 8 missed beats. The claim grace must
+    # exceed the SHARED queue's worst-case pickup delay — legacy playbook/
+    # tabular jobs run up to 900s each, and a queued-but-unclaimed agent
+    # run has no heartbeat to read — so 1200s: a legitimately queued run
+    # behind a legacy burst is never falsely failed, at the cost of slow
+    # detection for the rare lost-enqueue zombie (the api already settles
+    # enqueue FAILURES immediately at POST time).
+    agent_run_heartbeat_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        description="Min seconds between heartbeat writes from a live agent run.",
+    )
+    agent_run_orphan_after_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        description=(
+            "A claimed 'running' run whose heartbeat is older than this is "
+            "settled FAILED by the orphan sweep."
+        ),
+    )
+    agent_run_claim_grace_seconds: float = Field(
+        default=1200.0,
+        gt=0,
+        description=(
+            "An unclaimed 'running' run older than this is settled FAILED "
+            "by the orphan sweep (lost enqueue / worker died before claim / "
+            "pre-F1-S1 legacy rows). Must exceed the shared queue's "
+            "worst-case pickup delay (legacy job_timeout 900s)."
+        ),
+    )
+
     # ----- Skill registry (per Task C1 / ADR 0004) -----
     # Filesystem path the skill loader walks at startup (and re-walks on
     # SIGHUP). Defaults to the repo's `skills/` directory; in tests and

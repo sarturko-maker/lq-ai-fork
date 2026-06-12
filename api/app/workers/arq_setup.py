@@ -42,6 +42,9 @@ Registered functions:
   (M3-C2) — Tabular Review execution pipeline.
 * :func:`app.workers.autonomous_worker.autonomous_session_job`
   (M4-A2) — Autonomous Session execution pipeline.
+* :func:`app.workers.agent_run_worker.agent_run_job`
+  (F1-S1, ADR-F009) — deep-agent run execution, at-most-once
+  (per-function ``max_tries=1``; lease claim before composing).
 
 Registered cron jobs:
 
@@ -54,6 +57,12 @@ Registered cron jobs:
   (``second=0``). Spawns one session per due schedule
   (``enabled AND deleted_at IS NULL AND next_run_at <= now()``) and
   advances ``next_run_at`` from the schedule's ``cron_expr``.
+* :func:`app.workers.agent_run_worker.agent_run_orphan_sweep`
+  (F1-S1) — every minute at ``second=30``; settles orphaned agent runs
+  as FAILED (also runs once at startup).
+* :func:`app.workers.agent_run_worker.checkpoint_gc_job`
+  (F1-S1) — daily 04:30; deletes checkpoint lineages whose
+  conversation row is gone.
 
 Discovered by the ``arq`` CLI via::
 
@@ -68,8 +77,15 @@ import contextlib
 import logging
 from typing import Any, ClassVar
 
+from app.agents.checkpointer import close_agent_checkpointer, init_agent_checkpointer
 from app.config import get_settings
 from app.db.session import dispose_engine
+from app.workers.agent_run_worker import (
+    AGENT_RUN_JOB_TIMEOUT_SECONDS,
+    agent_run_job,
+    agent_run_orphan_sweep,
+    checkpoint_gc_job,
+)
 from app.workers.autonomous_worker import (
     autonomous_idle_watchdog,
     autonomous_schedule_dispatcher,
@@ -164,6 +180,23 @@ async def on_startup(ctx: dict[str, Any]) -> None:
         },
     )
 
+    # F1-S1 (ADR-F009): agent runs execute HERE — the worker needs the
+    # langgraph checkpointer exactly like the api lifespan. Init failure
+    # degrades (runs execute single-shot; follow-ups refused), never
+    # crashes the worker — the api's posture, mirrored.
+    await init_agent_checkpointer()
+
+    # Startup orphan sweep: settle any 'running' rows left behind by a
+    # dead worker (or by the pre-S1 BackgroundTasks model) before this
+    # worker takes new jobs — the ingest worker's startup-sweep
+    # precedent, with settle-FAILED instead of re-enqueue (ADR-F009).
+    try:
+        result = await agent_run_orphan_sweep(ctx)
+        if result.get("swept"):
+            log.warning("arq-worker startup: orphan sweep settled %s run(s)", result["swept"])
+    except Exception:
+        log.exception("arq-worker startup: orphan sweep failed (cron retries)")
+
     log.info(
         "arq-worker startup: playbook queue=%s ready",
         M3_PLAYBOOK_QUEUE_NAME,
@@ -174,13 +207,19 @@ async def on_startup(ctx: dict[str, Any]) -> None:
 
 
 async def on_shutdown(ctx: dict[str, Any]) -> None:
-    """Worker shutdown hook — dispose the DB engine.
+    """Worker shutdown hook — close the checkpointer, dispose the engine.
 
-    Mirrors :mod:`app.workers.document_pipeline.on_shutdown`. ``dispose_engine``
-    is idempotent and safe to call even if no session was ever opened.
+    Mirrors :mod:`app.workers.document_pipeline.on_shutdown`. Both
+    closers are idempotent and best-effort; in-flight agent runs were
+    already settled by :func:`agent_run_job`'s ``BaseException`` path
+    (arq cancels running tasks before this hook fires).
     """
 
-    log.info("arq-worker shutdown: disposing DB engine")
+    log.info("arq-worker shutdown: closing checkpointer + disposing DB engine")
+    try:
+        await close_agent_checkpointer()
+    except Exception as exc:  # pragma: no cover - shutdown best-effort
+        log.warning("arq-worker shutdown: checkpointer close failed: %s", exc)
     try:
         await dispose_engine()
     except Exception as exc:  # pragma: no cover - shutdown best-effort
@@ -220,6 +259,13 @@ def _build_cron_jobs() -> list[Any]:
         # Every minute at second=0: spawn sessions for due schedules and
         # advance next_run_at from each schedule's cron_expr (M4-B3).
         cron(autonomous_schedule_dispatcher, second=0),
+        # Every minute at second=30 (offset from the watchdogs): settle
+        # orphaned agent runs as FAILED — F1-S1, ADR-F009.
+        cron(agent_run_orphan_sweep, second=30),
+        # Daily at 04:30 (offset from the 03:00 user hard-delete on the
+        # ingest worker): delete checkpoint lineages whose thread row is
+        # gone — F1-S1 retention.
+        cron(checkpoint_gc_job, hour=4, minute=30),
     ]
 
 
@@ -234,8 +280,16 @@ class WorkerSettings:
         easy_playbook_generation_job,
         tabular_execution_job,
         autonomous_session_job,
+        # agent_run_job is appended by _populate_class_attrs wrapped in
+        # arq's func() so it carries per-function max_tries=1 + its own
+        # timeout (at-most-once, ADR-F009) without touching the legacy
+        # jobs' defaults.
     ]
     queue_name: ClassVar[str] = M3_PLAYBOOK_QUEUE_NAME
+    # F1-S1: lets the cancel endpoint deliver arq Job.abort() into a
+    # running agent_run_job (asyncio cancellation). Inert for every job
+    # nobody calls .abort() on.
+    allow_abort_jobs: ClassVar[bool] = True
     # PRD §3.7 NFR caps generation at 10 min for a 10-doc corpus on the
     # default judge model. A 5-doc corpus is ~5 min, so the prior
     # default-300s ceiling cut runs off mid-assembly. 900s = NFR + 50%
@@ -260,8 +314,21 @@ def _populate_class_attrs() -> None:
     # cleanly in environments where arq is absent (matching the pattern in
     # :mod:`app.workers.document_pipeline`).
     with contextlib.suppress(ImportError):  # pragma: no cover - arq missing in some envs
+        from arq.worker import func as arq_func
+
         WorkerSettings.redis_settings = _build_redis_settings()  # type: ignore[attr-defined]
         WorkerSettings.cron_jobs = _build_cron_jobs()  # type: ignore[attr-defined]
+        if not any(getattr(f, "name", None) == "agent_run_job" for f in WorkerSettings.functions):
+            WorkerSettings.functions.append(
+                # At-most-once (ADR-F009): max_tries=1 — verified at arq
+                # 0.26.3 that job_try is checked BEFORE the body runs, so
+                # post-crash redelivery settles without re-executing.
+                arq_func(
+                    agent_run_job,
+                    max_tries=1,
+                    timeout=AGENT_RUN_JOB_TIMEOUT_SECONDS,
+                )
+            )
 
 
 _populate_class_attrs()

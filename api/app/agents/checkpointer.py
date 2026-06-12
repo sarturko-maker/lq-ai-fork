@@ -18,7 +18,8 @@ requires existing checkpoint state (ADR-F008) — degradation is honest,
 never silent context loss.
 
 Consumers receive the saver through seams (``checkpointer_provider`` on
-``_run_in_background``; FastAPI dependency on the thread endpoints) —
+:func:`app.agents.composition.compose_and_execute_run`; FastAPI dependency
+on the thread endpoints) —
 tests substitute :class:`langgraph.checkpoint.memory.InMemorySaver`
 through the same seams, no monkeypatching.
 """

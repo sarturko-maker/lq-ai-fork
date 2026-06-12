@@ -568,9 +568,11 @@ async def test_stream_ends_for_run_orphaned_at_running(
     stream_user: User,
     commit_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """A run stuck at 'running' past the wall clock must not hold the
-    stream open forever (S7 review): the endpoint applies the same 330s
-    cutoff as the web poller and closes with error + finish + [DONE].
+    """A run stuck at 'running' past every recovery path must not hold
+    the stream open forever (S7 review). Since F1-S1 the cutoff is the
+    dead-sweep BELT mirroring the sweep's rules with slack: an UNCLAIMED
+    run trips it only past claim_grace (1200s) + slack — backdate far
+    beyond that (the sweep itself would settle a real one long before).
     """
     from datetime import timedelta
 
@@ -578,7 +580,7 @@ async def test_stream_ends_for_run_orphaned_at_running(
     async with commit_factory() as db:
         row = await db.get(AgentRun, run.id)
         assert row is not None
-        row.started_at = datetime.now(UTC) - timedelta(seconds=400)
+        row.started_at = datetime.now(UTC) - timedelta(seconds=3600)
         await db.commit()
 
     response = await stream_client.get(
@@ -597,10 +599,10 @@ async def test_composition_failure_closes_the_stream(
     commit_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A failure BEFORE the runner takes over must still end the wire:
-    _run_in_background's failure path publishes the failed terminal
+    compose_and_execute_run's failure path publishes the failed terminal
     parts through the same publisher the runner would have used.
     """
-    from app.api.agent_runs import _run_in_background
+    from app.agents.composition import compose_and_execute_run
 
     run = await _make_thread_run(commit_factory, stream_user, status="running")
     broker = RunStreamBroker()
@@ -609,7 +611,7 @@ async def test_composition_failure_closes_the_stream(
     def _exploding_builder(**_kwargs: Any) -> Any:
         raise RuntimeError("model build exploded")
 
-    await _run_in_background(
+    await compose_and_execute_run(
         run_id=run.id,
         broker=broker,
         model_builder=_exploding_builder,
@@ -675,3 +677,43 @@ async def test_stream_db_tail_serves_run_without_live_publisher(
     text_delta = next(f for f in frames if isinstance(f, dict) and f["type"] == "text-delta")
     assert text_delta["delta"] == "Tail-served answer."
     assert frames[-1] == "[DONE]"
+
+
+def test_run_is_orphaned_mirrors_the_sweep_rules() -> None:
+    """F1-S1 review fix: the stream belt reads the lease columns — a
+    queue-delayed UNCLAIMED run and a heartbeating CLAIMED run are NOT
+    orphans regardless of wall age; staleness past the sweep threshold
+    + slack is."""
+    from datetime import timedelta
+
+    from app.api.agent_runs import _run_is_orphaned
+
+    now = datetime.now(UTC)
+
+    def run_row(**kwargs: object) -> AgentRun:
+        defaults: dict[str, object] = {
+            "status": "running",
+            "started_at": now,
+            "claimed_at": None,
+            "heartbeat_at": None,
+        }
+        defaults.update(kwargs)
+        return AgentRun(**defaults)  # type: ignore[arg-type]
+
+    # Claimed + fresh heartbeat: alive, even if started long ago.
+    alive = run_row(
+        started_at=now - timedelta(hours=2), claimed_at=now - timedelta(hours=2), heartbeat_at=now
+    )
+    assert _run_is_orphaned(alive, now) is False
+    # Claimed + heartbeat stale past orphan_after + slack: belt fires.
+    dead = run_row(claimed_at=now - timedelta(hours=1), heartbeat_at=now - timedelta(hours=1))
+    assert _run_is_orphaned(dead, now) is True
+    # Unclaimed + young: queue wait is NOT an orphan.
+    queued = run_row(started_at=now - timedelta(seconds=400))
+    assert _run_is_orphaned(queued, now) is False
+    # Unclaimed + past claim_grace + slack: belt fires.
+    lost = run_row(started_at=now - timedelta(seconds=3600))
+    assert _run_is_orphaned(lost, now) is True
+    # Settled rows are never orphans.
+    settled = run_row(status="completed", started_at=now - timedelta(hours=5))
+    assert _run_is_orphaned(settled, now) is False

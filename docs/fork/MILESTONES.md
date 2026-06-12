@@ -154,6 +154,17 @@ visibility pulled forward via the render-deterministic pattern, ADR-F004; SSE v2
 
 ## F1 — First practice area, end to end (ADR-F002)
 
+- ✓ **F1-S1 — run-lifecycle durability (2026-06-12, PR #43, ADR-F009)**: runs execute on the arq
+  worker at-most-once (`max_tries=1` verified at arq 0.26.3); lease + heartbeat + fenced writes
+  (migration 0052); orphan sweep settles dead runs FAILED (stale heartbeat 120s + abort; unclaimed
+  grace 1200s) — never auto-resumes; cancel endpoint (settle-first, idempotent); thread repair
+  (pinned-checkpoint-view synthetic ToolMessages — deepagents #3789 regression-tested); any terminal
+  status admits a follow-up; DELETE thread + daily checkpoint GC. Gate: api 2084/3 containerized;
+  web 778/778; 44-agent adversarial review — 35 confirmed findings ALL fixed in-slice; live kill -9
+  → sweep settle (+2m12s) → follow-up completed; cancel 0.53s; checkpoint rows 0 after delete
+  (docs/fork/evidence/f1-s1/). Deferred on record: Redis pub/sub live deltas, flood-brake outage
+  semantics, two-writers window (F1-S5).
+
 Outcome: one configurable practice area (suggest: Commercial) with one Deep Agent and one unit-of-work
 type ("Matter") usable for a real task (e.g. NDA review), with visible agent work in the UI — and
 **users LAND in a cockpit where they run their matters and programmes** (maintainer, 2026-06-11).
@@ -286,9 +297,15 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 - Revisit third-party memory (Zep/Graphiti temporal graph) only if native consolidation proves
   insufficient (ADR-F003 option 3).
 - ~~Run artifact surface~~ — PROMOTED into F1 (audit 2026-06-11).
-- Thread management: rename, delete (MUST call `adelete_thread` — checkpoint rows carry
-  conversation content; security-review path), pagination past the 20-thread list cap (a cockpit
-  grouping client-side from it under-reports older matters) — F1/F2.
+- Thread management: rename (delete SHIPPED in F1-S1 with `adelete_thread` + daily GC cron),
+  pagination past the 20-thread list cap (a cockpit grouping client-side from it under-reports
+  older matters) — F1/F2.
+- Redis pub/sub run-stream publisher (live token deltas across the api/worker boundary; F1-S1
+  moved execution to arq, so live streams currently degrade to the 2s DB-tail — animation only).
+- Checkpoint history pruning inside LIVE threads + ShallowPostgresSaver evaluation (needs a
+  measured bloat problem AND a legal-retention policy decision; F1-S1 ships orphan-lineage GC only).
+- Ingest-orphan cron (cut from F1-S1: `files` lacks `updated_at`, cron re-enqueue can race a live
+  job; startup sweep remains the recovery path — needs a migration if promoted).
 - Searchable recent-first matter picker with privileged marker (replaces the flat name-only
   `<select>`; one of the S6 bare-select deferrals) — F1 design system.
 - Global notification bell in the chrome (DE-324 deferral) — cockpit-adjacent.
