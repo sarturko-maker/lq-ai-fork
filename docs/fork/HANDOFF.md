@@ -40,22 +40,25 @@ behalf are flagged ⚖ and need morning ratification):
       pass) — and the 80-cycle baseline RE-SCORED IDENTICALLY under the stricter scoring
       (zero metric changes; corrected spend $1.69). Services rebuilt on slice code +
       post-deploy spot-check. PR #41 — merged on green (see merge commit on main).
-- [ ] 7. F1 re-plan draft PR (drafted at /tmp/s9-overnight/F1-replan.md → own PR after S9 merge)
-- [ ] 8. F1-S1 exploration notes (only if context allows)
+- [x] 7. F1 re-plan draft PR #42 (DRAFT — docs/fork/plans/F1-replan.md; edit before any F1 work)
+- [x] 8. F1-S1 exploration notes appended to the re-plan (arq patterns, runner seams,
+      broker=None degradation path via the S7 DB-tail fallback)
 - **Spend tonight: ≈$1.75 standard-rate upper bound (≈$0.88 at the current launch promo)**
   of the $10 plan — probes $0.001 + smoke $0.004 + matrix $1.69 (corrected after the
   routing-window double-count fix) + post-deploy spot-check ~$0.05. Prior plan consumption
   from dev work is not visible to us; check the MiniMax console.
 
-### Morning checklist (maintainer)
+### Morning checklist — RESOLVED by the maintainer (2026-06-12)
 
-1. Ratify/override the ⚖ decisions above (esp.: empty-profile baseline, no-thresholds-yet,
-   the mismatch read-noise signal — is 19/20 eager-read acceptable behavior or a bar?).
-2. Add a second-family key to fill the Kimi K2.x row — the EXACT gateway recipe is in
-   docs/fork/model-compatibility.md (provider entry + alias + profile key + L0 probes +
-   `LQAI_EVAL_MODELS=kimi LQAI_EVAL_N=10`).
-3. Review/edit the F1 re-plan draft PR before any F1 work.
-4. Check MiniMax plan balance; top up if family-#2 cells + L2 judge runs are wanted.
+1. ✓ All ⚖ pre-made decisions RATIFIED as taken (incl. empty-profile baseline,
+   thresholds-after-baseline; the 19/20 mismatch read-noise stays a watch metric, no bar).
+2. → Family #2 POSTPONED: an OpenRouter key will come later (maintainer will top up);
+   the Kimi/OpenRouter row fills then via the recipe in docs/fork/model-compatibility.md.
+3. ✓ F1 re-plan PR #42 ACCEPTED as-is (this PR) — the slice list below is the ratified F1 plan.
+4. ✓ BUDGET CORRECTION (maintainer): the MiniMax USD-10 plan is a TOKEN/CALL plan, not
+   pay-as-you-go — quota is per-call and generous, NOT $-per-token. The $-figures quoted in
+   the eval docs are PAYG-equivalent upper bounds for comparability, not actual spend; the
+   budget rules can relax for future matrix re-runs / the L2 judge.
 
 ## State (end of F0-S9)
 
