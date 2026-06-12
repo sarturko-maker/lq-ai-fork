@@ -321,6 +321,10 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # in tests/agents/test_agent_lifecycle_api.py.
     ("POST", "/api/v1/agents/runs/{run_id}/cancel"),
     ("DELETE", "/api/v1/agents/threads/{thread_id}"),
+    # F1-S2 (fork) — cockpit reads (ADR-F002). Dedicated coverage in
+    # tests/test_practice_areas.py and tests/agents/test_matter_activity.py.
+    ("GET", "/api/v1/practice-areas"),
+    ("GET", "/api/v1/agents/matters"),
 }
 
 

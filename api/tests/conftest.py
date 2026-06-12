@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -36,6 +35,8 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
     create_async_engine,
 )
+
+from alembic import command
 
 if TYPE_CHECKING:
     pass

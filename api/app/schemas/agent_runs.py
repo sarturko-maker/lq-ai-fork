@@ -168,6 +168,50 @@ class AgentThreadListResponse(BaseModel):
     offset: int
 
 
+class MatterActivityRead(BaseModel):
+    """One matter (project) with its agent-conversation rollup — F1-S2.
+
+    The cockpit's matters list renders these instead of N+1
+    ``ProjectResponse`` reads (which serialize attachments the list
+    never shows). ``last_run_status`` is the newest run's status across
+    ALL of the matter's threads; ``last_run_at`` / ``thread_count`` are
+    aggregates over the caller's threads bound to the matter. All three
+    are None/0 for a matter with no conversations yet. Settled rows
+    only — never stream state (ADR-F004).
+    """
+
+    project_id: uuid.UUID
+    name: str
+    slug: str
+    privileged: bool
+    created_at: datetime
+    thread_count: int = 0
+    last_run_at: datetime | None = None
+    last_run_status: AgentRunStatus | None = None
+
+
+class UnfiledThreadsSummary(BaseModel):
+    """Rollup for the cockpit's "unfiled conversations" bucket — the
+    caller's threads with no Matter binding (``project_id`` NULL; legacy
+    data — every post-S8 composer run is matter-bound per ADR-F002).
+    Surfaced rather than hidden: losing them loses data visibility and
+    F2 memory scoping needs their story (MILESTONES § F1)."""
+
+    thread_count: int = 0
+    last_run_at: datetime | None = None
+    last_run_status: AgentRunStatus | None = None
+
+
+class MatterActivityResponse(BaseModel):
+    """``GET /agents/matters`` — the cockpit's one-call matters surface:
+    every active matter with activity rollups, plus the unfiled-bucket
+    summary (computed server-side so client pagination can never
+    under-report it)."""
+
+    matters: list[MatterActivityRead]
+    unfiled: UnfiledThreadsSummary
+
+
 class AgentRunWithSteps(BaseModel):
     """One conversation turn: the run plus its steps in ``seq`` order."""
 

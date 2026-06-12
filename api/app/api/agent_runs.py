@@ -96,6 +96,9 @@ from app.schemas.agent_runs import (
     AgentThreadDetailResponse,
     AgentThreadListResponse,
     AgentThreadRead,
+    MatterActivityRead,
+    MatterActivityResponse,
+    UnfiledThreadsSummary,
 )
 from app.workers.queue import abort_agent_run_job, enqueue_agent_run_job
 
@@ -711,6 +714,96 @@ async def stream_agent_run(
 
 
 @router.get(
+    "/matters",
+    response_model=MatterActivityResponse,
+    summary="The caller's matters with conversation activity rollups (cockpit).",
+)
+async def list_matter_activity(
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MatterActivityResponse:
+    """GET /api/v1/agents/matters
+
+    F1-S2 cockpit read model: every ACTIVE, non-sandbox matter the
+    caller owns — including matters with no conversations yet — each
+    rolled up with thread count, last activity, and the newest run's
+    status across all of the matter's threads, plus the unfiled-bucket
+    summary (threads with no Matter binding). One response, three
+    aggregate queries, no N+1 — and computed server-side so the bucket
+    and rollups never under-report behind the threads list's pagination
+    cap. Settled rows only (ADR-F004); owner-scoped like every agents
+    read. Archived matters are absent by design (their threads are
+    neither listed nor counted as unfiled — un-archiving restores them).
+    """
+    project_rows = (
+        await db.execute(
+            select(
+                Project.id, Project.name, Project.slug, Project.privileged, Project.created_at
+            ).where(
+                Project.owner_id == user.id,
+                Project.archived_at.is_(None),
+                Project.is_sandbox.is_(False),
+            )
+        )
+    ).all()
+
+    # Per-matter thread aggregates in one GROUP BY; the NULL group is
+    # the unfiled bucket.
+    agg_rows = (
+        await db.execute(
+            select(
+                AgentThread.project_id,
+                func.count(),
+                func.max(AgentThread.last_run_at),
+            )
+            .where(AgentThread.user_id == user.id)
+            .group_by(AgentThread.project_id)
+        )
+    ).all()
+    aggregates = {project_id: (count, last) for project_id, count, last in agg_rows}
+
+    # Newest run's status per matter: DISTINCT ON over the thread→run
+    # join (the list endpoint's per-thread pattern, lifted to the
+    # project grain; NULLs group together, covering the unfiled bucket).
+    status_rows = await db.execute(
+        select(AgentThread.project_id, AgentRun.status)
+        .join(AgentRun, AgentRun.thread_id == AgentThread.id)
+        .where(AgentThread.user_id == user.id)
+        .distinct(AgentThread.project_id)
+        .order_by(AgentThread.project_id, AgentRun.started_at.desc(), AgentRun.id.desc())
+    )
+    statuses: dict[uuid.UUID | None, str] = dict(status_rows.tuples().all())
+
+    matters = []
+    for pid, name, slug, privileged, created_at in project_rows:
+        thread_count, last_run_at = aggregates.get(pid, (0, None))
+        matters.append(
+            MatterActivityRead(
+                project_id=pid,
+                name=name,
+                slug=slug,
+                privileged=privileged,
+                created_at=created_at,
+                thread_count=thread_count,
+                last_run_at=last_run_at,
+                last_run_status=AgentRunStatus(statuses[pid]) if pid in statuses else None,
+            )
+        )
+    # Most recent activity first; matters without conversations follow,
+    # newest-created first.
+    epoch = datetime.min.replace(tzinfo=UTC)
+    matters.sort(key=lambda m: (m.last_run_at or epoch, m.created_at), reverse=True)
+
+    unfiled_count, unfiled_last = aggregates.get(None, (0, None))
+    unfiled = UnfiledThreadsSummary(
+        thread_count=unfiled_count,
+        last_run_at=unfiled_last,
+        last_run_status=AgentRunStatus(statuses[None]) if None in statuses else None,
+    )
+    return MatterActivityResponse(matters=matters, unfiled=unfiled)
+
+
+@router.get(
     "/threads",
     response_model=AgentThreadListResponse,
     summary="List the calling user's conversations (newest activity first).",
@@ -720,24 +813,43 @@ async def list_agent_threads(
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = _LIMIT_DEFAULT,
     offset: int = 0,
+    project_id: uuid.UUID | None = None,
+    unfiled: bool = False,
 ) -> AgentThreadListResponse:
     """GET /api/v1/agents/threads
 
     Conversation list for the agents page (ADR-F008). Each thread is
     badged with its NEWEST run's status (``last_run_status``) so the UI
     can show working/completed/failed without N+1 round trips.
+
+    F1-S2 cockpit filters (mutually exclusive — 422 when combined):
+    ``project_id`` narrows to one matter's conversations; ``unfiled``
+    narrows to threads with no Matter binding. A ``project_id`` the
+    caller doesn't own simply matches nothing (empty page, not 404 —
+    the filter never confirms foreign ids exist).
     """
+    if project_id is not None and unfiled:
+        raise HTTPException(
+            status_code=422,
+            detail="project_id and unfiled are mutually exclusive",
+        )
     limit = max(1, min(limit, _LIMIT_MAX))
     offset = max(0, offset)
 
-    count_stmt = select(func.count()).select_from(AgentThread).where(AgentThread.user_id == user.id)
+    filters = [AgentThread.user_id == user.id]
+    if project_id is not None:
+        filters.append(AgentThread.project_id == project_id)
+    if unfiled:
+        filters.append(AgentThread.project_id.is_(None))
+
+    count_stmt = select(func.count()).select_from(AgentThread).where(*filters)
     total_count: int = (await db.execute(count_stmt)).scalar_one()
 
     rows = (
         (
             await db.execute(
                 select(AgentThread)
-                .where(AgentThread.user_id == user.id)
+                .where(*filters)
                 .order_by(AgentThread.last_run_at.desc(), AgentThread.id.desc())
                 .limit(limit)
                 .offset(offset)
