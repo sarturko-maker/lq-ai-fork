@@ -48,15 +48,17 @@ behalf are flagged ⚖ and need morning ratification):
   routing-window double-count fix) + post-deploy spot-check ~$0.05. Prior plan consumption
   from dev work is not visible to us; check the MiniMax console.
 
-### Morning checklist (maintainer)
+### Morning checklist — RESOLVED by the maintainer (2026-06-12)
 
-1. Ratify/override the ⚖ decisions above (esp.: empty-profile baseline, no-thresholds-yet,
-   the mismatch read-noise signal — is 19/20 eager-read acceptable behavior or a bar?).
-2. Add a second-family key to fill the Kimi K2.x row — the EXACT gateway recipe is in
-   docs/fork/model-compatibility.md (provider entry + alias + profile key + L0 probes +
-   `LQAI_EVAL_MODELS=kimi LQAI_EVAL_N=10`).
-3. Review/edit the F1 re-plan draft PR before any F1 work.
-4. Check MiniMax plan balance; top up if family-#2 cells + L2 judge runs are wanted.
+1. ✓ All ⚖ pre-made decisions RATIFIED as taken (incl. empty-profile baseline,
+   thresholds-after-baseline; the 19/20 mismatch read-noise stays a watch metric, no bar).
+2. → Family #2 POSTPONED: an OpenRouter key will come later (maintainer will top up);
+   the Kimi/OpenRouter row fills then via the recipe in docs/fork/model-compatibility.md.
+3. ✓ F1 re-plan PR #42 ACCEPTED as-is (this PR) — the slice list below is the ratified F1 plan.
+4. ✓ BUDGET CORRECTION (maintainer): the MiniMax USD-10 plan is a TOKEN/CALL plan, not
+   pay-as-you-go — quota is per-call and generous, NOT $-per-token. The $-figures quoted in
+   the eval docs are PAYG-equivalent upper bounds for comparability, not actual spend; the
+   budget rules can relax for future matrix re-runs / the L2 judge.
 
 ## State (end of F0-S9)
 

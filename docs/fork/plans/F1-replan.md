@@ -1,7 +1,7 @@
 # F1 re-plan — slice list (draft for maintainer edit, 2026-06-12)
 
-Status: DRAFT — written at the F0/F1 milestone boundary (CLAUDE.md: re-plan at
-milestone boundaries). F0 closes with S9 (model qualification gate merged; see
+Status: RATIFIED by the maintainer 2026-06-12 (PR #42 accepted as-is). Written at the
+F0/F1 milestone boundary (CLAUDE.md: re-plan at milestone boundaries). F0 closes with S9 (model qualification gate merged; see
 `docs/fork/model-compatibility.md`). Inputs: MILESTONES.md § F1, the #36
 re-plan directive (run-lifecycle durability first), and
 `docs/fork/research/deepagents-ecosystem.md` §1.4/§5 (durability facts,
