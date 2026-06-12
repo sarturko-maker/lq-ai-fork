@@ -288,6 +288,37 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ----- Agent-run durability (F1-S1, ADR-F009) -----
+    # Liveness/sweep thresholds for deep-agent runs on the arq worker. The
+    # runner heartbeats (throttled) from inside its stream loop and at the
+    # guarded_tool_call chokepoint; the sweep settles stale runs as FAILED
+    # (never re-enqueues). A false-orphan is fenced-safe but rude, so the
+    # orphan threshold is sized at 8 missed beats; the claim grace covers
+    # lost enqueues and queue backlog and must stay well above the orphan
+    # threshold (a queued-but-unclaimed run has no heartbeat to read).
+    agent_run_heartbeat_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        description="Min seconds between heartbeat writes from a live agent run.",
+    )
+    agent_run_orphan_after_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        description=(
+            "A claimed 'running' run whose heartbeat is older than this is "
+            "settled FAILED by the orphan sweep."
+        ),
+    )
+    agent_run_claim_grace_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        description=(
+            "An unclaimed 'running' run older than this is settled FAILED "
+            "by the orphan sweep (lost enqueue / worker died before claim / "
+            "pre-F1-S1 legacy rows)."
+        ),
+    )
+
     # ----- Skill registry (per Task C1 / ADR 0004) -----
     # Filesystem path the skill loader walks at startup (and re-walks on
     # SIGHUP). Defaults to the repo's `skills/` directory; in tests and

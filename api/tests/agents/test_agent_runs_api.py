@@ -138,8 +138,13 @@ async def _make_run(
     return run
 
 
-async def _noop_background(**_kwargs: Any) -> None:
-    """Replaces ``_run_in_background`` so endpoint tests don't run the agent."""
+async def _noop_background(*_args: Any, **_kwargs: Any) -> bool:
+    """Replaces ``enqueue_agent_run_job`` so endpoint tests don't need a worker.
+
+    Returns True ("queued") — the run row stays 'running' exactly like a
+    real 202; nothing executes (F1-S1: the api has no execution path).
+    """
+    return True
 
 
 @pytest_asyncio.fixture
@@ -181,7 +186,7 @@ async def test_create_run_returns_202_with_running_row(
     user_a: User,
 ) -> None:
     """202 with the persisted row at status='running' and defaults applied."""
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -211,7 +216,7 @@ async def test_create_run_honours_model_alias_and_max_steps(
     client: AsyncClient,
     user_a: User,
 ) -> None:
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -245,7 +250,7 @@ async def test_create_run_rejects_invalid_bodies(
     payload: dict[str, Any],
 ) -> None:
     """Boundary validation: reject, don't sanitize (CLAUDE.md)."""
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post("/api/v1/agents/runs", headers=_bearer(user_a), json=payload)
     assert resp.status_code == 422, resp.text
 
@@ -270,7 +275,7 @@ async def test_create_run_429_at_concurrent_running_cap(
     for _ in range(3):
         await _make_run(db_session, user=user_a, status="running")
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -293,7 +298,7 @@ async def test_create_run_cap_ignores_terminal_runs(
     for terminal in ("completed", "failed", "cap_exceeded"):
         await _make_run(db_session, user=user_a, status=terminal)
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -317,7 +322,7 @@ async def test_create_run_binds_owned_active_project(
     """An owned, active matter binds: 202 with project_id persisted."""
     project = await _make_project(db_session, owner=user_a)
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -341,7 +346,7 @@ async def test_create_run_without_project_id_is_unbound(
     client: AsyncClient,
     user_a: User,
 ) -> None:
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -361,7 +366,7 @@ async def test_create_run_cross_user_project_returns_404(
     """Another user's matter id is 404 — never 403 (no existence leak)."""
     project = await _make_project(db_session, owner=user_a)
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_b),
@@ -379,7 +384,7 @@ async def test_create_run_archived_project_returns_404(
 ) -> None:
     project = await _make_project(db_session, owner=user_a, archived=True)
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -393,7 +398,7 @@ async def test_create_run_unknown_project_returns_404(
     client: AsyncClient,
     user_a: User,
 ) -> None:
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -515,7 +520,7 @@ async def test_create_run_creates_thread_with_bounded_title(
     """A first message creates its conversation: thread row, title from
     the prompt (bounded to 120 chars), run linked to it."""
     long_prompt = "Summarise the indemnity. " * 20  # > 120 chars
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -549,7 +554,7 @@ async def test_follow_up_continues_thread_and_inherits_binding(
     await _make_run(db_session, user=user_a, status="completed", thread=thread)
     await _put_checkpoint(thread_saver, thread.id)
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -575,7 +580,7 @@ async def test_follow_up_rejects_project_id_override(
     await _make_run(db_session, user=user_a, status="completed", thread=thread)
     await _put_checkpoint(thread_saver, thread.id)
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -601,7 +606,7 @@ async def test_follow_up_cross_user_thread_returns_404(
     await _make_run(db_session, user=user_a, status="completed", thread=thread)
     await _put_checkpoint(thread_saver, thread.id)
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_b),
@@ -622,7 +627,7 @@ async def test_follow_up_on_busy_thread_returns_409(
     await _make_run(db_session, user=user_a, status="running", thread=thread)
     await _put_checkpoint(thread_saver, thread.id)
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -634,27 +639,34 @@ async def test_follow_up_on_busy_thread_returns_409(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("latest_status", ["failed", "cap_exceeded", "cancelled"])
-async def test_follow_up_on_interrupted_thread_returns_409(
+async def test_follow_up_on_interrupted_thread_is_admitted(
     client: AsyncClient,
     db_session: AsyncSession,
     user_a: User,
     thread_saver: InMemorySaver,
     latest_status: str,
 ) -> None:
-    """An interrupted loop can strand dangling tool calls in checkpoint
-    state — follow-ups are refused until a repair pathway exists."""
+    """F1-S1 thread repair (ADR-F009): ANY terminal latest status admits
+    a follow-up — one bad turn no longer kills the conversation. The
+    runner repairs dangling tool calls before invoking
+    (tests/agents/test_agent_thread_repair.py); checkpoint state is
+    still required (the no-checkpoint test below)."""
     thread = await _make_thread(db_session, user=user_a)
     await _make_run(db_session, user=user_a, status=latest_status, thread=thread)
     await _put_checkpoint(thread_saver, thread.id)
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    # The thread detail advertises the admission (composer stays live).
+    detail = await client.get(f"/api/v1/agents/threads/{thread.id}", headers=_bearer(user_a))
+    assert detail.json()["continuable"] is True
+
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
             json={"prompt": "continue anyway?", "thread_id": str(thread.id)},
         )
-    assert resp.status_code == 409
-    assert resp.json()["detail"] == "thread_not_continuable"
+    assert resp.status_code == 202
+    assert resp.json()["thread_id"] == str(thread.id)
 
 
 @pytest.mark.integration
@@ -674,7 +686,7 @@ async def test_follow_up_on_archived_matter_returns_409(
     project.archived_at = datetime.now(UTC)
     await db_session.flush()
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),
@@ -702,7 +714,7 @@ async def test_follow_up_without_checkpoint_returns_409(
     await _make_run(db_session, user=user_a, status="completed", thread=thread)
     # No _put_checkpoint — the saver knows nothing about this thread.
 
-    with patch.object(agent_runs_module, "_run_in_background", new=_noop_background):
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
         resp = await client.post(
             "/api/v1/agents/runs",
             headers=_bearer(user_a),

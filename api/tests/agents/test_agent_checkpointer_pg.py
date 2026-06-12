@@ -23,7 +23,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import _psycopg_dsn, has_checkpoint
-from app.api.agent_runs import _run_in_background
+from app.agents.composition import compose_and_execute_run
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.user import User
@@ -117,7 +117,7 @@ async def test_follow_up_restores_state_through_postgres(
 
     try:
         run1 = await make_run("Remember: the password is swordfish.")
-        await _run_in_background(
+        await compose_and_execute_run(
             run_id=run1,
             model_builder=CapturingBuilder(
                 model=ScriptedToolCallingModel(responses=[final_message("Noted.")])
@@ -129,7 +129,7 @@ async def test_follow_up_restores_state_through_postgres(
 
         second_model = ScriptedToolCallingModel(responses=[final_message("swordfish")])
         run2 = await make_run("What was the password?")
-        await _run_in_background(
+        await compose_and_execute_run(
             run_id=run2,
             model_builder=CapturingBuilder(model=second_model),
             session_factory_provider=lambda: factory,
@@ -152,3 +152,58 @@ async def test_follow_up_restores_state_through_postgres(
             await db.execute(delete(AgentThread).where(AgentThread.user_id == user_id))
             await db.execute(delete(User).where(User.id == user_id))
             await db.commit()
+
+
+async def test_checkpoint_gc_deletes_only_orphaned_lineages(
+    pg_saver: AsyncPostgresSaver, test_engine: AsyncEngine
+) -> None:
+    """F1-S1 retention: a lineage whose agent_threads row is gone (user
+    cascade, failed best-effort delete) is removed through the saver's
+    own API; a LIVE thread's lineage is untouched."""
+    from langgraph.checkpoint.base import empty_checkpoint
+
+    from app.workers.agent_run_worker import run_checkpoint_gc
+
+    factory = async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
+    orphan_thread_id = str(uuid.uuid4())
+    orphan_config = {"configurable": {"thread_id": orphan_thread_id, "checkpoint_ns": ""}}
+    await pg_saver.aput(orphan_config, empty_checkpoint(), {}, {})
+
+    async with factory() as db:
+        user = User(
+            email=f"agent-gc-{uuid.uuid4().hex[:8]}@example.com",
+            display_name="Checkpoint GC User",
+            hashed_password=hash_password("correct-horse-battery-staple"),
+            is_admin=False,
+            mfa_enabled=False,
+            must_change_password=False,
+        )
+        db.add(user)
+        await db.flush()
+        thread = AgentThread(user_id=user.id, title="gc live thread")
+        db.add(thread)
+        await db.commit()
+        user_id, live_thread_id = user.id, thread.id
+    live_config = {"configurable": {"thread_id": str(live_thread_id), "checkpoint_ns": ""}}
+    await pg_saver.aput(live_config, empty_checkpoint(), {}, {})
+
+    try:
+        result = await run_checkpoint_gc(factory, pg_saver)
+        assert result["skipped"] is False
+        assert result["deleted_threads"] >= 1
+        assert await pg_saver.aget_tuple(orphan_config) is None
+        assert await pg_saver.aget_tuple(live_config) is not None
+    finally:
+        await pg_saver.adelete_thread(str(live_thread_id))
+        async with factory() as db:
+            await db.execute(delete(AgentThread).where(AgentThread.user_id == user_id))
+            await db.execute(delete(User).where(User.id == user_id))
+            await db.commit()
+
+
+async def test_checkpoint_gc_skips_when_degraded() -> None:
+    """No checkpointer (init failed) → honest skip, never a crash."""
+    from app.workers.agent_run_worker import run_checkpoint_gc
+
+    result = await run_checkpoint_gc(None, None)  # factory unused when skipped
+    assert result == {"deleted_threads": 0, "skipped": True}

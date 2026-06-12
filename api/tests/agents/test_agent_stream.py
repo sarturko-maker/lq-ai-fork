@@ -597,10 +597,10 @@ async def test_composition_failure_closes_the_stream(
     commit_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A failure BEFORE the runner takes over must still end the wire:
-    _run_in_background's failure path publishes the failed terminal
+    compose_and_execute_run's failure path publishes the failed terminal
     parts through the same publisher the runner would have used.
     """
-    from app.api.agent_runs import _run_in_background
+    from app.agents.composition import compose_and_execute_run
 
     run = await _make_thread_run(commit_factory, stream_user, status="running")
     broker = RunStreamBroker()
@@ -609,7 +609,7 @@ async def test_composition_failure_closes_the_stream(
     def _exploding_builder(**_kwargs: Any) -> Any:
         raise RuntimeError("model build exploded")
 
-    await _run_in_background(
+    await compose_and_execute_run(
         run_id=run.id,
         broker=broker,
         model_builder=_exploding_builder,

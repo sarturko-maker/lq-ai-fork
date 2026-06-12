@@ -9,13 +9,13 @@ brakes, one audit row:
 * **R6 (grant)** — the tool name must be in the run's granted set. In
   F0-S4 the grant set equals the injected matter tools; F1 swaps in
   per-practice-area grant configuration through this same check.
-* **R5 (halt)** — the run's ``status`` is re-read from the DB before
+* **R5 (halt)** — the run's ``status`` is re-checked at the DB before
   the tool body executes; anything other than ``'running'`` denies the
-  dispatch. ADVISORY in F0-S4: deepagents' tool node converts the
-  raised exception into a model-visible error and the loop continues
-  until the wall clock — a hard stop needs the cancel endpoint +
-  checkpointer interrupt (S5+). The chokepoint is still the right
-  place for the check: when ``cancelled`` lands, no tool runs again.
+  dispatch. Since F1-S1 the check IS a fenced heartbeat touch (one
+  UPDATE: lands only while running, and proves liveness at tool-
+  boundary cadence — ADR-F009). Deny is still model-visible-error
+  advisory per dispatch; the HARD stop is the runner's heartbeat
+  detecting the settled row (RunSettledElsewhere) or arq Job.abort.
 * **R4 (cost)** — honest no-op: the matter document tools are local
   Postgres reads with zero marginal inference cost. Per-run budgets
   aggregating gateway routing-log costs are F1 (``cost_usd`` NULL
@@ -34,7 +34,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.audit import audit_action
@@ -95,10 +95,20 @@ async def guarded_dispatch(
             await db.commit()
             raise AgentToolNotGranted(f"tool '{tool}' is not granted for this run")
 
-        run_status = (
-            await db.execute(select(AgentRun.status).where(AgentRun.id == ctx.run_id))
-        ).scalar_one_or_none()
-        if run_status != AgentRunStatus.running.value:
+        # R5 + liveness in one statement (F1-S1, ADR-F009): the UPDATE
+        # only lands while the run is still 'running' — so a hit IS the
+        # status check, and the touched heartbeat is the second liveness
+        # source (tool-boundary cadence) beside the runner's throttled
+        # per-event beat. Long tool bodies keep the run visibly alive.
+        touched = await db.execute(
+            sa_update(AgentRun)
+            .where(AgentRun.id == ctx.run_id, AgentRun.status == AgentRunStatus.running.value)
+            .values(heartbeat_at=func.now())
+        )
+        if touched.rowcount != 1:
+            run_status = (
+                await db.execute(select(AgentRun.status).where(AgentRun.id == ctx.run_id))
+            ).scalar_one_or_none()
             await _audit(db, ctx, tool=tool, outcome="run_halted")
             await db.commit()
             raise AgentRunHalted(f"run is '{run_status}' — tool dispatch denied")

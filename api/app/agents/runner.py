@@ -39,11 +39,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import thread_config
 from app.agents.factory import build_deep_agent
+from app.agents.lease import RunLease, RunSettledElsewhere, heartbeat_run, settle_run
 from app.agents.stream import RunStreamPublisher, step_payload
 from app.models.agent_run import AgentRun, AgentRunStep
 from app.schemas.agent_runs import AgentRunStatus, AgentRunStepKind
@@ -241,6 +243,8 @@ async def _drive_agent(
     wall_clock_seconds: float,
     thread_id: uuid.UUID | None = None,
     publisher: RunStreamPublisher | None = None,
+    lease: RunLease | None = None,
+    heartbeat_seconds: float | None = None,
 ) -> tuple[str | None, bool]:
     """Stream the agent, persisting one step row + COMMIT per event.
 
@@ -259,10 +263,22 @@ async def _drive_agent(
     rows decide), plus live-only animation — model deltas as reasoning
     blocks, top-level turn boundaries as step frames. Publishing is
     fire-and-forget; the stream never gates or fails the run.
+
+    With ``lease`` set (F1-S1, ADR-F009) the loop heartbeats the run row
+    (throttled to one fenced write per ``heartbeat_seconds``) from INSIDE
+    the event stream — the per-event granularity that survives long tool
+    calls (langgraph #7417's per-job heartbeat is the failure case). A
+    heartbeat that hits zero rows means the run was settled elsewhere
+    (sweep / cancel): the loop hard-stops via :class:`RunSettledElsewhere`
+    — every further gateway call would be spend on a run the user
+    already sees as settled. ``durability="sync"`` pins each superstep's
+    checkpoint before its effects can outrun a crash.
     """
     seq = 0
     final_answer: str | None = None
     cap_hit = False
+    interval = heartbeat_seconds if heartbeat_seconds is not None else _default_heartbeat_seconds()
+    last_beat = asyncio.get_running_loop().time()
     # Settled tool_call row id per dispatched tool's langchain run id.
     # The keys are the _is_nested ancestry test (F4); the values resolve
     # each nested step's parent_step_id and each tool_result's wire
@@ -271,16 +287,32 @@ async def _drive_agent(
     # max_steps anyway.
     tool_step_ids: dict[str, uuid.UUID] = {}
 
+    stream_kwargs: dict[str, Any] = {"version": "v2"}
+    if thread_id is not None:
+        stream_kwargs["config"] = thread_config(thread_id)
+        # ADR-F009: the default "async" durability can lose the checkpoint
+        # of a superstep whose side effects already ran — correctness
+        # first; revisit only if checkpoint write latency measures badly.
+        # Only with a checkpointer: langgraph's loop breaks on the kwarg
+        # when none is present (AsyncPregelLoop._put_checkpoint_fut
+        # AttributeError at langgraph 1.2.x, beyond the documented
+        # "no effect" warning).
+        stream_kwargs["durability"] = "sync"
     stream = agent.astream_events(
         {"messages": [{"role": "user", "content": prompt}]},
-        config=thread_config(thread_id) if thread_id is not None else None,
-        version="v2",
+        **stream_kwargs,
     )
     try:
         async with asyncio.timeout(wall_clock_seconds):
             async for event in stream:
                 etype = event.get("event")
                 event_run_id = str(event.get("run_id") or "")
+                if lease is not None:
+                    now = asyncio.get_running_loop().time()
+                    if now - last_beat >= interval:
+                        last_beat = now
+                        if not await heartbeat_run(session_factory, lease):
+                            raise RunSettledElsewhere(str(run_id))
                 if publisher is not None:
                     if etype == "on_chat_model_stream":
                         chunk = (event.get("data") or {}).get("chunk")
@@ -354,6 +386,13 @@ async def _drive_agent(
     return final_answer, cap_hit
 
 
+def _default_heartbeat_seconds() -> float:
+    """Settings-backed default, read lazily (DI: tests pass the param)."""
+    from app.config import get_settings
+
+    return get_settings().agent_run_heartbeat_seconds
+
+
 async def _finalize(
     session_factory: async_sessionmaker[AsyncSession],
     run_id: uuid.UUID,
@@ -361,35 +400,27 @@ async def _finalize(
     status: AgentRunStatus,
     final_answer: str | None = None,
     error: str | None = None,
-) -> None:
-    """Write the terminal state in a FRESH session, retrying once.
+    lease: RunLease | None = None,
+) -> bool:
+    """Write the terminal state — F1-S1: one fenced conditional UPDATE.
 
-    The driving session can be poisoned when the wall-clock cancellation
-    lands mid-commit (connection invalidated in flight), so the terminal
-    UPDATE never reuses it: a fresh session from the factory, with one
-    more fresh-session retry, keeps the run from being stuck at
-    ``'running'``. A double failure is logged, not raised — the runner
-    executes in a BackgroundTask with no caller to surface to.
+    Delegates to :func:`app.agents.lease.settle_run` (fresh-session,
+    retry-once — the F0-S2 posture survives): ``WHERE status='running'``
+    gives terminal-status monotonicity for every caller (a cancel that
+    raced us wins; we never flip 'cancelled' to 'completed'), and the
+    lease token fences a worker-side write so a zombie can never
+    overwrite its successor's state (ADR-F009). Returns whether THIS
+    call settled the run — the publisher only announces a terminal
+    state this process actually wrote.
     """
-    for attempt in (1, 2):
-        try:
-            async with session_factory() as db:
-                run = await db.get(AgentRun, run_id)
-                if run is None:  # deleted underneath us (user cascade)
-                    return
-                run.status = status.value
-                run.final_answer = final_answer
-                run.error = error
-                run.finished_at = datetime.now(UTC)
-                await db.commit()
-                return
-        except Exception:
-            if attempt == 2:
-                logger.exception(
-                    "agent run terminal write failed twice; run left at 'running'",
-                    extra={"event": "agent_run_finalize_failed", "run_id": str(run_id)},
-                )
-                return
+    return await settle_run(
+        session_factory,
+        run_id,
+        status=status,
+        final_answer=final_answer,
+        error=error,
+        lease_token=lease.token if lease is not None else None,
+    )
 
 
 async def mark_run_failed(
@@ -398,37 +429,72 @@ async def mark_run_failed(
     *,
     error: str,
 ) -> None:
-    """Public terminal-failure write for the composition point.
+    """Public terminal-failure write for composition-time failures.
 
-    The api layer's ``_run_in_background`` assembles tools/model BEFORE
-    ``execute_agent_run`` takes over; a failure there must not strand
-    the run at ``'running'`` (the flood brake counts those forever —
-    F0-S4 review). Unlike ``_finalize`` this NEVER overwrites a settled
-    run (the caller's except block can also catch post-execution
-    cleanup errors). Fresh-session, retry-once, bounded error — never
-    a stack trace.
+    A failure before the runner takes over must not strand the run at
+    ``'running'`` (the flood brake counts those forever — F0-S4 review).
+    Never overwrites a settled run (``settle_run``'s monotonicity).
+    Bounded error — never a stack trace.
     """
-    for attempt in (1, 2):
-        try:
-            async with session_factory() as db:
-                run = await db.get(AgentRun, run_id)
-                if run is None or run.status != AgentRunStatus.running.value:
-                    return  # gone, or already settled — leave the terminal state alone
-                run.status = AgentRunStatus.failed.value
-                run.error = _bounded(error, 500)
-                run.finished_at = datetime.now(UTC)
-                await db.commit()
-                return
-        except Exception:
-            if attempt == 2:
-                logger.exception(
-                    "composition-failure terminal write failed twice; run left at 'running'",
-                    extra={
-                        "event": "agent_run_mark_failed_failed",
-                        "run_id": str(run_id),
-                    },
-                )
-                return
+    await settle_run(
+        session_factory,
+        run_id,
+        status=AgentRunStatus.failed,
+        error=_bounded(error, 500),
+    )
+
+
+async def repair_dangling_tool_calls(agent: Any, thread_id: uuid.UUID) -> int:
+    """Append synthetic ToolMessages for unanswered tool calls (F1-S1).
+
+    A run settled non-cooperatively (cancel, orphan sweep, crash) can
+    leave the thread's checkpoint transcript ending in an AIMessage with
+    ``tool_calls`` no ToolMessage ever answered — the next invoke then
+    starts from an invalid alternation (langgraph #6726), and deepagents'
+    own ``PatchToolCallsMiddleware`` repair can permanently wedge the
+    thread (#3789, open at our pin). Repairing here, BEFORE the invoke,
+    leaves that middleware nothing to patch — the wedge path is never
+    entered. ``as_node="tools"`` because the synthetic answers logically
+    come from the tool node (and a plain update raises
+    ``InvalidUpdateError: Ambiguous update`` on this graph — verified
+    against deepagents 0.6.8).
+
+    The wording is honest about side effects: the tool MAY have executed
+    before the interruption (its result just never reached the
+    transcript). Returns the number of repairs written.
+    """
+    config = thread_config(thread_id)
+    state = await agent.aget_state(config)
+    messages = (state.values or {}).get("messages") if state is not None else None
+    if not messages:
+        return 0
+    answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage) and m.tool_call_id}
+    synthetic = [
+        ToolMessage(
+            content=(
+                "This tool call was interrupted before its result was recorded "
+                "(the run was cancelled or its worker died). The action may or "
+                "may not have executed — re-run it if its result is needed."
+            ),
+            tool_call_id=call_id,
+        )
+        for message in messages
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls or []
+        if (call_id := call.get("id")) and call_id not in answered
+    ]
+    if not synthetic:
+        return 0
+    await agent.aupdate_state(config, {"messages": synthetic}, as_node="tools")
+    logger.info(
+        "repaired dangling tool calls before invoke",
+        extra={
+            "event": "agent_thread_repaired",
+            "thread_id": str(thread_id),
+            "repaired": len(synthetic),
+        },
+    )
+    return len(synthetic)
 
 
 async def execute_agent_run(
@@ -442,6 +508,8 @@ async def execute_agent_run(
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: uuid.UUID | None = None,
     publisher: RunStreamPublisher | None = None,
+    lease: RunLease | None = None,
+    heartbeat_seconds: float | None = None,
 ) -> None:
     """Execute one persisted agent run end to end.
 
@@ -494,6 +562,10 @@ async def execute_agent_run(
             system_prompt=system_prompt,
             checkpointer=checkpointer,
         )
+        if checkpointer is not None and thread_id is not None:
+            # F1-S1 thread repair: a prior run settled non-cooperatively
+            # may have left dangling tool_calls in the transcript.
+            await repair_dangling_tool_calls(agent, thread_id)
         final_answer, cap_hit = await _drive_agent(
             agent,
             run_id=run_id,
@@ -503,16 +575,32 @@ async def execute_agent_run(
             wall_clock_seconds=wall_clock_seconds,
             thread_id=thread_id if checkpointer is not None else None,
             publisher=publisher,
+            lease=lease,
+            heartbeat_seconds=heartbeat_seconds,
         )
+    except RunSettledElsewhere:
+        # Sweep or cancel won the row (ADR-F009): no terminal write of
+        # ours could land (fenced), and the wire must not announce a
+        # state the DB doesn't have — close the stream bare.
+        logger.info(
+            "agent run hard-stopped: settled elsewhere",
+            extra={"event": "agent_run_settled_elsewhere", "run_id": str(run_id)},
+        )
+        if publisher is not None:
+            publisher.close()
+        return
     except TimeoutError:
-        await _finalize(
+        settled = await _finalize(
             db_session_factory,
             run_id,
             status=AgentRunStatus.failed,
             error="timeout",
+            lease=lease,
         )
-        if publisher is not None:
+        if publisher is not None and settled:
             publisher.run_finished(status=AgentRunStatus.failed.value, error="timeout")
+        elif publisher is not None:
+            publisher.close()
         return
     except Exception as exc:
         # Bounded type+message only — stack traces stay in logs.
@@ -521,18 +609,21 @@ async def execute_agent_run(
             extra={"event": "agent_run_failed", "run_id": str(run_id)},
         )
         error = _bounded(f"{type(exc).__name__}: {exc}", 500)
-        await _finalize(
+        settled = await _finalize(
             db_session_factory,
             run_id,
             status=AgentRunStatus.failed,
             error=error,
+            lease=lease,
         )
-        if publisher is not None:
+        if publisher is not None and settled:
             publisher.run_finished(status=AgentRunStatus.failed.value, error=error)
+        elif publisher is not None:
+            publisher.close()
         return
 
     status = AgentRunStatus.cap_exceeded if cap_hit else AgentRunStatus.completed
-    await _finalize(
+    settled = await _finalize(
         db_session_factory,
         run_id,
         status=status,
@@ -540,9 +631,12 @@ async def execute_agent_run(
         # incidental (e.g., a subagent's closing turn), not the run's
         # final answer — leave it NULL (F4).
         final_answer=None if cap_hit else final_answer,
+        lease=lease,
     )
-    if publisher is not None:
+    if publisher is not None and settled:
         publisher.run_finished(
             status=status.value,
             final_answer=None if cap_hit else final_answer,
         )
+    elif publisher is not None:
+        publisher.close()

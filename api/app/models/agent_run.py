@@ -159,6 +159,17 @@ class AgentRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    # F1-S1 lease/liveness (ADR-F009, migration 0052). ``lease_token`` is
+    # the fencing value: a new uuid per worker claim, carried in the WHERE
+    # clause of every heartbeat/terminal write so the first terminal writer
+    # wins and a zombie worker's late writes are rejected by rowcount.
+    # ``heartbeat_at`` is the positive liveness signal the orphan sweep
+    # reads; ``claimed_by``/``claimed_at`` identify the claiming worker for
+    # ops and the unclaimed-grace sweep rule.
+    claimed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return (
