@@ -15,6 +15,26 @@ captured against the running bundle BEFORE and the rebuilt bundle AFTER.
 | Cypress `r7-composer-satellites.cy.ts` | **4/4 passing** on the AFTER bundle (a11y, enhance panel, 2 screenshot tests) |
 | `grep -c 'var(--lq-'` both files | **0 / 0** (was 18 / 49) |
 
+## Adversarial review (fresh-context, 4 dimensions → per-finding skeptical verify)
+
+27 agents; **23 findings raised → 3 confirmed** (3 refuted-as-pre-existing/non-issues
+incl. retry-button aria-label that predates this diff). All 3 fixed + re-verified:
+
+1. **BLOCKER (WCAG AA)** — Enhanced-card label was `text-primary` on `bg-accent`
+   (2.69:1 light / 2.16:1 dark, fails 4.5:1). **Fixed →** `text-accent-foreground`
+   (the token designed for ink on the accent wash). Re-shot dark: now light-indigo,
+   clearly readable.
+2. **should-fix (a11y)** — SlashPopover active-row selection affordance too weak in
+   dark (bg-accent step alone). **Fixed →** active row pairs `bg-accent` with
+   `text-accent-foreground`; the title drops its hard-coded `text-foreground` and
+   inherits, so its colour flips on selection — a clear affordance + AA in both themes.
+3. **should-fix (correctness)** — `handleDismiss` fired `recordOutcome` (async)
+   un-awaited inside a sync try/catch → possible unhandled rejection. **Fixed →**
+   explicit `void recordOutcome(...).catch(() => {})` fire-and-forget.
+
+After the fixes: svelte-check 0, eslint clean, Cypress 4/4 re-run on the rebuilt
+bundle, after-screenshots refreshed.
+
 ## Cypress (deterministic, intercept-driven)
 
 `autocompleteSkills` / `enhance` / `recordOutcome` stubbed; `/lq-ai/chats?id=…`

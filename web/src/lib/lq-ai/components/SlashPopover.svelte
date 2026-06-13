@@ -278,6 +278,7 @@
 				id={`lq-slash-row-${i}`}
 				class="flex w-full items-start gap-2 rounded-sm px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
 				class:bg-accent={i === activeIndex}
+				class:text-accent-foreground={i === activeIndex}
 				aria-selected={i === activeIndex}
 				on:mousedown={(e) => onRowMouseDown(e, r)}
 				on:mouseenter={() => (activeIndex = i)}
@@ -286,7 +287,10 @@
 					>{displayIcon(r.icon)}</span
 				>
 				<span class="flex min-w-0 flex-col">
-					<span class="truncate font-medium text-foreground">{r.title}</span>
+					<!-- Title inherits the row colour: popover-foreground normally,
+					     accent-foreground on the active row (a clear selection
+					     affordance + AA on the bg-accent wash in both themes). -->
+					<span class="truncate font-medium">{r.title}</span>
 					<span class="truncate text-xs text-muted-foreground">{r.description ?? ''}</span>
 				</span>
 			</button>

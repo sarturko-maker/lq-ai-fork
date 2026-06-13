@@ -187,12 +187,10 @@
 		const prev = panel;
 		panel = { kind: 'closed' };
 		if (prev.kind === 'shown') {
-			const id = prev.interactionId;
-			try {
-				recordOutcome(id, { used: false });
-			} catch {
-				// best-effort: telemetry failure is non-fatal
-			}
+			// best-effort telemetry; panel is already closed, so fire-and-forget.
+			// `.catch` (not a sync try/catch) is what actually swallows the async
+			// rejection — recordOutcome returns a Promise.
+			void recordOutcome(prev.interactionId, { used: false }).catch(() => {});
 		}
 		onDismiss();
 	}
@@ -272,7 +270,7 @@
 					class="flex flex-col gap-2 rounded-md border border-primary/40 bg-accent p-3"
 					data-testid="lq-ai-enhance-enhanced"
 				>
-					<div class="text-[11px] font-semibold tracking-wider text-primary uppercase">
+					<div class="text-[11px] font-semibold tracking-wider text-accent-foreground uppercase">
 						Enhanced ✨
 					</div>
 					<p class="m-0 text-[13px] break-words whitespace-pre-wrap text-foreground">
