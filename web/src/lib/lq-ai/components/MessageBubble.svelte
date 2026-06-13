@@ -20,6 +20,7 @@
 	import { captureAffordanceInline } from '$lib/lq-ai/preferences/capture-affordance';
 	import { citationsApi, LQAIApiError } from '$lib/lq-ai/api';
 	import { decorateCitationsInline } from '$lib/lq-ai/citations/decorate-inline';
+	import { splitThink } from '$lib/lq-ai/agents/helpers';
 
 	import type { Citation, Message } from '../types';
 	import AppliedSkillsChip from './AppliedSkillsChip.svelte';
@@ -31,6 +32,8 @@
 	import RefusalMessageBubble from './RefusalMessageBubble.svelte';
 	import TierBadge from './TierBadge.svelte';
 	import TierDetailsPanel from './TierDetailsPanel.svelte';
+	import Alert from './primitives/Alert.svelte';
+	import ReasoningRibbon from './primitives/ReasoningRibbon.svelte';
 
 	export let message: Message;
 	export let isStreaming: boolean = false;
@@ -116,15 +119,30 @@
 
 	$: bubbleClasses =
 		message.role === 'user'
-			? 'bg-indigo-600 text-white self-end'
+			? 'bg-primary text-primary-foreground self-end'
 			: message.role === 'assistant'
-			? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 self-start'
-			: 'bg-gray-100 text-gray-700 self-center text-sm';
+			? 'bg-card text-card-foreground border border-border self-start'
+			: 'bg-muted text-muted-foreground self-center text-sm';
+
+	// R6: split MiniMax-M3 `<think>…</think>` reasoning out of the assistant
+	// text so it collapses into the ReasoningRibbon instead of leaking into the
+	// answer prose (DOMPurify drops the unknown <think> tag but keeps its text).
+	// `splitThink` is the same parser the agent surface uses; UI-only — the API
+	// record keeps the honest full text.
+	$: split =
+		message.role === 'assistant'
+			? splitThink(message.content)
+			: { thinking: null, visible: '' };
 
 	$: rendered =
 		message.role === 'assistant'
-			? DOMPurify.sanitize(marked.parse(message.content || '', { async: false }) as string)
+			? DOMPurify.sanitize(marked.parse(split.visible || '', { async: false }) as string)
 			: '';
+
+	// Reasoning rendered as markdown, sanitised like any other model output.
+	$: reasoningHtml = split.thinking
+		? DOMPurify.sanitize(marked.parse(split.thinking, { async: false }) as string)
+		: '';
 </script>
 
 {#if message.kind === 'refusal'}
@@ -144,6 +162,12 @@
 <div class="flex flex-col max-w-3xl {message.role === 'user' ? 'items-end' : 'items-start'} mb-3" data-testid={`lq-ai-message-${message.id}`}>
 	<div class="rounded-lg px-3 py-2 {bubbleClasses} max-w-full">
 		{#if message.role === 'assistant'}
+			{#if reasoningHtml}
+				<ReasoningRibbon>
+					<!-- eslint-disable-next-line svelte/no-at-html-tags — DOMPurify-sanitized above -->
+					{@html reasoningHtml}
+				</ReasoningRibbon>
+			{/if}
 			<div
 				class="prose prose-sm dark:prose-invert max-w-none"
 				data-testid="lq-ai-message-content"
@@ -155,7 +179,7 @@
 				{@html rendered}
 			</div>
 			{#if isStreaming}
-				<div class="mt-1 text-xs text-gray-500 italic">Streaming…</div>
+				<div class="mt-1 text-xs text-muted-foreground italic">Streaming…</div>
 			{/if}
 		{:else}
 			<div class="whitespace-pre-wrap text-sm" data-testid="lq-ai-message-content">
@@ -244,12 +268,11 @@
 		{/if}
 
 		{#if message.error_code}
-			<div
-				class="mt-2 px-2 py-1 rounded border border-rose-300 bg-rose-50 text-rose-800 text-xs max-w-full"
-				data-testid="lq-ai-message-error"
-			>
-				Error: <strong>{message.error_code}</strong>. The assistant message was persisted with the
-				partial content above for audit.
+			<div class="mt-2 max-w-full" data-testid="lq-ai-message-error">
+				<Alert intent="error">
+					Error: <strong>{message.error_code}</strong>. The assistant message was persisted
+					with the partial content above for audit.
+				</Alert>
 			</div>
 		{/if}
 
