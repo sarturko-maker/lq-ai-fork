@@ -44,4 +44,14 @@ verbatim per the gateway contract.)
   test_practice_areas + test_agent_composition + test_area_agent **38 passed**.
 - Migration verified upgrade → downgrade → re-upgrade on throwaway pg.
 - web: `npm run check` 0 errors; vitest 781; ruff/prettier/eslint clean.
-- Adversarial review (6 dimensions incl. a dedicated gateway-bypass security pass): see the PR.
+- Adversarial review (6 dimensions incl. a dedicated gateway-bypass security pass): 26 agents,
+  16 confirmed / 4 refuted / 0 pre-existing. **1 blocker fixed**: null-area matters (51/54 live)
+  were invisible in the cockpit — AreaGrid now renders an "Unfiled matters" section
+  (`after-landing-unfiled-matters.png`); 9/9 cockpit specs still pass. Should-fixes fixed:
+  strict `agent_config` top-level schema (unknown keys rejected, playbooks/mcp_servers
+  by-reference no-creds), matter-activity area-projection API tests, docstring 400. Nits
+  deferred on record (HANDOFF): subagent-skill registry validation (skills not live this slice),
+  audit/projects index coverage (slicing not queried yet). The gateway-bypass guard found NO
+  live bypass (the stored-config top-level gap was latent defense-in-depth, now closed).
+- After the fix, the landing shows Commercial with its filed matters AND the "Unfiled matters"
+  section keeping legacy matters reachable.
