@@ -96,6 +96,21 @@
 	const showList = $derived(!isStacked || !stackedShowPanel);
 	const showPanel = $derived(!isStacked || stackedShowPanel);
 
+	// Keep the stacked pane in sync with URL-driven thread changes (review
+	// fix): a threadId ARRIVING (composer-created sync, history forward)
+	// must show the panel — otherwise crossing the width threshold later
+	// unmounts a live conversation, and back/forward desyncs URL from
+	// pane. Transitions TO null stay hands-off: newConversation() already
+	// chose the panel, backToList() already chose the list.
+	// svelte-ignore state_referenced_locally
+	let lastThreadId = threadId;
+	$effect(() => {
+		if (threadId !== lastThreadId) {
+			lastThreadId = threadId;
+			if (threadId !== null) stackedShowPanel = true;
+		}
+	});
+
 	async function loadThreads() {
 		const generation = ++threadsGeneration;
 		try {
@@ -135,11 +150,16 @@
 	function backToList() {
 		// Stacked-mode back: unmounting the panel drops any live stream view,
 		// but the run itself is durable (F1-S1) — the list shows its pill.
+		// Clear the URL thread too (review fix): a reload/share of the list
+		// view must not reopen the conversation.
 		stackedShowPanel = false;
+		panelOwnedThread = null;
+		onSelectThread(null);
 	}
 
 	function handleThreadCreated(event: CustomEvent<{ threadId: string; projectId: string | null }>) {
 		panelOwnedThread = event.detail.threadId;
+		stackedShowPanel = true;
 		onThreadCreated(event.detail);
 		loadThreads();
 	}
@@ -152,7 +172,7 @@
 	class="h-full min-h-0 p-2 sm:p-3"
 	data-testid="lq-cockpit-conversation"
 	bind:clientWidth={hostWidth}
-	in:fade={{ duration: motionMs(120) }}
+	in:fade|global={{ duration: motionMs(120) }}
 >
 	<div
 		class="flex h-full min-h-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm"

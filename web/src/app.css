@@ -221,8 +221,10 @@
 	   particularly make sense"): the canvas drops to a decisive warm gray
 	   so white cards/panels FLOAT (the Legora/Harvey surface separation —
 	   canvas 0.965 < muted 0.945-wells < card 1.0), text steps to a real
-	   3-level hierarchy (foreground 0.21 / muted-foreground 0.45 /
-	   60-70% opacity for metadata), borders strengthen to read on gray. */
+	   3-level hierarchy (foreground 0.21 / muted-foreground 0.45 / a
+	   faded metadata step at ≥85% alpha — lower drops under the 4.5:1
+	   contract above; size/weight carry the rest of the hierarchy),
+	   borders strengthen to read on gray. */
 	--background: oklch(0.965 0.004 90);
 	--foreground: oklch(0.21 0.01 80);
 	--card: oklch(1 0 0);

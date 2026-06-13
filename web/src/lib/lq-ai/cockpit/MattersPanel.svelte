@@ -46,7 +46,7 @@
 <div
 	class="mx-auto w-full max-w-4xl px-6 py-8 sm:px-8"
 	data-testid="lq-cockpit-matters"
-	in:fade={{ duration: motionMs(120) }}
+	in:fade|global={{ duration: motionMs(120) }}
 >
 	<button
 		type="button"

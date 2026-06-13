@@ -48,12 +48,41 @@ by `f1-s21-responsive.cy.ts` (4/4) with its own screenshots.
    fully dark; a single element's one background captured as two colors across tile
    boundaries proves it's a rasterizer artifact, not CSS. HEADED runs (Cypress' Xvfb)
    capture correctly — dark evidence here is captured headed. Regression specs assert
-   computed styles (authoritative), not pixels.
+   computed styles (authoritative), not pixels. Probe report (matter view, dark, after
+   reload — same moment whose Electron capture showed light chrome), verbatim:
+
+   ```
+   html.class=dark
+   cockpit-root: bg=oklch(0.23 0.006 262) colorScheme=dark
+   header: bg=oklch(0.23 0.006 262) colorScheme=dark
+   rail-nav: bg=rgba(0, 0, 0, 0) colorScheme=dark
+   rail-pane(parent): bg=rgba(0, 0, 0, 0) colorScheme=dark
+   conv-outer: bg=rgba(0, 0, 0, 0) colorScheme=dark
+   conv-card: bg=oklch(0.28 0.006 262) colorScheme=dark
+   aside: bg=oklab(0.32 -0.00083504 -0.00594161 / 0.4) colorScheme=dark
+   composer: bg=oklch(0.28 0.006 262) colorScheme=dark
+   var(--background)=oklch(23% .006 262)
+   var(--card)=oklch(28% .006 262)
+   ```
 2. **The `.dark { --lq-* }` stopgap initially lost the cascade**: 16 legacy components
    re-`@import` practice.css inside scoped `<style>` blocks, so duplicate `:root` light
    blocks land later in bundle order and beat an equal-specificity `.dark` block. Fixed
    with `:root.dark` (0,2,0). Side effect: svelte-check's "unused CSS selector .dark"
    warnings dropped 20 → 5.
+
+## Adversarial review (fresh-context, 34 agents: 5 dimension finders + per-finding refutation)
+
+25 confirmed findings (6 should-fix, 19 nit, **0 blockers**), 3 refuted, 1 pre-existing.
+All 6 should-fixes FIXED in the review round (stacked-pane/threadId sync; `resizing`
+latch; legacy white-on-accent contrast via accent retune to the computed dual-use
+optimum 0.65 L; faded-metadata alpha floor 85%; responsive spec self-provisioning;
+HANDOFF in-branch). Deferred on record (HANDOFF § carry-overs): drawer focus trap
+(dialog semantics + initial focus landed; trap deferred); legacy white-on-accent
+residual ~3:1 until rollout waves restore per-surface AA; dark Run-button 3.54:1 (the
+dark `--primary` pair — a design-system question for the rollout, not this slice);
+scrim-lightening in dark; 720px-crossing unmounting a NON-live panel's transient state;
+composer up-shadow not tokenized; pre-existing hairline-border 1.15–1.35:1 vs the 3:1
+UI contract note.
 
 ## Suites (final bundle)
 

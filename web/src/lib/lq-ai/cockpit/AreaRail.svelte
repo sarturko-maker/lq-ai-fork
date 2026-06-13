@@ -59,10 +59,10 @@
 						{#if area.configured}
 							<button
 								type="button"
-								class="flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-sm font-medium transition-colors duration-150 ease-out hover:bg-sidebar-accent {selectedAreaKey ===
+								class="flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-sm font-medium transition-colors duration-150 ease-out {selectedAreaKey ===
 									area.key && !unfiledOpen
-									? 'bg-accent text-accent-foreground'
-									: ''}"
+									? 'bg-card text-accent-foreground shadow-xs'
+									: 'hover:bg-sidebar-accent'}"
 								data-testid="lq-cockpit-area-{area.key}"
 								onclick={() => onSelectArea(area)}
 							>
@@ -75,9 +75,7 @@
 								data-testid="lq-cockpit-area-{area.key}"
 							>
 								<span class="min-w-0 truncate">{area.name}</span>
-								<span class="shrink-0 text-[11px] whitespace-nowrap text-muted-foreground/80">
-									Not configured
-								</span>
+								<span class="shrink-0 text-[11px] whitespace-nowrap">Not configured</span>
 							</div>
 						{/if}
 					</li>
@@ -88,9 +86,9 @@
 	<div class="shrink-0 border-t border-sidebar-border px-2 py-2">
 		<button
 			type="button"
-			class="flex h-9 w-full items-center justify-between rounded-md px-2.5 text-sm font-medium transition-colors duration-150 hover:bg-sidebar-accent {unfiledOpen
-				? 'bg-accent text-accent-foreground'
-				: ''}"
+			class="flex h-9 w-full items-center justify-between rounded-md px-2.5 text-sm font-medium transition-colors duration-150 {unfiledOpen
+				? 'bg-card text-accent-foreground shadow-xs'
+				: 'hover:bg-sidebar-accent'}"
 			data-testid="lq-cockpit-unfiled"
 			onclick={onSelectUnfiled}
 		>

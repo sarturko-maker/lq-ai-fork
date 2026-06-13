@@ -60,6 +60,23 @@ describe('F1-S2.1 — responsive cockpit', () => {
 		cy.get('[data-testid="lq-cockpit-drawer"]')
 			.find('[data-testid="lq-cockpit-area-commercial"]')
 			.click();
+		cy.get('[data-testid="lq-cockpit-matters"]').should('exist');
+		// Self-provision: a fresh stack has no matters — create one so the
+		// test isn't ordering-dependent (review fix).
+		cy.get('[data-testid="lq-cockpit-matters"]').then(($m) => {
+			if ($m.find('[data-testid="lq-cockpit-matter-row"]').length === 0) {
+				cy.intercept('POST', '/api/v1/projects').as('createMatter');
+				cy.contains('button', 'New matter').click();
+				cy.get('[data-testid="lq-cockpit-new-matter-name"]').type(
+					`Responsive Matter ${Date.now()}`
+				);
+				cy.get('[data-testid="lq-cockpit-new-matter-create"]').click();
+				cy.wait('@createMatter').its('response.statusCode').should('eq', 201);
+				// Creation lands in the matter view — go back to the list so
+				// the assertions below exercise the row-click path.
+				cy.go('back');
+			}
+		});
 		cy.get('[data-testid="lq-cockpit-matter-row"]').first().click();
 		cy.get('[data-testid="lq-cockpit-conversation"]').should('exist');
 
@@ -81,13 +98,14 @@ describe('F1-S2.1 — responsive cockpit', () => {
 	});
 
 	it('elevation: the canvas is a real gray under white cards (light), charcoal in dark', () => {
-		// Light: canvas (cockpit root) must be measurably darker than cards.
-		cy.get('html').then(($html) => {
-			if ($html.hasClass('dark')) {
-				// normalize to light for this assertion
-				cy.get('button[aria-label^="Theme"]').click();
-			}
+		// Force light deterministically (review fix: a conditional toggle
+		// click depends on cycle position; set the stored theme and apply).
+		cy.window().then((win) => {
+			win.localStorage.setItem('theme', 'light');
+			win.document.documentElement.classList.remove('dark');
+			win.document.documentElement.classList.add('light');
 		});
+		cy.get('html').should('not.have.class', 'dark');
 		cy.get('[data-testid="lq-cockpit"]').should(($el) => {
 			const bg = getComputedStyle($el[0]).backgroundColor;
 			const ok = bg.match(/^oklch\((\d*\.?\d+)/);

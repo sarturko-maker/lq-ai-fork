@@ -64,12 +64,29 @@
 	let railCollapsed = $state(false);
 	let drawerOpen = $state(false);
 	// A flex-grow transition animates collapse/expand, but it must NOT
-	// apply while the user drags the resizer (it would rubber-band).
+	// apply while the user drags the resizer (it would rubber-band) and
+	// must respect prefers-reduced-motion (review fix — the slice's own
+	// motion gate).
 	let resizing = $state(false);
+	const reducedMotion =
+		typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 	$effect(() => {
-		// Leaving the narrow layout always closes the drawer.
-		if (!isNarrow) drawerOpen = false;
+		if (!isNarrow) {
+			// Leaving the narrow layout always closes the drawer.
+			drawerOpen = false;
+		} else {
+			// The Handle unmounts with the rail pane; its onDraggingChange
+			// never fires false mid-drag — unlatch (review fix).
+			resizing = false;
+		}
+	});
+
+	// The drawer is a modal surface: move focus into it on open (Escape
+	// and the scrim close it; full focus trapping is deferred on record).
+	let drawerEl = $state<HTMLElement | null>(null);
+	$effect(() => {
+		if (drawerOpen) drawerEl?.focus();
 	});
 
 	function toggleRail() {
@@ -284,7 +301,7 @@
 					defaultSize={18}
 					minSize={13}
 					maxSize={30}
-					class={resizing ? '' : 'transition-[flex-grow] duration-200 ease-out'}
+					class={resizing || reducedMotion ? '' : 'transition-[flex-grow] duration-200 ease-out'}
 					bind:this={railPane}
 					onCollapse={() => (railCollapsed = true)}
 					onExpand={() => (railCollapsed = false)}
@@ -314,8 +331,13 @@
 				onclick={() => (drawerOpen = false)}
 			></button>
 			<div
-				class="absolute inset-y-0 left-0 z-40 w-72 max-w-[85%] border-r border-border bg-background shadow-lg"
+				class="absolute inset-y-0 left-0 z-40 w-72 max-w-[85%] border-r border-border bg-background shadow-lg outline-none"
 				data-testid="lq-cockpit-drawer"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Practice areas"
+				tabindex="-1"
+				bind:this={drawerEl}
 				transition:fly={{ x: -24, duration: motionMs(160), opacity: 0.4 }}
 			>
 				{@render railContent()}

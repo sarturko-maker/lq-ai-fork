@@ -1309,8 +1309,10 @@
 		white-space: nowrap;
 	}
 
+	/* 85%, not lower: the faded metadata step must stay ≥4.5:1 on the card
+	   (review-verified; 75% landed at 3.86–3.97:1). */
 	.ag-step__digest {
-		color: color-mix(in oklch, var(--color-muted-foreground) 75%, transparent);
+		color: color-mix(in oklch, var(--color-muted-foreground) 85%, transparent);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -1319,7 +1321,7 @@
 
 	.ag-thinking summary {
 		cursor: pointer;
-		color: color-mix(in oklch, var(--color-muted-foreground) 75%, transparent);
+		color: color-mix(in oklch, var(--color-muted-foreground) 85%, transparent);
 	}
 
 	/* Settled reasoning, markdown-rendered (F0-S8) — quieter than the

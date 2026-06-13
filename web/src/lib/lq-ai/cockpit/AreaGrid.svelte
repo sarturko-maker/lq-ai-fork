@@ -36,7 +36,7 @@
 <div
 	class="mx-auto w-full max-w-4xl px-6 py-10 sm:px-8"
 	data-testid="lq-cockpit-area-grid"
-	in:fade={{ duration: motionMs(120) }}
+	in:fade|global={{ duration: motionMs(120) }}
 >
 	<h1 class="text-2xl font-semibold tracking-tight text-foreground">Your practice</h1>
 	<p class="mt-1.5 text-sm text-muted-foreground">
