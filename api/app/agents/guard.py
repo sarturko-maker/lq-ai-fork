@@ -70,6 +70,9 @@ class GuardContext:
     user_id: uuid.UUID
     project_id: uuid.UUID | None
     granted: frozenset[str]
+    # F1-S3: the matter's practice area, for per-area audit slicing (ADR-F002).
+    # B-class like project_id — never model-visible.
+    practice_area_id: uuid.UUID | None = None
 
 
 async def guarded_dispatch(
@@ -158,6 +161,7 @@ async def _audit(db: AsyncSession, ctx: GuardContext, *, tool: str, **details: o
             resource_type=_RESOURCE_TYPE,
             resource_id=str(ctx.run_id),
             project_id=ctx.project_id,
+            practice_area_id=ctx.practice_area_id,
             details={"tool": tool, **details},
         )
     except Exception:

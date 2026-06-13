@@ -68,6 +68,7 @@ from app.db.session import get_db
 from app.errors import Conflict, NotFound, ValidationError
 from app.models.file import File as FileModel
 from app.models.knowledge import KnowledgeBase
+from app.models.practice_area import PracticeArea
 from app.models.project import Project, ProjectFile, ProjectSkill
 from app.models.project_knowledge_base import ProjectKnowledgeBase
 from app.schemas.projects import (
@@ -363,6 +364,23 @@ async def create_project(
     desired_slug = payload.slug or slugify(payload.name)
     final_slug = await _resolve_unique_slug(db, owner_id=user.id, desired=desired_slug)
 
+    # F1-S3: a matter may file under a configured practice area (ADR-F002).
+    # The area must exist AND be configured (have a profile the agent builds
+    # from) — filing under an inert area is rejected. 404 for unknown ids
+    # (no existence leak), 400 for an inert area.
+    if payload.practice_area_id is not None:
+        area = await db.get(PracticeArea, payload.practice_area_id)
+        if area is None:
+            raise NotFound(
+                "practice area not found",
+                details={"practice_area_id": str(payload.practice_area_id)},
+            )
+        if not (area.profile_md and area.profile_md.strip()):
+            raise ValidationError(
+                "practice area is not configured",
+                details={"practice_area_id": str(payload.practice_area_id)},
+            )
+
     project = Project(
         owner_id=user.id,
         name=payload.name,
@@ -371,6 +389,7 @@ async def create_project(
         context_md=payload.context_md,
         privileged=payload.privileged,
         minimum_inference_tier=payload.minimum_inference_tier,
+        practice_area_id=payload.practice_area_id,
     )
     db.add(project)
     try:

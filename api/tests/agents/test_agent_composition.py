@@ -128,6 +128,17 @@ async def comp_env(
         await db.execute(delete(AgentThread).where(AgentThread.user_id == user_id))
         await db.execute(delete(Project).where(Project.id == project_id))
         await db.execute(delete(User).where(User.id == user_id))
+        # Restore the shared seeded Commercial row: the tier-floor test
+        # commits an UPDATE to it (commit_factory bypasses the per-test
+        # rollback), which would otherwise pollute later tests (e.g.
+        # test_practice_areas) in the full suite.
+        from app.models.practice_area import PracticeArea
+
+        await db.execute(
+            PracticeArea.__table__.update()
+            .where(PracticeArea.key == "commercial")
+            .values(default_tier_floor=None)
+        )
         await db.commit()
 
 
@@ -149,6 +160,23 @@ def test_system_prompt_assembly() -> None:
     assert prompt.startswith(SYSTEM_PROMPT)
     assert 'the matter "Acme MSA"' in prompt
     assert prompt.endswith(MATTER_PROMPT.format(name="Acme MSA"))
+
+
+def test_system_prompt_appends_area_profile() -> None:
+    """F1-S3: the area profile is appended after the matter addendum."""
+    from app.agents.area_agent import AreaAgentSpec
+
+    binding = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Acme MSA",
+        privileged=False,
+        minimum_inference_tier=None,
+    )
+    area = AreaAgentSpec(system_prompt_suffix="\n\nYou are the Commercial agent.")
+    prompt = system_prompt_for(binding, area)
+    assert 'the matter "Acme MSA"' in prompt
+    assert prompt.endswith("You are the Commercial agent.")
 
 
 async def test_bound_run_composes_matter_tools_and_privilege_envelope(
@@ -198,6 +226,65 @@ async def test_bound_run_composes_matter_tools_and_privilege_envelope(
             .all()
         )
     assert [r.details["tool"] for r in rows] == ["search_documents"]
+
+
+async def test_area_filed_matter_combines_tier_floor_and_audits_area(
+    comp_env: CompositionEnv,
+) -> None:
+    """F1-S3: a matter filed under an area with a tier floor sends the
+    STRONGER of the matter floor (4) and the area floor (2) → 2, and the
+    tool-call audit row carries the area id (per-area slicing). Sets the area
+    floor explicitly (Commercial seeds no floor — see the migration)."""
+    from app.models.practice_area import PracticeArea
+
+    async with comp_env.factory() as db:
+        area_id = (
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+        await db.execute(
+            PracticeArea.__table__.update()
+            .where(PracticeArea.id == area_id)
+            .values(default_tier_floor=2)
+        )
+        await db.execute(
+            Project.__table__.update()
+            .where(Project.id == comp_env.project_id)
+            .values(practice_area_id=area_id)
+        )
+        await db.commit()
+
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    builder = CapturingBuilder(
+        model=ScriptedToolCallingModel(
+            responses=[
+                tool_call_message("search_documents", {"query": "cap"}),
+                final_message("nothing to cite"),
+            ]
+        )
+    )
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=builder,
+        session_factory_provider=lambda: comp_env.factory,
+    )
+
+    # min(matter floor 4, area floor 2) = 2.
+    assert builder.calls[0]["project_minimum_inference_tier"] == 2
+
+    async with comp_env.factory() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.resource_type == "agent_run",
+                        AuditLog.resource_id == str(run_id),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert rows and all(r.practice_area_id == area_id for r in rows)
 
 
 async def test_unbound_run_gets_no_matter_tools_and_no_envelope(

@@ -154,6 +154,11 @@ class ProjectCreateRequest(BaseModel):
     context_md: str | None = None
     privileged: bool = False
     minimum_inference_tier: InferenceTier | None = None
+    # F1-S3: which configured practice area this matter files under
+    # (ADR-F002). Optional — omitting it creates an unfiled matter
+    # (legacy behaviour). Validated in the handler: the area must exist and
+    # be configured.
+    practice_area_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def _validate_context_size(self) -> Self:

@@ -80,6 +80,12 @@ class Project(Base):
             "char_length(slug) > 0 AND char_length(slug) <= 80",
             name="chk_projects_slug_len",
         ),
+        # F1-S3: sandbox rows are not matters (the matters rollup excludes
+        # them) — they must not file under a practice area.
+        CheckConstraint(
+            "NOT (is_sandbox AND practice_area_id IS NOT NULL)",
+            name="chk_projects_sandbox_no_area",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -91,6 +97,14 @@ class Project(Base):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT", name="fk_projects_owner_id"),
         nullable=False,
+    )
+    # F1-S3: which practice area this matter files under (ADR-F002). Nullable
+    # — legacy/unfiled matters keep NULL (no backfill); SET NULL on area
+    # delete so the matter survives. The CHECK above forbids it on sandboxes.
+    practice_area_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("practice_areas.id", ondelete="SET NULL", name="fk_projects_practice_area_id"),
+        nullable=True,
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False)

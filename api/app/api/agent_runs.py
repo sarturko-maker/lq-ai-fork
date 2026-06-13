@@ -84,6 +84,7 @@ from app.audit import audit_action
 from app.config import get_settings
 from app.db.session import get_db, get_session_factory
 from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
+from app.models.practice_area import PracticeArea
 from app.models.project import Project
 from app.schemas.agent_runs import (
     AgentRunCreate,
@@ -337,12 +338,17 @@ async def create_agent_run(
                 status_code=status.HTTP_409_CONFLICT, detail="thread_not_continuable"
             )
     elif body.project_id is not None:
+        # F1-S3: a sandbox is the chat try-it space, not a matter — agent
+        # runs never bind to one (closes the sandbox-thread state at the
+        # source; HANDOFF carry-over). Filter sandboxes out of the visible
+        # set so they 404 like any non-matter, no existence leak.
         visible_project_id = (
             await db.execute(
                 select(Project.id).where(
                     Project.id == body.project_id,
                     Project.owner_id == user.id,
                     Project.archived_at.is_(None),
+                    Project.is_sandbox.is_(False),
                 )
             )
         ).scalar_one_or_none()
@@ -750,7 +756,11 @@ async def list_matter_activity(
                 Project.slug,
                 Project.privileged,
                 Project.created_at,
-            ).where(
+                Project.practice_area_id,
+                PracticeArea.key,
+            )
+            .outerjoin(PracticeArea, PracticeArea.id == Project.practice_area_id)
+            .where(
                 Project.owner_id == user.id,
                 Project.archived_at.is_(None),
                 Project.is_sandbox.is_(False),
@@ -786,7 +796,7 @@ async def list_matter_activity(
     statuses: dict[uuid.UUID | None, str] = dict(status_rows.tuples().all())
 
     matters = []
-    for pid, name, slug, privileged, created_at in project_rows:
+    for pid, name, slug, privileged, created_at, area_id, area_key in project_rows:
         thread_count, last_run_at = aggregates.get(pid, (0, None))
         matters.append(
             MatterActivityRead(
@@ -798,6 +808,8 @@ async def list_matter_activity(
                 thread_count=thread_count,
                 last_run_at=last_run_at,
                 last_run_status=AgentRunStatus(statuses[pid]) if pid in statuses else None,
+                practice_area_id=area_id,
+                practice_area_key=area_key,
             )
         )
     # Most recent activity first; matters without conversations follow,

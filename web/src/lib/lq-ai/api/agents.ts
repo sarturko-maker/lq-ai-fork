@@ -124,6 +124,10 @@ export interface MatterActivity {
 	thread_count: number;
 	last_run_at: string | null;
 	last_run_status: AgentRunStatus | null;
+	/** F1-S3: which practice area this matter files under (ADR-F002). null
+	 * for unfiled/legacy matters; the cockpit groups its cards by this key. */
+	practice_area_id: string | null;
+	practice_area_key: string | null;
 }
 
 /** The "unfiled conversations" bucket summary (threads with no Matter). */

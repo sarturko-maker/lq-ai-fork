@@ -104,6 +104,32 @@ async def test_matters_rollup_counts_and_newest_status(
     assert matter["last_run_at"] is not None
     assert body["unfiled"]["thread_count"] == 0
     assert body["unfiled"]["last_run_status"] is None
+    # F1-S3: an unfiled matter reports null area projection.
+    assert matter["practice_area_id"] is None
+    assert matter["practice_area_key"] is None
+
+
+async def test_matters_rollup_projects_practice_area(
+    client: AsyncClient, db_session: AsyncSession, user_a: User
+) -> None:
+    """F1-S3: a matter filed under an area reports its practice_area_id/key —
+    the projection the whole cockpit grouping depends on."""
+    from sqlalchemy import select as _select
+
+    from app.models.practice_area import PracticeArea
+
+    area_id = (
+        await db_session.execute(_select(PracticeArea.id).where(PracticeArea.key == "commercial"))
+    ).scalar_one()
+    project = await _make_project(db_session, owner=user_a)
+    project.practice_area_id = area_id
+    await db_session.flush()
+
+    resp = await client.get("/api/v1/agents/matters", headers=_bearer(user_a))
+    assert resp.status_code == 200
+    matter = next(m for m in resp.json()["matters"] if m["project_id"] == str(project.id))
+    assert matter["practice_area_id"] == str(area_id)
+    assert matter["practice_area_key"] == "commercial"
 
 
 async def test_matters_includes_quiet_matters_after_active_ones(
