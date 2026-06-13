@@ -24,7 +24,11 @@
 		footer = undefined
 	}: {
 		open?: boolean;
-		/** Dialog heading — rendered as the bits-ui Title (an `<h2>`), auto-linked as the aria label. */
+		/**
+		 * Dialog heading — rendered as the bits-ui `Dialog.Title`, a
+		 * `div[data-slot="dialog-title"]` auto-linked via `aria-labelledby` (NOT a
+		 * literal `<h2>`, so assert on `[data-slot="dialog-title"]` in tests).
+		 */
 		title: string;
 		/** Optional sub-heading under the title. */
 		description?: string;
@@ -45,7 +49,15 @@
 			{/if}
 		</Dialog.Header>
 
-		{@render children()}
+		<!--
+			Scroll seam: cap the BODY (not the whole dialog) so the header + footer stay
+			pinned and only the content scrolls when a consumer's body is taller than the
+			viewport (R13 embedded / R14b authoring modals). Short bodies (NewMatterModal)
+			sit at natural height — the cap never engages, so layout is unchanged.
+		-->
+		<div class="max-h-[calc(85vh-8rem)] overflow-y-auto">
+			{@render children()}
+		</div>
 
 		{#if footer}
 			<Dialog.Footer>{@render footer()}</Dialog.Footer>

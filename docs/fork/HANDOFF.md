@@ -87,20 +87,23 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
      the last no longer pulls a `.svelte` for logic). Logic-only — **no token / no surface change**.
      23-test `matter.test.ts`; vitest 797 (was 781); svelte-check 0 errors; adversarial review SHIP
      (re-derived both old bodies → 20/20 inputs byte-identical, `.replace('Matter',unitLabel)` invariant holds).
-   - **R1a — Modal/form primitives: EXPLORED + PLANNED, ready to implement.** Full implementation
-     spec: **`docs/fork/plans/F1-R1a-modal-form-primitives.md`** (on branch `f1-r1a-modal-form-primitives`
-     — `git checkout` it; the plan doc is its first commit). Build `primitives/{ModalShell,FormControl,
-     Alert}.svelte` (ModalShell is a THIN wrap of shadcn `ui/dialog` — bits-ui already gives focus-trap +
-     Escape + overlay-close + aria), migrate **NewMatterModal** onto them (44 `var(--lq-)` → 0, delete the
-     `nmm-*` `<style>` block), fix the wrong "defaults to Tier 2" InfoTip copy. **PRESERVE these ids or
-     Cypress breaks:** `#nmm-name`, `#nmm-privileged`, `#nmm-tier`, plus `[role="dialog"]`, `h2 "New matter"`,
-     buttons "Cancel"/"Create matter". This is a rendered-surface slice → **screenshots REQUIRED** (headed,
-     light+dark, wide+narrow, default+error → `docs/fork/evidence/r1a/`). New `shared-primitives.cy.ts`;
-     keep `wave-c-matters`/`f0-s3-agents-tab`/`f1-s2-cockpit` green. *M.*
-   - **then R6** (MessageBubble family + `<think>` ribbon; R6 token files are only `ProvenancePill` (12)
-     + `M2Citations` (1) per the coverage table — MessageBubble itself has no `var(--lq-)`, so re-scope R6
-     when starting: its work is the `color:white` literal + the backlogged collapsed reasoning ribbon,
-     NOT a token swap. *M*).
+   - **R1a — Modal/form primitives: ✅ merged via PR #51** (or merging — confirm on main). New
+     `web/src/lib/lq-ai/components/primitives/{ModalShell,FormControl,Alert}.svelte` — ModalShell is a
+     THIN wrap of shadcn/bits-ui `Dialog` (focus-trap/Escape/overlay/scroll-lock/aria are the library's).
+     **NewMatterModal migrated** (44 `var(--lq-)` → 0, `nmm-*` `<style>` block deleted, Svelte-5 runes);
+     fixed the wrong "defaults to Tier 2" InfoTip copy. Footer submit sits outside `<form>` via
+     `form="nmm-form"`. 6-test `shared-primitives.cy.ts` (focus-trap/Escape/errors/create) all pass on
+     the live stack; before/after light+dark+narrow evidence in `docs/fork/evidence/r1a/`; vitest 797;
+     svelte-check 0. **Gotcha for downstream modal slices:** bits-ui `Dialog.Title` is a
+     `div[data-slot="dialog-title"]` (aria-labelledby heading), **NOT** an `<h2>` — assert
+     `[data-slot="dialog-title"]`, not `cy.contains('h2', …)`. **Reusable kit for R13/R14b/R17.**
+   - **NEXT → R6 — MessageBubble family + `<think>` ribbon.** Coverage-table token files are ONLY
+     `ProvenancePill` (12) + `M2Citations` (1) — **MessageBubble itself has no `var(--lq-)`**, so re-scope
+     R6 on entry: the work is the `color:white` literal + the backlogged **collapsed reasoning ribbon**,
+     NOT a bulk token swap. *Critique fixes (in the decomposition plan):* NO `marked`/DOMPurify
+     memoization here (behavior change — separate slice); drop the AppliedSkillsChip claim (zero `--lq-*`).
+     Adversarial focus: citation single-fetch race, accent-on-accent dark contrast, ARIA. Rendered-surface
+     → **screenshots REQUIRED**. *M.* Reuse the R1a `Alert`/idiom where the bubble shows errors/refusals.
 
    The dark-mode bridge (`+layout.svelte` lines 23–24) holds un-migrated surfaces, so slices merge in
    almost any order; R-BRIDGE/R-LAST last.

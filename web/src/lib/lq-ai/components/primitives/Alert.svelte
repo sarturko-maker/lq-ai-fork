@@ -16,7 +16,9 @@
 	} = $props();
 
 	const TONE: Record<string, string> = {
-		error: 'border-destructive/30 bg-destructive/10 text-destructive',
+		// `dark:text-red-300` lifts the error text to >=4.5:1 (AA) over the tinted
+		// wash on charcoal — bare `text-destructive` only reaches 3.7:1 in dark (R1a review).
+		error: 'border-destructive/30 bg-destructive/10 text-destructive dark:text-red-300',
 		warning: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
 		info: 'border-border bg-muted text-muted-foreground'
 	};

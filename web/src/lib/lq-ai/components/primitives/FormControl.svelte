@@ -43,6 +43,10 @@
 		<p class="text-xs text-muted-foreground">{help}</p>
 	{/if}
 	{#if error}
-		<p id={`${id}-error`} class="text-xs text-destructive" role="alert">{error}</p>
+		<!-- `dark:text-red-300` keeps the inline error >=4.5:1 (AA) on the dark popover
+		     surface; bare `text-destructive` is 4.15:1 in dark (R1a review regression fix). -->
+		<p id={`${id}-error`} class="text-xs text-destructive dark:text-red-300" role="alert">
+			{error}
+		</p>
 	{/if}
 </div>
