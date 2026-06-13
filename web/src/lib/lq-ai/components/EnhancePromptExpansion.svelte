@@ -13,57 +13,97 @@
 	 * The parent calls `open()` to trigger the API call. Callbacks let the
 	 * parent update composerText and handle dismissal without this component
 	 * reaching into the DOM.
+	 *
+	 * R7: migrated to Svelte 5 runes + semantic tokens. The three legacy button
+	 * families (`.lq-btn-primary/secondary/ghost`) collapse onto the shared
+	 * shadcn `Button` primitive — the runes conversion is what lets `onclick`
+	 * forward to it (a legacy `on:click` on a runes child would not). No `<style>`
+	 * block; the `max-[640px]` single-column reflow is now Tailwind's `sm:`. The
+	 * state-machine variable is named `panel` (not `state`) to avoid colliding
+	 * with the `$state` rune in the Svelte TS tooling.
 	 */
 	import { enhance, recordOutcome } from '$lib/lq-ai/api/enhancePrompt';
 	import TrustPill from './TrustPill.svelte';
+	import { Button } from '$lib/components/ui/button';
 
-	export let originalText: string;
-	export let chatId: string | null = null;
-	export let onUseEnhanced: (enhanced: string, interactionId: string) => void = () => undefined;
-	export let onEditEnhanced: (enhanced: string, interactionId: string) => void = () => undefined;
-	export let onKeepOriginal: (interactionId: string | null) => void = () => undefined;
-	export let onDismiss: () => void = () => undefined;
+	type ExpansionState =
+		| { kind: 'closed' }
+		| { kind: 'loading'; original: string }
+		| {
+				kind: 'shown';
+				original: string;
+				enhanced: string;
+				reasoning: string[];
+				preview?: string;
+				interactionId: string;
+				tier: number | null;
+				provider: string | null;
+		  }
+		| { kind: 'skipped'; original: string; skipReason: string; interactionId: string }
+		| { kind: 'error'; original: string; message: string };
+
+	let {
+		originalText,
+		chatId = null,
+		onUseEnhanced = () => undefined,
+		onEditEnhanced = () => undefined,
+		onKeepOriginal = () => undefined,
+		onDismiss = () => undefined
+	}: {
+		originalText: string;
+		chatId?: string | null;
+		onUseEnhanced?: (enhanced: string, interactionId: string) => void;
+		onEditEnhanced?: (enhanced: string, interactionId: string) => void;
+		onKeepOriginal?: (interactionId: string | null) => void;
+		onDismiss?: () => void;
+	} = $props();
 
 	/**
 	 * §7.1 — first-time JIT onboarding strip. Shows once on the user's first
 	 * post-enhance shown state and persists dismissal in localStorage so
 	 * subsequent enhancements don't re-show it.
 	 */
-	export const JIT_SEEN_KEY = 'lq_ai_jit_enhance_seen';
-	let jitDismissed = readJitSeen();
+	const JIT_SEEN_KEY = 'lq_ai_jit_enhance_seen';
 
 	function readJitSeen(): boolean {
-		try { return localStorage.getItem(JIT_SEEN_KEY) === 'true'; } catch { return false; }
+		try {
+			return localStorage.getItem(JIT_SEEN_KEY) === 'true';
+		} catch {
+			return false;
+		}
 	}
+
+	let jitDismissed = $state(readJitSeen());
+	let panel = $state<ExpansionState>({ kind: 'closed' });
+
 	function dismissJit(): void {
 		jitDismissed = true;
-		try { localStorage.setItem(JIT_SEEN_KEY, 'true'); } catch {}
+		try {
+			localStorage.setItem(JIT_SEEN_KEY, 'true');
+		} catch {
+			// best-effort: storage/telemetry unavailable is non-fatal
+		}
 	}
 
-	type ExpansionState =
-		| { kind: 'closed' }
-		| { kind: 'loading'; original: string }
-		| { kind: 'shown'; original: string; enhanced: string; reasoning: string[]; preview?: string; interactionId: string; tier: number | null; provider: string | null }
-		| { kind: 'skipped'; original: string; skipReason: string; interactionId: string }
-		| { kind: 'error'; original: string; message: string };
-
-	let state: ExpansionState = { kind: 'closed' };
-
 	function setOnboardedFlag(): void {
-		try { localStorage.setItem('lq-ai:onboarded:enhance', 'true'); } catch {}
+		try {
+			localStorage.setItem('lq-ai:onboarded:enhance', 'true');
+		} catch {
+			// best-effort: storage/telemetry unavailable is non-fatal
+		}
 	}
 
 	export async function open(): Promise<void> {
 		const text = originalText;
 		if (!text.trim()) return;
-		state = { kind: 'loading', original: text };
+		panel = { kind: 'loading', original: text };
 		try {
 			const res = await enhance({
 				raw_input: text,
 				chat_id: chatId ?? undefined
 			});
 			if (res.expansion_applied) {
-				state = {
+				panel = {
 					kind: 'shown',
 					original: text,
 					enhanced: res.expanded_prompt,
@@ -74,7 +114,7 @@
 					provider: res.routed_provider ?? null
 				};
 			} else {
-				state = {
+				panel = {
 					kind: 'skipped',
 					original: text,
 					skipReason: res.skip_reason ?? 'no reason provided',
@@ -82,8 +122,8 @@
 				};
 			}
 		} catch (e) {
-			const original = (state as { kind: 'loading'; original: string }).original ?? text;
-			state = {
+			const original = (panel as { kind: 'loading'; original: string }).original ?? text;
+			panel = {
 				kind: 'error',
 				original,
 				message: e instanceof Error ? e.message : 'Unknown error'
@@ -92,47 +132,65 @@
 	}
 
 	async function handleUseEnhanced(): Promise<void> {
-		if (state.kind !== 'shown') return;
-		const { enhanced, interactionId } = state;
-		state = { kind: 'closed' };
+		if (panel.kind !== 'shown') return;
+		const { enhanced, interactionId } = panel;
+		panel = { kind: 'closed' };
 		setOnboardedFlag();
 		onUseEnhanced(enhanced, interactionId);
-		try { await recordOutcome(interactionId, { used: true, edited_before_use: false }); } catch {}
+		try {
+			await recordOutcome(interactionId, { used: true, edited_before_use: false });
+		} catch {
+			// best-effort: storage/telemetry unavailable is non-fatal
+		}
 	}
 
 	async function handleEditEnhanced(): Promise<void> {
-		if (state.kind !== 'shown') return;
-		const { enhanced, interactionId } = state;
-		state = { kind: 'closed' };
+		if (panel.kind !== 'shown') return;
+		const { enhanced, interactionId } = panel;
+		panel = { kind: 'closed' };
 		setOnboardedFlag();
 		onEditEnhanced(enhanced, interactionId);
-		try { await recordOutcome(interactionId, { used: true, edited_before_use: true }); } catch {}
+		try {
+			await recordOutcome(interactionId, { used: true, edited_before_use: true });
+		} catch {
+			// best-effort: storage/telemetry unavailable is non-fatal
+		}
 	}
 
 	async function handleKeepOriginal(): Promise<void> {
-		if (state.kind !== 'shown') return;
-		const { interactionId } = state;
-		state = { kind: 'closed' };
+		if (panel.kind !== 'shown') return;
+		const { interactionId } = panel;
+		panel = { kind: 'closed' };
 		setOnboardedFlag();
 		onKeepOriginal(interactionId);
-		try { await recordOutcome(interactionId, { used: false }); } catch {}
+		try {
+			await recordOutcome(interactionId, { used: false });
+		} catch {
+			// best-effort: storage/telemetry unavailable is non-fatal
+		}
 	}
 
 	async function handleSkippedDismiss(): Promise<void> {
-		if (state.kind !== 'skipped') return;
-		const { interactionId } = state;
-		state = { kind: 'closed' };
+		if (panel.kind !== 'skipped') return;
+		const { interactionId } = panel;
+		panel = { kind: 'closed' };
 		setOnboardedFlag();
 		onKeepOriginal(interactionId);
-		try { await recordOutcome(interactionId, { used: false }); } catch {}
+		try {
+			await recordOutcome(interactionId, { used: false });
+		} catch {
+			// best-effort: storage/telemetry unavailable is non-fatal
+		}
 	}
 
 	function handleDismiss(): void {
-		const prevState = state;
-		state = { kind: 'closed' };
-		if (prevState.kind === 'shown') {
-			const id = prevState.interactionId;
-			try { recordOutcome(id, { used: false }); } catch {}
+		const prev = panel;
+		panel = { kind: 'closed' };
+		if (prev.kind === 'shown') {
+			// best-effort telemetry; panel is already closed, so fire-and-forget.
+			// `.catch` (not a sync try/catch) is what actually swallows the async
+			// rejection — recordOutcome returns a Promise.
+			void recordOutcome(prev.interactionId, { used: false }).catch(() => {});
 		}
 		onDismiss();
 	}
@@ -142,336 +200,128 @@
 	}
 </script>
 
-{#if state.kind !== 'closed'}
-	<div class="lq-enhance-panel" data-testid="lq-ai-enhance-panel">
-		{#if state.kind === 'loading'}
-			<div class="lq-enhance-loading" data-testid="lq-ai-enhance-loading">
-				<span class="lq-spinner" aria-hidden="true"></span>
-				<span class="lq-text-caption">Enhancing… ✨</span>
+{#if panel.kind !== 'closed'}
+	<div
+		class="flex flex-col gap-3 rounded-lg border border-border bg-card p-3"
+		data-testid="lq-ai-enhance-panel"
+	>
+		{#if panel.kind === 'loading'}
+			<div class="flex items-center gap-2 py-2" data-testid="lq-ai-enhance-loading">
+				<span
+					class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted border-t-primary"
+					aria-hidden="true"
+				></span>
+				<span class="text-xs text-muted-foreground">Enhancing… ✨</span>
 			</div>
-		{:else if state.kind === 'shown'}
+		{:else if panel.kind === 'shown'}
 			{#if !jitDismissed}
-				<div class="lq-enhance-jit" data-testid="lq-ai-enhance-jit">
-					<span class="lq-text-caption lq-enhance-jit-msg">
+				<div
+					class="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-300"
+					data-testid="lq-ai-enhance-jit"
+				>
+					<span class="flex-1 text-xs">
 						Tip: ✨ rewrites your prompt so the AI has more to work with. Pick
 						<strong>Use enhanced</strong>, tweak with <strong>Edit enhanced</strong>, or
 						<strong>Keep original</strong>. (⌘E)
 					</span>
-					<button
-						type="button"
-						class="lq-btn-ghost lq-enhance-jit-dismiss"
-						on:click={dismissJit}
+					<Button
+						variant="ghost"
+						size="sm"
+						class="shrink-0"
+						onclick={dismissJit}
 						data-testid="lq-ai-enhance-jit-dismiss"
 						aria-label="Dismiss tip"
 					>
 						Got it
-					</button>
+					</Button>
 				</div>
 			{/if}
-			<div class="lq-enhance-header">
-				<span class="lq-enhance-title">Prompt Enhancement</span>
-				<div class="lq-enhance-header-actions">
-					{#if state.tier != null}
-						<TrustPill variant="tier" label="Tier {state.tier}" />
+			<div class="flex items-center justify-between">
+				<span class="text-[13px] font-semibold text-foreground">Prompt Enhancement</span>
+				<div class="flex items-center gap-2">
+					{#if panel.tier != null}
+						<TrustPill variant="tier" label="Tier {panel.tier}" />
 					{/if}
-					<button
-						type="button"
-						class="lq-btn-ghost lq-enhance-dismiss-x"
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						class="text-lg leading-none text-muted-foreground"
 						aria-label="Dismiss enhancement"
-						on:click={handleDismiss}
+						onclick={handleDismiss}
 					>
 						×
-					</button>
+					</Button>
 				</div>
 			</div>
 
-			<div class="lq-enhance-cards">
-				<div class="lq-enhance-card lq-enhance-card--original" data-testid="lq-ai-enhance-original">
-					<div class="lq-enhance-card-label">Original</div>
-					<p class="lq-enhance-card-body">{state.original}</p>
+			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+				<div
+					class="flex flex-col gap-2 rounded-md border border-border bg-card p-3 opacity-60"
+					data-testid="lq-ai-enhance-original"
+				>
+					<div class="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
+						Original
+					</div>
+					<p class="m-0 text-[13px] break-words whitespace-pre-wrap text-foreground">
+						{panel.original}
+					</p>
 				</div>
-				<div class="lq-enhance-card lq-enhance-card--enhanced" data-testid="lq-ai-enhance-enhanced">
-					<div class="lq-enhance-card-label">Enhanced ✨</div>
-					<p class="lq-enhance-card-body">{state.enhanced}</p>
-					{#if state.reasoning.length > 0}
-						<ul class="lq-enhance-reasoning">
-							{#each state.reasoning as bullet}
-								<li class="lq-text-caption">{bullet}</li>
+				<div
+					class="flex flex-col gap-2 rounded-md border border-primary/40 bg-accent p-3"
+					data-testid="lq-ai-enhance-enhanced"
+				>
+					<div class="text-[11px] font-semibold tracking-wider text-accent-foreground uppercase">
+						Enhanced ✨
+					</div>
+					<p class="m-0 text-[13px] break-words whitespace-pre-wrap text-foreground">
+						{panel.enhanced}
+					</p>
+					{#if panel.reasoning.length > 0}
+						<ul class="m-0 flex flex-col gap-0.5 pl-4">
+							{#each panel.reasoning as bullet}
+								<li class="text-[11px] text-muted-foreground">{bullet}</li>
 							{/each}
 						</ul>
 					{/if}
 				</div>
 			</div>
 
-			<div class="lq-enhance-actions">
-				<button
-					type="button"
-					class="lq-btn-primary"
-					on:click={handleUseEnhanced}
-					data-testid="lq-ai-enhance-use"
-				>
-					Use enhanced
-				</button>
-				<button
-					type="button"
-					class="lq-btn-secondary"
-					on:click={handleEditEnhanced}
-					data-testid="lq-ai-enhance-edit"
-				>
+			<div class="flex flex-wrap items-center gap-2">
+				<Button onclick={handleUseEnhanced} data-testid="lq-ai-enhance-use">Use enhanced</Button>
+				<Button variant="outline" onclick={handleEditEnhanced} data-testid="lq-ai-enhance-edit">
 					Edit enhanced
-				</button>
-				<button
-					type="button"
-					class="lq-btn-ghost"
-					on:click={handleKeepOriginal}
-					data-testid="lq-ai-enhance-keep"
-				>
+				</Button>
+				<Button variant="ghost" onclick={handleKeepOriginal} data-testid="lq-ai-enhance-keep">
 					Keep original
-				</button>
+				</Button>
 			</div>
-		{:else if state.kind === 'skipped'}
-			<div class="lq-enhance-skipped" data-testid="lq-ai-enhance-skipped">
-				<span class="lq-text-caption">
-					No expansion needed — your prompt is already structured. ({state.skipReason})
+		{:else if panel.kind === 'skipped'}
+			<div class="flex flex-wrap items-center gap-3" data-testid="lq-ai-enhance-skipped">
+				<span class="text-xs text-muted-foreground">
+					No expansion needed — your prompt is already structured. ({panel.skipReason})
 				</span>
-				<button
-					type="button"
-					class="lq-btn-secondary"
-					on:click={handleSkippedDismiss}
+				<Button
+					variant="outline"
+					onclick={handleSkippedDismiss}
 					data-testid="lq-ai-enhance-skipped-ok"
 				>
 					Got it
-				</button>
+				</Button>
 			</div>
-		{:else if state.kind === 'error'}
-			<div class="lq-enhance-error" data-testid="lq-ai-enhance-error">
-				<span class="lq-text-caption lq-enhance-error-msg">
-					Enhance Prompt failed: {state.message}
+		{:else if panel.kind === 'error'}
+			<div class="flex flex-col gap-2" data-testid="lq-ai-enhance-error">
+				<span class="text-xs text-destructive dark:text-red-300">
+					Enhance Prompt failed: {panel.message}
 				</span>
-				<div class="lq-enhance-error-actions">
-					<button
-						type="button"
-						class="lq-btn-secondary"
-						on:click={handleRetry}
-						data-testid="lq-ai-enhance-retry"
-					>
+				<div class="flex gap-2">
+					<Button variant="outline" onclick={handleRetry} data-testid="lq-ai-enhance-retry">
 						Try again
-					</button>
-					<button
-						type="button"
-						class="lq-btn-ghost"
-						on:click={handleDismiss}
-						data-testid="lq-ai-enhance-error-dismiss"
-					>
+					</Button>
+					<Button variant="ghost" onclick={handleDismiss} data-testid="lq-ai-enhance-error-dismiss">
 						Dismiss
-					</button>
+					</Button>
 				</div>
 			</div>
 		{/if}
 	</div>
 {/if}
-
-<style>
-	@import '../styles/practice.css';
-
-	.lq-enhance-panel {
-		border: 1px solid var(--lq-border);
-		border-radius: var(--lq-radius-lg);
-		background: var(--lq-canvas);
-		padding: var(--lq-space-3);
-		display: flex;
-		flex-direction: column;
-		gap: var(--lq-space-3);
-	}
-
-	.lq-enhance-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-
-	.lq-enhance-title {
-		font-size: 13px;
-		font-weight: 600;
-		color: var(--lq-text);
-	}
-
-	.lq-enhance-header-actions {
-		display: flex;
-		align-items: center;
-		gap: var(--lq-space-2);
-	}
-
-	.lq-enhance-dismiss-x {
-		font-size: 18px;
-		line-height: 1;
-		padding: 2px 6px;
-		color: var(--lq-text-secondary);
-	}
-
-	.lq-enhance-cards {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: var(--lq-space-3);
-	}
-
-	@media (max-width: 640px) {
-		.lq-enhance-cards {
-			grid-template-columns: 1fr;
-		}
-	}
-
-	.lq-enhance-card {
-		border: 1px solid var(--lq-border);
-		border-radius: var(--lq-radius);
-		background: var(--lq-canvas);
-		padding: var(--lq-space-3);
-		display: flex;
-		flex-direction: column;
-		gap: var(--lq-space-2);
-	}
-
-	.lq-enhance-card--original {
-		opacity: 0.6;
-	}
-
-	.lq-enhance-card--enhanced {
-		border-color: var(--lq-accent-border);
-		background: var(--lq-inset-secure);
-	}
-
-	.lq-enhance-card-label {
-		font-size: 11px;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--lq-text-secondary);
-	}
-
-	.lq-enhance-card--enhanced .lq-enhance-card-label {
-		color: var(--lq-accent);
-	}
-
-	.lq-enhance-card-body {
-		font-size: 13px;
-		color: var(--lq-text);
-		margin: 0;
-		white-space: pre-wrap;
-		word-break: break-word;
-	}
-
-	.lq-enhance-reasoning {
-		margin: 0;
-		padding-left: var(--lq-space-4);
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-	}
-
-	.lq-text-caption {
-		font-size: 11px;
-		color: var(--lq-text-secondary);
-	}
-
-	.lq-enhance-actions {
-		display: flex;
-		align-items: center;
-		gap: var(--lq-space-2);
-		flex-wrap: wrap;
-	}
-
-	.lq-enhance-loading {
-		display: flex;
-		align-items: center;
-		gap: var(--lq-space-2);
-		padding: var(--lq-space-2) 0;
-	}
-
-	.lq-spinner {
-		display: inline-block;
-		width: 14px;
-		height: 14px;
-		border: 2px solid var(--lq-accent-border);
-		border-top-color: var(--lq-accent);
-		border-radius: 50%;
-		animation: lq-spin 0.7s linear infinite;
-	}
-
-	@keyframes lq-spin {
-		to { transform: rotate(360deg); }
-	}
-
-	.lq-enhance-skipped {
-		display: flex;
-		align-items: center;
-		gap: var(--lq-space-3);
-		flex-wrap: wrap;
-	}
-
-	.lq-enhance-error {
-		display: flex;
-		flex-direction: column;
-		gap: var(--lq-space-2);
-	}
-
-	.lq-enhance-error-msg {
-		color: var(--lq-error);
-	}
-
-	.lq-enhance-jit {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: var(--lq-space-3);
-		padding: var(--lq-space-2) var(--lq-space-3);
-		border-radius: var(--lq-radius);
-		background: var(--lq-warn-soft, #fef3c7);
-		border: 1px solid var(--lq-warn-border, #fcd34d);
-		color: var(--lq-warn, #92400e);
-	}
-	.lq-enhance-jit-msg { flex: 1; }
-	.lq-enhance-jit-dismiss { flex-shrink: 0; }
-
-	.lq-enhance-error-actions {
-		display: flex;
-		gap: var(--lq-space-2);
-	}
-
-	/* Button primitives — match practice palette */
-	.lq-btn-primary {
-		background: var(--lq-accent);
-		color: white;
-		border: 0;
-		border-radius: var(--lq-radius);
-		padding: 6px 14px;
-		font-size: 12px;
-		font-weight: 500;
-		cursor: pointer;
-	}
-	.lq-btn-primary:hover { filter: brightness(0.95); }
-	.lq-btn-primary:focus-visible { outline: 2px solid var(--lq-accent); outline-offset: 2px; }
-
-	.lq-btn-secondary {
-		background: white;
-		color: var(--lq-accent);
-		border: 1px solid var(--lq-accent-border);
-		border-radius: var(--lq-radius);
-		padding: 6px 12px;
-		font-size: 12px;
-		cursor: pointer;
-	}
-	.lq-btn-secondary:hover { background: var(--lq-accent-soft); }
-	.lq-btn-secondary:focus-visible { outline: 2px solid var(--lq-accent); outline-offset: 2px; }
-
-	.lq-btn-ghost {
-		background: transparent;
-		color: var(--lq-text-secondary);
-		border: 1px solid var(--lq-border);
-		border-radius: var(--lq-radius);
-		padding: 6px 12px;
-		font-size: 12px;
-		cursor: pointer;
-	}
-	.lq-btn-ghost:hover { background: var(--lq-inset); }
-	.lq-btn-ghost:focus-visible { outline: 2px solid var(--lq-accent); outline-offset: 2px; }
-</style>
