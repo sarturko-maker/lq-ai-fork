@@ -333,6 +333,7 @@
 <NewMatterDialog
 	bind:open={createOpen}
 	{unitLabel}
+	practiceAreaId={matter?.practice_area_id ?? null}
 	onCreated={(project) => {
 		selectedMatterId = project.id;
 		onMatterCreated(project);

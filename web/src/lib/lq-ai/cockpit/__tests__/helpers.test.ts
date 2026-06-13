@@ -6,7 +6,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+	areaActivityCounts,
 	cockpitUrl,
+	mattersForArea,
 	motionMs,
 	nextTheme,
 	normalizeTheme,
@@ -15,6 +17,8 @@ import {
 	viewOf,
 	type CockpitState
 } from '../helpers';
+
+type FakeMatter = { practice_area_key: string | null; last_run_at: string | null };
 
 function stateOf(url: string): CockpitState {
 	return parseCockpitState(new URL(`http://x${url}`).searchParams);
@@ -91,6 +95,33 @@ describe('theme cycle (app.html contract)', () => {
 		expect(normalizeTheme('dark')).toBe('dark');
 		// Legacy values render dark — same rule as app.html.
 		expect(normalizeTheme('oled-dark')).toBe('dark');
+	});
+});
+
+describe('area grouping (F1-S3 — matters file by practice_area_key)', () => {
+	const matters: FakeMatter[] = [
+		{ practice_area_key: 'commercial', last_run_at: '2026-06-13T10:00:00Z' },
+		{ practice_area_key: 'commercial', last_run_at: '2026-06-12T10:00:00Z' },
+		{ practice_area_key: 'privacy', last_run_at: null },
+		{ practice_area_key: null, last_run_at: '2026-06-11T10:00:00Z' } // unfiled
+	];
+
+	it('counts per area and takes the first (latest) activity, skipping unfiled', () => {
+		const byArea = areaActivityCounts(matters);
+		expect(byArea.get('commercial')).toEqual({
+			count: 2,
+			lastActivity: '2026-06-13T10:00:00Z'
+		});
+		expect(byArea.get('privacy')).toEqual({ count: 1, lastActivity: null });
+		// The unfiled matter (null key) is not grouped under any area.
+		expect(byArea.has('')).toBe(false);
+		expect([...byArea.keys()].sort()).toEqual(['commercial', 'privacy']);
+	});
+
+	it('filters matters to one area, never leaking another area or unfiled', () => {
+		expect(mattersForArea(matters, 'commercial')).toHaveLength(2);
+		expect(mattersForArea(matters, 'privacy')).toHaveLength(1);
+		expect(mattersForArea(matters, 'disputes')).toEqual([]);
 	});
 });
 

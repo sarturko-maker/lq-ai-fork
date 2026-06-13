@@ -16,10 +16,13 @@
 	let {
 		open = $bindable(false),
 		unitLabel,
+		practiceAreaId = null,
 		onCreated
 	}: {
 		open?: boolean;
 		unitLabel: string;
+		/** F1-S3: file the new matter under this area (null = unfiled). */
+		practiceAreaId?: string | null;
 		onCreated: (project: Project) => void;
 	} = $props();
 
@@ -56,7 +59,10 @@
 		creating = true;
 		error = null;
 		try {
-			const project = await projectsApi.createProject({ name: trimmed });
+			const project = await projectsApi.createProject({
+				name: trimmed,
+				...(practiceAreaId ? { practice_area_id: practiceAreaId } : {})
+			});
 			open = false;
 			name = '';
 			onCreated(project);

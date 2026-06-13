@@ -73,6 +73,45 @@ export function timeAgo(iso: string | null, nowMs: number): string {
 	return new Date(then).toLocaleDateString();
 }
 
+/** Per-area rollup for the area cards (F1-S3). */
+export interface AreaActivity {
+	count: number;
+	lastActivity: string | null;
+}
+
+/** Minimal shape the area-grouping helpers read off a matter. */
+interface AreaFileable {
+	practice_area_key: string | null;
+}
+
+/**
+ * Group matters by their practice-area key for the area-card rollups
+ * (F1-S3). Matters arrive most-recent-activity first, so the FIRST match
+ * per area carries its latest activity. Unfiled matters (null key) are
+ * skipped — they live in the cockpit's unfiled bucket, not under an area.
+ */
+export function areaActivityCounts<T extends AreaFileable & { last_run_at: string | null }>(
+	matters: T[]
+): Map<string, AreaActivity> {
+	const map = new Map<string, AreaActivity>();
+	for (const m of matters) {
+		if (!m.practice_area_key) continue;
+		const cur = map.get(m.practice_area_key);
+		if (cur) {
+			cur.count += 1;
+			cur.lastActivity ??= m.last_run_at;
+		} else {
+			map.set(m.practice_area_key, { count: 1, lastActivity: m.last_run_at });
+		}
+	}
+	return map;
+}
+
+/** The matters that file under one area (F1-S3 — by practice_area_key). */
+export function mattersForArea<T extends AreaFileable>(matters: T[], areaKey: string): T[] {
+	return matters.filter((m) => m.practice_area_key === areaKey);
+}
+
 export type Theme = 'light' | 'dark' | 'system';
 
 /** Toggle order: system → light → dark → system. */

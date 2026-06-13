@@ -18,7 +18,7 @@
 	import type { Project } from '$lib/lq-ai/types';
 	import NewMatterDialog from './NewMatterDialog.svelte';
 	import StatusPill from './StatusPill.svelte';
-	import { motionMs, timeAgo } from './helpers';
+	import { mattersForArea, motionMs, timeAgo } from './helpers';
 
 	let {
 		area,
@@ -39,6 +39,10 @@
 	} = $props();
 
 	const noun = $derived(area.unit_label.toLowerCase());
+
+	// F1-S3: only THIS area's matters (they file via projects.practice_area_id,
+	// surfaced as practice_area_key). null while loading.
+	const areaMatters = $derived(matters === null ? null : mattersForArea(matters, area.key));
 
 	let createOpen = $state(false);
 </script>
@@ -71,7 +75,7 @@
 
 	{#if mattersError}
 		<p class="mt-6 text-sm text-destructive">Couldn't load {noun}s: {mattersError}</p>
-	{:else if matters === null}
+	{:else if areaMatters === null}
 		<!-- Skeleton mirrors the loaded shape: a floating card of h-12 rows. -->
 		<div
 			class="mt-6 overflow-hidden rounded-xl border border-border bg-card shadow-xs"
@@ -83,7 +87,7 @@
 				</div>
 			{/each}
 		</div>
-	{:else if matters.length === 0}
+	{:else if areaMatters.length === 0}
 		<div class="mt-10 rounded-xl border border-border bg-card px-8 py-12 text-center shadow-xs">
 			<div class="mx-auto flex size-10 items-center justify-center rounded-full bg-muted">
 				<FolderOpenIcon class="size-5 text-muted-foreground" aria-hidden="true" />
@@ -96,7 +100,7 @@
 		</div>
 	{:else}
 		<ul class="mt-6 overflow-hidden rounded-xl border border-border bg-card shadow-xs">
-			{#each matters as matter (matter.project_id)}
+			{#each areaMatters as matter (matter.project_id)}
 				<li class="border-b border-border last:border-b-0">
 					<button
 						type="button"
@@ -133,4 +137,9 @@
 	{/if}
 </div>
 
-<NewMatterDialog bind:open={createOpen} unitLabel={area.unit_label} {onCreated} />
+<NewMatterDialog
+	bind:open={createOpen}
+	unitLabel={area.unit_label}
+	practiceAreaId={area.id}
+	{onCreated}
+/>
