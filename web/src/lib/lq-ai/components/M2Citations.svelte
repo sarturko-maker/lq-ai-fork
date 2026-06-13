@@ -182,7 +182,9 @@
 		cursor: default;
 	}
 	.lq-m2-cite-chip:focus-visible {
-		outline: 2px solid var(--lq-accent, #4338ca);
+		/* R6: semantic focus ring (was --lq-accent). The five-state emerald/amber/
+		   grey palette below is intentionally AA-tuned hex, not a token — left as-is. */
+		outline: 2px solid var(--ring);
 		outline-offset: 1px;
 	}
 
