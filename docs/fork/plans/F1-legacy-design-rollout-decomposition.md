@@ -46,19 +46,33 @@ is iterative edit churn + verify output, not reading. Rules, enforced by sizing:
 This forces three splits beyond the critique's (applied below): **R-CONV → R-CONV-1/-2**,
 **R15b → R15b-tab/-pb**, **R14 → R14a/-b**. Slices flagged ⚠ read a >1k-LOC file — read in ranges.
 
-## The three disciplines — baked into EVERY slice (the user's requirement)
+## The four disciplines — baked into EVERY slice (the user's requirement)
 
-Every slice's Definition of Done includes all three. This is the per-slice checklist:
+Every slice's Definition of Done includes all four. This is the per-slice checklist; a slice is **not
+done** until all four are satisfied and shown (not asserted).
 
-1. **Extensive testing.** Vitest unit tests for any logic touched/extracted; Cypress e2e exercising
-   the migrated surface; **before/after visual evidence** (light **and** dark, wide **and** narrow)
-   under `docs/fork/evidence/<slice>/`. Named specs per slice below. Existing suites stay green.
+1. **Extensive testing + visual screenshot verification.** Vitest unit tests for any logic
+   touched/extracted; Cypress e2e exercising the migrated surface; existing suites stay green.
+   **A slice that changes a rendered surface is not "worked" until screenshots prove it** — capture
+   **before/after**, **light AND dark**, **wide AND narrow**, on the dev stack (headed Chrome — headless
+   captures lie about the dark theme, see Gotchas), saved under `docs/fork/evidence/<slice>/` and
+   referenced in the PR. Eyeball each: correct semantic colors, AA contrast, no drift, states intact.
+   **Logic-only slices (R0, R-CONV-1) are screenshot-exempt** — they must say so explicitly in the PR
+   and lean on unit-test equivalence instead. Named specs per slice below.
 2. **Code simplification.** The token swap is the moment to **delete**, not just restyle: dead code,
    duplicated style blocks, component families collapsed to a primitive, surfaces deleted instead of
    migrated. Named targets per slice. A slice that only swaps tokens and simplifies nothing is a smell.
-3. **Adversarial review.** Fresh-context review per slice with an explicit regression-hunt focus
-   (visual drift, **dark-mode contrast**, lost states/affordances, a11y/focus/keyboard, responsive
-   breakage). Security-touching slices (MFA, change-password) get the extra ADR-F005 security pass.
+3. **Adversarial review — EVERY slice, no exceptions.** Fresh-context (subagent) review per slice with
+   an explicit regression-hunt focus (visual drift, **dark-mode contrast**, lost states/affordances,
+   a11y/focus/keyboard, responsive breakage; for logic slices: behavior equivalence). Blockers /
+   should-fixes fixed or deferred on record before merge. Security-touching slices (MFA,
+   change-password — R17a/R17b, and any gateway/auth/audit/crypto/anonymization path) get the **extra
+   ADR-F005 security pass**.
+4. **Session handoff at slice close (we compact every slice).** The context window is compacted at
+   every slice boundary, so the LAST act of every slice — before merge — is to **draft/overwrite
+   `docs/fork/HANDOFF.md`** for the next (near-empty) session: mark this slice done, point NEXT at the
+   following slice with its exact pickup, and carry any new gotcha. Committed with the slice's PR
+   (CLAUDE.md § Session handoff). A slice is not finished until HANDOFF says where the next one starts.
 
 ## Coverage model (critique fix — the plan's spine)
 
@@ -272,8 +286,17 @@ Each ≤~6–8 files / ≤~2k LOC, executable in one ≤200k session.
 
 ## Verification (per slice, ADR-F005 gate)
 
-`cd web && npm run check` (0 errors) + `npx vitest run` (counts quoted) + the slice's Cypress specs +
-visual evidence (light/dark, wide/narrow) under `docs/fork/evidence/<slice>/`; CI green on the PR;
-fresh-context adversarial review (security pass on R17a/R17b); HANDOFF updated. No new dependency
-(shadcn `ui/*` already present: badge/button/dialog/dropdown-menu/input/resizable/scroll-area/
-separator/skeleton/textarea/tooltip — wrap, don't rebuild).
+Every slice closes the same gate, in order:
+
+1. `cd web && npm run check` (0 errors) + `npx vitest run` (counts quoted in the PR) + the slice's
+   named Cypress specs. Existing suites stay green.
+2. **Screenshot evidence** (discipline 1) under `docs/fork/evidence/<slice>/` — before/after, light
+   **and** dark, wide **and** narrow, captured **headed** (headless lies about dark theme), referenced
+   in the PR. Logic-only slices (R0, R-CONV-1) state the screenshot-exempt reason instead.
+3. **CI green** on the PR (all three jobs).
+4. **Fresh-context adversarial review** (subagent) — every slice; extra security pass on
+   R17a/R17b and any gateway/auth/audit/crypto/anonymization path.
+5. **HANDOFF.md drafted/overwritten** for the next compacted session and committed with the PR.
+
+No new dependency (shadcn `ui/*` already present: badge/button/dialog/dropdown-menu/input/resizable/
+scroll-area/separator/skeleton/textarea/tooltip — wrap, don't rebuild). Then squash-merge per ADR-F005.
