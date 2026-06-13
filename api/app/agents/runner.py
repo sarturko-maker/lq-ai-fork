@@ -493,6 +493,7 @@ async def execute_agent_run(
     tools: Sequence[Callable[..., Any]],
     model: BaseChatModel,
     system_prompt: str = SYSTEM_PROMPT,
+    subagents: Sequence[dict[str, Any]] | None = None,
     wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS,
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: uuid.UUID | None = None,
@@ -545,11 +546,18 @@ async def execute_agent_run(
         # app.agents.guard (F0-S4 minimal — R6 grants / R5 halt /
         # audit). F1 extends the wrap to the full tool universe
         # incl. the deepagents builtins, plus R4 budgets.
+        # F1-S3: per-area declarative subagents (ADR-F010 — every spec is
+        # model-free, so each inherits the gateway-bound parent model;
+        # build_deep_agent re-asserts the guard). Omitted entirely when an
+        # area declares none, so the qualified default graph is unchanged.
+        agent_kwargs: dict[str, Any] = {"checkpointer": checkpointer}
+        if subagents:
+            agent_kwargs["subagents"] = list(subagents)
         agent = build_deep_agent(
             model=model,
             tools=tools,
             system_prompt=system_prompt,
-            checkpointer=checkpointer,
+            **agent_kwargs,
         )
         if checkpointer is not None and thread_id is not None:
             # F1-S1 thread repair: a prior run settled non-cooperatively

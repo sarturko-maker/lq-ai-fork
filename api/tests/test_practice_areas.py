@@ -51,6 +51,14 @@ async def user(db_session: AsyncSession) -> User:
     return await _make_user(db_session, suffix="practice-areas")
 
 
+@pytest_asyncio.fixture
+async def admin(db_session: AsyncSession) -> User:
+    u = await _make_user(db_session, suffix="practice-areas-admin")
+    u.is_admin = True
+    await db_session.flush()
+    return u
+
+
 async def test_seed_rows_present_once_with_expected_shape(
     db_session: AsyncSession,
 ) -> None:
@@ -109,3 +117,145 @@ async def test_list_practice_areas_position_order(client: AsyncClient, user: Use
 async def test_list_practice_areas_requires_auth(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/practice-areas")
     assert resp.status_code == 401
+
+
+# --- F1-S3 config vocabulary -------------------------------------------------
+
+
+async def test_seed_commercial_config_present_and_derived_configured(
+    client: AsyncClient, user: User
+) -> None:
+    """0054 seeded Commercial with a profile + tier floor; ``configured``
+    is DERIVED from the profile (F1-S3), and the profile is readable
+    (transparency)."""
+    resp = await client.get("/api/v1/practice-areas", headers=_bearer(user))
+    assert resp.status_code == 200
+    areas = {a["key"]: a for a in resp.json()["practice_areas"]}
+    commercial = areas["commercial"]
+    assert commercial["configured"] is True
+    assert commercial["default_tier_floor"] == 2
+    assert commercial["profile_md"] and "Commercial" in commercial["profile_md"]
+    assert commercial["bound_skills"] == []
+    # Inert areas have no profile and derive configured=False.
+    assert areas["disputes"]["configured"] is False
+    assert areas["disputes"]["profile_md"] is None
+
+
+async def test_seed_commercial_config_is_idempotent(db_session: AsyncSession) -> None:
+    """Re-running _seed_commercial_config never overwrites an edited profile."""
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0054", versions / "0054_practice_area_config.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["migration_0054"] = module
+    try:
+        spec.loader.exec_module(module)
+        # Edit Commercial's profile, then re-run the seed: it must NOT clobber.
+        area = (
+            await db_session.execute(select(PracticeArea).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+        area.profile_md = "operator-edited profile"
+        await db_session.flush()
+        conn = await db_session.connection()
+        await conn.run_sync(lambda sync_conn: module._seed_commercial_config(sync_conn))
+        await db_session.refresh(area)
+        assert area.profile_md == "operator-edited profile"
+    finally:
+        sys.modules.pop("migration_0054", None)
+
+
+async def test_admin_patch_configures_area(client: AsyncClient, admin: User) -> None:
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"profile_md": "You are the Disputes agent.", "default_tier_floor": 1},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["configured"] is True
+    assert body["default_tier_floor"] == 1
+    assert body["profile_md"] == "You are the Disputes agent."
+
+
+async def test_admin_patch_accepts_valid_subagents(client: AsyncClient, admin: User) -> None:
+    resp = await client.patch(
+        "/api/v1/practice-areas/commercial",
+        headers=_bearer(admin),
+        json={
+            "agent_config": {
+                "subagents": [
+                    {
+                        "name": "researcher",
+                        "description": "Finds matter passages.",
+                        "system_prompt": "Research the documents.",
+                    }
+                ]
+            }
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["agent_config"]["subagents"][0]["name"] == "researcher"
+
+
+async def test_admin_patch_rejects_model_bearing_subagent(client: AsyncClient, admin: User) -> None:
+    """ADR-F010: a subagent ``model`` key (gateway bypass) is rejected and
+    never stored."""
+    resp = await client.patch(
+        "/api/v1/practice-areas/commercial",
+        headers=_bearer(admin),
+        json={
+            "agent_config": {
+                "subagents": [
+                    {
+                        "name": "x",
+                        "description": "d",
+                        "system_prompt": "p",
+                        "model": "openai:gpt-5.5",
+                    }
+                ]
+            }
+        },
+    )
+    assert resp.status_code == 400
+    # And nothing was persisted (still no subagents on Commercial).
+    read = await client.get("/api/v1/practice-areas", headers=_bearer(admin))
+    commercial = next(a for a in read.json()["practice_areas"] if a["key"] == "commercial")
+    assert commercial["agent_config"].get("subagents", []) == []
+
+
+async def test_patch_requires_admin(client: AsyncClient, user: User) -> None:
+    resp = await client.patch(
+        "/api/v1/practice-areas/commercial",
+        headers=_bearer(user),
+        json={"profile_md": "nope"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_patch_unknown_area_is_404(client: AsyncClient, admin: User) -> None:
+    resp = await client.patch(
+        "/api/v1/practice-areas/does-not-exist",
+        headers=_bearer(admin),
+        json={"profile_md": "x"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_skill_attach_unknown_skill_is_404(client: AsyncClient, admin: User) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas/commercial/skills",
+        headers=_bearer(admin),
+        json={"skill_name": "no-such-skill-xyz"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_skill_attach_requires_admin(client: AsyncClient, user: User) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas/commercial/skills",
+        headers=_bearer(user),
+        json={"skill_name": "anything"},
+    )
+    assert resp.status_code == 403

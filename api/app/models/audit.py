@@ -51,6 +51,14 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String, nullable=False)
     resource_type: Mapped[str] = mapped_column(String, nullable=False)
     resource_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # F1-S3 (ADR-F002): first-class for per-area audit slicing. Nullable —
+    # non-area actions (auth, admin, legacy matters) leave it NULL. SET NULL
+    # on area delete so audit history survives.
+    practice_area_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("practice_areas.id", ondelete="SET NULL", name="fk_audit_log_practice_area_id"),
+        nullable=True,
+    )
 
     # Privilege fields (PRD §5.3, new in v0.2)
     privilege_marked: Mapped[bool] = mapped_column(

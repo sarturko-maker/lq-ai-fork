@@ -86,6 +86,9 @@ class MatterBinding:
     name: str
     privileged: bool
     minimum_inference_tier: int | None
+    # F1-S3: the matter's practice area (None for unfiled/legacy matters) —
+    # carried into the guard context for per-area audit slicing.
+    practice_area_id: uuid.UUID | None = None
 
 
 def build_matter_tools(
@@ -105,6 +108,7 @@ def build_matter_tools(
         user_id=binding.user_id,
         project_id=binding.project_id,
         granted=MATTER_TOOL_NAMES,
+        practice_area_id=binding.practice_area_id,
     )
 
     async def search_documents(query: str) -> str:

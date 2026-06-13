@@ -325,6 +325,11 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # tests/test_practice_areas.py and tests/agents/test_matter_activity.py.
     ("GET", "/api/v1/practice-areas"),
     ("GET", "/api/v1/agents/matters"),
+    # F1-S3 (fork) — practice-area config/admin (ADR-F002/F004/F010).
+    # Dedicated coverage in tests/test_practice_areas.py.
+    ("PATCH", "/api/v1/practice-areas/{key}"),
+    ("POST", "/api/v1/practice-areas/{key}/skills"),
+    ("DELETE", "/api/v1/practice-areas/{key}/skills/{skill_name}"),
 }
 
 
