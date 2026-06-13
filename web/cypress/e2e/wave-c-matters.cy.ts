@@ -48,9 +48,11 @@ describe('Wave C — Matters surfaces', () => {
 		cy.visit('/lq-ai/matters');
 		// The header "+ New matter" button is always visible regardless of list state.
 		cy.contains('button', '+ New matter').first().click();
-		// NewMatterModal renders as role="dialog" with h2 "New matter".
+		// NewMatterModal renders as role="dialog" with the labeled title "New matter"
+		// (R1a: now a bits-ui Dialog.Title — div[data-slot=dialog-title] linked via
+		// aria-labelledby — not a literal <h2>).
 		cy.get('[role="dialog"]').should('exist');
-		cy.contains('h2', 'New matter').should('be.visible');
+		cy.get('[data-slot="dialog-title"]').should('contain', 'New matter');
 		// Cancel closes the modal.
 		cy.contains('button', 'Cancel').click();
 		cy.get('[role="dialog"]').should('not.exist');
