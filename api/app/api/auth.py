@@ -291,7 +291,84 @@ async def _create_session(
     )
     db.add(session)
     await db.flush()
+
+    # Keep the per-user active-session set bounded. /auth/refresh has to
+    # bcrypt-compare the presented token against EVERY active session (per-row
+    # salt → no index lookup), so an unbounded set turns refresh into a
+    # multi-second, event-loop-occupying scan — 359 accumulated dev sessions
+    # (all one user) measured at ~79s, long enough that the web layout's
+    # session check never resolved and the cockpit rendered a permanent blank.
+    # Revoking this user's least-recently-active sessions beyond the cap caps
+    # per-user accumulation (and self-heals existing pile-ups on the next
+    # login). NOTE: it does NOT bound the GLOBAL scan cost — refresh can't
+    # attribute the presented token to a user before matching, so its scan
+    # spans all users' active sessions (~N_users x cap). The deterministic-HMAC
+    # index noted in refresh() is the real fix that removes the scan (and its
+    # bad-token-spam DoS surface) entirely.
+    await _revoke_sessions_over_cap(db, user.id, now=now)
+
     return plaintext, session
+
+
+# A person works from a handful of devices/browsers; active sessions past this
+# are almost always stale logins piling up. Caps the /auth/refresh scan above.
+_MAX_ACTIVE_SESSIONS_PER_USER = 10
+
+
+async def _revoke_sessions_over_cap(db: AsyncSession, user_id: UUID, *, now: datetime) -> None:
+    """Revoke a user's least-recently-active sessions beyond the cap.
+
+    Called on every session mint (login and refresh rotation): keeps the
+    newest ``_MAX_ACTIVE_SESSIONS_PER_USER`` active sessions and revokes the
+    rest, so the per-row bcrypt scan in :func:`refresh` stays small. Runs in
+    the caller's transaction (committed with the new session).
+
+    Known limitation (accepted): the keep-set is read on an unlocked snapshot,
+    so two near-simultaneous mints for the SAME user can each revoke a row the
+    other just kept — a user logging in on two devices at the exact same moment
+    may have one fresh session evicted. The blast radius is a spurious logout
+    (no privilege effect); adding row locks here risks deadlocking against the
+    ``with_for_update`` re-check in :func:`refresh`, so we accept the race
+    until the HMAC-index rework restructures this path.
+    """
+    keep_ids = (
+        (
+            await db.execute(
+                select(UserSession.id)
+                .where(
+                    UserSession.user_id == user_id,
+                    UserSession.revoked_at.is_(None),
+                    UserSession.expires_at > now,
+                )
+                .order_by(
+                    UserSession.last_active_at.desc().nullslast(),
+                    UserSession.created_at.desc(),
+                )
+                .limit(_MAX_ACTIVE_SESSIONS_PER_USER)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # Defensive guard: callers always invoke this right after flushing a new
+    # active session, so keep_ids holds at least that row — but enforce the
+    # invariant in code, not just prose. An empty keep_ids would make the
+    # NOT IN below an empty-set predicate and revoke the user's whole active
+    # set, so bail instead.
+    if not keep_ids:
+        return
+
+    await db.execute(
+        update(UserSession)
+        .where(
+            UserSession.user_id == user_id,
+            UserSession.revoked_at.is_(None),
+            UserSession.expires_at > now,
+            UserSession.id.not_in(keep_ids),
+        )
+        .values(revoked_at=now)
+    )
 
 
 def _login_response(user: User, refresh_token: str) -> LoginResponse:

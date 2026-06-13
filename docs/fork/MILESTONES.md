@@ -292,6 +292,13 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 - `<think>` block handling in MessageBubble for reasoning models (MiniMax-M3 emits them inline).
 - Streaming anonymization rehydration end-to-end test (upstream defers the streaming response path).
 - Per-phase / per-tool cost budgets inside a unit-of-work budget.
+- **`user_sessions` deterministic-HMAC index** (the real fix flagged in PR #47 / auth.py `refresh()`):
+  `/auth/refresh` bcrypt-scans every active session (per-row salt → no index lookup), an
+  unauthenticated-input CPU amplifier and the cause of the expired-session blank screen (359 sessions
+  ≈ 79s). PR #47 added a per-user active-session cap (bounds per-user accumulation + self-heals on
+  login) but the scan is GLOBAL, so it doesn't close the bad-token-spam DoS. Add a keyed-HMAC column
+  for O(1) lookup (miss → 401, zero bcrypt) — needs a migration (can't backfill plaintext → revoke-all
+  on migrate) + security review. Would also let the cap's accepted same-user revoke race be removed.
 - Configurable ethics gates per practice area (upstream's ethics_review is a stub).
 - Email-grade entry points: forward an email into a Matter; Word add-in revival.
 - Revisit third-party memory (Zep/Graphiti temporal graph) only if native consolidation proves
