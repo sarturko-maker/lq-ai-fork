@@ -52,7 +52,8 @@ class PracticeAreaConfigUpdate(BaseModel):
     """Admin config write (PATCH). All fields optional — only those present
     are applied (partial update). Validated at the boundary (reject, don't
     sanitize); ``agent_config`` is shape-checked by the area renderer so an
-    invalid subagent spec (or a forbidden ``model`` key, ADR-F010) is a 422.
+    invalid subagent spec, an unknown top-level key, or a forbidden ``model``
+    key (ADR-F010) is rejected as a 400 (ValidationError), never persisted.
     """
 
     model_config = ConfigDict(extra="forbid")

@@ -17,19 +17,28 @@
 		areasError,
 		matters,
 		nowMs,
-		onEnterArea
+		onEnterArea,
+		onOpenMatter
 	}: {
 		areas: PracticeArea[] | null;
 		areasError: string | null;
 		matters: MatterActivity[] | null;
 		nowMs: number;
 		onEnterArea: (area: PracticeArea) => void;
+		onOpenMatter: (matter: MatterActivity) => void;
 	} = $props();
 
 	// F1-S3: matters file under their area via projects.practice_area_id
 	// (surfaced as practice_area_key) — each card counts only ITS matters.
 	// null while loading (see areaActivityCounts).
 	const byArea = $derived(matters === null ? null : areaActivityCounts(matters));
+
+	// Legacy/unfiled matters (no practice_area_key) would otherwise be
+	// invisible in the cockpit (review blocker) — surface them here so they
+	// stay reachable; opening one needs no area (the matter view binds by id).
+	const unfiledMatters = $derived(
+		matters === null ? [] : matters.filter((m) => !m.practice_area_key)
+	);
 </script>
 
 <div
@@ -112,5 +121,37 @@
 				{/if}
 			{/each}
 		</div>
+
+		{#if unfiledMatters.length > 0}
+			<!-- Legacy/unfiled matters (no area) — kept reachable (review blocker
+			     fix). New matters file under an area; these predate filing. -->
+			<section class="mt-10" data-testid="lq-cockpit-unfiled-matters">
+				<h2 class="text-sm font-semibold tracking-tight text-foreground">Unfiled matters</h2>
+				<p class="mt-0.5 text-xs text-muted-foreground">
+					Matters not yet filed under a practice area.
+				</p>
+				<ul class="mt-3 overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+					{#each unfiledMatters as matter (matter.project_id)}
+						<li class="border-b border-border last:border-b-0">
+							<button
+								type="button"
+								class="group flex h-12 w-full items-center gap-3 px-4 text-left transition-colors duration-150 ease-out hover:bg-muted/60"
+								data-testid="lq-cockpit-unfiled-matter-row"
+								onclick={() => onOpenMatter(matter)}
+							>
+								<span class="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+									{matter.name}
+								</span>
+								{#if matter.last_run_at}
+									<span class="w-20 text-right text-xs text-muted-foreground tabular-nums">
+										{timeAgo(matter.last_run_at, nowMs)}
+									</span>
+								{/if}
+							</button>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
 	{/if}
 </div>

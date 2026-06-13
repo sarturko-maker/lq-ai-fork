@@ -35,6 +35,18 @@ from langchain_core.language_models.chat_models import BaseChatModel
 # subsets are a later slice.
 _ALLOWED_SUBAGENT_KEYS = frozenset({"name", "description", "system_prompt", "skills"})
 _REQUIRED_SUBAGENT_KEYS = ("name", "description", "system_prompt")
+# Top-level agent_config keys (ADR-F004 declarative shape). Strict: a
+# top-level ``model`` (or anything else) is rejected so it can never reach a
+# future renderer that bypasses the gateway (ADR-F010 defense in depth).
+# ``playbooks``/``mcp_servers`` are by-reference only — ids/names, NO
+# credentials (NORTH-STAR inv 3) — recorded for forward config, not consumed
+# by the renderer yet.
+_ALLOWED_CONFIG_KEYS = frozenset({"subagents", "playbooks", "mcp_servers"})
+# Credential-shaped keys that must NEVER appear in a by-reference entry
+# (no integration secrets in api config — NORTH-STAR inv 3).
+_FORBIDDEN_REF_KEYS = frozenset(
+    {"token", "api_key", "apikey", "secret", "password", "authorization", "credentials", "headers"}
+)
 
 
 @dataclass(frozen=True)
@@ -84,6 +96,28 @@ def reject_model_bearing_subagents(subagents: object) -> None:
             )
 
 
+def _validate_refs(value: object, field: str) -> None:
+    """By-reference entries only — strings (ids/names) or objects WITHOUT
+    credential-shaped keys (NORTH-STAR inv 3). Not consumed by the renderer
+    yet; validated so secrets can't be stored on the area row."""
+    if value is None:
+        return
+    if not isinstance(value, list):
+        raise ValueError(f"agent_config.{field} must be a list of references")
+    for i, entry in enumerate(value):
+        if isinstance(entry, str):
+            continue
+        if isinstance(entry, dict):
+            bad = {k for k in entry if k.lower() in _FORBIDDEN_REF_KEYS}
+            if bad:
+                raise ValueError(
+                    f"agent_config.{field}[{i}] must not carry credentials {sorted(bad)} "
+                    "(by-reference only — NORTH-STAR inv 3)"
+                )
+            continue
+        raise ValueError(f"agent_config.{field}[{i}] must be a string id/name or an object")
+
+
 def build_area_subagents(agent_config: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Build deepagents declarative SubAgent specs from area ``agent_config``.
 
@@ -96,6 +130,17 @@ def build_area_subagents(agent_config: dict[str, Any] | None) -> list[dict[str, 
     """
     if not agent_config:
         return []
+    # Strict top-level schema (plan Goal 1; treat area config as untrusted):
+    # reject unknown keys so a stray/malicious ``model`` (or anything a future
+    # renderer might read) can never be stored unvalidated (ADR-F010).
+    extra_top = set(agent_config) - _ALLOWED_CONFIG_KEYS
+    if extra_top:
+        raise ValueError(
+            f"agent_config has unsupported keys {sorted(extra_top)}; "
+            f"allowed: {sorted(_ALLOWED_CONFIG_KEYS)} (ADR-F010 forbids a top-level 'model')"
+        )
+    _validate_refs(agent_config.get("playbooks"), "playbooks")
+    _validate_refs(agent_config.get("mcp_servers"), "mcp_servers")
     raw = agent_config.get("subagents") or []
     if not isinstance(raw, list):
         raise ValueError("agent_config.subagents must be a list")

@@ -88,7 +88,9 @@ interface AreaFileable {
  * Group matters by their practice-area key for the area-card rollups
  * (F1-S3). Matters arrive most-recent-activity first, so the FIRST match
  * per area carries its latest activity. Unfiled matters (null key) are
- * skipped — they live in the cockpit's unfiled bucket, not under an area.
+ * skipped here — AreaGrid surfaces them in its own "Unfiled matters"
+ * section so they stay reachable (they are NOT in the unfiled-CONVERSATIONS
+ * bucket, which is threads without a matter).
  */
 export function areaActivityCounts<T extends AreaFileable & { last_run_at: string | null }>(
 	matters: T[]

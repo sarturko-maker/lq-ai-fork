@@ -137,6 +137,23 @@ def test_build_area_subagents_empty_config() -> None:
     assert build_area_subagents({"subagents": []}) == []
 
 
+def test_unknown_top_level_key_rejected() -> None:
+    """Strict top-level schema (ADR-F010 defense in depth): a stray top-level
+    'model' (or any unknown key) is rejected, never stored."""
+    with pytest.raises(ValueError, match=r"unsupported keys"):
+        build_area_subagents({"model": "openai:gpt-5.5"})
+    with pytest.raises(ValueError, match=r"unsupported keys"):
+        build_area_subagents({"subagents": [], "surprise": 1})
+
+
+def test_by_reference_playbooks_mcps_allowed_credentials_rejected() -> None:
+    # ids/names + credential-free objects pass.
+    build_area_subagents({"playbooks": ["nda-review"], "mcp_servers": [{"name": "fs"}]})
+    # credential-shaped keys are rejected (NORTH-STAR inv 3).
+    with pytest.raises(ValueError, match=r"must not carry credentials"):
+        build_area_subagents({"mcp_servers": [{"url": "http://x", "token": "secret"}]})
+
+
 # --- the renderer ----------------------------------------------------------
 
 
