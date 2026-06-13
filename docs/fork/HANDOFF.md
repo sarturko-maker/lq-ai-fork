@@ -66,21 +66,35 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-1. **Legacy-surface design rollout — NOW DECOMPOSED.** Full executable plan:
-   **`docs/fork/plans/F1-legacy-design-rollout-decomposition.md`** (read it first). It turns the
-   S2.1 3-wave sketch into ~29 vertical one-PR slices (R0…R-LAST), each carrying the maintainer's
-   three disciplines (extensive testing · code simplification · adversarial review) as DoD, produced
-   by a map→synthesize→adversarial-critique workflow. **Resolved decisions (proposed defaults, in the
-   plan §Resolved decisions):** autonomous → SKIP all 10 (deletion-bound, leave on bridge for F2/F3);
-   ConversationPanel → SPLIT R-CONV-1 (logic extraction, tested) + R-CONV-2 (style); scope → whole
-   interface, checkpoint after Foundation+Wave1; typography.css → `@layer base` shim + R-TYPO decouple;
-   coverage table = step 0. **200k operating constraint:** each slice runs in one ≤200k main-agent
-   session — ≤~6–8 files / ≤~2k LOC, focused+truncated verify in-loop (full suite → CI), exploration
-   + adversarial review pushed to SUBAGENTS, big files read in ranges, compact at every slice boundary.
-   **PICK UP EXACTLY HERE:** build the coverage table (`grep -rl 'var(--lq-' src` → assign every file
-   to a slice/defer), then execute **R0 (extract matter validators) → R1a (Modal/Form/Alert primitives
-   on NewMatterModal) → R6 (MessageBubble + `<think>`)**. The dark-mode bridge (`+layout.svelte`
-   lines 23–24) holds un-migrated surfaces, so slices merge in almost any order; R-BRIDGE/R-LAST last.
+1. **Legacy-surface design rollout — IN PROGRESS.** Full executable plan:
+   **`docs/fork/plans/F1-legacy-design-rollout-decomposition.md`** (read it first). ~29 vertical
+   one-PR slices (R0…R-LAST), each carrying the three disciplines (extensive testing · code
+   simplification · adversarial review) as DoD. **Resolved decisions (in plan §Resolved decisions):**
+   autonomous → SKIP all 10 (deletion-bound, leave on bridge for F2/F3); ConversationPanel → SPLIT
+   R-CONV-1 (logic) + R-CONV-2 (style); scope → whole interface, checkpoint after Foundation+Wave1;
+   typography.css → `@layer base` shim + R-TYPO decouple. **200k operating constraint:** each slice =
+   one ≤200k main-agent session — ≤~6–8 files / ≤~2k LOC, focused+truncated verify in-loop (full suite
+   → CI), exploration + adversarial review to SUBAGENTS, big files read in ranges, compact every slice.
+
+   **Rollout progress (R-series):**
+   - **Step 0 — coverage table: ✅ DONE** (PR #50). Committed in the plan doc § "Coverage table —
+     committed": all **101** `var(--lq-)` files assigned to a slice or deferred (R21 autonomous → F2/F3),
+     verified `union == grep`, zero unassigned/extra/dup — so R-LAST's deletion gate is provably reachable.
+   - **R0 — extract matter validators: ✅ merged via PR #50** (or merging — confirm on main). New
+     `web/src/lib/lq-ai/validators/matter.ts` (shared `validateName`/`validateTierFloor` behind two
+     thin wrappers `validateNewMatter`/`validateMetadata` — kept separate, copy diverges). Rewired 3
+     callers off the duplicated bodies (NewMatterModal, MatterRailMetadata, cockpit NewMatterDialog —
+     the last no longer pulls a `.svelte` for logic). Logic-only — **no token / no surface change**.
+     23-test `matter.test.ts`; vitest 797 (was 781); svelte-check 0 errors; adversarial review SHIP
+     (re-derived both old bodies → 20/20 inputs byte-identical, `.replace('Matter',unitLabel)` invariant holds).
+   - **NEXT → R1a** (Modal/form primitives `ModalShell`+`FormControl`+`Alert`, proven on
+     **NewMatterModal**, *M*), **then R6** (MessageBubble family + `<think>` ribbon; R6 token files are
+     only `ProvenancePill` (12) + `M2Citations` (1) per the coverage table — MessageBubble itself has
+     no `var(--lq-)`, so re-scope R6 when starting: its work is the `color:white` literal + the
+     backlogged collapsed reasoning ribbon, NOT a token swap. *M*).
+
+   The dark-mode bridge (`+layout.svelte` lines 23–24) holds un-migrated surfaces, so slices merge in
+   almost any order; R-BRIDGE/R-LAST last.
 2. **F1-S4** (subagent tree + SSE v3-projection adapter) and **F1-S5**
    (`(run_id, tool_call_id)` idempotency ledger + attribution fan-out) — see
    `docs/fork/plans/F1-replan.md`. S4 consumes deepagents v3 `stream_events` typed

@@ -10,7 +10,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { projectsApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
-	import { validateNewMatter } from '$lib/lq-ai/components/NewMatterModal.svelte';
+	import { validateNewMatter } from '$lib/lq-ai/validators/matter';
 	import type { Project } from '$lib/lq-ai/types';
 
 	let {
