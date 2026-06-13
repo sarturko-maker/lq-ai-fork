@@ -24,13 +24,31 @@ with `error_code` (the error banner).
 
 ## Checks run
 
-- **Cypress (live stack), 2/2 pass** on the R6 bundle:
+- **Cypress (live stack), 3/3 pass** on the R6 bundle:
   - *extracts `<think>` into a collapsed Reasoning ribbon, leaving clean prose* — asserts the
     reasoning text is absent from `[data-testid=lq-ai-message-content]`, present in
     `[data-testid=lq-ai-reasoning-ribbon]`, collapsed by default (`not.have.attr('open')`),
     and revealed on summary click (`have.attr('open')`).
+  - *sanitises media out of the ribbon and never chips an in-`<think>` citation* (adversarial-review
+    fixes) — feeds reasoning containing a markdown beacon image, a raw `<img onerror>`, and a
+    citation marker; asserts no `img`/`svg`/`image` survives in the ribbon body, `window.__pwned`
+    stays undefined, and the M2 sidecar renders no chip for the in-`<think>` marker.
   - *captures the chat surface across themes and widths* — the 5 screenshots above.
   - On the pre-R6 bundle the first test fails (no ribbon) — that IS the bug it documents.
+
+### Adversarial review (9 agents, 4 findings, all confirmed → all fixed)
+
+1. *should-fix (correctness/scope)* — citation marker inside `<think>` chipped by the sidecar but not
+   decorated inline. **Fixed:** `M2Citations` now scans `split.visible` (same surface as the inline decorator).
+2. *should-fix (security)* — the new reasoning `{@html}` sink (and the pre-existing answer sink) omitted
+   the `SANITIZE_OPTS` media-forbid the rest of the model-output surface enforces (img/svg beacon).
+   **Fixed:** extracted `lib/lq-ai/sanitize-markdown.ts` (`renderModelMarkdown`, media-forbidden) and
+   routed BOTH sinks through it; covered by the new Cypress test.
+3. *nit (a11y)* — summary hid only `::-webkit-details-marker` → Firefox double triangle. **Fixed:** added `list-none`.
+4. *nit (scope)* — duplicate of #1. **Fixed by #1.**
+
+Follow-up (Backlog): converge ConversationPanel + SkillSourceView onto `renderModelMarkdown` (they
+already enforce the same opts via local copies) in R-CONV-2 / R14a.
 - **svelte-check**: 0 errors (5 pre-existing warnings in unrelated legacy files).
 - **vitest**: 797 passing / 76 files (unchanged; ProvenancePill 5, RefusalMessageBubble 3 green).
 - **Token deletion**: `ProvenancePill.svelte` + `M2Citations.svelte` at **0 `var(--lq-)`** (R-LAST gate).

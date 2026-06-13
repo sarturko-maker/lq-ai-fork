@@ -14,13 +14,11 @@
 	 *   to `RefusalMessageBubble` and forwards the rerun / override /
 	 *   explainer callbacks; the default rendering below is skipped.
 	 */
-	import DOMPurify from 'dompurify';
-	import { marked } from 'marked';
-
 	import { captureAffordanceInline } from '$lib/lq-ai/preferences/capture-affordance';
 	import { citationsApi, LQAIApiError } from '$lib/lq-ai/api';
 	import { decorateCitationsInline } from '$lib/lq-ai/citations/decorate-inline';
 	import { splitThink } from '$lib/lq-ai/agents/helpers';
+	import { renderModelMarkdown } from '$lib/lq-ai/sanitize-markdown';
 
 	import type { Citation, Message } from '../types';
 	import AppliedSkillsChip from './AppliedSkillsChip.svelte';
@@ -134,15 +132,11 @@
 			? splitThink(message.content)
 			: { thinking: null, visible: '' };
 
-	$: rendered =
-		message.role === 'assistant'
-			? DOMPurify.sanitize(marked.parse(split.visible || '', { async: false }) as string)
-			: '';
-
-	// Reasoning rendered as markdown, sanitised like any other model output.
-	$: reasoningHtml = split.thinking
-		? DOMPurify.sanitize(marked.parse(split.thinking, { async: false }) as string)
-		: '';
+	// Both sinks go through the shared hardened renderer (media-forbidden — model
+	// output is untrusted; see sanitize-markdown.ts). The reasoning is sanitised
+	// on exactly the same path as the answer.
+	$: rendered = message.role === 'assistant' ? renderModelMarkdown(split.visible) : '';
+	$: reasoningHtml = renderModelMarkdown(split.thinking);
 </script>
 
 {#if message.kind === 'refusal'}
@@ -287,9 +281,15 @@
 		-->
 		{#if fetchedCitations !== null}
 			<div data-testid="lq-ai-message-citations">
+				<!--
+					R6: scan `split.visible` (the same think-stripped text the inline
+					decorator sees), NOT the raw content — so a citation marker that
+					appears only inside a `<think>` block produces neither a sidecar
+					chip nor an inline mark, keeping the two surfaces consistent.
+				-->
 				<M2Citations
 					citations={fetchedCitations}
-					messageContent={message.content}
+					messageContent={split.visible}
 				/>
 			</div>
 		{/if}
