@@ -128,6 +128,17 @@ async def comp_env(
         await db.execute(delete(AgentThread).where(AgentThread.user_id == user_id))
         await db.execute(delete(Project).where(Project.id == project_id))
         await db.execute(delete(User).where(User.id == user_id))
+        # Restore the shared seeded Commercial row: the tier-floor test
+        # commits an UPDATE to it (commit_factory bypasses the per-test
+        # rollback), which would otherwise pollute later tests (e.g.
+        # test_practice_areas) in the full suite.
+        from app.models.practice_area import PracticeArea
+
+        await db.execute(
+            PracticeArea.__table__.update()
+            .where(PracticeArea.key == "commercial")
+            .values(default_tier_floor=None)
+        )
         await db.commit()
 
 
