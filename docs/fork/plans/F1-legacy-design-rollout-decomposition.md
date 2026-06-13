@@ -83,6 +83,55 @@ first map pass under-listed ~15–20 surfaces. Known orphans the maps missed (mu
   `--lq-font-sans` — and **`--lq-font-sans` is undefined today** (pre-existing latent bug). Decouple
   before deleting the color layer (R-TYPO). Treat `lq-text-*` as orthogonal to color migration.
 
+### Coverage table — committed (step 0, closes to zero)
+
+Built + verified by `cov_tmp.py` (R0): the union of the rows below equals
+`grep -rl 'var(--lq-' src` exactly — **101 files, each assigned once, zero unassigned / extra / dup**
+(2,752 `var(--lq-)` uses; the ~91-use gap to the 2,843 raw-token total is bare `--lq-*` refs outside
+`var()` — `@media`, comments, the bridge definitions themselves — retired by R-BRIDGE/R-LAST/R-TYPO).
+Re-run the verifier (or `grep -rl 'var(--lq-' src` minus this table) before R-LAST to prove the gate
+is reachable. Legend: `C/` = `src/lib/lq-ai/components/`, `R/` = `src/routes/lq-ai/`.
+
+Slices absent from the table by design: **R0** (logic-only — extracts validators, touches no token),
+**R-CONV-1** (logic-only — ConversationPanel state extraction), **R-BRIDGE** (retires the global
+import, deletes no per-surface token), **R-LAST** (deletes the `--lq-*` color layer). All four are in
+the sequence below; they gate on the table, they don't appear in it.
+
+| Slice | Files (`var(--lq-)` count) |
+|---|---|
+| **R1a — Modal/form primitives** | `C/NewMatterModal.svelte` (44) |
+| **R2 — MatterRailMetadata + TrustPill** | `C/MatterRailMetadata.svelte` (70), `C/TrustPill.svelte` (18) |
+| **R3 — RailAttachSection + Files** | `C/MatterRailFiles.svelte` (43) |
+| **R4 — Knowledge + Skills rails** | `C/MatterRailKnowledge.svelte` (27), `C/MatterRailSkills.svelte` (37) |
+| **R5 — MatterRail container** | `C/MatterRail.svelte` (24) |
+| **R6 — MessageBubble family + `<think>`** | `C/ProvenancePill.svelte` (12), `C/M2Citations.svelte` (1) |
+| **R7 — Composer satellites** | `C/SlashPopover.svelte` (21), `C/EnhancePromptExpansion.svelte` (50) |
+| **R8 — Conversation containers** | `C/ChatSidebar.svelte` (17), `C/AttachedFilesPanel.svelte` (9), `C/MessageOverflowMenu.svelte` (8), `C/AttachedSkillPill.svelte` (7) |
+| **R9 — ChatPanel composition + agents home** | `C/ChatPanel.svelte` (15), `C/ModelPicker.svelte` (17), `C/SkillPicker.svelte` (19), `R/(tools)/agents/+page.svelte` (60) |
+| **R-CONV-2 — ConversationPanel styling** | `C/agents/ConversationPanel.svelte` (46) |
+| **R12 — Knowledge list + detail** | `R/(tools)/knowledge/+page.svelte` (74), `R/(tools)/knowledge/[id]/+page.svelte` (77) |
+| **R13 — Embedded modals** | `C/AttachKBModal.svelte` (87), `C/PlaybookExecuteModal.svelte` (25) |
+| **R14a — Skills list + read** | `R/(tools)/skills/+page.svelte` (35), `R/(tools)/skills/[id]/+page.svelte` (12), `C/SkillDetailTabs.svelte` (9), `C/SkillSourceView.svelte` (46), `C/SkillTryItPane.svelte` (10), `C/SkillVersionsTab.svelte` (6) |
+| **R14b — Skill authoring** | `R/(tools)/skills/[id]/edit/+page.svelte` (15), `C/SkillWizard.svelte` (10), `C/SkillWizardSection.svelte` (4), `C/CaptureSkillModal.svelte` (10) |
+| **R15 — Playbooks + Tabular lists** | `R/(tools)/playbooks/+page.svelte` (16), `R/(tools)/tabular/+page.svelte` (27) |
+| **R15b-tab — Tabular long tail** | `R/(tools)/tabular/new/+page.svelte` (46), `R/(tools)/tabular/[id]/+page.svelte` (31), `C/TabularCell.svelte` (15), `C/TabularGrid.svelte` (8), `C/TabularCitationModal.svelte` (16) |
+| **R15b-pb — Playbook long tail** | `R/(tools)/playbook-executions/[id]/+page.svelte` (64), `R/(tools)/playbooks/easy/+page.svelte` (34), `C/PlaybookEditor.svelte` (12), `C/PlaybookEditorPosition.svelte` (16), `C/PlaybookEditorFallbackTier.svelte` (10), `C/PlaybookDisclaimerBanner.svelte` (7) |
+| **R16 — Settings/admin nav shells** | `R/(tools)/settings/+layout.svelte` (12), `R/(tools)/settings/account/+page.svelte` (15), `R/(tools)/settings/appearance/+page.svelte` (9), `R/(tools)/settings/autonomous/+page.svelte` (6), `C/SettingsToggleGroup.svelte` (23), `R/(tools)/admin/+layout.svelte` (9) |
+| **R17a — MFA panel (security)** | `C/MfaEnrollmentPanel.svelte` (65) |
+| **R17b — Export/delete + change-password (security)** | `C/AccountExportDeletePanel.svelte` (62), `R/change-password/+page.svelte` (1) |
+| **R18 — Admin audit-log + intake-bridges** | `R/(tools)/admin/audit-log/+page.svelte` (18), `R/(tools)/admin/intake-bridges/+page.svelte` (42) |
+| **R19a — Trust + Learn (presentational)** | `R/(tools)/trust/+page.svelte` (5), `R/(tools)/learn/+page.svelte` (19), `R/(tools)/learn/build/+page.svelte` (57), `R/(tools)/learn/how/+page.svelte` (45), `R/(tools)/learn/use/+page.svelte` (36), `C/TrustArtifactsCard.svelte` (10), `C/TrustDataResidencyCard.svelte` (15), `C/TrustExternalTurnsCard.svelte` (14), `C/TrustProvidersCard.svelte` (11) |
+| **R19b — Dev/admin chrome** | `R/(tools)/admin/developer/+page.svelte` (6), `R/(tools)/admin/models/+page.svelte` (10), `R/(tools)/admin/word-addin/+page.svelte` (51), `R/word-addin/oauth-start/+page.svelte` (19), `C/DevRoleManagementCard.svelte` (51), `C/DevApiPlaygroundCard.svelte` (25), `C/DevForkCallout.svelte` (22), `C/DevApiDocsCard.svelte` (17) |
+| **R20 — SavedPromptsPanel + CronInput** | `C/SavedPromptsPanel.svelte` (19), `C/CronInput.svelte` (46), `R/(tools)/saved-prompts/+page.svelte` (4) |
+| **R-CHROME — Global chrome orphans** | `R/login/+page.svelte` (7), `R/(tools)/+layout.svelte` (13), `R/+layout.svelte` (2), `C/MatterCard.svelte` (20), `C/TopTabBar.svelte` (13), `C/AmbientFooter.svelte` (5), `C/AmbientTrustChrome.svelte` (6), `C/SessionTimeoutWarning.svelte` (10), `C/ComingSoonModal.svelte` (9), `C/InfoTip.svelte` (6), `R/(tools)/matters/+page.svelte` (19), `R/(tools)/matters/[id]/+page.svelte` (4) |
+| **R-TYPO — typography.css decouple** | `src/lib/lq-ai/styles/typography.css` (9) |
+| **R21 — autonomous/\* (DEFER to F2/F3 — skip, leave on bridge)** | `R/(tools)/autonomous/+page.svelte` (100), `R/(tools)/autonomous/+layout.svelte` (10), `R/(tools)/autonomous/configure/+page.svelte` (11), `R/(tools)/autonomous/memory/+page.svelte` (57), `R/(tools)/autonomous/notifications/+page.svelte` (62), `R/(tools)/autonomous/precedents/+page.svelte` (54), `R/(tools)/autonomous/proposals/+page.svelte` (63), `R/(tools)/autonomous/schedules/+page.svelte` (95), `R/(tools)/autonomous/sessions/[id]/+page.svelte` (74), `R/(tools)/autonomous/watches/+page.svelte` (92) |
+
+**R-LAST gate (now provably reachable):** all 101 files migrate (or defer to F2/F3 via R21). The 10
+R21 files (621 uses, the largest single bucket) stay on the bridge — which is exactly why R-LAST is
+conditional/partial (ships a radius/space-only `practice.css` + color alias, terminal deletion moves to
+the F2/F3 slice that deletes the autonomous surface). Non-R21 surfaces = 91 files / 2,131 uses.
+
 ## Slice sequence (corrected for the critique)
 
 Sizing: XS <0.5d · S ~1d · M ~2d · L = split it. IDs are stable handles, not strict order.
