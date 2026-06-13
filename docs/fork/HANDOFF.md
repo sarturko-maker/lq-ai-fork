@@ -114,6 +114,16 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
      or `-- --run`. `vitest` env is `node` (no jsdom) — DOMPurify needs a real browser, so sanitisation is
      Cypress-tested, not vitest. The legacy ChatPanel shell is non-responsive (R9) — chat screenshots below
      ~700px squeeze the conversation; capture narrow at ≥860px until R9.
+   - **Responsive parity folded into the rollout (PR #53, merged).** Maintainer directive: consistency
+     with the cockpit is **FOUR axes** — colours + elevation + motion + **responsive collapse** (panels/
+     tabs reflow on narrow). Now a first-class deliverable on the **shell slices** (R5 MatterRail, R8
+     containers, **R9 ChatPanel**, R-CONV-2, R-CHROME TopTabBar); DoD discipline #1 upgraded — on those
+     slices the narrow screenshot must show the cockpit COLLAPSE, not just an un-broken wide layout. **R9
+     will likely split into R9a (token/composition) + R9b (responsive shell)** — legacy ChatPanel is a
+     non-responsive flex row. (R7 is a satellite/popover slice — responsive parity does not change it.)
+   - **CI UNBLOCKED:** the repo is now **PUBLIC** (2026-06-13) → GitHub Actions are unlimited/free; the
+     earlier spending-limit block (R6 merged via maintainer authorization past it — PR #52) is resolved.
+     **R7 onward: full CI green is required again** (the ADR-F005 gate is back to normal).
    - **NEXT → R7 — Composer satellites** (`SlashPopover` + `EnhancePromptExpansion`); delete the
      `var(--lq-*,#fallback)` chains. *Adversarial:* listbox keyboard / `aria-activedescendant`, popover
      z-index under every modal combo. Rendered-surface → screenshots REQUIRED. Reuse the R1a/R6 kit.
