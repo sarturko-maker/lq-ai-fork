@@ -25,13 +25,12 @@
 	 *     shape per Task 3.1 is a plain function).
 	 *   - `SkillAutocompleteItem.description` is `string | null` (per
 	 *     Task 3.1's wire type), so the template `?? ''`s it.
-	 *   - Design tokens: the design spec called for `--lq-secure-tint`,
-	 *     which doesn't exist in this codebase. The "secure / sage" tone
-	 *     of AttachedSkillPill and TrustPill maps to `--lq-accent-soft`,
-	 *     `--lq-accent`, `--lq-accent-border` (styles/practice.css), so
-	 *     we use those here for the active row. `--lq-surface` is
-	 *     referenced elsewhere in the codebase but never defined, so we
-	 *     fall back to `--lq-canvas` (#ffffff) for the panel background.
+	 *   - Design tokens (R7): migrated off the legacy `--lq-*` palette onto
+	 *     the shipped semantic tokens (Tailwind `bg-popover`/`border-border`/
+	 *     `text-muted-foreground`, `shadow-md`→`--elevation-md`). The active
+	 *     row uses `bg-accent` (the soft indigo wash; text stays `foreground`,
+	 *     matching the old "soft tint, normal ink"); links/focus use
+	 *     `text-primary`/`ring-ring`. No `<style>` block — utility classes only.
 	 *   - Pure helpers exported from <script context="module"> so vitest
 	 *     can exercise them without @testing-library/svelte (which is
 	 *     not installed; see AttachKBModal.test.ts header).
@@ -67,11 +66,7 @@
 	 * decideKeyAction layer, but this defensive default keeps the helper
 	 * total (no NaN if it's ever called with length === 0).
 	 */
-	export function nextIndex(
-		activeIndex: number,
-		length: number,
-		direction: 1 | -1
-	): number {
+	export function nextIndex(activeIndex: number, length: number, direction: 1 | -1): number {
 		if (length === 0) return 0;
 		// JS `%` keeps sign of the dividend, so add `length` to handle
 		// negative wraps when direction = -1.
@@ -98,10 +93,7 @@
 	 * calls e.preventDefault() at the action-application site so tests
 	 * don't need to construct synthetic events.
 	 */
-	export function decideKeyAction(
-		key: string,
-		state: SlashPopoverState
-	): KeyAction {
+	export function decideKeyAction(key: string, state: SlashPopoverState): KeyAction {
 		if (key === 'Escape') return { kind: 'dismiss' };
 		const len = state.results.length;
 		if (len === 0) return { kind: 'noop' };
@@ -134,10 +126,7 @@
 	 * envelope). Errors propagate; the component catches and surfaces
 	 * them in the "error" empty state.
 	 */
-	export async function fetchResults(
-		query: string,
-		limit = 10
-	): Promise<SkillAutocompleteItem[]> {
+	export async function fetchResults(query: string, limit = 10): Promise<SkillAutocompleteItem[]> {
 		const resp = await autocompleteSkills(query, limit);
 		return resp.results;
 	}
@@ -253,29 +242,33 @@
      the composer (Task 7.1) retains focus and keyboard events are caught
      by the window handler above, so this listbox is never tab-focused. -->
 <div
-	class="lq-slash-popover"
+	class="flex max-h-80 min-w-[280px] max-w-[min(90vw,420px)] flex-col overflow-y-auto rounded-md border border-border bg-popover p-1 text-[13px] text-popover-foreground shadow-md"
 	role="listbox"
 	tabindex="-1"
 	aria-label="Skill suggestions"
 	aria-activedescendant={kind === 'results' ? `lq-slash-row-${activeIndex}` : undefined}
 >
 	{#if kind === 'loading'}
-		<div class="lq-slash-popover__status" role="presentation">Loading…</div>
+		<div class="px-3 py-2 text-xs text-muted-foreground" role="presentation">Loading…</div>
 	{:else if kind === 'error'}
-		<div class="lq-slash-popover__status lq-slash-popover__status--error" role="presentation">
+		<div class="px-3 py-2 text-xs text-destructive dark:text-red-300" role="presentation">
 			Couldn't load suggestions ·
-			<button type="button" class="lq-slash-popover__retry" on:click={retry}>retry</button>
+			<button
+				type="button"
+				class="rounded-sm text-xs text-inherit underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				on:click={retry}>retry</button
+			>
 		</div>
 	{:else if kind === 'empty-with-query'}
-		<div class="lq-slash-popover__status" role="presentation">
+		<div class="px-3 py-2 text-xs text-muted-foreground" role="presentation">
 			No matching skills · Esc to dismiss
 		</div>
 	{:else if kind === 'empty-no-query'}
-		<div class="lq-slash-popover__status" role="presentation">
+		<div class="px-3 py-2 text-xs text-muted-foreground" role="presentation">
 			You don't have any skills yet —
-			<a href="/lq-ai/skills" class="lq-slash-popover__link">Browse</a>
+			<a href="/lq-ai/skills" class="text-primary underline">Browse</a>
 			·
-			<a href="/lq-ai/skills/new" class="lq-slash-popover__link">Create</a>
+			<a href="/lq-ai/skills/new" class="text-primary underline">Create</a>
 		</div>
 	{:else}
 		{#each results as r, i}
@@ -283,121 +276,20 @@
 				type="button"
 				role="option"
 				id={`lq-slash-row-${i}`}
-				class="lq-slash-popover__row"
-				class:active={i === activeIndex}
+				class="flex w-full items-start gap-2 rounded-sm px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+				class:bg-accent={i === activeIndex}
 				aria-selected={i === activeIndex}
 				on:mousedown={(e) => onRowMouseDown(e, r)}
 				on:mouseenter={() => (activeIndex = i)}
 			>
-				<span class="lq-slash-popover__icon" aria-hidden="true">{displayIcon(r.icon)}</span>
-				<span class="lq-slash-popover__body">
-					<span class="lq-slash-popover__title">{r.title}</span>
-					<span class="lq-slash-popover__desc">{r.description ?? ''}</span>
+				<span class="shrink-0 pt-px text-sm leading-snug" aria-hidden="true"
+					>{displayIcon(r.icon)}</span
+				>
+				<span class="flex min-w-0 flex-col">
+					<span class="truncate font-medium text-foreground">{r.title}</span>
+					<span class="truncate text-xs text-muted-foreground">{r.description ?? ''}</span>
 				</span>
 			</button>
 		{/each}
 	{/if}
 </div>
-
-<style>
-	.lq-slash-popover {
-		display: flex;
-		flex-direction: column;
-		min-width: 280px;
-		max-width: clamp(280px, 90vw, 420px);
-		max-height: 320px;
-		overflow-y: auto;
-		background: var(--lq-surface, var(--lq-canvas, #ffffff));
-		border: 1px solid var(--lq-border, #e5e7eb);
-		border-radius: var(--lq-radius, 6px);
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-		padding: var(--lq-space-1, 4px);
-		font-family: var(--lq-font-sans);
-		font-size: 13px;
-		color: var(--lq-text, #1a1a1a);
-	}
-
-	.lq-slash-popover__status {
-		padding: var(--lq-space-2, 8px) var(--lq-space-3, 12px);
-		color: var(--lq-text-tertiary, #9ca3af);
-		font-size: 12px;
-	}
-
-	.lq-slash-popover__status--error {
-		color: var(--lq-error, #b54848);
-	}
-
-	.lq-slash-popover__retry {
-		background: none;
-		border: 0;
-		padding: 0;
-		margin: 0;
-		color: inherit;
-		font: inherit;
-		text-decoration: underline;
-		cursor: pointer;
-	}
-
-	.lq-slash-popover__retry:focus-visible {
-		outline: 2px solid var(--lq-accent, #1f7a6b);
-		outline-offset: 2px;
-	}
-
-	.lq-slash-popover__link {
-		color: var(--lq-accent, #1f7a6b);
-		text-decoration: underline;
-	}
-
-	.lq-slash-popover__row {
-		display: flex;
-		align-items: flex-start;
-		gap: var(--lq-space-2, 8px);
-		width: 100%;
-		text-align: left;
-		background: none;
-		border: 0;
-		padding: var(--lq-space-2, 8px) var(--lq-space-3, 12px);
-		border-radius: var(--lq-radius-sm, 4px);
-		color: inherit;
-		font: inherit;
-		cursor: pointer;
-	}
-
-	.lq-slash-popover__row.active {
-		background: var(--lq-accent-soft, #e8f4ec);
-	}
-
-	.lq-slash-popover__row:focus-visible {
-		outline: 2px solid var(--lq-accent, #1f7a6b);
-		outline-offset: -2px;
-	}
-
-	.lq-slash-popover__icon {
-		font-size: 14px;
-		line-height: 1.3;
-		padding-top: 1px;
-		flex: 0 0 auto;
-	}
-
-	.lq-slash-popover__body {
-		display: flex;
-		flex-direction: column;
-		min-width: 0;
-	}
-
-	.lq-slash-popover__title {
-		font-weight: 500;
-		color: var(--lq-text, #1a1a1a);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.lq-slash-popover__desc {
-		color: var(--lq-text-tertiary, #9ca3af);
-		font-size: 12px;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-</style>
