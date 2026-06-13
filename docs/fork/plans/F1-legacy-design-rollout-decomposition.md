@@ -13,6 +13,13 @@ F1-S2/S2.1 semantic-token system (Tailwind `bg-card`/`text-foreground`/`border-b
 (`AreaGrid`/`MattersPanel`/`ConversationHost`/`CockpitHeader`/`StatusPill`/`NewMatterDialog`) is the
 **already-migrated exemplar** — copy its idiom; never re-migrate it.
 
+**Consistency is four-fold, not just colour** (maintainer directive 2026-06-13, restoring the v1
+verdict's "collapse panels when narrow"): the legacy surfaces must reach the cockpit's (1) semantic
+colours, (2) elevation/shade, (3) motion, **and (4) responsive collapse** — panels/tabs reflowing as
+the window narrows. The dark-mode bridge gives colour parity for free while a surface waits; it does
+**not** give responsive parity, so (4) is an explicit per-slice deliverable on the shell/container
+slices (see "Responsive parity" below), not a "don't-break-narrow" afterthought.
+
 Each slice is vertical, ~one PR, ≤2–3 days, and carries the three disciplines below.
 
 ## Scale (measured, not estimated)
@@ -58,7 +65,9 @@ done** until all four are satisfied and shown (not asserted).
    captures lie about the dark theme, see Gotchas), saved under `docs/fork/evidence/<slice>/` and
    referenced in the PR. Eyeball each: correct semantic colors, AA contrast, no drift, states intact.
    **Logic-only slices (R0, R-CONV-1) are screenshot-exempt** — they must say so explicitly in the PR
-   and lean on unit-test equivalence instead. Named specs per slice below.
+   and lean on unit-test equivalence instead. Named specs per slice below. **On shell/container slices
+   (see "Responsive parity") the narrow capture must show the cockpit's COLLAPSE behaviour, not merely
+   an un-broken wide layout** — a non-responsive shell that "doesn't break" is a FAIL on those slices.
 2. **Code simplification.** The token swap is the moment to **delete**, not just restyle: dead code,
    duplicated style blocks, component families collapsed to a primitive, surfaces deleted instead of
    migrated. Named targets per slice. A slice that only swaps tokens and simplifies nothing is a smell.
@@ -73,6 +82,33 @@ done** until all four are satisfied and shown (not asserted).
    `docs/fork/HANDOFF.md`** for the next (near-empty) session: mark this slice done, point NEXT at the
    following slice with its exact pickup, and carry any new gotcha. Committed with the slice's PR
    (CLAUDE.md § Session handoff). A slice is not finished until HANDOFF says where the next one starts.
+
+## Responsive parity (maintainer directive 2026-06-13 — folded into the shell slices)
+
+Goal target (4) — the cockpit's **collapse-on-narrow** behaviour — is owned by the slices that already
+refactor a shell/container, so the responsive work lands in the SAME diff as the token swap (no
+touching these files twice). The standard: **mirror the cockpit's breakpoints and collapse idiom**
+(F1-S2/S2.1 — `AreaGrid`/`MattersPanel`/`ConversationHost`; reuse its container query / `motionMs`
+pattern, don't reinvent), so the whole app reflows identically.
+
+**Shell/container slices that MUST deliver responsive collapse (DoD upgraded from "don't break narrow"
+→ "matches the cockpit collapse"):**
+- **R5 — MatterRail container** (the rail collapses / docks as the workspace narrows).
+- **R8 — MessageList / ChatSidebar / AttachedFilesPanel** (the chat side panes collapse).
+- **R9 — ChatPanel composition** — the flagship: today a **non-responsive flex row** (fixed sidebar +
+  attachments squeeze the `flex-1` conversation below ~700px; R6 had to shoot "narrow" at 860px). R9
+  must make the three-pane workspace collapse like the cockpit. **Re-scope note:** this enlarges R9 —
+  if the responsive layout + the ~1,150-LOC token/composition swap blow the 200k cap, split R9 into
+  **R9a (token/composition)** + **R9b (responsive shell)**.
+- **R-CONV-2 — ConversationPanel** (stacked/collapsed layout at narrow, beyond the existing `<720`
+  auto-scroll).
+- **Global chrome:** the **TopTabBar** "collapsible tabs when the window size changes" lives in
+  **R-CHROME** (or its own XS slice) — give it the cockpit's tab-collapse, not just a token swap.
+
+Library/list surfaces (R12/R14a/R15/R16) already have their own breakpoints; for those, "don't break
+narrow" remains the bar UNLESS the surface visibly diverges from the cockpit idiom — then align it.
+The adversarial-review focus on these slices gains a first-class **"responsive collapse matches the
+cockpit"** check (not just "responsive breakage").
 
 ## Coverage model (critique fix — the plan's spine)
 
@@ -174,7 +210,8 @@ Sizing: XS <0.5d · S ~1d · M ~2d · L = split it. IDs are stable handles, not 
   UX + api signatures differ; don't let R3's abstraction be load-bearing on faith. *(M)*
 - **R4 — Knowledge + Skills rails** onto `RailAttachSection`; delete all `var(--lq-*,#fallback)`. *(S)*
 - **R5 — MatterRail container** → flex/gap/`border-border`; consolidate the 5 duplicated
-  `.rail-section*` blocks; family now has zero `practice.css` imports. *(M)*
+  `.rail-section*` blocks; family now has zero `practice.css` imports. **+ Responsive parity:** the rail
+  collapses/docks as the workspace narrows (cockpit idiom). *(M)*
 
 ### Wave 1 — conversation core (highest risk, highest value)
 - **R6 — MessageBubble family + `<think>` ribbon** (TierBadge/TierDetailsPanel/ProvenancePill); ship
@@ -186,12 +223,16 @@ Sizing: XS <0.5d · S ~1d · M ~2d · L = split it. IDs are stable handles, not 
 - **R7 — Composer satellites** SlashPopover + EnhancePromptExpansion; delete fallback chains.
   **Adversarial:** listbox keyboard/`aria-activedescendant`, popover z-index under every modal combo. *(S)*
 - **R8 — Containers** MessageList, ChatSidebar, AttachedFilesPanel, SavedPromptsPanel; `lq-btn-*`
-  literals → shadcn `Button`; extract a reusable upload-chip. **Adversarial:** scroll anchoring,
-  upload-cancel chip removal, dual-use SavedPromptsPanel. *(M)*
+  literals → shadcn `Button`; extract a reusable upload-chip. **+ Responsive parity:** the chat side
+  panes collapse on narrow (cockpit idiom). **Adversarial:** scroll anchoring,
+  upload-cancel chip removal, dual-use SavedPromptsPanel, **collapse-matches-cockpit**. *(M)*
 - **R9 — ChatPanel composition** (~1,150 LOC: skill/model pickers, draft, send/consume) + `agents/+page`
-  home chrome (orphan, folded here). **Adversarial:** skill-attachment provenance (final source wins),
-  tier-mismatch → `TierFloorOverrideModal`. *(M; ⚠ read ChatPanel in ranges; if edit churn pushes the
-  200k cap, split `agents/+page` into its own XS slice.)*
+  home chrome (orphan, folded here). **+ Responsive parity (flagship):** today a NON-responsive flex row
+  (fixed sidebar + attachments squeeze the `flex-1` conversation below ~700px) — make the three-pane
+  workspace collapse like the cockpit. **Adversarial:** skill-attachment provenance (final source wins),
+  tier-mismatch → `TierFloorOverrideModal`, **collapse-matches-cockpit**. *(M→L; ⚠ read ChatPanel in
+  ranges; the responsive layout + the token/composition swap likely exceed 200k → plan to split into
+  **R9a token/composition** + **R9b responsive shell**; `agents/+page` can also peel into its own XS slice.)*
 - **R-CONV-1 — ConversationPanel logic extraction** (NO styling). Extract the polling/generation-guard
   state machine, the SSE-consume helper, and the auto-scroll composable into `lib/lq-ai/agents/*.ts`
   modules; behavior-preserving. **Test:** vitest for each module (generation-mismatch, poll/stream
@@ -199,9 +240,11 @@ Sizing: XS <0.5d · S ~1d · M ~2d · L = split it. IDs are stable handles, not 
   load-bearing):** SSE/poll ordering, stale-snapshot guard, ADR-F004 settled-rows contract — pure
   equivalence, no visual surface. *(M; ⚠ read the file in ranges.)*
 - **R-CONV-2 — ConversationPanel styling** the now-thinner remainder + `<style>` block → semantic
-  tokens; `<think>` ribbon idiom from R6; reuse R8 upload-chip. **Adversarial (visual-only):** dark
-  contrast, auto-scroll on `<720` stacked, ConversationHost re-home (unchanged exemplar — verify, don't
-  edit). *(M; ⚠.) — split is best-practice (logic-equivalence vs visual review) AND fits the 200k cap.*
+  tokens; `<think>` ribbon idiom from R6 (adopt `primitives/ReasoningRibbon.svelte` + the shared
+  `renderModelMarkdown`); reuse R8 upload-chip. **+ Responsive parity:** stacked/collapsed layout at
+  narrow (cockpit idiom), beyond the existing `<720` auto-scroll. **Adversarial (visual-only):** dark
+  contrast, auto-scroll on `<720` stacked, **collapse-matches-cockpit**, ConversationHost re-home
+  (unchanged exemplar — verify, don't edit). *(M; ⚠.) — split is best-practice AND fits the 200k cap.*
 
 ### Wave 2 — library surfaces
 - **R12 — Knowledge list + detail** (folds **R1b** primitives); merge the duplicated status roll-up in
@@ -235,7 +278,10 @@ Sizing: XS <0.5d · S ~1d · M ~2d · L = split it. IDs are stable handles, not 
 - **R20 — SavedPromptsPanel + CronInput.** CronInput's *logic* survives F3 retargeting → migrate well
   (not deletion-bound), even though its host pages (schedules/watches) are skipped. *(M)*
 - **R-CHROME — Global chrome orphans** login, `(tools)/+layout`, word-addin/oauth-start, MatterCard,
-  TopTabBar, Ambient*, SessionTimeoutWarning, ComingSoonModal, InfoTip, DevApiDocsCard. *(S–M.)*
+  TopTabBar, Ambient*, SessionTimeoutWarning, ComingSoonModal, InfoTip, DevApiDocsCard. **+ Responsive
+  parity:** give **TopTabBar** the cockpit's "collapsible tabs when the window narrows" (the literal
+  behaviour the maintainer flagged) — not just a token swap; split it into its own XS slice if it grows.
+  *(S–M.)*
 
 ### autonomous/* (deletion candidate)
 - **R21 — SKIP ALL 10 pages** (resolved default, ↓ Decision 1). Touch nothing; leave the whole family
@@ -282,7 +328,9 @@ Sizing: XS <0.5d · S ~1d · M ~2d · L = split it. IDs are stable handles, not 
 
 Net slice count after the 200k splits: ~29 (R0, R1a, R2–R5, R6–R9, R-CONV-1/2, R12, R13, R14a/b, R15,
 R15b-tab/pb, R16, R17a/b, R18, R19a/b, R20, R-CHROME, R-TYPO, R-BRIDGE, R-LAST; autonomous deferred).
-Each ≤~6–8 files / ≤~2k LOC, executable in one ≤200k session.
+Each ≤~6–8 files / ≤~2k LOC, executable in one ≤200k session. **+ Responsive parity (2026-06-13)** may
+add ~1–2 slices: R9 likely splits into **R9a** (token/composition) + **R9b** (responsive shell), and
+**TopTabBar** may peel out of R-CHROME — finalise at the Wave-1 re-plan checkpoint.
 
 ## Verification (per slice, ADR-F005 gate)
 
