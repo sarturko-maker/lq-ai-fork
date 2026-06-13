@@ -1,47 +1,7 @@
-<script context="module" lang="ts">
-	/**
-	 * Form validation helpers — exported for unit tests.
-	 */
-	export type TierFloor = 1 | 2 | 3 | 4 | 5;
-
-	export interface NewMatterFields {
-		name: string;
-		description: string;
-		privileged: boolean;
-		minimum_inference_tier: TierFloor | null;
-	}
-
-	export interface ValidationResult {
-		valid: boolean;
-		nameError: string | null;
-		tierError: string | null;
-	}
-
-	export function validateNewMatter(fields: NewMatterFields): ValidationResult {
-		let nameError: string | null = null;
-		let tierError: string | null = null;
-
-		if (!fields.name.trim()) {
-			nameError = 'Matter name is required.';
-		} else if (fields.name.trim().length > 200) {
-			nameError = 'Matter name must be 200 characters or fewer.';
-		}
-
-		if (fields.privileged && fields.minimum_inference_tier === null) {
-			tierError = 'Privileged matters require a minimum tier floor — see PRD §5.x for why.';
-		}
-
-		return {
-			valid: nameError === null && tierError === null,
-			nameError,
-			tierError
-		};
-	}
-</script>
-
 <script lang="ts">
 	import { projectsApi } from '$lib/lq-ai/api';
 	import type { Project } from '$lib/lq-ai/types';
+	import { validateNewMatter, type TierFloor } from '$lib/lq-ai/validators/matter';
 	import InfoTip from './InfoTip.svelte';
 
 	export let onClose: () => void;

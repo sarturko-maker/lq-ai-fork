@@ -1,42 +1,6 @@
 <script context="module" lang="ts">
   import type { Project } from '$lib/lq-ai/types';
 
-  export type TierFloor = 1 | 2 | 3 | 4 | 5;
-
-  export interface MetadataFields {
-    name: string;
-    description: string;
-    privileged: boolean;
-    minimum_inference_tier: TierFloor | null;
-  }
-
-  export interface MetadataValidation {
-    valid: boolean;
-    nameError: string | null;
-    tierError: string | null;
-  }
-
-  export function validateMetadata(fields: MetadataFields): MetadataValidation {
-    let nameError: string | null = null;
-    let tierError: string | null = null;
-
-    if (!fields.name.trim()) {
-      nameError = 'Matter name is required.';
-    } else if (fields.name.trim().length > 200) {
-      nameError = 'Matter name must be 200 characters or fewer.';
-    }
-
-    if (fields.privileged && fields.minimum_inference_tier === null) {
-      tierError = 'Privileged matters require a minimum tier floor.';
-    }
-
-    return {
-      valid: nameError === null && tierError === null,
-      nameError,
-      tierError
-    };
-  }
-
   /** Whether a (non-archived) matter can be archived. Always true — exposed for testing. */
   export function canArchive(matter: Project): boolean {
     return !matter.archived_at;
@@ -45,6 +9,7 @@
 
 <script lang="ts">
   import { projectsApi } from '$lib/lq-ai/api';
+  import { validateMetadata, type TierFloor } from '$lib/lq-ai/validators/matter';
   import TrustPill from './TrustPill.svelte';
 
   export let matter: Project;
