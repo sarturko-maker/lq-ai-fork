@@ -55,61 +55,30 @@
 	export let tierMismatch = false;
 	export let onTap: (() => void) | undefined = undefined;
 
+	// R6: legacy `--lq-accent/tier/warn-*` tones → semantic tokens. sage is the
+	// soft-accent tint (the default metadata pill); slate is neutral muted (tier
+	// OK); amber is the warning idiom shared with the R1a Alert — `text-amber-700`
+	// / `dark:text-amber-300` clears WCAG AA on the tinted wash in both themes.
+	const TONE_CLASS: Record<ProvenanceTone, string> = {
+		sage: 'bg-accent text-accent-foreground hover:bg-accent/80',
+		slate: 'bg-muted text-muted-foreground hover:bg-muted/80',
+		amber:
+			'border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300'
+	};
+
 	$: tone = toneFor(kind, tierMismatch);
 	$: icon = iconFor(kind);
 	$: description = descriptionFor(kind);
+	$: toneClass = TONE_CLASS[tone];
 </script>
 
 <button
 	type="button"
-	class="lq-prov-pill lq-prov-tone-{tone}"
+	class="inline-flex cursor-pointer items-center gap-1 rounded-full border border-transparent px-2 py-0.5 text-[11px] font-medium leading-snug transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring {toneClass}"
 	aria-label="{kind}: {summary}"
 	title={description}
 	on:click={onTap}
 >
-	<span class="lq-prov-icon" aria-hidden="true">{icon}</span>
-	<span class="lq-prov-summary">{summary}</span>
+	<span class="text-[11px]" aria-hidden="true">{icon}</span>
+	<span>{summary}</span>
 </button>
-
-<style>
-	.lq-prov-pill {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--lq-space-1);
-		padding: 2px 8px;
-		border-radius: var(--lq-radius-pill);
-		font-size: 11px;
-		line-height: 1.4;
-		border: 1px solid transparent;
-		background: transparent;
-		cursor: pointer;
-	}
-	.lq-prov-icon {
-		font-size: 11px;
-	}
-	.lq-prov-summary {
-		font-weight: 500;
-	}
-	.lq-prov-tone-sage {
-		background: var(--lq-accent-soft);
-		color: var(--lq-accent);
-		border-color: var(--lq-accent-border);
-	}
-	.lq-prov-tone-slate {
-		background: var(--lq-tier-soft);
-		color: var(--lq-tier);
-		border-color: var(--lq-tier-border);
-	}
-	.lq-prov-tone-amber {
-		background: var(--lq-warn-soft);
-		color: var(--lq-warn);
-		border-color: var(--lq-warn-border);
-	}
-	.lq-prov-pill:hover {
-		filter: brightness(0.97);
-	}
-	.lq-prov-pill:focus-visible {
-		outline: 2px solid var(--lq-accent);
-		outline-offset: 2px;
-	}
-</style>

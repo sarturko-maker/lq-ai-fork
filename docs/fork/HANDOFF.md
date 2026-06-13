@@ -97,13 +97,28 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
      svelte-check 0. **Gotcha for downstream modal slices:** bits-ui `Dialog.Title` is a
      `div[data-slot="dialog-title"]` (aria-labelledby heading), **NOT** an `<h2>` — assert
      `[data-slot="dialog-title"]`, not `cy.contains('h2', …)`. **Reusable kit for R13/R14b/R17.**
-   - **NEXT → R6 — MessageBubble family + `<think>` ribbon.** Coverage-table token files are ONLY
-     `ProvenancePill` (12) + `M2Citations` (1) — **MessageBubble itself has no `var(--lq-)`**, so re-scope
-     R6 on entry: the work is the `color:white` literal + the backlogged **collapsed reasoning ribbon**,
-     NOT a bulk token swap. *Critique fixes (in the decomposition plan):* NO `marked`/DOMPurify
-     memoization here (behavior change — separate slice); drop the AppliedSkillsChip claim (zero `--lq-*`).
-     Adversarial focus: citation single-fetch race, accent-on-accent dark contrast, ARIA. Rendered-surface
-     → **screenshots REQUIRED**. *M.* Reuse the R1a `Alert`/idiom where the bubble shows errors/refusals.
+   - **R6 — MessageBubble family + `<think>` ribbon: ✅ merged via PR #52** (or merging — confirm on main).
+     NEW `primitives/ReasoningRibbon.svelte` (collapsed `<details>` reasoning disclosure, semantic tokens —
+     **the idiom R-CONV-2 adopts**). **MessageBubble** now `splitThink()`s the assistant content (shared
+     agent-surface parser) → reasoning collapses into the ribbon instead of leaking as prose; bubble palette
+     → semantic tokens (`bg-primary`/`bg-card`+`border-border`/`bg-muted`); `error_code` → R1a `Alert`.
+     **ProvenancePill** `<style>` deleted (12 tokens → semantic tones); **M2Citations** focus outline →
+     `var(--ring)`. Both token files at **0 `var(--lq-)`** (R-LAST gate). Re-scope verified on entry:
+     MessageBubble had NO `var(--lq-)`/no `color:white`; TierBadge/TierDetailsPanel already clean.
+     **RefusalMessageBubble deferred to R-CONV-2** (no token; refusal is un-triggerable on the tier-4-only
+     stack — no honest screenshot). NEW shared `lib/lq-ai/sanitize-markdown.ts` (`renderModelMarkdown`,
+     media-forbidden) — review fix; **MessageBubble's model-markdown `{@html}` was the lone un-hardened
+     sink**. Adversarial review: 9 agents, 4 confirmed (2 should-fix + 2 nit), ALL fixed. svelte-check 0;
+     vitest 797; Cypress 3/3 live; evidence `docs/fork/evidence/r6/`.
+     **Gotcha for downstream:** `test:frontend` is `vitest` (WATCH mode — never exits); run `npx vitest run`
+     or `-- --run`. `vitest` env is `node` (no jsdom) — DOMPurify needs a real browser, so sanitisation is
+     Cypress-tested, not vitest. The legacy ChatPanel shell is non-responsive (R9) — chat screenshots below
+     ~700px squeeze the conversation; capture narrow at ≥860px until R9.
+   - **NEXT → R7 — Composer satellites** (`SlashPopover` + `EnhancePromptExpansion`); delete the
+     `var(--lq-*,#fallback)` chains. *Adversarial:* listbox keyboard / `aria-activedescendant`, popover
+     z-index under every modal combo. Rendered-surface → screenshots REQUIRED. Reuse the R1a/R6 kit.
+     **Backlog (from R6 review):** converge `ConversationPanel` + `SkillSourceView` onto
+     `renderModelMarkdown` (they already enforce the same media-forbid via local copies) in R-CONV-2 / R14a.
 
    The dark-mode bridge (`+layout.svelte` lines 23–24) holds un-migrated surfaces, so slices merge in
    almost any order; R-BRIDGE/R-LAST last.
