@@ -22,8 +22,8 @@
 					root.classList.remove('dark', 'light');
 					root.classList.add(dark ? 'dark' : 'light');
 					const meta = document.querySelector('meta[name="theme-color"]');
-					// F1-S2 token canvases: charcoal (never black) / warm near-white.
-					if (meta) meta.setAttribute('content', dark ? '#1b1e24' : '#faf9f7');
+					// F1-S2.1 token canvases: charcoal (never black) / warm gray.
+					if (meta) meta.setAttribute('content', dark ? '#1b1e24' : '#f4f3f0');
 				};
 				let theme = localStorage.getItem('theme');
 				if (!theme) {

@@ -3,10 +3,11 @@
  * derivation (the cockpit LANDS on the area list), relative time, and
  * the theme cycle contract shared with app.html's pre-paint script.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
 	cockpitUrl,
+	motionMs,
 	nextTheme,
 	normalizeTheme,
 	parseCockpitState,
@@ -90,5 +91,20 @@ describe('theme cycle (app.html contract)', () => {
 		expect(normalizeTheme('dark')).toBe('dark');
 		// Legacy values render dark — same rule as app.html.
 		expect(normalizeTheme('oled-dark')).toBe('dark');
+	});
+});
+
+describe('motionMs (F1-S2.1 reduced-motion gate)', () => {
+	it('passes durations through normally and zeroes them under prefers-reduced-motion', () => {
+		const matchMedia = vi.fn().mockReturnValue({ matches: false });
+		vi.stubGlobal('matchMedia', matchMedia);
+		try {
+			expect(motionMs(120)).toBe(120);
+			expect(matchMedia).toHaveBeenCalledWith('(prefers-reduced-motion: reduce)');
+			matchMedia.mockReturnValue({ matches: true });
+			expect(motionMs(120)).toBe(0);
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });

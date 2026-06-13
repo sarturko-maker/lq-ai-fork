@@ -54,3 +54,50 @@
   --lq-space-6: 24px;
   --lq-space-8: 32px;
 }
+
+/*
+ * F1-S2.1 wave-0 stopgap: legacy dark mode was BROKEN (these tokens had no
+ * .dark overrides, so legacy surfaces stayed hard-white on the charcoal
+ * shell). This block maps the palette onto the same charcoal scale as the
+ * semantic tokens in app.css (canvas/cards merge at the card step — the
+ * legacy layer has no canvas/card split to preserve). STOPGAP QUALITY,
+ * not full AA: components hardcoding `color: white` on accent fills (or
+ * white chips) sit at ~3:1 in dark — --lq-accent 0.65 is the best single
+ * value for the accent-as-text vs accent-as-fill dual use (no L satisfies
+ * both at 4.5:1). Surfaces migrating onto the design system (rollout
+ * waves 1-3) supersede this per-surface and restore full compliance.
+ * Radii and spacing are theme-neutral and stay defined on :root only.
+ *
+ * `:root.dark` (specificity 0,2,0), NOT `.dark`: 16 legacy components
+ * re-@import this sheet inside scoped <style> blocks, so duplicate
+ * `:root` light blocks land LATER in bundle order — an equal-specificity
+ * `.dark` block loses the cascade to them.
+ */
+:root.dark {
+  --lq-canvas: oklch(0.28 0.006 262);
+  --lq-inset: oklch(0.32 0.006 262);
+  --lq-inset-secure: oklch(0.32 0.012 165);
+
+  --lq-text: oklch(0.93 0.004 90);
+  --lq-text-secondary: oklch(0.71 0.008 90);
+  --lq-text-tertiary: oklch(0.65 0.008 90);
+
+  --lq-accent: oklch(0.65 0.1 165);
+  --lq-accent-soft: oklch(0.32 0.04 165);
+  --lq-accent-border: oklch(0.45 0.06 165);
+
+  --lq-tier: oklch(0.72 0.08 250);
+  --lq-tier-soft: oklch(0.32 0.04 250);
+  --lq-tier-border: oklch(0.45 0.05 250);
+
+  --lq-warn: oklch(0.75 0.12 80);
+  --lq-warn-soft: oklch(0.32 0.05 80);
+  --lq-warn-border: oklch(0.45 0.07 80);
+
+  --lq-error: oklch(0.72 0.16 27);
+  --lq-error-soft: oklch(0.32 0.05 27);
+  --lq-error-border: oklch(0.45 0.08 27);
+
+  --lq-border: oklch(0.37 0.006 262);
+  --lq-border-strong: oklch(0.45 0.006 262);
+}

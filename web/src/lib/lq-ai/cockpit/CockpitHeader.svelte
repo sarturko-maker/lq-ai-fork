@@ -10,6 +10,7 @@
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import MonitorIcon from '@lucide/svelte/icons/monitor';
 	import MoonIcon from '@lucide/svelte/icons/moon';
+	import PanelLeftIcon from '@lucide/svelte/icons/panel-left';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import SunIcon from '@lucide/svelte/icons/sun';
@@ -25,7 +26,16 @@
 	import { preferences } from '$lib/lq-ai/stores/preferences';
 	import { applyTheme, nextTheme, normalizeTheme, type Theme } from './helpers';
 
-	let { user }: { user: User | null } = $props();
+	let {
+		user,
+		railHidden = false,
+		onToggleRail
+	}: {
+		user: User | null;
+		/** Whether the rail is currently collapsed/closed (labels the toggle). */
+		railHidden?: boolean;
+		onToggleRail?: () => void;
+	} = $props();
 
 	const toolTabs = $derived(
 		visibleTabsFor(user, { autonomousEnabled: $preferences.autonomous_enabled }).filter(
@@ -64,9 +74,24 @@
 <header
 	class="flex h-12 shrink-0 items-center justify-between border-b border-border bg-background px-4"
 >
-	<a href="/lq-ai" class="text-base font-semibold tracking-tight text-foreground no-underline">
-		<span class="text-primary">LQ</span>.AI
-	</a>
+	<div class="flex items-center gap-1.5">
+		{#if onToggleRail}
+			<Button
+				variant="ghost"
+				size="icon"
+				class="text-muted-foreground"
+				title={railHidden ? 'Show navigation' : 'Hide navigation'}
+				aria-label={railHidden ? 'Show navigation' : 'Hide navigation'}
+				data-testid="lq-cockpit-rail-toggle"
+				onclick={onToggleRail}
+			>
+				<PanelLeftIcon class="size-4" aria-hidden="true" />
+			</Button>
+		{/if}
+		<a href="/lq-ai" class="text-base font-semibold tracking-tight text-foreground no-underline">
+			<span class="text-primary">LQ</span>.AI
+		</a>
+	</div>
 	<div class="flex items-center gap-1.5">
 		<AmbientTrustChrome />
 		<DropdownMenu.Root>

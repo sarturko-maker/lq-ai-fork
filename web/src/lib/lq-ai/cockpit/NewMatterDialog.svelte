@@ -69,7 +69,7 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="sm:max-w-md">
+	<Dialog.Content class="shadow-lg sm:max-w-md">
 		<Dialog.Header>
 			<Dialog.Title>New {noun}</Dialog.Title>
 			<Dialog.Description>

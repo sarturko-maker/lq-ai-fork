@@ -79,14 +79,26 @@
 	--radius-2xl: calc(var(--radius) * 1.8);
 	--radius-3xl: calc(var(--radius) * 2.2);
 	--radius-4xl: calc(var(--radius) * 2.6);
+	/* Elevation scale (F1-S2.1): shadow-* utilities resolve through the
+	   theme-aware --elevation-* custom props below (light: soft cool-tinted
+	   layers, the Legora float; dark: deeper plain-black layers — shadows
+	   barely read on charcoal, so dark relies on surface steps + borders
+	   first). Only xs/sm/md/lg are tokenized; other Tailwind steps keep
+	   their defaults. */
+	--shadow-xs: var(--elevation-xs);
+	--shadow-sm: var(--elevation-sm);
+	--shadow-md: var(--elevation-md);
+	--shadow-lg: var(--elevation-lg);
 }
 
 @layer base {
 	html {
 		/* The .lq-shell layout (routes/lq-ai/+layout.svelte) is a 100vh column
 		   with its own scrollable <main>; the document itself must never
-		   scroll behind it. */
+		   scroll behind it — in EITHER axis (a body-level horizontal
+		   scrollbar leaked under the cockpit pre-S2.1). */
 		overflow-y: hidden !important;
+		overflow-x: clip;
 		overscroll-behavior-y: none;
 		/* Long unbroken tokens (URLs, citation ids) must wrap, not overflow. */
 		overflow-wrap: break-word;
@@ -205,38 +217,54 @@
  */
 
 :root {
-	--background: oklch(0.985 0.003 90);
-	--foreground: oklch(0.26 0.008 80);
+	/* F1-S2.1 shade scale (maintainer review: "no shades, contrasts don't
+	   particularly make sense"): the canvas drops to a decisive warm gray
+	   so white cards/panels FLOAT (the Legora/Harvey surface separation —
+	   canvas 0.965 < muted 0.945-wells < card 1.0), text steps to a real
+	   3-level hierarchy (foreground 0.21 / muted-foreground 0.45 / a
+	   faded metadata step at ≥85% alpha — lower drops under the 4.5:1
+	   contract above; size/weight carry the rest of the hierarchy),
+	   borders strengthen to read on gray. */
+	--background: oklch(0.965 0.004 90);
+	--foreground: oklch(0.21 0.01 80);
 	--card: oklch(1 0 0);
-	--card-foreground: oklch(0.26 0.008 80);
+	--card-foreground: oklch(0.21 0.01 80);
 	--popover: oklch(1 0 0);
-	--popover-foreground: oklch(0.26 0.008 80);
+	--popover-foreground: oklch(0.21 0.01 80);
 	--primary: oklch(0.47 0.15 262);
 	--primary-foreground: oklch(0.985 0.003 90);
-	--secondary: oklch(0.955 0.004 90);
-	--secondary-foreground: oklch(0.32 0.008 80);
-	--muted: oklch(0.955 0.004 90);
-	--muted-foreground: oklch(0.5 0.01 85);
+	--secondary: oklch(0.945 0.005 90);
+	--secondary-foreground: oklch(0.3 0.01 80);
+	--muted: oklch(0.945 0.005 90);
+	--muted-foreground: oklch(0.45 0.012 85);
 	--accent: oklch(0.96 0.02 262);
 	--accent-foreground: oklch(0.32 0.05 262);
 	--destructive: oklch(0.55 0.19 27);
-	--border: oklch(0.92 0.004 90);
-	--input: oklch(0.92 0.004 90);
+	--border: oklch(0.9 0.005 90);
+	--input: oklch(0.9 0.005 90);
 	--ring: oklch(0.47 0.15 262);
 	--chart-1: oklch(0.47 0.15 262);
 	--chart-2: oklch(0.55 0.12 155);
 	--chart-3: oklch(0.55 0.19 27);
-	--chart-4: oklch(0.5 0.01 85);
+	--chart-4: oklch(0.45 0.012 85);
 	--chart-5: oklch(0.77 0.005 90);
 	--radius: 0.5rem;
-	--sidebar: oklch(0.972 0.004 90);
-	--sidebar-foreground: oklch(0.26 0.008 80);
+	/* The rail merges with the canvas (content floats, nav recedes —
+	   sidebar tokens keep their names; only the values align to canvas). */
+	--sidebar: oklch(0.965 0.004 90);
+	--sidebar-foreground: oklch(0.21 0.01 80);
 	--sidebar-primary: oklch(0.47 0.15 262);
 	--sidebar-primary-foreground: oklch(0.985 0.003 90);
-	--sidebar-accent: oklch(0.94 0.006 90);
-	--sidebar-accent-foreground: oklch(0.26 0.008 80);
-	--sidebar-border: oklch(0.92 0.004 90);
+	--sidebar-accent: oklch(0.93 0.008 90);
+	--sidebar-accent-foreground: oklch(0.21 0.01 80);
+	--sidebar-border: oklch(0.9 0.005 90);
 	--sidebar-ring: oklch(0.47 0.15 262);
+	/* Elevation (consumed via the @theme --shadow-* mapping). */
+	--elevation-xs: 0 1px 2px oklch(0.25 0.02 262 / 0.05);
+	--elevation-sm: 0 1px 2px oklch(0.25 0.02 262 / 0.05), 0 2px 8px oklch(0.25 0.02 262 / 0.04);
+	--elevation-md: 0 2px 4px oklch(0.25 0.02 262 / 0.05), 0 8px 24px oklch(0.25 0.02 262 / 0.07);
+	--elevation-lg: 0 4px 12px oklch(0.25 0.02 262 / 0.06), 0 16px 48px oklch(0.25 0.02 262 / 0.1);
+	color-scheme: light;
 	/* Run-status intents (settled-rows rollups, ADR-F004): strong color
 	   for dot/text, wash for the pill background — soft pastel pills,
 	   never saturated chips. */
@@ -257,35 +285,42 @@
 .dark {
 	--background: oklch(0.23 0.006 262);
 	--foreground: oklch(0.93 0.004 90);
-	--card: oklch(0.27 0.006 262);
+	--card: oklch(0.28 0.006 262);
 	--card-foreground: oklch(0.93 0.004 90);
-	--popover: oklch(0.27 0.006 262);
+	--popover: oklch(0.28 0.006 262);
 	--popover-foreground: oklch(0.93 0.004 90);
 	--primary: oklch(0.62 0.14 262);
 	--primary-foreground: oklch(0.985 0.003 90);
-	--secondary: oklch(0.31 0.006 262);
+	--secondary: oklch(0.32 0.006 262);
 	--secondary-foreground: oklch(0.93 0.004 90);
-	--muted: oklch(0.31 0.006 262);
-	--muted-foreground: oklch(0.68 0.008 90);
-	--accent: oklch(0.32 0.04 262);
+	--muted: oklch(0.32 0.006 262);
+	--muted-foreground: oklch(0.71 0.008 90);
+	--accent: oklch(0.33 0.04 262);
 	--accent-foreground: oklch(0.9 0.02 262);
 	--destructive: oklch(0.65 0.18 27);
-	--border: oklch(0.36 0.006 262);
-	--input: oklch(0.36 0.006 262);
+	--border: oklch(0.37 0.006 262);
+	--input: oklch(0.37 0.006 262);
 	--ring: oklch(0.62 0.14 262);
 	--chart-1: oklch(0.62 0.14 262);
 	--chart-2: oklch(0.65 0.12 155);
 	--chart-3: oklch(0.65 0.18 27);
-	--chart-4: oklch(0.68 0.008 90);
+	--chart-4: oklch(0.71 0.008 90);
 	--chart-5: oklch(0.47 0.006 262);
-	--sidebar: oklch(0.25 0.006 262);
+	--sidebar: oklch(0.23 0.006 262);
 	--sidebar-foreground: oklch(0.93 0.004 90);
 	--sidebar-primary: oklch(0.62 0.14 262);
 	--sidebar-primary-foreground: oklch(0.985 0.003 90);
-	--sidebar-accent: oklch(0.3 0.006 262);
+	--sidebar-accent: oklch(0.29 0.006 262);
 	--sidebar-accent-foreground: oklch(0.93 0.004 90);
-	--sidebar-border: oklch(0.36 0.006 262);
+	--sidebar-border: oklch(0.37 0.006 262);
 	--sidebar-ring: oklch(0.62 0.14 262);
+	--elevation-xs: 0 1px 2px oklch(0 0 0 / 0.35);
+	--elevation-sm: 0 1px 2px oklch(0 0 0 / 0.4), 0 2px 8px oklch(0 0 0 / 0.3);
+	--elevation-md: 0 2px 4px oklch(0 0 0 / 0.4), 0 8px 24px oklch(0 0 0 / 0.35);
+	--elevation-lg: 0 4px 12px oklch(0 0 0 / 0.45), 0 16px 48px oklch(0 0 0 / 0.4);
+	/* Native scrollbars / form controls follow the theme (the light
+	   scrollbar-on-charcoal artifact). */
+	color-scheme: dark;
 	--status-running: oklch(0.68 0.13 262);
 	--status-running-wash: oklch(0.32 0.04 262);
 	--status-completed: oklch(0.7 0.12 155);
