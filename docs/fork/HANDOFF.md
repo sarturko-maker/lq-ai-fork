@@ -20,6 +20,26 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   16 confirmed (1 blocker + should-fixes ALL FIXED), 4 refuted, 0 pre-existing.
   Evidence: `docs/fork/evidence/f1-s3/`.
 
+### Hotfix since F1-S3 — expired-session blank screen (PR #47, main `ede41b1`)
+
+- **Symptom:** cockpit blank, surviving hard refresh. **Cause:** expired access token →
+  `/users/me` 401 → client auto-`POST /auth/refresh`, which bcrypt-scans EVERY active
+  session (per-row salt, no index) — 359 accumulated admin sessions ≈ **79s** → the web
+  layout waits with no timeout → permanent blank.
+- **Fixes:** api — per-user active-session cap (`_MAX_ACTIVE_SESSIONS_PER_USER = 10`) in
+  `_create_session`; self-heals on next login. web — `+layout.svelte` gate now times the
+  session check at 8s → redirect to login (never hangs), sets `booted` in `finally`,
+  `await goto(...)`, and renders auth-exempt routes regardless of `booted`.
+- **Live-verified on the dev stack:** a real login dropped active sessions **359 → 10**
+  in 0.67s; bad-token refresh **79s → 2.3s**, valid refresh 2.5s (both < the 8s gate
+  timeout); valid session renders the cockpit, expired session redirects to login.
+  api + web rebuilt; **no migration** (DB still 0054).
+- **Follow-up (Backlog):** the `/auth/refresh` scan is GLOBAL (across all users), so the
+  cap bounds per-user accumulation but not the bad-token-spam DoS — the **deterministic-
+  HMAC index** on `user_sessions` is the real fix (needs a migration + security review).
+  Security review of PR #47: no blockers; the inert empty-`keep_ids` guard was added, the
+  narrow same-user concurrent-mint revoke race is documented + accepted in code.
+
 ## Done (F1-S3, this slice)
 
 - **Schema 0054** (additive, reversible): `practice_areas` += `profile_md`,
@@ -75,8 +95,9 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 - **Area tier floor is operator-set** until a model stronger than tier 4 is S9-qualified
   (Commercial seeds none — a floor stronger than 4 makes every run fail
   tier_below_minimum; the gateway enforces it, proven live).
-- auth/refresh hardening (HMAC index + injected semaphore; dev session prune needs
-  maintainer approval — 186 rows) — legacy-bugfix candidate.
+- auth/refresh hardening: per-user session cap + web gate timeout SHIPPED (PR #47, see
+  Hotfix above). REMAINING: the **deterministic-HMAC index** (removes the global bcrypt
+  scan + its bad-token-spam DoS; needs a migration + security review — in Backlog).
 - ADR-0011 disclosure on the agent surface — after F1-S5's attribution extension.
 - Live SSE token deltas DEAD until a Redis pub/sub publisher lands — ride F1-S4.
 - Flood brake counts queued-unclaimed runs (ADR-F009). Ingest orphan recovery
