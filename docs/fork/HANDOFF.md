@@ -66,12 +66,21 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-1. **Legacy-surface design rollout** (maintainer point c from S2.1; order ratified in
-   the S2.1 plan §Goals-3): **wave 1** = ConversationPanel markup/typography + the
-   ChatPanel tree (restyles chats, matters workspace, agents tab, cockpit pane); then
-   **wave 2** knowledge/skills/playbooks/tabular; **wave 3** settings/admin/trust/
-   saved-prompts/learn (+ `autonomous/` only if it survives F2/F3) + `(tools)` chrome.
-   Sequence with the maintainer against F1-S4/S5.
+1. **Legacy-surface design rollout — NOW DECOMPOSED.** Full executable plan:
+   **`docs/fork/plans/F1-legacy-design-rollout-decomposition.md`** (read it first). It turns the
+   S2.1 3-wave sketch into ~29 vertical one-PR slices (R0…R-LAST), each carrying the maintainer's
+   three disciplines (extensive testing · code simplification · adversarial review) as DoD, produced
+   by a map→synthesize→adversarial-critique workflow. **Resolved decisions (proposed defaults, in the
+   plan §Resolved decisions):** autonomous → SKIP all 10 (deletion-bound, leave on bridge for F2/F3);
+   ConversationPanel → SPLIT R-CONV-1 (logic extraction, tested) + R-CONV-2 (style); scope → whole
+   interface, checkpoint after Foundation+Wave1; typography.css → `@layer base` shim + R-TYPO decouple;
+   coverage table = step 0. **200k operating constraint:** each slice runs in one ≤200k main-agent
+   session — ≤~6–8 files / ≤~2k LOC, focused+truncated verify in-loop (full suite → CI), exploration
+   + adversarial review pushed to SUBAGENTS, big files read in ranges, compact at every slice boundary.
+   **PICK UP EXACTLY HERE:** build the coverage table (`grep -rl 'var(--lq-' src` → assign every file
+   to a slice/defer), then execute **R0 (extract matter validators) → R1a (Modal/Form/Alert primitives
+   on NewMatterModal) → R6 (MessageBubble + `<think>`)**. The dark-mode bridge (`+layout.svelte`
+   lines 23–24) holds un-migrated surfaces, so slices merge in almost any order; R-BRIDGE/R-LAST last.
 2. **F1-S4** (subagent tree + SSE v3-projection adapter) and **F1-S5**
    (`(run_id, tool_call_id)` idempotency ledger + attribution fan-out) — see
    `docs/fork/plans/F1-replan.md`. S4 consumes deepagents v3 `stream_events` typed
