@@ -124,9 +124,34 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
    - **CI UNBLOCKED:** the repo is now **PUBLIC** (2026-06-13) → GitHub Actions are unlimited/free; the
      earlier spending-limit block (R6 merged via maintainer authorization past it — PR #52) is resolved.
      **R7 onward: full CI green is required again** (the ADR-F005 gate is back to normal).
-   - **NEXT → R7 — Composer satellites** (`SlashPopover` + `EnhancePromptExpansion`); delete the
-     `var(--lq-*,#fallback)` chains. *Adversarial:* listbox keyboard / `aria-activedescendant`, popover
-     z-index under every modal combo. Rendered-surface → screenshots REQUIRED. Reuse the R1a/R6 kit.
+   - **R7 — Composer satellites: ✅ merged via PR #55** (or merging — confirm on main). **SlashPopover**
+     (kept Svelte 4): `<style>` deleted → semantic tokens (`bg-popover`/`border-border`/`shadow-md`;
+     active row `bg-accent` **+ `text-accent-foreground`** so the title colour flips on selection —
+     review fix; links/focus `text-primary`/`ring-ring`). Module helpers + keyboard/`aria-activedescendant`
+     state machine **frozen**. **EnhancePromptExpansion**: migrated **Svelte 4 → Svelte 5 runes** (the
+     precondition for shadcn `Button`'s `onclick` to forward) + `<style>` deleted — the three `.lq-btn-*`
+     button families → shadcn **`Button`** (default/outline/ghost), `lq-spin` → `animate-spin`, local
+     `.lq-text-caption` → `text-xs text-muted-foreground`. Enhanced-card label `text-accent-foreground`
+     (NOT `text-primary` — review **BLOCKER**: text-primary on bg-accent fails AA 2.16–2.69:1); amber JIT
+     strip; `handleDismiss` telemetry now `void …catch()` (review fix). `open()` + every `data-testid` +
+     prop names preserved. **Both files 0 `var(--lq-)`** (was 18 / 49). Adversarial review: 27 agents, 23
+     raised → **3 confirmed (1 blocker + 2 should-fix), ALL FIXED**; svelte-check 0; vitest **797**;
+     Cypress **4/4** live; evidence `docs/fork/evidence/r7/`.
+     **Gotchas for downstream:** (a) naming a `$state` variable `state` trips the Svelte TS tooling
+     (`$state` reads as store-autosubscribe of `state`) → 4 phantom errors; **name it anything but `state`**.
+     (b) **`text-primary` on `bg-accent` fails WCAG AA** in both themes — use **`text-accent-foreground`**
+     for ink on the accent wash (applies to every downstream accent surface). (c) shadcn `Button` `onclick`
+     only forwards from a **runes** parent; a legacy `on:click` on it is a silent no-op. (d) long
+     multi-`cy.visit` screenshot loops outlive the access-token TTL → mid-run /login redirect; capture all
+     shots on **one** page load (toggle theme/viewport live). (e) web CI gates only `npm run check` +
+     `vitest` — **eslint is not gated** (so empty-catch / cypress-wait lint won't block, but clean them anyway).
+   - **NEXT → R8 — Conversation containers** (`ChatSidebar` 17, `AttachedFilesPanel` 9,
+     `MessageOverflowMenu` 8, `AttachedSkillPill` 7). *Simplify:* `lq-btn-*` literals → shadcn `Button`
+     (reuse the R7 pattern), extract a reusable upload-chip. **+ Responsive parity (SHELL slice):** the
+     chat side panes must **collapse on narrow like the cockpit** — the narrow screenshot must show the
+     COLLAPSE, not just an un-broken wide layout (non-responsive = FAIL on this slice; see plan §Responsive
+     parity). *Adversarial:* scroll anchoring, upload-cancel chip removal, dual-use SavedPromptsPanel,
+     **collapse-matches-cockpit**. Reuse the R1a/R6/R7 kit. (Coverage table → R8 row.)
      **Backlog (from R6 review):** converge `ConversationPanel` + `SkillSourceView` onto
      `renderModelMarkdown` (they already enforce the same media-forbid via local copies) in R-CONV-2 / R14a.
 
