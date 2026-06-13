@@ -1823,26 +1823,51 @@ parsed LLM turns). Landed across migrations `0048` (runs + steps),
 created by `AsyncPostgresSaver.setup()` and are deliberately NOT
 alembic-managed (the library migrates its own schema; alembic owns ours).
 
-### `practice_areas` (0053, ADR-F002 — F1-S2 minimal shape)
+### `practice_areas` (0053 minimal, 0054 config — ADR-F002/F004/F010)
 
 Practice areas are backend entities from day one (ADR-F002 rejected
-frontend-only grouping). F1-S2 ships only what the cockpit shell renders,
-seeded with the standard areas (Commercial configured, the rest inert);
-F1-S3 EXTENDS this table with the config vocabulary (area profile, bound
-skills/playbooks/MCPs, tier floor) plus `projects.practice_area_id`.
+frontend-only grouping) AND the agent identity record. F1-S2 (0053) shipped
+the cockpit-shell shape; F1-S3 (0054) adds the config vocabulary: `profile_md`
+(folded into the agent system prompt), `default_tier_floor` (combined with the
+matter floor via `min()`; the gateway enforces it), and `agent_config` JSONB —
+declarative shape data consumed by ONE renderer (`api/app/agents/area_agent.py`):
+`subagents` (declarative SubAgent specs that NEVER carry a `model` key — ADR-F010,
+gateway bypass) plus by-reference `playbooks`/`mcp_servers` (ids/names only, NO
+credentials — NORTH-STAR inv 3). `configured` is now DERIVED server-side (area has
+a non-empty profile); the column is retained but the API reports the derived value.
 
 ```sql
 CREATE TABLE practice_areas (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key         TEXT NOT NULL UNIQUE,     -- stable machine key ('commercial', …)
-    name        TEXT NOT NULL,
-    unit_label  TEXT NOT NULL,            -- unit-of-work noun: 'Matter'/'Programme'/'Deal' (ADR-F004: data, not code)
-    configured  BOOLEAN NOT NULL DEFAULT false,  -- F002 inert-card switch (seed data until S3)
-    position    INTEGER NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key                TEXT NOT NULL UNIQUE,     -- stable machine key ('commercial', …)
+    name               TEXT NOT NULL,
+    unit_label         TEXT NOT NULL,            -- unit-of-work noun (ADR-F004: data, not code)
+    configured         BOOLEAN NOT NULL DEFAULT false,  -- derived from profile in S3
+    position           INTEGER NOT NULL,
+    profile_md         TEXT,                     -- 0054: area profile -> system prompt
+    default_tier_floor SMALLINT,                 -- 0054: 1..5 CHECK; combined via min()
+    agent_config       JSONB NOT NULL DEFAULT '{}'::jsonb,  -- 0054: declarative subagents + refs
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_practice_areas_tier_range
+        CHECK (default_tier_floor IS NULL OR default_tier_floor BETWEEN 1 AND 5)
+);
+
+-- 0054: area-scoped skills (filesystem-canonical names, ADR-0004; mirrors project_skills).
+CREATE TABLE practice_area_skills (
+    practice_area_id UUID NOT NULL REFERENCES practice_areas(id) ON DELETE CASCADE,
+    skill_name       TEXT NOT NULL,
+    attached_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (practice_area_id, skill_name)
 );
 ```
+
+0054 also adds `projects.practice_area_id` (nullable FK → `practice_areas` ON DELETE
+SET NULL; CHECK `NOT (is_sandbox AND practice_area_id IS NOT NULL)`; partial index on
+active filed rows) and `audit_log.practice_area_id` (nullable FK, per-area slicing).
+Commercial is seeded with a real profile and NO area tier floor (the only S9-qualified
+model is tier 4; a stronger floor would make the area unusable — operators set one via
+PATCH once a qualifying model lands).
 
 ### `agent_threads` (0050, ADR-F008)
 

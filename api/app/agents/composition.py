@@ -32,6 +32,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agents.area_agent import AreaAgentSpec, combine_tier_floors, render_area_agent
 from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.lease import RunLease, settle_run
@@ -40,6 +41,7 @@ from app.agents.stream import RunStreamBroker
 from app.agents.tools import MatterBinding, build_matter_tools
 from app.db.session import get_session_factory
 from app.models.agent_run import AgentRun
+from app.models.practice_area import PracticeArea
 from app.models.project import Project
 from app.schemas.agent_runs import AgentRunStatus
 
@@ -57,11 +59,18 @@ MATTER_PROMPT = (
 )
 
 
-def system_prompt_for(binding: MatterBinding | None) -> str:
-    """The run's full system prompt — base + the matter addendum."""
-    if binding is None:
-        return SYSTEM_PROMPT
-    return SYSTEM_PROMPT + MATTER_PROMPT.format(name=binding.name)
+def system_prompt_for(binding: MatterBinding | None, area: AreaAgentSpec | None = None) -> str:
+    """The run's full system prompt — base + matter addendum + area profile.
+
+    The area profile (F1-S3) is appended last so the practice area's voice
+    grounds the matter work; an unconfigured/absent area adds nothing.
+    """
+    prompt = SYSTEM_PROMPT
+    if binding is not None:
+        prompt += MATTER_PROMPT.format(name=binding.name)
+    if area is not None:
+        prompt += area.system_prompt_suffix
+    return prompt
 
 
 async def compose_and_execute_run(
@@ -89,6 +98,7 @@ async def compose_and_execute_run(
     publisher = broker.publisher(run_id) if broker is not None else None
     try:
         binding: MatterBinding | None = None
+        area_spec: AreaAgentSpec | None = None
         is_follow_up = False
         async with session_factory() as db:
             run = await db.get(AgentRun, run_id)
@@ -122,7 +132,25 @@ async def compose_and_execute_run(
                         name=project.name,
                         privileged=project.privileged,
                         minimum_inference_tier=project.minimum_inference_tier,
+                        practice_area_id=project.practice_area_id,
                     )
+                    # F1-S3: the matter's practice area IS the agent identity
+                    # (ADR-F002). Render its profile/tier/subagents from
+                    # config (ADR-F004 — one renderer, no per-area branches).
+                    # Skills are config-landed but not live-attached this
+                    # slice (attaching SkillsMiddleware changes the harness
+                    # profile → S9 re-qualification; the activation slice owns
+                    # it), so bound_skill_names is empty here by design.
+                    if project.practice_area_id is not None:
+                        area = await db.get(PracticeArea, project.practice_area_id)
+                        if area is not None:
+                            area_spec = render_area_agent(
+                                profile_md=area.profile_md,
+                                default_tier_floor=area.default_tier_floor,
+                                agent_config=area.agent_config,
+                                bound_skill_names=[],
+                                known_skill_names=[],
+                            )
 
         checkpointer = checkpointer_provider()
         if checkpointer is None and is_follow_up:
@@ -148,15 +176,21 @@ async def compose_and_execute_run(
             else []
         )
 
+        # F1-S3: the gateway tier floor is the strongest (lowest) of the
+        # matter floor and the area's default floor — the gateway combiner
+        # is min() over its sources, so combining API-side keeps the single
+        # envelope field and needs no gateway change (plan §Goal 1).
+        matter_floor = binding.minimum_inference_tier if binding is not None else None
+        area_floor = area_spec.tier_floor if area_spec is not None else None
+        effective_tier_floor = combine_tier_floors(matter_floor, area_floor)
+
         http_client = build_gateway_http_client()
         try:
             model = model_builder(
                 model_alias=model_alias,
                 purpose=purpose,
                 http_async_client=http_client,
-                project_minimum_inference_tier=(
-                    binding.minimum_inference_tier if binding is not None else None
-                ),
+                project_minimum_inference_tier=effective_tier_floor,
                 privileged=binding.privileged if binding is not None else False,
             )
             await execute_agent_run(
@@ -164,7 +198,8 @@ async def compose_and_execute_run(
                 session_factory,
                 tools=tools,
                 model=model,
-                system_prompt=system_prompt_for(binding),
+                system_prompt=system_prompt_for(binding, area_spec),
+                subagents=area_spec.subagents if area_spec is not None else None,
                 checkpointer=checkpointer,
                 thread_id=thread_id,
                 publisher=publisher,

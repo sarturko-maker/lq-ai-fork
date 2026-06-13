@@ -228,6 +228,7 @@
 			matters={activity?.matters ?? null}
 			{nowMs}
 			onEnterArea={enterArea}
+			onOpenMatter={openMatter}
 		/>
 	{:else if view === 'matters' && selectedArea}
 		<MattersPanel
@@ -277,6 +278,7 @@
 			matters={activity?.matters ?? null}
 			{nowMs}
 			onEnterArea={enterArea}
+			onOpenMatter={openMatter}
 		/>
 	{/if}
 {/snippet}

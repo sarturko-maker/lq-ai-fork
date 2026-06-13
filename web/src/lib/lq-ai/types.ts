@@ -155,6 +155,8 @@ export interface ProjectCreate {
 	context_md?: string;
 	privileged?: boolean;
 	minimum_inference_tier?: 1 | 2 | 3 | 4 | 5;
+	/** F1-S3: file the matter under a configured practice area (ADR-F002). */
+	practice_area_id?: string;
 }
 
 // ----- Chats / messages -----
@@ -1028,12 +1030,7 @@ export interface EasyPlaybookGeneration {
  * execution surface does NOT have — tabular runs can be hours long, so
  * cancellation matters.
  */
-export type TabularExecutionStatus =
-	| 'pending'
-	| 'running'
-	| 'completed'
-	| 'failed'
-	| 'cancelled';
+export type TabularExecutionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 /**
  * Per-cell confidence from the Citation Engine cascade. `failed` is

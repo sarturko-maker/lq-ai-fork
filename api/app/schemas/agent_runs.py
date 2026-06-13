@@ -188,6 +188,11 @@ class MatterActivityRead(BaseModel):
     thread_count: int = 0
     last_run_at: datetime | None = None
     last_run_status: AgentRunStatus | None = None
+    # F1-S3: which practice area this matter files under (ADR-F002). None
+    # for unfiled/legacy matters; the cockpit groups its area cards by
+    # ``practice_area_key``.
+    practice_area_id: uuid.UUID | None = None
+    practice_area_key: str | None = None
 
 
 class UnfiledThreadsSummary(BaseModel):

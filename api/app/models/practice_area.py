@@ -27,18 +27,47 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Integer, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    PrimaryKeyConstraint,
+    SmallInteger,
+    String,
+    Text,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
 
 class PracticeArea(Base):
-    """One practice area — the cockpit's left-rail unit (ADR-F002)."""
+    """One practice area — the cockpit's left-rail unit AND the agent
+    identity record (ADR-F002).
+
+    F1-S3 (ADR-F004/F010) adds the config vocabulary: ``profile_md``
+    (folded into the agent system prompt), ``default_tier_floor`` (combined
+    with the matter floor via ``min()`` — the gateway enforces it), and
+    ``agent_config`` — declarative shape data consumed by ONE renderer:
+    ``subagents`` (declarative SubAgent specs; per ADR-F010 they NEVER carry
+    a ``model`` key — that would bypass the gateway), plus by-reference
+    ``playbooks``/``mcp_servers`` (ids/names only, NO credentials —
+    NORTH-STAR invariant 3; recorded for forward config, not consumed yet).
+    """
 
     __tablename__ = "practice_areas"
+    __table_args__ = (
+        CheckConstraint(
+            "default_tier_floor IS NULL OR (default_tier_floor BETWEEN 1 AND 5)",
+            name="chk_practice_areas_tier_range",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -52,6 +81,12 @@ class PracticeArea(Base):
     unit_label: Mapped[str] = mapped_column(Text, nullable=False)
     configured: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     position: Mapped[int] = mapped_column(Integer, nullable=False)
+    # F1-S3 config vocabulary.
+    profile_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_tier_floor: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    agent_config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -61,3 +96,36 @@ class PracticeArea(Base):
 
     def __repr__(self) -> str:
         return f"<PracticeArea key={self.key!r} configured={self.configured}>"
+
+
+class PracticeAreaSkill(Base):
+    """Many-to-many join: practice area ↔ skill name.
+
+    ``skill_name`` is text, not a FK — skills are filesystem-canonical per
+    ADR-0004 (no ``skills`` SQL table). The admin handler validates the name
+    exists in the in-memory registry before insert; the renderer skips any
+    name the registry no longer knows (registry is source of truth). Mirrors
+    ``project_skills``.
+    """
+
+    __tablename__ = "practice_area_skills"
+    __table_args__ = (
+        PrimaryKeyConstraint("practice_area_id", "skill_name", name="pk_practice_area_skills"),
+        CheckConstraint(
+            "char_length(skill_name) > 0 AND char_length(skill_name) <= 200",
+            name="chk_practice_area_skills_name_len",
+        ),
+    )
+
+    practice_area_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("practice_areas.id", ondelete="CASCADE", name="fk_practice_area_skills_area_id"),
+        nullable=False,
+    )
+    skill_name: Mapped[str] = mapped_column(String, nullable=False)
+    attached_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    def __repr__(self) -> str:
+        return f"<PracticeAreaSkill area_id={self.practice_area_id} skill_name={self.skill_name!r}>"

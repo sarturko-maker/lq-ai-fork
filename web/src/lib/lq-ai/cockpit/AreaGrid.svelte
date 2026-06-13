@@ -10,27 +10,35 @@
 
 	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 	import type { MatterActivity } from '$lib/lq-ai/api/agents';
-	import { motionMs, timeAgo } from './helpers';
+	import { areaActivityCounts, motionMs, timeAgo } from './helpers';
 
 	let {
 		areas,
 		areasError,
 		matters,
 		nowMs,
-		onEnterArea
+		onEnterArea,
+		onOpenMatter
 	}: {
 		areas: PracticeArea[] | null;
 		areasError: string | null;
 		matters: MatterActivity[] | null;
 		nowMs: number;
 		onEnterArea: (area: PracticeArea) => void;
+		onOpenMatter: (matter: MatterActivity) => void;
 	} = $props();
 
-	// v0: every matter renders under the single configured area —
-	// presentation only, nothing stored (S3's projects.practice_area_id
-	// makes filing real; MILESTONES pre-F1 guard).
-	const matterCount = $derived(matters?.length ?? null);
-	const lastActivity = $derived(matters && matters.length > 0 ? matters[0].last_run_at : null);
+	// F1-S3: matters file under their area via projects.practice_area_id
+	// (surfaced as practice_area_key) — each card counts only ITS matters.
+	// null while loading (see areaActivityCounts).
+	const byArea = $derived(matters === null ? null : areaActivityCounts(matters));
+
+	// Legacy/unfiled matters (no practice_area_key) would otherwise be
+	// invisible in the cockpit (review blocker) — surface them here so they
+	// stay reachable; opening one needs no area (the matter view binds by id).
+	const unfiledMatters = $derived(
+		matters === null ? [] : matters.filter((m) => !m.practice_area_key)
+	);
 </script>
 
 <div
@@ -55,6 +63,7 @@
 		<div class="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
 			{#each areas as area (area.id)}
 				{#if area.configured}
+					{@const stats = byArea?.get(area.key)}
 					<!-- Floating card: resting shadow-xs, hover lifts to shadow-sm
 					     (tokenized elevation scale, F1-S2.1). -->
 					<button
@@ -69,15 +78,15 @@
 							{area.name}
 						</span>
 						<span class="mt-1 text-xs text-muted-foreground">
-							{#if matterCount === null}
+							{#if byArea === null}
 								Loading {area.unit_label.toLowerCase()}s…
-							{:else if matterCount === 0}
+							{:else if !stats}
 								No {area.unit_label.toLowerCase()}s yet
 							{:else}
-								<span class="tabular-nums">{matterCount}</span>
-								{area.unit_label.toLowerCase()}{matterCount === 1 ? '' : 's'}
-								{#if lastActivity}
-									· active {timeAgo(lastActivity, nowMs)}
+								<span class="tabular-nums">{stats.count}</span>
+								{area.unit_label.toLowerCase()}{stats.count === 1 ? '' : 's'}
+								{#if stats.lastActivity}
+									· active {timeAgo(stats.lastActivity, nowMs)}
 								{/if}
 							{/if}
 						</span>
@@ -112,5 +121,37 @@
 				{/if}
 			{/each}
 		</div>
+
+		{#if unfiledMatters.length > 0}
+			<!-- Legacy/unfiled matters (no area) — kept reachable (review blocker
+			     fix). New matters file under an area; these predate filing. -->
+			<section class="mt-10" data-testid="lq-cockpit-unfiled-matters">
+				<h2 class="text-sm font-semibold tracking-tight text-foreground">Unfiled matters</h2>
+				<p class="mt-0.5 text-xs text-muted-foreground">
+					Matters not yet filed under a practice area.
+				</p>
+				<ul class="mt-3 overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+					{#each unfiledMatters as matter (matter.project_id)}
+						<li class="border-b border-border last:border-b-0">
+							<button
+								type="button"
+								class="group flex h-12 w-full items-center gap-3 px-4 text-left transition-colors duration-150 ease-out hover:bg-muted/60"
+								data-testid="lq-cockpit-unfiled-matter-row"
+								onclick={() => onOpenMatter(matter)}
+							>
+								<span class="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+									{matter.name}
+								</span>
+								{#if matter.last_run_at}
+									<span class="w-20 text-right text-xs text-muted-foreground tabular-nums">
+										{timeAgo(matter.last_run_at, nowMs)}
+									</span>
+								{/if}
+							</button>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
 	{/if}
 </div>

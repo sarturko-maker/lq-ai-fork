@@ -122,10 +122,19 @@ def build_deep_agent(
     """Construct a deep agent (compiled LangGraph graph).
 
     Single import site for ``deepagents``; absorb upstream API churn here.
+
+    ADR-F010 gate: if a ``subagents=`` list is passed, reject any spec
+    carrying a non-gateway ``model`` BEFORE construction. deepagents resolves
+    a string ``model`` via ``init_chat_model`` (direct provider SDK = gateway
+    bypass); area subagents must omit ``model`` to inherit the gateway-bound
+    parent. This is the one seam all agent construction passes through.
     """
     from deepagents import create_deep_agent
 
+    from app.agents.area_agent import reject_model_bearing_subagents
     from app.agents.profiles import ensure_harness_profiles_registered
+
+    reject_model_bearing_subagents(kwargs.get("subagents"))
 
     # F0-S9: qualification is per-(model, harness-profile) — the registry
     # must be populated before any agent resolves its profile.
