@@ -10,8 +10,15 @@
 	 * All rollups derive from settled rows via GET /agents/matters
 	 * (ADR-F004 — never stream state); area keys stay presentation/URL
 	 * state only until S3's schema (MILESTONES pre-F1 guard).
+	 *
+	 * F1-S2.1 responsive contract (maintainer review: "at half-screen the
+	 * content squashes"): ≥880px the rail is a collapsible paneforge pane
+	 * (header toggle, collapsed state persists via autoSaveId); <880px the
+	 * rail leaves the pane group entirely and becomes an off-canvas drawer
+	 * behind the same header toggle.
 	 */
 	import { onDestroy, onMount } from 'svelte';
+	import { fade, fly } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
@@ -28,7 +35,7 @@
 	import CockpitHeader from './CockpitHeader.svelte';
 	import ConversationHost from './ConversationHost.svelte';
 	import MattersPanel from './MattersPanel.svelte';
-	import { cockpitUrl, parseCockpitState, viewOf } from './helpers';
+	import { cockpitUrl, motionMs, parseCockpitState, viewOf } from './helpers';
 
 	let areas = $state<PracticeArea[] | null>(null);
 	let areasError = $state<string | null>(null);
@@ -47,6 +54,55 @@
 		activity?.matters.find((m) => m.project_id === sel.matter) ?? null
 	);
 	const unitLabel = $derived(selectedArea?.unit_label ?? 'Matter');
+
+	// --- Responsive shell state -------------------------------------------
+	let viewportWidth = $state(1280);
+	const isNarrow = $derived(viewportWidth < 880);
+	// paneforge Pane instance (collapse/expand/isCollapsed — verified 1.0.2
+	// API); only bound in the WIDE layout.
+	let railPane = $state<ReturnType<typeof Resizable.Pane> | null>(null);
+	let railCollapsed = $state(false);
+	let drawerOpen = $state(false);
+	// A flex-grow transition animates collapse/expand, but it must NOT
+	// apply while the user drags the resizer (it would rubber-band) and
+	// must respect prefers-reduced-motion (review fix — the slice's own
+	// motion gate).
+	let resizing = $state(false);
+	const reducedMotion =
+		typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+	$effect(() => {
+		if (!isNarrow) {
+			// Leaving the narrow layout always closes the drawer.
+			drawerOpen = false;
+		} else {
+			// The Handle unmounts with the rail pane; its onDraggingChange
+			// never fires false mid-drag — unlatch (review fix).
+			resizing = false;
+		}
+	});
+
+	// The drawer is a modal surface: move focus into it on open (Escape
+	// and the scrim close it; full focus trapping is deferred on record).
+	let drawerEl = $state<HTMLElement | null>(null);
+	$effect(() => {
+		if (drawerOpen) drawerEl?.focus();
+	});
+
+	function toggleRail() {
+		if (isNarrow) {
+			drawerOpen = !drawerOpen;
+			return;
+		}
+		if (!railPane) return;
+		if (railPane.isCollapsed()) railPane.expand();
+		else railPane.collapse();
+	}
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && drawerOpen) drawerOpen = false;
+	}
+	// ----------------------------------------------------------------------
 
 	function errText(e: unknown): string {
 		return e instanceof LQAIApiError ? e.message : 'network error';
@@ -98,7 +154,13 @@
 	}
 
 	function enterArea(area: PracticeArea) {
+		drawerOpen = false;
 		nav(cockpitUrl({ area: area.key }));
+	}
+
+	function openUnfiled() {
+		drawerOpen = false;
+		nav(cockpitUrl({ unfiled: true }));
 	}
 
 	function openMatter(matter: MatterActivity) {
@@ -144,82 +206,142 @@
 	}
 </script>
 
-<div class="flex h-dvh min-h-0 flex-col bg-background text-foreground" data-testid="lq-cockpit">
-	<CockpitHeader user={$auth.user ?? null} />
-	<Resizable.PaneGroup direction="horizontal" autoSaveId="lq-cockpit-panes" class="min-h-0 flex-1">
-		<Resizable.Pane defaultSize={18} minSize={13} maxSize={30}>
-			<AreaRail
-				{areas}
-				{areasError}
-				unfiled={activity?.unfiled ?? null}
-				selectedAreaKey={sel.area}
-				unfiledOpen={sel.unfiled}
-				onSelectArea={enterArea}
-				onSelectUnfiled={() => nav(cockpitUrl({ unfiled: true }))}
+<svelte:window bind:innerWidth={viewportWidth} onkeydown={handleKeydown} />
+
+{#snippet railContent()}
+	<AreaRail
+		{areas}
+		{areasError}
+		unfiled={activity?.unfiled ?? null}
+		selectedAreaKey={sel.area}
+		unfiledOpen={sel.unfiled}
+		onSelectArea={enterArea}
+		onSelectUnfiled={openUnfiled}
+	/>
+{/snippet}
+
+{#snippet mainViews()}
+	{#if view === 'areas'}
+		<AreaGrid
+			{areas}
+			{areasError}
+			matters={activity?.matters ?? null}
+			{nowMs}
+			onEnterArea={enterArea}
+		/>
+	{:else if view === 'matters' && selectedArea}
+		<MattersPanel
+			area={selectedArea}
+			matters={activity?.matters ?? null}
+			mattersError={activityError}
+			{nowMs}
+			onBack={() => nav(cockpitUrl({}))}
+			onOpenMatter={openMatter}
+			onCreated={onMatterCreated}
+		/>
+	{:else if view === 'matter' && selectedMatter}
+		{#key selectedMatter.project_id}
+			<ConversationHost
+				matter={selectedMatter}
+				{unitLabel}
+				threadId={sel.thread}
+				{projects}
+				{projectsError}
+				{nowMs}
+				onBack={() => nav(cockpitUrl({ area: sel.area }))}
+				onSelectThread={selectThread}
+				{onThreadCreated}
+				onMatterCreated={onMatterCreatedInline}
+				onActivity={loadActivity}
 			/>
-		</Resizable.Pane>
-		<Resizable.Handle />
-		<Resizable.Pane defaultSize={82}>
-			<main class="h-full min-h-0 overflow-y-auto">
-				{#if view === 'areas'}
-					<AreaGrid
-						{areas}
-						{areasError}
-						matters={activity?.matters ?? null}
-						{nowMs}
-						onEnterArea={enterArea}
-					/>
-				{:else if view === 'matters' && selectedArea}
-					<MattersPanel
-						area={selectedArea}
-						matters={activity?.matters ?? null}
-						mattersError={activityError}
-						{nowMs}
-						onBack={() => nav(cockpitUrl({}))}
-						onOpenMatter={openMatter}
-						onCreated={onMatterCreated}
-					/>
-				{:else if view === 'matter' && selectedMatter}
-					{#key selectedMatter.project_id}
-						<ConversationHost
-							matter={selectedMatter}
-							{unitLabel}
-							threadId={sel.thread}
-							{projects}
-							{projectsError}
-							{nowMs}
-							onBack={() => nav(cockpitUrl({ area: sel.area }))}
-							onSelectThread={selectThread}
-							{onThreadCreated}
-							onMatterCreated={onMatterCreatedInline}
-							onActivity={loadActivity}
-						/>
-					{/key}
-				{:else if view === 'unfiled'}
-					<ConversationHost
-						matter={null}
-						threadId={sel.thread}
-						{projects}
-						{projectsError}
-						{nowMs}
-						onBack={() => nav(cockpitUrl({}))}
-						onSelectThread={selectThread}
-						{onThreadCreated}
-						onMatterCreated={onMatterCreatedInline}
-						onActivity={loadActivity}
-					/>
-				{:else}
-					<!-- Selection points at something not loaded/not enterable
-					     (stale deep link, unconfigured area) — land honestly. -->
-					<AreaGrid
-						{areas}
-						{areasError}
-						matters={activity?.matters ?? null}
-						{nowMs}
-						onEnterArea={enterArea}
-					/>
-				{/if}
-			</main>
-		</Resizable.Pane>
-	</Resizable.PaneGroup>
+		{/key}
+	{:else if view === 'unfiled'}
+		<ConversationHost
+			matter={null}
+			threadId={sel.thread}
+			{projects}
+			{projectsError}
+			{nowMs}
+			onBack={() => nav(cockpitUrl({}))}
+			onSelectThread={selectThread}
+			{onThreadCreated}
+			onMatterCreated={onMatterCreatedInline}
+			onActivity={loadActivity}
+		/>
+	{:else}
+		<!-- Selection points at something not loaded/not enterable
+		     (stale deep link, unconfigured area) — land honestly. -->
+		<AreaGrid
+			{areas}
+			{areasError}
+			matters={activity?.matters ?? null}
+			{nowMs}
+			onEnterArea={enterArea}
+		/>
+	{/if}
+{/snippet}
+
+<div class="flex h-dvh min-h-0 flex-col bg-background text-foreground" data-testid="lq-cockpit">
+	<CockpitHeader
+		user={$auth.user ?? null}
+		railHidden={isNarrow ? !drawerOpen : railCollapsed}
+		onToggleRail={toggleRail}
+	/>
+	<div class="relative min-h-0 flex-1">
+		<!-- ONE pane group across both layouts: the rail pane (and its
+		     handle) leave the group below the breakpoint, but the MAIN pane
+		     never remounts — a live conversation survives crossing 880px. -->
+		<Resizable.PaneGroup direction="horizontal" autoSaveId="lq-cockpit-panes" class="h-full">
+			{#if !isNarrow}
+				<Resizable.Pane
+					id="cockpit-rail"
+					order={1}
+					collapsible
+					collapsedSize={0}
+					defaultSize={18}
+					minSize={13}
+					maxSize={30}
+					class={resizing || reducedMotion ? '' : 'transition-[flex-grow] duration-200 ease-out'}
+					bind:this={railPane}
+					onCollapse={() => (railCollapsed = true)}
+					onExpand={() => (railCollapsed = false)}
+				>
+					{@render railContent()}
+				</Resizable.Pane>
+				<!-- Resizer affordance (F1-S2.1): invisible at rest beyond the
+				     hairline, indigo on hover/drag. -->
+				<Resizable.Handle
+					class="transition-colors duration-150 ease-out hover:bg-primary/40 data-[active]:bg-primary/60"
+					onDraggingChange={(d) => (resizing = d)}
+				/>
+			{/if}
+			<Resizable.Pane id="cockpit-main" order={2} defaultSize={82}>
+				<main class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain">
+					{@render mainViews()}
+				</main>
+			</Resizable.Pane>
+		</Resizable.PaneGroup>
+		{#if isNarrow && drawerOpen}
+			<!-- Scrim: tokenized wash, never a black sheet. -->
+			<button
+				type="button"
+				class="absolute inset-0 z-30 cursor-default bg-foreground/20"
+				aria-label="Close navigation"
+				transition:fade={{ duration: motionMs(120) }}
+				onclick={() => (drawerOpen = false)}
+			></button>
+			<div
+				class="absolute inset-y-0 left-0 z-40 w-72 max-w-[85%] border-r border-border bg-background shadow-lg outline-none"
+				data-testid="lq-cockpit-drawer"
+				role="dialog"
+				aria-modal="true"
+				aria-label="Practice areas"
+				tabindex="-1"
+				bind:this={drawerEl}
+				transition:fly={{ x: -24, duration: motionMs(160), opacity: 0.4 }}
+			>
+				{@render railContent()}
+			</div>
+		{/if}
+	</div>
 </div>

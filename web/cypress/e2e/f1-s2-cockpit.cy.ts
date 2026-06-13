@@ -93,6 +93,12 @@ describe('F1-S2 — Cockpit v0', () => {
 				throw new Error(`unrecognized background-color serialization: ${bg}`);
 			}
 		});
+		// Settle before capturing: HEADLESS captures (Electron and Chromium
+		// alike) can composite stale light tiles after the class flip — the
+		// computed-style assertion above is authoritative; the screenshot is
+		// best-effort (F1-S2.1 evidence runs capture dark HEADED instead).
+		// eslint-disable-next-line cypress/no-unnecessary-waiting -- paint settle before a pixel capture
+		cy.wait(400);
 		cy.screenshot('f1-s2-4-dark-mode', { capture: 'viewport' });
 		// Back to system for the next spec.
 		cy.get('button[aria-label^="Theme"]').click();

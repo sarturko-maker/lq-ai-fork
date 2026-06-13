@@ -11,7 +11,9 @@
 	 * start inside a matter.
 	 */
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
+	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import ShieldIcon from '@lucide/svelte/icons/shield';
 
@@ -23,7 +25,7 @@
 	import ConversationPanel from '$lib/lq-ai/components/agents/ConversationPanel.svelte';
 	import NewMatterDialog from './NewMatterDialog.svelte';
 	import StatusPill from './StatusPill.svelte';
-	import { timeAgo } from './helpers';
+	import { motionMs, timeAgo } from './helpers';
 
 	let {
 		matter = null,
@@ -83,6 +85,32 @@
 		`${threadId !== null && threadId === panelOwnedThread ? 'live' : (threadId ?? 'fresh')}:${composerEpoch}`
 	);
 
+	// F1-S2.1 stacked mode: below 720px of HOST width the fixed w-72 aside
+	// would crush the conversation — show list OR conversation, with a back
+	// row. Width starts optimistic (side-by-side) so the first paint at
+	// desktop sizes doesn't flash the stacked layout.
+	let hostWidth = $state(1024);
+	const isStacked = $derived(hostWidth < 720);
+	// svelte-ignore state_referenced_locally
+	let stackedShowPanel = $state(threadId !== null);
+	const showList = $derived(!isStacked || !stackedShowPanel);
+	const showPanel = $derived(!isStacked || stackedShowPanel);
+
+	// Keep the stacked pane in sync with URL-driven thread changes (review
+	// fix): a threadId ARRIVING (composer-created sync, history forward)
+	// must show the panel — otherwise crossing the width threshold later
+	// unmounts a live conversation, and back/forward desyncs URL from
+	// pane. Transitions TO null stay hands-off: newConversation() already
+	// chose the panel, backToList() already chose the list.
+	// svelte-ignore state_referenced_locally
+	let lastThreadId = threadId;
+	$effect(() => {
+		if (threadId !== lastThreadId) {
+			lastThreadId = threadId;
+			if (threadId !== null) stackedShowPanel = true;
+		}
+	});
+
 	async function loadThreads() {
 		const generation = ++threadsGeneration;
 		try {
@@ -108,138 +136,198 @@
 
 	function selectThread(id: string | null) {
 		panelOwnedThread = null;
+		stackedShowPanel = true;
 		onSelectThread(id);
 	}
 
 	function newConversation() {
 		panelOwnedThread = null;
 		composerEpoch += 1;
+		stackedShowPanel = true;
+		onSelectThread(null);
+	}
+
+	function backToList() {
+		// Stacked-mode back: unmounting the panel drops any live stream view,
+		// but the run itself is durable (F1-S1) — the list shows its pill.
+		// Clear the URL thread too (review fix): a reload/share of the list
+		// view must not reopen the conversation.
+		stackedShowPanel = false;
+		panelOwnedThread = null;
 		onSelectThread(null);
 	}
 
 	function handleThreadCreated(event: CustomEvent<{ threadId: string; projectId: string | null }>) {
 		panelOwnedThread = event.detail.threadId;
+		stackedShowPanel = true;
 		onThreadCreated(event.detail);
 		loadThreads();
 	}
 </script>
 
-<div class="flex h-full min-h-0" data-testid="lq-cockpit-conversation">
-	<aside class="flex w-72 shrink-0 flex-col border-r border-border bg-background">
-		<div class="shrink-0 border-b border-border px-4 py-3">
-			<button
-				type="button"
-				class="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground"
-				onclick={onBack}
+<!-- The conversation workspace FLOATS as one card on the canvas (F1-S2.1
+     elevation scale): recessed thread list inside it, conversation column
+     to the right — three honest surface steps instead of one flat sheet. -->
+<div
+	class="h-full min-h-0 p-2 sm:p-3"
+	data-testid="lq-cockpit-conversation"
+	bind:clientWidth={hostWidth}
+	in:fade|global={{ duration: motionMs(120) }}
+>
+	<div
+		class="flex h-full min-h-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+	>
+		{#if showList}
+			<aside
+				class="flex min-h-0 shrink-0 flex-col {isStacked
+					? 'w-full'
+					: 'w-72 border-r border-border bg-muted/40'}"
 			>
-				<ChevronLeftIcon class="size-3.5" aria-hidden="true" />
-				{matter ? `${unitLabel}s` : 'Practice areas'}
-			</button>
-			<h2 class="mt-1.5 truncate text-sm font-semibold text-foreground">
-				{#if matter}
-					{matter.name}
-					{#if matter.privileged}
-						<ShieldIcon
-							class="ml-1 inline size-3.5 align-[-2px] text-muted-foreground"
-							aria-label="Privileged"
-						/>
+				<div class="shrink-0 border-b border-border px-4 py-3">
+					<button
+						type="button"
+						class="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground"
+						onclick={onBack}
+					>
+						<ChevronLeftIcon class="size-3.5" aria-hidden="true" />
+						{matter ? `${unitLabel}s` : 'Practice areas'}
+					</button>
+					<h2 class="mt-1.5 truncate text-sm font-semibold text-foreground">
+						{#if matter}
+							{matter.name}
+							{#if matter.privileged}
+								<ShieldIcon
+									class="ml-1 inline size-3.5 align-[-2px] text-muted-foreground"
+									aria-label="Privileged"
+								/>
+							{/if}
+						{:else}
+							Unfiled conversations
+						{/if}
+					</h2>
+					{#if matter}
+						<Button
+							size="sm"
+							variant="outline"
+							class="mt-2.5 w-full gap-1.5"
+							data-testid="lq-cockpit-new-conversation"
+							onclick={newConversation}
+						>
+							<PlusIcon class="size-4" aria-hidden="true" />
+							New conversation
+						</Button>
+					{:else}
+						<p class="mt-1.5 text-xs text-muted-foreground">
+							Legacy conversations without a {unitLabel.toLowerCase()}. Resume them here — new
+							conversations start inside a {unitLabel.toLowerCase()}.
+						</p>
 					{/if}
-				{:else}
-					Unfiled conversations
-				{/if}
-			</h2>
-			{#if matter}
-				<Button
-					size="sm"
-					variant="outline"
-					class="mt-2.5 w-full gap-1.5"
-					data-testid="lq-cockpit-new-conversation"
-					onclick={newConversation}
+				</div>
+				<nav
+					class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain px-2 py-2"
+					aria-label="Conversations"
 				>
-					<PlusIcon class="size-4" aria-hidden="true" />
-					New conversation
-				</Button>
-			{:else}
-				<p class="mt-1.5 text-xs text-muted-foreground">
-					Legacy conversations without a {unitLabel.toLowerCase()}. Resume them here — new
-					conversations start inside a {unitLabel.toLowerCase()}.
-				</p>
-			{/if}
-		</div>
-		<nav class="flex-1 overflow-y-auto px-2 py-2" aria-label="Conversations">
-			{#if threadsError}
-				<p class="px-2 py-1 text-sm text-destructive">
-					Couldn't load conversations: {threadsError}
-				</p>
-			{:else if threads === null}
-				<div class="space-y-1 px-2 py-1" aria-hidden="true">
-					{#each [0, 1, 2] as i (i)}
-						<div class="h-9 animate-pulse rounded-md bg-muted"></div>
-					{/each}
-				</div>
-			{:else if threads.length === 0}
-				<p class="px-2 py-1 text-xs text-muted-foreground">
-					{matter ? 'No conversations yet — ask the agent something.' : 'Nothing here.'}
-				</p>
-			{:else}
-				<ul class="space-y-0.5">
-					{#each threads as t (t.id)}
-						<li>
-							<button
-								type="button"
-								class="flex w-full flex-col gap-0.5 rounded-md px-2.5 py-2 text-left transition-colors duration-150 hover:bg-muted/60 {threadId ===
-								t.id
-									? 'bg-accent'
-									: ''}"
-								data-testid="lq-cockpit-thread-row"
-								onclick={() => selectThread(t.id)}
-							>
-								<span class="line-clamp-2 text-xs font-medium text-foreground">{t.title}</span>
-								<span class="flex items-center justify-between gap-2">
-									<StatusPill status={t.last_run_status} lastRunAt={t.last_run_at} {nowMs} />
-									<span class="text-[11px] text-muted-foreground tabular-nums">
-										{timeAgo(t.last_run_at, nowMs)}
-									</span>
-								</span>
-							</button>
-						</li>
-					{/each}
-				</ul>
-				{#if threads !== null && threadsTotal > threads.length}
-					<p class="px-2.5 py-2 text-[11px] text-muted-foreground tabular-nums">
-						Showing {threads.length} of {threadsTotal} — older conversations are on the legacy agents
-						page.
-					</p>
-				{/if}
-			{/if}
-		</nav>
-	</aside>
-
-	<section class="min-w-0 flex-1 overflow-y-auto">
-		{#if matter || threadId}
-			{#key panelKey}
-				<ConversationPanel
-					initialThreadId={threadId}
-					matters={projects}
-					mattersError={projectsError}
-					bind:prompt
-					bind:selectedMatterId
-					on:settled={handleSettled}
-					on:newmatter={() => (createOpen = true)}
-					on:threadcreated={handleThreadCreated}
-				/>
-			{/key}
-		{:else}
-			<div class="flex h-full items-center justify-center px-8">
-				<div class="max-w-sm text-center">
-					<h2 class="text-base font-semibold text-foreground">Pick a conversation</h2>
-					<p class="mt-1 text-sm text-muted-foreground">
-						Unfiled conversations are read-and-resume only. Select one on the left to continue it.
-					</p>
-				</div>
-			</div>
+					{#if threadsError}
+						<p class="px-2 py-1 text-sm text-destructive">
+							Couldn't load conversations: {threadsError}
+						</p>
+					{:else if threads === null}
+						<div class="space-y-1 px-2 py-1" aria-hidden="true">
+							{#each [0, 1, 2] as i (i)}
+								<div class="h-12 animate-pulse rounded-md bg-muted/70"></div>
+							{/each}
+						</div>
+					{:else if threads.length === 0}
+						<p class="px-2 py-1 text-xs text-muted-foreground">
+							{matter ? 'No conversations yet — ask the agent something.' : 'Nothing here.'}
+						</p>
+					{:else}
+						<ul class="space-y-0.5">
+							{#each threads as t (t.id)}
+								<li>
+									<button
+										type="button"
+										class="flex w-full flex-col gap-0.5 rounded-md px-2.5 py-2 text-left text-foreground transition-colors duration-150 ease-out hover:bg-muted/60 {threadId ===
+										t.id
+											? 'bg-accent text-accent-foreground'
+											: ''}"
+										data-testid="lq-cockpit-thread-row"
+										onclick={() => selectThread(t.id)}
+									>
+										<span class="line-clamp-2 text-xs font-medium">{t.title}</span>
+										<span class="flex items-center justify-between gap-2">
+											<StatusPill status={t.last_run_status} lastRunAt={t.last_run_at} {nowMs} />
+											<span class="text-[11px] text-muted-foreground tabular-nums">
+												{timeAgo(t.last_run_at, nowMs)}
+											</span>
+										</span>
+									</button>
+								</li>
+							{/each}
+						</ul>
+						{#if threads !== null && threadsTotal > threads.length}
+							<p class="px-2.5 py-2 text-[11px] text-muted-foreground tabular-nums">
+								Showing {threads.length} of {threadsTotal} — older conversations are on the legacy agents
+								page.
+							</p>
+						{/if}
+					{/if}
+				</nav>
+			</aside>
 		{/if}
-	</section>
+
+		{#if showPanel}
+			<section class="flex min-h-0 min-w-0 flex-1 flex-col">
+				{#if isStacked}
+					<div class="shrink-0 border-b border-border px-4 py-2">
+						<button
+							type="button"
+							class="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground"
+							data-testid="lq-cockpit-back-to-list"
+							onclick={backToList}
+						>
+							<ChevronLeftIcon class="size-3.5" aria-hidden="true" />
+							Conversations
+						</button>
+					</div>
+				{/if}
+				<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
+					{#if matter || threadId}
+						{#key panelKey}
+							<div
+								class="mx-auto w-full max-w-3xl px-4 py-4 sm:px-6"
+								in:fade={{ duration: motionMs(100) }}
+							>
+								<ConversationPanel
+									initialThreadId={threadId}
+									matters={projects}
+									mattersError={projectsError}
+									bind:prompt
+									bind:selectedMatterId
+									on:settled={handleSettled}
+									on:newmatter={() => (createOpen = true)}
+									on:threadcreated={handleThreadCreated}
+								/>
+							</div>
+						{/key}
+					{:else}
+						<div class="flex h-full items-center justify-center px-8">
+							<div class="max-w-sm text-center">
+								<div class="mx-auto flex size-10 items-center justify-center rounded-full bg-muted">
+									<InboxIcon class="size-5 text-muted-foreground" aria-hidden="true" />
+								</div>
+								<h2 class="mt-3 text-base font-semibold text-foreground">Pick a conversation</h2>
+								<p class="mt-1 text-sm text-muted-foreground">
+									Unfiled conversations are read-and-resume only. Select one on the left to continue
+									it.
+								</p>
+							</div>
+						</div>
+					{/if}
+				</div>
+			</section>
+		{/if}
+	</div>
 </div>
 
 <NewMatterDialog
