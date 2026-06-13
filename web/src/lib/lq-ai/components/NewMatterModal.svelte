@@ -2,42 +2,53 @@
 	import { projectsApi } from '$lib/lq-ai/api';
 	import type { Project } from '$lib/lq-ai/types';
 	import { validateNewMatter, type TierFloor } from '$lib/lq-ai/validators/matter';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import { Input } from '$lib/components/ui/input/index.js';
+	import { Textarea } from '$lib/components/ui/textarea/index.js';
+	import ModalShell from './primitives/ModalShell.svelte';
+	import FormControl from './primitives/FormControl.svelte';
+	import Alert from './primitives/Alert.svelte';
 	import InfoTip from './InfoTip.svelte';
 
-	export let onClose: () => void;
-	/**
-	 * The CALLER owns post-create navigation (F0-S8): the Matters page
-	 * routes to the new matter's detail; the Agents tab binds the matter
-	 * in place — a hardcoded goto here would yank the user out of the
-	 * conversation, defeating create-in-place.
-	 */
-	export let onCreated: (matter: Project) => void;
+	let {
+		onClose,
+		onCreated
+	}: {
+		onClose: () => void;
+		/**
+		 * The CALLER owns post-create navigation (F0-S8): the Matters page routes
+		 * to the new matter's detail; the Agents tab binds the matter in place — a
+		 * hardcoded goto here would yank the user out of the conversation.
+		 */
+		onCreated: (matter: Project) => void;
+	} = $props();
+
+	// Mounted == open; the dialog drives close (Escape / overlay / X / Cancel),
+	// and we propagate that to the caller so it unmounts us.
+	let open = $state(true);
+	$effect(() => {
+		if (!open) onClose();
+	});
 
 	// Form state
-	let name = '';
-	let description = '';
-	let privileged = false;
-	let tierFloor: TierFloor | null = null;
+	let name = $state('');
+	let description = $state('');
+	let privileged = $state(false);
+	let tierFloor = $state<TierFloor | null>(null);
 
 	// UI state
-	let submitting = false;
-	let nameError: string | null = null;
-	let tierError: string | null = null;
-	let submitError: string | null = null;
+	let submitting = $state(false);
+	let nameError = $state<string | null>(null);
+	let tierError = $state<string | null>(null);
+	let submitError = $state<string | null>(null);
 
-	// Reset tier floor when privileged is unchecked
-	$: if (!privileged) tierFloor = null;
+	// A non-privileged matter never carries a tier floor.
+	$effect(() => {
+		if (!privileged) tierFloor = null;
+	});
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') onClose();
-	}
-
-	let nameInput: HTMLInputElement;
-
-	// Focus the name input when modal opens
-	$: if (nameInput) nameInput.focus();
-
-	async function handleSubmit() {
+	async function handleSubmit(event: SubmitEvent) {
+		event.preventDefault();
 		nameError = null;
 		tierError = null;
 		submitError = null;
@@ -62,11 +73,10 @@
 			});
 			onCreated(created);
 		} catch (e: unknown) {
-			if (e instanceof Error) {
-				submitError = e.message ?? "Couldn't reach the server. Try again.";
-			} else {
-				submitError = "Couldn't reach the server. Try again.";
-			}
+			submitError =
+				e instanceof Error
+					? (e.message ?? "Couldn't reach the server. Try again.")
+					: "Couldn't reach the server. Try again.";
 		} finally {
 			submitting = false;
 		}
@@ -83,290 +93,78 @@
 	];
 </script>
 
-<div
-	class="nmm-backdrop"
-	role="dialog"
-	aria-modal="true"
-	aria-labelledby="nmm-title"
-	tabindex="-1"
-	on:click={onClose}
-	on:keydown={handleKeydown}
->
-	<!-- svelte-ignore a11y-no-static-element-interactions -->
-	<div class="nmm-panel" on:click|stopPropagation on:keydown|stopPropagation>
-		<h2 id="nmm-title" class="lq-text-page-h nmm-title">New matter</h2>
+<ModalShell bind:open title="New matter" contentClass="sm:max-w-lg">
+	<form id="nmm-form" class="flex flex-col gap-4" novalidate onsubmit={handleSubmit}>
+		<FormControl id="nmm-name" label="Matter name" required error={nameError}>
+			<Input
+				id="nmm-name"
+				type="text"
+				bind:value={name}
+				placeholder="e.g. Acme NDA Review"
+				maxlength={200}
+				required
+				disabled={submitting}
+				aria-invalid={!!nameError}
+				aria-describedby={nameError ? 'nmm-name-error' : undefined}
+			/>
+		</FormControl>
 
-		<form on:submit|preventDefault={handleSubmit} class="nmm-form" novalidate>
-			<!-- Name -->
-			<div class="nmm-field">
-				<label class="nmm-label" for="nmm-name"
-					>Matter name <span class="nmm-required" aria-hidden="true">*</span></label
+		<FormControl id="nmm-description" label="Description" optional>
+			<Textarea
+				id="nmm-description"
+				bind:value={description}
+				rows={4}
+				maxlength={2000}
+				placeholder="Brief description of this matter…"
+				disabled={submitting}
+			/>
+		</FormControl>
+
+		<div class="flex items-center gap-2">
+			<input
+				id="nmm-privileged"
+				type="checkbox"
+				class="size-4 accent-primary"
+				bind:checked={privileged}
+				disabled={submitting}
+			/>
+			<label class="cursor-pointer text-[13px] font-medium text-foreground" for="nmm-privileged">
+				Attorney-client privileged
+			</label>
+			<InfoTip
+				content="Marks this matter as covered by attorney-client privilege. Requires you to set a minimum inference tier floor (below) so privileged content can't route to weaker providers. Tags every chat and audit-log entry as privileged for e-discovery filtering. Recommended for client work."
+			/>
+		</div>
+
+		{#if privileged}
+			<FormControl id="nmm-tier" label="Minimum inference tier" required error={tierError}>
+				<select
+					id="nmm-tier"
+					class="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
+					bind:value={tierFloor}
+					disabled={submitting}
+					aria-invalid={!!tierError}
+					aria-describedby={tierError ? 'nmm-tier-error' : undefined}
 				>
-				<input
-					id="nmm-name"
-					type="text"
-					bind:this={nameInput}
-					bind:value={name}
-					class="nmm-input"
-					class:nmm-input--error={!!nameError}
-					placeholder="e.g. Acme NDA Review"
-					maxlength="200"
-					required
-					disabled={submitting}
-					aria-describedby={nameError ? 'nmm-name-error' : undefined}
-				/>
-				{#if nameError}
-					<p id="nmm-name-error" class="nmm-field-error" role="alert">{nameError}</p>
-				{/if}
-			</div>
+					<option value={null}>(none)</option>
+					{#each TIER_OPTIONS as opt (opt.value)}
+						<option value={opt.value}>{opt.label}</option>
+					{/each}
+				</select>
+			</FormControl>
+		{/if}
 
-			<!-- Description -->
-			<div class="nmm-field">
-				<label class="nmm-label" for="nmm-description"
-					>Description <span class="nmm-optional">(optional)</span></label
-				>
-				<textarea
-					id="nmm-description"
-					bind:value={description}
-					class="nmm-textarea"
-					rows="4"
-					maxlength="2000"
-					placeholder="Brief description of this matter…"
-					disabled={submitting}
-				></textarea>
-			</div>
+		{#if submitError}
+			<Alert intent="error">{submitError}</Alert>
+		{/if}
+	</form>
 
-			<!-- Privileged -->
-			<div class="nmm-field nmm-field--inline">
-				<input
-					id="nmm-privileged"
-					type="checkbox"
-					bind:checked={privileged}
-					disabled={submitting}
-				/>
-				<label class="nmm-label nmm-label--checkbox" for="nmm-privileged">
-					Attorney-client privileged
-				</label>
-				<InfoTip
-					content="Marks this matter as covered by attorney-client privilege. Forces a minimum inference tier (defaults to Tier 2 — enterprise managed inference with no-training commitments) so privileged content cannot accidentally route to weaker providers. Tags every chat and audit-log entry as privileged for e-discovery filtering. Recommended for client work."
-				/>
-			</div>
-
-			<!-- Tier floor — shown always but required when privileged -->
-			{#if privileged}
-				<div class="nmm-field">
-					<label class="nmm-label" for="nmm-tier">
-						Minimum inference tier <span class="nmm-required" aria-hidden="true">*</span>
-					</label>
-					<select
-						id="nmm-tier"
-						class="nmm-select"
-						class:nmm-input--error={!!tierError}
-						bind:value={tierFloor}
-						disabled={submitting}
-						aria-describedby={tierError ? 'nmm-tier-error' : undefined}
-					>
-						<option value={null}>(none)</option>
-						{#each TIER_OPTIONS as opt}
-							<option value={opt.value}>{opt.label}</option>
-						{/each}
-					</select>
-					{#if tierError}
-						<p id="nmm-tier-error" class="nmm-field-error" role="alert">{tierError}</p>
-					{/if}
-				</div>
-			{/if}
-
-			<!-- Submit error -->
-			{#if submitError}
-				<p class="nmm-submit-error" role="alert">{submitError}</p>
-			{/if}
-
-			<!-- Actions -->
-			<div class="nmm-actions">
-				<button type="button" class="nmm-btn-secondary" on:click={onClose} disabled={submitting}>
-					Cancel
-				</button>
-				<button type="submit" class="nmm-btn-primary" disabled={submitting}>
-					{submitting ? 'Creating matter…' : 'Create matter'}
-				</button>
-			</div>
-		</form>
-	</div>
-</div>
-
-<style>
-	.nmm-backdrop {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.35);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 100;
-	}
-
-	.nmm-panel {
-		background: var(--lq-canvas);
-		border-radius: var(--lq-radius-lg);
-		padding: var(--lq-space-6);
-		max-width: 520px;
-		width: calc(100% - 32px);
-		box-shadow: 0 24px 64px rgba(0, 0, 0, 0.18);
-		max-height: calc(100vh - 64px);
-		overflow-y: auto;
-	}
-
-	.nmm-title {
-		margin: 0 0 var(--lq-space-5);
-	}
-
-	.nmm-form {
-		display: flex;
-		flex-direction: column;
-		gap: var(--lq-space-4);
-	}
-
-	.nmm-field {
-		display: flex;
-		flex-direction: column;
-		gap: var(--lq-space-1);
-	}
-
-	.nmm-field--inline {
-		flex-direction: row;
-		align-items: center;
-		gap: var(--lq-space-2);
-	}
-
-	.nmm-label {
-		font-size: 13px;
-		font-weight: 500;
-		color: var(--lq-text-primary);
-	}
-
-	.nmm-label--checkbox {
-		cursor: pointer;
-	}
-
-	.nmm-required {
-		color: var(--lq-error);
-		margin-left: 2px;
-	}
-
-	.nmm-optional {
-		font-weight: 400;
-		color: var(--lq-text-tertiary);
-		font-size: 12px;
-	}
-
-	.nmm-input,
-	.nmm-textarea,
-	.nmm-select {
-		background: var(--lq-inset);
-		border: 1px solid var(--lq-border);
-		border-radius: var(--lq-radius);
-		padding: var(--lq-space-2) var(--lq-space-3);
-		font-size: 14px;
-		color: var(--lq-text-primary);
-		width: 100%;
-		box-sizing: border-box;
-		transition: border-color 0.15s ease;
-	}
-
-	.nmm-input:focus,
-	.nmm-textarea:focus,
-	.nmm-select:focus {
-		outline: none;
-		border-color: var(--lq-accent);
-		box-shadow: 0 0 0 2px var(--lq-accent-soft);
-	}
-
-	.nmm-input--error {
-		border-color: var(--lq-error);
-	}
-
-	.nmm-input--error:focus {
-		box-shadow: 0 0 0 2px var(--lq-error-soft);
-	}
-
-	.nmm-textarea {
-		resize: vertical;
-		min-height: 80px;
-	}
-
-	.nmm-field-error {
-		font-size: 12px;
-		color: var(--lq-error);
-		margin: 0;
-	}
-
-	.nmm-submit-error {
-		font-size: 13px;
-		color: var(--lq-error);
-		background: var(--lq-error-soft);
-		border: 1px solid var(--lq-error-border, var(--lq-error));
-		border-radius: var(--lq-radius);
-		padding: var(--lq-space-2) var(--lq-space-3);
-		margin: 0;
-	}
-
-	.nmm-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: var(--lq-space-3);
-		padding-top: var(--lq-space-2);
-		border-top: 1px solid var(--lq-border);
-		margin-top: var(--lq-space-2);
-	}
-
-	.nmm-btn-primary {
-		background: var(--lq-accent);
-		color: white;
-		border: 0;
-		border-radius: var(--lq-radius);
-		padding: var(--lq-space-2) var(--lq-space-4);
-		font-weight: 500;
-		font-size: 14px;
-		cursor: pointer;
-	}
-
-	.nmm-btn-primary:hover:not(:disabled) {
-		filter: brightness(0.95);
-	}
-
-	.nmm-btn-primary:focus-visible {
-		outline: 2px solid var(--lq-accent);
-		outline-offset: 2px;
-	}
-
-	.nmm-btn-primary:disabled {
-		opacity: 0.65;
-		cursor: not-allowed;
-	}
-
-	.nmm-btn-secondary {
-		background: transparent;
-		color: var(--lq-text-secondary);
-		border: 1px solid var(--lq-border);
-		border-radius: var(--lq-radius);
-		padding: var(--lq-space-2) var(--lq-space-4);
-		font-weight: 500;
-		font-size: 14px;
-		cursor: pointer;
-	}
-
-	.nmm-btn-secondary:hover:not(:disabled) {
-		background: var(--lq-inset);
-	}
-
-	.nmm-btn-secondary:focus-visible {
-		outline: 2px solid var(--lq-accent);
-		outline-offset: 2px;
-	}
-
-	.nmm-btn-secondary:disabled {
-		opacity: 0.65;
-		cursor: not-allowed;
-	}
-</style>
+	{#snippet footer()}
+		<Button type="button" variant="outline" disabled={submitting} onclick={() => (open = false)}>
+			Cancel
+		</Button>
+		<Button type="submit" form="nmm-form" disabled={submitting}>
+			{submitting ? 'Creating matter…' : 'Create matter'}
+		</Button>
+	{/snippet}
+</ModalShell>
