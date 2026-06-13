@@ -133,7 +133,10 @@ async def test_seed_commercial_config_present_and_derived_configured(
     areas = {a["key"]: a for a in resp.json()["practice_areas"]}
     commercial = areas["commercial"]
     assert commercial["configured"] is True
-    assert commercial["default_tier_floor"] == 2
+    # No seeded area floor: the only S9-qualified model is tier 4; a stronger
+    # area floor would make every Commercial run fail tier_below_minimum
+    # (the floor mechanism is proven elsewhere). Operators set one later.
+    assert commercial["default_tier_floor"] is None
     assert commercial["profile_md"] and "Commercial" in commercial["profile_md"]
     assert commercial["bound_skills"] == []
     # Inert areas have no profile and derive configured=False.

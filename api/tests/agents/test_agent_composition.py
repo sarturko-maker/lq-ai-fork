@@ -220,15 +220,21 @@ async def test_bound_run_composes_matter_tools_and_privilege_envelope(
 async def test_area_filed_matter_combines_tier_floor_and_audits_area(
     comp_env: CompositionEnv,
 ) -> None:
-    """F1-S3: a matter filed under Commercial (seeded tier floor 2) sends
-    the STRONGER of the matter floor (4) and the area floor (2) → 2, and the
-    tool-call audit row carries the area id (per-area slicing)."""
+    """F1-S3: a matter filed under an area with a tier floor sends the
+    STRONGER of the matter floor (4) and the area floor (2) → 2, and the
+    tool-call audit row carries the area id (per-area slicing). Sets the area
+    floor explicitly (Commercial seeds no floor — see the migration)."""
     from app.models.practice_area import PracticeArea
 
     async with comp_env.factory() as db:
         area_id = (
             await db.execute(select(PracticeArea.id).where(PracticeArea.key == "commercial"))
         ).scalar_one()
+        await db.execute(
+            PracticeArea.__table__.update()
+            .where(PracticeArea.id == area_id)
+            .values(default_tier_floor=2)
+        )
         await db.execute(
             Project.__table__.update()
             .where(Project.id == comp_env.project_id)

@@ -135,4 +135,25 @@ derives `configured` from real config and shows each area only its own matters.
 
 ## Deviations
 
-(filled during implementation)
+- **Commercial seeds NO area tier floor (NULL), not 2.** Live verification caught it: the
+  gateway correctly enforced a seeded floor of 2 and rejected MiniMax-M3 (tier 4) with
+  `403 tier_below_minimum` — proving the mechanism, but making Commercial unusable with the
+  only S9-qualified model. The floor mechanism still ships (unit test + the live 403 + the
+  combine test that sets a floor explicitly); Commercial's floor is operator-set via PATCH once
+  a qualifying model lands. Evidence: `docs/fork/evidence/f1-s3/live-verification.md`.
+- **Area skills: config-landed, not live-attached this slice.** The `practice_area_skills` join +
+  admin attach/detach + renderer skill-list ship and are curatable, but composition passes
+  `bound_skill_names=[]` — attaching `SkillsMiddleware` to the running agent changes the harness
+  profile, which re-runs the S9 qualification matrix (model-compatibility.md). That activation is
+  the S4-adjacent slice. Documented in code (composition comment) + the API endpoint docstring.
+- **Subagents: renderer + guard + pass-through ship; Commercial declares none.** So the live
+  agent graph is byte-identical to the qualified baseline (S9 stays dormant). An operator
+  configuring subagents activates fan-out (and should re-run S9). The load-bearing security guard
+  is enforced at the `build_deep_agent` seam regardless.
+- **`configured` derived in the endpoint, stored column retained.** The API reports
+  `bool(profile_md)`; the stored column is kept consistent on PATCH but is no longer the source of
+  truth. Avoided a column drop/rename for a one-slice change.
+- **ValidationError → 400, not 422.** The codebase's `ValidationError` maps to 400 (Pydantic
+  boundary errors are 422); the agent_config shape rejection is a 400. Tests assert 400.
+- **`audit_log.practice_area_id` is a first-class column** (per the ratified scope and F002
+  "audit slicing"), threaded via `GuardContext.practice_area_id` → `audit_action`.

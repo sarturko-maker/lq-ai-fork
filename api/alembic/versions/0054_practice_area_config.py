@@ -53,9 +53,15 @@ _COMMERCIAL_PROFILE_MD = (
     "in-house posture: protect our position, flag risk, and propose concrete "
     "fallbacks the business can act on."
 )
-# Tier 2 default floor: commercial matter work routes at least to the mid tier
-# (lower number = stronger). Combined with any stricter matter floor via min().
-_COMMERCIAL_TIER_FLOOR = 2
+# Commercial seeds NO area tier floor. The area-floor MECHANISM ships and is
+# enforced (the gateway combines it via min() and rejects too-weak models —
+# proven live), but the only S9-qualified model today is MiniMax-M3 at tier 4
+# (weaker). An area floor stronger than 4 would make EVERY run under the area
+# fail tier_below_minimum until a stronger model is qualified — i.e. it would
+# make Commercial unusable, defeating F1's "one configurable area usable for a
+# real task". An operator sets a floor via PATCH once a qualifying model lands
+# (model-compatibility.md, S9). Matters may still set their own floor.
+_COMMERCIAL_TIER_FLOOR: int | None = None
 
 
 def upgrade() -> None:
@@ -157,13 +163,14 @@ def _seed_commercial_config(conn: sa.engine.Connection) -> None:
         ),
         {"profile": _COMMERCIAL_PROFILE_MD},
     )
-    conn.execute(
-        sa.text(
-            "UPDATE practice_areas SET default_tier_floor = :tier "
-            "WHERE key = 'commercial' AND default_tier_floor IS NULL"
-        ),
-        {"tier": _COMMERCIAL_TIER_FLOOR},
-    )
+    if _COMMERCIAL_TIER_FLOOR is not None:
+        conn.execute(
+            sa.text(
+                "UPDATE practice_areas SET default_tier_floor = :tier "
+                "WHERE key = 'commercial' AND default_tier_floor IS NULL"
+            ),
+            {"tier": _COMMERCIAL_TIER_FLOOR},
+        )
 
 
 def downgrade() -> None:
