@@ -32,6 +32,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import _MAX_ACTIVE_SESSIONS_PER_USER
 from app.config import get_settings
 from app.db.session import get_db
 from app.main import app
@@ -199,6 +200,67 @@ async def test_login_creates_session_row(
     assert s.expires_at > datetime.now(tz=UTC)
     # The plaintext refresh token from the response is NOT what's stored.
     assert s.refresh_token_hash != resp.json()["refresh_token"]
+
+
+@pytest.mark.integration
+async def test_login_caps_active_sessions_per_user(
+    client: AsyncClient, db_session: AsyncSession, seed_user: User
+) -> None:
+    """Minting a session revokes the user's oldest sessions beyond the cap.
+
+    Bounds the /auth/refresh per-row bcrypt scan: unbounded session growth
+    made that scan take ~79s with 359 stale dev sessions, which stranded the
+    web layout on a permanent blank screen. The most-recently-active sessions
+    survive; the oldest are revoked.
+    """
+    settings = get_settings()
+    now = datetime.now(tz=UTC)
+    # Seed cap + 2 active sessions, oldest-active first (i=0 is the least
+    # recently active) so we can assert exactly which ones survive.
+    seeded: list[UserSession] = []
+    for i in range(_MAX_ACTIVE_SESSIONS_PER_USER + 2):
+        s = UserSession(
+            user_id=seed_user.id,
+            refresh_token_hash=f"seeded-hash-{i}",
+            expires_at=now + timedelta(seconds=settings.jwt_refresh_token_ttl_seconds),
+            absolute_expires_at=now + timedelta(seconds=settings.session_absolute_timeout_seconds),
+            created_at=now - timedelta(minutes=(100 - i)),
+            last_active_at=now - timedelta(minutes=(100 - i)),
+        )
+        db_session.add(s)
+        seeded.append(s)
+    await db_session.flush()
+
+    # A fresh login mints one more session (the newest) and triggers the cap.
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"email": seed_user.email, "password": "correct-horse-battery-staple"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    active = (
+        (
+            await db_session.execute(
+                select(UserSession).where(
+                    UserSession.user_id == seed_user.id,
+                    UserSession.revoked_at.is_(None),
+                    UserSession.expires_at > now,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Exactly the cap remains active (the new login + the newest kept).
+    assert len(active) == _MAX_ACTIVE_SESSIONS_PER_USER
+    # The two least-recently-active seeded sessions were revoked …
+    await db_session.refresh(seeded[0])
+    await db_session.refresh(seeded[1])
+    assert seeded[0].revoked_at is not None
+    assert seeded[1].revoked_at is not None
+    # … while the most-recently-active seeded session survives.
+    await db_session.refresh(seeded[-1])
+    assert seeded[-1].revoked_at is None
 
 
 @pytest.mark.integration
