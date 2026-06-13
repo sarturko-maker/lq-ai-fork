@@ -110,5 +110,15 @@ export function applyTheme(theme: Theme): void {
 	root.classList.remove('dark', 'light');
 	root.classList.add(dark ? 'dark' : 'light');
 	const meta = document.querySelector('meta[name="theme-color"]');
-	if (meta) meta.setAttribute('content', dark ? '#1b1e24' : '#faf9f7');
+	if (meta) meta.setAttribute('content', dark ? '#1b1e24' : '#f4f3f0');
+}
+
+/**
+ * Motion gate: component transitions pass their durations through here so
+ * `prefers-reduced-motion: reduce` collapses them to 0 (svelte transitions
+ * don't respect the media query on their own).
+ */
+export function motionMs(ms: number): number {
+	if (typeof matchMedia === 'undefined') return ms;
+	return matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : ms;
 }

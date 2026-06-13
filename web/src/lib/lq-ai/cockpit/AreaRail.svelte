@@ -29,8 +29,11 @@
 	} = $props();
 </script>
 
+<!-- The rail sits ON the canvas (F1-S2.1: content floats as cards, nav
+     recedes — the bg comes from the shell: canvas in the pane, raised
+     bg-background in the narrow drawer). -->
 <nav
-	class="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground"
+	class="flex h-full min-h-0 flex-col text-sidebar-foreground"
 	aria-label="Practice areas"
 	data-testid="lq-cockpit-rail"
 >
@@ -41,9 +44,10 @@
 			Practice areas
 		</p>
 		{#if areas === null && !areasError}
-			<div class="space-y-1 px-2.5 py-1" aria-hidden="true">
+			<!-- Skeletons match the real row height (h-9). -->
+			<div class="space-y-0.5" aria-hidden="true">
 				{#each [0, 1, 2] as i (i)}
-					<div class="h-7 animate-pulse rounded-md bg-sidebar-accent"></div>
+					<div class="h-9 animate-pulse rounded-md bg-sidebar-accent/70"></div>
 				{/each}
 			</div>
 		{:else if areasError}
@@ -55,23 +59,25 @@
 						{#if area.configured}
 							<button
 								type="button"
-								class="flex h-9 w-full items-center justify-between rounded-md px-2.5 text-sm font-medium transition-colors duration-150 hover:bg-sidebar-accent {selectedAreaKey ===
+								class="flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-sm font-medium transition-colors duration-150 ease-out hover:bg-sidebar-accent {selectedAreaKey ===
 									area.key && !unfiledOpen
 									? 'bg-accent text-accent-foreground'
 									: ''}"
 								data-testid="lq-cockpit-area-{area.key}"
 								onclick={() => onSelectArea(area)}
 							>
-								{area.name}
+								<span class="min-w-0 truncate">{area.name}</span>
 							</button>
 						{:else}
 							<div
-								class="flex h-9 w-full cursor-default items-center justify-between rounded-md px-2.5 text-sm text-muted-foreground"
+								class="flex h-9 w-full cursor-default items-center justify-between gap-2 rounded-md px-2.5 text-sm text-muted-foreground"
 								aria-disabled="true"
 								data-testid="lq-cockpit-area-{area.key}"
 							>
-								{area.name}
-								<span class="text-[11px]">Not configured</span>
+								<span class="min-w-0 truncate">{area.name}</span>
+								<span class="shrink-0 text-[11px] whitespace-nowrap text-muted-foreground/80">
+									Not configured
+								</span>
 							</div>
 						{/if}
 					</li>

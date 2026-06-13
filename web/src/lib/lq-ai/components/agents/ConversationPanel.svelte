@@ -665,27 +665,31 @@
 
 <!-- Reading order (F0-S8, maintainer feedback: "chatbox at the top makes
      it weird"): area header → conversation, top-down → composer DOCKED at
-     the bottom, like claude.ai / Claude Code. -->
-<section class="ag-area-card" data-testid="lq-ai-agents-area-card">
-	<div class="ag-area-card__head">
-		<slot name="head" />
-	</div>
-	<slot name="copy" />
-	{#if detail}
-		<p class="lq-text-body-sm ag-thread-head">
-			{#if matterName(matters, detail.thread.project_id)}
-				<span
-					class="ag-chip"
-					data-testid="lq-ai-agents-run-matter"
-					title={detail.thread.project_id}
-				>
-					{matterName(matters, detail.thread.project_id)}
-				</span>
-			{/if}
-			<span class="ag-thread-head__title">{detail.thread.title}</span>
-		</p>
-	{/if}
-</section>
+     the bottom, like claude.ai / Claude Code. F1-S2.1: the card renders
+     only when it has content — the cockpit host passes no slots, and an
+     EMPTY white bar floated over the fresh-composer view. -->
+{#if $$slots.head || $$slots.copy || detail}
+	<section class="ag-area-card" data-testid="lq-ai-agents-area-card">
+		<div class="ag-area-card__head">
+			<slot name="head" />
+		</div>
+		<slot name="copy" />
+		{#if detail}
+			<p class="lq-text-body-sm ag-thread-head">
+				{#if matterName(matters, detail.thread.project_id)}
+					<span
+						class="ag-chip"
+						data-testid="lq-ai-agents-run-matter"
+						title={detail.thread.project_id}
+					>
+						{matterName(matters, detail.thread.project_id)}
+					</span>
+				{/if}
+				<span class="ag-thread-head__title">{detail.thread.title}</span>
+			</p>
+		{/if}
+	</section>
+{/if}
 
 {#if threadOpening}
 	<p class="lq-text-body-sm ag-note">Loading the conversation…</p>
@@ -957,11 +961,16 @@
 </form>
 
 <style>
+	/* F1-S2.1: the panel's scoped palette migrated from the legacy --lq-*
+	   set onto the semantic intent tokens (app.css) — it renders INSIDE the
+	   cockpit, so it must sit on the same shade scale (theme-aware, incl.
+	   dark). Spacing keeps the --lq-space-* constants (theme-neutral px).
+	   Full markup/typography migration of this panel is rollout wave 1. */
 	.ag-area-card,
 	.ag-thread {
-		background: var(--lq-canvas);
-		border: 1px solid var(--lq-border);
-		border-radius: var(--lq-radius-lg);
+		background: var(--color-card);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
 		padding: var(--lq-space-4);
 	}
 
@@ -972,9 +981,9 @@
 	}
 
 	.ag-chip {
-		background: var(--lq-accent-soft);
-		color: var(--lq-accent);
-		border: 1px solid var(--lq-accent-border);
+		background: var(--color-accent);
+		color: var(--color-accent-foreground);
+		border: 1px solid transparent;
 		border-radius: var(--lq-radius-pill);
 		padding: 0 var(--lq-space-2);
 		font-size: 11px;
@@ -991,12 +1000,16 @@
 		position: sticky;
 		bottom: 0;
 		z-index: 5;
-		background: var(--lq-canvas);
-		border: 1px solid var(--lq-border);
-		border-radius: var(--lq-radius-lg);
+		background: var(--color-card);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
 		padding: var(--lq-space-4);
 		margin-top: var(--lq-space-4);
-		box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.06);
+		box-shadow: 0 -8px 24px oklch(0.25 0.02 262 / 0.07);
+	}
+
+	:global(.dark) .ag-composer {
+		box-shadow: 0 -8px 24px oklch(0 0 0 / 0.4);
 	}
 
 	.ag-thread-head {
@@ -1019,7 +1032,7 @@
 	}
 
 	.ag-dropzone--over textarea {
-		border-color: var(--lq-accent);
+		border-color: var(--color-ring);
 	}
 
 	.ag-dropzone__hint {
@@ -1028,25 +1041,26 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: var(--lq-accent-soft);
-		border: 1px dashed var(--lq-accent);
-		border-radius: var(--lq-radius);
-		color: var(--lq-accent);
+		background: var(--color-accent);
+		border: 1px dashed var(--color-ring);
+		border-radius: var(--radius-md);
+		color: var(--color-accent-foreground);
 		pointer-events: none;
 	}
 
 	.ag-composer textarea {
 		width: 100%;
-		border: 1px solid var(--lq-border);
-		border-radius: var(--lq-radius);
+		border: 1px solid var(--color-input);
+		border-radius: var(--radius-md);
 		padding: var(--lq-space-2) var(--lq-space-3);
 		font: inherit;
 		resize: vertical;
-		background: var(--lq-inset);
+		background: var(--color-muted);
+		transition: border-color 150ms ease-out;
 	}
 
 	.ag-composer textarea:focus-visible {
-		outline: 2px solid var(--lq-accent);
+		outline: 2px solid var(--color-ring);
 		outline-offset: 1px;
 	}
 
@@ -1073,15 +1087,16 @@
 
 	.ag-matter select {
 		width: 100%;
-		border: 1px solid var(--lq-border);
-		border-radius: var(--lq-radius);
+		border: 1px solid var(--color-input);
+		border-radius: var(--radius-md);
 		padding: var(--lq-space-1) var(--lq-space-2);
 		font: inherit;
-		background: var(--lq-inset);
+		background: var(--color-muted);
+		color: var(--color-foreground);
 	}
 
 	.ag-matter select:focus-visible {
-		outline: 2px solid var(--lq-accent);
+		outline: 2px solid var(--color-ring);
 		outline-offset: 1px;
 	}
 
@@ -1098,7 +1113,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: var(--lq-space-1);
-		border: 1px solid var(--lq-border);
+		border: 1px solid var(--color-border);
 		border-radius: var(--lq-radius-pill);
 		padding: 0 var(--lq-space-2);
 		font-size: 12px;
@@ -1114,25 +1129,25 @@
 	}
 
 	.ag-upload--ready {
-		border-color: var(--lq-accent-border);
-		background: var(--lq-accent-soft);
+		border-color: transparent;
+		background: var(--color-status-completed-wash);
 	}
 
 	.ag-upload--ready .ag-upload__status {
-		color: var(--lq-accent);
+		color: var(--color-status-completed);
 	}
 
 	.ag-upload--failed {
-		border-color: var(--lq-error-border);
-		background: var(--lq-error-soft);
+		border-color: transparent;
+		background: var(--color-status-failed-wash);
 	}
 
 	.ag-upload--failed .ag-upload__status {
-		color: var(--lq-error);
+		color: var(--color-status-failed);
 	}
 
 	.ag-upload__status {
-		color: var(--lq-text-tertiary);
+		color: var(--color-muted-foreground);
 	}
 
 	.ag-hidden-input {
@@ -1146,15 +1161,16 @@
 	}
 
 	.ag-btn-primary {
-		background: var(--lq-accent);
-		color: white;
+		background: var(--color-primary);
+		color: var(--color-primary-foreground);
 		border: 0;
-		border-radius: var(--lq-radius);
+		border-radius: var(--radius-md);
 		padding: var(--lq-space-2) var(--lq-space-4);
 		cursor: pointer;
 		font-weight: 500;
 		font-size: 14px;
 		line-height: 1.5;
+		transition: filter 150ms ease-out;
 	}
 
 	.ag-btn-primary:hover {
@@ -1174,7 +1190,7 @@
 	}
 
 	.ag-run + .ag-run {
-		border-top: 1px solid var(--lq-border);
+		border-top: 1px solid var(--color-border);
 		padding-top: var(--lq-space-3);
 	}
 
@@ -1197,33 +1213,35 @@
 		font-size: 11px;
 		line-height: 18px;
 		white-space: nowrap;
-		border: 1px solid var(--lq-border);
-		color: var(--lq-text-secondary);
+		border: 1px solid var(--color-border);
+		color: var(--color-muted-foreground);
 	}
 
+	/* Run-state badges ride the status intent pairs (wash + strong),
+	   matching the cockpit's StatusPill vocabulary. */
 	.ag-badge--running {
-		background: var(--lq-accent-soft);
-		border-color: var(--lq-accent-border);
-		color: var(--lq-accent);
+		background: var(--color-status-running-wash);
+		border-color: transparent;
+		color: var(--color-status-running);
 		animation: ag-pulse 1.6s ease-in-out infinite;
 	}
 
 	.ag-badge--ok {
-		background: var(--lq-accent-soft);
-		border-color: var(--lq-accent-border);
-		color: var(--lq-accent);
+		background: var(--color-status-completed-wash);
+		border-color: transparent;
+		color: var(--color-status-completed);
 	}
 
 	.ag-badge--warn {
-		background: var(--lq-warn-soft);
-		border-color: var(--lq-warn-border);
-		color: var(--lq-warn);
+		background: var(--color-status-attention-wash);
+		border-color: transparent;
+		color: var(--color-status-attention);
 	}
 
 	.ag-badge--error {
-		background: var(--lq-error-soft);
-		border-color: var(--lq-error-border);
-		color: var(--lq-error);
+		background: var(--color-status-failed-wash);
+		border-color: transparent;
+		color: var(--color-status-failed);
 	}
 
 	.ag-steps {
@@ -1236,16 +1254,16 @@
 	}
 
 	.ag-step {
-		border-left: 2px solid var(--lq-border);
+		border-left: 2px solid var(--color-border);
 		padding-left: var(--lq-space-3);
 	}
 
 	.ag-step--tool_call {
-		border-left-color: var(--lq-accent-border);
+		border-left-color: color-mix(in oklch, var(--color-primary) 35%, transparent);
 	}
 
 	.ag-step--tool_result {
-		border-left-color: var(--lq-accent);
+		border-left-color: var(--color-primary);
 	}
 
 	/* Subagent steps (parent_step_id set, F0-S7): indented under their
@@ -1256,7 +1274,7 @@
 	}
 
 	.ag-step__title {
-		color: var(--lq-text-secondary);
+		color: var(--color-muted-foreground);
 		display: block;
 	}
 
@@ -1269,8 +1287,8 @@
 	.ag-step__mono {
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-size: 12px;
-		background: var(--lq-inset);
-		border-radius: var(--lq-radius-sm);
+		background: var(--color-muted);
+		border-radius: var(--radius-sm);
 		padding: var(--lq-space-2);
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
@@ -1292,7 +1310,7 @@
 	}
 
 	.ag-step__digest {
-		color: var(--lq-text-tertiary);
+		color: color-mix(in oklch, var(--color-muted-foreground) 75%, transparent);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -1301,18 +1319,18 @@
 
 	.ag-thinking summary {
 		cursor: pointer;
-		color: var(--lq-text-tertiary);
+		color: color-mix(in oklch, var(--color-muted-foreground) 75%, transparent);
 	}
 
 	/* Settled reasoning, markdown-rendered (F0-S8) — quieter than the
      answer prose: inset panel, smaller type. */
 	.ag-thinking__body {
-		background: var(--lq-inset);
-		border-radius: var(--lq-radius-sm);
+		background: var(--color-muted);
+		border-radius: var(--radius-sm);
 		padding: var(--lq-space-2) var(--lq-space-3);
 		margin-top: var(--lq-space-1);
 		font-size: 13px;
-		color: var(--lq-text-secondary);
+		color: var(--color-muted-foreground);
 	}
 
 	/* Live ribbon (F0-S8): auto-expanded, clamped to a tail-anchored
@@ -1332,11 +1350,11 @@
 		display: flex;
 		flex-direction: column;
 		justify-content: flex-end;
-		background: var(--lq-inset);
-		border-radius: var(--lq-radius-sm);
+		background: var(--color-muted);
+		border-radius: var(--radius-sm);
 		padding: var(--lq-space-2) var(--lq-space-3);
 		font-size: 13px;
-		color: var(--lq-text-secondary);
+		color: var(--color-muted-foreground);
 		-webkit-mask-image: linear-gradient(to bottom, transparent 0, black 2.5em);
 		mask-image: linear-gradient(to bottom, transparent 0, black 2.5em);
 	}
@@ -1344,9 +1362,9 @@
 	.ag-shimmer {
 		background: linear-gradient(
 			90deg,
-			var(--lq-text-tertiary) 25%,
-			var(--lq-accent) 50%,
-			var(--lq-text-tertiary) 75%
+			var(--color-muted-foreground) 25%,
+			var(--color-primary) 50%,
+			var(--color-muted-foreground) 75%
 		);
 		background-size: 200% 100%;
 		-webkit-background-clip: text;
@@ -1357,25 +1375,28 @@
 
 	.ag-answer {
 		margin-top: var(--lq-space-4);
-		border-top: 1px solid var(--lq-border);
+		border-top: 1px solid var(--color-border);
 		padding-top: var(--lq-space-3);
 	}
 
 	.ag-btn-ghost {
 		background: none;
-		border: 1px solid var(--lq-border);
-		border-radius: var(--lq-radius-sm);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
 		padding: 0 var(--lq-space-2);
 		cursor: pointer;
 		font: inherit;
 		font-size: 12px;
 		line-height: 22px;
-		color: var(--lq-text-secondary);
+		color: var(--color-muted-foreground);
+		transition:
+			border-color 150ms ease-out,
+			color 150ms ease-out;
 	}
 
 	.ag-btn-ghost:hover {
-		border-color: var(--lq-accent-border);
-		color: var(--lq-accent);
+		border-color: color-mix(in oklch, var(--color-primary) 40%, transparent);
+		color: var(--color-primary);
 	}
 
 	.ag-btn-ghost:disabled {
@@ -1384,11 +1405,11 @@
 	}
 
 	.ag-error {
-		color: var(--lq-error);
+		color: var(--color-destructive);
 	}
 
 	.ag-note {
-		color: var(--lq-text-secondary);
+		color: var(--color-muted-foreground);
 	}
 
 	@keyframes ag-pulse {
