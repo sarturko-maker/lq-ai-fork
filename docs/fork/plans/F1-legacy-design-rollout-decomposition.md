@@ -436,12 +436,17 @@ screenshots light+dark/wide+narrow · simplification · adversarial review WITH 
   text; injected `<script>` renders as inert text (Cypress-asserted); DOMPurify preserves `--shiki-dark`
   so dark mode works (Cypress + screenshot). Gate: web check 0err / vitest 816 / cypress ae4 8/8 headed;
   shiki is the only new dep (ADR-F011 pre-approved); SBOM in NOTICES. *(M)*
-- **AE5 — Prompt Input** *(REPLACES R9's scope; shell).* Composer → AE **Prompt Input**: unified rounded
-  shell + toolbar (model selector, attach 📎, enhance ✨, receipts 📜, submit/stop). Keep SlashPopover,
-  EnhancePromptExpansion, SkillPicker, SavedPromptsPanel wiring + every `data-testid`. **Also migrates
-  ChatPanel's remaining `<style>` `--lq-*` block** (the R9 token debt). **Responsive.** **Adversarial:**
-  slash provenance (final source wins), tier-mismatch → `TierFloorOverrideModal`, send/stop state,
-  collapse-matches-cockpit. *(M→L; ⚠ read ChatPanel in ranges.)*
+- **AE5 — Prompt Input ✅ DONE (PR #64).** *(REPLACES R9's scope; shell; no new dep.)* **Option-2 hand-build**
+  (the AE `prompt-input` registry item pulls `ai@^6` — the AI SDK transport we reject — + `runed` + 6
+  registry deps + 23 SDK-bound context files). Composer → AE **Prompt Input**: one unified `rounded-xl
+  border shadow-sm bg-card` shell holding the textarea + a bottom toolbar (`lq-ai-prompt-toolbar`): model
+  selector + attach/enhance/receipts **lucide** icon-buttons (emoji retired) on the left, submit/stop on the
+  right. KEPT SlashPopover, EnhancePromptExpansion, SkillPicker, SavedPromptsPanel wiring + every
+  `data-testid`. **Migrated ChatPanel's header + composer off `--lq-*` (+ the scoped `<style>` `.lq-composer/
+  .lq-btn-*` block) to semantic tokens** → **fixes the standing dark-mode chat-column gap** (`section` now
+  `bg-background`; before/after screenshots in `docs/fork/evidence/ae5/`). `ModelPicker` gained an opt-in
+  `dropUp` prop (menu opens upward in the bottom toolbar; admin/models page unaffected). **Responsive
+  collapse** preserved (narrow shot). Gate: web check 0err / vitest 816 / cypress ae5 7/7 headed.
 - **AE6 — Tool + Task** *(REPLACES R-CONV-2's styling; shell).* ConversationPanel agent steps
   (`ag-step--tool_call/tool_result`) → AE **Tool** (collapsible name/input/output/status) + **Task**
   (step list); keep the Reasoning idiom; **keep all polling / stale-detection / statusBadge logic

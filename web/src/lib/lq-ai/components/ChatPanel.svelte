@@ -110,6 +110,13 @@
 		readPersistedOpen as readReceiptsDrawerOpen
 	} from '$lib/lq-ai/components/ReceiptsDrawer.svelte';
 	import SlashPopover from '$lib/lq-ai/components/SlashPopover.svelte';
+	// AE5 (ADR-F011) — AI Elements Prompt Input toolbar icons (lucide, the
+	// established icon set; no emoji glyphs).
+	import Paperclip from '@lucide/svelte/icons/paperclip';
+	import Sparkles from '@lucide/svelte/icons/sparkles';
+	import ScrollText from '@lucide/svelte/icons/scroll-text';
+	import Send from '@lucide/svelte/icons/send';
+	import Square from '@lucide/svelte/icons/square';
 	import type { SkillAutocompleteItem } from '$lib/lq-ai/types';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import { createEventDispatcher } from 'svelte';
@@ -125,8 +132,9 @@
 	// leave the flex row and become off-canvas drawers behind header toggles
 	// plus a shared scrim. The drawers slide via a CSS transform that
 	// motion-reduce:transition-none disables; the scrim fade is gated through
-	// the shared motionMs() helper. This slice owns ONLY the chat-shell layout;
-	// ChatPanel's own --lq-* tokens are migrated in R9.
+	// the shared motionMs() helper. (R8 owned the chat-shell layout; AE5 ≡ R9
+	// then migrated ChatPanel's header + composer off the legacy --lq-* tokens
+	// to semantic tokens — fixing the dark-mode column gap.)
 	let viewportWidth = 1280;
 	$: isNarrow = viewportWidth < 880;
 	let navDrawerOpen = false;
@@ -935,9 +943,9 @@
 		/>
 	</div>
 
-	<section class="flex-1 flex flex-col overflow-hidden min-w-0">
+	<section class="flex-1 flex flex-col overflow-hidden min-w-0 bg-background text-foreground">
 		<div
-			class="px-4 py-2 border-b border-gray-200 dark:border-gray-800 flex items-center gap-2"
+			class="px-4 py-2 border-b border-border flex items-center gap-2"
 			data-testid="lq-ai-chat-header"
 		>
 			{#if isNarrow}
@@ -954,11 +962,11 @@
 			{/if}
 			{#if activeChat}
 				<div class="min-w-0 flex-1">
-					<h2 class="lq-text-panel-h truncate">
+					<h2 class="text-base font-semibold text-foreground truncate">
 						{activeChat.title || 'Untitled chat'}
 					</h2>
 					{#if activeChat.project_id}
-						<p class="text-xs text-gray-500 truncate">
+						<p class="text-xs text-muted-foreground truncate">
 							In project: {$projectsStore.find((p) => p.id === activeChat.project_id)?.name ??
 								activeChat.project_id}
 						</p>
@@ -985,7 +993,7 @@
 					{/if}
 				</div>
 			{:else}
-				<h2 class="text-sm text-gray-500 flex-1">Pick or create a chat to start.</h2>
+				<h2 class="text-sm text-muted-foreground flex-1">Pick or create a chat to start.</h2>
 			{/if}
 		</div>
 
@@ -1002,18 +1010,7 @@
 		/>
 
 		{#if activeChat}
-			<div
-				class="border-t border-gray-200 dark:border-gray-800 p-3 space-y-2"
-				data-testid="lq-ai-composer"
-			>
-				<div class="flex items-center justify-between">
-					<ModelPicker
-						models={availableModels}
-						selectedId={currentModelId}
-						onSelect={selectModel}
-					/>
-				</div>
-
+			<div class="border-t border-border p-3 space-y-2" data-testid="lq-ai-composer">
 				<SkillPicker
 					availableSkills={$skillsStore}
 					selectedSkillNames={attachedSkillNames}
@@ -1035,17 +1032,24 @@
 
 				{#if sendError}
 					<div
-						class="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1"
+						class="text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-2 py-1"
 						data-testid="lq-ai-send-error"
 					>
 						{sendError}
 					</div>
 				{/if}
 
-				<div class="flex items-end gap-2">
-					<div class="lq-composer-wrap flex-1">
+				<!-- AE5 (ADR-F011) — AI Elements Prompt Input: one unified rounded
+				     shell holding the textarea + a bottom toolbar (model selector +
+				     tools left, submit/stop right). Hand-built (option-2) on our
+				     existing composer pipeline; the registry `prompt-input` item is
+				     not vendored (it pulls the `ai` SDK transport we reject). -->
+				<div class="relative" data-testid="lq-ai-prompt-input">
+					<div
+						class="rounded-xl border border-input bg-card shadow-sm transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring"
+					>
 						<textarea
-							class="lq-composer w-full text-sm resize-none"
+							class="block w-full resize-none bg-transparent px-3.5 pt-3 pb-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
 							rows="3"
 							placeholder="Type a message…"
 							bind:value={composerText}
@@ -1053,69 +1057,90 @@
 							on:keydown={handleComposerKeydown}
 							on:input={onComposerInput}
 						></textarea>
-						{#if slashOpen}
-							<div class="lq-composer-popover" data-testid="lq-ai-slash-popover-anchor">
-								<SlashPopover
-									query={slashQuery}
-									onSelect={onSlashSelect}
-									onDismiss={onSlashDismiss}
+						<div
+							class="flex items-center justify-between gap-1 px-2 pb-2"
+							data-testid="lq-ai-prompt-toolbar"
+						>
+							<div class="flex items-center gap-1">
+								<ModelPicker
+									models={availableModels}
+									selectedId={currentModelId}
+									onSelect={selectModel}
+									dropUp
 								/>
+								{#if composerProjectId}
+									<button
+										type="button"
+										class="inline-flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40 disabled:cursor-default"
+										aria-label="Attach knowledge base"
+										title="Attach a knowledge base to this matter"
+										on:click={openAttachKbModal}
+										data-testid="lq-ai-attach-kb-btn"
+									>
+										<Paperclip class="size-4" aria-hidden="true" />
+									</button>
+								{/if}
+								<button
+									type="button"
+									class="inline-flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40 disabled:cursor-default"
+									aria-label={enhanceButtonAriaLabel}
+									title={enhanceButtonTitle}
+									on:click={() => expansionPanel?.open()}
+									disabled={!composerText.trim() || !!streamingMessageId}
+									data-testid="lq-ai-enhance-btn"
+									data-enhance-mode={enhanceIsRefine ? 'refine' : 'enhance'}
+								>
+									<Sparkles class="size-4" aria-hidden="true" />
+								</button>
+								<button
+									type="button"
+									class="inline-flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40 disabled:cursor-default"
+									aria-label="Toggle receipts drawer"
+									title="Toggle receipts"
+									on:click={() => (receiptsDrawerOpen = !receiptsDrawerOpen)}
+									data-testid="lq-ai-receipts-toggle"
+								>
+									<ScrollText class="size-4" aria-hidden="true" />
+								</button>
 							</div>
-						{/if}
+							<div class="flex items-center gap-1">
+								{#if streamingMessageId}
+									<button
+										type="button"
+										class="inline-flex items-center gap-1.5 h-8 rounded-lg px-3 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-ring bg-destructive text-white hover:opacity-90"
+										on:click={abortStream}
+										aria-label="Stop generating"
+										title="Stop generating"
+										data-testid="lq-ai-abort-btn"
+									>
+										<Square class="size-4" aria-hidden="true" />
+										<span>Stop</span>
+									</button>
+								{:else}
+									<button
+										type="button"
+										class="inline-flex items-center gap-1.5 h-8 rounded-lg px-3 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-ring bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:cursor-default"
+										on:click={sendMessage}
+										disabled={!composerText.trim()}
+										aria-label="Send message"
+										title="Send message"
+										data-testid="lq-ai-send-btn"
+									>
+										<Send class="size-4" aria-hidden="true" />
+										<span>Send</span>
+									</button>
+								{/if}
+							</div>
+						</div>
 					</div>
-					{#if streamingMessageId}
-						<button
-							type="button"
-							class="lq-btn-abort text-sm font-medium"
-							on:click={abortStream}
-							data-testid="lq-ai-abort-btn"
-						>
-							Stop
-						</button>
-					{:else}
-						{#if composerProjectId}
-							<button
-								type="button"
-								class="lq-btn-secondary text-sm"
-								aria-label="Attach knowledge base"
-								title="Attach a knowledge base to this matter"
-								on:click={openAttachKbModal}
-								data-testid="lq-ai-attach-kb-btn"
-							>
-								📎
-							</button>
-						{/if}
-						<button
-							type="button"
-							class="lq-btn-secondary text-sm"
-							aria-label={enhanceButtonAriaLabel}
-							title={enhanceButtonTitle}
-							on:click={() => expansionPanel?.open()}
-							disabled={!composerText.trim() || !!streamingMessageId}
-							data-testid="lq-ai-enhance-btn"
-							data-enhance-mode={enhanceIsRefine ? 'refine' : 'enhance'}
-						>
-							✨
-						</button>
-						<button
-							type="button"
-							class="lq-btn-secondary text-sm"
-							aria-label="Toggle receipts drawer"
-							title="Toggle receipts"
-							on:click={() => (receiptsDrawerOpen = !receiptsDrawerOpen)}
-							data-testid="lq-ai-receipts-toggle"
-						>
-							📜
-						</button>
-						<button
-							type="button"
-							class="lq-btn-send text-sm font-medium disabled:opacity-50"
-							on:click={sendMessage}
-							disabled={!composerText.trim()}
-							data-testid="lq-ai-send-btn"
-						>
-							Send
-						</button>
+					{#if slashOpen}
+						<div class="lq-composer-popover" data-testid="lq-ai-slash-popover-anchor">
+							<SlashPopover
+								query={slashQuery}
+								onSelect={onSlashSelect}
+								onDismiss={onSlashDismiss}
+							/>
+						</div>
 					{/if}
 				</div>
 
@@ -1198,83 +1223,16 @@
 {/if}
 
 <style>
-	@import '$lib/lq-ai/styles/practice.css';
-
-	.lq-composer-wrap {
-		/* Anchor for the slash-invocation popover (Wave D.2 Task 7.1).
-		   The popover renders absolutely-positioned just above the
-		   textarea so the user's eye-line stays on what they typed. */
-		position: relative;
-	}
-
+	/* AE5 (ADR-F011): ChatPanel's shell + composer now use semantic tokens
+	   (bg-background/border-border/bg-card/bg-primary…), which are driven by
+	   the `.dark` class and so render correctly in dark mode — this replaces
+	   the legacy `--lq-*` composer styles whose dark values weren't resolving
+	   on the chat column (the standing dark-mode column gap). The only scoped
+	   rule left is the slash-popover anchor positioning. */
 	.lq-composer-popover {
 		position: absolute;
 		bottom: calc(100% + 4px);
 		left: 0;
 		z-index: 50;
-	}
-
-	.lq-composer {
-		background: var(--lq-canvas);
-		color: var(--lq-text);
-		border: 1.5px solid var(--lq-border);
-		border-radius: var(--lq-radius-lg);
-		padding: 12px;
-	}
-	.lq-composer:focus {
-		border-color: var(--lq-accent);
-		outline: none;
-	}
-	.lq-composer::placeholder {
-		color: var(--lq-text-tertiary);
-	}
-
-	.lq-btn-send {
-		background: var(--lq-accent);
-		color: white;
-		border: 0;
-		border-radius: var(--lq-radius);
-		padding: 8px 16px;
-		cursor: pointer;
-	}
-	.lq-btn-send:hover {
-		filter: brightness(0.95);
-	}
-	.lq-btn-send:focus-visible {
-		outline: 2px solid var(--lq-accent);
-		outline-offset: 2px;
-	}
-
-	.lq-btn-abort {
-		background: #dc2626;
-		color: white;
-		border: 0;
-		border-radius: var(--lq-radius);
-		padding: 8px 16px;
-		cursor: pointer;
-	}
-	.lq-btn-abort:hover {
-		filter: brightness(0.95);
-	}
-
-	.lq-btn-secondary {
-		background: white;
-		color: var(--lq-accent);
-		border: 1px solid var(--lq-accent-border);
-		border-radius: var(--lq-radius);
-		padding: 8px 12px;
-		font-size: 14px;
-		cursor: pointer;
-	}
-	.lq-btn-secondary:hover {
-		background: var(--lq-accent-soft);
-	}
-	.lq-btn-secondary:disabled {
-		opacity: 0.5;
-		cursor: default;
-	}
-	.lq-btn-secondary:focus-visible {
-		outline: 2px solid var(--lq-accent);
-		outline-offset: 2px;
 	}
 </style>
