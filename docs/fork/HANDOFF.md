@@ -2,148 +2,151 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (R8 MERGED + AI Elements adoption ACCEPTED — next is AE0)
+## State (AE0 MERGED — next is AE1)
 
-- **R8 MERGED via PR #57** (main `183abd9`) — conversation containers + chat-shell responsive
-  collapse. Slice of the legacy `--lq-*` → semantic-token design rollout (full plan:
-  `docs/fork/plans/F1-legacy-design-rollout-decomposition.md`).
-- **AI Elements adoption ACCEPTED (ADR-F011, 2026-06-14).** The conversation + agent surfaces
-  will adopt the Vercel **AI Elements** look via the **MIT Svelte port** (`SikandarJODD/ai-elements`),
-  vendored + re-tokened + re-wired to OUR data — **KEEP Svelte (no React rewrite)**, KEEP
-  gateway/SSE/`guarded_tool_call`/audit (NOT `@ai-sdk/svelte`'s Chat), KEEP our `marked`+`DOMPurify`
-  sanitizer. New **AE-series** in the plan doc §"AI Elements visual adoption": AE0 vendoring → AE1
-  Conversation/Message/Response (full-width assistant) → AE2 Reasoning+Actions → AE3 Sources+Citation
-  → AE4 Code Block (Shiki dep) → **AE5 Prompt Input (REPLACES R9)** → **AE6 Tool+Task (REPLACES
-  R-CONV-2)** → AE7 Suggestions (optional). Message identity default: full-width assistant + soft user
-  bubble. See [[ai-elements-svelte-decision]].
-- Dev stack: 8 services healthy; **DB at 0054**; web rebuilt on R8 + review fixes.
+- **AE0 MERGED via PR #59** — AI Elements vendoring foundation (ADR-F011). First slice of the
+  **AE-series** (Vercel AI Elements look via the MIT Svelte port `SikandarJODD/ai-elements`,
+  vendored + re-tokened + re-wired to OUR data — KEEP Svelte, KEEP gateway/SSE/`guarded_tool_call`/
+  audit, KEEP our `marked`+`DOMPurify` sanitizer). Plan: `docs/fork/plans/F1-legacy-design-rollout-decomposition.md`
+  §"AI Elements visual adoption". The R-series (legacy `--lq-*` → semantic-token migration of
+  non-conversation surfaces) continues independently on the dark-mode bridge.
+- **RE-PLAN CHECKPOINT PASSED (AE0 close):** the Svelte port is **high quality** — registry items
+  are clean, inspectable JSON (`https://svelte-ai-elements.vercel.app/r/<c>.json`); the token system
+  is **identical** to ours (shadcn-svelte + Tailwind v4) so the token-remap is ≈ identity; **zero new
+  npm deps**; components compile + render + behave in the real prod bundle. **Decision: proceed
+  AE1→AE7 with the VENDOR approach.** The ADR-F011 option-2 hand-build fallback is NOT needed (still
+  available per-component if a heavier one disappoints). Heavier components (Response/Reasoning/Tool)
+  still get per-slice scrutiny on their markdown sink + any `{@html}`.
+- Dev stack: 8 services healthy; **DB at 0054**; **web REBUILT on AE0** (new route in the bundle).
   Login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
   Gateway aliases smart/fast/budget → minimax/MiniMax-M3 (only S9-qualified model, **tier 4**).
-- Suites at gate: web `npm run check` **0 errors** (5 pre-existing a11y warnings, untouched
-  files); **vitest 803**; **Cypress `r8-conversation-containers.cy.ts` 6/6** headed/live.
-  Evidence: `docs/fork/evidence/r8/` (before/after × wide/narrow × light/dark, 8 PNGs).
-  Adversarial review (Workflow, 13 agents): 9 raw → **8 confirmed (0 blocker, 2 should-fix,
-  6 nit); ALL actioned** (security pass CLEAN — see below).
+- Suites at gate: web `npm run check` **0 errors** (5 pre-existing a11y warnings, untouched files);
+  **vitest 803**; **Cypress `ae0-ae-lab.cy.ts` 3/3** headed/live. Infra slice — **screenshot-exempt**
+  (the lab is dev scratch, not a user surface). Adversarial review (fresh-context agent): **CLEAN —
+  0 blocker / 0 should-fix / 2 cosmetic nits** (security pass CLEAN — no secrets, no `{@html}`, no
+  `@ai-sdk/svelte` coupling, 0 `var(--lq-)`, 0 hardcoded hex, no new dep, no live-surface change).
 
-### SECURITY INCIDENT (2026-06-14) — RESOLVED
+## Done (AE0, this slice)
 
-- `.env.bak-f0-s4` (tracked; `.gitignore` missed it) leaked LIVE `MINIMAX_API_KEY`,
-  `JWT_SECRET`, `LQ_AI_GATEWAY_KEY`, Postgres/MinIO/S3 creds to the public repo.
-- **Fixed:** all secrets ROTATED + verified live (new MiniMax key in untracked `.env`);
-  **PR #56** removed the file + hardened `.gitignore` (`.env.*` + `!.env.example`) + added
-  the security-review discipline; **git history rewritten** (filter-repo, force-pushed —
-  origin/main AND local have 0 commits with the file). R8 rebased onto the clean main.
-- **New per-slice discipline (CLAUDE.md §Definition-of-done + §Merge-policy):** EVERY slice
-  gets a security + simplification pass folded into the adversarial review, with a
-  pause-and-check. The R8 review honored this — security pass came back clean (no secrets,
-  no `@html`/unsafe sinks, all file metadata auto-escaped, no authz surface).
-
-## Done (R8, this slice)
-
-- **4 leaf containers → 0 `var(--lq-)`:** `ChatSidebar` + `AttachedFilesPanel` migrated to
-  **Svelte-5 runes** (so shadcn `Button onclick` forwards); `MessageOverflowMenu` +
-  `AttachedSkillPill` stay Svelte 4 (token swap + `<style>` deleted). `lq-btn-*` → shadcn
-  `Button`. Cockpit list idiom: selected rows `bg-accent text-accent-foreground`,
-  hover `hover:bg-muted/60`, sidebar `bg-muted/40`.
-- **NEW `primitives/UploadChip.svelte`** (runes) collapses the duplicated file-row markup;
-  module-exported `statusTone()` with dark-safe AA tones (now unit-tested — see review fix).
-- **Chat-shell responsive collapse (SHELL slice — maintainer directive).** `ChatPanel`
-  **layout region only** (stays Svelte 4; its own `--lq-*` tokens are R9's job): below 880px
-  the sidebar → left drawer, files → right drawer (computed wrapper class + CSS transform),
-  shared scrim `bg-foreground/20` + `transition:fade`/`motionMs`, ☰ + Files header toggles
-  (plain Svelte-4 buttons). Mirrors `cockpit/Cockpit.svelte`.
-- **Review fixes (all 8 confirmed findings actioned):**
-  - *should-fix* — closed off-canvas drawers were still Tab-reachable/SR-announced
-    (focus trap). Added **`inert={(isNarrow && !open) || undefined}`** to both drawer wrappers.
-  - *should-fix* — active project-filter label `text-primary` on `bg-muted/40` failed AA in
-    dark (4.12:1). Now `bg-accent font-semibold text-accent-foreground` (9.08:1 dark) — same
-    backing surface as the chat rows.
-  - *nit* — drawer dialog semantics: added conditional `role="dialog"` + `aria-label`
-    (narrow only) + static `tabindex="-1"` + **focus-on-open** (`await tick(); el.focus()`
-    in the toggle handlers). Dropped `aria-modal` (background isn't `inert` — would over-claim).
-  - *nit* — `UploadChip` detach `hover:text-destructive` was 4.15:1 dark → added
-    `dark:hover:text-red-300`; detach Button `size="sm"` → **`size="xs"`** (closer to the old
-    text-link weight).
-  - *nit* — added `__tests__/UploadChip.test.ts` (6 tests) locking the AA `dark:` tone lifts.
-  - *nit (accept)* — cypress dev-password fallback follows the 8-spec convention (not changed).
+- **Vendored 2 trivial AI Elements components** into `web/src/lib/lq-ai/components/ai-elements/`
+  (source we own, same model as `ui/*`):
+  - `loader/` — pure inline-SVG spinner (`currentColor` + `animate-spin`); **zero deps**.
+  - `suggestion/` — `Suggestion` chip + `Suggestions` horizontal scroller; reuses the
+    already-vendored `ui/button` + `ui/scroll-area` + `cn`; **zero new deps**.
+  Each registry-JSON item was **inspected before vendoring** (deps / registryDependencies / source);
+  CLI alias placeholders substituted (`$COMPONENTS$`→`$lib/components`, `$UTILS$`→`$lib/utils`);
+  house-formatted (prettier). Born **`0 var(--lq-)`** (no R-LAST regression).
+- **`ai-elements/README.md`** — provenance + the **token-remap convention** (the AE0 finding: the
+  port's tokens are identical to ours → remap ≈ identity; rules: born-0-`--lq-`, no hardcoded hex,
+  add-or-map any token the port introduces, keep our hardened markdown sink, any `{@html}` is a
+  per-slice security item). The ADR-F011 vendoring seam comment lives in each `index.ts` + this README.
+- **Internal lab route** `web/src/routes/lq-ai/_ae-lab/+page.svelte` — renders Loader (3 sizes) +
+  Suggestions (chips wired to a pick-counter) + a local non-persisting light/dark toggle. Unadvertised,
+  auth-gated, links nowhere → **changes no live surface**. `data-testid`s for the Cypress proof.
+- **`NOTICES.md`** — new "Web client provenance" row: MIT `SikandarJODD/ai-elements`, the
+  inspect-then-vendor process, "no new runtime dep at AE0", future `shiki` flagged for AE4.
+- **`.eslintignore`** — `ai-elements/` exempted from eslint (the shadcn `...rest` + `$props()`
+  pattern trips `custom_element_props_identifier`, a false positive for our SPA — same exemption as
+  `ui/*`); kept prettier-formatted (owned source). eslint is NOT CI-gated.
+- **`cypress/e2e/ae0-ae-lab.cy.ts`** (3 tests, live/headed) — loader renders+animates ×3; suggestion
+  `onclick` fires with the correct suggestion text + counter increments; theme flip survives.
 
 ## Next slice — pick up exactly here
 
-1. **AE0 — AI Elements vendoring foundation** (ADR-F011; plan §"AI Elements visual adoption").
-   *Infra slice — screenshot-exempt (say so in the PR).* Steps: `jsrepo init` against the Svelte
-   AI Elements registry (`SikandarJODD/ai-elements`); verify **Tailwind v4 + shadcn-svelte 1.3**
-   interop; establish the **token-remap convention** (registry tokens → our semantic tokens
-   `--background/foreground/card/muted/accent/primary/border/ring/popover/destructive`); add the
-   **MIT attribution to `NOTICES.md`**; prove the pipeline by vendoring + re-skinning **two trivial
-   components (Shimmer/Loader, Suggestion)** into `web/src/lib/lq-ai/components/ai-elements/` behind a
-   `/lq-ai/_ae-lab` **dev-only route** (NO live-surface change). **Adversarial + SECURITY pass
-   (mandatory):** review every dep `jsrepo` pulled (SBOM); confirm **no `@ai-sdk/svelte` runtime
-   coupling** crept in; confirm vendored components carry **0 `var(--lq-)`** and no unhardened
-   `{@html}`. **Re-plan checkpoint at AE0 close:** judge the port's quality + token-remap ergonomics;
-   if it disappoints, switch AE1–AE7 to hand-build-on-shadcn-svelte (ADR-F011 option-2 fallback).
-   Then proceed AE1 → AE7 (AE5 ≡ the old R9 slot; AE6 ≡ the old R-CONV-2 slot).
+1. **AE1 — Conversation + Message + Response (full-width)** *(shell; ⚠ touches the LIVE chat surface).*
+   Plan §"AI Elements visual adoption" → AE1. `MessageList` → AE **Conversation** (scroll container +
+   sticky scroll-to-bottom); `MessageBubble` → AE **Message + Response** (full-width assistant,
+   soft right-aligned user bubble — the AI Elements signature; restyles the already-merged R6 bubble
+   look). **CRITICAL: the AE "Response" ships its own markdown renderer (Streamdown/marked) — DO NOT
+   adopt it. Render OUR sanitized markdown** (`renderModelMarkdown` = `marked`+`DOMPurify` media-forbid).
+   Adopt only its *prose styling*. Keep the ProvenancePill / tier / citation row beneath the Response.
+   **Vendor pipeline (proven in AE0):** fetch + INSPECT the registry JSON for `conversation`, `message`,
+   `response` (`curl https://svelte-ai-elements.vercel.app/r/<c>.json`; parse with python3 — NOT jq,
+   not installed; mind `/tmp/types.py` shadowing stdlib — run python from the repo dir), check deps /
+   registryDependencies / `{@html}` / tokens BEFORE vendoring; substitute aliases; re-token to identity;
+   re-wire to our message store. **Responsive:** narrow = full-bleed. **Adversarial+security:** streaming
+   append correctness, citation-decorate action still binds, sanitizer unchanged, dark contrast, ARIA,
+   scroll anchoring. Full four-discipline gate + headed before/after screenshots (light+dark, wide+narrow).
    **Backlog (from R6):** converge `ConversationPanel` + `SkillSourceView` onto `renderModelMarkdown`
-   (do it as part of AE1/AE6).
+   (do as part of AE1/AE6).
+   Then AE2 Reasoning+Actions → AE3 Sources+InlineCitation → AE4 Code Block (**`shiki` dep**) →
+   **AE5 Prompt Input (≡ old R9 slot)** → **AE6 Tool+Task (≡ old R-CONV-2 slot)** → AE7 Suggestions
+   (optional — the AE0-vendored `Suggestion`/`Suggestions` are ready; back them with SavedPrompts).
 2. Other rollout slices (any order — the dark-mode bridge holds un-migrated surfaces):
    Foundation/rail R2–R5, Wave 1 R-CONV-1 (logic; R-CONV-2 → AE6), Wave 2
    R12/R13/R14a-b/R15/R15b-tab-pb/R16, Wave 3 R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO →
-   R-BRIDGE → R-LAST. autonomous R21 = SKIP (deferred to F2/F3, stays on bridge). The R-series
-   (non-conversation surfaces) and the AE-series (conversation/agent) proceed independently on the bridge.
+   R-BRIDGE → R-LAST. autonomous R21 = SKIP (deferred to F2/F3, stays on bridge).
 3. **F1-S4** (subagent tree + SSE v3-projection adapter) / **F1-S5** (idempotency ledger +
    attribution fan-out) — `docs/fork/plans/F1-replan.md`. **Area skills/subagents ACTIVATION**
    (S9-gated) — wires `composition.py` to pass area skills/subagents + re-runs the S9 matrix.
 
-## Rollout progress (R-series)
+## Rollout progress
 
-- **Step 0 coverage table ✅** (PR #50) — all 101 `var(--lq-)` files assigned; R-LAST gate reachable.
-- **R0 ✅** (PR #50) — `validators/matter.ts` (logic-only). **R1a ✅** (PR #51) —
-  `primitives/{ModalShell,FormControl,Alert}` + NewMatterModal. **R6 ✅** (PR #52) —
-  MessageBubble/`<think>` ribbon + `sanitize-markdown.ts`. **R7 ✅** (PR #55) — SlashPopover +
-  EnhancePromptExpansion. **Responsive parity folded in** (PR #53). **CI unblocked** (repo public).
-- **R8 ✅ (PR #57, merged `183abd9`)** — conversation containers + chat-shell responsive collapse.
-- **AI Elements adoption ✅ planned + ACCEPTED (ADR-F011)** — AE-series folded into the plan; AE0 is next.
+- **R-series:** Step 0 coverage table ✅ (PR #50) · R0 ✅ (#50) · R1a ✅ (#51) · R6 ✅ (#52) ·
+  R7 ✅ (#55) · responsive parity ✅ (#53) · **R8 ✅ (#57, `183abd9`)**. CI unblocked (repo public).
+- **AE-series (ADR-F011):** plan + ADR accepted ✅ (#58, `c2b505f`) · **AE0 ✅ (#59)** — vendoring
+  foundation; re-plan checkpoint passed → vendor approach confirmed for AE1–AE7.
 
 ## Carry-overs / review deferrals
 
-- **R8 deferred-on-record:** focus-on-open is implemented but NOT asserted in Cypress
-  (headed-Electron/Xvfb programmatic focus doesn't set `document.activeElement` without OS
-  window focus). Drawers are not full focus-traps (cockpit defers this too — partial parity
-  is the established bar); ESC + scrim-click + `inert`-on-close cover the practical cases.
-- auth/refresh: per-user session cap + web gate timeout SHIPPED (PR #47). REMAINING: the
+- **AE0 nits (accepted on record, no code change — kept byte-faithful to the MIT upstream):**
+  (a) `loader-icon.svelte` carries a redundant inline `style="color: currentcolor"` (paths already
+  use `stroke="currentColor"`). (b) the upstream clipPath `id="clip0_2393_1490"` is static, so N
+  mounted Loaders share the id — invalid HTML in the strict sense, but every instance has identical
+  clip geometry so `url(#clip…)` resolves to the first and all render correctly (Cypress 3/3). If a
+  future AE component needs per-instance clip geometry, scope the id then (e.g. `$props.id()`).
+- **R8 deferred-on-record:** focus-on-open implemented but NOT asserted in Cypress (headed-Electron/
+  Xvfb programmatic focus doesn't set `document.activeElement` without OS window focus). Drawers are
+  not full focus-traps (cockpit defers this too); ESC + scrim-click + `inert`-on-close cover practice.
+- auth/refresh: per-user session cap + web gate timeout SHIPPED (#47). REMAINING: the
   **deterministic-HMAC index** (removes the global bcrypt scan + bad-token-spam DoS; needs a
   migration + security review — Backlog).
-- F1-S3 deferrals: subagent-spec skill names bypass registry validation (validate on the
-  activation slice); `audit_log.practice_area_id` unindexed; area tier floor operator-set
-  until a model > tier 4 qualifies.
-- ADR-0011 disclosure after F1-S5 attribution. Live SSE token deltas DEAD until a Redis
-  pub/sub publisher lands (F1-S4). ADR-0011/F003 conversation memory + compaction → F2.
+- F1-S3 deferrals: subagent-spec skill names bypass registry validation (validate on the activation
+  slice); `audit_log.practice_area_id` unindexed; area tier floor operator-set until a model > tier 4.
+- ADR-0011 disclosure after F1-S5 attribution. Live SSE token deltas DEAD until a Redis pub/sub
+  publisher lands (F1-S4). ADR-0011/F003 conversation memory + compaction → F2.
 
 ## Gotchas (carried + new)
 
-- **NEW (R8): chai-jquery subject rebinding** — `.and('have.attr', name[, val])` and
-  `.and('not.have.attr', name)` REBIND the chained subject to the attr value/undefined, so a
-  following `.and('have.attr', …)` runs on a non-element ("neither DOM nor jQuery"). Put
-  multiple attribute checks in ONE `.should(($el) => { expect($el)… })` callback.
-- **NEW (R8): `inert` for off-canvas drawers** — a CSS `translate-x-full` only hides
-  visually; descendants stay focusable + in the a11y tree. Use `inert={(isNarrow && !open) ||
-  undefined}` on the closed wrapper. A DYNAMIC `role={isNarrow ? 'dialog' : undefined}` defeats
-  svelte-check's a11y static analysis, so use a **static `tabindex="-1"`** (negative → no
-  `a11y_no_noninteractive_tabindex` warning) rather than `tabindex={isNarrow ? -1 : undefined}`.
-- **NEW (R8): active row on a translucent wash needs a backing surface for AA** — bare
-  `text-primary` over `bg-muted/40` fails AA in dark (4.12:1). Give active rows
-  `bg-accent text-accent-foreground` like the chat rows (9.08:1 dark / 11.32:1 light).
-- shadcn `Button onclick` only forwards from a **runes** parent (legacy `on:click` = silent
-  no-op). `text-primary` on `bg-accent` fails WCAG AA → use **`text-accent-foreground`**.
-  `text-destructive` on a tinted bg fails AA in dark → add a **`dark:` lift** (`dark:text-red-300`).
-- web CI gates only `npm run check` + vitest (eslint NOT gated). `test:frontend` is vitest
-  WATCH mode — run `npx vitest run`. vitest env is `node` (no jsdom) — DOMPurify/sanitisation
-  must be Cypress-tested. Long multi-`cy.visit` screenshot loops outlive the token TTL →
-  shoot all frames on ONE page load. **headless cypress lies about dark theme — capture headed**
-  (`DISPLAY=:0`), and rebuild the `web` container before screenshotting a UI change.
+- **NEW (AE0): the AE vendor pipeline.** Distribution is **shadcn-svelte registry JSON**, NOT jsrepo
+  (the plan said jsrepo; the actual mechanism is `…/r/<component>.json`). INSPECT the JSON before
+  vendoring (deps / registryDependencies / `{@html}` / tokens). Items use CLI placeholders
+  `$COMPONENTS$`/`$UTILS$` — substitute to `$lib/components`/`$lib/utils`. Watch: `suggestion`'s item
+  **under-declares** `scroll-area` as a registry dep (we already had it). The port's "Response" is
+  expected to ship an unhardened markdown sink — **replace it with `renderModelMarkdown`**, adopt only
+  its prose styling.
+- **NEW (AE0): "dev-only route" reality.** The web container ALWAYS serves a prod build (no separate
+  dev deploy), so `import.meta.env.DEV` would make a route invisible in our only stack AND untestable
+  by Cypress (baseUrl :3000 = the built container). "Dev-only" is realized as an **unadvertised,
+  auth-gated, internal** route instead (`_ae-lab`). A **leading-`_` directory DOES route** in this
+  SvelteKit version (verified: `/lq-ai/_ae-lab` is a real RouteId via `svelte-kit sync`) — it is NOT
+  treated as private. Routes under `/lq-ai/*` are auth-gated by `+layout.svelte` (exempt list is only
+  `/login` + `/change-password`).
+- **NEW (AE0): vendored AE source is eslint-exempt** (`.eslintignore` `ai-elements/`) for the same
+  `custom_element_props_identifier` false positive as `ui/*`; kept prettier-formatted. eslint is NOT
+  CI-gated (only `npm run check` + vitest are).
+- **R8: chai-jquery subject rebinding** — `.and('have.attr', name[, val])` REBINDS the chained subject
+  to the attr value/undefined; put multiple attribute checks in ONE `.should(($el) => {…})` callback.
+- **R8: `inert` for off-canvas drawers** — CSS `translate-x-full` only hides visually; descendants stay
+  focusable + in the a11y tree. Use `inert={(isNarrow && !open) || undefined}`. A DYNAMIC
+  `role={isNarrow ? 'dialog' : undefined}` defeats svelte-check's a11y static analysis → use a static
+  `tabindex="-1"` (negative → no `a11y_no_noninteractive_tabindex` warning).
+- **R8: active row on a translucent wash needs a backing surface for AA** — bare `text-primary` over
+  `bg-muted/40` fails AA in dark (4.12:1). Give active rows `bg-accent text-accent-foreground`
+  (9.08:1 dark / 11.32:1 light).
+- shadcn `Button onclick` only forwards from a **runes** parent (legacy `on:click` = silent no-op).
+  `text-primary` on `bg-accent` fails WCAG AA → use `text-accent-foreground`. `text-destructive` on a
+  tinted bg fails AA in dark → add a `dark:` lift (`dark:text-red-300`).
+- web CI gates only `npm run check` + vitest (eslint NOT gated). `test:frontend` is vitest WATCH mode —
+  run `npx vitest run`. vitest env is `node` (no jsdom) — DOMPurify/sanitisation must be Cypress-tested.
+  Long multi-`cy.visit` screenshot loops outlive the token TTL → shoot all frames on ONE page load.
+  **headless cypress lies about dark theme — capture headed** (`DISPLAY=:0`), and **rebuild the `web`
+  container before screenshotting/Cypress-testing a UI change** (it serves a pre-built bundle).
 - `gh pr create` defaults to FROZEN upstream — always `--repo sarturko-maker/lq-ai-fork` AND
-  `--head <branch>` (ADR-F001). jq NOT installed — parse `gh --json` with python3.
-- migrations: NEVER host-side alembic against the live dev DB; api auto-migrates on boot;
-  rebuild api+arq-worker+ingest-worker together + web. **NEVER `docker compose down -v`.**
-- MiniMax-M3 is tier 4 (weak) — `default_tier_floor` < 4 makes every run 403. Seed areas with
-  NO floor. deepagents subagent `model` string = gateway-bypass (ADR-F010 guard at
-  `build_deep_agent`). New API endpoints register in tests/test_openapi.py (count assert).
+  `--head <branch>` (ADR-F001). jq NOT installed — parse `gh --json` with python3 (mind `/tmp/types.py`
+  can shadow stdlib `types` — run python from the repo dir, not `/tmp`).
+- migrations: NEVER host-side alembic against the live dev DB; api auto-migrates on boot; rebuild
+  api+arq-worker+ingest-worker together + web. **NEVER `docker compose down -v`.**
+- MiniMax-M3 is tier 4 (weak) — `default_tier_floor` < 4 makes every run 403. Seed areas with NO floor.
+  deepagents subagent `model` string = gateway-bypass (ADR-F010 guard at `build_deep_agent`). New API
+  endpoints register in tests/test_openapi.py (count assert).

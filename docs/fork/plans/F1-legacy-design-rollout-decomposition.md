@@ -384,7 +384,11 @@ screenshots light+dark/wide+narrow · simplification · adversarial review WITH 
 · HANDOFF at close). Shell slices (AE1, AE5, AE6) must show the responsive collapse in the narrow shot.
 
 ### AE slices
-- **AE0 — Vendoring foundation** *(infra; screenshot-exempt — say so in the PR).* `jsrepo init` against
+- **AE0 — Vendoring foundation ✅ DONE (PR #59).** *(infra; screenshot-exempt.)* Distribution turned
+  out to be the **shadcn-svelte registry JSON** (`…/r/<c>.json`), not jsrepo; vendored `loader` +
+  `suggestion` (zero new deps), proved the pipeline behind `/lq-ai/_ae-lab`, NOTICES MIT row added.
+  **Re-plan checkpoint PASSED → vendor approach confirmed for AE1–AE7** (token-remap ≈ identity; port
+  quality high). Original spec below for reference. ~~`jsrepo init` against~~
   the registry; verify Tailwind v4 + shadcn-svelte interop; establish the **token-remap convention**
   (registry tokens → our semantic tokens); add the MIT `NOTICES.md` entry; prove the pipeline by vendoring
   + re-skinning **two trivial components (Shimmer/Loader, Suggestion)** behind a `/lq-ai/_ae-lab` dev
