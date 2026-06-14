@@ -2,11 +2,20 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (end of R8 — conversation containers + chat-shell responsive collapse)
+## State (R8 MERGED + AI Elements adoption ACCEPTED — next is AE0)
 
-- **R8 on branch `f1-r8-conversation-containers`** (PR pending to
-  `sarturko-maker/lq-ai-fork`). Slice of the legacy `--lq-*` → semantic-token design
-  rollout (full plan: `docs/fork/plans/F1-legacy-design-rollout-decomposition.md`).
+- **R8 MERGED via PR #57** (main `183abd9`) — conversation containers + chat-shell responsive
+  collapse. Slice of the legacy `--lq-*` → semantic-token design rollout (full plan:
+  `docs/fork/plans/F1-legacy-design-rollout-decomposition.md`).
+- **AI Elements adoption ACCEPTED (ADR-F011, 2026-06-14).** The conversation + agent surfaces
+  will adopt the Vercel **AI Elements** look via the **MIT Svelte port** (`SikandarJODD/ai-elements`),
+  vendored + re-tokened + re-wired to OUR data — **KEEP Svelte (no React rewrite)**, KEEP
+  gateway/SSE/`guarded_tool_call`/audit (NOT `@ai-sdk/svelte`'s Chat), KEEP our `marked`+`DOMPurify`
+  sanitizer. New **AE-series** in the plan doc §"AI Elements visual adoption": AE0 vendoring → AE1
+  Conversation/Message/Response (full-width assistant) → AE2 Reasoning+Actions → AE3 Sources+Citation
+  → AE4 Code Block (Shiki dep) → **AE5 Prompt Input (REPLACES R9)** → **AE6 Tool+Task (REPLACES
+  R-CONV-2)** → AE7 Suggestions (optional). Message identity default: full-width assistant + soft user
+  bubble. See [[ai-elements-svelte-decision]].
 - Dev stack: 8 services healthy; **DB at 0054**; web rebuilt on R8 + review fixes.
   Login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
   Gateway aliases smart/fast/budget → minimax/MiniMax-M3 (only S9-qualified model, **tier 4**).
@@ -60,23 +69,26 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-1. **R9 — ChatPanel token/composition swap ONLY.** The responsive shell is **already done in
-   R8**, so R9 is NO LONGER split into R9a/R9b — it's just the token migration of ChatPanel's
-   remaining `<style>` block (the `.lq-composer*`, `.lq-btn-send/abort/secondary` rules at
-   `ChatPanel.svelte` ~lines 1157-1237, still using `--lq-canvas/text/border/accent/radius`)
-   plus the inline `border-gray-200 dark:border-gray-800` / `text-gray-500` / `lq-text-panel-h`
-   in the header + composer. Convert the composer buttons to shadcn `Button` (ChatPanel is
-   Svelte 4 — it must go **runes** for `onclick` to forward, OR keep plain `<button on:click>`;
-   note ChatPanel is large + holds heavy stream logic, so prefer the minimal token swap and
-   keep `on:click` rather than a full runes conversion unless clean). **Reuse the R6/R7/R8
-   kit:** `text-accent-foreground` on accent washes (NOT `text-primary`), `dark:` lifts on
-   destructive text, the `Alert` primitive for `sendError`. Coverage table → R9 row.
-   **Backlog (from R6):** converge `ConversationPanel` + `SkillSourceView` onto
-   `renderModelMarkdown` in R-CONV-2 / R14a.
+1. **AE0 — AI Elements vendoring foundation** (ADR-F011; plan §"AI Elements visual adoption").
+   *Infra slice — screenshot-exempt (say so in the PR).* Steps: `jsrepo init` against the Svelte
+   AI Elements registry (`SikandarJODD/ai-elements`); verify **Tailwind v4 + shadcn-svelte 1.3**
+   interop; establish the **token-remap convention** (registry tokens → our semantic tokens
+   `--background/foreground/card/muted/accent/primary/border/ring/popover/destructive`); add the
+   **MIT attribution to `NOTICES.md`**; prove the pipeline by vendoring + re-skinning **two trivial
+   components (Shimmer/Loader, Suggestion)** into `web/src/lib/lq-ai/components/ai-elements/` behind a
+   `/lq-ai/_ae-lab` **dev-only route** (NO live-surface change). **Adversarial + SECURITY pass
+   (mandatory):** review every dep `jsrepo` pulled (SBOM); confirm **no `@ai-sdk/svelte` runtime
+   coupling** crept in; confirm vendored components carry **0 `var(--lq-)`** and no unhardened
+   `{@html}`. **Re-plan checkpoint at AE0 close:** judge the port's quality + token-remap ergonomics;
+   if it disappoints, switch AE1–AE7 to hand-build-on-shadcn-svelte (ADR-F011 option-2 fallback).
+   Then proceed AE1 → AE7 (AE5 ≡ the old R9 slot; AE6 ≡ the old R-CONV-2 slot).
+   **Backlog (from R6):** converge `ConversationPanel` + `SkillSourceView` onto `renderModelMarkdown`
+   (do it as part of AE1/AE6).
 2. Other rollout slices (any order — the dark-mode bridge holds un-migrated surfaces):
-   Foundation/rail R2–R5, Wave 1 R-CONV-1/2, Wave 2 R12/R13/R14a-b/R15/R15b-tab-pb/R16,
-   Wave 3 R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO → R-BRIDGE → R-LAST. autonomous
-   R21 = SKIP (deferred to F2/F3, stays on bridge). Net ~24 slices left after R8.
+   Foundation/rail R2–R5, Wave 1 R-CONV-1 (logic; R-CONV-2 → AE6), Wave 2
+   R12/R13/R14a-b/R15/R15b-tab-pb/R16, Wave 3 R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO →
+   R-BRIDGE → R-LAST. autonomous R21 = SKIP (deferred to F2/F3, stays on bridge). The R-series
+   (non-conversation surfaces) and the AE-series (conversation/agent) proceed independently on the bridge.
 3. **F1-S4** (subagent tree + SSE v3-projection adapter) / **F1-S5** (idempotency ledger +
    attribution fan-out) — `docs/fork/plans/F1-replan.md`. **Area skills/subagents ACTIVATION**
    (S9-gated) — wires `composition.py` to pass area skills/subagents + re-runs the S9 matrix.
@@ -88,7 +100,8 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   `primitives/{ModalShell,FormControl,Alert}` + NewMatterModal. **R6 ✅** (PR #52) —
   MessageBubble/`<think>` ribbon + `sanitize-markdown.ts`. **R7 ✅** (PR #55) — SlashPopover +
   EnhancePromptExpansion. **Responsive parity folded in** (PR #53). **CI unblocked** (repo public).
-- **R8 ✅ (this slice, PR pending)** — conversation containers + chat-shell responsive collapse.
+- **R8 ✅ (PR #57, merged `183abd9`)** — conversation containers + chat-shell responsive collapse.
+- **AI Elements adoption ✅ planned + ACCEPTED (ADR-F011)** — AE-series folded into the plan; AE0 is next.
 
 ## Carry-overs / review deferrals
 
