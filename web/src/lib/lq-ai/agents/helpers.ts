@@ -262,26 +262,6 @@ export function stepDisplay(step: AgentRunStep): StepDisplay {
 	return { title: 'Model turn', body: visible, thinking, mono: false };
 }
 
-/** Longest one-line digest shown in a collapsed step's summary row. */
-export const STEP_DIGEST_LIMIT = 96;
-
-/**
- * One-line digest of a step body for the collapsed summary row (F0-S8,
- * maintainer feedback: tool steps were always expanded and drowned the
- * conversation). First non-empty line, code-point-truncated — the full
- * body stays one click away inside the <details>.
- */
-export function stepDigest(body: string): string {
-	const line = body
-		.split('\n')
-		.map((l) => l.trim())
-		.find((l) => l.length > 0);
-	if (!line) return '';
-	const points = Array.from(line);
-	if (points.length <= STEP_DIGEST_LIMIT) return line;
-	return points.slice(0, STEP_DIGEST_LIMIT - 1).join('') + '…';
-}
-
 /**
  * Mirror of the runner's step-summary bound (`_SUMMARY_LIMIT` in
  * api/app/agents/runner.py) — needed to recognise the closing model
@@ -316,6 +296,76 @@ export function visibleSteps(
 	if (!last || last.kind !== 'model_turn' || last.summary === null) return steps;
 	if (last.summary === boundedLikeServer(run.final_answer)) return steps.slice(0, -1);
 	return steps;
+}
+
+/**
+ * One rendered row of a turn's timeline (AE6, ADR-F011): the Vercel AI
+ * Elements "Tool" card shows a single tool's name + input + output + status
+ * together, but our settled record (ADR-F004) emits the call and its result
+ * as TWO separate `AgentRunStep` rows. This is a PURELY PRESENTATIONAL
+ * regrouping over the already-`visibleSteps` list — the step record, polling,
+ * staleness, and the run-level `statusBadge` are all untouched; this only
+ * decides how the surviving rows are drawn.
+ */
+export type TurnRow =
+	| { kind: 'reasoning'; id: string; step: AgentRunStep; nested: boolean }
+	| {
+			kind: 'tool';
+			id: string;
+			name: string;
+			/** The dispatching tool_call (null only for an orphan result). */
+			call: AgentRunStep | null;
+			/** The settled tool_result, when one immediately followed the call. */
+			result: AgentRunStep | null;
+			/** Ran under a subagent / tool-wrapped graph (parent_step_id set). */
+			nested: boolean;
+	  };
+
+/**
+ * Regroup a turn's visible steps into AE rows: each `model_turn` becomes a
+ * reasoning row; a `tool_call` pairs with the tool_result that IMMEDIATELY
+ * follows it when they share name + parent (the normal runner sequence), so
+ * one Tool card carries both Parameters and Result. Tools whose result is
+ * separated by interleaved subagent steps (the `task` dispatch case) stay
+ * unpaired and render as their own cards — adjacency-only keeps the pairing
+ * provably safe without reordering the honest record.
+ */
+export function groupTurnSteps(steps: AgentRunStep[]): TurnRow[] {
+	const rows: TurnRow[] = [];
+	for (let i = 0; i < steps.length; i++) {
+		const step = steps[i];
+		if (step.kind === 'model_turn') {
+			rows.push({ kind: 'reasoning', id: step.id, step, nested: step.parent_step_id !== null });
+			continue;
+		}
+		if (step.kind === 'tool_call') {
+			const next = steps[i + 1];
+			const pairs =
+				next?.kind === 'tool_result' &&
+				next.name === step.name &&
+				next.parent_step_id === step.parent_step_id;
+			rows.push({
+				kind: 'tool',
+				id: step.id,
+				name: step.name ?? 'unknown',
+				call: step,
+				result: pairs ? next : null,
+				nested: step.parent_step_id !== null
+			});
+			if (pairs) i += 1; // consume the paired result
+			continue;
+		}
+		// Orphan tool_result (no immediately-preceding call): render defensively.
+		rows.push({
+			kind: 'tool',
+			id: step.id,
+			name: step.name ?? 'unknown',
+			call: null,
+			result: step,
+			nested: step.parent_step_id !== null
+		});
+	}
+	return rows;
 }
 
 // ---------------------------------------------------------------------------

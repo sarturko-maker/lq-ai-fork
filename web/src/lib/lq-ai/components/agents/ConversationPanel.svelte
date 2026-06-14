@@ -21,8 +21,12 @@
 	 * back to the poll loop; stream end triggers ONE reconcile fetch.
 	 */
 	import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
-	import DOMPurify from 'dompurify';
-	import { marked } from 'marked';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
+	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
+	import SearchIcon from '@lucide/svelte/icons/search';
+	import WrenchIcon from '@lucide/svelte/icons/wrench';
+	import { renderModelMarkdown } from '$lib/lq-ai/sanitize-markdown';
 	import { agentsApi, filesApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import type { AgentRun, AgentRunStep, AgentThreadDetailResponse } from '$lib/lq-ai/api/agents';
@@ -33,17 +37,18 @@
 		composerEnabled,
 		isStaleRunning,
 		latestRunOf,
+		groupTurnSteps,
 		matterName,
 		shouldContinuePollingThread,
 		splitThink,
 		statusBadge,
-		stepDigest,
 		stepDisplay,
 		threadRailStates,
 		threadRailSteps,
 		uploadsSettled,
 		visibleSteps,
-		type RailState
+		type RailState,
+		type TurnRow
 	} from '$lib/lq-ai/agents/helpers';
 	import {
 		applyAnswerText,
@@ -85,15 +90,6 @@
 		newmatter: void;
 		threadcreated: { threadId: string; projectId: string | null };
 	}>();
-
-	// Model output is untrusted input (CLAUDE.md): forbid media so a poisoned
-	// answer can't beacon data out via auto-fetched remote resources — incl.
-	// the SVG image elements DOMPurify's defaults allow (F0-S5 review:
-	// <svg><image href>) auto-fetches exactly like <img src>).
-	const SANITIZE_OPTS = {
-		FORBID_TAGS: ['img', 'picture', 'audio', 'video', 'source', 'track', 'svg', 'image', 'use'],
-		FORBID_ATTR: ['srcset', 'ping']
-	};
 
 	let submitting = false;
 	let submitError: string | null = null;
@@ -612,19 +608,34 @@
 	// Derived view state
 	// ---------------------------------------------------------------------
 
-	/**
-	 * Markdown → sanitized HTML for MODEL OUTPUT (untrusted input). One
-	 * path for answers, settled reasoning, and the live ribbon (F0-S8:
-	 * thinking rendered as raw text while the answer got markdown).
-	 */
-	function mdSafe(text: string): string {
-		return DOMPurify.sanitize(marked.parse(text, { async: false }) as string, SANITIZE_OPTS);
-	}
-
+	// Markdown → sanitized HTML for MODEL OUTPUT (untrusted input) now routes
+	// through the shared `renderModelMarkdown` sink (AE6 / R-CONV-2) — one
+	// media-forbid policy for answers, settled reasoning, and the live ribbon,
+	// shared with the chat surface and the skill source view so none can drift.
 	function answerHtmlFor(run: AgentRun): string {
 		const visible = splitThink(run.final_answer).visible;
 		if (!visible) return '';
-		return mdSafe(visible);
+		return renderModelMarkdown(visible);
+	}
+
+	/**
+	 * View model for one AE Tool card (AE6): natural-language title from the
+	 * dispatching call (the raw name + args stay in the body, ADR-F004), the
+	 * input/output bodies, and a presentational status derived from whether the
+	 * result settled yet. No per-tool error signal exists in the record, so a
+	 * failed run surfaces through the run-level badge, not a fabricated state.
+	 */
+	function toolView(row: Extract<TurnRow, { kind: 'tool' }>, live: boolean) {
+		const titleStep = row.call ?? row.result;
+		const title = titleStep ? stepDisplay(titleStep).title : row.name;
+		const running = row.result === null && live && row.call !== null;
+		return {
+			title,
+			inputBody: row.call?.summary ?? '',
+			outputBody: row.result?.summary ?? '',
+			status: running ? ('running' as const) : ('completed' as const),
+			statusLabel: running ? 'Running' : 'Completed'
+		};
 	}
 
 	$: latestRun = latestRunOf(detail);
@@ -660,7 +671,7 @@
 	// workspace option is gone; create-in-place covers the zero-matter case.
 	$: needsMatter = !detail && !selectedMatterId;
 	// Live reasoning rendered as markdown, sanitized like any model output.
-	$: liveReasoningHtml = liveReasoning ? mdSafe(liveReasoning) : '';
+	$: liveReasoningHtml = liveReasoning ? renderModelMarkdown(liveReasoning) : '';
 </script>
 
 <!-- Reading order (F0-S8, maintainer feedback: "chatbox at the top makes
@@ -733,40 +744,83 @@
 				</header>
 
 				{#if turnSteps.length > 0}
-					<ol class="ag-steps">
-						{#each turnSteps as step (step.id)}
-							{@const d = stepDisplay(step)}
-							<li class="ag-step ag-step--{step.kind}" class:ag-step--nested={step.parent_step_id}>
-								{#if d.mono && d.body}
-									<!-- Tool calls/results collapse to a one-line digest
-                       (F0-S8 — always-expanded tool bodies drowned the
-                       conversation); the full args/output stay one
-                       click away. The record is untouched (ADR-F004). -->
-									<details class="ag-step__fold">
-										<summary>
-											<span class="ag-step__title lq-text-label">{d.title}</span>
-											<span class="ag-step__digest lq-text-caption">{stepDigest(d.body)}</span>
-										</summary>
-										<pre class="ag-step__mono">{d.body}</pre>
-									</details>
-								{:else}
-									<span class="ag-step__title lq-text-label">{d.title}</span>
-									{#if d.thinking}
-										<details class="ag-thinking">
-											<summary class="lq-text-caption">Reasoning</summary>
-											<div class="ag-thinking__body prose prose-sm max-w-none">
-												<!-- eslint-disable-next-line svelte/no-at-html-tags — mdSafe-sanitized -->
-												{@html mdSafe(d.thinking)}
+					{@const rows = groupTurnSteps(turnSteps)}
+					{@const turnLive =
+						i === detail.runs.length - 1 && turn.run.status === 'running' && !stale}
+					<!-- AE Task (AE6, ADR-F011 option-2): the turn's work as one
+                 collapsible step list — Search-icon trigger + a left rail —
+                 hand-built on a native <details> (the AE `task`/`tool`
+                 registry items pull `collapsible` + `./code.json`, both
+                 dodged across the AE series). The .ag-steps <li> structure
+                 is kept so the live step-count specs still match. -->
+					<details class="ag-task" open data-testid="lq-ai-agents-task">
+						<summary class="ag-task__trigger">
+							<SearchIcon class="size-4" aria-hidden="true" />
+							<span class="lq-text-label">{rows.length} step{rows.length === 1 ? '' : 's'}</span>
+							<ChevronDownIcon class="ag-task__chevron size-4" aria-hidden="true" />
+						</summary>
+						<ol class="ag-steps">
+							{#each rows as row (row.id)}
+								<li class="ag-step" class:ag-step--nested={row.nested}>
+									{#if row.kind === 'tool'}
+										{@const t = toolView(row, turnLive)}
+										<!-- AE Tool card: wrench + name + status badge header,
+                         Parameters / Result sections. The raw args/output
+                         stay verbatim in the mono bodies (ADR-F004). -->
+										<details class="ag-tool" data-testid="lq-ai-agents-tool">
+											<summary class="ag-tool__header">
+												<span class="ag-tool__name">
+													<WrenchIcon class="ag-tool__icon size-4" aria-hidden="true" />
+													<span class="lq-text-label ag-tool__title">{t.title}</span>
+													<span
+														class="ag-tool__badge ag-tool__badge--{t.status}"
+														data-testid="lq-ai-agents-tool-status"
+													>
+														{#if t.status === 'running'}
+															<LoaderCircleIcon class="size-3.5 ag-tool__spin" aria-hidden="true" />
+														{:else}
+															<CircleCheckIcon class="size-3.5" aria-hidden="true" />
+														{/if}
+														{t.statusLabel}
+													</span>
+												</span>
+												<ChevronDownIcon class="ag-tool__chevron size-4" aria-hidden="true" />
+											</summary>
+											<div class="ag-tool__body">
+												{#if t.inputBody}
+													<div class="ag-tool__section">
+														<h4 class="ag-tool__label">Parameters</h4>
+														<pre class="ag-tool__mono">{t.inputBody}</pre>
+													</div>
+												{/if}
+												{#if t.outputBody}
+													<div class="ag-tool__section">
+														<h4 class="ag-tool__label">Result</h4>
+														<pre class="ag-tool__mono">{t.outputBody}</pre>
+													</div>
+												{/if}
 											</div>
 										</details>
+									{:else}
+										{@const d = stepDisplay(row.step)}
+										<span class="ag-step__title lq-text-label">{d.title}</span>
+										{#if d.thinking}
+											<details class="ag-thinking">
+												<summary class="lq-text-caption">Reasoning</summary>
+												<div class="ag-thinking__body prose prose-sm max-w-none">
+													<!-- eslint-disable-next-line svelte/no-at-html-tags — renderModelMarkdown-sanitized -->
+													{@html renderModelMarkdown(d.thinking)}
+												</div>
+											</details>
+										{/if}
+										{#if d.body}
+											<p class="lq-text-body-sm ag-step__body">{d.body}</p>
+										{/if}
 									{/if}
-									{#if d.body}
-										<p class="lq-text-body-sm ag-step__body">{d.body}</p>
-									{/if}
-								{/if}
-							</li>
-						{/each}
-					</ol>
+								</li>
+							{/each}
+						</ol>
+					</details>
 				{:else if turn.run.status === 'running' && !stale && !liveReasoning}
 					<p class="lq-text-body-sm ag-note">Waiting for the first step…</p>
 				{/if}
@@ -784,7 +838,7 @@
 						</p>
 						<div class="ag-thinking-live__tail">
 							<div class="prose prose-sm max-w-none">
-								<!-- eslint-disable-next-line svelte/no-at-html-tags — mdSafe-sanitized -->
+								<!-- eslint-disable-next-line svelte/no-at-html-tags — renderModelMarkdown-sanitized -->
 								{@html liveReasoningHtml}
 							</div>
 						</div>
@@ -798,8 +852,8 @@
 								<details class="ag-thinking">
 									<summary class="lq-text-caption">Reasoning</summary>
 									<div class="ag-thinking__body prose prose-sm max-w-none">
-										<!-- eslint-disable-next-line svelte/no-at-html-tags — mdSafe-sanitized -->
-										{@html mdSafe(turnAnswer.thinking)}
+										<!-- eslint-disable-next-line svelte/no-at-html-tags — renderModelMarkdown-sanitized -->
+										{@html renderModelMarkdown(turnAnswer.thinking)}
 									</div>
 								</details>
 							{/if}
@@ -1244,33 +1298,58 @@
 		color: var(--color-status-failed);
 	}
 
+	/* AE Task (AE6): the turn's work as one collapsible step list. The
+     trigger mirrors the AE `task` identity (search glyph + rotating chevron);
+     the list carries the single left rail (AE puts the rail on the content,
+     not per-step). */
+	.ag-task {
+		margin-top: var(--lq-space-2);
+	}
+
+	.ag-task__trigger {
+		display: flex;
+		align-items: center;
+		gap: var(--lq-space-2);
+		cursor: pointer;
+		color: var(--color-muted-foreground);
+		list-style: none;
+	}
+
+	.ag-task__trigger::-webkit-details-marker {
+		display: none;
+	}
+
+	.ag-task__trigger:hover {
+		color: var(--color-foreground);
+	}
+
+	.ag-task__chevron {
+		margin-left: auto;
+		transition: transform 150ms ease-out;
+	}
+
+	.ag-task[open] .ag-task__chevron {
+		transform: rotate(180deg);
+	}
+
 	.ag-steps {
 		list-style: none;
-		margin: 0;
-		padding: 0;
+		margin: var(--lq-space-3) 0 0;
+		padding: 0 0 0 var(--lq-space-4);
+		border-left: 2px solid var(--color-border);
 		display: flex;
 		flex-direction: column;
 		gap: var(--lq-space-2);
 	}
 
 	.ag-step {
-		border-left: 2px solid var(--color-border);
-		padding-left: var(--lq-space-3);
-	}
-
-	.ag-step--tool_call {
-		border-left-color: color-mix(in oklch, var(--color-primary) 35%, transparent);
-	}
-
-	.ag-step--tool_result {
-		border-left-color: var(--color-primary);
+		min-width: 0;
 	}
 
 	/* Subagent steps (parent_step_id set, F0-S7): indented under their
      dispatch. The full tree view is F1; the linkage already renders. */
 	.ag-step--nested {
 		margin-left: var(--lq-space-4);
-		border-left-style: dashed;
 	}
 
 	.ag-step__title {
@@ -1284,7 +1363,112 @@
 		margin-top: var(--lq-space-1);
 	}
 
-	.ag-step__mono {
+	/* AE Tool card (AE6): bordered collapsible holding one tool's name +
+     status + Parameters/Result. Hand-built on <details> (the AE `tool`
+     registry item pulls `collapsible` + `badge` + `./code.json`, all dodged
+     across the AE series — README § prompt-input / code). */
+	.ag-tool {
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		background: var(--color-card);
+		overflow: hidden;
+	}
+
+	.ag-tool__header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--lq-space-3);
+		padding: var(--lq-space-2) var(--lq-space-3);
+		cursor: pointer;
+		list-style: none;
+		min-width: 0;
+	}
+
+	.ag-tool__header::-webkit-details-marker {
+		display: none;
+	}
+
+	.ag-tool__name {
+		display: flex;
+		align-items: center;
+		gap: var(--lq-space-2);
+		min-width: 0;
+	}
+
+	.ag-tool__icon {
+		color: var(--color-muted-foreground);
+		flex: none;
+	}
+
+	.ag-tool__title {
+		color: var(--color-foreground);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		min-width: 0;
+	}
+
+	.ag-tool__badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		flex: none;
+		border-radius: var(--lq-radius-pill);
+		padding: 0 var(--lq-space-2);
+		font-size: 11px;
+		line-height: 18px;
+		white-space: nowrap;
+	}
+
+	.ag-tool__badge--completed {
+		background: var(--color-status-completed-wash);
+		color: var(--color-status-completed);
+	}
+
+	.ag-tool__badge--running {
+		background: var(--color-status-running-wash);
+		color: var(--color-status-running);
+	}
+
+	.ag-tool__chevron {
+		color: var(--color-muted-foreground);
+		flex: none;
+		transition: transform 150ms ease-out;
+	}
+
+	.ag-tool[open] .ag-tool__chevron {
+		transform: rotate(180deg);
+	}
+
+	.ag-tool__spin {
+		animation: ag-spin 1s linear infinite;
+	}
+
+	.ag-tool__body {
+		border-top: 1px solid var(--color-border);
+		display: flex;
+		flex-direction: column;
+		gap: var(--lq-space-3);
+		padding: var(--lq-space-3);
+	}
+
+	.ag-tool__section {
+		display: flex;
+		flex-direction: column;
+		gap: var(--lq-space-1);
+	}
+
+	.ag-tool__label {
+		font-size: 10px;
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--color-muted-foreground);
+		margin: 0;
+	}
+
+	.ag-tool__mono {
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-size: 12px;
 		background: var(--color-muted);
@@ -1292,31 +1476,8 @@
 		padding: var(--lq-space-2);
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
-		margin: var(--lq-space-1) 0 0;
-	}
-
-	/* Collapsed tool step: title + one-line digest on the summary row. */
-	.ag-step__fold summary {
-		display: flex;
-		align-items: baseline;
-		gap: var(--lq-space-2);
-		cursor: pointer;
-		min-width: 0;
-	}
-
-	.ag-step__fold summary .ag-step__title {
-		display: inline;
-		white-space: nowrap;
-	}
-
-	/* 85%, not lower: the faded metadata step must stay ≥4.5:1 on the card
-	   (review-verified; 75% landed at 3.86–3.97:1). */
-	.ag-step__digest {
-		color: color-mix(in oklch, var(--color-muted-foreground) 85%, transparent);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		min-width: 0;
+		overflow-x: auto;
+		margin: 0;
 	}
 
 	.ag-thinking summary {
@@ -1430,6 +1591,12 @@
 		}
 		to {
 			background-position: -200% 0;
+		}
+	}
+
+	@keyframes ag-spin {
+		to {
+			transform: rotate(360deg);
 		}
 	}
 </style>

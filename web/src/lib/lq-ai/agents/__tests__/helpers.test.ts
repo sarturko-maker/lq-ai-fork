@@ -6,9 +6,9 @@ import {
 	POLL_INTERVAL_MS,
 	RAIL_TOOLS,
 	STALE_RUNNING_AFTER_MS,
-	STEP_DIGEST_LIMIT,
 	STEP_SUMMARY_LIMIT,
 	composerEnabled,
+	groupTurnSteps,
 	isStaleRunning,
 	latestRunOf,
 	railItems,
@@ -18,7 +18,6 @@ import {
 	splitThink,
 	threadRailStates,
 	statusBadge,
-	stepDigest,
 	stepDisplay,
 	threadRailSteps,
 	uploadsSettled,
@@ -298,32 +297,6 @@ describe('stepDisplay', () => {
 	});
 });
 
-describe('stepDigest (F0-S8 collapsed tool rows)', () => {
-	it('returns a short body unchanged', () => {
-		expect(stepDigest('{"query": "cap"}')).toBe('{"query": "cap"}');
-	});
-
-	it('takes the first NON-EMPTY line and trims it', () => {
-		expect(stepDigest('\n\n   first real line  \nsecond line')).toBe('first real line');
-	});
-
-	it('returns empty for whitespace-only bodies', () => {
-		expect(stepDigest('  \n \n')).toBe('');
-	});
-
-	it('truncates long lines to the digest limit with an ellipsis', () => {
-		const digest = stepDigest('x'.repeat(STEP_DIGEST_LIMIT + 50));
-		expect(digest).toBe('x'.repeat(STEP_DIGEST_LIMIT - 1) + '…');
-		expect(Array.from(digest).length).toBe(STEP_DIGEST_LIMIT);
-	});
-
-	it('truncates by code points, not UTF-16 units (astral chars near the bound)', () => {
-		const digest = stepDigest('🎉'.repeat(STEP_DIGEST_LIMIT + 10));
-		expect(digest).toBe('🎉'.repeat(STEP_DIGEST_LIMIT - 1) + '…');
-		expect(Array.from(digest).length).toBe(STEP_DIGEST_LIMIT);
-	});
-});
-
 describe('visibleSteps', () => {
 	const answer = 'The cap is twelve months of fees.';
 	const closing = (summary: string) => makeStep({ seq: 4, kind: 'model_turn', summary });
@@ -377,6 +350,74 @@ describe('visibleSteps', () => {
 		const steps = [...earlier];
 		const run = makeRun({ status: 'completed', final_answer: 'passages' });
 		expect(visibleSteps(steps, run)).toHaveLength(3);
+	});
+});
+
+describe('groupTurnSteps (AE6 Tool+Task pairing)', () => {
+	it('pairs an adjacent tool_call + tool_result into one tool row', () => {
+		const rows = groupTurnSteps([
+			makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents', summary: '{"q":"cap"}' }),
+			makeStep({ seq: 2, kind: 'tool_result', name: 'search_documents', summary: 'passages' })
+		]);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({ kind: 'tool', name: 'search_documents', nested: false });
+		const row = rows[0];
+		if (row.kind !== 'tool') throw new Error('expected tool row');
+		expect(row.call?.summary).toBe('{"q":"cap"}');
+		expect(row.result?.summary).toBe('passages');
+		// The row is keyed on the dispatching call so it stays stable as the
+		// result settles in (no remount when the pair completes).
+		expect(row.id).toBe(rows[0].id);
+	});
+
+	it('keeps a model_turn as its own reasoning row, interleaved in order', () => {
+		const rows = groupTurnSteps([
+			makeStep({ seq: 1, kind: 'model_turn', summary: '<think>plan</think>ok' }),
+			makeStep({ seq: 2, kind: 'tool_call', name: 'read_document' }),
+			makeStep({ seq: 3, kind: 'tool_result', name: 'read_document' })
+		]);
+		expect(rows.map((r) => r.kind)).toEqual(['reasoning', 'tool']);
+	});
+
+	it('does NOT pair across a name mismatch (back-to-back distinct tools)', () => {
+		const rows = groupTurnSteps([
+			makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' }),
+			makeStep({ seq: 2, kind: 'tool_call', name: 'read_document' })
+		]);
+		expect(rows).toHaveLength(2);
+		expect(rows.every((r) => r.kind === 'tool')).toBe(true);
+		const [a, b] = rows;
+		if (a.kind !== 'tool' || b.kind !== 'tool') throw new Error('expected tool rows');
+		expect(a.result).toBeNull();
+		expect(b.result).toBeNull();
+	});
+
+	it('leaves a result unpaired when subagent steps separate it from its call', () => {
+		// The `task` dispatch interleaves nested children before its result —
+		// adjacency-only pairing keeps the dispatch and its result as separate
+		// cards rather than mis-pairing across the nesting.
+		const rows = groupTurnSteps([
+			makeStep({ seq: 1, kind: 'tool_call', name: 'task' }),
+			makeStep({ seq: 2, kind: 'tool_call', name: 'grep', parent_step_id: 'step-1' }),
+			makeStep({ seq: 3, kind: 'tool_result', name: 'grep', parent_step_id: 'step-1' }),
+			makeStep({ seq: 4, kind: 'tool_result', name: 'task' })
+		]);
+		// dispatch (call-only) · nested grep pair · dispatch result (orphan)
+		expect(rows).toHaveLength(3);
+		const [dispatch, nested, orphan] = rows;
+		if (dispatch.kind !== 'tool' || nested.kind !== 'tool' || orphan.kind !== 'tool') {
+			throw new Error('expected tool rows');
+		}
+		expect(dispatch).toMatchObject({ name: 'task', nested: false });
+		expect(dispatch.result).toBeNull();
+		expect(nested).toMatchObject({ name: 'grep', nested: true });
+		expect(nested.result?.summary).toBe(null);
+		expect(orphan).toMatchObject({ name: 'task', call: null });
+		expect(orphan.result?.kind).toBe('tool_result');
+	});
+
+	it('returns an empty list for no steps', () => {
+		expect(groupTurnSteps([])).toEqual([]);
 	});
 });
 
