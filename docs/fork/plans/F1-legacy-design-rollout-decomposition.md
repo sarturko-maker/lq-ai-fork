@@ -425,10 +425,17 @@ screenshots light+dark/wide+narrow · simplification · adversarial review WITH 
   5-state verification UI + lazy single-fetch preserved. Source titles/quotes are escaped text bindings
   (no `{@html}`). Adversarial review: **SHIP** (0 blocker; soft-deleted-name suppression + 2 nits fixed).
   *(S–M)*
-- **AE4 — Code Block** *(new dep: `shiki`).* Vendor **Code Block** (language header + copy + Shiki
-  highlight); hook into `renderModelMarkdown`'s `<pre><code>` output — **highlight runs client-side on
-  already-sanitized text** (no injection). **Adversarial + security:** confirm Shiki receives escaped
-  text only; SBOM + ADR-F011 dep note; copy-button clipboard a11y; dark theme of the code surface. *(M)*
+- **AE4 — Code Block ✅ DONE (PR #63).** *(new dep: `shiki`.)* **Option-2 hand-build** (the AE `code`
+  registry item pulls `svelte-toolbelt` + a `copy-button` registry item + line-number/overflow machinery
+  + a controlled-`code`-prop API that doesn't fit our `{@html}` sink). `lib/lq-ai/code/`: `shiki.ts`
+  (fine-grained `createHighlighter`, JS engine, GitHub light/dark dual-theme, `normalizeLang` aliases +
+  `text` fallback) + `enhance.ts` — a Svelte action (mirrors `decorate-inline.ts`) that post-processes
+  the already-sanitized `<pre><code>`: reads `.textContent`, Shiki-highlights, **re-sanitizes Shiki's
+  output with DOMPurify**, swaps in the AE card (language header + copy button). Wired into `MessageBubble`
+  alongside `decorateCitationsInline`. **Security verified:** highlight runs only on already-sanitized
+  text; injected `<script>` renders as inert text (Cypress-asserted); DOMPurify preserves `--shiki-dark`
+  so dark mode works (Cypress + screenshot). Gate: web check 0err / vitest 816 / cypress ae4 8/8 headed;
+  shiki is the only new dep (ADR-F011 pre-approved); SBOM in NOTICES. *(M)*
 - **AE5 — Prompt Input** *(REPLACES R9's scope; shell).* Composer → AE **Prompt Input**: unified rounded
   shell + toolbar (model selector, attach 📎, enhance ✨, receipts 📜, submit/stop). Keep SlashPopover,
   EnhancePromptExpansion, SkillPicker, SavedPromptsPanel wiring + every `data-testid`. **Also migrates

@@ -17,6 +17,7 @@
 	import { captureAffordanceInline } from '$lib/lq-ai/preferences/capture-affordance';
 	import { citationsApi, LQAIApiError } from '$lib/lq-ai/api';
 	import { decorateCitationsInline } from '$lib/lq-ai/citations/decorate-inline';
+	import { enhanceCodeBlocks } from '$lib/lq-ai/code/enhance';
 	import { splitThink } from '$lib/lq-ai/agents/helpers';
 	import { renderModelMarkdown } from '$lib/lq-ai/sanitize-markdown';
 
@@ -187,6 +188,7 @@
 						citations: fetchedCitations ?? [],
 						enabled: !isStreaming
 					}}
+					use:enhanceCodeBlocks={{ enabled: !isStreaming }}
 				>
 					<!-- eslint-disable-next-line svelte/no-at-html-tags — DOMPurify-sanitized via renderModelMarkdown -->
 					{@html rendered}

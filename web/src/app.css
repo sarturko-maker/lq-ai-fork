@@ -332,3 +332,34 @@
 	--status-attention: oklch(0.72 0.12 80);
 	--status-attention-wash: oklch(0.3 0.04 80);
 }
+
+/*
+ * AE4 (ADR-F011) — Shiki code blocks in model output. The card chrome (border,
+ * header, copy button) is Tailwind utilities set in `lib/lq-ai/code/enhance.ts`;
+ * only the Shiki-generated `<pre class="shiki">` internals and the class-based
+ * dark swap need raw CSS here (Shiki emits inline styles we can't reach with
+ * utilities). Shiki's own background is forced transparent so the card supplies
+ * one bg for both themes; tokens swap to the dark palette via `--shiki-dark`
+ * under `.dark` (Shiki's recommended class-based dark mode).
+ */
+.lq-code .shiki {
+	margin: 0;
+	padding: 0.875rem 1rem;
+	overflow-x: auto;
+	font-size: 0.8125rem;
+	line-height: 1.6;
+	background-color: transparent !important;
+}
+
+.lq-code .shiki code {
+	font-family:
+		ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+.dark .lq-code .shiki,
+.dark .lq-code .shiki span {
+	color: var(--shiki-dark) !important;
+	font-style: var(--shiki-dark-font-style) !important;
+	font-weight: var(--shiki-dark-font-weight) !important;
+	text-decoration: var(--shiki-dark-text-decoration) !important;
+}
