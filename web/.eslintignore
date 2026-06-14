@@ -8,3 +8,10 @@ package-lock.json
 # provenance in NOTICES.md) — exempt from house lint/format.
 src/lib/components/ui/
 src/lib/utils.ts
+
+# AE0 (ADR-F011): vendored AI Elements component source. eslint-exempt for the
+# same reason as ui/* — the shadcn `...rest` + `$props()` pattern trips
+# `svelte/valid-compile`'s custom_element_props_identifier rule, a false
+# positive for our SPA (we never compile custom elements). Kept prettier-
+# formatted (owned source; provenance in NOTICES.md + ai-elements/README.md).
+src/lib/lq-ai/components/ai-elements/
