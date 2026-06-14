@@ -103,6 +103,13 @@ out/
 .env.development
 .env.production
 .env.test
+# Catch EVERY other .env.<suffix> — backups, dumps, env-specific copies. The
+# `.env.bak-f0-s4` leak (committed in PR #35) matched none of the patterns
+# above and exposed the live MiniMax/JWT/gateway/Postgres secrets once the
+# repo went public. `.env.*` closes that whole class. (SECURITY)
+.env.*
+# ...but the committed templates (root + deploy/*) stay tracked.
+!.env.example
 
 # Operator's actual gateway.yaml (the .example version is committed)
 gateway.yaml
