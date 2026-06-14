@@ -61,8 +61,8 @@
 		</div>
 		<Button
 			variant="ghost"
-			size="sm"
-			class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive focus-visible:opacity-100"
+			size="xs"
+			class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive dark:hover:text-red-300 focus-visible:opacity-100"
 			title="Detach from this chat"
 			data-testid={`lq-ai-detach-${file.id}`}
 			onclick={() => onDetach(file)}

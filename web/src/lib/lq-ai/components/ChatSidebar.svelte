@@ -80,7 +80,7 @@
 			<button
 				type="button"
 				class="{PROJECT_ROW} {activeProjectId === null
-					? 'font-semibold text-primary'
+					? 'bg-accent font-semibold text-accent-foreground'
 					: 'text-muted-foreground hover:bg-muted/60'}"
 				onclick={() => onSelectProject(null)}
 			>

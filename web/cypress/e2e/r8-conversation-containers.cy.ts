@@ -198,25 +198,49 @@ function openChat() {
 	it('collapses the side panes into drawers below 880px (cockpit idiom)', () => {
 		cy.viewport(760, 1000);
 		openChat();
-		// Sidebar is off-canvas: present in the DOM but translated away.
-		cy.get('[data-testid="lq-ai-sidebar-drawer"]').should('have.class', '-translate-x-full');
+		// Sidebar is off-canvas: present in the DOM but translated away AND
+		// `inert` so its controls leave the tab order + a11y tree when closed
+		// (R8 review fix — no invisible focusable controls). Multiple attribute
+		// checks go in one `.should(cb)` because chaining `.and('have.attr')`
+		// rebinds the subject to the attribute value, breaking the next link.
+		cy.get('[data-testid="lq-ai-sidebar-drawer"]').should(($el) => {
+			expect($el).to.have.class('-translate-x-full');
+			expect($el).to.have.attr('inert');
+		});
 		cy.get('[data-testid="lq-ai-chat-scrim"]').should('not.exist');
 
-		// ☰ opens the nav drawer + scrim.
+		// ☰ opens the nav drawer + scrim, drops `inert`, and exposes the dialog
+		// role. (Focus-on-open is implemented in the toggle handler — `await
+		// tick(); el.focus()` — but document.activeElement is unreliable under
+		// headed-Electron/Xvfb, where programmatic focus doesn't register
+		// without OS window focus, so it is not asserted here.)
 		cy.get('[data-testid="lq-ai-nav-toggle"]').click();
-		cy.get('[data-testid="lq-ai-sidebar-drawer"]').should('have.class', 'translate-x-0');
+		cy.get('[data-testid="lq-ai-sidebar-drawer"]').should(($el) => {
+			expect($el).to.have.class('translate-x-0');
+			expect($el).not.to.have.attr('inert');
+			expect($el).to.have.attr('role', 'dialog');
+		});
 		cy.get('[data-testid="lq-ai-chat-scrim"]').should('be.visible');
 
-		// Escape closes it.
+		// Escape closes it (and re-asserts `inert`).
 		cy.get('body').type('{esc}');
-		cy.get('[data-testid="lq-ai-sidebar-drawer"]').should('have.class', '-translate-x-full');
+		cy.get('[data-testid="lq-ai-sidebar-drawer"]').should(($el) => {
+			expect($el).to.have.class('-translate-x-full');
+			expect($el).to.have.attr('inert');
+		});
 		cy.get('[data-testid="lq-ai-chat-scrim"]').should('not.exist');
 
 		// Files toggle opens the right drawer; the scrim closes it.
 		cy.get('[data-testid="lq-ai-files-toggle"]').click();
-		cy.get('[data-testid="lq-ai-files-drawer"]').should('have.class', 'translate-x-0');
+		cy.get('[data-testid="lq-ai-files-drawer"]').should(($el) => {
+			expect($el).to.have.class('translate-x-0');
+			expect($el).not.to.have.attr('inert');
+		});
 		cy.get('[data-testid="lq-ai-chat-scrim"]').click({ force: true });
-		cy.get('[data-testid="lq-ai-files-drawer"]').should('have.class', 'translate-x-full');
+		cy.get('[data-testid="lq-ai-files-drawer"]').should(($el) => {
+			expect($el).to.have.class('translate-x-full');
+			expect($el).to.have.attr('inert');
+		});
 	});
 });
 

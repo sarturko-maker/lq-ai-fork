@@ -63,7 +63,7 @@
 	 * surfaced per-message.
 	 */
 	import { get } from 'svelte/store';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 
 	import {
@@ -131,6 +131,11 @@
 	$: isNarrow = viewportWidth < 880;
 	let navDrawerOpen = false;
 	let filesDrawerOpen = false;
+	// Drawer wrapper refs — focus moves into the just-opened drawer (a11y:
+	// matches the cockpit dialog idiom), and a closed drawer is made `inert`
+	// below so its off-canvas controls leave the tab order + a11y tree.
+	let sidebarDrawerEl: HTMLDivElement | null = null;
+	let filesDrawerEl: HTMLDivElement | null = null;
 	// Leaving the narrow layout always closes the drawers.
 	$: if (!isNarrow) {
 		navDrawerOpen = false;
@@ -143,13 +148,22 @@
 		? `absolute inset-y-0 right-0 z-40 flex w-72 max-w-[85%] bg-background shadow-lg transition-transform duration-200 ease-out motion-reduce:transition-none ${filesDrawerOpen ? 'translate-x-0' : 'translate-x-full'}`
 		: 'flex shrink-0';
 
-	function toggleNavDrawer() {
+	async function toggleNavDrawer() {
 		navDrawerOpen = !navDrawerOpen;
-		if (navDrawerOpen) filesDrawerOpen = false;
+		if (navDrawerOpen) {
+			filesDrawerOpen = false;
+			// Wait for the reactive `inert` to clear before focusing the panel.
+			await tick();
+			sidebarDrawerEl?.focus();
+		}
 	}
-	function toggleFilesDrawer() {
+	async function toggleFilesDrawer() {
 		filesDrawerOpen = !filesDrawerOpen;
-		if (filesDrawerOpen) navDrawerOpen = false;
+		if (filesDrawerOpen) {
+			navDrawerOpen = false;
+			await tick();
+			filesDrawerEl?.focus();
+		}
 	}
 	function closeDrawers() {
 		navDrawerOpen = false;
@@ -887,7 +901,15 @@
 	class="relative flex flex-1 h-full min-h-0 overflow-hidden"
 	data-testid="lq-ai-chat-shell"
 >
-	<div class={sidebarWrapClass} data-testid={isNarrow ? 'lq-ai-sidebar-drawer' : undefined}>
+	<div
+		class={sidebarWrapClass}
+		data-testid={isNarrow ? 'lq-ai-sidebar-drawer' : undefined}
+		bind:this={sidebarDrawerEl}
+		role={isNarrow ? 'dialog' : undefined}
+		aria-label={isNarrow ? 'Chat list' : undefined}
+		tabindex="-1"
+		inert={(isNarrow && !navDrawerOpen) || undefined}
+	>
 		<ChatSidebar
 			groups={filteredGroups}
 			activeChatId={activeChat?.id ?? null}
@@ -1099,7 +1121,15 @@
 	</section>
 
 	{#if activeChat}
-		<div class={filesWrapClass} data-testid={isNarrow ? 'lq-ai-files-drawer' : undefined}>
+		<div
+			class={filesWrapClass}
+			data-testid={isNarrow ? 'lq-ai-files-drawer' : undefined}
+			bind:this={filesDrawerEl}
+			role={isNarrow ? 'dialog' : undefined}
+			aria-label={isNarrow ? 'Attached files' : undefined}
+			tabindex="-1"
+			inert={(isNarrow && !filesDrawerOpen) || undefined}
+		>
 			<AttachedFilesPanel
 				{chatFiles}
 				{projectFiles}
