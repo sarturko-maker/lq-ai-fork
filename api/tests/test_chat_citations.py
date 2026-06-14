@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -560,6 +561,9 @@ async def test_get_citations_endpoint_returns_persisted_rows(
     assert len(body) == 1
     cite = body[0]
     assert cite["source_file_id"] == str(source_file.id)
+    # AE3: the endpoint LEFT JOINs files so the AE "Sources" card can show a
+    # human-readable document name without a second round-trip.
+    assert cite["source_filename"] == "nda-template.pdf"
     assert cite["source_text"] == quote
     assert cite["verified"] is True
     assert cite["verification_method"] == "exact_match"
@@ -569,6 +573,21 @@ async def test_get_citations_endpoint_returns_persisted_rows(
     expected_start = CHUNK_BODY.find(quote)
     assert cite["source_offset_start"] == expected_start
     assert cite["source_offset_end"] == expected_start + len(quote)
+
+    # AE3: soft-deleting the source file suppresses the joined filename (the
+    # join is scoped to non-deleted files, matching this module's "deleted
+    # files are invisible" posture) — the citation row itself still returns.
+    source_file.deleted_at = datetime.now(timezone.utc)
+    await db_session.flush()
+    after_delete = await client.get(
+        f"/api/v1/chats/{chat_with_kb_attached.id}/messages/{message_id}/citations",
+        headers=_h(owner_user),
+    )
+    assert after_delete.status_code == 200, after_delete.text
+    rows = after_delete.json()
+    assert len(rows) == 1
+    assert rows[0]["source_file_id"] == str(source_file.id)
+    assert rows[0]["source_filename"] is None
 
 
 @respx.mock

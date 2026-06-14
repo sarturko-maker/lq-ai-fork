@@ -12,6 +12,12 @@
 		type CitationRenderState,
 		type ParsedCitationMarker
 	} from '../citations/state';
+	// AE3: `previewQuote` now lives in `citations/format.ts` (shared with the AE
+	// Sources card). Re-exported so existing consumers + tests keep importing it
+	// from this module.
+	import { previewQuote } from '../citations/format';
+
+	export { previewQuote };
 
 	export interface CitationChip {
 		key: string;
@@ -23,13 +29,6 @@
 		sourceFileId: string | null;
 		sourcePage: number | null;
 		marker: ParsedCitationMarker;
-	}
-
-	/** Truncate a quote for chip display so a long sentence doesn't blow the layout. */
-	export function previewQuote(quote: string, maxChars = 60): string {
-		const trimmed = quote.trim();
-		if (trimmed.length <= maxChars) return trimmed;
-		return `${trimmed.slice(0, maxChars - 1).trimEnd()}…`;
 	}
 
 	/**

@@ -1513,17 +1513,30 @@ async def get_citations(
             details={"message_id": str(mid)},
         )
 
+    # LEFT JOIN the source file so the response carries a human-readable
+    # filename for the AE "Sources" card (AE3) without a second round-trip —
+    # the lazy single-fetch contract is preserved. The join is scoped to
+    # non-soft-deleted files to match this module's "deleted files are
+    # invisible" posture (cf. `_load_visible_file`): a citation whose source
+    # was soft-deleted resolves to a null filename, which the UI degrades to
+    # an ordinal label. OUTER join (not inner) so the citation row itself
+    # always returns even when its filename is suppressed or missing.
     cite_stmt = (
-        select(MessageCitation)
+        select(MessageCitation, File.filename)
+        .outerjoin(
+            File,
+            (File.id == MessageCitation.source_file_id) & File.deleted_at.is_(None),
+        )
         .where(MessageCitation.message_id == mid)
         .order_by(MessageCitation.created_at, MessageCitation.id)
     )
-    rows = (await db.execute(cite_stmt)).scalars().all()
+    rows = (await db.execute(cite_stmt)).all()
 
     return [
         {
             "id": str(c.id),
             "source_file_id": str(c.source_file_id),
+            "source_filename": filename,
             "source_offset_start": c.source_offset_start,
             "source_offset_end": c.source_offset_end,
             "source_page": c.source_page,
@@ -1536,7 +1549,7 @@ async def get_citations(
             "partial": c.partial,
             "created_at": c.created_at.isoformat(),
         }
-        for c in rows
+        for c, filename in rows
     ]
 
 

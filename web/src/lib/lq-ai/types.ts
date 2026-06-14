@@ -231,6 +231,12 @@ export type CitationVerificationMethod =
 export interface Citation {
 	id: string;
 	source_file_id: string;
+	/**
+	 * Human-readable source document name (AE3) — LEFT-joined from `files`
+	 * by the citations endpoint. Null on legacy rows / a deleted file; the
+	 * AE Sources card falls back to an ordinal label.
+	 */
+	source_filename?: string | null;
 	source_offset_start: number;
 	source_offset_end: number;
 	source_page?: number | null;
