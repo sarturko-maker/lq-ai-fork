@@ -117,17 +117,24 @@ StoreBackend namespaces keyed `(org_id, …)`; company and practice levels read-
 ### Definition of done
 - Build + lint + typecheck + tests pass and the output is SHOWN, not asserted. New behavior has tests.
 - Fresh-context review of the diff against the plan (correctness gaps only).
+- **Security + simplification pass on EVERY slice — no exceptions, even "unrelated"/design/doc work.**
+  Folded into the slice's adversarial review: pause and check for leaked secrets/credentials, authz
+  holes, injection, unsafe sinks, and anything that shouldn't be in the diff (e.g. a stray `.env*`
+  backup); and for dead code / duplication to delete. This is universal now, not just for
+  gateway/auth/audit/crypto paths. (Added 2026-06-14 after a `.env.bak-f0-s4` backup — which the
+  `.gitignore` didn't match — shipped the live MiniMax/JWT/gateway/Postgres secrets to the public repo.)
 - ADR drafted if the slice made an architectural call. If you can't verify it, don't ship it.
 - When the agent repeats a mistake, the retro action is editing this file (and keeping it short).
 
 ### Merge policy (agent-merged — ADR-F005)
 - This project is fully agentically coded; the maintainer does not review code. The agent
   squash-merges a PR when the FULL gate passes: (1) CI green; (2) containerized suites for every
-  touched service with counts quoted in the PR; (3) fresh-context adversarial review of the diff —
-  blockers/should-fixes fixed or explicitly deferred on record; (4) live verification on the dev
-  stack when behavior changes (provider tests / UI screenshot), evidence in the PR; (5) HANDOFF.md
-  updated. Security-sensitive paths (gateway, auth, audit, crypto, anonymization) get an extra
-  security-focused review pass.
+  touched service with counts quoted in the PR; (3) fresh-context adversarial review of the diff,
+  which ALWAYS includes a security pass (leaked secrets/credentials, authz, injection, unsafe sinks,
+  stray files that shouldn't ship) + a simplification pass — blockers/should-fixes fixed or explicitly
+  deferred on record; (4) live verification on the dev stack when behavior changes (provider tests /
+  UI screenshot), evidence in the PR; (5) HANDOFF.md updated. Security-sensitive paths (gateway, auth,
+  audit, crypto, anonymization) get an additional, deeper security-focused review pass.
 
 ### Fork discipline
 - Hard fork, upstream FROZEN (ADR-F001): no merges, no cherry-picks, nothing from upstream — and no
