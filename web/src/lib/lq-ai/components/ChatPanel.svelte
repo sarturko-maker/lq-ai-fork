@@ -63,7 +63,7 @@
 	 * surfaced per-message.
 	 */
 	import { get } from 'svelte/store';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 
 	import {
@@ -113,10 +113,65 @@
 	import type { SkillAutocompleteItem } from '$lib/lq-ai/types';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import { createEventDispatcher } from 'svelte';
+	import { fade } from 'svelte/transition';
+	import { motionMs } from '$lib/lq-ai/cockpit/helpers';
 
 	// ---- component props ----
 	export let projectIdFilter: string | undefined = undefined;
 	export let initialChatId: string | undefined = undefined;
+
+	// ---- responsive shell (R8) ----
+	// Mirrors cockpit/Cockpit.svelte: below 880px the two fixed side panes
+	// leave the flex row and become off-canvas drawers behind header toggles
+	// plus a shared scrim. The drawers slide via a CSS transform that
+	// motion-reduce:transition-none disables; the scrim fade is gated through
+	// the shared motionMs() helper. This slice owns ONLY the chat-shell layout;
+	// ChatPanel's own --lq-* tokens are migrated in R9.
+	let viewportWidth = 1280;
+	$: isNarrow = viewportWidth < 880;
+	let navDrawerOpen = false;
+	let filesDrawerOpen = false;
+	// Drawer wrapper refs — focus moves into the just-opened drawer (a11y:
+	// matches the cockpit dialog idiom), and a closed drawer is made `inert`
+	// below so its off-canvas controls leave the tab order + a11y tree.
+	let sidebarDrawerEl: HTMLDivElement | null = null;
+	let filesDrawerEl: HTMLDivElement | null = null;
+	// Leaving the narrow layout always closes the drawers.
+	$: if (!isNarrow) {
+		navDrawerOpen = false;
+		filesDrawerOpen = false;
+	}
+	$: sidebarWrapClass = isNarrow
+		? `absolute inset-y-0 left-0 z-40 flex w-72 max-w-[85%] bg-background shadow-lg transition-transform duration-200 ease-out motion-reduce:transition-none ${navDrawerOpen ? 'translate-x-0' : '-translate-x-full'}`
+		: 'flex w-72 shrink-0';
+	$: filesWrapClass = isNarrow
+		? `absolute inset-y-0 right-0 z-40 flex w-72 max-w-[85%] bg-background shadow-lg transition-transform duration-200 ease-out motion-reduce:transition-none ${filesDrawerOpen ? 'translate-x-0' : 'translate-x-full'}`
+		: 'flex shrink-0';
+
+	async function toggleNavDrawer() {
+		navDrawerOpen = !navDrawerOpen;
+		if (navDrawerOpen) {
+			filesDrawerOpen = false;
+			// Wait for the reactive `inert` to clear before focusing the panel.
+			await tick();
+			sidebarDrawerEl?.focus();
+		}
+	}
+	async function toggleFilesDrawer() {
+		filesDrawerOpen = !filesDrawerOpen;
+		if (filesDrawerOpen) {
+			navDrawerOpen = false;
+			await tick();
+			filesDrawerEl?.focus();
+		}
+	}
+	function closeDrawers() {
+		navDrawerOpen = false;
+		filesDrawerOpen = false;
+	}
+	function onShellKey(e: KeyboardEvent) {
+		if (e.key === 'Escape' && (navDrawerOpen || filesDrawerOpen)) closeDrawers();
+	}
 
 	// ---- state ----
 	let activeProject: Project | null = null;
@@ -840,46 +895,85 @@
 	$: enhanceButtonAriaLabel = enhanceIsRefine ? 'Refine prompt' : 'Enhance prompt';
 </script>
 
-<div class="flex flex-1 h-full min-h-0 overflow-hidden" data-testid="lq-ai-chat-shell">
-	<ChatSidebar
-		groups={filteredGroups}
-		activeChatId={activeChat?.id ?? null}
-		activeProjectId={activeProject?.id ?? null}
-		{archivedToggle}
-		hideProjectFilter={!!projectIdFilter}
-		onSelectChat={selectChat}
-		onNewChat={createNewChat}
-		onSelectProject={selectProject}
-		onToggleArchived={toggleArchived}
-	/>
+<svelte:window bind:innerWidth={viewportWidth} on:keydown={onShellKey} />
 
-	<section class="flex-1 flex flex-col overflow-hidden">
+<div
+	class="relative flex flex-1 h-full min-h-0 overflow-hidden"
+	data-testid="lq-ai-chat-shell"
+>
+	<div
+		class={sidebarWrapClass}
+		data-testid={isNarrow ? 'lq-ai-sidebar-drawer' : undefined}
+		bind:this={sidebarDrawerEl}
+		role={isNarrow ? 'dialog' : undefined}
+		aria-label={isNarrow ? 'Chat list' : undefined}
+		tabindex="-1"
+		inert={(isNarrow && !navDrawerOpen) || undefined}
+	>
+		<ChatSidebar
+			groups={filteredGroups}
+			activeChatId={activeChat?.id ?? null}
+			activeProjectId={activeProject?.id ?? null}
+			{archivedToggle}
+			hideProjectFilter={!!projectIdFilter}
+			onSelectChat={selectChat}
+			onNewChat={createNewChat}
+			onSelectProject={selectProject}
+			onToggleArchived={toggleArchived}
+		/>
+	</div>
+
+	<section class="flex-1 flex flex-col overflow-hidden min-w-0">
 		<div
-			class="px-4 py-2 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between"
+			class="px-4 py-2 border-b border-gray-200 dark:border-gray-800 flex items-center gap-2"
 			data-testid="lq-ai-chat-header"
 		>
+			{#if isNarrow}
+				<button
+					type="button"
+					class="shrink-0 rounded-md px-2 py-1 text-lg leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+					aria-label="Toggle chat list"
+					aria-expanded={navDrawerOpen}
+					on:click={toggleNavDrawer}
+					data-testid="lq-ai-nav-toggle"
+				>
+					☰
+				</button>
+			{/if}
 			{#if activeChat}
-				<div>
-					<h2 class="lq-text-panel-h">
+				<div class="min-w-0 flex-1">
+					<h2 class="lq-text-panel-h truncate">
 						{activeChat.title || 'Untitled chat'}
 					</h2>
 					{#if activeChat.project_id}
-						<p class="text-xs text-gray-500">
+						<p class="text-xs text-gray-500 truncate">
 							In project: {$projectsStore.find((p) => p.id === activeChat.project_id)?.name ??
 								activeChat.project_id}
 						</p>
 					{/if}
 				</div>
-				<div class="flex items-center gap-2">
+				<div class="flex items-center gap-2 shrink-0">
 					{#if messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.routed_inference_tier}
 						<TierBadge
 							tier={messages[messages.length - 1].routed_inference_tier ?? null}
 							provider={messages[messages.length - 1].routed_provider ?? null}
 						/>
 					{/if}
+					{#if isNarrow}
+						<button
+							type="button"
+							class="shrink-0 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+							aria-label="Toggle attached files"
+							aria-expanded={filesDrawerOpen}
+							on:click={toggleFilesDrawer}
+							data-testid="lq-ai-files-toggle"
+						>
+							Files
+						</button>
+					{/if}
 				</div>
 			{:else}
-				<h2 class="text-sm text-gray-500">Pick or create a chat to start.</h2>
+				<h2 class="text-sm text-gray-500 flex-1">Pick or create a chat to start.</h2>
 			{/if}
 		</div>
 
@@ -1027,13 +1121,23 @@
 	</section>
 
 	{#if activeChat}
-		<AttachedFilesPanel
-			{chatFiles}
-			{projectFiles}
-			{uploading}
-			onUpload={uploadAttached}
-			onDetach={detachFile}
-		/>
+		<div
+			class={filesWrapClass}
+			data-testid={isNarrow ? 'lq-ai-files-drawer' : undefined}
+			bind:this={filesDrawerEl}
+			role={isNarrow ? 'dialog' : undefined}
+			aria-label={isNarrow ? 'Attached files' : undefined}
+			tabindex="-1"
+			inert={(isNarrow && !filesDrawerOpen) || undefined}
+		>
+			<AttachedFilesPanel
+				{chatFiles}
+				{projectFiles}
+				{uploading}
+				onUpload={uploadAttached}
+				onDetach={detachFile}
+			/>
+		</div>
 	{/if}
 
 	{#if activeChat && receiptsDrawerOpen}
@@ -1042,6 +1146,19 @@
 			chatId={activeChat.id}
 			onClose={() => (receiptsDrawerOpen = false)}
 		/>
+	{/if}
+
+	{#if isNarrow && (navDrawerOpen || filesDrawerOpen)}
+		<!-- Shared scrim: tokenised wash (never a black sheet); closes whichever
+		     drawer is open. Escape also closes (onShellKey). -->
+		<button
+			type="button"
+			class="absolute inset-0 z-30 cursor-default bg-foreground/20"
+			aria-label="Close panel"
+			data-testid="lq-ai-chat-scrim"
+			transition:fade={{ duration: motionMs(120) }}
+			on:click={closeDrawers}
+		></button>
 	{/if}
 </div>
 

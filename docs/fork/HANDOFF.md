@@ -2,238 +2,135 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (end of F1-S3 — practice areas are real agent identities)
+## State (end of R8 — conversation containers + chat-shell responsive collapse)
 
-- **F1-S3 merged via PR #46** (or merging — confirm on main): `practice_areas` config
-  vocabulary + per-area Deep Agent + cockpit filing. Plan:
-  `docs/fork/plans/F1-S3-practice-area-config-deep-agent.md`. New ADR: **F010**
-  (gateway-only model binding; model-bearing subagent specs rejected). Follows F1-S2.1.
-- Dev stack: 8 services healthy; **DB at 0054** (api auto-migrated on boot); api +
-  arq-worker + ingest-worker + web rebuilt together on slice code. Login:
-  http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
-- Gateway aliases smart/fast/budget → minimax/MiniMax-M3 (the ONLY S9-qualified model,
-  **tier 4**). CALL-based token plan.
-- Suites at gate: web check 0 errors + vitest 781; api containerized green at alembic
-  head incl. 0054 (full suite was 2056-passing pre-review-fix; affected suites re-run
-  on fresh pg after fixes: 41 passed); migration verified upgrade/downgrade/re-upgrade.
-  CI: confirm green on the final commit before merge. Adversarial review: 26 agents,
-  16 confirmed (1 blocker + should-fixes ALL FIXED), 4 refuted, 0 pre-existing.
-  Evidence: `docs/fork/evidence/f1-s3/`.
+- **R8 on branch `f1-r8-conversation-containers`** (PR pending to
+  `sarturko-maker/lq-ai-fork`). Slice of the legacy `--lq-*` → semantic-token design
+  rollout (full plan: `docs/fork/plans/F1-legacy-design-rollout-decomposition.md`).
+- Dev stack: 8 services healthy; **DB at 0054**; web rebuilt on R8 + review fixes.
+  Login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
+  Gateway aliases smart/fast/budget → minimax/MiniMax-M3 (only S9-qualified model, **tier 4**).
+- Suites at gate: web `npm run check` **0 errors** (5 pre-existing a11y warnings, untouched
+  files); **vitest 803**; **Cypress `r8-conversation-containers.cy.ts` 6/6** headed/live.
+  Evidence: `docs/fork/evidence/r8/` (before/after × wide/narrow × light/dark, 8 PNGs).
+  Adversarial review (Workflow, 13 agents): 9 raw → **8 confirmed (0 blocker, 2 should-fix,
+  6 nit); ALL actioned** (security pass CLEAN — see below).
 
-### Hotfix since F1-S3 — expired-session blank screen (PR #47, main `ede41b1`)
+### SECURITY INCIDENT (2026-06-14) — RESOLVED
 
-- **Symptom:** cockpit blank, surviving hard refresh. **Cause:** expired access token →
-  `/users/me` 401 → client auto-`POST /auth/refresh`, which bcrypt-scans EVERY active
-  session (per-row salt, no index) — 359 accumulated admin sessions ≈ **79s** → the web
-  layout waits with no timeout → permanent blank.
-- **Fixes:** api — per-user active-session cap (`_MAX_ACTIVE_SESSIONS_PER_USER = 10`) in
-  `_create_session`; self-heals on next login. web — `+layout.svelte` gate now times the
-  session check at 8s → redirect to login (never hangs), sets `booted` in `finally`,
-  `await goto(...)`, and renders auth-exempt routes regardless of `booted`.
-- **Live-verified on the dev stack:** a real login dropped active sessions **359 → 10**
-  in 0.67s; bad-token refresh **79s → 2.3s**, valid refresh 2.5s (both < the 8s gate
-  timeout); valid session renders the cockpit, expired session redirects to login.
-  api + web rebuilt; **no migration** (DB still 0054).
-- **Follow-up (Backlog):** the `/auth/refresh` scan is GLOBAL (across all users), so the
-  cap bounds per-user accumulation but not the bad-token-spam DoS — the **deterministic-
-  HMAC index** on `user_sessions` is the real fix (needs a migration + security review).
-  Security review of PR #47: no blockers; the inert empty-`keep_ids` guard was added, the
-  narrow same-user concurrent-mint revoke race is documented + accepted in code.
+- `.env.bak-f0-s4` (tracked; `.gitignore` missed it) leaked LIVE `MINIMAX_API_KEY`,
+  `JWT_SECRET`, `LQ_AI_GATEWAY_KEY`, Postgres/MinIO/S3 creds to the public repo.
+- **Fixed:** all secrets ROTATED + verified live (new MiniMax key in untracked `.env`);
+  **PR #56** removed the file + hardened `.gitignore` (`.env.*` + `!.env.example`) + added
+  the security-review discipline; **git history rewritten** (filter-repo, force-pushed —
+  origin/main AND local have 0 commits with the file). R8 rebased onto the clean main.
+- **New per-slice discipline (CLAUDE.md §Definition-of-done + §Merge-policy):** EVERY slice
+  gets a security + simplification pass folded into the adversarial review, with a
+  pause-and-check. The R8 review honored this — security pass came back clean (no secrets,
+  no `@html`/unsafe sinks, all file metadata auto-escaped, no authz surface).
 
-## Done (F1-S3, this slice)
+## Done (R8, this slice)
 
-- **Schema 0054** (additive, reversible): `practice_areas` += `profile_md`,
-  `default_tier_floor` (1–5 CHECK), `agent_config` JSONB; `projects.practice_area_id`
-  (nullable FK SET NULL; CHECK forbids it on sandboxes; partial index);
-  `audit_log.practice_area_id`; `practice_area_skills` join. Commercial seeded with a
-  real profile + **NO area tier floor** (see Gotchas — a floor would break it with the
-  tier-4-only model).
-- **Per-area Deep Agent** (`api/app/agents/area_agent.py`, one renderer): area row →
-  system-prompt suffix (profile) + tier floor (min-combined API-side) + declarative
-  subagents. **ADR-F010 guard at `build_deep_agent`**: rejects any subagent `model`
-  string (gateway bypass via `init_chat_model`); `agent_config` strict top-level schema
-  (unknown keys rejected; playbooks/mcp_servers by-reference, no creds). Composition
-  folds profile/tier/subagents, threads `practice_area_id` into guard+audit.
-  **Proven live**: a real MiniMax-M3 run answered in-character from the Commercial
-  profile; a model-bearing PATCH → 400.
-- **Config/admin API**: GET reads carry profile/config (transparency); `PATCH /{key}`
-  + skill attach/detach are admin-only; 404-not-403; sandbox `project_id` rejected at
-  `POST /agents/runs`.
-- **Cockpit**: matters file by area; `/agents/matters` carries `practice_area_id/key`;
-  AreaGrid counts per area + an **"Unfiled matters"** section keeps legacy/null-area
-  matters reachable (review blocker fix); MattersPanel shows only the area's matters;
-  NewMatterDialog files under the area; `configured` derived.
+- **4 leaf containers → 0 `var(--lq-)`:** `ChatSidebar` + `AttachedFilesPanel` migrated to
+  **Svelte-5 runes** (so shadcn `Button onclick` forwards); `MessageOverflowMenu` +
+  `AttachedSkillPill` stay Svelte 4 (token swap + `<style>` deleted). `lq-btn-*` → shadcn
+  `Button`. Cockpit list idiom: selected rows `bg-accent text-accent-foreground`,
+  hover `hover:bg-muted/60`, sidebar `bg-muted/40`.
+- **NEW `primitives/UploadChip.svelte`** (runes) collapses the duplicated file-row markup;
+  module-exported `statusTone()` with dark-safe AA tones (now unit-tested — see review fix).
+- **Chat-shell responsive collapse (SHELL slice — maintainer directive).** `ChatPanel`
+  **layout region only** (stays Svelte 4; its own `--lq-*` tokens are R9's job): below 880px
+  the sidebar → left drawer, files → right drawer (computed wrapper class + CSS transform),
+  shared scrim `bg-foreground/20` + `transition:fade`/`motionMs`, ☰ + Files header toggles
+  (plain Svelte-4 buttons). Mirrors `cockpit/Cockpit.svelte`.
+- **Review fixes (all 8 confirmed findings actioned):**
+  - *should-fix* — closed off-canvas drawers were still Tab-reachable/SR-announced
+    (focus trap). Added **`inert={(isNarrow && !open) || undefined}`** to both drawer wrappers.
+  - *should-fix* — active project-filter label `text-primary` on `bg-muted/40` failed AA in
+    dark (4.12:1). Now `bg-accent font-semibold text-accent-foreground` (9.08:1 dark) — same
+    backing surface as the chat rows.
+  - *nit* — drawer dialog semantics: added conditional `role="dialog"` + `aria-label`
+    (narrow only) + static `tabindex="-1"` + **focus-on-open** (`await tick(); el.focus()`
+    in the toggle handlers). Dropped `aria-modal` (background isn't `inert` — would over-claim).
+  - *nit* — `UploadChip` detach `hover:text-destructive` was 4.15:1 dark → added
+    `dark:hover:text-red-300`; detach Button `size="sm"` → **`size="xs"`** (closer to the old
+    text-link weight).
+  - *nit* — added `__tests__/UploadChip.test.ts` (6 tests) locking the AA `dark:` tone lifts.
+  - *nit (accept)* — cypress dev-password fallback follows the 8-spec convention (not changed).
 
 ## Next slice — pick up exactly here
 
-1. **Legacy-surface design rollout — IN PROGRESS.** Full executable plan:
-   **`docs/fork/plans/F1-legacy-design-rollout-decomposition.md`** (read it first). ~29 vertical
-   one-PR slices (R0…R-LAST), each carrying the three disciplines (extensive testing · code
-   simplification · adversarial review) as DoD. **Resolved decisions (in plan §Resolved decisions):**
-   autonomous → SKIP all 10 (deletion-bound, leave on bridge for F2/F3); ConversationPanel → SPLIT
-   R-CONV-1 (logic) + R-CONV-2 (style); scope → whole interface, checkpoint after Foundation+Wave1;
-   typography.css → `@layer base` shim + R-TYPO decouple. **200k operating constraint:** each slice =
-   one ≤200k main-agent session — ≤~6–8 files / ≤~2k LOC, focused+truncated verify in-loop (full suite
-   → CI), exploration + adversarial review to SUBAGENTS, big files read in ranges, compact every slice.
+1. **R9 — ChatPanel token/composition swap ONLY.** The responsive shell is **already done in
+   R8**, so R9 is NO LONGER split into R9a/R9b — it's just the token migration of ChatPanel's
+   remaining `<style>` block (the `.lq-composer*`, `.lq-btn-send/abort/secondary` rules at
+   `ChatPanel.svelte` ~lines 1157-1237, still using `--lq-canvas/text/border/accent/radius`)
+   plus the inline `border-gray-200 dark:border-gray-800` / `text-gray-500` / `lq-text-panel-h`
+   in the header + composer. Convert the composer buttons to shadcn `Button` (ChatPanel is
+   Svelte 4 — it must go **runes** for `onclick` to forward, OR keep plain `<button on:click>`;
+   note ChatPanel is large + holds heavy stream logic, so prefer the minimal token swap and
+   keep `on:click` rather than a full runes conversion unless clean). **Reuse the R6/R7/R8
+   kit:** `text-accent-foreground` on accent washes (NOT `text-primary`), `dark:` lifts on
+   destructive text, the `Alert` primitive for `sendError`. Coverage table → R9 row.
+   **Backlog (from R6):** converge `ConversationPanel` + `SkillSourceView` onto
+   `renderModelMarkdown` in R-CONV-2 / R14a.
+2. Other rollout slices (any order — the dark-mode bridge holds un-migrated surfaces):
+   Foundation/rail R2–R5, Wave 1 R-CONV-1/2, Wave 2 R12/R13/R14a-b/R15/R15b-tab-pb/R16,
+   Wave 3 R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO → R-BRIDGE → R-LAST. autonomous
+   R21 = SKIP (deferred to F2/F3, stays on bridge). Net ~24 slices left after R8.
+3. **F1-S4** (subagent tree + SSE v3-projection adapter) / **F1-S5** (idempotency ledger +
+   attribution fan-out) — `docs/fork/plans/F1-replan.md`. **Area skills/subagents ACTIVATION**
+   (S9-gated) — wires `composition.py` to pass area skills/subagents + re-runs the S9 matrix.
 
-   **Rollout progress (R-series):**
-   - **Step 0 — coverage table: ✅ DONE** (PR #50). Committed in the plan doc § "Coverage table —
-     committed": all **101** `var(--lq-)` files assigned to a slice or deferred (R21 autonomous → F2/F3),
-     verified `union == grep`, zero unassigned/extra/dup — so R-LAST's deletion gate is provably reachable.
-   - **R0 — extract matter validators: ✅ merged via PR #50** (or merging — confirm on main). New
-     `web/src/lib/lq-ai/validators/matter.ts` (shared `validateName`/`validateTierFloor` behind two
-     thin wrappers `validateNewMatter`/`validateMetadata` — kept separate, copy diverges). Rewired 3
-     callers off the duplicated bodies (NewMatterModal, MatterRailMetadata, cockpit NewMatterDialog —
-     the last no longer pulls a `.svelte` for logic). Logic-only — **no token / no surface change**.
-     23-test `matter.test.ts`; vitest 797 (was 781); svelte-check 0 errors; adversarial review SHIP
-     (re-derived both old bodies → 20/20 inputs byte-identical, `.replace('Matter',unitLabel)` invariant holds).
-   - **R1a — Modal/form primitives: ✅ merged via PR #51** (or merging — confirm on main). New
-     `web/src/lib/lq-ai/components/primitives/{ModalShell,FormControl,Alert}.svelte` — ModalShell is a
-     THIN wrap of shadcn/bits-ui `Dialog` (focus-trap/Escape/overlay/scroll-lock/aria are the library's).
-     **NewMatterModal migrated** (44 `var(--lq-)` → 0, `nmm-*` `<style>` block deleted, Svelte-5 runes);
-     fixed the wrong "defaults to Tier 2" InfoTip copy. Footer submit sits outside `<form>` via
-     `form="nmm-form"`. 6-test `shared-primitives.cy.ts` (focus-trap/Escape/errors/create) all pass on
-     the live stack; before/after light+dark+narrow evidence in `docs/fork/evidence/r1a/`; vitest 797;
-     svelte-check 0. **Gotcha for downstream modal slices:** bits-ui `Dialog.Title` is a
-     `div[data-slot="dialog-title"]` (aria-labelledby heading), **NOT** an `<h2>` — assert
-     `[data-slot="dialog-title"]`, not `cy.contains('h2', …)`. **Reusable kit for R13/R14b/R17.**
-   - **R6 — MessageBubble family + `<think>` ribbon: ✅ merged via PR #52** (or merging — confirm on main).
-     NEW `primitives/ReasoningRibbon.svelte` (collapsed `<details>` reasoning disclosure, semantic tokens —
-     **the idiom R-CONV-2 adopts**). **MessageBubble** now `splitThink()`s the assistant content (shared
-     agent-surface parser) → reasoning collapses into the ribbon instead of leaking as prose; bubble palette
-     → semantic tokens (`bg-primary`/`bg-card`+`border-border`/`bg-muted`); `error_code` → R1a `Alert`.
-     **ProvenancePill** `<style>` deleted (12 tokens → semantic tones); **M2Citations** focus outline →
-     `var(--ring)`. Both token files at **0 `var(--lq-)`** (R-LAST gate). Re-scope verified on entry:
-     MessageBubble had NO `var(--lq-)`/no `color:white`; TierBadge/TierDetailsPanel already clean.
-     **RefusalMessageBubble deferred to R-CONV-2** (no token; refusal is un-triggerable on the tier-4-only
-     stack — no honest screenshot). NEW shared `lib/lq-ai/sanitize-markdown.ts` (`renderModelMarkdown`,
-     media-forbidden) — review fix; **MessageBubble's model-markdown `{@html}` was the lone un-hardened
-     sink**. Adversarial review: 9 agents, 4 confirmed (2 should-fix + 2 nit), ALL fixed. svelte-check 0;
-     vitest 797; Cypress 3/3 live; evidence `docs/fork/evidence/r6/`.
-     **Gotcha for downstream:** `test:frontend` is `vitest` (WATCH mode — never exits); run `npx vitest run`
-     or `-- --run`. `vitest` env is `node` (no jsdom) — DOMPurify needs a real browser, so sanitisation is
-     Cypress-tested, not vitest. The legacy ChatPanel shell is non-responsive (R9) — chat screenshots below
-     ~700px squeeze the conversation; capture narrow at ≥860px until R9.
-   - **Responsive parity folded into the rollout (PR #53, merged).** Maintainer directive: consistency
-     with the cockpit is **FOUR axes** — colours + elevation + motion + **responsive collapse** (panels/
-     tabs reflow on narrow). Now a first-class deliverable on the **shell slices** (R5 MatterRail, R8
-     containers, **R9 ChatPanel**, R-CONV-2, R-CHROME TopTabBar); DoD discipline #1 upgraded — on those
-     slices the narrow screenshot must show the cockpit COLLAPSE, not just an un-broken wide layout. **R9
-     will likely split into R9a (token/composition) + R9b (responsive shell)** — legacy ChatPanel is a
-     non-responsive flex row. (R7 is a satellite/popover slice — responsive parity does not change it.)
-   - **CI UNBLOCKED:** the repo is now **PUBLIC** (2026-06-13) → GitHub Actions are unlimited/free; the
-     earlier spending-limit block (R6 merged via maintainer authorization past it — PR #52) is resolved.
-     **R7 onward: full CI green is required again** (the ADR-F005 gate is back to normal).
-   - **R7 — Composer satellites: ✅ merged via PR #55** (or merging — confirm on main). **SlashPopover**
-     (kept Svelte 4): `<style>` deleted → semantic tokens (`bg-popover`/`border-border`/`shadow-md`;
-     active row `bg-accent` **+ `text-accent-foreground`** so the title colour flips on selection —
-     review fix; links/focus `text-primary`/`ring-ring`). Module helpers + keyboard/`aria-activedescendant`
-     state machine **frozen**. **EnhancePromptExpansion**: migrated **Svelte 4 → Svelte 5 runes** (the
-     precondition for shadcn `Button`'s `onclick` to forward) + `<style>` deleted — the three `.lq-btn-*`
-     button families → shadcn **`Button`** (default/outline/ghost), `lq-spin` → `animate-spin`, local
-     `.lq-text-caption` → `text-xs text-muted-foreground`. Enhanced-card label `text-accent-foreground`
-     (NOT `text-primary` — review **BLOCKER**: text-primary on bg-accent fails AA 2.16–2.69:1); amber JIT
-     strip; `handleDismiss` telemetry now `void …catch()` (review fix). `open()` + every `data-testid` +
-     prop names preserved. **Both files 0 `var(--lq-)`** (was 18 / 49). Adversarial review: 27 agents, 23
-     raised → **3 confirmed (1 blocker + 2 should-fix), ALL FIXED**; svelte-check 0; vitest **797**;
-     Cypress **4/4** live; evidence `docs/fork/evidence/r7/`.
-     **Gotchas for downstream:** (a) naming a `$state` variable `state` trips the Svelte TS tooling
-     (`$state` reads as store-autosubscribe of `state`) → 4 phantom errors; **name it anything but `state`**.
-     (b) **`text-primary` on `bg-accent` fails WCAG AA** in both themes — use **`text-accent-foreground`**
-     for ink on the accent wash (applies to every downstream accent surface). (c) shadcn `Button` `onclick`
-     only forwards from a **runes** parent; a legacy `on:click` on it is a silent no-op. (d) long
-     multi-`cy.visit` screenshot loops outlive the access-token TTL → mid-run /login redirect; capture all
-     shots on **one** page load (toggle theme/viewport live). (e) web CI gates only `npm run check` +
-     `vitest` — **eslint is not gated** (so empty-catch / cypress-wait lint won't block, but clean them anyway).
-   - **NEXT → R8 — Conversation containers** (`ChatSidebar` 17, `AttachedFilesPanel` 9,
-     `MessageOverflowMenu` 8, `AttachedSkillPill` 7). *Simplify:* `lq-btn-*` literals → shadcn `Button`
-     (reuse the R7 pattern), extract a reusable upload-chip. **+ Responsive parity (SHELL slice):** the
-     chat side panes must **collapse on narrow like the cockpit** — the narrow screenshot must show the
-     COLLAPSE, not just an un-broken wide layout (non-responsive = FAIL on this slice; see plan §Responsive
-     parity). *Adversarial:* scroll anchoring, upload-cancel chip removal, dual-use SavedPromptsPanel,
-     **collapse-matches-cockpit**. Reuse the R1a/R6/R7 kit. (Coverage table → R8 row.)
-     **Backlog (from R6 review):** converge `ConversationPanel` + `SkillSourceView` onto
-     `renderModelMarkdown` (they already enforce the same media-forbid via local copies) in R-CONV-2 / R14a.
+## Rollout progress (R-series)
 
-   The dark-mode bridge (`+layout.svelte` lines 23–24) holds un-migrated surfaces, so slices merge in
-   almost any order; R-BRIDGE/R-LAST last.
-2. **F1-S4** (subagent tree + SSE v3-projection adapter) and **F1-S5**
-   (`(run_id, tool_call_id)` idempotency ledger + attribution fan-out) — see
-   `docs/fork/plans/F1-replan.md`. S4 consumes deepagents v3 `stream_events` typed
-   projections to render the per-area subagent tree S3 stood up.
-3. **Area skills / subagents ACTIVATION** (S9-gated): S3 landed the config + renderer +
-   guard but does NOT attach SkillsMiddleware or pass subagents for Commercial (seeded
-   with none) — attaching them changes the harness profile, which **re-runs the S9
-   qualification matrix** (`docs/fork/model-compatibility.md`). The activation slice
-   wires `composition.py` to pass area skills/subagents into the live agent AND adds the
-   qualified matrix row. The machinery + security guard already ship and are tested.
-4. Every slice: explore → written plan (docs/fork/plans/…) → implement → full ADR-F005 gate.
+- **Step 0 coverage table ✅** (PR #50) — all 101 `var(--lq-)` files assigned; R-LAST gate reachable.
+- **R0 ✅** (PR #50) — `validators/matter.ts` (logic-only). **R1a ✅** (PR #51) —
+  `primitives/{ModalShell,FormControl,Alert}` + NewMatterModal. **R6 ✅** (PR #52) —
+  MessageBubble/`<think>` ribbon + `sanitize-markdown.ts`. **R7 ✅** (PR #55) — SlashPopover +
+  EnhancePromptExpansion. **Responsive parity folded in** (PR #53). **CI unblocked** (repo public).
+- **R8 ✅ (this slice, PR pending)** — conversation containers + chat-shell responsive collapse.
 
 ## Carry-overs / review deferrals
 
-- **NEW (F1-S3 review, deferred on record)**: subagent-spec skill names bypass registry
-  validation (skills not live-attached this slice — validate on the activation slice);
-  `audit_log.practice_area_id` has no index + the `projects` partial index doesn't cover
-  the FK-delete scan (per-area audit slicing isn't queried yet — add an index when it is);
-  `CompiledSubAgent`/`AsyncSubAgent` dicts aren't guarded (out of scope — the renderer
-  only emits declarative dicts).
-- **Area tier floor is operator-set** until a model stronger than tier 4 is S9-qualified
-  (Commercial seeds none — a floor stronger than 4 makes every run fail
-  tier_below_minimum; the gateway enforces it, proven live).
-- auth/refresh hardening: per-user session cap + web gate timeout SHIPPED (PR #47, see
-  Hotfix above). REMAINING: the **deterministic-HMAC index** (removes the global bcrypt
-  scan + its bad-token-spam DoS; needs a migration + security review — in Backlog).
-- ADR-0011 disclosure on the agent surface — after F1-S5's attribution extension.
-- Live SSE token deltas DEAD until a Redis pub/sub publisher lands — ride F1-S4.
-- Flood brake counts queued-unclaimed runs (ADR-F009). Ingest orphan recovery
-  startup-only (cron sweep Backlog). Mismatch read-noise metric / L2 judge seam — S9.
-- ADR-0011/F003 conversation memory + compaction — F2. Cypress pre-existing reds:
-  wave-b Enhance-Prompt + skill-detail, wave-c chat-in-matter (control-proven).
+- **R8 deferred-on-record:** focus-on-open is implemented but NOT asserted in Cypress
+  (headed-Electron/Xvfb programmatic focus doesn't set `document.activeElement` without OS
+  window focus). Drawers are not full focus-traps (cockpit defers this too — partial parity
+  is the established bar); ESC + scrim-click + `inert`-on-close cover the practical cases.
+- auth/refresh: per-user session cap + web gate timeout SHIPPED (PR #47). REMAINING: the
+  **deterministic-HMAC index** (removes the global bcrypt scan + bad-token-spam DoS; needs a
+  migration + security review — Backlog).
+- F1-S3 deferrals: subagent-spec skill names bypass registry validation (validate on the
+  activation slice); `audit_log.practice_area_id` unindexed; area tier floor operator-set
+  until a model > tier 4 qualifies.
+- ADR-0011 disclosure after F1-S5 attribution. Live SSE token deltas DEAD until a Redis
+  pub/sub publisher lands (F1-S4). ADR-0011/F003 conversation memory + compaction → F2.
 
 ## Gotchas (carried + new)
 
-- **NEW: the only S9-qualified model (MiniMax-M3) is tier 4 (weak).** Any
-  `default_tier_floor` < 4 on an area makes EVERY run under it fail the gateway's
-  `tier_below_minimum` (403). Seed areas with NO floor; operators set one when a
-  stronger model qualifies. The floor MECHANISM works (gateway min()-combines + enforces
-  — proven live).
-- **NEW: deepagents 0.6.8 subagent `model` is a gateway-bypass vector** — a STRING model
-  → `init_chat_model` → direct provider SDK. App-authored subagents OMIT `model` (inherit
-  the gateway-bound parent instance). The guard lives at `factory.build_deep_agent`
-  (single deepagents import site) — ADR-F010. Inheritance (verified vs source):
-  permissions REPLACE, tools OVERRIDE-on-presence-else-inherit, middleware never inherits
-  (fresh stack per subagent).
-- **NEW: attaching area skills/subagents to the LIVE agent changes the harness profile →
-  re-run the S9 matrix** (model-compatibility.md "re-run on any deepagents change").
-  S3 deliberately does NOT do this for Commercial.
-- **NEW: null-practice-area matters need a home in the cockpit** — they're NOT in the
-  unfiled-CONVERSATIONS bucket (that's threads without a matter); AreaGrid's "Unfiled
-  matters" section surfaces them. Don't filter them to nowhere.
-- **NEW: agent_config is operator input — keep it strictly validated** (build_area_subagents
-  rejects unknown top-level + per-subagent keys, forbids `model`, forbids credential keys
-  in playbooks/mcp_servers). Validate on BOTH write and render.
-- **NEW: prettier reformats whole legacy files** (practice.css 2-space → tabs) — format
-  ONLY new-code files; restore legacy files byte-identical. **ruff** needs the repo-root
-  ruff.toml (run from /repo, not /work) — line-length 100, else it flags 234 files.
-- **NEW: ValidationError → 400** (not 422; Pydantic boundary errors are 422). agent_config
-  shape rejection is 400.
-- migrations: NEVER host-side alembic against the live dev DB — verify on throwaway pg
-  (recipe below), api auto-migrates on boot; rebuild api+arq-worker+ingest-worker
-  together + web. Fix a live row via the admin API, not host alembic.
-- New API endpoints register in tests/test_openapi.py (count assert — now **129**) +
-  tests/test_endpoints.py IMPLEMENTED_ROUTES. Containerized pytest needs `/skills`
-  mounted (migration 0032 seed).
-- `gh pr create` defaults to FROZEN upstream — always `--repo sarturko-maker/lq-ai-fork`
-  AND `--head <branch>` (ADR-F001). jq NOT installed — parse `gh --json` with python3.
-  Host Python 3.11; api/gateway need 3.12 — all py tooling in containers.
-- Throwaway-pg recipe:
-  ```bash
-  docker run -d --name s3pg -e POSTGRES_USER=lq -e POSTGRES_PASSWORD=lq -e POSTGRES_DB=lqtest pgvector/pgvector:pg16
-  docker run --rm --network container:s3pg -v $PWD/api:/work -v $PWD/skills:/skills:ro -w /work \
-    -e PYTHONPATH=/work -e DATABASE_URL=postgresql+asyncpg://lq:lq@localhost:5432/lqtest \
-    --entrypoint bash lq-ai-api:latest -c "pip install -q pytest pytest-asyncio respx; pytest tests/ -q"
-  ```
-- NEVER `docker compose down -v`. headless cypress captures lie about dark theme — capture
-  headed. cockpit panel re-homing: keep the `{#key}` STABLE for the panel-created thread.
-- MiniMax-M3 emits `<think>` inline + a `reasoning` delta; both round-trip verbatim.
-  GET /agents/runs/{id} returns `{run, steps}`.
+- **NEW (R8): chai-jquery subject rebinding** — `.and('have.attr', name[, val])` and
+  `.and('not.have.attr', name)` REBIND the chained subject to the attr value/undefined, so a
+  following `.and('have.attr', …)` runs on a non-element ("neither DOM nor jQuery"). Put
+  multiple attribute checks in ONE `.should(($el) => { expect($el)… })` callback.
+- **NEW (R8): `inert` for off-canvas drawers** — a CSS `translate-x-full` only hides
+  visually; descendants stay focusable + in the a11y tree. Use `inert={(isNarrow && !open) ||
+  undefined}` on the closed wrapper. A DYNAMIC `role={isNarrow ? 'dialog' : undefined}` defeats
+  svelte-check's a11y static analysis, so use a **static `tabindex="-1"`** (negative → no
+  `a11y_no_noninteractive_tabindex` warning) rather than `tabindex={isNarrow ? -1 : undefined}`.
+- **NEW (R8): active row on a translucent wash needs a backing surface for AA** — bare
+  `text-primary` over `bg-muted/40` fails AA in dark (4.12:1). Give active rows
+  `bg-accent text-accent-foreground` like the chat rows (9.08:1 dark / 11.32:1 light).
+- shadcn `Button onclick` only forwards from a **runes** parent (legacy `on:click` = silent
+  no-op). `text-primary` on `bg-accent` fails WCAG AA → use **`text-accent-foreground`**.
+  `text-destructive` on a tinted bg fails AA in dark → add a **`dark:` lift** (`dark:text-red-300`).
+- web CI gates only `npm run check` + vitest (eslint NOT gated). `test:frontend` is vitest
+  WATCH mode — run `npx vitest run`. vitest env is `node` (no jsdom) — DOMPurify/sanitisation
+  must be Cypress-tested. Long multi-`cy.visit` screenshot loops outlive the token TTL →
+  shoot all frames on ONE page load. **headless cypress lies about dark theme — capture headed**
+  (`DISPLAY=:0`), and rebuild the `web` container before screenshotting a UI change.
+- `gh pr create` defaults to FROZEN upstream — always `--repo sarturko-maker/lq-ai-fork` AND
+  `--head <branch>` (ADR-F001). jq NOT installed — parse `gh --json` with python3.
+- migrations: NEVER host-side alembic against the live dev DB; api auto-migrates on boot;
+  rebuild api+arq-worker+ingest-worker together + web. **NEVER `docker compose down -v`.**
+- MiniMax-M3 is tier 4 (weak) — `default_tier_floor` < 4 makes every run 403. Seed areas with
+  NO floor. deepagents subagent `model` string = gateway-bypass (ADR-F010 guard at
+  `build_deep_agent`). New API endpoints register in tests/test_openapi.py (count assert).

@@ -24,10 +24,13 @@
    * on the trigger because that correctly describes a disclosure.
    *
    * Notes for reviewers:
-   *   - Scoped style block uses the same token vocabulary as
-   *     `CaptureSkillModal.svelte` / `AttachKBModal.svelte`. There is NO
-   *     `--lq-surface-tinted` token; hover uses `--lq-inset` (the
-   *     subtle-surface neutral) which already shipped in `practice.css`.
+   *   - Styling (R8): migrated off the legacy `--lq-*` palette onto the
+   *     shipped semantic tokens. The menu is a popover surface
+   *     (`bg-popover`/`shadow-md`, matching SlashPopover); the trigger and
+   *     items use `text-muted-foreground`/`hover:bg-muted`. No `<style>`
+   *     block — utility classes only. Stays Svelte 4: the trigger keeps a
+   *     `bind:this` to its DOM node for `.focus()` (the focusout/Escape
+   *     focus dance below relies on real element refs).
    *   - Close-on-blur uses a microtask defer (requestAnimationFrame) so a
    *     click on a menu item registers BEFORE the focusout handler tears
    *     the menu down — the naive `e.relatedTarget` check fires before the
@@ -94,10 +97,10 @@
 
 {#if hasItems}
   <!-- svelte-ignore a11y-no-static-element-interactions -->
-  <div class="overflow" bind:this={rootEl} on:focusout={handleFocusout}>
+  <div class="relative inline-block" bind:this={rootEl} on:focusout={handleFocusout}>
     <button
       type="button"
-      class="trigger"
+      class="rounded-sm px-2 py-1 text-base leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       aria-label="More actions"
       aria-expanded={open}
       data-testid="lq-ai-message-overflow-trigger"
@@ -105,11 +108,14 @@
       on:click={toggle}
     >⋯</button>
     {#if open}
-      <ul class="menu">
+      <ul
+        class="absolute right-0 top-full z-10 mt-1 min-w-[180px] list-none rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
+      >
         {#if captureInOverflow}
           <li>
             <button
               type="button"
+              class="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
               disabled={captureDisabled}
               data-testid="lq-ai-message-overflow-capture"
               on:click={handleCapture}
@@ -120,64 +126,3 @@
     {/if}
   </div>
 {/if}
-
-<style>
-  @import '$lib/lq-ai/styles/practice.css';
-
-  .overflow {
-    position: relative;
-    display: inline-block;
-  }
-
-  .trigger {
-    background: transparent;
-    border: 0;
-    padding: 4px 8px;
-    cursor: pointer;
-    color: var(--lq-text-tertiary, #9ca3af);
-    font-size: 16px;
-    line-height: 1;
-    border-radius: var(--lq-radius-sm, 4px);
-  }
-
-  .trigger:hover {
-    background: var(--lq-inset, #fafbfa);
-    color: var(--lq-text-secondary, #6b7280);
-  }
-
-  .menu {
-    list-style: none;
-    padding: 4px 0;
-    margin: 0;
-    position: absolute;
-    right: 0;
-    top: 100%;
-    background: var(--lq-canvas, #ffffff);
-    border: 1px solid var(--lq-border, #e5e7eb);
-    border-radius: var(--lq-radius, 6px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-    min-width: 180px;
-    z-index: 10;
-  }
-
-  .menu button {
-    width: 100%;
-    text-align: left;
-    padding: 6px 12px;
-    background: transparent;
-    border: 0;
-    font-size: 14px;
-    cursor: pointer;
-    color: inherit;
-    font-family: inherit;
-  }
-
-  .menu button:hover:not(:disabled) {
-    background: var(--lq-inset, #fafbfa);
-  }
-
-  .menu button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-</style>

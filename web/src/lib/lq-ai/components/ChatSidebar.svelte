@@ -8,51 +8,66 @@
 	 *   selected.
 	 * - Project picker spans across groups; clicking a Project header
 	 *   filters the sidebar to that project's chats.
+	 *
+	 * R8: migrated to Svelte 5 runes + semantic tokens (the cockpit list-pane
+	 * idiom — `bg-muted/40`, selected rows `bg-accent text-accent-foreground`,
+	 * `hover:bg-muted/60`); "+ New Chat" is the shadcn `Button` primitive
+	 * (runes is what lets its `onclick` forward). No `<style>` block. The
+	 * archived checkbox no longer binds a prop — it reports the new value up
+	 * via `onToggleArchived` (the parent owns the state).
 	 */
+	import { Button } from '$lib/components/ui/button';
 	import type { Chat, Project } from '../types';
 
-	export let groups: Array<{ project: Project | null; chats: Chat[] }> = [];
-	export let activeChatId: string | null = null;
-	export let activeProjectId: string | null = null;
-	export let archivedToggle: boolean = false;
+	let {
+		groups = [],
+		activeChatId = null,
+		activeProjectId = null,
+		archivedToggle = false,
+		onSelectChat = () => undefined,
+		onNewChat = () => undefined,
+		onSelectProject = () => undefined,
+		onToggleArchived = () => undefined,
+		hideProjectFilter = false
+	}: {
+		groups?: Array<{ project: Project | null; chats: Chat[] }>;
+		activeChatId?: string | null;
+		activeProjectId?: string | null;
+		archivedToggle?: boolean;
+		onSelectChat?: (chat: Chat) => void;
+		onNewChat?: () => void;
+		onSelectProject?: (project: Project | null) => void;
+		onToggleArchived?: (next: boolean) => void;
+		/**
+		 * When true, hides the project-filter UI (the "Projects" label, "All chats"
+		 * button, and per-project rows in the sidebar header). Used when ChatPanel
+		 * is mounted inside a matter workspace that already represents a single
+		 * project context — the user shouldn't see redundant project filtering.
+		 */
+		hideProjectFilter?: boolean;
+	} = $props();
 
-	export let onSelectChat: (chat: Chat) => void = () => undefined;
-	export let onNewChat: () => void = () => undefined;
-	export let onSelectProject: (project: Project | null) => void = () => undefined;
-	export let onToggleArchived: (next: boolean) => void = () => undefined;
-
-	/**
-	 * When true, hides the project-filter UI (the "Projects" label, "All chats"
-	 * button, and per-project rows in the sidebar header). Used when ChatPanel
-	 * is mounted inside a matter workspace that already represents a single
-	 * project context — the user shouldn't see redundant project filtering.
-	 */
-	export let hideProjectFilter: boolean = false;
+	const PROJECT_ROW =
+		'block w-full text-left rounded-sm px-3 py-1 text-xs uppercase tracking-wider transition-colors duration-150';
+	const CHAT_ROW =
+		'block w-full text-left rounded-md px-3 py-1.5 text-sm transition-colors duration-150 ease-out';
 </script>
 
-<aside
-	class="lq-sidebar w-72 flex flex-col"
-	data-testid="lq-ai-chat-sidebar"
->
-	<div class="lq-sidebar-header">
-		<button
-			type="button"
-			class="lq-btn-primary w-full inline-flex items-center justify-center"
-			on:click={onNewChat}
-			data-testid="lq-ai-new-chat-btn"
-		>
-			+ New Chat
-		</button>
+<aside class="flex w-72 flex-col border-r border-border bg-muted/40" data-testid="lq-ai-chat-sidebar">
+	<div class="border-b border-border p-3">
+		<Button class="w-full" onclick={onNewChat} data-testid="lq-ai-new-chat-btn">+ New Chat</Button>
 	</div>
 
 	{#if !hideProjectFilter}
-		<div class="lq-sidebar-section-label">
+		<div
+			class="flex items-center justify-between border-b border-border px-3 py-2 text-xs text-muted-foreground"
+		>
 			<span>Projects</span>
-			<label class="inline-flex items-center gap-1 cursor-pointer">
+			<label class="inline-flex cursor-pointer items-center gap-1">
 				<input
 					type="checkbox"
-					bind:checked={archivedToggle}
-					on:change={() => onToggleArchived(archivedToggle)}
+					checked={archivedToggle}
+					onchange={(e) => onToggleArchived(e.currentTarget.checked)}
 					data-testid="lq-ai-archived-toggle"
 				/>
 				<span>Show archived</span>
@@ -60,12 +75,14 @@
 		</div>
 	{/if}
 
-	<div class="flex-1 overflow-y-auto">
+	<div class="flex-1 overflow-y-auto p-1">
 		{#if !hideProjectFilter}
 			<button
 				type="button"
-				class="lq-project-row {activeProjectId === null ? 'lq-project-row--active' : ''}"
-				on:click={() => onSelectProject(null)}
+				class="{PROJECT_ROW} {activeProjectId === null
+					? 'bg-accent font-semibold text-accent-foreground'
+					: 'text-muted-foreground hover:bg-muted/60'}"
+				onclick={() => onSelectProject(null)}
 			>
 				All chats
 			</button>
@@ -74,14 +91,16 @@
 				<div class="mt-2">
 					<button
 						type="button"
-						class="lq-project-row {activeProjectId === group.project?.id ? 'lq-project-row--active' : ''}"
-						on:click={() => onSelectProject(group.project)}
+						class="{PROJECT_ROW} {activeProjectId === group.project?.id
+							? 'font-semibold text-primary'
+							: 'text-muted-foreground hover:bg-muted/60'}"
+						onclick={() => onSelectProject(group.project)}
 						data-testid={`lq-ai-project-${group.project?.id ?? 'no-project'}`}
 					>
 						{group.project?.name ?? 'Without a project'}
 						{#if group.project?.privileged}
 							<span
-								class="ml-1 inline-block px-1 py-0.5 rounded text-[10px] font-semibold bg-rose-100 text-rose-700 align-middle"
+								class="ml-1 inline-block rounded bg-rose-500/10 px-1 py-0.5 align-middle text-[10px] font-semibold text-rose-700 dark:text-rose-300"
 								title="Privileged matter — minimum_inference_tier enforced"
 							>
 								PRIVILEGED
@@ -93,8 +112,10 @@
 							<li>
 								<button
 									type="button"
-									class="lq-chat-row {activeChatId === chat.id ? 'lq-chat-row--active' : ''}"
-									on:click={() => onSelectChat(chat)}
+									class="{CHAT_ROW} {activeChatId === chat.id
+										? 'bg-accent font-medium text-accent-foreground'
+										: 'text-foreground hover:bg-muted/60'}"
+									onclick={() => onSelectChat(chat)}
 									data-testid={`lq-ai-chat-${chat.id}`}
 								>
 									{chat.title || 'Untitled chat'}
@@ -106,7 +127,7 @@
 			{/each}
 
 			{#if groups.length === 0}
-				<div class="px-3 py-6 text-sm text-center lq-empty-hint">
+				<div class="px-3 py-6 text-center text-sm text-muted-foreground">
 					No chats yet. Click <strong>+ New Chat</strong> to start.
 				</div>
 			{/if}
@@ -117,8 +138,10 @@
 						<li>
 							<button
 								type="button"
-								class="lq-chat-row {activeChatId === chat.id ? 'lq-chat-row--active' : ''}"
-								on:click={() => onSelectChat(chat)}
+								class="{CHAT_ROW} {activeChatId === chat.id
+									? 'bg-accent font-medium text-accent-foreground'
+									: 'text-foreground hover:bg-muted/60'}"
+								onclick={() => onSelectChat(chat)}
 								data-testid={`lq-ai-chat-${chat.id}`}
 							>
 								{chat.title || 'Untitled chat'}
@@ -129,99 +152,10 @@
 			{/each}
 
 			{#if groups.every((g) => g.chats.length === 0)}
-				<div class="px-3 py-6 text-sm text-center lq-empty-hint">
+				<div class="px-3 py-6 text-center text-sm text-muted-foreground">
 					No chats yet. Click <strong>+ New Chat</strong> to start.
 				</div>
 			{/if}
 		{/if}
 	</div>
 </aside>
-
-<style>
-	@import '../styles/practice.css';
-
-	.lq-sidebar {
-		background: var(--lq-inset);
-		border-right: 1px solid var(--lq-border);
-	}
-
-	.lq-sidebar-header {
-		padding: 12px;
-		border-bottom: 1px solid var(--lq-border);
-	}
-
-	.lq-sidebar-section-label {
-		padding: 8px 12px;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		font-size: 12px;
-		color: var(--lq-text-secondary);
-		border-bottom: 1px solid var(--lq-border);
-	}
-
-	.lq-btn-primary {
-		background: var(--lq-accent);
-		color: white;
-		border: 0;
-		border-radius: var(--lq-radius);
-		padding: 8px 16px;
-		font-size: 14px;
-		font-weight: 500;
-		cursor: pointer;
-	}
-	.lq-btn-primary:hover {
-		filter: brightness(0.95);
-	}
-	.lq-btn-primary:focus-visible {
-		outline: 2px solid var(--lq-accent);
-		outline-offset: 2px;
-	}
-
-	.lq-project-row {
-		display: block;
-		width: 100%;
-		text-align: left;
-		padding: 4px 12px;
-		font-size: 12px;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--lq-text-secondary);
-		background: transparent;
-		border: 0;
-		cursor: pointer;
-	}
-	.lq-project-row:hover {
-		background: var(--lq-accent-soft);
-	}
-	.lq-project-row--active {
-		font-weight: 600;
-		color: var(--lq-accent);
-	}
-
-	.lq-chat-row {
-		display: block;
-		width: 100%;
-		text-align: left;
-		padding: 6px 20px;
-		font-size: 14px;
-		border-radius: 2px;
-		color: var(--lq-text);
-		background: transparent;
-		border: 0;
-		cursor: pointer;
-	}
-	.lq-chat-row:hover {
-		background: var(--lq-accent-soft);
-	}
-	.lq-chat-row--active {
-		background: var(--lq-accent-soft);
-		color: var(--lq-accent);
-		border-left: 2px solid var(--lq-accent);
-		padding-left: 18px;
-	}
-
-	.lq-empty-hint {
-		color: var(--lq-text-tertiary);
-	}
-</style>
