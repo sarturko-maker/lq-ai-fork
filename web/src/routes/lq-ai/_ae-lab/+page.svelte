@@ -16,6 +16,8 @@
 	import { Suggestion, Suggestions } from '$lib/lq-ai/components/ai-elements/suggestion/index.js';
 	import ReasoningRibbon from '$lib/lq-ai/components/primitives/ReasoningRibbon.svelte';
 	import MessageActionsBar from '$lib/lq-ai/components/MessageActionsBar.svelte';
+	import MessageSources from '$lib/lq-ai/components/MessageSources.svelte';
+	import type { Citation } from '$lib/lq-ai/types';
 
 	const SUGGESTIONS = [
 		'Summarise this contract',
@@ -61,6 +63,55 @@
 		'[1] "...indemnify and hold harmless..." (p.12)',
 		'[2] "...without limit..." (p.13)'
 	];
+
+	// AE3 — Sources card demo. Three distinct documents with mixed verification
+	// states (green exact, amber paraphrase, grey unverified) exercising the
+	// per-source rollup marker + the pages/passages meta + the quote.
+	function makeCite(o: Partial<Citation>): Citation {
+		return {
+			id: o.id ?? 'c',
+			source_file_id: o.source_file_id ?? 'f',
+			source_offset_start: 0,
+			source_offset_end: 0,
+			source_text: '',
+			verified: true,
+			...o
+		};
+	}
+	const DEMO_CITATIONS: Citation[] = [
+		makeCite({
+			id: 'c1',
+			source_file_id: 'f1',
+			source_filename: 'Master Services Agreement.pdf',
+			source_page: 12,
+			source_text: 'The Supplier shall indemnify and hold harmless the Customer…',
+			verification_method: 'exact_match'
+		}),
+		makeCite({
+			id: 'c2',
+			source_file_id: 'f1',
+			source_filename: 'Master Services Agreement.pdf',
+			source_page: 13,
+			source_text: 'such indemnity to apply without limit of liability',
+			verification_method: 'exact_match'
+		}),
+		makeCite({
+			id: 'c3',
+			source_file_id: 'f2',
+			source_filename: 'Data Processing Addendum.pdf',
+			source_page: 4,
+			source_text: 'the processor notifies the controller within 24 hours of a breach',
+			verification_method: 'paraphrase_judge'
+		}),
+		makeCite({
+			id: 'c4',
+			source_file_id: 'f3',
+			source_filename: 'Side Letter (unsigned).pdf',
+			source_text: 'the parties intend to negotiate a cap in good faith',
+			verified: false,
+			verification_method: 'failed'
+		})
+	];
 </script>
 
 <div class="min-h-full bg-background text-foreground">
@@ -74,7 +125,7 @@
 		</div>
 
 		<div class="mb-8 flex items-center justify-between">
-			<h1 class="text-xl font-semibold">AI Elements lab — AE0 + AE2</h1>
+			<h1 class="text-xl font-semibold">AI Elements lab — AE0 + AE2 + AE3</h1>
 			<button
 				type="button"
 				class="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted/60"
@@ -149,6 +200,16 @@
 					>
 					×
 				</p>
+			</div>
+		</section>
+
+		<section class="mt-10" data-testid="ae-lab-sources">
+			<h2 class="mb-3 text-sm font-semibold text-muted-foreground">Sources (AE3)</h2>
+			<div class="rounded-lg border border-border bg-card p-6">
+				<p class="mb-3 text-sm">
+					Clause 9.2 carries an uncapped indemnity "…without limit of liability" (Source: [1]).
+				</p>
+				<MessageSources citations={DEMO_CITATIONS} />
 			</div>
 		</section>
 	</div>

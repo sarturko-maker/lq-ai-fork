@@ -414,10 +414,17 @@ screenshots light+dark/wide+narrow · simplification · adversarial review WITH 
   until F1-S4) — exercised in `_ae-lab`. Zero new deps. Original spec: ~~`primitives/ReasoningRibbon` → AE
   **Reasoning** (shimmer while streaming, auto-collapse on complete + a duration); add per-message
   **Actions** (copy / retry / copy-citation) wired to the existing rerun + stream handlers.~~ *(M)*
-- **AE3 — Sources + Inline Citation.** Wrap the M2 Citation Engine in AE **Sources** (collapsible "Used
-  N sources") + **Inline Citation** styling; preserve the 5-state verification UI + lazy `GET
-  /messages/{id}/citations`. **Adversarial:** verification-state contrast, single-fetch race, untrusted
-  source-title escaping. *(S–M)*
+- **AE3 — Sources + Inline Citation ✅ DONE (PR #62).** New `MessageSources.svelte` (runes) renders the
+  AE **Sources** collapsible ("Used N sources") beneath an assistant message — one entry per distinct
+  cited document (filename + passages·pages + a representative quote + a 5-state verification marker),
+  via `citations/sources.ts` `buildMessageSources` (group by `source_file_id`, **most-cautionary** state
+  rollup). **Option-2:** `Sources` hand-built on native `<details>` (dodges `collapsible`); only the two
+  dependency-free `inline-citation` primitives vendored (`-source`/`-quote`; the hover-card/carousel
+  pieces dodged). Backend: `get_citations` LEFT JOINs `files` to add `source_filename` (single-fetch
+  preserved; join scoped to non-soft-deleted files). `previewQuote` extracted to `citations/format.ts`.
+  5-state verification UI + lazy single-fetch preserved. Source titles/quotes are escaped text bindings
+  (no `{@html}`). Adversarial review: **SHIP** (0 blocker; soft-deleted-name suppression + 2 nits fixed).
+  *(S–M)*
 - **AE4 — Code Block** *(new dep: `shiki`).* Vendor **Code Block** (language header + copy + Shiki
   highlight); hook into `renderModelMarkdown`'s `<pre><code>` output — **highlight runs client-side on
   already-sanitized text** (no injection). **Adversarial + security:** confirm Shiki receives escaped

@@ -26,6 +26,7 @@
 	import EnhancedDiffModal from './EnhancedDiffModal.svelte';
 	import M2Citations from './M2Citations.svelte';
 	import MessageActionsBar from './MessageActionsBar.svelte';
+	import MessageSources from './MessageSources.svelte';
 	import MessageOverflowMenu from './MessageOverflowMenu.svelte';
 	import ProvenancePill from './ProvenancePill.svelte';
 	import RefusalMessageBubble from './RefusalMessageBubble.svelte';
@@ -302,6 +303,14 @@
 		-->
 			{#if fetchedCitations !== null}
 				<div data-testid="lq-ai-message-citations">
+					<!--
+					AE3 — the AI Elements "Sources" card: a collapsible "Used N
+					sources" rollup of the distinct documents this message cites
+					(filename + pages + a representative quote + the 5-state
+					verification marker). Sits above the per-quote sidecar chips;
+					renders nothing when the message cites no documents.
+				-->
+					<MessageSources citations={fetchedCitations} />
 					<!--
 					R6: scan `split.visible` (the same think-stripped text the inline
 					decorator sees), NOT the raw content — so a citation marker that
