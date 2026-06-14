@@ -227,12 +227,10 @@ Sizing: XS <0.5d · S ~1d · M ~2d · L = split it. IDs are stable handles, not 
   panes collapse on narrow (cockpit idiom). **Adversarial:** scroll anchoring,
   upload-cancel chip removal, dual-use SavedPromptsPanel, **collapse-matches-cockpit**. *(M)*
 - **R9 — ChatPanel composition** (~1,150 LOC: skill/model pickers, draft, send/consume) + `agents/+page`
-  home chrome (orphan, folded here). **+ Responsive parity (flagship):** today a NON-responsive flex row
-  (fixed sidebar + attachments squeeze the `flex-1` conversation below ~700px) — make the three-pane
-  workspace collapse like the cockpit. **Adversarial:** skill-attachment provenance (final source wins),
-  tier-mismatch → `TierFloorOverrideModal`, **collapse-matches-cockpit**. *(M→L; ⚠ read ChatPanel in
-  ranges; the responsive layout + the token/composition swap likely exceed 200k → plan to split into
-  **R9a token/composition** + **R9b responsive shell**; `agents/+page` can also peel into its own XS slice.)*
+  home chrome (orphan, folded here). **→ NOW SUBSUMED BY AE5 (Prompt Input)** — see § "AI Elements visual
+  adoption" (ADR-F011): R9 is no longer a token swap, it becomes the AE Prompt Input restyle. The R9a/R9b
+  split is **moot** — the responsive chat shell already shipped in **R8**. **Adversarial:** skill-attachment
+  provenance (final source wins), tier-mismatch → `TierFloorOverrideModal`. *(M→L; ⚠ read ChatPanel in ranges.)*
 - **R-CONV-1 — ConversationPanel logic extraction** (NO styling). Extract the polling/generation-guard
   state machine, the SSE-consume helper, and the auto-scroll composable into `lib/lq-ai/agents/*.ts`
   modules; behavior-preserving. **Test:** vitest for each module (generation-mismatch, poll/stream
@@ -241,10 +239,11 @@ Sizing: XS <0.5d · S ~1d · M ~2d · L = split it. IDs are stable handles, not 
   equivalence, no visual surface. *(M; ⚠ read the file in ranges.)*
 - **R-CONV-2 — ConversationPanel styling** the now-thinner remainder + `<style>` block → semantic
   tokens; `<think>` ribbon idiom from R6 (adopt `primitives/ReasoningRibbon.svelte` + the shared
-  `renderModelMarkdown`); reuse R8 upload-chip. **+ Responsive parity:** stacked/collapsed layout at
-  narrow (cockpit idiom), beyond the existing `<720` auto-scroll. **Adversarial (visual-only):** dark
-  contrast, auto-scroll on `<720` stacked, **collapse-matches-cockpit**, ConversationHost re-home
-  (unchanged exemplar — verify, don't edit). *(M; ⚠.) — split is best-practice AND fits the 200k cap.*
+  `renderModelMarkdown`); reuse R8 upload-chip. **→ NOW SUBSUMED BY AE6 (Tool + Task)** — see § "AI
+  Elements visual adoption" (ADR-F011): the agent-step timeline (`ag-step--tool_call/tool_result`) is
+  restyled to the AE **Tool** + **Task** cards instead of a bare token swap. **+ Responsive parity:**
+  stacked/collapsed layout at narrow (cockpit idiom). **Adversarial (visual-only):** dark contrast,
+  auto-scroll on `<720` stacked, ConversationHost re-home (unchanged exemplar — verify, don't edit). *(M; ⚠.)*
 
 ### Wave 2 — library surfaces
 - **R12 — Knowledge list + detail** (folds **R1b** primitives); merge the duplicated status roll-up in
@@ -348,3 +347,86 @@ Every slice closes the same gate, in order:
 
 No new dependency (shadcn `ui/*` already present: badge/button/dialog/dropdown-menu/input/resizable/
 scroll-area/separator/skeleton/textarea/tooltip — wrap, don't rebuild). Then squash-merge per ADR-F005.
+**Exception:** the AE-series below adds `shiki` (justified in ADR-F011) — the one sanctioned new runtime dep.
+
+## AI Elements visual adoption (AE-series) — folded in 2026-06-14 (ADR-F011)
+
+**Goal:** adopt the look-and-feel of Vercel **AI Elements** on the conversation + agent surfaces —
+document-style full-width assistant responses, polished streaming (shimmer + auto-collapsing reasoning
+with a duration), syntax-highlighted code blocks, hover actions, collapsible tool/task/sources cards.
+**Hard rule honored:** default clean light/white theme + dark mode (we re-token to our existing palette).
+
+**Why this is additive, not a detour:** the R-series builds the semantic-token foundation AI Elements
+*requires*; we're already on its exact substrate (shadcn-svelte 1.3 + bits-ui 2.18 + Tailwind v4). So AE
+layers on top of the migration — it does not replace it. **Svelte is retained — no React rewrite** (ADR-F011).
+
+**Approach — VENDOR, re-token, re-wire (not a drop-in):**
+- Vendor the MIT Svelte port [`SikandarJODD/ai-elements`](https://github.com/SikandarJODD/ai-elements)
+  component **source** via `jsrepo` (dev-only CLI) into **`web/src/lib/lq-ai/components/ai-elements/`** —
+  source we own, same model as `ui/*`. Re-skin to our semantic tokens (born 0 `var(--lq-)` → no R-LAST
+  regression). Where the port lags or is low-quality, **fall back to hand-building on shadcn-svelte**.
+- **KEEP our transport + chokepoint:** gateway + custom SSE + `guarded_tool_call` + audit. Do **NOT**
+  adopt `@ai-sdk/svelte`'s `Chat` (it expects an AI-SDK-shaped endpoint and bypasses all of the above).
+  Feed the AE components from our existing message store / SSE frames / Citation Engine / agent steps.
+- **KEEP our hardened sink:** render model output through `renderModelMarkdown` (`marked`+`DOMPurify`,
+  media-forbid). Adopt the "Response" *prose styling*, not its markdown renderer. Any vendored `{@html}`
+  is a per-slice security item.
+- **Deps/governance:** `shiki` (code highlight) = SBOM entry (tokenizes text; no eval/network). `jsrepo`
+  = dev-only. **Each vendored component = SBOM + supply-chain review on its slice + MIT attribution in
+  `NOTICES.md`.** Confirm each compiles under our Svelte 5 / Tailwind v4 build.
+
+**Message identity (proposed default — overturnable):** **full-width assistant** (document-style
+Response) **+ soft right-aligned user bubble** (the AI Elements signature; suits long legal answers with a
+provenance/citation row beneath).
+
+**Each AE slice carries the same four disciplines + the ADR-F005 gate** (testing + headed before/after
+screenshots light+dark/wide+narrow · simplification · adversarial review WITH the mandatory security pass
+· HANDOFF at close). Shell slices (AE1, AE5, AE6) must show the responsive collapse in the narrow shot.
+
+### AE slices
+- **AE0 — Vendoring foundation** *(infra; screenshot-exempt — say so in the PR).* `jsrepo init` against
+  the registry; verify Tailwind v4 + shadcn-svelte interop; establish the **token-remap convention**
+  (registry tokens → our semantic tokens); add the MIT `NOTICES.md` entry; prove the pipeline by vendoring
+  + re-skinning **two trivial components (Shimmer/Loader, Suggestion)** behind a `/lq-ai/_ae-lab` dev
+  route (no live-surface change). **Adversarial:** dep/SBOM review of what `jsrepo` pulled; confirm no
+  `@ai-sdk/svelte` runtime coupling crept in. *(S)*
+- **AE1 — Conversation + Message + Response (full-width)** *(shell).* `MessageList` → **Conversation**
+  (scroll container + sticky scroll-to-bottom); `MessageBubble` → **Message + Response** (full-width
+  assistant, soft user bubble); **Response renders OUR sanitized markdown**. Restyles the already-merged
+  R6 bubble look on the chat surface. Keep the ProvenancePill / tier / citation row beneath the Response.
+  **Responsive:** narrow = full-bleed. **Adversarial:** streaming append correctness, citation-decorate
+  action still binds, dark contrast, ARIA, scroll anchoring. *(M; ⚠ touches the live chat surface.)*
+- **AE2 — Reasoning + Actions.** `primitives/ReasoningRibbon` → AE **Reasoning** (shimmer while
+  streaming, auto-collapse on complete + a duration); add per-message **Actions** (copy / retry /
+  copy-citation) wired to the existing rerun + stream handlers. **Adversarial:** reasoning sanitization
+  unchanged, action focus/keyboard, retry idempotency. *(M)*
+- **AE3 — Sources + Inline Citation.** Wrap the M2 Citation Engine in AE **Sources** (collapsible "Used
+  N sources") + **Inline Citation** styling; preserve the 5-state verification UI + lazy `GET
+  /messages/{id}/citations`. **Adversarial:** verification-state contrast, single-fetch race, untrusted
+  source-title escaping. *(S–M)*
+- **AE4 — Code Block** *(new dep: `shiki`).* Vendor **Code Block** (language header + copy + Shiki
+  highlight); hook into `renderModelMarkdown`'s `<pre><code>` output — **highlight runs client-side on
+  already-sanitized text** (no injection). **Adversarial + security:** confirm Shiki receives escaped
+  text only; SBOM + ADR-F011 dep note; copy-button clipboard a11y; dark theme of the code surface. *(M)*
+- **AE5 — Prompt Input** *(REPLACES R9's scope; shell).* Composer → AE **Prompt Input**: unified rounded
+  shell + toolbar (model selector, attach 📎, enhance ✨, receipts 📜, submit/stop). Keep SlashPopover,
+  EnhancePromptExpansion, SkillPicker, SavedPromptsPanel wiring + every `data-testid`. **Also migrates
+  ChatPanel's remaining `<style>` `--lq-*` block** (the R9 token debt). **Responsive.** **Adversarial:**
+  slash provenance (final source wins), tier-mismatch → `TierFloorOverrideModal`, send/stop state,
+  collapse-matches-cockpit. *(M→L; ⚠ read ChatPanel in ranges.)*
+- **AE6 — Tool + Task** *(REPLACES R-CONV-2's styling; shell).* ConversationPanel agent steps
+  (`ag-step--tool_call/tool_result`) → AE **Tool** (collapsible name/input/output/status) + **Task**
+  (step list); keep the Reasoning idiom; **keep all polling / stale-detection / statusBadge logic
+  untouched** (R-CONV-1 already extracted it). **Responsive.** **Adversarial:** status-state mapping,
+  nested-step indentation, dark contrast, ConversationHost re-home (verify, don't edit). *(M; ⚠.)*
+- **AE7 — Suggestions** *(optional, lowest priority).* AE **Suggestion** chips for follow-ups
+  above/below the composer **only if a clean data source exists** (else back them with SavedPrompts).
+  **Defer** if no honest source — don't invent suggestions. *(S)*
+
+**Sequencing:** AE0 first (foundation). AE1–AE4 are chat-surface and land in any order on the dark-mode
+bridge. AE5 fills the R9 slot; AE6 fills the R-CONV-2 slot. AE7 last/optional. The R-series continues for
+non-conversation surfaces (rails, library, chrome, cleanup). **Re-plan checkpoint:** review AE0's output
+(port quality + token-remap ergonomics) before committing AE1–AE7 — if the port disappoints, switch those
+slices to hand-build-on-shadcn-svelte (ADR-F011 option 2 fallback).
+
+**Net add:** ~7 AE slices, of which AE5/AE6 absorb R9/R-CONV-2 → **net new ≈ 5** (AE0–AE4 + AE7).
