@@ -318,6 +318,13 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 - Global notification bell in the chrome (DE-324 deferral) — cockpit-adjacent.
 - Declare the F3 retire list explicitly when the IA re-centres: saved-prompts, guided-dashboard
   components, FeaturedToolsRow, learn-as-global-tab.
+- **Minimalist "cleaned interface" pass (post-AE series)** — maintainer likes the minimalist aesthetic
+  + positioning of [`scira`](https://github.com/zaidmukaddam/scira). **scira is AGPL-3.0 → REFERENCE
+  ONLY: study the look / IA / positioning, never copy code** (copying would force AGPL on our stack —
+  same inspect-don't-copy discipline as ADR-F011, but stricter: not even vendoring, unlike the MIT AI
+  Elements port we DO copy). scira is itself built on AI Elements, so the AE-series already lands the
+  component substrate; this is a subsequent IA / visual-cleanup milestone (effortless, minimal chrome)
+  once the AE components are plugged in. Sequence AFTER AE0–AE7.
 - NewMatterModal's privileged InfoTip claims "defaults to Tier 2" — neither client nor server
   implements a default (the field is simply required); fix the copy on next touch (transparency).
 - Pre-F1 guard: frontend-static practice-area identifiers must never leak into stored rows

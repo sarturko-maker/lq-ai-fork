@@ -403,10 +403,17 @@ screenshots light+dark/wide+narrow · simplification · adversarial review WITH 
   R6 bubble look on the chat surface. Keep the ProvenancePill / tier / citation row beneath the Response.
   **Responsive:** narrow = full-bleed. **Adversarial:** streaming append correctness, citation-decorate
   action still binds, dark contrast, ARIA, scroll anchoring. *(M; ⚠ touches the live chat surface.)*
-- **AE2 — Reasoning + Actions.** `primitives/ReasoningRibbon` → AE **Reasoning** (shimmer while
-  streaming, auto-collapse on complete + a duration); add per-message **Actions** (copy / retry /
-  copy-citation) wired to the existing rerun + stream handlers. **Adversarial:** reasoning sanitization
-  unchanged, action focus/keyboard, retry idempotency. *(M)*
+- **AE2 — Reasoning + Actions ✅ DONE (PR #61).** Vendored `message/actions/` (action/actions/toolbar);
+  per-assistant-message **Actions** toolbar (Copy / Retry / Copy-sources) in a NEW runes wrapper
+  `MessageActionsBar.svelte` (isolates shadcn-Button `onclick` forwarding from the legacy bubble), Retry
+  reuses the extracted `rerunPrecedingPrompt` (shared with refusal re-run). `ReasoningRibbon` upgraded to
+  the AE **Reasoning** *identity* (brain icon, chevron, "Thinking…" shimmer, "Thought for Ns", auto-open-
+  while-streaming + one-shot auto-collapse) — **option-2 hand-build** kept on the accessible `<details>`
+  because the AE `reasoning` registry block pulls 4 avoided deps (streamdown/shiki/mode-watcher/
+  collapsible). Streaming/duration are DORMANT on the live chat surface (no separate reasoning stream
+  until F1-S4) — exercised in `_ae-lab`. Zero new deps. Original spec: ~~`primitives/ReasoningRibbon` → AE
+  **Reasoning** (shimmer while streaming, auto-collapse on complete + a duration); add per-message
+  **Actions** (copy / retry / copy-citation) wired to the existing rerun + stream handlers.~~ *(M)*
 - **AE3 — Sources + Inline Citation.** Wrap the M2 Citation Engine in AE **Sources** (collapsible "Used
   N sources") + **Inline Citation** styling; preserve the 5-state verification UI + lazy `GET
   /messages/{id}/citations`. **Adversarial:** verification-state contrast, single-fetch race, untrusted

@@ -25,6 +25,7 @@
 	import CaptureSkillModal from './CaptureSkillModal.svelte';
 	import EnhancedDiffModal from './EnhancedDiffModal.svelte';
 	import M2Citations from './M2Citations.svelte';
+	import MessageActionsBar from './MessageActionsBar.svelte';
 	import MessageOverflowMenu from './MessageOverflowMenu.svelte';
 	import ProvenancePill from './ProvenancePill.svelte';
 	import RefusalMessageBubble from './RefusalMessageBubble.svelte';
@@ -46,6 +47,12 @@
 	export let message: Message;
 	export let isStreaming: boolean = false;
 	export let onAppliedSkillClicked: ((name: string) => void) | undefined = undefined;
+
+	// AE2 (ADR-F011) — Retry re-runs the prompt that produced this assistant
+	// message through the normal send path (ChatPanel owns the re-dispatch). The
+	// Copy / Copy-sources actions are self-contained in MessageActionsBar.
+	// No-op default so historical/standalone renders keep working.
+	export let onRetry: (msg: Message) => void = () => {};
 
 	// Wave D.1 T20 follow-on — the original prompt the operator typed
 	// before clicking "Use enhanced" on the EnhancePromptExpansion panel.
@@ -138,6 +145,15 @@
 	// on exactly the same path as the answer.
 	$: rendered = message.role === 'assistant' ? renderModelMarkdown(split.visible) : '';
 	$: reasoningHtml = renderModelMarkdown(split.thinking);
+
+	// AE2 — pre-format the cited sources for the Copy-sources action. Empty when
+	// the message has no fetched citations (hides the action). Plain text only —
+	// the raw `source_text` is model/document output, but clipboard text is inert
+	// (no markup is interpreted), so this needs no HTML sanitisation.
+	$: sources = (fetchedCitations ?? []).map((c, i) => {
+		const page = c.source_page != null ? ` (p.${c.source_page})` : '';
+		return `[${i + 1}] ${c.source_text}${page}`;
+	});
 </script>
 
 {#if message.kind === 'refusal'}
@@ -220,6 +236,12 @@
 					/>
 				</div>
 				<div class="flex items-center gap-1">
+					<MessageActionsBar
+						answer={split.visible}
+						{sources}
+						retryDisabled={isStreaming}
+						onRetry={() => onRetry(message)}
+					/>
 					{#if $captureAffordanceInline}
 						<button
 							type="button"

@@ -14,6 +14,8 @@
 	 */
 	import { Loader } from '$lib/lq-ai/components/ai-elements/loader/index.js';
 	import { Suggestion, Suggestions } from '$lib/lq-ai/components/ai-elements/suggestion/index.js';
+	import ReasoningRibbon from '$lib/lq-ai/components/primitives/ReasoningRibbon.svelte';
+	import MessageActionsBar from '$lib/lq-ai/components/MessageActionsBar.svelte';
 
 	const SUGGESTIONS = [
 		'Summarise this contract',
@@ -40,6 +42,25 @@
 		root.classList.remove('dark', 'light');
 		root.classList.add(dark ? 'dark' : 'light');
 	}
+
+	// AE2 — Reasoning demo. The streaming toggle exercises the shimmer +
+	// auto-open while "streaming", then the measured duration + one-shot
+	// auto-collapse when it ends (the path the live chat surface can't show yet
+	// — reasoning deltas land with F1-S4).
+	let reasoningStreaming = $state(false);
+	const REASONING_BODY =
+		'The indemnity at clause 9.2 is uncapped, which is unusual for a mutual ' +
+		'agreement of this size; flag it against the playbook before signature.';
+
+	// AE2 — Actions demo. Retry just bumps a counter here (the live surface
+	// re-dispatches the preceding prompt); Copy / Copy-sources are self-contained.
+	let retryCount = $state(0);
+	const DEMO_ANSWER =
+		'Clause 9.2 carries an uncapped indemnity. Recommend negotiating a liability cap.';
+	const DEMO_SOURCES = [
+		'[1] "...indemnify and hold harmless..." (p.12)',
+		'[2] "...without limit..." (p.13)'
+	];
 </script>
 
 <div class="min-h-full bg-background text-foreground">
@@ -53,7 +74,7 @@
 		</div>
 
 		<div class="mb-8 flex items-center justify-between">
-			<h1 class="text-xl font-semibold">AE0 — vendored components</h1>
+			<h1 class="text-xl font-semibold">AI Elements lab — AE0 + AE2</h1>
 			<button
 				type="button"
 				class="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted/60"
@@ -91,6 +112,42 @@
 						— last: <span class="font-medium text-foreground" data-testid="ae-lab-last-pick"
 							>{lastPicked}</span
 						>{/if}
+				</p>
+			</div>
+		</section>
+
+		<section class="mt-10" data-testid="ae-lab-reasoning">
+			<h2 class="mb-3 text-sm font-semibold text-muted-foreground">Reasoning (AE2)</h2>
+			<div class="rounded-lg border border-border bg-card p-6">
+				<button
+					type="button"
+					class="mb-4 rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted/60"
+					data-testid="ae-lab-reasoning-toggle"
+					onclick={() => (reasoningStreaming = !reasoningStreaming)}
+				>
+					{reasoningStreaming ? 'Stop streaming' : 'Start streaming'}
+				</button>
+				<ReasoningRibbon streaming={reasoningStreaming}>
+					{REASONING_BODY}
+				</ReasoningRibbon>
+			</div>
+		</section>
+
+		<section class="mt-10" data-testid="ae-lab-actions">
+			<h2 class="mb-3 text-sm font-semibold text-muted-foreground">Message actions (AE2)</h2>
+			<div class="group rounded-lg border border-border bg-card p-6">
+				<p class="mb-3 text-sm">{DEMO_ANSWER}</p>
+				<MessageActionsBar
+					answer={DEMO_ANSWER}
+					sources={DEMO_SOURCES}
+					onRetry={() => (retryCount += 1)}
+				/>
+				<p class="mt-4 text-sm text-muted-foreground">
+					Retried
+					<span class="font-semibold text-foreground" data-testid="ae-lab-retry-count"
+						>{retryCount}</span
+					>
+					×
 				</p>
 			</div>
 		</section>
