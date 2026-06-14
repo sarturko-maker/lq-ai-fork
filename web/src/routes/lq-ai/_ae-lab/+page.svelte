@@ -17,6 +17,8 @@
 	import ReasoningRibbon from '$lib/lq-ai/components/primitives/ReasoningRibbon.svelte';
 	import MessageActionsBar from '$lib/lq-ai/components/MessageActionsBar.svelte';
 	import MessageSources from '$lib/lq-ai/components/MessageSources.svelte';
+	import { renderModelMarkdown } from '$lib/lq-ai/sanitize-markdown';
+	import { enhanceCodeBlocks } from '$lib/lq-ai/code/enhance';
 	import type { Citation } from '$lib/lq-ai/types';
 
 	const SUGGESTIONS = [
@@ -112,6 +114,34 @@
 			verification_method: 'failed'
 		})
 	];
+
+	// AE4 — Code Block demo. Goes through the REAL chat path: untrusted markdown
+	// → renderModelMarkdown (marked + DOMPurify, media-forbidden) → {@html} →
+	// the enhanceCodeBlocks action (Shiki highlight + card). The `<script>` and
+	// `&` below prove the escaped-text→highlight pipeline is injection-safe; the
+	// `cobol` fence proves an unsupported language degrades to plain text.
+	const DEMO_CODE_MD = [
+		'```python',
+		'def redline(clause: str) -> bool:',
+		'    # flag uncapped indemnities',
+		'    return "without limit" in clause.lower()  # 1 < 2 && safe',
+		'```',
+		'',
+		'```sql',
+		'SELECT party, MAX(liability_cap)',
+		'FROM contracts WHERE signed IS NULL;',
+		'```',
+		'',
+		'```cobol',
+		'IDENTIFICATION DIVISION.',
+		'PROGRAM-ID. UNKNOWN-LANG.',
+		'```',
+		'',
+		'```',
+		'<script>alert(1)<\/script> & plain "fence" — no language',
+		'```'
+	].join('\n');
+	const demoCodeHtml = renderModelMarkdown(DEMO_CODE_MD);
 </script>
 
 <div class="min-h-full bg-background text-foreground">
@@ -125,7 +155,7 @@
 		</div>
 
 		<div class="mb-8 flex items-center justify-between">
-			<h1 class="text-xl font-semibold">AI Elements lab — AE0 + AE2 + AE3</h1>
+			<h1 class="text-xl font-semibold">AI Elements lab — AE0 + AE2 + AE3 + AE4</h1>
 			<button
 				type="button"
 				class="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted/60"
@@ -210,6 +240,20 @@
 					Clause 9.2 carries an uncapped indemnity "…without limit of liability" (Source: [1]).
 				</p>
 				<MessageSources citations={DEMO_CITATIONS} />
+			</div>
+		</section>
+
+		<section class="mt-10" data-testid="ae-lab-code">
+			<h2 class="mb-3 text-sm font-semibold text-muted-foreground">Code blocks (AE4)</h2>
+			<div class="rounded-lg border border-border bg-card p-6">
+				<div
+					class="prose prose-sm dark:prose-invert max-w-none"
+					data-testid="ae-lab-code-content"
+					use:enhanceCodeBlocks={{ enabled: true }}
+				>
+					<!-- eslint-disable-next-line svelte/no-at-html-tags — DOMPurify-sanitized via renderModelMarkdown -->
+					{@html demoCodeHtml}
+				</div>
 			</div>
 		</section>
 	</div>

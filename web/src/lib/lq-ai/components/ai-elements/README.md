@@ -61,12 +61,26 @@ Gateway + `guarded_tool_call` + audit (CLAUDE.md "KEEP unchanged").
 **`response` deliberately not vendored:** the registry `response` item is a thin wrapper over
 `streamdown-svelte` (its own markdown renderer + Shiki). Per ADR-F011 we keep our hardened
 `renderModelMarkdown` (`marked`+`DOMPurify`, media-forbid) and adopt only the *prose styling* (the
-`prose prose-sm dark:prose-invert` wrapper in `MessageBubble`). Revisit Shiki code highlighting in AE4.
+`prose prose-sm dark:prose-invert` wrapper in `MessageBubble`).
+
+**`code` deliberately not vendored (AE4, option-2):** the registry `code` item pulls `svelte-toolbelt`,
+a separate `copy-button` registry item, `runed` Context, and line-number/overflow machinery, and exposes
+a controlled-`code`-prop API that doesn't fit our `renderModelMarkdown` → single `{@html}` sink (we do
+NOT split markdown into a streamdown-style Response). Per **ADR-F011 option-2** the AE code-block
+identity (bordered card, language header, copy button, Shiki GitHub light/dark dual-theme) is hand-built
+in **`web/src/lib/lq-ai/code/`** as a Svelte action (`enhanceCodeBlocks`) that post-processes the
+already-sanitized `<pre><code>` output — mirroring `citations/decorate-inline.ts`. The one new runtime
+dep `shiki` lands there (its only home); highlight runs on already-sanitized `.textContent` and Shiki's
+output is re-sanitized with DOMPurify before re-entering the DOM. See `NOTICES.md` § Web client
+provenance.
 
 The internal lab at `/lq-ai/_ae-lab` (unadvertised, auth-gated, dev scratch — links nowhere, changes no
 live surface) renders the trivial primitives (Loader, Suggestion) plus the AE2 Reasoning ribbon (with a
 streaming toggle so the shimmer + duration + auto-collapse path — dormant on the live chat surface until
 F1-S4 wires reasoning deltas — is visible + testable), the message actions bar, and the **AE3 Sources
-card** (three documents with mixed verification states), for visual + interaction checks. The
-conversation/message primitives + the Sources card are also exercised on the live chat surface
-(`MessageList`/`MessageBubble` → `MessageSources`).
+card** (three documents with mixed verification states), and the **AE4 code blocks** (four fences —
+python, sql, an unsupported `cobol` → plain text, and a no-language block whose body holds a literal
+`<script>` to prove the escaped-text → highlight pipeline is injection-safe), for visual + interaction
+checks. The conversation/message primitives + the Sources card + the code-block action are also
+exercised on the live chat surface (`MessageList`/`MessageBubble` → `MessageSources` /
+`use:enhanceCodeBlocks`).

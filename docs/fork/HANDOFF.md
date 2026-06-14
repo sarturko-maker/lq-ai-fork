@@ -2,74 +2,75 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (AE3 MERGED — next is AE4)
+## State (AE4 MERGED — next is AE5)
 
-- **AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (PR #62) MERGED** — AI Elements adoption on the chat
-  surface (ADR-F011). The **AE-series** brings the Vercel AI Elements look via the MIT Svelte port
+- **AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (#62) + AE4 (PR #63) MERGED** — AI Elements adoption on the
+  chat surface (ADR-F011). The **AE-series** brings the Vercel AI Elements look via the MIT Svelte port
   `SikandarJODD/ai-elements`, vendored + re-tokened + re-wired to OUR data — KEEP Svelte, KEEP
   gateway/SSE/`guarded_tool_call`/audit, KEEP our `marked`+`DOMPurify` sanitizer. Plan:
   `docs/fork/plans/F1-legacy-design-rollout-decomposition.md` §"AI Elements visual adoption". The
   R-series (legacy `--lq-*` → semantic-token migration of non-conversation surfaces) continues
   independently on the dark-mode bridge.
-- **VENDOR APPROACH CONFIRMED (AE0–AE3):** token system is **identical** to ours (shadcn-svelte +
-  Tailwind v4) so remap ≈ identity. Still **zero new runtime deps** through AE3. **ADR-F011 option-2
-  (hand-build on shadcn) used again in AE3:** the AE `sources` block sits on `collapsible` (not shipped)
-  and `inline-citation` pulls `carousel`+`hover-card` — so `Sources` was hand-built on native `<details>`
-  (like the AE2 reasoning ribbon) and only the **two** dependency-free `inline-citation` primitives
-  (`-source`/`-quote`) were vendored. `sources/source.svelte` WAS vendored faithfully.
-- Dev stack: 8 services healthy; **DB at 0054**; **web REBUILT on AE3**.
+- **VENDOR APPROACH (AE0–AE4):** token system is **identical** to ours (shadcn-svelte + Tailwind v4) so
+  remap ≈ identity. **ADR-F011 option-2 (hand-build, don't vendor) used again in AE4:** the AE `code`
+  registry item pulls `svelte-toolbelt` + a separate `copy-button` registry item + line-number/overflow
+  machinery + a controlled-`code`-prop API that doesn't fit our `{@html}` sink — so the AE code-block
+  identity was hand-built in `lib/lq-ai/code/` as a Svelte action over the sanitized output (NOT vendored).
+  **AE4 adds the ONE new runtime dep ADR-F011 pre-approved: `shiki` (`^4.2.0`).** It is the only new dep
+  through the AE series.
+- Dev stack: 8 services healthy; **DB at 0054**; **web REBUILT on AE4**.
   Login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
   Gateway aliases smart/fast/budget → minimax/MiniMax-M3 (only S9-qualified model, **tier 4**).
 - Suites at gate: web `npm run check` **0 errors** (5 pre-existing a11y warnings, untouched files);
-  **vitest 811** (803 + 8 new `sources.test.ts`); **Cypress `ae3-sources-citations.cy.ts` 5/5** headed/
-  live (lab funcional ×2 + live integration + 2 capture); **api pytest 2127 passed / 3 skipped** in a
-  throwaway pgvector container (the lone `test_agent_runner` blip was a 20-min-concurrent-load flake —
-  re-passed alone; unrelated to AE3). AE3 after-screenshots (lab Sources card + chat surface, light+dark,
-  wide+narrow) in `docs/fork/evidence/ae3/`. Adversarial review (fresh-context agent): **SHIP** —
-  0 blocker; the one should-fix (soft-deleted file names surfacing + a misleading CASCADE comment) and
-  both nits FIXED before merge. Security pass CLEAN (source titles/quotes are escaped text bindings, no
-  `{@html}`; backend leaks only the filename; authz unchanged — ownership enforced upstream of the join;
-  no new deps; no secrets/stray files).
+  **vitest 816** (811 + 5 new `code/__tests__/shiki.test.ts`); **Cypress `ae4-code-block.cy.ts` 8/8**
+  headed/live (lab functional ×5 + live integration + 2 capture; one cold-boot first-attempt flake,
+  clean 8/8 on a warm re-run). **api/gateway UNAFFECTED — AE4 touches only `web`** (no backend change).
+  AE4 after-screenshots (lab code cards + chat surface, light+dark, wide+narrow) in
+  `docs/fork/evidence/ae4/`. Adversarial review (fresh-context agent): see PR #63. Security pass: highlight
+  runs only on already-sanitized `.textContent`; Shiki output **re-sanitized with DOMPurify** before it
+  re-enters the DOM (no new injection sink); injected `<script>` renders as inert text (Cypress-asserted);
+  DOMPurify preserves `--shiki-dark` so dark mode works (Cypress + screenshot); shiki is the only new dep;
+  no secrets/stray files.
 
-## Done (AE3, this slice)
+## Done (AE4, this slice)
 
-- **Backend `get_citations`** (`api/app/api/chats.py`) — LEFT JOINs `files` to add `source_filename` to
-  each citation row (the AE Sources card shows real document names, not opaque UUIDs) **without a second
-  round-trip** — the lazy single-fetch contract holds. Join scoped to `File.deleted_at IS NULL` (mirrors
-  the module's "deleted files invisible" posture); a suppressed/missing name degrades to an ordinal
-  label. Test extended (happy path + soft-delete suppression).
-- **`citations/format.ts`** — `previewQuote` extracted (was in `M2Citations.svelte`, now shared +
-  re-exported for back-compat). **`citations/sources.ts`** — pure `buildMessageSources(citations)`:
-  group by `source_file_id` (first-seen order), **most-cautionary** state rollup, distinct sorted pages,
-  passage count, representative quote. Vitest `__tests__/sources.test.ts` (8).
-- **Vendored `ai-elements/sources/`** — `source.svelte` (faithful; `href` made optional → non-navigating
-  `<span>` for our internal docs, viewer is M2-D2), `sources.svelte` (**option-2** on `<details>` —
-  trigger="Used N sources"+chevron, content snippet), `index.ts`. **Vendored `ai-elements/inline-citation/`**
-  — only `-source` + `-quote` (the two dependency-free primitives used), `index.ts`.
-- **NEW `MessageSources.svelte` (runes)** — composes Sources + the inline-citation identity with a 5-state
-  verification marker (badge-check green/amber, circle-alert grey; AA in light+dark, matches M2Citations
-  palette). Rendered in `MessageBubble` assistant footer **above** the M2Citations sidecar chips; renders
-  nothing when the message cites no documents.
-- **`_ae-lab`** — Sources demo (3 docs, mixed states). **NOTICES + `ai-elements/README.md`** updated.
-  **`cypress/e2e/ae3-sources-citations.cy.ts`** (5).
+- **`lib/lq-ai/code/shiki.ts`** — fine-grained Shiki highlighter singleton: bundled `createHighlighter`
+  + the **pure-JS regex engine** (`shiki/engine/javascript`, no WASM) + GitHub light/dark **dual-theme** +
+  an explicit modest language list. `normalizeLang(raw)` maps aliases (`sh`→bash, `ts`→typescript,
+  `py`→python, `postgres`→sql, …) + case/whitespace-insensitive + **falls back to `text`** for unknown
+  langs (codeToHtml throws on an unknown lang). Vitest `code/__tests__/shiki.test.ts` (5).
+- **`lib/lq-ai/code/enhance.ts`** — `enhanceCodeBlocks` **Svelte action** (mirrors
+  `citations/decorate-inline.ts`): finds `pre > code` in the **already-sanitized** `{@html}` output,
+  reads `.textContent` (a plain string), Shiki-highlights it, **re-sanitizes Shiki's output with
+  DOMPurify**, then swaps in the AE card (language header + copy button top-right). No-op while
+  `enabled === false` (streaming); a **generation counter + `pre.isConnected` guard** discard stale/
+  detached async results; highlight failure leaves the raw `<pre>` (never drops the code). Copy button
+  has an accessible label + transient "Copied" confirmation.
+- **`app.css`** — a `.lq-code` block for the Shiki-generated `<pre class="shiki">` internals (padding,
+  mono font, `overflow-x`) + the **class-based dark swap** (`.dark .lq-code .shiki span { color:
+  var(--shiki-dark) }`); Shiki's own bg forced transparent so the card supplies one bg per theme.
+- **`MessageBubble.svelte`** — `use:enhanceCodeBlocks={{ enabled: !isStreaming }}` on the same prose
+  `<div>` as `decorateCitationsInline` (orthogonal: one acts on `pre>code`, the other on text markers).
+- **`_ae-lab`** — code-block demo through the REAL chat path (markdown → `renderModelMarkdown` → `{@html}`
+  → action): python, sql, an unsupported `cobol` (→ text), and a no-language fence with a literal
+  `<script>` (injection-safety proof). **NOTICES** (new `code/**` row + shiki SBOM) + `ai-elements/README.md`
+  (option-2 note) updated. **`cypress/e2e/ae4-code-block.cy.ts`** (8). **No new ADR** — F011 already
+  sanctioned both `shiki` and the option-2 pattern; the action approach mirrors the accepted
+  `decorate-inline` seam.
 
 ## Next slice — pick up exactly here
 
-1. **AE4 — Code Block** (plan §"AI Elements visual adoption" → AE4). **This is the one sanctioned new
-   runtime dep: `shiki`** (justified in ADR-F011 — SBOM entry; tokenizes text, no eval/network). Vendor
-   the AE **Code Block** (language header + copy button + Shiki highlight); hook it into
-   `renderModelMarkdown`'s `<pre><code>` output — **highlight runs client-side on ALREADY-SANITIZED text**
-   (no injection). **Inspect first** (proven pipeline): `curl https://svelte-ai-elements.vercel.app/r/code-block.json`
-   — parse with python3 from the repo dir (NOT jq; mind `/tmp/types.py`). **Adversarial + security
-   (extra pass — touches a new dep + a render sink):** confirm Shiki receives escaped text only; SBOM +
-   ADR-F011 dep note + `NOTICES.md` row + `package.json`/lockfile surgical add (mirror the `runed` devDep
-   precedent if it's build-time, but Shiki ships in the bundle → it's a true runtime dep); copy-button
-   clipboard a11y; dark theme of the code surface reads AA. Full four-discipline gate + before/after
-   screenshots (light+dark). Lab-based functional tests dodge the auth flakiness.
-   Then **AE5 Prompt Input (≡ old R9 slot; also migrates ChatPanel's remaining `--lq-*` shell — see
-   Carry-overs; responsive collapse REQUIRED in the narrow shot)** → **AE6 Tool+Task (≡ old R-CONV-2
-   slot; responsive)** → AE7 Suggestions (the AE0 `Suggestion` chips are ready). **Backlog (from R6):**
-   converge `ConversationPanel` + `SkillSourceView` onto `renderModelMarkdown` (do as part of AE6).
+1. **AE5 — Prompt Input** (plan §"AI Elements visual adoption" → AE5; **≡ the old R9 slot**). Composer →
+   AE **Prompt Input**: unified rounded shell + toolbar (model selector, attach 📎, enhance ✨, receipts
+   📜, submit/stop). KEEP `SlashPopover` + `EnhancePromptExpansion`. **Also migrates ChatPanel's remaining
+   `--lq-*` shell** — this fixes the standing **dark-mode shell gap** (see Carry-overs: the central chat
+   *column* renders LIGHT in dark mode because ChatPanel's shell still uses legacy `--lq-*`). **Responsive
+   collapse REQUIRED in the narrow shot.** Inspect the AE `prompt-input` registry item first
+   (`curl …/r/prompt-input.json`, parse with python3 — NOT jq; mind `/tmp/types.py`) and apply option-2
+   if it pulls avoided deps. Full four-discipline gate + before/after screenshots (light+dark, wide+narrow).
+   Then **AE6 Tool+Task (≡ old R-CONV-2 slot; responsive)** → AE7 Suggestions (the AE0 `Suggestion` chips
+   are ready). **Backlog (from R6):** converge `ConversationPanel` + `SkillSourceView` onto
+   `renderModelMarkdown` (do as part of AE6).
 2. Other rollout slices (any order — the dark-mode bridge holds un-migrated surfaces):
    Foundation/rail R2–R5, Wave 1 R-CONV-1 (logic; R-CONV-2 → AE6), Wave 2
    R12/R13/R14a-b/R15/R15b-tab-pb/R16, Wave 3 R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO →
@@ -85,8 +86,9 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 - **R-series:** Step 0 ✅ (#50) · R0 ✅ · R1a ✅ (#51) · R6 ✅ (#52) · R7 ✅ (#55) · responsive parity ✅
   (#53) · **R8 ✅ (#57)**. CI unblocked (repo public).
 - **AE-series (ADR-F011):** plan+ADR ✅ (#58) · **AE0 ✅ (#59)** vendoring foundation · **AE1 ✅ (#60)**
-  Conversation+Message+Response · **AE2 ✅ (#61)** Reasoning+Actions · **AE3 ✅ (PR #62)** Sources +
-  Inline-Citation (Sources card + `source_filename` join). **Next AE4 (Code Block + `shiki`).**
+  Conversation+Message+Response · **AE2 ✅ (#61)** Reasoning+Actions · **AE3 ✅ (#62)** Sources +
+  Inline-Citation · **AE4 ✅ (PR #63)** Code Block (Shiki highlight, option-2 action; the one new dep
+  `shiki`). **Next AE5 (Prompt Input ≡ R9 — migrates ChatPanel shell + fixes the dark-mode column gap).**
 
 ## Carry-overs / review deferrals
 
@@ -94,6 +96,8 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   chat *column* renders LIGHT in dark mode while the chrome is dark — ChatPanel shell still uses legacy
   `--lq-*` tokens. Pre-existing (AE1+AE2), NOT an AE3 regression (AE3 touched only the message footer +
   the new Sources card, both semantic-token). **AE5 migrates ChatPanel's `--lq-*` block.**
+- **AE4 — no new carry-overs.** The ChatPanel dark-mode shell gap above is unchanged by AE4 (AE4 only
+  added a `use:` action on the existing prose `<div>` + a `.lq-code` CSS block + `lib/lq-ai/code/`).
 - **AE3 — no new carry-overs.** The fresh-context review's one should-fix (soft-deleted filenames
   surfacing + misleading CASCADE comment) and both nits (unused `isFallbackLabel`; over-vendored
   `inline-citation`/`-text`) were FIXED in-slice, not deferred.
@@ -117,6 +121,18 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Gotchas (carried + new)
 
+- **NEW (AE4): DOMPurify (3.4.0) DOES preserve CSS custom properties in `style`.** Shiki dual-theme output
+  carries the dark palette in a `--shiki-dark` CSS var on each token's inline `style`; class-based dark mode
+  breaks silently if the sanitiser strips it. It does NOT — verified in a real browser (Cypress asserts
+  `span[style*="--shiki-dark"]` exists post-sanitize + the dark screenshot shows the dark palette). vitest
+  env is `node` (no DOM) so DOMPurify behavior is **Cypress-only** to test — don't try to unit-test it.
+- **NEW (AE4): Shiki fine-grained setup = no WASM, only listed grammars.** Use `createHighlighter` from
+  `shiki` + `createJavaScriptRegexEngine` from `shiki/engine/javascript` (NOT the default oniguruma WASM)
+  + an explicit `langs` list. `codeToHtml` THROWS on an unknown lang → `normalizeLang` must map to a loaded
+  grammar or `'text'`. `shiki` is the only declared dep; `@shikijs/langs|themes` arrive as its pinned
+  transitives.
+- **NEW (AE4): a literal `</script>` inside a Svelte `<script>` string closes the block** (parse error).
+  Escape the slash — `'<\/script>'` — when a demo string must contain it (the lab injection-safety sample).
 - **NEW (AE3): run ruff from the REPO ROOT with the root `ruff.toml`, exactly as CI does.** CI runs
   `ruff check api scripts` + `ruff format --check api scripts` from the repo root. Running ruff from
   inside `api/` uses ruff's DEFAULT settings (the root `ruff.toml` excludes web/ and tunes line-length/
