@@ -1,61 +1,65 @@
 <script lang="ts">
-	import { afterUpdate } from 'svelte';
-
 	import type { Message } from '../types';
 	import MessageBubble from './MessageBubble.svelte';
+	import {
+		Conversation,
+		ConversationContent,
+		ConversationEmptyState,
+		ConversationScrollButton
+	} from '$lib/lq-ai/components/ai-elements/conversation/index.js';
 
-	export let messages: Message[] = [];
-	export let streamingMessageId: string | null = null;
-	export let onAppliedSkillClicked: ((name: string) => void) | undefined = undefined;
-
-	// Wave D.1 T15 — refusal-bubble forwarding. ChatPanel owns the modal +
-	// re-run state; MessageList is a pure pass-through so the bubble can fire
-	// the three callbacks per refusal row.
-	export let currentUserRole: 'admin' | 'member' | 'viewer' = 'member';
-	export let onRefusalRerun: (msg: Message) => void = () => {};
-	export let onRefusalOverrideRequested: (msg: Message) => void = () => {};
-	export let onRefusalExplainerRequested: (msg: Message) => void = () => {};
-
-	// Wave D.1 T20 follow-on — map of enhanced-prompt content → original
-	// prompt text the user typed before clicking "Use enhanced". Session
-	// scope only (server stores only the enhanced text; the original is
-	// not currently persisted — see EnhancedDiffModal docstring). Empty
-	// map is fine: MessageBubble renders a graceful fallback.
-	export let enhancementOriginals: Record<string, string> = {};
-
-	let scroller: HTMLDivElement;
-
-	afterUpdate(() => {
-		// Stick to bottom while messages stream in. The user can still scroll
-		// up; this is a lightweight auto-scroll that re-anchors on each
-		// message append.
-		if (scroller) {
-			scroller.scrollTop = scroller.scrollHeight;
-		}
-	});
+	// AE1 (ADR-F011): MessageList is now the AI Elements **Conversation** —
+	// a scroll container with sticky scroll-to-bottom. The previous
+	// `afterUpdate` hard-scroll is gone: ConversationContent's
+	// StickToBottomContext auto-scrolls on append UNLESS the user has scrolled
+	// up (then the floating ScrollButton appears). Runes so the vendored
+	// runes components compose cleanly.
+	let {
+		messages = [],
+		streamingMessageId = null,
+		onAppliedSkillClicked = undefined,
+		// Wave D.1 T15 — refusal-bubble forwarding (pure pass-through to the bubble).
+		currentUserRole = 'member',
+		onRefusalRerun = () => {},
+		onRefusalOverrideRequested = () => {},
+		onRefusalExplainerRequested = () => {},
+		// Wave D.1 T20 — enhanced-prompt originals (content → typed original).
+		enhancementOriginals = {}
+	}: {
+		messages?: Message[];
+		streamingMessageId?: string | null;
+		onAppliedSkillClicked?: (name: string) => void;
+		currentUserRole?: 'admin' | 'member' | 'viewer';
+		onRefusalRerun?: (msg: Message) => void;
+		onRefusalOverrideRequested?: (msg: Message) => void;
+		onRefusalExplainerRequested?: (msg: Message) => void;
+		enhancementOriginals?: Record<string, string>;
+	} = $props();
 </script>
 
-<div
-	bind:this={scroller}
-	class="flex-1 overflow-y-auto px-4 py-4 flex flex-col"
-	data-testid="lq-ai-message-list"
->
-	{#each messages as msg (msg.id)}
-		<MessageBubble
-			message={msg}
-			isStreaming={streamingMessageId === msg.id}
-			{onAppliedSkillClicked}
-			{currentUserRole}
-			{onRefusalRerun}
-			{onRefusalOverrideRequested}
-			{onRefusalExplainerRequested}
-			originalEnhancedPrompt={enhancementOriginals[msg.content]}
-		/>
-	{/each}
+<div class="min-h-0 flex-1">
+	<Conversation class="h-full">
+		<ConversationContent class="min-h-0 flex-1 overflow-y-auto" data-testid="lq-ai-message-list">
+			{#each messages as msg (msg.id)}
+				<MessageBubble
+					message={msg}
+					isStreaming={streamingMessageId === msg.id}
+					{onAppliedSkillClicked}
+					{currentUserRole}
+					{onRefusalRerun}
+					{onRefusalOverrideRequested}
+					{onRefusalExplainerRequested}
+					originalEnhancedPrompt={enhancementOriginals[msg.content]}
+				/>
+			{/each}
 
-	{#if messages.length === 0}
-		<div class="flex-1 flex items-center justify-center text-gray-400 text-sm italic">
-			No messages yet. Attach a skill, optionally upload a file, and send a message.
-		</div>
-	{/if}
+			{#if messages.length === 0}
+				<ConversationEmptyState
+					title="No messages yet"
+					description="Attach a skill, optionally upload a file, and send a message."
+				/>
+			{/if}
+		</ConversationContent>
+		<ConversationScrollButton data-testid="lq-ai-scroll-bottom" aria-label="Scroll to latest" />
+	</Conversation>
 </div>

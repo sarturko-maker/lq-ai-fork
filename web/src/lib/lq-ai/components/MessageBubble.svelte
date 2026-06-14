@@ -32,6 +32,16 @@
 	import TierDetailsPanel from './TierDetailsPanel.svelte';
 	import Alert from './primitives/Alert.svelte';
 	import ReasoningRibbon from './primitives/ReasoningRibbon.svelte';
+	// AE1 (ADR-F011): the AI Elements message identity — full-width assistant
+	// (document-style Response = our sanitized prose) + soft right-aligned user
+	// bubble. Message/MessageContent are pure layout primitives; all the
+	// functional plumbing below (ribbon, citations, tier, skills, capture,
+	// overflow, refusal, error) is unchanged.
+	// Aliased to `AeMessage` — `Message` is already the message *type* from `../types`.
+	import {
+		Message as AeMessage,
+		MessageContent
+	} from '$lib/lq-ai/components/ai-elements/message/index.js';
 
 	export let message: Message;
 	export let isStreaming: boolean = false;
@@ -115,22 +125,13 @@
 		void loadCitations(message.chat_id, message.id);
 	}
 
-	$: bubbleClasses =
-		message.role === 'user'
-			? 'bg-primary text-primary-foreground self-end'
-			: message.role === 'assistant'
-			? 'bg-card text-card-foreground border border-border self-start'
-			: 'bg-muted text-muted-foreground self-center text-sm';
-
 	// R6: split MiniMax-M3 `<think>…</think>` reasoning out of the assistant
 	// text so it collapses into the ReasoningRibbon instead of leaking into the
 	// answer prose (DOMPurify drops the unknown <think> tag but keeps its text).
 	// `splitThink` is the same parser the agent surface uses; UI-only — the API
 	// record keeps the honest full text.
 	$: split =
-		message.role === 'assistant'
-			? splitThink(message.content)
-			: { thinking: null, visible: '' };
+		message.role === 'assistant' ? splitThink(message.content) : { thinking: null, visible: '' };
 
 	// Both sinks go through the shared hardened renderer (media-forbidden — model
 	// output is untrusted; see sanitize-markdown.ts). The reasoning is sanitised
@@ -140,10 +141,7 @@
 </script>
 
 {#if message.kind === 'refusal'}
-	<div
-		class="flex flex-col max-w-3xl items-start mb-3"
-		data-testid={`lq-ai-message-${message.id}`}
-	>
+	<AeMessage from="assistant" data-testid={`lq-ai-message-${message.id}`}>
 		<RefusalMessageBubble
 			{message}
 			{currentUserRole}
@@ -151,126 +149,127 @@
 			onOverrideRequested={() => onRefusalOverrideRequested(message)}
 			onExplainerRequested={() => onRefusalExplainerRequested(message)}
 		/>
-	</div>
+	</AeMessage>
 {:else}
-<div class="flex flex-col max-w-3xl {message.role === 'user' ? 'items-end' : 'items-start'} mb-3" data-testid={`lq-ai-message-${message.id}`}>
-	<div class="rounded-lg px-3 py-2 {bubbleClasses} max-w-full">
-		{#if message.role === 'assistant'}
-			{#if reasoningHtml}
-				<ReasoningRibbon>
-					<!-- eslint-disable-next-line svelte/no-at-html-tags — DOMPurify-sanitized above -->
-					{@html reasoningHtml}
-				</ReasoningRibbon>
+	<AeMessage
+		from={message.role === 'user' ? 'user' : 'assistant'}
+		data-testid={`lq-ai-message-${message.id}`}
+	>
+		<MessageContent>
+			{#if message.role === 'assistant'}
+				{#if reasoningHtml}
+					<ReasoningRibbon>
+						<!-- eslint-disable-next-line svelte/no-at-html-tags — DOMPurify-sanitized above -->
+						{@html reasoningHtml}
+					</ReasoningRibbon>
+				{/if}
+				<div
+					class="prose prose-sm dark:prose-invert max-w-none"
+					data-testid="lq-ai-message-content"
+					use:decorateCitationsInline={{
+						citations: fetchedCitations ?? [],
+						enabled: !isStreaming
+					}}
+				>
+					<!-- eslint-disable-next-line svelte/no-at-html-tags — DOMPurify-sanitized via renderModelMarkdown -->
+					{@html rendered}
+				</div>
+				{#if isStreaming}
+					<div class="mt-1 text-xs text-muted-foreground italic">Streaming…</div>
+				{/if}
+			{:else}
+				<div class="whitespace-pre-wrap text-sm" data-testid="lq-ai-message-content">
+					{message.content}
+				</div>
 			{/if}
+		</MessageContent>
+
+		{#if message.role === 'user' && message.is_enhanced}
 			<div
-				class="prose prose-sm dark:prose-invert max-w-none"
-				data-testid="lq-ai-message-content"
-				use:decorateCitationsInline={{
-					citations: fetchedCitations ?? [],
-					enabled: !isStreaming
-				}}
+				class="mt-1 flex items-center gap-2 flex-wrap justify-end"
+				data-testid="provenance-pill-enhanced"
 			>
-				{@html rendered}
+				<ProvenancePill
+					kind="enhanced"
+					summary="enhanced"
+					onTap={() => (enhancedDiffOpen = true)}
+				/>
 			</div>
-			{#if isStreaming}
-				<div class="mt-1 text-xs text-muted-foreground italic">Streaming…</div>
+			{#if enhancedDiffOpen}
+				<EnhancedDiffModal
+					original={originalEnhancedPrompt}
+					enhanced={message.content}
+					on:close={() => (enhancedDiffOpen = false)}
+				/>
 			{/if}
-		{:else}
-			<div class="whitespace-pre-wrap text-sm" data-testid="lq-ai-message-content">
-				{message.content}
-			</div>
 		{/if}
-	</div>
 
-	{#if message.role === 'user' && message.is_enhanced}
-		<div
-			class="mt-1 flex items-center gap-2 flex-wrap justify-end"
-			data-testid="provenance-pill-enhanced"
-		>
-			<ProvenancePill
-				kind="enhanced"
-				summary="enhanced"
-				onTap={() => (enhancedDiffOpen = true)}
-			/>
-		</div>
-		{#if enhancedDiffOpen}
-			<EnhancedDiffModal
-				original={originalEnhancedPrompt}
-				enhanced={message.content}
-				on:close={() => (enhancedDiffOpen = false)}
-			/>
-		{/if}
-	{/if}
-
-	{#if message.role === 'assistant'}
-		<div class="mt-1 flex items-center gap-2 flex-wrap justify-start w-full">
-			<div class="flex items-center gap-2 flex-wrap">
-				{#if message.routed_inference_tier}
-					<TierBadge
-						tier={message.routed_inference_tier}
-						provider={message.routed_provider ?? null}
-						on:open={() => (tierDetailsOpen = true)}
+		{#if message.role === 'assistant'}
+			<div class="mt-1 flex items-center gap-2 flex-wrap justify-start w-full">
+				<div class="flex items-center gap-2 flex-wrap">
+					{#if message.routed_inference_tier}
+						<TierBadge
+							tier={message.routed_inference_tier}
+							provider={message.routed_provider ?? null}
+							on:open={() => (tierDetailsOpen = true)}
+						/>
+					{/if}
+					<AppliedSkillsChip
+						appliedSkills={message.applied_skills ?? []}
+						onSkillClicked={onAppliedSkillClicked}
 					/>
-				{/if}
-				<AppliedSkillsChip
-					appliedSkills={message.applied_skills ?? []}
-					onSkillClicked={onAppliedSkillClicked}
+				</div>
+				<div class="flex items-center gap-1">
+					{#if $captureAffordanceInline}
+						<button
+							type="button"
+							class="text-base leading-none px-2 py-1 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+							aria-label={isStreaming
+								? 'Capture as skill (available when streaming completes)'
+								: 'Capture as skill'}
+							title={isStreaming
+								? 'Capture as skill (available when streaming completes)'
+								: 'Capture as skill'}
+							disabled={isStreaming}
+							data-testid="lq-ai-message-capture-inline"
+							on:click={() => (captureOpen = true)}>📝</button
+						>
+					{/if}
+					<MessageOverflowMenu
+						captureInOverflow={!$captureAffordanceInline}
+						captureDisabled={isStreaming}
+						onCapture={() => (captureOpen = true)}
+					/>
+				</div>
+			</div>
+
+			{#if captureOpen}
+				<CaptureSkillModal sourceMessage={message} onClose={() => (captureOpen = false)} />
+			{/if}
+
+			{#if tierDetailsOpen}
+				<TierDetailsPanel
+					tier={message.routed_inference_tier ?? null}
+					provider={message.routed_provider ?? null}
+					model={message.routed_model ?? null}
+					requestedModel={message.requested_model ?? null}
+					promptTokens={message.prompt_tokens ?? null}
+					completionTokens={message.completion_tokens ?? null}
+					costEstimate={message.cost_estimate ?? null}
+					on:close={() => (tierDetailsOpen = false)}
 				/>
-			</div>
-			<div class="flex items-center gap-1">
-				{#if $captureAffordanceInline}
-					<button
-						type="button"
-						class="text-base leading-none px-2 py-1 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
-						aria-label={isStreaming
-							? 'Capture as skill (available when streaming completes)'
-							: 'Capture as skill'}
-						title={isStreaming
-							? 'Capture as skill (available when streaming completes)'
-							: 'Capture as skill'}
-						disabled={isStreaming}
-						data-testid="lq-ai-message-capture-inline"
-						on:click={() => (captureOpen = true)}
-					>📝</button>
-				{/if}
-				<MessageOverflowMenu
-					captureInOverflow={!$captureAffordanceInline}
-					captureDisabled={isStreaming}
-					onCapture={() => (captureOpen = true)}
-				/>
-			</div>
-		</div>
+			{/if}
 
-		{#if captureOpen}
-			<CaptureSkillModal
-				sourceMessage={message}
-				onClose={() => (captureOpen = false)}
-			/>
-		{/if}
+			{#if message.error_code}
+				<div class="mt-2 max-w-full" data-testid="lq-ai-message-error">
+					<Alert intent="error">
+						Error: <strong>{message.error_code}</strong>. The assistant message was persisted with
+						the partial content above for audit.
+					</Alert>
+				</div>
+			{/if}
 
-		{#if tierDetailsOpen}
-			<TierDetailsPanel
-				tier={message.routed_inference_tier ?? null}
-				provider={message.routed_provider ?? null}
-				model={message.routed_model ?? null}
-				requestedModel={message.requested_model ?? null}
-				promptTokens={message.prompt_tokens ?? null}
-				completionTokens={message.completion_tokens ?? null}
-				costEstimate={message.cost_estimate ?? null}
-				on:close={() => (tierDetailsOpen = false)}
-			/>
-		{/if}
-
-		{#if message.error_code}
-			<div class="mt-2 max-w-full" data-testid="lq-ai-message-error">
-				<Alert intent="error">
-					Error: <strong>{message.error_code}</strong>. The assistant message was persisted
-					with the partial content above for audit.
-				</Alert>
-			</div>
-		{/if}
-
-		<!--
+			<!--
 			M2-C2 — Citation Engine sidecar chip list. Renders one chip per
 			`"<quote>" (Source: [N])` marker the assistant emitted, joined
 			to its persisted MessageCitation row. Markers without a row are
@@ -279,20 +278,17 @@
 			message has no citation markers — older skills + non-RAG turns
 			stay visually unchanged.
 		-->
-		{#if fetchedCitations !== null}
-			<div data-testid="lq-ai-message-citations">
-				<!--
+			{#if fetchedCitations !== null}
+				<div data-testid="lq-ai-message-citations">
+					<!--
 					R6: scan `split.visible` (the same think-stripped text the inline
 					decorator sees), NOT the raw content — so a citation marker that
 					appears only inside a `<think>` block produces neither a sidecar
 					chip nor an inline mark, keeping the two surfaces consistent.
 				-->
-				<M2Citations
-					citations={fetchedCitations}
-					messageContent={split.visible}
-				/>
-			</div>
+					<M2Citations citations={fetchedCitations} messageContent={split.visible} />
+				</div>
+			{/if}
 		{/if}
-	{/if}
-</div>
+	</AeMessage>
 {/if}

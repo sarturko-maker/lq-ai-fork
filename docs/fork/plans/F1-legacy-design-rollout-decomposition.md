@@ -394,7 +394,10 @@ screenshots light+dark/wide+narrow · simplification · adversarial review WITH 
   + re-skinning **two trivial components (Shimmer/Loader, Suggestion)** behind a `/lq-ai/_ae-lab` dev
   route (no live-surface change). **Adversarial:** dep/SBOM review of what `jsrepo` pulled; confirm no
   `@ai-sdk/svelte` runtime coupling crept in. *(S)*
-- **AE1 — Conversation + Message + Response (full-width)** *(shell).* `MessageList` → **Conversation**
+- **AE1 — Conversation + Message + Response (full-width) ✅ DONE (PR #60).** Vendored `conversation/`
+  (full) + `message/` CORE only (Message + MessageContent); assistant = full-width prose via OUR
+  `renderModelMarkdown` (port's Streamdown sink NOT taken); user = soft `bg-secondary` right bubble;
+  sticky scroll-to-bottom. `runed` promoted to a declared devDep. Original spec below. ~~`MessageList` → **Conversation**
   (scroll container + sticky scroll-to-bottom); `MessageBubble` → **Message + Response** (full-width
   assistant, soft user bubble); **Response renders OUR sanitized markdown**. Restyles the already-merged
   R6 bubble look on the chat surface. Keep the ProvenancePill / tier / citation row beneath the Response.
