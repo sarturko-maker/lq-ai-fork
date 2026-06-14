@@ -74,6 +74,17 @@ dep `shiki` lands there (its only home); highlight runs on already-sanitized `.t
 output is re-sanitized with DOMPurify before re-entering the DOM. See `NOTICES.md` § Web client
 provenance.
 
+**`prompt-input` deliberately not vendored (AE5, option-2):** the registry `prompt-input` item pulls
+`ai@^6` (the Vercel AI SDK transport we explicitly reject — it bypasses our gateway/SSE/`guarded_tool_call`),
+`runed`, six registry deps (`aspect-ratio`/`button`/`dialog`/`dropdown-menu`/`textarea`/`tooltip`) and
+23 files of SDK-bound `Controller`/context machinery. Per **ADR-F011 option-2** the AE **Prompt Input**
+identity (one unified `rounded-xl border shadow-sm` shell holding the textarea + a bottom toolbar — model
+selector + attach/enhance/receipts tools on the left, submit/stop on the right) is hand-built directly on
+our existing composer in **`ChatPanel.svelte`** (KEEP `SlashPopover` + `EnhancePromptExpansion` + the
+gateway/SSE send path; lucide toolbar icons replace the prior emoji). The same slice migrated ChatPanel's
+header + composer off the legacy `--lq-*` tokens to semantic tokens, fixing the standing dark-mode
+chat-column gap. Zero new deps. No lab section — the composer is inherently the live chat surface.
+
 The internal lab at `/lq-ai/_ae-lab` (unadvertised, auth-gated, dev scratch — links nowhere, changes no
 live surface) renders the trivial primitives (Loader, Suggestion) plus the AE2 Reasoning ribbon (with a
 streaming toggle so the shimmer + duration + auto-collapse path — dormant on the live chat surface until

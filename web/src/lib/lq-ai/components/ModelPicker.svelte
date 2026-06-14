@@ -19,6 +19,10 @@
 	export let models: ModelListResponse = { object: 'list', data: [] };
 	export let selectedId: string | null = null;
 	export let onSelect: (id: string) => void = () => undefined;
+	// AE5 (ADR-F011): when the picker sits in the Prompt Input bottom toolbar
+	// the menu must open UPWARD or it clips off the viewport bottom. Opt-in so
+	// the admin/models page keeps its default downward menu.
+	export let dropUp = false;
 
 	let open = false;
 
@@ -79,7 +83,9 @@
 
 	{#if open}
 		<div
-			class="lq-dropdown absolute z-10 mt-1 w-72 max-h-80 overflow-auto rounded-md shadow-lg"
+			class="lq-dropdown absolute z-10 w-72 max-h-80 overflow-auto rounded-md shadow-lg {dropUp
+				? 'bottom-full mb-1'
+				: 'mt-1'}"
 			data-testid="lq-ai-model-picker-dropdown"
 		>
 			{#if models.data.length === 0}

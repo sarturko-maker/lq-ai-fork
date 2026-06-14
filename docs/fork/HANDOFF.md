@@ -2,75 +2,73 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (AE4 MERGED — next is AE5)
+## State (AE5 MERGED — next is AE6)
 
-- **AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (#62) + AE4 (PR #63) MERGED** — AI Elements adoption on the
+- **AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (#62) + AE4 (#63) + AE5 (PR #64) MERGED** — AI Elements adoption on the
   chat surface (ADR-F011). The **AE-series** brings the Vercel AI Elements look via the MIT Svelte port
   `SikandarJODD/ai-elements`, vendored + re-tokened + re-wired to OUR data — KEEP Svelte, KEEP
   gateway/SSE/`guarded_tool_call`/audit, KEEP our `marked`+`DOMPurify` sanitizer. Plan:
   `docs/fork/plans/F1-legacy-design-rollout-decomposition.md` §"AI Elements visual adoption". The
   R-series (legacy `--lq-*` → semantic-token migration of non-conversation surfaces) continues
   independently on the dark-mode bridge.
-- **VENDOR APPROACH (AE0–AE4):** token system is **identical** to ours (shadcn-svelte + Tailwind v4) so
-  remap ≈ identity. **ADR-F011 option-2 (hand-build, don't vendor) used again in AE4:** the AE `code`
-  registry item pulls `svelte-toolbelt` + a separate `copy-button` registry item + line-number/overflow
-  machinery + a controlled-`code`-prop API that doesn't fit our `{@html}` sink — so the AE code-block
-  identity was hand-built in `lib/lq-ai/code/` as a Svelte action over the sanitized output (NOT vendored).
-  **AE4 adds the ONE new runtime dep ADR-F011 pre-approved: `shiki` (`^4.2.0`).** It is the only new dep
-  through the AE series.
-- Dev stack: 8 services healthy; **DB at 0054**; **web REBUILT on AE4**.
+- **VENDOR APPROACH (AE0–AE5):** token system is **identical** to ours (shadcn-svelte + Tailwind v4) so
+  remap ≈ identity. **ADR-F011 option-2 (hand-build, don't vendor) used again in AE5:** the AE
+  `prompt-input` registry item pulls `ai@^6` (the AI SDK transport we reject) + `runed` + 6 registry deps +
+  23 SDK-bound context files — so the AE Prompt Input identity was hand-built directly on the existing
+  composer in `ChatPanel.svelte` (NOT vendored). **`shiki` (AE4) remains the ONLY new runtime dep** through
+  the AE series; AE5 added none.
+- Dev stack: 8 services healthy; **DB at 0054**; **web REBUILT on AE5**.
   Login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
   Gateway aliases smart/fast/budget → minimax/MiniMax-M3 (only S9-qualified model, **tier 4**).
 - Suites at gate: web `npm run check` **0 errors** (5 pre-existing a11y warnings, untouched files);
-  **vitest 816** (811 + 5 new `code/__tests__/shiki.test.ts`); **Cypress `ae4-code-block.cy.ts` 8/8**
-  headed/live (lab functional ×5 + live integration + 2 capture; one cold-boot first-attempt flake,
-  clean 8/8 on a warm re-run). **api/gateway UNAFFECTED — AE4 touches only `web`** (no backend change).
-  AE4 after-screenshots (lab code cards + chat surface, light+dark, wide+narrow) in
-  `docs/fork/evidence/ae4/`. Adversarial review (fresh-context agent): see PR #63. Security pass: highlight
-  runs only on already-sanitized `.textContent`; Shiki output **re-sanitized with DOMPurify** before it
-  re-enters the DOM (no new injection sink); injected `<script>` renders as inert text (Cypress-asserted);
-  DOMPurify preserves `--shiki-dark` so dark mode works (Cypress + screenshot); shiki is the only new dep;
-  no secrets/stray files.
+  **vitest 816** (unchanged — AE5 is a UI restructure, no unit tests added); **Cypress
+  `ae5-prompt-input.cy.ts` 7/7** headed/live (6 functional + 1 capture; the first test's attempt-1 eats the
+  first-`cy.visit` session-establishment latency → fails then passes on retry — the documented first-visit
+  flake, NOT a code defect; 7/7 final on TWO runs). **api/gateway UNAFFECTED — AE5 touches only `web`** (no
+  backend change). AE5 **before+after** screenshots (chat surface, light+dark, wide+narrow) in
+  `docs/fork/evidence/ae5/` — the before-dark clearly shows the LIGHT chat column; the after-dark shows it
+  fixed. Adversarial review (fresh-context agent): SHIP, no blockers/should-fixes, 2 cosmetic nits left
+  (consistent `text-white` Stop; icon-btn class dedup). Security pass: no new `{@html}`/sink (textarea is
+  `bind:value`); no secrets/stray files; web-only.
 
-## Done (AE4, this slice)
+## Done (AE5, this slice)
 
-- **`lib/lq-ai/code/shiki.ts`** — fine-grained Shiki highlighter singleton: bundled `createHighlighter`
-  + the **pure-JS regex engine** (`shiki/engine/javascript`, no WASM) + GitHub light/dark **dual-theme** +
-  an explicit modest language list. `normalizeLang(raw)` maps aliases (`sh`→bash, `ts`→typescript,
-  `py`→python, `postgres`→sql, …) + case/whitespace-insensitive + **falls back to `text`** for unknown
-  langs (codeToHtml throws on an unknown lang). Vitest `code/__tests__/shiki.test.ts` (5).
-- **`lib/lq-ai/code/enhance.ts`** — `enhanceCodeBlocks` **Svelte action** (mirrors
-  `citations/decorate-inline.ts`): finds `pre > code` in the **already-sanitized** `{@html}` output,
-  reads `.textContent` (a plain string), Shiki-highlights it, **re-sanitizes Shiki's output with
-  DOMPurify**, then swaps in the AE card (language header + copy button top-right). No-op while
-  `enabled === false` (streaming); a **generation counter + `pre.isConnected` guard** discard stale/
-  detached async results; highlight failure leaves the raw `<pre>` (never drops the code). Copy button
-  has an accessible label + transient "Copied" confirmation.
-- **`app.css`** — a `.lq-code` block for the Shiki-generated `<pre class="shiki">` internals (padding,
-  mono font, `overflow-x`) + the **class-based dark swap** (`.dark .lq-code .shiki span { color:
-  var(--shiki-dark) }`); Shiki's own bg forced transparent so the card supplies one bg per theme.
-- **`MessageBubble.svelte`** — `use:enhanceCodeBlocks={{ enabled: !isStreaming }}` on the same prose
-  `<div>` as `decorateCitationsInline` (orthogonal: one acts on `pre>code`, the other on text markers).
-- **`_ae-lab`** — code-block demo through the REAL chat path (markdown → `renderModelMarkdown` → `{@html}`
-  → action): python, sql, an unsupported `cobol` (→ text), and a no-language fence with a literal
-  `<script>` (injection-safety proof). **NOTICES** (new `code/**` row + shiki SBOM) + `ai-elements/README.md`
-  (option-2 note) updated. **`cypress/e2e/ae4-code-block.cy.ts`** (8). **No new ADR** — F011 already
-  sanctioned both `shiki` and the option-2 pattern; the action approach mirrors the accepted
-  `decorate-inline` seam.
+- **`ChatPanel.svelte`** — the composer is now ONE unified AE **Prompt Input** shell:
+  `<div data-testid="lq-ai-prompt-input">` → `rounded-xl border border-input bg-card shadow-sm
+  focus-within:ring-1` holding the textarea (transparent/borderless) on top + a bottom toolbar
+  (`data-testid="lq-ai-prompt-toolbar"`, `flex items-center justify-between`): LEFT = `ModelPicker dropUp`
+  + attach/enhance/receipts **lucide** icon-buttons (Paperclip/Sparkles/ScrollText — emoji retired);
+  RIGHT = Send (lucide Send) / Stop (lucide Square). KEPT every wire + `data-testid`
+  (`lq-ai-send-btn`/`-abort-btn`/`-attach-kb-btn`/`-enhance-btn` + `data-enhance-mode`/`-receipts-toggle`/
+  `-composer-input`/`-composer`), `SlashPopover` (now anchored to the shell via the kept
+  `.lq-composer-popover` rule), `EnhancePromptExpansion`, `SkillPicker`, `SavedPromptsPanel`. **UX change
+  on record:** tools stay VISIBLE during streaming (only Send↔Stop swaps); Enhance still `disabled` while
+  streaming. Header + composer + `<section>` migrated off `--lq-*`/`text-gray-*`/hardcoded-white to semantic
+  tokens (`bg-background`/`border-border`/`bg-card`/`text-foreground`/`text-muted-foreground`/`bg-primary`/
+  `bg-destructive`); the `<section>` got `bg-background text-foreground` — **the dark-mode column-gap fix**.
+  Deleted the scoped `.lq-composer/.lq-btn-*/.lq-composer-wrap` styles + the now-unused `@import
+  practice.css` (children still import it, so global `--lq-*` :root rules remain for them).
+- **`ModelPicker.svelte`** — opt-in `dropUp` prop (default false): toolbar usage opens the menu UPWARD
+  (`bottom-full mb-1`) so it doesn't clip at the viewport bottom; admin/models page keeps the default
+  downward menu. No token change to ModelPicker (still `--lq-*`, its own future slice).
+- **`cypress/e2e/ae5-prompt-input.cy.ts`** (7) — live stubbed chat surface (the composer is inherently the
+  live surface; no lab section to avoid a drifting static duplicate): unified shell, toolbar contents +
+  lucide SVGs, send disabled→enabled, Enhance opens its panel, slash popover anchors, model menu opens
+  upward; + before/after capture. **NOTICES** (AE row note: option-2, no vendoring, no new dep) +
+  `ai-elements/README.md` (`prompt-input` not-vendored paragraph) + plan updated. **No new ADR** — F011
+  already sanctions option-2; the token migration is the established rollout pattern.
 
 ## Next slice — pick up exactly here
 
-1. **AE5 — Prompt Input** (plan §"AI Elements visual adoption" → AE5; **≡ the old R9 slot**). Composer →
-   AE **Prompt Input**: unified rounded shell + toolbar (model selector, attach 📎, enhance ✨, receipts
-   📜, submit/stop). KEEP `SlashPopover` + `EnhancePromptExpansion`. **Also migrates ChatPanel's remaining
-   `--lq-*` shell** — this fixes the standing **dark-mode shell gap** (see Carry-overs: the central chat
-   *column* renders LIGHT in dark mode because ChatPanel's shell still uses legacy `--lq-*`). **Responsive
-   collapse REQUIRED in the narrow shot.** Inspect the AE `prompt-input` registry item first
-   (`curl …/r/prompt-input.json`, parse with python3 — NOT jq; mind `/tmp/types.py`) and apply option-2
-   if it pulls avoided deps. Full four-discipline gate + before/after screenshots (light+dark, wide+narrow).
-   Then **AE6 Tool+Task (≡ old R-CONV-2 slot; responsive)** → AE7 Suggestions (the AE0 `Suggestion` chips
-   are ready). **Backlog (from R6):** converge `ConversationPanel` + `SkillSourceView` onto
-   `renderModelMarkdown` (do as part of AE6).
+1. **AE6 — Tool + Task** (plan §"AI Elements visual adoption" → AE6; **≡ the old R-CONV-2 slot**).
+   `ConversationPanel` agent steps (`ag-step--tool_call/tool_result`) → AE **Tool** (collapsible
+   name/input/output/status) + **Task** (step list); keep the Reasoning idiom; **keep ALL polling /
+   stale-detection / statusBadge logic untouched** (R-CONV-1 already extracted it). **Responsive collapse
+   REQUIRED in the narrow shot.** Inspect the AE `tool`/`task` registry items first (`curl …/r/<c>.json`,
+   parse with python3 — NOT jq; mind `/tmp/types.py`) and apply option-2 if they pull avoided deps.
+   **Backlog (from R6, do as part of AE6):** converge `ConversationPanel` + `SkillSourceView` onto
+   `renderModelMarkdown`. Full four-discipline gate + before/after screenshots (light+dark, wide+narrow).
+   Then **AE7 Suggestions** (the AE0 `Suggestion` chips are ready; optional/lowest priority).
 2. Other rollout slices (any order — the dark-mode bridge holds un-migrated surfaces):
    Foundation/rail R2–R5, Wave 1 R-CONV-1 (logic; R-CONV-2 → AE6), Wave 2
    R12/R13/R14a-b/R15/R15b-tab-pb/R16, Wave 3 R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO →
@@ -87,17 +85,19 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   (#53) · **R8 ✅ (#57)**. CI unblocked (repo public).
 - **AE-series (ADR-F011):** plan+ADR ✅ (#58) · **AE0 ✅ (#59)** vendoring foundation · **AE1 ✅ (#60)**
   Conversation+Message+Response · **AE2 ✅ (#61)** Reasoning+Actions · **AE3 ✅ (#62)** Sources +
-  Inline-Citation · **AE4 ✅ (PR #63)** Code Block (Shiki highlight, option-2 action; the one new dep
-  `shiki`). **Next AE5 (Prompt Input ≡ R9 — migrates ChatPanel shell + fixes the dark-mode column gap).**
+  Inline-Citation · **AE4 ✅ (#63)** Code Block (Shiki highlight, option-2 action; the one new dep
+  `shiki`) · **AE5 ✅ (PR #64)** Prompt Input (≡ R9 — option-2 hand-build, no new dep; migrated ChatPanel
+  shell off `--lq-*` → **dark-mode column gap FIXED**). **Next AE6 (Tool+Task ≡ R-CONV-2 slot) → AE7.**
 
 ## Carry-overs / review deferrals
 
-- **AE2 — ChatPanel dark-mode shell gap (deferred to AE5 ≡ old R9):** in the wide layout the central
-  chat *column* renders LIGHT in dark mode while the chrome is dark — ChatPanel shell still uses legacy
-  `--lq-*` tokens. Pre-existing (AE1+AE2), NOT an AE3 regression (AE3 touched only the message footer +
-  the new Sources card, both semantic-token). **AE5 migrates ChatPanel's `--lq-*` block.**
-- **AE4 — no new carry-overs.** The ChatPanel dark-mode shell gap above is unchanged by AE4 (AE4 only
-  added a `use:` action on the existing prose `<div>` + a `.lq-code` CSS block + `lib/lq-ai/code/`).
+- **AE5 — ChatPanel dark-mode column gap RESOLVED.** The standing AE2 carry-over (central chat *column*
+  rendered LIGHT in dark mode while the chrome was dark) is FIXED in AE5: the `<section>` got
+  `bg-background text-foreground` and the header/composer migrated off `--lq-*` to semantic tokens.
+  Confirmed by `docs/fork/evidence/ae5/ae5-{before,after}-chat-dark-{wide,narrow}.png`. **Note:** the
+  remaining composer-adjacent panels still on `--lq-*` (ModelPicker pill, SkillPicker, SavedPromptsPanel)
+  render acceptably on the `--lq-*` dark stopgap and are each their own future R/AE slice — NOT migrated here.
+- **AE5 — no other new carry-overs.** UX change recorded above (tools stay visible while streaming).
 - **AE3 — no new carry-overs.** The fresh-context review's one should-fix (soft-deleted filenames
   surfacing + misleading CASCADE comment) and both nits (unused `isFallbackLabel`; over-vendored
   `inline-citation`/`-text`) were FIXED in-slice, not deferred.
@@ -121,6 +121,25 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Gotchas (carried + new)
 
+- **NEW (AE5): the dark-mode "light chat column" root cause.** The center `<section>` was transparent and
+  showed the `(tools)` layout's `.lq-shell { background: var(--lq-canvas) }`, and `--lq-canvas` resolved to
+  its LIGHT value on the chat route (a cascade/bundle-order quirk of the legacy `@import practice.css`
+  chain — practice.css banks on `:root.dark` winning, but it wasn't on this surface). Fix = stop depending
+  on `--lq-*` for the column: give the `<section>` `bg-background text-foreground` (semantic, `.dark`-driven,
+  proven on the already-dark sidebar). General rule for the R/AE rollout: when a surface is light-in-dark,
+  the migration to semantic tokens IS the fix — don't chase the `--lq-*` cascade.
+- **NEW (AE5): the AE `prompt-input` registry item is option-2 territory.** It pulls `ai@^6` (the Vercel AI
+  SDK transport we reject — bypasses gateway/SSE/`guarded_tool_call`), `runed`, 6 registry deps, and 23
+  SDK-bound `Controller`/context files. Hand-build the identity (`rounded-xl border shadow-sm` shell →
+  textarea → `flex justify-between p-1` toolbar; submit = status-driven lucide icon) directly on our composer.
+- **NEW (AE5): a dropdown in a bottom toolbar must open UPWARD.** `ModelPicker` got an opt-in `dropUp`
+  (`bottom-full mb-1` vs `mt-1`) so its menu doesn't clip off the viewport bottom; opt-in keeps other
+  consumers (admin/models) on the default downward menu.
+- **NEW (AE5): the composer is inherently the LIVE chat surface** (needs an active chat) — so AE5 has NO
+  `_ae-lab` section (a static duplicate would drift). Functional + capture run on `/lq-ai/chats?id=…` with
+  the SHORT stubbed fixture (add a `**/api/v1/models` intercept so the toolbar ModelPicker populates). The
+  first test of the run still eats the first-`cy.visit` session-establishment latency (fails attempt 1,
+  passes on retry) — `retries: { runMode: 2 }` covers it; 7/7 final.
 - **NEW (AE4): DOMPurify (3.4.0) DOES preserve CSS custom properties in `style`.** Shiki dual-theme output
   carries the dark palette in a `--shiki-dark` CSS var on each token's inline `style`; class-based dark mode
   breaks silently if the sanitiser strips it. It does NOT — verified in a real browser (Cypress asserts
