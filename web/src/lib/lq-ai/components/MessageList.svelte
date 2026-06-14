@@ -23,6 +23,8 @@
 		onRefusalRerun = () => {},
 		onRefusalOverrideRequested = () => {},
 		onRefusalExplainerRequested = () => {},
+		// AE2 — per-message Retry (re-run the preceding prompt). Pass-through.
+		onRetry = () => {},
 		// Wave D.1 T20 — enhanced-prompt originals (content → typed original).
 		enhancementOriginals = {}
 	}: {
@@ -33,6 +35,7 @@
 		onRefusalRerun?: (msg: Message) => void;
 		onRefusalOverrideRequested?: (msg: Message) => void;
 		onRefusalExplainerRequested?: (msg: Message) => void;
+		onRetry?: (msg: Message) => void;
 		enhancementOriginals?: Record<string, string>;
 	} = $props();
 </script>
@@ -49,6 +52,7 @@
 					{onRefusalRerun}
 					{onRefusalOverrideRequested}
 					{onRefusalExplainerRequested}
+					{onRetry}
 					originalEnhancedPrompt={enhancementOriginals[msg.content]}
 				/>
 			{/each}

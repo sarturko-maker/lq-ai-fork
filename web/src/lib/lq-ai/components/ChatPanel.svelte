@@ -288,12 +288,12 @@
 		overrideMessage = null;
 	}
 
-	function handleRefusalRerun(msg: Message): void {
+	function rerunPrecedingPrompt(msg: Message): void {
 		// Find the immediately-preceding user message and re-dispatch its
 		// content through the existing sendMessage() flow. Re-using the
 		// composer path keeps streaming + applied-skills + model selection
-		// consistent with a normal turn. Future: surface a "re-running…"
-		// indicator on the refusal row while the stream is in flight.
+		// consistent with a normal turn. Shared by the refusal "re-run" and the
+		// AE2 per-message "Retry" action.
 		const list = get(messagesStore);
 		const idx = list.findIndex((m) => m.id === msg.id);
 		if (idx <= 0) return;
@@ -306,6 +306,18 @@
 				return;
 			}
 		}
+	}
+
+	function handleRefusalRerun(msg: Message): void {
+		// Future: surface a "re-running…" indicator on the refusal row while the
+		// stream is in flight.
+		rerunPrecedingPrompt(msg);
+	}
+
+	// AE2 (ADR-F011) — per-message Retry on any assistant message; identical
+	// re-dispatch path as the refusal re-run.
+	function handleAssistantRetry(msg: Message): void {
+		rerunPrecedingPrompt(msg);
 	}
 
 	function handleRefusalExplainerRequested(_msg: Message): void {
@@ -985,6 +997,7 @@
 			onRefusalRerun={handleRefusalRerun}
 			onRefusalOverrideRequested={handleRefusalOverrideRequested}
 			onRefusalExplainerRequested={handleRefusalExplainerRequested}
+			onRetry={handleAssistantRetry}
 			{enhancementOriginals}
 		/>
 

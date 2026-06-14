@@ -2,78 +2,81 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (AE1 MERGED — next is AE2)
+## State (AE2 MERGED — next is AE3)
 
-- **AE0 (PR #59, `77855f9`) + AE1 (PR #60) MERGED** — AI Elements adoption on the chat surface
-  (ADR-F011). The **AE-series** brings the Vercel AI Elements look via the MIT Svelte port
+- **AE0 (PR #59, `77855f9`) + AE1 (PR #60) + AE2 (PR #61) MERGED** — AI Elements adoption on the chat
+  surface (ADR-F011). The **AE-series** brings the Vercel AI Elements look via the MIT Svelte port
   `SikandarJODD/ai-elements`, vendored + re-tokened + re-wired to OUR data — KEEP Svelte, KEEP
   gateway/SSE/`guarded_tool_call`/audit, KEEP our `marked`+`DOMPurify` sanitizer. Plan:
   `docs/fork/plans/F1-legacy-design-rollout-decomposition.md` §"AI Elements visual adoption". The
   R-series (legacy `--lq-*` → semantic-token migration of non-conversation surfaces) continues
   independently on the dark-mode bridge.
-- **VENDOR APPROACH CONFIRMED (AE0 + AE1):** the port is high quality; the token system is **identical**
-  to ours (shadcn-svelte + Tailwind v4) so remap ≈ identity. AE1 proved the pipeline on a REAL live
-  surface with **zero new runtime deps** (one transitive, `runed`, promoted to a declared devDep).
-  The ADR-F011 option-2 hand-build fallback remains available per-component but is not needed.
-- Dev stack: 8 services healthy; **DB at 0054**; **web REBUILT on AE1**.
+- **VENDOR APPROACH CONFIRMED (AE0–AE2):** the port is high quality; the token system is **identical**
+  to ours (shadcn-svelte + Tailwind v4) so remap ≈ identity. Still **zero new runtime deps** through AE2.
+  **AE2 was the first to use the ADR-F011 option-2 hand-build fallback** (the AE `reasoning` registry
+  block pulls 4 deps we avoid — streamdown/shiki/mode-watcher/collapsible — so the AE Reasoning identity
+  was hand-built on our accessible `<details>` instead of vendored). The actions subtree WAS cleanly
+  vendored (reuses `ui/button`+`ui/tooltip`).
+- Dev stack: 8 services healthy; **DB at 0054**; **web REBUILT on AE2**.
   Login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
   Gateway aliases smart/fast/budget → minimax/MiniMax-M3 (only S9-qualified model, **tier 4**).
 - Suites at gate: web `npm run check` **0 errors** (5 pre-existing a11y warnings, untouched files);
-  **vitest 803**; **Cypress `ae1-conversation.cy.ts` 5/5** + regression **`r6` 3/3 · `m2-c2` 1/1 ·
-  `wave-m1` 3/3**, headed/live. Before/after screenshots (light+dark × wide+narrow, 8 PNGs) in
-  `docs/fork/evidence/ae1/`. Adversarial review (fresh-context agent): **ship-ready — 0 blocker /
-  1 should-fix (actioned: `runed` phantom dep → declared) / 2 nits (1 actioned: sentinel
-  `aria-hidden`; 1 left diffable)**. Security pass CLEAN (no secrets; the only `{@html}` are the
-  pre-existing DOMPurify-sanitized `rendered`/`reasoningHtml`; no `@ai-sdk/svelte`/`streamdown`/`shiki`
-  imports; 0 `var(--lq-)`; package.json/lockfile delta = the 1 `runed` line only).
-  - **NOTE (real-backend specs, NOT AE1 regressions):** `f0-s5-multi-turn` timed out at **file
-    ingestion** (worker round-trip) and `f0-s7-stream` **skips** without `LQ_AI_MATTER_NAME` (live SSE
-    deltas DEAD until F1-S4). AE1 is web-only — no ingestion/streaming/transport code touched.
+  **vitest 803**; **Cypress `ae2-reasoning-actions.cy.ts` 7/7** + regression **`ae1` 5/5 · `r6` 3/3**,
+  headed/live. AE2 after-screenshots (chat surface, light+dark wide) in `docs/fork/evidence/ae2/`; the
+  **AE2 "before" baseline = `docs/fork/evidence/ae1/ae1-after-conversation-*-wide.png`** (same main
+  bundle/fixture pre-AE2 — shows old ribbon + no actions; saves a rebuild). Adversarial review
+  (fresh-context agent): **SHIP — 0 blocker / 0 should-fix / 3 nits (all left on record)**. Security
+  pass CLEAN (no new `{@html}`; model `<think>` sanitized via `renderModelMarkdown` before the
+  ribbon; clipboard writes are inert plaintext; no new deps; no secrets/stray files).
+  - **NOTE (real-backend specs, NOT AE2 regressions):** `f0-s5-multi-turn` timed out at **file
+    ingestion** and `f0-s7-stream` **skips** without `LQ_AI_MATTER_NAME` (live SSE deltas DEAD until
+    F1-S4). AE2 is web-only. The first run of `r6`+`ae1` showed `r6` "1 failing 2 skipped" = a
+    `beforeEach` LOGIN timeout (r6 has no `cy.session`/retries) under the degraded auth backend — r6
+    re-run ALONE = **3/3**. Same documented login flakiness, NOT a ribbon defect.
 
-## Done (AE1, this slice)
+## Done (AE2, this slice)
 
-- **Vendored `ai-elements/conversation/`** (full block) — `Conversation` (scroll container,
-  `role="log"`) + `ConversationContent` (the scroller) + `ConversationScrollButton` (sticky
-  scroll-to-bottom) + `EmptyState`, backed by a runes `StickToBottomContext` (Resize/Mutation/
-  Intersection observers auto-scroll on append UNLESS the user scrolled up). **Fixed an upstream
-  double `bind:this`** (Svelte 5 compile error) + added `aria-hidden` to the sentinel.
-- **Vendored `ai-elements/message/` CORE ONLY** — `Message` + `MessageContent` (the identity: user
-  `bg-secondary` soft right bubble; assistant plain full-width `text-foreground`). **NOT vendored:**
-  the upstream Streamdown `response` (would bypass our sink), `branching`/`attachments`/`actions`
-  (AE2/AE4). Context trimmed to the `MessageRole` type.
-- **`MessageList` → runes** — renders Conversation/Content/ScrollButton/EmptyState; dropped the
-  `afterUpdate` hard-scroll; kept the `lq-ai-message-list` testid on the scroller; added a
-  `lq-ai-scroll-bottom` testid on the scroll button.
-- **`MessageBubble` → Message + full-width Response** — wraps each turn in `Message`/`MessageContent`
-  (AE `Message` aliased `AeMessage` to avoid the `Message` *type* clash). Assistant renders OUR
-  `renderModelMarkdown` prose as the "Response" (port's markdown sink NOT adopted). **All plumbing
-  unchanged** (ReasoningRibbon, `use:decorateCitationsInline`, M2Citations, TierBadge,
-  AppliedSkillsChip, capture, overflow, refusal, error, enhanced pill). Dropped dead `bubbleClasses`;
-  annotated the sanitized `{@html}` (net −1 lint error).
-- **`runed` promoted** transitive→declared devDep (`^0.35.1`; surgical 1-line lockfile add, `npm ci`
-  verified). **NOTICES + `ai-elements/README.md`** updated.
-- **`cypress/e2e/ae1-conversation.cy.ts`** (structure + before/after capture; SHORT fixture for
-  capture so auto-scroll doesn't fight the shot). **`r6` tweak:** `scrollIntoView()` the ribbon
-  summary before the visibility check (AE1's `gap-8` + auto-scroll can push a middle turn's collapsed
-  ribbon above the fold — rendered + functional, just not in view; same idiom the spec already uses).
+- **Vendored `ai-elements/message/actions/`** — `message-action.svelte` (ghost icon-button + tooltip +
+  sr-only label; reuses `ui/button` + `ui/tooltip`), `message-actions.svelte` (inline row),
+  `message-toolbar.svelte` (footer row). Exported from `message/index.ts`. Re-tokened (identity).
+- **NEW `MessageActionsBar.svelte` (runes)** — the per-assistant-message toolbar: **Copy** (answer text),
+  **Retry** (callback), **Copy-sources** (formatted citations, hidden when none). Self-contained
+  clipboard + transient "copied" tick. It's a **runes** wrapper on purpose: the legacy `MessageBubble`
+  feeds it plain props/callbacks, and the shadcn `Button` `onclick` forwards reliably from a runes parent
+  (a legacy `on:click` on a runes component is a silent no-op — see Gotchas).
+- **`ReasoningRibbon` → AE Reasoning identity (option-2 hand-build)** — brain icon, rotating chevron,
+  "Thinking…" shimmer while streaming, measured "Thought for Ns", auto-open-while-streaming +
+  one-shot auto-collapse. Kept on the accessible native `<details>` + the sanitized slot. New optional
+  `streaming`/`durationSeconds` props are DORMANT on the live chat surface (no separate reasoning
+  stream until F1-S4) → renders a static "Reasoning" there; the streaming path is exercised in `_ae-lab`.
+- **`MessageBubble`** — renders `<MessageActionsBar>` in the assistant footer (answer = `split.visible`,
+  `sources` formatted from `fetchedCitations`, `onRetry`); added `onRetry` prop. **All other plumbing
+  unchanged.** **`MessageList`/`ChatPanel`** — thread `onRetry`; `handleAssistantRetry` reuses the
+  extracted `rerunPrecedingPrompt` (shared with `handleRefusalRerun`).
+- **`_ae-lab`** — added Reasoning (with a streaming toggle) + actions-bar demo sections. **NOTICES +
+  `ai-elements/README.md`** updated (actions vendored; reasoning option-2 recorded).
+- **`cypress/e2e/ae2-reasoning-actions.cy.ts`** (7 tests) — lab: ribbon idle/streaming/duration/
+  auto-collapse + copy/copy-sources/retry; live chat: assistant-only actions; before/after capture.
 
 ## Next slice — pick up exactly here
 
-1. **AE2 — Reasoning + Actions** (plan §"AI Elements visual adoption" → AE2). `primitives/ReasoningRibbon`
-   → AE **Reasoning** (shimmer while streaming, auto-collapse on complete + a duration); add per-message
-   **Actions** (copy / retry / copy-citation) wired to the existing rerun + stream handlers. **Inspect
-   first** (proven pipeline): `curl https://svelte-ai-elements.vercel.app/r/reasoning.json` (+ `actions`
-   if a separate item) — parse with python3 from the repo dir (NOT jq; mind `/tmp/types.py` shadowing).
-   The `message` block's `actions/` subtree was deliberately left unvendored in AE1 — pull it here.
-   Watch for `mode-watcher`/`shiki`/`streamdown` deps in those items (defer/avoid; Shiki is AE4). Keep
-   reasoning sanitization unchanged (`renderModelMarkdown`). **Adversarial:** reasoning sanitization,
-   action focus/keyboard, retry idempotency, dark contrast. Full four-discipline gate + before/after
-   screenshots. **AE-capture recipe (AE1 finding, see Gotchas):** SHORT fixture + localStorage-theme-
-   before-visit + post-boot `setTheme` class pin + `html.should('have.class')` + a viewport nudge.
-   Then AE3 Sources+InlineCitation → AE4 Code Block (**`shiki` dep**) → **AE5 Prompt Input (≡ old R9
-   slot)** → **AE6 Tool+Task (≡ old R-CONV-2 slot)** → AE7 Suggestions (the AE0 `Suggestion` chips are
-   ready). **Backlog (from R6):** converge `ConversationPanel` + `SkillSourceView` onto
-   `renderModelMarkdown` (do as part of AE6).
+1. **AE3 — Sources + Inline Citation** (plan §"AI Elements visual adoption" → AE3). Wrap the M2 Citation
+   Engine in AE **Sources** (collapsible "Used N sources") + **Inline Citation** styling; **preserve the
+   5-state verification UI + the lazy `GET /messages/{id}/citations` single-fetch** (`fetchedCitations`
+   in `MessageBubble`; `M2Citations.svelte`; `decorate-inline.ts`). **Inspect first** (proven pipeline):
+   `curl https://svelte-ai-elements.vercel.app/r/sources.json` + `r/inline-citation.json` — parse with
+   python3 from the repo dir (NOT jq; mind `/tmp/types.py`). Watch for `streamdown`/`shiki`/`mode-watcher`
+   deps (defer/avoid; Shiki is AE4) — if the item pulls them, use the **option-2 hand-build** (as AE2 did
+   for reasoning). **Untrusted:** source titles/quotes are model+document output — escape, never `{@html}`
+   without `renderModelMarkdown`. **Adversarial:** verification-state contrast (the 5 states read AA in
+   dark), single-fetch race, source-title escaping. Full four-discipline gate + before/after screenshots.
+   **AE-capture recipe (see Gotchas):** SHORT fixture + localStorage-theme-before-visit + post-boot
+   `setTheme` class pin + `html.should('have.class')` + viewport nudge; lab-based functional tests dodge
+   the auth-login flakiness.
+   Then AE4 Code Block (**`shiki` dep**) → **AE5 Prompt Input (≡ old R9 slot; also migrates ChatPanel's
+   remaining `--lq-*` shell — see Carry-overs)** → **AE6 Tool+Task (≡ old R-CONV-2 slot)** → AE7
+   Suggestions (the AE0 `Suggestion` chips are ready). **Backlog (from R6):** converge `ConversationPanel`
+   + `SkillSourceView` onto `renderModelMarkdown` (do as part of AE6).
 2. Other rollout slices (any order — the dark-mode bridge holds un-migrated surfaces):
    Foundation/rail R2–R5, Wave 1 R-CONV-1 (logic; R-CONV-2 → AE6), Wave 2
    R12/R13/R14a-b/R15/R15b-tab-pb/R16, Wave 3 R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO →
@@ -87,11 +90,22 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 - **R-series:** Step 0 coverage table ✅ (PR #50) · R0 ✅ (#50) · R1a ✅ (#51) · R6 ✅ (#52) ·
   R7 ✅ (#55) · responsive parity ✅ (#53) · **R8 ✅ (#57, `183abd9`)**. CI unblocked (repo public).
 - **AE-series (ADR-F011):** plan + ADR accepted ✅ (#58, `c2b505f`) · **AE0 ✅ (#59, `77855f9`)** —
-  vendoring foundation · **AE1 ✅ (#60)** — Conversation + Message + full-width Response (live chat
-  surface). Vendor approach confirmed; next AE2.
+  vendoring foundation · **AE1 ✅ (#60)** — Conversation + Message + full-width Response · **AE2 ✅
+  (#61)** — Reasoning identity (option-2) + per-message Actions (Copy/Retry/Copy-sources). Next AE3.
 
 ## Carry-overs / review deferrals
 
+- **AE2 — ChatPanel dark-mode shell gap (deferred to AE5 ≡ old R9):** in the wide layout the central
+  chat *column* renders LIGHT in dark mode while the chrome (header/sidebar/footer) is dark — the
+  ChatPanel shell still uses legacy `--lq-*` tokens (the dark-mode bridge doesn't fully cover it). This
+  is **pre-existing** (identical in the AE1 dark capture) and NOT an AE2 regression; AE2 only touched the
+  bubble internals (ribbon + actions, both semantic-token). **AE5 migrates ChatPanel's `--lq-*` block.**
+- **AE2 nits (accepted on record, from the fresh-context review):** (a) `handleAssistantRetry` is a
+  one-line passthrough to `rerunPrecedingPrompt` — kept for symmetry with `handleRefusalRerun` + a
+  documented future divergence. (b) `MessageActionsBar.copyTimer` has no `onDestroy` clear — a pending
+  1.5s timeout could set `copied=false` after unmount; Svelte 5 tolerates it (cosmetic). (c) `untrack()`
+  in the `ReasoningRibbon` `$state` initializer — KEPT (it silences the `state_referenced_locally`
+  svelte-check warning; the reviewer's "no-op" call was on the runtime, not the linter).
 - **AE1 nit (accepted on record):** the upstream `debugInfo` getter in `stick-to-bottom-context.svelte.ts`
   is unused; left in to stay diffable against the MIT upstream (the "owned but diffable" convention).
 - **AE0 nits (accepted on record, kept byte-faithful to the MIT upstream):** (a) `loader-icon.svelte`
@@ -116,6 +130,28 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Gotchas (carried + new)
 
+- **NEW (AE2): some AE registry blocks aren't cleanly vendorable — use option-2.** The `reasoning`
+  block's registry JSON pulls `streamdown-svelte` + `@shikijs/themes` + `mode-watcher` + a `collapsible`
+  we don't ship + a Streamdown `Response` sink. When an item drags in the avoided deps, **hand-build the
+  AE *identity* on our existing primitive** (ADR-F011 option-2) instead of vendoring — that's what AE2
+  did for `ReasoningRibbon` (kept the accessible `<details>`, added brain/chevron/shimmer/duration). The
+  clean `actions/` subtree (only `ui/button`+`ui/tooltip`) WAS vendored normally. Inspect each item's
+  `dependencies` BEFORE deciding vendor vs hand-build.
+- **NEW (AE2): forward shadcn `Button onclick` through a RUNES wrapper, not the legacy parent.** The
+  legacy `MessageBubble` can't reliably forward `onclick` to a runes shadcn `Button`. Fix: a small runes
+  component (`MessageActionsBar.svelte`) renders the AE actions; the legacy parent passes plain
+  props/callbacks to it (legacy→runes prop passing is fine). Inside the runes wrapper, `onclick` →
+  `restProps` → `Button` forwards correctly.
+- **NEW (AE2): `npx prettier --write` reformats pre-existing non-conformant files → unrelated churn.**
+  Web CI gates only `npm run check` + vitest (NOT prettier/eslint), so committed files aren't all
+  prettier-clean. Running prettier on a touched-but-mostly-unchanged file (e.g. ChatPanel) rewrites
+  dozens of unrelated lines. **Format only genuinely-new files; for an edited legacy file, match the
+  surrounding style by hand and `git checkout main --` it if prettier churned it** (AE2 reverted
+  ChatPanel and re-applied just the logical change).
+- **NEW (AE2): lab-based functional Cypress dodges the auth-login flakiness.** The `_ae-lab` route is
+  auth-gated but makes no API calls, so deterministic interaction tests (reasoning toggle, copy/retry)
+  run there without the live chat fixtures. Use the live chat surface only for the integration check +
+  before/after capture. Distinguish Copy/Check icons etc. via lucide's `svg.lucide-<name>` class.
 - **NEW (AE1): the AE dark-capture recipe.** A SHORT fixture is mandatory for screenshots — the AE
   Conversation auto-scrolls to the latest turn, so a long thread scrolls the interesting content out
   of frame AND the in-flight smooth-scroll fights the shot (renders mid-thread / wrong theme). Recipe
