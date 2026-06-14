@@ -414,7 +414,7 @@ screenshots light+dark/wide+narrow · simplification · adversarial review WITH 
   until F1-S4) — exercised in `_ae-lab`. Zero new deps. Original spec: ~~`primitives/ReasoningRibbon` → AE
   **Reasoning** (shimmer while streaming, auto-collapse on complete + a duration); add per-message
   **Actions** (copy / retry / copy-citation) wired to the existing rerun + stream handlers.~~ *(M)*
-- **AE3 — Sources + Inline Citation ✅ DONE (PR #NN).** New `MessageSources.svelte` (runes) renders the
+- **AE3 — Sources + Inline Citation ✅ DONE (PR #62).** New `MessageSources.svelte` (runes) renders the
   AE **Sources** collapsible ("Used N sources") beneath an assistant message — one entry per distinct
   cited document (filename + passages·pages + a representative quote + a 5-state verification marker),
   via `citations/sources.ts` `buildMessageSources` (group by `source_file_id`, **most-cautionary** state

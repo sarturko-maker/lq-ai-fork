@@ -4,7 +4,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (AE3 MERGED — next is AE4)
 
-- **AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (PR #NN) MERGED** — AI Elements adoption on the chat
+- **AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (PR #62) MERGED** — AI Elements adoption on the chat
   surface (ADR-F011). The **AE-series** brings the Vercel AI Elements look via the MIT Svelte port
   `SikandarJODD/ai-elements`, vendored + re-tokened + re-wired to OUR data — KEEP Svelte, KEEP
   gateway/SSE/`guarded_tool_call`/audit, KEEP our `marked`+`DOMPurify` sanitizer. Plan:
@@ -85,7 +85,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 - **R-series:** Step 0 ✅ (#50) · R0 ✅ · R1a ✅ (#51) · R6 ✅ (#52) · R7 ✅ (#55) · responsive parity ✅
   (#53) · **R8 ✅ (#57)**. CI unblocked (repo public).
 - **AE-series (ADR-F011):** plan+ADR ✅ (#58) · **AE0 ✅ (#59)** vendoring foundation · **AE1 ✅ (#60)**
-  Conversation+Message+Response · **AE2 ✅ (#61)** Reasoning+Actions · **AE3 ✅ (PR #NN)** Sources +
+  Conversation+Message+Response · **AE2 ✅ (#61)** Reasoning+Actions · **AE3 ✅ (PR #62)** Sources +
   Inline-Citation (Sources card + `source_filename` join). **Next AE4 (Code Block + `shiki`).**
 
 ## Carry-overs / review deferrals
