@@ -20,8 +20,20 @@ export const SANITIZE_OPTS = {
 	FORBID_ATTR: ['srcset', 'ping']
 };
 
-/** Render untrusted model markdown to sanitised, media-free HTML. */
-export function renderModelMarkdown(raw: string | null | undefined): string {
+/**
+ * Render untrusted model markdown to sanitised, media-free HTML.
+ *
+ * `breaks` maps single newlines to `<br>` (GitHub-flavoured) — off by default
+ * to match the agent/chat answer surfaces; the skill source view opts in so
+ * authored SKILL.md bodies keep their hard line breaks (R-CONV-2 convergence).
+ */
+export function renderModelMarkdown(
+	raw: string | null | undefined,
+	opts: { breaks?: boolean } = {}
+): string {
 	if (!raw) return '';
-	return DOMPurify.sanitize(marked.parse(raw, { async: false }) as string, SANITIZE_OPTS);
+	return DOMPurify.sanitize(
+		marked.parse(raw, { async: false, breaks: opts.breaks ?? false }) as string,
+		SANITIZE_OPTS
+	);
 }

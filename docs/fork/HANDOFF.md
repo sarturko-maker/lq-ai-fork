@@ -2,73 +2,68 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (AE5 MERGED — next is AE6)
+## State (AE6 shipped — next is AE7)
 
-- **AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (#62) + AE4 (#63) + AE5 (PR #64) MERGED** — AI Elements adoption on the
+- **AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (#62) + AE4 (#63) + AE5 (#64) MERGED; AE6 (PR #65) on `ae6-tool-task`** — AI Elements adoption on the
   chat surface (ADR-F011). The **AE-series** brings the Vercel AI Elements look via the MIT Svelte port
   `SikandarJODD/ai-elements`, vendored + re-tokened + re-wired to OUR data — KEEP Svelte, KEEP
   gateway/SSE/`guarded_tool_call`/audit, KEEP our `marked`+`DOMPurify` sanitizer. Plan:
   `docs/fork/plans/F1-legacy-design-rollout-decomposition.md` §"AI Elements visual adoption". The
   R-series (legacy `--lq-*` → semantic-token migration of non-conversation surfaces) continues
   independently on the dark-mode bridge.
-- **VENDOR APPROACH (AE0–AE5):** token system is **identical** to ours (shadcn-svelte + Tailwind v4) so
-  remap ≈ identity. **ADR-F011 option-2 (hand-build, don't vendor) used again in AE5:** the AE
-  `prompt-input` registry item pulls `ai@^6` (the AI SDK transport we reject) + `runed` + 6 registry deps +
-  23 SDK-bound context files — so the AE Prompt Input identity was hand-built directly on the existing
-  composer in `ChatPanel.svelte` (NOT vendored). **`shiki` (AE4) remains the ONLY new runtime dep** through
-  the AE series; AE5 added none.
-- Dev stack: 8 services healthy; **DB at 0054**; **web REBUILT on AE5**.
+- **VENDOR APPROACH (AE0–AE6):** token system is **identical** to ours (shadcn-svelte + Tailwind v4) so
+  remap ≈ identity. **ADR-F011 option-2 (hand-build, don't vendor) used again in AE6:** the AE `tool`/`task`
+  registry items pull `collapsible` + `badge` + `runed` + `./code.json` / `bits-ui` — so the AE Tool card +
+  Task step-list identity were hand-built on native `<details>` directly in `ConversationPanel.svelte` (NOT
+  vendored). **`shiki` (AE4) remains the ONLY new runtime dep** through the AE series; AE5+AE6 added none.
+- Dev stack: 8 services healthy; **DB at 0054**; **web REBUILT on AE6** (the spec is bundle-independent,
+  but the bundle carries the AE6 ConversationPanel changes).
   Login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
   Gateway aliases smart/fast/budget → minimax/MiniMax-M3 (only S9-qualified model, **tier 4**).
 - Suites at gate: web `npm run check` **0 errors** (5 pre-existing a11y warnings, untouched files);
-  **vitest 816** (unchanged — AE5 is a UI restructure, no unit tests added); **Cypress
-  `ae5-prompt-input.cy.ts` 7/7** headed/live (6 functional + 1 capture; the first test's attempt-1 eats the
-  first-`cy.visit` session-establishment latency → fails then passes on retry — the documented first-visit
-  flake, NOT a code defect; 7/7 final on TWO runs). **api/gateway UNAFFECTED — AE5 touches only `web`** (no
-  backend change). AE5 **before+after** screenshots (chat surface, light+dark, wide+narrow) in
-  `docs/fork/evidence/ae5/` — the before-dark clearly shows the LIGHT chat column; the after-dark shows it
-  fixed. Adversarial review (fresh-context agent): SHIP, no blockers/should-fixes, 2 cosmetic nits left
-  (consistent `text-white` Stop; icon-btn class dedup). Security pass: no new `{@html}`/sink (textarea is
-  `bind:value`); no secrets/stray files; web-only.
+  **vitest 816** (net baseline — +5 `groupTurnSteps`, −5 dead `stepDigest`); **Cypress
+  `ae6-tool-task.cy.ts` 7/7** headed/live-stubbed (6 functional + 1 capture; first run had 1 first-visit
+  flake on the first test, deterministic 7/7 on the re-run). **api/gateway UNAFFECTED — AE6 touches only
+  `web`** (no backend change). AE6 **after** screenshots (agent timeline, light+dark, wide+narrow) in
+  `docs/fork/evidence/ae6/`. Adversarial review (fresh-context agent): SHIP, no blockers/should-fixes;
+  the one simplification nit (dead `stepDigest`) was FIXED in-slice. Security pass: the 5 `{@html}` sinks
+  all route through the shared `renderModelMarkdown` (media-forbid); tool Parameters/Result bodies are
+  escaped TEXT bindings (`{t.inputBody}`/`{t.outputBody}`, never `{@html}`); no secrets/stray files; web-only.
 
-## Done (AE5, this slice)
+## Done (AE6, this slice)
 
-- **`ChatPanel.svelte`** — the composer is now ONE unified AE **Prompt Input** shell:
-  `<div data-testid="lq-ai-prompt-input">` → `rounded-xl border border-input bg-card shadow-sm
-  focus-within:ring-1` holding the textarea (transparent/borderless) on top + a bottom toolbar
-  (`data-testid="lq-ai-prompt-toolbar"`, `flex items-center justify-between`): LEFT = `ModelPicker dropUp`
-  + attach/enhance/receipts **lucide** icon-buttons (Paperclip/Sparkles/ScrollText — emoji retired);
-  RIGHT = Send (lucide Send) / Stop (lucide Square). KEPT every wire + `data-testid`
-  (`lq-ai-send-btn`/`-abort-btn`/`-attach-kb-btn`/`-enhance-btn` + `data-enhance-mode`/`-receipts-toggle`/
-  `-composer-input`/`-composer`), `SlashPopover` (now anchored to the shell via the kept
-  `.lq-composer-popover` rule), `EnhancePromptExpansion`, `SkillPicker`, `SavedPromptsPanel`. **UX change
-  on record:** tools stay VISIBLE during streaming (only Send↔Stop swaps); Enhance still `disabled` while
-  streaming. Header + composer + `<section>` migrated off `--lq-*`/`text-gray-*`/hardcoded-white to semantic
-  tokens (`bg-background`/`border-border`/`bg-card`/`text-foreground`/`text-muted-foreground`/`bg-primary`/
-  `bg-destructive`); the `<section>` got `bg-background text-foreground` — **the dark-mode column-gap fix**.
-  Deleted the scoped `.lq-composer/.lq-btn-*/.lq-composer-wrap` styles + the now-unused `@import
-  practice.css` (children still import it, so global `--lq-*` :root rules remain for them).
-- **`ModelPicker.svelte`** — opt-in `dropUp` prop (default false): toolbar usage opens the menu UPWARD
-  (`bottom-full mb-1`) so it doesn't clip at the viewport bottom; admin/models page keeps the default
-  downward menu. No token change to ModelPicker (still `--lq-*`, its own future slice).
-- **`cypress/e2e/ae5-prompt-input.cy.ts`** (7) — live stubbed chat surface (the composer is inherently the
-  live surface; no lab section to avoid a drifting static duplicate): unified shell, toolbar contents +
-  lucide SVGs, send disabled→enabled, Enhance opens its panel, slash popover anchors, model menu opens
-  upward; + before/after capture. **NOTICES** (AE row note: option-2, no vendoring, no new dep) +
-  `ai-elements/README.md` (`prompt-input` not-vendored paragraph) + plan updated. **No new ADR** — F011
-  already sanctions option-2; the token migration is the established rollout pattern.
+- **`ConversationPanel.svelte`** — the per-turn step timeline is now ONE collapsible AE **Task** list
+  (`<details class="ag-task" open>` → search-glyph trigger "N steps" + rotating chevron) holding AE
+  **Tool** cards: `<details class="ag-tool">` with a wrench header + natural-language tool name + a status
+  **badge** (Completed = `circle-check` on `--color-status-completed-wash`; Running = spinning
+  `loader-circle` on `--color-status-running-wash`) + collapsible **Parameters / Result** mono sections.
+  The call+result pair into one card via the pure `groupTurnSteps(steps)` helper in `agents/helpers.ts`
+  (adjacency-only: same name + parent; the subagent `task` dispatch/result stay separate cards). **The
+  `.ag-steps` `<ol>` + `<li>` rows + `details.ag-thinking` are KEPT** so the live specs (f0-s3/s4/s7) still
+  match. Reasoning idiom unchanged. Deleted the old `.ag-step__fold/__mono/__digest` + `.ag-step--tool_*`
+  CSS. **Polling / stream / staleness / run-level `statusBadge` UNTOUCHED** — grouping is view-only over
+  the already-`visibleSteps` list; the step record is never mutated.
+- **Convergence (R6 backlog):** `ConversationPanel` **and** `SkillSourceView` dropped their local
+  `marked`+`DOMPurify`+`SANITIZE_OPTS` copies and now call the shared `renderModelMarkdown`
+  (`sanitize-markdown.ts`), which gained an optional `{ breaks }` param so SKILL.md keeps its hard line
+  breaks. One media-forbid sink for the whole model-output surface.
+- **Simplification:** deleted the now-dead `stepDigest` + `STEP_DIGEST_LIMIT` (+ their test block) — the
+  old collapsed-fold one-liner has no caller after the Tool card.
+- **`cypress/e2e/ae6-tool-task.cy.ts`** (7) — live-stubbed agent timeline on `/lq-ai/agents` (one SETTLED
+  conversation = model_turn + one tool pair, so polling/streaming never engage): Task grouping ("2 steps",
+  `.ag-steps li` ×2), one paired Tool card (`svg.lucide-wrench` + title + Completed badge w/
+  `svg.lucide-circle-check`), collapsed-by-default body → expand reveals Parameters+Result (assert on the
+  `open` attr, NOT visibility — see gotcha), Reasoning `<details>` kept, Task collapse toggles `open`,
+  answer renders; + 1 capture (single visit, theme toggled in place). **NOTICES** + `ai-elements/README.md`
+  (`tool`/`task` not-vendored paragraph) + plan updated. **No new ADR** — F011 already sanctions option-2.
 
 ## Next slice — pick up exactly here
 
-1. **AE6 — Tool + Task** (plan §"AI Elements visual adoption" → AE6; **≡ the old R-CONV-2 slot**).
-   `ConversationPanel` agent steps (`ag-step--tool_call/tool_result`) → AE **Tool** (collapsible
-   name/input/output/status) + **Task** (step list); keep the Reasoning idiom; **keep ALL polling /
-   stale-detection / statusBadge logic untouched** (R-CONV-1 already extracted it). **Responsive collapse
-   REQUIRED in the narrow shot.** Inspect the AE `tool`/`task` registry items first (`curl …/r/<c>.json`,
-   parse with python3 — NOT jq; mind `/tmp/types.py`) and apply option-2 if they pull avoided deps.
-   **Backlog (from R6, do as part of AE6):** converge `ConversationPanel` + `SkillSourceView` onto
-   `renderModelMarkdown`. Full four-discipline gate + before/after screenshots (light+dark, wide+narrow).
-   Then **AE7 Suggestions** (the AE0 `Suggestion` chips are ready; optional/lowest priority).
+1. **AE7 — Suggestions** (plan §"AI Elements visual adoption" → AE7; **optional, lowest priority**). The
+   AE0 `Suggestion`/`Suggestions` chips are already vendored (`components/ai-elements/suggestion/`). Add
+   follow-up suggestion chips above/below a composer **ONLY if a clean, honest data source exists** — else
+   back them with SavedPrompts, or **DEFER** (don't invent suggestions). Full four-discipline gate +
+   before/after screenshots if it ships. **With AE7 the AE-series closes** (AE0–AE6 done).
 2. Other rollout slices (any order — the dark-mode bridge holds un-migrated surfaces):
    Foundation/rail R2–R5, Wave 1 R-CONV-1 (logic; R-CONV-2 → AE6), Wave 2
    R12/R13/R14a-b/R15/R15b-tab-pb/R16, Wave 3 R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO →
@@ -86,11 +81,18 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 - **AE-series (ADR-F011):** plan+ADR ✅ (#58) · **AE0 ✅ (#59)** vendoring foundation · **AE1 ✅ (#60)**
   Conversation+Message+Response · **AE2 ✅ (#61)** Reasoning+Actions · **AE3 ✅ (#62)** Sources +
   Inline-Citation · **AE4 ✅ (#63)** Code Block (Shiki highlight, option-2 action; the one new dep
-  `shiki`) · **AE5 ✅ (PR #64)** Prompt Input (≡ R9 — option-2 hand-build, no new dep; migrated ChatPanel
-  shell off `--lq-*` → **dark-mode column gap FIXED**). **Next AE6 (Tool+Task ≡ R-CONV-2 slot) → AE7.**
+  `shiki`) · **AE5 ✅ (#64)** Prompt Input (≡ R9 — option-2; dark-mode column gap FIXED) · **AE6 ✅ (PR #65)**
+  Tool+Task (≡ R-CONV-2 — option-2 hand-build, no new dep; `groupTurnSteps`; renderModelMarkdown
+  convergence). **Next AE7 Suggestions (optional, lowest priority) → AE-series closes.**
 
 ## Carry-overs / review deferrals
 
+- **AE6 — no new carry-overs.** Review SHIP, the one nit (dead `stepDigest`) fixed in-slice. Per-tool
+  status has no error state (the record carries no per-tool error signal) — a failed/stale run surfaces
+  via the run-level badge + stale banner + the rail's `failed` state, which is honest and documented in
+  `toolView`. The cockpit `ConversationHost` stacked collapse (<720px) was verify-only (unchanged); the
+  legacy `.ag-layout` 1-col collapse (<900px) is the AE6 narrow shot. ModelPicker/SkillPicker etc. remain
+  on the `--lq-*` dark stopgap (their own future slices).
 - **AE5 — ChatPanel dark-mode column gap RESOLVED.** The standing AE2 carry-over (central chat *column*
   rendered LIGHT in dark mode while the chrome was dark) is FIXED in AE5: the `<section>` got
   `bg-background text-foreground` and the header/composer migrated off `--lq-*` to semantic tokens.
@@ -121,6 +123,20 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Gotchas (carried + new)
 
+- **NEW (AE6): Cypress reports a CLOSED `<details>`'s content as "visible".** Chromium collapses a
+  `<details>` by giving non-`<summary>` children a zero box WITHOUT `display:none`, so Cypress'
+  `.should('not.be.visible')` FAILS on collapsed content. Assert on the `open` ATTRIBUTE instead
+  (`.should('not.have.attr','open')` → click `> summary` → `.should('have.attr','open')`); check inner
+  content with `.should('exist')`/`contains`, not visibility. (Cost AE6 two red tests on the first run.)
+- **NEW (AE6): a second `cy.visit` to `/lq-ai/agents` mid-test intermittently bounces to `/login`.** The
+  capture test originally re-visited per theme; the dark iteration's visit re-triggered auth and
+  redirected (the documented first-visit session flake, here fatal because it's not the run's first test).
+  Fix: visit + open the thread ONCE, then toggle the theme IN PLACE (`localStorage.theme` + the `.dark`
+  class on `<html>`) and screenshot per theme/viewport — no second auth-triggering visit.
+- **NEW (AE6): the AE `tool`/`task` registry items are option-2 territory.** `tool` pulls `collapsible` +
+  `badge` + `runed` + `./code.json` (the AE4 code block we hand-built, NOT vendored); `task` pulls
+  `collapsible` + `bits-ui`. `collapsible` is the same shadcn component dodged for reasoning/sources. Hand-
+  build the AE Tool card + Task list on native `<details>` (the ConversationPanel already used that idiom).
 - **NEW (AE5): the dark-mode "light chat column" root cause.** The center `<section>` was transparent and
   showed the `(tools)` layout's `.lq-shell { background: var(--lq-canvas) }`, and `--lq-canvas` resolved to
   its LIGHT value on the chat route (a cascade/bundle-order quirk of the legacy `@import practice.css`

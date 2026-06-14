@@ -85,6 +85,17 @@ gateway/SSE send path; lucide toolbar icons replace the prior emoji). The same s
 header + composer off the legacy `--lq-*` tokens to semantic tokens, fixing the standing dark-mode
 chat-column gap. Zero new deps. No lab section — the composer is inherently the live chat surface.
 
+**`tool` / `task` deliberately not vendored (AE6, option-2):** the registry `tool` item pulls
+`collapsible` + `badge` + `runed` + `./code.json` (the AE code block we hand-built in AE4, NOT vendored),
+and `task` pulls `collapsible` + `bits-ui` — `collapsible` is the same shadcn registry component dodged
+for `reasoning`/`sources`. Per **ADR-F011 option-2** the AE **Tool** card (wrench header + tool name +
+status badge + collapsible Parameters/Result) and the **Task** step list (search-glyph trigger + a single
+left rail) are hand-built on native `<details>` directly in `ConversationPanel.svelte` — the call/result
+pair into one card via the pure `groupTurnSteps` helper (presentational only; the settled step record and
+all polling/staleness/`statusBadge` logic are untouched). The same slice converged `ConversationPanel`
+**and** `SkillSourceView` off their local `marked`+`DOMPurify` copies onto the shared `renderModelMarkdown`
+sink. No new deps; no `_ae-lab` section — the timeline is inherently the live agent surface.
+
 The internal lab at `/lq-ai/_ae-lab` (unadvertised, auth-gated, dev scratch — links nowhere, changes no
 live surface) renders the trivial primitives (Loader, Suggestion) plus the AE2 Reasoning ribbon (with a
 streaming toggle so the shimmer + duration + auto-collapse path — dormant on the live chat surface until

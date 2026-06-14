@@ -447,11 +447,21 @@ screenshots light+dark/wide+narrow · simplification · adversarial review WITH 
   `bg-background`; before/after screenshots in `docs/fork/evidence/ae5/`). `ModelPicker` gained an opt-in
   `dropUp` prop (menu opens upward in the bottom toolbar; admin/models page unaffected). **Responsive
   collapse** preserved (narrow shot). Gate: web check 0err / vitest 816 / cypress ae5 7/7 headed.
-- **AE6 — Tool + Task** *(REPLACES R-CONV-2's styling; shell).* ConversationPanel agent steps
-  (`ag-step--tool_call/tool_result`) → AE **Tool** (collapsible name/input/output/status) + **Task**
-  (step list); keep the Reasoning idiom; **keep all polling / stale-detection / statusBadge logic
-  untouched** (R-CONV-1 already extracted it). **Responsive.** **Adversarial:** status-state mapping,
-  nested-step indentation, dark contrast, ConversationHost re-home (verify, don't edit). *(M; ⚠.)*
+- **AE6 — Tool + Task ✅ DONE (PR #65).** *(REPLACES R-CONV-2's styling; shell; no new dep.)*
+  **Option-2 hand-build** (the AE `tool`/`task` registry items pull `collapsible` + `badge` + `runed` +
+  `./code.json` / `bits-ui` — all dodged across the AE series). `ConversationPanel.svelte` agent steps now
+  render as ONE collapsible AE **Task** list (search-glyph trigger + a single left rail; the `.ag-steps`
+  `<li>` structure kept so the live step-count specs still match) holding AE **Tool** cards (wrench header
+  + natural-language name + status badge {Completed/Running} + collapsible Parameters/Result). The
+  call+result pair into one card via the **pure `groupTurnSteps` helper** (presentational only — settled
+  step record + all polling/staleness/`statusBadge` logic UNTOUCHED; adjacency-only pairing leaves the
+  subagent `task` dispatch/result as separate cards). Reasoning idiom kept (`<details>`). **Converged
+  `ConversationPanel` + `SkillSourceView` off their local `marked`+`DOMPurify` onto the shared
+  `renderModelMarkdown` sink** (the R6 backlog item; `breaks` opt added for SKILL.md). Simplification:
+  deleted the now-dead `stepDigest`/`STEP_DIGEST_LIMIT` (no caller after the Tool card replaced the old
+  collapsed-fold one-liner). Responsive: the legacy `.ag-layout` collapses to one column <900px (narrow
+  shot); the cockpit `ConversationHost` stacked collapse (<720px) is verify-only (unchanged). Gate: check
+  0err / vitest 816 (−5 dead `stepDigest`, +5 `groupTurnSteps`) / cypress ae6 7/7 headed. *(M; ⚠.)*
 - **AE7 — Suggestions** *(optional, lowest priority).* AE **Suggestion** chips for follow-ups
   above/below the composer **only if a clean data source exists** (else back them with SavedPrompts).
   **Defer** if no honest source — don't invent suggestions. *(S)*
