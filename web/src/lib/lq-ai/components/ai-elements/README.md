@@ -52,6 +52,14 @@ Gateway + `guarded_tool_call` + audit (CLAUDE.md "KEEP unchanged").
 |---|---|---|---|
 | `loader/` | none | none | Pure inline SVG spinner (`currentColor` + `animate-spin`). |
 | `suggestion/` | `button` (registry) | `ui/button`, `ui/scroll-area`, `cn` | Chip (`Suggestion`) + horizontal scroller (`Suggestions`). Upstream item under-declares `scroll-area` as a registry dep — already present here. |
+| `conversation/` | `@lucide/svelte`, `runed`, `button` | `ui/button`, `cn`, `@lucide/svelte`, `runed` | AE1. Scroll container (`Conversation`) + scroller (`ConversationContent`) + sticky scroll-to-bottom (`ConversationScrollButton`) + `EmptyState`, backed by a runes `StickToBottomContext` (observers auto-scroll on append unless the user scrolled up). **Fix:** upstream `conversation-content.svelte` bound BOTH `element` and `ref` to one `<div>` (two `bind:this` = a Svelte 5 compile error) — we bind `ref` only and register it as the scroll element. No new deps (lucide ^1.17 ⊇ item's ^1.16; runed already transitive). |
+| `message/` (core only) | (full block pulls `streamdown-svelte`, `mode-watcher`, `@shikijs/themes`) | `cn` | AE1. **Only `core/message.svelte` + `core/message-content.svelte`** vendored (the message identity: `MessageContent` → user `bg-secondary` soft right bubble, assistant plain full-width `text-foreground`). **NOT vendored:** the upstream `response/` (a `streamdown-svelte` wrapper — we keep `renderModelMarkdown`), `branching/`, `attachments/`, `actions/` (AE2). `context/message-context.svelte.ts` trimmed to the shared types (branch controller dropped). |
+
+**`response` deliberately not vendored:** the registry `response` item is a thin wrapper over
+`streamdown-svelte` (its own markdown renderer + Shiki). Per ADR-F011 we keep our hardened
+`renderModelMarkdown` (`marked`+`DOMPurify`, media-forbid) and adopt only the *prose styling* (the
+`prose prose-sm dark:prose-invert` wrapper in `MessageBubble`). Revisit Shiki code highlighting in AE4.
 
 The internal lab at `/lq-ai/_ae-lab` (unadvertised, auth-gated, dev scratch — links nowhere, changes no
-live surface) renders these for visual + interaction checks.
+live surface) renders the trivial primitives (Loader, Suggestion) for visual + interaction checks. The
+conversation/message primitives are exercised on the live chat surface (`MessageList`/`MessageBubble`).

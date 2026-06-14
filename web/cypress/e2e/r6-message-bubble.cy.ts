@@ -151,9 +151,13 @@ describe('R6 — MessageBubble reasoning ribbon + semantic tokens', () => {
 			.first()
 			.should('not.contain', 'controlling language is in §12.3');
 
-		// It lives in a collapsed <details> ribbon instead.
+		// It lives in a collapsed <details> ribbon instead. (AE1, ADR-F011: the
+		// Conversation auto-scrolls to the latest turn and uses generous `gap-8`
+		// spacing, so a middle turn's ribbon can sit above the fold — scroll it
+		// into view before the visibility check, as this spec already does for
+		// the answer prose in `openChat`.)
 		cy.get('[data-testid="lq-ai-reasoning-ribbon"]').should('exist');
-		cy.contains('summary', /reasoning/i).should('be.visible');
+		cy.contains('summary', /reasoning/i).scrollIntoView().should('be.visible');
 		// Collapsed by default — body hidden.
 		cy.get('[data-testid="lq-ai-reasoning-ribbon"]').should('not.have.attr', 'open');
 
