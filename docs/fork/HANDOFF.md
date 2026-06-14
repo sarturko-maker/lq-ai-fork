@@ -117,12 +117,14 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Gotchas (carried + new)
 
-- **NEW (AE3): api `ruff format --check` trap (the api analogue of the web prettier churn).** A NEWER
-  ruff than the project's pinned one reformats pre-existing lines in big files (e.g. `chats.py`) — main
-  is NOT format-clean under ruff 0.15.x, yet CI is green, so **CI pins an older ruff**. DON'T blanket-run
-  `ruff format` (it churns dozens of unrelated lines). Match surrounding style by hand, then VERIFY your
-  edit is format-neutral: `cp file /t/x; ruff format /t/x; diff file /t/x | grep <your-lines>` → must show
-  your lines untouched. `ruff check` (CI-gated) + `mypy app` still must pass.
+- **NEW (AE3): run ruff from the REPO ROOT with the root `ruff.toml`, exactly as CI does.** CI runs
+  `ruff check api scripts` + `ruff format --check api scripts` from the repo root. Running ruff from
+  inside `api/` uses ruff's DEFAULT settings (the root `ruff.toml` excludes web/ and tunes line-length/
+  rules) → spurious "would reformat" noise AND it MISSES rules like `UP017` (`datetime.UTC` over
+  `timezone.utc`) — AE3's first CI run failed on exactly that. Correct repro:
+  `docker run --rm -v $PWD:/repo -w /repo python:3.12-slim bash -c "pip install -q ruff; ruff check api
+  scripts; ruff format --check api scripts"`. Under the root config everything (incl. your edits) is
+  format-clean. `mypy app` (run from `api/`) still must pass separately.
 - **NEW (AE3): running api pytest off the live dev DB.** The runtime image has NO test deps and the live
   postgres is off-limits. Recipe: throwaway `docker run -d --name <pg> --network lq-ai_default
   pgvector/pgvector:pg16` (+ `CREATE EXTENSION vector`); then

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -577,7 +577,7 @@ async def test_get_citations_endpoint_returns_persisted_rows(
     # AE3: soft-deleting the source file suppresses the joined filename (the
     # join is scoped to non-deleted files, matching this module's "deleted
     # files are invisible" posture) — the citation row itself still returns.
-    source_file.deleted_at = datetime.now(timezone.utc)
+    source_file.deleted_at = datetime.now(UTC)
     await db_session.flush()
     after_delete = await client.get(
         f"/api/v1/chats/{chat_with_kb_attached.id}/messages/{message_id}/citations",
