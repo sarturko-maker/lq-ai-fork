@@ -2,7 +2,7 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 milestone OPEN — F2-M4 shipped; AE-series CLOSED)
+## State (F2 milestone OPEN — F2-M5 shipped; AE-series CLOSED)
 
 - **NEW MILESTONE — F2 (scira-style minimalist pass), governed by ADR-F012.** The maintainer wants the
   whole interface taken toward the calm, minimal aesthetic of [`scira`](https://github.com/zaidmukaddam/scira)
@@ -21,7 +21,21 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   `cypress/e2e/f2-baseline.cy.ts` (PHASE=before|after). The cockpit already lands on "Your practice"
   (areas + per-area agents + unfiled matters) — the architecture already leans toward the destination;
   F2-M4 adds a calm centered intent entry above it.
-- **F2-M4 (this slice)** — cockpit centered intent **launcher** (ADR-F002: a launcher, **NOT a
+- **F2-M5 (this slice)** — CockpitHeader **minimal-chrome restyle** (already semantic → **restyle-only,
+  reversible**; one file, no logic/props/routes changed). `cockpit/CockpitHeader.svelte`: muted icon
+  buttons now also **`hover:text-foreground`** (one calm resting state → brighten on hover, matching the
+  M2/M3 tab-bar idiom; applied to the rail toggle, Tools trigger, theme, settings, sign-out); the right
+  cluster gap tightened `gap-1.5`→`gap-1`; the **three trailing utility icons (theme/settings/sign-out)
+  grouped into one tight `gap-0.5` cluster behind a hairline `bg-border` separator** so account/prefs read
+  apart from tools/trust; single primary accent stays on the brand. **No AI furniture (ADR-F002)** — the
+  header still picks no models/skills/context; `AmbientTrustChrome` (ADR-0011 disclosure) + the Tools menu
+  (with the M3 muted-legacy treatment) + the trust link all intact. No new token scale, no `--lq-*`, no
+  `{@html}`, nothing retired. Suites: web check **0 err**; **vitest 835** (unchanged — presentation-only,
+  no pure helper, like M2); f2-baseline cypress **2/2** (PHASE=after). Evidence:
+  `docs/fork/evidence/f2-m5/` (cockpit, light+dark × wide+narrow — separator + tight cluster visible both
+  themes; the legacy `(tools)` surface uses `TopTabBar`/`(tools)` chrome, NOT this header, so its shots are
+  unchanged). Fresh-context review: **SHIP**, no blockers/should-fixes (1 benign cosmetic nit). web-only.
+- **F2-M4 (PR #71, main `df65826`)** — cockpit centered intent **launcher** (ADR-F002: a launcher, **NOT a
   composer** — it never starts an unbound thread). New **`cockpit/CenteredEntry.svelte`** rendered ABOVE
   a **de-emphasised** `AreaGrid` (its "Your practice" header dropped from `page`→`section`, so the page
   keeps a **single h1** — the launcher's "What are you working on?"), wired through a new
@@ -109,50 +123,42 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   (`prompt.prompt_text`) are escaped text/attribute bindings via the vendored `Suggestion`→`Button`;
   SavedPrompts are user-owned + server-scoped (404-not-403); no secrets/stray files; web-only.
 
-## Done (F2-M4, this slice)
+## Done (F2-M5, this slice)
 
-- **`cockpit/CenteredEntry.svelte`** (new) — the calm centered launcher. Static greeting `<h1>` "What are
-  you working on?" + subtitle, a prompt-styled textarea (`rounded-xl border border-input bg-card shadow-sm
-  focus-within:…ring`, Enter-to-submit / Shift+Enter newline) with an arrow submit button (disabled when
-  empty), an `awaitingAreaPick` hint (cleared on `oninput`), and optional AE `Suggestion` starter chips
-  from the user's own SavedPrompts (`savedPromptsApi.listSavedPrompts()` on mount, fail-soft → none;
-  clicking a chip appends its body to the field). `onLaunch(text)` hands the trimmed text to the parent.
-  Semantic tokens only; no `{@html}` (chip label/title are escaped text/attr bindings).
-- **`cockpit/helpers.ts`** — new pure **`launchIntent(areas, text) → {url, draft}`** (+ `LaunchIntent`/
-  `LaunchableArea` types). Filters to `configured` areas; exactly one → `{url: cockpitUrl({area}), draft}`,
-  else `{url: null, draft}`. Trims the draft. Never builds a thread URL (ADR-F002).
-- **`cockpit/Cockpit.svelte`** — `pendingDraft` state + `launchFromEntry` (calls `launchIntent`, sets the
-  draft, navigates only when a single area resolves). New **`landingView`** snippet (`CenteredEntry` +
-  `AreaGrid`) reused by the `view==='areas'` branch AND the stale-deep-link fallback (deletes the two
-  duplicated `AreaGrid` blocks). Passes `initialDraft`/`onDraftConsumed` to the **matter-mode**
-  `ConversationHost` only (not unfiled).
-- **`cockpit/ConversationHost.svelte`** — new `initialDraft`/`onDraftConsumed` props; `onMount` seeds
-  `prompt` from `initialDraft` once (guarded by `!prompt`) then calls `onDraftConsumed`. Survives the
-  per-matter `{#key}` remount correctly (parent clears the draft on first consume).
-- **`cockpit/AreaGrid.svelte`** — "Your practice" `SectionHeader` `size="section"` (de-emphasis + single
-  page h1). Minimal one-prop diff (avoided a prettier full-file reindent of a pre-existing M1 mis-indent).
-- **`__tests__/launch-intent.test.ts`** (new, 6) — `launchIntent` for 0/1/many configured, unconfigured
-  filtered, empty list, draft-trim. **`cypress/e2e/f2-baseline.cy.ts`** — cockpit test waits on the new
-  `lq-cockpit-centered-entry` testid before capture. **No new ADR** — F2-M4 is the launcher ADR-F012/F002
-  already ratified; the routing + carry-window call is recorded here + in code comments + memory.
+- **`cockpit/CockpitHeader.svelte`** (the only file changed) — minimal-chrome restyle, presentation-only:
+  - added **`hover:text-foreground`** to every muted ghost button (rail toggle, Tools trigger, theme,
+    settings, sign-out) so resting = `text-muted-foreground`, hover brightens — one calm state matching
+    the tab bar (the passed `hover:` class wins over the ghost variant's `hover:text-accent-foreground` via
+    tailwind-merge).
+  - right-side outer gap `gap-1.5`→`gap-1`; wrapped **theme + settings + sign-out** in a tight
+    `flex items-center gap-0.5` cluster, preceded by a decorative hairline
+    `<div class="mx-0.5 h-4 w-px bg-border" aria-hidden="true">` separating account/prefs from tools/trust.
+  - everything else byte-identical: all `onclick`/route handlers (`onToggleRail`, `cycleTheme`,
+    `goto('/lq-ai/settings/appearance')`, `signOut`, per-tab `goto(tab.route)`, trust `goto('/lq-ai/trust')`),
+    every `title`+`aria-label`, the `DropdownMenu` Tools structure (with the M3 muted-legacy item class),
+    `AmbientTrustChrome`, and the single primary brand accent. No AI furniture (ADR-F002). No new token
+    scale / `--lq-*` / `{@html}` / retired surface. Prettier-formatted (run from `web/`).
+- **No new tests** (presentation-only, no pure helper — same as F2-M2; behavior unchanged so vitest stays
+  835). **No new ADR** — restyle within the already-accepted ADR-F012/F002 envelope; the call is recorded
+  here + the in-file F2-M5 comment + memory. Evidence: `docs/fork/evidence/f2-m5/`.
 
 ## Next slice — pick up exactly here
 
-**Active milestone: F2 (minimalist pass).** F2-M0…M4 shipped. The cockpit landing now leads with the
-centered intent launcher above a de-emphasised area grid; the legacy `(tools)` shell + tab bar + footer +
-AmbientTrustChrome are on semantic tokens with the cockpit's blue accent; the tab bar is condensed +
-grouped (core / muted-legacy / gated) with all 11 tabs intact.
+**Active milestone: F2 (minimalist pass).** F2-M0…M5 shipped. The cockpit landing leads with the centered
+intent launcher above a de-emphasised area grid; the CockpitHeader is restyled calm (muted-icon/hover,
+grouped account cluster + hairline); the legacy `(tools)` shell + tab bar + footer + AmbientTrustChrome are
+on semantic tokens with the cockpit's blue accent; the tab bar is condensed + grouped with all 11 tabs.
 
-1. **F2-M5 — CockpitHeader minimal-chrome pass** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`,
-   task #116). `cockpit/CockpitHeader.svelte` is **already on semantic tokens** (F2-M2/M3 touched it) →
-   **restyle-only, reversible**: quieter icon buttons, tighter chrome rhythm, single accent on the brand,
-   calmer Tools menu. Do NOT add AI furniture (ADR-F002 — the header picks no models/skills/context). Keep
-   the Tools dropdown's muted-legacy treatment (F2-M3) and the trust link (ADR-0011 disclosure). Capture
-   via `cypress/e2e/f2-baseline.cy.ts` (PHASE=after) — the header shows on both the cockpit landing and
-   the legacy `(tools)` surface shots. Then M6/M7/M8 (per-surface calm) → M9 (sweep). **F2-M6 must add the
-   `PageShell` `pad` variant before MattersPanel/ConversationHost adopt it** (M1 carry-over below).
-   **Hard rule (ADR-F012): no tab/route/surface retired or hidden in F2; never re-introduce `--lq-*`; no
-   new token scale; the cockpit entry stays a launcher, not an unbound composer.**
+1. **F2-M6 — Matters + conversation surfaces** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`,
+   task #117). `cockpit/MattersPanel.svelte`, `cockpit/ConversationHost.svelte`, `cockpit/AreaRail.svelte`
+   — whitespace/type calm + adopt `PageShell`/`SectionHeader` where they fit (already semantic → light
+   tightening). **FIRST add a `PageShell` `pad` variant** (M1 carry-over): the default padding is
+   AreaGrid's rhythm `px-6 py-10 sm:px-8`; MattersPanel uses `py-8`, ConversationHost `px-4 py-4 sm:px-6` —
+   add the variant before they adopt PageShell (do NOT override via the `class` passthrough — Tailwind
+   utility order makes a px/py override unreliable). Capture via `cypress/e2e/f2-baseline.cy.ts` (extend it
+   to a matters + a conversation view, or a focused spec). Then M7 (library lists) → M8 (settings/admin/
+   trust) → M9 (sweep+verify). **Hard rule (ADR-F012): no tab/route/surface retired or hidden in F2; never
+   re-introduce `--lq-*`; no new token scale; the cockpit entry stays a launcher, not an unbound composer.**
 2. **UX-A (navigational convergence)** — own milestone after F2 (cockpit = single shell, legacy top-tab IA
    retired). **UX-B (capability convergence)** — folds into the pivot track (F1-S4/S5 + area activation +
    schema). Both per ADR-F012.

@@ -122,7 +122,14 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
   f2-baseline cypress 2/2 (PHASE=after) + a throwaway interaction spec confirmed end-to-end carry-forward
   then removed. Evidence: `docs/fork/evidence/f2-m4/`. Carry-overs (HANDOFF): the stale-draft window
   (accepted/documented) + the multi-area hint not screenshot-able with one configured area.
-- M5–M9 pending.
+- **F2-M5** — done (PR #72): CockpitHeader minimal-chrome restyle (one file, presentation-only). Muted
+  ghost buttons gain `hover:text-foreground` (one calm resting state, tab-bar idiom); right cluster gap
+  `gap-1.5`→`gap-1`; theme/settings/sign-out grouped into a tight `gap-0.5` cluster behind a decorative
+  `bg-border` hairline separator. All handlers/routes/aria-labels/the Tools dropdown (with the M3
+  muted-legacy item) byte-identical; no AI furniture (ADR-F002), no new token scale/`--lq-*`/`{@html}`,
+  nothing retired. vitest unchanged (835); f2-baseline cypress 2/2 (PHASE=after). Evidence:
+  `docs/fork/evidence/f2-m5/`. Review SHIP.
+- M6–M9 pending. **M6 must add the `PageShell` `pad` variant first** (M1 carry-over).
 
 ## Risks / overlaps
 
