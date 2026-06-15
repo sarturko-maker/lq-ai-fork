@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en" class="light">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>F013 — design-language preview (Radix Slate + Indigo · Lucide)</title>
+		<!--
+			F013 style tile v2 — STANDALONE, NON-PRODUCTION preview.
+			Palette: Radix Colors (MIT) — Slate neutral + Indigo accent + Green/Red status.
+			Icons:   Lucide (ISC) — inline SVG, replacing the v1 emoji.
+			Type / spacing / motion / radius: F013 proposals (docs/fork/plans/F013-token-language-spec.md).
+
+			Provenance: Radix + Lucide are permissively licensed and may be adopted (ADR-F013).
+			No scira code is copied. This file touches no app code — review artifact only.
+			Dark canvas is lifted off Radix Slate-1 (#111113) to Slate-2/3 to honor the
+			maintainer rule: "don't use black background — charcoal."
+		-->
+		<style>
+			/* ===== TOKENS — light (Radix Slate + Indigo, sRGB) ===== */
+			:root {
+				--background: #f9f9fb; /* slate-2 */
+				--card: #ffffff;
+				--foreground: #1c2024; /* slate-12 */
+				--muted: #f0f0f3; /* slate-3 */
+				--muted-foreground: #60646c; /* slate-11 */
+				--border: #d9d9e0; /* slate-6 */
+				--border-strong: #cdced6; /* slate-7 */
+				--primary: #3e63dd; /* indigo-9 */
+				--primary-hover: #3358d4; /* indigo-10 */
+				--primary-foreground: #ffffff;
+				--accent: #edf2fe; /* indigo-3 */
+				--accent-foreground: #3a5bc7; /* indigo-11 */
+				--ring: #8da4ef; /* indigo-8 */
+				--run: #3a5bc7;
+				--run-wash: #edf2fe; /* indigo 11/3 */
+				--done: #218358;
+				--done-wash: #e6f6eb; /* green 11/3 */
+				--fail: #ce2c31;
+				--fail-wash: #feebec; /* red 11/3 */
+				--idle: #60646c;
+				--idle-wash: #f0f0f3; /* slate 11/3 */
+				--elevation-sm: 0 1px 2px rgb(28 32 36 / 0.06), 0 2px 8px rgb(28 32 36 / 0.04);
+				--elevation-md: 0 2px 4px rgb(28 32 36 / 0.06), 0 12px 28px rgb(28 32 36 / 0.1);
+				--radius: 0.625rem;
+				--radius-sm: 0.375rem;
+				--radius-lg: 0.875rem;
+				--text-display: 2.25rem;
+				--text-title: 1.5rem;
+				--text-heading: 1.125rem;
+				--text-subheading: 1rem;
+				--text-body: 0.9375rem;
+				--text-body-sm: 0.875rem;
+				--text-caption: 0.8125rem;
+				--text-label: 0.75rem;
+				--motion-fast: 100ms;
+				--motion-base: 160ms;
+				--ease: cubic-bezier(0.2, 0, 0, 1);
+				--ease-emph: cubic-bezier(0.3, 0, 0, 1);
+				--font-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+					Helvetica, Arial, sans-serif;
+				color-scheme: light;
+			}
+			/* ===== TOKENS — dark (Radix Slate-dark + Indigo-dark; canvas lifted to slate-2/3) ===== */
+			html.dark {
+				--background: #18191b; /* slate-2 (charcoal, not slate-1 near-black) */
+				--card: #212225; /* slate-3 */
+				--foreground: #edeef0; /* slate-12 */
+				--muted: #272a2d; /* slate-4 */
+				--muted-foreground: #b0b4ba; /* slate-11 */
+				--border: #363a3f; /* slate-6 */
+				--border-strong: #43484e; /* slate-7 */
+				--primary: #3e63dd; /* indigo-9 */
+				--primary-hover: #5472e4; /* indigo-10 */
+				--primary-foreground: #ffffff;
+				--accent: #182449; /* indigo-3 dark */
+				--accent-foreground: #9eb1ff; /* indigo-11 dark */
+				--ring: #435db1; /* indigo-8 dark */
+				--run: #9eb1ff;
+				--run-wash: #182449;
+				--done: #3dd68c;
+				--done-wash: #132d21;
+				--fail: #ff9592;
+				--fail-wash: #3b1219;
+				--idle: #b0b4ba;
+				--idle-wash: #272a2d;
+				--elevation-sm: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.3);
+				--elevation-md: 0 2px 4px rgb(0 0 0 / 0.4), 0 12px 28px rgb(0 0 0 / 0.36);
+				color-scheme: dark;
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+			body {
+				margin: 0;
+				font-family: var(--font-sans);
+				background: var(--background);
+				color: var(--foreground);
+				font-size: var(--text-body);
+				line-height: 1.55;
+				-webkit-font-smoothing: antialiased;
+				transition:
+					background var(--motion-base) var(--ease),
+					color var(--motion-base) var(--ease);
+			}
+			.icon {
+				width: 20px;
+				height: 20px;
+				stroke: currentColor;
+				fill: none;
+				stroke-width: 2;
+				stroke-linecap: round;
+				stroke-linejoin: round;
+				flex-shrink: 0;
+			}
+
+			.t-display { font-size: var(--text-display); line-height: 1.12; font-weight: 600; letter-spacing: -0.025em; margin: 0; }
+			.t-title { font-size: var(--text-title); line-height: 1.25; font-weight: 600; letter-spacing: -0.018em; margin: 0; }
+			.t-heading { font-size: var(--text-heading); line-height: 1.35; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+			.t-subheading { font-size: var(--text-subheading); line-height: 1.4; font-weight: 600; margin: 0; }
+			.t-body { font-size: var(--text-body); line-height: 1.55; margin: 0; }
+			.t-body-sm { font-size: var(--text-body-sm); line-height: 1.5; margin: 0; }
+			.t-caption { font-size: var(--text-caption); line-height: 1.45; color: var(--muted-foreground); margin: 0; }
+			.t-label { font-size: var(--text-label); line-height: 1.3; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted-foreground); margin: 0; }
+			.muted { color: var(--muted-foreground); }
+
+			.chrome {
+				display: flex; align-items: center; justify-content: space-between;
+				padding: 0 32px; height: 56px; border-bottom: 1px solid var(--border);
+				position: sticky; top: 0; z-index: 5;
+				background: color-mix(in srgb, var(--background) 85%, transparent);
+				backdrop-filter: saturate(1.3) blur(8px);
+			}
+			.brand { font-weight: 700; letter-spacing: -0.02em; font-size: 1.05rem; }
+			.brand b { color: var(--primary); }
+			.chrome-right { display: flex; align-items: center; gap: 20px; }
+			.nav-link { font-size: var(--text-body-sm); color: var(--muted-foreground); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+			.nav-link .icon { width: 16px; height: 16px; }
+			.nav-link.active { color: var(--primary); font-weight: 600; }
+			.toggle { display: inline-flex; align-items: center; gap: 7px; font-size: var(--text-body-sm); color: var(--muted-foreground); background: var(--card); border: 1px solid var(--border); border-radius: 9999px; padding: 6px 13px; cursor: pointer; }
+			.toggle:hover { color: var(--foreground); border-color: var(--border-strong); }
+			.toggle .icon { width: 15px; height: 15px; }
+
+			.shell { max-width: 64rem; margin: 0 auto; padding: 56px 32px 80px; }
+			.stack { display: flex; flex-direction: column; gap: 56px; }
+
+			.hero { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 18px; padding-top: 24px; }
+			.hero .sub { max-width: 52ch; color: var(--muted-foreground); }
+			.composer {
+				width: 100%; max-width: 640px; margin-top: 10px;
+				display: flex; align-items: flex-end; gap: 10px;
+				background: var(--card); border: 1px solid var(--border-strong);
+				border-radius: var(--radius-lg); box-shadow: var(--elevation-sm);
+				padding: 14px 14px 14px 18px;
+				transition: box-shadow var(--motion-base) var(--ease), border-color var(--motion-base) var(--ease);
+			}
+			.composer:focus-within { border-color: var(--primary); box-shadow: var(--elevation-md), 0 0 0 3px color-mix(in srgb, var(--ring) 45%, transparent); }
+			.composer textarea { flex: 1; border: 0; outline: 0; resize: none; background: transparent; color: var(--foreground); font: inherit; line-height: 1.5; min-height: 26px; }
+			.composer textarea::placeholder { color: var(--muted-foreground); }
+			.send { flex-shrink: 0; width: 38px; height: 38px; border-radius: var(--radius-sm); border: 0; background: var(--primary); color: var(--primary-foreground); cursor: pointer; display: grid; place-items: center; transition: transform var(--motion-fast) var(--ease-emph), background var(--motion-fast) var(--ease); }
+			.send:hover { transform: translateY(-1px); background: var(--primary-hover); }
+			.chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 6px; }
+			.chip { font-size: var(--text-caption); color: var(--muted-foreground); background: var(--card); border: 1px solid var(--border); border-radius: 9999px; padding: 6px 14px; cursor: pointer; transition: color var(--motion-fast) var(--ease), border-color var(--motion-fast) var(--ease); }
+			.chip:hover { color: var(--foreground); border-color: var(--border-strong); }
+
+			.section-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 20px; }
+
+			.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+			.card {
+				background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg);
+				padding: 22px; display: flex; flex-direction: column; gap: 10px; cursor: pointer;
+				transition: transform var(--motion-base) var(--ease), box-shadow var(--motion-base) var(--ease), border-color var(--motion-base) var(--ease);
+			}
+			.card:hover { transform: translateY(-2px); box-shadow: var(--elevation-md); border-color: var(--border-strong); }
+			.card .tile { width: 38px; height: 38px; border-radius: var(--radius-sm); display: grid; place-items: center; background: var(--accent); color: var(--accent-foreground); }
+			.card .tile .icon { width: 20px; height: 20px; }
+			.card-foot { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+
+			.btn-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+			.btn { display: inline-flex; align-items: center; gap: 7px; font-size: var(--text-body-sm); font-weight: 500; border-radius: var(--radius-sm); padding: 9px 15px; cursor: pointer; border: 1px solid transparent; transition: background var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease), border-color var(--motion-fast) var(--ease); }
+			.btn .icon { width: 16px; height: 16px; }
+			.btn-primary { background: var(--primary); color: var(--primary-foreground); }
+			.btn-primary:hover { background: var(--primary-hover); }
+			.btn-secondary { background: transparent; color: var(--foreground); border-color: var(--border-strong); }
+			.btn-secondary:hover { background: var(--muted); }
+			.btn-ghost { background: transparent; color: var(--muted-foreground); }
+			.btn-ghost:hover { color: var(--foreground); }
+
+			.pills { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+			.pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-caption); font-weight: 500; border-radius: 9999px; padding: 3px 11px; }
+			.pill .dot { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; }
+			.pill.running { background: var(--run-wash); color: var(--run); }
+			.pill.completed { background: var(--done-wash); color: var(--done); }
+			.pill.failed { background: var(--fail-wash); color: var(--fail); }
+			.pill.cancelled { background: var(--idle-wash); color: var(--idle); }
+
+			table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; font-size: var(--text-body-sm); }
+			th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+			th { font-size: var(--text-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted-foreground); font-weight: 600; }
+			tbody tr:last-child td { border-bottom: 0; }
+			tbody tr:hover { background: var(--muted); }
+			td .name { display: inline-flex; align-items: center; gap: 9px; font-weight: 500; }
+			td .name .icon { width: 16px; height: 16px; color: var(--muted-foreground); }
+
+			.specimen { display: flex; flex-direction: column; gap: 0; }
+			.specimen .row { display: flex; align-items: baseline; gap: 18px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+			.specimen .row:last-child { border-bottom: 0; }
+			.specimen .tag { flex-shrink: 0; width: 150px; color: var(--muted-foreground); font-size: var(--text-caption); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+			.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+			.swatch { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+			.ramp { display: flex; height: 30px; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border); }
+			.ramp span { flex: 1; }
+			.radius-demo { height: 40px; background: var(--accent); border: 1px solid var(--accent-foreground); border-radius: var(--radius-lg); }
+			.divider { height: 1px; background: var(--border); border: 0; margin: 0; }
+			.note { font-size: var(--text-caption); color: var(--muted-foreground); background: var(--muted); border-radius: var(--radius); padding: 12px 16px; }
+		</style>
+	</head>
+	<body>
+		<header class="chrome">
+			<span class="brand">LQ<b>.AI</b></span>
+			<nav class="chrome-right">
+				<span class="nav-link active">
+					<svg class="icon" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
+					Home
+				</span>
+				<span class="nav-link">Agents</span>
+				<span class="nav-link">Matters</span>
+				<span class="nav-link">Skills</span>
+				<button class="toggle" onclick="document.documentElement.classList.toggle('dark')">
+					<svg class="icon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+					Theme
+				</button>
+			</nav>
+		</header>
+
+		<main class="shell">
+			<div class="stack">
+				<!-- HERO -->
+				<section class="hero">
+					<h1 class="t-display">What are you working on?</h1>
+					<p class="t-body sub">
+						State the intent — your practice-area deep agent picks its own tools, skills and
+						playbooks, and works visibly.
+					</p>
+					<div class="composer">
+						<textarea rows="1" placeholder="Draft a mutual NDA for a SaaS pilot, UK law, 2-year term…"></textarea>
+						<button class="send" title="Launch">
+							<svg class="icon" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+						</button>
+					</div>
+					<div class="chips">
+						<span class="chip">Review this contract</span>
+						<span class="chip">Summarise key risks</span>
+						<span class="chip">Compare to our standard</span>
+					</div>
+				</section>
+
+				<!-- AREA CARDS -->
+				<section>
+					<div class="section-head">
+						<h2 class="t-heading">Your practice</h2>
+						<p class="t-caption">Configured practice areas — each one a deep agent.</p>
+					</div>
+					<div class="grid">
+						<div class="card">
+							<span class="tile">
+								<svg class="icon" viewBox="0 0 24 24"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>
+							</span>
+							<h3 class="t-subheading">Commercial</h3>
+							<p class="t-caption">Matters, NDAs, MSAs, SaaS terms.</p>
+							<div class="card-foot"><span class="pill completed"><span class="dot"></span>3 matters</span></div>
+						</div>
+						<div class="card">
+							<span class="tile">
+								<svg class="icon" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+							</span>
+							<h3 class="t-subheading">Privacy</h3>
+							<p class="t-caption">GDPR programmes, DPIAs, ROPA.</p>
+							<div class="card-foot"><span class="pill running"><span class="dot"></span>running</span></div>
+						</div>
+						<div class="card">
+							<span class="tile">
+								<svg class="icon" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+							</span>
+							<h3 class="t-subheading">M&amp;A</h3>
+							<p class="t-caption">Due diligence, disclosure.</p>
+							<div class="card-foot"><span class="pill cancelled"><span class="dot"></span>idle</span></div>
+						</div>
+					</div>
+				</section>
+
+				<!-- COMPONENTS -->
+				<section>
+					<div class="section-head">
+						<h2 class="t-heading">Components</h2>
+						<p class="t-caption">Radix Slate + Indigo · one scarce accent · Lucide icons · soft hairline borders.</p>
+					</div>
+					<div class="stack" style="gap: 28px">
+						<div class="btn-row">
+							<button class="btn btn-primary">
+								<svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+								New matter
+							</button>
+							<button class="btn btn-secondary">Secondary</button>
+							<button class="btn btn-ghost">Ghost</button>
+						</div>
+						<div class="pills">
+							<span class="pill running"><span class="dot"></span>running</span>
+							<span class="pill completed"><span class="dot"></span>completed</span>
+							<span class="pill failed"><span class="dot"></span>failed</span>
+							<span class="pill cancelled"><span class="dot"></span>cancelled</span>
+						</div>
+						<table>
+							<thead>
+								<tr><th>Skill</th><th>Scope</th><th>Status</th><th>Created</th></tr>
+							</thead>
+							<tbody>
+								<tr>
+									<td><span class="name"><svg class="icon" viewBox="0 0 24 24"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M2 15h10"/><path d="m9 18 3-3-3-3"/></svg>Contract Snapshot</span></td>
+									<td class="muted">12 docs · 6 cols</td>
+									<td><span class="pill completed"><span class="dot"></span>completed</span></td>
+									<td class="muted">Jun 15, 2026</td>
+								</tr>
+								<tr>
+									<td><span class="name"><svg class="icon" viewBox="0 0 24 24"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M2 15h10"/><path d="m9 18 3-3-3-3"/></svg>MSA Snapshot</span></td>
+									<td class="muted">4 docs · 8 cols</td>
+									<td><span class="pill running"><span class="dot"></span>running</span></td>
+									<td class="muted">Jun 15, 2026</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+				</section>
+
+				<!-- TYPE -->
+				<section>
+					<div class="section-head">
+						<h2 class="t-heading">Type scale</h2>
+						<p class="t-caption">Inter · role-named ramp (proposed F013 §1).</p>
+					</div>
+					<div class="specimen">
+						<div class="row"><span class="tag">display · 36</span><span class="t-display">Aa</span></div>
+						<div class="row"><span class="tag">title · 24</span><span class="t-title">Aa Title</span></div>
+						<div class="row"><span class="tag">heading · 18</span><span class="t-heading">Aa Heading</span></div>
+						<div class="row"><span class="tag">subheading · 16</span><span class="t-subheading">Aa Subheading</span></div>
+						<div class="row"><span class="tag">body · 15</span><span class="t-body">The quick brown fox jumps over the lazy dog.</span></div>
+						<div class="row"><span class="tag">body-sm · 14</span><span class="t-body-sm">The quick brown fox jumps over the lazy dog.</span></div>
+						<div class="row"><span class="tag">caption · 13</span><span class="t-caption">The quick brown fox.</span></div>
+						<div class="row"><span class="tag">label · 12</span><span class="t-label">Overline label</span></div>
+					</div>
+				</section>
+
+				<!-- FOUNDATIONS -->
+				<section>
+					<div class="section-head">
+						<h2 class="t-heading">Foundations</h2>
+						<p class="t-caption">Radix Slate + Indigo scales (the real values) · radius 10px · motion.</p>
+					</div>
+					<div class="legend">
+						<div class="swatch">
+							<span class="t-label">Slate (neutral)</span>
+							<div class="ramp"><span style="background:#f0f0f3"></span><span style="background:#e0e1e6"></span><span style="background:#cdced6"></span><span style="background:#b9bbc6"></span><span style="background:#8b8d98"></span><span style="background:#60646c"></span><span style="background:#1c2024"></span></div>
+							<p class="t-caption">bg → border → text</p>
+						</div>
+						<div class="swatch">
+							<span class="t-label">Indigo (accent)</span>
+							<div class="ramp"><span style="background:#edf2fe"></span><span style="background:#d2deff"></span><span style="background:#abbdf9"></span><span style="background:#8da4ef"></span><span style="background:#3e63dd"></span><span style="background:#3358d4"></span><span style="background:#1f2d5c"></span></div>
+							<p class="t-caption">wash → solid (9) → text</p>
+						</div>
+						<div class="swatch">
+							<span class="t-label">Radius · 10px</span>
+							<div class="radius-demo"></div>
+							<p class="t-caption">soft card / input</p>
+						</div>
+						<div class="swatch">
+							<span class="t-label">Motion</span>
+							<p class="t-body-sm" style="margin: 2px 0">100 / 160 / 240 ms</p>
+							<p class="t-caption">cubic-bezier(.2,0,0,1) — subtle, fast, never bouncy.</p>
+						</div>
+					</div>
+				</section>
+
+				<hr class="divider" />
+				<p class="note">
+					Preview only — non-production, no app code touched. Palette = <b>Radix Colors (MIT)</b>
+					Slate + Indigo + Green/Red, exact published values; icons = <b>Lucide (ISC)</b>, inline.
+					Type / spacing / motion / radius = the <b>F013 proposals</b>. No scira code copied
+					(ADR-F013). Dark canvas lifted off Radix Slate-1 (#111113) to Slate-2/3 per the
+					"charcoal, never black" rule. Toggle the theme top-right.
+				</p>
+			</div>
+		</main>
+	</body>
+</html>

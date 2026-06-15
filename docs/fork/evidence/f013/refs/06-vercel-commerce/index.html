@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>LQ.AI — in the style of: Vercel Commerce (MIT)</title>
+		<!-- Emulates the FEEL of vercel/commerce (MIT): ultra-minimal, typography-led,
+		     maximal whitespace, near-monochrome, thin borders, big type. Original CSS; no code copied. -->
+		<style>
+			:root {
+				--bg: #ffffff;
+				--fg: #111111;
+				--muted: #707070;
+				--border: #ededed;
+				--primary: #111111;
+				--primary-fg: #ffffff;
+				--accent: #0070f3;
+				--green: #0f7b34;
+				--red: #c4271a;
+				--font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, sans-serif;
+			}
+			* { box-sizing: border-box; }
+			body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--fg); font-size: 15px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+			.icon { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+			.chrome { display: flex; align-items: center; justify-content: space-between; height: 64px; padding: 0 40px; border-bottom: 1px solid var(--border); }
+			.brand { font-weight: 700; letter-spacing: -0.03em; font-size: 17px; }
+			.nav { display: flex; gap: 28px; }
+			.nav span { font-size: 14px; color: var(--muted); cursor: pointer; }
+			.nav span:hover { color: var(--fg); }
+			.shell { max-width: 56rem; margin: 0 auto; padding: 96px 40px 96px; display: flex; flex-direction: column; gap: 80px; }
+			.hero { display: flex; flex-direction: column; gap: 28px; }
+			.hero h1 { font-size: 56px; line-height: 1.05; font-weight: 600; letter-spacing: -0.04em; margin: 0; max-width: 14ch; }
+			.hero p { color: var(--muted); font-size: 18px; max-width: 46ch; margin: 0; }
+			.composer { display: flex; align-items: center; gap: 0; border-bottom: 2px solid var(--fg); padding: 10px 0; max-width: 640px; }
+			.composer input { flex: 1; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: 18px; }
+			.composer input::placeholder { color: var(--muted); }
+			.send { background: var(--fg); color: var(--primary-fg); border: 0; border-radius: 9999px; width: 44px; height: 44px; cursor: pointer; display: grid; place-items: center; }
+			.chips { display: flex; gap: 24px; flex-wrap: wrap; }
+			.chips span { font-size: 14px; color: var(--muted); cursor: pointer; border-bottom: 1px solid transparent; padding-bottom: 2px; }
+			.chips span:hover { color: var(--fg); border-bottom-color: var(--fg); }
+			.section .eyebrow { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); margin: 0 0 28px; }
+			.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); }
+			.card { background: var(--bg); padding: 32px 28px; cursor: pointer; transition: background .15s; display: flex; flex-direction: column; gap: 12px; }
+			.card:hover { background: #fafafa; }
+			.card .tile { color: var(--fg); }
+			.card h3 { font-size: 20px; font-weight: 500; letter-spacing: -0.02em; margin: 8px 0 0; }
+			.card p { font-size: 14px; color: var(--muted); margin: 0; flex: 1; }
+			.card .meta { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 7px; }
+			.card .meta .dot { width: 7px; height: 7px; border-radius: 9999px; }
+			.dot.run { background: var(--accent); }
+			.dot.done { background: var(--green); }
+			.dot.idle { background: #c7c7c7; }
+			.list { display: flex; flex-direction: column; }
+			.row { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; border-bottom: 1px solid var(--border); }
+			.row:first-child { border-top: 1px solid var(--border); }
+			.row .l { display: flex; flex-direction: column; gap: 3px; }
+			.row .title { font-size: 17px; font-weight: 500; letter-spacing: -0.01em; }
+			.row .sub { font-size: 13px; color: var(--muted); }
+			.status { font-size: 13px; display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+			.status .dot { width: 7px; height: 7px; border-radius: 9999px; }
+		</style>
+	</head>
+	<body>
+		<header class="chrome">
+			<span class="brand">LQ.AI</span>
+			<nav class="nav"><span>Matters</span><span>Skills</span><span>Knowledge</span><span>Settings</span></nav>
+		</header>
+		<main class="shell">
+			<section class="hero">
+				<h1>What are you working on?</h1>
+				<p>State the intent. Your practice-area deep agent picks its own tools, skills and playbooks — and works visibly.</p>
+				<div class="composer">
+					<input placeholder="Draft a mutual NDA for a SaaS pilot, UK law, 2-year term…" />
+					<button class="send"><svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+				</div>
+				<div class="chips"><span>Review this contract</span><span>Summarise key risks</span><span>Compare to our standard</span></div>
+			</section>
+			<section class="section">
+				<p class="eyebrow">Your practice</p>
+				<div class="grid">
+					<div class="card"><span class="tile"><svg class="icon" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg></span><h3>Commercial</h3><p>NDAs, MSAs, SaaS terms</p><span class="meta"><span class="dot done"></span>3 matters</span></div>
+					<div class="card"><span class="tile"><svg class="icon" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span><h3>Privacy</h3><p>GDPR, DPIAs, ROPA</p><span class="meta"><span class="dot run"></span>running</span></div>
+					<div class="card"><span class="tile"><svg class="icon" viewBox="0 0 24 24" style="width:22px;height:22px"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span><h3>M&amp;A</h3><p>Diligence, disclosure</p><span class="meta"><span class="dot idle"></span>idle</span></div>
+				</div>
+			</section>
+			<section class="section">
+				<p class="eyebrow">Recent matters</p>
+				<div class="list">
+					<div class="row"><div class="l"><span class="title">NDA — Acme SaaS pilot</span><span class="sub">Contract Snapshot · 12 docs · 6 cols</span></div><span class="status"><span class="dot done"></span>Completed</span></div>
+					<div class="row"><div class="l"><span class="title">MSA review — Northwind</span><span class="sub">MSA Snapshot · 4 docs · 8 cols</span></div><span class="status"><span class="dot run"></span>Running</span></div>
+					<div class="row"><div class="l"><span class="title">SaaS terms — Project Iris</span><span class="sub">ad-hoc · 1 doc</span></div><span class="status"><span class="dot idle"></span>Idle</span></div>
+				</div>
+			</section>
+		</main>
+	</body>
+</html>

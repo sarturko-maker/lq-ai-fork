@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>LQ.AI — in the style of: Trigger.dev (Apache-2.0)</title>
+		<!-- Emulates the FEEL of triggerdotdev/trigger.dev (Apache-2.0): dark navy-charcoal
+		     observability dashboard, vivid indigo accent + subtle glow, prominent coloured
+		     status badges, monospace run IDs. Original CSS; no code copied. -->
+		<style>
+			:root {
+				--bg: #0e1015;
+				--side: #15181f;
+				--panel: #1a1e27;
+				--panel-2: #222732;
+				--fg: #e7e9ee;
+				--muted: #878c99;
+				--border: #262b36;
+				--border-2: #333a48;
+				--indigo: #6366f1;
+				--indigo-bright: #818cf8;
+				--indigo-bg: #1e1b4b;
+				--green: #4ade80;
+				--green-bg: #0f2a1c;
+				--amber: #fbbf24;
+				--amber-bg: #2a2008;
+				--red: #f87171;
+				--red-bg: #2a1418;
+				--radius: 8px;
+				--font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+				--mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+			}
+			* { box-sizing: border-box; }
+			body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--fg); font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+			.app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+			.nav { background: var(--side); border-right: 1px solid var(--border); padding: 16px 12px; }
+			.brand { display: flex; align-items: center; gap: 9px; padding: 4px 8px 16px; font-weight: 700; letter-spacing: -0.01em; font-size: 15px; }
+			.brand .mark { width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(135deg, var(--indigo), #a855f7); display: grid; place-items: center; box-shadow: 0 0 14px -2px var(--indigo); }
+			.n-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; padding: 12px 8px 4px; }
+			.n-item { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: var(--radius); font-size: 13px; color: var(--muted); cursor: pointer; }
+			.n-item:hover { background: var(--panel); color: var(--fg); }
+			.n-item.active { background: var(--indigo-bg); color: var(--indigo-bright); }
+			.icon { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+			.main { display: flex; flex-direction: column; min-width: 0; }
+			.topbar { display: flex; align-items: center; justify-content: space-between; height: 50px; padding: 0 22px; border-bottom: 1px solid var(--border); }
+			.crumb { font-size: 13px; color: var(--muted); }
+			.crumb b { color: var(--fg); }
+			.btn { font-size: 12.5px; font-weight: 600; border-radius: var(--radius); padding: 7px 13px; cursor: pointer; border: 0; display: inline-flex; gap: 6px; align-items: center; }
+			.btn-primary { background: var(--indigo); color: #fff; box-shadow: 0 0 16px -4px var(--indigo); }
+			.content { padding: 24px; display: flex; flex-direction: column; gap: 22px; }
+			.hero-h { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+			.sub { font-size: 13px; color: var(--muted); margin: 4px 0 0; }
+			.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+			.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+			.card:hover { border-color: var(--indigo); box-shadow: 0 0 24px -8px var(--indigo); }
+			.card .tile { width: 34px; height: 34px; border-radius: 8px; background: var(--indigo-bg); color: var(--indigo-bright); display: grid; place-items: center; margin-bottom: 12px; }
+			.card h3 { font-size: 14px; font-weight: 600; margin: 0 0 3px; }
+			.card p { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+			.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+			.p-head { padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+			table { width: 100%; border-collapse: collapse; }
+			th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--border); }
+			th { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+			tbody tr:last-child td { border-bottom: 0; }
+			tbody tr:hover { background: var(--panel-2); }
+			.mono { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+			.badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; border-radius: 6px; padding: 3px 9px; text-transform: uppercase; letter-spacing: 0.03em; }
+			.badge .dot { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; box-shadow: 0 0 8px currentColor; }
+			.badge.run { color: var(--indigo-bright); background: var(--indigo-bg); }
+			.badge.done { color: var(--green); background: var(--green-bg); }
+			.badge.fail { color: var(--red); background: var(--red-bg); }
+			.badge.idle { color: var(--muted); background: var(--panel-2); }
+		</style>
+	</head>
+	<body>
+		<div class="app">
+			<nav class="nav">
+				<div class="brand"><span class="mark"><svg class="icon" viewBox="0 0 24 24" style="color:#fff"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg></span> LQ.AI</div>
+				<div class="n-label">Commercial</div>
+				<div class="n-item active"><svg class="icon" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg> Runs</div>
+				<div class="n-item"><svg class="icon" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg> Matters</div>
+				<div class="n-item"><svg class="icon" viewBox="0 0 24 24"><path d="m14.7 6.3 3 3M5 19l4-1 9.5-9.5a2.1 2.1 0 0 0-3-3L6 15z"/></svg> Skills</div>
+				<div class="n-item"><svg class="icon" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18M9 21V9"/></svg> Tabular</div>
+				<div class="n-label">Workspace</div>
+				<div class="n-item"><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg> Knowledge</div>
+				<div class="n-item"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg> Settings</div>
+			</nav>
+			<div class="main">
+				<div class="topbar">
+					<span class="crumb">Commercial <b>/ Runs</b></span>
+					<button class="btn btn-primary"><svg class="icon" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M5 12h14"/><path d="M12 5v14"/></svg> New matter</button>
+				</div>
+				<div class="content">
+					<div><h1 class="hero-h">What are you working on?</h1><p class="sub">State the intent — the Commercial deep agent picks its tools and fans out subagents, visibly.</p></div>
+					<div class="cards">
+						<div class="card"><div class="tile"><svg class="icon" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg></div><h3>Commercial</h3><p>NDAs, MSAs, SaaS terms</p><span class="badge done"><span class="dot"></span>3 matters</span></div>
+						<div class="card"><div class="tile"><svg class="icon" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div><h3>Privacy</h3><p>GDPR, DPIAs, ROPA</p><span class="badge run"><span class="dot"></span>running</span></div>
+						<div class="card"><div class="tile"><svg class="icon" viewBox="0 0 24 24" style="width:18px;height:18px"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></div><h3>M&amp;A</h3><p>Diligence, disclosure</p><span class="badge idle"><span class="dot"></span>idle</span></div>
+					</div>
+					<div class="panel">
+						<div class="p-head"><span>Recent runs</span><span class="mono">run_4f9c…b35c</span></div>
+						<table>
+							<thead><tr><th>Run</th><th>Skill</th><th>Scope</th><th>Status</th><th>Duration</th></tr></thead>
+							<tbody>
+								<tr><td>NDA — Acme SaaS pilot</td><td>Contract Snapshot</td><td class="mono">12 docs · 6 cols</td><td><span class="badge done"><span class="dot"></span>completed</span></td><td class="mono">2m 14s</td></tr>
+								<tr><td>MSA review — Northwind</td><td>MSA Snapshot</td><td class="mono">4 docs · 8 cols</td><td><span class="badge run"><span class="dot"></span>running</span></td><td class="mono">0m 38s</td></tr>
+								<tr><td>SaaS terms — Project Iris</td><td>ad-hoc</td><td class="mono">1 doc</td><td><span class="badge fail"><span class="dot"></span>failed</span></td><td class="mono">0m 09s</td></tr>
+								<tr><td>DPA addendum — Q2</td><td>—</td><td class="mono">2 docs</td><td><span class="badge idle"><span class="dot"></span>queued</span></td><td class="mono">—</td></tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+	</body>
+</html>
