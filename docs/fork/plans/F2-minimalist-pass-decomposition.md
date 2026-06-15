@@ -85,7 +85,13 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
 
 ## Progress
 
-- **F2-M0** — in progress (this slice). M1–M9 pending.
+- **F2-M0** — done (PR #67, main `749a5a1`): ADR-F012 + this doc + before-baselines.
+- **F2-M1** — done: `PageShell` + `SectionHeader` primitives (with exported pure helpers
+  `pageShellClass` / `sectionHeaderScale`, unit-tested), adopted in `cockpit/AreaGrid.svelte`.
+  Faithful extraction — after-shots pixel-identical to the M0 before-baselines
+  (`docs/fork/evidence/f2-m1/`). PageShell padding default = AreaGrid's rhythm only; a `pad`
+  variant is deferred to M6 (MattersPanel `py-8` / ConversationHost `px-4 py-4` differ).
+- M2–M9 pending.
 
 ## Risks / overlaps
 
