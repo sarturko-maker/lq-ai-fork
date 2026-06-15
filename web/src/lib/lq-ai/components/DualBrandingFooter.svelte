@@ -7,8 +7,11 @@
 	 */
 </script>
 
+<!-- F2-M2: raw gray-* swapped for semantic tokens (text-muted-foreground /
+     border-border) so the footer follows the same `.dark` palette as the
+     rest of the chrome instead of a parallel gray scale. -->
 <footer
-	class="text-xs text-gray-500 dark:text-gray-400 px-4 py-2 border-t border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-2"
+	class="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs text-muted-foreground"
 	data-testid="lq-ai-dual-branding-footer"
 >
 	<span>

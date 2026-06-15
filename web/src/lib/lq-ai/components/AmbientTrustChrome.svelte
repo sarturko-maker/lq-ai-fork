@@ -12,17 +12,15 @@
   import TrustPill from './TrustPill.svelte';
 </script>
 
-<div class="lq-chrome">
+<!-- F2-M2: wrapper + ⌘K hint migrated off `--lq-*` to semantic tokens (the
+     dark-mode fix). The TrustPill itself stays on its dark-bridged `--lq-*`
+     tone palette — migrating its sage/slate/amber/red tones would need a new
+     token scale (forbidden in F2) and touches ~15 consumers, so it is its own
+     slice (see HANDOFF carry-overs). -->
+<div class="inline-flex items-center gap-2">
   <TrustPill variant="secure" label="● self-hosted" />
-  <span class="lq-kbd" aria-hidden="true">⌘K</span>
+  <span
+    class="rounded-sm border border-border bg-muted px-1.5 py-px text-[11px] text-muted-foreground"
+    aria-hidden="true">⌘K</span
+  >
 </div>
-
-<style>
-  .lq-chrome { display: inline-flex; align-items: center; gap: var(--lq-space-2); }
-  .lq-kbd {
-    font-family: var(--lq-font-sans);
-    font-size: 11px; color: var(--lq-text-tertiary);
-    border: 1px solid var(--lq-border); border-radius: var(--lq-radius-sm);
-    padding: 1px 6px; background: var(--lq-inset);
-  }
-</style>
