@@ -41,6 +41,11 @@
 	 *  "Insert" (append to composer); the standalone page uses "Use in
 	 *  chat" (navigate to a fresh chat with the prompt prefilled). */
 	export let insertLabel = 'Insert';
+	/** Fired after each successful list refresh with the caller's saved
+	 *  prompts (AE7 / ADR-F011). Lets a parent render the same honest,
+	 *  user-owned list as AE Suggestion starter chips WITHOUT a second
+	 *  GET /saved-prompts — this panel stays the single fetch site. */
+	export let onPromptsLoaded: (prompts: SavedPrompt[]) => void = () => undefined;
 
 	let prompts: SavedPrompt[] = [];
 	let panelOpen = alwaysOpen;
@@ -64,6 +69,7 @@
 		loadError = null;
 		try {
 			prompts = await savedPromptsApi.listSavedPrompts();
+			onPromptsLoaded(prompts);
 		} catch (e) {
 			console.error('lq-ai: saved-prompts list failed', e);
 			loadError = e instanceof Error ? e.message : 'Failed to load saved prompts';
