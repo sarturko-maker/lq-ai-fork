@@ -4,6 +4,29 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (NEW MILESTONE — UX-A navigational convergence OPEN; F2 visual pass complete through VL2; AE-series CLOSED)
 
+- **UX-A-3 (PR #83) — SHIPPED. The conversation surfaces re-hosted in the cockpit canvas.** `git mv`'d
+  `agents`, `chats`, `matters` (incl. `matters/[id]`) + `playbook-executions/[id]` (incl. its
+  `page-helpers` + `__tests__`) from `(tools)` into `(app)` — **pure renames, zero content change** — so
+  they render in the cockpit canvas with the rail present + the rail Tools active-highlight (generic via
+  `activeTabFor`, no code change needed). URLs unchanged; the `/lq-ai/+layout.svelte` auth/boot gate still
+  wraps both groups. **Scroll/height verified**: the list pages flow in the canvas `<main overflow-y-auto>`;
+  `matters/[id]`'s `.matter-workspace{height:100%}` resolves against `main.h-full` → paneforge Pane (every
+  ancestor has a definite height), same boundedness the old `(tools)` shell gave. **Nested `<main>` is
+  pre-existing/unchanged** (the old `(tools)` shell also had a `<main>` around these pages' own `<main>`) —
+  out of scope for a mechanical move. **Recorded call — the two-rail composition for `matters/[id]`**: the
+  cockpit rail (app nav) and the matter's own `MatterRail` (within-matter nav: Chats/Files/Knowledge/Skills
+  + metadata) now BOTH render, side by side. Kept deliberately for this slice (functional, no DOM/id clash,
+  distinct selectors); it's visually dense at 1280px. A future slice (UX-B or a reconcile pass) may fold
+  `MatterRail` into the cockpit rail or auto-collapse the cockpit rail on matter detail — NOT done here.
+  Repointed the `f2-baseline` legacy-chrome capture `/chats`→`/trust` (chats is no longer legacy; trust
+  migrates in UX-A-4). Suites: web check **0 err** (5 pre-existing a11y warnings, untouched files); **vitest
+  854** (moved `__tests__` auto-discovered); **`ux-a-3-conversation-surfaces.cy.ts` 3/3** + **`f2-baseline.cy.ts`
+  4/4** headed/live (open-from-rail-into-canvas + active highlight; deep-link agents/chats/matters inside the
+  shell; `matters/[id]` two-rail composition). Evidence: `docs/fork/evidence/ux-a-3/`. Fresh-context review:
+  **SHIP**, 0 blockers/should-fixes; 1 NIT (two-rail density, recorded/accepted). web-only — no api/gateway
+  change. **Pickup: UX-A-4** (migrate the sub-nav surfaces `admin`/`autonomous`/`settings`/`trust` into
+  `(app)`; each except trust has its own sub-nav `+layout.svelte` that now renders inside the canvas —
+  nested chrome, accepted for UX-A; autonomous stays opt-in gated).
 - **UX-A-2 (PR #82) — SHIPPED. Rail "Tools" section + the flat tool surfaces re-hosted in the cockpit
   canvas (the dead-end fix).** Added an expandable **Tools** group to `AreaRail` (open by default;
   `ChevronDownIcon` toggle; Lucide glyphs via the shared `tabIcon()` map; **active highlight** via
@@ -379,15 +402,16 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 primitives** (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/`Inline`/`StatusDot`) exist + are proven in
 `_vl-lab` against the `direction-vercel` target. No live surface re-skinned yet.
 
-1. **UX-A-3 — migrate the conversation surfaces.** Per ADR-F014 / the UX-A decomposition. Move `agents`,
-   `chats`, `matters` (+ `matters/[id]`, `playbook-executions/[id]`) from `(tools)` into `(app)` so they
-   render in the cockpit canvas. Heavier than UX-A-2: `matters/[id]` mounts its own `MatterRail` +
-   `ChatPanel` side-by-side, and `chats` reads `?id=&project_id=` — verify they compose inside the canvas
-   without a nested-rail clash with the cockpit rail. **Note the overlap** with the cockpit's own
-   matter/conversation views (the landing already renders a matter conversation) — reconcile or keep both
-   deliberately and record the call. Wire these into the rail Tools active-highlight (already generic via
-   `activeTabFor`). Then UX-A-4 (admin/autonomous/settings/trust) → UX-A-5 (retire TopTabBar + header
-   Tools dropdown + sweep). **UX-A-2 SHIPPED** (rail Tools + the 6 flat surfaces now render in the canvas).
+1. **UX-A-4 — migrate the sub-nav surfaces.** Per ADR-F014 / the UX-A decomposition. Move `admin`,
+   `autonomous`, `settings`, `trust` from `(tools)` into `(app)` so they render in the cockpit canvas.
+   Each except `trust` has its OWN sub-nav `+layout.svelte` (horizontal/vertical) that now renders INSIDE
+   the canvas (nested chrome — accepted for UX-A). The header gear (→ `settings/appearance`) + the rail
+   Tools entries keep working; `autonomous` stays opt-in gated. After this only `(tools)` chrome itself
+   remains → **UX-A-5** retires `(tools)/+layout.svelte` (`TopTabBar` + footer) + the `CockpitHeader` Tools
+   dropdown + sweeps (and re-homes the trust/branding links the old shell carried; repoints/removes the
+   `f2-baseline` legacy-chrome capture, now that no legacy chrome remains). **UX-A-1/2/3 SHIPPED** — the
+   landing + all flat + all conversation surfaces now render in the cockpit canvas; `(tools)` holds only
+   admin/autonomous/settings/trust until UX-A-4.
 2. **deferred F2 visual work (after UX-A, or interleaved): F2-M7b — Library card/wrapper surfaces** (task
    #118): the remaining three `(tools)` list
    pages — **`knowledge`** (card grid + inline create form, max-1100px; KB status pills `indexed`/`indexing`/

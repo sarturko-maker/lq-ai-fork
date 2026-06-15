@@ -110,10 +110,10 @@ describe('F2 baseline capture', { retries: { runMode: 2, openMode: 0 } }, () => 
 
 	it('captures a legacy (tools) chrome surface (light + dark, wide + narrow)', () => {
 		login();
-		// UX-A-2 moved skills into the cockpit shell; `chats` is still a legacy
-		// `(tools)` surface (its UX-A-3 slice hasn't landed), so it still carries
-		// the TopTabBar chrome F2-M2/M3 calm.
-		cy.visit('/lq-ai/chats');
+		// UX-A-2/3 moved skills + chats into the cockpit shell; `trust` is still a
+		// legacy `(tools)` surface (it migrates in UX-A-4), so it still carries the
+		// TopTabBar chrome F2-M2/M3 calm.
+		cy.visit('/lq-ai/trust');
 		// Wait for the chrome F2 actually changes (the TopTabBar nav) to paint,
 		// not just `body` — a bare `body` assertion passes before the SPA renders
 		// and yields a blank capture (seen on F2-M3 light-wide).
@@ -121,7 +121,7 @@ describe('F2 baseline capture', { retries: { runMode: 2, openMode: 0 } }, () => 
 		cy.wait(800);
 		for (const theme of ['light', 'dark'] as const) {
 			pinTheme(theme);
-			shoot(`tools-chats-${theme}`);
+			shoot(`tools-trust-${theme}`);
 		}
 	});
 });
