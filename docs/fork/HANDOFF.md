@@ -2,7 +2,7 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 milestone OPEN — F2-VL0 shipped, F013 token layer live; AE-series CLOSED)
+## State (F2 milestone OPEN — F2-VL1 shipped, F013 primitives live; AE-series CLOSED)
 
 - **NEW MILESTONE — F2 (scira-style minimalist pass), governed by ADR-F012.** The maintainer wants the
   whole interface taken toward the calm, minimal aesthetic of [`scira`](https://github.com/zaidmukaddam/scira)
@@ -21,7 +21,28 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   `cypress/e2e/f2-baseline.cy.ts` (PHASE=before|after). The cockpit already lands on "Your practice"
   (areas + per-area agents + unfiled matters) — the architecture already leans toward the destination;
   F2-M4 adds a calm centered intent entry above it.
-- **F2-VL0 (this slice, PR #76)** — the **F013 design-language token layer** lands (ADR-F013; milestone
+- **F2-VL1 (this slice, PR #77)** — the **F013 design-language primitives** land (ADR-F013, milestone
+  F2-VL). Seven token-consuming primitives in `components/primitives/`: **`AppShell`** (the Vercel layout
+  skeleton — 264px `--sidebar` rail with caller-supplied contents + main column + optional thin topbar; rail
+  `hidden lg:flex` so it collapses < lg, VL2 wires the drawer), **`Hero`** (centred display-type block — the
+  FIRST consumer of the VL0 `--text-display` token, so it materialises that JIT utility), **`Card`** +
+  **`CardGrid`** (the hairline-divided plane: `grid gap-px bg-border rounded-lg overflow-hidden`, cells fill
+  `bg-card`; Card `interactive` → real `<button>`/`<a>`, `bordered` → standalone hairline+12px), **`Stack`**/
+  **`Inline`** (vertical/horizontal rhythm from the §3 scale — literal-class Records so JIT keeps them),
+  **`StatusDot`** (dot-status on the `--status-*` tokens; `running` resolves to the scarce `--brand`). The
+  **inverting-primary / hairline-secondary / ghost button idioms already exist** via the VL0-recoloured shadcn
+  `Button` (`--primary` is ink) → demonstrated, NOT re-built. Pure class helpers (`stackClass`/`inlineClass`/
+  `cardGridClass`/`cardClass`/`statusDotClass`) exported from `<script module>` + **unit-tested** (the
+  `pageShellClass` precedent). Proven in a NEW dev-only **`/lq-ai/_vl-lab`** route (the `_ae-lab` precedent —
+  unadvertised, auth-gated by the lq-ai layout, leading-`_`, served by the prod bundle, Cypress-captured;
+  imported by NOTHING live) that rebuilds the `direction-vercel` cockpit target from the real primitives + an
+  isolated gallery (type scale, button variants, dot tones, standalone cards). **No live surface re-skinned —
+  that's VL2.** Suites: web check **0 err** (5 pre-existing a11y warnings, untouched files); **vitest 850**
+  (+13 helper assertions); **`vl1-lab.cy.ts` 1/1** (PHASE-less capture, light+dark × wide+narrow). Evidence:
+  `docs/fork/evidence/f2-vl1/` — near-exact match to the mockup; charcoal dark honest; narrow collapses the
+  rail + CardGrid → 2-col. Fresh-context review: **SHIP**, no blockers/should-fixes; two lab-only a11y nits
+  (heading-in-button, unlabelled composer textarea) **FIXED in-slice**. web-only — no api/gateway change.
+- **F2-VL0 (PR #76)** — the **F013 design-language token layer** lands (ADR-F013; milestone
   **F2-VL**, sequenced between M7a and M7b). **`app.css` recoloured to the Vercel palette** (spec §1): the two
   structural remaps that define the look — **`--primary` is now INK** (`#111` light / `#ededed` dark, inverts)
   not the old indigo, and a **new `--brand`** holds the one scarce Vercel blue (`#0070f3` / `#47a3ff`), used
@@ -179,7 +200,24 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   (`prompt.prompt_text`) are escaped text/attribute bindings via the vendored `Suggestion`→`Button`;
   SavedPrompts are user-owned + server-scoped (404-not-403); no secrets/stray files; web-only.
 
-## Done (F2-VL0, this slice)
+## Done (F2-VL1, this slice)
+
+- **`components/primitives/{AppShell,Hero,Card,CardGrid,Stack,Inline,StatusDot}.svelte`** — seven new
+  presentation-only runes primitives consuming the VL0 tokens (see the F2-VL1 State bullet for each one's
+  role). Each `<script module>` exports a pure class helper where one applies (`stackClass`, `inlineClass`,
+  `cardGridClass`, `cardClass`, `statusDotClass`); all variant classes are literal strings in `Record`s so
+  Tailwind's JIT keeps them.
+- **`routes/lq-ai/_vl-lab/+page.svelte`** — NEW dev-only proof route (the `_ae-lab` recipe). `h-screen` (the
+  layout renders booted non-exempt routes as a bare `<slot>` — the cockpit "owns its own viewport"), composes
+  AppShell + the cockpit target + a gallery. Local non-persisting theme toggle. Imported by nothing live.
+- **`__tests__/vl-primitives.test.ts`** — locks the five pure helpers (exact-string assertions). vitest
+  837→850 (+13). **`cypress/e2e/vl1-lab.cy.ts`** — logs in, visits `_vl-lab`, asserts the `text-display`
+  Hero renders, captures light+dark × wide+narrow (1/1). Evidence `docs/fork/evidence/f2-vl1/`.
+- **No new ADR** (ADR-F013 governs; this is its VL1 slice). **No new `--lq-*`, no `{@html}`, no token scale
+  added, no surface retired/re-skinned.** Two lab-only a11y nits fixed in-slice (`<span>` not `<h3>` inside the
+  interactive Card; `aria-label` on the composer textarea).
+
+## Done (F2-VL0, PR #76)
 
 - **`web/src/app.css`** — recoloured both `:root` (light) and `.dark` to the Vercel palette (hex, matching
   `direction-vercel`): ink `--primary` `#111`/`#ededed` (was indigo), new `--brand` `#0070f3`/`#47a3ff`,
@@ -244,22 +282,24 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**Active milestone: F2 (minimalist pass), now with the F013 token layer (F2-VL) sequenced in.** F2-M0…M7a +
-**F2-VL0** shipped. The semantic tokens now carry the **Vercel design language** — ink primaries, scarce
-`--brand` blue, charcoal `#111` dark, the `--text-*`/`--motion-*` families, 10/12px radius. The cockpit lands
-on the centered launcher above a de-emphasised grid; chrome/tab-bar/matters/conversation are calm + on
-semantic tokens (which now render the new palette automatically).
+**Active milestone: F2 (minimalist pass), with the F013 token layer (F2-VL) sequenced in.** F2-M0…M7a +
+**F2-VL0 + F2-VL1** shipped. The semantic tokens carry the **Vercel design language** (ink primaries, scarce
+`--brand`, charcoal `#111` dark, `--text-*`/`--motion-*`, 10/12px radius), and the **token-consuming
+primitives** (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/`Inline`/`StatusDot`) exist + are proven in
+`_vl-lab` against the `direction-vercel` target. No live surface re-skinned yet.
 
-1. **F2-VL1 — primitives + AppShell** (next; spec §7/§8). Build `AppShell` (the 264px sidebar — brand · *New
-   matter* ink button · Recent matters · account footer — beside the centred cockpit column), `Hero` (display
-   type), `Card`/hairline `CardGrid`, `Stack`/`Inline`, `StatusDot`, and button variants — **all consuming the
-   VL0 tokens** (`text-display`, `--brand`, the radius/motion scale). Prove them in a **dev-only `_vl-lab`**
-   route (the AE `_ae-lab` precedent — unadvertised, auth-gated, leading-`_`). Presentation-only, token-driven,
-   unit-test the pure class helpers (`pageShellClass` precedent). NO real surface re-skinned yet (that's VL2).
-2. **F2-VL2 — cockpit landing proof (flagship, maintainer design-review gate).** Re-skin `cockpit/` to
-   `direction-vercel`: `AreaRail` → the Vercel sidebar, `CenteredEntry` → `Hero`, `AreaGrid` → hairline
-   `CardGrid`, matters → dot-status list. **Iterate values here under the maintainer's eye** until it reads
-   right.
+1. **F2-VL2 — cockpit landing proof (flagship, MAINTAINER DESIGN-REVIEW GATE).** Re-skin `cockpit/` to
+   `direction-vercel` using the VL1 primitives: **`AreaRail` → the AppShell `--sidebar`** (brand · *New matter*
+   ink button · Recent matters with area+relative-time · account footer); **`CenteredEntry` → `Hero`** (the
+   44px `text-display` launcher + composer + the existing SavedPrompts starter chips as text-links);
+   **`AreaGrid` → the hairline `CardGrid`** of area Cards with `StatusDot` rollups; **matters list → the
+   dot-status hairline list**. Wire the real responsive drawer/toggle into AppShell (reuse the existing
+   AreaRail collapse logic — F1-S2.1). Honour ADR-F002 (the entry is a LAUNCHER, not an unbound composer) +
+   ADR-F004 (settled-rows rollups, real data). **Resolve the VL1 `CardGrid` trailing-empty-cell** against the
+   real area count (choose a column count that divides it, or fill/stretch the last row). **Iterate values
+   under the maintainer's eye** until it reads right; carry a `direction-vercel` side-by-side in the evidence.
+2. **F2-VL2** is the design gate — do NOT auto-merge it without the maintainer's design sign-off (unlike the
+   reversible token/primitive slices, this re-skins the flagship surface).
 3. **then resume F2-M7b — Library card/wrapper surfaces** (task #118): the remaining three `(tools)` list
    pages — **`knowledge`** (card grid + inline create form, max-1100px; KB status pills `indexed`/`indexing`/
    `failed`/`empty` → `--status-completed`/`--status-running`/`--status-failed`/`--muted` like tabular),
@@ -298,6 +338,18 @@ semantic tokens (which now render the new palette automatically).
 
 ## Carry-overs / review deferrals
 
+- **F2-VL1 — `CardGrid` trailing empty cell on non-full rows (resolve in VL2).** The hairline technique
+  (`grid gap-px bg-border` + cells filling `bg-card`) means a final responsive row that isn't full shows the
+  `--border` background as an empty gray cell (seen in the narrow lab: 3 areas at 2 columns → one empty cell).
+  Acceptable in the lab; VL2 must decide the real behaviour against the actual area count — pick a column count
+  that divides it, render filler cells, or let the last card span. Not a token/primitive defect.
+- **F2-VL1 — AppShell rail is `hidden lg:flex` (no narrow nav yet).** The primitive only models the skeleton;
+  below `lg` the rail disappears with no toggle. VL2 wires the real drawer/toggle (reuse the F1-S2.1 AreaRail
+  responsive collapse). The lab's narrow shot therefore shows the cockpit full-width (the honest collapsed
+  state), not a hamburger.
+- **F2-VL1 — the interactive `Card` renders as `<button>`; put a `<span>` (not `<h3>`) as its title.** A
+  heading isn't valid phrasing content inside a button. The lab's practice grid uses `<span class=
+  "text-subheading">`; carry that into VL2's area cards. Standalone non-interactive cards keep real headings.
 - **F2-VL0 — checkbox + focus-ring hardcoded blues left as-is (own slice).** The `@layer base`
   `input[type=checkbox]` uses literal `#2563eb` (checked fill) / `#3b82f6` (focus outline). They were NOT
   migrated to `--primary`/`--ring` because the checked fill carries a `fill='white'` SVG checkmark — and
