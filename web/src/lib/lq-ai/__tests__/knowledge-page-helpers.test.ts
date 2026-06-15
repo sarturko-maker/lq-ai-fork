@@ -13,7 +13,7 @@ import {
 	kbListStatus,
 	kbStatusLabel,
 	type KBListStatus
-} from '../../../routes/lq-ai/(tools)/knowledge/+page.svelte';
+} from '../../../routes/lq-ai/(app)/knowledge/+page.svelte';
 import type { KnowledgeBase } from '../types';
 
 function makeKB(overrides: Partial<KnowledgeBase> = {}): KnowledgeBase {

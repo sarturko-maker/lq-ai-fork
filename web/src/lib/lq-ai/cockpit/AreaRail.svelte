@@ -12,14 +12,22 @@
 	 * status, ADR-F004 settled rows), the unfiled bucket, and an account
 	 * footer. Account ACTIONS stay in the header (CockpitHeader); the footer
 	 * is identity only. Keeps the practice-area-first IA (no IA change — F2).
+	 *
+	 * UX-A-2 (ADR-F014): an expandable "Tools" group lists the tool surfaces
+	 * (Lucide glyphs via the shared `tabIcon()` map; active highlight from the
+	 * caller's `activeTab`; the legacy executor group rests one step quieter,
+	 * the M3 treatment). Selecting one renders it in the cockpit canvas (for
+	 * migrated surfaces) — the way "back to the cockpit" is now always the rail.
 	 */
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 
 	import { Button } from '$lib/components/ui/button/index.js';
 	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 	import type { MatterActivity, UnfiledThreadsSummary } from '$lib/lq-ai/api/agents';
-	import type { User } from '$lib/lq-ai/tabs';
+	import { tabGroupOf, type TabDef, type TabId, type User } from '$lib/lq-ai/tabs';
+	import { tabIcon } from '$lib/lq-ai/tab-icons';
 	import StatusDot from '$lib/lq-ai/components/primitives/StatusDot.svelte';
 	import { areaActivityCounts, runDot } from './helpers';
 
@@ -32,9 +40,12 @@
 		user,
 		selectedAreaKey,
 		unfiledOpen,
+		toolTabs,
+		activeTab,
 		onSelectArea,
 		onSelectUnfiled,
-		onNewMatter
+		onNewMatter,
+		onSelectTool
 	}: {
 		areas: PracticeArea[] | null;
 		areasError: string | null;
@@ -44,14 +55,25 @@
 		user: User | null;
 		selectedAreaKey: string | null;
 		unfiledOpen: boolean;
+		/** The tool surfaces to list under "Tools" (already role/pref-filtered). */
+		toolTabs: TabDef[];
+		/** The tab id the canvas is currently showing, for the active highlight. */
+		activeTab: TabId | null;
 		onSelectArea: (area: PracticeArea) => void;
 		onSelectUnfiled: () => void;
 		/** Start something new — routes to the landing launcher (ADR-F002). */
 		onNewMatter: () => void;
+		/** Open a tool surface (renders in the canvas for migrated surfaces). */
+		onSelectTool: (tab: TabDef) => void;
 	} = $props();
 
 	const byArea = $derived(matters === null ? null : areaActivityCounts(matters));
 	const accountInitial = $derived((user?.email ?? '?').trim().charAt(0).toUpperCase() || '?');
+
+	// Expandable Tools group — open by default so the surfaces are discoverable
+	// (the dead-end this slice fixes). Component-local; the pane + drawer each
+	// hold their own toggle, which is fine since only one is visible at a time.
+	let toolsOpen = $state(true);
 </script>
 
 <!-- The rail is the Vercel `--sidebar` surface (#fafafa / #0c0c0c) — a step off
@@ -121,6 +143,52 @@
 				{/each}
 			</ul>
 		{/if}
+
+		<!-- Tools — the expandable surface group (UX-A-2, ADR-F014). Reaches the
+		     tool surfaces from the cockpit rail; migrated surfaces render in the
+		     canvas alongside this rail (no more dead-end). -->
+		<div class="border-sidebar-border mt-3 border-t pt-3">
+			<button
+				type="button"
+				class="text-label text-muted-foreground hover:text-foreground flex w-full items-center justify-between px-2.5 pb-1.5 uppercase transition-colors duration-150"
+				aria-expanded={toolsOpen}
+				aria-controls="lq-cockpit-tools"
+				data-testid="lq-cockpit-tools-toggle"
+				onclick={() => (toolsOpen = !toolsOpen)}
+			>
+				<span>Tools</span>
+				<ChevronDownIcon
+					class="size-3.5 transition-transform duration-150 ease-out {toolsOpen
+						? ''
+						: '-rotate-90'}"
+					aria-hidden="true"
+				/>
+			</button>
+			{#if toolsOpen}
+				<ul class="space-y-0.5" id="lq-cockpit-tools" data-testid="lq-cockpit-tools">
+					{#each toolTabs as tab (tab.id)}
+						{@const Icon = tabIcon(tab.id)}
+						{@const isActive = activeTab === tab.id}
+						<li>
+							<button
+								type="button"
+								class="flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-sm font-medium transition-colors duration-150 ease-out {isActive
+									? 'bg-card text-foreground shadow-xs'
+									: tabGroupOf(tab) === 'legacy'
+										? 'text-muted-foreground/80 hover:bg-sidebar-accent hover:text-foreground'
+										: 'hover:bg-sidebar-accent'}"
+								aria-current={isActive ? 'page' : undefined}
+								data-testid="lq-cockpit-tool-{tab.id}"
+								onclick={() => onSelectTool(tab)}
+							>
+								<Icon class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+								<span class="min-w-0 truncate">{tab.label}</span>
+							</button>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</div>
 	</div>
 
 	<div class="border-sidebar-border shrink-0 border-t px-2 py-2">
