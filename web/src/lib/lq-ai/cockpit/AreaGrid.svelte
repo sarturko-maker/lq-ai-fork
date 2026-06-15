@@ -45,7 +45,11 @@
 
 <PageShell data-testid="lq-cockpit-area-grid">
 	<div in:fade|global={{ duration: motionMs(120) }}>
+		<!-- F2-M4: de-emphasised to a section header — the cockpit landing now
+		     leads with the centered intent launcher (its hero h1), so the grid
+		     reads as the secondary "or pick an area" path (page keeps one h1). -->
 		<SectionHeader
+			size="section"
 			title="Your practice"
 			subtitle="Pick a practice area to work in — each area runs its matters with its own agent."
 		/>

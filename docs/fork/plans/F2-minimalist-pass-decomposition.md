@@ -110,7 +110,19 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
   (`visibleTabsFor`/`isTabVisible`/`activeTabFor` untouched; one `<ul role="tablist">` keeps arrow-key
   nav). Resolves the M2 active-tab nit (active wins in `tabStateClass`). Strengthened the f2-baseline
   tools-skills wait (nav, not body) after a blank light-wide capture. Evidence: `docs/fork/evidence/f2-m3/`.
-- M4–M9 pending.
+- **F2-M4** — done: cockpit centered intent **launcher** (ADR-F002: launcher, NOT a composer — never
+  starts an unbound thread). New `cockpit/CenteredEntry.svelte` above a de-emphasised `AreaGrid` ("Your
+  practice" → `section` header so the page keeps a single h1), wired via a new `landingView` snippet in
+  `Cockpit.svelte` (dedupes the two `AreaGrid` render blocks). New pure `launchIntent(areas, text) →
+  {url, draft}` (`helpers.ts`, unit-tested): exactly-one-configured-area → enter it carrying the text;
+  0/several → no nav, draft held + a hint to pick an area below. The text carries via a parent-held
+  `pendingDraft` → `ConversationHost`'s new `initialDraft`/`onDraftConsumed` (seeds the composer once on
+  mount, guarded by `!prompt`, then cleared — only the first matter after a launch is seeded). Honest
+  starter chips from the user's own SavedPrompts (AE7 precedent, fail-soft → none). vitest 835 (+6);
+  f2-baseline cypress 2/2 (PHASE=after) + a throwaway interaction spec confirmed end-to-end carry-forward
+  then removed. Evidence: `docs/fork/evidence/f2-m4/`. Carry-overs (HANDOFF): the stale-draft window
+  (accepted/documented) + the multi-area hint not screenshot-able with one configured area.
+- M5–M9 pending.
 
 ## Risks / overlaps
 

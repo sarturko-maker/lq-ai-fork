@@ -114,6 +114,37 @@ export function mattersForArea<T extends AreaFileable>(matters: T[], areaKey: st
 	return matters.filter((m) => m.practice_area_key === areaKey);
 }
 
+/** Minimal area shape the centered-entry launcher reads (F2-M4). */
+interface LaunchableArea {
+	key: string;
+	configured: boolean;
+}
+
+export interface LaunchIntent {
+	/** Where to navigate now, or null when the user must pick an area first. */
+	url: string | null;
+	/** Typed text to carry forward as the conversation composer draft. */
+	draft: string;
+}
+
+/**
+ * Resolve a centered-entry submission into a navigation + a carried draft
+ * (F2-M4, ADR-F012). This is a LAUNCHER, not a composer (ADR-F002): it never
+ * starts a thread — it routes into the area→matter binding flow and carries
+ * the typed text forward as the composer draft. With exactly one configured
+ * area the destination is unambiguous, so enter it; with zero or several the
+ * user must choose, so `url` is null and the caller anchors the area grid
+ * (the draft is still returned so the choice carries the note forward).
+ */
+export function launchIntent(areas: LaunchableArea[], text: string): LaunchIntent {
+	const draft = text.trim();
+	const configured = areas.filter((a) => a.configured);
+	if (configured.length === 1) {
+		return { url: cockpitUrl({ area: configured[0].key }), draft };
+	}
+	return { url: null, draft };
+}
+
 export type Theme = 'light' | 'dark' | 'system';
 
 /** Toggle order: system → light → dark → system. */

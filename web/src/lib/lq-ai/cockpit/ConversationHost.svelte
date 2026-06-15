@@ -34,6 +34,8 @@
 		projects,
 		projectsError,
 		nowMs,
+		initialDraft = '',
+		onDraftConsumed,
 		onBack,
 		onSelectThread,
 		onThreadCreated,
@@ -47,6 +49,10 @@
 		projects: Project[];
 		projectsError: string | null;
 		nowMs: number;
+		/** F2-M4: a launcher draft to seed the fresh composer once on mount. */
+		initialDraft?: string;
+		/** Called after the launcher draft has been consumed (parent clears it). */
+		onDraftConsumed?: () => void;
 		onBack: () => void;
 		onSelectThread: (threadId: string | null) => void;
 		/** The composer created a NEW conversation — sync URL state (replaceState). */
@@ -127,7 +133,16 @@
 		}
 	}
 
-	onMount(loadThreads);
+	onMount(() => {
+		loadThreads();
+		// F2-M4: seed the composer from a launcher draft exactly once. This
+		// host remounts per matter ({#key}), and the parent clears the draft on
+		// consume, so only the FIRST matter reached after a launch gets it.
+		if (initialDraft && !prompt) {
+			prompt = initialDraft;
+			onDraftConsumed?.();
+		}
+	});
 
 	function handleSettled() {
 		loadThreads();

@@ -51,6 +51,9 @@ describe('F2 baseline capture', { retries: { runMode: 2, openMode: 0 } }, () => 
 		cy.visit('/lq-ai');
 		cy.get('[data-testid="lq-cockpit"]', { timeout: 30000 }).should('be.visible');
 		cy.get('[data-testid="lq-cockpit-area-grid"]', { timeout: 30000 }).should('exist');
+		// F2-M4: the centered intent launcher leads the landing now — wait for it
+		// so the after-capture is guaranteed to include it.
+		cy.get('[data-testid="lq-cockpit-centered-entry"]', { timeout: 30000 }).should('be.visible');
 		cy.wait(800);
 		for (const theme of ['light', 'dark'] as const) {
 			pinTheme(theme);
