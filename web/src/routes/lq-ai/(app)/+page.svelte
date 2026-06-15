@@ -1,0 +1,184 @@
+<script lang="ts">
+	/**
+	 * Cockpit landing (UX-A-1, ADR-F014) — the canvas content for `/lq-ai`,
+	 * rendered inside the shell layout (`(app)/+layout.svelte`). This is the
+	 * view-switch the cockpit lands on (MILESTONES § F1: lands on the area list,
+	 * never auto-lands in an area): area grid → matters under an area → matter
+	 * conversation → unfiled conversations, all driven by URL state
+	 * (`?area=&matter=&thread=&view=`) so every view deep-links + survives reload.
+	 *
+	 * Shared data (areas + activity + nowMs) comes from the shell via
+	 * `CockpitState` context; `projects` + the launch `pendingDraft` are
+	 * landing-local. All rollups are settled rows (ADR-F004).
+	 */
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
+
+	import { projectsApi } from '$lib/lq-ai/api';
+	import { LQAIApiError } from '$lib/lq-ai/api/client';
+	import type { MatterActivity } from '$lib/lq-ai/api/agents';
+	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
+	import type { Project } from '$lib/lq-ai/types';
+	import AreaGrid from '$lib/lq-ai/cockpit/AreaGrid.svelte';
+	import CenteredEntry from '$lib/lq-ai/cockpit/CenteredEntry.svelte';
+	import ConversationHost from '$lib/lq-ai/cockpit/ConversationHost.svelte';
+	import MattersPanel from '$lib/lq-ai/cockpit/MattersPanel.svelte';
+	import { getCockpitState } from '$lib/lq-ai/cockpit/context.svelte';
+	import { cockpitUrl, launchIntent, parseCockpitState, viewOf } from '$lib/lq-ai/cockpit/helpers';
+
+	const cockpit = getCockpitState();
+
+	const sel = $derived(parseCockpitState($page.url.searchParams));
+	const view = $derived(viewOf(sel));
+	const selectedArea = $derived(
+		cockpit.areas?.find((a) => a.key === sel.area && a.configured) ?? null
+	);
+	const selectedMatter = $derived(
+		cockpit.activity?.matters.find((m) => m.project_id === sel.matter) ?? null
+	);
+	const unitLabel = $derived(selectedArea?.unit_label ?? 'Matter');
+
+	// Landing-local: the matter composer needs the project list; a launch carries
+	// its text to the FIRST matter composer reached (seeded once, then cleared).
+	let projects = $state<Project[]>([]);
+	let projectsError = $state<string | null>(null);
+	let pendingDraft = $state('');
+
+	async function loadProjects() {
+		try {
+			projects = await projectsApi.listProjects();
+			projectsError = null;
+		} catch (e: unknown) {
+			projectsError = e instanceof LQAIApiError ? e.message : 'network error';
+		}
+	}
+
+	onMount(loadProjects);
+
+	function nav(url: string) {
+		goto(url, { keepFocus: true, noScroll: true });
+	}
+
+	function enterArea(area: PracticeArea) {
+		nav(cockpitUrl({ area: area.key }));
+	}
+
+	function launchFromEntry(text: string) {
+		// LAUNCHER, not composer (ADR-F002): resolve the typed intent to a
+		// destination + carried draft. One configured area → enter it carrying
+		// the note; otherwise the note is held and the user picks an area below.
+		const intent = launchIntent(cockpit.areas ?? [], text);
+		pendingDraft = intent.draft;
+		if (intent.url) nav(intent.url);
+	}
+
+	function openMatter(matter: MatterActivity) {
+		// Prefer the matter's OWN area so opening from the landing's recent list
+		// (where sel.area is null) deep-links + back-navigates correctly; unfiled
+		// matters (null key) open by id with no area, which the matter view allows.
+		nav(cockpitUrl({ area: matter.practice_area_key ?? sel.area, matter: matter.project_id }));
+	}
+
+	function onMatterCreated(project: Project) {
+		cockpit.loadActivity();
+		loadProjects();
+		nav(cockpitUrl({ area: sel.area, matter: project.id }));
+	}
+
+	function onMatterCreatedInline(project: Project) {
+		// Quick-create from the composer: the select needs the option NOW —
+		// append optimistically, then reconcile from the server.
+		projects = [project, ...projects];
+		cockpit.loadActivity();
+		loadProjects();
+	}
+
+	function selectThread(threadId: string | null) {
+		nav(
+			sel.unfiled
+				? cockpitUrl({ unfiled: true, thread: threadId })
+				: cockpitUrl({ area: sel.area, matter: sel.matter, thread: threadId })
+		);
+	}
+
+	function onThreadCreated(detail: { threadId: string; projectId: string | null }) {
+		// Sync the URL to the conversation the panel just created so the
+		// deep-link/reload contract holds. If the user re-pointed the composer's
+		// matter select, follow the REAL binding (the thread files under ITS
+		// matter, not the open one). replaceState: the fresh-composer state isn't
+		// a history entry worth keeping.
+		const matterId = sel.unfiled ? null : (detail.projectId ?? sel.matter);
+		goto(
+			sel.unfiled && detail.projectId === null
+				? cockpitUrl({ unfiled: true, thread: detail.threadId })
+				: cockpitUrl({ area: sel.area, matter: matterId, thread: detail.threadId }),
+			{ replaceState: true, keepFocus: true, noScroll: true }
+		);
+		cockpit.loadActivity();
+	}
+</script>
+
+{#snippet landingView()}
+	<!-- The centered intent LAUNCHER above the (de-emphasised) area grid. A
+	     launcher, not a composer (ADR-F002): it routes into the area→matter flow
+	     rather than starting an unbound thread. -->
+	<CenteredEntry areas={cockpit.areas} onLaunch={launchFromEntry} />
+	<AreaGrid
+		areas={cockpit.areas}
+		areasError={cockpit.areasError}
+		matters={cockpit.activity?.matters ?? null}
+		nowMs={cockpit.nowMs}
+		onEnterArea={enterArea}
+		onOpenMatter={openMatter}
+	/>
+{/snippet}
+
+{#if view === 'areas'}
+	{@render landingView()}
+{:else if view === 'matters' && selectedArea}
+	<MattersPanel
+		area={selectedArea}
+		matters={cockpit.activity?.matters ?? null}
+		mattersError={cockpit.activityError}
+		nowMs={cockpit.nowMs}
+		onBack={() => nav(cockpitUrl({}))}
+		onOpenMatter={openMatter}
+		onCreated={onMatterCreated}
+	/>
+{:else if view === 'matter' && selectedMatter}
+	{#key selectedMatter.project_id}
+		<ConversationHost
+			matter={selectedMatter}
+			{unitLabel}
+			threadId={sel.thread}
+			{projects}
+			{projectsError}
+			nowMs={cockpit.nowMs}
+			initialDraft={pendingDraft}
+			onDraftConsumed={() => (pendingDraft = '')}
+			onBack={() => nav(cockpitUrl({ area: sel.area }))}
+			onSelectThread={selectThread}
+			{onThreadCreated}
+			onMatterCreated={onMatterCreatedInline}
+			onActivity={() => cockpit.loadActivity()}
+		/>
+	{/key}
+{:else if view === 'unfiled'}
+	<ConversationHost
+		matter={null}
+		threadId={sel.thread}
+		{projects}
+		{projectsError}
+		nowMs={cockpit.nowMs}
+		onBack={() => nav(cockpitUrl({}))}
+		onSelectThread={selectThread}
+		{onThreadCreated}
+		onMatterCreated={onMatterCreatedInline}
+		onActivity={() => cockpit.loadActivity()}
+	/>
+{:else}
+	<!-- Selection points at something not loaded/not enterable (stale deep link,
+	     unconfigured area) — land honestly. -->
+	{@render landingView()}
+{/if}
