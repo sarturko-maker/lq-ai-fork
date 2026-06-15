@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>LQ.AI — in the style of: Supabase Studio (Apache-2.0)</title>
+		<!-- Emulates the FEEL of supabase/supabase Studio (Apache-2.0): charcoal dashboard,
+		     green accent, dense data, icon sidebar, monospace IDs. Original CSS; no code copied. -->
+		<style>
+			:root {
+				--bg: #1c1c1c;
+				--side: #171717;
+				--panel: #232323;
+				--panel-2: #2a2a2a;
+				--fg: #ededed;
+				--muted: #8f8f8f;
+				--border: #2e2e2e;
+				--border-2: #3a3a3a;
+				--green: #3ecf8e;
+				--green-fg: #00261a;
+				--green-dim: #006239;
+				--green-bg: #11271f;
+				--amber: #f5a623;
+				--amber-bg: #2a2008;
+				--red: #f56565;
+				--red-bg: #2a1414;
+				--radius: 6px;
+				--font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+				--mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+			}
+			* { box-sizing: border-box; }
+			body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--fg); font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+			.app { display: grid; grid-template-columns: 54px 230px 1fr; min-height: 100vh; }
+			.rail { background: var(--side); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 6px; }
+			.rail .logo { width: 30px; height: 30px; border-radius: 7px; background: var(--green); color: var(--green-fg); display: grid; place-items: center; font-weight: 800; margin-bottom: 10px; }
+			.rail .r-ico { width: 36px; height: 36px; border-radius: 7px; display: grid; place-items: center; color: var(--muted); cursor: pointer; }
+			.rail .r-ico:hover, .rail .r-ico.active { background: var(--panel); color: var(--fg); }
+			.icon { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+			.nav { background: var(--side); border-right: 1px solid var(--border); padding: 16px 12px; }
+			.nav h2 { font-size: 14px; font-weight: 600; margin: 4px 8px 14px; }
+			.nav .n-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 12px 8px 4px; }
+			.nav .n-item { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: var(--radius); font-size: 13px; color: var(--muted); cursor: pointer; }
+			.nav .n-item:hover { background: var(--panel); color: var(--fg); }
+			.nav .n-item.active { background: var(--panel); color: var(--green); }
+			.main { display: flex; flex-direction: column; min-width: 0; }
+			.topbar { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 20px; border-bottom: 1px solid var(--border); }
+			.crumb { font-size: 13px; color: var(--muted); }
+			.crumb b { color: var(--fg); font-weight: 600; }
+			.btn { font-size: 12.5px; font-weight: 500; border-radius: var(--radius); padding: 6px 12px; cursor: pointer; border: 1px solid var(--border-2); background: var(--panel); color: var(--fg); display: inline-flex; gap: 6px; align-items: center; }
+			.btn-green { background: var(--green); color: var(--green-fg); border-color: var(--green); font-weight: 600; }
+			.content { padding: 22px 24px; display: flex; flex-direction: column; gap: 22px; }
+			.h-row { display: flex; align-items: center; justify-content: space-between; }
+			.page-h { font-size: 19px; font-weight: 600; margin: 0; }
+			.sub { font-size: 12.5px; color: var(--muted); margin: 3px 0 0; }
+			.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+			.stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+			.stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+			.stat .v { font-size: 22px; font-weight: 600; margin-top: 4px; }
+			.stat .v small { font-size: 12px; color: var(--green); font-weight: 500; }
+			.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+			.panel .p-head { padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+			table { width: 100%; border-collapse: collapse; }
+			th, td { text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+			th { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+			tbody tr:last-child td { border-bottom: 0; }
+			tbody tr:hover { background: var(--panel-2); }
+			.mono { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+			.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; border-radius: 9999px; padding: 2px 9px; border: 1px solid transparent; }
+			.pill .dot { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; }
+			.pill.run { color: var(--green); background: var(--green-bg); border-color: var(--green-dim); }
+			.pill.done { color: var(--green); background: var(--green-bg); }
+			.pill.fail { color: var(--red); background: var(--red-bg); }
+			.pill.idle { color: var(--muted); background: var(--panel-2); }
+		</style>
+	</head>
+	<body>
+		<div class="app">
+			<nav class="rail">
+				<div class="logo">L</div>
+				<div class="r-ico active"><svg class="icon" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></div>
+				<div class="r-ico"><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+				<div class="r-ico"><svg class="icon" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
+				<div class="r-ico"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+			</nav>
+			<nav class="nav">
+				<h2>Commercial</h2>
+				<div class="n-label">Practice</div>
+				<div class="n-item active"><svg class="icon" viewBox="0 0 24 24" style="width:15px;height:15px"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg> Overview</div>
+				<div class="n-item"><svg class="icon" viewBox="0 0 24 24" style="width:15px;height:15px"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg> Matters</div>
+				<div class="n-item"><svg class="icon" viewBox="0 0 24 24" style="width:15px;height:15px"><path d="m14.7 6.3 3 3M5 19l4-1 9.5-9.5a2.1 2.1 0 0 0-3-3L6 15z"/></svg> Skills</div>
+				<div class="n-item"><svg class="icon" viewBox="0 0 24 24" style="width:15px;height:15px"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18M9 21V9"/></svg> Tabular</div>
+				<div class="n-label">Workspace</div>
+				<div class="n-item"><svg class="icon" viewBox="0 0 24 24" style="width:15px;height:15px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg> Knowledge</div>
+				<div class="n-item"><svg class="icon" viewBox="0 0 24 24" style="width:15px;height:15px"><circle cx="12" cy="12" r="10"/></svg> Settings</div>
+			</nav>
+			<div class="main">
+				<div class="topbar">
+					<span class="crumb">Commercial <b>/ Overview</b></span>
+					<button class="btn btn-green"><svg class="icon" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M5 12h14"/><path d="M12 5v14"/></svg> New matter</button>
+				</div>
+				<div class="content">
+					<div class="h-row">
+						<div><h1 class="page-h">What are you working on?</h1><p class="sub">State the intent — the Commercial deep agent picks its own tools, skills and playbooks.</p></div>
+					</div>
+					<div class="stats">
+						<div class="stat"><div class="k">Open matters</div><div class="v">12</div></div>
+						<div class="stat"><div class="k">Running</div><div class="v">3 <small>live</small></div></div>
+						<div class="stat"><div class="k">Skills active</div><div class="v">28</div></div>
+						<div class="stat"><div class="k">This week</div><div class="v">£4.1k <small>+8%</small></div></div>
+					</div>
+					<div class="panel">
+						<div class="p-head"><span>Recent matters</span><span class="mono">commercial.matters</span></div>
+						<table>
+							<thead><tr><th>Matter</th><th>Skill</th><th>Scope</th><th>Status</th><th>Updated</th></tr></thead>
+							<tbody>
+								<tr><td>NDA — Acme SaaS pilot</td><td>Contract Snapshot</td><td class="mono">12 docs · 6 cols</td><td><span class="pill done"><span class="dot"></span>completed</span></td><td class="mono">Jun 15</td></tr>
+								<tr><td>MSA review — Northwind</td><td>MSA Snapshot</td><td class="mono">4 docs · 8 cols</td><td><span class="pill run"><span class="dot"></span>running</span></td><td class="mono">Jun 15</td></tr>
+								<tr><td>SaaS terms — Project Iris</td><td>—</td><td class="mono">1 doc</td><td><span class="pill fail"><span class="dot"></span>failed</span></td><td class="mono">Jun 14</td></tr>
+								<tr><td>DPA addendum — Q2</td><td>—</td><td class="mono">2 docs</td><td><span class="pill idle"><span class="dot"></span>idle</span></td><td class="mono">Jun 13</td></tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+	</body>
+</html>

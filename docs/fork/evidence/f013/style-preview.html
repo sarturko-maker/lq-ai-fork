@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="en" class="light">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>F013 — design-language preview (proposed)</title>
+		<!--
+			F013 style tile — a STANDALONE, NON-PRODUCTION preview of the proposed
+			design-language token values (docs/fork/plans/F013-token-language-spec.md).
+			Open in any browser; toggle light/dark top-right.
+
+			Provenance (ADR-F013): values are our own, chosen to evoke a calm minimalist
+			feel. No scira code is copied. Colors are LQ.AI's existing semantic oklch
+			tokens (app.css); type / spacing / motion / radius are the F013 PROPOSALS.
+			This file touches no app code and ships nothing — review artifact only.
+		-->
+		<style>
+			/* ============================================================
+			   TOKENS — colour (existing, app.css) + F013 PROPOSALS
+			   ============================================================ */
+			:root {
+				/* colour — light (verbatim from app.css :root) */
+				--background: oklch(0.965 0.004 90);
+				--foreground: oklch(0.21 0.01 80);
+				--card: oklch(1 0 0);
+				--muted: oklch(0.945 0.005 90);
+				--muted-foreground: oklch(0.45 0.012 85);
+				--primary: oklch(0.47 0.15 262);
+				--primary-foreground: oklch(0.985 0.003 90);
+				--accent: oklch(0.96 0.02 262);
+				--accent-foreground: oklch(0.32 0.05 262);
+				--border: oklch(0.9 0.005 90);
+				--ring: oklch(0.47 0.15 262);
+				--status-running: oklch(0.55 0.14 262);
+				--status-running-wash: oklch(0.96 0.02 262);
+				--status-completed: oklch(0.55 0.12 155);
+				--status-completed-wash: oklch(0.96 0.03 155);
+				--status-failed: oklch(0.55 0.19 27);
+				--status-failed-wash: oklch(0.96 0.02 27);
+				--status-cancelled: oklch(0.55 0.01 90);
+				--status-cancelled-wash: oklch(0.95 0.004 90);
+
+				/* elevation — light: soft cool float (app.css F1-S2.1) */
+				--elevation-xs: 0 1px 2px oklch(0.25 0.02 262 / 0.05);
+				--elevation-sm: 0 1px 2px oklch(0.25 0.02 262 / 0.05), 0 2px 8px oklch(0.25 0.02 262 / 0.04);
+				--elevation-md: 0 2px 4px oklch(0.25 0.02 262 / 0.05), 0 8px 24px oklch(0.25 0.02 262 / 0.07);
+
+				/* ---- F013 PROPOSALS ---- */
+				/* radius — proposed soften 8px -> 10px base */
+				--radius: 0.625rem;
+				--radius-sm: calc(var(--radius) * 0.6);
+				--radius-lg: calc(var(--radius) * 1.4);
+
+				/* type scale (rem; 1rem = 16px) — role / size / line-height / weight / tracking */
+				--text-display: 2.25rem; /* 36 */
+				--text-title: 1.5rem; /* 24 */
+				--text-heading: 1.125rem; /* 18 */
+				--text-subheading: 1rem; /* 16 */
+				--text-body: 0.9375rem; /* 15 */
+				--text-body-sm: 0.875rem; /* 14 */
+				--text-caption: 0.8125rem; /* 13 */
+				--text-label: 0.75rem; /* 12 */
+
+				/* motion */
+				--motion-fast: 100ms;
+				--motion-base: 160ms;
+				--motion-slow: 240ms;
+				--motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+				--motion-ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
+
+				--font-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+					Helvetica, Arial, sans-serif;
+				color-scheme: light;
+			}
+
+			html.dark {
+				/* colour — charcoal dark (verbatim from app.css .dark; never #000) */
+				--background: oklch(0.23 0.006 262);
+				--foreground: oklch(0.93 0.004 90);
+				--card: oklch(0.28 0.006 262);
+				--muted: oklch(0.32 0.006 262);
+				--muted-foreground: oklch(0.71 0.008 90);
+				--primary: oklch(0.62 0.14 262);
+				--primary-foreground: oklch(0.985 0.003 90);
+				--accent: oklch(0.33 0.04 262);
+				--accent-foreground: oklch(0.9 0.02 262);
+				--border: oklch(0.37 0.006 262);
+				--ring: oklch(0.62 0.14 262);
+				--status-running: oklch(0.68 0.13 262);
+				--status-running-wash: oklch(0.32 0.04 262);
+				--status-completed: oklch(0.7 0.12 155);
+				--status-completed-wash: oklch(0.32 0.04 155);
+				--status-failed: oklch(0.68 0.17 27);
+				--status-failed-wash: oklch(0.32 0.04 27);
+				--status-cancelled: oklch(0.68 0.008 90);
+				--status-cancelled-wash: oklch(0.31 0.006 262);
+				/* dark: border-first, shadows barely read on charcoal */
+				--elevation-xs: 0 1px 2px oklch(0 0 0 / 0.35);
+				--elevation-sm: 0 1px 2px oklch(0 0 0 / 0.4), 0 2px 8px oklch(0 0 0 / 0.3);
+				--elevation-md: 0 2px 4px oklch(0 0 0 / 0.4), 0 8px 24px oklch(0 0 0 / 0.35);
+				color-scheme: dark;
+			}
+
+			/* ============================================================
+			   BASE
+			   ============================================================ */
+			* {
+				box-sizing: border-box;
+			}
+			body {
+				margin: 0;
+				font-family: var(--font-sans);
+				background: var(--background);
+				color: var(--foreground);
+				font-size: var(--text-body);
+				line-height: 1.55;
+				-webkit-font-smoothing: antialiased;
+				transition:
+					background var(--motion-base) var(--motion-ease-standard),
+					color var(--motion-base) var(--motion-ease-standard);
+			}
+
+			/* type roles */
+			.t-display {
+				font-size: var(--text-display);
+				line-height: 1.15;
+				font-weight: 600;
+				letter-spacing: -0.02em;
+				margin: 0;
+			}
+			.t-title {
+				font-size: var(--text-title);
+				line-height: 1.25;
+				font-weight: 600;
+				letter-spacing: -0.015em;
+				margin: 0;
+			}
+			.t-heading {
+				font-size: var(--text-heading);
+				line-height: 1.35;
+				font-weight: 600;
+				letter-spacing: -0.01em;
+				margin: 0;
+			}
+			.t-subheading {
+				font-size: var(--text-subheading);
+				line-height: 1.4;
+				font-weight: 600;
+				margin: 0;
+			}
+			.t-body {
+				font-size: var(--text-body);
+				line-height: 1.55;
+				margin: 0;
+			}
+			.t-body-sm {
+				font-size: var(--text-body-sm);
+				line-height: 1.5;
+				margin: 0;
+			}
+			.t-caption {
+				font-size: var(--text-caption);
+				line-height: 1.45;
+				color: var(--muted-foreground);
+				margin: 0;
+			}
+			.t-label {
+				font-size: var(--text-label);
+				line-height: 1.3;
+				font-weight: 600;
+				letter-spacing: 0.06em;
+				text-transform: uppercase;
+				color: var(--muted-foreground);
+				margin: 0;
+			}
+			.muted {
+				color: var(--muted-foreground);
+			}
+
+			/* ============================================================
+			   LAYOUT — minimal chrome + centered page shell
+			   ============================================================ */
+			.chrome {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				padding: 0 32px;
+				height: 56px;
+				border-bottom: 1px solid var(--border);
+				position: sticky;
+				top: 0;
+				background: color-mix(in oklch, var(--background) 88%, transparent);
+				backdrop-filter: saturate(1.4) blur(8px);
+				z-index: 5;
+			}
+			.brand {
+				font-weight: 700;
+				letter-spacing: -0.02em;
+			}
+			.brand b {
+				color: var(--primary);
+			}
+			.chrome-right {
+				display: flex;
+				align-items: center;
+				gap: 18px;
+			}
+			.shell {
+				max-width: 64rem;
+				margin: 0 auto;
+				padding: 56px 32px 80px;
+			}
+			.stack {
+				display: flex;
+				flex-direction: column;
+				gap: 56px; /* section rhythm — generous */
+			}
+
+			/* ---- hero (launcher mock) ---- */
+			.hero {
+				text-align: center;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				gap: 20px;
+				padding-top: 24px;
+			}
+			.hero p.sub {
+				max-width: 52ch;
+				color: var(--muted-foreground);
+			}
+			.composer {
+				width: 100%;
+				max-width: 640px;
+				margin-top: 8px;
+				display: flex;
+				align-items: flex-end;
+				gap: 10px;
+				background: var(--card);
+				border: 1px solid var(--border);
+				border-radius: var(--radius-lg);
+				box-shadow: var(--elevation-sm);
+				padding: 14px 14px 14px 18px;
+				transition:
+					box-shadow var(--motion-base) var(--motion-ease-standard),
+					border-color var(--motion-base) var(--motion-ease-standard);
+			}
+			.composer:focus-within {
+				border-color: var(--ring);
+				box-shadow:
+					var(--elevation-md),
+					0 0 0 3px color-mix(in oklch, var(--ring) 22%, transparent);
+			}
+			.composer textarea {
+				flex: 1;
+				border: 0;
+				outline: 0;
+				resize: none;
+				background: transparent;
+				color: var(--foreground);
+				font: inherit;
+				line-height: 1.5;
+				min-height: 26px;
+			}
+			.composer textarea::placeholder {
+				color: var(--muted-foreground);
+			}
+			.send {
+				flex-shrink: 0;
+				width: 38px;
+				height: 38px;
+				border-radius: calc(var(--radius) * 0.9);
+				border: 0;
+				background: var(--primary);
+				color: var(--primary-foreground);
+				font-size: 18px;
+				cursor: pointer;
+				display: grid;
+				place-items: center;
+				transition: transform var(--motion-fast) var(--motion-ease-emphasized);
+			}
+			.send:hover {
+				transform: translateY(-1px);
+			}
+			.chips {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px;
+				justify-content: center;
+				margin-top: 4px;
+			}
+			.chip {
+				font-size: var(--text-caption);
+				color: var(--muted-foreground);
+				background: var(--card);
+				border: 1px solid var(--border);
+				border-radius: 9999px;
+				padding: 6px 14px;
+				cursor: pointer;
+				transition:
+					color var(--motion-fast) var(--motion-ease-standard),
+					border-color var(--motion-fast) var(--motion-ease-standard);
+			}
+			.chip:hover {
+				color: var(--foreground);
+				border-color: var(--muted-foreground);
+			}
+
+			/* ---- section header ---- */
+			.section-head {
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+				margin-bottom: 20px;
+			}
+
+			/* ---- area cards ---- */
+			.grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+				gap: 16px;
+			}
+			.card {
+				background: var(--card);
+				border: 1px solid var(--border);
+				border-radius: var(--radius-lg);
+				padding: 22px;
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+				cursor: pointer;
+				transition:
+					transform var(--motion-base) var(--motion-ease-standard),
+					box-shadow var(--motion-base) var(--motion-ease-standard),
+					border-color var(--motion-base) var(--motion-ease-standard);
+			}
+			.card:hover {
+				transform: translateY(-2px);
+				box-shadow: var(--elevation-md);
+				border-color: color-mix(in oklch, var(--primary) 35%, var(--border));
+			}
+			.card .icon {
+				width: 34px;
+				height: 34px;
+				border-radius: var(--radius-sm);
+				display: grid;
+				place-items: center;
+				background: var(--accent);
+				color: var(--accent-foreground);
+				font-size: 18px;
+			}
+			.card-foot {
+				display: flex;
+				gap: 8px;
+				align-items: center;
+				margin-top: 4px;
+			}
+
+			/* ---- buttons ---- */
+			.btn-row {
+				display: flex;
+				gap: 12px;
+				align-items: center;
+				flex-wrap: wrap;
+			}
+			.btn {
+				font-size: var(--text-body-sm);
+				font-weight: 500;
+				border-radius: calc(var(--radius) * 0.85);
+				padding: 9px 16px;
+				cursor: pointer;
+				border: 1px solid transparent;
+				transition:
+					background var(--motion-fast) var(--motion-ease-standard),
+					color var(--motion-fast) var(--motion-ease-standard),
+					border-color var(--motion-fast) var(--motion-ease-standard);
+			}
+			.btn-primary {
+				background: var(--primary);
+				color: var(--primary-foreground);
+			}
+			.btn-primary:hover {
+				filter: brightness(1.05);
+			}
+			.btn-secondary {
+				background: transparent;
+				color: var(--foreground);
+				border-color: var(--border);
+			}
+			.btn-secondary:hover {
+				background: var(--muted);
+			}
+			.btn-ghost {
+				background: transparent;
+				color: var(--muted-foreground);
+			}
+			.btn-ghost:hover {
+				color: var(--foreground);
+			}
+
+			/* ---- status pills ---- */
+			.pills {
+				display: flex;
+				gap: 10px;
+				flex-wrap: wrap;
+				align-items: center;
+			}
+			.pill {
+				font-size: var(--text-caption);
+				font-weight: 500;
+				border-radius: 9999px;
+				padding: 3px 11px;
+			}
+			.pill.running {
+				background: var(--status-running-wash);
+				color: var(--status-running);
+			}
+			.pill.completed {
+				background: var(--status-completed-wash);
+				color: var(--status-completed);
+			}
+			.pill.failed {
+				background: var(--status-failed-wash);
+				color: var(--status-failed);
+			}
+			.pill.cancelled {
+				background: var(--status-cancelled-wash);
+				color: var(--status-cancelled);
+			}
+
+			/* ---- table ---- */
+			table {
+				width: 100%;
+				border-collapse: collapse;
+				background: var(--card);
+				border: 1px solid var(--border);
+				border-radius: var(--radius-lg);
+				overflow: hidden;
+				font-size: var(--text-body-sm);
+			}
+			th,
+			td {
+				text-align: left;
+				padding: 12px 16px;
+				border-bottom: 1px solid var(--border);
+			}
+			th {
+				font-size: var(--text-label);
+				letter-spacing: 0.06em;
+				text-transform: uppercase;
+				color: var(--muted-foreground);
+				font-weight: 600;
+			}
+			tbody tr:last-child td {
+				border-bottom: 0;
+			}
+			tbody tr:hover {
+				background: var(--muted);
+			}
+
+			/* ---- type specimen ---- */
+			.specimen {
+				display: flex;
+				flex-direction: column;
+				gap: 16px;
+			}
+			.specimen .row {
+				display: flex;
+				align-items: baseline;
+				gap: 18px;
+				padding-bottom: 14px;
+				border-bottom: 1px solid var(--border);
+			}
+			.specimen .row:last-child {
+				border-bottom: 0;
+			}
+			.specimen .tag {
+				flex-shrink: 0;
+				width: 150px;
+				color: var(--muted-foreground);
+				font-size: var(--text-caption);
+				font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+			}
+
+			/* ---- token legend ---- */
+			.legend {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+				gap: 16px;
+			}
+			.swatch {
+				background: var(--card);
+				border: 1px solid var(--border);
+				border-radius: var(--radius-lg);
+				padding: 16px;
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+			}
+			.radius-demo {
+				height: 44px;
+				background: var(--accent);
+				border: 1px solid color-mix(in oklch, var(--primary) 30%, var(--border));
+			}
+			.space-demo {
+				display: flex;
+				gap: 6px;
+				align-items: flex-end;
+				height: 44px;
+			}
+			.space-demo span {
+				background: var(--primary);
+				width: 14px;
+				border-radius: 3px;
+			}
+			.divider {
+				height: 1px;
+				background: var(--border);
+				border: 0;
+			}
+
+			.toggle {
+				font-size: var(--text-body-sm);
+				color: var(--muted-foreground);
+				background: var(--card);
+				border: 1px solid var(--border);
+				border-radius: 9999px;
+				padding: 6px 14px;
+				cursor: pointer;
+			}
+			.toggle:hover {
+				color: var(--foreground);
+			}
+			.nav-link {
+				font-size: var(--text-body-sm);
+				color: var(--muted-foreground);
+				cursor: pointer;
+			}
+			.nav-link.active {
+				color: var(--primary);
+				font-weight: 600;
+			}
+			.note {
+				font-size: var(--text-caption);
+				color: var(--muted-foreground);
+				background: var(--muted);
+				border-radius: var(--radius);
+				padding: 12px 16px;
+			}
+		</style>
+	</head>
+	<body>
+		<header class="chrome">
+			<span class="brand">LQ<b>.AI</b></span>
+			<nav class="chrome-right">
+				<span class="nav-link active">Home</span>
+				<span class="nav-link">Agents</span>
+				<span class="nav-link">Matters</span>
+				<span class="nav-link">Skills</span>
+				<button class="toggle" onclick="document.documentElement.classList.toggle('dark')">
+					◐ theme
+				</button>
+			</nav>
+		</header>
+
+		<main class="shell">
+			<div class="stack">
+				<!-- HERO / launcher -->
+				<section class="hero">
+					<h1 class="t-display">What are you working on?</h1>
+					<p class="t-body sub">
+						State the intent — your practice-area deep agent picks its own tools, skills and
+						playbooks, and works visibly.
+					</p>
+					<div class="composer">
+						<textarea
+							rows="1"
+							placeholder="Draft a mutual NDA for a SaaS pilot, UK law, 2-year term…"
+						></textarea>
+						<button class="send" title="Launch">↑</button>
+					</div>
+					<div class="chips">
+						<span class="chip">Review this contract</span>
+						<span class="chip">Summarise key risks</span>
+						<span class="chip">Compare to our standard</span>
+					</div>
+				</section>
+
+				<!-- AREA CARDS -->
+				<section>
+					<div class="section-head">
+						<h2 class="t-heading">Your practice</h2>
+						<p class="t-caption">Configured practice areas — each one a deep agent.</p>
+					</div>
+					<div class="grid">
+						<div class="card">
+							<span class="icon">⚖️</span>
+							<h3 class="t-subheading">Commercial</h3>
+							<p class="t-caption">Matters, NDAs, MSAs, SaaS terms.</p>
+							<div class="card-foot">
+								<span class="pill completed">3 matters</span>
+							</div>
+						</div>
+						<div class="card">
+							<span class="icon">🛡️</span>
+							<h3 class="t-subheading">Privacy</h3>
+							<p class="t-caption">GDPR programmes, DPIAs, ROPA.</p>
+							<div class="card-foot"><span class="pill running">running</span></div>
+						</div>
+						<div class="card">
+							<span class="icon">🤝</span>
+							<h3 class="t-subheading">M&amp;A</h3>
+							<p class="t-caption">Due diligence, disclosure.</p>
+							<div class="card-foot"><span class="pill cancelled">idle</span></div>
+						</div>
+					</div>
+				</section>
+
+				<!-- COMPONENTS -->
+				<section>
+					<div class="section-head">
+						<h2 class="t-heading">Components</h2>
+						<p class="t-caption">Single scarce indigo accent · soft hairline borders · pastel tones.</p>
+					</div>
+					<div class="stack" style="gap: 28px">
+						<div class="btn-row">
+							<button class="btn btn-primary">Primary action</button>
+							<button class="btn btn-secondary">Secondary</button>
+							<button class="btn btn-ghost">Ghost</button>
+						</div>
+						<div class="pills">
+							<span class="pill running">running</span>
+							<span class="pill completed">completed</span>
+							<span class="pill failed">failed</span>
+							<span class="pill cancelled">cancelled</span>
+						</div>
+						<table>
+							<thead>
+								<tr>
+									<th>Skill</th>
+									<th>Scope</th>
+									<th>Status</th>
+									<th>Created</th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr>
+									<td>Contract Snapshot</td>
+									<td class="muted">12 docs · 6 cols</td>
+									<td><span class="pill completed">completed</span></td>
+									<td class="muted">Jun 15, 2026</td>
+								</tr>
+								<tr>
+									<td>MSA Snapshot</td>
+									<td class="muted">4 docs · 8 cols</td>
+									<td><span class="pill running">running</span></td>
+									<td class="muted">Jun 15, 2026</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+				</section>
+
+				<!-- TYPE SPECIMEN -->
+				<section>
+					<div class="section-head">
+						<h2 class="t-heading">Type scale</h2>
+						<p class="t-caption">Inter · role-named ramp (proposed F013 §1).</p>
+					</div>
+					<div class="specimen">
+						<div class="row">
+							<span class="tag">display · 36</span><span class="t-display">Aa</span>
+						</div>
+						<div class="row"><span class="tag">title · 24</span><span class="t-title">Aa Title</span></div>
+						<div class="row">
+							<span class="tag">heading · 18</span><span class="t-heading">Aa Heading</span>
+						</div>
+						<div class="row">
+							<span class="tag">subheading · 16</span><span class="t-subheading">Aa Subheading</span>
+						</div>
+						<div class="row"><span class="tag">body · 15</span><span class="t-body">The quick brown fox jumps over the lazy dog.</span></div>
+						<div class="row">
+							<span class="tag">body-sm · 14</span><span class="t-body-sm">The quick brown fox jumps over the lazy dog.</span>
+						</div>
+						<div class="row">
+							<span class="tag">caption · 13</span><span class="t-caption">The quick brown fox.</span>
+						</div>
+						<div class="row"><span class="tag">label · 12</span><span class="t-label">Overline label</span></div>
+					</div>
+				</section>
+
+				<!-- TOKEN LEGEND -->
+				<section>
+					<div class="section-head">
+						<h2 class="t-heading">Foundations</h2>
+						<p class="t-caption">Radius (proposed 10px) · spacing rhythm (4px base) · motion.</p>
+					</div>
+					<div class="legend">
+						<div class="swatch">
+							<span class="t-label">Radius · 10px</span>
+							<div class="radius-demo" style="border-radius: var(--radius-lg)"></div>
+							<p class="t-caption">Soft card / input</p>
+						</div>
+						<div class="swatch">
+							<span class="t-label">Spacing · 4px base</span>
+							<div class="space-demo">
+								<span style="height: 8px"></span>
+								<span style="height: 12px"></span>
+								<span style="height: 20px"></span>
+								<span style="height: 32px"></span>
+								<span style="height: 44px"></span>
+							</div>
+							<p class="t-caption">8 · 12 · 20 · 32 · 44</p>
+						</div>
+						<div class="swatch">
+							<span class="t-label">Motion</span>
+							<p class="t-body-sm" style="margin: 4px 0">100 / 160 / 240 ms</p>
+							<p class="t-caption">standard cubic-bezier(.2,0,0,1) — subtle, fast, never bouncy.</p>
+						</div>
+						<div class="swatch">
+							<span class="t-label">Accent · scarce</span>
+							<div style="display: flex; gap: 8px; align-items: center">
+								<span style="width: 28px; height: 28px; border-radius: 8px; background: var(--primary)"></span>
+								<span style="width: 28px; height: 28px; border-radius: 8px; background: var(--accent)"></span>
+								<span style="width: 28px; height: 28px; border-radius: 8px; background: var(--muted)"></span>
+							</div>
+							<p class="t-caption">primary · accent-wash · muted</p>
+						</div>
+					</div>
+				</section>
+
+				<hr class="divider" />
+				<p class="note">
+					Preview only — non-production, no app code touched. Colours are LQ.AI's existing semantic
+					oklch tokens (app.css); type / spacing / motion / radius are the <b>F013 proposals</b>
+					(docs/fork/plans/F013-token-language-spec.md). No scira code copied (ADR-F013). Toggle the
+					theme top-right; resize the window to see the responsive grid.
+				</p>
+			</div>
+		</main>
+	</body>
+</html>

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en" class="light">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>LQ.AI — chosen direction: Vercel (Commerce look + Chatbot layout)</title>
+		<!--
+			F013 CHOSEN DIRECTION. Vercel aesthetic:
+			- LOOK from vercel/commerce (MIT): ultra-minimal, typography-led, near-monochrome,
+			  thin hairline borders, generous whitespace, one scarce blue accent.
+			- LAYOUT from vercel/ai-chatbot (Apache-2.0): left sidebar (recent matters + New matter)
+			  + main centred cockpit launcher.
+			Original CSS; no code copied. Review artifact only. Theme toggle top-right.
+			Dark canvas is charcoal #111 (NOT Vercel's pure #000) to honour the maintainer rule
+			"don't use black background — charcoal."
+		-->
+		<style>
+			:root {
+				--bg: #ffffff;
+				--side: #fafafa;
+				--fg: #111111;
+				--muted: #707070;
+				--faint: #999999;
+				--border: #ededed;
+				--border-strong: #e2e2e2;
+				--hover: #f5f5f5;
+				--primary: #111111;
+				--primary-fg: #ffffff;
+				--accent: #0070f3;
+				--green: #0f7b34;
+				--red: #c4271a;
+				--font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, sans-serif;
+				--mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+			}
+			html.dark {
+				--bg: #111111;
+				--side: #0c0c0c;
+				--fg: #ededed;
+				--muted: #8f8f8f;
+				--faint: #6b6b6b;
+				--border: #262626;
+				--border-strong: #333333;
+				--hover: #1a1a1a;
+				--primary: #ededed;
+				--primary-fg: #111111;
+				--accent: #47a3ff;
+				--green: #4ade80;
+				--red: #f87171;
+			}
+			* { box-sizing: border-box; }
+			body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+			.icon { stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+			.app { display: grid; grid-template-columns: 264px 1fr; min-height: 100vh; }
+
+			/* ---- sidebar (chatbot layout, commerce minimalism) ---- */
+			.sidebar { background: var(--side); border-right: 1px solid var(--border); padding: 20px 14px; display: flex; flex-direction: column; }
+			.brand { font-weight: 700; letter-spacing: -0.03em; font-size: 16px; padding: 4px 8px 18px; }
+			.newbtn { display: flex; align-items: center; gap: 8px; justify-content: center; background: var(--primary); color: var(--primary-fg); border: 0; border-radius: 8px; padding: 9px 12px; font-size: 13px; font-weight: 500; cursor: pointer; }
+			.newbtn .icon { width: 15px; height: 15px; stroke-width: 2; }
+			.eyebrow { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: var(--faint); padding: 22px 8px 8px; }
+			.m-item { padding: 8px 8px; border-radius: 7px; font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+			.m-item:hover { background: var(--hover); color: var(--fg); }
+			.m-item.active { color: var(--fg); font-weight: 500; }
+			.m-item .when { font-size: 11px; color: var(--faint); }
+			.sb-foot { margin-top: auto; display: flex; align-items: center; gap: 9px; padding: 10px 8px 2px; border-top: 1px solid var(--border); }
+			.avatar { width: 26px; height: 26px; border-radius: 9999px; background: var(--hover); border: 1px solid var(--border); display: grid; place-items: center; font-size: 11px; font-weight: 600; }
+			.sb-foot .who { font-size: 12px; }
+			.sb-foot .who small { color: var(--faint); display: block; }
+
+			/* ---- main ---- */
+			.main { display: flex; flex-direction: column; min-width: 0; }
+			.topbar { display: flex; align-items: center; justify-content: space-between; height: 54px; padding: 0 28px; border-bottom: 1px solid var(--border); }
+			.crumb { font-size: 13px; color: var(--muted); }
+			.crumb b { color: var(--fg); font-weight: 500; }
+			.toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 9999px; padding: 5px 12px; cursor: pointer; background: var(--bg); }
+			.toggle:hover { color: var(--fg); border-color: var(--border-strong); }
+			.toggle .icon { width: 13px; height: 13px; stroke-width: 2; }
+
+			.cockpit { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 72px 28px 64px; }
+			.inner { width: 100%; max-width: 720px; }
+			.hero { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+			.hero h1 { font-size: 44px; line-height: 1.08; font-weight: 600; letter-spacing: -0.04em; margin: 0; }
+			.hero p { color: var(--muted); font-size: 16px; max-width: 44ch; margin: 0; }
+			.composer { width: 100%; max-width: 600px; display: flex; align-items: flex-end; gap: 12px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg); padding: 14px 14px 14px 18px; margin-top: 6px; transition: border-color .15s; }
+			.composer:focus-within { border-color: var(--fg); }
+			.composer textarea { flex: 1; border: 0; outline: 0; resize: none; background: transparent; color: var(--fg); font: inherit; min-height: 26px; }
+			.composer textarea::placeholder { color: var(--faint); }
+			.send { width: 38px; height: 38px; border-radius: 9999px; border: 0; background: var(--primary); color: var(--primary-fg); cursor: pointer; display: grid; place-items: center; }
+			.send .icon { width: 17px; height: 17px; stroke-width: 2; }
+			.chips { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; }
+			.chips span { font-size: 13px; color: var(--muted); cursor: pointer; border-bottom: 1px solid transparent; padding-bottom: 2px; }
+			.chips span:hover { color: var(--fg); border-bottom-color: var(--fg); }
+
+			.section { margin-top: 64px; }
+			.section .lbl { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: var(--faint); margin: 0 0 18px; }
+			.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+			.card { background: var(--bg); padding: 24px 22px; cursor: pointer; display: flex; flex-direction: column; gap: 10px; transition: background .15s; }
+			.card:hover { background: var(--hover); }
+			.card .tile { color: var(--fg); }
+			.card .tile .icon { width: 22px; height: 22px; }
+			.card h3 { font-size: 18px; font-weight: 500; letter-spacing: -0.02em; margin: 6px 0 0; }
+			.card p { font-size: 13px; color: var(--muted); margin: 0; flex: 1; }
+			.meta { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 7px; }
+			.dot { width: 7px; height: 7px; border-radius: 9999px; }
+			.dot.run { background: var(--accent); }
+			.dot.done { background: var(--green); }
+			.dot.idle { background: var(--faint); }
+
+			.list { display: flex; flex-direction: column; }
+			.row { display: flex; align-items: center; justify-content: space-between; padding: 18px 2px; border-bottom: 1px solid var(--border); }
+			.row:first-child { border-top: 1px solid var(--border); }
+			.row .l { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+			.row .title { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
+			.row .sub { font-size: 12px; color: var(--muted); }
+			.status { font-size: 12px; display: inline-flex; align-items: center; gap: 8px; color: var(--muted); white-space: nowrap; }
+		</style>
+	</head>
+	<body>
+		<div class="app">
+			<aside class="sidebar">
+				<div class="brand">LQ.AI</div>
+				<button class="newbtn"><svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg> New matter</button>
+				<div class="eyebrow">Recent</div>
+				<div class="m-item active">NDA — Acme SaaS pilot<div class="when">Commercial · 2m ago</div></div>
+				<div class="m-item">MSA review — Northwind<div class="when">Commercial · 1h ago</div></div>
+				<div class="m-item">GDPR ROPA — Q2 programme<div class="when">Privacy · yesterday</div></div>
+				<div class="m-item">Disclosure schedule — Iris<div class="when">M&amp;A · 2d ago</div></div>
+				<div class="sb-foot"><span class="avatar">A</span><span class="who">Arturs<small>admin@lq.ai</small></span></div>
+			</aside>
+			<div class="main">
+				<div class="topbar">
+					<span class="crumb">Commercial <b>· deep agent</b></span>
+					<button class="toggle" onclick="document.documentElement.classList.toggle('dark')"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg> Theme</button>
+				</div>
+				<div class="cockpit">
+					<div class="inner">
+						<div class="hero">
+							<h1>What are you working on?</h1>
+							<p>State the intent. Your practice-area deep agent picks its own tools, skills and playbooks — and works visibly.</p>
+							<div class="composer">
+								<textarea rows="1" placeholder="Draft a mutual NDA for a SaaS pilot, UK law, 2-year term…"></textarea>
+								<button class="send"><svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+							</div>
+							<div class="chips"><span>Review this contract</span><span>Summarise key risks</span><span>Compare to our standard</span></div>
+						</div>
+
+						<div class="section">
+							<p class="lbl">Your practice</p>
+							<div class="grid">
+								<div class="card"><span class="tile"><svg class="icon" viewBox="0 0 24 24"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg></span><h3>Commercial</h3><p>NDAs, MSAs, SaaS terms</p><span class="meta"><span class="dot done"></span>3 matters</span></div>
+								<div class="card"><span class="tile"><svg class="icon" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span><h3>Privacy</h3><p>GDPR, DPIAs, ROPA</p><span class="meta"><span class="dot run"></span>running</span></div>
+								<div class="card"><span class="tile"><svg class="icon" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span><h3>M&amp;A</h3><p>Diligence, disclosure</p><span class="meta"><span class="dot idle"></span>idle</span></div>
+							</div>
+						</div>
+
+						<div class="section">
+							<p class="lbl">Recent matters</p>
+							<div class="list">
+								<div class="row"><div class="l"><span class="title">NDA — Acme SaaS pilot</span><span class="sub">Contract Snapshot · 12 docs · 6 cols</span></div><span class="status"><span class="dot done"></span>Completed</span></div>
+								<div class="row"><div class="l"><span class="title">MSA review — Northwind</span><span class="sub">MSA Snapshot · 4 docs · 8 cols</span></div><span class="status"><span class="dot run"></span>Running</span></div>
+								<div class="row"><div class="l"><span class="title">SaaS terms — Project Iris</span><span class="sub">ad-hoc · 1 doc</span></div><span class="status"><span class="dot idle"></span>Idle</span></div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</body>
+</html>

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>LQ.AI — in the style of: PostHog (MIT)</title>
+		<!-- Emulates the FEEL of PostHog/posthog (MIT): warm cream canvas, signature
+		     black-bordered offset-shadow cards, orange accent, friendly-professional.
+		     Original CSS; no code copied. -->
+		<style>
+			:root {
+				--bg: #eeefe9;
+				--card: #ffffff;
+				--ink: #1d1f27;
+				--muted: #5f6168;
+				--border: #1d1f27;
+				--border-soft: #d7d8d2;
+				--orange: #f54e00;
+				--orange-bg: #ffe7d9;
+				--blue: #1d4aff;
+				--blue-bg: #e3e9ff;
+				--green: #197d52;
+				--green-bg: #d6f1e2;
+				--red: #db3700;
+				--red-bg: #ffe0d6;
+				--radius: 8px;
+				--font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+			}
+			* { box-sizing: border-box; }
+			body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+			.icon { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+			.chrome { display: flex; align-items: center; justify-content: space-between; padding: 0 28px; height: 60px; border-bottom: 2px solid var(--border); background: var(--bg); }
+			.brand { font-weight: 800; font-size: 18px; letter-spacing: -0.02em; display: flex; align-items: center; gap: 9px; }
+			.brand .mark { width: 28px; height: 28px; border-radius: 7px; background: var(--orange); display: grid; place-items: center; color: #fff; }
+			.nav { display: flex; gap: 22px; align-items: center; }
+			.nav span { font-size: 14px; color: var(--muted); cursor: pointer; font-weight: 500; }
+			.nav span.active { color: var(--ink); font-weight: 700; }
+			.shell { max-width: 60rem; margin: 0 auto; padding: 44px 28px 72px; display: flex; flex-direction: column; gap: 40px; }
+			.hero { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+			.hero h1 { font-size: 38px; font-weight: 800; letter-spacing: -0.03em; margin: 0; }
+			.hero p { color: var(--muted); max-width: 48ch; margin: 0; font-size: 16px; }
+			.composer { width: 100%; max-width: 600px; display: flex; align-items: flex-end; gap: 10px; background: var(--card); border: 2px solid var(--border); border-radius: 12px; box-shadow: 4px 4px 0 var(--border); padding: 14px 14px 14px 18px; margin-top: 6px; }
+			.composer textarea { flex: 1; border: 0; outline: 0; resize: none; background: transparent; color: var(--ink); font: inherit; min-height: 26px; }
+			.composer textarea::placeholder { color: var(--muted); }
+			.send { width: 40px; height: 40px; border-radius: 9px; border: 2px solid var(--border); background: var(--orange); color: #fff; cursor: pointer; display: grid; place-items: center; }
+			.chips { display: flex; gap: 9px; flex-wrap: wrap; justify-content: center; }
+			.chip { font-size: 13px; font-weight: 600; color: var(--ink); background: var(--card); border: 2px solid var(--border); border-radius: 9999px; padding: 6px 14px; cursor: pointer; }
+			.chip:hover { background: var(--orange-bg); }
+			.section h2 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 16px; }
+			.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+			.card { background: var(--card); border: 2px solid var(--border); border-radius: var(--radius); box-shadow: 4px 4px 0 var(--border); padding: 20px; cursor: pointer; transition: transform .12s, box-shadow .12s; }
+			.card:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--border); }
+			.card .tile { width: 40px; height: 40px; border-radius: 9px; border: 2px solid var(--border); background: var(--orange-bg); display: grid; place-items: center; margin-bottom: 12px; }
+			.card h3 { font-size: 17px; font-weight: 700; margin: 0 0 3px; }
+			.card p { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+			.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; border: 1.5px solid var(--border); border-radius: 9999px; padding: 3px 10px; }
+			.pill .dot { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; }
+			.pill.run { color: var(--orange); background: var(--orange-bg); }
+			.pill.done { color: var(--green); background: var(--green-bg); }
+			.pill.fail { color: var(--red); background: var(--red-bg); }
+			.pill.idle { color: var(--muted); background: var(--bg); }
+			.panel { background: var(--card); border: 2px solid var(--border); border-radius: var(--radius); box-shadow: 4px 4px 0 var(--border); overflow: hidden; }
+			table { width: 100%; border-collapse: collapse; }
+			th, td { text-align: left; padding: 12px 16px; border-bottom: 1.5px solid var(--border-soft); }
+			th { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); background: var(--bg); }
+			tbody tr:last-child td { border-bottom: 0; }
+			td .name { font-weight: 600; }
+		</style>
+	</head>
+	<body>
+		<header class="chrome">
+			<span class="brand"><span class="mark"><svg class="icon" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></span> LQ.AI</span>
+			<nav class="nav"><span class="active">Home</span><span>Matters</span><span>Skills</span><span>Knowledge</span></nav>
+		</header>
+		<main class="shell">
+			<section class="hero">
+				<h1>What are you working on?</h1>
+				<p>State the intent — your practice-area deep agent picks its own tools, skills and playbooks, and works visibly.</p>
+				<div class="composer">
+					<textarea rows="1" placeholder="Draft a mutual NDA for a SaaS pilot, UK law, 2-year term…"></textarea>
+					<button class="send"><svg class="icon" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></button>
+				</div>
+				<div class="chips"><span class="chip">Review this contract</span><span class="chip">Summarise key risks</span><span class="chip">Compare to our standard</span></div>
+			</section>
+			<section class="section">
+				<h2>Your practice</h2>
+				<div class="grid">
+					<div class="card"><div class="tile"><svg class="icon" viewBox="0 0 24 24"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg></div><h3>Commercial</h3><p>NDAs, MSAs, SaaS terms</p><span class="pill done"><span class="dot"></span>3 matters</span></div>
+					<div class="card"><div class="tile"><svg class="icon" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div><h3>Privacy</h3><p>GDPR, DPIAs, ROPA</p><span class="pill run"><span class="dot"></span>running</span></div>
+					<div class="card"><div class="tile"><svg class="icon" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></div><h3>M&amp;A</h3><p>Diligence, disclosure</p><span class="pill idle"><span class="dot"></span>idle</span></div>
+				</div>
+			</section>
+			<section class="section">
+				<h2>Recent matters</h2>
+				<div class="panel">
+					<table>
+						<thead><tr><th>Matter</th><th>Scope</th><th>Status</th><th>Updated</th></tr></thead>
+						<tbody>
+							<tr><td class="name">NDA — Acme SaaS pilot</td><td>12 docs · 6 cols</td><td><span class="pill done"><span class="dot"></span>completed</span></td><td>Jun 15, 2026</td></tr>
+							<tr><td class="name">MSA review — Northwind</td><td>4 docs · 8 cols</td><td><span class="pill run"><span class="dot"></span>running</span></td><td>Jun 15, 2026</td></tr>
+							<tr><td class="name">SaaS terms — Project Iris</td><td>1 doc</td><td><span class="pill fail"><span class="dot"></span>failed</span></td><td>Jun 14, 2026</td></tr>
+						</tbody>
+					</table>
+				</div>
+			</section>
+		</main>
+	</body>
+</html>
