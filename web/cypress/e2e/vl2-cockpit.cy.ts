@@ -58,6 +58,26 @@ describe('F2-VL2 cockpit re-skin', { retries: { runMode: 2, openMode: 0 } }, () 
 		}
 	});
 
+	it('captures the Tools menu with the new Lucide glyphs (light + dark)', () => {
+		login();
+		cy.visit('/lq-ai');
+		cy.get('[data-testid="lq-cockpit"]', { timeout: 30000 }).should('be.visible');
+		cy.wait(600);
+		cy.viewport(1280, 950);
+
+		for (const theme of ['light', 'dark'] as const) {
+			pinTheme(theme);
+			cy.wait(300);
+			cy.contains('button', 'Tools').click();
+			// The menu renders Lucide glyphs now, not emoji — capture it open.
+			cy.contains('[role="menuitem"]', 'Tabular', { timeout: 10000 }).should('be.visible');
+			cy.wait(400);
+			cy.screenshot(`vl2-tools-menu-${theme}-wide`, { capture: 'viewport' });
+			cy.get('body').type('{esc}');
+			cy.wait(200);
+		}
+	});
+
 	it('captures the re-skinned rail drawer at narrow (light + dark)', () => {
 		login();
 		cy.visit('/lq-ai');
