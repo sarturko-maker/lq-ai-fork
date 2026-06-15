@@ -180,8 +180,19 @@ HANDOFF). Each visual slice carries a **`direction-vercel` side-by-side** for th
   **0 err**, vitest **837** (+1 MOTION lock), f2-baseline cypress **4/4**. Carry-over: checkbox/focus-ring
   hardcoded blues (#2563eb/#3b82f6) left as-is (changing the checked fill to `--primary` ink would make the
   white checkmark invisible in dark — own slice).
-- **VL1 — primitives + app shell.** Build `AppShell` (sidebar+cockpit), `Hero`, `Card`/`CardGrid`,
-  `Stack`/`Inline`, `StatusDot`, button variants on the tokens. Prove in a dev-only `_vl-lab`.
+- **VL1 — primitives + app shell. ✅ SHIPPED (PR #77).** Built `AppShell` (264px `--sidebar` rail +
+  main column + optional thin topbar; rail collapses < lg), `Hero` (first consumer of `--text-display`),
+  `Card`/`CardGrid` (the hairline plane — 1px gaps over `--border`, single 12px radius), `Stack`/`Inline`
+  (the §3 rhythm), `StatusDot` (dot-status on `--status-*`; `running` = `--brand`). The inverting-primary /
+  hairline-secondary / ghost **button idioms already exist** via the VL0-recoloured shadcn `Button` (so they
+  were demonstrated, not re-built). Pure class helpers (`stackClass`/`inlineClass`/`cardGridClass`/`cardClass`/
+  `statusDotClass`) unit-tested (the `pageShellClass` precedent; vitest 837→850). Proven in a dev-only
+  **`_vl-lab`** route (the `_ae-lab` precedent — unadvertised, auth-gated, leading-`_`, prod-bundle,
+  Cypress-captured) that rebuilds the `direction-vercel` cockpit target from the real primitives + an isolated
+  gallery. Evidence `docs/fork/evidence/f2-vl1/` (near-exact match to the mockup, charcoal dark honest,
+  responsive collapse). **No live surface re-skinned (that's VL2); no new `--lq-*`/`{@html}`/token scale.**
+  Carry-over: `CardGrid` shows a trailing empty cell when items don't fill the last responsive row (the
+  hairline technique) — decide column-count vs real area-count in VL2.
 - **VL2 — cockpit landing proof (flagship).** Re-skin `cockpit/` (`AreaRail` → the Vercel sidebar;
   `CenteredEntry` → the `Hero`; `AreaGrid` → the hairline `CardGrid`; matters → dot-status list) to match
   `direction-vercel`. **Maintainer design-review gate** — iterate values here until it reads right.

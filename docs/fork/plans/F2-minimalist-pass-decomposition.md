@@ -149,7 +149,11 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
   M7b, ADR-F013). `app.css` recoloured to the Vercel palette — ink `--primary` + scarce `--brand` blue +
   charcoal `#111` dark; added the `--text-*` type scale + `--motion-*` tokens; radius 10/12; `motionMs()`
   wired onto a CSS-synced `MOTION` mirror. Tokens only, no layout. check 0 err, vitest 837, cypress 4/4.
-  Evidence: `docs/fork/evidence/f2-vl0/`. Then **VL1** (primitives + AppShell), **VL2** (cockpit proof).
+  Evidence: `docs/fork/evidence/f2-vl0/`.
+- **F2-VL1** — done (PR #77): seven token-consuming primitives (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/
+  `Inline`/`StatusDot`) + pure class helpers (unit-tested, vitest 850), proven in a dev-only `_vl-lab` route
+  rebuilding `direction-vercel`. No live surface re-skinned. Evidence `docs/fork/evidence/f2-vl1/`. Then
+  **VL2** (re-skin `cockpit/` — maintainer design gate).
 - **F2-M7b** — pending (AFTER the VL series): card/wrapper trio (knowledge/learn/saved-prompts). Same recipe;
   knowledge KB status pills → `--status-*` too. Now **applies the F013 language** as it migrates.
 - M8–M9 pending (also apply the language).
