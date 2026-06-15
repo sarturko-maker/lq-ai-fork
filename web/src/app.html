@@ -6,7 +6,7 @@
 			name="viewport"
 			content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
 		/>
-		<meta name="theme-color" content="#1b1e24" />
+		<meta name="theme-color" content="#ffffff" />
 		<meta name="robots" content="noindex,nofollow" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<title>LQ.AI</title>
@@ -22,8 +22,9 @@
 					root.classList.remove('dark', 'light');
 					root.classList.add(dark ? 'dark' : 'light');
 					const meta = document.querySelector('meta[name="theme-color"]');
-					// F1-S2.1 token canvases: charcoal (never black) / warm gray.
-					if (meta) meta.setAttribute('content', dark ? '#1b1e24' : '#f4f3f0');
+					// F013 (VL0) token canvases: charcoal #111 (never black) / white.
+					// Mirrors applyTheme() in cockpit/helpers.ts — keep the two in sync.
+					if (meta) meta.setAttribute('content', dark ? '#111111' : '#ffffff');
 				};
 				let theme = localStorage.getItem('theme');
 				if (!theme) {

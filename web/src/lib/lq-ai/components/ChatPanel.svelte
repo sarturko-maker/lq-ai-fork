@@ -126,7 +126,7 @@
 	import { auth } from '$lib/lq-ai/auth/store';
 	import { createEventDispatcher } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { motionMs } from '$lib/lq-ai/cockpit/helpers';
+	import { MOTION, motionMs } from '$lib/lq-ai/cockpit/helpers';
 
 	// ---- component props ----
 	export let projectIdFilter: string | undefined = undefined;
@@ -1231,7 +1231,7 @@
 			class="absolute inset-0 z-30 cursor-default bg-foreground/20"
 			aria-label="Close panel"
 			data-testid="lq-ai-chat-scrim"
-			transition:fade={{ duration: motionMs(120) }}
+			transition:fade={{ duration: motionMs(MOTION.base) }}
 			on:click={closeDrawers}
 		></button>
 	{/if}

@@ -26,7 +26,7 @@
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import NewMatterDialog from './NewMatterDialog.svelte';
 	import StatusPill from './StatusPill.svelte';
-	import { motionMs, timeAgo } from './helpers';
+	import { MOTION, motionMs, timeAgo } from './helpers';
 
 	let {
 		matter = null,
@@ -188,7 +188,7 @@
 	class="h-full min-h-0 p-2 sm:p-3"
 	data-testid="lq-cockpit-conversation"
 	bind:clientWidth={hostWidth}
-	in:fade|global={{ duration: motionMs(120) }}
+	in:fade|global={{ duration: motionMs(MOTION.base) }}
 >
 	<div
 		class="flex h-full min-h-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm"
@@ -314,7 +314,7 @@
 							     (`narrow` width + `tight` pad = px-4 py-4 sm:px-6). Fade on an
 							     inner div (PageShell is a component; transitions need an element). -->
 							<PageShell size="narrow" pad="tight">
-								<div in:fade={{ duration: motionMs(100) }}>
+								<div in:fade={{ duration: motionMs(MOTION.fast) }}>
 									<ConversationPanel
 										initialThreadId={threadId}
 										matters={projects}

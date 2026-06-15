@@ -36,7 +36,7 @@
 	import CockpitHeader from './CockpitHeader.svelte';
 	import ConversationHost from './ConversationHost.svelte';
 	import MattersPanel from './MattersPanel.svelte';
-	import { cockpitUrl, launchIntent, motionMs, parseCockpitState, viewOf } from './helpers';
+	import { cockpitUrl, launchIntent, MOTION, motionMs, parseCockpitState, viewOf } from './helpers';
 
 	let areas = $state<PracticeArea[] | null>(null);
 	let areasError = $state<string | null>(null);
@@ -353,7 +353,7 @@
 				type="button"
 				class="absolute inset-0 z-30 cursor-default bg-foreground/20"
 				aria-label="Close navigation"
-				transition:fade={{ duration: motionMs(120) }}
+				transition:fade={{ duration: motionMs(MOTION.base) }}
 				onclick={() => (drawerOpen = false)}
 			></button>
 			<div
@@ -364,7 +364,7 @@
 				aria-label="Practice areas"
 				tabindex="-1"
 				bind:this={drawerEl}
-				transition:fly={{ x: -24, duration: motionMs(160), opacity: 0.4 }}
+				transition:fly={{ x: -24, duration: motionMs(MOTION.base), opacity: 0.4 }}
 			>
 				{@render railContent()}
 			</div>

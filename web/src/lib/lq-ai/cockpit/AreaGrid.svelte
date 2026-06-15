@@ -12,7 +12,7 @@
 	import type { MatterActivity } from '$lib/lq-ai/api/agents';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
-	import { areaActivityCounts, motionMs, timeAgo } from './helpers';
+	import { areaActivityCounts, MOTION, motionMs, timeAgo } from './helpers';
 
 	let {
 		areas,
@@ -44,7 +44,7 @@
 </script>
 
 <PageShell data-testid="lq-cockpit-area-grid">
-	<div in:fade|global={{ duration: motionMs(120) }}>
+	<div in:fade|global={{ duration: motionMs(MOTION.base) }}>
 		<!-- F2-M4: de-emphasised to a section header — the cockpit landing now
 		     leads with the centered intent launcher (its hero h1), so the grid
 		     reads as the secondary "or pick an area" path (page keeps one h1). -->
