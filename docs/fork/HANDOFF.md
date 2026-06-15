@@ -2,7 +2,7 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 milestone OPEN — F2-M0 shipping; AE-series CLOSED)
+## State (F2 milestone OPEN — F2-M1 shipped; AE-series CLOSED)
 
 - **NEW MILESTONE — F2 (scira-style minimalist pass), governed by ADR-F012.** The maintainer wants the
   whole interface taken toward the calm, minimal aesthetic of [`scira`](https://github.com/zaidmukaddam/scira)
@@ -15,12 +15,22 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   area activation + F1-S4/S5; building it before those = schema debt or a dishonest hollow shell). Plan:
   `docs/fork/plans/F2-minimalist-pass-decomposition.md` (slices **F2-M0…M9**). This extends F006/F011 and
   sequences F002's F3 commitment.
-- **F2-M0 (PR pending on `f2-m0-foundation`)** — docs + baseline only (no app code): **ADR-F012** written;
+- **F2-M0 (PR #67, main `749a5a1`)** — docs + baseline only (no app code): **ADR-F012** written;
   F2 decomposition doc written; **before** baseline screenshots captured (cockpit landing + a legacy
   `(tools)` chrome surface, light+dark × wide+narrow) in `docs/fork/evidence/f2-m0/` via the reusable
-  `cypress/e2e/f2-baseline.cy.ts` (PHASE=before|after). Suites unaffected (web check 0 err / vitest 816).
-  The cockpit already lands on "Your practice" (areas + per-area agents + unfiled matters) — the
-  architecture already leans toward the destination; F2-M4 adds a calm centered intent entry above it.
+  `cypress/e2e/f2-baseline.cy.ts` (PHASE=before|after). The cockpit already lands on "Your practice"
+  (areas + per-area agents + unfiled matters) — the architecture already leans toward the destination;
+  F2-M4 adds a calm centered intent entry above it.
+- **F2-M1 (this slice)** — calm layout primitives. New `components/primitives/PageShell.svelte`
+  (centered `mx-auto w-full max-w-* px-* py-*` container) + `SectionHeader.svelte` (title + optional
+  subtitle, `page`=h1 / `section`=h2 type scale), each with an exported pure helper (`pageShellClass`,
+  `sectionHeaderScale`) **unit-tested** (vitest +7 → 823). Adopted in **one** real consumer,
+  `cockpit/AreaGrid.svelte` (the "Your practice" page title + the "Unfiled matters" section header +
+  the page container). Faithful extraction: after-shots **pixel-identical** to the M0 before-baselines
+  (`docs/fork/evidence/f2-m1/`). No new token scale; semantic tokens only; no `{@html}`; no IA change.
+  Fresh-context review: **SHIP**, no blockers (2 nits on record — see carry-overs). Suites: web check
+  **0 err** (5 pre-existing a11y warnings, untouched files); **vitest 823**; f2-baseline cypress **2/2**
+  (PHASE=after). web-only — no api/gateway change.
 
 - **AE-series (ADR-F011) — CLOSED. AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (#62) + AE4 (#63) + AE5 (#64) +
   AE6 (#65) + AE7 (#66) ALL MERGED.** The series brought the Vercel AI Elements look via the MIT Svelte port
@@ -76,16 +86,19 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**Active milestone: F2 (minimalist pass).** F2-M0 (this slice) ships the ADR + decomposition + baseline.
+**Active milestone: F2 (minimalist pass).** F2-M0 (ADR + decomposition + baseline) and F2-M1 (layout
+primitives, adopted on AreaGrid) are shipped. The primitives (`PageShell` / `SectionHeader`) are now the
+extraction target other surfaces adopt as F2 calms them.
 
-1. **F2-M1 — Calm layout primitives** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`). Extract the
-   repeated `mx-auto max-w-* px-* py-*` page-shell + heading idiom (see `cockpit/AreaGrid.svelte`) into
-   `components/primitives/PageShell.svelte` + `SectionHeader.svelte`, **proven on one real consumer**
-   (AreaGrid). No new token scale (the `app.css` semantic palette is the system); semantic tokens only.
-   Then M2 (chrome calm + token unification) → M3 (tab-bar condense) → M4 (cockpit centered entry) → M5
-   (CockpitHeader) → M6/M7/M8 (per-surface calm) → M9 (sweep). Use `cypress/e2e/f2-baseline.cy.ts`
-   (PHASE=after) for the after-shots. **Hard rule (ADR-F012): no tab/route/surface retired or hidden in
-   F2; never re-introduce `--lq-*`; the cockpit entry is a launcher, not an unbound composer (F002).**
+1. **F2-M2 — Chrome calm + token unification** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`).
+   `components/TopTabBar.svelte`, `AmbientTrustChrome.svelte`, `TrustPill.svelte`,
+   `DualBrandingFooter.svelte`, `routes/lq-ai/(tools)/+layout.svelte` inline chrome → migrate `--lq-*` →
+   semantic (the dark-mode fix) + scira calm (lighter borders, tighter type, muted resting state, single
+   accent on active). **Coordinate with F1 R-CHROME** — same files; migrate-and-calm once, never
+   double-touch, never re-introduce `--lq-*`. Then M3 (tab-bar condense) → M4 (cockpit centered entry) →
+   M5 (CockpitHeader) → M6/M7/M8 (per-surface calm) → M9 (sweep). Use `cypress/e2e/f2-baseline.cy.ts`
+   (PHASE=after) for after-shots. **Hard rule (ADR-F012): no tab/route/surface retired or hidden in F2;
+   never re-introduce `--lq-*`; the cockpit entry is a launcher, not an unbound composer (F002).**
 2. **UX-A (navigational convergence)** — own milestone after F2 (cockpit = single shell, legacy top-tab IA
    retired). **UX-B (capability convergence)** — folds into the pivot track (F1-S4/S5 + area activation +
    schema). Both per ADR-F012.
@@ -113,6 +126,15 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Carry-overs / review deferrals
 
+- **F2-M1 — 2 nits on record (non-blocking).** (1) `PageShell` hardcodes the calm padding default
+  `px-6 py-10 sm:px-8` (AreaGrid's rhythm). The sibling surfaces it will eventually serve differ —
+  `MattersPanel` uses `py-8`, `ConversationHost` uses `px-4 py-4 sm:px-6` — so **F2-M6 must add a `pad`
+  variant before those adopt PageShell** (don't force AreaGrid's rhythm onto them; don't try to override
+  via the `class` passthrough — Tailwind utility order makes a px/py override unreliable). (2) The refactor
+  adds two structurally-empty wrapper `<div>`s (the `in:fade` div + SectionHeader's root, which renders
+  `class=""` when no class is passed) — no box-model effect, render is pixel-equal (screenshots confirm),
+  fully reversible. Visually identical, not literally byte-identical DOM — acceptable under the pixel-equal
+  contract.
 - **AE7 — no new carry-overs.** Review SHIP, no blockers/should-fixes; nit #1 (chip flash while a
   populated chat's messages load) FIXED in-slice via the `message_count` gate. Honest-source design is
   load-bearing: chips are the user's own SavedPrompts shown as empty-state starters, never model-invented

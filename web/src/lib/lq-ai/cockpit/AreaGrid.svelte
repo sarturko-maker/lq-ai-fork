@@ -10,6 +10,8 @@
 
 	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 	import type { MatterActivity } from '$lib/lq-ai/api/agents';
+	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
+	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
 	import { areaActivityCounts, motionMs, timeAgo } from './helpers';
 
 	let {
@@ -41,15 +43,12 @@
 	);
 </script>
 
-<div
-	class="mx-auto w-full max-w-4xl px-6 py-10 sm:px-8"
-	data-testid="lq-cockpit-area-grid"
-	in:fade|global={{ duration: motionMs(120) }}
->
-	<h1 class="text-2xl font-semibold tracking-tight text-foreground">Your practice</h1>
-	<p class="mt-1.5 text-sm text-muted-foreground">
-		Pick a practice area to work in — each area runs its matters with its own agent.
-	</p>
+<PageShell data-testid="lq-cockpit-area-grid">
+	<div in:fade|global={{ duration: motionMs(120) }}>
+		<SectionHeader
+			title="Your practice"
+			subtitle="Pick a practice area to work in — each area runs its matters with its own agent."
+		/>
 
 	{#if areasError}
 		<p class="mt-6 text-sm text-destructive">Couldn't load practice areas: {areasError}</p>
@@ -126,10 +125,11 @@
 			<!-- Legacy/unfiled matters (no area) — kept reachable (review blocker
 			     fix). New matters file under an area; these predate filing. -->
 			<section class="mt-10" data-testid="lq-cockpit-unfiled-matters">
-				<h2 class="text-sm font-semibold tracking-tight text-foreground">Unfiled matters</h2>
-				<p class="mt-0.5 text-xs text-muted-foreground">
-					Matters not yet filed under a practice area.
-				</p>
+				<SectionHeader
+					size="section"
+					title="Unfiled matters"
+					subtitle="Matters not yet filed under a practice area."
+				/>
 				<ul class="mt-3 overflow-hidden rounded-xl border border-border bg-card shadow-xs">
 					{#each unfiledMatters as matter (matter.project_id)}
 						<li class="border-b border-border last:border-b-0">
@@ -154,4 +154,5 @@
 			</section>
 		{/if}
 	{/if}
-</div>
+	</div>
+</PageShell>
