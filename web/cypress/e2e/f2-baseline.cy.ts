@@ -61,6 +61,31 @@ describe('F2 baseline capture', { retries: { runMode: 2, openMode: 0 } }, () => 
 		}
 	});
 
+	it('captures the matters + conversation surfaces (light + dark, wide + narrow)', () => {
+		// F2-M6: the matters list + conversation column adopt the PageShell idiom
+		// (compact / tight pads). Deep-link into the one configured area, capture
+		// the matters list, then open a matter to capture the conversation view.
+		login();
+		cy.visit('/lq-ai?area=commercial');
+		cy.get('[data-testid="lq-cockpit-matters"]', { timeout: 30000 }).should('be.visible');
+		cy.get('[data-testid="lq-cockpit-matter-row"]', { timeout: 30000 }).should(
+			'have.length.gte',
+			1
+		);
+		cy.wait(800);
+		for (const theme of ['light', 'dark'] as const) {
+			pinTheme(theme);
+			shoot(`matters-${theme}`);
+		}
+		cy.get('[data-testid="lq-cockpit-matter-row"]').first().click();
+		cy.get('[data-testid="lq-cockpit-conversation"]', { timeout: 30000 }).should('be.visible');
+		cy.wait(800);
+		for (const theme of ['light', 'dark'] as const) {
+			pinTheme(theme);
+			shoot(`conversation-${theme}`);
+		}
+	});
+
 	it('captures a legacy (tools) chrome surface (light + dark, wide + narrow)', () => {
 		login();
 		cy.visit('/lq-ai/skills');

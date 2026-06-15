@@ -23,6 +23,7 @@
 	import type { AgentThread, MatterActivity } from '$lib/lq-ai/api/agents';
 	import type { Project } from '$lib/lq-ai/types';
 	import ConversationPanel from '$lib/lq-ai/components/agents/ConversationPanel.svelte';
+	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import NewMatterDialog from './NewMatterDialog.svelte';
 	import StatusPill from './StatusPill.svelte';
 	import { motionMs, timeAgo } from './helpers';
@@ -309,21 +310,23 @@
 				<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
 					{#if matter || threadId}
 						{#key panelKey}
-							<div
-								class="mx-auto w-full max-w-3xl px-4 py-4 sm:px-6"
-								in:fade={{ duration: motionMs(100) }}
-							>
-								<ConversationPanel
-									initialThreadId={threadId}
-									matters={projects}
-									mattersError={projectsError}
-									bind:prompt
-									bind:selectedMatterId
-									on:settled={handleSettled}
-									on:newmatter={() => (createOpen = true)}
-									on:threadcreated={handleThreadCreated}
-								/>
-							</div>
+							<!-- F2-M6: the conversation column shares the PageShell idiom
+							     (`narrow` width + `tight` pad = px-4 py-4 sm:px-6). Fade on an
+							     inner div (PageShell is a component; transitions need an element). -->
+							<PageShell size="narrow" pad="tight">
+								<div in:fade={{ duration: motionMs(100) }}>
+									<ConversationPanel
+										initialThreadId={threadId}
+										matters={projects}
+										mattersError={projectsError}
+										bind:prompt
+										bind:selectedMatterId
+										on:settled={handleSettled}
+										on:newmatter={() => (createOpen = true)}
+										on:threadcreated={handleThreadCreated}
+									/>
+								</div>
+							</PageShell>
 						{/key}
 					{:else}
 						<div class="flex h-full items-center justify-center px-8">

@@ -129,7 +129,14 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
   muted-legacy item) byte-identical; no AI furniture (ADR-F002), no new token scale/`--lq-*`/`{@html}`,
   nothing retired. vitest unchanged (835); f2-baseline cypress 2/2 (PHASE=after). Evidence:
   `docs/fork/evidence/f2-m5/`. Review SHIP.
-- M6–M9 pending. **M6 must add the `PageShell` `pad` variant first** (M1 carry-over).
+- **F2-M6** — done (PR #73): matters + conversation surfaces consolidated onto PageShell. Added the
+  `pad` variant (`default`/`compact`/`tight`) to `PageShell` (M1 carry-over RESOLVED); `MattersPanel`
+  container → `<PageShell pad="compact">` (bespoke header kept), `ConversationHost` conversation column →
+  `<PageShell size="narrow" pad="tight">` (fade on an inner div, the M1 idiom). Visually equivalent (pads
+  copied verbatim — consolidation, not a visible redesign). `AreaRail` intentionally untouched (sidebar,
+  doesn't fit). vitest 836 (+1); f2-baseline cypress 3/3 (PHASE=after, new matters+conversation capture
+  test). Evidence: `docs/fork/evidence/f2-m6/`. Review SHIP.
+- M7–M9 pending.
 
 ## Risks / overlaps
 

@@ -13,13 +13,21 @@ describe('pageShellClass', () => {
 		expect(pageShellClass('wide')).toContain('max-w-5xl');
 	});
 
+	it('maps each pad variant to its rhythm (F2-M6)', () => {
+		expect(pageShellClass('default', 'default')).toContain('px-6 py-10 sm:px-8');
+		expect(pageShellClass('default', 'compact')).toBe('mx-auto w-full max-w-4xl px-6 py-8 sm:px-8');
+		expect(pageShellClass('narrow', 'tight')).toBe('mx-auto w-full max-w-3xl px-4 py-4 sm:px-6');
+	});
+
 	it('appends trimmed extra classes after the base', () => {
-		expect(pageShellClass('default', '  mt-4  ')).toBe(
+		expect(pageShellClass('default', 'default', '  mt-4  ')).toBe(
 			'mx-auto w-full max-w-4xl px-6 py-10 sm:px-8 mt-4'
 		);
 	});
 
 	it('omits the trailing space when no extra is given', () => {
-		expect(pageShellClass('narrow', '   ')).toBe('mx-auto w-full max-w-3xl px-6 py-10 sm:px-8');
+		expect(pageShellClass('narrow', 'default', '   ')).toBe(
+			'mx-auto w-full max-w-3xl px-6 py-10 sm:px-8'
+		);
 	});
 });
