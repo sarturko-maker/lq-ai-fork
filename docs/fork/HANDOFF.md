@@ -2,7 +2,36 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 milestone OPEN — F2-VL1 shipped, F013 primitives live; AE-series CLOSED)
+## State (F2 milestone OPEN — F2-VL2 IMPLEMENTED, PR open, AWAITING MAINTAINER DESIGN SIGN-OFF; AE-series CLOSED)
+
+- **F2-VL2 (this slice, PR #78) — the flagship cockpit re-skin. NOT MERGED: it is the maintainer
+  DESIGN-REVIEW GATE** (unlike the reversible token/primitive slices, it re-skins the live landing).
+  Re-skins `cockpit/` to the `direction-vercel` target using the VL1 primitives, **keeping the resizable
+  PaneGroup + drawer mechanics** (maintainer chose "keep resizable pane, re-skin contents" over adopting
+  the fixed-rail AppShell — so **AppShell stays a lab-only primitive**, not used in prod). Changes:
+  **`CenteredEntry` → `Hero`** (first live `text-display` consumer) + a Vercel composer + SavedPrompts
+  chips as calm text-links (dropped the AE `Suggestion` pills here); **`AreaGrid` → gap'd bordered
+  `Card`s** (icon + name + `StatusDot` rollup of the area's latest matter status) + a new **"Recent
+  matters" dot-status list** (all matters, newest-first — keeps unfiled/legacy reachable); **`AreaRail` →
+  the Vercel `--sidebar`** (a "New matter" ink `Button` routing to the launcher, calm area rows with a
+  bare per-area activity dot, the unfiled bucket, an identity-only account footer — account ACTIONS stay
+  in the header). **StatusDot gained an `attention` tone** (systematic — `--status-attention` already
+  exists; the stale/cap-reached belt); a new pure **`runDot()`** in `cockpit/helpers.ts` maps a settled
+  run status → calm dot + label **through the canonical `statusBadge`** (incl. the stale belt) so the
+  cockpit dots and the agents pills never disagree (ADR-F004). `areaActivityCounts` now also carries
+  `lastStatus`. **IA UNCHANGED** (rail stays the practice-area navigator; areas reachable from the
+  landing grid too) — no surface retired (F2 rule); **launcher not composer** (ADR-F002); **all rollups
+  settled rows** (ADR-F004). **Resolved the VL1 `CardGrid` trailing-empty-cell**: with 5 seeded areas the
+  hairline plane leaves a gray cell on non-full rows at most breakpoints, so the area grid uses **gap'd
+  bordered cards** (clean at every count) — the hairline `CardGrid` stays for fixed-count sections. Suites:
+  web check **0 err** (5 pre-existing a11y warnings, untouched files); **vitest 854** (+4: `runDot` ×3 +
+  `statusDotClass('attention')`); **`vl2-cockpit.cy.ts` 2/2** headed/live (landing light+dark × wide+narrow
+  + the narrow rail drawer). Evidence: `docs/fork/evidence/f2-vl2/` (incl. `_target-vercel-{light,dark}.png`
+  for side-by-side). Fresh-context review: **SHIP**, no blockers/should-fixes; one NIT (area-card `rd`
+  computed-but-discarded) **FIXED in-slice**. web-only — no api/gateway change. **Pickup: present evidence,
+  iterate values under the maintainer's eye, MERGE ONLY on explicit design sign-off.**
+
+## State (F2 milestone — F2-VL1 shipped, F013 primitives live; AE-series CLOSED)
 
 - **NEW MILESTONE — F2 (scira-style minimalist pass), governed by ADR-F012.** The maintainer wants the
   whole interface taken toward the calm, minimal aesthetic of [`scira`](https://github.com/zaidmukaddam/scira)
@@ -288,19 +317,14 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 primitives** (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/`Inline`/`StatusDot`) exist + are proven in
 `_vl-lab` against the `direction-vercel` target. No live surface re-skinned yet.
 
-1. **F2-VL2 — cockpit landing proof (flagship, MAINTAINER DESIGN-REVIEW GATE).** Re-skin `cockpit/` to
-   `direction-vercel` using the VL1 primitives: **`AreaRail` → the AppShell `--sidebar`** (brand · *New matter*
-   ink button · Recent matters with area+relative-time · account footer); **`CenteredEntry` → `Hero`** (the
-   44px `text-display` launcher + composer + the existing SavedPrompts starter chips as text-links);
-   **`AreaGrid` → the hairline `CardGrid`** of area Cards with `StatusDot` rollups; **matters list → the
-   dot-status hairline list**. Wire the real responsive drawer/toggle into AppShell (reuse the existing
-   AreaRail collapse logic — F1-S2.1). Honour ADR-F002 (the entry is a LAUNCHER, not an unbound composer) +
-   ADR-F004 (settled-rows rollups, real data). **Resolve the VL1 `CardGrid` trailing-empty-cell** against the
-   real area count (choose a column count that divides it, or fill/stretch the last row). **Iterate values
-   under the maintainer's eye** until it reads right; carry a `direction-vercel` side-by-side in the evidence.
-2. **F2-VL2** is the design gate — do NOT auto-merge it without the maintainer's design sign-off (unlike the
-   reversible token/primitive slices, this re-skins the flagship surface).
-3. **then resume F2-M7b — Library card/wrapper surfaces** (task #118): the remaining three `(tools)` list
+1. **F2-VL2 — DONE + PR OPEN, AWAITING MAINTAINER DESIGN SIGN-OFF (do NOT merge without it).** Implemented
+   as described in the State block above. Pickup: show the maintainer `docs/fork/evidence/f2-vl2/` (the
+   landing + drawer vs `_target-vercel-*`), iterate values under their eye if they ask, then **merge per
+   ADR-F005 only on explicit design sign-off**. Open design questions to raise: (a) the sidebar keeps the
+   practice-area navigator (the `direction-vercel` mockup put *recent matters* there — that's a UX-A/IA move,
+   deferred); (b) area cards use gap'd bordered cards, not the mockup's hairline plane (5 areas → empty cell);
+   (c) the rail account footer duplicates identity the header also carries. All three are cheap to flip.
+2. **then resume F2-M7b — Library card/wrapper surfaces** (task #118): the remaining three `(tools)` list
    pages — **`knowledge`** (card grid + inline create form, max-1100px; KB status pills `indexed`/`indexing`/
    `failed`/`empty` → `--status-completed`/`--status-running`/`--status-failed`/`--muted` like tabular),
    **`learn`** (card grid, max-960px), **`saved-prompts`** (thin `SavedPromptsPanel` wrapper, max-920px). Same

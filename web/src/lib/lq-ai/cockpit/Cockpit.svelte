@@ -175,6 +175,13 @@
 		nav(cockpitUrl({ unfiled: true }));
 	}
 
+	function newMatter() {
+		// "Start something new" → the landing launcher (ADR-F002: a matter binds
+		// to an area, so this routes to the intent entry, not an unbound thread).
+		drawerOpen = false;
+		nav(cockpitUrl({}));
+	}
+
 	function launchFromEntry(text: string) {
 		// LAUNCHER, not composer (ADR-F002): resolve the typed intent to a
 		// destination + carried draft. One configured area → enter it carrying
@@ -185,7 +192,10 @@
 	}
 
 	function openMatter(matter: MatterActivity) {
-		nav(cockpitUrl({ area: sel.area, matter: matter.project_id }));
+		// Prefer the matter's OWN area so opening from the landing's recent list
+		// (where sel.area is null) deep-links + back-navigates correctly; unfiled
+		// matters (null key) open by id with no area, which the matter view allows.
+		nav(cockpitUrl({ area: matter.practice_area_key ?? sel.area, matter: matter.project_id }));
 	}
 
 	function onMatterCreated(project: Project) {
@@ -234,10 +244,14 @@
 		{areas}
 		{areasError}
 		unfiled={activity?.unfiled ?? null}
+		matters={activity?.matters ?? null}
+		{nowMs}
+		user={$auth.user ?? null}
 		selectedAreaKey={sel.area}
 		unfiledOpen={sel.unfiled}
 		onSelectArea={enterArea}
 		onSelectUnfiled={openUnfiled}
+		onNewMatter={newMatter}
 	/>
 {/snippet}
 

@@ -1,12 +1,17 @@
 <script lang="ts">
 	/**
-	 * Cockpit centered intent entry (F2-M4, ADR-F012) — a calm launcher that
-	 * sits ABOVE the area grid on the landing. It is NOT a composer (ADR-F002
-	 * forbids an unbound free-floating chat): submitting never starts a
-	 * conversation. It hands the typed text to the parent, which routes into
-	 * the area→matter binding flow (carrying the text forward as the composer
-	 * draft) when the destination is unambiguous — exactly one configured
-	 * area — and otherwise points the user at the area grid below.
+	 * Cockpit centered intent entry (F2-M4, ADR-F012; re-skinned to the F013
+	 * Vercel language in F2-VL2). A calm launcher that sits ABOVE the area grid
+	 * on the landing. It is NOT a composer (ADR-F002 forbids an unbound
+	 * free-floating chat): submitting never starts a conversation. It hands the
+	 * typed text to the parent, which routes into the area→matter binding flow
+	 * (carrying the text forward as the composer draft) when the destination is
+	 * unambiguous — exactly one configured area — and otherwise points the user
+	 * at the area grid below.
+	 *
+	 * VL2: the greeting + lead render through the `Hero` primitive (the first
+	 * `text-display` consumer on a live surface); the starter chips render as
+	 * calm text-links (the direction-vercel idiom) instead of filled pills.
 	 *
 	 * Honest content only: the greeting/subtitle are static copy; the optional
 	 * starter chips are the user's OWN SavedPrompts (the AE7 precedent), never
@@ -19,7 +24,8 @@
 	import { savedPromptsApi } from '$lib/lq-ai/api';
 	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 	import type { SavedPrompt } from '$lib/lq-ai/types';
-	import { Suggestion, Suggestions } from '$lib/lq-ai/components/ai-elements/suggestion/index.js';
+	import Hero from '$lib/lq-ai/components/primitives/Hero.svelte';
+	import Inline from '$lib/lq-ai/components/primitives/Inline.svelte';
 
 	let {
 		areas,
@@ -73,31 +79,33 @@
 </script>
 
 <div
-	class="mx-auto w-full max-w-2xl px-6 pt-12 pb-2 text-center sm:px-8"
+	class="mx-auto w-full max-w-3xl px-6 pt-14 pb-4 sm:px-8"
 	data-testid="lq-cockpit-centered-entry"
 >
-	<h1 class="text-2xl font-semibold tracking-tight text-foreground">What are you working on?</h1>
-	<p class="mt-1.5 text-sm text-muted-foreground">
-		Describe the task — your practice-area agent runs it inside a matter.
-	</p>
-
-	<div
-		class="mt-6 rounded-xl border border-input bg-card text-left shadow-sm transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring"
+	<Hero
+		title="What are you working on?"
+		subtitle="State the intent — your practice-area deep agent picks its own tools, skills and playbooks, and works visibly inside a matter."
 	>
-		<textarea
-			bind:this={fieldEl}
-			bind:value={text}
-			onkeydown={onKeydown}
-			oninput={() => (awaitingAreaPick = false)}
-			rows="2"
-			placeholder="e.g. Review this NDA for unusual indemnity terms…"
-			class="block w-full resize-none bg-transparent px-3.5 pt-3 pb-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-			data-testid="lq-cockpit-entry-field"
-		></textarea>
-		<div class="flex items-center justify-end px-2 pb-2">
+		<!-- The launcher field: a calm prompt-styled surface (NOT a composer —
+		     ADR-F002): submit routes into the area→matter flow, never starts a
+		     thread. The brand-ink submit + hairline border are the VL0 tokens. -->
+		<div
+			class="border-input bg-card focus-within:border-foreground mt-1 flex w-full max-w-[600px] items-end gap-2.5 rounded-xl border px-4 py-3 text-left shadow-sm transition-colors"
+		>
+			<textarea
+				bind:this={fieldEl}
+				bind:value={text}
+				onkeydown={onKeydown}
+				oninput={() => (awaitingAreaPick = false)}
+				rows="1"
+				aria-label="Describe your matter"
+				placeholder="Draft a mutual NDA for a SaaS pilot, UK law, 2-year term…"
+				class="text-foreground placeholder:text-muted-foreground min-h-[28px] flex-1 resize-none border-0 bg-transparent text-sm outline-none"
+				data-testid="lq-cockpit-entry-field"
+			></textarea>
 			<Button
 				size="icon"
-				class="size-8 rounded-lg"
+				class="size-9 shrink-0 rounded-full"
 				disabled={!text.trim()}
 				onclick={submit}
 				aria-label="Start"
@@ -106,28 +114,32 @@
 				<ArrowUpIcon class="size-4" aria-hidden="true" />
 			</Button>
 		</div>
-	</div>
 
-	{#if awaitingAreaPick}
-		<p class="mt-3 text-xs text-muted-foreground" data-testid="lq-cockpit-entry-hint">
-			{configuredCount === 0
-				? 'Configure a practice area below to start.'
-				: 'Pick a practice area below to start — your note is kept.'}
-		</p>
-	{/if}
+		{#if awaitingAreaPick}
+			<p class="text-caption text-muted-foreground" data-testid="lq-cockpit-entry-hint">
+				{configuredCount === 0
+					? 'Configure a practice area below to start.'
+					: 'Pick a practice area below to start — your note is kept.'}
+			</p>
+		{/if}
 
-	{#if savedPrompts.length > 0}
-		<div class="mt-5 flex justify-center" data-testid="lq-cockpit-entry-suggestions">
-			<Suggestions class="justify-center">
+		{#if savedPrompts.length > 0}
+			<!-- Starter chips as calm text-links (direction-vercel): the user's own
+			     SavedPrompts, never model-invented (AE7). `name` + inserted body are
+			     escaped text/attribute bindings (no {@html}). -->
+			<Inline gap="lg" wrap justify="center" data-testid="lq-cockpit-entry-suggestions">
 				{#each savedPrompts as prompt (prompt.id)}
-					<Suggestion
-						suggestion={prompt.name}
+					<button
+						type="button"
+						class="text-caption text-muted-foreground hover:text-foreground border-b border-transparent pb-0.5 transition-colors hover:border-current"
 						title={prompt.prompt_text}
 						onclick={() => useChip(prompt.prompt_text)}
 						data-testid="lq-cockpit-entry-suggestion"
-					/>
+					>
+						{prompt.name}
+					</button>
 				{/each}
-			</Suggestions>
-		</div>
-	{/if}
+			</Inline>
+		{/if}
+	</Hero>
 </div>
