@@ -318,13 +318,16 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 - Global notification bell in the chrome (DE-324 deferral) — cockpit-adjacent.
 - Declare the F3 retire list explicitly when the IA re-centres: saved-prompts, guided-dashboard
   components, FeaturedToolsRow, learn-as-global-tab.
-- **Minimalist "cleaned interface" pass (post-AE series)** — maintainer likes the minimalist aesthetic
-  + positioning of [`scira`](https://github.com/zaidmukaddam/scira). **scira is AGPL-3.0 → REFERENCE
-  ONLY: study the look / IA / positioning, never copy code** (copying would force AGPL on our stack —
-  same inspect-don't-copy discipline as ADR-F011, but stricter: not even vendoring, unlike the MIT AI
-  Elements port we DO copy). scira is itself built on AI Elements, so the AE-series already lands the
-  component substrate; this is a subsequent IA / visual-cleanup milestone (effortless, minimal chrome)
-  once the AE components are plugged in. Sequence AFTER AE0–AE7.
+- **Minimalist "cleaned interface" pass (post-AE series) — PROMOTED to milestone F2 (ADR-F012,
+  2026-06-15).** Maintainer likes the minimalist aesthetic + positioning of
+  [`scira`](https://github.com/zaidmukaddam/scira). **scira is AGPL-3.0 → REFERENCE ONLY: study the look /
+  IA / positioning, never copy code** (copying would force AGPL on our stack — stricter than ADR-F011: not
+  even vendoring). ADR-F012 splits the work by dependency: **F2** = the visual pass (now, reversible, no IA
+  retirement — slices F2-M0…M9 in `docs/fork/plans/F2-minimalist-pass-decomposition.md`); **UX-A** =
+  navigational convergence (cockpit = single shell, legacy top-tab IA retired — own milestone after F2);
+  **UX-B** = capability convergence (tools as in-context agent capabilities — folds into the pivot track,
+  F1-S4/S5 + area activation + the practice_area/unit_of_work schema). UX-A/UX-B together are F002's F3
+  commitment, now sequenced. F2-M0 (ADR + decomposition + baseline) shipping; AE0–AE7 already closed.
 - NewMatterModal's privileged InfoTip claims "defaults to Tier 2" — neither client nor server
   implements a default (the field is simply required); fix the copy on next touch (transparency).
 - Pre-F1 guard: frontend-static practice-area identifiers must never leak into stored rows
