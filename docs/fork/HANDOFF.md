@@ -30,8 +30,9 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   `load` functions** anywhere under `/lq-ai` (all client-side fetch), so no server logic migrates. NOT UX-B
   (tools stay tools, just re-hosted; capability convergence still rides the pivot). Plan: **ADR-F014** +
   **`docs/fork/plans/UX-A-navigational-convergence-decomposition.md`** (slices UX-A-0…5). **Pickup: UX-A-2 —
-  add the expandable "Tools" section to the rail (Lucide icons via the CockpitHeader `TAB_ICON` map; active
-  highlight from `$page.url.pathname`; legacy group muted) + migrate the FLAT list surfaces** (tabular,
+  add the expandable "Tools" section to the rail (Lucide icons via the shared `tabIcon()` map in
+  `lib/lq-ai/tab-icons.ts` — already extracted; active highlight from `$page.url.pathname`; legacy group
+  muted) + migrate the FLAT list surfaces** (tabular,
   playbooks, knowledge, skills, saved-prompts, learn incl. their `new`/`[id]`/`[id]/edit` children) **from
   `(tools)` into `(app)`** so they render in the cockpit canvas. Resolve the scroll-parent change (`#lq-main`
   → the cockpit canvas pane). `TopTabBar` still serves the not-yet-migrated surfaces (transitional). Then
@@ -352,9 +353,9 @@ primitives** (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/`Inline`/`StatusDot`) 
 `_vl-lab` against the `direction-vercel` target. No live surface re-skinned yet.
 
 1. **UX-A-2 — rail "Tools" section + migrate the flat list surfaces.** Per ADR-F014 / the UX-A
-   decomposition. Add an expandable **Tools** group to `AreaRail` (Lucide icons via the `CockpitHeader`
-   `TAB_ICON` map — extract it to a shared module; active highlight from `$page.url.pathname`; legacy group
-   muted, M3). Move the **flat** tool routes (`tabular`, `playbooks`, `knowledge`, `skills`, `saved-prompts`,
+   decomposition. Add an expandable **Tools** group to `AreaRail` (Lucide icons via the shared `tabIcon()`
+   map in `lib/lq-ai/tab-icons.ts` — already extracted; active highlight from `$page.url.pathname`; legacy
+   group muted, M3). Move the **flat** tool routes (`tabular`, `playbooks`, `knowledge`, `skills`, `saved-prompts`,
    `learn` incl. `new`/`[id]`/`[id]/edit`) from `(tools)` into `(app)` so they render in the cockpit canvas
    with the rail present. **Resolve the scroll-parent change** (`#lq-main` → the cockpit canvas pane —
    verify long lists scroll, sticky headers behave). `TopTabBar` still serves the not-yet-migrated surfaces
