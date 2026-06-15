@@ -86,12 +86,23 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
 ## Progress
 
 - **F2-M0** — done (PR #67, main `749a5a1`): ADR-F012 + this doc + before-baselines.
-- **F2-M1** — done: `PageShell` + `SectionHeader` primitives (with exported pure helpers
-  `pageShellClass` / `sectionHeaderScale`, unit-tested), adopted in `cockpit/AreaGrid.svelte`.
+- **F2-M1** — done (PR #68, main `a8db5c7`): `PageShell` + `SectionHeader` primitives (with exported
+  pure helpers `pageShellClass` / `sectionHeaderScale`, unit-tested), adopted in `cockpit/AreaGrid.svelte`.
   Faithful extraction — after-shots pixel-identical to the M0 before-baselines
   (`docs/fork/evidence/f2-m1/`). PageShell padding default = AreaGrid's rhythm only; a `pad`
   variant is deferred to M6 (MattersPanel `py-8` / ConversationHost `px-4 py-4` differ).
-- M2–M9 pending.
+- **F2-M2** — done: structural chrome migrated `--lq-*` → semantic Tailwind (the dark-mode fix) + scira
+  calm. `TopTabBar` (muted resting / single primary accent on active / lighter underline),
+  `AmbientTrustChrome` wrapper + ⌘K hint, `DualBrandingFooter` (raw `gray-*` → semantic), and the
+  `(tools)/+layout.svelte` shell (`bg-background`/`text-foreground` — the robust fix for the AE5
+  `--lq-canvas` light-in-dark quirk). Legacy chrome accent now unifies to the cockpit's blue `--primary`.
+  Evidence: `docs/fork/evidence/f2-m2/` (cockpit + legacy `(tools)` skills, light+dark × wide+narrow).
+  **`TrustPill.svelte` migration DEFERRED on record** — its sage/slate/amber/red soft+border tone
+  palette has no semantic-palette equivalent (migrating = a new token scale, forbidden in F2); it is
+  dark-bridged (renders fine) and feeds ~15 consumers → its own slice. Transitional: un-migrated page
+  content (e.g. the skills "+ New skill" button, TrustPills) stays teal/sage until M7 + the TrustPill
+  slice — expected during the staged rollout.
+- M3–M9 pending.
 
 ## Risks / overlaps
 

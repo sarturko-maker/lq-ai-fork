@@ -47,8 +47,12 @@
   }
 </script>
 
-<nav class="lq-tabbar" aria-label="Primary">
-  <ul role="tablist">
+<!-- F2-M2: migrated off `--lq-*` to semantic tokens (the dark-mode fix) +
+     scira calm — quiet muted resting state, a single primary accent on the
+     active tab, lighter underline. Matches the cockpit CockpitHeader idiom so
+     the two eras share one accent. -->
+<nav class="border-b border-border px-4" aria-label="Primary">
+  <ul class="m-0 flex list-none gap-4 p-0" role="tablist">
     {#each tabs as tab, tabIndex (tab.id)}
       <li role="presentation">
         <button
@@ -56,14 +60,17 @@
           role="tab"
           aria-selected={active === tab.id}
           aria-controls="lq-main"
-          class="lq-tab"
-          class:lq-tab-active={active === tab.id}
-          class:lq-tab-unavailable={!isTabAvailable(tab.id)}
+          class="inline-flex cursor-pointer items-center gap-1 border-0 border-b-2 border-transparent bg-transparent px-1 py-3 text-sm font-medium transition-colors duration-150 ease-out focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring {active ===
+          tab.id
+            ? 'border-primary text-primary'
+            : isTabAvailable(tab.id)
+              ? 'text-muted-foreground hover:text-foreground'
+              : 'text-muted-foreground/60'}"
           on:click={() => handleTabClick(tab.id, tab.route, tab.shipsInWave)}
           on:keydown={(e) => handleTabKeydown(e, tabIndex)}
         >
-          <span class="lq-tab-icon" aria-hidden="true">{tab.icon}</span>
-          <span class="lq-tab-label">{tab.label}</span>
+          <span class="text-sm" aria-hidden="true">{tab.icon}</span>
+          <span>{tab.label}</span>
         </button>
       </li>
     {/each}
@@ -76,20 +83,3 @@
   wave={comingSoonWave}
   onClose={() => (comingSoonOpen = false)}
 />
-
-<style>
-  .lq-tabbar { border-bottom: 1px solid var(--lq-border); padding: 0 var(--lq-space-4); }
-  .lq-tabbar ul { display: flex; gap: var(--lq-space-4); margin: 0; padding: 0; list-style: none; }
-  .lq-tab {
-    display: inline-flex; align-items: center; gap: var(--lq-space-1);
-    background: transparent; border: 0; padding: var(--lq-space-3) var(--lq-space-1);
-    font-size: 14px; font-weight: 500; color: var(--lq-text-secondary);
-    cursor: pointer; border-bottom: 2px solid transparent;
-    transition: color 0.12s ease, border-color 0.12s ease;
-  }
-  .lq-tab:hover { color: var(--lq-text); }
-  .lq-tab-active { color: var(--lq-accent); border-bottom-color: var(--lq-accent); }
-  .lq-tab-unavailable { color: var(--lq-text-tertiary); }
-  .lq-tab:focus-visible { outline: 2px solid var(--lq-accent); outline-offset: 2px; border-radius: var(--lq-radius-sm); }
-  .lq-tab-icon { font-size: 14px; }
-</style>

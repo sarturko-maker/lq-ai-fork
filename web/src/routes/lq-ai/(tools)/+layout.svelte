@@ -17,65 +17,35 @@
 	$: pathname = $page.url.pathname;
 </script>
 
-<div class="lq-shell">
-	<header class="lq-topbar">
-		<a class="lq-brand" href="/lq-ai">
-			<span class="lq-brand-lq">LQ</span>.AI
+<!-- F2-M2: shell chrome migrated off `--lq-*` to semantic Tailwind. This is
+     the robust dark-mode fix for the legacy shell — the AE5 "light column in
+     dark mode" quirk came from depending on `--lq-canvas` (whose `:root.dark`
+     bridge loses the cascade on some routes); `bg-background`/`text-foreground`
+     are `.dark`-class-driven and match the cockpit. Brand accent unifies to
+     `text-primary` (the cockpit's single accent). `main` keeps its own scroll
+     (app.css pins `html { overflow-y: hidden }`); `min-h-0` lets the flex
+     column shrink correctly. -->
+<div class="flex h-screen flex-col bg-background text-foreground">
+	<header
+		class="flex shrink-0 items-center justify-between border-b border-border bg-background px-4 py-3"
+	>
+		<a class="text-base font-semibold tracking-tight text-foreground no-underline" href="/lq-ai">
+			<span class="text-primary">LQ</span>.AI
 		</a>
-		<div style="display: inline-flex; align-items: center; gap: var(--lq-space-3);">
+		<div class="inline-flex items-center gap-3">
 			<AmbientTrustChrome />
 			<a
 				href="/lq-ai/settings/appearance"
 				aria-label="Settings"
 				title="Settings"
-				style="color: var(--lq-text-secondary); text-decoration: none; padding: var(--lq-space-1) var(--lq-space-2); border-radius: var(--lq-radius-sm);"
+				class="rounded-sm px-2 py-1 text-muted-foreground no-underline transition-colors duration-150 hover:text-foreground"
 				>⚙</a
 			>
 		</div>
 	</header>
 	<TopTabBar user={$auth.user ?? null} {pathname} />
-	<main id="lq-main">
+	<main id="lq-main" class="min-h-0 flex-1 overflow-y-auto">
 		<slot />
 	</main>
 	<DualBrandingFooter />
 </div>
-
-<style>
-	/* src/app.css pins html { overflow-y: hidden !important; } so the shell
-	   can manage its own scroll containers. The LQ.AI shell's
-	   non-chat surfaces (settings, admin sub-routes, trust page) need a
-	   scrollable main; the chat shell already wraps itself in flex+
-	   overflow-hidden and manages internal scroll, so adding overflow-y
-	   here doesn't disturb it. min-height: 0 lets flex children shrink
-	   correctly inside the column. */
-	.lq-shell {
-		background: var(--lq-canvas);
-		color: var(--lq-text);
-		height: 100vh;
-		display: flex;
-		flex-direction: column;
-	}
-	.lq-topbar {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: var(--lq-space-3) var(--lq-space-4);
-		border-bottom: 1px solid var(--lq-border);
-		background: var(--lq-canvas);
-		flex-shrink: 0;
-	}
-	.lq-brand {
-		font-size: 16px;
-		font-weight: 600;
-		color: var(--lq-text);
-		text-decoration: none;
-	}
-	.lq-brand-lq {
-		color: var(--lq-accent);
-	}
-	main {
-		flex: 1;
-		min-height: 0;
-		overflow-y: auto;
-	}
-</style>
