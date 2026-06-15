@@ -2,7 +2,7 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 milestone OPEN — F2-M5 shipped; AE-series CLOSED)
+## State (F2 milestone OPEN — F2-M6 shipped; AE-series CLOSED)
 
 - **NEW MILESTONE — F2 (scira-style minimalist pass), governed by ADR-F012.** The maintainer wants the
   whole interface taken toward the calm, minimal aesthetic of [`scira`](https://github.com/zaidmukaddam/scira)
@@ -21,7 +21,22 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   `cypress/e2e/f2-baseline.cy.ts` (PHASE=before|after). The cockpit already lands on "Your practice"
   (areas + per-area agents + unfiled matters) — the architecture already leans toward the destination;
   F2-M4 adds a calm centered intent entry above it.
-- **F2-M5 (this slice)** — CockpitHeader **minimal-chrome restyle** (already semantic → **restyle-only,
+- **F2-M6 (this slice)** — matters + conversation surfaces **consolidated onto `PageShell`** (the M1
+  carry-over). Added a **`pad` variant** to `components/primitives/PageShell.svelte`
+  (`PageShellPad = 'default'|'compact'|'tight'`; `default`=`px-6 py-10 sm:px-8`, `compact`=`px-6 py-8
+  sm:px-8`, `tight`=`px-4 py-4 sm:px-6`); `pageShellClass(size, pad='default', extra='')` (signature
+  changed — only callers are PageShell itself + its test). **`MattersPanel`** container →
+  `<PageShell pad="compact" data-testid="lq-cockpit-matters">` (bespoke header kept — SectionHeader models
+  no back link / trailing action / truncating title); **`ConversationHost`** keyed conversation column →
+  `<PageShell size="narrow" pad="tight">`. Both keep the `in:fade` on an inner div (the AreaGrid M1 idiom —
+  PageShell is a component; transitions need an element). **Visually equivalent** — the pads were copied
+  verbatim (the win is consolidation/consistency, not a visible redesign). **`AreaRail` intentionally
+  untouched** (sidebar — already minimal, doesn't fit PageShell/SectionHeader). Suites: web check **0 err**;
+  **vitest 836** (+1 pad-variant assertion); f2-baseline cypress **3/3** (PHASE=after — added a matters +
+  conversation capture test). Evidence: `docs/fork/evidence/f2-m6/` (matters + conversation, light+dark ×
+  wide+narrow). Fresh-context review: **SHIP**, no blockers/should-fixes/nits (visual equivalence verified
+  exactly; the responsive geometry test still matches the testid). web-only.
+- **F2-M5 (PR #72, main `2f363e4`)** — CockpitHeader **minimal-chrome restyle** (already semantic → **restyle-only,
   reversible**; one file, no logic/props/routes changed). `cockpit/CockpitHeader.svelte`: muted icon
   buttons now also **`hover:text-foreground`** (one calm resting state → brighten on hover, matching the
   M2/M3 tab-bar idiom; applied to the rail toggle, Tools trigger, theme, settings, sign-out); the right
@@ -123,42 +138,48 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   (`prompt.prompt_text`) are escaped text/attribute bindings via the vendored `Suggestion`→`Button`;
   SavedPrompts are user-owned + server-scoped (404-not-403); no secrets/stray files; web-only.
 
-## Done (F2-M5, this slice)
+## Done (F2-M6, this slice)
 
-- **`cockpit/CockpitHeader.svelte`** (the only file changed) — minimal-chrome restyle, presentation-only:
-  - added **`hover:text-foreground`** to every muted ghost button (rail toggle, Tools trigger, theme,
-    settings, sign-out) so resting = `text-muted-foreground`, hover brightens — one calm state matching
-    the tab bar (the passed `hover:` class wins over the ghost variant's `hover:text-accent-foreground` via
-    tailwind-merge).
-  - right-side outer gap `gap-1.5`→`gap-1`; wrapped **theme + settings + sign-out** in a tight
-    `flex items-center gap-0.5` cluster, preceded by a decorative hairline
-    `<div class="mx-0.5 h-4 w-px bg-border" aria-hidden="true">` separating account/prefs from tools/trust.
-  - everything else byte-identical: all `onclick`/route handlers (`onToggleRail`, `cycleTheme`,
-    `goto('/lq-ai/settings/appearance')`, `signOut`, per-tab `goto(tab.route)`, trust `goto('/lq-ai/trust')`),
-    every `title`+`aria-label`, the `DropdownMenu` Tools structure (with the M3 muted-legacy item class),
-    `AmbientTrustChrome`, and the single primary brand accent. No AI furniture (ADR-F002). No new token
-    scale / `--lq-*` / `{@html}` / retired surface. Prettier-formatted (run from `web/`).
-- **No new tests** (presentation-only, no pure helper — same as F2-M2; behavior unchanged so vitest stays
-  835). **No new ADR** — restyle within the already-accepted ADR-F012/F002 envelope; the call is recorded
-  here + the in-file F2-M5 comment + memory. Evidence: `docs/fork/evidence/f2-m5/`.
+- **`components/primitives/PageShell.svelte`** — new `pad` variant (the M1 carry-over). `PageShellPad =
+  'default'|'compact'|'tight'` + a `PAD` map; `pageShellClass(size, pad='default', extra='')` (signature
+  changed — grep-confirmed the only callers are PageShell's own template + the test). New `pad` prop
+  (default `'default'`, so AreaGrid is unaffected). The `default`/`compact`/`tight` pads ARE the matters/
+  conversation rhythms verbatim — do NOT override pad via `class` (Tailwind utility order is unreliable).
+- **`cockpit/MattersPanel.svelte`** — container div → `<PageShell pad="compact" data-testid=
+  "lq-cockpit-matters">` with the `in:fade|global` on an inner div (the AreaGrid M1 idiom). Bespoke header
+  kept (back link + truncating `<h1>` + trailing "New {noun}" button — SectionHeader models none of these).
+  Body reindented +1 level (large but purely mechanical; prettier-clean).
+- **`cockpit/ConversationHost.svelte`** — the `{#key panelKey}` conversation column div →
+  `<PageShell size="narrow" pad="tight">` with `in:fade` on an inner div; added the PageShell import. The
+  key remount + `bind:prompt`/`bind:selectedMatterId` on ConversationPanel are unchanged (PageShell just
+  renders children).
+- **`cockpit/AreaRail.svelte`** — intentionally NOT touched (sidebar nav on `sidebar-*` tokens, already
+  minimal; PageShell/SectionHeader don't fit a rail). Recorded so M9's sweep doesn't expect a change.
+- **`__tests__/PageShell.test.ts`** — calls updated to the 3-arg signature + a `pad`-variant `.toBe()`
+  assertion locking the exact compact/tight strings (vitest 836). **`cypress/e2e/f2-baseline.cy.ts`** — new
+  capture test deep-links `?area=commercial`, captures the matters list, opens a matter, captures the
+  conversation view (light+dark × wide+narrow). **No new ADR** — consolidation within ADR-F012; recorded
+  here + in-file F2-M6 comments + memory. Evidence: `docs/fork/evidence/f2-m6/`.
 
 ## Next slice — pick up exactly here
 
-**Active milestone: F2 (minimalist pass).** F2-M0…M5 shipped. The cockpit landing leads with the centered
-intent launcher above a de-emphasised area grid; the CockpitHeader is restyled calm (muted-icon/hover,
-grouped account cluster + hairline); the legacy `(tools)` shell + tab bar + footer + AmbientTrustChrome are
-on semantic tokens with the cockpit's blue accent; the tab bar is condensed + grouped with all 11 tabs.
+**Active milestone: F2 (minimalist pass).** F2-M0…M6 shipped. The cockpit landing leads with the centered
+intent launcher above a de-emphasised area grid; CockpitHeader is restyled calm; the matters list +
+conversation column are consolidated onto PageShell (`compact`/`tight` pads); the legacy `(tools)` shell +
+tab bar + footer + AmbientTrustChrome are on semantic tokens with the cockpit's blue accent; the tab bar is
+condensed + grouped with all 11 tabs.
 
-1. **F2-M6 — Matters + conversation surfaces** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`,
-   task #117). `cockpit/MattersPanel.svelte`, `cockpit/ConversationHost.svelte`, `cockpit/AreaRail.svelte`
-   — whitespace/type calm + adopt `PageShell`/`SectionHeader` where they fit (already semantic → light
-   tightening). **FIRST add a `PageShell` `pad` variant** (M1 carry-over): the default padding is
-   AreaGrid's rhythm `px-6 py-10 sm:px-8`; MattersPanel uses `py-8`, ConversationHost `px-4 py-4 sm:px-6` —
-   add the variant before they adopt PageShell (do NOT override via the `class` passthrough — Tailwind
-   utility order makes a px/py override unreliable). Capture via `cypress/e2e/f2-baseline.cy.ts` (extend it
-   to a matters + a conversation view, or a focused spec). Then M7 (library lists) → M8 (settings/admin/
-   trust) → M9 (sweep+verify). **Hard rule (ADR-F012): no tab/route/surface retired or hidden in F2; never
-   re-introduce `--lq-*`; no new token scale; the cockpit entry stays a launcher, not an unbound composer.**
+1. **F2-M7 — Library list surfaces** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`, task #118).
+   The legacy `(tools)` list pages — Knowledge / Skills / Playbooks / Tabular / Saved-Prompts / Learn —
+   get a calm container + the muted-legacy treatment. **Per-page token state differs**: if that page's
+   F1 R-slice already migrated it to semantic tokens → calm-on-semantic; else **migrate-and-calm**
+   (`--lq-*`→semantic in the same pass — never re-introduce `--lq-*`, never double-touch). Coordinate with
+   F1 R12/R14a/R15/R19a/R20 (don't redo a merged R-slice). These live under `web/src/routes/lq-ai/(tools)/
+   {knowledge,skills,playbooks,tabular,saved-prompts,learn}/` — check each page's current tokens FIRST.
+   Adopt `PageShell`/`SectionHeader` where a page is a centered list (many of these are full-width tables/
+   grids — adopt only where it fits). Capture via a focused spec or extend `f2-baseline.cy.ts`. Then M8
+   (settings/admin/trust shells) → M9 (sweep+verify). **Hard rule (ADR-F012): no tab/route/surface retired
+   or hidden in F2; never re-introduce `--lq-*`; no new token scale; the cockpit entry stays a launcher.**
 2. **UX-A (navigational convergence)** — own milestone after F2 (cockpit = single shell, legacy top-tab IA
    retired). **UX-B (capability convergence)** — folds into the pivot track (F1-S4/S5 + area activation +
    schema). Both per ADR-F012.
@@ -208,11 +229,8 @@ on semantic tokens with the cockpit's blue accent; the tab bar is condensed + gr
   content (skills "+ New skill" button, all TrustPills) stays teal/sage — expected during staged rollout.
 - **F2-M2 — active-tab nit RESOLVED in M3.** The active-AND-unavailable/legacy precedence is now explicit
   in the pure `tabStateClass()` (active branch first), unit-tested.
-- **F2-M1 — 2 nits on record (non-blocking).** (1) `PageShell` hardcodes the calm padding default
-  `px-6 py-10 sm:px-8` (AreaGrid's rhythm). The sibling surfaces it will eventually serve differ —
-  `MattersPanel` uses `py-8`, `ConversationHost` uses `px-4 py-4 sm:px-6` — so **F2-M6 must add a `pad`
-  variant before those adopt PageShell** (don't force AreaGrid's rhythm onto them; don't try to override
-  via the `class` passthrough — Tailwind utility order makes a px/py override unreliable). (2) The refactor
+- **F2-M1 — nit (1) RESOLVED in F2-M6.** The `PageShell` `pad` variant (`default`/`compact`/`tight`) landed
+  in M6; MattersPanel (`compact`) and ConversationHost (`tight`) now adopt it. (2) The refactor
   adds two structurally-empty wrapper `<div>`s (the `in:fade` div + SectionHeader's root, which renders
   `class=""` when no class is passed) — no box-model effect, render is pixel-equal (screenshots confirm),
   fully reversible. Visually identical, not literally byte-identical DOM — acceptable under the pixel-equal
