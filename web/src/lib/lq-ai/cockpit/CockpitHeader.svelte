@@ -71,6 +71,12 @@
 	}
 </script>
 
+<!-- F2-M5: minimal-chrome restyle (already semantic — restyle-only, ADR-F012).
+     Quiet muted icon buttons that brighten to `text-foreground` on hover (one
+     calm resting state, matching the M2/M3 tab-bar idiom), the trailing
+     theme/settings/sign-out grouped as one tight cluster behind a hairline
+     separator, single primary accent on the brand. No AI furniture (ADR-F002 —
+     the header picks no models/skills/context). -->
 <header
 	class="flex h-12 shrink-0 items-center justify-between border-b border-border bg-background px-4"
 >
@@ -79,7 +85,7 @@
 			<Button
 				variant="ghost"
 				size="icon"
-				class="text-muted-foreground"
+				class="text-muted-foreground hover:text-foreground"
 				title={railHidden ? 'Show navigation' : 'Hide navigation'}
 				aria-label={railHidden ? 'Show navigation' : 'Hide navigation'}
 				data-testid="lq-cockpit-rail-toggle"
@@ -92,12 +98,17 @@
 			<span class="text-primary">LQ</span>.AI
 		</a>
 	</div>
-	<div class="flex items-center gap-1.5">
+	<div class="flex items-center gap-1">
 		<AmbientTrustChrome />
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger>
 				{#snippet child({ props })}
-					<Button {...props} variant="ghost" size="sm" class="gap-1.5 text-muted-foreground">
+					<Button
+						{...props}
+						variant="ghost"
+						size="sm"
+						class="gap-1.5 text-muted-foreground hover:text-foreground"
+					>
 						<WrenchIcon class="size-4" aria-hidden="true" />
 						Tools
 					</Button>
@@ -107,9 +118,9 @@
 				<DropdownMenu.Label>Tool surfaces</DropdownMenu.Label>
 				{#each toolTabs as tab (tab.id)}
 					<DropdownMenu.Item
-							onSelect={() => goto(tab.route)}
-							class={tabGroupOf(tab) === 'legacy' ? 'text-muted-foreground' : undefined}
-						>
+						onSelect={() => goto(tab.route)}
+						class={tabGroupOf(tab) === 'legacy' ? 'text-muted-foreground' : undefined}
+					>
 						<span aria-hidden="true">{tab.icon}</span>
 						{tab.label}
 					</DropdownMenu.Item>
@@ -123,41 +134,46 @@
 				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
-		<Button
-			variant="ghost"
-			size="icon"
-			class="text-muted-foreground"
-			title={THEME_LABEL[theme]}
-			aria-label={THEME_LABEL[theme]}
-			onclick={cycleTheme}
-		>
-			{#if theme === 'light'}
-				<SunIcon class="size-4" aria-hidden="true" />
-			{:else if theme === 'dark'}
-				<MoonIcon class="size-4" aria-hidden="true" />
-			{:else}
-				<MonitorIcon class="size-4" aria-hidden="true" />
-			{/if}
-		</Button>
-		<Button
-			variant="ghost"
-			size="icon"
-			class="text-muted-foreground"
-			title="Settings"
-			aria-label="Settings"
-			onclick={() => goto('/lq-ai/settings/appearance')}
-		>
-			<SettingsIcon class="size-4" aria-hidden="true" />
-		</Button>
-		<Button
-			variant="ghost"
-			size="icon"
-			class="text-muted-foreground"
-			title="Sign out"
-			aria-label="Sign out"
-			onclick={signOut}
-		>
-			<LogOutIcon class="size-4" aria-hidden="true" />
-		</Button>
+		<!-- Hairline separating tools/trust from the account/prefs cluster. -->
+		<div class="mx-0.5 h-4 w-px bg-border" aria-hidden="true"></div>
+		<!-- Account / preferences — one tight, quiet icon cluster. -->
+		<div class="flex items-center gap-0.5">
+			<Button
+				variant="ghost"
+				size="icon"
+				class="text-muted-foreground hover:text-foreground"
+				title={THEME_LABEL[theme]}
+				aria-label={THEME_LABEL[theme]}
+				onclick={cycleTheme}
+			>
+				{#if theme === 'light'}
+					<SunIcon class="size-4" aria-hidden="true" />
+				{:else if theme === 'dark'}
+					<MoonIcon class="size-4" aria-hidden="true" />
+				{:else}
+					<MonitorIcon class="size-4" aria-hidden="true" />
+				{/if}
+			</Button>
+			<Button
+				variant="ghost"
+				size="icon"
+				class="text-muted-foreground hover:text-foreground"
+				title="Settings"
+				aria-label="Settings"
+				onclick={() => goto('/lq-ai/settings/appearance')}
+			>
+				<SettingsIcon class="size-4" aria-hidden="true" />
+			</Button>
+			<Button
+				variant="ghost"
+				size="icon"
+				class="text-muted-foreground hover:text-foreground"
+				title="Sign out"
+				aria-label="Sign out"
+				onclick={signOut}
+			>
+				<LogOutIcon class="size-4" aria-hidden="true" />
+			</Button>
+		</div>
 	</div>
 </header>
