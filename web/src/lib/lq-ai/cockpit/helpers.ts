@@ -7,6 +7,10 @@
  * stored rows until S3's real schema lands (MILESTONES pre-F1 guard).
  */
 
+import { statusBadge, type StatusTone } from '$lib/lq-ai/agents/helpers';
+import type { AgentRunStatus } from '$lib/lq-ai/api/agents';
+import type { DotStatus } from '$lib/lq-ai/components/primitives/StatusDot.svelte';
+
 /** Selection state carried in `/lq-ai` search params — deep-linkable. */
 export interface CockpitState {
 	/** Practice-area key ('commercial', …) — presentation-only until S3. */
@@ -73,10 +77,45 @@ export function timeAgo(iso: string | null, nowMs: number): string {
 	return new Date(then).toLocaleDateString();
 }
 
+/** StatusTone → the calm StatusDot tone (F2-VL2). */
+const TONE_TO_DOT: Record<StatusTone, DotStatus> = {
+	running: 'running',
+	ok: 'completed',
+	warn: 'attention',
+	error: 'failed',
+	neutral: 'cancelled'
+};
+
+export interface RunDot {
+	dot: DotStatus;
+	label: string;
+}
+
+/**
+ * Map a matter's settled run status to a calm StatusDot tone + label (F2-VL2).
+ * Routes through the canonical `statusBadge` — including the stale-running
+ * belt — so the cockpit's dots and the agents page's pills can never disagree
+ * (ADR-F004: settled rows decide). A null status (no runs yet) is faint
+ * `idle`. `error` is unavailable on the matter rollup (the failed/timeout
+ * split needs it), so failed reads as "Failed" — matching StatusPill, which
+ * also passes `error: null`.
+ */
+export function runDot(
+	status: AgentRunStatus | null,
+	lastRunAt: string | null,
+	nowMs: number
+): RunDot {
+	if (status === null) return { dot: 'idle', label: 'No runs yet' };
+	const badge = statusBadge({ status, started_at: lastRunAt ?? '', error: null }, nowMs);
+	return { dot: TONE_TO_DOT[badge.tone], label: badge.label };
+}
+
 /** Per-area rollup for the area cards (F1-S3). */
 export interface AreaActivity {
 	count: number;
 	lastActivity: string | null;
+	/** The most-recent matter's run status (F2-VL2 — for the area dot rollup). */
+	lastStatus: AgentRunStatus | null;
 }
 
 /** Minimal shape the area-grouping helpers read off a matter. */
@@ -92,9 +131,12 @@ interface AreaFileable {
  * section so they stay reachable (they are NOT in the unfiled-CONVERSATIONS
  * bucket, which is threads without a matter).
  */
-export function areaActivityCounts<T extends AreaFileable & { last_run_at: string | null }>(
-	matters: T[]
-): Map<string, AreaActivity> {
+export function areaActivityCounts<
+	T extends AreaFileable & {
+		last_run_at: string | null;
+		last_run_status: AgentRunStatus | null;
+	}
+>(matters: T[]): Map<string, AreaActivity> {
 	const map = new Map<string, AreaActivity>();
 	for (const m of matters) {
 		if (!m.practice_area_key) continue;
@@ -103,7 +145,13 @@ export function areaActivityCounts<T extends AreaFileable & { last_run_at: strin
 			cur.count += 1;
 			cur.lastActivity ??= m.last_run_at;
 		} else {
-			map.set(m.practice_area_key, { count: 1, lastActivity: m.last_run_at });
+			// Matters arrive newest-activity first, so the FIRST per area is the
+			// latest — its status is the area's current status (F2-VL2).
+			map.set(m.practice_area_key, {
+				count: 1,
+				lastActivity: m.last_run_at,
+				lastStatus: m.last_run_status
+			});
 		}
 	}
 	return map;

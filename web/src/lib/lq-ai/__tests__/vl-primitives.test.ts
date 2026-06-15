@@ -93,4 +93,8 @@ describe('statusDotClass', () => {
 		expect(statusDotClass('cancelled')).toBe('bg-status-cancelled');
 		expect(statusDotClass('idle')).toBe('bg-muted-foreground/40');
 	});
+
+	it('maps the attention tone onto --status-attention (VL2 — stale/cap belt)', () => {
+		expect(statusDotClass('attention')).toBe('bg-status-attention');
+	});
 });

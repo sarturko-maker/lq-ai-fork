@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import type { AgentRunStatus } from '$lib/lq-ai/api/agents';
 import {
 	areaActivityCounts,
 	cockpitUrl,
@@ -17,12 +18,17 @@ import {
 	nextTheme,
 	normalizeTheme,
 	parseCockpitState,
+	runDot,
 	timeAgo,
 	viewOf,
 	type CockpitState
 } from '../helpers';
 
-type FakeMatter = { practice_area_key: string | null; last_run_at: string | null };
+type FakeMatter = {
+	practice_area_key: string | null;
+	last_run_at: string | null;
+	last_run_status: AgentRunStatus | null;
+};
 
 function stateOf(url: string): CockpitState {
 	return parseCockpitState(new URL(`http://x${url}`).searchParams);
@@ -104,19 +110,29 @@ describe('theme cycle (app.html contract)', () => {
 
 describe('area grouping (F1-S3 — matters file by practice_area_key)', () => {
 	const matters: FakeMatter[] = [
-		{ practice_area_key: 'commercial', last_run_at: '2026-06-13T10:00:00Z' },
-		{ practice_area_key: 'commercial', last_run_at: '2026-06-12T10:00:00Z' },
-		{ practice_area_key: 'privacy', last_run_at: null },
-		{ practice_area_key: null, last_run_at: '2026-06-11T10:00:00Z' } // unfiled
+		{
+			practice_area_key: 'commercial',
+			last_run_at: '2026-06-13T10:00:00Z',
+			last_run_status: 'completed'
+		},
+		{
+			practice_area_key: 'commercial',
+			last_run_at: '2026-06-12T10:00:00Z',
+			last_run_status: 'failed'
+		},
+		{ practice_area_key: 'privacy', last_run_at: null, last_run_status: null },
+		{ practice_area_key: null, last_run_at: '2026-06-11T10:00:00Z', last_run_status: 'completed' } // unfiled
 	];
 
-	it('counts per area and takes the first (latest) activity, skipping unfiled', () => {
+	it('counts per area and takes the first (latest) activity + status, skipping unfiled', () => {
 		const byArea = areaActivityCounts(matters);
+		// The FIRST matter per area is the latest, so its status is the area's.
 		expect(byArea.get('commercial')).toEqual({
 			count: 2,
-			lastActivity: '2026-06-13T10:00:00Z'
+			lastActivity: '2026-06-13T10:00:00Z',
+			lastStatus: 'completed'
 		});
-		expect(byArea.get('privacy')).toEqual({ count: 1, lastActivity: null });
+		expect(byArea.get('privacy')).toEqual({ count: 1, lastActivity: null, lastStatus: null });
 		// The unfiled matter (null key) is not grouped under any area.
 		expect(byArea.has('')).toBe(false);
 		expect([...byArea.keys()].sort()).toEqual(['commercial', 'privacy']);
@@ -126,6 +142,35 @@ describe('area grouping (F1-S3 — matters file by practice_area_key)', () => {
 		expect(mattersForArea(matters, 'commercial')).toHaveLength(2);
 		expect(mattersForArea(matters, 'privacy')).toHaveLength(1);
 		expect(mattersForArea(matters, 'disputes')).toEqual([]);
+	});
+});
+
+describe('runDot (F2-VL2 — settled status → calm dot, via statusBadge)', () => {
+	const NOW = Date.parse('2026-06-15T12:00:00Z');
+	const recent = '2026-06-15T11:59:00Z'; // 1m ago — not stale
+
+	it('maps the settled tones onto the StatusDot tones + the canonical labels', () => {
+		expect(runDot('completed', recent, NOW)).toEqual({ dot: 'completed', label: 'Completed' });
+		expect(runDot('running', recent, NOW)).toEqual({ dot: 'running', label: 'Working…' });
+		expect(runDot('failed', recent, NOW)).toEqual({ dot: 'failed', label: 'Failed' });
+		expect(runDot('cancelled', recent, NOW)).toEqual({ dot: 'cancelled', label: 'Cancelled' });
+	});
+
+	it('routes cap_exceeded + the stale-running belt to the attention tone', () => {
+		// cap_exceeded → warn → attention.
+		expect(runDot('cap_exceeded', recent, NOW)).toEqual({
+			dot: 'attention',
+			label: 'Step cap reached'
+		});
+		// A run "running" since long before NOW is stale (warn → attention).
+		expect(runDot('running', '2026-06-15T11:50:00Z', NOW)).toEqual({
+			dot: 'attention',
+			label: 'Stale'
+		});
+	});
+
+	it('treats no runs yet (null status) as faint idle', () => {
+		expect(runDot(null, null, NOW)).toEqual({ dot: 'idle', label: 'No runs yet' });
 	});
 });
 

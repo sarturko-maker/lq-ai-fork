@@ -10,13 +10,16 @@
 	Presentation only; `label` is an escaped text binding (no `{@html}`).
 -->
 <script module lang="ts">
-	export type DotStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'idle';
+	export type DotStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'attention' | 'idle';
 
 	const DOT: Record<DotStatus, string> = {
 		running: 'bg-status-running',
 		completed: 'bg-status-completed',
 		failed: 'bg-status-failed',
 		cancelled: 'bg-status-cancelled',
+		// `attention` = the stale/cap-reached belt (StatusPill's `warn` tone);
+		// `--status-attention` already exists, so this is no new token scale.
+		attention: 'bg-status-attention',
 		idle: 'bg-muted-foreground/40'
 	};
 
