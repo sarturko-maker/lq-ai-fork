@@ -3,12 +3,16 @@
  * derivation (the cockpit LANDS on the area list), relative time, and
  * the theme cycle contract shared with app.html's pre-paint script.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
 	areaActivityCounts,
 	cockpitUrl,
 	mattersForArea,
+	MOTION,
 	motionMs,
 	nextTheme,
 	normalizeTheme,
@@ -137,5 +141,27 @@ describe('motionMs (F1-S2.1 reduced-motion gate)', () => {
 		} finally {
 			vi.unstubAllGlobals();
 		}
+	});
+});
+
+describe('MOTION scale (F013 VL0)', () => {
+	// The JS mirror exists because Svelte's JS transitions take a number, not a
+	// CSS var. This test is the sync lock: it parses the canonical `--motion-*`
+	// tokens out of app.css and asserts MOTION matches them, so the two can't
+	// drift silently.
+	const appCss = readFileSync(
+		fileURLToPath(new URL('../../../../app.css', import.meta.url)),
+		'utf8'
+	);
+	const cssMs = (name: string): number => {
+		const m = appCss.match(new RegExp(`--motion-${name}:\\s*(\\d+)ms`));
+		if (!m) throw new Error(`--motion-${name} not found in app.css`);
+		return Number(m[1]);
+	};
+
+	it('mirrors the CSS --motion-* duration tokens', () => {
+		expect(MOTION.fast).toBe(cssMs('fast'));
+		expect(MOTION.base).toBe(cssMs('base'));
+		expect(MOTION.slow).toBe(cssMs('slow'));
 	});
 });

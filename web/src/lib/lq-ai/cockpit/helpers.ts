@@ -182,8 +182,19 @@ export function applyTheme(theme: Theme): void {
 	root.classList.remove('dark', 'light');
 	root.classList.add(dark ? 'dark' : 'light');
 	const meta = document.querySelector('meta[name="theme-color"]');
-	if (meta) meta.setAttribute('content', dark ? '#1b1e24' : '#f4f3f0');
+	// F013 (VL0): browser chrome follows the Vercel canvas — white / charcoal #111.
+	if (meta) meta.setAttribute('content', dark ? '#111111' : '#ffffff');
 }
+
+/**
+ * Motion scale (F013 §4) — the JS mirror of the CSS `--motion-*` tokens in
+ * app.css. Svelte's JS transitions take a number (ms), so they can't resolve
+ * the CSS custom property; these constants hold the same durations so motion
+ * stays consistent between CSS-driven and transition-driven animation. Keep in
+ * sync with `--motion-fast/base/slow` (locked by a unit test). Pass them
+ * through `motionMs()` at the call site to honour `prefers-reduced-motion`.
+ */
+export const MOTION = { fast: 100, base: 150, slow: 240 } as const;
 
 /**
  * Motion gate: component transitions pass their durations through here so

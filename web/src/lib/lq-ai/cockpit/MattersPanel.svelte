@@ -19,7 +19,7 @@
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import NewMatterDialog from './NewMatterDialog.svelte';
 	import StatusPill from './StatusPill.svelte';
-	import { mattersForArea, motionMs, timeAgo } from './helpers';
+	import { mattersForArea, MOTION, motionMs, timeAgo } from './helpers';
 
 	let {
 		area,
@@ -53,7 +53,7 @@
      / truncating title — so only the shell idiom is shared. Fade on an inner
      div (PageShell is a component; transition directives need an element). -->
 <PageShell pad="compact" data-testid="lq-cockpit-matters">
-	<div in:fade|global={{ duration: motionMs(120) }}>
+	<div in:fade|global={{ duration: motionMs(MOTION.base) }}>
 		<button
 			type="button"
 			class="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground"

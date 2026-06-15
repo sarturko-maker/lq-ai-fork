@@ -66,19 +66,63 @@
 	--color-secondary: var(--secondary);
 	--color-primary-foreground: var(--primary-foreground);
 	--color-primary: var(--primary);
+	/* F013 (VL0): the one scarce Vercel-blue accent — focus/links/running ONLY
+	   (the rest is monochrome ink). `--brand` is the new family; `--primary`
+	   recoloured to ink below. */
+	--color-brand: var(--brand);
+	--color-brand-foreground: var(--brand-foreground);
 	--color-popover-foreground: var(--popover-foreground);
 	--color-popover: var(--popover);
 	--color-card-foreground: var(--card-foreground);
 	--color-card: var(--card);
 	--color-foreground: var(--foreground);
 	--color-background: var(--background);
+	/* F013 (VL0): base 10px (--radius below), buttons 8px (md), cards 12px (lg
+	   — pinned, not derived, so cards read a touch rounder than controls). */
 	--radius-sm: calc(var(--radius) * 0.6);
 	--radius-md: calc(var(--radius) * 0.8);
-	--radius-lg: var(--radius);
+	--radius-lg: 0.75rem;
 	--radius-xl: calc(var(--radius) * 1.4);
 	--radius-2xl: calc(var(--radius) * 1.8);
 	--radius-3xl: calc(var(--radius) * 2.2);
 	--radius-4xl: calc(var(--radius) * 2.6);
+	/*
+	 * F013 (VL0) — type scale (the role-named ramp; spec §2). Tailwind v4
+	 * emits a `text-<name>` utility per size carrying its line-height / weight /
+	 * tracking, so VL1 primitives style by role (`class="text-display"`) not by
+	 * raw px. Inter stays the face. Additive — these names don't collide with
+	 * Tailwind's default xs/sm/base/lg scale, and nothing consumes them in VL0
+	 * (R-TYPO migrates `lq-text-*` → these later).
+	 */
+	--text-display: 2.75rem;
+	--text-display--line-height: 1.08;
+	--text-display--font-weight: 600;
+	--text-display--letter-spacing: -0.04em;
+	--text-title: 1.5rem;
+	--text-title--line-height: 1.2;
+	--text-title--font-weight: 600;
+	--text-title--letter-spacing: -0.02em;
+	--text-heading: 1.125rem;
+	--text-heading--line-height: 1.35;
+	--text-heading--font-weight: 600;
+	--text-heading--letter-spacing: -0.01em;
+	--text-subheading: 1.125rem;
+	--text-subheading--line-height: 1.3;
+	--text-subheading--font-weight: 500;
+	--text-subheading--letter-spacing: -0.02em;
+	--text-body: 0.9375rem;
+	--text-body--line-height: 1.6;
+	--text-body--font-weight: 400;
+	--text-body-sm: 0.875rem;
+	--text-body-sm--line-height: 1.5;
+	--text-body-sm--font-weight: 400;
+	--text-caption: 0.8125rem;
+	--text-caption--line-height: 1.45;
+	--text-caption--font-weight: 400;
+	--text-label: 0.6875rem;
+	--text-label--line-height: 1.3;
+	--text-label--font-weight: 600;
+	--text-label--letter-spacing: 0.12em;
 	/* Elevation scale (F1-S2.1): shadow-* utilities resolve through the
 	   theme-aware --elevation-* custom props below (light: soft cool-tinted
 	   layers, the Legora float; dark: deeper plain-black layers — shadows
@@ -217,103 +261,123 @@
  */
 
 :root {
-	/* F1-S2.1 shade scale (maintainer review: "no shades, contrasts don't
-	   particularly make sense"): the canvas drops to a decisive warm gray
-	   so white cards/panels FLOAT (the Legora/Harvey surface separation —
-	   canvas 0.965 < muted 0.945-wells < card 1.0), text steps to a real
-	   3-level hierarchy (foreground 0.21 / muted-foreground 0.45 / a
-	   faded metadata step at ≥85% alpha — lower drops under the 4.5:1
-	   contract above; size/weight carry the rest of the hierarchy),
-	   borders strengthen to read on gray. */
-	--background: oklch(0.965 0.004 90);
-	--foreground: oklch(0.21 0.01 80);
-	--card: oklch(1 0 0);
-	--card-foreground: oklch(0.21 0.01 80);
-	--popover: oklch(1 0 0);
-	--popover-foreground: oklch(0.21 0.01 80);
-	--primary: oklch(0.47 0.15 262);
-	--primary-foreground: oklch(0.985 0.003 90);
-	--secondary: oklch(0.945 0.005 90);
-	--secondary-foreground: oklch(0.3 0.01 80);
-	--muted: oklch(0.945 0.005 90);
-	--muted-foreground: oklch(0.45 0.012 85);
-	--accent: oklch(0.96 0.02 262);
-	--accent-foreground: oklch(0.32 0.05 262);
-	--destructive: oklch(0.55 0.19 27);
-	--border: oklch(0.9 0.005 90);
-	--input: oklch(0.9 0.005 90);
-	--ring: oklch(0.47 0.15 262);
-	--chart-1: oklch(0.47 0.15 262);
-	--chart-2: oklch(0.55 0.12 155);
-	--chart-3: oklch(0.55 0.19 27);
-	--chart-4: oklch(0.45 0.012 85);
-	--chart-5: oklch(0.77 0.005 90);
-	--radius: 0.5rem;
-	/* The rail merges with the canvas (content floats, nav recedes —
-	   sidebar tokens keep their names; only the values align to canvas). */
-	--sidebar: oklch(0.965 0.004 90);
-	--sidebar-foreground: oklch(0.21 0.01 80);
-	--sidebar-primary: oklch(0.47 0.15 262);
-	--sidebar-primary-foreground: oklch(0.985 0.003 90);
-	--sidebar-accent: oklch(0.93 0.008 90);
-	--sidebar-accent-foreground: oklch(0.21 0.01 80);
-	--sidebar-border: oklch(0.9 0.005 90);
-	--sidebar-ring: oklch(0.47 0.15 262);
-	/* Elevation (consumed via the @theme --shadow-* mapping). */
-	--elevation-xs: 0 1px 2px oklch(0.25 0.02 262 / 0.05);
-	--elevation-sm: 0 1px 2px oklch(0.25 0.02 262 / 0.05), 0 2px 8px oklch(0.25 0.02 262 / 0.04);
-	--elevation-md: 0 2px 4px oklch(0.25 0.02 262 / 0.05), 0 8px 24px oklch(0.25 0.02 262 / 0.07);
-	--elevation-lg: 0 4px 12px oklch(0.25 0.02 262 / 0.06), 0 16px 48px oklch(0.25 0.02 262 / 0.1);
+	/* F013 (VL0) — Vercel direction (spec §1). Neutral gray ink/charcoal +
+	   ONE scarce blue. The remaps that define the look: `--primary` is INK
+	   (#111, inverts to near-white in dark), not the old indigo; the new
+	   `--brand` holds the single Vercel blue, used ONLY for focus / links /
+	   running. Everything else is monochrome. White canvas, white cards on a
+	   faint `--sidebar` rail; hairline `--border`; the 3-level text hierarchy
+	   (foreground / muted-foreground / faint metadata) is preserved, just
+	   neutralised (warm hue 90 + indigo 262 dropped). Hex matches the approved
+	   `direction-vercel` mockup verbatim. WCAG-rechecked (4.5:1 text, 3:1 UI). */
+	--background: #ffffff;
+	--foreground: #111111;
+	--card: #ffffff;
+	--card-foreground: #111111;
+	--popover: #ffffff;
+	--popover-foreground: #111111;
+	--primary: #111111;
+	--primary-foreground: #ffffff;
+	--secondary: #f5f5f5;
+	--secondary-foreground: #111111;
+	--muted: #f5f5f5;
+	--muted-foreground: #707070;
+	--accent: #f5f5f5;
+	--accent-foreground: #111111;
+	--destructive: #c4271a;
+	--border: #ededed;
+	--input: #e2e2e2;
+	--brand: #0070f3;
+	--brand-foreground: #ffffff;
+	--ring: #0070f3;
+	--chart-1: #0070f3;
+	--chart-2: #0f7b34;
+	--chart-3: #c4271a;
+	--chart-4: #707070;
+	--chart-5: #999999;
+	--radius: 0.625rem;
+	/* The rail sits a hair off-white so content reads forward of nav. */
+	--sidebar: #fafafa;
+	--sidebar-foreground: #111111;
+	--sidebar-primary: #111111;
+	--sidebar-primary-foreground: #ffffff;
+	--sidebar-accent: #f5f5f5;
+	--sidebar-accent-foreground: #111111;
+	--sidebar-border: #ededed;
+	--sidebar-ring: #0070f3;
+	/* Elevation (consumed via the @theme --shadow-* mapping). Vercel is flat —
+	   hairline borders do the work; shadows are neutral (indigo tint dropped)
+	   and reserved for true float (popover/modal/dropdown). */
+	--elevation-xs: 0 1px 2px oklch(0.2 0 0 / 0.05);
+	--elevation-sm: 0 1px 2px oklch(0.2 0 0 / 0.05), 0 2px 8px oklch(0.2 0 0 / 0.04);
+	--elevation-md: 0 2px 4px oklch(0.2 0 0 / 0.05), 0 8px 24px oklch(0.2 0 0 / 0.07);
+	--elevation-lg: 0 4px 12px oklch(0.2 0 0 / 0.06), 0 16px 48px oklch(0.2 0 0 / 0.1);
 	color-scheme: light;
-	/* Run-status intents (settled-rows rollups, ADR-F004): strong color
-	   for dot/text, wash for the pill background — soft pastel pills,
-	   never saturated chips. */
-	--status-running: oklch(0.55 0.14 262);
-	--status-running-wash: oklch(0.96 0.02 262);
-	--status-completed: oklch(0.55 0.12 155);
-	--status-completed-wash: oklch(0.96 0.03 155);
-	--status-failed: oklch(0.55 0.19 27);
-	--status-failed-wash: oklch(0.96 0.02 27);
-	--status-cancelled: oklch(0.55 0.01 90);
-	--status-cancelled-wash: oklch(0.95 0.004 90);
-	--status-attention: oklch(0.55 0.12 75);
-	--status-attention-wash: oklch(0.96 0.04 85);
+	/* Run-status intents (settled-rows rollups, ADR-F004): strong color for
+	   dot/text, wash for the pill background. `running` = the scarce `--brand`
+	   blue (the one place blue carries meaning in data); the rest stay green/
+	   red/neutral. Retained for dense tables; minimal surfaces prefer a dot. */
+	--status-running: #0070f3;
+	--status-running-wash: #eef4ff;
+	--status-completed: #0f7b34;
+	--status-completed-wash: #e9f6ed;
+	--status-failed: #c4271a;
+	--status-failed-wash: #fdeceb;
+	--status-cancelled: #707070;
+	--status-cancelled-wash: #f5f5f5;
+	--status-attention: #b25e09;
+	--status-attention-wash: #fdf3e7;
+	/*
+	 * F013 (VL0) — motion scale (spec §4). Subtle, fast, never bouncy. CSS
+	 * transitions read these; Svelte JS transitions read the `MOTION` mirror in
+	 * cockpit/helpers.ts (kept in sync by a unit test), still gated through
+	 * `motionMs()` for prefers-reduced-motion. Theme-invariant (light only).
+	 */
+	--motion-fast: 100ms;
+	--motion-base: 150ms;
+	--motion-slow: 240ms;
+	--motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+	--motion-ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
 }
 
-/* Charcoal dark — floors at L=0.23 (≈#1B1E24); never pure black per the
-   maintainer rule. Same accent hue, lightness raised for contrast. */
+/* F013 (VL0) — charcoal dark (spec §1). Floors at #111 (never pure black, the
+   maintainer rule); cards/popovers step up to #161616, the rail drops to
+   #0c0c0c. `--primary` inverts to near-white ink; `--brand` lifts to a brighter
+   blue for contrast on charcoal. Neutral throughout (the indigo hue is gone). */
 .dark {
-	--background: oklch(0.23 0.006 262);
-	--foreground: oklch(0.93 0.004 90);
-	--card: oklch(0.28 0.006 262);
-	--card-foreground: oklch(0.93 0.004 90);
-	--popover: oklch(0.28 0.006 262);
-	--popover-foreground: oklch(0.93 0.004 90);
-	--primary: oklch(0.62 0.14 262);
-	--primary-foreground: oklch(0.985 0.003 90);
-	--secondary: oklch(0.32 0.006 262);
-	--secondary-foreground: oklch(0.93 0.004 90);
-	--muted: oklch(0.32 0.006 262);
-	--muted-foreground: oklch(0.71 0.008 90);
-	--accent: oklch(0.33 0.04 262);
-	--accent-foreground: oklch(0.9 0.02 262);
-	--destructive: oklch(0.65 0.18 27);
-	--border: oklch(0.37 0.006 262);
-	--input: oklch(0.37 0.006 262);
-	--ring: oklch(0.62 0.14 262);
-	--chart-1: oklch(0.62 0.14 262);
-	--chart-2: oklch(0.65 0.12 155);
-	--chart-3: oklch(0.65 0.18 27);
-	--chart-4: oklch(0.71 0.008 90);
-	--chart-5: oklch(0.47 0.006 262);
-	--sidebar: oklch(0.23 0.006 262);
-	--sidebar-foreground: oklch(0.93 0.004 90);
-	--sidebar-primary: oklch(0.62 0.14 262);
-	--sidebar-primary-foreground: oklch(0.985 0.003 90);
-	--sidebar-accent: oklch(0.29 0.006 262);
-	--sidebar-accent-foreground: oklch(0.93 0.004 90);
-	--sidebar-border: oklch(0.37 0.006 262);
-	--sidebar-ring: oklch(0.62 0.14 262);
+	--background: #111111;
+	--foreground: #ededed;
+	--card: #161616;
+	--card-foreground: #ededed;
+	--popover: #161616;
+	--popover-foreground: #ededed;
+	--primary: #ededed;
+	--primary-foreground: #111111;
+	--secondary: #1a1a1a;
+	--secondary-foreground: #ededed;
+	--muted: #1a1a1a;
+	--muted-foreground: #8f8f8f;
+	--accent: #1a1a1a;
+	--accent-foreground: #ededed;
+	--destructive: #f87171;
+	--border: #262626;
+	--input: #333333;
+	--brand: #47a3ff;
+	--brand-foreground: #111111;
+	--ring: #47a3ff;
+	--chart-1: #47a3ff;
+	--chart-2: #4ade80;
+	--chart-3: #f87171;
+	--chart-4: #8f8f8f;
+	--chart-5: #6b6b6b;
+	--sidebar: #0c0c0c;
+	--sidebar-foreground: #ededed;
+	--sidebar-primary: #ededed;
+	--sidebar-primary-foreground: #111111;
+	--sidebar-accent: #1a1a1a;
+	--sidebar-accent-foreground: #ededed;
+	--sidebar-border: #262626;
+	--sidebar-ring: #47a3ff;
 	--elevation-xs: 0 1px 2px oklch(0 0 0 / 0.35);
 	--elevation-sm: 0 1px 2px oklch(0 0 0 / 0.4), 0 2px 8px oklch(0 0 0 / 0.3);
 	--elevation-md: 0 2px 4px oklch(0 0 0 / 0.4), 0 8px 24px oklch(0 0 0 / 0.35);
@@ -321,16 +385,16 @@
 	/* Native scrollbars / form controls follow the theme (the light
 	   scrollbar-on-charcoal artifact). */
 	color-scheme: dark;
-	--status-running: oklch(0.68 0.13 262);
-	--status-running-wash: oklch(0.32 0.04 262);
-	--status-completed: oklch(0.7 0.12 155);
-	--status-completed-wash: oklch(0.32 0.04 155);
-	--status-failed: oklch(0.68 0.17 27);
-	--status-failed-wash: oklch(0.32 0.04 27);
-	--status-cancelled: oklch(0.68 0.008 90);
-	--status-cancelled-wash: oklch(0.31 0.006 262);
-	--status-attention: oklch(0.72 0.12 80);
-	--status-attention-wash: oklch(0.3 0.04 80);
+	--status-running: #47a3ff;
+	--status-running-wash: #14233a;
+	--status-completed: #4ade80;
+	--status-completed-wash: #11271a;
+	--status-failed: #f87171;
+	--status-failed-wash: #2e1514;
+	--status-cancelled: #8f8f8f;
+	--status-cancelled-wash: #1f1f1f;
+	--status-attention: #d99a4e;
+	--status-attention-wash: #2a2012;
 }
 
 /*

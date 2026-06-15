@@ -145,9 +145,14 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
   `--lq-radius*`/`--lq-space-*`/`lq-text-*` left to R-TYPO (documented); `TrustPill` deferred (M2). vitest
   836 (unchanged — presentation-only); f2-baseline cypress 4/4 (PHASE=after, new playbooks+tabular capture).
   Evidence: `docs/fork/evidence/f2-m7a/`. Review SHIP, no blockers/should-fixes/nits.
-- **F2-M7b** — pending: card/wrapper trio (knowledge/learn/saved-prompts). Same recipe; knowledge KB status
-  pills → `--status-*` too.
-- M8–M9 pending.
+- **F2-VL0** — done (PR #76): the **F013 design-language token layer** lands first (sequenced between M7a and
+  M7b, ADR-F013). `app.css` recoloured to the Vercel palette — ink `--primary` + scarce `--brand` blue +
+  charcoal `#111` dark; added the `--text-*` type scale + `--motion-*` tokens; radius 10/12; `motionMs()`
+  wired onto a CSS-synced `MOTION` mirror. Tokens only, no layout. check 0 err, vitest 837, cypress 4/4.
+  Evidence: `docs/fork/evidence/f2-vl0/`. Then **VL1** (primitives + AppShell), **VL2** (cockpit proof).
+- **F2-M7b** — pending (AFTER the VL series): card/wrapper trio (knowledge/learn/saved-prompts). Same recipe;
+  knowledge KB status pills → `--status-*` too. Now **applies the F013 language** as it migrates.
+- M8–M9 pending (also apply the language).
 
 ## Risks / overlaps
 

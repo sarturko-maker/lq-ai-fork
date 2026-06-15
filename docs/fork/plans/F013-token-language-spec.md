@@ -167,11 +167,19 @@ Surfaces shed bespoke `<style>` as they adopt these.
 Each = one PR, full DoD (check/vitest/headed before+after light+dark × wide+narrow / fresh-context review /
 HANDOFF). Each visual slice carries a **`direction-vercel` side-by-side** for the maintainer's eye.
 
-- **VL0 — tokens + ADR.** Accept ADR-F013; **recolour `app.css`** to §1 (ink `--primary` + new `--brand` +
-  neutral ramp + charcoal `#111` dark) and add **type / motion** tokens (+ radius tune); wire `motionMs()` to
-  `--motion-*`. Recolour is global → screenshot the existing surfaces light+dark to confirm no contrast
-  regression (the semantic names are unchanged, so consumers move with the values). The one app-wide visible
-  shift: brand blue → ink primaries + scarce blue. Tokens only, no new layout.
+- **VL0 — tokens + ADR. ✅ SHIPPED (PR #76).** ADR-F013 accepted (VL prior). **`app.css` recoloured** to §1
+  (ink `--primary` #111/#ededed + new `--brand` #0070f3/#47a3ff + neutral ramp + charcoal `#111` dark floor),
+  hex matching the `direction-vercel` mockup; **type scale** (`--text-display`…`--text-label`, registered in
+  `@theme` → consumed later as `text-*` utility classes; JIT-pruned until used) + **motion** tokens
+  (`--motion-fast/base/slow` + 2 eases) added; `--radius` → 10px, `--radius-lg` pinned 12px (cards); elevation
+  de-tinted (neutral, was indigo). `motionMs()` callers wired onto a `MOTION` JS mirror (helpers.ts) of the
+  CSS `--motion-*` tokens — a unit test parses app.css and locks them in sync (durations normalised 120→base
+  150, 160→base, 100→fast). Theme-color meta → #111/#fff. **No layout change.** Evidence:
+  `docs/fork/evidence/f2-vl0/` (cockpit/matters/conversation/playbooks/tabular/skills, light+dark ×
+  wide+narrow) — ink inverting primaries, charcoal dark (no light-in-dark), green dot-status. Suites: check
+  **0 err**, vitest **837** (+1 MOTION lock), f2-baseline cypress **4/4**. Carry-over: checkbox/focus-ring
+  hardcoded blues (#2563eb/#3b82f6) left as-is (changing the checked fill to `--primary` ink would make the
+  white checkmark invisible in dark — own slice).
 - **VL1 — primitives + app shell.** Build `AppShell` (sidebar+cockpit), `Hero`, `Card`/`CardGrid`,
   `Stack`/`Inline`, `StatusDot`, button variants on the tokens. Prove in a dev-only `_vl-lab`.
 - **VL2 — cockpit landing proof (flagship).** Re-skin `cockpit/` (`AreaRail` → the Vercel sidebar;

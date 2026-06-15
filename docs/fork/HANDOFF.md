@@ -2,7 +2,7 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 milestone OPEN — F2-M7a shipped; AE-series CLOSED)
+## State (F2 milestone OPEN — F2-VL0 shipped, F013 token layer live; AE-series CLOSED)
 
 - **NEW MILESTONE — F2 (scira-style minimalist pass), governed by ADR-F012.** The maintainer wants the
   whole interface taken toward the calm, minimal aesthetic of [`scira`](https://github.com/zaidmukaddam/scira)
@@ -21,7 +21,26 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   `cypress/e2e/f2-baseline.cy.ts` (PHASE=before|after). The cockpit already lands on "Your practice"
   (areas + per-area agents + unfiled matters) — the architecture already leans toward the destination;
   F2-M4 adds a calm centered intent entry above it.
-- **F2-M7a (this slice)** — calm **table-list surfaces**: `playbooks`, `tabular`, `skills` list pages.
+- **F2-VL0 (this slice, PR #76)** — the **F013 design-language token layer** lands (ADR-F013; milestone
+  **F2-VL**, sequenced between M7a and M7b). **`app.css` recoloured to the Vercel palette** (spec §1): the two
+  structural remaps that define the look — **`--primary` is now INK** (`#111` light / `#ededed` dark, inverts)
+  not the old indigo, and a **new `--brand`** holds the one scarce Vercel blue (`#0070f3` / `#47a3ff`), used
+  only for focus / links / running. Everything else monochrome; **charcoal `#111` dark floor** (never black),
+  white canvas, hairline borders. Hex values match the approved `direction-vercel` mockup. Also: **type scale**
+  `--text-display`…`--text-label` registered in `@theme` (consumed later as `text-*` utility classes — JIT, so
+  the vars are pruned until VL1/R-TYPO use them; not a defect); **motion** tokens `--motion-fast/base/slow` +
+  2 eases; `--radius` → **10px** base, `--radius-lg` pinned **12px** (cards); elevation **de-tinted** (neutral,
+  was indigo); status `running` = `--brand`. `motionMs()` callers (5 files) wired onto a new **`MOTION` JS
+  mirror** in `cockpit/helpers.ts` of the CSS `--motion-*` tokens — a **unit test parses `app.css` and locks
+  the two in sync** (durations normalised 120→base 150, 160→base, 100→fast). Theme-color meta → `#111`/`#fff`.
+  **Tokens only — no new layout** (VL1 builds the AppShell/primitives; VL2 the cockpit proof). The one app-wide
+  visible shift: indigo-blue → ink primaries + scarce blue, on charcoal dark. Suites: web check **0 err** (5
+  pre-existing a11y warnings, untouched files); **vitest 837** (+1: the MOTION↔CSS sync lock); f2-baseline
+  cypress **4/4** (PHASE=after — reused as-is). Built bundle verified to carry `--brand`/`--primary:#111`/
+  `--motion-*`/`--background:#111`. Evidence: `docs/fork/evidence/f2-vl0/` (cockpit, matters, conversation,
+  playbooks, tabular, skills — light+dark × wide+narrow; ink inverting primaries, charcoal dark with no
+  light-in-dark, green dot-status, blue scarce). web-only — no api/gateway change.
+- **F2-M7a (PR #74)** — calm **table-list surfaces**: `playbooks`, `tabular`, `skills` list pages.
   **Split of F2-M7** by visual family (M7b = `knowledge`/`learn`/`saved-prompts` card/wrapper surfaces, next).
   Each page: (1) **adopt `<PageShell size="wide" pad="compact">`** for the centered container (the three
   list pages used `max-width: 64rem`/`max-w-5xl` = PageShell `wide` exactly; bespoke header kept — the
@@ -160,7 +179,27 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   (`prompt.prompt_text`) are escaped text/attribute bindings via the vendored `Suggestion`→`Button`;
   SavedPrompts are user-owned + server-scoped (404-not-403); no secrets/stray files; web-only.
 
-## Done (F2-M7a, this slice)
+## Done (F2-VL0, this slice)
+
+- **`web/src/app.css`** — recoloured both `:root` (light) and `.dark` to the Vercel palette (hex, matching
+  `direction-vercel`): ink `--primary` `#111`/`#ededed` (was indigo), new `--brand` `#0070f3`/`#47a3ff`,
+  neutral gray ramp, charcoal `#111` dark floor, white canvas/cards, `#fafafa`/`#0c0c0c` sidebar. `--ring` =
+  brand. Status `running` = brand blue (the rest green/red/neutral); washes re-derived per theme. Elevation
+  de-tinted to neutral oklch (was hue-262 indigo). In `@theme`: added `--color-brand`/`--color-brand-foreground`
+  mappings, the `--text-display`…`--text-label` scale (size + line-height + weight + tracking companions),
+  `--radius-lg` pinned `0.75rem`; `--radius` `0.5rem`→`0.625rem`. In `:root`: `--motion-fast/base/slow` +
+  `--motion-ease-standard/-emphasized`.
+- **`cockpit/helpers.ts`** — new exported `MOTION = { fast:100, base:150, slow:240 }` (the JS mirror of the CSS
+  `--motion-*` tokens; Svelte JS transitions take a number, not a CSS var). `motionMs()` unchanged (still the
+  reduced-motion gate). Theme-color meta literals → `#111111`/`#ffffff`.
+- **5 motion consumers** (`MattersPanel`, `ConversationHost` ×2, `Cockpit` ×2, `AreaGrid`, `ChatPanel`) — import
+  `MOTION` and pass `motionMs(MOTION.base|fast)` instead of magic 120/160/100 (normalised; ≤30ms shift).
+- **`cockpit/__tests__/helpers.test.ts`** — new `MOTION scale (F013 VL0)` suite: reads `app.css`, regex-parses
+  `--motion-fast/base/slow`, asserts `MOTION` matches (the anti-drift sync lock). vitest 836→837.
+- **No new ADR** (ADR-F013 already accepted in PR #75; this is its first code slice). **No new `--lq-*`, no
+  `{@html}`, no token scale removed, no surface retired.** Evidence: `docs/fork/evidence/f2-vl0/`.
+
+## Done (F2-M7a, PR #74)
 
 - **`(tools)/playbooks/+page.svelte`** — `<section class="lq-playbooks-page">` → `<PageShell size="wide"
   pad="compact">` + inner `.lq-playbooks-page` (now flex/gap only; width/margin/padding from PageShell).
@@ -205,24 +244,33 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**Active milestone: F2 (minimalist pass).** F2-M0…M6 shipped. The cockpit landing leads with the centered
-intent launcher above a de-emphasised area grid; CockpitHeader is restyled calm; the matters list +
-conversation column are consolidated onto PageShell (`compact`/`tight` pads); the legacy `(tools)` shell +
-tab bar + footer + AmbientTrustChrome are on semantic tokens with the cockpit's blue accent; the tab bar is
-condensed + grouped with all 11 tabs.
+**Active milestone: F2 (minimalist pass), now with the F013 token layer (F2-VL) sequenced in.** F2-M0…M7a +
+**F2-VL0** shipped. The semantic tokens now carry the **Vercel design language** — ink primaries, scarce
+`--brand` blue, charcoal `#111` dark, the `--text-*`/`--motion-*` families, 10/12px radius. The cockpit lands
+on the centered launcher above a de-emphasised grid; chrome/tab-bar/matters/conversation are calm + on
+semantic tokens (which now render the new palette automatically).
 
-1. **F2-M7b — Library card/wrapper surfaces** (task #118; F2-M7 was split — **M7a (this PR) did the
-   table-list trio** playbooks/tabular/skills). M7b = the remaining three `(tools)` list pages: **`knowledge`**
-   (`+page.svelte`, card grid + inline create form, max-1100px — all `--lq-*` in a scoped `<style>` + KB
-   status pills `indexed`/`indexing`/`failed`/`empty` → map to `--status-completed`/`--status-running`/
-   `--status-failed`/`--muted` like tabular did), **`learn`** (`+page.svelte`, card grid, max-960px, no data),
-   **`saved-prompts`** (`+page.svelte`, thin wrapper around `SavedPromptsPanel`, max-920px). Same recipe as
-   M7a: adopt `<PageShell>` (pick the closest size: knowledge/learn → `wide`, saved-prompts → `default`),
-   migrate **color** `--lq-*`→semantic, leave `--lq-radius*`/`--lq-space-*`/`lq-text-*` to R-TYPO, status
-   pills → `--status-*` family. `SavedPromptsPanel` internals are their own surface — touch only the page
-   wrapper. Extend `f2-baseline.cy.ts` with a knowledge/learn capture. Then M8 (settings/admin/trust
-   shells) → M9 (sweep+verify). **Hard rule (ADR-F012): no tab/route/surface retired or hidden in F2; never
-   re-introduce `--lq-*`; no new token scale; the cockpit entry stays a launcher.**
+1. **F2-VL1 — primitives + AppShell** (next; spec §7/§8). Build `AppShell` (the 264px sidebar — brand · *New
+   matter* ink button · Recent matters · account footer — beside the centred cockpit column), `Hero` (display
+   type), `Card`/hairline `CardGrid`, `Stack`/`Inline`, `StatusDot`, and button variants — **all consuming the
+   VL0 tokens** (`text-display`, `--brand`, the radius/motion scale). Prove them in a **dev-only `_vl-lab`**
+   route (the AE `_ae-lab` precedent — unadvertised, auth-gated, leading-`_`). Presentation-only, token-driven,
+   unit-test the pure class helpers (`pageShellClass` precedent). NO real surface re-skinned yet (that's VL2).
+2. **F2-VL2 — cockpit landing proof (flagship, maintainer design-review gate).** Re-skin `cockpit/` to
+   `direction-vercel`: `AreaRail` → the Vercel sidebar, `CenteredEntry` → `Hero`, `AreaGrid` → hairline
+   `CardGrid`, matters → dot-status list. **Iterate values here under the maintainer's eye** until it reads
+   right.
+3. **then resume F2-M7b — Library card/wrapper surfaces** (task #118): the remaining three `(tools)` list
+   pages — **`knowledge`** (card grid + inline create form, max-1100px; KB status pills `indexed`/`indexing`/
+   `failed`/`empty` → `--status-completed`/`--status-running`/`--status-failed`/`--muted` like tabular),
+   **`learn`** (card grid, max-960px), **`saved-prompts`** (thin `SavedPromptsPanel` wrapper, max-920px). Same
+   M7a recipe — adopt `<PageShell>`, migrate **color** `--lq-*`→semantic, leave `--lq-radius*`/`--lq-space-*`/
+   `lq-text-*` to R-TYPO, status pills → `--status-*` — and now **apply the F013 language** (the tokens already
+   carry it). Touch only the page wrapper for saved-prompts. Extend `f2-baseline.cy.ts` with a knowledge/learn
+   capture. Then M8 (settings/admin/trust) → R-TYPO (`lq-text-*`→§2 type tokens) → TrustPill tones → M9
+   (sweep+verify). **Hard rule (ADR-F012): no tab/route/surface retired or hidden in F2; never re-introduce
+   `--lq-*`; the cockpit entry stays a launcher. ADR-F013 relaxes "no new token scale" for SYSTEMATIC
+   extensions only.**
 2. **UX-A (navigational convergence)** — own milestone after F2 (cockpit = single shell, legacy top-tab IA
    retired). **UX-B (capability convergence)** — folds into the pivot track (F1-S4/S5 + area activation +
    schema). Both per ADR-F012.
@@ -250,6 +298,26 @@ condensed + grouped with all 11 tabs.
 
 ## Carry-overs / review deferrals
 
+- **F2-VL0 — checkbox + focus-ring hardcoded blues left as-is (own slice).** The `@layer base`
+  `input[type=checkbox]` uses literal `#2563eb` (checked fill) / `#3b82f6` (focus outline). They were NOT
+  migrated to `--primary`/`--ring` because the checked fill carries a `fill='white'` SVG checkmark — and
+  `--primary` inverts to near-white in dark, which would make the checkmark invisible on a white well.
+  Resolving it needs a non-inverting "control ink" token (or a theme-aware checkmark color), so it's deferred
+  to a control-styling slice (likely VL1's button/control-variant work). They render as a blue close to the
+  new `--brand`, so no visible clash today.
+- **F2-VL0 — type-scale vars are JIT-pruned until consumed (expected, not a defect).** Tailwind v4 only emits
+  a `text-<name>` utility (and its `--text-*` var) when the class is actually used in markup. VL0 registers the
+  scale in `@theme` but consumes none of it, so `--text-display` etc. don't appear in the built `:root` yet —
+  they materialise the moment VL1 primitives use `class="text-display"`. Don't reference `var(--text-display)`
+  raw in CSS expecting it to resolve before a utility consumes it; use the utility class (the spec §2/§7
+  contract).
+- **F2-VL0 — motion durations normalised (≤30ms).** Wiring the 7 call sites onto the `MOTION` scale shifted
+  fades 120→150ms (base) and the area fly 160→150ms; the inner fade stayed 100ms (fast). Imperceptible and
+  intended (the point of the scale); static screenshots are unaffected. The reduced-motion gate is unchanged.
+- **F2-VL0 — status pills / multi-area hint still not screenshot-able on the dev stack** (carried from M7a/M4):
+  tabular has no executions, only Commercial is configured. The new status-`running`=`--brand` tone and the
+  dark status washes are verified against `app.css`/the built bundle, not headed. Recapture in VL2/M9 when the
+  data exists.
 - **F2-M7a — tabular status pills not screenshot-able (dev stack has no executions).** The migrated
   `--status-*` pill tones (`completed`/`failed`/`cancelled`/`running`) render only with tabular execution
   rows; the dev stack shows the empty state. The mapping is verified against `app.css` (both themes) by the
