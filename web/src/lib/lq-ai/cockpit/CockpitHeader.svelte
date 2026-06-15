@@ -15,20 +15,6 @@
 	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import WrenchIcon from '@lucide/svelte/icons/wrench';
-	// Tool-surface glyphs (F2-VL2): Lucide, replacing the emoji placeholders so
-	// the Tools menu matches the re-skinned cockpit. (UX-A reuses this map when
-	// the tools move into the cockpit rail.)
-	import BotIcon from '@lucide/svelte/icons/bot';
-	import BookmarkIcon from '@lucide/svelte/icons/bookmark';
-	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
-	import FolderIcon from '@lucide/svelte/icons/folder';
-	import GraduationCapIcon from '@lucide/svelte/icons/graduation-cap';
-	import LibraryIcon from '@lucide/svelte/icons/library';
-	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
-	import PencilRulerIcon from '@lucide/svelte/icons/pencil-ruler';
-	import ScaleIcon from '@lucide/svelte/icons/scale';
-	import ShieldIcon from '@lucide/svelte/icons/shield';
-	import Table2Icon from '@lucide/svelte/icons/table-2';
 
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -37,6 +23,7 @@
 	import AmbientTrustChrome from '$lib/lq-ai/components/AmbientTrustChrome.svelte';
 	import { visibleTabsFor } from '$lib/lq-ai/components/TopTabBar.svelte';
 	import { tabGroupOf, type User } from '$lib/lq-ai/tabs';
+	import { tabIcon } from '$lib/lq-ai/tab-icons';
 	import { preferences } from '$lib/lq-ai/stores/preferences';
 	import { applyTheme, nextTheme, normalizeTheme, type Theme } from './helpers';
 
@@ -56,21 +43,6 @@
 			(t) => t.id !== 'home'
 		)
 	);
-
-	// tab.id → Lucide glyph (falls back to the tab's emoji for any unmapped id).
-	const TAB_ICON: Record<string, typeof ScaleIcon> = {
-		agents: ScaleIcon,
-		chats: MessageSquareIcon,
-		matters: FolderIcon,
-		skills: PencilRulerIcon,
-		knowledge: LibraryIcon,
-		playbooks: ClipboardListIcon,
-		tabular: Table2Icon,
-		'saved-prompts': BookmarkIcon,
-		learn: GraduationCapIcon,
-		autonomous: BotIcon,
-		admin: ShieldIcon
-	};
 
 	let theme: Theme = $state('system');
 	$effect(() => {
@@ -146,16 +118,12 @@
 			<DropdownMenu.Content align="end" class="w-52">
 				<DropdownMenu.Label>Tool surfaces</DropdownMenu.Label>
 				{#each toolTabs as tab (tab.id)}
-					{@const Icon = TAB_ICON[tab.id]}
+					{@const Icon = tabIcon(tab.id)}
 					<DropdownMenu.Item
 						onSelect={() => goto(tab.route)}
 						class={tabGroupOf(tab) === 'legacy' ? 'text-muted-foreground' : undefined}
 					>
-						{#if Icon}
-							<Icon class="size-4" aria-hidden="true" />
-						{:else}
-							<span aria-hidden="true">{tab.icon}</span>
-						{/if}
+						<Icon class="size-4" aria-hidden="true" />
 						{tab.label}
 					</DropdownMenu.Item>
 				{/each}
