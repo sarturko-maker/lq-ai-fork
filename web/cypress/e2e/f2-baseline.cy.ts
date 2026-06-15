@@ -61,7 +61,10 @@ describe('F2 baseline capture', { retries: { runMode: 2, openMode: 0 } }, () => 
 	it('captures a legacy (tools) chrome surface (light + dark, wide + narrow)', () => {
 		login();
 		cy.visit('/lq-ai/skills');
-		cy.get('body', { timeout: 30000 }).should('be.visible');
+		// Wait for the chrome F2 actually changes (the TopTabBar nav) to paint,
+		// not just `body` — a bare `body` assertion passes before the SPA renders
+		// and yields a blank capture (seen on F2-M3 light-wide).
+		cy.get('nav[aria-label="Primary"]', { timeout: 30000 }).should('be.visible');
 		cy.wait(800);
 		for (const theme of ['light', 'dark'] as const) {
 			pinTheme(theme);
