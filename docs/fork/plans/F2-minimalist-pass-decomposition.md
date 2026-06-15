@@ -73,7 +73,9 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
   `PageShell`/`SectionHeader` where they fit (already semantic; light tightening). *(M)*
 - **F2-M7 — Library list surfaces.** `routes/lq-ai/(tools)/{knowledge,skills,playbooks,tabular,
   saved-prompts,learn}/+page.svelte` — calm container + muted-legacy treatment; calm-on-semantic if its
-  R-slice merged, else migrate-and-calm. Coordinate F1 R12/R14a/R15/R19a/R20. *(M)*
+  R-slice merged, else migrate-and-calm. Coordinate F1 R12/R14a/R15/R19a/R20. **SPLIT by visual family:**
+  **M7a** = table-list trio (playbooks/tabular/skills); **M7b** = card/wrapper trio
+  (knowledge/learn/saved-prompts). *(M)*
 - **F2-M8 — Settings / admin / trust shells.** `routes/lq-ai/(tools)/settings/+layout.svelte`,
   `routes/lq-ai/(tools)/admin/+layout.svelte`, `routes/lq-ai/(tools)/trust/+page.svelte` — calm nav
   shells + section headers. Coordinate F1 R16/R19. *(S–M)*
@@ -136,7 +138,16 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
   copied verbatim — consolidation, not a visible redesign). `AreaRail` intentionally untouched (sidebar,
   doesn't fit). vitest 836 (+1); f2-baseline cypress 3/3 (PHASE=after, new matters+conversation capture
   test). Evidence: `docs/fork/evidence/f2-m6/`. Review SHIP.
-- M7–M9 pending.
+- **F2-M7a** — done (this PR): calm table-list trio (playbooks/tabular/skills). Adopted
+  `<PageShell size="wide" pad="compact">` (bespoke headers kept — trailing-CTA header, SectionHeader doesn't
+  model it); migrated **color** `--lq-*`→semantic (`--lq-accent`→`--primary` teal→blue, unifies with chrome);
+  tabular status pills → the existing `--status-*` tone family (both themes, no new scale).
+  `--lq-radius*`/`--lq-space-*`/`lq-text-*` left to R-TYPO (documented); `TrustPill` deferred (M2). vitest
+  836 (unchanged — presentation-only); f2-baseline cypress 4/4 (PHASE=after, new playbooks+tabular capture).
+  Evidence: `docs/fork/evidence/f2-m7a/`. Review SHIP, no blockers/should-fixes/nits.
+- **F2-M7b** — pending: card/wrapper trio (knowledge/learn/saved-prompts). Same recipe; knowledge KB status
+  pills → `--status-*` too.
+- M8–M9 pending.
 
 ## Risks / overlaps
 
