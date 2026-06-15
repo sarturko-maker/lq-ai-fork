@@ -2,11 +2,28 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (AE7 shipped — the AE-series is CLOSED)
+## State (F2 milestone OPEN — F2-M0 shipping; AE-series CLOSED)
 
-- **AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (#62) + AE4 (#63) + AE5 (#64) + AE6 (#65) MERGED; AE7 (PR #66)
-  on `ae7-suggestions`** — AI Elements adoption on the chat surface (ADR-F011). **With AE7 the AE-series
-  CLOSES (AE0–AE7 all done).** The series brought the Vercel AI Elements look via the MIT Svelte port
+- **NEW MILESTONE — F2 (scira-style minimalist pass), governed by ADR-F012.** The maintainer wants the
+  whole interface taken toward the calm, minimal aesthetic of [`scira`](https://github.com/zaidmukaddam/scira)
+  (**AGPL → REFERENCE ONLY**: study look/IA, never fetch/copy code), AND a UX redesign (land in the
+  cockpit → reach tools from there → deep-agents-per-area as the centre). **ADR-F012 splits the work by
+  dependency:** **F2** = the *visual* pass (now, reversible, no irreversible IA move — all 11 tabs stay);
+  **UX-A** = navigational convergence (own milestone after F2; cockpit becomes the single shell, legacy
+  top-tab IA retired — unblocked frontend IA); **UX-B** = capability convergence ("tools as in-context
+  agent capabilities", *rides the pivot track* — hard-blocked by the practice_area/unit_of_work SCHEMA +
+  area activation + F1-S4/S5; building it before those = schema debt or a dishonest hollow shell). Plan:
+  `docs/fork/plans/F2-minimalist-pass-decomposition.md` (slices **F2-M0…M9**). This extends F006/F011 and
+  sequences F002's F3 commitment.
+- **F2-M0 (PR pending on `f2-m0-foundation`)** — docs + baseline only (no app code): **ADR-F012** written;
+  F2 decomposition doc written; **before** baseline screenshots captured (cockpit landing + a legacy
+  `(tools)` chrome surface, light+dark × wide+narrow) in `docs/fork/evidence/f2-m0/` via the reusable
+  `cypress/e2e/f2-baseline.cy.ts` (PHASE=before|after). Suites unaffected (web check 0 err / vitest 816).
+  The cockpit already lands on "Your practice" (areas + per-area agents + unfiled matters) — the
+  architecture already leans toward the destination; F2-M4 adds a calm centered intent entry above it.
+
+- **AE-series (ADR-F011) — CLOSED. AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (#62) + AE4 (#63) + AE5 (#64) +
+  AE6 (#65) + AE7 (#66) ALL MERGED.** The series brought the Vercel AI Elements look via the MIT Svelte port
   `SikandarJODD/ai-elements`, vendored + re-tokened + re-wired to OUR data — KEEP Svelte, KEEP
   gateway/SSE/`guarded_tool_call`/audit, KEEP our `marked`+`DOMPurify` sanitizer. Plan:
   `docs/fork/plans/F1-legacy-design-rollout-decomposition.md` §"AI Elements visual adoption". The
@@ -59,13 +76,24 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**The AE-series is CLOSED (AE0–AE7 all merged).** No AE8. Pick the next slice from:
+**Active milestone: F2 (minimalist pass).** F2-M0 (this slice) ships the ADR + decomposition + baseline.
 
-1. R-series rollout slices (any order — the dark-mode bridge holds un-migrated surfaces):
-   Foundation/rail R2–R5, Wave 1 R-CONV-1 (logic; R-CONV-2 → AE6), Wave 2
-   R12/R13/R14a-b/R15/R15b-tab-pb/R16, Wave 3 R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO →
-   R-BRIDGE → R-LAST. autonomous R21 = SKIP (deferred to F2/F3, stays on bridge).
-2. **F1-S4** (subagent tree + SSE v3-projection adapter) / **F1-S5** (idempotency ledger +
+1. **F2-M1 — Calm layout primitives** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`). Extract the
+   repeated `mx-auto max-w-* px-* py-*` page-shell + heading idiom (see `cockpit/AreaGrid.svelte`) into
+   `components/primitives/PageShell.svelte` + `SectionHeader.svelte`, **proven on one real consumer**
+   (AreaGrid). No new token scale (the `app.css` semantic palette is the system); semantic tokens only.
+   Then M2 (chrome calm + token unification) → M3 (tab-bar condense) → M4 (cockpit centered entry) → M5
+   (CockpitHeader) → M6/M7/M8 (per-surface calm) → M9 (sweep). Use `cypress/e2e/f2-baseline.cy.ts`
+   (PHASE=after) for the after-shots. **Hard rule (ADR-F012): no tab/route/surface retired or hidden in
+   F2; never re-introduce `--lq-*`; the cockpit entry is a launcher, not an unbound composer (F002).**
+2. **UX-A (navigational convergence)** — own milestone after F2 (cockpit = single shell, legacy top-tab IA
+   retired). **UX-B (capability convergence)** — folds into the pivot track (F1-S4/S5 + area activation +
+   schema). Both per ADR-F012.
+3. R-series rollout slices (any order — the dark-mode bridge holds un-migrated surfaces; **coordinate with
+   F2 — don't double-touch chrome, never re-introduce `--lq-*`**): Foundation/rail R2–R5, Wave 1 R-CONV-1
+   (logic; R-CONV-2 → AE6), Wave 2 R12/R13/R14a-b/R15/R15b-tab-pb/R16, Wave 3
+   R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO → R-BRIDGE → R-LAST. autonomous R21 = SKIP.
+4. **F1-S4** (subagent tree + SSE v3-projection adapter) / **F1-S5** (idempotency ledger +
    attribution fan-out) — `docs/fork/plans/F1-replan.md`. **Area skills/subagents ACTIVATION**
    (S9-gated) — wires `composition.py` to pass area skills/subagents + re-runs the S9 matrix.
    **Backlog:** scira-style minimalist interface pass AFTER the AE-series (MILESTONES § Backlog;
