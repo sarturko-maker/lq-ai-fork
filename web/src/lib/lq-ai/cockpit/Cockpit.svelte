@@ -32,10 +32,11 @@
 	import { serverNowMs } from '$lib/lq-ai/agents/server-clock';
 	import AreaGrid from './AreaGrid.svelte';
 	import AreaRail from './AreaRail.svelte';
+	import CenteredEntry from './CenteredEntry.svelte';
 	import CockpitHeader from './CockpitHeader.svelte';
 	import ConversationHost from './ConversationHost.svelte';
 	import MattersPanel from './MattersPanel.svelte';
-	import { cockpitUrl, motionMs, parseCockpitState, viewOf } from './helpers';
+	import { cockpitUrl, launchIntent, motionMs, parseCockpitState, viewOf } from './helpers';
 
 	let areas = $state<PracticeArea[] | null>(null);
 	let areasError = $state<string | null>(null);
@@ -46,6 +47,17 @@
 
 	let nowMs = $state(Date.now());
 	let ticker: ReturnType<typeof setInterval> | null = null;
+
+	// F2-M4: a centered-entry submission carries its text here so the FIRST
+	// matter composer reached after the launch opens with it as a draft —
+	// whether routed directly (sole configured area) or after the user picks an
+	// area. ConversationHost seeds it once on mount and clears it via
+	// onDraftConsumed, so a second matter is never re-seeded. Carry window: if
+	// the user opens some other existing matter before fulfilling the launch it
+	// also receives the draft — acceptable, it is their last typed intent and
+	// fully editable. NOT a thread — the launcher never starts a conversation
+	// (ADR-F002).
+	let pendingDraft = $state('');
 
 	const sel = $derived(parseCockpitState($page.url.searchParams));
 	const view = $derived(viewOf(sel));
@@ -163,6 +175,15 @@
 		nav(cockpitUrl({ unfiled: true }));
 	}
 
+	function launchFromEntry(text: string) {
+		// LAUNCHER, not composer (ADR-F002): resolve the typed intent to a
+		// destination + carried draft. One configured area → enter it carrying
+		// the note; otherwise the note is held and the user picks an area below.
+		const intent = launchIntent(areas ?? [], text);
+		pendingDraft = intent.draft;
+		if (intent.url) nav(intent.url);
+	}
+
 	function openMatter(matter: MatterActivity) {
 		nav(cockpitUrl({ area: sel.area, matter: matter.project_id }));
 	}
@@ -220,16 +241,24 @@
 	/>
 {/snippet}
 
+{#snippet landingView()}
+	<!-- F2-M4: the centered intent LAUNCHER above the (de-emphasised) area
+	     grid. A launcher, not a composer (ADR-F002): it routes into the
+	     area→matter flow rather than starting an unbound thread. -->
+	<CenteredEntry {areas} onLaunch={launchFromEntry} />
+	<AreaGrid
+		{areas}
+		{areasError}
+		matters={activity?.matters ?? null}
+		{nowMs}
+		onEnterArea={enterArea}
+		onOpenMatter={openMatter}
+	/>
+{/snippet}
+
 {#snippet mainViews()}
 	{#if view === 'areas'}
-		<AreaGrid
-			{areas}
-			{areasError}
-			matters={activity?.matters ?? null}
-			{nowMs}
-			onEnterArea={enterArea}
-			onOpenMatter={openMatter}
-		/>
+		{@render landingView()}
 	{:else if view === 'matters' && selectedArea}
 		<MattersPanel
 			area={selectedArea}
@@ -249,6 +278,8 @@
 				{projects}
 				{projectsError}
 				{nowMs}
+				initialDraft={pendingDraft}
+				onDraftConsumed={() => (pendingDraft = '')}
 				onBack={() => nav(cockpitUrl({ area: sel.area }))}
 				onSelectThread={selectThread}
 				{onThreadCreated}
@@ -272,14 +303,7 @@
 	{:else}
 		<!-- Selection points at something not loaded/not enterable
 		     (stale deep link, unconfigured area) — land honestly. -->
-		<AreaGrid
-			{areas}
-			{areasError}
-			matters={activity?.matters ?? null}
-			{nowMs}
-			onEnterArea={enterArea}
-			onOpenMatter={openMatter}
-		/>
+		{@render landingView()}
 	{/if}
 {/snippet}
 

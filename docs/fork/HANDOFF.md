@@ -2,7 +2,7 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 milestone OPEN — F2-M3 shipped; AE-series CLOSED)
+## State (F2 milestone OPEN — F2-M4 shipped; AE-series CLOSED)
 
 - **NEW MILESTONE — F2 (scira-style minimalist pass), governed by ADR-F012.** The maintainer wants the
   whole interface taken toward the calm, minimal aesthetic of [`scira`](https://github.com/zaidmukaddam/scira)
@@ -21,7 +21,27 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   `cypress/e2e/f2-baseline.cy.ts` (PHASE=before|after). The cockpit already lands on "Your practice"
   (areas + per-area agents + unfiled matters) — the architecture already leans toward the destination;
   F2-M4 adds a calm centered intent entry above it.
-- **F2-M3 (this slice)** — tab-bar visual condense (restyle/group ONLY — **no tab retired/hidden/
+- **F2-M4 (this slice)** — cockpit centered intent **launcher** (ADR-F002: a launcher, **NOT a
+  composer** — it never starts an unbound thread). New **`cockpit/CenteredEntry.svelte`** rendered ABOVE
+  a **de-emphasised** `AreaGrid` (its "Your practice" header dropped from `page`→`section`, so the page
+  keeps a **single h1** — the launcher's "What are you working on?"), wired through a new
+  **`landingView`** snippet in `cockpit/Cockpit.svelte` (replaces the two duplicated `AreaGrid` render
+  blocks — areas-view + fallback — a real simplification). On submit a new **pure `launchIntent(areas,
+  text) → {url, draft}`** helper (`cockpit/helpers.ts`, unit-tested) decides: **exactly one CONFIGURED
+  area → enter it** (`cockpitUrl({area})`) carrying the text; **0 or several → no nav**, draft held +
+  hint points the user at the grid below. The text carries via a parent-held **`pendingDraft`** in
+  `Cockpit.svelte` → passed to `ConversationHost` as **`initialDraft`**, which seeds the composer
+  `prompt` **once on mount** (`!prompt` guard) and clears it via **`onDraftConsumed`** — so only the
+  FIRST matter after a launch is seeded, never a second, never overwriting in-progress text; unfiled
+  (resume-only) gets no draft. Optional starter chips = the user's own **SavedPrompts** (AE7 precedent,
+  fetched fail-soft → none). Suites: web check **0 err**; **vitest 835** (+6 `launchIntent`); f2-baseline
+  cypress **2/2** (PHASE=after) + a throwaway interaction spec confirmed end-to-end carry-forward
+  (submit → `area=commercial` → open matter → composer pre-seeded), then removed. Evidence:
+  `docs/fork/evidence/f2-m4/` (cockpit, light+dark × wide+narrow — launcher hero + chip + de-emphasised
+  grid). Fresh-context review: **SHIP**, no blockers; 1 should-fix (stale-draft carry window) documented
+  in-code as accepted intended behavior; hint-after-typing nit FIXED in-slice (`oninput` clears it).
+  web-only — no api/gateway change.
+- **F2-M3 (PR #70, main `7c03cef`)** — tab-bar visual condense (restyle/group ONLY — **no tab retired/hidden/
   reordered**). Added a **presentational** `group?: 'core'|'legacy'|'gated'` field + `tabGroupOf()` to
   `lib/lq-ai/tabs.ts` (playbooks/tabular → `legacy`; autonomous/admin → `gated`; absent ⇒ `core`) — purely
   visual, does NOT touch `isTabVisible`/`isTabAvailable`/`activeTabFor`/`visibleTabsFor`. **`TopTabBar`**
@@ -89,51 +109,50 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   (`prompt.prompt_text`) are escaped text/attribute bindings via the vendored `Suggestion`→`Button`;
   SavedPrompts are user-owned + server-scoped (404-not-403); no secrets/stray files; web-only.
 
-## Done (AE7, this slice)
+## Done (F2-M4, this slice)
 
-- **`ChatPanel.svelte`** — AE **Suggestion** starter chips above the composer. A row of
-  `Suggestions`/`Suggestion` (the AE0-vendored chips, reused as-is) renders the user's saved prompts as
-  one-click starters, gated `{#if messages.length === 0 && (activeChat?.message_count ?? 0) === 0 &&
-  savedPromptChips.length > 0}` — i.e. only on an EMPTY conversation that genuinely has no messages, and
-  only when the user actually has saved prompts. Chip label = `prompt.name`; `onclick` fills the composer
-  with `prompt.prompt_text` via the new shared **`insertIntoComposer`** helper (which also replaced the
-  inline arrow the SavedPromptsPanel quick-insert used — same append-if-nonempty-else-set behavior, now
-  deduped). The chips are **NOT** model-invented follow-ups — there is no honest source for those, so none
-  are shown.
-- **`SavedPromptsPanel.svelte`** — new optional **`onPromptsLoaded(prompts)`** callback, fired at the end
-  of its existing `refresh()`. This lets ChatPanel render the same honest, user-owned list as chips WITHOUT
-  a second `GET /saved-prompts` — the panel stays the single fetch site. (The panel only mounts inside
-  `{#if activeChat}`, which persists across chat switches, so no re-fetch / no race; `message_count`
-  gates the empty-state flash during a populated chat's message load.)
-- **`cypress/e2e/ae7-suggestions.cy.ts`** (5) — live-stubbed chat surface on `/lq-ai/chats` (SHORT
-  fixtures): chips count == saved-prompt count + label is the prompt name; click inserts the prompt BODY
-  (exact-value assert, proving label≠inserted); chips hidden once the conversation has messages (composer
-  still present → proves it's an empty-state-only affordance, not a load failure); **NO chips when the
-  saved-prompts list is empty (the anti-invention guarantee)**; + 1 before/after capture (light+dark,
-  wide+narrow). **NOTICES** (AE row bumped AE0–AE7 + AE7 sentence) + `ai-elements/README.md` (AE7
-  honest-source paragraph) + plan (AE7 DONE) updated. **No new ADR** — F011 already sanctions reusing a
-  vendored component; the honest-source/no-invention call is recorded here + in NOTICES/README/memory.
+- **`cockpit/CenteredEntry.svelte`** (new) — the calm centered launcher. Static greeting `<h1>` "What are
+  you working on?" + subtitle, a prompt-styled textarea (`rounded-xl border border-input bg-card shadow-sm
+  focus-within:…ring`, Enter-to-submit / Shift+Enter newline) with an arrow submit button (disabled when
+  empty), an `awaitingAreaPick` hint (cleared on `oninput`), and optional AE `Suggestion` starter chips
+  from the user's own SavedPrompts (`savedPromptsApi.listSavedPrompts()` on mount, fail-soft → none;
+  clicking a chip appends its body to the field). `onLaunch(text)` hands the trimmed text to the parent.
+  Semantic tokens only; no `{@html}` (chip label/title are escaped text/attr bindings).
+- **`cockpit/helpers.ts`** — new pure **`launchIntent(areas, text) → {url, draft}`** (+ `LaunchIntent`/
+  `LaunchableArea` types). Filters to `configured` areas; exactly one → `{url: cockpitUrl({area}), draft}`,
+  else `{url: null, draft}`. Trims the draft. Never builds a thread URL (ADR-F002).
+- **`cockpit/Cockpit.svelte`** — `pendingDraft` state + `launchFromEntry` (calls `launchIntent`, sets the
+  draft, navigates only when a single area resolves). New **`landingView`** snippet (`CenteredEntry` +
+  `AreaGrid`) reused by the `view==='areas'` branch AND the stale-deep-link fallback (deletes the two
+  duplicated `AreaGrid` blocks). Passes `initialDraft`/`onDraftConsumed` to the **matter-mode**
+  `ConversationHost` only (not unfiled).
+- **`cockpit/ConversationHost.svelte`** — new `initialDraft`/`onDraftConsumed` props; `onMount` seeds
+  `prompt` from `initialDraft` once (guarded by `!prompt`) then calls `onDraftConsumed`. Survives the
+  per-matter `{#key}` remount correctly (parent clears the draft on first consume).
+- **`cockpit/AreaGrid.svelte`** — "Your practice" `SectionHeader` `size="section"` (de-emphasis + single
+  page h1). Minimal one-prop diff (avoided a prettier full-file reindent of a pre-existing M1 mis-indent).
+- **`__tests__/launch-intent.test.ts`** (new, 6) — `launchIntent` for 0/1/many configured, unconfigured
+  filtered, empty list, draft-trim. **`cypress/e2e/f2-baseline.cy.ts`** — cockpit test waits on the new
+  `lq-cockpit-centered-entry` testid before capture. **No new ADR** — F2-M4 is the launcher ADR-F012/F002
+  already ratified; the routing + carry-window call is recorded here + in code comments + memory.
 
 ## Next slice — pick up exactly here
 
-**Active milestone: F2 (minimalist pass).** F2-M0…M3 shipped. The legacy `(tools)` shell + tab bar +
-footer + AmbientTrustChrome are on semantic tokens with the cockpit's blue accent; the tab bar is now
-condensed + grouped (core / muted-legacy / gated) with all 11 tabs intact.
+**Active milestone: F2 (minimalist pass).** F2-M0…M4 shipped. The cockpit landing now leads with the
+centered intent launcher above a de-emphasised area grid; the legacy `(tools)` shell + tab bar + footer +
+AmbientTrustChrome are on semantic tokens with the cockpit's blue accent; the tab bar is condensed +
+grouped (core / muted-legacy / gated) with all 11 tabs intact.
 
-1. **F2-M4 — Cockpit centered intent entry** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`).
-   New `cockpit/CenteredEntry.svelte` rendered in the `view==='areas'` branch of `cockpit/Cockpit.svelte`,
-   ABOVE a de-emphasised `AreaGrid`. A calm centered **launcher — NOT a composer (ADR-F002 forbids an
-   unbound free-floating chat)**: greeting + a single prompt-styled field that routes via
-   `cockpit/helpers.ts` `cockpitUrl(...)` into the area→matter binding flow (carry the typed text forward
-   as the `ConversationHost` draft); exactly-one-configured-area → enter it, multiple → anchor/filter the
-   grid. Optional honest starter chips (AE `suggestion/` backed by the user's SavedPrompts — the AE7
-   precedent; empty ⇒ none). Optional pure `launchIntent(areas, text) → {url, draft}` helper in
-   `helpers.ts` (unit-testable). Reuse `AreaGrid`/`helpers.ts`/`components/ai-elements/suggestion/`/shadcn
-   `ui/{input,button}`. **Do NOT** reuse the AE5 `ChatPanel` composer or `ConversationPanel` (they
-   manufacture an unbound thread → F002). Reversible (delete the component + one render line). Then M5
-   (CockpitHeader restyle) → M6/M7/M8 (per-surface calm) → M9 (sweep). Use `cypress/e2e/f2-baseline.cy.ts`
-   (PHASE=after) for the cockpit after-shots. **Hard rule (ADR-F012): no tab/route/surface retired or
-   hidden in F2; never re-introduce `--lq-*`; the cockpit entry is a launcher, not an unbound composer.**
+1. **F2-M5 — CockpitHeader minimal-chrome pass** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`,
+   task #116). `cockpit/CockpitHeader.svelte` is **already on semantic tokens** (F2-M2/M3 touched it) →
+   **restyle-only, reversible**: quieter icon buttons, tighter chrome rhythm, single accent on the brand,
+   calmer Tools menu. Do NOT add AI furniture (ADR-F002 — the header picks no models/skills/context). Keep
+   the Tools dropdown's muted-legacy treatment (F2-M3) and the trust link (ADR-0011 disclosure). Capture
+   via `cypress/e2e/f2-baseline.cy.ts` (PHASE=after) — the header shows on both the cockpit landing and
+   the legacy `(tools)` surface shots. Then M6/M7/M8 (per-surface calm) → M9 (sweep). **F2-M6 must add the
+   `PageShell` `pad` variant before MattersPanel/ConversationHost adopt it** (M1 carry-over below).
+   **Hard rule (ADR-F012): no tab/route/surface retired or hidden in F2; never re-introduce `--lq-*`; no
+   new token scale; the cockpit entry stays a launcher, not an unbound composer.**
 2. **UX-A (navigational convergence)** — own milestone after F2 (cockpit = single shell, legacy top-tab IA
    retired). **UX-B (capability convergence)** — folds into the pivot track (F1-S4/S5 + area activation +
    schema). Both per ADR-F012.
@@ -161,6 +180,17 @@ condensed + grouped (core / muted-legacy / gated) with all 11 tabs intact.
 
 ## Carry-overs / review deferrals
 
+- **F2-M4 — stale-draft carry window (accepted, documented in-code).** `pendingDraft` clears only on
+  consume (`onDraftConsumed`), so if the user launches into the 0/many-area case (draft held, no nav) and
+  then opens *some other* existing matter before fulfilling the launch, that matter's composer receives
+  the draft. Accepted: it is the user's last typed intent, fully editable, and the multi-area carry is the
+  intended feature (a fragile "clear on any nav" would break it). Documented at the `pendingDraft`
+  declaration in `Cockpit.svelte`. If a future slice wants tighter scoping, distinguish the
+  "fulfilling-the-launch" matter open from an "abandon" open (hard with the shared `openMatter`).
+- **F2-M4 — multi-area hint not screenshot-able on the dev stack.** Only Commercial is configured, so the
+  `awaitingAreaPick` hint ("Pick a practice area below…" / 0-area "Configure a practice area…") couldn't be
+  captured headed — it's covered by the `launchIntent` unit test + the in-code logic. Re-capture when a
+  second area is configured (or in M9's sweep).
 - **F2-M2 — `TrustPill.svelte` migration DEFERRED (own slice).** Its sage/slate/amber/red tone palette
   (`--lq-accent/tier/warn/error` + `-soft`/`-border`) has **no equivalent in the base semantic palette**
   (which only carries primary/destructive/muted/accent) — migrating it would mean **adding a tone-color
