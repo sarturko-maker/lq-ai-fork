@@ -4,6 +4,33 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (NEW MILESTONE — UX-A navigational convergence OPEN; F2 visual pass complete through VL2; AE-series CLOSED)
 
+- **UX-A-2 (PR #82) — SHIPPED. Rail "Tools" section + the flat tool surfaces re-hosted in the cockpit
+  canvas (the dead-end fix).** Added an expandable **Tools** group to `AreaRail` (open by default;
+  `ChevronDownIcon` toggle; Lucide glyphs via the shared `tabIcon()` map; **active highlight** via
+  `activeTabFor($page.url.pathname)` → `aria-current="page"`; the legacy executor group rests one step
+  quieter, the M3 treatment). The layout (`(app)/+layout.svelte`) computes `toolTabs` (=
+  `visibleTabsFor(user, {autonomousEnabled})` minus `home`, role/pref-gated identically to the header
+  dropdown) + `activeTab` and passes `onSelectTool` (`drawerOpen=false; goto(tab.route)` — plain
+  scroll-to-top nav). **`git mv`'d the six flat surfaces** `tabular`, `playbooks`, `saved-prompts`,
+  `learn`, `knowledge`, `skills` (incl. `new`/`[id]`/`[id]/edit`/`easy` children + their `__tests__`)
+  from `(tools)` into `(app)` — **pure renames, zero content change** — so they render in the cockpit
+  canvas with the rail present (the way back is always the rail). URLs unchanged (route groups are
+  URL-invisible); the parent `/lq-ai/+layout.svelte` auth/boot gate still wraps both groups. **Scroll
+  parent resolved**: these pages use `PageShell` (flowing content, no `h-full`/`#lq-main` coupling — grep
+  confirmed) so the cockpit canvas `<main overflow-y-auto>` provides the single scroll axis. `TopTabBar`
+  still serves the not-yet-migrated surfaces (`agents`/`chats`/`matters`/`admin`/`autonomous`/`settings`/
+  `trust`) — transitional; the header Tools dropdown also coexists until UX-A-5. Fixed 2 knowledge test
+  import paths (`(tools)`→`(app)`); repointed the `f2-baseline` legacy-chrome capture `/skills`→`/chats`
+  (skills is no longer legacy). Suites: web check **0 err** (5 pre-existing a11y warnings, untouched
+  files); **vitest 854** (moved `__tests__` auto-discovered under `(app)`); **`ux-a-2-rail-tools.cy.ts`
+  4/4** + **`f2-baseline.cy.ts` 4/4** headed/live (open-from-rail-into-canvas with rail-stays + active
+  highlight; Tools collapse/expand; deep-link all 6 migrated surfaces inside the shell; deep-link a
+  `[id]`-style child `tabular/new`). Evidence: `docs/fork/evidence/ux-a-2/`. Fresh-context review:
+  **SHIP**, no blockers/should-fixes; 1 NIT (rail lists ALL tabs not just migrated — INTENDED per
+  ADR-F014 "every surface reachable from the rail"; non-migrated ones transitionally leave the shell).
+  web-only — no api/gateway change. **Pickup: UX-A-3** (migrate the conversation surfaces
+  `agents`/`chats`/`matters` + `matters/[id]`/`playbook-executions/[id]` into `(app)`; reconcile
+  `matters/[id]`'s own `MatterRail`/`ChatPanel` with the cockpit rail — record the call).
 - **UX-A-1 (PR #80) — SHIPPED. The cockpit shell extracted into the `(app)` layout (pure refactor, no
   visual change).** Split `cockpit/Cockpit.svelte` into a shared SvelteKit SHELL
   (`routes/lq-ai/(app)/+layout.svelte`: `CockpitHeader` + the resizable rail/drawer/toggle + responsive
@@ -352,15 +379,15 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 primitives** (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/`Inline`/`StatusDot`) exist + are proven in
 `_vl-lab` against the `direction-vercel` target. No live surface re-skinned yet.
 
-1. **UX-A-2 — rail "Tools" section + migrate the flat list surfaces.** Per ADR-F014 / the UX-A
-   decomposition. Add an expandable **Tools** group to `AreaRail` (Lucide icons via the shared `tabIcon()`
-   map in `lib/lq-ai/tab-icons.ts` — already extracted; active highlight from `$page.url.pathname`; legacy
-   group muted, M3). Move the **flat** tool routes (`tabular`, `playbooks`, `knowledge`, `skills`, `saved-prompts`,
-   `learn` incl. `new`/`[id]`/`[id]/edit`) from `(tools)` into `(app)` so they render in the cockpit canvas
-   with the rail present. **Resolve the scroll-parent change** (`#lq-main` → the cockpit canvas pane —
-   verify long lists scroll, sticky headers behave). `TopTabBar` still serves the not-yet-migrated surfaces
-   (transitional). Deep-link checks per migrated surface. Then UX-A-3 (agents/chats/matters) → UX-A-4
-   (admin/autonomous/settings/trust) → UX-A-5 (retire TopTabBar + header Tools dropdown + sweep).
+1. **UX-A-3 — migrate the conversation surfaces.** Per ADR-F014 / the UX-A decomposition. Move `agents`,
+   `chats`, `matters` (+ `matters/[id]`, `playbook-executions/[id]`) from `(tools)` into `(app)` so they
+   render in the cockpit canvas. Heavier than UX-A-2: `matters/[id]` mounts its own `MatterRail` +
+   `ChatPanel` side-by-side, and `chats` reads `?id=&project_id=` — verify they compose inside the canvas
+   without a nested-rail clash with the cockpit rail. **Note the overlap** with the cockpit's own
+   matter/conversation views (the landing already renders a matter conversation) — reconcile or keep both
+   deliberately and record the call. Wire these into the rail Tools active-highlight (already generic via
+   `activeTabFor`). Then UX-A-4 (admin/autonomous/settings/trust) → UX-A-5 (retire TopTabBar + header
+   Tools dropdown + sweep). **UX-A-2 SHIPPED** (rail Tools + the 6 flat surfaces now render in the canvas).
 2. **deferred F2 visual work (after UX-A, or interleaved): F2-M7b — Library card/wrapper surfaces** (task
    #118): the remaining three `(tools)` list
    pages — **`knowledge`** (card grid + inline create form, max-1100px; KB status pills `indexed`/`indexing`/

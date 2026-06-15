@@ -13,7 +13,7 @@ import {
 	formatBytes,
 	sortFiles,
 	type DocStatus
-} from '../../../routes/lq-ai/(tools)/knowledge/[id]/+page.svelte';
+} from '../../../routes/lq-ai/(app)/knowledge/[id]/+page.svelte';
 import type { KnowledgeBaseFile, IngestionStatus } from '../types';
 
 function makeFile(overrides: Partial<KnowledgeBaseFile> = {}): KnowledgeBaseFile {

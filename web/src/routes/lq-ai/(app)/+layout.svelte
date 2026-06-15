@@ -21,11 +21,13 @@
 	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 	import { auth } from '$lib/lq-ai/auth/store';
 	import { serverNowMs } from '$lib/lq-ai/agents/server-clock';
-	import { initPreferences } from '$lib/lq-ai/stores/preferences';
+	import { initPreferences, preferences } from '$lib/lq-ai/stores/preferences';
 	import AreaRail from '$lib/lq-ai/cockpit/AreaRail.svelte';
 	import CockpitHeader from '$lib/lq-ai/cockpit/CockpitHeader.svelte';
 	import { CockpitShellState, setCockpitState } from '$lib/lq-ai/cockpit/context.svelte';
 	import { cockpitUrl, MOTION, motionMs, parseCockpitState } from '$lib/lq-ai/cockpit/helpers';
+	import { visibleTabsFor } from '$lib/lq-ai/components/TopTabBar.svelte';
+	import { activeTabFor, type TabDef } from '$lib/lq-ai/tabs';
 
 	let { children } = $props();
 
@@ -33,6 +35,15 @@
 	const cockpit = setCockpitState(new CockpitShellState());
 
 	const sel = $derived(parseCockpitState($page.url.searchParams));
+
+	// The rail "Tools" group mirrors the header dropdown's set (role/pref-gated),
+	// minus Home (the cockpit itself). `activeTab` highlights the open surface.
+	const toolTabs = $derived(
+		visibleTabsFor($auth.user ?? null, {
+			autonomousEnabled: $preferences.autonomous_enabled
+		}).filter((t) => t.id !== 'home')
+	);
+	const activeTab = $derived(activeTabFor($page.url.pathname));
 
 	// --- Responsive shell state (unchanged from F1-S2.1) --------------------
 	let viewportWidth = $state(1280);
@@ -106,6 +117,16 @@
 		drawerOpen = false;
 		nav(cockpitUrl({}));
 	}
+
+	function selectTool(tab: TabDef) {
+		// Open a tool surface. Migrated surfaces ((app)/tabular, /playbooks, …)
+		// render in the canvas with this shell present; not-yet-migrated ones
+		// transitionally leave the shell to the legacy TopTabBar chrome until
+		// their UX-A slice lands. A plain goto (scroll-to-top) — a new surface,
+		// not an in-cockpit URL-state nudge.
+		drawerOpen = false;
+		goto(tab.route);
+	}
 </script>
 
 <svelte:window bind:innerWidth={viewportWidth} onkeydown={handleKeydown} />
@@ -120,9 +141,12 @@
 		user={$auth.user ?? null}
 		selectedAreaKey={sel.area}
 		unfiledOpen={sel.unfiled}
+		{toolTabs}
+		{activeTab}
 		onSelectArea={enterArea}
 		onSelectUnfiled={openUnfiled}
 		onNewMatter={newMatter}
+		onSelectTool={selectTool}
 	/>
 {/snippet}
 
