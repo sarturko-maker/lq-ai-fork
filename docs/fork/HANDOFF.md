@@ -2,7 +2,7 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 milestone OPEN — F2-M2 shipped; AE-series CLOSED)
+## State (F2 milestone OPEN — F2-M3 shipped; AE-series CLOSED)
 
 - **NEW MILESTONE — F2 (scira-style minimalist pass), governed by ADR-F012.** The maintainer wants the
   whole interface taken toward the calm, minimal aesthetic of [`scira`](https://github.com/zaidmukaddam/scira)
@@ -21,7 +21,22 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   `cypress/e2e/f2-baseline.cy.ts` (PHASE=before|after). The cockpit already lands on "Your practice"
   (areas + per-area agents + unfiled matters) — the architecture already leans toward the destination;
   F2-M4 adds a calm centered intent entry above it.
-- **F2-M2 (this slice)** — chrome calm + `--lq-*` → semantic token unification (the dark-mode fix).
+- **F2-M3 (this slice)** — tab-bar visual condense (restyle/group ONLY — **no tab retired/hidden/
+  reordered**). Added a **presentational** `group?: 'core'|'legacy'|'gated'` field + `tabGroupOf()` to
+  `lib/lq-ai/tabs.ts` (playbooks/tabular → `legacy`; autonomous/admin → `gated`; absent ⇒ `core`) — purely
+  visual, does NOT touch `isTabVisible`/`isTabAvailable`/`activeTabFor`/`visibleTabsFor`. **`TopTabBar`**
+  condensed (`gap-4`→`gap-0.5`, `px-1`→`px-2.5`) with **in-place section separators** (inert
+  `role="presentation" aria-hidden` `<li>` rules at each group boundary) + the **legacy group rests one
+  step quieter** (`text-muted-foreground/70`), all via a new exported pure **`tabStateClass()`** (unit-
+  tested). One `<ul role="tablist">` preserved → arrow-key nav intact (separators carry no button, so the
+  `button[role="tab"]` nodelist still maps to `tabIndex`). **`CockpitHeader`** Tools dropdown mirrors the
+  muted-legacy treatment. **Resolves the M2 active-tab nit** (active wins in `tabStateClass`). Also
+  strengthened the reusable `f2-baseline.cy.ts` tools-skills wait (on `nav[aria-label="Primary"]`, not
+  `body`) after a blank light-wide capture. Suites: web check **0 err**; **vitest 829** (+6: `tabGroupOf`
+  + `tabStateClass`); f2-baseline cypress **2/2** (PHASE=after). Evidence: `docs/fork/evidence/f2-m3/`
+  (legacy `(tools)` skills surface, light+dark × wide+narrow — grouping + muted legacy visible both
+  themes). Fresh-context review: **SHIP**, no blockers/should-fixes/nits. web-only.
+- **F2-M2 (PR #69, main `feacb02`)** — chrome calm + `--lq-*` → semantic token unification (the dark-mode fix).
   Migrated four chrome files off the legacy `--lq-*` system to semantic Tailwind utilities + applied scira
   calm: **`TopTabBar.svelte`** (scoped `<style>` dropped; muted resting tabs, **single primary accent** on
   the active tab + lighter underline, `text-muted-foreground/60` for unavailable), **`AmbientTrustChrome`**
@@ -101,21 +116,24 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**Active milestone: F2 (minimalist pass).** F2-M0 (ADR + decomposition + baseline), F2-M1 (layout
-primitives on AreaGrid) and F2-M2 (chrome calm + token unification) are shipped. The legacy `(tools)`
-shell + tab bar + footer + AmbientTrustChrome are now on semantic tokens; the legacy accent matches the
-cockpit's blue.
+**Active milestone: F2 (minimalist pass).** F2-M0…M3 shipped. The legacy `(tools)` shell + tab bar +
+footer + AmbientTrustChrome are on semantic tokens with the cockpit's blue accent; the tab bar is now
+condensed + grouped (core / muted-legacy / gated) with all 11 tabs intact.
 
-1. **F2-M3 — Tab-bar visual condense** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`). Restyle/
-   group ONLY — **all 11 tabs stay visible & clickable** (no retire). Tighter spacing + subtle section
-   separators grouping core / legacy-executor / gated; muted styling on the legacy group. Add an optional
-   presentational `group?: 'core'|'legacy'|'gated'` field to `lib/lq-ai/tabs.ts` (additive, no behavior
-   change). Mirror the calm in `cockpit/CockpitHeader.svelte`'s Tools dropdown. Forward-compatible with
-   UX-A (de-emphasised → retired). Builds on the now-semantic `TopTabBar` (F2-M2). Then M4 (cockpit
-   centered entry) → M5 (CockpitHeader) → M6/M7/M8 (per-surface calm) → M9 (sweep). Use
-   `cypress/e2e/f2-baseline.cy.ts` (PHASE=after) for after-shots. **Hard rule (ADR-F012): no tab/route/
-   surface retired or hidden in F2; never re-introduce `--lq-*`; the cockpit entry is a launcher, not an
-   unbound composer (F002).**
+1. **F2-M4 — Cockpit centered intent entry** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`).
+   New `cockpit/CenteredEntry.svelte` rendered in the `view==='areas'` branch of `cockpit/Cockpit.svelte`,
+   ABOVE a de-emphasised `AreaGrid`. A calm centered **launcher — NOT a composer (ADR-F002 forbids an
+   unbound free-floating chat)**: greeting + a single prompt-styled field that routes via
+   `cockpit/helpers.ts` `cockpitUrl(...)` into the area→matter binding flow (carry the typed text forward
+   as the `ConversationHost` draft); exactly-one-configured-area → enter it, multiple → anchor/filter the
+   grid. Optional honest starter chips (AE `suggestion/` backed by the user's SavedPrompts — the AE7
+   precedent; empty ⇒ none). Optional pure `launchIntent(areas, text) → {url, draft}` helper in
+   `helpers.ts` (unit-testable). Reuse `AreaGrid`/`helpers.ts`/`components/ai-elements/suggestion/`/shadcn
+   `ui/{input,button}`. **Do NOT** reuse the AE5 `ChatPanel` composer or `ConversationPanel` (they
+   manufacture an unbound thread → F002). Reversible (delete the component + one render line). Then M5
+   (CockpitHeader restyle) → M6/M7/M8 (per-surface calm) → M9 (sweep). Use `cypress/e2e/f2-baseline.cy.ts`
+   (PHASE=after) for the cockpit after-shots. **Hard rule (ADR-F012): no tab/route/surface retired or
+   hidden in F2; never re-introduce `--lq-*`; the cockpit entry is a launcher, not an unbound composer.**
 2. **UX-A (navigational convergence)** — own milestone after F2 (cockpit = single shell, legacy top-tab IA
    retired). **UX-B (capability convergence)** — folds into the pivot track (F1-S4/S5 + area activation +
    schema). Both per ADR-F012.
@@ -152,11 +170,8 @@ cockpit's blue.
   alongside R-series tone work or when M7/M8 calm those surfaces; it needs the tone scale defined first.
   **Transitional state after M2:** the legacy chrome accent is blue (`--primary`) while un-migrated page
   content (skills "+ New skill" button, all TrustPills) stays teal/sage — expected during staged rollout.
-- **F2-M2 — 1 unreachable-state nit (non-blocking).** In `TopTabBar`, an active-AND-unavailable tab would
-  now render fully active (primary text + underline) rather than the old dimmed look (old composable CSS
-  let `.lq-tab-unavailable`'s later source order win the color). Unreachable in practice — `handleTabClick`
-  blocks nav to unavailable tabs and coming-soon tabs have no live route for `activeTabFor` to match — so
-  cosmetic-only; not fixed.
+- **F2-M2 — active-tab nit RESOLVED in M3.** The active-AND-unavailable/legacy precedence is now explicit
+  in the pure `tabStateClass()` (active branch first), unit-tested.
 - **F2-M1 — 2 nits on record (non-blocking).** (1) `PageShell` hardcodes the calm padding default
   `px-6 py-10 sm:px-8` (AreaGrid's rhythm). The sibling surfaces it will eventually serve differ —
   `MattersPanel` uses `py-8`, `ConversationHost` uses `px-4 py-4 sm:px-6` — so **F2-M6 must add a `pad`

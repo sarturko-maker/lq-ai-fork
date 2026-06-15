@@ -22,7 +22,7 @@
 	import { clearSession } from '$lib/lq-ai/auth/store';
 	import AmbientTrustChrome from '$lib/lq-ai/components/AmbientTrustChrome.svelte';
 	import { visibleTabsFor } from '$lib/lq-ai/components/TopTabBar.svelte';
-	import type { User } from '$lib/lq-ai/tabs';
+	import { tabGroupOf, type User } from '$lib/lq-ai/tabs';
 	import { preferences } from '$lib/lq-ai/stores/preferences';
 	import { applyTheme, nextTheme, normalizeTheme, type Theme } from './helpers';
 
@@ -106,7 +106,10 @@
 			<DropdownMenu.Content align="end" class="w-52">
 				<DropdownMenu.Label>Tool surfaces</DropdownMenu.Label>
 				{#each toolTabs as tab (tab.id)}
-					<DropdownMenu.Item onSelect={() => goto(tab.route)}>
+					<DropdownMenu.Item
+							onSelect={() => goto(tab.route)}
+							class={tabGroupOf(tab) === 'legacy' ? 'text-muted-foreground' : undefined}
+						>
 						<span aria-hidden="true">{tab.icon}</span>
 						{tab.label}
 					</DropdownMenu.Item>

@@ -6,11 +6,27 @@
   export function visibleTabsFor(user: User | null, opts: TabVisibilityOpts = {}): TabDef[] {
     return TABS.filter((t) => isTabVisible(t.id, user, opts));
   }
+
+  /**
+   * State-dependent colour/underline classes for a tab (F2-M3). Active wins
+   * (single primary accent); coming-soon (unavailable) is dimmest; the legacy
+   * group rests one step quieter than core so the section reads as secondary.
+   */
+  export function tabStateClass(opts: {
+    active: boolean;
+    available: boolean;
+    legacy: boolean;
+  }): string {
+    if (opts.active) return 'border-primary text-primary';
+    if (!opts.available) return 'text-muted-foreground/60';
+    if (opts.legacy) return 'text-muted-foreground/70 hover:text-foreground';
+    return 'text-muted-foreground hover:text-foreground';
+  }
 </script>
 
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { activeTabFor, isTabAvailable, type TabId } from '../tabs';
+  import { activeTabFor, isTabAvailable, tabGroupOf, type TabId } from '../tabs';
   import { preferences } from '$lib/lq-ai/stores/preferences';
   import ComingSoonModal from './ComingSoonModal.svelte';
 
@@ -50,22 +66,35 @@
 <!-- F2-M2: migrated off `--lq-*` to semantic tokens (the dark-mode fix) +
      scira calm — quiet muted resting state, a single primary accent on the
      active tab, lighter underline. Matches the cockpit CockpitHeader idiom so
-     the two eras share one accent. -->
+     the two eras share one accent.
+     F2-M3: condensed (tighter `gap-0.5`) + subtle section separators between
+     presentational groups (core / legacy-executor / gated) with the legacy
+     group resting one step quieter. RESTYLE/GROUP ONLY — every tab stays
+     visible, clickable, in source order; one `<ul role="tablist">` keeps
+     arrow-key nav intact (separators are inert presentation rows). -->
 <nav class="border-b border-border px-4" aria-label="Primary">
-  <ul class="m-0 flex list-none gap-4 p-0" role="tablist">
+  <ul class="m-0 flex list-none items-stretch gap-0.5 p-0" role="tablist">
     {#each tabs as tab, tabIndex (tab.id)}
+      {#if tabIndex > 0 && tabGroupOf(tab) !== tabGroupOf(tabs[tabIndex - 1])}
+        <li
+          role="presentation"
+          aria-hidden="true"
+          class="mx-1.5 h-5 w-px self-center bg-border"
+        ></li>
+      {/if}
       <li role="presentation">
         <button
           type="button"
           role="tab"
           aria-selected={active === tab.id}
           aria-controls="lq-main"
-          class="inline-flex cursor-pointer items-center gap-1 border-0 border-b-2 border-transparent bg-transparent px-1 py-3 text-sm font-medium transition-colors duration-150 ease-out focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring {active ===
-          tab.id
-            ? 'border-primary text-primary'
-            : isTabAvailable(tab.id)
-              ? 'text-muted-foreground hover:text-foreground'
-              : 'text-muted-foreground/60'}"
+          class="inline-flex cursor-pointer items-center gap-1 border-0 border-b-2 border-transparent bg-transparent px-2.5 py-3 text-sm font-medium transition-colors duration-150 ease-out focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring {tabStateClass(
+            {
+              active: active === tab.id,
+              available: isTabAvailable(tab.id),
+              legacy: tabGroupOf(tab) === 'legacy'
+            }
+          )}"
           on:click={() => handleTabClick(tab.id, tab.route, tab.shipsInWave)}
           on:keydown={(e) => handleTabKeydown(e, tabIndex)}
         >

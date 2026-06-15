@@ -24,6 +24,16 @@ export type TabId =
 	| 'autonomous'
 	| 'admin';
 
+/**
+ * Presentational grouping for the tab bar's section separators + muted-legacy
+ * styling (F2-M3). PURELY VISUAL — does not gate visibility, availability, or
+ * order. `core` = everyday surfaces; `legacy` = the linear LangGraph executors
+ * the fork replaces (playbooks, tabular); `gated` = role/pref-gated (admin,
+ * autonomous). Forward-compatible with UX-A (de-emphasised here → retired there).
+ * Absent ⇒ treated as `core`.
+ */
+export type TabGroup = 'core' | 'legacy' | 'gated';
+
 export interface TabDef {
 	id: TabId;
 	label: string;
@@ -33,6 +43,13 @@ export interface TabDef {
 	available: boolean;
 	/** The wave that lands the destination route. Used by ComingSoonModal copy. */
 	shipsInWave?: 'B' | 'C' | 'D' | 'E';
+	/** Presentational section (F2-M3) — see {@link TabGroup}. Absent ⇒ `core`. */
+	group?: TabGroup;
+}
+
+/** The presentational group of a tab (defaults to `core`). */
+export function tabGroupOf(tab: TabDef): TabGroup {
+	return tab.group ?? 'core';
 }
 
 export interface User {
@@ -52,8 +69,22 @@ export const TABS: readonly TabDef[] = [
 	{ id: 'matters', label: 'Matters', icon: '📁', route: '/lq-ai/matters', available: true },
 	{ id: 'skills', label: 'Skills', icon: '🛠️', route: '/lq-ai/skills', available: true },
 	{ id: 'knowledge', label: 'Knowledge', icon: '📎', route: '/lq-ai/knowledge', available: true },
-	{ id: 'playbooks', label: 'Playbooks', icon: '📋', route: '/lq-ai/playbooks', available: true },
-	{ id: 'tabular', label: 'Tabular', icon: '📊', route: '/lq-ai/tabular', available: true },
+	{
+		id: 'playbooks',
+		label: 'Playbooks',
+		icon: '📋',
+		route: '/lq-ai/playbooks',
+		available: true,
+		group: 'legacy'
+	},
+	{
+		id: 'tabular',
+		label: 'Tabular',
+		icon: '📊',
+		route: '/lq-ai/tabular',
+		available: true,
+		group: 'legacy'
+	},
 	{
 		id: 'saved-prompts',
 		label: 'Saved Prompts',
@@ -67,7 +98,8 @@ export const TABS: readonly TabDef[] = [
 		label: 'Autonomous',
 		icon: '🤖',
 		route: '/lq-ai/autonomous',
-		available: true
+		available: true,
+		group: 'gated'
 	},
 	{
 		id: 'admin',
@@ -75,7 +107,8 @@ export const TABS: readonly TabDef[] = [
 		icon: '🛡',
 		route: '/lq-ai/admin/audit-log',
 		adminOnly: true,
-		available: true
+		available: true,
+		group: 'gated'
 	}
 ] as const;
 

@@ -102,7 +102,15 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
   dark-bridged (renders fine) and feeds ~15 consumers → its own slice. Transitional: un-migrated page
   content (e.g. the skills "+ New skill" button, TrustPills) stays teal/sage until M7 + the TrustPill
   slice — expected during the staged rollout.
-- M3–M9 pending.
+- **F2-M3** — done: tab-bar visual condense (restyle/group ONLY). Added a presentational
+  `group?: 'core'|'legacy'|'gated'` field + `tabGroupOf()` to `tabs.ts` (playbooks/tabular = legacy,
+  autonomous/admin = gated); `TopTabBar` condensed (`gap-0.5`, `px-2.5`) with in-place section separators
+  + a muted legacy group via the new exported pure `tabStateClass()` (unit-tested); CockpitHeader Tools
+  dropdown mirrors the muted-legacy treatment. **All 11 tabs stay visible/clickable/in source order**
+  (`visibleTabsFor`/`isTabVisible`/`activeTabFor` untouched; one `<ul role="tablist">` keeps arrow-key
+  nav). Resolves the M2 active-tab nit (active wins in `tabStateClass`). Strengthened the f2-baseline
+  tools-skills wait (nav, not body) after a blank light-wide capture. Evidence: `docs/fork/evidence/f2-m3/`.
+- M4–M9 pending.
 
 ## Risks / overlaps
 
