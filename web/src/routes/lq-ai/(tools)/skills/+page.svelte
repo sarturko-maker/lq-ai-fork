@@ -18,6 +18,7 @@
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import type { UserSkill, SkillSummary, TeamSummary } from '$lib/lq-ai/types';
 	import TrustPill from '$lib/lq-ai/components/TrustPill.svelte';
+	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 
 	let rows: UserSkill[] = [];
 	let builtinSlugs = new Set<string>();
@@ -44,9 +45,7 @@
 			builtinTableSkills = builtins
 				.filter((s: SkillSummary) => s.output_format === 'table')
 				.sort((a: SkillSummary, b: SkillSummary) => a.name.localeCompare(b.name));
-			teamNamesById = new Map(
-				(myTeams as TeamSummary[]).map((t) => [t.id, t.name])
-			);
+			teamNamesById = new Map((myTeams as TeamSummary[]).map((t) => [t.id, t.name]));
 		} catch (e) {
 			console.error('user-skills: load failed', e);
 			listError =
@@ -88,22 +87,17 @@
 	});
 </script>
 
-<div class="p-4 max-w-5xl mx-auto" data-testid="lq-ai-user-skills">
+<PageShell size="wide" pad="compact" data-testid="lq-ai-user-skills">
 	<header class="mb-4 flex items-center justify-between">
 		<div>
 			<h1 class="lq-text-page-h">My skills</h1>
-			<p class="lq-text-caption mt-1" style="color: var(--lq-text-tertiary);">
+			<p class="lq-text-caption mt-1" style="color: var(--muted-foreground);">
 				Skills you can edit — your personal skills, plus team skills for any team where you're an
 				admin. A skill at the same slug as a built-in shadows the built-in for the relevant scope.
 			</p>
 		</div>
 		<div class="flex gap-2">
-			<a
-				href="/lq-ai"
-				class="lq-btn-secondary text-xs"
-			>
-				Back to chat
-			</a>
+			<a href="/lq-ai" class="lq-btn-secondary text-xs"> Back to chat </a>
 			<a
 				href="/lq-ai/skills/new"
 				class="lq-btn-primary text-xs"
@@ -134,10 +128,10 @@
 	{#if !loading && builtinTableSkills.length > 0}
 		<section class="mb-6" data-testid="lq-ai-builtin-table-skills">
 			<h2 class="lq-text-h4 mb-2">Reference table-mode skills</h2>
-			<p class="lq-text-caption mb-3" style="color: var(--lq-text-secondary);">
+			<p class="lq-text-caption mb-3" style="color: var(--muted-foreground);">
 				Built-in skills with <code>output_format: table</code> — usable from the
-				<a href="/lq-ai/tabular/new" class="lq-link">Tabular Review wizard</a>'s
-				skill picker. Paired with the synthetic corpus in
+				<a href="/lq-ai/tabular/new" class="lq-link">Tabular Review wizard</a>'s skill picker.
+				Paired with the synthetic corpus in
 				<code>docs/quickstart/</code> for first-run exploration.
 			</p>
 			<ul class="lq-table-skill-list">
@@ -151,9 +145,16 @@
 										<TrustPill variant="tier" label="Table" />
 									</span>
 								</div>
-								<code class="lq-text-caption font-mono" style="color: var(--lq-text-secondary);">{s.name}</code>
+								<code class="lq-text-caption font-mono" style="color: var(--muted-foreground);"
+									>{s.name}</code
+								>
 								{#if s.description}
-									<p class="lq-text-caption mt-1 line-clamp-2" style="color: var(--lq-text-tertiary);">{s.description}</p>
+									<p
+										class="lq-text-caption mt-1 line-clamp-2"
+										style="color: var(--muted-foreground);"
+									>
+										{s.description}
+									</p>
 								{/if}
 							</div>
 						</div>
@@ -164,16 +165,14 @@
 	{/if}
 
 	{#if loading}
-		<p class="lq-text-body" style="color: var(--lq-text-secondary);">Loading…</p>
+		<p class="lq-text-body" style="color: var(--muted-foreground);">Loading…</p>
 	{:else if rows.length === 0}
-		<div
-			class="lq-empty-state p-6 text-center"
-		>
-			<p class="lq-text-body" style="color: var(--lq-text-secondary);">You haven't created any skills yet.</p>
+		<div class="lq-empty-state p-6 text-center">
+			<p class="lq-text-body" style="color: var(--muted-foreground);">
+				You haven't created any skills yet.
+			</p>
 			<p class="mt-2 lq-text-body">
-				<a href="/lq-ai/skills/new" class="lq-link">
-					Create your first skill
-				</a>
+				<a href="/lq-ai/skills/new" class="lq-link"> Create your first skill </a>
 				, or fork a built-in from the picker.
 			</p>
 		</div>
@@ -193,7 +192,7 @@
 				<tbody class="lq-tbody">
 					{#each rows as row (row.id)}
 						<tr data-testid="lq-ai-user-skill-row" data-scope={row.scope}>
-							<td class="px-3 py-2" style="color: var(--lq-text);">
+							<td class="px-3 py-2" style="color: var(--foreground);">
 								<a
 									href={`/lq-ai/skills/${encodeURIComponent(row.slug)}`}
 									class="font-medium lq-link hover:underline"
@@ -201,23 +200,30 @@
 									{row.display_name}
 								</a>
 								{#if row.description}
-									<div class="lq-text-caption mt-0.5 line-clamp-1" style="color: var(--lq-text-tertiary);">{row.description}</div>
+									<div
+										class="lq-text-caption mt-0.5 line-clamp-1"
+										style="color: var(--muted-foreground);"
+									>
+										{row.description}
+									</div>
 								{/if}
 							</td>
 							<td class="px-3 py-2">
-								<code class="lq-text-caption font-mono" style="color: var(--lq-text-secondary);">{row.slug}</code>
+								<code class="lq-text-caption font-mono" style="color: var(--muted-foreground);"
+									>{row.slug}</code
+								>
 								{#if builtinSlugs.has(row.slug)}
 									<span class="ml-2" data-testid="lq-ai-user-skill-shadow-chip">
-										<TrustPill
-											variant="tier"
-											label="Shadows built-in"
-										/>
+										<TrustPill variant="tier" label="Shadows built-in" />
 									</span>
 								{/if}
 							</td>
 							<td class="px-3 py-2">
 								{#if row.scope === 'team'}
-									<span data-testid="lq-ai-user-skill-team-chip" title="Team-scope skill — visible to every member of this team.">
+									<span
+										data-testid="lq-ai-user-skill-team-chip"
+										title="Team-scope skill — visible to every member of this team."
+									>
 										<TrustPill
 											variant="tier"
 											label={`Team · ${row.owner_team_id ? (teamNamesById.get(row.owner_team_id) ?? 'unknown') : 'unknown'}`}
@@ -229,13 +235,15 @@
 									</span>
 								{/if}
 							</td>
-							<td class="px-3 py-2 lq-tabular lq-text-caption" style="color: var(--lq-text-secondary);">{row.version}</td>
-							<td class="px-3 py-2 lq-text-caption" style="color: var(--lq-text-tertiary);">{shortDate(row.updated_at)}</td>
+							<td
+								class="px-3 py-2 lq-tabular lq-text-caption"
+								style="color: var(--muted-foreground);">{row.version}</td
+							>
+							<td class="px-3 py-2 lq-text-caption" style="color: var(--muted-foreground);"
+								>{shortDate(row.updated_at)}</td
+							>
 							<td class="px-3 py-2 text-right whitespace-nowrap">
-								<a
-									href={`/lq-ai/skills/${row.id}/edit`}
-									class="lq-btn-secondary lq-text-caption"
-								>
+								<a href={`/lq-ai/skills/${row.id}/edit`} class="lq-btn-secondary lq-text-caption">
 									Edit
 								</a>
 								<button
@@ -253,7 +261,7 @@
 			</table>
 		</div>
 	{/if}
-</div>
+</PageShell>
 
 <style>
 	.lq-table-skill-list {
@@ -266,12 +274,12 @@
 	}
 	.lq-table-skill-card {
 		padding: 0.75rem;
-		border: 1px solid var(--lq-border);
+		border: 1px solid var(--border);
 		border-radius: 0.5rem;
-		background: var(--lq-surface);
+		background: var(--card);
 	}
 	.lq-btn-primary {
-		background: var(--lq-accent);
+		background: var(--primary);
 		color: white;
 		border: 0;
 		border-radius: var(--lq-radius);
@@ -286,8 +294,8 @@
 
 	.lq-btn-secondary {
 		background: transparent;
-		color: var(--lq-text-secondary);
-		border: 1px solid var(--lq-border);
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
 		border-radius: var(--lq-radius);
 		padding: 6px 12px;
 		font-size: 12px;
@@ -296,42 +304,48 @@
 		display: inline-flex;
 		align-items: center;
 	}
-	.lq-btn-secondary:hover { background: var(--lq-inset); }
+	.lq-btn-secondary:hover {
+		background: var(--muted);
+	}
 
 	.lq-btn-danger {
 		background: transparent;
-		color: var(--lq-error);
-		border: 1px solid var(--lq-error);
+		color: var(--destructive);
+		border: 1px solid var(--destructive);
 		border-radius: var(--lq-radius);
 		padding: 6px 12px;
 		font-size: 12px;
 		cursor: pointer;
 	}
-	.lq-btn-danger:hover { background: var(--lq-error-soft); }
+	.lq-btn-danger:hover {
+		background: var(--status-failed-wash);
+	}
 
 	.lq-link {
-		color: var(--lq-accent);
+		color: var(--primary);
 		text-decoration: none;
 	}
-	.lq-link:hover { text-decoration: underline; }
+	.lq-link:hover {
+		text-decoration: underline;
+	}
 
 	.lq-empty-state {
 		border-radius: var(--lq-radius-lg);
-		border: 1px dashed var(--lq-border);
+		border: 1px dashed var(--border);
 		padding: var(--lq-space-6);
 	}
 
 	.lq-table-wrap {
 		border-radius: var(--lq-radius-lg);
-		border: 1px solid var(--lq-border);
+		border: 1px solid var(--border);
 	}
 
 	.lq-thead {
-		background: var(--lq-inset);
+		background: var(--muted);
 	}
 
 	.lq-tbody tr {
-		border-top: 1px solid var(--lq-border);
+		border-top: 1px solid var(--border);
 	}
 
 	.lq-scope-personal {
@@ -341,8 +355,8 @@
 		border-radius: var(--lq-radius-pill);
 		font-size: 11px;
 		font-weight: 500;
-		background: var(--lq-inset);
-		color: var(--lq-text-secondary);
-		border: 1px solid var(--lq-border);
+		background: var(--muted);
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
 	}
 </style>

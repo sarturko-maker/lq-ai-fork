@@ -86,6 +86,28 @@ describe('F2 baseline capture', { retries: { runMode: 2, openMode: 0 } }, () => 
 		}
 	});
 
+	it('captures the table-list surfaces — playbooks + tabular (light + dark, wide + narrow)', () => {
+		// F2-M7a: the executor/skills table-list pages adopt PageShell + migrate
+		// their color --lq-* tokens to semantic (status pills onto the status-*
+		// tone family). Capture playbooks + tabular page bodies; skills is already
+		// captured by the (tools)-chrome test below.
+		login();
+		cy.visit('/lq-ai/playbooks');
+		cy.get('[data-testid="lq-playbooks-generate-cta"]', { timeout: 30000 }).should('be.visible');
+		cy.wait(800);
+		for (const theme of ['light', 'dark'] as const) {
+			pinTheme(theme);
+			shoot(`playbooks-${theme}`);
+		}
+		cy.visit('/lq-ai/tabular');
+		cy.get('[data-testid="lq-tabular-new-cta"]', { timeout: 30000 }).should('be.visible');
+		cy.wait(800);
+		for (const theme of ['light', 'dark'] as const) {
+			pinTheme(theme);
+			shoot(`tabular-${theme}`);
+		}
+	});
+
 	it('captures a legacy (tools) chrome surface (light + dark, wide + narrow)', () => {
 		login();
 		cy.visit('/lq-ai/skills');

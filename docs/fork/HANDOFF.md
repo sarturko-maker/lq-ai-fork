@@ -2,7 +2,7 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 milestone OPEN — F2-M6 shipped; AE-series CLOSED)
+## State (F2 milestone OPEN — F2-M7a shipped; AE-series CLOSED)
 
 - **NEW MILESTONE — F2 (scira-style minimalist pass), governed by ADR-F012.** The maintainer wants the
   whole interface taken toward the calm, minimal aesthetic of [`scira`](https://github.com/zaidmukaddam/scira)
@@ -21,7 +21,29 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   `cypress/e2e/f2-baseline.cy.ts` (PHASE=before|after). The cockpit already lands on "Your practice"
   (areas + per-area agents + unfiled matters) — the architecture already leans toward the destination;
   F2-M4 adds a calm centered intent entry above it.
-- **F2-M6 (this slice)** — matters + conversation surfaces **consolidated onto `PageShell`** (the M1
+- **F2-M7a (this slice)** — calm **table-list surfaces**: `playbooks`, `tabular`, `skills` list pages.
+  **Split of F2-M7** by visual family (M7b = `knowledge`/`learn`/`saved-prompts` card/wrapper surfaces, next).
+  Each page: (1) **adopt `<PageShell size="wide" pad="compact">`** for the centered container (the three
+  list pages used `max-width: 64rem`/`max-w-5xl` = PageShell `wide` exactly; bespoke header kept — the
+  header row carries an h1 + a trailing CTA + subtitle, which `SectionHeader` doesn't model, the same call
+  M6 made for MattersPanel); (2) **migrate the COLOR `--lq-*` tokens → semantic** (`--lq-border`→`--border`,
+  `--lq-surface`→`--card`, `--lq-inset`→`--muted`, `--lq-canvas`→`--background`, `--lq-accent`→`--primary`
+  (teal→**blue** — unifies the page accent with the chrome, the M2 precedent), `--lq-on-accent`→
+  `--primary-foreground`, `--lq-text`→`--foreground`, `--lq-text-secondary`/`-tertiary`→`--muted-foreground`,
+  `--lq-error`→`--destructive`, `--lq-error-soft`→`--status-failed-wash`); (3) **tabular status pills → the
+  existing `--status-*` tone family** (running/completed/failed/cancelled + `-wash`, defined for BOTH themes
+  in `app.css` — an existing scale, NOT a new token scale → sidesteps the TrustPill problem). **Left for
+  R-TYPO (documented, not a defect):** `--lq-radius*`/`--lq-space-*`/`lq-text-*` (no semantic equivalent, no
+  light/dark variance, R-TYPO's domain — never re-introduced, just not double-touched). **`TrustPill`
+  badges on skills stay teal/sage** (M2 deferral — needs the tone scale defined first). Suites: web check
+  **0 err** (5 pre-existing a11y warnings, untouched files); **vitest 836** (unchanged — presentation-only,
+  no new pure helper, like M2/M5); f2-baseline cypress **4/4** (PHASE=after — added a playbooks + tabular
+  capture test; skills captured by the existing `(tools)`-chrome test). Evidence:
+  `docs/fork/evidence/f2-m7a/` (playbooks + tabular + skills, light+dark × wide+narrow — dark renders
+  honest, no light-in-dark; CTAs blue). Fresh-context review: **SHIP**, no blockers/should-fixes/nits
+  (every target token verified to exist in both themes; markup balanced; `lq-ai-user-skills` testid
+  forwarded via PageShell `{...rest}`). web-only — no api/gateway change.
+- **F2-M6 (PR #73, main `bf3f034`)** — matters + conversation surfaces **consolidated onto `PageShell`** (the M1
   carry-over). Added a **`pad` variant** to `components/primitives/PageShell.svelte`
   (`PageShellPad = 'default'|'compact'|'tight'`; `default`=`px-6 py-10 sm:px-8`, `compact`=`px-6 py-8
   sm:px-8`, `tight`=`px-4 py-4 sm:px-6`); `pageShellClass(size, pad='default', extra='')` (signature
@@ -138,7 +160,27 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   (`prompt.prompt_text`) are escaped text/attribute bindings via the vendored `Suggestion`→`Button`;
   SavedPrompts are user-owned + server-scoped (404-not-403); no secrets/stray files; web-only.
 
-## Done (F2-M6, this slice)
+## Done (F2-M7a, this slice)
+
+- **`(tools)/playbooks/+page.svelte`** — `<section class="lq-playbooks-page">` → `<PageShell size="wide"
+  pad="compact">` + inner `.lq-playbooks-page` (now flex/gap only; width/margin/padding from PageShell).
+  CTA + apply button → `--primary`/`--primary-foreground`; subtitle/states → `--muted-foreground`/`--muted`;
+  error block → `--destructive`/`--status-failed-wash`; table → `--card`/`--border`.
+- **`(tools)/tabular/+page.svelte`** — same PageShell adoption + token migration; **status pills** (`completed`/
+  `failed`/`cancelled`/`running`+`pending`) remapped from `--lq-success`/`--lq-error`/`--lq-warning`/`--lq-inset`
+  onto `--status-completed`/`--status-failed`/`--status-cancelled`/`--status-running` + their `-wash` bgs.
+- **`(tools)/skills/+page.svelte`** — outer `<div class="p-4 max-w-5xl mx-auto" data-testid="lq-ai-user-skills">`
+  → `<PageShell size="wide" pad="compact" data-testid="lq-ai-user-skills">` (testid forwarded via `{...rest}`).
+  Inline `style="color: var(--lq-text*)"` + `<style>` `.lq-btn-*`/`.lq-link`/`.lq-table-skill-card`/`.lq-thead`/
+  `.lq-tbody`/`.lq-scope-personal`/`.lq-empty-state` color tokens migrated; `--lq-radius*`/`--lq-space-6` left
+  (R-TYPO); `TrustPill` "Table"/scope badges untouched (deferred). Partial-semantic markup (rose error blocks,
+  Tailwind utilities) left as-is.
+- **`cypress/e2e/f2-baseline.cy.ts`** — new capture test deep-links `/lq-ai/playbooks` (waits
+  `lq-playbooks-generate-cta`) + `/lq-ai/tabular` (waits `lq-tabular-new-cta`), captures both light+dark ×
+  wide+narrow. Skills captured by the existing `(tools)`-chrome test. **No new ADR** (visual consolidation
+  within ADR-F012). Evidence: `docs/fork/evidence/f2-m7a/`.
+
+## Done (F2-M6, PR #73)
 
 - **`components/primitives/PageShell.svelte`** — new `pad` variant (the M1 carry-over). `PageShellPad =
   'default'|'compact'|'tight'` + a `PAD` map; `pageShellClass(size, pad='default', extra='')` (signature
@@ -169,17 +211,18 @@ conversation column are consolidated onto PageShell (`compact`/`tight` pads); th
 tab bar + footer + AmbientTrustChrome are on semantic tokens with the cockpit's blue accent; the tab bar is
 condensed + grouped with all 11 tabs.
 
-1. **F2-M7 — Library list surfaces** (`docs/fork/plans/F2-minimalist-pass-decomposition.md`, task #118).
-   The legacy `(tools)` list pages — Knowledge / Skills / Playbooks / Tabular / Saved-Prompts / Learn —
-   get a calm container + the muted-legacy treatment. **Per-page token state differs**: if that page's
-   F1 R-slice already migrated it to semantic tokens → calm-on-semantic; else **migrate-and-calm**
-   (`--lq-*`→semantic in the same pass — never re-introduce `--lq-*`, never double-touch). Coordinate with
-   F1 R12/R14a/R15/R19a/R20 (don't redo a merged R-slice). These live under `web/src/routes/lq-ai/(tools)/
-   {knowledge,skills,playbooks,tabular,saved-prompts,learn}/` — check each page's current tokens FIRST.
-   Adopt `PageShell`/`SectionHeader` where a page is a centered list (many of these are full-width tables/
-   grids — adopt only where it fits). Capture via a focused spec or extend `f2-baseline.cy.ts`. Then M8
-   (settings/admin/trust shells) → M9 (sweep+verify). **Hard rule (ADR-F012): no tab/route/surface retired
-   or hidden in F2; never re-introduce `--lq-*`; no new token scale; the cockpit entry stays a launcher.**
+1. **F2-M7b — Library card/wrapper surfaces** (task #118; F2-M7 was split — **M7a (this PR) did the
+   table-list trio** playbooks/tabular/skills). M7b = the remaining three `(tools)` list pages: **`knowledge`**
+   (`+page.svelte`, card grid + inline create form, max-1100px — all `--lq-*` in a scoped `<style>` + KB
+   status pills `indexed`/`indexing`/`failed`/`empty` → map to `--status-completed`/`--status-running`/
+   `--status-failed`/`--muted` like tabular did), **`learn`** (`+page.svelte`, card grid, max-960px, no data),
+   **`saved-prompts`** (`+page.svelte`, thin wrapper around `SavedPromptsPanel`, max-920px). Same recipe as
+   M7a: adopt `<PageShell>` (pick the closest size: knowledge/learn → `wide`, saved-prompts → `default`),
+   migrate **color** `--lq-*`→semantic, leave `--lq-radius*`/`--lq-space-*`/`lq-text-*` to R-TYPO, status
+   pills → `--status-*` family. `SavedPromptsPanel` internals are their own surface — touch only the page
+   wrapper. Extend `f2-baseline.cy.ts` with a knowledge/learn capture. Then M8 (settings/admin/trust
+   shells) → M9 (sweep+verify). **Hard rule (ADR-F012): no tab/route/surface retired or hidden in F2; never
+   re-introduce `--lq-*`; no new token scale; the cockpit entry stays a launcher.**
 2. **UX-A (navigational convergence)** — own milestone after F2 (cockpit = single shell, legacy top-tab IA
    retired). **UX-B (capability convergence)** — folds into the pivot track (F1-S4/S5 + area activation +
    schema). Both per ADR-F012.
@@ -207,6 +250,15 @@ condensed + grouped with all 11 tabs.
 
 ## Carry-overs / review deferrals
 
+- **F2-M7a — tabular status pills not screenshot-able (dev stack has no executions).** The migrated
+  `--status-*` pill tones (`completed`/`failed`/`cancelled`/`running`) render only with tabular execution
+  rows; the dev stack shows the empty state. The mapping is verified against `app.css` (both themes) by the
+  fresh-context review; recapture once executions exist (or in M9's sweep). The `formatTabularStatus` label
+  helper is already unit-tested.
+- **F2-M7a — color-only migration is intentional, not partial.** `--lq-radius*`/`--lq-space-*`/`lq-text-*`
+  remain on these three pages — they have no semantic-palette equivalent and no light/dark variance, so they
+  are R-TYPO's domain (not re-introduced, just not double-touched). Same staged-rollout transitional state
+  M2 accepted. `TrustPill` badges (skills) stay teal/sage (M2 deferral — needs a tone scale first).
 - **F2-M4 — stale-draft carry window (accepted, documented in-code).** `pendingDraft` clears only on
   consume (`onDraftConsumed`), so if the user launches into the 0/many-area case (draft held, no nav) and
   then opens *some other* existing matter before fulfilling the launch, that matter's composer receives
