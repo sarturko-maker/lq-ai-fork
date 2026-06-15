@@ -96,6 +96,16 @@ all polling/staleness/`statusBadge` logic are untouched). The same slice converg
 **and** `SkillSourceView` off their local `marked`+`DOMPurify` copies onto the shared `renderModelMarkdown`
 sink. No new deps; no `_ae-lab` section — the timeline is inherently the live agent surface.
 
+**`suggestion` reused as-is, backed by an honest source (AE7, the AE-series closer):** the AE0-vendored
+`suggestion/` (`Suggestion`/`Suggestions`) is rendered in `ChatPanel.svelte` as empty-conversation
+**starter chips** — shown only when the conversation has no messages AND the user has saved prompts. They
+are backed by the caller's own `SavedPrompts` (an honest, user-owned data source) surfaced from
+`SavedPromptsPanel`'s single existing fetch via a new `onPromptsLoaded` callback (no duplicate request);
+the chip label is the prompt name and clicking fills the composer with its body (shared
+`insertIntoComposer` helper). They are **not** model-invented follow-ups — no honest source for those
+exists, so none are shown (an empty saved-prompts list renders no chips). No new deps. **With AE7 the
+AE-series closes (AE0–AE7 done).**
+
 The internal lab at `/lq-ai/_ae-lab` (unadvertised, auth-gated, dev scratch — links nowhere, changes no
 live surface) renders the trivial primitives (Loader, Suggestion) plus the AE2 Reasoning ribbon (with a
 streaming toggle so the shimmer + duration + auto-collapse path — dormant on the live chat surface until

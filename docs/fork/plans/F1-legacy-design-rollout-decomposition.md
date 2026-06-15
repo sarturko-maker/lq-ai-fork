@@ -462,9 +462,15 @@ screenshots light+dark/wide+narrow · simplification · adversarial review WITH 
   collapsed-fold one-liner). Responsive: the legacy `.ag-layout` collapses to one column <900px (narrow
   shot); the cockpit `ConversationHost` stacked collapse (<720px) is verify-only (unchanged). Gate: check
   0err / vitest 816 (−5 dead `stepDigest`, +5 `groupTurnSteps`) / cypress ae6 7/7 headed. *(M; ⚠.)*
-- **AE7 — Suggestions** *(optional, lowest priority).* AE **Suggestion** chips for follow-ups
-  above/below the composer **only if a clean data source exists** (else back them with SavedPrompts).
-  **Defer** if no honest source — don't invent suggestions. *(S)*
+- **AE7 — Suggestions ✅ DONE (PR #66).** *(The AE-series closer.)* AE **Suggestion** chips, surfaced in
+  `ChatPanel.svelte` above the composer as empty-conversation **starters** (shown only when the chat has
+  no messages AND the user has saved prompts). Backed by the caller's own **SavedPrompts** (an honest,
+  user-owned data source) surfaced from `SavedPromptsPanel`'s single existing fetch via a new
+  `onPromptsLoaded` callback (no duplicate request); chip label = prompt name, click fills the composer
+  with its body (shared `insertIntoComposer` helper). **Not** model-invented follow-ups — no honest source
+  for those exists, so none are shown (empty saved-prompts list → no chips). Reuses the AE0-vendored
+  `suggestion/` as-is; no new dep. Gate: web check 0err / vitest 816 / cypress ae7 5/5 headed (live-stubbed
+  chat surface). **With AE7 the AE-series closes (AE0–AE7 done).** *(S)*
 
 **Sequencing:** AE0 first (foundation). AE1–AE4 are chat-surface and land in any order on the dark-mode
 bridge. AE5 fills the R9 slot; AE6 fills the R-CONV-2 slot. AE7 last/optional. The R-series continues for

@@ -92,6 +92,7 @@
 		FileMeta,
 		Message,
 		Project,
+		SavedPrompt,
 		Skill
 	} from '$lib/lq-ai/types';
 
@@ -102,6 +103,10 @@
 	import MessageList from '$lib/lq-ai/components/MessageList.svelte';
 	import TierBadge from '$lib/lq-ai/components/TierBadge.svelte';
 	import SavedPromptsPanel from '$lib/lq-ai/components/SavedPromptsPanel.svelte';
+	// AE7 (ADR-F011) — AI Elements Suggestion chips. Backed by the user's own
+	// SavedPrompts (an honest, user-owned data source) as empty-state starters —
+	// NOT invented model follow-ups (no honest source for those exists).
+	import { Suggestion, Suggestions } from '$lib/lq-ai/components/ai-elements/suggestion/index.js';
 	import AmbientFooter from '$lib/lq-ai/components/AmbientFooter.svelte';
 	import EnhancePromptExpansion from '$lib/lq-ai/components/EnhancePromptExpansion.svelte';
 	import AttachKBModal from '$lib/lq-ai/components/AttachKBModal.svelte';
@@ -187,6 +192,17 @@
 
 	// Per-chat draft state.
 	let composerText = '';
+	// AE7 — the caller's saved prompts, surfaced from SavedPromptsPanel's single
+	// fetch (no duplicate request). Rendered as AE Suggestion starter chips on an
+	// empty conversation.
+	let savedPromptChips: SavedPrompt[] = [];
+
+	/** Append a saved-prompt body to the composer (stack onto any in-progress
+	 *  draft), or set it when the composer is empty. Shared by the
+	 *  SavedPromptsPanel quick-insert and the AE7 starter chips. */
+	function insertIntoComposer(text: string): void {
+		composerText = composerText.trim() ? `${composerText.trimEnd()}\n\n${text}` : text;
+	}
 	let attachedSkillNames: string[] = [];
 	let skillDetails: Record<string, Skill> = {};
 	let skillInputs: Record<string, Record<string, unknown>> = {};
@@ -1023,12 +1039,33 @@
 				/>
 
 				<SavedPromptsPanel
-					onInsert={(text) => {
-						composerText = composerText.trim()
-							? `${composerText.trimEnd()}\n\n${text}`
-							: text;
-					}}
+					onInsert={insertIntoComposer}
+					onPromptsLoaded={(prompts) => (savedPromptChips = prompts)}
 				/>
+
+				<!-- AE7 (ADR-F011) — AI Elements Suggestion starter chips. Shown
+				     only on an empty conversation, and ONLY when the user has saved
+				     prompts: these are the user's own SavedPrompts (an honest,
+				     user-owned source), offered as one-click starters — NOT
+				     model-invented follow-ups (no honest source for those exists).
+				     The label is the prompt name; clicking fills the composer with
+				     its body. The message_count gate avoids a chip flash while a
+				     populated chat's messages are still loading (the store is []
+				     until the fetch resolves). -->
+				{#if messages.length === 0 && (activeChat?.message_count ?? 0) === 0 && savedPromptChips.length > 0}
+					<div data-testid="lq-ai-suggestions">
+						<Suggestions>
+							{#each savedPromptChips as prompt (prompt.id)}
+								<Suggestion
+									suggestion={prompt.name}
+									title={prompt.prompt_text}
+									onclick={() => insertIntoComposer(prompt.prompt_text)}
+									data-testid="lq-ai-suggestion"
+								/>
+							{/each}
+						</Suggestions>
+					</div>
+				{/if}
 
 				{#if sendError}
 					<div

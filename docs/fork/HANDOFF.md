@@ -2,73 +2,70 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (AE6 shipped — next is AE7)
+## State (AE7 shipped — the AE-series is CLOSED)
 
-- **AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (#62) + AE4 (#63) + AE5 (#64) MERGED; AE6 (PR #65) on `ae6-tool-task`** — AI Elements adoption on the
-  chat surface (ADR-F011). The **AE-series** brings the Vercel AI Elements look via the MIT Svelte port
+- **AE0 (#59) + AE1 (#60) + AE2 (#61) + AE3 (#62) + AE4 (#63) + AE5 (#64) + AE6 (#65) MERGED; AE7 (PR #66)
+  on `ae7-suggestions`** — AI Elements adoption on the chat surface (ADR-F011). **With AE7 the AE-series
+  CLOSES (AE0–AE7 all done).** The series brought the Vercel AI Elements look via the MIT Svelte port
   `SikandarJODD/ai-elements`, vendored + re-tokened + re-wired to OUR data — KEEP Svelte, KEEP
   gateway/SSE/`guarded_tool_call`/audit, KEEP our `marked`+`DOMPurify` sanitizer. Plan:
   `docs/fork/plans/F1-legacy-design-rollout-decomposition.md` §"AI Elements visual adoption". The
   R-series (legacy `--lq-*` → semantic-token migration of non-conversation surfaces) continues
   independently on the dark-mode bridge.
-- **VENDOR APPROACH (AE0–AE6):** token system is **identical** to ours (shadcn-svelte + Tailwind v4) so
-  remap ≈ identity. **ADR-F011 option-2 (hand-build, don't vendor) used again in AE6:** the AE `tool`/`task`
-  registry items pull `collapsible` + `badge` + `runed` + `./code.json` / `bits-ui` — so the AE Tool card +
-  Task step-list identity were hand-built on native `<details>` directly in `ConversationPanel.svelte` (NOT
-  vendored). **`shiki` (AE4) remains the ONLY new runtime dep** through the AE series; AE5+AE6 added none.
-- Dev stack: 8 services healthy; **DB at 0054**; **web REBUILT on AE6** (the spec is bundle-independent,
-  but the bundle carries the AE6 ConversationPanel changes).
-  Login: http://localhost:3000/lq-ai/login · admin@lq.ai / LQ-AI-local-Pw1!
-  Gateway aliases smart/fast/budget → minimax/MiniMax-M3 (only S9-qualified model, **tier 4**).
+- **AE7 = honest Suggestions, NO new dep:** reused the AE0-vendored `suggestion/` as-is. The chips are
+  empty-conversation **starters** backed by the user's own **SavedPrompts** (an honest, user-owned source)
+  — NOT model-invented follow-ups (no honest source for those exists, so none are shown). **`shiki` (AE4)
+  remains the ONLY new runtime dep across the whole AE series**; AE5/AE6/AE7 added none.
+- Dev stack: 8 services healthy; **DB at 0054**; **web REBUILT on AE7** (the bundle carries the ChatPanel
+  chips + the SavedPromptsPanel `onPromptsLoaded` hook). Login: http://localhost:3000/lq-ai/login ·
+  admin@lq.ai / LQ-AI-local-Pw1!  Gateway aliases smart/fast/budget → minimax/MiniMax-M3 (only
+  S9-qualified model, **tier 4**).
 - Suites at gate: web `npm run check` **0 errors** (5 pre-existing a11y warnings, untouched files);
-  **vitest 816** (net baseline — +5 `groupTurnSteps`, −5 dead `stepDigest`); **Cypress
-  `ae6-tool-task.cy.ts` 7/7** headed/live-stubbed (6 functional + 1 capture; first run had 1 first-visit
-  flake on the first test, deterministic 7/7 on the re-run). **api/gateway UNAFFECTED — AE6 touches only
-  `web`** (no backend change). AE6 **after** screenshots (agent timeline, light+dark, wide+narrow) in
-  `docs/fork/evidence/ae6/`. Adversarial review (fresh-context agent): SHIP, no blockers/should-fixes;
-  the one simplification nit (dead `stepDigest`) was FIXED in-slice. Security pass: the 5 `{@html}` sinks
-  all route through the shared `renderModelMarkdown` (media-forbid); tool Parameters/Result bodies are
-  escaped TEXT bindings (`{t.inputBody}`/`{t.outputBody}`, never `{@html}`); no secrets/stray files; web-only.
+  **vitest 816** (unchanged — AE7 behavior is covered by Cypress, no unit-level pure helper added);
+  **Cypress `ae7-suggestions.cy.ts` 5/5** headed/live-stubbed (4 functional + 1 capture; the first test
+  eats the documented first-`cy.visit` session-establishment latency → it ran ~30s and passed; the rest
+  are fast). **api/gateway UNAFFECTED — AE7 touches only `web`** (no backend change). AE7 **after**
+  screenshots (empty-chat starter chips, light+dark, wide+narrow) in `docs/fork/evidence/ae7/`.
+  Adversarial review (fresh-context agent): **SHIP**, no blockers/should-fixes; nit #1 (a benign chip
+  flash while a populated chat's messages load) was FIXED in-slice by adding the `message_count` gate.
+  Security pass: NO `{@html}` introduced — the chip label (`prompt.name`) + inserted body
+  (`prompt.prompt_text`) are escaped text/attribute bindings via the vendored `Suggestion`→`Button`;
+  SavedPrompts are user-owned + server-scoped (404-not-403); no secrets/stray files; web-only.
 
-## Done (AE6, this slice)
+## Done (AE7, this slice)
 
-- **`ConversationPanel.svelte`** — the per-turn step timeline is now ONE collapsible AE **Task** list
-  (`<details class="ag-task" open>` → search-glyph trigger "N steps" + rotating chevron) holding AE
-  **Tool** cards: `<details class="ag-tool">` with a wrench header + natural-language tool name + a status
-  **badge** (Completed = `circle-check` on `--color-status-completed-wash`; Running = spinning
-  `loader-circle` on `--color-status-running-wash`) + collapsible **Parameters / Result** mono sections.
-  The call+result pair into one card via the pure `groupTurnSteps(steps)` helper in `agents/helpers.ts`
-  (adjacency-only: same name + parent; the subagent `task` dispatch/result stay separate cards). **The
-  `.ag-steps` `<ol>` + `<li>` rows + `details.ag-thinking` are KEPT** so the live specs (f0-s3/s4/s7) still
-  match. Reasoning idiom unchanged. Deleted the old `.ag-step__fold/__mono/__digest` + `.ag-step--tool_*`
-  CSS. **Polling / stream / staleness / run-level `statusBadge` UNTOUCHED** — grouping is view-only over
-  the already-`visibleSteps` list; the step record is never mutated.
-- **Convergence (R6 backlog):** `ConversationPanel` **and** `SkillSourceView` dropped their local
-  `marked`+`DOMPurify`+`SANITIZE_OPTS` copies and now call the shared `renderModelMarkdown`
-  (`sanitize-markdown.ts`), which gained an optional `{ breaks }` param so SKILL.md keeps its hard line
-  breaks. One media-forbid sink for the whole model-output surface.
-- **Simplification:** deleted the now-dead `stepDigest` + `STEP_DIGEST_LIMIT` (+ their test block) — the
-  old collapsed-fold one-liner has no caller after the Tool card.
-- **`cypress/e2e/ae6-tool-task.cy.ts`** (7) — live-stubbed agent timeline on `/lq-ai/agents` (one SETTLED
-  conversation = model_turn + one tool pair, so polling/streaming never engage): Task grouping ("2 steps",
-  `.ag-steps li` ×2), one paired Tool card (`svg.lucide-wrench` + title + Completed badge w/
-  `svg.lucide-circle-check`), collapsed-by-default body → expand reveals Parameters+Result (assert on the
-  `open` attr, NOT visibility — see gotcha), Reasoning `<details>` kept, Task collapse toggles `open`,
-  answer renders; + 1 capture (single visit, theme toggled in place). **NOTICES** + `ai-elements/README.md`
-  (`tool`/`task` not-vendored paragraph) + plan updated. **No new ADR** — F011 already sanctions option-2.
+- **`ChatPanel.svelte`** — AE **Suggestion** starter chips above the composer. A row of
+  `Suggestions`/`Suggestion` (the AE0-vendored chips, reused as-is) renders the user's saved prompts as
+  one-click starters, gated `{#if messages.length === 0 && (activeChat?.message_count ?? 0) === 0 &&
+  savedPromptChips.length > 0}` — i.e. only on an EMPTY conversation that genuinely has no messages, and
+  only when the user actually has saved prompts. Chip label = `prompt.name`; `onclick` fills the composer
+  with `prompt.prompt_text` via the new shared **`insertIntoComposer`** helper (which also replaced the
+  inline arrow the SavedPromptsPanel quick-insert used — same append-if-nonempty-else-set behavior, now
+  deduped). The chips are **NOT** model-invented follow-ups — there is no honest source for those, so none
+  are shown.
+- **`SavedPromptsPanel.svelte`** — new optional **`onPromptsLoaded(prompts)`** callback, fired at the end
+  of its existing `refresh()`. This lets ChatPanel render the same honest, user-owned list as chips WITHOUT
+  a second `GET /saved-prompts` — the panel stays the single fetch site. (The panel only mounts inside
+  `{#if activeChat}`, which persists across chat switches, so no re-fetch / no race; `message_count`
+  gates the empty-state flash during a populated chat's message load.)
+- **`cypress/e2e/ae7-suggestions.cy.ts`** (5) — live-stubbed chat surface on `/lq-ai/chats` (SHORT
+  fixtures): chips count == saved-prompt count + label is the prompt name; click inserts the prompt BODY
+  (exact-value assert, proving label≠inserted); chips hidden once the conversation has messages (composer
+  still present → proves it's an empty-state-only affordance, not a load failure); **NO chips when the
+  saved-prompts list is empty (the anti-invention guarantee)**; + 1 before/after capture (light+dark,
+  wide+narrow). **NOTICES** (AE row bumped AE0–AE7 + AE7 sentence) + `ai-elements/README.md` (AE7
+  honest-source paragraph) + plan (AE7 DONE) updated. **No new ADR** — F011 already sanctions reusing a
+  vendored component; the honest-source/no-invention call is recorded here + in NOTICES/README/memory.
 
 ## Next slice — pick up exactly here
 
-1. **AE7 — Suggestions** (plan §"AI Elements visual adoption" → AE7; **optional, lowest priority**). The
-   AE0 `Suggestion`/`Suggestions` chips are already vendored (`components/ai-elements/suggestion/`). Add
-   follow-up suggestion chips above/below a composer **ONLY if a clean, honest data source exists** — else
-   back them with SavedPrompts, or **DEFER** (don't invent suggestions). Full four-discipline gate +
-   before/after screenshots if it ships. **With AE7 the AE-series closes** (AE0–AE6 done).
-2. Other rollout slices (any order — the dark-mode bridge holds un-migrated surfaces):
+**The AE-series is CLOSED (AE0–AE7 all merged).** No AE8. Pick the next slice from:
+
+1. R-series rollout slices (any order — the dark-mode bridge holds un-migrated surfaces):
    Foundation/rail R2–R5, Wave 1 R-CONV-1 (logic; R-CONV-2 → AE6), Wave 2
    R12/R13/R14a-b/R15/R15b-tab-pb/R16, Wave 3 R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO →
    R-BRIDGE → R-LAST. autonomous R21 = SKIP (deferred to F2/F3, stays on bridge).
-3. **F1-S4** (subagent tree + SSE v3-projection adapter) / **F1-S5** (idempotency ledger +
+2. **F1-S4** (subagent tree + SSE v3-projection adapter) / **F1-S5** (idempotency ledger +
    attribution fan-out) — `docs/fork/plans/F1-replan.md`. **Area skills/subagents ACTIVATION**
    (S9-gated) — wires `composition.py` to pass area skills/subagents + re-runs the S9 matrix.
    **Backlog:** scira-style minimalist interface pass AFTER the AE-series (MILESTONES § Backlog;
@@ -81,12 +78,19 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 - **AE-series (ADR-F011):** plan+ADR ✅ (#58) · **AE0 ✅ (#59)** vendoring foundation · **AE1 ✅ (#60)**
   Conversation+Message+Response · **AE2 ✅ (#61)** Reasoning+Actions · **AE3 ✅ (#62)** Sources +
   Inline-Citation · **AE4 ✅ (#63)** Code Block (Shiki highlight, option-2 action; the one new dep
-  `shiki`) · **AE5 ✅ (#64)** Prompt Input (≡ R9 — option-2; dark-mode column gap FIXED) · **AE6 ✅ (PR #65)**
+  `shiki`) · **AE5 ✅ (#64)** Prompt Input (≡ R9 — option-2; dark-mode column gap FIXED) · **AE6 ✅ (#65)**
   Tool+Task (≡ R-CONV-2 — option-2 hand-build, no new dep; `groupTurnSteps`; renderModelMarkdown
-  convergence). **Next AE7 Suggestions (optional, lowest priority) → AE-series closes.**
+  convergence) · **AE7 ✅ (PR #66)** Suggestions (honest starter chips backed by SavedPrompts; AE0
+  `suggestion/` reused, no new dep). **AE-series CLOSED (AE0–AE7 done) — no AE8.**
 
 ## Carry-overs / review deferrals
 
+- **AE7 — no new carry-overs.** Review SHIP, no blockers/should-fixes; nit #1 (chip flash while a
+  populated chat's messages load) FIXED in-slice via the `message_count` gate. Honest-source design is
+  load-bearing: chips are the user's own SavedPrompts shown as empty-state starters, never model-invented
+  follow-ups — if a future slice wants contextual follow-ups, it needs a real backend source first (don't
+  fabricate). The remaining composer-adjacent panels (ModelPicker/SkillPicker/SavedPromptsPanel internals)
+  stay on the `--lq-*` dark stopgap (their own future R slices).
 - **AE6 — no new carry-overs.** Review SHIP, the one nit (dead `stepDigest`) fixed in-slice. Per-tool
   status has no error state (the record carries no per-tool error signal) — a failed/stale run surfaces
   via the run-level badge + stale banner + the rail's `failed` state, which is honest and documented in
