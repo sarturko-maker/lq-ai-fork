@@ -4,6 +4,33 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (NEW MILESTONE — UX-A navigational convergence OPEN; F2 visual pass complete through VL2; AE-series CLOSED)
 
+- **UX-A-4 (PR #__) — SHIPPED. The sub-nav surfaces re-hosted in the cockpit canvas (the last `(tools)`
+  routes).** `git mv`'d `admin`, `autonomous`, `settings`, `trust` (incl. all children + `page-helpers` +
+  `__tests__`) from `(tools)` into `(app)` — **27 pure renames, zero content change** — so they render in
+  the cockpit canvas with the rail present. URLs unchanged (route groups URL-invisible); the
+  `/lq-ai/+layout.svelte` auth/boot gate still wraps both groups. **Reachability preserved from cockpit
+  chrome** (verified, no re-wiring needed): `admin` (admin-only) + `autonomous` (opt-in gated) appear in the
+  rail Tools section + the header Tools dropdown; `settings` via the header gear (→ `settings/appearance`);
+  `trust` via the header Tools-dropdown trust link. **Nested sub-nav chrome accepted** (per UX-A): three of
+  the four carry their OWN sub-nav `+layout.svelte` (admin/autonomous = horizontal tab strip; settings =
+  vertical rail) that now renders INSIDE the canvas beside the cockpit rail — functional, no DOM/id clash
+  (distinct `aria-label`s). No `#lq-main`/`h-screen`/cross-boundary-import coupling (grep-verified; the
+  route-group rename keeps directory depth identical so relative imports resolve unchanged); the 3
+  `max-height: calc(100vh - 64px)` modal caps in autonomous are viewport-relative (pre-existing, fine
+  nested). **Known cosmetic quirk (pre-existing, NOT fixed — mechanical scope):** `activeTabFor` keys the
+  rail highlight off `admin`'s exact route `/lq-ai/admin/audit-log`, so the Admin tool highlights on
+  audit-log but not on other admin sub-pages (models/word-addin/…) — predates this slice (the rail's had the
+  admin tab since UX-A-2). **DELIBERATELY LEFT:** `(tools)/+layout.svelte` is now orphaned (zero child
+  routes, unreachable) but kept in place — deleting it is coupled to re-homing the `DualBrandingFooter` it
+  carries, which is a **UX-A-5** decision. Removed the `f2-baseline` legacy-chrome capture (no surface
+  carries the legacy `TopTabBar` chrome any more — nothing left to capture). Suites: web check **0 err** (5
+  pre-existing a11y warnings, untouched files); **vitest 854** (moved `__tests__` auto-discovered under
+  `(app)`); **`ux-a-4-subnav-surfaces.cy.ts` 3/3** + **`f2-baseline.cy.ts` 3/3** headed/live (open admin
+  from rail into canvas + rail-stays + active highlight + admin sub-nav paints; deep-link
+  admin/models/settings/trust inside the shell; settings vertical sub-nav + trust in canvas). Evidence:
+  `docs/fork/evidence/ux-a-4/`. Fresh-context review: **SHIP**, 0 blockers/should-fixes (1 stale-comment
+  tidy applied). web-only — no api/gateway change. **Pickup: UX-A-5** (retire the orphaned
+  `(tools)/+layout.svelte` + re-home `DualBrandingFooter` + decide on the header Tools dropdown + sweep).
 - **UX-A-3 (PR #83) — SHIPPED. The conversation surfaces re-hosted in the cockpit canvas.** `git mv`'d
   `agents`, `chats`, `matters` (incl. `matters/[id]`) + `playbook-executions/[id]` (incl. its
   `page-helpers` + `__tests__`) from `(tools)` into `(app)` — **pure renames, zero content change** — so
@@ -402,16 +429,21 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 primitives** (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/`Inline`/`StatusDot`) exist + are proven in
 `_vl-lab` against the `direction-vercel` target. No live surface re-skinned yet.
 
-1. **UX-A-4 — migrate the sub-nav surfaces.** Per ADR-F014 / the UX-A decomposition. Move `admin`,
-   `autonomous`, `settings`, `trust` from `(tools)` into `(app)` so they render in the cockpit canvas.
-   Each except `trust` has its OWN sub-nav `+layout.svelte` (horizontal/vertical) that now renders INSIDE
-   the canvas (nested chrome — accepted for UX-A). The header gear (→ `settings/appearance`) + the rail
-   Tools entries keep working; `autonomous` stays opt-in gated. After this only `(tools)` chrome itself
-   remains → **UX-A-5** retires `(tools)/+layout.svelte` (`TopTabBar` + footer) + the `CockpitHeader` Tools
-   dropdown + sweeps (and re-homes the trust/branding links the old shell carried; repoints/removes the
-   `f2-baseline` legacy-chrome capture, now that no legacy chrome remains). **UX-A-1/2/3 SHIPPED** — the
-   landing + all flat + all conversation surfaces now render in the cockpit canvas; `(tools)` holds only
-   admin/autonomous/settings/trust until UX-A-4.
+1. **UX-A-5 — retire the legacy `(tools)` shell + the header Tools dropdown + sweep.** Per ADR-F014 / the
+   UX-A decomposition. **UX-A-1/2/3/4 SHIPPED** — the landing + ALL tool surfaces (flat, conversation, and
+   the sub-nav admin/autonomous/settings/trust) now render in the cockpit canvas; `(tools)/` holds ONLY the
+   now-ORPHANED `+layout.svelte` (the legacy `TopTabBar`/`AmbientTrustChrome`/`DualBrandingFooter` shell —
+   zero child routes, unreachable). UX-A-5: (a) delete `(tools)/+layout.svelte` (and the empty `(tools)`
+   group); (b) **re-home the `DualBrandingFooter`** the old shell carried — the cockpit shell currently has
+   NO footer (decide: add to `(app)/+layout.svelte`, or drop — the OpenWebUI §4 branding obligation ended
+   in F0-S6/ADR-F006, so it's a UX choice not an obligation); trust + AmbientTrustChrome are already in
+   `CockpitHeader`; (c) decide on the `CockpitHeader` **Tools dropdown** — it now duplicates the rail Tools
+   section (retire it, or keep as a quick-jump); (d) cross-surface sweep: no dead `TopTabBar`/`#lq-main`
+   refs reachable, all deep-links resolve, no orphaned `--lq-*`; the STALE older cypress specs
+   (`wave-a-chrome` clicks "Skills" in the now-gone `TopTabBar`; `wave-b-surfaces`, `m4-autonomous`,
+   `f1-s2-cockpit` assert legacy chrome on migrated surfaces — already superseded since UX-A-2/3, NOT in the
+   maintained gate) get removed/repointed; (e) full screenshot matrix. `f2-baseline`'s legacy-chrome
+   capture was already removed in UX-A-4 (no legacy chrome left to capture).
 2. **deferred F2 visual work (after UX-A, or interleaved): F2-M7b — Library card/wrapper surfaces** (task
    #118): the remaining three `(tools)` list
    pages — **`knowledge`** (card grid + inline create form, max-1100px; KB status pills `indexed`/`indexing`/

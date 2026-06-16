@@ -1,12 +1,16 @@
 /**
  * F2 — minimalist pass: before/after capture (ADR-F012).
  *
- * Captures the two surface families F2 changes most: the cockpit landing
- * (`/lq-ai` — the centered-entry + AreaGrid target) and a legacy `(tools)`
- * surface (`/lq-ai/skills` — shows the TopTabBar + AmbientTrustChrome + footer
- * chrome that F2-M2/M3 calm). Runs against the live dev backend (real data, no
- * stubs) so the baseline is honest. PHASE selects the filename (before|after);
- * M0 captures PHASE=before on the pre-F2 bundle.
+ * Captures the surface families F2 changes most: the cockpit landing
+ * (`/lq-ai` — the centered-entry + AreaGrid target), the matters/conversation
+ * surfaces, and the table-list surfaces. Runs against the live dev backend
+ * (real data, no stubs) so the baseline is honest. PHASE selects the filename
+ * (before|after); M0 captures PHASE=before on the pre-F2 bundle.
+ *
+ * UX-A-4 removed the "legacy (tools) chrome" capture: admin/autonomous/settings/
+ * trust migrated into the cockpit shell, so NO surface carries the legacy
+ * TopTabBar chrome any more (the orphaned `(tools)/+layout.svelte` is unreachable,
+ * retired in UX-A-5). There is nothing legacy left to capture.
  *
  * Run (live stack, headed for honest dark capture):
  *   cd web && npx cypress run --headed --browser electron \
@@ -89,8 +93,7 @@ describe('F2 baseline capture', { retries: { runMode: 2, openMode: 0 } }, () => 
 	it('captures the table-list surfaces — playbooks + tabular (light + dark, wide + narrow)', () => {
 		// F2-M7a: the executor/skills table-list pages adopt PageShell + migrate
 		// their color --lq-* tokens to semantic (status pills onto the status-*
-		// tone family). Capture playbooks + tabular page bodies; skills is already
-		// captured by the (tools)-chrome test below.
+		// tone family). Capture playbooks + tabular page bodies.
 		login();
 		cy.visit('/lq-ai/playbooks');
 		cy.get('[data-testid="lq-playbooks-generate-cta"]', { timeout: 30000 }).should('be.visible');
@@ -105,23 +108,6 @@ describe('F2 baseline capture', { retries: { runMode: 2, openMode: 0 } }, () => 
 		for (const theme of ['light', 'dark'] as const) {
 			pinTheme(theme);
 			shoot(`tabular-${theme}`);
-		}
-	});
-
-	it('captures a legacy (tools) chrome surface (light + dark, wide + narrow)', () => {
-		login();
-		// UX-A-2/3 moved skills + chats into the cockpit shell; `trust` is still a
-		// legacy `(tools)` surface (it migrates in UX-A-4), so it still carries the
-		// TopTabBar chrome F2-M2/M3 calm.
-		cy.visit('/lq-ai/trust');
-		// Wait for the chrome F2 actually changes (the TopTabBar nav) to paint,
-		// not just `body` — a bare `body` assertion passes before the SPA renders
-		// and yields a blank capture (seen on F2-M3 light-wide).
-		cy.get('nav[aria-label="Primary"]', { timeout: 30000 }).should('be.visible');
-		cy.wait(800);
-		for (const theme of ['light', 'dark'] as const) {
-			pinTheme(theme);
-			shoot(`tools-trust-${theme}`);
 		}
 	});
 });
