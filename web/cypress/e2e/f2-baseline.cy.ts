@@ -110,4 +110,33 @@ describe('F2 baseline capture', { retries: { runMode: 2, openMode: 0 } }, () => 
 			shoot(`tabular-${theme}`);
 		}
 	});
+
+	it('captures the library card surfaces — knowledge + learn (light + dark, wide + narrow)', () => {
+		// F2-M7b: the card/wrapper library pages adopt PageShell (snapped onto the
+		// system reading widths) + migrate their color --lq-* tokens to semantic
+		// (KB status pills onto the status-* tone family) + the F013 calm card
+		// idiom (flat, border-led, hover-washes-to-muted, scarce-blue focus).
+		login();
+		cy.visit('/lq-ai/knowledge');
+		cy.get('[data-testid="lq-ai-knowledge-page"]', { timeout: 30000 }).should('be.visible');
+		cy.wait(800);
+		for (const theme of ['light', 'dark'] as const) {
+			pinTheme(theme);
+			shoot(`knowledge-${theme}`);
+		}
+		cy.visit('/lq-ai/learn');
+		cy.get('[data-testid="lq-ai-learn-page"]', { timeout: 30000 }).should('be.visible');
+		cy.wait(800);
+		for (const theme of ['light', 'dark'] as const) {
+			pinTheme(theme);
+			shoot(`learn-${theme}`);
+		}
+		cy.visit('/lq-ai/saved-prompts');
+		cy.get('[data-testid="lq-ai-saved-prompts-page"]', { timeout: 30000 }).should('be.visible');
+		cy.wait(800);
+		for (const theme of ['light', 'dark'] as const) {
+			pinTheme(theme);
+			shoot(`saved-prompts-${theme}`);
+		}
+	});
 });

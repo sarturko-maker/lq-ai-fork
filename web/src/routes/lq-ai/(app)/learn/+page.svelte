@@ -5,27 +5,31 @@
   what the surface is and who it is for. Every claim on the sub-pages
   links back to a verifiable file path in source.
 -->
+<script lang="ts">
+	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
+</script>
 
-<main class="lq-learn-page" data-testid="lq-ai-learn-page">
+<!-- F2-M7b: bespoke 960px → PageShell `default` (896px), snapping onto the
+     system reading widths; color --lq-* → semantic + F013 calm. -->
+<PageShell size="default" pad="compact" data-testid="lq-ai-learn-page">
 	<header class="lq-page-header">
 		<h1 class="lq-text-page-h">Learn</h1>
 		<div class="lq-learn-intro">
 			<p class="lq-text-body lq-learn-intro-p">
-				A guided introduction to LQ.AI for everyone — practicing attorneys curious about
-				what the project does, security and procurement teams evaluating it for deployment,
-				engineers exploring the architecture, and anyone considering contributing a skill.
-				The three sections below address a different question: what it does, how it works,
-				and how to contribute.
+				A guided introduction to LQ.AI for everyone — practicing attorneys curious about what the
+				project does, security and procurement teams evaluating it for deployment, engineers
+				exploring the architecture, and anyone considering contributing a skill. The three sections
+				below address a different question: what it does, how it works, and how to contribute.
 			</p>
 			<p class="lq-text-body lq-learn-intro-p">
-				Every claim on these pages is backed by a path to verify it in the codebase. If
-				the docs say something the code does not do, the code is canonical — please
+				Every claim on these pages is backed by a path to verify it in the codebase. If the docs say
+				something the code does not do, the code is canonical — please
 				<a
 					href="https://github.com/LegalQuants/lq-ai/issues"
 					class="lq-link"
 					target="_blank"
-					rel="noopener noreferrer"
-				>open an issue</a>.
+					rel="noopener noreferrer">open an issue</a
+				>.
 			</p>
 		</div>
 	</header>
@@ -44,8 +48,8 @@
 			<span class="lq-learn-card-icon" aria-hidden="true">🔍</span>
 			<h2 class="lq-learn-card-title">How It Works</h2>
 			<p class="lq-learn-card-desc">
-				Interactive playgrounds that show how the system fits together. Click any
-				visualization to verify claims against the source.
+				Interactive playgrounds that show how the system fits together. Click any visualization to
+				verify claims against the source.
 			</p>
 			<span class="lq-learn-card-cta">Explore →</span>
 		</a>
@@ -59,15 +63,9 @@
 			<span class="lq-learn-card-cta">Explore →</span>
 		</a>
 	</div>
-</main>
+</PageShell>
 
 <style>
-	.lq-learn-page {
-		padding: var(--lq-space-6);
-		max-width: 960px;
-		margin: 0 auto;
-	}
-
 	.lq-page-header {
 		margin-bottom: var(--lq-space-6);
 	}
@@ -81,12 +79,12 @@
 	}
 
 	.lq-learn-intro-p {
-		color: var(--lq-text-secondary);
+		color: var(--muted-foreground);
 		line-height: 1.6;
 	}
 
 	.lq-link {
-		color: var(--lq-accent);
+		color: var(--brand);
 		text-decoration: underline;
 	}
 
@@ -105,21 +103,22 @@
 		flex-direction: column;
 		gap: var(--lq-space-3);
 		padding: var(--lq-space-6);
-		border: 1px solid var(--lq-border);
+		border: 1px solid var(--border);
 		border-radius: var(--lq-radius-lg);
-		background: var(--lq-canvas);
+		background: var(--card);
 		text-decoration: none;
-		color: var(--lq-text);
-		transition: border-color 0.15s ease, box-shadow 0.15s ease;
+		color: var(--foreground);
+		transition: background-color 0.15s ease;
 	}
 
+	/* F013: flat, border-led cards — hover washes to muted, no float shadow
+	   (shadows reserved for true elevation); the scarce blue is for focus only. */
 	.lq-learn-card:hover {
-		border-color: var(--lq-accent);
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+		background: var(--muted);
 	}
 
 	.lq-learn-card:focus-visible {
-		outline: 2px solid var(--lq-accent);
+		outline: 2px solid var(--ring);
 		outline-offset: 2px;
 	}
 
@@ -132,13 +131,13 @@
 		margin: 0;
 		font-size: 18px;
 		font-weight: 600;
-		color: var(--lq-text);
+		color: var(--foreground);
 	}
 
 	.lq-learn-card-desc {
 		margin: 0;
 		font-size: 14px;
-		color: var(--lq-text-secondary);
+		color: var(--muted-foreground);
 		line-height: 1.5;
 		flex: 1;
 	}
@@ -146,7 +145,7 @@
 	.lq-learn-card-cta {
 		font-size: 14px;
 		font-weight: 500;
-		color: var(--lq-accent);
+		color: var(--brand);
 		margin-top: var(--lq-space-2);
 	}
 </style>

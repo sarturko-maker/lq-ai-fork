@@ -15,6 +15,7 @@
 	 * logs, and browser history (matters for legal-sensitive text).
 	 */
 	import { goto } from '$app/navigation';
+	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import SavedPromptsPanel from '$lib/lq-ai/components/SavedPromptsPanel.svelte';
 
 	function useInChat(text: string): void {
@@ -25,30 +26,28 @@
 	}
 </script>
 
-<main class="lq-saved-prompts-page" data-testid="lq-ai-saved-prompts-page">
+<!-- F2-M7b: bespoke 920px → PageShell `default` (896px), snapping onto the
+     system reading widths; only the page wrapper is touched (SavedPromptsPanel
+     itself is migrated by its own R-slice). -->
+<PageShell size="default" pad="compact" data-testid="lq-ai-saved-prompts-page">
 	<header class="lq-page-header">
 		<h1 class="lq-text-page-h">Saved prompts</h1>
 		<p class="lq-text-body lq-page-intro">
-			Reusable prompt fragments scoped to your account. Insert into a chat,
-			edit them in place, or promote one to a skill when a fragment outgrows
-			its prompt and starts deserving inputs / examples / a versioned home.
+			Reusable prompt fragments scoped to your account. Insert into a chat, edit them in place, or
+			promote one to a skill when a fragment outgrows its prompt and starts deserving inputs /
+			examples / a versioned home.
 		</p>
 	</header>
 
 	<SavedPromptsPanel alwaysOpen insertLabel="Use in chat" onInsert={useInChat} />
-</main>
+</PageShell>
 
 <style>
-	.lq-saved-prompts-page {
-		padding: var(--lq-space-6);
-		max-width: 920px;
-		margin: 0 auto;
-	}
 	.lq-page-header {
 		margin-bottom: var(--lq-space-5);
 	}
 	.lq-page-intro {
-		color: var(--lq-text-secondary);
+		color: var(--muted-foreground);
 		margin-top: var(--lq-space-2);
 		max-width: 60ch;
 	}

@@ -57,11 +57,9 @@
 	 */
 	import { onMount } from 'svelte';
 
-	import {
-		listKnowledgeBases,
-		createKnowledgeBase
-	} from '$lib/lq-ai/api/knowledgeBases';
+	import { listKnowledgeBases, createKnowledgeBase } from '$lib/lq-ai/api/knowledgeBases';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
+	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	// `KnowledgeBase` is imported in the module script above; Svelte merges
 	// the two script blocks at compile time, so re-importing here would
 	// duplicate-identifier under svelte-check (matches AttachKBModal pattern).
@@ -149,14 +147,15 @@
 	onMount(load);
 </script>
 
-<main class="lq-knowledge-page" data-testid="lq-ai-knowledge-page">
+<!-- F2-M7b: bespoke 1100px → PageShell `wide` (1024px), snapping onto the
+     system reading widths; color --lq-* → semantic + F013 calm. -->
+<PageShell size="wide" pad="compact" data-testid="lq-ai-knowledge-page">
 	<header class="lq-page-header">
 		<div>
 			<h1 class="lq-text-page-h">Knowledge bases</h1>
 			<p class="lq-text-body lq-page-intro">
-				Curated collections of documents your matters can search alongside the
-				prompt. Upload PDFs, attach them to a KB, and the hybrid retrieval
-				surface (vector + full-text) handles the rest.
+				Curated collections of documents your matters can search alongside the prompt. Upload PDFs,
+				attach them to a KB, and the hybrid retrieval surface (vector + full-text) handles the rest.
 			</p>
 		</div>
 		<div class="lq-header-actions">
@@ -203,12 +202,9 @@
 				<p class="lq-error" role="alert">{createError}</p>
 			{/if}
 			<div class="lq-create-actions">
-				<button
-					type="button"
-					class="lq-btn-secondary"
-					on:click={closeCreate}
-					disabled={creating}
-				>Cancel</button>
+				<button type="button" class="lq-btn-secondary" on:click={closeCreate} disabled={creating}
+					>Cancel</button
+				>
 				<button
 					type="button"
 					class="lq-btn-primary"
@@ -227,18 +223,16 @@
 	{/if}
 
 	{#if loading}
-		<p class="lq-text-body" style="color: var(--lq-text-secondary);">Loading…</p>
+		<p class="lq-text-body" style="color: var(--muted-foreground);">Loading…</p>
 	{:else if kbs.length === 0}
 		<div class="lq-empty-state" data-testid="lq-ai-knowledge-empty">
-			<p class="lq-text-body" style="color: var(--lq-text-secondary);">
+			<p class="lq-text-body" style="color: var(--muted-foreground);">
 				No knowledge bases yet. Create one to start collecting documents.
 			</p>
 			{#if !showCreateForm}
-				<button
-					type="button"
-					class="lq-btn-primary"
-					on:click={openCreate}
-				>+ Create your first KB</button>
+				<button type="button" class="lq-btn-primary" on:click={openCreate}
+					>+ Create your first KB</button
+				>
 			{/if}
 		</div>
 	{:else}
@@ -263,9 +257,11 @@
 					{/if}
 					<footer class="lq-kb-card-foot">
 						<span class="lq-kb-meta">
-							{kb.file_count} {kb.file_count === 1 ? 'doc' : 'docs'}
+							{kb.file_count}
+							{kb.file_count === 1 ? 'doc' : 'docs'}
 							·
-							{kb.chunk_count} {kb.chunk_count === 1 ? 'chunk' : 'chunks'}
+							{kb.chunk_count}
+							{kb.chunk_count === 1 ? 'chunk' : 'chunks'}
 						</span>
 						<span class="lq-kb-date">Updated {shortDate(kb.updated_at)}</span>
 						{#if kb.archived_at}
@@ -276,15 +272,9 @@
 			{/each}
 		</div>
 	{/if}
-</main>
+</PageShell>
 
 <style>
-	.lq-knowledge-page {
-		padding: var(--lq-space-6);
-		max-width: 1100px;
-		margin: 0 auto;
-	}
-
 	.lq-page-header {
 		display: flex;
 		justify-content: space-between;
@@ -294,7 +284,7 @@
 	}
 
 	.lq-page-intro {
-		color: var(--lq-text-secondary);
+		color: var(--muted-foreground);
 		margin-top: var(--lq-space-2);
 		max-width: 64ch;
 	}
@@ -306,8 +296,8 @@
 	}
 
 	.lq-create-card {
-		background: var(--lq-inset);
-		border: 1px solid var(--lq-border);
+		background: var(--muted);
+		border: 1px solid var(--border);
 		border-radius: var(--lq-radius-lg);
 		padding: var(--lq-space-4);
 		margin-bottom: var(--lq-space-5);
@@ -324,12 +314,12 @@
 
 	.lq-field input,
 	.lq-field textarea {
-		background: var(--lq-canvas);
-		border: 1px solid var(--lq-border);
+		background: var(--background);
+		border: 1px solid var(--border);
 		border-radius: var(--lq-radius);
 		padding: var(--lq-space-2) var(--lq-space-3);
 		font-size: 14px;
-		color: var(--lq-text);
+		color: var(--foreground);
 		font-family: inherit;
 		resize: vertical;
 	}
@@ -337,8 +327,8 @@
 	.lq-field input:focus,
 	.lq-field textarea:focus {
 		outline: none;
-		border-color: var(--lq-accent);
-		box-shadow: 0 0 0 2px var(--lq-accent-soft);
+		border-color: var(--ring);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 25%, transparent);
 	}
 
 	.lq-create-actions {
@@ -348,9 +338,9 @@
 	}
 
 	.lq-error {
-		color: var(--lq-error);
-		background: var(--lq-error-soft);
-		border: 1px solid var(--lq-error-border);
+		color: var(--destructive);
+		background: var(--status-failed-wash);
+		border: 1px solid var(--destructive);
 		border-radius: var(--lq-radius);
 		padding: var(--lq-space-2) var(--lq-space-3);
 		font-size: 13px;
@@ -359,7 +349,7 @@
 
 	.lq-empty-state {
 		border-radius: var(--lq-radius-lg);
-		border: 1px dashed var(--lq-border);
+		border: 1px dashed var(--border);
 		padding: var(--lq-space-6);
 		text-align: center;
 		display: flex;
@@ -379,21 +369,22 @@
 		flex-direction: column;
 		gap: var(--lq-space-2);
 		padding: var(--lq-space-4);
-		border: 1px solid var(--lq-border);
+		border: 1px solid var(--border);
 		border-radius: var(--lq-radius-lg);
-		background: var(--lq-canvas);
+		background: var(--card);
 		text-decoration: none;
-		color: var(--lq-text);
-		transition: border-color 0.15s ease, transform 0.05s ease, box-shadow 0.15s ease;
+		color: var(--foreground);
+		transition: background-color 0.15s ease;
 	}
 
+	/* F013: flat, border-led cards — hover washes to muted, no float shadow
+	   (shadows reserved for true elevation); the scarce blue is for focus only. */
 	.lq-kb-card:hover {
-		border-color: var(--lq-accent);
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+		background: var(--muted);
 	}
 
 	.lq-kb-card:focus-visible {
-		outline: 2px solid var(--lq-accent);
+		outline: 2px solid var(--ring);
 		outline-offset: 2px;
 	}
 
@@ -412,13 +403,13 @@
 		margin: 0;
 		font-size: 15px;
 		font-weight: 600;
-		color: var(--lq-text);
+		color: var(--foreground);
 	}
 
 	.lq-kb-card-desc {
 		margin: 0;
 		font-size: 13px;
-		color: var(--lq-text-secondary);
+		color: var(--muted-foreground);
 		line-height: 1.4;
 	}
 
@@ -430,11 +421,11 @@
 		margin-top: auto;
 		padding-top: var(--lq-space-2);
 		font-size: 12px;
-		color: var(--lq-text-tertiary);
+		color: var(--muted-foreground);
 	}
 
 	.lq-kb-meta {
-		color: var(--lq-text-secondary);
+		color: var(--muted-foreground);
 	}
 
 	.lq-kb-date {
@@ -442,9 +433,9 @@
 	}
 
 	.lq-kb-archived-pill {
-		background: var(--lq-inset);
-		color: var(--lq-text-tertiary);
-		border: 1px solid var(--lq-border);
+		background: var(--muted);
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
 		border-radius: var(--lq-radius-pill);
 		padding: 1px 8px;
 		font-size: 11px;
@@ -458,33 +449,32 @@
 		flex-shrink: 0;
 	}
 
+	/* F2-M7b: KB status pills migrate onto the existing `status-*` tone family
+	   (defined for both themes in app.css) — no new token scale, no border, the
+	   M7a tabular-pill recipe. `indexing` → the scarce blue `running` tone. */
 	.lq-kb-status--indexed {
-		background: var(--lq-accent-soft);
-		color: var(--lq-accent);
-		border: 1px solid var(--lq-accent-border);
+		background: var(--status-completed-wash);
+		color: var(--status-completed);
 	}
 
 	.lq-kb-status--indexing {
-		background: var(--lq-warn-soft);
-		color: var(--lq-warn);
-		border: 1px solid var(--lq-warn-border);
+		background: var(--status-running-wash);
+		color: var(--status-running);
 	}
 
 	.lq-kb-status--failed {
-		background: var(--lq-error-soft);
-		color: var(--lq-error);
-		border: 1px solid var(--lq-error-border);
+		background: var(--status-failed-wash);
+		color: var(--status-failed);
 	}
 
 	.lq-kb-status--empty {
-		background: var(--lq-inset);
-		color: var(--lq-text-tertiary);
-		border: 1px solid var(--lq-border);
+		background: var(--muted);
+		color: var(--muted-foreground);
 	}
 
 	.lq-btn-primary {
-		background: var(--lq-accent);
-		color: white;
+		background: var(--primary);
+		color: var(--primary-foreground);
 		border: 0;
 		border-radius: var(--lq-radius);
 		padding: 8px 16px;
@@ -497,7 +487,7 @@
 	}
 
 	.lq-btn-primary:hover:not(:disabled) {
-		filter: brightness(0.95);
+		opacity: 0.9;
 	}
 
 	.lq-btn-primary:disabled {
@@ -507,8 +497,8 @@
 
 	.lq-btn-secondary {
 		background: transparent;
-		color: var(--lq-text-secondary);
-		border: 1px solid var(--lq-border);
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
 		border-radius: var(--lq-radius);
 		padding: 6px 12px;
 		font-size: 13px;
@@ -519,7 +509,7 @@
 	}
 
 	.lq-btn-secondary:hover:not(:disabled) {
-		background: var(--lq-inset);
+		background: var(--muted);
 	}
 
 	.lq-btn-secondary:disabled {
