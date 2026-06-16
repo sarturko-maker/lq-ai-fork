@@ -26,8 +26,7 @@
 	import CockpitHeader from '$lib/lq-ai/cockpit/CockpitHeader.svelte';
 	import { CockpitShellState, setCockpitState } from '$lib/lq-ai/cockpit/context.svelte';
 	import { cockpitUrl, MOTION, motionMs, parseCockpitState } from '$lib/lq-ai/cockpit/helpers';
-	import { visibleTabsFor } from '$lib/lq-ai/components/TopTabBar.svelte';
-	import { activeTabFor, type TabDef } from '$lib/lq-ai/tabs';
+	import { activeTabFor, visibleTabsFor, type TabDef } from '$lib/lq-ai/tabs';
 
 	let { children } = $props();
 
@@ -119,11 +118,9 @@
 	}
 
 	function selectTool(tab: TabDef) {
-		// Open a tool surface. Migrated surfaces ((app)/tabular, /playbooks, …)
-		// render in the canvas with this shell present; not-yet-migrated ones
-		// transitionally leave the shell to the legacy TopTabBar chrome until
-		// their UX-A slice lands. A plain goto (scroll-to-top) — a new surface,
-		// not an in-cockpit URL-state nudge.
+		// Open a tool surface. Every tool surface now renders in the canvas with
+		// this shell present (UX-A folded them all into `(app)`). A plain goto
+		// (scroll-to-top) — a new surface, not an in-cockpit URL-state nudge.
 		drawerOpen = false;
 		goto(tab.route);
 	}
@@ -152,7 +149,6 @@
 
 <div class="bg-background text-foreground flex h-dvh min-h-0 flex-col" data-testid="lq-cockpit">
 	<CockpitHeader
-		user={$auth.user ?? null}
 		railHidden={isNarrow ? !drawerOpen : railCollapsed}
 		onToggleRail={toggleRail}
 	/>

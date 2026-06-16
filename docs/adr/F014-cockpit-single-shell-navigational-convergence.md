@@ -116,3 +116,16 @@ each slice an independently shippable PR with the full F2/ADR-F005 gate, reversi
   `--lq-*` rollout.
 - **~** UX-B is untouched: tools remain tools, merely hosted in the cockpit. The capability convergence
   (agent picks/exposes tools) still rides the pivot track (schema + activation + F1-S4/S5).
+
+## Status update — UX-A COMPLETE (2026-06-16)
+
+Shipped in five slices, all merged: UX-A-1 (shell extraction, #80) · UX-A-2 (rail Tools + flat surfaces,
+#82) · UX-A-3 (conversation surfaces, #83) · UX-A-4 (sub-nav surfaces, #84) · UX-A-5 (retire the legacy
+`(tools)` shell + the header Tools dropdown + sweep). The cockpit is now the single app shell: every
+authenticated surface renders in its canvas with the persistent rail; tools are reached only from the
+rail's Tools section; `TopTabBar.svelte`, the `(tools)` route group, and the header Tools dropdown are
+gone. `visibleTabsFor` moved to `tabs.ts` (the tab vocabulary outlived the top-tab component). Trust stays
+reachable via a dedicated header button. The two predicted nested-chrome consequences held as designed
+(sub-nav layouts render in-canvas; `matters/[id]` keeps its own `MatterRail` beside the cockpit rail) —
+both flagged for a future reconcile/UX-B pass, neither blocking. No tool surface was removed; all
+deep-links resolve unchanged.

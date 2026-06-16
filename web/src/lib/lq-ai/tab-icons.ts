@@ -1,8 +1,8 @@
 /**
  * Tab → Lucide glyph map (UX-A). One source of truth for the icons that
- * represent each tool surface, so the cockpit header Tools menu, the legacy
- * `TopTabBar`, and (UX-A-2) the cockpit rail's Tools section all render the
- * same glyphs — replacing the emoji placeholders that predate the F013 look.
+ * represent each tool surface, so the cockpit rail's Tools section (UX-A-2)
+ * renders consistent glyphs — replacing the emoji placeholders that predate
+ * the F013 look.
  *
  * Presentation only. Unknown ids fall back to a generic glyph.
  */
