@@ -2,8 +2,40 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 + UX-A COMPLETE; UX-B milestone OPEN — ADR-F015 accepted; pickup = UX-B-1 scenario harness)
+## State (F2 + UX-A COMPLETE; UX-B milestone OPEN — UX-B-1 harness SHIPPED; pickup = UX-B-2 default areas)
 
+- **UX-B-1 (PR #TBD) — SHIPPED. Scenario harness + Commercial baseline (ADR-F015). Test infra only — no
+  `app/` change.** A reusable, provider-marked rig (`api/tests/agents/scenarios/`) that drives the REAL
+  practice-area Deep Agent through the PRODUCTION composition point
+  (`compose_and_execute_run`, injecting only the test-DB session factory + a null checkpointer — the model,
+  gateway http client, and gateway URL/key all flow from settings exactly as in prod, so **no provider key
+  is ever held or printed**) against the **live gateway / real MiniMax-M3**, then reads back the settled
+  `AgentRun` + ordered `AgentRunStep` rows as honest **receipts** (tool selection, step count, model turns,
+  final answer, latency) and emits a committed **behavior report**
+  (`docs/fork/evidence/ux-b-1/behavior-report.{md,json}` — observations only: tool names/counts/pass-fail/
+  bounded answer excerpts, never keys/secrets/raw payloads). Files: `scenarios.py` (the `Scenario` model +
+  the 5 Commercial starter scenarios + a synthetic searchable MSA fixture, offsets satisfying the Citation
+  Engine invariant + the pure `evaluate()`), `harness.py` (`seed_commercial_matter` → user + Commercial-bound
+  matter + file→document→chunks; `run_scenario` → drive + receipt), `report.py` (JSON+MD emitter),
+  `test_commercial_scenarios.py` (the `@pytest.mark.provider` + `LQ_AI_GATEWAY_KEY` skipif entry),
+  `conftest.py` (`commit_factory`). **Per ADR-F015 it is NOT a model pass/fail gate** — a shape-miss is a
+  recorded *finding* that calibrates UX-B-2; the test asserts only that the RIG ran (every scenario reached a
+  terminal status + receipts + ≥1 live model turn). **Baseline findings (MiniMax-M3, runs vary — tier-4
+  non-determinism is itself the observation):** single-tool fetch grounds + cites cleanly; no-tool-needed
+  answers directly (respects "without consulting documents"); guard/refusal **honestly declines** delete/email
+  (no such tool) with sound legal reasoning — never hallucinates a confirmation; **multi-step search→read is
+  inconsistent** (M3 often answers from the search snippet alone when it already contains the clause — a
+  calibration note, not a defect); **ambiguous→clarify is the real weakness** — M3 sometimes clarifies well
+  but sometimes spins through repeated search/read (one run hit `cap_exceeded` at 16 steps, no answer). These
+  CALIBRATE UX-B-2's default-area profiles + tier floors. **Verify:** scripted CI suite **2128 passed, 4
+  skipped** (the 4 = provider tests self-skipping with no key — mine among them, so it never gates CI); ruff
+  format+check clean; mypy `app` clean; harness runs locally against the live dev stack (87s → 70s; report
+  committed); fresh-context adversarial+security review **SHIP** (0 blockers/should-fixes; 3 NITs — dead
+  `applicable` field removed, model-resolution wording softened to observation-honest, a "reading the checks"
+  heuristic caveat added to the report; the report carries no key/secret/PII). **Run it:** `DATABASE_URL=…
+  LQ_AI_GATEWAY_KEY=… pytest -m provider tests/agents/scenarios/ -s` (containerized: `Dockerfile.dev` image,
+  mount `api/`→`/app` + `skills/`→`/skills:ro` + the evidence dir, set `UX_B1_EVIDENCE_DIR`). **Pickup:
+  UX-B-2** (default areas, calibrated to this baseline) — see Next slice.
 - **UX-B-0 (PR #89) — SHIPPED. ADR-F015 ACCEPTED + UX-B decomposition. Docs only.** The maintainer revealed
   the long-range vision (agentic SaaS **modules** à la **Oscar Privacy**; see [[oscar-privacy-modules-vision]])
   and the near-term mandate that gates it: *Deep Agents must truly work, the cockpit must be perfect*. This
@@ -526,48 +558,55 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**F2 + UX-A are COMPLETE.** F2 (M0…M9 + VL0…VL2) put the whole interface on the Vercel/F013 design language,
-semantic-token clean, AA-dark, M9-verified. UX-A made the cockpit the single app shell (legacy `(tools)`/
-`TopTabBar`/Tools-dropdown gone). **UX-B is now OPEN** and **ADR-F015 is accepted** (the milestone plan +
-gate are committed in PR #89 — merge pending CI).
+**F2 + UX-A are COMPLETE; UX-B-1 (scenario harness) is SHIPPED.** The provider-marked rig now drives the
+real Deep Agent through the production loop against live MiniMax-M3 and emits a committed behavior report
+(`docs/fork/evidence/ux-b-1/`). That report is the **calibration input** for this slice.
 
-### → NEXT: UX-B-1 — scenario harness + Commercial baseline (ADR-F015). Branch FIRST.
+### → NEXT: UX-B-2 — sensible default practice areas, calibrated to the UX-B-1 baseline (ADR-F015). Branch FIRST.
 
 **Milestone context:** UX-B = capability convergence ("Deep Agents truly work / cockpit perfect"), the
-gate for the agentic-**modules** / Oscar-Privacy direction ([[oscar-privacy-modules-vision]]). The full
-decomposition + sequencing lives in **`docs/fork/plans/UX-B-deep-agents-truly-work-decomposition.md`**;
-the gate is **ADR-F015** (read both first). Maintainer steers: harness-first; skills activation (S9) in
-scope as a later slice (UX-B-3); MiniMax-M3 is the dependency-injected model (tier-4-weak).
+gate for the agentic-**modules** / Oscar-Privacy direction ([[oscar-privacy-modules-vision]]). Decomposition +
+sequencing: **`docs/fork/plans/UX-B-deep-agents-truly-work-decomposition.md`**; gate: **ADR-F015** (read both
+first, plus the UX-B-1 behavior report). MiniMax-M3 is the DI model (tier-4-weak).
 
-**Build UX-B-1 — the scenario harness + Commercial baseline:**
-- A **reusable, provider-marked (`@pytest.mark.provider`) rig**: scenario fixtures (intent + expected-shape:
-  which tool(s), step bound, must / should-not, refusal expectation) → drive the **real** agent against the
-  **live gateway** (build the model via `build_gateway_chat_model()` — keys stay in the gateway) → capture
-  **receipts** (tool selection, step count, final-answer check, guard/refusal, latency) → emit a structured
-  **behavior report** committed to `docs/fork/evidence/ux-b-1/`.
-- Run it against **Commercial** (the only configured area) with a starter set: single-tool fetch, multi-step
-  `search → read → answer`, no-tool-needed, ambiguous → clarify, guard/refusal. The report is an honest map
-  of how MiniMax-M3 behaves in the cockpit loop — it CALIBRATES UX-B-2's default-area profiles/tier-floors.
-- Production code change limited to test infra (+ minimal observability hooks if needed).
-- **Anchors (from the 2026-06-16 Explore map):** the loop = `composition.py:compose_and_execute_run`
-  (62-209) → `runner.py:_drive_agent` (236-386) → gateway → `stream.py` (110-371) SSE. Existing harness
-  precedents: `api/tests/agents/test_deepagents_spike.py` (the one live-MiniMax tool-loop proof — model
-  picks the tool; copy its model-injection + `@pytest.mark.provider` shape) and
-  `test_agent_composition.py` (scripted-model loop tests — these stay the CI gate). Tools today =
-  `build_matter_tools` → `[search_documents, read_document]` (`tools.py:94-136`). Area profile lives in
-  `practice_areas.profile_md` (Commercial seeded by migration `0054`).
+**Build UX-B-2 — configure the 4 inert areas (Disputes / M&A / Privacy / Employment):**
+- Author `profile_md` + `default_tier_floor` + `agent_config` for each via an **idempotent migration** (the
+  `0054` pattern — write only when `profile_md IS NULL`, never overwrite operator edits). Migration **#0055**.
+- **Profiles + tier floors calibrated to the UX-B-1 baseline** (degrade honestly where M3 is weak — see the
+  findings below; e.g. instruct clarification on ambiguous intent, since M3 sometimes spins instead).
+  **Privacy gets a forward-looking profile** (it is the future Oscar-Privacy module's home).
+- **Extend the harness with per-area scenarios** (reuse `api/tests/agents/scenarios/` — add a per-area
+  scenario set + seed helper; the rig + report emitter are already reusable) and commit per-area behavior
+  reports under `docs/fork/evidence/ux-b-2/`. `configured` is derived from `bool(profile_md.strip())`, so
+  the cockpit then shows all 5 areas configured.
+- **Dev-env hard rules (now they bite — a migration lands):** verify the migration on a **throwaway pgvector
+  container first**; apply by **rebuilding `api` + `arq-worker` + `ingest-worker` together**; NEVER host-side
+  `alembic upgrade` on the live dev DB; NEVER `docker compose down -v`.
 
-**Verify:** scripted suite still green (CI); the harness runs locally against the **live dev stack** (gateway
-up, `LQ_AI_GATEWAY_KEY` set); behavior report committed. Fresh-context adversarial + **security +
-simplification** pass ([[security-review-every-slice]]) — confirm no provider key leaks into fixtures/report/
-logs. **Dev-env hard rules apply** (never host-side `alembic upgrade` on the live dev DB; never
-`docker compose down -v`; rebuild workers together when a migration lands — UX-B-2 onward). HANDOFF updated.
-Merge per ADR-F005 against `sarturko-maker/lq-ai-fork` (`gh pr create --repo sarturko-maker/lq-ai-fork
---head <branch>`).
+**UX-B-1 baseline findings to calibrate against (MiniMax-M3; runs vary — non-determinism is the headline):**
+single-tool fetch grounds + cites well; no-tool-needed answers directly; guard/refusal honestly declines an
+action with no tool (never fakes a confirmation); **multi-step search→read is inconsistent** (M3 often
+answers from the search snippet alone — fine when the snippet is complete); **ambiguous→clarify is the real
+weakness** (sometimes clarifies, sometimes spins to `cap_exceeded`). Profiles should lean on explicit
+"ask before guessing" and "ground every claim in a tool result" instructions where M3 is weak.
 
-**Then:** UX-B-2 default areas (calibrated) → UX-B-3 skills activation (S9; drop `composition.py:151`
-`bound_skill_names=[]`, attach `SkillsMiddleware`, re-qualify) → UX-B-4 live subagent → UX-B-5 cockpit UI
-(area-pick at matter creation + subagent boundary rendering) → UX-B-6 verify.
+**Reusing the harness (UX-B-1, anchors):** `api/tests/agents/scenarios/` — `scenarios.py` (`Scenario`
+model + `evaluate()` + synthetic-doc builder), `harness.py` (`seed_commercial_matter` pattern → clone
+per area; `run_scenario` is area-agnostic), `report.py` (emitter, reused as-is), `conftest.py`
+(`commit_factory`). Run: `DATABASE_URL=… LQ_AI_GATEWAY_KEY=… pytest -m provider tests/agents/scenarios/ -s`
+(or the `Dockerfile.dev` container: mount `api/`→`/app` + `skills/`→`/skills:ro` + the evidence dir,
+set `UX_B1_EVIDENCE_DIR`). The loop itself: `composition.py:compose_and_execute_run` (62-209) →
+`runner.py:_drive_agent` (236-386) → gateway. The `bound_skill_names=[]` stub at `composition.py:151`
+stays until UX-B-3.
+
+**Verify:** migration on a throwaway pgvector container; scripted suite still green (CI); per-area harness
+behavior reports committed; cockpit screenshot showing 5 configured areas; fresh-context adversarial +
+**security + simplification** pass ([[security-review-every-slice]]). HANDOFF updated. Merge per ADR-F005
+against `sarturko-maker/lq-ai-fork` (`gh pr create --repo sarturko-maker/lq-ai-fork --head <branch>`).
+
+**Then:** UX-B-3 skills activation (S9; drop `composition.py:151` `bound_skill_names=[]`, attach
+`SkillsMiddleware`, re-qualify the harness with the expanded tool surface) → UX-B-4 live subagent → UX-B-5
+cockpit UI (area-pick at matter creation + subagent boundary rendering) → UX-B-6 verify.
 
 **Grounded state of the loop (2026-06-16 Explore map):** the cockpit loop WORKS end-to-end and is unit-
 tested with a *scripted* model; gaps to "truly works" = skills stubbed (`composition.py:151`
