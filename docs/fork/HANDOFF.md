@@ -4,7 +4,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (UX-A navigational convergence COMPLETE — cockpit is the single app shell; F2 visual pass complete through VL2 + the library surfaces M7a/M7b + the nav shells M8; only M9 sweep remains; AE-series CLOSED)
 
-- **F2-M8 (PR #__) — SHIPPED. The settings / admin / trust nav shells calmed.** The three sub-nav
+- **F2-M8 (PR #87) — SHIPPED. The settings / admin / trust nav shells calmed.** The three sub-nav
   shells under `(app)` were the last chrome still rendering the old **teal `--lq-accent`** active marker
   (`--lq-accent` = `#1f7a6b`, NOT the Vercel scarce blue — so these shells were visibly off-brand, not
   cosmetic-only). Migrated each: **`settings/+layout.svelte`** (vertical rail) — active = the live
