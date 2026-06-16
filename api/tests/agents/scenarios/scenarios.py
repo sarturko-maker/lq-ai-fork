@@ -83,18 +83,19 @@ class FixtureDocument:
     chunks: list[DocChunk]
 
 
-def build_fixture_document() -> FixtureDocument:
-    """Assemble the synthetic MSA, computing offsets from the joined text.
+def build_document(filename: str, sections: list[tuple[int, str]]) -> FixtureDocument:
+    """Assemble a synthetic document from ``(page, body)`` sections.
 
     Sections are joined with a blank line; each section becomes one chunk
     whose ``[start, end)`` offsets slice exactly back to its text — the
-    same fidelity invariant the real ingest pipeline guarantees.
+    same fidelity invariant the real ingest pipeline (and the Citation
+    Engine) guarantees. Reused by every practice-area fixture.
     """
     sep = "\n\n"
     chunks: list[DocChunk] = []
     parts: list[str] = []
     cursor = 0
-    for index, (page, body) in enumerate(_SECTIONS):
+    for index, (page, body) in enumerate(sections):
         if index > 0:
             cursor += len(sep)
             parts.append(sep)
@@ -116,13 +117,18 @@ def build_fixture_document() -> FixtureDocument:
     # Sanity: the load-bearing invariant the Citation Engine relies on.
     for chunk in chunks:
         assert normalized[chunk.char_offset_start : chunk.char_offset_end] == chunk.content
-    page_count = max(page for page, _ in _SECTIONS)
+    page_count = max(page for page, _ in sections)
     return FixtureDocument(
-        filename=DOC_FILENAME,
+        filename=filename,
         normalized_content=normalized,
         page_count=page_count,
         chunks=chunks,
     )
+
+
+def build_fixture_document() -> FixtureDocument:
+    """The Commercial MSA fixture (UX-B-1) — a thin call into ``build_document``."""
+    return build_document(DOC_FILENAME, _SECTIONS)
 
 
 # --- the scenario model + the Commercial starter set ----------------------

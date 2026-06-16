@@ -1,0 +1,100 @@
+{
+  "milestone": "UX-B-2",
+  "adr": "F015",
+  "area": "privacy",
+  "model_alias": "smart",
+  "model_note": "alias 'smart' is expected to resolve to MiniMax-M3 (tier-4) via the gateway's operator-configured routing — the only S9-qualified provider today. The gateway owns the alias→model mapping; this report observes the loop's behaviour, not the resolved model name.",
+  "generated_at": "2026-06-16T17:22:46+00:00",
+  "summary": {
+    "scenarios": 3,
+    "shape_matched": 3,
+    "completed": 3
+  },
+  "results": [
+    {
+      "id": "privacy_single_tool_fetch",
+      "title": "Grounded fetch — lawful basis",
+      "note": "A direct fact in the ROPA — does the model search and ground the lawful basis rather than invent one?",
+      "prompt": "What is the lawful basis recorded for this processing activity in the programme?",
+      "status": "completed",
+      "latency_s": 7.8,
+      "step_count": 6,
+      "model_turns": 2,
+      "tools_called": [
+        "search_documents",
+        "search_documents"
+      ],
+      "expect_tools": [
+        "search_documents"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "<think>\nI found the answer directly. The lawful basis is legitimate interests under Article 6(1)(f) of the UK GDPR, recorded in the Customer-Analytics-ROPA.txt on page 1. Let me provide a concise answer with the citation.\n</think>\nThe lawful basis recorded for the Customer Analytics processing activity is **legitimate interests under Article 6(1)(f) of the UK GDPR**.\n\nSource: *Customer-Analytics-ROPA.txt*, page 1 (section 1, \"Processing Activity and Lawful Basis\"). The purpose recorded alongside it is \"product improvement and usage analysis.\""
+    },
+    {
+      "id": "privacy_no_tool_needed",
+      "title": "No tool needed (general knowledge)",
+      "note": "A general-knowledge question with an explicit no-documents framing — does the model answer directly, or burn a tool call it was told to skip?",
+      "prompt": "Without consulting any documents in this programme, briefly explain in general terms what a Data Protection Impact Assessment (DPIA) is.",
+      "status": "completed",
+      "latency_s": 18.0,
+      "step_count": 1,
+      "model_turns": 1,
+      "tools_called": [],
+      "expect_tools": [],
+      "forbid_tools": [
+        "search_documents",
+        "read_document"
+      ],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "<think>\nThe user is asking a general question about what a DPIA is, and explicitly says \"Without consulting any documents in this programme.\" So I should not use search_documents or read_document tools. I should just answer from general knowledge as a privacy practice agent.\n\nA DPIA under the UK GDPR/GDPR is:\n- Article 35 GDPR / UK GDPR Article 35\n- Required where processing is \"likely to result in a high risk to the rights and freedoms of natural persons\"\n- It's a process to help identify and minimise data protection risks\n- Describes the processing, assesses necessity and proportionality, assesses risks, and identifies mitigations\n- Must be conducted before processing begins\n- Consultation with DPO is required\n- ICO provides guidance; list of processing requiring DPIA exists (Article 35(…"
+    },
+    {
+      "id": "privacy_ambiguous_clarify",
+      "title": "Ambiguous → clarify",
+      "note": "An unresolved referent ('it') — does the model ask, or guess a subject?",
+      "prompt": "Is it compliant?",
+      "status": "completed",
+      "latency_s": 14.9,
+      "step_count": 4,
+      "model_turns": 2,
+      "tools_called": [
+        "search_documents"
+      ],
+      "expect_tools": [],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": true,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "<think>\nThe matter has a single document — a Customer Analytics ROPA. The user's question \"Is it compliant?\" is genuinely ambiguous: compliant with what? Against which standard? The ROPA itself, a specific processing activity in it, a proposed change, etc.\n\nI should ask a brief clarifying question rather than guess. The user has given me essentially nothing to anchor on.\n</think>\nThe matter contains a single document: **Customer-Analytics-ROPA.txt** (2 pages) — the records-of-processing register for a customer analytics programme.\n\n\"Is it compliant?\" is too open-ended for me to act on without guessing. To give you a grounded answer I need to know what specifically you want assessed. A few likely candidates — let me know which (or describe your own):\n\n1. **The ROPA itself** — is the registe…"
+    }
+  ]
+}
