@@ -115,9 +115,7 @@ def build_fixture_document() -> FixtureDocument:
     normalized = "".join(parts)
     # Sanity: the load-bearing invariant the Citation Engine relies on.
     for chunk in chunks:
-        assert (
-            normalized[chunk.char_offset_start : chunk.char_offset_end] == chunk.content
-        )
+        assert normalized[chunk.char_offset_start : chunk.char_offset_end] == chunk.content
     page_count = max(page for page, _ in _SECTIONS)
     return FixtureDocument(
         filename=DOC_FILENAME,

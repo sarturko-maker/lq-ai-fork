@@ -68,9 +68,7 @@ async def seed_commercial_matter(
     doc: FixtureDocument = build_fixture_document()
     async with factory() as db:
         area_id = (
-            await db.execute(
-                select(PracticeArea.id).where(PracticeArea.key == "commercial")
-            )
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == "commercial"))
         ).scalar_one()
 
         user = User(
@@ -139,18 +137,12 @@ async def seed_commercial_matter(
             # Steps + runs first (FK), then threads, then the matter's
             # file→document→chunk cascade drops with the file.
             run_ids = (
-                (
-                    await db.execute(
-                        select(AgentRun.id).where(AgentRun.user_id == user_id)
-                    )
-                )
+                (await db.execute(select(AgentRun.id).where(AgentRun.user_id == user_id)))
                 .scalars()
                 .all()
             )
             if run_ids:
-                await db.execute(
-                    delete(AgentRunStep).where(AgentRunStep.run_id.in_(run_ids))
-                )
+                await db.execute(delete(AgentRunStep).where(AgentRunStep.run_id.in_(run_ids)))
             await db.execute(delete(AgentRun).where(AgentRun.user_id == user_id))
             await db.execute(delete(AgentThread).where(AgentThread.user_id == user_id))
             await db.execute(delete(File).where(File.owner_id == user_id))
@@ -183,9 +175,7 @@ class Receipt:
 
     def to_dict(self) -> dict[str, Any]:
         answer = self.final_answer or ""
-        excerpt = answer[:_ANSWER_EXCERPT] + (
-            "…" if len(answer) > _ANSWER_EXCERPT else ""
-        )
+        excerpt = answer[:_ANSWER_EXCERPT] + ("…" if len(answer) > _ANSWER_EXCERPT else "")
         return {
             "id": self.scenario.id,
             "title": self.scenario.title,
@@ -247,9 +237,7 @@ async def run_scenario(scenario: Scenario, seeded: SeededMatter) -> Receipt:
     latency = time.monotonic() - started
 
     async with factory() as db:
-        run_row = (
-            await db.execute(select(AgentRun).where(AgentRun.id == run_id))
-        ).scalar_one()
+        run_row = (await db.execute(select(AgentRun).where(AgentRun.id == run_id))).scalar_one()
         steps = (
             (
                 await db.execute(
@@ -262,9 +250,7 @@ async def run_scenario(scenario: Scenario, seeded: SeededMatter) -> Receipt:
             .all()
         )
 
-    tools_called = [
-        s.name for s in steps if s.kind == AgentRunStepKind.tool_call.value and s.name
-    ]
+    tools_called = [s.name for s in steps if s.kind == AgentRunStepKind.tool_call.value and s.name]
     model_turns = sum(1 for s in steps if s.kind == AgentRunStepKind.model_turn.value)
     answer = run_row.final_answer or ""
     checks = evaluate(

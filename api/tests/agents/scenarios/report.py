@@ -56,9 +56,7 @@ def write_report(
         "results": [r.to_dict() for r in receipts],
     }
     json_path = out_dir / "behavior-report.json"
-    json_path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     md_path = out_dir / "behavior-report.md"
     md_path.write_text(_render_markdown(payload), encoding="utf-8")
@@ -113,17 +111,14 @@ def _render_markdown(payload: dict) -> str:
             f"_{r['note']}_",
             "",
             f"- **Prompt:** {r['prompt']}",
-            f"- **Status:** `{r['status']}`"
-            + (f" · error: `{r['error']}`" if r["error"] else ""),
+            f"- **Status:** `{r['status']}`" + (f" · error: `{r['error']}`" if r["error"] else ""),
             f"- **Tools called:** {', '.join(r['tools_called']) or '—'}  "
             f"(expected: {', '.join(r['expect_tools']) or '—'}; "
             f"forbidden: {', '.join(r['forbid_tools']) or '—'})",
             f"- **Steps:** {r['step_count']} · model turns: {r['model_turns']} · "
             f"latency: {r['latency_s']}s",
             "- **Checks:** "
-            + ", ".join(
-                f"{name}={value}" for name, value in checks.items() if value is not None
-            ),
+            + ", ".join(f"{name}={value}" for name, value in checks.items() if value is not None),
             "",
             "**Final answer (excerpt):**",
             "",

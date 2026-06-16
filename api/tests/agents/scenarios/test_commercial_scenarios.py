@@ -67,6 +67,4 @@ async def test_commercial_scenario_baseline(
         (r.scenario.id, r.status) for r in receipts
     ]
     # The live loop actually turned the model (not an instant wiring error).
-    assert any(r.model_turns > 0 for r in receipts), (
-        "no model turn recorded in any scenario"
-    )
+    assert any(r.model_turns > 0 for r in receipts), "no model turn recorded in any scenario"
