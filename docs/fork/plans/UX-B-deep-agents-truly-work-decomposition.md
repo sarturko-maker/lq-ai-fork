@@ -43,7 +43,7 @@ Two complementary suites:
 
 - **UX-B-0 — ADR-F015 + this decomposition (THIS PR).** Docs only. Maintainer edits + accepts before UX-B-1.
 
-- **UX-B-1 — Scenario harness + Commercial baseline.** Build the reusable rig: scenario fixtures (intent +
+- **UX-B-1 — Scenario harness + Commercial baseline. ✅ SHIPPED (PR #90).** Build the reusable rig: scenario fixtures (intent +
   expected-shape: which tool(s), step bound, must/should-not, refusal expectation) → drive the **real** agent
   against the live gateway → capture receipts (tool selection, step count, final-answer check, guard/refusal,
   latency) → emit a structured **behavior report**. Run it against **Commercial** (the one configured area)

@@ -1,0 +1,272 @@
+"""The rig: seed a Commercial matter, drive the real agent, read receipts.
+
+:func:`seed_commercial_matter` plants a user + a Commercial-bound matter
++ one searchable document (file → document → chunks) in the test DB.
+:func:`run_scenario` creates a run row, drives the PRODUCTION composition
+point against the live gateway, then reads back the settled run + step
+rows into a :class:`Receipt`. The only injected seams are the test DB
+session factory and a null checkpointer (each scenario is single-turn on
+its own fresh thread) — the model, the gateway http client, and the
+gateway URL/key all flow from settings exactly as in production.
+"""
+
+from __future__ import annotations
+
+import time
+import uuid
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.agents.composition import compose_and_execute_run
+from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
+from app.models.audit import AuditLog
+from app.models.document import Document, DocumentChunk
+from app.models.file import File
+from app.models.practice_area import PracticeArea
+from app.models.project import Project
+from app.models.user import User
+from app.schemas.agent_runs import AgentRunStepKind
+from app.security import hash_password
+from tests.agents.scenarios.scenarios import (
+    FixtureDocument,
+    Scenario,
+    ScenarioChecks,
+    build_fixture_document,
+    evaluate,
+)
+
+# The run's step cap — generous enough for a search→read→answer chain,
+# tight enough that a runaway loop terminates as cap_exceeded (a finding).
+_MAX_STEPS = 16
+# Bound the answer excerpt that lands in the report (observations only).
+_ANSWER_EXCERPT = 800
+
+
+@dataclass
+class SeededMatter:
+    """A planted Commercial matter and its teardown handle."""
+
+    factory: async_sessionmaker[AsyncSession]
+    user_id: uuid.UUID
+    project_id: uuid.UUID
+    practice_area_id: uuid.UUID
+    cleanup: Callable[[], Awaitable[None]]
+
+
+async def seed_commercial_matter(
+    factory: async_sessionmaker[AsyncSession],
+) -> SeededMatter:
+    """Plant a user + Commercial-bound matter + one searchable document.
+
+    The matter floor is tier 4 (MiniMax-M3's tier); Commercial seeds no
+    area floor, so the effective gateway floor stays 4 and M3 qualifies.
+    """
+    doc: FixtureDocument = build_fixture_document()
+    async with factory() as db:
+        area_id = (
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+
+        user = User(
+            email=f"ux-b1-{uuid.uuid4().hex[:8]}@example.com",
+            display_name="UX-B-1 Scenario User",
+            hashed_password=hash_password("correct-horse-battery-staple"),
+            is_admin=False,
+            mfa_enabled=False,
+            must_change_password=False,
+        )
+        db.add(user)
+        await db.flush()
+
+        project = Project(
+            owner_id=user.id,
+            name="Acme — Master Services Agreement",
+            slug=f"acme-msa-{uuid.uuid4().hex[:6]}",
+            privileged=True,
+            minimum_inference_tier=4,
+            practice_area_id=area_id,
+        )
+        db.add(project)
+        await db.flush()
+
+        file = File(
+            owner_id=user.id,
+            project_id=project.id,
+            filename=doc.filename,
+            mime_type="text/plain",
+            size_bytes=len(doc.normalized_content.encode("utf-8")),
+            hash_sha256=uuid.uuid4().hex,
+            storage_path=str(uuid.uuid4()),
+            ingestion_status="ready",
+        )
+        db.add(file)
+        await db.flush()
+
+        document = Document(
+            file_id=file.id,
+            parser="harness-fixture",
+            page_count=doc.page_count,
+            character_count=len(doc.normalized_content),
+            normalized_content=doc.normalized_content,
+        )
+        db.add(document)
+        await db.flush()
+
+        for chunk in doc.chunks:
+            db.add(
+                DocumentChunk(
+                    document_id=document.id,
+                    chunk_index=chunk.chunk_index,
+                    content=chunk.content,
+                    page_start=chunk.page_start,
+                    page_end=chunk.page_end,
+                    char_offset_start=chunk.char_offset_start,
+                    char_offset_end=chunk.char_offset_end,
+                )
+            )
+        await db.commit()
+        user_id, project_id = user.id, project.id
+
+    async def cleanup() -> None:
+        async with factory() as db:
+            await db.execute(delete(AuditLog).where(AuditLog.user_id == user_id))
+            # Steps + runs first (FK), then threads, then the matter's
+            # file→document→chunk cascade drops with the file.
+            run_ids = (
+                (await db.execute(select(AgentRun.id).where(AgentRun.user_id == user_id)))
+                .scalars()
+                .all()
+            )
+            if run_ids:
+                await db.execute(delete(AgentRunStep).where(AgentRunStep.run_id.in_(run_ids)))
+            await db.execute(delete(AgentRun).where(AgentRun.user_id == user_id))
+            await db.execute(delete(AgentThread).where(AgentThread.user_id == user_id))
+            await db.execute(delete(File).where(File.owner_id == user_id))
+            await db.execute(delete(Project).where(Project.owner_id == user_id))
+            await db.execute(delete(User).where(User.id == user_id))
+            await db.commit()
+
+    return SeededMatter(
+        factory=factory,
+        user_id=user_id,
+        project_id=project_id,
+        practice_area_id=area_id,
+        cleanup=cleanup,
+    )
+
+
+@dataclass
+class Receipt:
+    """The honest record of one scenario run — observations only."""
+
+    scenario: Scenario
+    status: str
+    tools_called: list[str]
+    step_count: int
+    model_turns: int
+    final_answer: str | None
+    error: str | None
+    latency_s: float
+    checks: ScenarioChecks
+
+    def to_dict(self) -> dict[str, Any]:
+        answer = self.final_answer or ""
+        excerpt = answer[:_ANSWER_EXCERPT] + ("…" if len(answer) > _ANSWER_EXCERPT else "")
+        return {
+            "id": self.scenario.id,
+            "title": self.scenario.title,
+            "note": self.scenario.note,
+            "prompt": self.scenario.prompt,
+            "status": self.status,
+            "latency_s": round(self.latency_s, 1),
+            "step_count": self.step_count,
+            "model_turns": self.model_turns,
+            "tools_called": self.tools_called,
+            "expect_tools": list(self.scenario.expect_tools),
+            "forbid_tools": list(self.scenario.forbid_tools),
+            "shape_matched": self.checks.shape_matched,
+            "checks": {
+                "expected_tools_present": self.checks.expected_tools_present,
+                "forbidden_tools_absent": self.checks.forbidden_tools_absent,
+                "must_include_ok": self.checks.must_include_ok,
+                "should_not_ok": self.checks.should_not_ok,
+                "within_step_bound": self.checks.within_step_bound,
+                "clarify_ok": self.checks.clarify_ok,
+                "refusal_ok": self.checks.refusal_ok,
+            },
+            "error": self.error,
+            "final_answer_excerpt": excerpt,
+        }
+
+
+async def run_scenario(scenario: Scenario, seeded: SeededMatter) -> Receipt:
+    """Drive one scenario through the production loop; read back receipts."""
+    factory = seeded.factory
+    async with factory() as db:
+        thread = AgentThread(
+            user_id=seeded.user_id, project_id=seeded.project_id, title=scenario.title
+        )
+        db.add(thread)
+        await db.flush()
+        run = AgentRun(
+            user_id=seeded.user_id,
+            thread_id=thread.id,
+            project_id=seeded.project_id,
+            status="running",
+            prompt=scenario.prompt,
+            model_alias="smart",
+            max_steps=_MAX_STEPS,
+        )
+        db.add(run)
+        await db.commit()
+        run_id = run.id
+
+    started = time.monotonic()
+    await compose_and_execute_run(
+        run_id=run_id,
+        session_factory_provider=lambda: factory,
+        # Single-turn, fresh thread per scenario — no checkpoint needed,
+        # and this keeps the harness off any Postgres checkpointer that
+        # would point at the dev DB rather than the test DB.
+        checkpointer_provider=lambda: None,
+    )
+    latency = time.monotonic() - started
+
+    async with factory() as db:
+        run_row = (await db.execute(select(AgentRun).where(AgentRun.id == run_id))).scalar_one()
+        steps = (
+            (
+                await db.execute(
+                    select(AgentRunStep)
+                    .where(AgentRunStep.run_id == run_id)
+                    .order_by(AgentRunStep.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    tools_called = [s.name for s in steps if s.kind == AgentRunStepKind.tool_call.value and s.name]
+    model_turns = sum(1 for s in steps if s.kind == AgentRunStepKind.model_turn.value)
+    answer = run_row.final_answer or ""
+    checks = evaluate(
+        scenario,
+        tools_called=tools_called,
+        step_count=len(steps),
+        answer=answer,
+    )
+    return Receipt(
+        scenario=scenario,
+        status=run_row.status,
+        tools_called=tools_called,
+        step_count=len(steps),
+        model_turns=model_turns,
+        final_answer=run_row.final_answer,
+        error=run_row.error,
+        latency_s=latency,
+        checks=checks,
+    )
