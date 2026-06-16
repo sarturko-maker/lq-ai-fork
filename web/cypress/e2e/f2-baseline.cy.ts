@@ -139,4 +139,33 @@ describe('F2 baseline capture', { retries: { runMode: 2, openMode: 0 } }, () => 
 			shoot(`saved-prompts-${theme}`);
 		}
 	});
+
+	it('captures the nav-shell surfaces — settings + admin + trust (light + dark, wide + narrow)', () => {
+		// F2-M8: the settings (vertical rail) / admin (horizontal tab strip) / trust
+		// nav shells migrate their color --lq-* tokens to semantic + adopt the F013
+		// calm idiom — the active marker is inked (--card pill / --foreground
+		// underline), no longer the old teal --lq-accent; scarce blue is focus-only.
+		login();
+		cy.visit('/lq-ai/settings/account');
+		cy.get('nav[aria-label="Settings navigation"]', { timeout: 30000 }).should('be.visible');
+		cy.wait(800);
+		for (const theme of ['light', 'dark'] as const) {
+			pinTheme(theme);
+			shoot(`settings-${theme}`);
+		}
+		cy.visit('/lq-ai/admin/audit-log');
+		cy.get('nav[aria-label="Admin navigation"]', { timeout: 30000 }).should('be.visible');
+		cy.wait(800);
+		for (const theme of ['light', 'dark'] as const) {
+			pinTheme(theme);
+			shoot(`admin-${theme}`);
+		}
+		cy.visit('/lq-ai/trust');
+		cy.get('[data-testid="lq-ai-trust-page"]', { timeout: 30000 }).should('be.visible');
+		cy.wait(800);
+		for (const theme of ['light', 'dark'] as const) {
+			pinTheme(theme);
+			shoot(`trust-${theme}`);
+		}
+	});
 });
