@@ -118,7 +118,11 @@ def _validate_refs(value: object, field: str) -> None:
         raise ValueError(f"agent_config.{field}[{i}] must be a string id/name or an object")
 
 
-def build_area_subagents(agent_config: dict[str, Any] | None) -> list[dict[str, Any]]:
+def build_area_subagents(
+    agent_config: dict[str, Any] | None,
+    *,
+    known_skill_names: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
     """Build deepagents declarative SubAgent specs from area ``agent_config``.
 
     Each ``agent_config['subagents']`` entry is a declarative dict with
@@ -127,9 +131,17 @@ def build_area_subagents(agent_config: dict[str, Any] | None) -> list[dict[str, 
     inherits the parent's guarded matter tools (deepagents inherit-on-absent
     semantics) — the parent's GuardContext still mediates every dispatch.
     A ``model`` key is rejected (ADR-F010).
+
+    UX-B-3 (ADR-F016): when ``known_skill_names`` is given (the PATCH config
+    path passes the registry's current set), every subagent ``skills`` entry
+    must be a known skill — an unknown name is REJECTED at config time so a
+    dangling reference can never be stored (the registry-drift gap the main
+    agent already closes by filtering at render). ``None`` (the render path,
+    or no registry) skips the check — a run is never broken by drift.
     """
     if not agent_config:
         return []
+    known = set(known_skill_names) if known_skill_names is not None else None
     # Strict top-level schema (plan Goal 1; treat area config as untrusted):
     # reject unknown keys so a stray/malicious ``model`` (or anything a future
     # renderer might read) can never be stored unvalidated (ADR-F010).
@@ -166,6 +178,14 @@ def build_area_subagents(agent_config: dict[str, Any] | None) -> list[dict[str, 
         if skills is not None:
             if not isinstance(skills, list) or not all(isinstance(s, str) for s in skills):
                 raise ValueError(f"agent_config.subagents[{i}].skills must be a list of strings")
+            if known is not None:
+                unknown = sorted(s for s in skills if s not in known)
+                if unknown:
+                    raise ValueError(
+                        f"agent_config.subagents[{i}].skills references unknown skill(s) "
+                        f"{unknown}; attach only skills the registry knows (ADR-F016 — "
+                        "no dangling skill references)"
+                    )
             spec["skills"] = skills
         specs.append(spec)
     # Defense in depth: the specs we just built carry no 'model', but assert it.

@@ -31,6 +31,7 @@ from app.models.project import Project
 from app.models.user import User
 from app.schemas.agent_runs import AgentRunStepKind
 from app.security import hash_password
+from app.skills.registry import SkillRegistry
 from tests.agents.scenarios.scenarios import (
     FixtureDocument,
     Scenario,
@@ -220,8 +221,20 @@ class Receipt:
         }
 
 
-async def run_scenario(scenario: Scenario, seeded: SeededMatter) -> Receipt:
-    """Drive one scenario through the production loop; read back receipts."""
+async def run_scenario(
+    scenario: Scenario,
+    seeded: SeededMatter,
+    *,
+    skill_registry: SkillRegistry | None = None,
+) -> Receipt:
+    """Drive one scenario through the production loop; read back receipts.
+
+    UX-B-3: pass ``skill_registry`` (a real registry loaded from ``/skills``)
+    to activate the matter's area-bound skills — the composition point builds
+    the registry-backed backend over the area's bound subset. ``None`` (the
+    default) leaves skills off, exactly as the production default provider
+    resolves when no registry is installed in-process (the UX-B-1/2 baseline).
+    """
     factory = seeded.factory
     async with factory() as db:
         thread = AgentThread(
@@ -250,6 +263,9 @@ async def run_scenario(scenario: Scenario, seeded: SeededMatter) -> Receipt:
         # and this keeps the harness off any Postgres checkpointer that
         # would point at the dev DB rather than the test DB.
         checkpointer_provider=lambda: None,
+        # UX-B-3: inject the loaded registry (or None → skills off, the
+        # production default in a registry-less process).
+        skill_registry_provider=lambda: skill_registry,
     )
     latency = time.monotonic() - started
 

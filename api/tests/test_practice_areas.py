@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.main import app
-from app.models.practice_area import PracticeArea
+from app.models.practice_area import PracticeArea, PracticeAreaSkill
 from app.models.user import User
 from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_db
 
@@ -148,7 +148,9 @@ async def test_seed_commercial_config_present_and_derived_configured(
     # (the floor mechanism is proven elsewhere). Operators set one later.
     assert commercial["default_tier_floor"] is None
     assert commercial["profile_md"] and "Commercial" in commercial["profile_md"]
-    assert commercial["bound_skills"] == []
+    # UX-B-3 (0056): Commercial now carries its default skill bindings.
+    assert "contract-qa" in commercial["bound_skills"]
+    assert "nda-review" in commercial["bound_skills"]
 
 
 async def test_seed_commercial_config_is_idempotent(db_session: AsyncSession) -> None:
@@ -227,6 +229,82 @@ async def test_default_area_profiles_seed_is_idempotent(db_session: AsyncSession
         assert area.profile_md == "operator-edited disputes profile"
     finally:
         sys.modules.pop("migration_0055", None)
+
+
+# --- UX-B-3 default-area skill bindings (migration 0056) ---------------------
+
+
+async def test_default_area_skill_bindings_present(client: AsyncClient, user: User) -> None:
+    """0056 bound a focused, relevant skill set to each area by default."""
+    resp = await client.get("/api/v1/practice-areas", headers=_bearer(user))
+    assert resp.status_code == 200
+    areas = {a["key"]: a for a in resp.json()["practice_areas"]}
+    expected = {
+        "commercial": {
+            "msa-review-commercial-purchase",
+            "msa-review-saas",
+            "contract-qa",
+            "nda-review",
+        },
+        "privacy": {"dpa-checklist-review", "vendor-privacy-policy-first-pass", "contract-qa"},
+        "m-and-a": {"nda-review", "contract-qa", "contract-snapshot"},
+        "disputes": {"contract-qa", "action-items-from-client-alert"},
+        "employment": {"contract-qa", "nda-review", "action-items-from-client-alert"},
+    }
+    for key, want in expected.items():
+        assert want <= set(areas[key]["bound_skills"]), key
+
+
+async def test_default_area_skill_bindings_seed_is_idempotent(db_session: AsyncSession) -> None:
+    """Re-running the 0056 seed inserts no duplicates and never disturbs an
+    operator-attached skill."""
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0056", versions / "0056_default_area_skill_bindings.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["migration_0056"] = module
+    try:
+        spec.loader.exec_module(module)
+        area_id = (
+            await db_session.execute(
+                select(PracticeArea.id).where(PracticeArea.key == "commercial")
+            )
+        ).scalar_one()
+
+        async def _count() -> int:
+            return (
+                await db_session.execute(
+                    select(func.count())
+                    .select_from(PracticeAreaSkill)
+                    .where(PracticeAreaSkill.practice_area_id == area_id)
+                )
+            ).scalar_one()
+
+        # An operator attaches an extra skill the defaults don't include.
+        db_session.add(PracticeAreaSkill(practice_area_id=area_id, skill_name="comms-improver"))
+        await db_session.flush()
+        before = await _count()
+
+        conn = await db_session.connection()
+        await conn.run_sync(lambda sync_conn: module._seed_default_area_skill_bindings(sync_conn))
+
+        assert await _count() == before  # no duplicate inserts
+        names = (
+            (
+                await db_session.execute(
+                    select(PracticeAreaSkill.skill_name).where(
+                        PracticeAreaSkill.practice_area_id == area_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert "comms-improver" in names  # operator attachment survived
+    finally:
+        sys.modules.pop("migration_0056", None)
 
 
 async def test_admin_patch_configures_area(client: AsyncClient, admin: User) -> None:
