@@ -56,25 +56,36 @@
 		gap: var(--lq-space-1);
 	}
 
+	/* F2-M8: color --lq-* → semantic + F013 calm. The active state follows the
+	   live rail idiom (AreaRail tool links): raised card pill, no accent colour —
+	   the scarce blue is reserved for focus (--ring). */
 	.settings-nav-link {
 		display: block;
 		padding: var(--lq-space-2) var(--lq-space-3);
 		border-radius: var(--lq-radius-sm);
-		color: var(--lq-text-secondary);
+		color: var(--muted-foreground);
 		text-decoration: none;
 		font-size: 14px;
 		font-weight: 500;
-		transition: color 0.12s, background 0.12s;
+		transition:
+			color 0.12s,
+			background-color 0.12s;
 	}
 
 	.settings-nav-link:hover {
-		color: var(--lq-text);
-		background: var(--lq-inset);
+		color: var(--foreground);
+		background: var(--muted);
+	}
+
+	.settings-nav-link:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
 	}
 
 	.settings-nav-link--active {
-		color: var(--lq-accent);
-		background: var(--lq-accent-soft);
+		color: var(--foreground);
+		background: var(--card);
+		box-shadow: var(--shadow-xs);
 	}
 
 	.settings-content {

@@ -43,9 +43,12 @@
 		min-height: 0;
 	}
 
+	/* F2-M8: color --lq-* → semantic + F013 calm. Horizontal tab strip keeps the
+	   underline idiom but inks the active marker (--foreground), not the old teal
+	   accent; scarce blue is reserved for focus (--ring). */
 	.admin-nav {
-		border-bottom: 1px solid var(--lq-border);
-		background: var(--lq-surface);
+		border-bottom: 1px solid var(--border);
+		background: var(--background);
 	}
 
 	.admin-nav-list {
@@ -59,7 +62,7 @@
 	.admin-nav-link {
 		display: block;
 		padding: var(--lq-space-3) var(--lq-space-4);
-		color: var(--lq-text-secondary);
+		color: var(--muted-foreground);
 		text-decoration: none;
 		font-size: 14px;
 		font-weight: 500;
@@ -71,12 +74,17 @@
 	}
 
 	.admin-nav-link:hover {
-		color: var(--lq-text);
+		color: var(--foreground);
+	}
+
+	.admin-nav-link:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: -2px;
 	}
 
 	.admin-nav-link--active {
-		color: var(--lq-accent);
-		border-bottom-color: var(--lq-accent);
+		color: var(--foreground);
+		border-bottom-color: var(--foreground);
 	}
 
 	.admin-content {

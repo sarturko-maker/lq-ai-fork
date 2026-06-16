@@ -2,8 +2,29 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (UX-A navigational convergence COMPLETE — cockpit is the single app shell; F2 visual pass complete through VL2 + the library surfaces M7a/M7b; AE-series CLOSED)
+## State (UX-A navigational convergence COMPLETE — cockpit is the single app shell; F2 visual pass complete through VL2 + the library surfaces M7a/M7b + the nav shells M8; only M9 sweep remains; AE-series CLOSED)
 
+- **F2-M8 (PR #87) — SHIPPED. The settings / admin / trust nav shells calmed.** The three sub-nav
+  shells under `(app)` were the last chrome still rendering the old **teal `--lq-accent`** active marker
+  (`--lq-accent` = `#1f7a6b`, NOT the Vercel scarce blue — so these shells were visibly off-brand, not
+  cosmetic-only). Migrated each: **`settings/+layout.svelte`** (vertical rail) — active = the live
+  **AreaRail idiom** (raised `--card` pill + `--shadow-xs`, no accent colour), rest `--muted-foreground`,
+  hover `--muted`; **`admin/+layout.svelte`** (horizontal tab strip) — keeps the underline idiom but
+  **inks the active marker** (`--foreground` text + border, was teal), nav bg `--lq-surface`→`--background`,
+  border `--lq-border`→`--border`; **`trust/+page.svelte`** — adopt **`<PageShell size="wide" pad="compact">`**
+  (bespoke 1100px→`wide` 1024, the M7b snap), color `--lq-text-secondary`→`--muted-foreground`. Added a
+  **`:focus-visible` ring** to both nav link sets (scarce blue, was absent). **Scope = the nav shells only**
+  (the HANDOFF/plan rule): the settings/admin CHILD page **bodies** (account MFA button, audit-log table,
+  word-addin/intake status pills — still teal/`--lq-*`) and the **Trust\*Card internals** are owned by
+  **R16/R19 / their R-slices** — visible in the after-shots, documented, NOT a defect. Suites: web check
+  **0 err** (5 pre-existing a11y warnings, untouched files); **vitest 851** (unchanged — presentation-only,
+  no new pure helper); **`f2-baseline.cy.ts` 5/5** headed/live (added a settings+admin+trust capture test,
+  PHASE=after). Evidence: `docs/fork/evidence/f2-m8/` (settings + admin + trust, light+dark × wide+narrow —
+  active markers inked not teal; dark renders honest charcoal). Fresh-context review: **SHIP**, 0
+  blockers (every target token verified in both themes incl. `--shadow-xs`/`--background`; `.trust-stack`
+  inner wrapper added so Svelte style-scoping applies — `class` on a child component's root would be a dead
+  selector; testid forwarded via PageShell `{...rest}`; no `{@html}`; no stray/secret files). web-only.
+  **Pickup: F2-M9** (consistency sweep + verify) — see Next slice.
 - **F2-M7b (PR #86) — SHIPPED. The library card/wrapper surfaces calmed (the last `(app)` list pages
   on `--lq-*`).** Same M7a recipe applied to the three remaining library pages: **`knowledge`** (card grid +
   inline create form), **`learn`** (3-tile card grid), **`saved-prompts`** (thin `SavedPromptsPanel`
@@ -476,37 +497,60 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**Active milestone: F2 (minimalist pass), with the F013 token layer (F2-VL) sequenced in.** F2-M0…M7a +
-**F2-VL0 + F2-VL1** shipped. The semantic tokens carry the **Vercel design language** (ink primaries, scarce
-`--brand`, charcoal `#111` dark, `--text-*`/`--motion-*`, 10/12px radius), and the **token-consuming
-primitives** (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/`Inline`/`StatusDot`) exist + are proven in
-`_vl-lab` against the `direction-vercel` target. No live surface re-skinned yet.
+**Active milestone: F2 (minimalist pass), with the F013 token layer (F2-VL) sequenced in.** SHIPPED:
+F2-M0…M6, **M7a + M7b** (all list/card/wrapper surfaces), **M8** (settings/admin/trust nav shells),
+**VL0 + VL1 + VL2** (the Vercel re-skin of the cockpit landing + rail). The semantic tokens carry the
+**Vercel design language** (ink primaries, scarce `--brand`, charcoal `#111` dark, `--text-*`/`--motion-*`,
+10/12px radius); the **token-consuming primitives** (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/`Inline`/
+`StatusDot`) exist (proven in `_vl-lab`, `Card`/`CardGrid`/`Hero`/`StatusDot` live in the cockpit). The
+cockpit landing, rail, conversation/matters, every list surface, **and the settings/admin/trust nav shells**
+are calmed. **What's left = the M9 consistency sweep + the deferred R-TYPO / TrustPill-tones passes** (the
+settings/admin CHILD page bodies + Trust\*Card internals still carry `--lq-*`, owned by R16/R19 / R-series).
 
 **UX-A is COMPLETE (all 5 slices merged + ADR-F014 closed).** The cockpit is the single app shell; the
-legacy `(tools)` shell, `TopTabBar`, and the header Tools dropdown are gone. Next is the deferred F2 visual
-work (the maintainer picks the order; these are independent of UX-A and of each other):
+legacy `(tools)` shell, `TopTabBar`, and the header Tools dropdown are gone.
 
-1. **deferred F2 visual work: F2-M8 — calm settings/admin/trust shells** (task #119): the nav-shell
-   surfaces (settings vertical rail, admin horizontal tab strip, trust page) — calm nav shells + section
-   headers; coordinate with R16/R19. Same recipe — adopt `<PageShell>`/`SectionHeader` where they fit,
-   migrate **color** `--lq-*`→semantic, leave `--lq-radius*`/`--lq-space-*`/`lq-text-*` to R-TYPO, status/
-   tone families → existing scales — and apply the F013 language. Then R-TYPO (`lq-text-*`→§2 type tokens) →
-   TrustPill tones → **M9** (task #120: consistency sweep + verify). **Hard rule (ADR-F012): no tab/route/
-   surface retired or hidden in F2; never re-introduce `--lq-*`; the cockpit entry stays a launcher.
-   ADR-F013 relaxes "no new token scale" for SYSTEMATIC extensions only.** (F2-M7b shipped: knowledge/
-   learn/saved-prompts calmed onto PageShell + semantic tokens + F013 cards.)
-2. **UX-A (navigational convergence)** — own milestone after F2 (cockpit = single shell, legacy top-tab IA
-   retired). **UX-B (capability convergence)** — folds into the pivot track (F1-S4/S5 + area activation +
-   schema). Both per ADR-F012.
-3. R-series rollout slices (any order — the dark-mode bridge holds un-migrated surfaces; **coordinate with
-   F2 — don't double-touch chrome, never re-introduce `--lq-*`**): Foundation/rail R2–R5, Wave 1 R-CONV-1
-   (logic; R-CONV-2 → AE6), Wave 2 R12/R13/R14a-b/R15/R15b-tab-pb/R16, Wave 3
-   R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO → R-BRIDGE → R-LAST. autonomous R21 = SKIP.
-4. **F1-S4** (subagent tree + SSE v3-projection adapter) / **F1-S5** (idempotency ledger +
-   attribution fan-out) — `docs/fork/plans/F1-replan.md`. **Area skills/subagents ACTIVATION**
-   (S9-gated) — wires `composition.py` to pass area skills/subagents + re-runs the S9 matrix.
-   **Backlog:** scira-style minimalist interface pass AFTER the AE-series (MILESTONES § Backlog;
-   **AGPL → reference-only**, study look/IA, never copy code — unlike the MIT AE port we vendor).
+### → NEXT: F2-M9 — consistency sweep + verify (task #120). Branch FIRST.
+
+The F2 closing slice. Cross-surface audit + the no-regression gate (no new surface, ADR-F012):
+- **Zero-new-`--lq-*` check** on every F2-touched file (`grep` for color `--lq-*` in the calmed surfaces —
+  `--lq-radius*`/`--lq-space-*` + `lq-text-*` typography CLASSES are the deliberate R-TYPO carve-out, not a
+  miss). **No new `{@html}` sinks.** **One-accent discipline** (scarce `--brand`/`--ring` only; ink
+  primaries; no stray teal `--lq-accent` survivors in calmed chrome). **AA-dark contrast** spot-check on the
+  charcoal `#111` dark theme across the surface families.
+- **Reachability (the no-retire contract):** every surface reachable from the cockpit (rail Tools group +
+  header gear/ShieldCheck) — nothing hidden or retired by the visual pass.
+- Full screenshot matrix refresh if anything shifts; otherwise the per-slice evidence dirs stand.
+- **Known carve-outs to record, NOT fix in M9** (they belong to R-series): the settings/admin child page
+  **bodies** + the Trust\*Card internals still on `--lq-*`/teal (R16/R19); `lq-text-*` classes (R-TYPO);
+  TrustPill tones (need the tone scale defined first). M9 verifies the *calmed* surfaces are clean and
+  documents the rest as owned debt — it does NOT expand to swallow R-series scope.
+
+**Verify:** `npm run check` (0 err) + `vitest`; rebuild the web container if any surface changed; headed
+Cypress matrix as needed; fresh-context adversarial+security+simplification review; HANDOFF. Merge per
+ADR-F005 against `sarturko-maker/lq-ai-fork` (`gh pr create --repo sarturko-maker/lq-ai-fork --head
+<branch>`). **Hard rule (ADR-F012): no tab/route/surface retired or hidden in F2; never re-introduce
+`--lq-*`; the cockpit entry stays a launcher.**
+
+After M9, F2 is done; then the deferred **R-TYPO** (`lq-text-*`→§2 type tokens) + **TrustPill tones**, and
+the open frontier is **UX-B** (capability convergence — see the grounding recorded in the 2026-06-16
+session: the model-driven tool *dispatch* is live + tested (`test_deepagents_spike.py`), but the tool *set*
+is hardcoded and area-skill attachment is stubbed at `composition.py:151` `bound_skill_names=[]`, S9-gated;
+nearest seam = the skills-activation slice).
+
+**Lower-priority parallel tracks:**
+- **UX-B (capability convergence)** — the post-F2 frontier (ADR-F012): "tools as in-context capabilities the
+  area agent picks/exposes." Folds into the pivot track (F1-S4/S5 + area-skill activation + the
+  `practice_area`/`unit_of_work` schema). Grounding done 2026-06-16 (see the F2-M8 pickup note above);
+  nearest beachhead = the S9-gated skills-activation slice (no new schema). UX-A is COMPLETE.
+- **R-series rollout slices** (any order — the dark-mode bridge holds un-migrated surfaces; **coordinate with
+  F2 — don't double-touch chrome, never re-introduce `--lq-*`**): Foundation/rail R2–R5, Wave 1 R-CONV-1
+  (logic; R-CONV-2 → AE6), Wave 2 R12/R13/R14a-b/R15/R15b-tab-pb/R16, Wave 3
+  R17a-b/R18/R19a-b/R20/R-CHROME, cleanup R-TYPO → R-BRIDGE → R-LAST. autonomous R21 = SKIP.
+- **F1-S4** (subagent tree + SSE v3-projection adapter) / **F1-S5** (idempotency ledger +
+  attribution fan-out) — `docs/fork/plans/F1-replan.md`. **Area skills/subagents ACTIVATION**
+  (S9-gated) — wires `composition.py` to pass area skills/subagents + re-runs the S9 matrix (this IS the
+  UX-B beachhead above).
 
 ## Rollout progress
 
