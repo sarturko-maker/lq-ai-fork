@@ -2,9 +2,33 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (UX-A navigational convergence COMPLETE — cockpit is the single app shell; F2 visual pass complete through VL2; AE-series CLOSED)
+## State (UX-A navigational convergence COMPLETE — cockpit is the single app shell; F2 visual pass complete through VL2 + the library surfaces M7a/M7b; AE-series CLOSED)
 
-- **UX-A-5 (PR #__) — SHIPPED. The legacy `(tools)` shell + the header Tools dropdown RETIRED; UX-A
+- **F2-M7b (PR #86) — SHIPPED. The library card/wrapper surfaces calmed (the last `(app)` list pages
+  on `--lq-*`).** Same M7a recipe applied to the three remaining library pages: **`knowledge`** (card grid +
+  inline create form), **`learn`** (3-tile card grid), **`saved-prompts`** (thin `SavedPromptsPanel`
+  wrapper). Each: **adopt `<PageShell pad="compact">`** (replacing the page's bespoke `<main>` wrapper — also
+  drops a nested-`<main>` landmark, since `(app)/+layout.svelte` already supplies the page `<main>`); the
+  bespoke widths **snapped onto the system reading widths** — knowledge 1100→`wide` (1024), learn 960 +
+  saved-prompts 920→`default` (896); **migrate COLOR `--lq-*`→semantic** (text→`--foreground`/`--muted-foreground`,
+  border→`--border`, card bg→`--card`, inset→`--muted`, accent button→`--primary`/`--primary-foreground` ink
+  inverting, accent link/CTA→`--brand`, focus→`--ring`, error→`--destructive`+`--status-failed-wash`);
+  **KB status pills → the `--status-*` tone family** (`indexed`→completed, `indexing`→the scarce-blue running
+  tone, `failed`→failed, `empty`→muted — borderless, the M7a tabular-pill recipe); **F013 calm card idiom**
+  (flat, border-led, hover washes to `--muted`, NO float shadow — dropped the old `box-shadow` hover, scarce
+  blue reserved for focus). **Left for R-TYPO (documented, not a defect):** `--lq-radius*`/`--lq-space-*` +
+  the `lq-text-*` typography CLASSES (no semantic equivalent, no light/dark variance — never re-introduced,
+  just not double-touched). For saved-prompts, **only the page wrapper** is touched — `SavedPromptsPanel`
+  itself keeps its own accents (its R-slice owns it). Suites: web check **0 err** (5 pre-existing a11y
+  warnings, untouched files); **vitest 851** (unchanged — presentation-only, no new pure helper, like
+  M2/M5/M7a); **`f2-baseline.cy.ts` 4/4** headed/live (added a knowledge+learn+saved-prompts capture test,
+  PHASE=after). Evidence: `docs/fork/evidence/f2-m7b/` (knowledge + learn + saved-prompts, light+dark ×
+  wide+narrow — dark renders honest charcoal, no light-in-dark; ink primaries, scarce-blue pills/links).
+  Fresh-context review: **SHIP**, 0 blockers/should-fixes (every target token verified in both themes;
+  markup balanced; testids forwarded via PageShell `{...rest}`; no dead selectors; no `{@html}`; the
+  heavier `.lq-error` destructive border matches the M7a recipe). web-only — no api/gateway change.
+  **Pickup: F2-M8** (calm settings/admin/trust shells) — see Next slice.
+- **UX-A-5 (PR #85) — SHIPPED. The legacy `(tools)` shell + the header Tools dropdown RETIRED; UX-A
   COMPLETE.** Deleted `TopTabBar.svelte` (the legacy top-tab component) and the orphaned
   `(tools)/+layout.svelte` (the whole `(tools)` route group is gone). Moved the still-needed
   `visibleTabsFor` into `tabs.ts` (the tab vocabulary outlived the component; importers `(app)/+layout` +
@@ -462,18 +486,15 @@ primitives** (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/`Inline`/`StatusDot`) 
 legacy `(tools)` shell, `TopTabBar`, and the header Tools dropdown are gone. Next is the deferred F2 visual
 work (the maintainer picks the order; these are independent of UX-A and of each other):
 
-1. **deferred F2 visual work: F2-M7b — Library card/wrapper surfaces** (task
-   #118): the remaining three `(tools)` list
-   pages — **`knowledge`** (card grid + inline create form, max-1100px; KB status pills `indexed`/`indexing`/
-   `failed`/`empty` → `--status-completed`/`--status-running`/`--status-failed`/`--muted` like tabular),
-   **`learn`** (card grid, max-960px), **`saved-prompts`** (thin `SavedPromptsPanel` wrapper, max-920px). Same
-   M7a recipe — adopt `<PageShell>`, migrate **color** `--lq-*`→semantic, leave `--lq-radius*`/`--lq-space-*`/
-   `lq-text-*` to R-TYPO, status pills → `--status-*` — and now **apply the F013 language** (the tokens already
-   carry it). Touch only the page wrapper for saved-prompts. Extend `f2-baseline.cy.ts` with a knowledge/learn
-   capture. Then M8 (settings/admin/trust) → R-TYPO (`lq-text-*`→§2 type tokens) → TrustPill tones → M9
-   (sweep+verify). **Hard rule (ADR-F012): no tab/route/surface retired or hidden in F2; never re-introduce
-   `--lq-*`; the cockpit entry stays a launcher. ADR-F013 relaxes "no new token scale" for SYSTEMATIC
-   extensions only.**
+1. **deferred F2 visual work: F2-M8 — calm settings/admin/trust shells** (task #119): the nav-shell
+   surfaces (settings vertical rail, admin horizontal tab strip, trust page) — calm nav shells + section
+   headers; coordinate with R16/R19. Same recipe — adopt `<PageShell>`/`SectionHeader` where they fit,
+   migrate **color** `--lq-*`→semantic, leave `--lq-radius*`/`--lq-space-*`/`lq-text-*` to R-TYPO, status/
+   tone families → existing scales — and apply the F013 language. Then R-TYPO (`lq-text-*`→§2 type tokens) →
+   TrustPill tones → **M9** (task #120: consistency sweep + verify). **Hard rule (ADR-F012): no tab/route/
+   surface retired or hidden in F2; never re-introduce `--lq-*`; the cockpit entry stays a launcher.
+   ADR-F013 relaxes "no new token scale" for SYSTEMATIC extensions only.** (F2-M7b shipped: knowledge/
+   learn/saved-prompts calmed onto PageShell + semantic tokens + F013 cards.)
 2. **UX-A (navigational convergence)** — own milestone after F2 (cockpit = single shell, legacy top-tab IA
    retired). **UX-B (capability convergence)** — folds into the pivot track (F1-S4/S5 + area activation +
    schema). Both per ADR-F012.
