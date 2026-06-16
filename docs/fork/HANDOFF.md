@@ -2,9 +2,38 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (NEW MILESTONE — UX-A navigational convergence OPEN; F2 visual pass complete through VL2; AE-series CLOSED)
+## State (UX-A navigational convergence COMPLETE — cockpit is the single app shell; F2 visual pass complete through VL2; AE-series CLOSED)
 
-- **UX-A-4 (PR #__) — SHIPPED. The sub-nav surfaces re-hosted in the cockpit canvas (the last `(tools)`
+- **UX-A-5 (PR #__) — SHIPPED. The legacy `(tools)` shell + the header Tools dropdown RETIRED; UX-A
+  COMPLETE.** Deleted `TopTabBar.svelte` (the legacy top-tab component) and the orphaned
+  `(tools)/+layout.svelte` (the whole `(tools)` route group is gone). Moved the still-needed
+  `visibleTabsFor` into `tabs.ts` (the tab vocabulary outlived the component; importers `(app)/+layout` +
+  `CockpitHeader` repointed) and DROPPED the now-dead `tabStateClass` (the rail has its own styling).
+  Retired the `CockpitHeader` Tools dropdown (it duplicated the rail Tools section — tools are reached
+  ONLY from the rail now); **preserved trust** via a dedicated header ShieldCheck button → `/lq-ai/trust`
+  (the dropdown was trust's only entry point; `AmbientTrustChrome` doesn't link). Dropped the unused `user`
+  prop from `CockpitHeader`; added `data-testid="lq-cockpit-header"`. **No footer re-home needed**: the
+  cockpit never carried `DualBrandingFooter` (it lives in the parent gate layout's auth-exempt branch +
+  login only); the obligation ended F0-S6/ADR-F006. Swept stale comments (parent `+layout`, `tab-icons`,
+  `autonomous/memory`) + cypress: **deleted** `wave-a-chrome.cy.ts` (100% legacy chrome) + the
+  `vl2-cockpit` Tools-menu capture; **repointed** the rail-nav refs in `f1-s2-cockpit` (removed its
+  obsolete "Tools menu" test — covered by the new spec), `wave-b-surfaces`, `wave-m1-final-surfaces`,
+  `m4-autonomous` (its `.lq-tabbar` assertions had been dead since F2-M2) onto the rail Tools testids.
+  Suites: web check **0 err** (5 pre-existing a11y warnings, untouched files); **vitest 851** (−3 =
+  removed `tabStateClass` tests; renamed `TopTabBar.test.ts`→`visible-tabs.test.ts`); **new
+  `ux-a-5-retire-legacy-shell.cy.ts` 3/3** + **`f2-baseline.cy.ts` 3/3** + **`vl2-cockpit.cy.ts` 2/2**
+  headed/live (no `nav[aria-label="Primary"]` / no header Tools dropdown on any surface; tools open from
+  the rail into canvas; trust reachable from the header button). Evidence: `docs/fork/evidence/ux-a-5/`.
+  Grep-clean: zero live `TopTabBar`/`(tools)`/`lq-tabbar`/Primary-nav refs remain. **KNOWN pre-existing
+  legacy-spec debt (NOT in CI, NOT touched by UX-A-5, do NOT attribute to this slice):**
+  `f1-s2-cockpit.cy.ts` test 1 (`lq-cockpit-new-matter-name` testid — matter-flow drift) + test 2 (asserts
+  the dark canvas channel `>20` but VL0 set charcoal `#111`=rgb(17,17,17) — stale threshold);
+  `wave-b-surfaces.cy.ts` `beforeEach` login flake. These are orthogonal test-debt for a later cleanup;
+  UX-A-5 only removed their dead-chrome refs. Fresh-context review: **SHIP**, 0 blockers/should-fixes
+  (reachability of every surface re-verified incl. the new header trust button; footer non-goal confirmed;
+  `visibleTabsFor` move byte-identical; security clean). web-only — no api/gateway change. **ADR-F014
+  closed** (status note appended). **Pickup: deferred F2 visual work** (see Next slice).
+- **UX-A-4 (PR #84) — SHIPPED. The sub-nav surfaces re-hosted in the cockpit canvas (the last `(tools)`
   routes).** `git mv`'d `admin`, `autonomous`, `settings`, `trust` (incl. all children + `page-helpers` +
   `__tests__`) from `(tools)` into `(app)` — **27 pure renames, zero content change** — so they render in
   the cockpit canvas with the rail present. URLs unchanged (route groups URL-invisible); the
@@ -429,22 +458,11 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 primitives** (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/`Inline`/`StatusDot`) exist + are proven in
 `_vl-lab` against the `direction-vercel` target. No live surface re-skinned yet.
 
-1. **UX-A-5 — retire the legacy `(tools)` shell + the header Tools dropdown + sweep.** Per ADR-F014 / the
-   UX-A decomposition. **UX-A-1/2/3/4 SHIPPED** — the landing + ALL tool surfaces (flat, conversation, and
-   the sub-nav admin/autonomous/settings/trust) now render in the cockpit canvas; `(tools)/` holds ONLY the
-   now-ORPHANED `+layout.svelte` (the legacy `TopTabBar`/`AmbientTrustChrome`/`DualBrandingFooter` shell —
-   zero child routes, unreachable). UX-A-5: (a) delete `(tools)/+layout.svelte` (and the empty `(tools)`
-   group); (b) **re-home the `DualBrandingFooter`** the old shell carried — the cockpit shell currently has
-   NO footer (decide: add to `(app)/+layout.svelte`, or drop — the OpenWebUI §4 branding obligation ended
-   in F0-S6/ADR-F006, so it's a UX choice not an obligation); trust + AmbientTrustChrome are already in
-   `CockpitHeader`; (c) decide on the `CockpitHeader` **Tools dropdown** — it now duplicates the rail Tools
-   section (retire it, or keep as a quick-jump); (d) cross-surface sweep: no dead `TopTabBar`/`#lq-main`
-   refs reachable, all deep-links resolve, no orphaned `--lq-*`; the STALE older cypress specs
-   (`wave-a-chrome` clicks "Skills" in the now-gone `TopTabBar`; `wave-b-surfaces`, `m4-autonomous`,
-   `f1-s2-cockpit` assert legacy chrome on migrated surfaces — already superseded since UX-A-2/3, NOT in the
-   maintained gate) get removed/repointed; (e) full screenshot matrix. `f2-baseline`'s legacy-chrome
-   capture was already removed in UX-A-4 (no legacy chrome left to capture).
-2. **deferred F2 visual work (after UX-A, or interleaved): F2-M7b — Library card/wrapper surfaces** (task
+**UX-A is COMPLETE (all 5 slices merged + ADR-F014 closed).** The cockpit is the single app shell; the
+legacy `(tools)` shell, `TopTabBar`, and the header Tools dropdown are gone. Next is the deferred F2 visual
+work (the maintainer picks the order; these are independent of UX-A and of each other):
+
+1. **deferred F2 visual work: F2-M7b — Library card/wrapper surfaces** (task
    #118): the remaining three `(tools)` list
    pages — **`knowledge`** (card grid + inline create form, max-1100px; KB status pills `indexed`/`indexing`/
    `failed`/`empty` → `--status-completed`/`--status-running`/`--status-failed`/`--muted` like tabular),

@@ -1,10 +1,10 @@
 <script lang="ts">
 	/**
 	 * Cockpit header — brand, ambient trust chrome (ADR-0011 disclosure
-	 * stays present), a Tools menu linking to the legacy tool surfaces
-	 * (they keep working unchanged until F3 demotes them), theme toggle,
-	 * settings. No AI furniture (ADR-F002): nothing here picks models,
-	 * skills, or context.
+	 * stays present), a trust link, theme toggle, settings, sign-out. The
+	 * tool surfaces are reached from the rail's Tools section (UX-A): the
+	 * legacy header Tools dropdown retired with the `(tools)` shell in UX-A-5.
+	 * No AI furniture (ADR-F002): nothing here picks models, skills, or context.
 	 */
 	import { goto } from '$app/navigation';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
@@ -14,35 +14,21 @@
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import ShieldCheckIcon from '@lucide/svelte/icons/shield-check';
 	import SunIcon from '@lucide/svelte/icons/sun';
-	import WrenchIcon from '@lucide/svelte/icons/wrench';
 
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { authApi } from '$lib/lq-ai/api';
 	import { clearSession } from '$lib/lq-ai/auth/store';
 	import AmbientTrustChrome from '$lib/lq-ai/components/AmbientTrustChrome.svelte';
-	import { visibleTabsFor } from '$lib/lq-ai/components/TopTabBar.svelte';
-	import { tabGroupOf, type User } from '$lib/lq-ai/tabs';
-	import { tabIcon } from '$lib/lq-ai/tab-icons';
-	import { preferences } from '$lib/lq-ai/stores/preferences';
 	import { applyTheme, nextTheme, normalizeTheme, type Theme } from './helpers';
 
 	let {
-		user,
 		railHidden = false,
 		onToggleRail
 	}: {
-		user: User | null;
 		/** Whether the rail is currently collapsed/closed (labels the toggle). */
 		railHidden?: boolean;
 		onToggleRail?: () => void;
 	} = $props();
-
-	const toolTabs = $derived(
-		visibleTabsFor(user, { autonomousEnabled: $preferences.autonomous_enabled }).filter(
-			(t) => t.id !== 'home'
-		)
-	);
 
 	let theme: Theme = $state('system');
 	$effect(() => {
@@ -74,12 +60,13 @@
 
 <!-- F2-M5: minimal-chrome restyle (already semantic — restyle-only, ADR-F012).
      Quiet muted icon buttons that brighten to `text-foreground` on hover (one
-     calm resting state, matching the M2/M3 tab-bar idiom), the trailing
-     theme/settings/sign-out grouped as one tight cluster behind a hairline
-     separator, single primary accent on the brand. No AI furniture (ADR-F002 —
-     the header picks no models/skills/context). -->
+     calm resting state), the trust link + theme/settings/sign-out grouped as
+     one tight cluster, single primary accent on the brand. No AI furniture
+     (ADR-F002 — the header picks no models/skills/context). Tools moved to the
+     rail's Tools section in UX-A. -->
 <header
 	class="flex h-12 shrink-0 items-center justify-between border-b border-border bg-background px-4"
+	data-testid="lq-cockpit-header"
 >
 	<div class="flex items-center gap-1.5">
 		{#if onToggleRail}
@@ -101,45 +88,20 @@
 	</div>
 	<div class="flex items-center gap-1">
 		<AmbientTrustChrome />
-		<DropdownMenu.Root>
-			<DropdownMenu.Trigger>
-				{#snippet child({ props })}
-					<Button
-						{...props}
-						variant="ghost"
-						size="sm"
-						class="gap-1.5 text-muted-foreground hover:text-foreground"
-					>
-						<WrenchIcon class="size-4" aria-hidden="true" />
-						Tools
-					</Button>
-				{/snippet}
-			</DropdownMenu.Trigger>
-			<DropdownMenu.Content align="end" class="w-52">
-				<DropdownMenu.Label>Tool surfaces</DropdownMenu.Label>
-				{#each toolTabs as tab (tab.id)}
-					{@const Icon = tabIcon(tab.id)}
-					<DropdownMenu.Item
-						onSelect={() => goto(tab.route)}
-						class={tabGroupOf(tab) === 'legacy' ? 'text-muted-foreground' : undefined}
-					>
-						<Icon class="size-4" aria-hidden="true" />
-						{tab.label}
-					</DropdownMenu.Item>
-				{/each}
-				<DropdownMenu.Separator />
-				<!-- Transparency stays reachable from the landing chrome
-				     (PRD §1.3; the retired dashboard held the trust page link). -->
-				<DropdownMenu.Item onSelect={() => goto('/lq-ai/trust')}>
-					<ShieldCheckIcon class="size-4" aria-hidden="true" />
-					Trust &amp; transparency
-				</DropdownMenu.Item>
-			</DropdownMenu.Content>
-		</DropdownMenu.Root>
-		<!-- Hairline separating tools/trust from the account/prefs cluster. -->
-		<div class="mx-0.5 h-4 w-px bg-border" aria-hidden="true"></div>
-		<!-- Account / preferences — one tight, quiet icon cluster. -->
+		<!-- Account / preferences — one tight, quiet icon cluster. Tools live in
+		     the rail's Tools section now (UX-A); the header keeps only the
+		     transparency link + prefs. -->
 		<div class="flex items-center gap-0.5">
+			<Button
+				variant="ghost"
+				size="icon"
+				class="text-muted-foreground hover:text-foreground"
+				title="Trust &amp; transparency"
+				aria-label="Trust &amp; transparency"
+				onclick={() => goto('/lq-ai/trust')}
+			>
+				<ShieldCheckIcon class="size-4" aria-hidden="true" />
+			</Button>
 			<Button
 				variant="ghost"
 				size="icon"

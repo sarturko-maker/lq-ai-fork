@@ -425,7 +425,7 @@
 	}
 
 	/* ------------------------------------------------------------------ */
-	/* State-tab bar — mirrors SkillDetailTabs + TopTabBar styling         */
+	/* State-tab bar — mirrors the SkillDetailTabs styling                 */
 	/* ------------------------------------------------------------------ */
 
 	.memory-tabs {

@@ -116,6 +116,16 @@ export interface TabVisibilityOpts {
 	autonomousEnabled?: boolean;
 }
 
+/**
+ * The tabs a user may see, role/pref-gated. Drives the cockpit rail's Tools
+ * section + the header tool menu. (Lived in the now-retired `TopTabBar.svelte`
+ * until UX-A-5; moved here — the legacy top-tab shell is gone, but the tab
+ * vocabulary it defined is still the source of truth for the rail.)
+ */
+export function visibleTabsFor(user: User | null, opts: TabVisibilityOpts = {}): TabDef[] {
+	return TABS.filter((t) => isTabVisible(t.id, user, opts));
+}
+
 export function isTabVisible(id: TabId, user: User | null, opts: TabVisibilityOpts = {}): boolean {
 	const tab = TABS.find((t) => t.id === id);
 	if (!tab) return false;

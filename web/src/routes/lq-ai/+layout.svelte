@@ -2,9 +2,10 @@
 	/**
 	 * LQ.AI gate layout — auth + force-change-password + idle tracking for
 	 * every route under `/lq-ai/*` except `/lq-ai/login` and
-	 * `/lq-ai/change-password` (F1-S2: chrome moved out — the cockpit at
-	 * `/lq-ai` owns its own viewport; legacy tool routes carry the tab
-	 * chrome via the `(tools)` group layout).
+	 * `/lq-ai/change-password` (F1-S2: chrome moved out — the cockpit shell at
+	 * `(app)/+layout.svelte` owns the viewport for every authenticated surface;
+	 * UX-A folded all the legacy tool routes into it and retired the `(tools)`
+	 * shell, so this gate just renders `<slot />` for protected routes).
 	 *
 	 * - No access token → redirect to /lq-ai/login.
 	 * - Access token but `must_change_password` → redirect to /lq-ai/change-password.

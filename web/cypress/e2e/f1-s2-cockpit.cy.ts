@@ -104,13 +104,8 @@ describe('F1-S2 — Cockpit v0', () => {
 		cy.get('button[aria-label^="Theme"]').click();
 	});
 
-	it('Tools menu reaches the legacy surfaces (tab chrome intact there)', () => {
-		cy.contains('button', 'Tools').click();
-		cy.contains('[role="menuitem"]', 'Skills').click();
-		cy.url().should('include', '/lq-ai/skills');
-		cy.get('nav[aria-label="Primary"]').should('exist');
-		// And the brand link returns to the cockpit.
-		cy.get('a.lq-brand').click();
-		cy.get('[data-testid="lq-cockpit"]').should('exist');
-	});
+	// (The "Tools menu reaches the legacy surfaces" test retired in UX-A-5: the
+	// header Tools dropdown + legacy TopTabBar are gone. Tools now open from the
+	// rail's Tools section into the canvas — covered by
+	// ux-a-5-retire-legacy-shell.cy.ts + the ux-a-2/3/4 specs.)
 });

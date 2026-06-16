@@ -229,15 +229,15 @@ describe('M4-C2 — Scenario 1 + 5: opt-in gating and opt-out', () => {
 	it('1a: Autonomous tab is NOT present when autonomous_enabled=false', () => {
 		interceptBaseRequests(false);
 
-		// F1-S2: /lq-ai is the cockpit (no tab bar) — the TopTabBar lives on
-		// the (tools) routes; gating is asserted there.
-		cy.visit('/lq-ai/chats', {
+		// UX-A: the cockpit rail's Tools section is the gated nav now; visit the
+		// cockpit where the rail renders.
+		cy.visit('/lq-ai', {
 			onBeforeLoad: (win) => setAuthStorage(win, { autonomousEnabled: false })
 		});
 
-		// TopTabBar renders tabs; 'Autonomous' should not appear.
-		cy.get('.lq-tabbar', { timeout: 10000 }).should('exist');
-		cy.get('.lq-tabbar').contains('button', 'Autonomous').should('not.exist');
+		// The rail renders the Tools section; the gated 'Autonomous' tool is absent.
+		cy.get('[data-testid="lq-cockpit-tools"]', { timeout: 10000 }).should('exist');
+		cy.get('[data-testid="lq-cockpit-tool-autonomous"]').should('not.exist');
 	});
 
 	it('1b: Direct visit to /lq-ai/autonomous redirects to /lq-ai/settings/autonomous when opt-in=false', () => {
@@ -280,10 +280,10 @@ describe('M4-C2 — Scenario 1 + 5: opt-in gating and opt-out', () => {
 
 		cy.wait('@patchPreferences');
 
-		// After the PATCH the preferences store is updated. The TopTabBar is
-		// reactive to $preferences.autonomous_enabled. The Autonomous tab should
-		// now be present in the tab bar.
-		cy.get('.lq-tabbar', { timeout: 10000 }).contains('button', 'Autonomous').should('exist');
+		// After the PATCH the preferences store is updated. The rail Tools section
+		// is reactive to $preferences.autonomous_enabled (settings/autonomous now
+		// renders inside the cockpit shell), so the Autonomous tool appears.
+		cy.get('[data-testid="lq-cockpit-tool-autonomous"]', { timeout: 10000 }).should('exist');
 	});
 
 	it('5: After opt-out, Autonomous tab disappears and direct visit redirects', () => {
@@ -294,8 +294,8 @@ describe('M4-C2 — Scenario 1 + 5: opt-in gating and opt-out', () => {
 			onBeforeLoad: (win) => setAuthStorage(win, { autonomousEnabled: true })
 		});
 
-		// Autonomous tab should be visible right now.
-		cy.get('.lq-tabbar', { timeout: 10000 }).contains('button', 'Autonomous').should('exist');
+		// Autonomous tool should be visible in the rail right now.
+		cy.get('[data-testid="lq-cockpit-tool-autonomous"]', { timeout: 10000 }).should('exist');
 
 		// Intercept PATCH to return disabled.
 		cy.intercept('PATCH', '**/api/v1/users/me/preferences', {
@@ -317,8 +317,8 @@ describe('M4-C2 — Scenario 1 + 5: opt-in gating and opt-out', () => {
 
 		cy.wait('@patchPreferencesOff');
 
-		// Tab should disappear.
-		cy.get('.lq-tabbar').contains('button', 'Autonomous').should('not.exist');
+		// Tool should disappear from the rail.
+		cy.get('[data-testid="lq-cockpit-tool-autonomous"]').should('not.exist');
 
 		// Intercept the preferences GET for the next page visit — now returns disabled.
 		cy.intercept('GET', '**/api/v1/users/me/preferences', {

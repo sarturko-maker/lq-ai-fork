@@ -48,14 +48,13 @@ describe('Wave B v2 — new surfaces', () => {
 	});
 
 	// ── Test 2 ───────────────────────────────────────────────────────────────────
-	// Chats tab is now available=true; clicking it routes to /lq-ai/chats and
-	// the chat shell renders instead of ComingSoonModal.
-	it('Chats opens from the cockpit Tools menu with no ComingSoonModal', () => {
+	// Chats opens from the rail's Tools section (UX-A; the header Tools dropdown
+	// retired in UX-A-5) into the canvas — the chat shell renders.
+	it('Chats opens from the rail Tools section into the canvas', () => {
 		cy.get('[data-testid="lq-cockpit"]').should('exist');
-		cy.contains('button', 'Tools').click();
-		cy.contains('[role="menuitem"]', 'Chats').click();
+		cy.get('[data-testid="lq-cockpit-tool-chats"]').click();
 		cy.url().should('include', '/lq-ai/chats');
-		// No dialog should be present (was the ComingSoonModal path).
+		// No dialog should be present (was the legacy ComingSoonModal path).
 		cy.get('[role="dialog"]').should('not.exist');
 		// The chat shell root element must be in the DOM.
 		cy.get('[data-testid="lq-ai-chat-shell"]').should('exist');

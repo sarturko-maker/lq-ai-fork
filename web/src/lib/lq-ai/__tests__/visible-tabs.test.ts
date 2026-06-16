@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { visibleTabsFor, type TopTabBarUser } from '../components/TopTabBar.svelte';
+import { visibleTabsFor, type User } from '../tabs';
 
-describe('TopTabBar.visibleTabsFor', () => {
-  const admin: TopTabBarUser = { id: '1', email: 'a@x', is_admin: true,  must_change_password: false };
-  const member: TopTabBarUser = { id: '2', email: 'm@x', is_admin: false, must_change_password: false };
+describe('visibleTabsFor (rail Tools visibility)', () => {
+  const admin: User = { id: '1', email: 'a@x', is_admin: true,  must_change_password: false };
+  const member: User = { id: '2', email: 'm@x', is_admin: false, must_change_password: false };
 
   it('returns ten tabs for a non-admin user (admin hidden, tabular added in M3-C3, agents in F0-S3)', () => {
     const ids = visibleTabsFor(member).map((t) => t.id);

@@ -42,17 +42,19 @@ describe('Wave M1-final — Saved Prompts + Knowledge + Receipts source', () => 
 		// a prior active chat from the matter workspace stays set when we land
 		// on /lq-ai/chats after clicking "Use in chat". Without this step,
 		// activeChatStore is null and the composer never mounts.
-		// Critically: we use SPA navigation (click the TopTabBar "Saved Prompts"
-		// tab) rather than cy.visit() so Svelte stores are NOT reset by a hard
-		// reload. cy.visit() resets all module-level Svelte stores including
+		// Critically: we use SPA navigation (click the rail's "Saved Prompts"
+		// Tools entry) rather than cy.visit() so Svelte stores are NOT reset by a
+		// hard reload. cy.visit() resets all module-level Svelte stores including
 		// activeChatStore.
 		createSampleMatter('Saved Prompt Test Matter');
 
-		// ── Navigate to saved-prompts via TopTabBar (SPA navigation) ─────────
-		// TopTabBar renders a button[role="tab"] for each tab and calls
-		// goto(route) on click — preserving Svelte store state. The label text
-		// is 'Saved Prompts' (tabs.ts line 47).
-		cy.contains('button[role="tab"]', 'Saved Prompts').click();
+		// ── Navigate to saved-prompts via the rail Tools section (SPA nav) ───
+		// UX-A: the rail Tools button calls goto(route) on click — preserving
+		// Svelte store state (the retired TopTabBar did the same). `.first()`
+		// guards the brief during-navigation window where the outgoing + incoming
+		// cockpit shells can both be mounted (two rails) before the old one tears
+		// down — `.click()` throws on a multi-element subject.
+		cy.get('[data-testid="lq-cockpit-tool-saved-prompts"]:visible').first().click();
 		cy.url({ timeout: 10000 }).should('include', '/lq-ai/saved-prompts');
 		cy.get('[data-testid="lq-ai-saved-prompts-page"]').should('exist');
 
