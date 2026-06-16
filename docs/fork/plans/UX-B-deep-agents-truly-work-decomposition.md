@@ -53,15 +53,21 @@ Two complementary suites:
   observability hooks if needed). **Verify:** scripted suite still green (CI); harness runs locally against
   the dev stack; report committed. **(The agreed start.)**
 
-- **UX-B-2 — Sensible default practice areas, calibrated to UX-B-1.** Author `profile_md` +
-  `default_tier_floor` + `agent_config` (subagents) for **Disputes / M&A / Privacy / Employment** via an
-  **idempotent migration** (the `0054` pattern — write only when `profile_md IS NULL`, never overwrite
-  operator edits; rebuild `api` + `arq-worker` + `ingest-worker` together, verify on a throwaway pgvector
-  container first per the dev-env hard rules). Profiles + tier floors **calibrated to the UX-B-1 baseline**
-  (degrade honestly where M3 is weak). Extend the harness with per-area scenarios; commit per-area behavior
-  reports. Cockpit then shows all five areas configured. **Privacy gets a forward-looking profile** (it is
-  the future Oscar-Privacy module's home). **Verify:** migration on throwaway container; per-area harness
-  reports; cockpit screenshot showing 5 configured areas.
+- **UX-B-2 — Sensible default practice areas, calibrated to UX-B-1. ✅ SHIPPED (PR #91).** Authored
+  `profile_md` for **Disputes / M&A / Privacy / Employment** via the **idempotent migration `0055`** (the
+  `0054` pattern — write only when `profile_md IS NULL`, never overwrite operator edits). Profiles
+  **calibrated to the UX-B-1 baseline**: every one leans on the disciplines that degrade honestly under a
+  tier-4-weak model — ground-and-cite, say-so-when-absent, **ask one clarifying question before guessing**,
+  and never fake a confirmation. `default_tier_floor` stays NULL (the 0054 Commercial rationale: M3 is
+  tier 4, a stronger floor makes the area unusable). **`agent_config` stays `{}` — live subagents are
+  DEFERRED to UX-B-4** (the composition point renders subagents live; delegation is harder than the
+  multi-step chaining M3 is inconsistent at, and ADR-F015 forbids activating an unqualified capability —
+  the sequencing rationale below already puts subagents after skills). Extended the harness to be
+  area-agnostic (`seed_matter`, per-area fixtures + scenario sets) and committed per-area behavior reports
+  (`docs/fork/evidence/ux-b-2/`). **Privacy got a forward-looking profile** (the future Oscar-Privacy
+  module's home). **Verify:** migration on throwaway test DB (conftest) — scripted suite **2130 passed/8
+  skipped**, ruff+mypy clean; live per-area harness ran (all 12 scenarios `completed`); cockpit shows 5
+  configured areas. **Pickup: UX-B-3.**
 
 - **UX-B-3 — Skills activation (S9). The big, security-sensitive slice.** Drop the `composition.py:151`
   `bound_skill_names=[]` stub; attach `SkillsMiddleware`; thread the DB-bound skill names through. **Re-

@@ -57,23 +57,28 @@ class SeededMatter:
     cleanup: Callable[[], Awaitable[None]]
 
 
-async def seed_commercial_matter(
+async def seed_matter(
     factory: async_sessionmaker[AsyncSession],
+    *,
+    area_key: str,
+    doc: FixtureDocument,
+    matter_name: str,
 ) -> SeededMatter:
-    """Plant a user + Commercial-bound matter + one searchable document.
+    """Plant a user + an ``area_key``-bound matter + one searchable document.
 
-    The matter floor is tier 4 (MiniMax-M3's tier); Commercial seeds no
-    area floor, so the effective gateway floor stays 4 and M3 qualifies.
+    Area-agnostic (UX-B-2): pass the area key, the area's fixture document,
+    and a matter name. The matter floor is tier 4 (MiniMax-M3's tier) and the
+    default areas seed no area floor, so the effective gateway floor stays 4
+    and M3 qualifies. ``seed_commercial_matter`` is the UX-B-1 wrapper.
     """
-    doc: FixtureDocument = build_fixture_document()
     async with factory() as db:
         area_id = (
-            await db.execute(select(PracticeArea.id).where(PracticeArea.key == "commercial"))
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == area_key))
         ).scalar_one()
 
         user = User(
-            email=f"ux-b1-{uuid.uuid4().hex[:8]}@example.com",
-            display_name="UX-B-1 Scenario User",
+            email=f"ux-b2-{uuid.uuid4().hex[:8]}@example.com",
+            display_name="UX-B Scenario User",
             hashed_password=hash_password("correct-horse-battery-staple"),
             is_admin=False,
             mfa_enabled=False,
@@ -84,8 +89,8 @@ async def seed_commercial_matter(
 
         project = Project(
             owner_id=user.id,
-            name="Acme — Master Services Agreement",
-            slug=f"acme-msa-{uuid.uuid4().hex[:6]}",
+            name=matter_name,
+            slug=f"{area_key}-{uuid.uuid4().hex[:6]}",
             privileged=True,
             minimum_inference_tier=4,
             practice_area_id=area_id,
@@ -156,6 +161,18 @@ async def seed_commercial_matter(
         project_id=project_id,
         practice_area_id=area_id,
         cleanup=cleanup,
+    )
+
+
+async def seed_commercial_matter(
+    factory: async_sessionmaker[AsyncSession],
+) -> SeededMatter:
+    """UX-B-1 wrapper: a Commercial matter with the Acme MSA fixture."""
+    return await seed_matter(
+        factory,
+        area_key="commercial",
+        doc=build_fixture_document(),
+        matter_name="Acme — Master Services Agreement",
     )
 
 

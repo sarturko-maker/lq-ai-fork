@@ -29,21 +29,24 @@ def write_report(
     out_dir: Path,
     *,
     model_alias: str,
+    area: str = "commercial",
+    milestone: str = "UX-B-1",
     generated_at: str | None = None,
 ) -> tuple[Path, Path]:
     """Write ``behavior-report.json`` + ``behavior-report.md`` to ``out_dir``.
 
-    Returns the two paths. ``generated_at`` is injectable for
-    determinism in tests; defaults to the current UTC time.
+    Returns the two paths. ``area``/``milestone`` default to the UX-B-1
+    Commercial baseline; UX-B-2 passes the per-area values. ``generated_at``
+    is injectable for determinism in tests; defaults to the current UTC time.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = generated_at or datetime.now(UTC).isoformat(timespec="seconds")
     counts = _summary_counts(receipts)
 
     payload = {
-        "milestone": "UX-B-1",
+        "milestone": milestone,
         "adr": "F015",
-        "area": "commercial",
+        "area": area,
         "model_alias": model_alias,
         "model_note": (
             f"alias '{model_alias}' is expected to resolve to MiniMax-M3 (tier-4) "
@@ -65,10 +68,11 @@ def write_report(
 
 def _render_markdown(payload: dict) -> str:
     counts = payload["summary"]
+    milestone = payload["milestone"]
     lines: list[str] = [
-        "# UX-B-1 — Commercial scenario behavior report",
+        f"# {milestone} — {payload['area']} scenario behavior report",
         "",
-        f"- **Milestone:** UX-B-1 (gate: ADR-{payload['adr']})",
+        f"- **Milestone:** {milestone} (gate: ADR-{payload['adr']})",
         f"- **Practice area:** {payload['area']}",
         f"- **Model:** {payload['model_note']}",
         f"- **Generated:** {payload['generated_at']}",
@@ -76,7 +80,7 @@ def _render_markdown(payload: dict) -> str:
         f"matched expected shape · {counts['completed']}/{counts['scenarios']} ran to `completed`",
         "",
         "> Per ADR-F015 a scenario that does not match its expected shape is a "
-        "**finding** that calibrates UX-B-2 (profiles / tier floors), not a test "
+        "**finding** that calibrates the area profile / tier floor, not a test "
         "failure. The harness asserts only that every scenario produced a terminal "
         "run + receipts.",
         "",

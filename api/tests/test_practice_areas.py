@@ -28,12 +28,14 @@ from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_
 pytestmark = pytest.mark.integration
 
 _EXPECTED_SEED = [
-    # (key, name, unit_label, configured) in position order — migration 0053.
+    # (key, name, unit_label, configured) in position order. Identity/unit are
+    # migration 0053; ``configured`` reflects the profile seeds — Commercial in
+    # 0054, the other four in 0055 (UX-B-2), so all five now read configured.
     ("commercial", "Commercial", "Matter", True),
-    ("disputes", "Disputes", "Matter", False),
-    ("m-and-a", "M&A", "Deal", False),
-    ("privacy", "Privacy", "Programme", False),
-    ("employment", "Employment", "Matter", False),
+    ("disputes", "Disputes", "Matter", True),
+    ("m-and-a", "M&A", "Deal", True),
+    ("privacy", "Privacy", "Programme", True),
+    ("employment", "Employment", "Matter", True),
 ]
 
 
@@ -111,7 +113,15 @@ async def test_list_practice_areas_position_order(client: AsyncClient, user: Use
     commercial = areas[0]
     assert commercial["configured"] is True
     assert commercial["unit_label"] == "Matter"
-    assert {a["key"] for a in areas if a["configured"]} == {"commercial"}
+    # All five standard areas carry a seeded profile (Commercial 0054, the rest
+    # 0055), so all derive configured=True.
+    assert {a["key"] for a in areas if a["configured"]} == {
+        "commercial",
+        "disputes",
+        "m-and-a",
+        "privacy",
+        "employment",
+    }
 
 
 async def test_list_practice_areas_requires_auth(client: AsyncClient) -> None:
@@ -139,9 +149,6 @@ async def test_seed_commercial_config_present_and_derived_configured(
     assert commercial["default_tier_floor"] is None
     assert commercial["profile_md"] and "Commercial" in commercial["profile_md"]
     assert commercial["bound_skills"] == []
-    # Inert areas have no profile and derive configured=False.
-    assert areas["disputes"]["configured"] is False
-    assert areas["disputes"]["profile_md"] is None
 
 
 async def test_seed_commercial_config_is_idempotent(db_session: AsyncSession) -> None:
@@ -167,6 +174,59 @@ async def test_seed_commercial_config_is_idempotent(db_session: AsyncSession) ->
         assert area.profile_md == "operator-edited profile"
     finally:
         sys.modules.pop("migration_0054", None)
+
+
+# --- UX-B-2 default-area profiles (migration 0055) ---------------------------
+
+
+async def test_default_area_profiles_present_and_derived_configured(
+    client: AsyncClient, user: User
+) -> None:
+    """0055 gave Disputes/M&A/Privacy/Employment a profile; each derives
+    ``configured=True``, seeds no area tier floor and no subagents, and the
+    profiles are readable (transparency) and calibrated (clarify-before-guess).
+    """
+    resp = await client.get("/api/v1/practice-areas", headers=_bearer(user))
+    assert resp.status_code == 200
+    areas = {a["key"]: a for a in resp.json()["practice_areas"]}
+    for key in ("disputes", "m-and-a", "privacy", "employment"):
+        area = areas[key]
+        assert area["configured"] is True, key
+        assert area["profile_md"] and area["profile_md"].strip(), key
+        # Calibrated to the UX-B-1 baseline: every profile carries the
+        # ground-and-cite + clarify-before-guess disciplines.
+        assert "cite" in area["profile_md"].lower(), key
+        assert "clarifying question" in area["profile_md"].lower(), key
+        # No area floor (M3 is tier 4) and no live subagents (deferred to UX-B-4).
+        assert area["default_tier_floor"] is None, key
+        assert area["agent_config"] == {}, key
+    # Privacy's profile is forward-looking (the modules / Oscar-Privacy home).
+    assert "module" in areas["privacy"]["profile_md"].lower()
+
+
+async def test_default_area_profiles_seed_is_idempotent(db_session: AsyncSession) -> None:
+    """Re-running _seed_default_area_profiles never overwrites an edited profile."""
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0055", versions / "0055_default_area_profiles.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["migration_0055"] = module
+    try:
+        spec.loader.exec_module(module)
+        # Edit Disputes' profile, then re-run the seed: it must NOT clobber.
+        area = (
+            await db_session.execute(select(PracticeArea).where(PracticeArea.key == "disputes"))
+        ).scalar_one()
+        area.profile_md = "operator-edited disputes profile"
+        await db_session.flush()
+        conn = await db_session.connection()
+        await conn.run_sync(lambda sync_conn: module._seed_default_area_profiles(sync_conn))
+        await db_session.refresh(area)
+        assert area.profile_md == "operator-edited disputes profile"
+    finally:
+        sys.modules.pop("migration_0055", None)
 
 
 async def test_admin_patch_configures_area(client: AsyncClient, admin: User) -> None:
