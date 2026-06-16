@@ -4,7 +4,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (UX-A navigational convergence COMPLETE — cockpit is the single app shell; F2 visual pass complete through VL2 + the library surfaces M7a/M7b; AE-series CLOSED)
 
-- **F2-M7b (PR #__) — SHIPPED. The library card/wrapper surfaces calmed (the last `(app)` list pages
+- **F2-M7b (PR #86) — SHIPPED. The library card/wrapper surfaces calmed (the last `(app)` list pages
   on `--lq-*`).** Same M7a recipe applied to the three remaining library pages: **`knowledge`** (card grid +
   inline create form), **`learn`** (3-tile card grid), **`saved-prompts`** (thin `SavedPromptsPanel`
   wrapper). Each: **adopt `<PageShell pad="compact">`** (replacing the page's bespoke `<main>` wrapper — also
