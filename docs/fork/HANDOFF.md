@@ -4,7 +4,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (F2 + UX-A COMPLETE; UX-B milestone OPEN — UX-B-1 harness SHIPPED; pickup = UX-B-2 default areas)
 
-- **UX-B-1 (PR #TBD) — SHIPPED. Scenario harness + Commercial baseline (ADR-F015). Test infra only — no
+- **UX-B-1 (PR #90) — SHIPPED. Scenario harness + Commercial baseline (ADR-F015). Test infra only — no
   `app/` change.** A reusable, provider-marked rig (`api/tests/agents/scenarios/`) that drives the REAL
   practice-area Deep Agent through the PRODUCTION composition point
   (`compose_and_execute_run`, injecting only the test-DB session factory + a null checkpointer — the model,
