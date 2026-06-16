@@ -154,9 +154,27 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
   `Inline`/`StatusDot`) + pure class helpers (unit-tested, vitest 850), proven in a dev-only `_vl-lab` route
   rebuilding `direction-vercel`. No live surface re-skinned. Evidence `docs/fork/evidence/f2-vl1/`. Then
   **VL2** (re-skin `cockpit/` — maintainer design gate).
-- **F2-M7b** — pending (AFTER the VL series): card/wrapper trio (knowledge/learn/saved-prompts). Same recipe;
-  knowledge KB status pills → `--status-*` too. Now **applies the F013 language** as it migrates.
-- M8–M9 pending (also apply the language).
+- **F2-M7b** — done (PR #86): card/wrapper trio (knowledge/learn/saved-prompts). Same recipe + the F013 calm
+  card idiom (flat/border-led, hover→`--muted`, no float shadow, scarce-blue focus); bespoke widths snapped
+  onto the system reading widths (knowledge→`wide`, learn/saved-prompts→`default`); knowledge KB status pills
+  → `--status-*`. vitest 851; f2-baseline cypress 4/4. Evidence: `docs/fork/evidence/f2-m7b/`. Review SHIP.
+- **F2-M8** — done (PR #87): settings/admin/trust **nav shells** — the last chrome on the teal `--lq-accent`
+  active marker (`#1f7a6b`, not the Vercel blue — visibly off-brand, not cosmetic). settings (vertical rail)
+  → the live AreaRail idiom (raised `--card` pill + `--shadow-xs`, no accent); admin (horizontal tab strip)
+  → inked `--foreground` underline; trust → `<PageShell size="wide">`. `:focus-visible --ring` added to both
+  nav sets. Scope = nav shells only (child page bodies + Trust\*Card internals stay on `--lq-*`/teal — owned
+  by R16/R19). vitest 851; f2-baseline cypress 5/5. Evidence: `docs/fork/evidence/f2-m8/`. Review SHIP.
+- **F2-M9** — done (PR #88): **consistency sweep + verify — the F2 closer.** Static audit of every F2-touched
+  surface: **zero color `--lq-*`** (the `--lq-radius*`/`--lq-space-*`/`lq-text-*` carve-outs are the
+  deliberate R-TYPO boundary), **zero `{@html}` sinks**, **zero teal/hardcoded-hex rogue accents** (one-accent
+  holds: ink primaries + scarce `--brand`/`--ring`). **Reachability (no-retire contract):** all 11 tab
+  surfaces + trust + settings resolve under `(app)`, reachable from the rail Tools group + header gear/
+  ShieldCheck. **Cross-surface consistency (44-shot full matrix, light+dark × wide+narrow):** the
+  raised-card-pill active-nav idiom is identical across rail + settings; status pills share the family
+  (scarce-blue `running`, green `completed`); AA-dark legible, no light-in-dark panels. **No code change** —
+  the F2 pass was disciplined throughout; M9 verifies + documents the owned debt (R16/R19 child bodies,
+  R-TYPO `lq-text-*`/radius/space, deferred TrustPill tones, the intentional `_vl-lab`/`_ae-lab` scratch
+  routes). Evidence: `docs/fork/evidence/f2-m9/`. **F2 milestone COMPLETE.**
 
 ## Risks / overlaps
 
