@@ -69,7 +69,7 @@ Two complementary suites:
   skipped**, ruff+mypy clean; live per-area harness ran (all 12 scenarios `completed`); cockpit shows 5
   configured areas. **Pickup: UX-B-3.**
 
-- **UX-B-3 — Skills activation (S9). ✅ SHIPPED (PR #TBD, ADR-F016).** Corrected the HANDOFF premise:
+- **UX-B-3 — Skills activation (S9). ✅ SHIPPED (PR #92, ADR-F016).** Corrected the HANDOFF premise:
   `SkillsMiddleware` adds **no tools** — it `ls`/`download`s a *backend* and the model reads each `SKILL.md`
   via the builtin `read_file`; so activation = give the agent a **backend** + `skills=[sources]`, and the
   security posture is **what the backend exposes** (the builtins aren't guarded — the F1 universe-wrap is

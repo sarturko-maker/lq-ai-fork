@@ -4,7 +4,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (F2 + UX-A COMPLETE; UX-B milestone OPEN — UX-B-3 skills activation SHIPPED; pickup = UX-B-4 live subagent)
 
-- **UX-B-3 (PR #TBD) — SHIPPED. Skills activation (S9), via a read-only registry-backed virtual backend
+- **UX-B-3 (PR #92) — SHIPPED. Skills activation (S9), via a read-only registry-backed virtual backend
   (ADR-F016 accepted).** Corrected the long-standing HANDOFF premise: **`SkillsMiddleware` adds no tools** —
   it `ls`/`download`s a deepagents *backend* and the model reads each `SKILL.md` via the **builtin
   `read_file`**; those builtins already exist on our agent over an empty `StateBackend` and are **not** wrapped
