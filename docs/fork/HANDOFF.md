@@ -2,8 +2,19 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 minimalist pass COMPLETE — M0…M9 + VL0…VL2 all shipped; UX-A navigational convergence COMPLETE; cockpit is the single app shell; AE-series CLOSED)
+## State (F2 + UX-A COMPLETE; UX-B milestone OPEN — ADR-F015 accepted; pickup = UX-B-1 scenario harness)
 
+- **UX-B-0 (PR #89) — SHIPPED. ADR-F015 ACCEPTED + UX-B decomposition. Docs only.** The maintainer revealed
+  the long-range vision (agentic SaaS **modules** à la **Oscar Privacy**; see [[oscar-privacy-modules-vision]])
+  and the near-term mandate that gates it: *Deep Agents must truly work, the cockpit must be perfect*. This
+  is **UX-B** (ADR-F012's third leg; the delivery of roadmap "F3 — Practice-area IA re-centre" — named UX-B,
+  not F3, to avoid the roadmap-label collision). **ADR-F015 accepted 2026-06-16** = *scenario-based model
+  qualification is the gate*: a provider-marked live-MiniMax scenario harness emits a committed behavior
+  report; nothing ships `configured`/`activated`/blessed until the report shows M3 handles it; area profiles
+  + tier floors calibrated to observed behaviour. Scripted unit tests stay the CI gate; the harness runs
+  out-of-CI. Maintainer's steers: start = harness + Commercial baseline; skills activation (S9) in scope (a
+  later slice); plan reviewed first (this PR). Files: `docs/adr/F015-scenario-qualified-cockpit-deep-agent.md`,
+  `docs/fork/plans/UX-B-deep-agents-truly-work-decomposition.md`. **Pickup: UX-B-1** (see Next slice).
 - **F2-M9 (PR #88) — SHIPPED. Consistency sweep + verify — the F2 milestone closer. NO code change.**
   Static audit of every F2-touched surface (cockpit/rail/conversation/matters + all list/card surfaces +
   the M8 nav shells): **zero color `--lq-*`** survivors (the `--lq-radius*`/`--lq-space-*` + `lq-text-*`
@@ -515,41 +526,48 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**F2 (minimalist pass) is COMPLETE — M0…M9 + VL0…VL2 all merged.** The semantic tokens carry the **Vercel
-design language** (ink primaries, scarce `--brand`, charcoal `#111` dark, `--text-*`/`--motion-*`, 10/12px
-radius); the token-consuming primitives (`AppShell`/`Hero`/`Card`/`CardGrid`/`Stack`/`Inline`/`StatusDot`)
-are live in the cockpit. Every chrome + surface the visual pass owns — cockpit landing, rail,
-conversation/matters, every list/card surface, the settings/admin/trust nav shells — is calmed, on semantic
-tokens, AA-dark clean, and consistent (M9 verified: zero color `--lq-*`, zero `{@html}`, one-accent holds,
-no surface retired). **UX-A is also COMPLETE** (cockpit is the single app shell; legacy `(tools)`/`TopTabBar`/
-Tools-dropdown gone). **This is a milestone boundary — re-plan here (CLAUDE.md § Iteration).**
+**F2 + UX-A are COMPLETE.** F2 (M0…M9 + VL0…VL2) put the whole interface on the Vercel/F013 design language,
+semantic-token clean, AA-dark, M9-verified. UX-A made the cockpit the single app shell (legacy `(tools)`/
+`TopTabBar`/Tools-dropdown gone). **UX-B is now OPEN** and **ADR-F015 is accepted** (the milestone plan +
+gate are committed in PR #89 — merge pending CI).
 
-### → NEXT: UX-B — capability convergence: Deep Agents truly work / cockpit perfection (ADR-F015). Branch FIRST.
+### → NEXT: UX-B-1 — scenario harness + Commercial baseline (ADR-F015). Branch FIRST.
 
-**The decision point resolved (2026-06-16):** the maintainer revealed the long-range vision (agentic SaaS
-**modules** à la **Oscar Privacy** — OneTrust/TrustArc but the *agent* does data-discovery/ROPA/DB updates;
-see [[oscar-privacy-modules-vision]]) and the **near-term mandate that gates it**: *Deep Agents must truly
-work, the cockpit must be perfect* — via **MiniMax scenario testing** + **sensible default practice areas**
-+ cockpit honesty. The fork's practice-area model **is** the module substrate (Privacy area + ROPA = the
-Oscar-Privacy module), so we **do not reorder**. This is **UX-B** (ADR-F012's third leg after F2-visual ✓ +
-UX-A-nav ✓) made concrete — the delivery of roadmap milestone "F3 — Practice-area IA re-centre". (Named
-**UX-B**, not "F3", to avoid colliding with that roadmap label; the ADR keeps its monotonic number F015.)
+**Milestone context:** UX-B = capability convergence ("Deep Agents truly work / cockpit perfect"), the
+gate for the agentic-**modules** / Oscar-Privacy direction ([[oscar-privacy-modules-vision]]). The full
+decomposition + sequencing lives in **`docs/fork/plans/UX-B-deep-agents-truly-work-decomposition.md`**;
+the gate is **ADR-F015** (read both first). Maintainer steers: harness-first; skills activation (S9) in
+scope as a later slice (UX-B-3); MiniMax-M3 is the dependency-injected model (tier-4-weak).
 
-**Maintainer's three steers (2026-06-16):** start with the **scenario harness + Commercial baseline**;
-**skills activation (S9) is IN SCOPE** for the milestone (a later slice, not the first); **review a short
-plan + ADR before building** (this PR, **UX-B-0**).
+**Build UX-B-1 — the scenario harness + Commercial baseline:**
+- A **reusable, provider-marked (`@pytest.mark.provider`) rig**: scenario fixtures (intent + expected-shape:
+  which tool(s), step bound, must / should-not, refusal expectation) → drive the **real** agent against the
+  **live gateway** (build the model via `build_gateway_chat_model()` — keys stay in the gateway) → capture
+  **receipts** (tool selection, step count, final-answer check, guard/refusal, latency) → emit a structured
+  **behavior report** committed to `docs/fork/evidence/ux-b-1/`.
+- Run it against **Commercial** (the only configured area) with a starter set: single-tool fetch, multi-step
+  `search → read → answer`, no-tool-needed, ambiguous → clarify, guard/refusal. The report is an honest map
+  of how MiniMax-M3 behaves in the cockpit loop — it CALIBRATES UX-B-2's default-area profiles/tier-floors.
+- Production code change limited to test infra (+ minimal observability hooks if needed).
+- **Anchors (from the 2026-06-16 Explore map):** the loop = `composition.py:compose_and_execute_run`
+  (62-209) → `runner.py:_drive_agent` (236-386) → gateway → `stream.py` (110-371) SSE. Existing harness
+  precedents: `api/tests/agents/test_deepagents_spike.py` (the one live-MiniMax tool-loop proof — model
+  picks the tool; copy its model-injection + `@pytest.mark.provider` shape) and
+  `test_agent_composition.py` (scripted-model loop tests — these stay the CI gate). Tools today =
+  `build_matter_tools` → `[search_documents, read_document]` (`tools.py:94-136`). Area profile lives in
+  `practice_areas.profile_md` (Commercial seeded by migration `0054`).
 
-- **UX-B-0 (THIS PR) — ADR-F015 + the UX-B decomposition.** Docs only. ADR-F015 = *scenario-based model
-  qualification is the gate*: a provider-marked live-MiniMax scenario harness emits a committed **behavior
-  report**, and nothing ships `configured`/`activated`/blessed until the report shows M3 handles it (config
-  calibrated to observed behaviour, not assumption). **Awaiting maintainer edit + acceptance** (ADR status:
-  proposed) before UX-B-1. Files: `docs/adr/F015-scenario-qualified-cockpit-deep-agent.md`,
-  `docs/fork/plans/UX-B-deep-agents-truly-work-decomposition.md`.
-- **UX-B-1 — Scenario harness + Commercial baseline** (the agreed start, after UX-B-0 accepted). Build the
-  reusable rig (scenario fixtures → drive the real agent against the live gateway → capture receipts → emit
-  the behavior report); run it against Commercial; commit the baseline. **Pick up here once UX-B-0 is accepted.**
-- **UX-B-2 default areas (calibrated) → UX-B-3 skills activation (S9) → UX-B-4 live subagent → UX-B-5 cockpit
-  UI (area-pick + subagent rendering) → UX-B-6 verify.** Full decomposition + sequencing in the plan doc.
+**Verify:** scripted suite still green (CI); the harness runs locally against the **live dev stack** (gateway
+up, `LQ_AI_GATEWAY_KEY` set); behavior report committed. Fresh-context adversarial + **security +
+simplification** pass ([[security-review-every-slice]]) — confirm no provider key leaks into fixtures/report/
+logs. **Dev-env hard rules apply** (never host-side `alembic upgrade` on the live dev DB; never
+`docker compose down -v`; rebuild workers together when a migration lands — UX-B-2 onward). HANDOFF updated.
+Merge per ADR-F005 against `sarturko-maker/lq-ai-fork` (`gh pr create --repo sarturko-maker/lq-ai-fork
+--head <branch>`).
+
+**Then:** UX-B-2 default areas (calibrated) → UX-B-3 skills activation (S9; drop `composition.py:151`
+`bound_skill_names=[]`, attach `SkillsMiddleware`, re-qualify) → UX-B-4 live subagent → UX-B-5 cockpit UI
+(area-pick at matter creation + subagent boundary rendering) → UX-B-6 verify.
 
 **Grounded state of the loop (2026-06-16 Explore map):** the cockpit loop WORKS end-to-end and is unit-
 tested with a *scripted* model; gaps to "truly works" = skills stubbed (`composition.py:151`

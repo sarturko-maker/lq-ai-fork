@@ -1,12 +1,12 @@
 # F015 — making the cockpit Deep Agent production-real: scenario-based model qualification as the gate
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-06-16
-- Deciders: maintainer (Arturs) — _pending_ (raised the UX-B mandate "Deep Agents must truly work, the
-  cockpit must be perfect; run MiniMax through scenario testing — you create scenarios and see how it handles
-  them; configure sensible default practice areas and test those"; chose to start with the scenario harness +
-  Commercial baseline, to include skills activation in the milestone, and to review a short plan + ADR
-  before building)
+- Deciders: maintainer (Arturs) — accepted 2026-06-16 ("Accept ADR"). Raised the UX-B mandate "Deep Agents
+  must truly work, the cockpit must be perfect; run MiniMax through scenario testing — you create scenarios
+  and see how it handles them; configure sensible default practice areas and test those"; chose to start
+  with the scenario harness + Commercial baseline, to include skills activation in the milestone, and to
+  review a short plan + ADR before building.
 - Extends: [[F010]] (per-area Deep Agent — config vocabulary, the gateway-bypass guard, the tier-floor
   envelope), [[F004]] (conversation identity + durable state — the run/thread/step model the harness
   observes), [[F009]] (at-most-once runs — the durability the harness depends on), [[F002]]
