@@ -1,0 +1,80 @@
+{
+  "milestone": "UX-B-3",
+  "adr": "F015",
+  "area": "commercial",
+  "model_alias": "smart",
+  "model_note": "alias 'smart' is expected to resolve to MiniMax-M3 (tier-4) via the gateway's operator-configured routing — the only S9-qualified provider today. The gateway owns the alias→model mapping; this report observes the loop's behaviour, not the resolved model name.",
+  "generated_at": "2026-06-16T20:50:51+00:00",
+  "summary": {
+    "scenarios": 2,
+    "shape_matched": 1,
+    "completed": 1
+  },
+  "results": [
+    {
+      "id": "skill_grounded_review",
+      "title": "Grounded review (skills on)",
+      "note": "With the area's review skills exposed, does the model still ground the limitation-of-liability answer in the document and cite it, rather than answering from the skill prose or wandering the bigger tool surface?",
+      "prompt": "As the customer, review the limitation of liability clause in the Acme MSA in this matter: what is the cap, and is it acceptable? Quote the clause and cite the section.",
+      "status": "completed",
+      "latency_s": 34.3,
+      "step_count": 7,
+      "model_turns": 3,
+      "tools_called": [
+        "search_documents",
+        "read_document"
+      ],
+      "expect_tools": [
+        "search_documents"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "<think>\nNow I have a complete picture. Let me analyze the limitation of liability clause from a customer's perspective:\n\n**The Clause (Section 7):**\n\"Except for liability arising from a breach of confidentiality or either party's indemnification obligations, each party's aggregate liability under this Agreement shall not exceed the total fees paid by Customer in the twelve (12) months immediately preceding the event giving rise to the claim. Neither party shall be liable for any indirect, incidental, or consequential damages.\"\n\n**Analysis from Customer's Perspective:**\n\n1. **The Cap:** 12 months of fees paid by Customer (a \"12-month lookback\" cap).\n\n2. **Acceptability from a customer standpoint:**\n   - **Concerning aspects:**\n     - The cap is tied to fees *paid* in the prior 12 months, wh…"
+    },
+    {
+      "id": "skill_recognition",
+      "title": "Skill recognition (skills on)",
+      "note": "A request squarely matching a bound review skill — does the model recognise the skill (read its SKILL.md via read_file) and/or apply a structured review, while still grounding in the document? Observation only: whether it reaches for the skill is the finding.",
+      "prompt": "Do a structured risk review of the Acme MSA in this matter from the customer's perspective, and flag anything a buyer should worry about, with citations.",
+      "status": "cap_exceeded",
+      "latency_s": 7.3,
+      "step_count": 16,
+      "model_turns": 2,
+      "tools_called": [
+        "search_documents",
+        "read_file",
+        "read_document",
+        "read_file",
+        "read_file",
+        "read_file",
+        "read_file"
+      ],
+      "expect_tools": [
+        "search_documents"
+      ],
+      "forbid_tools": [],
+      "shape_matched": false,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": false,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": ""
+    }
+  ]
+}

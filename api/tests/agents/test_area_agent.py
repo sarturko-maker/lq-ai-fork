@@ -46,6 +46,47 @@ def test_none_and_empty_subagents_pass() -> None:
     reject_model_bearing_subagents([])
 
 
+# --- UX-B-3 (ADR-F016): subagent skill-name drift validation ---------------
+
+
+def test_subagent_skills_validated_against_registry_at_config_time() -> None:
+    """A subagent referencing an unknown skill is rejected when known names
+    are supplied (the PATCH config path) — no dangling reference is stored."""
+    cfg = {
+        "subagents": [
+            {
+                "name": "x",
+                "description": "d",
+                "system_prompt": "p",
+                "skills": ["nda-review", "ghost"],
+            }
+        ]
+    }
+    with pytest.raises(ValueError, match=r"unknown skill\(s\) \['ghost'\]"):
+        build_area_subagents(cfg, known_skill_names=["nda-review", "contract-qa"])
+
+
+def test_subagent_skills_accepted_when_all_known() -> None:
+    cfg = {
+        "subagents": [
+            {"name": "x", "description": "d", "system_prompt": "p", "skills": ["nda-review"]}
+        ]
+    }
+    specs = build_area_subagents(cfg, known_skill_names=["nda-review", "contract-qa"])
+    assert specs[0]["skills"] == ["nda-review"]
+
+
+def test_subagent_skills_not_validated_without_known_names() -> None:
+    """The render path passes no known set — drift never breaks a run."""
+    cfg = {
+        "subagents": [
+            {"name": "x", "description": "d", "system_prompt": "p", "skills": ["anything"]}
+        ]
+    }
+    specs = build_area_subagents(cfg)  # known_skill_names=None → no check
+    assert specs[0]["skills"] == ["anything"]
+
+
 def test_non_list_subagents_rejected() -> None:
     with pytest.raises(ValueError, match="list"):
         reject_model_bearing_subagents({"name": "x"})

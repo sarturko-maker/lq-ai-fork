@@ -2,8 +2,47 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 + UX-A COMPLETE; UX-B milestone OPEN — UX-B-2 default areas SHIPPED; pickup = UX-B-3 skills activation)
+## State (F2 + UX-A COMPLETE; UX-B milestone OPEN — UX-B-3 skills activation SHIPPED; pickup = UX-B-4 live subagent)
 
+- **UX-B-3 (PR #92) — SHIPPED. Skills activation (S9), via a read-only registry-backed virtual backend
+  (ADR-F016 accepted).** Corrected the long-standing HANDOFF premise: **`SkillsMiddleware` adds no tools** —
+  it `ls`/`download`s a deepagents *backend* and the model reads each `SKILL.md` via the **builtin
+  `read_file`**; those builtins already exist on our agent over an empty `StateBackend` and are **not** wrapped
+  by `guarded_dispatch` (the full-universe guard wrap is F1, out of scope). So activation = give the agent a
+  **backend** carrying the area's skills + `skills=[sources]`, and the security boundary is **what the backend
+  exposes**. **Maintainer-ruled architecture (ADR-F016):** one library, **no duplication** (areas reference
+  skills by name), **subset per agent** (the whole library confuses the model), **relevant skills by default +
+  user-extend**. Built **`app/agents/skill_backend.py`** (`RegistrySkillBackend`) — a read-only
+  `BackendProtocol` adapter over a `SkillRegistry` snapshot serving ONLY the area's bound subset as a virtual
+  `/skills/<name>/SKILL.md` tree (zero-copy; reaches no host FS / matter data / unbound skills; `read()`
+  windows by offset/limit per the StateBackend contract; mutations refused; drift closes structurally — a
+  bound name the registry forgot is absent). **Composition** (`composition.py`) gained a
+  **`skill_registry_provider`** seam (default reads the worker/api `app.state.skill_registry` holder — the
+  autonomous-executor precedent; runs execute in the arq worker which installs it at `on_startup`), loads the
+  area's `practice_area_skills`, renders `render_area_agent(bound, known)`, builds the backend over the
+  resolved subset, threads **`skills`+`backend`** → `execute_agent_run` → `build_deep_agent` →
+  `create_deep_agent` (ADR-F010 subagent guard still runs; skills/backend carry no model → no gateway bypass).
+  Dropped the `composition.py:151 bound_skill_names=[]` stub. **Migration `0056`** seeds focused default
+  bindings per area (idempotent, insert-only-when-absent; symmetric downgrade removes only seeded pairs):
+  Commercial 4 (msa-review-commercial-purchase/msa-review-saas/contract-qa/nda-review), Privacy 3
+  (dpa-checklist-review/vendor-privacy-policy-first-pass/contract-qa), M&A 3 (nda-review/contract-qa/
+  contract-snapshot), Disputes 2 (contract-qa/action-items-from-client-alert), Employment 3 (contract-qa/
+  nda-review/action-items). **Drift gap closed:** `build_area_subagents(known_skill_names=…)` rejects a
+  subagent referencing an unknown skill at PATCH time (best-effort — skips if no registry installed, never
+  404s the PATCH). **Live skills-on re-qualification** (`docs/fork/evidence/ux-b-3/`, real MiniMax-M3): the
+  **mechanism works** — the model reads the bound SKILL.md via the backend (5× `read_file` in one run);
+  **focused** review still grounds+cites cleanly (`completed`), but a **broad** "structured risk review"
+  over-explores to **`cap_exceeded` with no answer** — an honest calibration finding (the expanded surface
+  amplifies M3's known multi-step inconsistency), **kept verbatim, not tuned away**. **Verify:** scripted suite
+  **2148 passed / 9 skipped** (clean re-run, 0 errors; +18 vs UX-B-2's 2130 — backend/drift/composition/
+  migration tests; the 9th skip = the new provider scenario test self-skipping without a key); migration verified on the conftest
+  throwaway test DB; ruff+mypy clean; **dev stack migrated 0055→0056** (api+arq-worker+ingest-worker rebuilt
+  together; all 5 areas show their bindings). The 22 `asyncpg` setup errors in the first full-suite run were
+  **environmental** (I rebuilt the dev stack + ran the live harness on the same Postgres concurrently) — the
+  errored clusters (auth/audit/admin/watches, untouched by this diff) re-ran **75/75 clean** in isolation; a
+  clean re-run confirms the count. Fresh-context adversarial+security+simplification review: **SHIP-WITH-NITS**
+  (1 should-fix — `read()` offset/limit windowing — FIXED in-slice + tested; 1 nit accepted). No secrets in
+  code/migration/reports. **Pickup: UX-B-4** (live subagent — see Next slice).
 - **UX-B-2 (PR #91) — SHIPPED. Sensible default practice areas, calibrated to the UX-B-1 baseline
   (ADR-F002/F004/F015).** Gave the four remaining standard areas — **Disputes / M&A / Privacy /
   Employment** — a real `profile_md` via the **idempotent migration `0055_default_area_profiles.py`** (the
@@ -599,59 +638,62 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**F2 + UX-A are COMPLETE; UX-B-1 (harness) + UX-B-2 (default areas) are SHIPPED.** All five standard areas
-are now configured + scenario-reported (`docs/fork/evidence/ux-b-{1,2}/`) on a clean **matter-tool** surface
-(`search_documents` + `read_document` only). The next slice expands that surface with skills.
+**F2 + UX-A are COMPLETE; UX-B-1 (harness) + UX-B-2 (default areas) + UX-B-3 (skills) are SHIPPED.** All five
+areas are configured + scenario-reported (`docs/fork/evidence/ux-b-{1,2,3}/`); skills are **live** (the area's
+bound subset exposed via the registry-backed backend, ADR-F016). The next slice exercises **subagents**.
 
-### → NEXT: UX-B-3 — skills activation (S9). The big, security-sensitive slice. Branch FIRST.
+### → NEXT: UX-B-4 — live subagent scenario. Branch FIRST.
 
 **Milestone context:** UX-B = capability convergence ("Deep Agents truly work / cockpit perfect"), the
 gate for the agentic-**modules** / Oscar-Privacy direction ([[oscar-privacy-modules-vision]]). Decomposition +
-sequencing: **`docs/fork/plans/UX-B-deep-agents-truly-work-decomposition.md`**; gate: **ADR-F015** (read both
-first, plus the UX-B-1/2 behavior reports). MiniMax-M3 is the DI model (tier-4-weak).
+sequencing: **`docs/fork/plans/UX-B-deep-agents-truly-work-decomposition.md`**; gate: **ADR-F015** (read it +
+ADR-F010 + ADR-F016 + the UX-B-1/2/3 behavior reports first). MiniMax-M3 is the DI model (tier-4-weak).
 
-**Build UX-B-3 — turn skills on:**
-- **Drop the `composition.py:151` `bound_skill_names=[]` stub**; load the area's `practice_area_skills` rows
-  (the m2m exists, seeded none yet) + thread them through `render_area_agent(bound_skill_names=…)` (already
-  filters to the registry's known set) and attach **`SkillsMiddleware`** so the bound skills become tools.
-- **Re-qualify the harness with skills on** — the expanded tool surface makes selection harder; commit the
-  skills-on re-qualification report (`docs/fork/evidence/ux-b-3/`). Expect M3's tool-selection to need
-  watching (UX-B-2 already showed it over-explores; more tools = more room to wander).
-- **Deeper security pass (this slice earns it):** skill-bound tool dispatch must still route through
-  **`guarded_tool_call`** (R4 cost cap / R5 halt / R6 grants preserved — verify the chokepoint isn't
-  bypassed by the middleware); skill content stays curated/read-only (treat as untrusted model input —
-  prompt injection); **validate subagent-referenced skill names against the registry at config time** (close
-  the drift gap — `area_agent.py` already drops unknown bound names at render, but subagent `skills` lists
-  aren't checked on PATCH).
-- **ADR note** if the harness/skills wiring is architecturally load-bearing (e.g. how SkillsMiddleware
-  composes with the guard chokepoint).
+**Build UX-B-4 — exercise a live subagent:**
+- Configure ONE area with a real declarative subagent spec (the areas' `agent_config={}` was left empty
+  deliberately through UX-B-3). The whole pipe already exists + is guarded: `composition.py` passes
+  `area_spec.subagents` LIVE → `build_deep_agent`/`create_deep_agent` (the ADR-F010 model-bearing-subagent
+  guard fires at the seam; `build_area_subagents` validates the spec, and now validates subagent `skills`
+  against the registry at PATCH time — ADR-F016). A subagent spec may carry `skills` (names) — deepagents
+  wires a per-subagent `SkillsMiddleware(sources=…)`; **NOTE the semantic mismatch to resolve**: deepagents
+  treats subagent `skills` as *source paths*, but our config models them as *names* (area_agent.py
+  `_ALLOWED_SUBAGENT_KEYS`). UX-B-4 must decide how a subagent's named skills map to a backend (reuse
+  `RegistrySkillBackend` — the same area backend already passed to `create_deep_agent` is shared with
+  subagents per deepagents graph.py:630, so a subagent's skill names must be a subset of the area's exposed
+  set, or the backend widened for the subagent).
+- Run a matter under it through the harness; **assert `parent_step_id` ancestry** (the runner already
+  computes it — `runner.py:_innermost_tool_parent`; F0-S7). Commit the subagent behavior report
+  (`docs/fork/evidence/ux-b-4/`). Per ADR-F015 a shape-miss is a finding (and UX-B-3 already showed M3
+  over-explores the expanded surface → delegation is *harder*; expect to calibrate or to find M3 can't
+  delegate reliably — that itself is the qualification result).
 
-**Reusing the harness (anchors, now area-agnostic after UX-B-2):** `api/tests/agents/scenarios/` —
-`scenarios.py` (`Scenario` + `evaluate()` + `build_document(filename, sections)`), `harness.py`
-(`seed_matter(factory, *, area_key, doc, matter_name)` + `run_scenario`), `area_fixtures.py` (per-area docs
-+ scenario sets), `report.py` (`write_report(..., area=, milestone=)`), `conftest.py` (`commit_factory`).
-Run (out-of-CI, live): the `Dockerfile.dev` container — mount `api/`→`/app` + `skills/`→`/skills:ro` + the
-evidence dir, set `DATABASE_URL` + `LQ_AI_GATEWAY_URL=http://localhost:8001` + `LQ_AI_GATEWAY_KEY` +
-`UX_B2_EVIDENCE_DIR` (override `LQ_AI_GATEWAY_URL` to **localhost** — `.env` carries the compose-internal
-`gateway:8001` which `--network host` can't resolve), `--user "$(id -u):$(id -g)" -e HOME=/tmp` +
-`-o cache_dir=/tmp/pytest_cache`. The loop: `composition.py:compose_and_execute_run` (62-209) →
-`runner.py:_drive_agent` → gateway.
+**Reusing the harness (area-agnostic):** `api/tests/agents/scenarios/` — `scenarios.py` (`Scenario` +
+`evaluate()` + `build_document`), `harness.py` (`seed_matter(factory, *, area_key, doc, matter_name)` +
+`run_scenario(scenario, seeded, *, skill_registry=…)` — pass a loaded registry to activate skills),
+`area_fixtures.py`, `report.py` (`write_report(..., area=, milestone=)`), `test_skills_on_scenarios.py` (the
+UX-B-3 skills-on pattern to copy). Run (out-of-CI, live): the `Dockerfile.dev` container — mount `api/`→`/app`
++ `skills/`→`/skills:ro` + the evidence dir, set `DATABASE_URL` + `LQ_AI_GATEWAY_URL=http://localhost:8001`
+(override the compose-internal `gateway:8001` under `--network host`) + `LQ_AI_GATEWAY_KEY` + the evidence-dir
+env, `--user "$(id -u):$(id -g)" -e HOME=/tmp -o cache_dir=/tmp/pytest_cache`.
 
-**Verify:** scripted suite green (CI; provider tests self-skip); skills-on harness report committed;
-**security pass on record** (guard chokepoint, injection, registry-drift); fresh-context adversarial +
-**security + simplification** pass ([[security-review-every-slice]]). HANDOFF updated. Merge per ADR-F005
-against `sarturko-maker/lq-ai-fork` (`gh pr create --repo sarturko-maker/lq-ai-fork --head <branch>`).
+**Verify:** scripted suite green (CI; provider tests self-skip); subagent harness report committed; scripted
+assertion on `parent_step_id` ancestry; fresh-context adversarial + **security + simplification** pass
+([[security-review-every-slice]]). HANDOFF updated. Merge per ADR-F005 against `sarturko-maker/lq-ai-fork`
+(`gh pr create --repo sarturko-maker/lq-ai-fork --head <branch>`).
 
-**Then:** UX-B-4 live subagent (configure an area with a real subagent spec — agent_config was left `{}`
-deliberately in UX-B-2 — run it through the harness, assert `parent_step_id` ancestry) → UX-B-5 cockpit UI
-(area-pick at matter creation + subagent boundary rendering) → UX-B-6 verify.
+**Then:** UX-B-5 cockpit UI (area-pick at matter creation + subagent boundary rendering) → UX-B-6 verify.
 
-**Grounded state of the loop:** the cockpit loop WORKS end-to-end, all 5 areas are configured + scenario-
-reported, on a clean matter-tool surface. Gaps to "truly works": **skills stubbed**
-(`composition.py:151` `bound_skill_names=[]`) ← UX-B-3; **no live subagent** (areas' `agent_config={}`) ←
-UX-B-4; **web area-pick / subagent-rendering missing** ← UX-B-5. Anchors: `composition.py:62-209`,
-`area_agent.py:121-202`, `tools.py:94-136`, `runner.py:236-386`, `practice_areas.py:50-261`,
-`test_agent_composition.py`, and the UX-B-2 migration `0055_default_area_profiles.py`.
+**Grounded state of the loop:** the cockpit loop WORKS end-to-end; all 5 areas configured + scenario-reported;
+**skills live** (registry-backed backend exposes the area's bound subset). Gaps to "truly works": **no live
+subagent** (areas' `agent_config={}`) ← UX-B-4; **web area-pick / subagent-rendering missing** ← UX-B-5.
+Anchors: `composition.py` (skills+backend wiring + `skill_registry_provider`), `skill_backend.py`,
+`area_agent.py:121-216` (`build_area_subagents` + drift validation), `factory.py:build_deep_agent`,
+`runner.py` (`skills`/`backend` params + `_innermost_tool_parent`), the migration `0056`, ADR-F016.
+
+**A caution from UX-B-3 (read before broadening the surface):** the live report showed M3 *over-explores* the
+expanded skill surface on a broad prompt (read 5 SKILL.md files, hit `cap_exceeded`, no answer). Subagents add
+yet more surface — keep the subagent's tool/skill set tight and the prompt narrow, and treat a no-converge run
+as the honest qualification finding, not a thing to tune green.
 
 **Branch FIRST; full ADR-F005 gate; dev-env hard rules apply (migrations on a throwaway pgvector container,
 rebuild workers together, never `down -v`). Merge against `sarturko-maker/lq-ai-fork`.**

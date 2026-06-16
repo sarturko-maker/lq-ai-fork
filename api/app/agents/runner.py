@@ -494,6 +494,8 @@ async def execute_agent_run(
     model: BaseChatModel,
     system_prompt: str = SYSTEM_PROMPT,
     subagents: Sequence[dict[str, Any]] | None = None,
+    skills: Sequence[str] | None = None,
+    backend: Any | None = None,
     wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS,
     checkpointer: BaseCheckpointSaver | None = None,
     thread_id: uuid.UUID | None = None,
@@ -553,6 +555,14 @@ async def execute_agent_run(
         agent_kwargs: dict[str, Any] = {"checkpointer": checkpointer}
         if subagents:
             agent_kwargs["subagents"] = list(subagents)
+        # UX-B-3 (ADR-F016): the area's bound skills + the read-only
+        # registry-backed backend that serves ONLY that subset. Both omitted
+        # when the area binds none → the qualified default graph is unchanged
+        # (no SkillsMiddleware, deepagents' default StateBackend).
+        if skills:
+            agent_kwargs["skills"] = list(skills)
+        if backend is not None:
+            agent_kwargs["backend"] = backend
         agent = build_deep_agent(
             model=model,
             tools=tools,

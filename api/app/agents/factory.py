@@ -135,6 +135,10 @@ def build_deep_agent(
     from app.agents.profiles import ensure_harness_profiles_registered
 
     reject_model_bearing_subagents(kwargs.get("subagents"))
+    # UX-B-3 (ADR-F016): ``skills`` (source paths) + ``backend`` ride **kwargs
+    # straight into create_deep_agent, which wires SkillsMiddleware over the
+    # backend. The ADR-F010 gate is subagent-only — skills/backend carry no
+    # model and cannot bypass the gateway.
 
     # F0-S9: qualification is per-(model, harness-profile) — the registry
     # must be populated before any agent resolves its profile.

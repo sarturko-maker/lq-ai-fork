@@ -69,14 +69,24 @@ Two complementary suites:
   skipped**, ruff+mypy clean; live per-area harness ran (all 12 scenarios `completed`); cockpit shows 5
   configured areas. **Pickup: UX-B-3.**
 
-- **UX-B-3 — Skills activation (S9). The big, security-sensitive slice.** Drop the `composition.py:151`
-  `bound_skill_names=[]` stub; attach `SkillsMiddleware`; thread the DB-bound skill names through. **Re-
-  qualify the harness** with skills on (expanded tool surface → harder selection) and commit the
-  re-qualification report. **Deeper security pass:** skill-bound tool dispatch routes through
-  `guarded_tool_call` (R4 cost cap / R5 halt / R6 grants preserved); skill content curated/read-only;
-  validate subagent-referenced skill names against the registry at config time (close the drift gap). ADR
-  note if the harness profile change is architecturally load-bearing. **Verify:** scripted suite green;
-  skills-on harness report; security pass on record.
+- **UX-B-3 — Skills activation (S9). ✅ SHIPPED (PR #92, ADR-F016).** Corrected the HANDOFF premise:
+  `SkillsMiddleware` adds **no tools** — it `ls`/`download`s a *backend* and the model reads each `SKILL.md`
+  via the builtin `read_file`; so activation = give the agent a **backend** + `skills=[sources]`, and the
+  security posture is **what the backend exposes** (the builtins aren't guarded — the F1 universe-wrap is
+  out of scope). Maintainer-ruled architecture (**ADR-F016**): one library, no duplication (reference by
+  name), **subset per agent** (the whole library confuses the model). Built `app/agents/skill_backend.py`
+  (`RegistrySkillBackend`) — a read-only `BackendProtocol` adapter over a `SkillRegistry` snapshot serving
+  ONLY the area's bound subset (`/skills/<name>/SKILL.md`); zero-copy, reaches no host FS / matter data,
+  drift closes structurally. Composition gained a `skill_registry_provider` seam (worker reads
+  `app.state.skill_registry`), loads `practice_area_skills`, renders with bound/known, builds the backend,
+  threads `skills`+`backend` → `execute_agent_run` → `build_deep_agent`. Dropped the `composition.py:151`
+  stub. Migration **0056** seeds focused default bindings per area (idempotent). Drift gap closed:
+  `build_area_subagents(known_skill_names=…)` rejects unknown subagent skill names at PATCH time. **Re-
+  qualified live** (`docs/fork/evidence/ux-b-3/`): focused review grounds+cites with skills on (clean); a
+  **broad** "structured risk review" makes M3 read the skill 5× and over-explore to `cap_exceeded` — an
+  honest calibration finding (the expanded surface amplifies M3's known multi-step inconsistency), NOT tuned
+  away. **Verify:** scripted suite green (provider tests self-skip); migration on the throwaway test DB;
+  dev stack 0055→0056 (5 areas bound). **Pickup: UX-B-4.**
 
 - **UX-B-4 — Live subagent scenario.** Configure an area with a real subagent spec (e.g. a research subagent
   that narrows to document search), run a matter under it through the harness, and prove the subagent

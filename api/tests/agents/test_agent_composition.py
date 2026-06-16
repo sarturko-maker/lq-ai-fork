@@ -57,6 +57,25 @@ class CapturingBuilder:
 
 
 @dataclass
+class _SkillRec:
+    raw_yaml: str
+    body: str
+
+
+@dataclass
+class _FakeSkillRegistry:
+    """Minimal registry for the skills-activation wiring test (UX-B-3)."""
+
+    records: dict[str, _SkillRec]
+
+    def get(self, name: str) -> _SkillRec | None:
+        return self.records.get(name)
+
+    def names(self) -> list[str]:
+        return sorted(self.records)
+
+
+@dataclass
 class CompositionEnv:
     factory: async_sessionmaker[AsyncSession]
     user_id: uuid.UUID
@@ -285,6 +304,54 @@ async def test_area_filed_matter_combines_tier_floor_and_audits_area(
             .all()
         )
     assert rows and all(r.practice_area_id == area_id for r in rows)
+
+
+async def test_area_bound_skill_reaches_agent_system_prompt(
+    comp_env: CompositionEnv,
+) -> None:
+    """UX-B-3 (ADR-F016): a skill bound to the matter's area, known to the
+    injected registry, is exposed to the agent — its name lands in the
+    SkillsMiddleware-augmented system prompt the model receives. Drives the
+    REAL composition with the registry-backed backend; nothing is monkeypatched.
+    Commercial carries default bindings (migration 0056), incl. ``nda-review``.
+    """
+    from app.models.practice_area import PracticeArea
+
+    async with comp_env.factory() as db:
+        area_id = (
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+        await db.execute(
+            Project.__table__.update()
+            .where(Project.id == comp_env.project_id)
+            .values(practice_area_id=area_id)
+        )
+        await db.commit()
+
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model = ScriptedToolCallingModel(responses=[final_message("done")])
+    # The registry knows only nda-review; the area's other bound names
+    # (msa-*, contract-qa) filter out — proving the subset filter (drift).
+    registry = _FakeSkillRegistry(
+        {
+            "nda-review": _SkillRec(
+                "name: nda-review\ndescription: Use when reviewing an NDA.", "# NDA"
+            )
+        }
+    )
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+        skill_registry_provider=lambda: registry,
+    )
+
+    assert model.seen_messages, "model was never called"
+    prompt_text = "\n".join(
+        str(getattr(m, "content", "")) for msgs in model.seen_messages for m in msgs
+    )
+    assert "nda-review" in prompt_text  # exposed via the backend
+    assert "msa-review-saas" not in prompt_text  # not known to the registry → filtered
 
 
 async def test_unbound_run_gets_no_matter_tools_and_no_envelope(

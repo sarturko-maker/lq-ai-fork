@@ -37,15 +37,34 @@ from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.lease import RunLease, settle_run
 from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
+from app.agents.skill_backend import SKILLS_ROOT, build_area_skill_backend
 from app.agents.stream import RunStreamBroker
 from app.agents.tools import MatterBinding, build_matter_tools
 from app.db.session import get_session_factory
 from app.models.agent_run import AgentRun
-from app.models.practice_area import PracticeArea
+from app.models.practice_area import PracticeArea, PracticeAreaSkill
 from app.models.project import Project
 from app.schemas.agent_runs import AgentRunStatus
+from app.skills.registry import MutableSkillRegistry, SkillRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def _skill_registry_from_app_state() -> SkillRegistry | None:
+    """Current :class:`SkillRegistry` snapshot from ``app.state``, or None.
+
+    Mirrors :func:`app.autonomous.prompts._registry_from_app_state`: both
+    production startups install a :class:`MutableSkillRegistry` holder at
+    ``app.state.skill_registry`` — the FastAPI lifespan and the arq worker's
+    ``on_startup`` (runs execute in the worker, so the snapshot resolves
+    there). Tests inject a fake via ``skill_registry_provider``; the import
+    of :mod:`app.main` is deferred to avoid the startup import cycle.
+    """
+    from app.main import app
+
+    holder: MutableSkillRegistry | None = getattr(app.state, "skill_registry", None)
+    return holder.current() if holder is not None else None
+
 
 # Appended to SYSTEM_PROMPT for matter-bound runs. Transparency rule:
 # every agent instruction is readable in source (CLAUDE.md).
@@ -81,6 +100,7 @@ async def compose_and_execute_run(
     model_builder: Callable[..., BaseChatModel] = build_gateway_chat_model,
     session_factory_provider: Callable[[], async_sessionmaker[AsyncSession]] = get_session_factory,
     checkpointer_provider: Callable[[], BaseCheckpointSaver | None] = get_agent_checkpointer,
+    skill_registry_provider: Callable[[], SkillRegistry | None] = _skill_registry_from_app_state,
 ) -> None:
     """Compose one run's dependencies and execute it end to end.
 
@@ -99,6 +119,7 @@ async def compose_and_execute_run(
     try:
         binding: MatterBinding | None = None
         area_spec: AreaAgentSpec | None = None
+        registry: SkillRegistry | None = None
         is_follow_up = False
         async with session_factory() as db:
             run = await db.get(AgentRun, run_id)
@@ -137,19 +158,31 @@ async def compose_and_execute_run(
                     # F1-S3: the matter's practice area IS the agent identity
                     # (ADR-F002). Render its profile/tier/subagents from
                     # config (ADR-F004 — one renderer, no per-area branches).
-                    # Skills are config-landed but not live-attached this
-                    # slice (attaching SkillsMiddleware changes the harness
-                    # profile → S9 re-qualification; the activation slice owns
-                    # it), so bound_skill_names is empty here by design.
+                    # UX-B-3 (ADR-F016): the area's bound skills (the
+                    # practice_area_skills rows) go live, filtered to the
+                    # registry's current set (drift). render_area_agent returns
+                    # the resolved names; the backend below is built over them.
                     if project.practice_area_id is not None:
                         area = await db.get(PracticeArea, project.practice_area_id)
                         if area is not None:
+                            registry = skill_registry_provider()
+                            bound_skill_names = (
+                                (
+                                    await db.execute(
+                                        select(PracticeAreaSkill.skill_name).where(
+                                            PracticeAreaSkill.practice_area_id == area.id
+                                        )
+                                    )
+                                )
+                                .scalars()
+                                .all()
+                            )
                             area_spec = render_area_agent(
                                 profile_md=area.profile_md,
                                 default_tier_floor=area.default_tier_floor,
                                 agent_config=area.agent_config,
-                                bound_skill_names=[],
-                                known_skill_names=[],
+                                bound_skill_names=bound_skill_names,
+                                known_skill_names=registry.names() if registry is not None else [],
                             )
 
         checkpointer = checkpointer_provider()
@@ -184,6 +217,18 @@ async def compose_and_execute_run(
         area_floor = area_spec.tier_floor if area_spec is not None else None
         effective_tier_floor = combine_tier_floors(matter_floor, area_floor)
 
+        # UX-B-3 (ADR-F016): the area's bound skills become live via a
+        # read-only backend exposing ONLY that subset — least privilege over
+        # the (unguarded) builtin read_file the model uses to read a SKILL.md.
+        # None when the area binds no resolvable skill → the qualified default
+        # graph (no skills source) is unchanged.
+        skill_backend = (
+            build_area_skill_backend(registry, area_spec.skills)
+            if registry is not None and area_spec is not None and area_spec.skills
+            else None
+        )
+        skills_sources = [SKILLS_ROOT] if skill_backend is not None else None
+
         http_client = build_gateway_http_client()
         try:
             model = model_builder(
@@ -200,6 +245,8 @@ async def compose_and_execute_run(
                 model=model,
                 system_prompt=system_prompt_for(binding, area_spec),
                 subagents=area_spec.subagents if area_spec is not None else None,
+                skills=skills_sources,
+                backend=skill_backend,
                 checkpointer=checkpointer,
                 thread_id=thread_id,
                 publisher=publisher,
