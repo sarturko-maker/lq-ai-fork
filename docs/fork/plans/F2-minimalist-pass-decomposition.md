@@ -164,7 +164,7 @@ light+dark × wide+narrow in `docs/fork/evidence/<slice>/` · HANDOFF updated). 
   → inked `--foreground` underline; trust → `<PageShell size="wide">`. `:focus-visible --ring` added to both
   nav sets. Scope = nav shells only (child page bodies + Trust\*Card internals stay on `--lq-*`/teal — owned
   by R16/R19). vitest 851; f2-baseline cypress 5/5. Evidence: `docs/fork/evidence/f2-m8/`. Review SHIP.
-- **F2-M9** — done (PR #__): **consistency sweep + verify — the F2 closer.** Static audit of every F2-touched
+- **F2-M9** — done (PR #88): **consistency sweep + verify — the F2 closer.** Static audit of every F2-touched
   surface: **zero color `--lq-*`** (the `--lq-radius*`/`--lq-space-*`/`lq-text-*` carve-outs are the
   deliberate R-TYPO boundary), **zero `{@html}` sinks**, **zero teal/hardcoded-hex rogue accents** (one-accent
   holds: ink primaries + scarce `--brand`/`--ring`). **Reachability (no-retire contract):** all 11 tab

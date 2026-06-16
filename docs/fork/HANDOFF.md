@@ -4,7 +4,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (F2 minimalist pass COMPLETE — M0…M9 + VL0…VL2 all shipped; UX-A navigational convergence COMPLETE; cockpit is the single app shell; AE-series CLOSED)
 
-- **F2-M9 (PR #__) — SHIPPED. Consistency sweep + verify — the F2 milestone closer. NO code change.**
+- **F2-M9 (PR #88) — SHIPPED. Consistency sweep + verify — the F2 milestone closer. NO code change.**
   Static audit of every F2-touched surface (cockpit/rail/conversation/matters + all list/card surfaces +
   the M8 nav shells): **zero color `--lq-*`** survivors (the `--lq-radius*`/`--lq-space-*` + `lq-text-*`
   typography CLASSES are the deliberate R-TYPO carve-out, not a miss); **zero `{@html}` sinks** (the one
