@@ -282,6 +282,32 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
 - Long tasks keep running when the laptop closes: background continuation + notification + finished
   artifact on the Matter.
 
+## Oscar Edition — Agentic Modules (post-UX-B; ADR-F018)
+
+Outcome: enterprises adopt **modules** — vertical capabilities where the agent *does the work* — on the
+practice-area substrate. The fork is positioned as **LQ.AI Oscar Edition** (cutting-edge: Deep Agents +
+modules; upstream stays reserved — rebrand its own ADR + slice when executed,
+[[lq-ai-oscar-edition-rebrand]]). A **module** = a practice area + a **typed domain** + **code-validated
+agent writes** (agent proposes, code disposes) + deliverables (ADR-F018). Built **short-slice → compact →
+short-slice**.
+
+- **Module 1 — Privacy / ROPA (FIRST, in progress).** Maintain a client's ROPA + privacy programme with the
+  Privacy Deep Agent — a OneTrust-equivalent done LQ.AI-style. Reference-only: the maintainer's deployed
+  **Oscar Privacy** product (take the idea + domain, reimplement + **improve** — code-validated entries over
+  Oscar's trusted-model writes; ICO RAG + Oscar's engine dropped). Decomposition:
+  `docs/fork/plans/PRIV-privacy-ropa-module-decomposition.md` — PRIV-0 (plan+ADR) → PRIV-1 (ROPA domain spine
+  + code validation) → PRIV-2 (validated agent write path) → PRIV-3 (thin vertical + first ROPA export +
+  scenario calibration) → PRIV-4+ (broaden). The genuinely-large GDPR programme is also the natural test of
+  whether a tier-4 model fans out to subagents (open UX-B-4 question).
+- **Module 2 — Redlining (NEXT track, Commercial/M&A).** "Redline like a lawyer": **adeu** (MIT, mechanical
+  OpenXML tracked-changes — clean, no LLM calls, no gateway entanglement) as the RENDER layer + a redlining
+  skill / positions-playbook (acceptable terms, fallback language, defined-term + cross-ref consistency,
+  clause-level rewrites/insertions, margin-comment rationale) + agent loop + harness calibration. adeu is weak
+  at lawyering out-of-the-box; the intelligence is our build. Its own decomposition + ADR when it starts.
+- **Substrate enablers (built in service of modules, not speculatively):** run-artifact surface (deliverables);
+  playbooks-as-deliverables (skills with an explicit output artifact — the mike concept); MCP via gateway
+  tool-egress (cf. upstream ADR 0014/0015) only when a module needs an external source.
+
 ## Backlog
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)

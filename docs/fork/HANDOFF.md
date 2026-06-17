@@ -2,7 +2,22 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 + UX-A + **UX-B COMPLETE** — UX-B-6 verify sweep SHIPPED; pickup = the agentic-modules / Oscar-Privacy direction, its own milestone)
+## State (UX-B COMPLETE; **Oscar Edition / Agentic Modules milestone OPEN** — PRIV-0 plan+ADR-F018 SHIPPED; pickup = PRIV-1 ROPA domain spine)
+
+- **PRIV-0 (PR #TBD) — SHIPPED. Privacy/ROPA module: plan + ADR-F018. DOCS-ONLY.** Opened the first agentic
+  **module** milestone of **LQ.AI Oscar Edition** (maintainer "Go" 2026-06-17: privacy first, redlining next).
+  **ADR-F018 (proposed):** a *module* = a practice area + a **typed domain** + **code-validated agent writes**
+  (agent proposes → deterministic code validates → commit, or rejects back to the model — never silent
+  write/fix; the headline improvement over the reference product **Oscar Privacy**, which trusted the model's
+  writes). Oscar is **reference-only** (take the idea + domain, reimplement + improve; ICO RAG + Oscar's
+  single-call/fixed-action engine dropped). **Honest grounding correction:** CLAUDE.md blocker #5 ("practice_
+  area/unit_of_work appear nowhere") is **stale** — `practice_areas` + matter binding (`projects.practice_area_id`,
+  `context_md`) shipped in F1-S3; what's missing is only the **typed ROPA domain + validated write path**, so
+  the foundation is small. Decomposition `docs/fork/plans/PRIV-privacy-ropa-module-decomposition.md`: PRIV-0 →
+  PRIV-1 (ROPA domain spine + code validation) → PRIV-2 (validated agent write path) → PRIV-3 (thin vertical +
+  ROPA export + scenario calibration) → PRIV-4+ (broaden). **Working rule (maintainer): short slice → compact
+  → short slice.** Redlining = the NEXT track (adeu MIT render layer + a redline-like-a-lawyer skill).
+  **Pickup: PRIV-1.**
 
 - **UX-B-6 (PR #95) — SHIPPED. Verify + consistency sweep — the UX-B closer. DOCS-ONLY (no app/web/api
   change).** Re-verified every cross-slice claim against the **live dev DB (read-only `SELECT` — never an
@@ -731,42 +746,35 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**F2 + UX-A + UX-B are all COMPLETE.** UX-B-1 (harness) → UX-B-2 (areas) → UX-B-3 (skills) → UX-B-4
-(subagents) → UX-B-5 (cockpit web) → UX-B-6 (verify sweep) all SHIPPED. All five areas are configured +
-scenario-reported; skills are **live** (per-area subset, ADR-F016); Commercial carries a **live
-`document-researcher` subagent** with its own isolated skill source (ADR-F017), delegated on-demand; the web
-lets the user **pick the area at matter creation**, **renders the subagent delegation boundary** when it
-occurs, and **surfaces area config read-only**. UX-B-6 re-verified every claim against the live dev DB and
-wrote the milestone index (`docs/fork/evidence/UX-B-MILESTONE-INDEX.md` — the honest M3 behaviour map). **The
-substrate demonstrably works end-to-end; the agentic-modules / Oscar-Privacy direction is unblocked.**
+**UX-B is COMPLETE; the Oscar Edition / Agentic Modules milestone is OPEN.** PRIV-0 (plan + ADR-F018) is
+shipped — the Privacy/ROPA module is scoped and the architecture decided (typed domain + code-validated agent
+writes; agent proposes, code disposes). Decomposition: `docs/fork/plans/PRIV-privacy-ropa-module-decomposition.md`.
 
-### → NEXT: the agentic-modules / Oscar-Privacy direction (its own milestone). Branch FIRST; needs a plan + ADR before code.
+### → NEXT: PRIV-1 — ROPA domain spine + code validation (no agent yet). Branch FIRST.
 
-**Context:** UX-B was the gate ("Deep Agents truly work / cockpit perfect") for the long-range vision —
-agentic SaaS **modules** on the practice-area substrate ([[oscar-privacy-modules-vision]]). That gate is now
-passed. The next milestone is the maintainer's call (it has not been scoped or authorised — do NOT start
-building without an explicit go-ahead + a written plan + an ADR for any structural decision). Likely entry
-points, in no fixed order:
-- **A first module** built on the proven substrate (configured area → per-area + per-subagent skill subsets →
-  on-demand delegation → honest cockpit). The honest M3 behaviour map in `UX-B-MILESTONE-INDEX.md` is the
-  calibration baseline any new module inherits; ADR-F015 (scenario qualification) is the template for
-  admitting any new capability or model.
-- **The open tier-4 delegation calibration question** (backlog, recorded in `MILESTONES.md`): whether/when a
-  tier-4 model fans out on a genuinely large matter — a profile nudge, a larger fixture, or a stronger
-  qualified model (S9/ADR-F015 gate first).
-- **The pivot schema** still pending (CLAUDE.md blocker #5): `practice_area`/`unit_of_work` are not yet
-  first-class in the DB schema — areas/matters remain wired through the existing project/area columns. A real
-  module milestone may need this; scope it deliberately (it is its own phase).
+**Build PRIV-1 (the smallest useful typed entity, the spine — keep it SHORT, compact after):**
+- A **`processing_activities`** SQLAlchemy model (purpose, lawful basis, retention, special-category flag,
+  controller/processor role) linked to a Privacy `project_id` (the matter / unit of work). **Migration 0058**
+  (new chain head; current head is 0057).
+- A **Pydantic domain schema with code invariants** (ADR-F018's headline pattern): lawful-basis enum;
+  retention required; special-category ⇒ Article 9 condition required. This schema is what the PRIV-2 agent
+  write path will validate against before commit.
+- Authz follows the existing **project-ownership** pattern (cross-user → 404, never 403). NO agent wiring yet.
+- **Tests:** unit tests for the invariants (accept + reject cases).
 
-**Reuse / anchors:** the scenario harness (`api/tests/agents/scenarios/`); `composition.py`
-(`build_area_skill_wiring` + `skill_registry_provider`), `skill_backend.py` (multi-source
-`RegistrySkillBackend`), `area_agent.py`, `runner.py` (`parent_step_id` via `_innermost_tool_parent`); web
-`agents/helpers.ts` (`groupTurnTree`/`subagentTypeOf`), `cockpit/{NewMatterDialog,AreaConfigDisclosure}.svelte`;
-migrations 0054–0057; ADR-F002/F004/F010/F015/F016/F017; evidence `docs/fork/evidence/ux-b-{1,2,3,4,5}/` +
-the milestone index. **Verify (DoD):** per the touched surface — `npm run check`/vitest (web), scripted suite
-(api), the scenario report for any production-real capability claim; fresh-context adversarial + **security +
-simplification** pass ([[security-review-every-slice]]). Merge per ADR-F005 against `sarturko-maker/lq-ai-fork`
-(`gh pr create --repo sarturko-maker/lq-ai-fork --head <branch>`).
+**Dev-stack safety (CLAUDE.md hard rules):** verify migration 0058 on a **throwaway pgvector container**,
+never host-side `alembic upgrade` on the dev DB; never `docker compose down -v`; rebuild api+arq-worker+
+ingest-worker together once it lands.
+
+**Reuse / anchors:** existing matter/area schema `api/app/models/{project.py,practice_area.py}`; the
+project-ownership authz pattern; `api/alembic/versions/` (head 0057); the scenario harness for later slices
+(`api/tests/agents/scenarios/`); `composition.py`/`area_agent.py`/`guard.py`/`tools.py` (PRIV-2 will add a
+guarded validated-write tool). ADRs: **F018** (this milestone), F002, ADR-0013 D4, F010, F015.
+
+**Verify (DoD):** scripted api suite green (CI, containerized — host py is 3.11, use the `lq-ai-api-dev`
+image); migration verified on a throwaway pgvector container; fresh-context adversarial + **security +
+simplification** pass ([[security-review-every-slice]]). Merge per ADR-F005 against `sarturko-maker/lq-ai-fork`.
+**HANDOFF updated last; COMPACT after the slice** (maintainer rule: short slice → compact → short slice).
 
 **Grounded state of the loop:** the cockpit loop WORKS end-to-end AND is now surfaced on the web honestly;
 all 5 areas configured + scenario-reported; **skills live** (per-area + per-subagent subsets); **subagent
