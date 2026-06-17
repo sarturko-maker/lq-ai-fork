@@ -128,9 +128,18 @@ Two complementary suites:
   `docs/fork/evidence/ux-b-5/` (area-config + area-pick LIVE Commercial; delegation boundary STUBBED — M3
   doesn't elect to fan out at small matter sizes, UX-B-4, so the unit test is the gate). **Pickup: UX-B-6.**
 
-- **UX-B-6 — Verify + consistency sweep (if warranted).** Cross-slice: all 5 areas configured + scenario-
-  reported; skills on + re-qualified; subagents exercised; cockpit honest. Final HANDOFF + a milestone
-  behavior-report index. (May fold into UX-B-5 if thin.)
+- **UX-B-6 — Verify + consistency sweep. ✅ SHIPPED (PR #TBD).** The UX-B closer (its own small slice —
+  UX-B-5 stayed focused, so this did not fold in). Re-verified every cross-slice claim against the **live dev
+  DB (read-only)**: all 5 areas `configured` + profiled; tier floors NULL; skills bound per area (0056 —
+  Commercial 4 / Disputes 2 / M&A 3 / Privacy 3 / Employment 3); Commercial's `document-researcher` subagent
+  present with skills ⊆ its bound set (0057, ADR-F017 subset holds in stored data); cockpit honest (UX-B-5).
+  No drift between docs and the running stack. Wrote the **milestone behavior-report index**
+  (`docs/fork/evidence/UX-B-MILESTONE-INDEX.md`) tying UX-B-1…5 together — the honest map of what M3 does
+  (grounds+cites, declines honestly, clarifies, answers general directly) and does not do reliably
+  (multi-step efficiency varies; a broad ask over a large skill surface can `cap_exceeded`; doesn't elect to
+  delegate at small matter sizes). The open calibration question (does a tier-4 model fan out on a genuinely
+  large matter?) recorded as **backlog** in `MILESTONES.md`, not built. Docs-only. **UX-B is COMPLETE — the
+  agentic-modules / Oscar-Privacy direction is unblocked as its own milestone.**
 
 ## Sequencing rationale
 

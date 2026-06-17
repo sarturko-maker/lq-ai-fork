@@ -328,6 +328,12 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
   **UX-B** = capability convergence (tools as in-context agent capabilities — folds into the pivot track,
   F1-S4/S5 + area activation + the practice_area/unit_of_work schema). UX-A/UX-B together are F002's F3
   commitment, now sequenced. F2-M0 (ADR + decomposition + baseline) shipping; AE0–AE7 already closed.
+- **Tier-4 large-matter delegation (UX-B-4/6 open calibration question).** UX-B-4 proved the delegation
+  machinery is correct + isolated (deterministic CI test), but MiniMax-M3 does not *elect* to fan out at
+  the matter sizes tested (`task_calls=0` on a 4-doc RFQ — it reads them itself). Does a tier-4 model ever
+  delegate on a genuinely large matter? Options (rough effort order): a conditional profile nudge naming the
+  researcher for large/multi-thread matters; a larger fixture (dozens of docs); a stronger qualified model
+  (S9/ADR-F015 gate first). Not a UX-B blocker; see `docs/fork/evidence/UX-B-MILESTONE-INDEX.md`.
 - NewMatterModal's privileged InfoTip claims "defaults to Tier 2" — neither client nor server
   implements a default (the field is simply required); fix the copy on next touch (transparency).
 - Pre-F1 guard: frontend-static practice-area identifiers must never leak into stored rows
