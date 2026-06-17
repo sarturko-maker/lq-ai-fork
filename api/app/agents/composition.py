@@ -37,7 +37,7 @@ from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.lease import RunLease, settle_run
 from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
-from app.agents.skill_backend import SKILLS_ROOT, build_area_skill_backend
+from app.agents.skill_backend import SkillWiring, build_area_skill_wiring
 from app.agents.stream import RunStreamBroker
 from app.agents.tools import MatterBinding, build_matter_tools
 from app.db.session import get_session_factory
@@ -217,17 +217,24 @@ async def compose_and_execute_run(
         area_floor = area_spec.tier_floor if area_spec is not None else None
         effective_tier_floor = combine_tier_floors(matter_floor, area_floor)
 
-        # UX-B-3 (ADR-F016): the area's bound skills become live via a
-        # read-only backend exposing ONLY that subset — least privilege over
-        # the (unguarded) builtin read_file the model uses to read a SKILL.md.
-        # None when the area binds no resolvable skill → the qualified default
-        # graph (no skills source) is unchanged.
-        skill_backend = (
-            build_area_skill_backend(registry, area_spec.skills)
-            if registry is not None and area_spec is not None and area_spec.skills
-            else None
-        )
-        skills_sources = [SKILLS_ROOT] if skill_backend is not None else None
+        # UX-B-3/UX-B-4 (ADR-F016/F017): the area's bound skills become live via
+        # a read-only MULTI-SOURCE backend — least privilege over the (unguarded)
+        # builtin read_file the model uses to read a SKILL.md. The main agent
+        # sees ONLY the area subset (source /skills); each skill-bearing subagent
+        # sees ONLY its own (⊆ area) subset under its own source (deepagents'
+        # isolated per-subagent skills). The wiring also rewrites each subagent
+        # spec's `skills` (names → its virtual source path). When nothing
+        # resolves (skills off — no registry — or no bound skill) the backend is
+        # None and subagent `skills` are stripped, so the qualified default graph
+        # is unchanged and no stored name can reach deepagents as a bogus source.
+        if area_spec is not None:
+            wiring = build_area_skill_wiring(
+                registry,
+                area_skill_names=area_spec.skills,
+                subagents=area_spec.subagents,
+            )
+        else:
+            wiring = SkillWiring(backend=None, main_sources=None, subagents=[])
 
         http_client = build_gateway_http_client()
         try:
@@ -244,9 +251,9 @@ async def compose_and_execute_run(
                 tools=tools,
                 model=model,
                 system_prompt=system_prompt_for(binding, area_spec),
-                subagents=area_spec.subagents if area_spec is not None else None,
-                skills=skills_sources,
-                backend=skill_backend,
+                subagents=wiring.subagents or None,
+                skills=wiring.main_sources,
+                backend=wiring.backend,
                 checkpointer=checkpointer,
                 thread_id=thread_id,
                 publisher=publisher,

@@ -17,9 +17,10 @@ import pytest
 from app.agents.skill_backend import (
     SKILLS_ROOT,
     RegistrySkillBackend,
-    build_area_skill_backend,
+    build_area_skill_wiring,
     reconstruct_skill_md,
     resolve_skill_files,
+    subagent_source_path,
 )
 
 pytestmark = pytest.mark.unit
@@ -50,7 +51,8 @@ def _md(name: str, desc: str = "Use when X.", body: str = "# Title\nDo the thing
 
 
 def _backend(*names: str) -> RegistrySkillBackend:
-    return RegistrySkillBackend({n: _md(n) for n in names})
+    """Single-source (area) backend — the UX-B-3 shape, now under one source."""
+    return RegistrySkillBackend({SKILLS_ROOT: {n: _md(n) for n in names}})
 
 
 # --- the read path ----------------------------------------------------------
@@ -90,7 +92,7 @@ def test_read_windows_by_offset_and_limit() -> None:
     """read() slices lines before returning — the read_file tool numbers from
     offset+1 and does not re-slice (the StateBackend contract)."""
     md = reconstruct_skill_md("name: nda-review\ndescription: d", "L1\nL2\nL3\nL4\nL5")
-    b = RegistrySkillBackend({"nda-review": md})
+    b = RegistrySkillBackend({SKILLS_ROOT: {"nda-review": md}})
     path = f"{SKILLS_ROOT}/nda-review/SKILL.md"
     full = b.read(path).file_data["content"]  # type: ignore[index]
     lines = full.splitlines()
@@ -142,26 +144,151 @@ def test_resolve_skill_files_drops_unknown_names() -> None:
     assert set(resolved) == {"nda-review"}
 
 
-def test_build_area_skill_backend_none_when_nothing_resolves() -> None:
+def test_wiring_backend_none_when_nothing_resolves() -> None:
     registry = _FakeRegistry({"nda-review": _Rec("name: nda-review\ndescription: d", "body")})
-    assert build_area_skill_backend(registry, []) is None  # type: ignore[arg-type]
-    assert build_area_skill_backend(registry, ["ghost"]) is None  # type: ignore[arg-type]
+    assert build_area_skill_wiring(registry, area_skill_names=[], subagents=[]).backend is None  # type: ignore[arg-type]
+    assert (
+        build_area_skill_wiring(registry, area_skill_names=["ghost"], subagents=[]).backend is None  # type: ignore[arg-type]
+    )
 
 
-def test_build_area_skill_backend_serves_resolved_subset() -> None:
+def test_wiring_area_source_serves_resolved_subset() -> None:
     registry = _FakeRegistry(
         {
             "nda-review": _Rec("name: nda-review\ndescription: d", "b1"),
             "contract-qa": _Rec("name: contract-qa\ndescription: d", "b2"),
         }
     )
-    backend = build_area_skill_backend(registry, ["nda-review", "ghost"])  # type: ignore[arg-type]
-    assert backend is not None
-    paths = sorted(e["path"] for e in (backend.ls(SKILLS_ROOT).entries or []))
+    wiring = build_area_skill_wiring(
+        registry,
+        area_skill_names=["nda-review", "ghost"],
+        subagents=[],  # type: ignore[arg-type]
+    )
+    assert wiring.backend is not None
+    paths = sorted(e["path"] for e in (wiring.backend.ls(SKILLS_ROOT).entries or []))
     assert paths == [f"{SKILLS_ROOT}/nda-review"]  # ghost dropped
 
 
-# --- the deepagents SkillsMiddleware contract -------------------------------
+# --- multi-source isolation (UX-B-4, ADR-F017) ------------------------------
+
+
+def test_multi_source_isolation_area_vs_subagent() -> None:
+    """Each source lists ONLY its own names; a subagent source is invisible to
+    the area source, and vice versa (deepagents' per-subagent skill isolation)."""
+    sub = subagent_source_path("document-researcher")
+    b = RegistrySkillBackend(
+        {
+            SKILLS_ROOT: {"contract-qa": _md("contract-qa"), "nda-review": _md("nda-review")},
+            sub: {"nda-review": _md("nda-review")},
+        }
+    )
+    # The area source lists its two names — and NOT the nested subagent dir.
+    area_paths = sorted(e["path"] for e in (b.ls(SKILLS_ROOT).entries or []))
+    assert area_paths == [f"{SKILLS_ROOT}/contract-qa", f"{SKILLS_ROOT}/nda-review"]
+    assert all("subagents" not in p for p in area_paths)
+    # The subagent source lists ONLY its own (⊆ area) subset.
+    sub_paths = sorted(e["path"] for e in (b.ls(sub).entries or []))
+    assert sub_paths == [f"{sub}/nda-review"]
+    # Reads resolve per source; a name absent from a given source is not found
+    # under it even though it exists under another source.
+    assert b.read(f"{sub}/nda-review/SKILL.md").error is None
+    assert b.read(f"{sub}/contract-qa/SKILL.md").error == "file_not_found"
+    assert b.read(f"{SKILLS_ROOT}/contract-qa/SKILL.md").error is None
+
+
+def test_subagent_source_path_is_under_skills_subagents() -> None:
+    assert subagent_source_path("document-researcher") == "/skills/subagents/document-researcher"
+
+
+# --- build_area_skill_wiring (the composition seam) -------------------------
+
+
+def _wiring_registry() -> _FakeRegistry:
+    return _FakeRegistry(
+        {
+            "contract-qa": _Rec("name: contract-qa\ndescription: d", "b1"),
+            "nda-review": _Rec("name: nda-review\ndescription: d", "b2"),
+            "msa-review-saas": _Rec("name: msa-review-saas\ndescription: d", "b3"),
+        }
+    )
+
+
+def test_wiring_area_only_no_subagents() -> None:
+    wiring = build_area_skill_wiring(
+        _wiring_registry(),
+        area_skill_names=["contract-qa", "nda-review"],
+        subagents=[],  # type: ignore[arg-type]
+    )
+    assert wiring.main_sources == [SKILLS_ROOT]
+    assert wiring.subagents == []
+    assert wiring.backend is not None
+    assert sorted(e["path"] for e in (wiring.backend.ls(SKILLS_ROOT).entries or [])) == [
+        f"{SKILLS_ROOT}/contract-qa",
+        f"{SKILLS_ROOT}/nda-review",
+    ]
+
+
+def test_wiring_subagent_gets_its_own_source() -> None:
+    sub = {
+        "name": "document-researcher",
+        "description": "d",
+        "system_prompt": "p",
+        "skills": ["nda-review"],
+    }
+    wiring = build_area_skill_wiring(
+        _wiring_registry(),
+        area_skill_names=["contract-qa", "nda-review"],
+        subagents=[sub],  # type: ignore[arg-type]
+    )
+    src = subagent_source_path("document-researcher")
+    # The subagent spec's skills (names) are rewritten to its source path.
+    assert wiring.subagents[0]["skills"] == [src]
+    # The backend serves the subagent's isolated subset under that source.
+    assert wiring.backend is not None
+    assert [e["path"] for e in (wiring.backend.ls(src).entries or [])] == [f"{src}/nda-review"]
+    # The original spec dict is NOT mutated (composition rebuilds).
+    assert sub["skills"] == ["nda-review"]
+
+
+def test_wiring_drops_subagent_skill_outside_area() -> None:
+    """⊆-area + drift: a subagent name not in the area's resolved set is dropped,
+    and a subagent left with nothing loses its skills key entirely."""
+    sub = {
+        "name": "x",
+        "description": "d",
+        "system_prompt": "p",
+        "skills": ["nda-review", "msa-review-saas"],
+    }  # msa-review-saas NOT area-bound below
+    wiring = build_area_skill_wiring(
+        _wiring_registry(),
+        area_skill_names=["nda-review"],
+        subagents=[sub],  # type: ignore[arg-type]
+    )
+    src = subagent_source_path("x")
+    assert wiring.subagents[0]["skills"] == [src]
+    assert [e["path"] for e in (wiring.backend.ls(src).entries or [])] == [f"{src}/nda-review"]
+
+    sub2 = {"name": "y", "description": "d", "system_prompt": "p", "skills": ["msa-review-saas"]}
+    wiring2 = build_area_skill_wiring(
+        _wiring_registry(),
+        area_skill_names=["nda-review"],
+        subagents=[sub2],  # type: ignore[arg-type]
+    )
+    assert "skills" not in wiring2.subagents[0]  # nothing resolved → key dropped
+
+
+def test_wiring_registry_none_strips_all_skills() -> None:
+    """Skills off (no registry): backend None, subagent skills stripped so a
+    stored name can never reach deepagents as a bogus source."""
+    sub = {"name": "x", "description": "d", "system_prompt": "p", "skills": ["nda-review"]}
+    wiring = build_area_skill_wiring(
+        None,
+        area_skill_names=["nda-review"],
+        subagents=[sub],  # type: ignore[arg-type]
+    )
+    assert wiring.backend is None
+    assert wiring.main_sources is None
+    assert "skills" not in wiring.subagents[0]
 
 
 def test_deepagents_loader_parses_our_backend() -> None:

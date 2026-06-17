@@ -354,6 +354,92 @@ async def test_area_bound_skill_reaches_agent_system_prompt(
     assert "msa-review-saas" not in prompt_text  # not known to the registry → filtered
 
 
+async def test_subagent_delegation_nests_steps_via_parent_step_id(
+    comp_env: CompositionEnv,
+) -> None:
+    """UX-B-4 (ADR-F017): when the lead agent delegates via the deepagents
+    ``task`` tool, the subagent's steps nest under that task step through
+    ``parent_step_id`` — the delegation ancestry the runner records (F0-S7).
+
+    Commercial carries the live ``document-researcher`` subagent (migration
+    0057, applied to the test DB), so composing a matter under it builds the
+    subagent for real. Driven by a scripted model: turn 1 calls ``task``, the
+    subagent answers, the lead synthesises. No registry is injected — the
+    subagent runs skill-less here (this probes ancestry, not skills) and the
+    composition wiring strips its skill names, so deepagents never sees a bogus
+    source. Deterministic; CI gate (the live qualification is separate)."""
+    from app.models.agent_run import AgentRunStep
+    from app.models.practice_area import PracticeArea
+    from app.schemas.agent_runs import AgentRunStepKind
+
+    async with comp_env.factory() as db:
+        area_id = (
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+        await db.execute(
+            Project.__table__.update()
+            .where(Project.id == comp_env.project_id)
+            .values(practice_area_id=area_id)
+        )
+        await db.commit()
+
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message(
+                "task",
+                {
+                    "description": "Investigate the liability cap across the matter's documents.",
+                    "subagent_type": "document-researcher",
+                },
+            ),
+            final_message(
+                "Researcher findings: the cap is the fees paid in the preceding twelve "
+                "months (Acme MSA, section 7)."
+            ),
+            final_message(
+                "Based on the researcher's findings, the liability cap is 12 months' fees."
+            ),
+        ]
+    )
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+        # No registry → the subagent's declared skills are stripped (skill-less).
+        skill_registry_provider=lambda: None,
+    )
+
+    run = await _run_row(comp_env, run_id)
+    assert run.status == "completed", run.error
+
+    async with comp_env.factory() as db:
+        steps = (
+            (
+                await db.execute(
+                    select(AgentRunStep)
+                    .where(AgentRunStep.run_id == run_id)
+                    .order_by(AgentRunStep.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    task_steps = [
+        s for s in steps if s.kind == AgentRunStepKind.tool_call.value and s.name == "task"
+    ]
+    assert task_steps, (
+        f"no `task` delegation step recorded; steps={[(s.kind, s.name) for s in steps]}"
+    )
+    task_ids = {s.id for s in task_steps}
+    nested_under_task = [s for s in steps if s.parent_step_id in task_ids]
+    assert nested_under_task, (
+        "no step nested under the task delegation — parent_step_id ancestry missing; "
+        f"parents={[(s.seq, s.parent_step_id) for s in steps]}"
+    )
+
+
 async def test_unbound_run_gets_no_matter_tools_and_no_envelope(
     comp_env: CompositionEnv,
 ) -> None:
