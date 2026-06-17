@@ -2,8 +2,27 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 + UX-A COMPLETE; UX-B milestone OPEN — UX-B-5 cockpit web SHIPPED; pickup = UX-B-6 verify sweep)
+## State (F2 + UX-A + **UX-B COMPLETE** — UX-B-6 verify sweep SHIPPED; pickup = the agentic-modules / Oscar-Privacy direction, its own milestone)
 
+- **UX-B-6 (PR #95) — SHIPPED. Verify + consistency sweep — the UX-B closer. DOCS-ONLY (no app/web/api
+  change).** Re-verified every cross-slice claim against the **live dev DB (read-only `SELECT` — never an
+  `alembic upgrade`, never `down -v`)**: all 5 areas `configured` + non-empty `profile_md`; tier floors NULL
+  (M3 is the only S9-qualified model, tier 4); skills bound per area (0056 — Commercial 4 / Disputes 2 /
+  M&A 3 / Privacy 3 / Employment 3, exact names verified); Commercial's `document-researcher` subagent
+  present (0057) with skills `[contract-qa, nda-review]` ⊆ its 4 bound skills (the **ADR-F017 subset rule
+  holds in stored data**, not just at PATCH); cockpit honest (UX-B-5). **No drift between docs and the
+  running stack.** Wrote the **milestone behavior-report index** `docs/fork/evidence/UX-B-MILESTONE-INDEX.md`
+  — the honest map tying UX-B-1…5 together: what MiniMax-M3 *does* (grounds+cites, declines honestly,
+  clarifies, answers general directly) vs does *not* do reliably (multi-step efficiency varies; a broad ask
+  over a large skill surface can `cap_exceeded` — UX-B-3 1/2 completed; doesn't *elect* to delegate at small
+  matter sizes — UX-B-4 `task_calls=0`, machinery proven deterministically in CI not by a live run), plus
+  the per-area scenario snapshot totals. The open calibration question (does a tier-4 model fan out on a
+  genuinely large matter?) recorded as **backlog** in `MILESTONES.md` — NOT built (a forced delegation would
+  game the ADR-F015 qualification). **Verify:** no code touched (3 docs: the index + decomposition UX-B-6
+  entry + MILESTONES backlog line) → no suite to run; security pass: docs carry only area keys / skill names
+  / scenario counts (no secrets, no raw values; the DB output surfaced is operator-authored config). **UX-B
+  is COMPLETE — the agentic-modules / Oscar-Privacy direction is unblocked as its own milestone.** **Pickup:
+  the modules direction (its own milestone) or deferred F2 debt — see Next slice.**
 - **UX-B-5 (PR #94) — SHIPPED. Cockpit perfection (web): the proven loop surfaced honestly. WEB-ONLY — no
   api/gateway change** (every datum already on the wire; this slice only consumes it). Three deliverables on
   the F013 design language (ADR-F012/F013 — Vercel charcoal #111 + scarce blue):
@@ -712,41 +731,42 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**F2 + UX-A are COMPLETE; UX-B-1 (harness) + UX-B-2 (areas) + UX-B-3 (skills) + UX-B-4 (subagents) + UX-B-5
-(cockpit web) are SHIPPED.** All five areas are configured + scenario-reported; skills are **live** (per-area
-subset, ADR-F016); Commercial carries a **live `document-researcher` subagent** with its own isolated skill
-source (ADR-F017), delegated on-demand; the web now lets the user **pick the area at matter creation**,
-**renders the subagent delegation boundary** when it occurs, and **surfaces area config read-only**. The
-remaining UX-B work is the closing **verify + consistency sweep**.
+**F2 + UX-A + UX-B are all COMPLETE.** UX-B-1 (harness) → UX-B-2 (areas) → UX-B-3 (skills) → UX-B-4
+(subagents) → UX-B-5 (cockpit web) → UX-B-6 (verify sweep) all SHIPPED. All five areas are configured +
+scenario-reported; skills are **live** (per-area subset, ADR-F016); Commercial carries a **live
+`document-researcher` subagent** with its own isolated skill source (ADR-F017), delegated on-demand; the web
+lets the user **pick the area at matter creation**, **renders the subagent delegation boundary** when it
+occurs, and **surfaces area config read-only**. UX-B-6 re-verified every claim against the live dev DB and
+wrote the milestone index (`docs/fork/evidence/UX-B-MILESTONE-INDEX.md` — the honest M3 behaviour map). **The
+substrate demonstrably works end-to-end; the agentic-modules / Oscar-Privacy direction is unblocked.**
 
-### → NEXT: UX-B-6 — verify + consistency sweep (the UX-B closer). Branch FIRST.
+### → NEXT: the agentic-modules / Oscar-Privacy direction (its own milestone). Branch FIRST; needs a plan + ADR before code.
 
-**Milestone context:** UX-B = capability convergence ("Deep Agents truly work / cockpit perfect"), the gate
-for the agentic-**modules** / Oscar-Privacy direction ([[oscar-privacy-modules-vision]]). Decomposition:
-**`docs/fork/plans/UX-B-deep-agents-truly-work-decomposition.md`** §UX-B-6.
+**Context:** UX-B was the gate ("Deep Agents truly work / cockpit perfect") for the long-range vision —
+agentic SaaS **modules** on the practice-area substrate ([[oscar-privacy-modules-vision]]). That gate is now
+passed. The next milestone is the maintainer's call (it has not been scoped or authorised — do NOT start
+building without an explicit go-ahead + a written plan + an ADR for any structural decision). Likely entry
+points, in no fixed order:
+- **A first module** built on the proven substrate (configured area → per-area + per-subagent skill subsets →
+  on-demand delegation → honest cockpit). The honest M3 behaviour map in `UX-B-MILESTONE-INDEX.md` is the
+  calibration baseline any new module inherits; ADR-F015 (scenario qualification) is the template for
+  admitting any new capability or model.
+- **The open tier-4 delegation calibration question** (backlog, recorded in `MILESTONES.md`): whether/when a
+  tier-4 model fans out on a genuinely large matter — a profile nudge, a larger fixture, or a stronger
+  qualified model (S9/ADR-F015 gate first).
+- **The pivot schema** still pending (CLAUDE.md blocker #5): `practice_area`/`unit_of_work` are not yet
+  first-class in the DB schema — areas/matters remain wired through the existing project/area columns. A real
+  module milestone may need this; scope it deliberately (it is its own phase).
 
-**Build UX-B-6 — the cross-slice closer (decomposition §UX-B-6: "may fold into UX-B-5 if thin"; UX-B-5 stayed
-focused so this is its own small slice):**
-- **Cross-slice consistency check:** all 5 areas configured + scenario-reported (UX-B-2); skills on +
-  re-qualified (UX-B-3); subagents exercised (UX-B-4); cockpit honest (UX-B-5). Confirm the evidence trail is
-  complete and the claims hold.
-- **A milestone behavior-report index** under `docs/fork/evidence/` tying UX-B-1…5 together (what M3 does +
-  doesn't do across areas/skills/delegation — the honest map for the modules direction).
-- **Optional small honesty/polish items** surfaced by UX-B-5 if any (e.g. the area-config note copy; the
-  delegation boundary against a real delegated run if one can be produced) — keep tight; this is a closer,
-  not a new feature.
-- Consider whether a stronger qualified model or a profile nudge for large matters is worth a follow-up
-  (the open UX-B-4 calibration question: M3 doesn't elect to fan out at small matter sizes) — RECORD as
-  backlog, don't build here.
-
-**Reuse / anchors:** evidence dirs `docs/fork/evidence/ux-b-{1,2,3,4,5}/`; the scenario harness
-(`api/tests/agents/scenarios/`); the cockpit web surfaces (`web/src/routes/lq-ai/(app)/`,
-`web/src/lib/lq-ai/cockpit/`, `components/agents/{ConversationPanel,StepRow}.svelte`); ADR-F015 (qualification
-gate), F016/F017 (skills/subagents). **Verify (DoD):** whatever the sweep touches (likely docs-heavy) —
-`npm run check`/vitest if web, scripted suite if api; fresh-context adversarial + **security + simplification**
-pass ([[security-review-every-slice]]). Merge per ADR-F005 against `sarturko-maker/lq-ai-fork`
-(`gh pr create --repo sarturko-maker/lq-ai-fork --head <branch>`). **Then:** UX-B is COMPLETE — the modules /
-Oscar-Privacy direction is unblocked (its own milestone).
+**Reuse / anchors:** the scenario harness (`api/tests/agents/scenarios/`); `composition.py`
+(`build_area_skill_wiring` + `skill_registry_provider`), `skill_backend.py` (multi-source
+`RegistrySkillBackend`), `area_agent.py`, `runner.py` (`parent_step_id` via `_innermost_tool_parent`); web
+`agents/helpers.ts` (`groupTurnTree`/`subagentTypeOf`), `cockpit/{NewMatterDialog,AreaConfigDisclosure}.svelte`;
+migrations 0054–0057; ADR-F002/F004/F010/F015/F016/F017; evidence `docs/fork/evidence/ux-b-{1,2,3,4,5}/` +
+the milestone index. **Verify (DoD):** per the touched surface — `npm run check`/vitest (web), scripted suite
+(api), the scenario report for any production-real capability claim; fresh-context adversarial + **security +
+simplification** pass ([[security-review-every-slice]]). Merge per ADR-F005 against `sarturko-maker/lq-ai-fork`
+(`gh pr create --repo sarturko-maker/lq-ai-fork --head <branch>`).
 
 **Grounded state of the loop:** the cockpit loop WORKS end-to-end AND is now surfaced on the web honestly;
 all 5 areas configured + scenario-reported; **skills live** (per-area + per-subagent subsets); **subagent
