@@ -128,7 +128,7 @@ Two complementary suites:
   `docs/fork/evidence/ux-b-5/` (area-config + area-pick LIVE Commercial; delegation boundary STUBBED — M3
   doesn't elect to fan out at small matter sizes, UX-B-4, so the unit test is the gate). **Pickup: UX-B-6.**
 
-- **UX-B-6 — Verify + consistency sweep. ✅ SHIPPED (PR #TBD).** The UX-B closer (its own small slice —
+- **UX-B-6 — Verify + consistency sweep. ✅ SHIPPED (PR #95).** The UX-B closer (its own small slice —
   UX-B-5 stayed focused, so this did not fold in). Re-verified every cross-slice claim against the **live dev
   DB (read-only)**: all 5 areas `configured` + profiled; tier floors NULL; skills bound per area (0056 —
   Commercial 4 / Disputes 2 / M&A 3 / Privacy 3 / Employment 3); Commercial's `document-researcher` subagent

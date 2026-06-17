@@ -4,7 +4,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (F2 + UX-A + **UX-B COMPLETE** — UX-B-6 verify sweep SHIPPED; pickup = the agentic-modules / Oscar-Privacy direction, its own milestone)
 
-- **UX-B-6 (PR #TBD) — SHIPPED. Verify + consistency sweep — the UX-B closer. DOCS-ONLY (no app/web/api
+- **UX-B-6 (PR #95) — SHIPPED. Verify + consistency sweep — the UX-B closer. DOCS-ONLY (no app/web/api
   change).** Re-verified every cross-slice claim against the **live dev DB (read-only `SELECT` — never an
   `alembic upgrade`, never `down -v`)**: all 5 areas `configured` + non-empty `profile_md`; tier floors NULL
   (M3 is the only S9-qualified model, tier 4); skills bound per area (0056 — Commercial 4 / Disputes 2 /
