@@ -376,3 +376,24 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
   surface, while curl and the agents-page modal flow (f0-s3) work — fails identically on
   main's build (verified S8). Diagnose with the surface's pivot retirement or earlier if a
   REAL browser ever reproduces it.
+- **Functionality candidates studied from `willchen96/mike` (AGPL-3.0 → REFERENCE-ONLY: study what it
+  DOES, build independently, never copy code — same posture as scira/ADR-F012). 2026-06-17.** A parallel
+  OSS legal-AI cockpit; the relevant capabilities, mapped onto our practice-area substrate:
+  - **Playbooks-as-deliverables** (highest fit): named, user-authored/shareable templates that emit a
+    DEFINED artifact (Word table / topic checklist / inline summary) — extends our skills/SKILL.md system
+    with an explicit output contract. Seed examples for Commercial/M&A: CP-checklist extraction,
+    credit-agreement 21-topic summary, shareholder-agreement governance summary. Ties to the existing
+    "Run artifact surface" backlog item (ADR-F002).
+  - **DOCX deliverables incl. tracked-changes / redline output** — produce a redlined Word doc; a
+    high-value lawyer artifact we don't surface. Pairs with the artifact surface above.
+  - **Tabular review inside a matter** (documents-as-rows × AI-extracted-fields-as-columns) — the
+    capability is valuable even though we retired upstream's flat global Tabular tab; reframe as an
+    in-matter agent capability, not a top-level tool. Needs a roadmap decision.
+  - **Per-user/per-area MCP connectors + OAuth handshake** — concrete reference for our stated MCP
+    direction (aligns with upstream ADR 0014/0015 gateway tool-egress + the agentic-modules milestone).
+  - **Document versioning + soft-delete**, **GDPR data export/erasure** (fits the Privacy area), and
+    **collaboration: sharing + org multi-tenancy** (we are single-operator-voice today) — each a gap.
+  - **Inline citation / case-law panels** as a first-class structured response element — a UX pattern
+    for Citation-Engine output.
+  - **CONTRAST, do NOT copy:** mike holds LLM keys per-user client-side; our gateway is the sole
+    egress + key-holder ([[llm-is-injected-replaceable]]) — keep that boundary.
