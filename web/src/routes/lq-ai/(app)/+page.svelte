@@ -38,6 +38,10 @@
 		cockpit.activity?.matters.find((m) => m.project_id === sel.matter) ?? null
 	);
 	const unitLabel = $derived(selectedArea?.unit_label ?? 'Matter');
+	// UX-B-5: the areas a new matter may file under — only configured areas are
+	// fileable (ADR-F002). Threaded to the new-matter dialog for explicit area
+	// selection at creation.
+	const configuredAreas = $derived(cockpit.areas?.filter((a) => a.configured) ?? []);
 
 	// Landing-local: the matter composer needs the project list; a launch carries
 	// its text to the FIRST matter composer reached (seeded once, then cleared).
@@ -139,6 +143,7 @@
 {:else if view === 'matters' && selectedArea}
 	<MattersPanel
 		area={selectedArea}
+		areas={configuredAreas}
 		matters={cockpit.activity?.matters ?? null}
 		mattersError={cockpit.activityError}
 		nowMs={cockpit.nowMs}
@@ -151,6 +156,7 @@
 		<ConversationHost
 			matter={selectedMatter}
 			{unitLabel}
+			areas={configuredAreas}
 			threadId={sel.thread}
 			{projects}
 			{projectsError}
@@ -167,6 +173,7 @@
 {:else if view === 'unfiled'}
 	<ConversationHost
 		matter={null}
+		areas={configuredAreas}
 		threadId={sel.thread}
 		{projects}
 		{projectsError}

@@ -9,6 +9,8 @@ import {
 	STEP_SUMMARY_LIMIT,
 	composerEnabled,
 	groupTurnSteps,
+	groupTurnTree,
+	subagentTypeOf,
 	isStaleRunning,
 	latestRunOf,
 	railItems,
@@ -421,6 +423,78 @@ describe('groupTurnSteps (AE6 Tool+Task pairing)', () => {
 	});
 });
 
+describe('subagentTypeOf (UX-B-5 delegation label)', () => {
+	it('parses subagent_type from the task call args digest', () => {
+		const call = makeStep({
+			kind: 'tool_call',
+			name: 'task',
+			summary: '{"description": "review the RFQ", "subagent_type": "document-researcher"}'
+		});
+		expect(subagentTypeOf(call)).toBe('document-researcher');
+	});
+
+	it('returns null when absent / no summary / null call', () => {
+		expect(subagentTypeOf(makeStep({ kind: 'tool_call', name: 'task', summary: '{}' }))).toBeNull();
+		expect(subagentTypeOf(makeStep({ kind: 'tool_call', name: 'task', summary: null }))).toBeNull();
+		expect(subagentTypeOf(null)).toBeNull();
+	});
+});
+
+describe('groupTurnTree (UX-B-5 subagent delegation boundary)', () => {
+	it('folds a task call + its nested children + its result into one delegation', () => {
+		const rows = groupTurnSteps([
+			makeStep({
+				seq: 1,
+				kind: 'tool_call',
+				name: 'task',
+				summary: '{"description": "review", "subagent_type": "document-researcher"}'
+			}),
+			makeStep({ seq: 2, kind: 'tool_call', name: 'grep', parent_step_id: 'step-1' }),
+			makeStep({ seq: 3, kind: 'tool_result', name: 'grep', parent_step_id: 'step-1' }),
+			makeStep({ seq: 4, kind: 'tool_result', name: 'task' })
+		]);
+		const segments = groupTurnTree(rows);
+		expect(segments).toHaveLength(1);
+		const seg = segments[0];
+		if (seg.kind !== 'delegation') throw new Error('expected a delegation segment');
+		expect(seg.subagentType).toBe('document-researcher');
+		// The nested grep call+result paired into ONE child row (adjacency).
+		expect(seg.children).toHaveLength(1);
+		expect(seg.children[0]).toMatchObject({ kind: 'tool', name: 'grep' });
+		// The task's own result (the subagent's return) folds in as the result.
+		expect(seg.result?.kind).toBe('tool');
+		expect(seg.header.name).toBe('task');
+	});
+
+	it('leaves a turn with NO delegation as flat top-level rows (the common case)', () => {
+		const rows = groupTurnSteps([
+			makeStep({ seq: 1, kind: 'tool_call', name: 'search_documents' }),
+			makeStep({ seq: 2, kind: 'tool_result', name: 'search_documents' }),
+			makeStep({ seq: 3, kind: 'model_turn', summary: 'here is the answer' })
+		]);
+		const segments = groupTurnTree(rows);
+		expect(segments.every((s) => s.kind === 'row')).toBe(true);
+		expect(segments).toHaveLength(2); // paired tool row + reasoning row
+	});
+
+	it('keeps an unknown subagent type as null (label degrades, never crashes)', () => {
+		const rows = groupTurnSteps([
+			makeStep({ seq: 1, kind: 'tool_call', name: 'task', summary: '{"description": "x"}' }),
+			makeStep({ seq: 2, kind: 'model_turn', summary: 'inside', parent_step_id: 'step-1' }),
+			makeStep({ seq: 3, kind: 'tool_result', name: 'task' })
+		]);
+		const segments = groupTurnTree(rows);
+		const seg = segments[0];
+		if (seg.kind !== 'delegation') throw new Error('expected a delegation segment');
+		expect(seg.subagentType).toBeNull();
+		expect(seg.children).toHaveLength(1);
+	});
+
+	it('returns an empty list for no rows', () => {
+		expect(groupTurnTree([])).toEqual([]);
+	});
+});
+
 describe('conversations (F0-S5)', () => {
 	function detailWith(
 		runs: { run: AgentRun; steps: AgentRunStep[] }[],
@@ -482,10 +556,7 @@ describe('conversations (F0-S5)', () => {
 		expect(shouldContinuePollingThread(null, T0)).toBe(false);
 		// A stale 'running' run stops the poll (same cutoff as single runs).
 		expect(
-			shouldContinuePollingThread(
-				detailWith([live], false),
-				T0 + STALE_RUNNING_AFTER_MS + 1000
-			)
+			shouldContinuePollingThread(detailWith([live], false), T0 + STALE_RUNNING_AFTER_MS + 1000)
 		).toBe(false);
 	});
 
@@ -500,12 +571,12 @@ describe('conversations (F0-S5)', () => {
 
 	it('uploadsSettled is true only when every file is ready or failed', () => {
 		expect(uploadsSettled([])).toBe(true);
-		expect(
-			uploadsSettled([{ ingestion_status: 'ready' }, { ingestion_status: 'failed' }])
-		).toBe(true);
-		expect(uploadsSettled([{ ingestion_status: 'ready' }, { ingestion_status: 'processing' }])).toBe(
-			false
+		expect(uploadsSettled([{ ingestion_status: 'ready' }, { ingestion_status: 'failed' }])).toBe(
+			true
 		);
+		expect(
+			uploadsSettled([{ ingestion_status: 'ready' }, { ingestion_status: 'processing' }])
+		).toBe(false);
 		expect(uploadsSettled([{ ingestion_status: 'pending' }])).toBe(false);
 		// No status yet (fresh upload response without the field) = not settled.
 		expect(uploadsSettled([{ ingestion_status: undefined }])).toBe(false);
@@ -513,9 +584,7 @@ describe('conversations (F0-S5)', () => {
 });
 
 describe('threadRailStates (F0-S5 review)', () => {
-	function detail(
-		runs: { run: AgentRun; steps: AgentRunStep[] }[]
-	): AgentThreadDetailResponse {
+	function detail(runs: { run: AgentRun; steps: AgentRunStep[] }[]): AgentThreadDetailResponse {
 		return {
 			thread: {
 				id: 'thread-1',

@@ -48,7 +48,10 @@ export const STALE_RUNNING_AFTER_MS = 330_000;
 // nowMs vs the server's started_at: since F0-S7 callers pass a
 // server-derived 'now' (serverNowMs() in ./server-clock, fed by every API
 // response's Date header), so client clock skew no longer fakes staleness.
-export function isStaleRunning(run: Pick<AgentRun, 'status' | 'started_at'>, nowMs: number): boolean {
+export function isStaleRunning(
+	run: Pick<AgentRun, 'status' | 'started_at'>,
+	nowMs: number
+): boolean {
 	if (run.status !== 'running') return false;
 	const startedMs = Date.parse(run.started_at);
 	if (Number.isNaN(startedMs)) return true;
@@ -368,6 +371,94 @@ export function groupTurnSteps(steps: AgentRunStep[]): TurnRow[] {
 	return rows;
 }
 
+/**
+ * The deepagents delegation tool: the lead agent calls `task` to hand work to
+ * a declarative subagent (ADR-F017). A `task` tool_call opens a subagent
+ * boundary; the steps that ran under it carry its row id as `parent_step_id`.
+ */
+const TASK_TOOL = 'task';
+const SUBAGENT_TYPE_RE = /"subagent_type"\s*:\s*"([^"]+)"/;
+
+/**
+ * The subagent a `task` call delegated to, parsed from the call's bounded args
+ * digest (server emits `json.dumps({description, subagent_type})`, sorted keys
+ * — runner.py). Display-only and DEFENSIVE: null when absent/odd-shaped.
+ */
+export function subagentTypeOf(taskCall: AgentRunStep | null): string | null {
+	if (!taskCall?.summary) return null;
+	const m = SUBAGENT_TYPE_RE.exec(taskCall.summary);
+	return m ? m[1] : null;
+}
+
+/**
+ * One node of a turn's timeline once subagent delegations are folded into
+ * boundaries (UX-B-5): either a plain top-level row, or a `delegation` —
+ * the `task` call as a header, the contiguous run of subagent rows that ran
+ * under it as children, and the task's own result (the subagent's return) as
+ * the boundary's result.
+ */
+export type TurnSegment =
+	| { kind: 'row'; id: string; row: TurnRow }
+	| {
+			kind: 'delegation';
+			id: string;
+			/** The subagent delegated to, for the boundary label (null = unknown). */
+			subagentType: string | null;
+			/** The `task` tool row (its result is the subagent's return, below). */
+			header: Extract<TurnRow, { kind: 'tool' }>;
+			/** The subagent's return to the parent, when it settled. */
+			result: TurnRow | null;
+			/** The steps that ran inside the subagent (parent_step_id = task id). */
+			children: TurnRow[];
+	  };
+
+/**
+ * Fold a turn's flat rows into a subagent-delegation tree (UX-B-5). A `task`
+ * tool row opens a delegation boundary; the CONTIGUOUS run of nested rows that
+ * follow it (`parent_step_id` set — they ran under the subagent) become its
+ * children, and the task's own result row (the subagent's return) folds in.
+ * Everything else stays a top-level row. Honest by construction: with no `task`
+ * row there is no boundary — exactly the common tier-4 case where the agent
+ * does the work itself (UX-B-4). Single-level nesting is exercised today;
+ * deeper nesting degrades to visible top-level rows (never hidden).
+ */
+export function groupTurnTree(rows: TurnRow[]): TurnSegment[] {
+	const segments: TurnSegment[] = [];
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i];
+		const opensDelegation = row.kind === 'tool' && row.name === TASK_TOOL && !row.nested;
+		if (!opensDelegation) {
+			segments.push({ kind: 'row', id: row.id, row });
+			continue;
+		}
+		// The contiguous run of rows that ran under this delegation.
+		const children: TurnRow[] = [];
+		let j = i + 1;
+		while (j < rows.length && rows[j].nested) {
+			children.push(rows[j]);
+			j += 1;
+		}
+		// The task's result (the subagent's return) is the next non-nested orphan
+		// `task` row — fold it into the boundary instead of trailing after it.
+		let result: TurnRow | null = null;
+		const after = rows[j];
+		if (after && after.kind === 'tool' && after.name === TASK_TOOL && after.call === null) {
+			result = after;
+			j += 1;
+		}
+		segments.push({
+			kind: 'delegation',
+			id: row.id,
+			subagentType: subagentTypeOf(row.call),
+			header: row,
+			result,
+			children
+		});
+		i = j - 1;
+	}
+	return segments;
+}
+
 // ---------------------------------------------------------------------------
 // Conversations (F0-S5, ADR-F008)
 // ---------------------------------------------------------------------------
@@ -420,17 +511,12 @@ export function shouldContinuePollingThread(
  * follow-up would be accepted AND its newest run isn't still working
  * (the advisory `continuable` flag — POST re-checks, ADR-F008).
  */
-export function composerEnabled(
-	detail: AgentThreadDetailResponse | null,
-	nowMs: number
-): boolean {
+export function composerEnabled(detail: AgentThreadDetailResponse | null, nowMs: number): boolean {
 	if (detail === null) return true;
 	return detail.continuable && !shouldContinuePollingThread(detail, nowMs);
 }
 
 /** All composer uploads settled (ready or failed) — stop the file poller. */
 export function uploadsSettled(files: Pick<FileMeta, 'ingestion_status'>[]): boolean {
-	return files.every(
-		(f) => f.ingestion_status === 'ready' || f.ingestion_status === 'failed'
-	);
+	return files.every((f) => f.ingestion_status === 'ready' || f.ingestion_status === 'failed');
 }

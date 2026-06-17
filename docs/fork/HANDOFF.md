@@ -2,8 +2,50 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (F2 + UX-A COMPLETE; UX-B milestone OPEN — UX-B-4 live subagent SHIPPED; pickup = UX-B-5 cockpit web)
+## State (F2 + UX-A COMPLETE; UX-B milestone OPEN — UX-B-5 cockpit web SHIPPED; pickup = UX-B-6 verify sweep)
 
+- **UX-B-5 (PR #94) — SHIPPED. Cockpit perfection (web): the proven loop surfaced honestly. WEB-ONLY — no
+  api/gateway change** (every datum already on the wire; this slice only consumes it). Three deliverables on
+  the F013 design language (ADR-F012/F013 — Vercel charcoal #111 + scarce blue):
+  **(1) Area selection at matter creation** — `NewMatterDialog` gained an explicit practice-area **picker**
+  (configured areas only, ADR-F002; defaults to the contextual area; the dialog noun/title follow the chosen
+  area's `unit_label`; posts the chosen area's `id` as `practice_area_id`). Threaded a new
+  `configuredAreas` derived from the cockpit context into `MattersPanel` + both `ConversationHost` renders →
+  the dialog. The matter→area binding that drives the whole server-side agent identity (`composition.py`) is
+  now **explicit + visible** at creation, not implicit-from-navigation.
+  **(2) Subagent boundary rendering** — a new pure **`groupTurnTree(rows)`** (in `agents/helpers.ts`) folds a
+  `task` tool-call + its contiguous `parent_step_id`-nested children + the task's result into ONE labelled
+  **"Delegated to `<subagent_type>`"** boundary block (`subagentTypeOf` parses the type from the call's
+  bounded args digest — runner.py emits `json.dumps({description, subagent_type})`). **Honest by
+  construction:** the boundary renders ONLY when a `task` step exists (delegation actually occurred); a turn
+  with no delegation stays flat — the common tier-4 case (M3 doesn't elect to fan out at small matter sizes,
+  UX-B-4). The flat row content (AE6 Tool card / reasoning) was factored into **`StepRow.svelte`** so a
+  top-level row and a nested child render identically — the parent `ConversationPanel` uses legacy `<slot>`,
+  so a `{#snippet}` there is **illegal** (`slot_snippet_conflict`); a child component is the clean share.
+  **Net code reduction** (−248/+ in ConversationPanel), **no DOM/testid change** (`lq-ai-agents-tool`/
+  `-task`/`-tool-status` preserved; `.ag-step` count = `rows.length` unchanged) — ae6 Tool/Task regression
+  **7/7**. **The SSE protocol gap (CLAUDE.md blocker #4) was NOT needed** — `parent_step_id` already rides
+  every `data-step` part (F0-S7), so the boundary renders live AND on replay with no protocol change; a
+  dedicated subagent/tool frame TYPE stays follow-up (the HANDOFF-blessed scoping decision, held).
+  **(3) Area-config visibility (read-only)** — new **`AreaConfigDisclosure.svelte`** in the matters-panel
+  header (collapsed by default): the area's PROFILE (rendered through the shared `renderModelMarkdown`
+  sanitiser — operator-authored but treated as untrusted-class input, one media-forbid policy), bound SKILLS
+  as chips, and SUBAGENTS (name + description + each one's ⊆-area skill subset, ADR-F016/F017) + an honest
+  on-demand-delegation note. Satisfies the transparency rule; data from `GET /practice-areas` (no api
+  change). New pure **`areaSubagents(agent_config)`** (in `cockpit/helpers.ts`) parses the opaque
+  `Record<string,unknown>` config DEFENSIVELY (display-only). **Admin PATCH editor DEFERRED** (own slice —
+  needs a web PATCH client + client-side mirroring of the server validation ADR-F017/F010; read-only
+  satisfies transparency). **Verify:** `npm run check` **0 err** (5 pre-existing a11y warnings, unchanged
+  baseline); **vitest 861** (+10: `groupTurnTree`/`subagentTypeOf` in agents-helpers + `areaSubagents` in
+  cockpit-helpers); web container rebuilt; **headed Cypress `ux-b-5-cockpit.cy.ts` 2/2** + **ae6 regression
+  7/7** (light+dark × wide+narrow). Evidence `docs/fork/evidence/ux-b-5/`: area-config + area-pick captured
+  **LIVE** (Commercial — real profile/skills/`document-researcher`); the delegation boundary **STUBBED** (a
+  fixtured delegated run — M3 won't reliably fan out at small matter size, ADR-F015/UX-B-4, so the
+  deterministic `groupTurnTree` unit test is the gate, the stub renders the boundary for the screenshot).
+  Fresh-context security+simplification pass: no secrets (Cypress fixture synthetic, no creds); `{@html}`
+  only behind the sanitiser; read-only config (no PATCH); no new deps; no `--lq-*` color tokens in new files;
+  dead `toolView`+CSS removed from ConversationPanel (moved to StepRow). **Pickup: UX-B-6** (verify +
+  consistency sweep — see Next slice).
 - **UX-B-4 (PR #93) — SHIPPED. Live subagent (on-demand delegation), via the idiomatic deepagents
   per-subagent skill-source model (ADR-F017 accepted).** Commercial gained its first live subagent —
   `document-researcher` (migration **0057**, idempotent: writes only where `agent_config = '{}'`) — a GENERAL
@@ -670,54 +712,52 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## Next slice — pick up exactly here
 
-**F2 + UX-A are COMPLETE; UX-B-1 (harness) + UX-B-2 (areas) + UX-B-3 (skills) + UX-B-4 (subagents) are
-SHIPPED.** All five areas are configured + scenario-reported; skills are **live** (per-area subset, ADR-F016);
-Commercial carries a **live `document-researcher` subagent** with its own isolated skill source (ADR-F017),
-delegated on-demand. The remaining gap to "truly works + cockpit perfect" is the **web surface**: the cockpit
-doesn't yet let a user pick the practice area at matter creation, nor render the subagent boundary in a run.
+**F2 + UX-A are COMPLETE; UX-B-1 (harness) + UX-B-2 (areas) + UX-B-3 (skills) + UX-B-4 (subagents) + UX-B-5
+(cockpit web) are SHIPPED.** All five areas are configured + scenario-reported; skills are **live** (per-area
+subset, ADR-F016); Commercial carries a **live `document-researcher` subagent** with its own isolated skill
+source (ADR-F017), delegated on-demand; the web now lets the user **pick the area at matter creation**,
+**renders the subagent delegation boundary** when it occurs, and **surfaces area config read-only**. The
+remaining UX-B work is the closing **verify + consistency sweep**.
 
-### → NEXT: UX-B-5 — cockpit perfection (web). Branch FIRST.
+### → NEXT: UX-B-6 — verify + consistency sweep (the UX-B closer). Branch FIRST.
 
 **Milestone context:** UX-B = capability convergence ("Deep Agents truly work / cockpit perfect"), the gate
 for the agentic-**modules** / Oscar-Privacy direction ([[oscar-privacy-modules-vision]]). Decomposition:
-**`docs/fork/plans/UX-B-deep-agents-truly-work-decomposition.md`** §UX-B-5; design language: **ADR-F012/F013**
-(Vercel charcoal #111 + scarce blue; no black bg). The backend loop is proven + honest end-to-end; UX-B-5
-**surfaces it on the web**, honestly (transparency rule — nothing faked).
+**`docs/fork/plans/UX-B-deep-agents-truly-work-decomposition.md`** §UX-B-6.
 
-**Build UX-B-5 — surface the proven loop on the F013 design language (web-only; no api/gateway change):**
-- **Area selection at matter creation** — wire the existing `practiceAreasApi` (web) into the new-matter
-  flow so a user picks the practice area (only `configured` areas fileable; the cockpit already lands on
-  areas via `AreaGrid`). The matter→area binding already drives the whole agent identity server-side
-  (`composition.py`); this just lets the user set it.
-- **Subagent boundary rendering** in the run view — parse `parent_step_id` (now populated when the agent
-  delegates) into distinct **subagent frames** in the SSE stream, not just flat nested steps. NOTE the SSE
-  protocol gap (CLAUDE.md blocker #4): frames are start/delta/complete/error only — a tool-call/subagent
-  frame type may need adding end-to-end (`web/src/lib/lq-ai/sse/parser.ts` + the api SSE projection). Scope
-  to what's honest + shippable; if the full subagent-frame projection is too big for one slice, render the
-  nested `parent_step_id` steps as an indented boundary and note the richer projection as follow-up.
-- **Area-config visibility** — at minimum read-only surfacing of an area's profile/skills/subagents
-  (transparency); the admin PATCH surface if it fits the slice.
+**Build UX-B-6 — the cross-slice closer (decomposition §UX-B-6: "may fold into UX-B-5 if thin"; UX-B-5 stayed
+focused so this is its own small slice):**
+- **Cross-slice consistency check:** all 5 areas configured + scenario-reported (UX-B-2); skills on +
+  re-qualified (UX-B-3); subagents exercised (UX-B-4); cockpit honest (UX-B-5). Confirm the evidence trail is
+  complete and the claims hold.
+- **A milestone behavior-report index** under `docs/fork/evidence/` tying UX-B-1…5 together (what M3 does +
+  doesn't do across areas/skills/delegation — the honest map for the modules direction).
+- **Optional small honesty/polish items** surfaced by UX-B-5 if any (e.g. the area-config note copy; the
+  delegation boundary against a real delegated run if one can be produced) — keep tight; this is a closer,
+  not a new feature.
+- Consider whether a stronger qualified model or a profile nudge for large matters is worth a follow-up
+  (the open UX-B-4 calibration question: M3 doesn't elect to fan out at small matter sizes) — RECORD as
+  backlog, don't build here.
 
-**Reuse / anchors:** the cockpit shell is `web/src/routes/lq-ai/(app)/` (UX-A); `practiceAreasApi` +
-`GET /agents/matters` (ADR-F004) already exist; AE-series chat components (`components/ai-elements/`) render
-the run. **Verify (web DoD):** `cd web && npm run check` (0 err) + `npx vitest run`; rebuild the `web`
-container; headed Cypress (`DISPLAY=:0`, electron) before/after light+dark × wide+narrow →
-`docs/fork/evidence/ux-b-5/`; fresh-context adversarial + **security + simplification** pass
-([[security-review-every-slice]]). Merge per ADR-F005 against `sarturko-maker/lq-ai-fork`
-(`gh pr create --repo sarturko-maker/lq-ai-fork --head <branch>`). **Then:** UX-B-6 verify + consistency sweep.
+**Reuse / anchors:** evidence dirs `docs/fork/evidence/ux-b-{1,2,3,4,5}/`; the scenario harness
+(`api/tests/agents/scenarios/`); the cockpit web surfaces (`web/src/routes/lq-ai/(app)/`,
+`web/src/lib/lq-ai/cockpit/`, `components/agents/{ConversationPanel,StepRow}.svelte`); ADR-F015 (qualification
+gate), F016/F017 (skills/subagents). **Verify (DoD):** whatever the sweep touches (likely docs-heavy) —
+`npm run check`/vitest if web, scripted suite if api; fresh-context adversarial + **security + simplification**
+pass ([[security-review-every-slice]]). Merge per ADR-F005 against `sarturko-maker/lq-ai-fork`
+(`gh pr create --repo sarturko-maker/lq-ai-fork --head <branch>`). **Then:** UX-B is COMPLETE — the modules /
+Oscar-Privacy direction is unblocked (its own milestone).
 
-**Grounded state of the loop:** the cockpit loop WORKS end-to-end; all 5 areas configured + scenario-reported;
-**skills live** (per-area + per-subagent subsets); **subagent delegation wired + proven** (deterministic
-ancestry test) though M3 elects not to fan out at small matter sizes (UX-B-4 finding). Gap to "truly works":
-**web area-pick + subagent-boundary rendering missing** ← UX-B-5. Anchors: `composition.py`
+**Grounded state of the loop:** the cockpit loop WORKS end-to-end AND is now surfaced on the web honestly;
+all 5 areas configured + scenario-reported; **skills live** (per-area + per-subagent subsets); **subagent
+delegation wired + proven** (deterministic ancestry test + `groupTurnTree` render) though M3 elects not to
+fan out at small matter sizes (UX-B-4 finding). **Open calibration question (backlog, not a blocker):**
+whether a tier-4 model ever fans out on a genuinely large matter (options: a profile nudge naming the
+subagent for big matters, a larger fixture, or a stronger qualified model). Anchors: `composition.py`
 (`build_area_skill_wiring` + `skill_registry_provider`), `skill_backend.py` (multi-source `RegistrySkillBackend`),
-`area_agent.py` (`build_area_subagents` + ⊆-area drift validation), `factory.py:build_deep_agent`,
-`runner.py` (`skills`/`backend` params + `_innermost_tool_parent`), migrations `0056`/`0057`, ADR-F016/F017.
-
-**A caution carried from UX-B-3/4 (server-side, informs the web copy):** a tier-4 model (MiniMax-M3)
-over-explores a big skill surface and does NOT spontaneously delegate at small matter sizes. UX-B-5 must
-present the loop **honestly** — don't imply subagent fan-out happens when it usually won't on a small matter;
-render delegation when it occurs, degrade gracefully when it doesn't.
+`area_agent.py`, `runner.py` (`parent_step_id` via `_innermost_tool_parent`), web
+`agents/helpers.ts` (`groupTurnTree`/`subagentTypeOf`), `cockpit/{NewMatterDialog,AreaConfigDisclosure}.svelte`,
+migrations `0056`/`0057`, ADR-F015/F016/F017.
 
 **Branch FIRST; full ADR-F005 gate; the `web` container serves a PRE-BUILT bundle — rebuild it before
 debugging any UI change. Merge against `sarturko-maker/lq-ai-fork`.**

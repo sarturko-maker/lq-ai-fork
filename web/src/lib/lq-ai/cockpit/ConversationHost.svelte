@@ -21,6 +21,7 @@
 	import { agentsApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import type { AgentThread, MatterActivity } from '$lib/lq-ai/api/agents';
+	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 	import type { Project } from '$lib/lq-ai/types';
 	import ConversationPanel from '$lib/lq-ai/components/agents/ConversationPanel.svelte';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
@@ -31,6 +32,7 @@
 	let {
 		matter = null,
 		unitLabel = 'Matter',
+		areas = [],
 		threadId,
 		projects,
 		projectsError,
@@ -46,6 +48,8 @@
 		/** null = the unfiled bucket (resume-only). */
 		matter?: MatterActivity | null;
 		unitLabel?: string;
+		/** Configured areas the new-matter dialog may file under (UX-B-5). */
+		areas?: PracticeArea[];
 		threadId: string | null;
 		projects: Project[];
 		projectsError: string | null;
@@ -352,6 +356,7 @@
 	bind:open={createOpen}
 	{unitLabel}
 	practiceAreaId={matter?.practice_area_id ?? null}
+	{areas}
 	onCreated={(project) => {
 		selectedMatterId = project.id;
 		onMatterCreated(project);
