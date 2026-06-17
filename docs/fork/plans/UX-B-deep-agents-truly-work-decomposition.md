@@ -105,12 +105,28 @@ Two complementary suites:
   tier-4 model doesn't *elect* to fan out at this matter size; not tuned green
   (`docs/fork/evidence/ux-b-4/`). **Pickup: UX-B-5.**
 
-- **UX-B-5 — Cockpit perfection (web).** Surface the now-proven loop honestly, on the F013 design language:
-  **area selection at matter creation** (wire the existing `practiceAreasApi` into the new-matter flow);
-  **subagent boundary rendering** in the run view (parse `parent_step_id` → distinct subagent frames in the
-  SSE stream, not just nested steps); and area-config **visibility** (at minimum read-only; admin PATCH
-  surface if it fits the slice). **Verify:** `npm run check` + vitest; rebuild the web container; headed
-  Cypress before/after (light+dark × wide+narrow) → `docs/fork/evidence/ux-b-5/`.
+- **UX-B-5 — Cockpit perfection (web). ✅ SHIPPED (PR #94).** Surfaced the now-proven loop honestly on the
+  F013 design language, **web-only** (every datum already on the wire — no api/gateway change). **(1) Area
+  selection at matter creation:** `NewMatterDialog` gained an explicit practice-area **picker** (configured
+  areas only, ADR-F002; defaults to the contextual area; noun/title follow the chosen area's `unit_label`),
+  threaded from the cockpit context's `configuredAreas` into `MattersPanel` + `ConversationHost` — the
+  matter→area binding that drives the server-side agent identity (`composition.py`) is now explicit + visible
+  at creation. **(2) Subagent boundary rendering:** a pure `groupTurnTree` folds a `task` tool-call + its
+  `parent_step_id`-nested children + the task result into one labelled **"Delegated to `<subagent_type>`"**
+  boundary block (subagent type parsed from the call's args digest); honest by construction — renders only
+  when delegation occurred, degrades to flat rows otherwise (the common tier-4 case). The flat-rendering
+  path was factored into a `StepRow.svelte` child (the parent uses legacy `<slot>`, so a `{#snippet}` there
+  is illegal) — a net code reduction, no DOM/testid change (ae6 regression 7/7). The SSE protocol gap
+  (blocker #4) was **not** needed: `parent_step_id` already rides every `data-step`, so the boundary renders
+  live + on replay with no protocol change — a richer subagent frame type stays follow-up (decision held).
+  **(3) Area-config visibility:** a read-only `AreaConfigDisclosure` in the matters-panel header surfaces the
+  area's profile (sanitised), bound skills, and subagents (name + description + each one's ⊆-area skill
+  subset) — the transparency rule. Admin PATCH editor **deferred** (own slice — needs a web PATCH client +
+  validation mirroring). **Verify:** `npm run check` **0 err** (5 pre-existing a11y warnings); **vitest 861**
+  (+10: `groupTurnTree`/`subagentTypeOf`/`areaSubagents`); web container rebuilt; headed Cypress
+  `ux-b-5-cockpit.cy.ts` **2/2** + ae6 regression **7/7** (light+dark × wide+narrow) →
+  `docs/fork/evidence/ux-b-5/` (area-config + area-pick LIVE Commercial; delegation boundary STUBBED — M3
+  doesn't elect to fan out at small matter sizes, UX-B-4, so the unit test is the gate). **Pickup: UX-B-6.**
 
 - **UX-B-6 — Verify + consistency sweep (if warranted).** Cross-slice: all 5 areas configured + scenario-
   reported; skills on + re-qualified; subagents exercised; cockpit honest. Final HANDOFF + a milestone

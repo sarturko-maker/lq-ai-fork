@@ -193,6 +193,48 @@ export function launchIntent(areas: LaunchableArea[], text: string): LaunchInten
 	return { url: null, draft };
 }
 
+/**
+ * A practice area's declarative subagent, as surfaced read-only in the cockpit
+ * (UX-B-5, ADR-F017). The server validates the full shape at PATCH time; the
+ * web receives `agent_config` as an opaque `Record<string, unknown>`, so this
+ * parses it DEFENSIVELY for display only — never for behaviour.
+ */
+export interface AreaSubagent {
+	name: string;
+	description: string;
+	/** The subagent's own skill subset (⊆ the area's bound skills, ADR-F017). */
+	skills: string[];
+}
+
+function asStringArray(v: unknown): string[] {
+	return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+}
+
+/**
+ * Read the declarative subagents out of an area's `agent_config` for read-only
+ * display (UX-B-5). Tolerant of a missing/empty/odd-shaped config — an area
+ * with no subagents (the common case) returns `[]`. Skips entries without a
+ * string `name` (the one field the boundary header needs).
+ */
+export function areaSubagents(
+	agentConfig: Record<string, unknown> | null | undefined
+): AreaSubagent[] {
+	const raw = agentConfig?.subagents;
+	if (!Array.isArray(raw)) return [];
+	const out: AreaSubagent[] = [];
+	for (const entry of raw) {
+		if (typeof entry !== 'object' || entry === null) continue;
+		const rec = entry as Record<string, unknown>;
+		if (typeof rec.name !== 'string') continue;
+		out.push({
+			name: rec.name,
+			description: typeof rec.description === 'string' ? rec.description : '',
+			skills: asStringArray(rec.skills)
+		});
+	}
+	return out;
+}
+
 export type Theme = 'light' | 'dark' | 'system';
 
 /** Toggle order: system → light → dark → system. */

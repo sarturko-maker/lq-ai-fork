@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AgentRunStatus } from '$lib/lq-ai/api/agents';
 import {
 	areaActivityCounts,
+	areaSubagents,
 	cockpitUrl,
 	mattersForArea,
 	MOTION,
@@ -208,5 +209,46 @@ describe('MOTION scale (F013 VL0)', () => {
 		expect(MOTION.fast).toBe(cssMs('fast'));
 		expect(MOTION.base).toBe(cssMs('base'));
 		expect(MOTION.slow).toBe(cssMs('slow'));
+	});
+});
+
+describe('areaSubagents (UX-B-5 — read-only config visibility)', () => {
+	it('parses well-shaped subagents (name + description + skills)', () => {
+		const cfg = {
+			subagents: [
+				{
+					name: 'document-researcher',
+					description: 'Reviews many documents.',
+					system_prompt: 'ignored here',
+					skills: ['contract-qa', 'nda-review']
+				}
+			]
+		};
+		expect(areaSubagents(cfg)).toEqual([
+			{
+				name: 'document-researcher',
+				description: 'Reviews many documents.',
+				skills: ['contract-qa', 'nda-review']
+			}
+		]);
+	});
+
+	it('returns [] for the common empty config and for a missing/odd subagents key', () => {
+		expect(areaSubagents({})).toEqual([]);
+		expect(areaSubagents(null)).toEqual([]);
+		expect(areaSubagents(undefined)).toEqual([]);
+		expect(areaSubagents({ subagents: 'nope' })).toEqual([]);
+	});
+
+	it('is defensive — skips a nameless entry, tolerates missing description/skills', () => {
+		const cfg = {
+			subagents: [{ description: 'no name → skipped' }, { name: 'bare' }]
+		};
+		expect(areaSubagents(cfg)).toEqual([{ name: 'bare', description: '', skills: [] }]);
+	});
+
+	it('drops non-string skill entries (untrusted shape)', () => {
+		const cfg = { subagents: [{ name: 'x', skills: ['ok', 3, null, 'also-ok'] }] };
+		expect(areaSubagents(cfg)[0].skills).toEqual(['ok', 'also-ok']);
 	});
 });

@@ -17,12 +17,14 @@
 	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 	import type { Project } from '$lib/lq-ai/types';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
+	import AreaConfigDisclosure from './AreaConfigDisclosure.svelte';
 	import NewMatterDialog from './NewMatterDialog.svelte';
 	import StatusPill from './StatusPill.svelte';
 	import { mattersForArea, MOTION, motionMs, timeAgo } from './helpers';
 
 	let {
 		area,
+		areas = [],
 		matters,
 		mattersError,
 		nowMs,
@@ -31,6 +33,8 @@
 		onCreated
 	}: {
 		area: PracticeArea;
+		/** Configured areas the new-matter dialog may file under (UX-B-5). */
+		areas?: PracticeArea[];
 		matters: MatterActivity[] | null;
 		mattersError: string | null;
 		nowMs: number;
@@ -74,6 +78,10 @@
 				New {noun}
 			</Button>
 		</div>
+
+		<!-- UX-B-5: read-only area config (profile / skills / subagents) — the
+		     transparency rule. Collapsed by default; shows what the agent CAN do. -->
+		<AreaConfigDisclosure {area} />
 
 		{#if mattersError}
 			<p class="mt-6 text-sm text-destructive">Couldn't load {noun}s: {mattersError}</p>
@@ -144,5 +152,6 @@
 	bind:open={createOpen}
 	unitLabel={area.unit_label}
 	practiceAreaId={area.id}
+	{areas}
 	{onCreated}
 />
