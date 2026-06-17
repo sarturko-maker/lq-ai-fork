@@ -121,6 +121,9 @@ def _render_markdown(payload: dict) -> str:
             f"forbidden: {', '.join(r['forbid_tools']) or '—'})",
             f"- **Steps:** {r['step_count']} · model turns: {r['model_turns']} · "
             f"latency: {r['latency_s']}s",
+            f"- **Delegation:** {r.get('task_calls', 0)} `task` call(s) · "
+            f"delegated={r.get('delegated', False)}"
+            + (f" · ancestry: {r['ancestry']}" if r.get("ancestry") else ""),
             "- **Checks:** "
             + ", ".join(f"{name}={value}" for name, value in checks.items() if value is not None),
             "",

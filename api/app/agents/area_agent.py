@@ -132,12 +132,13 @@ def build_area_subagents(
     semantics) — the parent's GuardContext still mediates every dispatch.
     A ``model`` key is rejected (ADR-F010).
 
-    UX-B-3 (ADR-F016): when ``known_skill_names`` is given (the PATCH config
-    path passes the registry's current set), every subagent ``skills`` entry
-    must be a known skill — an unknown name is REJECTED at config time so a
-    dangling reference can never be stored (the registry-drift gap the main
-    agent already closes by filtering at render). ``None`` (the render path,
-    or no registry) skips the check — a run is never broken by drift.
+    UX-B-3/UX-B-4 (ADR-F016/F017): when ``known_skill_names`` is given (the
+    PATCH config path passes the area's BOUND skill set), every subagent
+    ``skills`` entry must be in that allow-list — a name outside it is REJECTED
+    at config time so a dangling reference can never be stored (a subagent's
+    skills are a subset of the area's, served from its own isolated source).
+    ``None`` (the render path) skips the check — a run is never broken by drift
+    (the composition wiring drops any unresolved name instead).
     """
     if not agent_config:
         return []
@@ -183,8 +184,8 @@ def build_area_subagents(
                 if unknown:
                     raise ValueError(
                         f"agent_config.subagents[{i}].skills references unknown skill(s) "
-                        f"{unknown}; attach only skills the registry knows (ADR-F016 — "
-                        "no dangling skill references)"
+                        f"{unknown}; a subagent may use only skills bound to this area "
+                        "(ADR-F017 — no dangling skill references)"
                     )
             spec["skills"] = skills
         specs.append(spec)

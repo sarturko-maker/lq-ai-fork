@@ -149,16 +149,16 @@ async def update_practice_area_config(
         cfg = fields["agent_config"] or {}
         # Validate the declarative shape (raises ValueError on bad subagent
         # specs / forbidden model key). Treat area config as untrusted input.
-        # UX-B-3 (ADR-F016): pass the registry's current names so a subagent
-        # that references an unknown skill is rejected here, not stored as a
-        # dangling reference (close the drift gap at config time). Best-effort:
-        # read the holder directly (not _registry, which 404s) so a process
-        # without a registry skips the skill check rather than failing the
-        # PATCH — production always has one installed (lifespan / worker).
-        holder: MutableSkillRegistry | None = getattr(request.app.state, "skill_registry", None)
-        known_skill_names = holder.current().names() if holder is not None else None
+        # UX-B-4 (ADR-F017): a subagent may reference only skills BOUND TO THIS
+        # AREA — its isolated source is a subset of the area source — so validate
+        # against the area's bound names (themselves the registry-known set the
+        # attach endpoint admits). A subagent skill outside the area's set is
+        # rejected here, never stored as a dangling reference. Best-effort: with
+        # no bound skills the area can carry no skill-bearing subagent, so an
+        # empty allow-list correctly rejects any subagent `skills`.
+        area_bound = await _bound_skill_names(db, area.id)
         try:
-            build_area_subagents(cfg, known_skill_names=known_skill_names)
+            build_area_subagents(cfg, known_skill_names=area_bound)
         except ValueError as exc:
             raise ValidationError(str(exc), details={"field": "agent_config"}) from exc
         area.agent_config = cfg

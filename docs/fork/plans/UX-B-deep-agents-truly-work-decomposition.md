@@ -88,11 +88,22 @@ Two complementary suites:
   away. **Verify:** scripted suite green (provider tests self-skip); migration on the throwaway test DB;
   dev stack 0055→0056 (5 areas bound). **Pickup: UX-B-4.**
 
-- **UX-B-4 — Live subagent scenario.** Configure an area with a real subagent spec (e.g. a research subagent
-  that narrows to document search), run a matter under it through the harness, and prove the subagent
-  executes, calls tools, and returns to the parent. Assert subagent steps carry `parent_step_id`. Commit the
-  subagent behavior report. **Verify:** harness report shows delegation; scripted assertion on
-  `parent_step_id` ancestry.
+- **UX-B-4 — Live subagent scenario. ✅ SHIPPED (PR #93, ADR-F017).** Commercial gained a live
+  `document-researcher` subagent (migration 0057) — an **on-demand** delegate (the parent's `task` tool fires
+  only when a matter warrants it; a single NDA is read directly, a complex multi-document RFQ is fanned out).
+  Resolved the deepagents name↔source-path mismatch the **idiomatic** way (re-read the docs first): each
+  subagent gets its OWN virtual skill source over a generalised **multi-source `RegistrySkillBackend`** —
+  deepagents' isolated per-subagent skill model — rather than inheriting the area set (the initial sketch,
+  revised after research). The composition wiring (`build_area_skill_wiring`) rewrites a subagent's skill
+  NAMES → its source path (⊆ area; rejected at PATCH, dropped-not-fatal at render). Harness gained multi-doc
+  seeding + delegation observations (`task_calls`/`delegated`/`parent_step_id` ancestry). **Verify:** scripted
+  suite **2158 passed / 10 skipped** (incl. the deterministic ancestry CI gate
+  `test_subagent_delegation_nests_steps_via_parent_step_id` — a `task` step with subagent steps nested via
+  `parent_step_id`); ruff+mypy clean; dev stack migrated 0056→0057. **Live finding (ADR-F015, kept verbatim):**
+  both RFQ scenarios `completed`; M3 correctly did NOT delegate the single fact, and ALSO did not delegate the
+  4-document review (read all four itself, `task_calls=0`) — the plumbing is proven (deterministic test) but a
+  tier-4 model doesn't *elect* to fan out at this matter size; not tuned green
+  (`docs/fork/evidence/ux-b-4/`). **Pickup: UX-B-5.**
 
 - **UX-B-5 — Cockpit perfection (web).** Surface the now-proven loop honestly, on the F013 design language:
   **area selection at matter creation** (wire the existing `practiceAreasApi` into the new-matter flow);

@@ -151,6 +151,11 @@ async def test_seed_commercial_config_present_and_derived_configured(
     # UX-B-3 (0056): Commercial now carries its default skill bindings.
     assert "contract-qa" in commercial["bound_skills"]
     assert "nda-review" in commercial["bound_skills"]
+    # UX-B-4 (0057): Commercial carries the live document-researcher subagent.
+    subagents = commercial["agent_config"].get("subagents", [])
+    assert [s["name"] for s in subagents] == ["document-researcher"]
+    assert set(subagents[0]["skills"]) <= set(commercial["bound_skills"])  # ⊆ area (ADR-F017)
+    assert "model" not in subagents[0]  # inherits the gateway-bound parent (ADR-F010)
 
 
 async def test_seed_commercial_config_is_idempotent(db_session: AsyncSession) -> None:
@@ -307,6 +312,91 @@ async def test_default_area_skill_bindings_seed_is_idempotent(db_session: AsyncS
         sys.modules.pop("migration_0056", None)
 
 
+# --- UX-B-4 Commercial subagent (migration 0057) -----------------------------
+
+
+async def test_commercial_subagent_seed_is_idempotent(db_session: AsyncSession) -> None:
+    """Re-running the 0057 seed never clobbers an operator-edited agent_config
+    (it writes only where agent_config is still the empty default)."""
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0057", versions / "0057_commercial_subagent.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["migration_0057"] = module
+    try:
+        spec.loader.exec_module(module)
+        area = (
+            await db_session.execute(select(PracticeArea).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+        # An operator edits the config; re-running the seed must NOT clobber it
+        # (the WHERE agent_config = '{}' guard misses a non-empty config).
+        edited = {
+            "subagents": [{"name": "operator-edit", "description": "d", "system_prompt": "p"}]
+        }
+        area.agent_config = edited
+        await db_session.flush()
+        conn = await db_session.connection()
+        await conn.run_sync(lambda sync_conn: module._seed_commercial_subagent(sync_conn))
+        await db_session.refresh(area)
+        assert area.agent_config == edited
+    finally:
+        sys.modules.pop("migration_0057", None)
+
+
+async def test_admin_patch_rejects_subagent_skill_outside_area(
+    client: AsyncClient, admin: User
+) -> None:
+    """ADR-F017: a subagent may reference only skills BOUND to the area. A skill
+    bound elsewhere (dpa-checklist-review → privacy, not commercial) is rejected."""
+    resp = await client.patch(
+        "/api/v1/practice-areas/commercial",
+        headers=_bearer(admin),
+        json={
+            "agent_config": {
+                "subagents": [
+                    {
+                        "name": "x",
+                        "description": "d",
+                        "system_prompt": "p",
+                        "skills": ["dpa-checklist-review"],
+                    }
+                ]
+            }
+        },
+    )
+    assert resp.status_code == 400
+    read = await client.get("/api/v1/practice-areas", headers=_bearer(admin))
+    commercial = next(a for a in read.json()["practice_areas"] if a["key"] == "commercial")
+    assert "x" not in [s["name"] for s in commercial["agent_config"].get("subagents", [])]
+
+
+async def test_admin_patch_accepts_subagent_with_area_bound_skill(
+    client: AsyncClient, admin: User
+) -> None:
+    """ADR-F017: a subagent declaring a skill the area binds (nda-review →
+    commercial, 0056) is accepted and stored."""
+    resp = await client.patch(
+        "/api/v1/practice-areas/commercial",
+        headers=_bearer(admin),
+        json={
+            "agent_config": {
+                "subagents": [
+                    {
+                        "name": "researcher",
+                        "description": "Finds matter passages.",
+                        "system_prompt": "Research the documents.",
+                        "skills": ["nda-review"],
+                    }
+                ]
+            }
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["agent_config"]["subagents"][0]["skills"] == ["nda-review"]
+
+
 async def test_admin_patch_configures_area(client: AsyncClient, admin: User) -> None:
     resp = await client.patch(
         "/api/v1/practice-areas/disputes",
@@ -360,10 +450,12 @@ async def test_admin_patch_rejects_model_bearing_subagent(client: AsyncClient, a
         },
     )
     assert resp.status_code == 400
-    # And nothing was persisted (still no subagents on Commercial).
+    # And the bad subagent was not persisted — Commercial still carries only its
+    # seeded document-researcher (0057), never the rejected "x".
     read = await client.get("/api/v1/practice-areas", headers=_bearer(admin))
     commercial = next(a for a in read.json()["practice_areas"] if a["key"] == "commercial")
-    assert commercial["agent_config"].get("subagents", []) == []
+    names = [s["name"] for s in commercial["agent_config"].get("subagents", [])]
+    assert "x" not in names
 
 
 async def test_patch_requires_admin(client: AsyncClient, user: User) -> None:

@@ -1,0 +1,86 @@
+{
+  "milestone": "UX-B-4",
+  "adr": "F015",
+  "area": "commercial",
+  "model_alias": "smart",
+  "model_note": "alias 'smart' is expected to resolve to MiniMax-M3 (tier-4) via the gateway's operator-configured routing — the only S9-qualified provider today. The gateway owns the alias→model mapping; this report observes the loop's behaviour, not the resolved model name.",
+  "generated_at": "2026-06-17T09:43:41+00:00",
+  "summary": {
+    "scenarios": 2,
+    "shape_matched": 0,
+    "completed": 2
+  },
+  "results": [
+    {
+      "id": "rfq_single_fact",
+      "title": "Single fact — direct answer, no delegation",
+      "note": "One fact in one document (the submission deadline). Best path is a direct grounded fetch — a single short question does NOT warrant spawning a subagent. Finding if the model delegates anyway.",
+      "prompt": "What is the submission deadline stated in the RFQ instructions for this matter?",
+      "status": "completed",
+      "latency_s": 7.9,
+      "step_count": 7,
+      "model_turns": 3,
+      "tools_called": [
+        "search_documents",
+        "read_document"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "search_documents"
+      ],
+      "forbid_tools": [
+        "task"
+      ],
+      "shape_matched": false,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": false,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "<think>Found it. The RFQ instructions state that quotations must be submitted by no later than 5:00pm on 30 September 2026. Late submissions will not be considered.</think>\n\nThe submission deadline stated in the RFQ instructions is **5:00pm on 30 September 2026**.\n\nPer RFQ-Instructions.txt, §1: \"Quotations must be submitted by no later than 5:00pm on 30 September 2026. Late submissions will not be considered.\""
+    },
+    {
+      "id": "rfq_cross_document_review",
+      "title": "Cross-document review — delegate to the researcher",
+      "note": "A broad review spanning four documents and several independent questions (price, SLA, liability per vendor, vs the draft terms). Best path is to delegate per-vendor / per-question investigation to the document-researcher subagent. Finding if the model does not delegate, or cannot converge within the step cap (the honest tier-4 qualification result, NOT tuned green).",
+      "prompt": "Review this RFQ across all of the documents in the matter. Compare the two vendor proposals on price, service level, and liability, check each against our draft contract terms, and flag the key risks for us. Cite the document name for each point.",
+      "status": "completed",
+      "latency_s": 76.8,
+      "step_count": 13,
+      "model_turns": 3,
+      "tools_called": [
+        "search_documents",
+        "read_document",
+        "read_document",
+        "read_document",
+        "read_document"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "task"
+      ],
+      "forbid_tools": [],
+      "shape_matched": false,
+      "checks": {
+        "expected_tools_present": false,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "<think>Now I have all the information I need. Let me analyze and structure this carefully.\n\n**RFQ Instructions (RFQ-Instructions.txt):**\n- Buyer: Helix Manufacturing Limited\n- Submission deadline: 5:00pm, 30 September 2026\n- Evaluation weights: Price 40%, Service levels 35%, Contractual risk/liability 25%\n- Not bound to accept lowest\n\n**Brightpath Proposal (Vendor-Proposal-Brightpath.txt):**\n- Price: £390,000/year\n- Service level: 98.0% on-time, measured quarterly\n- Liability cap: 50% of annual fee\n- Requires buyer-side indemnity for third-party claims from buyer's instructions\n\n**Northstar Proposal (Vendor-Proposal-Northstar.txt):**\n- Price: £420,000/year\n- Service level: 99.5% on-time, measured monthly\n- Liability cap: 100% of annual fee\n- Excludes indirect/consequential loss\n\n**Draft MS…"
+    }
+  ]
+}

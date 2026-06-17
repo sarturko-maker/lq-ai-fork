@@ -1,4 +1,4 @@
-"""Registry-backed virtual skills backend — UX-B-3 (fork, ADR-F016).
+"""Registry-backed virtual skills backend — UX-B-3/UX-B-4 (fork, ADR-F016/F017).
 
 deepagents' ``SkillsMiddleware`` discovers skills by ``ls``-ing a *source*
 directory in a :class:`~deepagents.backends.protocol.BackendProtocol` and
@@ -6,8 +6,7 @@ directory in a :class:`~deepagents.backends.protocol.BackendProtocol` and
 instructions on demand via the builtin ``read_file`` tool, which also goes
 through the backend. This adapter presents the in-memory
 :class:`~app.skills.registry.SkillRegistry` as such a backend — but exposes
-**only an explicit allow-list of skill names** (the practice area's bound
-subset), never the whole library.
+**only explicit allow-lists of skill names**, never the whole library.
 
 Why a backend over the registry instead of pointing deepagents at the
 ``/skills`` directory (ADR-F016, maintainer-ruled): one library, no
@@ -16,23 +15,32 @@ duplication (areas reference skills by name; nothing is copied per area),
 ``guarded_dispatch`` chokepoint — extending the guard to the full tool
 universe is F1 — so the backend is the boundary: it is read-only, serves only
 the allow-listed names, reaches no host filesystem and no matter data), and
-**zero-copy per run** (the registry is already resident). A bound name the
-registry no longer knows is simply absent here — the drift gap closes
-structurally.
+**zero-copy per run** (the registry is already resident).
 
-The virtual tree is ``{root}/{name}/SKILL.md`` per allowed skill. The file
-body is reconstructed from the registry record's verbatim frontmatter +
-markdown body — the same bytes the loader read, so the middleware's own
+UX-B-4 (ADR-F017): the backend is **multi-source**. deepagents gives each
+subagent its OWN ``SkillsMiddleware`` over its own source paths (custom
+subagents do NOT inherit the parent's skills — skill discovery is isolated per
+subagent), while the parent ``backend`` is shared only as the file-storage
+substrate. So one :class:`RegistrySkillBackend` serves several virtual
+sources: the area source ``/skills`` (the area's bound subset, as in UX-B-3)
+plus, per skill-bearing subagent, ``/skills/subagents/<name>`` exposing that
+subagent's (⊆ area) subset. Each source's tree is ``{source}/{name}/SKILL.md``;
+the file body is reconstructed from the registry record's verbatim frontmatter
++ markdown body — the same bytes the loader read, so the middleware's own
 frontmatter parse (which requires ``name`` to match the parent directory)
-succeeds. Mutating operations (``write``/``edit``/``upload``) return a
-read-only error; ``grep``/``glob`` inherit the protocol default (unsupported)
-— progressive disclosure steers the model to ``read_file`` by path.
+succeeds. ``ls`` of a source lists ONLY that source's names — a subagent never
+sees the area catalogue in its prompt. Mutating operations
+(``write``/``edit``/``upload``) return a read-only error; ``grep``/``glob``
+inherit the protocol default (unsupported) — progressive disclosure steers the
+model to ``read_file`` by path.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+from typing import Any
 
 from deepagents.backends.protocol import (
     FILE_NOT_FOUND,
@@ -49,11 +57,20 @@ from deepagents.backends.protocol import (
 
 from app.skills.registry import SkillRegistry
 
-# The virtual source directory the middleware is pointed at. One source is
-# enough — every bound skill lives directly beneath it as ``<name>/SKILL.md``.
+# The area (main agent) source directory. Every bound skill lives directly
+# beneath it as ``<name>/SKILL.md``.
 SKILLS_ROOT = "/skills"
+# Per-subagent source directories live under here as ``<subagent>/<name>/...``.
+# Nested under SKILLS_ROOT, but the backend is fully virtual: ``ls(SKILLS_ROOT)``
+# lists only the AREA's skill names, never this directory (ADR-F017).
+_SUBAGENT_SOURCE_ROOT = "/skills/subagents"
 _SKILL_FILE = "SKILL.md"
 _READ_ONLY = "skills library is read-only"
+
+
+def subagent_source_path(subagent_name: str) -> str:
+    """The virtual source directory for a subagent's isolated skill subset."""
+    return f"{_SUBAGENT_SOURCE_ROOT}/{subagent_name}"
 
 
 def reconstruct_skill_md(raw_yaml: str, body: str) -> str:
@@ -85,64 +102,72 @@ def resolve_skill_files(registry: SkillRegistry, names: list[str]) -> dict[str, 
 
 
 class RegistrySkillBackend(BackendProtocol):
-    """Read-only backend serving an allow-listed subset of registry skills.
+    """Read-only backend serving allow-listed registry skills over N sources.
 
-    ``skills`` maps skill name → full ``SKILL.md`` text. Only these names are
-    visible; every other path is ``file_not_found``. Constructed per run by
-    :func:`build_area_skill_backend` from a registry snapshot + the area's
-    bound names.
+    ``sources`` maps a source directory path → {skill name → full ``SKILL.md``
+    text}. Only those names, under their source, are visible; every other path
+    is ``file_not_found``. Constructed per run by :func:`build_area_skill_wiring`
+    (the area source + per-subagent sources).
     """
 
-    def __init__(self, skills: Mapping[str, str], *, root: str = SKILLS_ROOT) -> None:
-        self._root = root.rstrip("/") or "/"
-        # Sorted for a stable ls() ordering (the prompt skill list mirrors it).
-        self._skills = {name: skills[name] for name in sorted(skills)}
+    def __init__(self, sources: Mapping[str, Mapping[str, str]]) -> None:
+        # Normalise each source root; sort names per source for a stable ls()
+        # (the prompt skill list mirrors that order).
+        self._sources: dict[str, dict[str, str]] = {
+            (root.rstrip("/") or "/"): {n: skills[n] for n in sorted(skills)}
+            for root, skills in sources.items()
+        }
 
     # -- name/path resolution ------------------------------------------------
 
-    def _skill_md_path(self, name: str) -> str:
-        return f"{self._root}/{name}/{_SKILL_FILE}"
+    def _owner_for_md(self, file_path: str) -> tuple[str, str] | None:
+        """``{source}/<name>/SKILL.md`` → (source, name), or None.
 
-    def _name_from_md_path(self, file_path: str) -> str | None:
-        """``{root}/<name>/SKILL.md`` → ``<name>`` (or None if shape/name miss)."""
+        Exact-parts match per source disambiguates nested roots: an area path
+        (``/skills/<name>/SKILL.md``, 4 parts) only matches the 2-part
+        ``/skills`` source; a subagent path (6 parts) only its 4-part source.
+        """
         parts = PurePosixPath(file_path).parts
-        root_parts = PurePosixPath(self._root).parts
-        # Expect root parts + (<name>, "SKILL.md").
-        if len(parts) != len(root_parts) + 2:
+        if not parts or parts[-1] != _SKILL_FILE:
             return None
-        if parts[: len(root_parts)] != root_parts or parts[-1] != _SKILL_FILE:
-            return None
-        name = parts[len(root_parts)]
-        return name if name in self._skills else None
+        for root, skills in self._sources.items():
+            root_parts = PurePosixPath(root).parts
+            if len(parts) == len(root_parts) + 2 and parts[: len(root_parts)] == root_parts:
+                name = parts[len(root_parts)]
+                if name in skills:
+                    return root, name
+        return None
 
-    def _name_from_dir_path(self, path: str) -> str | None:
-        """``{root}/<name>`` → ``<name>`` (or None)."""
+    def _owner_for_dir(self, path: str) -> tuple[str, str] | None:
+        """``{source}/<name>`` → (source, name), or None."""
         parts = PurePosixPath(path).parts
-        root_parts = PurePosixPath(self._root).parts
-        if len(parts) != len(root_parts) + 1:
-            return None
-        if parts[: len(root_parts)] != root_parts:
-            return None
-        name = parts[-1]
-        return name if name in self._skills else None
+        for root, skills in self._sources.items():
+            root_parts = PurePosixPath(root).parts
+            if len(parts) == len(root_parts) + 1 and parts[: len(root_parts)] == root_parts:
+                name = parts[-1]
+                if name in skills:
+                    return root, name
+        return None
 
     # -- read path (the only operations the middleware + read_file use) ------
 
     def ls(self, path: str) -> LsResult:
         norm = path.rstrip("/") or "/"
-        if norm == self._root:
-            # The source directory: one entry per allowed skill directory.
-            entries: list[FileInfo] = [
-                FileInfo(path=f"{self._root}/{name}", is_dir=True) for name in self._skills
-            ]
-            return LsResult(entries=entries)
-        name = self._name_from_dir_path(norm)
-        if name is not None:
-            content = self._skills[name]
+        skills = self._sources.get(norm)
+        if skills is not None:
+            # A source directory: one entry per allowed skill directory. Only
+            # this source's names — a subagent source never reveals the area's.
+            return LsResult(
+                entries=[FileInfo(path=f"{norm}/{name}", is_dir=True) for name in skills]
+            )
+        owner = self._owner_for_dir(norm)
+        if owner is not None:
+            root, name = owner
+            content = self._sources[root][name]
             return LsResult(
                 entries=[
                     FileInfo(
-                        path=self._skill_md_path(name),
+                        path=f"{root}/{name}/{_SKILL_FILE}",
                         is_dir=False,
                         size=len(content.encode("utf-8")),
                     )
@@ -151,16 +176,20 @@ class RegistrySkillBackend(BackendProtocol):
         return LsResult(error=FILE_NOT_FOUND)
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        name = self._name_from_md_path(file_path)
-        if name is None:
+        owner = self._owner_for_md(file_path)
+        if owner is None:
             return ReadResult(error=FILE_NOT_FOUND)
+        root, name = owner
         # Window by line BEFORE returning: the read_file tool numbers lines from
         # ``offset + 1`` and does NOT re-slice — it assumes the backend already
         # dropped the first ``offset`` lines and capped at ``limit`` (the
         # StateBackend.read / slice_read_response contract). Returning the whole
         # text would mislabel paginated reads and ignore ``limit``.
         lines = (
-            self._skills[name].replace("\r\n", "\n").replace("\r", "\n").splitlines(keepends=True)
+            self._sources[root][name]
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .splitlines(keepends=True)
         )
         if offset and offset >= len(lines):
             return ReadResult(
@@ -172,13 +201,14 @@ class RegistrySkillBackend(BackendProtocol):
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         out: list[FileDownloadResponse] = []
         for path in paths:
-            name = self._name_from_md_path(path)
-            if name is None:
+            owner = self._owner_for_md(path)
+            if owner is None:
                 out.append(FileDownloadResponse(path=path, content=None, error=FILE_NOT_FOUND))
             else:
+                root, name = owner
                 out.append(
                     FileDownloadResponse(
-                        path=path, content=self._skills[name].encode("utf-8"), error=None
+                        path=path, content=self._sources[root][name].encode("utf-8"), error=None
                     )
                 )
         return out
@@ -201,17 +231,58 @@ class RegistrySkillBackend(BackendProtocol):
         return [FileUploadResponse(path=path, error=PERMISSION_DENIED) for path, _ in files]
 
 
-def build_area_skill_backend(
-    registry: SkillRegistry, names: list[str]
-) -> RegistrySkillBackend | None:
-    """Build a backend exposing the area's bound skills, or None if none resolve.
+@dataclass(frozen=True)
+class SkillWiring:
+    """The composition seam's skill wiring for one run (ADR-F017).
 
-    ``names`` is the area's ``practice_area_skills`` set; the registry filters
-    it to known skills (drift). Returns None when nothing resolves so the
-    composition point can skip wiring skills entirely — the qualified default
-    graph (no skills source) is then unchanged.
+    ``backend`` is the one multi-source backend shared with subagents (or None
+    when no skill resolves). ``main_sources`` is the area agent's ``skills=``
+    argument (``[SKILLS_ROOT]`` or None). ``subagents`` is the declarative spec
+    list with each ``skills`` field REWRITTEN from names → its source path (or
+    the key dropped when nothing resolves).
     """
-    skills = resolve_skill_files(registry, names)
-    if not skills:
-        return None
-    return RegistrySkillBackend(skills)
+
+    backend: RegistrySkillBackend | None
+    main_sources: list[str] | None
+    subagents: list[dict[str, Any]] = field(default_factory=list)
+
+
+def build_area_skill_wiring(
+    registry: SkillRegistry | None,
+    *,
+    area_skill_names: list[str],
+    subagents: list[dict[str, Any]],
+) -> SkillWiring:
+    """Build the run's skill backend + sources + rewritten subagent specs.
+
+    The area source ``/skills`` carries the area's resolved bound subset. Each
+    subagent that declares skills gets its OWN source ``/skills/subagents/<name>``
+    exposing only its (⊆ area) subset — deepagents' isolated per-subagent skill
+    model (ADR-F017). A subagent skill name not in the area's resolved set is
+    dropped (⊆-area + drift, the UX-B-3 non-fatal posture; PATCH rejects it at
+    config time). When ``registry`` is None (skills off — the UX-B-1/2 baseline)
+    nothing resolves: the backend is None and subagent ``skills`` are stripped,
+    so a stored name can never reach deepagents as a bogus source.
+    """
+    area_files = resolve_skill_files(registry, area_skill_names) if registry is not None else {}
+    sources: dict[str, dict[str, str]] = {}
+    if area_files:
+        sources[SKILLS_ROOT] = area_files
+
+    rewritten: list[dict[str, Any]] = []
+    for spec in subagents:
+        spec = dict(spec)
+        declared = spec.get("skills") or []
+        # ⊆ area + drift: keep only names the area actually exposes.
+        sub_files = {n: area_files[n] for n in declared if n in area_files}
+        if sub_files:
+            source = subagent_source_path(spec["name"])
+            sources[source] = sub_files
+            spec["skills"] = [source]
+        else:
+            spec.pop("skills", None)
+        rewritten.append(spec)
+
+    backend = RegistrySkillBackend(sources) if sources else None
+    main_sources = [SKILLS_ROOT] if area_files else None
+    return SkillWiring(backend=backend, main_sources=main_sources, subagents=rewritten)
