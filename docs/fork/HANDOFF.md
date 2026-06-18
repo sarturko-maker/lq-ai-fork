@@ -2,9 +2,9 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-5a Vendor/recipient entity SHIPPED (PR #TBD, on branch `priv-5a-vendors`)**, on top of PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). Maintainer split PRIV-5 → **PRIV-5a (Vendors, done) + PRIV-5b (Transfers + the outside-UK/EEA⇒mechanism invariant, NEXT)**. Plan: `docs/fork/plans/PRIV-5-vendors-and-transfers.md` (decisions recorded: split; vendor lean / risk→assessments; restricted = declared bool).)
+## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-5a Vendor/recipient entity SHIPPED (PR #103, on branch `priv-5a-vendors`)**, on top of PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). Maintainer split PRIV-5 → **PRIV-5a (Vendors, done) + PRIV-5b (Transfers + the outside-UK/EEA⇒mechanism invariant, NEXT)**. Plan: `docs/fork/plans/PRIV-5-vendors-and-transfers.md` (decisions recorded: split; vendor lean / risk→assessments; restricted = declared bool).)
 
-- **PRIV-5a (PR #TBD) — Vendor (recipient) entity + recipients in the Article 30 export. Migration 0060.**
+- **PRIV-5a (PR #103) — Vendor (recipient) entity + recipients in the Article 30 export. Migration 0060.**
   Extends the ADR-F019 graph with the Article 30(1)(e) **categories of recipients** axis (F019 named this slice).
   **Domain:** new `Vendor` (`app/models/ropa.py`) — **lean by maintainer decision** (name, `vendor_role`,
   `description`, `country`, `dpa_status`; **risk DEFERRED to the assessment track PRIV-A1**, not an inventory
