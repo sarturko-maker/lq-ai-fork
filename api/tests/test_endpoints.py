@@ -71,6 +71,9 @@ _PARAM_VALUES: dict[str, str] = {
     "run_id": _DUMMY_UUID,
     # F0-S5 (fork) — conversations (ADR-F008)
     "thread_id": _DUMMY_UUID,
+    # PRIV-3 (fork) — ROPA register read API (ADR-F019)
+    "activity_id": _DUMMY_UUID,
+    "system_id": _DUMMY_UUID,
 }
 
 
@@ -330,6 +333,12 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("PATCH", "/api/v1/practice-areas/{key}"),
     ("POST", "/api/v1/practice-areas/{key}/skills"),
     ("DELETE", "/api/v1/practice-areas/{key}/skills/{skill_name}"),
+    # PRIV-3 (fork) — ROPA register read API (ADR-F019). Dedicated coverage in
+    # tests/test_ropa_read.py.
+    ("GET", "/api/v1/ropa/processing-activities"),
+    ("GET", "/api/v1/ropa/processing-activities/{activity_id}"),
+    ("GET", "/api/v1/ropa/systems"),
+    ("GET", "/api/v1/ropa/systems/{system_id}"),
 }
 
 
