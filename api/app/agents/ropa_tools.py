@@ -1,33 +1,32 @@
-"""ROPA agent tools — PRIV-2 (fork, ADR-F018): the validated write path.
+"""ROPA agent tools — PRIV-2/PRIV-3 (fork, ADR-F018/F019): the validated write path.
 
-The Privacy practice-area Deep Agent gets two guarded ROPA tools over the
-matter's :class:`app.models.ropa.ProcessingActivity` register:
+The Privacy practice-area Deep Agent maintains the company's **deployment-global**
+ROPA inventory (ADR-F019 — LQ.AI is single-tenant; the in-house team's one client
+is its own organization, so the register is the company's standing record, not a
+per-matter artifact). Five guarded tools over the two-tier graph
+(:class:`~app.models.ropa.ProcessingActivity` ↔ :class:`~app.models.ropa.System`):
 
-* :func:`propose_processing_activity` — the **code-validated write**. The model
-  PROPOSES a Records-of-Processing-Activities entry; the tool validates the
-  proposal against :class:`app.schemas.ropa.ProcessingActivityInput` (the single
-  validation contract — PRIV-1) BEFORE any commit. A proposal that passes is
-  written; one that fails is **rejected back to the model with the reason**, so
-  the model can fix and re-propose. Agent proposes → code disposes → commit OR
-  reject-and-retry; never a silent write, never a silent fix (ADR-F018). A
-  rejection is returned as ordinary tool-result text (not raised): the dispatch
-  succeeded, the *write* was refused — the model reads the reason and retries.
-* :func:`list_processing_activities` — the matter's current register, so the
-  agent can see what it has already recorded (and a future read UI is PRIV-3).
+* :func:`propose_processing_activity` — the **code-validated write** of an Article
+  30 record. The model PROPOSES; the tool validates against
+  :class:`app.schemas.ropa.ProcessingActivityInput` (PRIV-1) BEFORE commit; a pass
+  is written, a failure is **rejected back to the model with the reason**. Agent
+  proposes → code disposes → commit OR reject-and-retry; never a silent write/fix.
+* :func:`propose_system` — same loop for an IT system/asset
+  (:class:`app.schemas.ropa.SystemInput`).
+* :func:`link_processing_activity_to_system` — record that an activity uses a
+  system (the M:N data-flow link), by the IDs the list tools surface.
+* :func:`list_processing_activities` / :func:`list_systems` — the current register
+  (with IDs), so the agent can see what exists and link records.
 
-**Scoping / authz.** Like the matter document tools, the matter + owner are
-B-class parameters (ADR-F004): closure-injected at :func:`build_ropa_tools`,
-never model-visible. Every row is scoped to ``binding.project_id`` — which the
-composition point already resolved from the run's project AFTER asserting
-``Project.owner_id == run.user_id`` (``compose_and_execute_run``). The model
-cannot name another project, so there is no cross-matter / cross-user vector at
-the tool layer to leak; the project-ownership 404 posture belongs to the PRIV-3
-read API, where a project id IS user-supplied. The ``processing_activities``
-foreign key (ON DELETE CASCADE) keeps every row anchored to its matter.
-
-Every dispatch passes the :mod:`app.agents.guard` chokepoint FIRST (ADR-F002):
-R6 grants exactly these two tool names, R5 re-checks the run is live, one audit
-row records the outcome (counts/types/IDs — never the proposal's values).
+**Scope / authz (ADR-F019).** The register is company-wide, NOT matter- or
+user-scoped — so the tools do not filter by ``project_id``. The matter still
+governs *whether* these tools exist (the composition point grants them only to a
+matter filed under the Privacy area) and the ``guarded_dispatch`` chokepoint
+governs *whether this run may write* (R6 grant set, R5 live re-check, one audit
+row per dispatch — counts/types/IDs, never the proposal's values). The run's
+matter is stamped onto new rows as ``source_project_id`` (provenance only — a
+``rejection`` carries no row). A rejection is returned as ordinary tool-result
+text (not raised): the dispatch succeeded, the *write* was refused.
 """
 
 from __future__ import annotations
@@ -42,16 +41,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.agents.tools import MatterBinding
-from app.models.ropa import ProcessingActivity
-from app.schemas.ropa import ProcessingActivityInput
+from app.models.ropa import ProcessingActivity, System, processing_activity_systems
+from app.schemas.ropa import ProcessingActivityInput, SystemInput
 
 # The stable key of the Privacy practice area (migration 0053). The composition
 # point grants the ROPA tools only to a matter filed under this area.
 PRIVACY_AREA_KEY = "privacy"
 
-ROPA_TOOL_NAMES = frozenset({"propose_processing_activity", "list_processing_activities"})
+ROPA_TOOL_NAMES = frozenset(
+    {
+        "propose_processing_activity",
+        "propose_system",
+        "link_processing_activity_to_system",
+        "list_processing_activities",
+        "list_systems",
+    }
+)
 
-# Cap the register dump so a large matter's tool result stays inside the model's
+# Cap the register dump so a large register's tool result stays inside the model's
 # working context; the read UI (PRIV-3) is the place to browse a long register.
 _LIST_LIMIT = 100
 
@@ -64,8 +71,9 @@ def build_ropa_tools(
 ) -> list[Callable[..., Any]]:
     """Build the Privacy matter's guarded ROPA tools for one run.
 
-    The closures carry the B-class scope (matter + owner); the guard context
-    grants exactly these two tools (R6's grant set).
+    The guard context grants exactly the ROPA tool names (R6's grant set). The
+    run's matter (``binding.project_id``) is closure-injected as row provenance
+    (``source_project_id``), never as a scoping filter (ADR-F019).
     """
     ctx = GuardContext(
         session_factory=session_factory,
@@ -105,7 +113,7 @@ def build_ropa_tools(
         """
         return await guarded_dispatch(
             "propose_processing_activity",
-            lambda db: _propose(
+            lambda db: _propose_activity(
                 db,
                 binding,
                 name=name,
@@ -119,21 +127,85 @@ def build_ropa_tools(
             ctx,
         )
 
-    async def list_processing_activities() -> str:
-        """List the processing activities already recorded for this matter.
+    async def propose_system(
+        name: str,
+        system_type: str,
+        description: str | None = None,
+        owner: str | None = None,
+        hosting_location: str | None = None,
+        retention: str | None = None,
+        security_measures: str | None = None,
+        ai_usage: bool = False,
+    ) -> str:
+        """Propose one IT system/asset where personal data lives.
 
-        Returns the matter's ROPA register — each entry's name, purpose, lawful
-        basis, role, retention, and special-category condition — so you can see
-        what is already recorded before proposing more.
+        Only ``name`` and ``system_type`` are required; fill the rest as you learn
+        it. The proposal is validated before recording; a failure comes back with
+        the reasons to fix and re-propose.
+
+        - ``system_type``: one of database, analytics, crm, support,
+          email_marketing, logs, backup, third_party_processor, other.
+        - ``hosting_location``: country/region where the system hosts data.
+        - ``security_measures``: technical/organisational measures (TOMs).
+        - ``ai_usage``: true if the system applies AI/automated decision-making.
         """
         return await guarded_dispatch(
-            "list_processing_activities", lambda db: _list(db, binding), ctx
+            "propose_system",
+            lambda db: _propose_system(
+                db,
+                binding,
+                name=name,
+                system_type=system_type,
+                description=description,
+                owner=owner,
+                hosting_location=hosting_location,
+                retention=retention,
+                security_measures=security_measures,
+                ai_usage=ai_usage,
+            ),
+            ctx,
         )
 
-    return [propose_processing_activity, list_processing_activities]
+    async def link_processing_activity_to_system(
+        processing_activity_id: str,
+        system_id: str,
+    ) -> str:
+        """Record that a processing activity uses a system (the data-flow link).
+
+        Pass the IDs shown by list_processing_activities and list_systems. If
+        either ID is unknown the link is refused with the reason. Linking an
+        already-linked pair is a no-op.
+        """
+        return await guarded_dispatch(
+            "link_processing_activity_to_system",
+            lambda db: _link(
+                db,
+                processing_activity_id=processing_activity_id,
+                system_id=system_id,
+            ),
+            ctx,
+        )
+
+    async def list_processing_activities() -> str:
+        """List the processing activities in the company ROPA register (with IDs)."""
+        return await guarded_dispatch(
+            "list_processing_activities", lambda db: _list_activities(db), ctx
+        )
+
+    async def list_systems() -> str:
+        """List the systems in the company inventory (with IDs)."""
+        return await guarded_dispatch("list_systems", lambda db: _list_systems(db), ctx)
+
+    return [
+        propose_processing_activity,
+        propose_system,
+        link_processing_activity_to_system,
+        list_processing_activities,
+        list_systems,
+    ]
 
 
-async def _propose(
+async def _propose_activity(
     db: AsyncSession,
     binding: MatterBinding,
     *,
@@ -157,11 +229,11 @@ async def _propose(
             art9_condition=art9_condition,  # type: ignore[arg-type]
         )
     except ValidationError as exc:
-        return _rejection_text(exc)
+        return _rejection_text(exc, "propose_processing_activity")
 
     db.add(
         ProcessingActivity(
-            project_id=binding.project_id,
+            source_project_id=binding.project_id,
             name=proposal.name,
             purpose=proposal.purpose,
             lawful_basis=proposal.lawful_basis.value,
@@ -176,19 +248,109 @@ async def _propose(
     # rolled back). The guard commits the row together with its audit row.
     await db.flush()
     return (
-        f'Recorded processing activity "{proposal.name}" in this matter\'s ROPA '
+        f'Recorded processing activity "{proposal.name}" in the company ROPA '
         f"(lawful basis: {proposal.lawful_basis.value}; role: "
         f"{proposal.controller_role.value}; retention: {proposal.retention})."
     )
 
 
-async def _list(db: AsyncSession, binding: MatterBinding) -> str:
-    """Format the matter's ROPA register (oldest first)."""
+async def _propose_system(
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    name: str,
+    system_type: str,
+    description: str | None,
+    owner: str | None,
+    hosting_location: str | None,
+    retention: str | None,
+    security_measures: str | None,
+    ai_usage: bool,
+) -> str:
+    """Validate the system proposal, then write it (or return the rejection)."""
+    try:
+        proposal = SystemInput(
+            name=name,
+            system_type=system_type,  # type: ignore[arg-type]  # str → enum coercion
+            description=description,
+            owner=owner,
+            hosting_location=hosting_location,
+            retention=retention,
+            security_measures=security_measures,
+            ai_usage=ai_usage,
+        )
+    except ValidationError as exc:
+        return _rejection_text(exc, "propose_system")
+
+    db.add(
+        System(
+            source_project_id=binding.project_id,
+            name=proposal.name,
+            system_type=proposal.system_type.value,
+            description=proposal.description,
+            owner=proposal.owner,
+            hosting_location=proposal.hosting_location,
+            retention=proposal.retention,
+            security_measures=proposal.security_measures,
+            ai_usage=proposal.ai_usage,
+        )
+    )
+    await db.flush()
+    return f'Recorded system "{proposal.name}" ({proposal.system_type.value}) in the company inventory.'
+
+
+async def _link(
+    db: AsyncSession,
+    *,
+    processing_activity_id: str,
+    system_id: str,
+) -> str:
+    """Link an activity to a system after checking both exist (else reject)."""
+    try:
+        pa_uuid = uuid.UUID(processing_activity_id)
+        sys_uuid = uuid.UUID(system_id)
+    except ValueError:
+        return (
+            "Link refused — processing_activity_id and system_id must be the IDs "
+            "shown by list_processing_activities / list_systems. Nothing was linked."
+        )
+
+    activity = await db.get(ProcessingActivity, pa_uuid)
+    system = await db.get(System, sys_uuid)
+    missing = []
+    if activity is None:
+        missing.append(f"no processing activity with id {processing_activity_id}")
+    if system is None:
+        missing.append(f"no system with id {system_id}")
+    if missing:
+        return "Link refused — " + "; ".join(missing) + ". Nothing was linked."
+
+    existing = (
+        await db.execute(
+            select(processing_activity_systems).where(
+                processing_activity_systems.c.processing_activity_id == pa_uuid,
+                processing_activity_systems.c.system_id == sys_uuid,
+            )
+        )
+    ).first()
+    if existing is not None:
+        return f'"{activity.name}" is already linked to system "{system.name}".'
+
+    await db.execute(
+        processing_activity_systems.insert().values(
+            processing_activity_id=pa_uuid, system_id=sys_uuid
+        )
+    )
+    await db.flush()
+    return f'Linked processing activity "{activity.name}" to system "{system.name}".'
+
+
+async def _list_activities(db: AsyncSession) -> str:
+    """Format the company ROPA register (oldest first), with IDs for linking."""
     rows = (
         (
             await db.execute(
                 select(ProcessingActivity)
-                .where(ProcessingActivity.project_id == binding.project_id)
                 .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
                 .limit(_LIST_LIMIT)
             )
@@ -197,7 +359,7 @@ async def _list(db: AsyncSession, binding: MatterBinding) -> str:
         .all()
     )
     if not rows:
-        return "This matter's ROPA has no processing activities yet."
+        return "The company ROPA has no processing activities yet."
 
     blocks: list[str] = []
     for row in rows:
@@ -207,16 +369,45 @@ async def _list(db: AsyncSession, binding: MatterBinding) -> str:
             else "not special-category"
         )
         blocks.append(
-            f"- {row.name}\n"
+            f"- [{row.id}] {row.name}\n"
             f"  purpose: {row.purpose}\n"
             f"  lawful basis: {row.lawful_basis}; role: {row.controller_role}; "
             f"retention: {row.retention}; {sc}"
         )
     noun = "activity" if len(rows) == 1 else "activities"
-    return f"This matter's ROPA — {len(rows)} processing {noun}:\n\n" + "\n".join(blocks)
+    return f"Company ROPA — {len(rows)} processing {noun}:\n\n" + "\n".join(blocks)
 
 
-def _rejection_text(exc: ValidationError) -> str:
+async def _list_systems(db: AsyncSession) -> str:
+    """Format the company system inventory (oldest first), with IDs for linking."""
+    rows = (
+        (
+            await db.execute(
+                select(System)
+                .order_by(System.created_at.asc(), System.name.asc())
+                .limit(_LIST_LIMIT)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return "The company system inventory has no systems yet."
+
+    blocks: list[str] = []
+    for row in rows:
+        extras = []
+        if row.hosting_location:
+            extras.append(f"hosted: {row.hosting_location}")
+        if row.ai_usage:
+            extras.append("uses AI")
+        tail = f" ({'; '.join(extras)})" if extras else ""
+        blocks.append(f"- [{row.id}] {row.name} — {row.system_type}{tail}")
+    noun = "system" if len(rows) == 1 else "systems"
+    return f"Company inventory — {len(rows)} {noun}:\n\n" + "\n".join(blocks)
+
+
+def _rejection_text(exc: ValidationError, tool_name: str) -> str:
     """Turn a Pydantic validation failure into a fix-and-retry message.
 
     Reports the offending field(s) and the rule each broke (the message carries
@@ -225,10 +416,10 @@ def _rejection_text(exc: ValidationError) -> str:
     """
     problems = []
     for err in exc.errors():
-        loc = ".".join(str(p) for p in err["loc"]) or "(activity)"
+        loc = ".".join(str(p) for p in err["loc"]) or "(record)"
         problems.append(f"- {loc}: {err['msg']}")
     return (
-        "Proposal rejected — it does not satisfy the ROPA validation rules. "
-        "Nothing was recorded. Fix the following and call "
-        "propose_processing_activity again:\n" + "\n".join(problems)
+        "Proposal rejected — it does not satisfy the validation rules. "
+        f"Nothing was recorded. Fix the following and call {tool_name} again:\n"
+        + "\n".join(problems)
     )

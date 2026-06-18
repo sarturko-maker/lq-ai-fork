@@ -1,25 +1,27 @@
-"""ROPA agent tools — PRIV-2: the code-validated write path over REAL rows.
+"""ROPA agent tools — PRIV-2/PRIV-3: the code-validated write path over REAL rows.
 
-Real Postgres, real ``ProcessingActivity`` inserts, real audit rows: the
-``build_ropa_tools`` closures are exercised exactly as the runner dispatches
+Real Postgres, real ``ProcessingActivity`` / ``System`` inserts, real audit rows:
+the ``build_ropa_tools`` closures are exercised exactly as the runner dispatches
 them. The load-bearing assertions:
 
-* propose → validate → COMMIT: a valid proposal writes exactly one row with the
-  proposed values;
-* propose → reject → RETRY: an invalid proposal (off-enum basis; special-
-  category without an Article 9(2) condition) is refused, NOTHING is written,
-  and the validation reason comes back as the tool result — never a silent
-  write, never a silent fix (ADR-F018);
-* scoping — entries are the bound matter's only;
+* propose → validate → COMMIT (activity AND system): a valid proposal writes
+  exactly one row with the proposed values;
+* propose → reject → RETRY: an invalid proposal is refused, NOTHING is written,
+  the validation reason comes back as the tool result — never a silent write,
+  never a silent fix (ADR-F018);
+* the M:N link tool — links an activity to a system, rejects unknown ids, is
+  idempotent;
+* deployment-global scope (ADR-F019) — rows carry ``source_project_id`` as
+  provenance, not ownership; the register is not matter-filtered;
 * the guard chokepoint — every dispatch leaves one ``agent_run.tool_call`` audit
   row carrying counts/types/IDs, never the proposal's values;
 * the end-to-end loop — a scripted model proposes a valid then an invalid entry;
   the run completes with exactly the valid row persisted and the rejection
   surfaced back to the model.
 
-Like the matter-tool tests, these COMMIT (the tools open their own sessions from
-the factory), so they seed via a commit-capable factory and tear down
-explicitly.
+Like the matter-tool tests these COMMIT (the tools open their own sessions from
+the factory), so they seed via a commit-capable factory and tear down explicitly
+by ``source_project_id``.
 """
 
 from __future__ import annotations
@@ -40,7 +42,7 @@ from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.practice_area import PracticeArea
 from app.models.project import Project
-from app.models.ropa import ProcessingActivity
+from app.models.ropa import ProcessingActivity, System
 from app.models.user import User
 from app.security import hash_password
 
@@ -56,6 +58,12 @@ _VALID = {
     "art9_condition": None,
 }
 
+_VALID_SYSTEM = {
+    "name": "Production database",
+    "system_type": "database",
+    "hosting_location": "London, UK",
+}
+
 
 @dataclass
 class RopaEnv:
@@ -65,7 +73,10 @@ class RopaEnv:
     project_id: uuid.UUID
     practice_area_id: uuid.UUID
     propose: Callable[..., Awaitable[str]]
+    propose_system: Callable[..., Awaitable[str]]
+    link: Callable[..., Awaitable[str]]
     list_activities: Callable[..., Awaitable[str]]
+    list_systems: Callable[..., Awaitable[str]]
 
 
 @pytest_asyncio.fixture
@@ -126,24 +137,30 @@ async def ropa_env(
             minimum_inference_tier=None,
             practice_area_id=privacy_area_id,
         )
-        propose, list_activities = build_ropa_tools(commit_factory, run_id=run.id, binding=binding)
+        tools = build_ropa_tools(commit_factory, run_id=run.id, binding=binding)
+        by_name = {t.__name__: t for t in tools}
         env = RopaEnv(
             factory=commit_factory,
             user_id=user.id,
             run_id=run.id,
             project_id=project.id,
             practice_area_id=privacy_area_id,
-            propose=propose,
-            list_activities=list_activities,
+            propose=by_name["propose_processing_activity"],
+            propose_system=by_name["propose_system"],
+            link=by_name["link_processing_activity_to_system"],
+            list_activities=by_name["list_processing_activities"],
+            list_systems=by_name["list_systems"],
         )
 
     yield env
 
     async with commit_factory() as db:
         await db.execute(delete(AuditLog).where(AuditLog.user_id == env.user_id))
+        # Join rows cascade when the activity/system is deleted.
         await db.execute(
-            delete(ProcessingActivity).where(ProcessingActivity.project_id == env.project_id)
+            delete(ProcessingActivity).where(ProcessingActivity.source_project_id == env.project_id)
         )
+        await db.execute(delete(System).where(System.source_project_id == env.project_id))
         await db.execute(delete(AgentRun).where(AgentRun.user_id == env.user_id))
         await db.execute(delete(AgentThread).where(AgentThread.user_id == env.user_id))
         await db.execute(delete(Project).where(Project.id == env.project_id))
@@ -156,8 +173,20 @@ async def _activities(env: RopaEnv) -> list[ProcessingActivity]:
         rows = (
             await db.execute(
                 select(ProcessingActivity)
-                .where(ProcessingActivity.project_id == env.project_id)
+                .where(ProcessingActivity.source_project_id == env.project_id)
                 .order_by(ProcessingActivity.created_at.asc())
+            )
+        ).scalars()
+        return list(rows)
+
+
+async def _systems(env: RopaEnv) -> list[System]:
+    async with env.factory() as db:
+        rows = (
+            await db.execute(
+                select(System)
+                .where(System.source_project_id == env.project_id)
+                .order_by(System.created_at.asc())
             )
         ).scalars()
         return list(rows)
@@ -191,7 +220,8 @@ async def test_valid_proposal_commits_one_row(ropa_env: RopaEnv) -> None:
     rows = await _activities(ropa_env)
     assert len(rows) == 1
     row = rows[0]
-    assert row.project_id == ropa_env.project_id
+    # Provenance, not ownership (ADR-F019).
+    assert row.source_project_id == ropa_env.project_id
     assert row.name == "Payroll processing"
     assert row.lawful_basis == "legal_obligation"
     assert row.controller_role == "controller"
@@ -247,13 +277,78 @@ async def test_art9_without_special_category_is_rejected(ropa_env: RopaEnv) -> N
     assert await _activities(ropa_env) == []
 
 
-# (A hallucinated extra field is rejected by the tool's fixed signature before
-# it reaches Pydantic; ProcessingActivityInput's extra="forbid" is covered at
-# the schema layer in tests/test_ropa.py.)
+# ---------------------------------------------------------------------------
+# propose_system — the second code-validated entity (PRIV-3)
+# ---------------------------------------------------------------------------
+
+
+async def test_valid_system_proposal_commits(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.propose_system(**_VALID_SYSTEM)
+    assert "Recorded system" in result
+    assert "Production database" in result
+    rows = await _systems(ropa_env)
+    assert len(rows) == 1
+    assert rows[0].name == "Production database"
+    assert rows[0].system_type == "database"
+    assert rows[0].hosting_location == "London, UK"
+    assert rows[0].source_project_id == ropa_env.project_id
+
+
+async def test_off_enum_system_type_is_rejected_and_nothing_written(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.propose_system(name="Mystery box", system_type="quantum_orb")
+    assert "rejected" in result.lower()
+    assert "system_type" in result
+    assert await _systems(ropa_env) == []
 
 
 # ---------------------------------------------------------------------------
-# list_processing_activities
+# link_processing_activity_to_system — the M:N data-flow link
+# ---------------------------------------------------------------------------
+
+
+async def test_link_activity_to_system(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose_system(**_VALID_SYSTEM)
+    activity = (await _activities(ropa_env))[0]
+    system = (await _systems(ropa_env))[0]
+
+    result = await ropa_env.link(processing_activity_id=str(activity.id), system_id=str(system.id))
+    assert "Linked processing activity" in result
+
+    # The link is visible through the relationship.
+    from sqlalchemy.orm import selectinload
+
+    async with ropa_env.factory() as db:
+        loaded = (
+            await db.execute(
+                select(ProcessingActivity)
+                .options(selectinload(ProcessingActivity.systems))
+                .where(ProcessingActivity.id == activity.id)
+            )
+        ).scalar_one()
+        assert [s.id for s in loaded.systems] == [system.id]
+
+    # Idempotent.
+    again = await ropa_env.link(processing_activity_id=str(activity.id), system_id=str(system.id))
+    assert "already linked" in again
+
+
+async def test_link_unknown_ids_is_rejected(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.link(
+        processing_activity_id=str(uuid.uuid4()), system_id=str(uuid.uuid4())
+    )
+    assert "refused" in result.lower()
+    assert "no processing activity" in result
+    assert "no system" in result
+
+
+async def test_link_non_uuid_is_rejected(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.link(processing_activity_id="not-a-uuid", system_id="also-not")
+    assert "refused" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# list tools
 # ---------------------------------------------------------------------------
 
 
@@ -269,6 +364,17 @@ async def test_list_is_empty_then_reflects_proposals(ropa_env: RopaEnv) -> None:
     assert "7 years after the tax year ends" in listed
 
 
+async def test_list_systems_is_empty_then_reflects_proposals(ropa_env: RopaEnv) -> None:
+    empty = await ropa_env.list_systems()
+    assert "no systems yet" in empty
+
+    await ropa_env.propose_system(**_VALID_SYSTEM)
+    listed = await ropa_env.list_systems()
+    assert "1 system" in listed
+    assert "Production database" in listed
+    assert "database" in listed
+
+
 # ---------------------------------------------------------------------------
 # The guard chokepoint + the model-facing surface
 # ---------------------------------------------------------------------------
@@ -280,7 +386,10 @@ async def test_each_dispatch_writes_one_audit_row_without_values(ropa_env: RopaE
 
     rows = await _audit_rows(ropa_env)
     assert len(rows) == 2
-    assert {r.details["tool"] for r in rows} == ROPA_TOOL_NAMES
+    assert {r.details["tool"] for r in rows} == {
+        "propose_processing_activity",
+        "list_processing_activities",
+    }
     for row in rows:
         assert row.action == "agent_run.tool_call"
         assert row.user_id == ropa_env.user_id
@@ -303,11 +412,19 @@ async def test_rejected_proposal_still_audits_the_dispatch(ropa_env: RopaEnv) ->
     assert await _activities(ropa_env) == []
 
 
+def test_tool_names_cover_the_built_tools(ropa_env: RopaEnv) -> None:
+    assert {
+        "propose_processing_activity",
+        "propose_system",
+        "link_processing_activity_to_system",
+        "list_processing_activities",
+        "list_systems",
+    } == ROPA_TOOL_NAMES
+
+
 async def test_tools_expose_model_facing_schema(ropa_env: RopaEnv) -> None:
     """The model-visible surface: A-class content args only (ADR-F004) — no
-    project_id / user_id leaks into the signature."""
-    assert ropa_env.propose.__name__ == "propose_processing_activity"
-    assert ropa_env.list_activities.__name__ == "list_processing_activities"
+    project_id / user_id leaks into any signature."""
     assert list(inspect.signature(ropa_env.propose).parameters) == [
         "name",
         "purpose",
@@ -317,9 +434,30 @@ async def test_tools_expose_model_facing_schema(ropa_env: RopaEnv) -> None:
         "special_category",
         "art9_condition",
     ]
+    assert list(inspect.signature(ropa_env.propose_system).parameters) == [
+        "name",
+        "system_type",
+        "description",
+        "owner",
+        "hosting_location",
+        "retention",
+        "security_measures",
+        "ai_usage",
+    ]
+    assert list(inspect.signature(ropa_env.link).parameters) == [
+        "processing_activity_id",
+        "system_id",
+    ]
     assert list(inspect.signature(ropa_env.list_activities).parameters) == []
-    assert inspect.iscoroutinefunction(ropa_env.propose)
-    assert inspect.iscoroutinefunction(ropa_env.list_activities)
+    assert list(inspect.signature(ropa_env.list_systems).parameters) == []
+    for tool in (
+        ropa_env.propose,
+        ropa_env.propose_system,
+        ropa_env.link,
+        ropa_env.list_activities,
+        ropa_env.list_systems,
+    ):
+        assert inspect.iscoroutinefunction(tool)
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +492,13 @@ async def test_real_loop_proposes_valid_then_rejects_invalid(ropa_env: RopaEnv) 
     await execute_agent_run(
         ropa_env.run_id,
         ropa_env.factory,
-        tools=[ropa_env.propose, ropa_env.list_activities],
+        tools=[
+            ropa_env.propose,
+            ropa_env.propose_system,
+            ropa_env.link,
+            ropa_env.list_activities,
+            ropa_env.list_systems,
+        ],
         model=model,
     )
 

@@ -21,6 +21,8 @@ CHECK constraints (defense-in-depth).
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -58,6 +60,24 @@ class ControllerRole(StrEnum):
     CONTROLLER = "controller"
     JOINT_CONTROLLER = "joint_controller"
     PROCESSOR = "processor"
+
+
+class SystemType(StrEnum):
+    """Inventory type of an IT system/asset where personal data lives.
+
+    Oscar's DSAR systems-walk list plus OneTrust/TrustArc asset types (PRIV-3,
+    ADR-F019). The SQL CHECK in ``app.models.ropa`` mirrors this set.
+    """
+
+    DATABASE = "database"
+    ANALYTICS = "analytics"
+    CRM = "crm"
+    SUPPORT = "support"
+    EMAIL_MARKETING = "email_marketing"
+    LOGS = "logs"
+    BACKUP = "backup"
+    THIRD_PARTY_PROCESSOR = "third_party_processor"
+    OTHER = "other"
 
 
 class ProcessingActivityInput(BaseModel):
@@ -106,3 +126,99 @@ class ProcessingActivityInput(BaseModel):
         if not self.special_category and self.art9_condition is not None:
             raise ValueError("art9_condition must be set only when special_category is true")
         return self
+
+
+class SystemInput(BaseModel):
+    """A proposed System/asset inventory record — the validated write contract.
+
+    The "where personal data lives" half of the two-tier inventory (ADR-F019);
+    code-validated before commit exactly like :class:`ProcessingActivityInput`
+    (reject, don't sanitize). Only ``name`` and ``system_type`` are required — an
+    inventory entry is useful the moment it is named and typed; the descriptive
+    fields fill in as the agent (or user) learns more. Blank optional fields are
+    normalised to ``None`` so the register stores absence as NULL, not "".
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=200)
+    system_type: SystemType
+    description: str | None = Field(default=None, max_length=2000)
+    owner: str | None = Field(default=None, max_length=200)
+    hosting_location: str | None = Field(default=None, max_length=200)
+    retention: str | None = Field(default=None, max_length=1000)
+    security_measures: str | None = Field(default=None, max_length=2000)
+    ai_usage: bool = False
+
+    @field_validator("description", "owner", "hosting_location", "retention", "security_measures")
+    @classmethod
+    def _blank_optional_to_none(cls, v: str | None) -> str | None:
+        # str_strip_whitespace already trimmed; a whitespace-only optional should
+        # mean "not provided", not an empty string in the register.
+        if v is not None and not v.strip():
+            return None
+        return v
+
+
+# --- Read DTOs (PRIV-3 read API; from ORM via from_attributes) ----------------
+#
+# The register read surface. Summaries carry just enough to render a cross-link
+# without recursing into the other entity's own links (id + label fields).
+
+
+class SystemSummary(BaseModel):
+    """A system as it appears linked under a processing activity."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    system_type: str
+
+
+class ProcessingActivitySummary(BaseModel):
+    """A processing activity as it appears linked under a system."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    lawful_basis: str
+    special_category: bool
+
+
+class ProcessingActivityRead(BaseModel):
+    """One Article 30 record + the systems it uses (detail view)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    purpose: str
+    lawful_basis: str
+    controller_role: str
+    retention: str
+    special_category: bool
+    art9_condition: str | None
+    created_at: datetime
+    updated_at: datetime
+    systems: list[SystemSummary] = Field(default_factory=list)
+
+
+class SystemRead(BaseModel):
+    """One system/asset + the processing activities that use it (detail view)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    system_type: str
+    description: str | None
+    owner: str | None
+    hosting_location: str | None
+    retention: str | None
+    security_measures: str | None
+    ai_usage: bool
+    created_at: datetime
+    updated_at: datetime
+    processing_activities: list[ProcessingActivitySummary] = Field(default_factory=list)

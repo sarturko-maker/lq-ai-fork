@@ -1,27 +1,39 @@
-"""ROPA (Records of Processing Activities) ORM model — PRIV-1 (fork, ADR-F018).
+"""ROPA (Records of Processing Activities) ORM models — PRIV-1/PRIV-3 (fork).
 
-The first **typed domain** of the LQ.AI Oscar Edition Privacy module. A
-``processing_activity`` is one Article 30 GDPR record — a single processing
-operation the controller/processor performs — hung off a Privacy **matter**
-(``projects.practice_area_id`` → the Privacy area, ADR-F002). PRIV-1 is the
-domain SPINE only: the table + the validation contract (``app.schemas.ropa``).
-No agent writes to it yet — the validated, guarded write path is PRIV-2.
+The Privacy module's **typed, relational domain** (ADR-F018, ADR-F019). Two
+first-class entities form a two-tier inventory graph — the OneTrust/TrustArc
+"Business Process composes Systems" shape:
+
+* :class:`ProcessingActivity` — one Article 30 GDPR record (a single processing
+  operation: purpose, lawful basis, retention, special-category…). PRIV-1.
+* :class:`System` — an IT system/asset where personal data lives (database, CRM,
+  analytics, backups, a third-party processor…). PRIV-3.
+
+linked many-to-many through :data:`processing_activity_systems` (a processing
+activity uses several systems; a system serves several activities).
+
+**Deployment-global scope (ADR-F019).** LQ.AI is single-tenant — an in-house
+team's one client is its own organization, so the deployment IS the org. The
+register is therefore the **company-wide** standing record, NOT matter- or
+user-scoped. Both tables carry only a **nullable** ``source_project_id``
+(``ON DELETE SET NULL``) — provenance (which matter/run first recorded the row),
+never ownership/scoping. This SUPERSEDES PRIV-1's matter-scoping
+(``processing_activities.project_id`` is dropped in migration 0059).
 
 **ADR-F018 — code-validated domain writes.** The integrity invariants live in
-the Pydantic domain schema (``app.schemas.ropa.ProcessingActivityInput``), which
-the PRIV-2 write path validates BEFORE commit (agent proposes → code disposes;
-a rejected proposal goes back to the model with the reason, never a silent
-write/fix). The CHECK constraints below DUPLICATE those invariants at the DB
-boundary as defense-in-depth — the ``projects.privileged ⇒ tier`` precedent — so
-the table cannot hold an inconsistent row even if a future caller bypasses the
-schema.
+the Pydantic domain schemas (``app.schemas.ropa``), which the agent write path
+validates BEFORE commit (agent proposes → code disposes; a rejected proposal
+goes back to the model with the reason, never a silent write/fix). The CHECK
+constraints below DUPLICATE those invariants at the DB boundary as
+defense-in-depth — the table cannot hold an inconsistent row even if a future
+caller bypasses the schema.
 
 The free-text enum-ish columns (``lawful_basis``, ``controller_role``,
-``art9_condition``) are stored as ``Text`` + a CHECK against the allowed set
-rather than a PG ``ENUM`` type: the allowed values are GDPR-canonical and the
-authoritative list is the Pydantic enum (``app.schemas.ropa``); a CHECK keeps
-the migration cheap to evolve (ALTER a CHECK, no ``ALTER TYPE`` dance) while
-still refusing an off-list value.
+``art9_condition``, ``system_type``) are stored as ``Text`` + a CHECK against the
+allowed set rather than a PG ``ENUM`` type: the allowed values are GDPR/inventory
+canonical and the authoritative list is the Pydantic enum (``app.schemas.ropa``);
+a CHECK keeps the migration cheap to evolve (ALTER a CHECK, no ``ALTER TYPE``
+dance) while still refusing an off-list value.
 """
 
 from __future__ import annotations
@@ -32,13 +44,15 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Column,
     DateTime,
     ForeignKey,
+    Table,
     Text,
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -68,18 +82,61 @@ _ART9_CONDITIONS = (
 )
 _CONTROLLER_ROLES = ("controller", "joint_controller", "processor")
 
+# System/asset types — Oscar's DSAR systems-walk list plus OneTrust/TrustArc
+# asset types (PRIV-3 / ADR-F019). Authoritative list: app.schemas.ropa.SystemType.
+_SYSTEM_TYPES = (
+    "database",
+    "analytics",
+    "crm",
+    "support",
+    "email_marketing",
+    "logs",
+    "backup",
+    "third_party_processor",
+    "other",
+)
+
 
 def _in_set(column: str, values: tuple[str, ...]) -> str:
     quoted = ", ".join(f"'{v}'" for v in values)
     return f"{column} IN ({quoted})"
 
 
-class ProcessingActivity(Base):
-    """One ROPA entry (Article 30 record) scoped to a Privacy matter.
+def _opt_len(column: str, max_len: int) -> str:
+    """CHECK fragment for an optional Text column: NULL, or within length."""
+    return f"{column} IS NULL OR char_length({column}) <= {max_len}"
 
-    Child of a ``project`` (the matter / unit of work) — ``ON DELETE CASCADE``,
-    so closing a matter removes its records. The DB invariants (mirroring
-    ``app.schemas.ropa.ProcessingActivityInput``):
+
+# Many-to-many link between processing activities and the systems they use
+# (ADR-F019). Both sides CASCADE: deleting either end drops the link rows, not
+# the surviving record. Composite PK = the pair (no duplicate links).
+processing_activity_systems = Table(
+    "processing_activity_systems",
+    Base.metadata,
+    Column(
+        "processing_activity_id",
+        UUID(as_uuid=True),
+        ForeignKey(
+            "processing_activities.id",
+            ondelete="CASCADE",
+            name="fk_pa_systems_processing_activity_id",
+        ),
+        primary_key=True,
+    ),
+    Column(
+        "system_id",
+        UUID(as_uuid=True),
+        ForeignKey("systems.id", ondelete="CASCADE", name="fk_pa_systems_system_id"),
+        primary_key=True,
+    ),
+)
+
+
+class ProcessingActivity(Base):
+    """One ROPA entry (Article 30 record) in the company-wide register.
+
+    Deployment-global (ADR-F019): not owned by a matter. The DB invariants
+    (mirroring ``app.schemas.ropa.ProcessingActivityInput``):
 
     * ``lawful_basis`` is one of the Article 6(1) bases.
     * ``controller_role`` is controller / joint_controller / processor.
@@ -130,16 +187,17 @@ class ProcessingActivity(Base):
         primary_key=True,
         server_default=text("gen_random_uuid()"),
     )
-    # The Privacy matter this record belongs to (ADR-F002 unit of work). CASCADE:
-    # a ROPA entry has no life outside its matter.
-    project_id: Mapped[uuid.UUID] = mapped_column(
+    # Provenance only (ADR-F019): which matter/run first recorded this entry.
+    # Nullable, ON DELETE SET NULL — the register row outlives any matter and is
+    # never scoped/owned by it.
+    source_project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(
             "projects.id",
-            ondelete="CASCADE",
-            name="fk_processing_activities_project_id",
+            ondelete="SET NULL",
+            name="fk_processing_activities_source_project_id",
         ),
-        nullable=False,
+        nullable=True,
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     purpose: Mapped[str] = mapped_column(Text, nullable=False)
@@ -157,8 +215,79 @@ class ProcessingActivity(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
 
+    systems: Mapped[list[System]] = relationship(
+        secondary=processing_activity_systems,
+        back_populates="processing_activities",
+        order_by="System.name",
+    )
+
     def __repr__(self) -> str:
         return (
-            f"<ProcessingActivity id={self.id} project_id={self.project_id} "
+            f"<ProcessingActivity id={self.id} "
             f"name={self.name!r} special_category={self.special_category}>"
         )
+
+
+class System(Base):
+    """One IT system / asset where personal data lives — company-wide (ADR-F019).
+
+    The "where" half of the two-tier inventory graph (the processing activity is
+    the "what/why"). Invariants mirror ``app.schemas.ropa.SystemInput``:
+
+    * ``name`` is non-empty (≤200).
+    * ``system_type`` is one of the canonical inventory types.
+    * the optional descriptive fields stay within length bounds.
+    """
+
+    __tablename__ = "systems"
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(name) > 0 AND char_length(name) <= 200",
+            name="chk_systems_name_len",
+        ),
+        CheckConstraint(
+            _in_set("system_type", _SYSTEM_TYPES),
+            name="chk_systems_system_type",
+        ),
+        CheckConstraint(_opt_len("description", 2000), name="chk_systems_description_len"),
+        CheckConstraint(_opt_len("owner", 200), name="chk_systems_owner_len"),
+        CheckConstraint(_opt_len("hosting_location", 200), name="chk_systems_hosting_location_len"),
+        CheckConstraint(_opt_len("retention", 1000), name="chk_systems_retention_len"),
+        CheckConstraint(
+            _opt_len("security_measures", 2000), name="chk_systems_security_measures_len"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    source_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL", name="fk_systems_source_project_id"),
+        nullable=True,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    system_type: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hosting_location: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retention: Mapped[str | None] = mapped_column(Text, nullable=True)
+    security_measures: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_usage: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    processing_activities: Mapped[list[ProcessingActivity]] = relationship(
+        secondary=processing_activity_systems,
+        back_populates="systems",
+        order_by="ProcessingActivity.name",
+    )
+
+    def __repr__(self) -> str:
+        return f"<System id={self.id} name={self.name!r} type={self.system_type!r}>"

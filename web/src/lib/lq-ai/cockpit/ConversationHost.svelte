@@ -24,6 +24,7 @@
 	import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 	import type { Project } from '$lib/lq-ai/types';
 	import ConversationPanel from '$lib/lq-ai/components/agents/ConversationPanel.svelte';
+	import RopaRegister from '$lib/lq-ai/components/ropa/RopaRegister.svelte';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import NewMatterDialog from './NewMatterDialog.svelte';
 	import StatusPill from './StatusPill.svelte';
@@ -106,6 +107,12 @@
 	let stackedShowPanel = $state(threadId !== null);
 	const showList = $derived(!isStacked || !stackedShowPanel);
 	const showPanel = $derived(!isStacked || stackedShowPanel);
+
+	// PRIV-3 (ADR-F019): a Privacy matter surfaces the company's read-only ROPA
+	// register alongside the conversation via one calm toggle. Other areas never
+	// see it; reversible = this derived + the {#if} branch in the panel column.
+	const isPrivacyMatter = $derived(matter?.practice_area_key === 'privacy');
+	let matterTab = $state<'conversation' | 'register'>('conversation');
 
 	// Keep the stacked pane in sync with URL-driven thread changes (review
 	// fix): a threadId ARRIVING (composer-created sync, history forward)
@@ -311,8 +318,34 @@
 						</button>
 					</div>
 				{/if}
+				{#if isPrivacyMatter}
+					<!-- PRIV-3: switch the panel column between the conversation and the
+					     company ROPA register (read-only). Privacy matters only. -->
+					<div
+						class="flex shrink-0 gap-1 border-b border-border px-4 py-2"
+						role="tablist"
+						aria-label="Matter view"
+					>
+						{#each [{ id: 'conversation', label: 'Conversation' }, { id: 'register', label: 'ROPA register' }] as t (t.id)}
+							<button
+								type="button"
+								role="tab"
+								aria-selected={matterTab === t.id}
+								class="rounded-md px-2.5 py-1 text-xs font-medium transition-colors duration-150 {matterTab ===
+								t.id
+									? 'bg-muted text-foreground'
+									: 'text-muted-foreground hover:text-foreground'}"
+								onclick={() => (matterTab = t.id as 'conversation' | 'register')}
+							>
+								{t.label}
+							</button>
+						{/each}
+					</div>
+				{/if}
 				<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
-					{#if matter || threadId}
+					{#if isPrivacyMatter && matterTab === 'register'}
+						<RopaRegister />
+					{:else if matter || threadId}
 						{#key panelKey}
 							<!-- F2-M6: the conversation column shares the PageShell idiom
 							     (`narrow` width + `tight` pad = px-4 py-4 sm:px-6). Fade on an
