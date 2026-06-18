@@ -2,7 +2,46 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-5a Vendor/recipient entity SHIPPED (PR #103, on branch `priv-5a-vendors`)**, on top of PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). Maintainer split PRIV-5 → **PRIV-5a (Vendors, done) + PRIV-5b (Transfers + the outside-UK/EEA⇒mechanism invariant, NEXT)**. Plan: `docs/fork/plans/PRIV-5-vendors-and-transfers.md` (decisions recorded: split; vendor lean / risk→assessments; restricted = declared bool).)
+## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-5b Transfer entity + the restricted⇒mechanism invariant SHIPPED (PR #104, branch `priv-5b-transfers`)**, on top of PRIV-5a (PR #103) + PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). **PRIV-5 is COMPLETE** (5a Vendors + 5b Transfers). The Article 30(1)(e) axis is now fully captured (recipients + transfers); the export coverage note is down to **2 lines** (data-subject / personal-data taxonomy → **PRIV-6**). Plan: `docs/fork/plans/PRIV-5-vendors-and-transfers.md`. **Pickup: PRIV-6** (data-flow view + Legal-Entity scope + programme dashboard) — or the P1 flagship assessment track (PRIV-A1/A2, needs ADR-F020).)
+
+- **PRIV-5b (PR #104) — Transfer entity (third-country transfers + safeguards) + the restricted⇒mechanism invariant. Migration 0061.**
+  Fills the second clause of Article 30(1)(e) — the **last** of PRIV-5's two coverage lines. A **`Transfer`** is a
+  **child of one processing activity** (required FK, **CASCADE** — the Art 30 structure) with an **optional recipient
+  vendor** (`vendor_id`, ON DELETE SET NULL). **Headline ADR-F018 invariant:** a **restricted** transfer (recipient
+  outside the UK/EEA) **requires** a Chapter V `mechanism`; a non-restricted one **must not** carry one — mirrored in
+  **`TransferInput`** (`model_validator`, both directions) AND a DB **CHECK** (`chk_transfers_restricted_requires_mechanism`),
+  exactly like `special_category ⇔ art9_condition`. **`restricted` is DECLARED** (set by agent/code), NOT derived from a
+  maintained adequacy list (plan § Decisions — drifts as adequacy regs change). **Domain:** `TransferMechanism` StrEnum
+  (adequacy_regulations/standard_contractual_clauses/uk_idta/binding_corporate_rules/derogation); `TransferInput` write
+  contract; `TransferSummary` rides **`ProcessingActivityRead.transfers`** (with nested recipient `vendor`). ORM `Transfer`
+  + 4 CHECKs (destination len, mechanism-in-set, the invariant, details len) + `_TRANSFER_MECHANISMS` literal mirror
+  (model + migration — the established enum-mirror pattern). **Migration 0061** (head 0060→0061) — **verified up/down/up on
+  a throwaway pgvector** (table + 4 CHECKs + 3 FKs + `ix_transfers_processing_activity_id` on up, gone on down, back on
+  re-up); applied to dev DB by rebuilding api+arq-worker+ingest-worker together (dev head = 0061). **Agent tools** (now
+  **10** — `ROPA_TOOL_NAMES`): `propose_transfer` (validates content incl. the invariant FIRST, then resolves the parent
+  activity (required) + optional vendor FKs against the register — reject-and-retry on either; `source_project_id`
+  closure-injected B-class) + `list_transfers`; both guarded (R5/R6 + audit). Composition grants them automatically (the
+  composition point uses `build_ropa_tools`'s **returned list**, not a hardcoded count — no `composition.py` change).
+  **Read API:** transfers eager-loaded (`selectinload(.transfers).selectinload(Transfer.vendor)`) on all 3 activity
+  queries (list/detail/export). **NO standalone `/ropa/transfers` endpoint or register tab** (a transfer has no meaning
+  detached from its activity → surfaces inside the activity detail + export; **route count stays 136**, no contract-test
+  churn). **Export** (`ropa_export.py`): a **Transfers column** on the activity row (restricted → `"dest — mechanism"`,
+  non-restricted → `"dest (not restricted)"`) + a **Transfers sheet** (flattened from activities' nested transfers — one
+  row per transfer with parent-activity name, recipient, safeguard details; **no separate fetch/DTO**); mechanism
+  humanizers (SCCs / UK IDTA / BCRs / Derogation (Art 49)); `_csv_safe` on every new cell (CSV + XLSX). **Coverage note
+  dropped the transfer line** → now **2** (data-subject + personal-data taxonomy, PRIV-6). **Web** (`api/ropa.ts` +
+  `components/ropa/`): `TransferMechanism`/`TransferSummary` types + `transfers` on `ProcessingActivityRead`;
+  `transferMechanismLabel`; a **Third-country transfers** section in `ProcessingActivityDetail` (Restricted/mechanism
+  badges + "Not restricted" marker + recipient cross-link to the vendor). **Verify:** migration throwaway up/down/up;
+  **full api suite 2248 passed / 10 skipped** (+21 over PRIV-5a); ruff + mypy clean (166 files); web svelte-check **0 err**
+  + vitest **879** (+2); **LIVE on dev stack** (head 0061): seeded 1 restricted (US/SCCs + recipient) + 1 non-restricted
+  (Germany) transfer — **the DB CHECK rejected an inconsistent restricted-without-mechanism INSERT live**; read API +
+  all 3 export formats reflect them (XLSX = **4 sheets** incl. Transfers; CSV Transfers column; coverage 2 lines);
+  **screenshots `docs/fork/evidence/priv-5b/`** (restricted + non-restricted activity detail). **Fresh-context review (3
+  parallel finders — correctness / removed-behavior+cross-file / security+simplification): 0 blockers, 0 correctness
+  defects, security all-PASS.** The `adequacy_regulations` label intentionally falls back to `_humanize` (correct output);
+  the enum-mirror tuple + the link/resolve patterns are the documented deliberate ROPA pattern. **No new ADR** (under
+  ADR-F018/F019). **Known-deferred (carried):** `updated_at` has no `onupdate` (now also `transfers`). **Pickup: PRIV-6.**
 
 - **PRIV-5a (PR #103) — Vendor (recipient) entity + recipients in the Article 30 export. Migration 0060.**
   Extends the ADR-F019 graph with the Article 30(1)(e) **categories of recipients** axis (F019 named this slice).
