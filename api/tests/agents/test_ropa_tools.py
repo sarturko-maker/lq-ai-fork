@@ -42,7 +42,7 @@ from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.practice_area import PracticeArea
 from app.models.project import Project
-from app.models.ropa import ProcessingActivity, System
+from app.models.ropa import ProcessingActivity, System, Vendor
 from app.models.user import User
 from app.security import hash_password
 
@@ -64,6 +64,13 @@ _VALID_SYSTEM = {
     "hosting_location": "London, UK",
 }
 
+_VALID_VENDOR = {
+    "name": "Acme Payroll Ltd",
+    "vendor_role": "processor",
+    "dpa_status": "in_place",
+    "country": "UK",
+}
+
 
 @dataclass
 class RopaEnv:
@@ -74,9 +81,12 @@ class RopaEnv:
     practice_area_id: uuid.UUID
     propose: Callable[..., Awaitable[str]]
     propose_system: Callable[..., Awaitable[str]]
+    propose_vendor: Callable[..., Awaitable[str]]
     link: Callable[..., Awaitable[str]]
+    link_vendor: Callable[..., Awaitable[str]]
     list_activities: Callable[..., Awaitable[str]]
     list_systems: Callable[..., Awaitable[str]]
+    list_vendors: Callable[..., Awaitable[str]]
 
 
 @pytest_asyncio.fixture
@@ -147,9 +157,12 @@ async def ropa_env(
             practice_area_id=privacy_area_id,
             propose=by_name["propose_processing_activity"],
             propose_system=by_name["propose_system"],
+            propose_vendor=by_name["propose_vendor"],
             link=by_name["link_processing_activity_to_system"],
+            link_vendor=by_name["link_vendor_to_activity"],
             list_activities=by_name["list_processing_activities"],
             list_systems=by_name["list_systems"],
+            list_vendors=by_name["list_vendors"],
         )
 
     yield env
@@ -161,6 +174,7 @@ async def ropa_env(
             delete(ProcessingActivity).where(ProcessingActivity.source_project_id == env.project_id)
         )
         await db.execute(delete(System).where(System.source_project_id == env.project_id))
+        await db.execute(delete(Vendor).where(Vendor.source_project_id == env.project_id))
         await db.execute(delete(AgentRun).where(AgentRun.user_id == env.user_id))
         await db.execute(delete(AgentThread).where(AgentThread.user_id == env.user_id))
         await db.execute(delete(Project).where(Project.id == env.project_id))
@@ -187,6 +201,18 @@ async def _systems(env: RopaEnv) -> list[System]:
                 select(System)
                 .where(System.source_project_id == env.project_id)
                 .order_by(System.created_at.asc())
+            )
+        ).scalars()
+        return list(rows)
+
+
+async def _vendors(env: RopaEnv) -> list[Vendor]:
+    async with env.factory() as db:
+        rows = (
+            await db.execute(
+                select(Vendor)
+                .where(Vendor.source_project_id == env.project_id)
+                .order_by(Vendor.created_at.asc())
             )
         ).scalars()
         return list(rows)
@@ -302,6 +328,31 @@ async def test_off_enum_system_type_is_rejected_and_nothing_written(ropa_env: Ro
 
 
 # ---------------------------------------------------------------------------
+# propose_vendor — the recipient entity (PRIV-5a)
+# ---------------------------------------------------------------------------
+
+
+async def test_valid_vendor_proposal_commits(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.propose_vendor(**_VALID_VENDOR)
+    assert "Recorded vendor" in result
+    assert "Acme Payroll Ltd" in result
+    rows = await _vendors(ropa_env)
+    assert len(rows) == 1
+    assert rows[0].name == "Acme Payroll Ltd"
+    assert rows[0].vendor_role == "processor"
+    assert rows[0].dpa_status == "in_place"
+    assert rows[0].country == "UK"
+    assert rows[0].source_project_id == ropa_env.project_id
+
+
+async def test_off_enum_vendor_role_is_rejected_and_nothing_written(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.propose_vendor(name="X", vendor_role="overlord", dpa_status="none")
+    assert "rejected" in result.lower()
+    assert "vendor_role" in result
+    assert await _vendors(ropa_env) == []
+
+
+# ---------------------------------------------------------------------------
 # link_processing_activity_to_system — the M:N data-flow link
 # ---------------------------------------------------------------------------
 
@@ -348,6 +399,50 @@ async def test_link_non_uuid_is_rejected(ropa_env: RopaEnv) -> None:
 
 
 # ---------------------------------------------------------------------------
+# link_vendor_to_activity — the recipient link (PRIV-5a)
+# ---------------------------------------------------------------------------
+
+
+async def test_link_activity_to_vendor(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    activity = (await _activities(ropa_env))[0]
+    vendor = (await _vendors(ropa_env))[0]
+
+    result = await ropa_env.link_vendor(
+        processing_activity_id=str(activity.id), vendor_id=str(vendor.id)
+    )
+    assert "Linked processing activity" in result
+
+    from sqlalchemy.orm import selectinload
+
+    async with ropa_env.factory() as db:
+        loaded = (
+            await db.execute(
+                select(ProcessingActivity)
+                .options(selectinload(ProcessingActivity.vendors))
+                .where(ProcessingActivity.id == activity.id)
+            )
+        ).scalar_one()
+        assert [v.id for v in loaded.vendors] == [vendor.id]
+
+    # Idempotent.
+    again = await ropa_env.link_vendor(
+        processing_activity_id=str(activity.id), vendor_id=str(vendor.id)
+    )
+    assert "already discloses" in again
+
+
+async def test_link_vendor_unknown_ids_is_rejected(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.link_vendor(
+        processing_activity_id=str(uuid.uuid4()), vendor_id=str(uuid.uuid4())
+    )
+    assert "refused" in result.lower()
+    assert "no processing activity" in result
+    assert "no vendor" in result
+
+
+# ---------------------------------------------------------------------------
 # list tools
 # ---------------------------------------------------------------------------
 
@@ -373,6 +468,18 @@ async def test_list_systems_is_empty_then_reflects_proposals(ropa_env: RopaEnv) 
     assert "1 system" in listed
     assert "Production database" in listed
     assert "database" in listed
+
+
+async def test_list_vendors_is_empty_then_reflects_proposals(ropa_env: RopaEnv) -> None:
+    empty = await ropa_env.list_vendors()
+    assert "no vendors" in empty
+
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    listed = await ropa_env.list_vendors()
+    assert "1 vendor" in listed
+    assert "Acme Payroll Ltd" in listed
+    assert "processor" in listed
+    assert "in_place" in listed
 
 
 # ---------------------------------------------------------------------------
@@ -416,9 +523,12 @@ def test_tool_names_cover_the_built_tools(ropa_env: RopaEnv) -> None:
     assert {
         "propose_processing_activity",
         "propose_system",
+        "propose_vendor",
         "link_processing_activity_to_system",
+        "link_vendor_to_activity",
         "list_processing_activities",
         "list_systems",
+        "list_vendors",
     } == ROPA_TOOL_NAMES
 
 
@@ -444,18 +554,33 @@ async def test_tools_expose_model_facing_schema(ropa_env: RopaEnv) -> None:
         "security_measures",
         "ai_usage",
     ]
+    assert list(inspect.signature(ropa_env.propose_vendor).parameters) == [
+        "name",
+        "vendor_role",
+        "dpa_status",
+        "description",
+        "country",
+    ]
     assert list(inspect.signature(ropa_env.link).parameters) == [
         "processing_activity_id",
         "system_id",
     ]
+    assert list(inspect.signature(ropa_env.link_vendor).parameters) == [
+        "processing_activity_id",
+        "vendor_id",
+    ]
     assert list(inspect.signature(ropa_env.list_activities).parameters) == []
     assert list(inspect.signature(ropa_env.list_systems).parameters) == []
+    assert list(inspect.signature(ropa_env.list_vendors).parameters) == []
     for tool in (
         ropa_env.propose,
         ropa_env.propose_system,
+        ropa_env.propose_vendor,
         ropa_env.link,
+        ropa_env.link_vendor,
         ropa_env.list_activities,
         ropa_env.list_systems,
+        ropa_env.list_vendors,
     ):
         assert inspect.iscoroutinefunction(tool)
 

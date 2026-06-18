@@ -20,15 +20,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project
-from app.models.ropa import ProcessingActivity
+from app.models.ropa import ProcessingActivity, Vendor
 from app.models.user import User
 from app.schemas.ropa import (
     Art9Condition,
     ControllerRole,
+    DpaStatus,
     LawfulBasis,
     ProcessingActivityInput,
     SystemInput,
     SystemType,
+    VendorInput,
+    VendorRole,
 )
 from tests.agents.test_agent_runs_api import _make_user
 
@@ -151,6 +154,53 @@ def test_system_unknown_field_is_rejected() -> None:
         SystemInput(name="X", system_type=SystemType.OTHER, vendor="Acme")
 
 
+# --- VendorInput invariants (PRIV-5a, pure) ----------------------------------
+
+
+def test_minimal_vendor_passes() -> None:
+    v = VendorInput(name="Acme Payroll Ltd", vendor_role="processor", dpa_status="in_place")
+    assert v.vendor_role is VendorRole.PROCESSOR
+    assert v.dpa_status is DpaStatus.IN_PLACE
+    assert v.description is None and v.country is None
+
+
+def test_full_vendor_passes() -> None:
+    v = VendorInput(
+        name="SubCo Analytics",
+        vendor_role="sub_processor",
+        dpa_status="pending",
+        description="Provides analytics on behalf of our processor",
+        country="United States",
+    )
+    assert v.vendor_role is VendorRole.SUB_PROCESSOR
+    assert v.country == "United States"
+
+
+def test_off_enum_vendor_role_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        VendorInput(name="X", vendor_role="overlord", dpa_status="none")
+
+
+def test_off_enum_dpa_status_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        VendorInput(name="X", vendor_role="processor", dpa_status="maybe")
+
+
+def test_vendor_blank_name_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        VendorInput(name="   ", vendor_role="recipient", dpa_status="not_required")
+
+
+def test_vendor_blank_optional_normalises_to_none() -> None:
+    v = VendorInput(name="Acme", vendor_role="processor", dpa_status="in_place", country="   ")
+    assert v.country is None
+
+
+def test_vendor_unknown_field_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        VendorInput(name="X", vendor_role="processor", dpa_status="none", risk_level="high")
+
+
 # --- DB defense-in-depth (integration) ---------------------------------------
 
 
@@ -217,6 +267,38 @@ async def test_db_check_rejects_off_enum_lawful_basis(db_session: AsyncSession) 
         retention="until consent withdrawn",
         special_category=False,
         art9_condition=None,
+    )
+    db_session.add(row)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_valid_vendor_row_persists(db_session: AsyncSession) -> None:
+    owner = await _make_user(db_session, suffix="vendor-valid")
+    matter = await _make_matter(db_session, owner)
+    row = Vendor(
+        source_project_id=matter.id,
+        name="Acme Payroll Ltd",
+        vendor_role=VendorRole.PROCESSOR.value,
+        dpa_status=DpaStatus.IN_PLACE.value,
+        country="UK",
+    )
+    db_session.add(row)
+    await db_session.flush()
+    assert row.id is not None
+
+
+@pytest.mark.integration
+async def test_db_check_rejects_off_enum_vendor_role(db_session: AsyncSession) -> None:
+    owner = await _make_user(db_session, suffix="vendor-enum")
+    matter = await _make_matter(db_session, owner)
+    row = Vendor(
+        source_project_id=matter.id,
+        name="Mystery vendor",
+        vendor_role="overlord",  # off-enum → chk_vendors_vendor_role rejects
+        dpa_status=DpaStatus.NONE.value,
     )
     db_session.add(row)
     with pytest.raises(IntegrityError):

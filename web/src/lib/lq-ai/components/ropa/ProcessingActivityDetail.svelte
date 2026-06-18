@@ -12,17 +12,20 @@
 		art9ConditionLabel,
 		controllerRoleLabel,
 		lawfulBasisLabel,
-		systemTypeLabel
+		systemTypeLabel,
+		vendorRoleLabel
 	} from './format';
 
 	let {
 		activity,
 		onBack,
-		onOpenSystem
+		onOpenSystem,
+		onOpenVendor
 	}: {
 		activity: ProcessingActivityRead;
 		onBack: () => void;
 		onOpenSystem: (id: string) => void;
+		onOpenVendor: (id: string) => void;
 	} = $props();
 </script>
 
@@ -84,6 +87,31 @@
 						>
 							{sys.name}
 							<span class="text-muted-foreground">{systemTypeLabel(sys.system_type)}</span>
+						</button>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</div>
+
+	<div class="space-y-2">
+		<h3 class="text-sm font-semibold tracking-tight text-foreground">
+			Recipients
+			<span class="text-muted-foreground">({activity.vendors.length})</span>
+		</h3>
+		{#if activity.vendors.length === 0}
+			<p class="text-sm text-muted-foreground">No recipients linked to this activity yet.</p>
+		{:else}
+			<ul class="flex flex-wrap gap-1.5">
+				{#each activity.vendors as vendor (vendor.id)}
+					<li>
+						<button
+							type="button"
+							class="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-foreground transition-colors duration-150 hover:bg-muted"
+							onclick={() => onOpenVendor(vendor.id)}
+						>
+							{vendor.name}
+							<span class="text-muted-foreground">{vendorRoleLabel(vendor.vendor_role)}</span>
 						</button>
 					</li>
 				{/each}

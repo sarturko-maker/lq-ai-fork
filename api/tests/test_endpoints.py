@@ -74,6 +74,8 @@ _PARAM_VALUES: dict[str, str] = {
     # PRIV-3 (fork) — ROPA register read API (ADR-F019)
     "activity_id": _DUMMY_UUID,
     "system_id": _DUMMY_UUID,
+    # PRIV-5a (fork) — vendors/recipients
+    "vendor_id": _DUMMY_UUID,
 }
 
 
@@ -339,6 +341,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/ropa/processing-activities/{activity_id}"),
     ("GET", "/api/v1/ropa/systems"),
     ("GET", "/api/v1/ropa/systems/{system_id}"),
+    # PRIV-5a (fork) — vendors/recipients. Dedicated coverage in tests/test_ropa_read.py.
+    ("GET", "/api/v1/ropa/vendors"),
+    ("GET", "/api/v1/ropa/vendors/{vendor_id}"),
     # PRIV-4a (fork) — Article 30 export. Dedicated coverage in tests/test_ropa_export.py.
     ("GET", "/api/v1/ropa/export"),
 }

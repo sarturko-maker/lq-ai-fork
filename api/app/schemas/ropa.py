@@ -80,6 +80,29 @@ class SystemType(StrEnum):
     OTHER = "other"
 
 
+class VendorRole(StrEnum):
+    """The data-protection relationship a vendor/third party has with the operator.
+
+    The Article 30(1)(e) "categories of recipients" axis (PRIV-5a, ADR-F019). The
+    SQL CHECK in ``app.models.ropa`` mirrors this set.
+    """
+
+    PROCESSOR = "processor"
+    SUB_PROCESSOR = "sub_processor"
+    JOINT_CONTROLLER = "joint_controller"
+    SEPARATE_CONTROLLER = "separate_controller"
+    RECIPIENT = "recipient"
+
+
+class DpaStatus(StrEnum):
+    """Status of the Article 28 data-processing agreement with a vendor."""
+
+    IN_PLACE = "in_place"
+    PENDING = "pending"
+    NOT_REQUIRED = "not_required"
+    NONE = "none"
+
+
 class ProcessingActivityInput(BaseModel):
     """A proposed ROPA entry — the validated write contract (ADR-F018).
 
@@ -160,6 +183,36 @@ class SystemInput(BaseModel):
         return v
 
 
+class VendorInput(BaseModel):
+    """A proposed vendor/third-party (recipient) record — the validated write contract.
+
+    The "categories of recipients" half of Article 30(1)(e) (PRIV-5a, ADR-F019):
+    a third party to whom a processing activity discloses personal data. Only
+    ``name``, ``vendor_role`` and ``dpa_status`` are required — the descriptive
+    fields fill in as the agent (or user) learns more. Code-validated before
+    commit exactly like the other domain inputs (reject, don't sanitize). Blank
+    optional fields normalise to ``None`` so the register stores absence as NULL.
+
+    Risk rating is deliberately NOT modelled here — risk is an assessment-track
+    concept (PRIV-A1), not an inventory field (plan § Decisions).
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=200)
+    vendor_role: VendorRole
+    description: str | None = Field(default=None, max_length=2000)
+    country: str | None = Field(default=None, max_length=200)
+    dpa_status: DpaStatus
+
+    @field_validator("description", "country")
+    @classmethod
+    def _blank_optional_to_none(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            return None
+        return v
+
+
 # --- Read DTOs (PRIV-3 read API; from ORM via from_attributes) ----------------
 #
 # The register read surface. Summaries carry just enough to render a cross-link
@@ -177,7 +230,7 @@ class SystemSummary(BaseModel):
 
 
 class ProcessingActivitySummary(BaseModel):
-    """A processing activity as it appears linked under a system."""
+    """A processing activity as it appears linked under a system or vendor."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -187,8 +240,18 @@ class ProcessingActivitySummary(BaseModel):
     special_category: bool
 
 
+class VendorSummary(BaseModel):
+    """A vendor/recipient as it appears linked under a processing activity."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    vendor_role: str
+
+
 class ProcessingActivityRead(BaseModel):
-    """One Article 30 record + the systems it uses (detail view)."""
+    """One Article 30 record + the systems it uses and recipients it discloses to."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -203,6 +266,7 @@ class ProcessingActivityRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     systems: list[SystemSummary] = Field(default_factory=list)
+    vendors: list[VendorSummary] = Field(default_factory=list)
 
 
 class SystemRead(BaseModel):
@@ -219,6 +283,22 @@ class SystemRead(BaseModel):
     retention: str | None
     security_measures: str | None
     ai_usage: bool
+    created_at: datetime
+    updated_at: datetime
+    processing_activities: list[ProcessingActivitySummary] = Field(default_factory=list)
+
+
+class VendorRead(BaseModel):
+    """One vendor/recipient + the processing activities that disclose to it (detail view)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    vendor_role: str
+    description: str | None
+    country: str | None
+    dpa_status: str
     created_at: datetime
     updated_at: datetime
     processing_activities: list[ProcessingActivitySummary] = Field(default_factory=list)
@@ -249,3 +329,4 @@ class Article30Export(BaseModel):
     coverage: Article30Coverage
     processing_activities: list[ProcessingActivityRead] = Field(default_factory=list)
     systems: list[SystemRead] = Field(default_factory=list)
+    vendors: list[VendorRead] = Field(default_factory=list)
