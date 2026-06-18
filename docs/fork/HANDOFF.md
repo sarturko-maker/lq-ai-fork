@@ -2,8 +2,28 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-6a personal-data taxonomy (Article 30(1)(c)) SHIPPED (PR #105, branch `priv-6a-personal-data-taxonomy`)**, on top of PRIV-5b (PR #104) + PRIV-5a (PR #103) + PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). **The full Article 30(1) content set is now captured** — recipients (5a) + transfers (5b) + the categories-of-data-subjects / categories-of-personal-data taxonomy (6a); **the export coverage note is EMPTY** (mechanism retained for any future gap). Migration 0062. Plan: `docs/fork/plans/PRIV-6a-personal-data-taxonomy.md`; **ultracode adversarial audit + dispositions: `docs/fork/evidence/priv-6a/audit-report.md`**. **Pickup: PRIV-6b** (data-flow / lineage view + Legal-Entity scope + programme dashboard) — or the P1 flagship assessment track (PRIV-A1/A2, needs ADR-F020).)
+## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-6a personal-data taxonomy (Article 30(1)(c)) SHIPPED (PR #105, branch `priv-6a-personal-data-taxonomy`)**, on top of PRIV-5b (PR #104) + PRIV-5a (PR #103) + PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). **The full Article 30(1) content set is now captured** — recipients (5a) + transfers (5b) + the categories-of-data-subjects / categories-of-personal-data taxonomy (6a); **the export coverage note is EMPTY** (mechanism retained for any future gap). Migration 0062. Plan: `docs/fork/plans/PRIV-6a-personal-data-taxonomy.md`; **ultracode adversarial audit + dispositions: `docs/fork/evidence/priv-6a/audit-report.md`**. **ALSO OPEN: ADR-F021 — user permissions / areas of responsibility (PR #106, branch `adr-f021-permissions-areas-of-responsibility`, docs-only, PROPOSED, not merged).** Enterprise users have areas of responsibility (M:N users↔areas); maintainer decided the expanded model: area membership + per-matter sharing + invitations + cross-area collaboration (person + **guest Deep Agent**: time-boxed, matter-scoped, default read-only, honors ADR-F002 + gateway/guard); KEEP roles (segregation); owner always keeps own matters; ROPA register = programme-level (Privacy-area-scoped). The PRIV-6a confused-deputy finding is the symptom this closes. **Pickup options: PRIV-6b** (data-flow / lineage view + Legal-Entity scope + programme dashboard); the P1 assessment track (PRIV-A1/A2, ADR-F020); or **Authorization Phase 1** (ship the behavior-identical `can()`/`visible_filter()` seam — see MILESTONES § Authorization).)
 
+- **ADR-F021 (PR #106, OPEN/PROPOSED, docs-only) — user permissions: areas of responsibility + collaboration.**
+  Grounded + designed via two ultracode workflows (map authz surface → panel → verify). Target: ONE injected
+  decision seam (`app/authz/policy.py` `can(actor,action,resource)` + `visible_filter(actor,kind)` SQL predicate
+  ANDed into list WHERE) + fork-owned `user_practice_areas` (area membership, roles area_owner/member/viewer) +
+  **`matter_collaborators`** (per-matter sharing) + **invitations** (auditable grant lifecycle) + cross-area
+  **guest agents** ("@ Deep Agent": time-boxed, matter-scoped, default read-only; honors ADR-F002 one-matter-
+  one-identity + gateway/guard; permission-gated). `is_admin` = deployment super-user (the policy branches on it,
+  not the drift-prone `users.role`). The dead `get_mutating_user`/`MutatingUser` (mounted nowhere) is retired;
+  roles are KEPT + enforced via the seam's closed `Action` verb enum + per-area/-matter roles. **Refines** (does
+  not rewrite) ADR-F019 §Authz read clause only when the register read-filter flips; single-tenant intact (no
+  org_id). The **load-bearing deliverable now is the design-readiness contract** (modules built flip-ready:
+  reads through the seam, deny→404, durable NON-NULL `practice_area_id` scoping column separate from provenance,
+  agent writes through `guarded_dispatch` carrying user_id+practice_area_id with the area set resolved once at
+  GuardContext build, owner-OR-area-member-OR-matter-collaborator). Phased rollout in **MILESTONES § Authorization**
+  (Track 0 ADR → Phase 1 seam behavior-identical → Phase 2 tables+invites → Phase 3 durable area attribution +
+  backfill → Phase 4 per-seam flips incl. the register → Phase 5 cross-area + new modules). **NEXT SESSION: fold
+  the grounded cross-area-agent + matter-sharing detail from the in-flight workflow `wf_815d3f81-70e` (task
+  `wajbzaq82`) into ADR-F021's guest-agent mechanism + Phase 5 (its output journals to the run dir; extract the
+  synthesis ECONOMICALLY — python, not full read).** Remaining open Qs in the ADR: area_owner config scope;
+  invite issuer/surface; the guest-agent detailed mechanism (its own slice + ADR).
 - **PRIV-6a (PR #105) — personal-data taxonomy (categories of data subjects + personal data). Migration 0062. CLOSES Article 30(1).**
   Fills **Article 30(1)(c)** — the **last** uncaptured Article 30(1) content axis — so the RoPA register now
   captures every Article 30(1) field and the **export coverage note is EMPTY** (`ART30_FIELDS_NOT_YET_RECORDED
