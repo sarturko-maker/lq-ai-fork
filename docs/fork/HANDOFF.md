@@ -4,7 +4,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 
 ## State (UX-B COMPLETE; **Oscar Edition / Agentic Modules milestone OPEN** — PRIV-2 validated agent write path SHIPPED; pickup = PRIV-3 thin vertical + ROPA register UI (read) + first export)
 
-- **PRIV-2 (PR #PRPLACEHOLDER) — SHIPPED. Validated agent write path. API-ONLY (no migration, no web).** Wired
+- **PRIV-2 (PR #100) — SHIPPED. Validated agent write path. API-ONLY (no migration, no web).** Wired
   the PRIV-1 ROPA domain onto the **Privacy** practice-area Deep Agent: the ADR-F018 *agent proposes → code
   disposes* loop is now live end-to-end. New **`app/agents/ropa_tools.py`** (`build_ropa_tools`, mirroring
   `build_matter_tools`) builds two guarded tools, granted ONLY to a matter filed under the Privacy area:
