@@ -2,7 +2,25 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (**Oscar Edition / Agentic Modules milestone OPEN** — PRIV-3 two-tier relational ROPA spine + read UI **SHIPPED (PR #101, squash-merged to `main`)**; ADR-F019 **accepted**. Pickup = **PRIV-4a** (Article 30 export). Plus: the OneTrust→LQ.AI functionality map is logged.)
+## State (**Oscar Edition / Agentic Modules milestone OPEN** — PRIV-4a Article 30 export **SHIPPED (PR #102, squash-merged to `main`)**, on top of PRIV-3 (PR #101, ADR-F019 accepted). Pickup = **PRIV-5** (Vendor + Transfer entities + the outside-UK/EEA⇒mechanism invariant). The OneTrust→LQ.AI functionality map is logged.)
+
+- **PRIV-4a (PR #102) — SHIPPED. Article 30 RoPA export (JSON / CSV / XLSX). Read-and-render, no migration.**
+  The extractable RoPA deliverable over the PRIV-3 deployment-global register (ADR-F019). **`GET
+  /ropa/export?format=json|csv|xlsx`** (`app/api/ropa.py`, shared-read `_active`; typed `ExportFormat` enum,
+  off-enum→422; `selectinload`ed). Pure formatter **`app/ropa_export.py`**: JSON envelope (machine/queries),
+  CSV (one row per activity, systems joined), XLSX (OneTrust's two-sheet shape — Processing Activities +
+  Systems). **`openpyxl` was already a dep** (Tabular Review) — no new SBOM entry; lazy-imported. **OWASP
+  CSV-injection guard on every cell in BOTH CSV and XLSX** (register holds untrusted model-proposed strings).
+  **Honest Article 30(1) coverage note** names the not-yet-captured fields (data-subject/data categories,
+  recipients, third-country transfers — PRIV-5); renders what exists, never falsely complete. Web:
+  `downloadArticle30()` + a new `apiBlobRequest` (auth + refresh-on-401) + a calm Excel/CSV/JSON export control
+  in `RopaRegister.svelte` (F013). New schema field is **`register_name`** (not `register` — that shadows a
+  pydantic `BaseModel` attr). **Verify:** full api suite **2210 passed / 10 skipped**; ruff+mypy clean (166
+  files); web check 0 err + vitest **875**; LIVE-verified (all 3 formats 200, coverage note, CRM label,
+  bad-format 422, no-auth 401; screenshots `docs/fork/evidence/priv-4a/`). Global contracts updated (route
+  133→134). Fresh-context security review: **0 blockers** (both fixes applied: `register_name` rename; XLSX via
+  plain `Response`). **No new ADR** (under ADR-F019). **Known-deferred (carried from PRIV-3):** `updated_at` has
+  no `onupdate` — fix when an edit/UPDATE path lands (PRIV-6+).
 
 - **PRIV-3 (PR #101) — SHIPPED. Two-tier relational ROPA spine + read UI + read API (ADR-F019 accepted).** Two-tier
   **relational, deployment-global**
@@ -871,22 +889,35 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 shipped — the Privacy/ROPA module is scoped and the architecture decided (typed domain + code-validated agent
 writes; agent proposes, code disposes). Decomposition: `docs/fork/plans/PRIV-privacy-ropa-module-decomposition.md`.
 
-### → NEXT: PRIV-4a — Article 30 export.
+### → NEXT: PRIV-5 — Vendor + Transfer entities (+ the outside-UK/EEA⇒mechanism invariant).
 
-**PRIV-3 is SHIPPED (PR #101, squash-merged; ADR-F019 accepted).** The two-tier relational ROPA spine
-(System ↔ ProcessingActivity, deployment-global) + read API + read register UI are on `main`. Start a new
-branch off `main` for PRIV-4a.
+**PRIV-3 + PRIV-4a are SHIPPED (PRs #101/#102; ADR-F019 accepted).** The two-tier relational register
+(System ↔ ProcessingActivity, deployment-global) + read API + read UI + the Article 30 export (JSON/CSV/XLSX)
+are on `main`. Start a new branch off `main` for PRIV-5.
 
-**PRIV-4a — Article 30 RoPA export.** A structured, extractable Article 30 report over the deployment-global
-register (OneTrust's "one-click RoPA report"; map § B). The register now exists relationally, so the export
-is a read-and-render slice — no new domain entity. Likely shape: a `GET /ropa/export` endpoint (auth `_active`,
-same shared-read posture as the read API per ADR-F019) returning the full register joined across the M:N
-(each processing activity with its lawful basis / retention / special-category + its linked systems), and a
-"Download Article 30" affordance in the register UI. Decide the format(s) — structured JSON is cheap and is
-what the agent + downstream queries want; a human-readable doc (CSV/Markdown→PDF) is the lawyer-facing
-deliverable. Reuse the `*Read` DTOs. **Reminder (from PRIV-3 this session): run the FULL `pytest -q` before
-pushing** — a new export route trips `tests/test_endpoints.py` (IMPLEMENTED_ROUTES + _PARAM_VALUES) and
-`tests/test_openapi.py` (EXPECTED_PATHS + the 129/133-style route count), which a slice-only test run misses.
+**PRIV-5 — Vendors/processors + Transfers (the Art 30(1) content the export's coverage note names as missing).**
+This is the slice that closes most of PRIV-4a's honest coverage gap. Two new typed domain entities + their
+links (the PRIV-1/PRIV-3 pattern: Pydantic write contract + ORM + CHECK mirror + a migration + guarded
+code-validated agent tools + read DTOs/endpoints + register UI). Sketch (re-plan at the boundary):
+- **`vendor`** (processor/third party): name, role (processor/sub-processor/joint-controller/recipient), DPA
+  in place, contract ref, risk. Linked to processing activities (recipients) and/or systems.
+- **`transfer`**: a personal-data transfer to a third country/region + its **mechanism** (adequacy / SCCs /
+  BCRs / derogation). **Headline validated invariant: destination outside UK/EEA ⇒ a transfer mechanism is
+  REQUIRED** (the ADR-F018 reject-and-retry shape, mirrored as a DB CHECK like `special_category⇔art9`).
+- **Extend the Article 30 export** to render vendors/recipients + transfers, and **shrink the coverage note**
+  accordingly (it currently lists "Categories of recipients" + "Third-country transfers and the safeguards
+  applied" as not-yet-recorded — PRIV-5 removes those two lines as it fills them).
+- Data-subject/data-element **categories** may be a thin part of PRIV-5 or its own PRIV-5b — decide at the plan.
+
+**Reminders for PRIV-5 (lessons banked this milestone):**
+- **Run the FULL containerized `pytest -q`, not just the slice's test files**, before pushing — a new
+  endpoint/route trips the GLOBAL contracts `tests/test_endpoints.py` (IMPLEMENTED_ROUTES + _PARAM_VALUES) and
+  `tests/test_openapi.py` (EXPECTED_PATHS + the route-count assertion, now 134). And **mypy runs in CI** — a
+  pytest-only local run misses union-attr / type errors.
+- **Run ruff/mypy from the REPO ROOT** (or mount the whole repo into the container) so the root `ruff.toml`
+  (line-length 100) is found — from `api/` alone ruff falls back to 88 and over-wraps.
+- A **migration** lands in PRIV-5: verify up/down/up on a throwaway pgvector container, then apply by
+  rebuilding api+arq-worker+ingest-worker together (NEVER host-side `alembic upgrade` on the dev DB).
 
 **THEN the reshaped roadmap (from `docs/fork/plans/PRIV-onetrust-to-lqai-functionality-map.md` — the spine):**
 - **P0 in-flight:** **PRIV-4a** Article 30 export → **PRIV-5** Vendor + Transfer entities (+ the
