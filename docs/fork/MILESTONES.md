@@ -304,7 +304,7 @@ short-slice**.
   re-scope, **ADR-F019 accepted**; read API + the two-tier register read UI in F013 style; `propose_system`/
   `link`/`list_systems` tools; migration 0059) → **PRIV-4a ✅ (PR #102)** (Article 30 export — JSON/CSV/XLSX,
   shared-read; pure formatter + OWASP CSV-injection guard + honest Art-30 coverage note; openpyxl already a dep)
-  → **PRIV-5 split into 5a + 5b (maintainer): PRIV-5a ✅** (Vendor/recipient entity — name/role/country/
+  → **PRIV-5 split into 5a + 5b (maintainer): PRIV-5a ✅ (PR #103)** (Vendor/recipient entity — name/role/country/
   DPA-status, lean: risk deferred to assessments; `processing_activity_vendors` M:N + `propose_vendor`/
   `link_vendor_to_activity`/`list_vendors` tools, migration 0060; read API + Vendors register tab; Recipients
   column + Vendors sheet in the Art 30 export; coverage note's "recipients" line dropped) → **PRIV-5b** (Transfer
