@@ -2,12 +2,13 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (**Oscar Edition / Agentic Modules milestone OPEN** — PRIV-3 two-tier relational ROPA spine + read UI BUILT, tested green, LIVE on localhost, committed to branch `priv-3-ropa-read-ui`, **NOT yet PR'd/merged**; pickup = open the PRIV-3 PR then PRIV-4a. Plus: the OneTrust→LQ.AI functionality map is logged.)
+## State (**Oscar Edition / Agentic Modules milestone OPEN** — PRIV-3 two-tier relational ROPA spine + read UI **SHIPPED (PR #101, squash-merged to `main`)**; ADR-F019 **accepted**. Pickup = **PRIV-4a** (Article 30 export). Plus: the OneTrust→LQ.AI functionality map is logged.)
 
-- **PRIV-3 — BUILT + LIVE, on branch `priv-3-ropa-read-ui`, NOT merged.** Two-tier **relational, deployment-global**
+- **PRIV-3 (PR #101) — SHIPPED. Two-tier relational ROPA spine + read UI + read API (ADR-F019 accepted).** Two-tier
+  **relational, deployment-global**
   ROPA inventory + the **read UI** (the "lead with the read UI" slice; maintainer chose the richer scope over a
   flat list — see decision trail in `docs/fork/plans/PRIV-3-ropa-read-ui-and-relational-reshape.md`). **ADR-F019**
-  (proposed): relational two-tier graph **System ↔ ProcessingActivity (M:N)**, scoped **deployment-global** (LQ.AI
+  (accepted): relational two-tier graph **System ↔ ProcessingActivity (M:N)**, scoped **deployment-global** (LQ.AI
   is single-tenant — an in-house team's one client is its own org, so the deployment IS the org; no `organizations`
   table). This **SUPERSEDES PRIV-1's matter-scoping**: `processing_activities` **drops `project_id`**, adds nullable
   `source_project_id` (provenance only, `ON DELETE SET NULL`). **Migration 0059** (head 0058→0059) creates `systems`
@@ -30,7 +31,17 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   `tests/test_ropa_read.py` + reworked `tests/agents/test_ropa_tools.py` + composition test), **ruff clean** (repo
   root); **web `npm run check` 0 errors + 11 vitest**; **LIVE-verified on http://localhost:3000** (seeded demo matter
   "Programme — GDPR / ROPA" under admin@lq.ai: 4 systems / 3 activities / 6 links; **screenshots
-  `docs/fork/evidence/priv-3/01-07`**). **NOT done = the ship step: open PR → full CI → ADR-F005 review → merge.**
+  `docs/fork/evidence/priv-3/01-07`**). **Ship gate (ADR-F005) — PASSED:** all 3 CI checks green (Web + Gateway +
+  API); the full containerized api suite **2202 passed / 9 skipped** (the +5 over the first run = the global
+  contract tests now register the 4 read routes — see below); ruff + mypy clean (root `ruff.toml`, line-length 100,
+  165 files); web check 0 err + 11 ropa vitest; fresh-context adversarial+security review **SHIP / 0 blockers**
+  (shared-read authz divergence is documented in ADR-F019, keys gateway-only, agent writes code-validated with
+  closure-injected B-class IDs, migration 0059 reversible). **CI caught 5 failures a ROPA-subset local run missed**
+  (now fixed in the PR): mypy `union-attr` in `_link` (added a narrowing `assert`); and the two GLOBAL contract
+  tests that enumerate every route — `tests/test_endpoints.py` (`_PARAM_VALUES` += `activity_id`/`system_id`;
+  `IMPLEMENTED_ROUTES` += the 4 `GET /ropa/*`) + `tests/test_openapi.py` (`EXPECTED_PATHS` += the 4 paths; route
+  count 129→133). **Lesson: run the FULL `pytest -q` (not just the slice's test files) before pushing — new
+  endpoints trip the route-coverage + OpenAPI-sketch contracts.**
   Also logged this session: **`docs/fork/plans/PRIV-onetrust-to-lqai-functionality-map.md`** — the full OneTrust→LQ.AI
   capability map (P0 in-flight / P1 flagship / P2 tracks / **P3 deferred**: consent platform, cookie CMP, data-store
   discovery, regulatory RAG — maintainer-confirmed non-goals). The **differentiator** = conversational-link
@@ -38,6 +49,11 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   **DeepSeek dev-provider experiment** (dev-ONLY: `docker-compose.yml` `DEEPSEEK_API_KEY` passthrough + `harness.py`
   `LQ_AI_SCENARIO_MODEL` override; live gateway config is gitignored). NB: MiniMax + DeepSeek are **dev models only**
   — clients run a Western model via the gateway ([[llm-is-injected-replaceable]]).
+  **Known-deferred nits (from the PRIV-3 review, NOT blockers — pick up in a later slice):** (1) `systems` +
+  `processing_activities` carry `updated_at` with a `server_default now()` but **no `onupdate`** and there is no
+  edit path yet, so `updated_at` always equals `created_at` — add `onupdate` (or a trigger) when the edit/UPDATE
+  path lands so a future "last modified" UI isn't misled; (2) `harness.py` reads `LQ_AI_SCENARIO_MODEL` from raw
+  `os.environ` rather than via settings/DI (test-only knob, accepted).
 
 - **PRIV-2 (PR #100) — SHIPPED. Validated agent write path. API-ONLY (no migration, no web).** Wired
   the PRIV-1 ROPA domain onto the **Privacy** practice-area Deep Agent: the ADR-F018 *agent proposes → code
@@ -855,21 +871,22 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 shipped — the Privacy/ROPA module is scoped and the architecture decided (typed domain + code-validated agent
 writes; agent proposes, code disposes). Decomposition: `docs/fork/plans/PRIV-privacy-ropa-module-decomposition.md`.
 
-### → NEXT: open the PRIV-3 PR (CI + ADR-F005 gate + merge), THEN PRIV-4a.
+### → NEXT: PRIV-4a — Article 30 export.
 
-**PRIV-3 is code-complete, green, and live-verified** — what remains is the **ship step** (the maintainer
-paused here to compact after logging the plan + map). Branch `priv-3-ropa-read-ui` is committed (PRIV-3 + the
-OneTrust map + ADR-F019 + a separate DeepSeek-dev commit). To ship:
-1. `gh pr create --repo sarturko-maker/lq-ai-fork --head priv-3-ropa-read-ui` — body quotes: api **51 ROPA
-   tests pass** + ruff clean; web **`npm run check` 0 / 11 vitest**; migration 0059 throwaway-verified;
-   **live screenshots `docs/fork/evidence/priv-3/01-07`**; ADR-F019.
-2. Full CI green (the complete api + web suites run on the PR — confirms no regression beyond the 51 ROPA
-   tests I ran locally). Watch with `gh pr checks <n> --watch`.
-3. Fresh-context adversarial + **security + simplification** pass on the diff (the register is an
-   intentionally-shared read surface — confirm ADR-F019's authz divergence reads as deliberate; no
-   `{@html}`/render-sink issues in the new Svelte; M:N cascade correctness).
-4. Squash-merge per ADR-F005 (`gh pr merge <n> --repo sarturko-maker/lq-ai-fork --squash --delete-branch`).
-   **Mark ADR-F019 `accepted`** in the merge PR.
+**PRIV-3 is SHIPPED (PR #101, squash-merged; ADR-F019 accepted).** The two-tier relational ROPA spine
+(System ↔ ProcessingActivity, deployment-global) + read API + read register UI are on `main`. Start a new
+branch off `main` for PRIV-4a.
+
+**PRIV-4a — Article 30 RoPA export.** A structured, extractable Article 30 report over the deployment-global
+register (OneTrust's "one-click RoPA report"; map § B). The register now exists relationally, so the export
+is a read-and-render slice — no new domain entity. Likely shape: a `GET /ropa/export` endpoint (auth `_active`,
+same shared-read posture as the read API per ADR-F019) returning the full register joined across the M:N
+(each processing activity with its lawful basis / retention / special-category + its linked systems), and a
+"Download Article 30" affordance in the register UI. Decide the format(s) — structured JSON is cheap and is
+what the agent + downstream queries want; a human-readable doc (CSV/Markdown→PDF) is the lawyer-facing
+deliverable. Reuse the `*Read` DTOs. **Reminder (from PRIV-3 this session): run the FULL `pytest -q` before
+pushing** — a new export route trips `tests/test_endpoints.py` (IMPLEMENTED_ROUTES + _PARAM_VALUES) and
+`tests/test_openapi.py` (EXPECTED_PATHS + the 129/133-style route count), which a slice-only test run misses.
 
 **THEN the reshaped roadmap (from `docs/fork/plans/PRIV-onetrust-to-lqai-functionality-map.md` — the spine):**
 - **P0 in-flight:** **PRIV-4a** Article 30 export → **PRIV-5** Vendor + Transfer entities (+ the

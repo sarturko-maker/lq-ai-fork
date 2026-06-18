@@ -1,6 +1,6 @@
 # F019 — Relational, deployment-global ROPA inventory graph
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-06-18
 - Supersedes: the matter-scoping of `processing_activities` introduced in PRIV-1 (ADR-F018 / migration 0058)
 - Extends: ADR-F018 (agentic modules = typed domain + code-validated agent writes + domain UI)
