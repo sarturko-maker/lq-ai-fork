@@ -17,13 +17,16 @@ owns ("system proposes, user owns", ADR-0013 D4).
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app import ropa_export
 from app.db.session import get_db
 from app.models.ropa import ProcessingActivity, System
 from app.schemas.ropa import ProcessingActivityRead, SystemRead
@@ -31,6 +34,14 @@ from app.schemas.ropa import ProcessingActivityRead, SystemRead
 router = APIRouter(prefix="/ropa", tags=["ropa"])
 
 _Db = Annotated[AsyncSession, Depends(get_db)]
+
+
+class ExportFormat(StrEnum):
+    """Article 30 export formats (PRIV-4a). An off-enum value is a 422 at the boundary."""
+
+    JSON = "json"
+    CSV = "csv"
+    XLSX = "xlsx"
 
 
 @router.get("/processing-activities", response_model=list[ProcessingActivityRead])
@@ -97,3 +108,64 @@ async def get_system(system_id: uuid.UUID, db: _Db) -> System:
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="system not found")
     return row
+
+
+@router.get("/export")
+async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -> Response:
+    """Export the company ROPA as an Article 30 deliverable (JSON / CSV / XLSX).
+
+    Read-and-render over the deployment-global register (ADR-F019): every
+    processing activity with its lawful basis / retention / special-category,
+    joined across the M:N to its linked systems, plus the system inventory.
+    Shared-read posture (``_active`` at the mount) — the register is the
+    company's standing record, not a per-user artifact. The export is HONEST
+    about the Article 30(1) fields the domain does not yet capture (see the
+    coverage note; transfers/recipients/data categories arrive with PRIV-5).
+    """
+    activities = (
+        (
+            await db.execute(
+                select(ProcessingActivity)
+                .options(selectinload(ProcessingActivity.systems))
+                .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    systems = (
+        (
+            await db.execute(
+                select(System)
+                .options(selectinload(System.processing_activities))
+                .order_by(System.created_at.asc(), System.name.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    export = ropa_export.build_export(
+        [ProcessingActivityRead.model_validate(a) for a in activities],
+        [SystemRead.model_validate(s) for s in systems],
+        generated_at=datetime.now(UTC),
+    )
+
+    stamp = export.generated_at.date().isoformat()
+    if format is ExportFormat.JSON:
+        return Response(
+            content=export.model_dump_json(),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="article-30-ropa-{stamp}.json"'},
+        )
+    if format is ExportFormat.CSV:
+        return Response(
+            content=ropa_export.to_csv(export),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="article-30-ropa-{stamp}.csv"'},
+        )
+    return Response(
+        content=ropa_export.to_xlsx(export),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="article-30-ropa-{stamp}.xlsx"'},
+    )

@@ -13,6 +13,7 @@
 	import { fade } from 'svelte/transition';
 
 	import { Badge } from '$lib/components/ui/badge/index.js';
+	import { Button } from '$lib/components/ui/button/index.js';
 	import {
 		Table,
 		TableBody,
@@ -24,8 +25,10 @@
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
 	import {
+		downloadArticle30,
 		listProcessingActivities,
 		listSystems,
+		type ExportFormat,
 		type ProcessingActivityRead,
 		type SystemRead
 	} from '$lib/lq-ai/api/ropa';
@@ -54,6 +57,30 @@
 		activities?.find((a) => a.id === selectedActivityId) ?? null
 	);
 	const selectedSystem = $derived(systems?.find((s) => s.id === selectedSystemId) ?? null);
+
+	const registerEmpty = $derived(
+		(activities?.length ?? 0) === 0 && (systems?.length ?? 0) === 0
+	);
+
+	const EXPORT_FORMATS: { fmt: ExportFormat; label: string }[] = [
+		{ fmt: 'xlsx', label: 'Excel' },
+		{ fmt: 'csv', label: 'CSV' },
+		{ fmt: 'json', label: 'JSON' }
+	];
+	let exporting = $state<ExportFormat | null>(null);
+	let exportError = $state<string | null>(null);
+
+	async function doExport(fmt: ExportFormat) {
+		exportError = null;
+		exporting = fmt;
+		try {
+			await downloadArticle30(fmt);
+		} catch (e) {
+			exportError = e instanceof Error ? e.message : 'Export failed.';
+		} finally {
+			exporting = null;
+		}
+	}
 
 	async function load() {
 		loading = true;
@@ -105,11 +132,34 @@
 	{:else if selectedSystem}
 		<SystemDetail system={selectedSystem} onBack={backToList} onOpenActivity={openActivity} />
 	{:else}
-		<SectionHeader
-			size="page"
-			title="ROPA register"
-			subtitle="The company's Records of Processing Activities — maintained by the Privacy agent, owned by you."
-		/>
+		<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+			<SectionHeader
+				size="page"
+				title="ROPA register"
+				subtitle="The company's Records of Processing Activities — maintained by the Privacy agent, owned by you."
+			/>
+
+			<!-- Article 30 export (PRIV-4a): the extractable RoPA deliverable. -->
+			<div class="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+				<div class="flex items-center gap-1.5">
+					<span class="mr-1 text-xs font-medium text-muted-foreground">Export Article 30</span>
+					{#each EXPORT_FORMATS as f (f.fmt)}
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							disabled={registerEmpty || exporting !== null}
+							onclick={() => doExport(f.fmt)}
+						>
+							{exporting === f.fmt ? 'Preparing…' : f.label}
+						</Button>
+					{/each}
+				</div>
+				{#if exportError}
+					<p class="text-xs text-destructive">{exportError}</p>
+				{/if}
+			</div>
+		</div>
 
 		<!-- Two-tier switch: calm, single accent on the active register. -->
 		<div

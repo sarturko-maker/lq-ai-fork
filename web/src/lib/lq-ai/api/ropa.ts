@@ -9,7 +9,7 @@
  *
  * Wire shapes mirror api/app/schemas/ropa.py (the Read DTOs).
  */
-import { apiRequest } from './client';
+import { apiBlobRequest, apiRequest } from './client';
 
 export type LawfulBasis =
 	| 'consent'
@@ -92,4 +92,48 @@ export function listSystems(): Promise<SystemRead[]> {
 
 export function getSystem(id: string): Promise<SystemRead> {
 	return apiRequest<SystemRead>(`/ropa/systems/${encodeURIComponent(id)}`);
+}
+
+// --- Article 30 export (PRIV-4a) ---------------------------------------------
+
+/** Export formats the backend serves (api/app/api/ropa.py ExportFormat). */
+export type ExportFormat = 'json' | 'csv' | 'xlsx';
+
+/**
+ * Read the download filename the server set in `Content-Disposition`, falling
+ * back to a sensible default when the header is absent (e.g. under a proxy that
+ * strips it). Pure — unit-tested separately from the DOM download.
+ */
+export function filenameFromDisposition(
+	disposition: string | null,
+	format: ExportFormat
+): string {
+	const match = disposition?.match(/filename="([^"]+)"/);
+	return match ? match[1] : `article-30-ropa.${format}`;
+}
+
+/**
+ * Download the company ROPA as an Article 30 deliverable. Fetches the file with
+ * auth (refresh-on-401), then triggers a browser download via an object URL.
+ * Browser-only — the DOM bits no-op under SSR/tests without a document.
+ */
+export async function downloadArticle30(format: ExportFormat = 'xlsx'): Promise<void> {
+	const res = await apiBlobRequest(`/ropa/export?format=${encodeURIComponent(format)}`);
+	const blob = await res.blob();
+	const filename = filenameFromDisposition(res.headers.get('content-disposition'), format);
+
+	if (typeof document === 'undefined') {
+		return;
+	}
+	const url = URL.createObjectURL(blob);
+	try {
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+	} finally {
+		URL.revokeObjectURL(url);
+	}
 }
