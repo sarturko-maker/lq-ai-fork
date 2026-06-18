@@ -332,19 +332,63 @@ short-slice**.
   playbooks-as-deliverables (skills with an explicit output artifact — the mike concept); MCP via gateway
   tool-egress (cf. upstream ADR 0014/0015) only when a module needs an external source.
 
+## Authorization — areas of responsibility (ADR-F021, proposed)
+
+The enterprise reality (maintainer, 2026-06-18): **users have areas of responsibility** — one user handles
+Privacy, a colleague does not; several may share Privacy. A many-to-many **users ↔ practice-areas** model with
+**roles within an area** that does not exist yet (authority today is the single boolean `is_admin`; the
+`users.role` enum is assignable but its gate is mounted nowhere; no user↔area link exists). **ADR-F021** records
+the target (one injected `can()`/`visible_filter()` decision seam + a fork-owned `user_practice_areas` table +
+`is_admin` as the super-user) and — the load-bearing part now — a **design-readiness contract** so every module
+is built flip-ready (reads through the seam, deny→404, durable NON-NULL `practice_area_id` scoping column on new
+domain rows kept separate from provenance, agent writes through `guarded_dispatch` carrying user_id +
+practice_area_id with the actor's area set resolved once at GuardContext build, owner-OR-area-member never
+area-only). **Closes the PRIV-6a confused-deputy gap** (it is the symptom: the ROPA register is read by every
+authenticated user). Grounded + designed via the `permissions-roadmap-design` workflow (28/32 code claims
+verified). Phased rollout (each its own slice, re-planned at the boundary):
+
+- **Track 0 — ADR-F021 + this roadmap entry (no code; THIS slice).** Maintainer accepts before any enforcement
+  flip. Settles the open questions (owner-retains-own-matter; ROPA backfill; `area_owner` scope; catalog
+  visibility; retire `users.role`/`get_mutating_user`?; area-grain vs per-matter ACL).
+- **Phase 1 — ship the decision seam, behavior-identical (no schema).** `app/authz/policy.py` with `can()` +
+  `visible_filter()` returning today's results; refactor the scattered `_load_visible_*` helpers + the ropa
+  read handlers to delegate; no-op-on-ship test. The one (desirable) one-way door.
+- **Phase 2 — membership + per-matter sharing + invitations (schema + admin/grant surface; policy ignores it).**
+  Migration **0063+**: `user_practice_areas` (area membership) **+ `matter_collaborators(project_id, user_id,
+  role)`** (per-matter sharing — decision 6) + an auditable **invitation/grant** record (lifecycle
+  invited→accepted/revoked, `granted_by` RESTRICT). ORM copies `TeamMember`'s shape into separate fork-owned
+  tables. Grant/revoke + invite endpoints (admin, area_owner for their area, matter owner/collaborator for
+  their matter; mirror `admin.update_user_role` + `teams.py` admin_router). Behavior unchanged until Phase 4.
+- **Phase 3 — durable area attribution on ROPA rows + backfill (the hard prerequisite).** Non-null
+  `practice_area_id` on `processing_activities` + `systems` (keep `source_project_id` as separate provenance);
+  forward/backward migration + backfill (open question 2).
+- **Phase 4 — flip enforcement per seam (each a one-line predicate, feature-flaggable, revertible):** matter
+  creation; agent-run launch + worker re-validation; the guard R6-sibling per-call check; owned-resource reads
+  (owner OR area-member); and **LAST** the register read-filter (`true()` → area-membership) — which closes
+  PRIV-6a and supersedes ADR-F019's §Authz read-posture clause (single-tenant/schema untouched).
+- **Phase 4b — the read flip extends to per-matter sharing**: matter reads = owner OR area-member OR
+  matter-collaborator (decision 1 keeps owner unconditional).
+- **Phase 5 — cross-area collaboration + new modules born flip-ready.** Cross-area **person** (invite an
+  Employment colleague onto a Commercial matter as a matter-collaborator). Cross-area **agent** ("@ Deep Agent")
+  — another area's Deep Agent as a **time-boxed, matter-scoped, default read-only GUEST** (honors ADR-F002
+  one-matter-one-identity + the gateway/guard chokepoint; gated by the permission model) — **its own design
+  slice + ADR** (grounding workflow `wf_815d3f81-70e` to fold). New modules (redlining, assessments) follow the
+  readiness contract from birth — no retrofit.
+
 ## Backlog
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
-- **ROPA private→shared information-flow guardrail (from the PRIV-6a ultracode audit, 2026-06-18 — medium).**
-  The deployment-global ROPA register (ADR-F019, shared-read) means a privileged/private matter's
-  confidential narrative could be distilled by the Privacy agent into a register free-text field
-  (purpose/description/details) and then read by ANY authenticated firm user. `project.privileged` is in the
-  binding but gates only the inference tier, not ROPA writes. **Maintainer decision needed:** (a) add a
-  firm-wide / generic-facts-only guardrail to the Privacy `profile_md` + the `propose_*`/`add_*` tool
-  docstrings; and/or (b) gate writes originating from a privileged matter behind user confirmation; and/or
-  (c) document the boundary in a superseding ADR (F019's consequences don't name this path). Spans all
-  `propose_*` free-text (predates PRIV-6a). Full write-up: `docs/fork/evidence/priv-6a/audit-report.md` #3.
+- **ROPA private→shared information-flow gap (from the PRIV-6a ultracode audit, 2026-06-18 — medium) → now
+  owned by the Authorization track (ADR-F021).** The deployment-global ROPA register (ADR-F019, shared-read)
+  means a privileged/private matter's confidential narrative could be distilled by the Privacy agent into a
+  register free-text field (purpose/description/details) and then read by ANY authenticated **enterprise** user.
+  `project.privileged` is in the binding but gates only the inference tier, not ROPA writes. **This is the
+  symptom of the missing areas-of-responsibility permissions layer, not a ROPA-local bug** — it is closed
+  properly by **ADR-F021 Phase 3 + 4e** (durable area attribution on register rows, then flipping the register
+  read-filter to area membership). The interim cheap mitigations (a generic-facts-only guardrail in the Privacy
+  `profile_md` + `propose_*`/`add_*` docstrings; and/or gating privileged-matter writes) remain a maintainer
+  option if the permissions flip is far out. Full write-up: `docs/fork/evidence/priv-6a/audit-report.md` #3.
 - **Guard DB-error message scrubbing (defense-in-depth, from the PRIV-6a audit — low).** `guard.py` re-raises
   a tool's exception; the runner serialises `str(exc)` into `AgentRun.error` + the SSE frame, so a raw
   `DBAPIError`/`IntegrityError` would carry the failing SQL + bound params. PRIV-6a closed the only reachable
