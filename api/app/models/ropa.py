@@ -107,6 +107,16 @@ _VENDOR_ROLES = (
 )
 _DPA_STATUSES = ("in_place", "pending", "not_required", "none")
 
+# Chapter V transfer mechanisms (PRIV-5b / ADR-F019).
+# Authoritative list: app.schemas.ropa.TransferMechanism.
+_TRANSFER_MECHANISMS = (
+    "adequacy_regulations",
+    "standard_contractual_clauses",
+    "uk_idta",
+    "binding_corporate_rules",
+    "derogation",
+)
+
 
 def _in_set(column: str, values: tuple[str, ...]) -> str:
     quoted = ", ".join(f"'{v}'" for v in values)
@@ -261,6 +271,14 @@ class ProcessingActivity(Base):
         back_populates="processing_activities",
         order_by="Vendor.name",
     )
+    # Third-country transfers are CHILDREN of this activity (Art 30 lists
+    # transfers within each record; PRIV-5b). Deleting the activity cascades to
+    # its transfers (DB FK CASCADE + ORM delete-orphan).
+    transfers: Mapped[list[Transfer]] = relationship(
+        back_populates="processing_activity",
+        cascade="all, delete-orphan",
+        order_by="Transfer.destination",
+    )
 
     def __repr__(self) -> str:
         return (
@@ -392,3 +410,87 @@ class Vendor(Base):
 
     def __repr__(self) -> str:
         return f"<Vendor id={self.id} name={self.name!r} role={self.vendor_role!r}>"
+
+
+class Transfer(Base):
+    """One third-country transfer of a processing activity's data — PRIV-5b.
+
+    The "transfers + safeguards" axis of Article 30(1)(e). A transfer is a CHILD
+    of exactly one processing activity (required FK, CASCADE — Art 30 lists
+    transfers within each record), with an optional recipient :class:`Vendor`.
+    Invariants mirror ``app.schemas.ropa.TransferInput``:
+
+    * ``destination`` is non-empty (≤200).
+    * ``mechanism`` (when present) is one of the Chapter V transfer mechanisms.
+    * **restricted ⇔ mechanism present**: a restricted transfer (recipient
+      outside the UK/EEA) requires a Chapter V safeguard; a non-restricted
+      transfer must not assert one. The headline ADR-F018 invariant for this
+      slice, parallel to ``special_category ⇔ art9_condition``. ``restricted``
+      is *declared* (not derived from a maintained adequacy list).
+    """
+
+    __tablename__ = "transfers"
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(destination) > 0 AND char_length(destination) <= 200",
+            name="chk_transfers_destination_len",
+        ),
+        CheckConstraint(
+            f"mechanism IS NULL OR {_in_set('mechanism', _TRANSFER_MECHANISMS)}",
+            name="chk_transfers_mechanism",
+        ),
+        # The headline invariant at the DB boundary (defense-in-depth): a
+        # restricted transfer requires a mechanism; a non-restricted one must not
+        # carry one.
+        CheckConstraint(
+            "(restricted AND mechanism IS NOT NULL) OR (NOT restricted AND mechanism IS NULL)",
+            name="chk_transfers_restricted_requires_mechanism",
+        ),
+        CheckConstraint(_opt_len("details", 2000), name="chk_transfers_details_len"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    source_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL", name="fk_transfers_source_project_id"),
+        nullable=True,
+    )
+    # The parent activity — required; deleting the activity drops its transfers.
+    processing_activity_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "processing_activities.id",
+            ondelete="CASCADE",
+            name="fk_transfers_processing_activity_id",
+        ),
+        nullable=False,
+    )
+    # The recipient vendor when known — optional; if the vendor is deleted the
+    # transfer survives with a null recipient (the transfer still happened).
+    vendor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vendors.id", ondelete="SET NULL", name="fk_transfers_vendor_id"),
+        nullable=True,
+    )
+    destination: Mapped[str] = mapped_column(Text, nullable=False)
+    restricted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    mechanism: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    processing_activity: Mapped[ProcessingActivity] = relationship(back_populates="transfers")
+    vendor: Mapped[Vendor | None] = relationship()
+
+    def __repr__(self) -> str:
+        return (
+            f"<Transfer id={self.id} destination={self.destination!r} restricted={self.restricted}>"
+        )

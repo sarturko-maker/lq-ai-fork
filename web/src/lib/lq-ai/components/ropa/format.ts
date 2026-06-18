@@ -53,6 +53,14 @@ const DPA_STATUS_LABELS: Record<string, string> = {
 	none: 'None'
 };
 
+const TRANSFER_MECHANISM_LABELS: Record<string, string> = {
+	adequacy_regulations: 'Adequacy regulations',
+	standard_contractual_clauses: 'Standard contractual clauses (SCCs)',
+	uk_idta: 'UK IDTA',
+	binding_corporate_rules: 'Binding corporate rules (BCRs)',
+	derogation: 'Derogation (Art 49)'
+};
+
 const ART9_CONDITION_LABELS: Record<string, string> = {
 	explicit_consent: 'Explicit consent',
 	employment_social_security: 'Employment / social security',
@@ -90,6 +98,8 @@ export const vendorRoleLabel = (t: string | null | undefined): string =>
 	labelFrom(VENDOR_ROLE_LABELS, t);
 export const dpaStatusLabel = (t: string | null | undefined): string =>
 	labelFrom(DPA_STATUS_LABELS, t);
+export const transferMechanismLabel = (t: string | null | undefined): string =>
+	labelFrom(TRANSFER_MECHANISM_LABELS, t);
 export const art9ConditionLabel = (t: string | null | undefined): string =>
 	labelFrom(ART9_CONDITION_LABELS, t);
 

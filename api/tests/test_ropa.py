@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project
-from app.models.ropa import ProcessingActivity, Vendor
+from app.models.ropa import ProcessingActivity, Transfer, Vendor
 from app.models.user import User
 from app.schemas.ropa import (
     Art9Condition,
@@ -30,6 +30,8 @@ from app.schemas.ropa import (
     ProcessingActivityInput,
     SystemInput,
     SystemType,
+    TransferInput,
+    TransferMechanism,
     VendorInput,
     VendorRole,
 )
@@ -201,6 +203,60 @@ def test_vendor_unknown_field_is_rejected() -> None:
         VendorInput(name="X", vendor_role="processor", dpa_status="none", risk_level="high")
 
 
+# --- TransferInput invariants (PRIV-5b, pure) --------------------------------
+
+
+def test_unrestricted_transfer_without_mechanism_passes() -> None:
+    t = TransferInput(destination="Germany")
+    assert t.restricted is False
+    assert t.mechanism is None
+
+
+def test_restricted_transfer_with_mechanism_passes() -> None:
+    t = TransferInput(
+        destination="United States",
+        restricted=True,
+        mechanism="standard_contractual_clauses",
+        details="EU SCCs module 2 + UK Addendum",
+    )
+    assert t.restricted is True
+    assert t.mechanism is TransferMechanism.STANDARD_CONTRACTUAL_CLAUSES
+
+
+def test_restricted_transfer_without_mechanism_is_rejected() -> None:
+    # Invariant (forward): a restricted transfer needs a Chapter V safeguard.
+    with pytest.raises(ValidationError, match="mechanism"):
+        TransferInput(destination="India", restricted=True, mechanism=None)
+
+
+def test_mechanism_on_unrestricted_transfer_is_rejected() -> None:
+    # Invariant (reverse): a mechanism on an intra-UK/EEA transfer is incoherent.
+    with pytest.raises(ValidationError, match="restricted"):
+        TransferInput(
+            destination="France", restricted=False, mechanism="standard_contractual_clauses"
+        )
+
+
+def test_off_enum_transfer_mechanism_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        TransferInput(destination="US", restricted=True, mechanism="vibes")
+
+
+def test_blank_transfer_destination_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        TransferInput(destination="   ")
+
+
+def test_transfer_blank_details_normalises_to_none() -> None:
+    t = TransferInput(destination="Germany", details="   ")
+    assert t.details is None
+
+
+def test_transfer_unknown_field_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        TransferInput(destination="US", restricted=True, mechanism="uk_idta", country="US")
+
+
 # --- DB defense-in-depth (integration) ---------------------------------------
 
 
@@ -299,6 +355,79 @@ async def test_db_check_rejects_off_enum_vendor_role(db_session: AsyncSession) -
         name="Mystery vendor",
         vendor_role="overlord",  # off-enum → chk_vendors_vendor_role rejects
         dpa_status=DpaStatus.NONE.value,
+    )
+    db_session.add(row)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+async def _make_activity(db_session: AsyncSession, matter: Project) -> ProcessingActivity:
+    activity = ProcessingActivity(
+        source_project_id=matter.id,
+        name="Marketing analytics",
+        purpose="Analyse campaign performance.",
+        lawful_basis=LawfulBasis.LEGITIMATE_INTERESTS.value,
+        controller_role=ControllerRole.CONTROLLER.value,
+        retention="2 years",
+        special_category=False,
+        art9_condition=None,
+    )
+    db_session.add(activity)
+    await db_session.flush()
+    return activity
+
+
+@pytest.mark.integration
+async def test_valid_restricted_transfer_row_persists(db_session: AsyncSession) -> None:
+    owner = await _make_user(db_session, suffix="transfer-valid")
+    matter = await _make_matter(db_session, owner)
+    activity = await _make_activity(db_session, matter)
+    row = Transfer(
+        source_project_id=matter.id,
+        processing_activity_id=activity.id,
+        destination="United States",
+        restricted=True,
+        mechanism=TransferMechanism.STANDARD_CONTRACTUAL_CLAUSES.value,
+    )
+    db_session.add(row)
+    await db_session.flush()
+    assert row.id is not None
+
+
+@pytest.mark.integration
+async def test_db_check_rejects_restricted_transfer_without_mechanism(
+    db_session: AsyncSession,
+) -> None:
+    owner = await _make_user(db_session, suffix="transfer-check")
+    matter = await _make_matter(db_session, owner)
+    activity = await _make_activity(db_session, matter)
+    row = Transfer(
+        source_project_id=matter.id,
+        processing_activity_id=activity.id,
+        destination="India",
+        restricted=True,
+        mechanism=None,  # violates chk_transfers_restricted_requires_mechanism
+    )
+    db_session.add(row)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_db_check_rejects_mechanism_on_unrestricted_transfer(
+    db_session: AsyncSession,
+) -> None:
+    owner = await _make_user(db_session, suffix="transfer-rev")
+    matter = await _make_matter(db_session, owner)
+    activity = await _make_activity(db_session, matter)
+    row = Transfer(
+        source_project_id=matter.id,
+        processing_activity_id=activity.id,
+        destination="France",
+        restricted=False,
+        mechanism=TransferMechanism.UK_IDTA.value,  # incoherent → CHECK rejects
     )
     db_session.add(row)
     with pytest.raises(IntegrityError):

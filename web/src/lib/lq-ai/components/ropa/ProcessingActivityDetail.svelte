@@ -13,6 +13,7 @@
 		controllerRoleLabel,
 		lawfulBasisLabel,
 		systemTypeLabel,
+		transferMechanismLabel,
 		vendorRoleLabel
 	} from './format';
 
@@ -113,6 +114,50 @@
 							{vendor.name}
 							<span class="text-muted-foreground">{vendorRoleLabel(vendor.vendor_role)}</span>
 						</button>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</div>
+
+	<div class="space-y-2">
+		<h3 class="text-sm font-semibold tracking-tight text-foreground">
+			Third-country transfers
+			<span class="text-muted-foreground">({activity.transfers.length})</span>
+		</h3>
+		{#if activity.transfers.length === 0}
+			<p class="text-sm text-muted-foreground">
+				No third-country transfers recorded for this activity.
+			</p>
+		{:else}
+			<ul class="space-y-2">
+				{#each activity.transfers as transfer (transfer.id)}
+					<li class="rounded-md border border-border p-3 text-sm">
+						<div class="flex flex-wrap items-center gap-2">
+							<span class="font-medium text-foreground">{transfer.destination}</span>
+							{#if transfer.restricted}
+								<Badge variant="destructive">Restricted</Badge>
+								<Badge variant="outline">{transferMechanismLabel(transfer.mechanism)}</Badge>
+							{:else}
+								<Badge variant="secondary">Not restricted</Badge>
+							{/if}
+						</div>
+						{#if transfer.vendor}
+							{@const recipient = transfer.vendor}
+							<p class="mt-1.5 text-xs text-muted-foreground">
+								Recipient:
+								<button
+									type="button"
+									class="text-foreground underline-offset-2 transition-colors duration-150 hover:text-brand hover:underline"
+									onclick={() => onOpenVendor(recipient.id)}
+								>
+									{recipient.name}
+								</button>
+							</p>
+						{/if}
+						{#if transfer.details}
+							<p class="mt-1.5 text-xs text-muted-foreground">{transfer.details}</p>
+						{/if}
 					</li>
 				{/each}
 			</ul>

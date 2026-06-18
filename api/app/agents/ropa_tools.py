@@ -1,10 +1,12 @@
-"""ROPA agent tools — PRIV-2/PRIV-3 (fork, ADR-F018/F019): the validated write path.
+"""ROPA agent tools — PRIV-2/PRIV-3/PRIV-5 (fork, ADR-F018/F019): the validated write path.
 
 The Privacy practice-area Deep Agent maintains the company's **deployment-global**
 ROPA inventory (ADR-F019 — LQ.AI is single-tenant; the in-house team's one client
 is its own organization, so the register is the company's standing record, not a
-per-matter artifact). Five guarded tools over the two-tier graph
-(:class:`~app.models.ropa.ProcessingActivity` ↔ :class:`~app.models.ropa.System`):
+per-matter artifact). Guarded, code-validated tools over the inventory graph
+(:class:`~app.models.ropa.ProcessingActivity` ↔ :class:`~app.models.ropa.System` /
+:class:`~app.models.ropa.Vendor`, with :class:`~app.models.ropa.Transfer` hung off
+each activity):
 
 * :func:`propose_processing_activity` — the **code-validated write** of an Article
   30 record. The model PROPOSES; the tool validates against
@@ -16,12 +18,16 @@ per-matter artifact). Five guarded tools over the two-tier graph
 * :func:`propose_vendor` — same loop for a vendor/recipient
   (:class:`app.schemas.ropa.VendorInput`) — the Article 30(1)(e) categories of
   recipients (PRIV-5a).
+* :func:`propose_transfer` — same loop for a third-country transfer
+  (:class:`app.schemas.ropa.TransferInput`) — the Article 30(1)(e) transfers +
+  safeguards (PRIV-5b); a child of a processing activity, with the headline
+  restricted⇔mechanism invariant validated before commit.
 * :func:`link_processing_activity_to_system` / :func:`link_vendor_to_activity` —
   record that an activity uses a system / discloses to a vendor (the M:N links),
   by the IDs the list tools surface.
 * :func:`list_processing_activities` / :func:`list_systems` / :func:`list_vendors`
-  — the current register (with IDs), so the agent can see what exists and link
-  records.
+  / :func:`list_transfers` — the current register (with IDs), so the agent can
+  see what exists and link records.
 
 **Scope / authz (ADR-F019).** The register is company-wide, NOT matter- or
 user-scoped — so the tools do not filter by ``project_id``. The matter still
@@ -43,17 +49,24 @@ from typing import Any
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import selectinload
 
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.agents.tools import MatterBinding
 from app.models.ropa import (
     ProcessingActivity,
     System,
+    Transfer,
     Vendor,
     processing_activity_systems,
     processing_activity_vendors,
 )
-from app.schemas.ropa import ProcessingActivityInput, SystemInput, VendorInput
+from app.schemas.ropa import (
+    ProcessingActivityInput,
+    SystemInput,
+    TransferInput,
+    VendorInput,
+)
 
 # The stable key of the Privacy practice area (migration 0053). The composition
 # point grants the ROPA tools only to a matter filed under this area.
@@ -64,11 +77,13 @@ ROPA_TOOL_NAMES = frozenset(
         "propose_processing_activity",
         "propose_system",
         "propose_vendor",
+        "propose_transfer",
         "link_processing_activity_to_system",
         "link_vendor_to_activity",
         "list_processing_activities",
         "list_systems",
         "list_vendors",
+        "list_transfers",
     }
 )
 
@@ -214,6 +229,48 @@ def build_ropa_tools(
             ctx,
         )
 
+    async def propose_transfer(
+        processing_activity_id: str,
+        destination: str,
+        restricted: bool = False,
+        mechanism: str | None = None,
+        vendor_id: str | None = None,
+        details: str | None = None,
+    ) -> str:
+        """Propose one third-country transfer of a processing activity's data.
+
+        A transfer belongs to a processing activity (pass the id shown by
+        list_processing_activities) and optionally names a recipient vendor (an
+        id from list_vendors). The proposal is validated before recording; a
+        failure comes back with the reasons to fix and re-propose.
+
+        - ``destination``: the third country / international organisation the data
+          goes to (e.g. "United States", "India").
+        - ``restricted``: true if this is a restricted transfer — the recipient is
+          OUTSIDE the UK/EEA. When true, ``mechanism`` is REQUIRED; when false,
+          ``mechanism`` must be left unset.
+        - ``mechanism``: the Chapter V safeguard — one of adequacy_regulations,
+          standard_contractual_clauses, uk_idta, binding_corporate_rules,
+          derogation (Article 49).
+        - ``vendor_id``: the recipient vendor, if it is a known vendor.
+        - ``details``: free-text safeguard detail (e.g. "EU SCCs module 2 + UK
+          Addendum; transfer risk assessment dated 2026-03").
+        """
+        return await guarded_dispatch(
+            "propose_transfer",
+            lambda db: _propose_transfer(
+                db,
+                binding,
+                processing_activity_id=processing_activity_id,
+                destination=destination,
+                restricted=restricted,
+                mechanism=mechanism,
+                vendor_id=vendor_id,
+                details=details,
+            ),
+            ctx,
+        )
+
     async def link_processing_activity_to_system(
         processing_activity_id: str,
         system_id: str,
@@ -268,15 +325,21 @@ def build_ropa_tools(
         """List the vendors/recipients in the company register (with IDs)."""
         return await guarded_dispatch("list_vendors", lambda db: _list_vendors(db), ctx)
 
+    async def list_transfers() -> str:
+        """List the third-country transfers in the company ROPA (with IDs)."""
+        return await guarded_dispatch("list_transfers", lambda db: _list_transfers(db), ctx)
+
     return [
         propose_processing_activity,
         propose_system,
         propose_vendor,
+        propose_transfer,
         link_processing_activity_to_system,
         link_vendor_to_activity,
         list_processing_activities,
         list_systems,
         list_vendors,
+        list_transfers,
     ]
 
 
@@ -411,6 +474,74 @@ async def _propose_vendor(
         f'Recorded vendor "{proposal.name}" ({proposal.vendor_role.value}; '
         f"DPA: {proposal.dpa_status.value}) in the company register."
     )
+
+
+async def _propose_transfer(
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    processing_activity_id: str,
+    destination: str,
+    restricted: bool,
+    mechanism: str | None,
+    vendor_id: str | None,
+    details: str | None,
+) -> str:
+    """Validate the transfer proposal + resolve its FKs, then write it (or reject).
+
+    Content (incl. the restricted⇔mechanism invariant) is validated against
+    ``TransferInput`` first; then the parent activity (required) and the optional
+    recipient vendor are resolved against the register — both refusals come back
+    to the model so it can fix and re-propose (never a silent write/fix).
+    """
+    try:
+        proposal = TransferInput(
+            destination=destination,
+            restricted=restricted,
+            mechanism=mechanism,  # type: ignore[arg-type]  # str → enum coercion
+            details=details,
+        )
+    except ValidationError as exc:
+        return _rejection_text(exc, "propose_transfer")
+
+    try:
+        pa_uuid = uuid.UUID(processing_activity_id)
+        vendor_uuid = uuid.UUID(vendor_id) if vendor_id is not None else None
+    except ValueError:
+        return (
+            "Transfer refused — processing_activity_id (and vendor_id, if given) must "
+            "be the IDs shown by list_processing_activities / list_vendors. Nothing was recorded."
+        )
+
+    activity = await db.get(ProcessingActivity, pa_uuid)
+    vendor = await db.get(Vendor, vendor_uuid) if vendor_uuid is not None else None
+    missing = []
+    if activity is None:
+        missing.append(f"no processing activity with id {processing_activity_id}")
+    if vendor_uuid is not None and vendor is None:
+        missing.append(f"no vendor with id {vendor_id}")
+    if missing:
+        return "Transfer refused — " + "; ".join(missing) + ". Nothing was recorded."
+    assert activity is not None  # narrowed by the check above
+
+    db.add(
+        Transfer(
+            source_project_id=binding.project_id,
+            processing_activity_id=pa_uuid,
+            vendor_id=vendor_uuid,
+            destination=proposal.destination,
+            restricted=proposal.restricted,
+            mechanism=(proposal.mechanism.value if proposal.mechanism else None),
+            details=proposal.details,
+        )
+    )
+    # Flush so the DB CHECK mirror (the restricted⇔mechanism invariant) surfaces
+    # inside the guard's try, audited and rolled back together with the audit row.
+    await db.flush()
+    safeguard = (
+        f"; mechanism: {proposal.mechanism.value}" if proposal.mechanism else "; not restricted"
+    )
+    return f'Recorded transfer of "{activity.name}" to {proposal.destination}{safeguard}.'
 
 
 async def _link(
@@ -591,6 +722,40 @@ async def _list_vendors(db: AsyncSession) -> str:
         blocks.append(f"- [{row.id}] {row.name} — {row.vendor_role} (DPA: {row.dpa_status}{tail})")
     noun = "vendor" if len(rows) == 1 else "vendors"
     return f"Company register — {len(rows)} {noun}:\n\n" + "\n".join(blocks)
+
+
+async def _list_transfers(db: AsyncSession) -> str:
+    """Format the company's third-country transfers (oldest first), with IDs."""
+    rows = (
+        (
+            await db.execute(
+                select(Transfer)
+                .options(
+                    selectinload(Transfer.processing_activity),
+                    selectinload(Transfer.vendor),
+                )
+                .order_by(Transfer.created_at.asc(), Transfer.destination.asc())
+                .limit(_LIST_LIMIT)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return "The company ROPA has no third-country transfers yet."
+
+    blocks: list[str] = []
+    for row in rows:
+        safeguard = (
+            f"restricted (mechanism: {row.mechanism})" if row.restricted else "not restricted"
+        )
+        recipient = f"; recipient: {row.vendor.name}" if row.vendor is not None else ""
+        blocks.append(
+            f"- [{row.id}] {row.processing_activity.name} → {row.destination} "
+            f"({safeguard}){recipient}"
+        )
+    noun = "transfer" if len(rows) == 1 else "transfers"
+    return f"Company ROPA — {len(rows)} third-country {noun}:\n\n" + "\n".join(blocks)
 
 
 def _rejection_text(exc: ValidationError, tool_name: str) -> str:
