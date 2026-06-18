@@ -222,3 +222,30 @@ class SystemRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     processing_activities: list[ProcessingActivitySummary] = Field(default_factory=list)
+
+
+# --- Article 30 export (PRIV-4a) ---------------------------------------------
+#
+# The extractable RoPA deliverable over the deployment-global register. A
+# read-and-render envelope (no new entity): the processing activities joined to
+# their systems, plus the system inventory, plus an HONEST coverage note naming
+# the Article 30(1) fields the domain does not yet capture (transfers,
+# recipients, data-subject/data categories — PRIV-5). The export renders what
+# exists and never invents the rest.
+
+
+class Article30Coverage(BaseModel):
+    """Honest scope of the export — what Article 30(1) content is/ isn't captured yet."""
+
+    fields_not_yet_recorded: list[str] = Field(default_factory=list)
+
+
+class Article30Export(BaseModel):
+    """The Article 30 RoPA export payload (JSON form; the CSV/XLSX render the same data)."""
+
+    generated_at: datetime
+    # NB: not ``register`` — that shadows a pydantic BaseModel attribute (UserWarning).
+    register_name: str = "Article 30 Records of Processing Activities"
+    coverage: Article30Coverage
+    processing_activities: list[ProcessingActivityRead] = Field(default_factory=list)
+    systems: list[SystemRead] = Field(default_factory=list)

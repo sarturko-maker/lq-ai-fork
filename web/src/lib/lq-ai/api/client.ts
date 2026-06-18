@@ -291,6 +291,39 @@ export async function apiStreamRequest(
 }
 
 /**
+ * Binary/file variant: returns the raw `Response` (after auth + refresh-on-401)
+ * so the caller can read `res.blob()` and trigger a download. Throws typed
+ * errors on non-OK. Unlike `apiStreamRequest` it does not force an SSE `Accept`
+ * header — used for file exports (CSV/XLSX/JSON attachments).
+ */
+export async function apiBlobRequest(
+	path: string,
+	options: RequestOptions = {}
+): Promise<Response> {
+	let res = await rawRequest(path, options);
+
+	if (res.status === 401 && !options.skipRefresh && !options.skipAuth) {
+		const refreshed = await refreshOnce();
+		if (refreshed) {
+			res = await rawRequest(path, options);
+		} else {
+			clearSession();
+		}
+	}
+
+	if (!res.ok) {
+		const body = await parseErrorBody(res);
+		const err = errorFor(res.status, body);
+		if (err.status === 401) {
+			clearSession();
+		}
+		throw err;
+	}
+
+	return res;
+}
+
+/**
  * Subscribe to the auth store: when the user signs out, this hook fires.
  * Used by the layout to redirect to /lq-ai/login on revocation.
  */

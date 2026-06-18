@@ -339,6 +339,8 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/ropa/processing-activities/{activity_id}"),
     ("GET", "/api/v1/ropa/systems"),
     ("GET", "/api/v1/ropa/systems/{system_id}"),
+    # PRIV-4a (fork) — Article 30 export. Dedicated coverage in tests/test_ropa_export.py.
+    ("GET", "/api/v1/ropa/export"),
 }
 
 

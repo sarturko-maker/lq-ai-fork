@@ -300,10 +300,12 @@ short-slice**.
   invariants + DB CHECK defense-in-depth, migration 0058) → PRIV-2 ✅ (validated agent write path:
   `propose_processing_activity`/`list_processing_activities` guarded ROPA tools on the Privacy area agent —
   validate against `ProcessingActivityInput` before commit, reject-back-to-model on failure; PR #100)** →
-  **PRIV-3 ✅ BUILT/live, pre-PR** (two-tier RELATIONAL spine System↔ProcessingActivity M:N + deployment-global
-  re-scope, **ADR-F019**; read API + the two-tier register read UI in F013 style; `propose_system`/`link`/
-  `list_systems` tools; migration 0059; branch `priv-3-ropa-read-ui`) → PRIV-4a (Article 30 export) → PRIV-5
-  (Vendor + Transfer + mechanism invariant) → PRIV-6 (data-flow view + Legal-Entity scope + programme dashboard)
+  **PRIV-3 ✅ (PR #101)** (two-tier RELATIONAL spine System↔ProcessingActivity M:N + deployment-global
+  re-scope, **ADR-F019 accepted**; read API + the two-tier register read UI in F013 style; `propose_system`/
+  `link`/`list_systems` tools; migration 0059) → **PRIV-4a ✅ (PR #102)** (Article 30 export — JSON/CSV/XLSX,
+  shared-read; pure formatter + OWASP CSV-injection guard + honest Art-30 coverage note; openpyxl already a dep)
+  → PRIV-5 (Vendor + Transfer + mechanism invariant; fills the export's coverage gap) → PRIV-6 (data-flow view
+  + Legal-Entity scope + programme dashboard)
   → **P1 flagship** PRIV-A1 (assessment domain+skill) / PRIV-A2 (**conversational-link external intake** — the
   differentiator, **ADR-F020**) → P2 tracks (DSAR, breach, DPA review, reg-gap, reporting). **Full capability
   plan: `docs/fork/plans/PRIV-onetrust-to-lqai-functionality-map.md`** (OneTrust→LQ.AI, P0–P3; **P3

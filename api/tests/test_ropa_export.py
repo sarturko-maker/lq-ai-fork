@@ -1,0 +1,290 @@
+"""Article 30 RoPA export — PRIV-4a (fork, ADR-F018/F019).
+
+Two layers:
+
+* **Pure formatter** (no DB) — the JSON envelope's honest coverage note, the CSV
+  header/rows + systems-join cell + the OWASP CSV-injection guard, and the
+  two-sheet XLSX workbook.
+* **Endpoint** (integration) — ``GET /ropa/export`` in each format, the empty
+  register, an off-enum ``format`` → 422, and the shared-read auth gate (401).
+"""
+
+from __future__ import annotations
+
+import io
+import uuid
+from collections.abc import AsyncIterator, Callable
+from datetime import UTC, datetime
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from openpyxl import load_workbook
+from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app import ropa_export
+from app.db.session import get_db
+from app.main import app
+from app.models.ropa import ProcessingActivity, System, processing_activity_systems
+from app.models.user import User
+from app.schemas.ropa import ProcessingActivityRead, SystemRead
+from app.security import create_access_token, hash_password
+
+_NOW = datetime(2026, 6, 18, 9, 30, tzinfo=UTC)
+
+
+# --- pure formatter (unit) ----------------------------------------------------
+
+
+def _activity(**over: object) -> ProcessingActivityRead:
+    base: dict[str, object] = {
+        "id": uuid.uuid4(),
+        "name": "Payroll processing",
+        "purpose": "Pay employees and meet tax obligations",
+        "lawful_basis": "legal_obligation",
+        "controller_role": "controller",
+        "retention": "7 years",
+        "special_category": False,
+        "art9_condition": None,
+        "created_at": _NOW,
+        "updated_at": _NOW,
+        "systems": [],
+    }
+    base.update(over)
+    return ProcessingActivityRead.model_validate(base)
+
+
+def _system(**over: object) -> SystemRead:
+    base: dict[str, object] = {
+        "id": uuid.uuid4(),
+        "name": "Production database",
+        "system_type": "database",
+        "description": None,
+        "owner": None,
+        "hosting_location": "UK",
+        "retention": None,
+        "security_measures": None,
+        "ai_usage": False,
+        "created_at": _NOW,
+        "updated_at": _NOW,
+        "processing_activities": [],
+    }
+    base.update(over)
+    return SystemRead.model_validate(base)
+
+
+@pytest.mark.unit
+def test_build_export_carries_honest_coverage_note() -> None:
+    export = ropa_export.build_export([_activity()], [_system()], generated_at=_NOW)
+    assert export.generated_at == _NOW
+    assert export.register_name == "Article 30 Records of Processing Activities"
+    # The Art 30(1) fields the domain does not yet model are named, not hidden.
+    assert "Categories of recipients" in export.coverage.fields_not_yet_recorded
+    assert any("transfer" in f.lower() for f in export.coverage.fields_not_yet_recorded)
+    assert len(export.processing_activities) == 1
+    assert len(export.systems) == 1
+
+
+@pytest.mark.unit
+def test_to_csv_header_row_and_humanized_values() -> None:
+    sysid = uuid.uuid4()
+    a = _activity(
+        special_category=True,
+        art9_condition="employment_social_security",
+        systems=[{"id": sysid, "name": "Prod DB", "system_type": "database"}],
+    )
+    export = ropa_export.build_export([a], [], generated_at=_NOW)
+    text = ropa_export.to_csv(export)
+    lines = text.splitlines()
+    assert lines[0].split(",")[0] == "Name"
+    assert "Linked systems" in lines[0]
+    # Enum values are humanized for the spreadsheet; the special-category +
+    # systems-join cell render as expected.
+    assert "Legal obligation" in lines[1]
+    assert "Employment social security" in lines[1]
+    assert "Prod DB (Database)" in text
+    # date-only stamp (no time-of-day noise)
+    assert "2026-06-18" in lines[1]
+    assert "09:30" not in text
+
+
+@pytest.mark.unit
+def test_system_type_acronyms_read_professionally() -> None:
+    # crm → "CRM" (not "Crm"); the join cell + the Systems sheet both use it.
+    a = _activity(systems=[{"id": uuid.uuid4(), "name": "Salesforce", "system_type": "crm"}])
+    s = _system(name="Salesforce", system_type="crm")
+    export = ropa_export.build_export([a], [s], generated_at=_NOW)
+    assert "Salesforce (CRM)" in ropa_export.to_csv(export)
+    wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
+    assert wb["Systems"]["B2"].value == "CRM"
+
+
+@pytest.mark.unit
+def test_to_csv_neutralises_formula_injection() -> None:
+    a = _activity(name="=cmd|'/c calc'!A1", purpose="+SUM(1)")
+    export = ropa_export.build_export([a], [], generated_at=_NOW)
+    text = ropa_export.to_csv(export)
+    # Both formula-trigger cells are prefixed with a single quote so a
+    # spreadsheet won't execute them; the raw "=cmd" never starts a field.
+    assert "'=cmd|" in text
+    assert "'+SUM(1)" in text
+
+
+@pytest.mark.unit
+def test_to_xlsx_two_sheets_with_headers() -> None:
+    export = ropa_export.build_export([_activity()], [_system()], generated_at=_NOW)
+    wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
+    assert wb.sheetnames == ["Processing Activities", "Systems"]
+    activities = wb["Processing Activities"]
+    assert activities["A1"].value == "Name"
+    assert activities["A2"].value == "Payroll processing"
+    systems = wb["Systems"]
+    assert systems["A1"].value == "Name"
+    assert systems["A2"].value == "Production database"
+
+
+@pytest.mark.unit
+def test_to_xlsx_neutralises_formula_injection() -> None:
+    export = ropa_export.build_export([_activity(name="=danger()")], [], generated_at=_NOW)
+    wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
+    assert wb["Processing Activities"]["A2"].value == "'=danger()"
+
+
+# --- endpoint (integration) ---------------------------------------------------
+
+pytest_integration = pytest.mark.integration
+
+
+def _override_get_db(session: AsyncSession) -> Callable[[], AsyncIterator[AsyncSession]]:
+    async def _f() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    return _f
+
+
+@pytest_asyncio.fixture
+async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    app.dependency_overrides[get_db] = _override_get_db(db_session)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+    app.dependency_overrides.pop(get_db, None)
+
+
+@pytest_asyncio.fixture
+async def user(db_session: AsyncSession) -> User:
+    u = User(
+        email="ropa-export@example.com",
+        display_name="ROPA Export",
+        hashed_password=hash_password("correct-horse-battery-staple"),
+        is_admin=False,
+        mfa_enabled=False,
+        must_change_password=False,
+    )
+    db_session.add(u)
+    await db_session.flush()
+    return u
+
+
+def _bearer(u: User) -> dict[str, str]:
+    token = create_access_token(u.id, u.email, is_admin=u.is_admin)
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _clean(db_session: AsyncSession) -> None:
+    await db_session.execute(delete(processing_activity_systems))
+    await db_session.execute(delete(ProcessingActivity))
+    await db_session.execute(delete(System))
+    await db_session.flush()
+
+
+async def _seed_linked(db_session: AsyncSession) -> None:
+    await _clean(db_session)
+    pa = ProcessingActivity(
+        name="Payroll processing",
+        purpose="Pay employees and meet tax obligations",
+        lawful_basis="legal_obligation",
+        controller_role="controller",
+        retention="7 years",
+        special_category=False,
+        art9_condition=None,
+    )
+    system = System(name="Production database", system_type="database", hosting_location="UK")
+    db_session.add_all([pa, system])
+    await db_session.flush()
+    await db_session.execute(
+        processing_activity_systems.insert().values(
+            processing_activity_id=pa.id, system_id=system.id
+        )
+    )
+    await db_session.flush()
+
+
+@pytest_integration
+async def test_export_json(client: AsyncClient, db_session: AsyncSession, user: User) -> None:
+    await _seed_linked(db_session)
+    resp = await client.get("/api/v1/ropa/export", headers=_bearer(user))
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/json")
+    assert "attachment" in resp.headers["content-disposition"]
+    assert resp.headers["content-disposition"].endswith('.json"')
+    body = resp.json()
+    assert body["register_name"] == "Article 30 Records of Processing Activities"
+    assert body["coverage"]["fields_not_yet_recorded"]
+    assert body["processing_activities"][0]["name"] == "Payroll processing"
+    assert body["processing_activities"][0]["systems"][0]["name"] == "Production database"
+    assert body["systems"][0]["name"] == "Production database"
+
+
+@pytest_integration
+async def test_export_csv(client: AsyncClient, db_session: AsyncSession, user: User) -> None:
+    await _seed_linked(db_session)
+    resp = await client.get("/api/v1/ropa/export?format=csv", headers=_bearer(user))
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert resp.headers["content-disposition"].endswith('.csv"')
+    lines = resp.text.splitlines()
+    assert lines[0].startswith("Name,")
+    assert "Payroll processing" in lines[1]
+    assert "Production database (Database)" in resp.text
+
+
+@pytest_integration
+async def test_export_xlsx(client: AsyncClient, db_session: AsyncSession, user: User) -> None:
+    await _seed_linked(db_session)
+    resp = await client.get("/api/v1/ropa/export?format=xlsx", headers=_bearer(user))
+    assert resp.status_code == 200
+    assert "spreadsheetml" in resp.headers["content-type"]
+    assert resp.headers["content-disposition"].endswith('.xlsx"')
+    wb = load_workbook(io.BytesIO(resp.content))
+    assert wb.sheetnames == ["Processing Activities", "Systems"]
+    assert wb["Processing Activities"]["A2"].value == "Payroll processing"
+
+
+@pytest_integration
+async def test_export_empty_register(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    await _clean(db_session)
+    resp = await client.get("/api/v1/ropa/export", headers=_bearer(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["processing_activities"] == []
+    assert body["systems"] == []
+    # Coverage note is present even when the register is empty (honest scope).
+    assert body["coverage"]["fields_not_yet_recorded"]
+
+
+@pytest_integration
+async def test_export_bad_format_is_422(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    resp = await client.get("/api/v1/ropa/export?format=pdf", headers=_bearer(user))
+    assert resp.status_code == 422
+
+
+@pytest_integration
+async def test_export_requires_authentication(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/ropa/export")
+    assert resp.status_code == 401
