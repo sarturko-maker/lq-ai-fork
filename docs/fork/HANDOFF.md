@@ -2,9 +2,51 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (UX-B COMPLETE; **Oscar Edition / Agentic Modules milestone OPEN** — PRIV-1 ROPA domain spine SHIPPED; pickup = PRIV-2 validated agent write path)
+## State (UX-B COMPLETE; **Oscar Edition / Agentic Modules milestone OPEN** — PRIV-2 validated agent write path SHIPPED; pickup = PRIV-3 thin vertical + ROPA register UI (read) + first export)
 
-- **PRIV-1 (PR #TBD) — SHIPPED. ROPA domain spine + code validation (no agent yet). API-ONLY.** The first
+- **PRIV-2 (PR #100) — SHIPPED. Validated agent write path. API-ONLY (no migration, no web).** Wired
+  the PRIV-1 ROPA domain onto the **Privacy** practice-area Deep Agent: the ADR-F018 *agent proposes → code
+  disposes* loop is now live end-to-end. New **`app/agents/ropa_tools.py`** (`build_ropa_tools`, mirroring
+  `build_matter_tools`) builds two guarded tools, granted ONLY to a matter filed under the Privacy area:
+  **(1) `propose_processing_activity`** — the **code-validated write**: the model's proposal is validated
+  against `app/schemas/ropa.py ProcessingActivityInput` (the PRIV-1 contract) BEFORE any commit; a valid one
+  is written, an invalid one is **rejected back to the model as tool-result text** carrying the field+reason
+  (Pydantic `errors()` → fix-and-retry) — never a silent write, never a silent fix. A rejection is **returned,
+  not raised** (the dispatch succeeded; the *write* was refused), so the model reads the reason and re-proposes.
+  The write `flush`es inside the guard's session so the DB CHECK mirror (PRIV-1 defense-in-depth) surfaces as
+  an audited error, and the row commits atomically with its audit row. **(2) `list_processing_activities`** —
+  the matter's current register (zero-arg; oldest-first; `_LIST_LIMIT=100`). **Wiring:** `composition.py`
+  captures `area_key` when the matter's area loads and appends the ROPA tools when `area_key == PRIVACY_AREA_KEY`
+  (`"privacy"`) — area-keyed tool selection at the composition point (the area row IS the agent identity,
+  ADR-F002); other areas never grant them. **Authz:** `project_id`/`user_id` are B-class (closure-injected,
+  never model-visible, ADR-F004); every row is scoped to `binding.project_id`, which composition already
+  resolved AFTER asserting `Project.owner_id == run.user_id` — the model cannot name another project, so there
+  is **no cross-matter/cross-user vector at the tool layer** to leak (the project-ownership 404 posture belongs
+  to the PRIV-3 read API, where a project id is user-supplied). Guard R5/R6 still mediate every dispatch; no
+  gateway bypass. **Tests** (`tests/agents/test_ropa_tools.py`, +N; plus 1 composition test): valid proposal
+  commits one row with the proposed values (+ a special-category-with-Art9 happy path); off-enum basis / blank
+  retention / special-without-Art9 / Art9-without-special each rejected with NOTHING written and the reason
+  surfaced; `list` empty→reflects-proposals; the **guard/audit contract** (one `agent_run.tool_call` row per
+  dispatch carrying counts/types/IDs — never the proposal's purpose/retention text; a code-rejected write is
+  still an audited successful *dispatch*); the model-facing signature pin (A-class args only); and the
+  **end-to-end real-loop** test (scripted model proposes a valid then an invalid entry → run completes, exactly
+  the valid row persisted, the rejection surfaced as a tool result). The composition test files the matter
+  under Privacy and proves the real composition point grants + dispatches the validated write. **Verify:**
+  containerized api suite **2181 passed / 2 skipped** (was 2169 at PRIV-1; **+12** = the new
+  `test_ropa_tools.py` tool/guard/audit/real-loop tests + 1 composition test; 8 provider/live-gateway scenario
+  tests deselected here — they `skipif` in CI; `tests/agents/` alone = 231 passed / 8 deselected); ruff check +
+  `ruff format --check api scripts` clean (root `ruff.toml`, line-length 100 — run from the REPO ROOT); mypy
+  `app` clean (164 files). **No new migration** (0058 already landed); **no ADR** (this IS the implementation
+  of accepted ADR-F018). Fresh-context security+simplification pass: no secrets; ORM/parameterized queries
+  only (no string SQL); rejection text bounded (field locs + Pydantic msgs, no raw input echo) and kept OUT of
+  the audit row; model can't influence `project_id`; dropped a misplaced "unknown-field" tool test (a
+  hallucinated field hits the tool's fixed signature before Pydantic — `extra="forbid"` is covered at the
+  schema layer in `tests/test_ropa.py`). **Pickup: PRIV-3** (thin vertical + the ROPA register read UI + first
+  export). **Compact after this slice (maintainer rule).** NB for PRIV-3: the Privacy area's `profile_md`
+  doesn't yet instruct ROPA maintenance — enrich it (data, not code) so a live model knows to use these tools;
+  and confirm the qualified model can call a zero-arg tool (`list_processing_activities`).
+
+- **PRIV-1 (PR #99) — SHIPPED. ROPA domain spine + code validation (no agent yet). API-ONLY.** The first
   **typed domain** of the Privacy module (ADR-F018). New **`processing_activities`** table (migration
   **0058**, head 0057→0058; DDL only, no seed — per-matter data): one Article 30 GDPR record per row, scoped
   to a Privacy matter (`projects.id`, ON DELETE CASCADE). Columns: `name`/`purpose`, `lawful_basis`,
@@ -778,42 +820,48 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 shipped — the Privacy/ROPA module is scoped and the architecture decided (typed domain + code-validated agent
 writes; agent proposes, code disposes). Decomposition: `docs/fork/plans/PRIV-privacy-ropa-module-decomposition.md`.
 
-### → NEXT: PRIV-2 — Validated agent write path. Branch FIRST.
+### → NEXT: PRIV-3 — Thin vertical end-to-end + the ROPA register UI (read) + first export. Branch FIRST.
 
-**Build PRIV-2 (keep it SHORT, compact after):** wire the PRIV-1 domain onto the Privacy area's Deep Agent.
-- One or two ROPA **tools** through `guarded_tool_call` — `propose_processing_activity` (write) and
-  `list_processing_activities` (read) — bound to the matter (`project_id`). The write tool **validates the
-  model's proposal against `app/schemas/ropa.py ProcessingActivityInput` BEFORE commit** and, on failure,
-  **returns the Pydantic validation error to the model** so it retries (propose→validate→commit OR
-  propose→reject→retry — never a silent write, never a silent fix; ADR-F018 + ADR-0013 D4).
-- **Authz:** the tools act only within the run's own matter; any read/write keyed to a `project_id` follows
-  the existing **project-ownership** pattern (cross-user → 404, never 403). The guard chokepoint (R5/R6) still
-  mediates every call; no gateway bypass (ADR-F010).
-- **Tests:** a **scripted-model** test of both paths — a valid proposal commits a `processing_activities`
-  row; an invalid proposal (e.g. special-category without `art9_condition`) is rejected and the reason is
-  surfaced back to the model (mirror the UX-B-4 deterministic scripted-`task` precedent;
-  `api/tests/agents/`). No live provider needed for the CI gate.
+**Build PRIV-3 (keep it SHORT, compact after; the read UI may split into its own slice — re-plan at the
+boundary):** the first user-visible privacy deliverable. Ingest a doc into a Privacy matter → the agent
+extracts + **proposes** processing-activity entries (the PRIV-2 `propose_processing_activity` tool) → code
+validates → commit → **the user SEES the ROPA**:
+- a read-only **OneTrust/TrustArc-equivalent register view** in the cockpit — the matter's processing
+  activities as a browsable list + entry detail (lawful-basis / special-category / retention visible at a
+  glance). **Rendered in LQ.AI's OWN F013 design language, NOT Oscar/OneTrust's look** — IA/feature parity
+  borrowed, style ours (charcoal + scarce blue, our tokens + `PageShell`/`SectionHeader`; cf.
+  [[f013-design-language-vercel]]). Needs a **read API** (`GET` the matter's processing activities) — THIS is
+  where the project-ownership **cross-user → 404** authz pattern applies (the matter id is user-supplied);
+- a first **ROPA export** deliverable (structured export / DOCX-or-XLSX) on the run-artifact surface;
+- **live scenario-harness calibration** (out-of-CI, real MiniMax-M3): does the qualified model extract +
+  propose VALID entries from a real privacy doc? does a multi-document programme finally trigger subagent
+  delegation (the open UX-B-4 question)? Evidence under `docs/fork/evidence/priv-3/`.
 
-**Reuse / anchors:** **PRIV-1 ships the domain** — `app/models/ropa.py` (`ProcessingActivity`),
-`app/schemas/ropa.py` (`ProcessingActivityInput` + the `LawfulBasis`/`Art9Condition`/`ControllerRole` enums),
-migration **0058** (head is now 0058). The agent seam: `composition.py` (`build_area_skill_wiring` /
-`build_deep_agent` / matter-tool wiring), `tools.py` (the existing guarded matter tools
-`search_documents`/`read_document` are the pattern to copy), `guard.py` (`guarded_dispatch` / R5 / R6),
-`area_agent.py`, `runner.py`. The scenario harness (`api/tests/agents/scenarios/`) for the PRIV-3 live
-calibration later. ADRs: **F018** (headline), ADR-0013 D4 (propose/dispose), F010 (no bypass), F015 (scenario
-qualification), F016/F017 (skills/subagents).
+**Anchors:** PRIV-2 shipped the write path — `app/agents/ropa_tools.py` (`build_ropa_tools`,
+`propose_processing_activity` / `list_processing_activities`), wired in `composition.py` (area-keyed on
+`PRIVACY_AREA_KEY`). Domain: `app/models/ropa.py`, `app/schemas/ropa.py`, migration **0058** (head). For the
+read API: copy the **project-ownership** query pattern (`Project.id == … AND owner_id == user_id` → 404,
+`api/api/autonomous.py:_load_owned_project`). For the UI: the cockpit shell + `PageShell`/`SectionHeader`
+primitives + the F013 tokens; the matters-panel/area surfaces (UX-B-5). The scenario harness
+(`api/tests/agents/scenarios/` — `seed_matter`/`seed_multi_doc_matter`/`run_scenario`). **First:** enrich the
+Privacy area's `profile_md` (data via migration, not code) to instruct the agent to maintain the ROPA with
+these tools, and confirm the qualified model can invoke a zero-arg tool (`list_processing_activities`).
+ADRs: **F018** (module = typed domain + code-validated writes + a domain UI), F002 (areas), ADR-0013 D4,
+F012/F013 (design), F015 (scenario qualification).
 
-**Dev-stack safety (CLAUDE.md hard rules):** no new migration in PRIV-2 (domain table already landed in 0058);
-verify any future migration on a **throwaway pgvector container**, never host-side `alembic upgrade` on the
-dev DB; never `docker compose down -v`; rebuild api+arq-worker+ingest-worker together when a migration lands.
-**NB ruff:** run from the **repo root** (`ruff check api scripts` / `ruff format --check api scripts`) so it
-picks up the root `ruff.toml` (line-length 100) — running from `api/` uses ruff defaults (88) and falsely
-reports the whole tree as needing reformatting.
+**Dev-stack safety (CLAUDE.md hard rules):** a Privacy-profile migration → verify on a **throwaway pgvector
+container**, never host-side `alembic upgrade` on the dev DB; never `docker compose down -v`; rebuild
+api+arq-worker+ingest-worker together when a migration lands; the `web` container serves a PRE-BUILT bundle —
+rebuild it before debugging any UI change. **NB ruff:** run from the **repo root** (`ruff check api scripts` /
+`ruff format --check api scripts`) so it picks up the root `ruff.toml` (line-length 100) — running from `api/`
+uses ruff defaults (88) and falsely reports the whole tree as needing reformatting.
 
 **Verify (DoD):** scripted api suite green (CI, containerized — host py is 3.11, use the `lq-ai-api-dev`
-image, pass `DATABASE_URL` for a throwaway pgvector + mount `skills/` at `/skills` for migration 0032);
-fresh-context adversarial + **security + simplification** pass ([[security-review-every-slice]]). Merge per
-ADR-F005 against `sarturko-maker/lq-ai-fork`.
+image, pass `DATABASE_URL` for a throwaway pgvector + mount `skills/` at `/skills` for migration 0032); web
+`npm run check` + vitest + headed Cypress with before/after screenshots (light+dark × wide+narrow) for the
+register UI; live harness out-of-CI; fresh-context adversarial + **security + simplification** pass
+([[security-review-every-slice]]) — the read API is a NEW authz surface (cross-user → 404) + new
+`{@html}`/render sinks to check. Merge per ADR-F005 against `sarturko-maker/lq-ai-fork`.
 **HANDOFF updated last; COMPACT after the slice** (maintainer rule: short slice → compact → short slice).
 
 **Grounded state of the loop:** the cockpit loop WORKS end-to-end AND is now surfaced on the web honestly;

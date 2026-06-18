@@ -15,12 +15,18 @@ cockpit (not merely an export) and can export as a deliverable — agent propose
 
 ## Module UI requirement (maintainer, 2026-06-18)
 
-A "module" in LQ.AI must **render its domain UI** the way the reference product does. For Privacy that means
-the user can **SEE the OneTrust / TrustArc-equivalent ROPA UI** Oscar Privacy gave them — a browsable Records
-of Processing Activities register (list + entry detail, lawful-basis / special-category / retention visible
-at a glance), surfaced in the cockpit, not just a file you download. The agent maintains it; the user reads
-and owns it. We rebuild this in LQ.AI style (calm F013 design language, [[f013-design-language-vercel]]) —
-take the *information architecture* from Oscar/OneTrust, not the code. This is a **first-class module
+A "module" in LQ.AI must **render its domain UI** — give the user the **functional equivalent** of what the
+reference product shows. For Privacy that means the user can **SEE a OneTrust / TrustArc-equivalent ROPA
+register** (a browsable Records of Processing Activities view — list + entry detail, lawful-basis /
+special-category / retention visible at a glance), surfaced in the cockpit, not just a file you download.
+The agent maintains it; the user reads and owns it.
+
+**Take the information architecture / feature parity from Oscar/OneTrust — NOT their visual style.** The UI
+must look and feel like **LQ.AI Oscar Edition**: it lives inside our cockpit and is rendered in our own
+calm F013 design language ([[f013-design-language-vercel]]) — charcoal, scarce-blue accent, our type/spacing/
+motion tokens, our primitives (`PageShell`/`SectionHeader`/shadcn-svelte). It must **not** inherit
+Oscar Privacy's (or OneTrust's) look, chrome, or component styling — only the *what to show* (the register
+as a first-class surface, the fields that matter), not the *how it looks*. This is a **first-class module
 surface**, sequenced into PRIV-3 (read view) → PRIV-4+ (the full programme cockpit), below.
 
 ## Working rules (per maintainer, 2026-06-17)
@@ -59,7 +65,8 @@ domain + the validated write path — that is all this milestone adds on the api
   a Privacy matter → agent extracts + proposes processing-activity entries → code validates → commit → the
   user **SEES the ROPA**: a read-only **OneTrust/TrustArc-equivalent register view** in the cockpit (the
   matter's processing activities as a browsable list + entry detail, lawful-basis/special-category/retention
-  visible, F013 calm design) **plus** a **ROPA export** deliverable (structured export view / DOCX-or-XLSX) on
+  visible) — **rendered in LQ.AI's own F013 design language, not Oscar/OneTrust's look** (IA borrowed, style
+  ours) — **plus** a **ROPA export** deliverable (structured export view / DOCX-or-XLSX) on
   the run-artifact surface. Live scenario-harness calibration (does the qualified model extract + propose
   valid entries? does a multi-document programme trigger subagent delegation — the open UX-B-4 question?).
   Evidence report under `docs/fork/evidence/priv-3/`. (The read UI may itself split into its own short slice

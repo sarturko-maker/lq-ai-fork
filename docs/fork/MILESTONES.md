@@ -297,11 +297,14 @@ short-slice**.
   Oscar's trusted-model writes; ICO RAG + Oscar's engine dropped). Decomposition:
   `docs/fork/plans/PRIV-privacy-ropa-module-decomposition.md` — **PRIV-0 ✅ (plan+ADR, PR #98) → PRIV-1 ✅
   (ROPA domain spine + code validation: `processing_activities` table + `ProcessingActivityInput` Pydantic
-  invariants + DB CHECK defense-in-depth, migration 0058)** → PRIV-2 (validated agent write path) → PRIV-3
-  (thin vertical + the OneTrust/TrustArc-equivalent ROPA register UI + first export + scenario calibration) →
+  invariants + DB CHECK defense-in-depth, migration 0058) → PRIV-2 ✅ (validated agent write path:
+  `propose_processing_activity`/`list_processing_activities` guarded ROPA tools on the Privacy area agent —
+  validate against `ProcessingActivityInput` before commit, reject-back-to-model on failure; PR #100)** →
+  PRIV-3 (thin vertical + the OneTrust/TrustArc-equivalent ROPA register UI + first export + scenario calibration) →
   PRIV-4+ (broaden, incl. the full programme cockpit). **Module-UI requirement (2026-06-18):** a module must
   render its domain UI like the reference product — users must SEE the ROPA register in the cockpit, not just
-  download an export (decomposition § Module UI requirement). The genuinely-large GDPR programme is also the
+  download an export — but rendered in **LQ.AI's own F013 design language, NOT Oscar/OneTrust's look** (IA
+  borrowed, style ours) (decomposition § Module UI requirement). The genuinely-large GDPR programme is also the
   natural test of whether a tier-4 model fans out to subagents (open UX-B-4 question).
 - **Module 2 — Redlining (NEXT track, Commercial/M&A).** "Redline like a lawyer": **adeu** (MIT, mechanical
   OpenXML tracked-changes — clean, no LLM calls, no gateway entanglement) as the RENDER layer + a redlining

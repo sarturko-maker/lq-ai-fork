@@ -440,6 +440,83 @@ async def test_subagent_delegation_nests_steps_via_parent_step_id(
     )
 
 
+async def test_privacy_matter_grants_ropa_tools_and_validated_write_commits(
+    comp_env: CompositionEnv,
+) -> None:
+    """PRIV-2 (ADR-F018): a matter filed under the Privacy area gets the ROPA
+    tools (area-keyed selection at the composition point). A scripted model
+    proposes a valid entry; the real loop dispatches the guarded, code-validated
+    write and one processing-activity row is persisted to the matter."""
+    from app.models.practice_area import PracticeArea
+    from app.models.ropa import ProcessingActivity
+
+    async with comp_env.factory() as db:
+        area_id = (
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == "privacy"))
+        ).scalar_one()
+        await db.execute(
+            Project.__table__.update()
+            .where(Project.id == comp_env.project_id)
+            .values(practice_area_id=area_id)
+        )
+        await db.commit()
+
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message(
+                "propose_processing_activity",
+                {
+                    "name": "Marketing emails",
+                    "purpose": "Send opt-in newsletters",
+                    "lawful_basis": "consent",
+                    "controller_role": "controller",
+                    "retention": "Until consent is withdrawn",
+                },
+            ),
+            final_message("Recorded the marketing-emails processing activity."),
+        ]
+    )
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+    )
+
+    run = await _run_row(comp_env, run_id)
+    assert run.status == "completed", run.error
+
+    async with comp_env.factory() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(ProcessingActivity).where(
+                        ProcessingActivity.project_id == comp_env.project_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        audit = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.resource_type == "agent_run",
+                        AuditLog.resource_id == str(run_id),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert len(rows) == 1
+    assert rows[0].name == "Marketing emails"
+    assert rows[0].lawful_basis == "consent"
+    assert [r.details["tool"] for r in audit] == ["propose_processing_activity"]
+
+
 async def test_unbound_run_gets_no_matter_tools_and_no_envelope(
     comp_env: CompositionEnv,
 ) -> None:

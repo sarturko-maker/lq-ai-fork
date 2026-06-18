@@ -36,6 +36,7 @@ from app.agents.area_agent import AreaAgentSpec, combine_tier_floors, render_are
 from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.lease import RunLease, settle_run
+from app.agents.ropa_tools import PRIVACY_AREA_KEY, build_ropa_tools
 from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
 from app.agents.skill_backend import SkillWiring, build_area_skill_wiring
 from app.agents.stream import RunStreamBroker
@@ -119,6 +120,7 @@ async def compose_and_execute_run(
     try:
         binding: MatterBinding | None = None
         area_spec: AreaAgentSpec | None = None
+        area_key: str | None = None
         registry: SkillRegistry | None = None
         is_follow_up = False
         async with session_factory() as db:
@@ -165,6 +167,7 @@ async def compose_and_execute_run(
                     if project.practice_area_id is not None:
                         area = await db.get(PracticeArea, project.practice_area_id)
                         if area is not None:
+                            area_key = area.key
                             registry = skill_registry_provider()
                             bound_skill_names = (
                                 (
@@ -208,6 +211,12 @@ async def compose_and_execute_run(
             if binding is not None
             else []
         )
+        # PRIV-2 (ADR-F018): a matter filed under the Privacy area also gets the
+        # ROPA domain tools — propose (the code-validated write) + list. Tool
+        # selection is area-keyed at the composition point (the area row is the
+        # agent identity, ADR-F002); other areas never grant these.
+        if binding is not None and area_key == PRIVACY_AREA_KEY:
+            tools = tools + build_ropa_tools(session_factory, run_id=run_id, binding=binding)
 
         # F1-S3: the gateway tier floor is the strongest (lowest) of the
         # matter floor and the area's default floor — the gateway combiner
