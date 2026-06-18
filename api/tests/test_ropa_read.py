@@ -26,6 +26,7 @@ from app.main import app
 from app.models.ropa import (
     ProcessingActivity,
     System,
+    Transfer,
     Vendor,
     processing_activity_systems,
     processing_activity_vendors,
@@ -77,6 +78,7 @@ async def _clean(db_session: AsyncSession) -> None:
     # regardless of any committed leftovers from earlier tests.
     await db_session.execute(delete(processing_activity_systems))
     await db_session.execute(delete(processing_activity_vendors))
+    await db_session.execute(delete(Transfer))
     await db_session.execute(delete(ProcessingActivity))
     await db_session.execute(delete(System))
     await db_session.execute(delete(Vendor))
@@ -113,6 +115,15 @@ async def _seed_linked(db_session: AsyncSession) -> tuple[ProcessingActivity, Sy
             processing_activity_id=pa.id, vendor_id=vendor.id
         )
     )
+    # A restricted transfer of this activity's data, with the recipient vendor.
+    transfer = Transfer(
+        processing_activity_id=pa.id,
+        vendor_id=vendor.id,
+        destination="United States",
+        restricted=True,
+        mechanism="standard_contractual_clauses",
+    )
+    db_session.add(transfer)
     await db_session.flush()
     return pa, system, vendor
 
@@ -145,11 +156,20 @@ async def test_list_and_detail_render_cross_links(
     assert [s["name"] for s in body[0]["systems"]] == ["Production database"]
     assert [v["name"] for v in body[0]["vendors"]] == ["Acme Payroll Ltd"]
     assert body[0]["vendors"][0]["vendor_role"] == "processor"
+    # The child transfer rides on the activity, with its recipient vendor nested.
+    assert len(body[0]["transfers"]) == 1
+    transfer = body[0]["transfers"][0]
+    assert transfer["destination"] == "United States"
+    assert transfer["restricted"] is True
+    assert transfer["mechanism"] == "standard_contractual_clauses"
+    assert transfer["vendor"]["name"] == "Acme Payroll Ltd"
 
     # Activity detail.
     resp = await client.get(f"/api/v1/ropa/processing-activities/{pa.id}", headers=_bearer(user))
     assert resp.status_code == 200
-    assert resp.json()["systems"][0]["system_type"] == "database"
+    detail = resp.json()
+    assert detail["systems"][0]["system_type"] == "database"
+    assert detail["transfers"][0]["destination"] == "United States"
 
     # System detail carries the reverse link.
     resp = await client.get(f"/api/v1/ropa/systems/{system.id}", headers=_bearer(user))

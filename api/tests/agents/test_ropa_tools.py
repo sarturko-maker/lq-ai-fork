@@ -42,7 +42,7 @@ from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.practice_area import PracticeArea
 from app.models.project import Project
-from app.models.ropa import ProcessingActivity, System, Vendor
+from app.models.ropa import ProcessingActivity, System, Transfer, Vendor
 from app.models.user import User
 from app.security import hash_password
 
@@ -82,11 +82,13 @@ class RopaEnv:
     propose: Callable[..., Awaitable[str]]
     propose_system: Callable[..., Awaitable[str]]
     propose_vendor: Callable[..., Awaitable[str]]
+    propose_transfer: Callable[..., Awaitable[str]]
     link: Callable[..., Awaitable[str]]
     link_vendor: Callable[..., Awaitable[str]]
     list_activities: Callable[..., Awaitable[str]]
     list_systems: Callable[..., Awaitable[str]]
     list_vendors: Callable[..., Awaitable[str]]
+    list_transfers: Callable[..., Awaitable[str]]
 
 
 @pytest_asyncio.fixture
@@ -158,18 +160,22 @@ async def ropa_env(
             propose=by_name["propose_processing_activity"],
             propose_system=by_name["propose_system"],
             propose_vendor=by_name["propose_vendor"],
+            propose_transfer=by_name["propose_transfer"],
             link=by_name["link_processing_activity_to_system"],
             link_vendor=by_name["link_vendor_to_activity"],
             list_activities=by_name["list_processing_activities"],
             list_systems=by_name["list_systems"],
             list_vendors=by_name["list_vendors"],
+            list_transfers=by_name["list_transfers"],
         )
 
     yield env
 
     async with commit_factory() as db:
         await db.execute(delete(AuditLog).where(AuditLog.user_id == env.user_id))
-        # Join rows cascade when the activity/system is deleted.
+        # Transfers are children of activities (CASCADE), but delete explicitly by
+        # provenance first so nothing is orphaned. Join rows cascade with their ends.
+        await db.execute(delete(Transfer).where(Transfer.source_project_id == env.project_id))
         await db.execute(
             delete(ProcessingActivity).where(ProcessingActivity.source_project_id == env.project_id)
         )
@@ -213,6 +219,18 @@ async def _vendors(env: RopaEnv) -> list[Vendor]:
                 select(Vendor)
                 .where(Vendor.source_project_id == env.project_id)
                 .order_by(Vendor.created_at.asc())
+            )
+        ).scalars()
+        return list(rows)
+
+
+async def _transfers(env: RopaEnv) -> list[Transfer]:
+    async with env.factory() as db:
+        rows = (
+            await db.execute(
+                select(Transfer)
+                .where(Transfer.source_project_id == env.project_id)
+                .order_by(Transfer.created_at.asc())
             )
         ).scalars()
         return list(rows)
@@ -443,6 +461,107 @@ async def test_link_vendor_unknown_ids_is_rejected(ropa_env: RopaEnv) -> None:
 
 
 # ---------------------------------------------------------------------------
+# propose_transfer — the child transfer + the restricted⇔mechanism invariant (PRIV-5b)
+# ---------------------------------------------------------------------------
+
+
+async def test_valid_restricted_transfer_commits(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    activity = (await _activities(ropa_env))[0]
+    vendor = (await _vendors(ropa_env))[0]
+
+    result = await ropa_env.propose_transfer(
+        processing_activity_id=str(activity.id),
+        destination="United States",
+        restricted=True,
+        mechanism="standard_contractual_clauses",
+        vendor_id=str(vendor.id),
+        details="EU SCCs module 2 + UK Addendum",
+    )
+    assert "Recorded transfer" in result
+    assert "United States" in result
+
+    rows = await _transfers(ropa_env)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.processing_activity_id == activity.id
+    assert row.vendor_id == vendor.id
+    assert row.destination == "United States"
+    assert row.restricted is True
+    assert row.mechanism == "standard_contractual_clauses"
+    assert row.source_project_id == ropa_env.project_id
+
+
+async def test_valid_unrestricted_transfer_without_vendor_commits(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+
+    result = await ropa_env.propose_transfer(
+        processing_activity_id=str(activity.id),
+        destination="Germany",
+    )
+    assert "Recorded transfer" in result
+    rows = await _transfers(ropa_env)
+    assert len(rows) == 1
+    assert rows[0].restricted is False
+    assert rows[0].mechanism is None
+    assert rows[0].vendor_id is None
+
+
+async def test_restricted_transfer_without_mechanism_is_rejected(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    result = await ropa_env.propose_transfer(
+        processing_activity_id=str(activity.id),
+        destination="India",
+        restricted=True,
+    )
+    assert "rejected" in result.lower()
+    assert "mechanism" in result
+    assert await _transfers(ropa_env) == []
+
+
+async def test_mechanism_on_unrestricted_transfer_is_rejected(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    result = await ropa_env.propose_transfer(
+        processing_activity_id=str(activity.id),
+        destination="France",
+        restricted=False,
+        mechanism="uk_idta",
+    )
+    assert "rejected" in result.lower()
+    assert "restricted" in result
+    assert await _transfers(ropa_env) == []
+
+
+async def test_transfer_unknown_activity_is_rejected(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.propose_transfer(
+        processing_activity_id=str(uuid.uuid4()),
+        destination="United States",
+        restricted=True,
+        mechanism="standard_contractual_clauses",
+    )
+    assert "refused" in result.lower()
+    assert "no processing activity" in result
+    assert await _transfers(ropa_env) == []
+
+
+async def test_transfer_unknown_vendor_is_rejected(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    result = await ropa_env.propose_transfer(
+        processing_activity_id=str(activity.id),
+        destination="Germany",
+        vendor_id=str(uuid.uuid4()),
+    )
+    assert "refused" in result.lower()
+    assert "no vendor" in result
+    assert await _transfers(ropa_env) == []
+
+
+# ---------------------------------------------------------------------------
 # list tools
 # ---------------------------------------------------------------------------
 
@@ -480,6 +599,25 @@ async def test_list_vendors_is_empty_then_reflects_proposals(ropa_env: RopaEnv) 
     assert "Acme Payroll Ltd" in listed
     assert "processor" in listed
     assert "in_place" in listed
+
+
+async def test_list_transfers_is_empty_then_reflects_proposals(ropa_env: RopaEnv) -> None:
+    empty = await ropa_env.list_transfers()
+    assert "no third-country transfers" in empty
+
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    await ropa_env.propose_transfer(
+        processing_activity_id=str(activity.id),
+        destination="United States",
+        restricted=True,
+        mechanism="standard_contractual_clauses",
+    )
+    listed = await ropa_env.list_transfers()
+    assert "1 third-country transfer" in listed
+    assert "United States" in listed
+    assert "Payroll processing" in listed
+    assert "standard_contractual_clauses" in listed
 
 
 # ---------------------------------------------------------------------------
@@ -524,11 +662,13 @@ def test_tool_names_cover_the_built_tools(ropa_env: RopaEnv) -> None:
         "propose_processing_activity",
         "propose_system",
         "propose_vendor",
+        "propose_transfer",
         "link_processing_activity_to_system",
         "link_vendor_to_activity",
         "list_processing_activities",
         "list_systems",
         "list_vendors",
+        "list_transfers",
     } == ROPA_TOOL_NAMES
 
 
@@ -561,6 +701,14 @@ async def test_tools_expose_model_facing_schema(ropa_env: RopaEnv) -> None:
         "description",
         "country",
     ]
+    assert list(inspect.signature(ropa_env.propose_transfer).parameters) == [
+        "processing_activity_id",
+        "destination",
+        "restricted",
+        "mechanism",
+        "vendor_id",
+        "details",
+    ]
     assert list(inspect.signature(ropa_env.link).parameters) == [
         "processing_activity_id",
         "system_id",
@@ -572,15 +720,18 @@ async def test_tools_expose_model_facing_schema(ropa_env: RopaEnv) -> None:
     assert list(inspect.signature(ropa_env.list_activities).parameters) == []
     assert list(inspect.signature(ropa_env.list_systems).parameters) == []
     assert list(inspect.signature(ropa_env.list_vendors).parameters) == []
+    assert list(inspect.signature(ropa_env.list_transfers).parameters) == []
     for tool in (
         ropa_env.propose,
         ropa_env.propose_system,
         ropa_env.propose_vendor,
+        ropa_env.propose_transfer,
         ropa_env.link,
         ropa_env.link_vendor,
         ropa_env.list_activities,
         ropa_env.list_systems,
         ropa_env.list_vendors,
+        ropa_env.list_transfers,
     ):
         assert inspect.iscoroutinefunction(tool)
 

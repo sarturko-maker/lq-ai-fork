@@ -28,7 +28,7 @@ from sqlalchemy.orm import selectinload
 
 from app import ropa_export
 from app.db.session import get_db
-from app.models.ropa import ProcessingActivity, System, Vendor
+from app.models.ropa import ProcessingActivity, System, Transfer, Vendor
 from app.schemas.ropa import ProcessingActivityRead, SystemRead, VendorRead
 
 router = APIRouter(prefix="/ropa", tags=["ropa"])
@@ -54,6 +54,7 @@ async def list_processing_activities(db: _Db) -> list[ProcessingActivity]:
                 .options(
                     selectinload(ProcessingActivity.systems),
                     selectinload(ProcessingActivity.vendors),
+                    selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
                 )
                 .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
             )
@@ -73,6 +74,7 @@ async def get_processing_activity(activity_id: uuid.UUID, db: _Db) -> Processing
             .options(
                 selectinload(ProcessingActivity.systems),
                 selectinload(ProcessingActivity.vendors),
+                selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
             )
             .where(ProcessingActivity.id == activity_id)
         )
@@ -154,12 +156,12 @@ async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -
 
     Read-and-render over the deployment-global register (ADR-F019): every
     processing activity with its lawful basis / retention / special-category,
-    joined across the M:N to its linked systems and recipients (vendors), plus
-    the system and vendor inventories. Shared-read posture (``_active`` at the
-    mount) — the register is the company's standing record, not a per-user
-    artifact. The export is HONEST about the Article 30(1) fields the domain
-    does not yet capture (see the coverage note; transfers arrive with PRIV-5b,
-    the data-subject/data-category taxonomy with PRIV-6).
+    joined across the M:N to its linked systems and recipients (vendors) and its
+    child third-country transfers, plus the system and vendor inventories.
+    Shared-read posture (``_active`` at the mount) — the register is the
+    company's standing record, not a per-user artifact. The export is HONEST
+    about the Article 30(1) fields the domain does not yet capture (see the
+    coverage note; the data-subject/data-category taxonomy arrives with PRIV-6).
     """
     activities = (
         (
@@ -168,6 +170,7 @@ async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -
                 .options(
                     selectinload(ProcessingActivity.systems),
                     selectinload(ProcessingActivity.vendors),
+                    selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
                 )
                 .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
             )

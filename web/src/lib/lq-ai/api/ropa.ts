@@ -41,6 +41,13 @@ export type VendorRole =
 
 export type DpaStatus = 'in_place' | 'pending' | 'not_required' | 'none';
 
+export type TransferMechanism =
+	| 'adequacy_regulations'
+	| 'standard_contractual_clauses'
+	| 'uk_idta'
+	| 'binding_corporate_rules'
+	| 'derogation';
+
 /** A system as it appears linked under a processing activity. */
 export interface SystemSummary {
 	id: string;
@@ -53,6 +60,20 @@ export interface VendorSummary {
 	id: string;
 	name: string;
 	vendor_role: VendorRole;
+}
+
+/**
+ * A third-country transfer as it appears under its parent processing activity
+ * (PRIV-5b). A transfer is a child of one activity, with an optional recipient
+ * vendor; `mechanism` is the Chapter V safeguard, present iff `restricted`.
+ */
+export interface TransferSummary {
+	id: string;
+	destination: string;
+	restricted: boolean;
+	mechanism: TransferMechanism | null;
+	details: string | null;
+	vendor: VendorSummary | null;
 }
 
 /** A processing activity as it appears linked under a system or vendor. */
@@ -76,6 +97,7 @@ export interface ProcessingActivityRead {
 	updated_at: string;
 	systems: SystemSummary[];
 	vendors: VendorSummary[];
+	transfers: TransferSummary[];
 }
 
 export interface VendorRead {

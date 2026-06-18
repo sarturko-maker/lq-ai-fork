@@ -307,9 +307,13 @@ short-slice**.
   → **PRIV-5 split into 5a + 5b (maintainer): PRIV-5a ✅ (PR #103)** (Vendor/recipient entity — name/role/country/
   DPA-status, lean: risk deferred to assessments; `processing_activity_vendors` M:N + `propose_vendor`/
   `link_vendor_to_activity`/`list_vendors` tools, migration 0060; read API + Vendors register tab; Recipients
-  column + Vendors sheet in the Art 30 export; coverage note's "recipients" line dropped) → **PRIV-5b** (Transfer
-  entity + the outside-UK/EEA⇒mechanism invariant — declared `restricted` bool mirroring special_category⇔art9;
-  fills the export's last transfer line) → PRIV-6 (data-flow view + Legal-Entity scope + programme dashboard)
+  column + Vendors sheet in the Art 30 export; coverage note's "recipients" line dropped) → **PRIV-5b ✅ (PR #104)**
+  (Transfer entity — child of a processing activity (CASCADE) + optional recipient vendor; the outside-UK/EEA⇒mechanism
+  invariant as a declared `restricted` bool mirroring special_category⇔art9, in both `TransferInput` and a DB CHECK;
+  `propose_transfer`/`list_transfers` tools (now 10), migration 0061; transfers ride `ProcessingActivityRead` + the
+  activity-detail UI; Transfers column + Transfers sheet in the Art 30 export; coverage note's last transfer line
+  dropped — now 2 lines, both → PRIV-6; **no standalone /ropa/transfers endpoint** — a transfer has no meaning detached
+  from its activity) → PRIV-6 (data-flow view + Legal-Entity scope + programme dashboard)
   → **P1 flagship** PRIV-A1 (assessment domain+skill) / PRIV-A2 (**conversational-link external intake** — the
   differentiator, **ADR-F020**) → P2 tracks (DSAR, breach, DPA review, reg-gap, reporting). **Full capability
   plan: `docs/fork/plans/PRIV-onetrust-to-lqai-functionality-map.md`** (OneTrust→LQ.AI, P0–P3; **P3

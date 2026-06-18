@@ -1,10 +1,11 @@
-"""Article 30 RoPA export — PRIV-4a + PRIV-5a (fork, ADR-F018/F019).
+"""Article 30 RoPA export — PRIV-4a + PRIV-5a + PRIV-5b (fork, ADR-F018/F019).
 
 Two layers:
 
 * **Pure formatter** (no DB) — the JSON envelope's honest coverage note, the CSV
-  header/rows + systems-join + recipients-join cells + the OWASP CSV-injection
-  guard, and the three-sheet XLSX workbook (Activities + Systems + Vendors).
+  header/rows + systems-join + recipients-join + transfers-join cells + the OWASP
+  CSV-injection guard, and the four-sheet XLSX workbook (Activities + Systems +
+  Vendors + Transfers).
 * **Endpoint** (integration) — ``GET /ropa/export`` in each format, the empty
   register, an off-enum ``format`` → 422, and the shared-read auth gate (401).
 """
@@ -29,6 +30,7 @@ from app.main import app
 from app.models.ropa import (
     ProcessingActivity,
     System,
+    Transfer,
     Vendor,
     processing_activity_systems,
     processing_activity_vendors,
@@ -57,9 +59,24 @@ def _activity(**over: object) -> ProcessingActivityRead:
         "updated_at": _NOW,
         "systems": [],
         "vendors": [],
+        "transfers": [],
     }
     base.update(over)
     return ProcessingActivityRead.model_validate(base)
+
+
+def _transfer(**over: object) -> dict[str, object]:
+    """A TransferSummary dict as it rides nested under a ProcessingActivityRead."""
+    base: dict[str, object] = {
+        "id": uuid.uuid4(),
+        "destination": "United States",
+        "restricted": True,
+        "mechanism": "standard_contractual_clauses",
+        "details": None,
+        "vendor": None,
+    }
+    base.update(over)
+    return base
 
 
 def _system(**over: object) -> SystemRead:
@@ -102,11 +119,14 @@ def test_build_export_carries_honest_coverage_note() -> None:
     export = ropa_export.build_export([_activity()], [_system()], [_vendor()], generated_at=_NOW)
     assert export.generated_at == _NOW
     assert export.register_name == "Article 30 Records of Processing Activities"
-    # PRIV-5a filled "categories of recipients" — it is no longer in the gap note.
+    # PRIV-5a filled "categories of recipients"; PRIV-5b filled transfers — neither
+    # is in the gap note any more.
     assert "Categories of recipients" not in export.coverage.fields_not_yet_recorded
-    # The Art 30(1) fields still missing are named, not hidden.
+    assert not any("transfer" in f.lower() for f in export.coverage.fields_not_yet_recorded)
+    # The Art 30(1) fields still missing (the data-subject/personal-data taxonomy)
+    # are named, not hidden.
     assert any("data subjects" in f.lower() for f in export.coverage.fields_not_yet_recorded)
-    assert any("transfer" in f.lower() for f in export.coverage.fields_not_yet_recorded)
+    assert any("personal data" in f.lower() for f in export.coverage.fields_not_yet_recorded)
     assert len(export.processing_activities) == 1
     assert len(export.systems) == 1
     assert len(export.vendors) == 1
@@ -174,10 +194,22 @@ def test_to_csv_neutralises_formula_injection() -> None:
 
 
 @pytest.mark.unit
-def test_to_xlsx_three_sheets_with_headers() -> None:
-    export = ropa_export.build_export([_activity()], [_system()], [_vendor()], generated_at=_NOW)
+def test_to_xlsx_four_sheets_with_headers() -> None:
+    a = _activity(
+        transfers=[
+            _transfer(
+                destination="United States",
+                vendor={
+                    "id": uuid.uuid4(),
+                    "name": "Acme Cloud",
+                    "vendor_role": "processor",
+                },
+            ),
+        ]
+    )
+    export = ropa_export.build_export([a], [_system()], [_vendor()], generated_at=_NOW)
     wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
-    assert wb.sheetnames == ["Processing Activities", "Systems", "Vendors"]
+    assert wb.sheetnames == ["Processing Activities", "Systems", "Vendors", "Transfers"]
     activities = wb["Processing Activities"]
     assert activities["A1"].value == "Name"
     assert activities["A2"].value == "Payroll processing"
@@ -189,6 +221,14 @@ def test_to_xlsx_three_sheets_with_headers() -> None:
     assert vendors["A2"].value == "Acme Payroll Ltd"
     assert vendors["B2"].value == "Processor"
     assert vendors["D2"].value == "In place"
+    transfers = wb["Transfers"]
+    assert transfers["A1"].value == "Processing activity"
+    # One row per transfer, prefixed with its parent activity.
+    assert transfers["A2"].value == "Payroll processing"
+    assert transfers["B2"].value == "United States"
+    assert transfers["C2"].value == "Yes"
+    assert transfers["D2"].value == "Standard contractual clauses (SCCs)"
+    assert transfers["E2"].value == "Acme Cloud"
 
 
 @pytest.mark.unit
@@ -210,6 +250,44 @@ def test_to_xlsx_neutralises_formula_injection_in_vendor_sheet() -> None:
     wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
     assert wb["Processing Activities"]["A2"].value == "'=danger()"
     assert wb["Vendors"]["A2"].value == "'@evil"
+
+
+@pytest.mark.unit
+def test_transfers_cell_shows_restricted_safeguard_and_unrestricted_marker() -> None:
+    a = _activity(
+        transfers=[
+            _transfer(destination="United States", restricted=True, mechanism="uk_idta"),
+            _transfer(destination="Germany", restricted=False, mechanism=None),
+        ]
+    )
+    export = ropa_export.build_export([a], [], [], generated_at=_NOW)
+    text = ropa_export.to_csv(export)
+    assert "Transfers (Art 30(1)(e))" in text.splitlines()[0]
+    # A restricted transfer shows its mechanism; a non-restricted one is marked so.
+    assert "United States — UK IDTA" in text
+    assert "Germany (not restricted)" in text
+
+
+@pytest.mark.unit
+def test_transfer_rows_flatten_across_activities_with_parent_name() -> None:
+    a1 = _activity(name="Payroll", transfers=[_transfer(destination="United States")])
+    a2 = _activity(name="Marketing", transfers=[_transfer(destination="Singapore")])
+    export = ropa_export.build_export([a1, a2], [], [], generated_at=_NOW)
+    wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
+    transfers = wb["Transfers"]
+    # One row per transfer, each carrying its parent activity name.
+    assert transfers["A2"].value == "Payroll"
+    assert transfers["B2"].value == "United States"
+    assert transfers["A3"].value == "Marketing"
+    assert transfers["B3"].value == "Singapore"
+
+
+@pytest.mark.unit
+def test_to_xlsx_neutralises_formula_injection_in_transfer_sheet() -> None:
+    a = _activity(transfers=[_transfer(destination="=danger()", restricted=False, mechanism=None)])
+    export = ropa_export.build_export([a], [], [], generated_at=_NOW)
+    wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
+    assert wb["Transfers"]["B2"].value == "'=danger()"
 
 
 # --- endpoint (integration) ---------------------------------------------------
@@ -256,6 +334,7 @@ def _bearer(u: User) -> dict[str, str]:
 async def _clean(db_session: AsyncSession) -> None:
     await db_session.execute(delete(processing_activity_systems))
     await db_session.execute(delete(processing_activity_vendors))
+    await db_session.execute(delete(Transfer))
     await db_session.execute(delete(ProcessingActivity))
     await db_session.execute(delete(System))
     await db_session.execute(delete(Vendor))
@@ -292,6 +371,15 @@ async def _seed_linked(db_session: AsyncSession) -> None:
             processing_activity_id=pa.id, vendor_id=vendor.id
         )
     )
+    db_session.add(
+        Transfer(
+            processing_activity_id=pa.id,
+            vendor_id=vendor.id,
+            destination="United States",
+            restricted=True,
+            mechanism="standard_contractual_clauses",
+        )
+    )
     await db_session.flush()
 
 
@@ -309,6 +397,9 @@ async def test_export_json(client: AsyncClient, db_session: AsyncSession, user: 
     assert body["processing_activities"][0]["name"] == "Payroll processing"
     assert body["processing_activities"][0]["systems"][0]["name"] == "Production database"
     assert body["processing_activities"][0]["vendors"][0]["name"] == "Acme Payroll Ltd"
+    transfer = body["processing_activities"][0]["transfers"][0]
+    assert transfer["destination"] == "United States"
+    assert transfer["restricted"] is True
     assert body["systems"][0]["name"] == "Production database"
     assert body["vendors"][0]["name"] == "Acme Payroll Ltd"
 
@@ -325,6 +416,7 @@ async def test_export_csv(client: AsyncClient, db_session: AsyncSession, user: U
     assert "Payroll processing" in lines[1]
     assert "Production database (Database)" in resp.text
     assert "Acme Payroll Ltd (Processor)" in resp.text
+    assert "United States — Standard contractual clauses (SCCs)" in resp.text
 
 
 @pytest_integration
@@ -335,9 +427,12 @@ async def test_export_xlsx(client: AsyncClient, db_session: AsyncSession, user: 
     assert "spreadsheetml" in resp.headers["content-type"]
     assert resp.headers["content-disposition"].endswith('.xlsx"')
     wb = load_workbook(io.BytesIO(resp.content))
-    assert wb.sheetnames == ["Processing Activities", "Systems", "Vendors"]
+    assert wb.sheetnames == ["Processing Activities", "Systems", "Vendors", "Transfers"]
     assert wb["Processing Activities"]["A2"].value == "Payroll processing"
     assert wb["Vendors"]["A2"].value == "Acme Payroll Ltd"
+    # The seeded restricted transfer appears on the Transfers sheet.
+    assert wb["Transfers"]["A2"].value == "Payroll processing"
+    assert wb["Transfers"]["B2"].value == "United States"
 
 
 @pytest_integration

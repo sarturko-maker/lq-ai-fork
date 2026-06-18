@@ -19,6 +19,7 @@ import {
 	humanize,
 	lawfulBasisLabel,
 	systemTypeLabel,
+	transferMechanismLabel,
 	vendorRoleLabel
 } from './format';
 
@@ -79,6 +80,23 @@ describe('dpaStatusLabel', () => {
 		expect(dpaStatusLabel('not_required')).toBe('Not required');
 		expect(dpaStatusLabel('pending')).toBe('Pending');
 		expect(dpaStatusLabel('none')).toBe('None');
+	});
+});
+
+describe('transferMechanismLabel', () => {
+	it('maps Chapter V transfer mechanisms, with acronyms/Article refs preserved', () => {
+		expect(transferMechanismLabel('standard_contractual_clauses')).toBe(
+			'Standard contractual clauses (SCCs)'
+		);
+		expect(transferMechanismLabel('uk_idta')).toBe('UK IDTA');
+		expect(transferMechanismLabel('binding_corporate_rules')).toBe(
+			'Binding corporate rules (BCRs)'
+		);
+		expect(transferMechanismLabel('derogation')).toBe('Derogation (Art 49)');
+		expect(transferMechanismLabel('adequacy_regulations')).toBe('Adequacy regulations');
+	});
+	it('shows an em dash when absent (a non-restricted transfer carries no mechanism)', () => {
+		expect(transferMechanismLabel(null)).toBe('—');
 	});
 });
 

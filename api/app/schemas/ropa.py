@@ -103,6 +103,20 @@ class DpaStatus(StrEnum):
     NONE = "none"
 
 
+class TransferMechanism(StrEnum):
+    """The Chapter V (Art 44-49) basis that legitimises a restricted transfer.
+
+    The Article 30(1)(e) "transfers + safeguards" axis (PRIV-5b, ADR-F019). The
+    SQL CHECK in ``app.models.ropa`` mirrors this set.
+    """
+
+    ADEQUACY_REGULATIONS = "adequacy_regulations"
+    STANDARD_CONTRACTUAL_CLAUSES = "standard_contractual_clauses"
+    UK_IDTA = "uk_idta"
+    BINDING_CORPORATE_RULES = "binding_corporate_rules"
+    DEROGATION = "derogation"
+
+
 class ProcessingActivityInput(BaseModel):
     """A proposed ROPA entry — the validated write contract (ADR-F018).
 
@@ -213,6 +227,57 @@ class VendorInput(BaseModel):
         return v
 
 
+class TransferInput(BaseModel):
+    """A proposed third-country transfer — the validated write contract (ADR-F018).
+
+    The "transfers + safeguards" half of Article 30(1)(e) (PRIV-5b, ADR-F019): a
+    transfer of an activity's personal data to a third country / international
+    organisation. The relational ids (the parent processing activity, the
+    optional recipient vendor) are resolved against the register by the agent
+    write tool, like the M:N links — this contract carries only the transfer's
+    own content + the headline invariant:
+
+    **A restricted transfer (recipient outside the UK/EEA) requires a Chapter V
+    transfer mechanism; a non-restricted transfer must not assert one** — exactly
+    parallel to ``special_category ⇔ art9_condition``. ``restricted`` is
+    *declared* (set by the agent/code), not derived from a maintained adequacy
+    list (plan § Decisions). Reject, don't sanitize.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    destination: str = Field(min_length=1, max_length=200)
+    restricted: bool = False
+    mechanism: TransferMechanism | None = None
+    details: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("details")
+    @classmethod
+    def _blank_optional_to_none(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            return None
+        return v
+
+    @model_validator(mode="after")
+    def _restricted_requires_mechanism(self) -> TransferInput:
+        """Invariant: restricted ⇔ a transfer mechanism present.
+
+        Both directions: a restricted transfer needs a Chapter V safeguard; a
+        non-restricted (intra-UK/EEA) transfer must not carry one (a mechanism on
+        an unrestricted transfer is incoherent and would mislead the ROPA).
+        """
+        if self.restricted and self.mechanism is None:
+            raise ValueError(
+                "a restricted transfer (recipient outside the UK/EEA) requires a transfer "
+                "mechanism (a Chapter V safeguard — e.g. standard_contractual_clauses, uk_idta)"
+            )
+        if not self.restricted and self.mechanism is not None:
+            raise ValueError(
+                "mechanism must be set only when the transfer is restricted (outside the UK/EEA)"
+            )
+        return self
+
+
 # --- Read DTOs (PRIV-3 read API; from ORM via from_attributes) ----------------
 #
 # The register read surface. Summaries carry just enough to render a cross-link
@@ -250,8 +315,27 @@ class VendorSummary(BaseModel):
     vendor_role: str
 
 
+class TransferSummary(BaseModel):
+    """A third-country transfer as it appears under its parent processing activity.
+
+    A transfer is a child of one activity (Art 30 lists transfers within each
+    record, PRIV-5b), so it surfaces here rather than as its own register entity.
+    ``vendor`` is the recipient when it is a known vendor (intra-group transfers
+    may have none).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    destination: str
+    restricted: bool
+    mechanism: str | None
+    details: str | None
+    vendor: VendorSummary | None = None
+
+
 class ProcessingActivityRead(BaseModel):
-    """One Article 30 record + the systems it uses and recipients it discloses to."""
+    """One Article 30 record + the systems, recipients and transfers it carries."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -267,6 +351,7 @@ class ProcessingActivityRead(BaseModel):
     updated_at: datetime
     systems: list[SystemSummary] = Field(default_factory=list)
     vendors: list[VendorSummary] = Field(default_factory=list)
+    transfers: list[TransferSummary] = Field(default_factory=list)
 
 
 class SystemRead(BaseModel):
@@ -308,10 +393,10 @@ class VendorRead(BaseModel):
 #
 # The extractable RoPA deliverable over the deployment-global register. A
 # read-and-render envelope (no new entity): the processing activities joined to
-# their systems, plus the system inventory, plus an HONEST coverage note naming
-# the Article 30(1) fields the domain does not yet capture (transfers,
-# recipients, data-subject/data categories — PRIV-5). The export renders what
-# exists and never invents the rest.
+# their systems, recipients and transfers, plus the system and vendor
+# inventories, plus an HONEST coverage note naming the Article 30(1) fields the
+# domain does not yet capture (the data-subject / personal-data taxonomy —
+# PRIV-6). The export renders what exists and never invents the rest.
 
 
 class Article30Coverage(BaseModel):
