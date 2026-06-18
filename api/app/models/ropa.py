@@ -47,6 +47,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Table,
     Text,
     text,
@@ -178,6 +179,63 @@ processing_activity_vendors = Table(
 )
 
 
+# Many-to-many link between processing activities and the categories of data
+# subjects they process (the first half of Article 30(1)(c); PRIV-6a). Same shape
+# as the other link tables: composite PK, CASCADE both ends.
+processing_activity_data_subject_categories = Table(
+    "processing_activity_data_subject_categories",
+    Base.metadata,
+    Column(
+        "processing_activity_id",
+        UUID(as_uuid=True),
+        ForeignKey(
+            "processing_activities.id",
+            ondelete="CASCADE",
+            name="fk_pa_dsc_processing_activity_id",
+        ),
+        primary_key=True,
+    ),
+    Column(
+        "data_subject_category_id",
+        UUID(as_uuid=True),
+        ForeignKey(
+            "data_subject_categories.id",
+            ondelete="CASCADE",
+            name="fk_pa_dsc_data_subject_category_id",
+        ),
+        primary_key=True,
+    ),
+)
+
+
+# Many-to-many link between processing activities and the categories of personal
+# data they process (the second half of Article 30(1)(c); PRIV-6a).
+processing_activity_data_categories = Table(
+    "processing_activity_data_categories",
+    Base.metadata,
+    Column(
+        "processing_activity_id",
+        UUID(as_uuid=True),
+        ForeignKey(
+            "processing_activities.id",
+            ondelete="CASCADE",
+            name="fk_pa_dc_processing_activity_id",
+        ),
+        primary_key=True,
+    ),
+    Column(
+        "data_category_id",
+        UUID(as_uuid=True),
+        ForeignKey(
+            "data_categories.id",
+            ondelete="CASCADE",
+            name="fk_pa_dc_data_category_id",
+        ),
+        primary_key=True,
+    ),
+)
+
+
 class ProcessingActivity(Base):
     """One ROPA entry (Article 30 record) in the company-wide register.
 
@@ -278,6 +336,19 @@ class ProcessingActivity(Base):
         back_populates="processing_activity",
         cascade="all, delete-orphan",
         order_by="Transfer.destination",
+    )
+    # Article 30(1)(c) personal-data taxonomy (PRIV-6a): the categories of data
+    # subjects and of personal data this activity processes (M:N controlled
+    # vocabularies).
+    data_subject_categories: Mapped[list[DataSubjectCategory]] = relationship(
+        secondary=processing_activity_data_subject_categories,
+        back_populates="processing_activities",
+        order_by="DataSubjectCategory.name",
+    )
+    data_categories: Mapped[list[DataCategory]] = relationship(
+        secondary=processing_activity_data_categories,
+        back_populates="processing_activities",
+        order_by="DataCategory.name",
     )
 
     def __repr__(self) -> str:
@@ -494,3 +565,102 @@ class Transfer(Base):
         return (
             f"<Transfer id={self.id} destination={self.destination!r} restricted={self.restricted}>"
         )
+
+
+class DataSubjectCategory(Base):
+    """One category of data subjects — company-wide controlled vocabulary (ADR-F019).
+
+    The first half of Article 30(1)(c) (PRIV-6a): a class of individuals whose
+    personal data is processed (e.g. "Employees", "Customers", "Job applicants").
+    A pure label — ``name`` only (plus provenance) — tagged onto processing
+    activities through :data:`processing_activity_data_subject_categories`.
+    ``name`` is UNIQUE so the vocabulary is reused, not duplicated (the agent
+    write tool finds-or-creates by name). No ``updated_at``: a label is immutable.
+    """
+
+    __tablename__ = "data_subject_categories"
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(name) > 0 AND char_length(name) <= 200",
+            name="chk_data_subject_categories_name_len",
+        ),
+        # Case-insensitive uniqueness: the vocabulary term is matched + reused on
+        # lower(name) (PRIV-6a), so "Health data"/"Health Data" can't both persist.
+        Index("uq_data_subject_categories_name", text("lower(name)"), unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    source_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "projects.id",
+            ondelete="SET NULL",
+            name="fk_data_subject_categories_source_project_id",
+        ),
+        nullable=True,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    processing_activities: Mapped[list[ProcessingActivity]] = relationship(
+        secondary=processing_activity_data_subject_categories,
+        back_populates="data_subject_categories",
+        order_by="ProcessingActivity.name",
+    )
+
+    def __repr__(self) -> str:
+        return f"<DataSubjectCategory id={self.id} name={self.name!r}>"
+
+
+class DataCategory(Base):
+    """One category of personal data — company-wide controlled vocabulary (ADR-F019).
+
+    The second half of Article 30(1)(c) (PRIV-6a): a class of personal data that
+    is processed (e.g. "Contact details", "Financial data", "Health data"). Same
+    pure-label shape as :class:`DataSubjectCategory` (unique ``name``, no
+    ``updated_at``), tagged onto activities through
+    :data:`processing_activity_data_categories`.
+    """
+
+    __tablename__ = "data_categories"
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(name) > 0 AND char_length(name) <= 200",
+            name="chk_data_categories_name_len",
+        ),
+        Index("uq_data_categories_name", text("lower(name)"), unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    source_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "projects.id",
+            ondelete="SET NULL",
+            name="fk_data_categories_source_project_id",
+        ),
+        nullable=True,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    processing_activities: Mapped[list[ProcessingActivity]] = relationship(
+        secondary=processing_activity_data_categories,
+        back_populates="data_categories",
+        order_by="ProcessingActivity.name",
+    )
+
+    def __repr__(self) -> str:
+        return f"<DataCategory id={self.id} name={self.name!r}>"

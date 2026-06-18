@@ -344,6 +344,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # PRIV-5a (fork) — vendors/recipients. Dedicated coverage in tests/test_ropa_read.py.
     ("GET", "/api/v1/ropa/vendors"),
     ("GET", "/api/v1/ropa/vendors/{vendor_id}"),
+    # PRIV-6a (fork) — Article 30(1)(c) personal-data taxonomy. Coverage in tests/test_ropa_read.py.
+    ("GET", "/api/v1/ropa/data-subject-categories"),
+    ("GET", "/api/v1/ropa/data-categories"),
     # PRIV-4a (fork) — Article 30 export. Dedicated coverage in tests/test_ropa_export.py.
     ("GET", "/api/v1/ropa/export"),
 }

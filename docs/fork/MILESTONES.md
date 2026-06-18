@@ -336,6 +336,20 @@ short-slice**.
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+- **ROPA private→shared information-flow guardrail (from the PRIV-6a ultracode audit, 2026-06-18 — medium).**
+  The deployment-global ROPA register (ADR-F019, shared-read) means a privileged/private matter's
+  confidential narrative could be distilled by the Privacy agent into a register free-text field
+  (purpose/description/details) and then read by ANY authenticated firm user. `project.privileged` is in the
+  binding but gates only the inference tier, not ROPA writes. **Maintainer decision needed:** (a) add a
+  firm-wide / generic-facts-only guardrail to the Privacy `profile_md` + the `propose_*`/`add_*` tool
+  docstrings; and/or (b) gate writes originating from a privileged matter behind user confirmation; and/or
+  (c) document the boundary in a superseding ADR (F019's consequences don't name this path). Spans all
+  `propose_*` free-text (predates PRIV-6a). Full write-up: `docs/fork/evidence/priv-6a/audit-report.md` #3.
+- **Guard DB-error message scrubbing (defense-in-depth, from the PRIV-6a audit — low).** `guard.py` re-raises
+  a tool's exception; the runner serialises `str(exc)` into `AgentRun.error` + the SSE frame, so a raw
+  `DBAPIError`/`IntegrityError` would carry the failing SQL + bound params. PRIV-6a closed the only reachable
+  path (the find-or-create savepoint); hardening the shared chokepoint to map `DBAPIError` → a constraint-
+  name-only, value-free message (keeping the raw text in server logs) is belt-and-braces across all tools.
 - Project rename before public release (ADR-F001 obligation).
 - Embedding provider strategy (KB + chat vector search currently lack one; MiniMax coding-plan key is
   chat-only — needs a dedicated embedding model, possibly local/Tier-1 for privileged matters).

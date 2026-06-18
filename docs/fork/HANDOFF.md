@@ -2,7 +2,53 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-5b Transfer entity + the restricted⇒mechanism invariant SHIPPED (PR #104, branch `priv-5b-transfers`)**, on top of PRIV-5a (PR #103) + PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). **PRIV-5 is COMPLETE** (5a Vendors + 5b Transfers). The Article 30(1)(e) axis is now fully captured (recipients + transfers); the export coverage note is down to **2 lines** (data-subject / personal-data taxonomy → **PRIV-6**). Plan: `docs/fork/plans/PRIV-5-vendors-and-transfers.md`. **Pickup: PRIV-6** (data-flow view + Legal-Entity scope + programme dashboard) — or the P1 flagship assessment track (PRIV-A1/A2, needs ADR-F020).)
+## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-6a personal-data taxonomy (Article 30(1)(c)) SHIPPED (PR #105, branch `priv-6a-personal-data-taxonomy`)**, on top of PRIV-5b (PR #104) + PRIV-5a (PR #103) + PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). **The full Article 30(1) content set is now captured** — recipients (5a) + transfers (5b) + the categories-of-data-subjects / categories-of-personal-data taxonomy (6a); **the export coverage note is EMPTY** (mechanism retained for any future gap). Migration 0062. Plan: `docs/fork/plans/PRIV-6a-personal-data-taxonomy.md`; **ultracode adversarial audit + dispositions: `docs/fork/evidence/priv-6a/audit-report.md`**. **Pickup: PRIV-6b** (data-flow / lineage view + Legal-Entity scope + programme dashboard) — or the P1 flagship assessment track (PRIV-A1/A2, needs ADR-F020).)
+
+- **PRIV-6a (PR #105) — personal-data taxonomy (categories of data subjects + personal data). Migration 0062. CLOSES Article 30(1).**
+  Fills **Article 30(1)(c)** — the **last** uncaptured Article 30(1) content axis — so the RoPA register now
+  captures every Article 30(1) field and the **export coverage note is EMPTY** (`ART30_FIELDS_NOT_YET_RECORDED
+  = ()`; the honest-coverage mechanism is retained for a future gap). **Maintainer decisions** (this session):
+  taxonomy slice first (closes Art 30); model = **two M:N controlled-vocabulary entities** (`DataSubjectCategory`
+  + `DataCategory`), both in one slice. **Domain:** the two entities are pure labels — `{id, name,
+  source_project_id, created_at}`, **no `description`/`updated_at`** (a label is immutable) — each M:N to
+  `processing_activities` (composite-PK link tables, CASCADE both ends, mirroring systems/vendors). `name` is
+  **UNIQUE case-insensitively** — a **functional UNIQUE index on `lower(name)`** (model `Index(...,
+  text("lower(name)"), unique=True)` + migration `create_index([text("lower(name)")], unique=True)`) — so
+  "Health data"/"Health Data" can't both persist. `*Input` (name-only, `extra="forbid"`, **collapse-internal-
+  whitespace** validator); `*Summary` on `ProcessingActivityRead`; `*Read` for the list endpoints + export.
+  **Agent tools** (now **14**): **`add_data_subject_categories` / `add_data_categories`** — list-valued
+  **find-or-create** (validate each name → match case-insensitively on `lower(name)` → reuse or create →
+  idempotent link), **race-safe via a SAVEPOINT** (`_find_or_create_category`: `begin_nested` + on-
+  `IntegrityError` re-select the winner — a concurrent create never raises out of the dispatch, never loses
+  sibling links, never leaks SQL/params into the run error); whole call refused (nothing written) on any
+  invalid name or unknown activity. `list_data_subject_categories` / `list_data_categories`. **Read API:** 2 GET
+  list endpoints (`/ropa/data-subject-categories`, `/ropa/data-categories`; shared-read `_active`, ADR-F019;
+  routes **136→138**); new rels eager-loaded on all 3 activity queries + export; the 4 category fetches share
+  `_all_categories(db, model)` (PEP 695 generic), ordered `created_at, name` (matches the agent tool + other
+  entities). **Export:** 2 activity columns + a **Data Subjects + Data Categories sheet** (6-sheet XLSX);
+  coverage note → empty; `_csv_safe` on every new cell. **Web:** types + 2 list fns; **5-tab register** (Data
+  subjects / Data categories tabs); activity-detail chip sections. The generic ROPA helpers are **PEP 695**
+  (`def f[CatT: (DataSubjectCategory, DataCategory)]`) — the classic-`TypeVar` form tripped ruff **UP047** (would
+  have failed CI). **Verify:** migration **up/down/up on a throwaway pgvector** (functional `lower(name)` indexes
+  present + **case-variant rejected live**, gone on down, back on re-up); **full api suite 2276 passed / 10
+  skipped** (+28 over PRIV-5a; includes the audit-regression tests); ruff + mypy clean (166 files); web check **0
+  err** + vitest **879**; **LIVE on the dev stack** — read API + all 3 exports reflect the taxonomy, coverage
+  note empty, the (pre-edit) unique constraint rejected a duplicate live; **screenshots
+  `docs/fork/evidence/priv-6a/`** (activity taxonomy + the 2 register tabs). **Ultracode adversarial audit (54
+  agents, 7 lenses → per-finding skeptics → synthesis): 23 candidates → 20 survived → 13 confirmed; initial
+  verdict BLOCK on 2 highs in the find-or-create path — BOTH FIXED in-slice** (the SAVEPOINT race/leak fix + the
+  case/whitespace-insensitivity fix) plus cheap correctness/transparency/test fixes (grant-set drift test, stale
+  export docstring, `_all_categories` helper, ordering, coverage-mechanism + shared-read-no-provenance
+  regression tests). **Flagged to the maintainer (NOT fixed unilaterally):** the **confused-deputy private→shared
+  laundering** (medium — a privileged matter's confidential narrative could be distilled into a firm-wide
+  register free-text field; `project.privileged` gates only the inference tier, not ROPA writes) → **MILESTONES
+  § Backlog** + audit-report #3. Accepted-low: RopaRegister tab-block duplication, the twin Summary DTOs, guard
+  DB-error scrubbing (defense-in-depth backlog). **No new ADR** (under ADR-F018/F019). **Dev-DB note:** the dev
+  volume still carries the **pre-edit** 0062 index (plain `UNIQUE(name)`) because the dev-DB-protection rule
+  forbids a direct downgrade — the **corrected** functional `lower(name)` index is what the throwaway-pg verify,
+  the fresh CI test DB, and any fresh stack apply; reset the dev volume to converge it. **Known-deferred
+  (carried):** `updated_at` has no `onupdate` (the category labels deliberately omit `updated_at`). **Pickup:
+  PRIV-6b.**
 
 - **PRIV-5b (PR #104) — Transfer entity (third-country transfers + safeguards) + the restricted⇒mechanism invariant. Migration 0061.**
   Fills the second clause of Article 30(1)(e) — the **last** of PRIV-5's two coverage lines. A **`Transfer`** is a

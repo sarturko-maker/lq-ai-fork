@@ -111,12 +111,20 @@ describe('art9ConditionLabel', () => {
 });
 
 describe('register tabs + empty states', () => {
-	it('exposes the three tiers in order', () => {
-		expect(REGISTER_TABS.map((t) => t.id)).toEqual(['activities', 'systems', 'vendors']);
+	it('exposes the register tabs in order', () => {
+		expect(REGISTER_TABS.map((t) => t.id)).toEqual([
+			'activities',
+			'systems',
+			'vendors',
+			'data-subjects',
+			'data-categories'
+		]);
 		expect(REGISTER_TABS.map((t) => t.label)).toEqual([
 			'Processing activities',
 			'Systems',
-			'Vendors'
+			'Vendors',
+			'Data subjects',
+			'Data categories'
 		]);
 	});
 	it('has honest, agent-attributed empty-state copy', () => {

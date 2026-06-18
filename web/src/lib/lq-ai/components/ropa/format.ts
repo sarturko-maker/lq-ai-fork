@@ -110,12 +110,23 @@ export const EMPTY_SYSTEMS =
 	'No systems recorded yet — the Privacy agent adds these to the company inventory as it works.';
 export const EMPTY_VENDORS =
 	'No vendors recorded yet — the Privacy agent adds recipients to the company register as it works.';
+export const EMPTY_DATA_SUBJECTS =
+	'No categories of data subjects recorded yet — the Privacy agent tags activities with them as it works.';
+export const EMPTY_DATA_CATEGORIES =
+	'No categories of personal data recorded yet — the Privacy agent tags activities with them as it works.';
 
-export type RegisterTab = 'activities' | 'systems' | 'vendors';
+export type RegisterTab =
+	| 'activities'
+	| 'systems'
+	| 'vendors'
+	| 'data-subjects'
+	| 'data-categories';
 
-/** The two-tier register's tabs, in display order. */
+/** The register's tabs, in display order. */
 export const REGISTER_TABS: { id: RegisterTab; label: string }[] = [
 	{ id: 'activities', label: 'Processing activities' },
 	{ id: 'systems', label: 'Systems' },
-	{ id: 'vendors', label: 'Vendors' }
+	{ id: 'vendors', label: 'Vendors' },
+	{ id: 'data-subjects', label: 'Data subjects' },
+	{ id: 'data-categories', label: 'Data categories' }
 ];

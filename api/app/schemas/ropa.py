@@ -278,6 +278,50 @@ class TransferInput(BaseModel):
         return self
 
 
+class DataSubjectCategoryInput(BaseModel):
+    """A proposed *category of data subjects* — the validated write contract (ADR-F018).
+
+    The first half of Article 30(1)(c) (PRIV-6a): a class of individuals whose
+    data an activity processes (e.g. "Employees", "Customers", "Job applicants").
+    A pure controlled-vocabulary label — only ``name`` (a category is a tag, not a
+    narrative record). Code-validated before commit (reject, don't sanitize); the
+    name is unique across the vocabulary (case-insensitively — see the write tool)
+    so it is reused, not duplicated. Internal whitespace is collapsed so
+    "Job  applicants" and "Job applicants" are the same term (canonicalization is
+    code's job, not the model's — ADR-F018).
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def _collapse_internal_whitespace(cls, v: str) -> str:
+        # Outer whitespace is already stripped (str_strip_whitespace); collapse any
+        # internal run to a single space so casing/spacing variants converge.
+        return " ".join(v.split())
+
+
+class DataCategoryInput(BaseModel):
+    """A proposed *category of personal data* — the validated write contract (ADR-F018).
+
+    The second half of Article 30(1)(c) (PRIV-6a): a class of personal data an
+    activity processes (e.g. "Contact details", "Financial data", "Health data").
+    Same pure controlled-vocabulary shape as :class:`DataSubjectCategoryInput`
+    (unique case-insensitively, internal whitespace collapsed).
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def _collapse_internal_whitespace(cls, v: str) -> str:
+        return " ".join(v.split())
+
+
 # --- Read DTOs (PRIV-3 read API; from ORM via from_attributes) ----------------
 #
 # The register read surface. Summaries carry just enough to render a cross-link
@@ -334,8 +378,26 @@ class TransferSummary(BaseModel):
     vendor: VendorSummary | None = None
 
 
+class DataSubjectCategorySummary(BaseModel):
+    """A category of data subjects as it appears tagged on a processing activity."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+
+
+class DataCategorySummary(BaseModel):
+    """A category of personal data as it appears tagged on a processing activity."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+
+
 class ProcessingActivityRead(BaseModel):
-    """One Article 30 record + the systems, recipients and transfers it carries."""
+    """One Article 30 record + the systems, recipients, transfers and categories it carries."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -352,6 +414,8 @@ class ProcessingActivityRead(BaseModel):
     systems: list[SystemSummary] = Field(default_factory=list)
     vendors: list[VendorSummary] = Field(default_factory=list)
     transfers: list[TransferSummary] = Field(default_factory=list)
+    data_subject_categories: list[DataSubjectCategorySummary] = Field(default_factory=list)
+    data_categories: list[DataCategorySummary] = Field(default_factory=list)
 
 
 class SystemRead(BaseModel):
@@ -389,14 +453,40 @@ class VendorRead(BaseModel):
     processing_activities: list[ProcessingActivitySummary] = Field(default_factory=list)
 
 
+class DataSubjectCategoryRead(BaseModel):
+    """One category of data subjects + the activities tagged with it (list/export view).
+
+    A pure controlled-vocabulary label (PRIV-6a): immutable name, so no
+    ``updated_at`` (unlike the System/Vendor records, which have editable fields).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    processing_activities: list[ProcessingActivitySummary] = Field(default_factory=list)
+
+
+class DataCategoryRead(BaseModel):
+    """One category of personal data + the activities tagged with it (list/export view)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    processing_activities: list[ProcessingActivitySummary] = Field(default_factory=list)
+
+
 # --- Article 30 export (PRIV-4a) ---------------------------------------------
 #
 # The extractable RoPA deliverable over the deployment-global register. A
 # read-and-render envelope (no new entity): the processing activities joined to
-# their systems, recipients and transfers, plus the system and vendor
-# inventories, plus an HONEST coverage note naming the Article 30(1) fields the
-# domain does not yet capture (the data-subject / personal-data taxonomy —
-# PRIV-6). The export renders what exists and never invents the rest.
+# their systems, recipients, transfers and personal-data taxonomy, plus the
+# system, vendor and category inventories. As of PRIV-6a the domain captures
+# every Article 30(1) content field, so the coverage note is empty; the field is
+# kept (still honest) so a future Article 30(1) gap can re-populate it.
 
 
 class Article30Coverage(BaseModel):
@@ -415,3 +505,5 @@ class Article30Export(BaseModel):
     processing_activities: list[ProcessingActivityRead] = Field(default_factory=list)
     systems: list[SystemRead] = Field(default_factory=list)
     vendors: list[VendorRead] = Field(default_factory=list)
+    data_subject_categories: list[DataSubjectCategoryRead] = Field(default_factory=list)
+    data_categories: list[DataCategoryRead] = Field(default_factory=list)

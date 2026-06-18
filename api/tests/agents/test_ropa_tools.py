@@ -42,7 +42,14 @@ from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.practice_area import PracticeArea
 from app.models.project import Project
-from app.models.ropa import ProcessingActivity, System, Transfer, Vendor
+from app.models.ropa import (
+    DataCategory,
+    DataSubjectCategory,
+    ProcessingActivity,
+    System,
+    Transfer,
+    Vendor,
+)
 from app.models.user import User
 from app.security import hash_password
 
@@ -85,10 +92,17 @@ class RopaEnv:
     propose_transfer: Callable[..., Awaitable[str]]
     link: Callable[..., Awaitable[str]]
     link_vendor: Callable[..., Awaitable[str]]
+    add_data_subjects: Callable[..., Awaitable[str]]
+    add_data_categories: Callable[..., Awaitable[str]]
     list_activities: Callable[..., Awaitable[str]]
     list_systems: Callable[..., Awaitable[str]]
     list_vendors: Callable[..., Awaitable[str]]
     list_transfers: Callable[..., Awaitable[str]]
+    list_data_subjects: Callable[..., Awaitable[str]]
+    list_data_categories: Callable[..., Awaitable[str]]
+    # The actual __name__s of the built closures (the returned list) — so the
+    # grant-set drift test compares against what build_ropa_tools really returns.
+    built_tool_names: frozenset[str]
 
 
 @pytest_asyncio.fixture
@@ -163,10 +177,15 @@ async def ropa_env(
             propose_transfer=by_name["propose_transfer"],
             link=by_name["link_processing_activity_to_system"],
             link_vendor=by_name["link_vendor_to_activity"],
+            add_data_subjects=by_name["add_data_subject_categories"],
+            add_data_categories=by_name["add_data_categories"],
             list_activities=by_name["list_processing_activities"],
             list_systems=by_name["list_systems"],
             list_vendors=by_name["list_vendors"],
             list_transfers=by_name["list_transfers"],
+            list_data_subjects=by_name["list_data_subject_categories"],
+            list_data_categories=by_name["list_data_categories"],
+            built_tool_names=frozenset(t.__name__ for t in tools),
         )
 
     yield env
@@ -181,6 +200,16 @@ async def ropa_env(
         )
         await db.execute(delete(System).where(System.source_project_id == env.project_id))
         await db.execute(delete(Vendor).where(Vendor.source_project_id == env.project_id))
+        # Category link rows cascade with the activities deleted above; the
+        # vocabulary terms themselves carry provenance, so delete by it.
+        await db.execute(
+            delete(DataSubjectCategory).where(
+                DataSubjectCategory.source_project_id == env.project_id
+            )
+        )
+        await db.execute(
+            delete(DataCategory).where(DataCategory.source_project_id == env.project_id)
+        )
         await db.execute(delete(AgentRun).where(AgentRun.user_id == env.user_id))
         await db.execute(delete(AgentThread).where(AgentThread.user_id == env.user_id))
         await db.execute(delete(Project).where(Project.id == env.project_id))
@@ -231,6 +260,30 @@ async def _transfers(env: RopaEnv) -> list[Transfer]:
                 select(Transfer)
                 .where(Transfer.source_project_id == env.project_id)
                 .order_by(Transfer.created_at.asc())
+            )
+        ).scalars()
+        return list(rows)
+
+
+async def _data_subject_categories(env: RopaEnv) -> list[DataSubjectCategory]:
+    async with env.factory() as db:
+        rows = (
+            await db.execute(
+                select(DataSubjectCategory)
+                .where(DataSubjectCategory.source_project_id == env.project_id)
+                .order_by(DataSubjectCategory.name.asc())
+            )
+        ).scalars()
+        return list(rows)
+
+
+async def _data_categories(env: RopaEnv) -> list[DataCategory]:
+    async with env.factory() as db:
+        rows = (
+            await db.execute(
+                select(DataCategory)
+                .where(DataCategory.source_project_id == env.project_id)
+                .order_by(DataCategory.name.asc())
             )
         ).scalars()
         return list(rows)
@@ -621,6 +674,155 @@ async def test_list_transfers_is_empty_then_reflects_proposals(ropa_env: RopaEnv
 
 
 # ---------------------------------------------------------------------------
+# add_data_subject_categories / add_data_categories — find-or-create + link (PRIV-6a)
+# ---------------------------------------------------------------------------
+
+
+async def test_add_data_subjects_creates_and_links(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+
+    result = await ropa_env.add_data_subjects(
+        processing_activity_id=str(activity.id),
+        names=["Employees", "Job applicants"],
+    )
+    assert "Tagged" in result
+    assert "Employees" in result and "Job applicants" in result
+
+    cats = await _data_subject_categories(ropa_env)
+    assert {c.name for c in cats} == {"Employees", "Job applicants"}
+    assert all(c.source_project_id == ropa_env.project_id for c in cats)
+
+    from sqlalchemy.orm import selectinload
+
+    async with ropa_env.factory() as db:
+        loaded = (
+            await db.execute(
+                select(ProcessingActivity)
+                .options(selectinload(ProcessingActivity.data_subject_categories))
+                .where(ProcessingActivity.id == activity.id)
+            )
+        ).scalar_one()
+        assert {c.name for c in loaded.data_subject_categories} == {"Employees", "Job applicants"}
+
+
+async def test_add_data_categories_reuses_existing_vocabulary_term(ropa_env: RopaEnv) -> None:
+    # Two activities tagged with the same name share one vocabulary row (the
+    # controlled-vocabulary find-or-create), not two.
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose(**{**_VALID, "name": "Recruitment"})
+    a1, a2 = await _activities(ropa_env)
+
+    await ropa_env.add_data_categories(processing_activity_id=str(a1.id), names=["Health data"])
+    await ropa_env.add_data_categories(processing_activity_id=str(a2.id), names=["Health data"])
+
+    cats = await _data_categories(ropa_env)
+    assert [c.name for c in cats] == ["Health data"]  # exactly one row, reused
+
+
+async def test_add_data_categories_reuses_case_and_whitespace_variants(ropa_env: RopaEnv) -> None:
+    # The controlled vocabulary is case-insensitive + whitespace-collapsed, so
+    # 'Health data' / 'Health Data' / 'health data' and 'Health  data' converge to
+    # ONE row (the find-or-create matches on lower(name); the input collapses runs
+    # of internal whitespace).
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    await ropa_env.add_data_categories(
+        processing_activity_id=str(activity.id),
+        names=["Health data", "Health Data", "health data", "Health  data"],
+    )
+    cats = await _data_categories(ropa_env)
+    assert [c.name for c in cats] == ["Health data"]  # first-seen casing, one row
+
+    from sqlalchemy.orm import selectinload
+
+    async with ropa_env.factory() as db:
+        loaded = (
+            await db.execute(
+                select(ProcessingActivity)
+                .options(selectinload(ProcessingActivity.data_categories))
+                .where(ProcessingActivity.id == activity.id)
+            )
+        ).scalar_one()
+        assert [c.name for c in loaded.data_categories] == ["Health data"]
+
+
+async def test_add_data_subjects_reuses_precommitted_case_variant(ropa_env: RopaEnv) -> None:
+    # A term already committed (e.g. by an earlier run) is reused by a later
+    # case-variant tag rather than duplicated — the cross-run reuse path.
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose(**{**_VALID, "name": "Recruitment"})
+    a1, a2 = await _activities(ropa_env)
+    await ropa_env.add_data_subjects(processing_activity_id=str(a1.id), names=["Job applicants"])
+    await ropa_env.add_data_subjects(processing_activity_id=str(a2.id), names=["JOB APPLICANTS"])
+    cats = await _data_subject_categories(ropa_env)
+    assert [c.name for c in cats] == ["Job applicants"]  # one row, reused across runs
+
+
+async def test_add_data_subjects_is_idempotent(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    await ropa_env.add_data_subjects(processing_activity_id=str(activity.id), names=["Customers"])
+    again = await ropa_env.add_data_subjects(
+        processing_activity_id=str(activity.id), names=["Customers"]
+    )
+    assert "Already tagged" in again
+    # Still exactly one link.
+    from sqlalchemy.orm import selectinload
+
+    async with ropa_env.factory() as db:
+        loaded = (
+            await db.execute(
+                select(ProcessingActivity)
+                .options(selectinload(ProcessingActivity.data_subject_categories))
+                .where(ProcessingActivity.id == activity.id)
+            )
+        ).scalar_one()
+        assert [c.name for c in loaded.data_subject_categories] == ["Customers"]
+
+
+async def test_add_data_categories_blank_name_is_rejected_and_nothing_written(
+    ropa_env: RopaEnv,
+) -> None:
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    result = await ropa_env.add_data_categories(
+        processing_activity_id=str(activity.id), names=["Contact details", "   "]
+    )
+    assert "refused" in result.lower()
+    # Whole call refused — neither the valid nor the invalid name was written.
+    assert await _data_categories(ropa_env) == []
+
+
+async def test_add_data_subjects_unknown_activity_is_rejected(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.add_data_subjects(
+        processing_activity_id=str(uuid.uuid4()), names=["Employees"]
+    )
+    assert "refused" in result.lower()
+    assert "no processing activity" in result
+    assert await _data_subject_categories(ropa_env) == []
+
+
+async def test_list_data_subjects_and_categories_reflect_tags(ropa_env: RopaEnv) -> None:
+    empty = await ropa_env.list_data_subjects()
+    assert "no categories of data subjects" in empty.lower()
+
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    await ropa_env.add_data_subjects(processing_activity_id=str(activity.id), names=["Employees"])
+    await ropa_env.add_data_categories(
+        processing_activity_id=str(activity.id), names=["Payroll data"]
+    )
+
+    listed_subjects = await ropa_env.list_data_subjects()
+    assert "Employees" in listed_subjects
+    assert "1 activity" in listed_subjects
+
+    listed_categories = await ropa_env.list_data_categories()
+    assert "Payroll data" in listed_categories
+
+
+# ---------------------------------------------------------------------------
 # The guard chokepoint + the model-facing surface
 # ---------------------------------------------------------------------------
 
@@ -658,18 +860,27 @@ async def test_rejected_proposal_still_audits_the_dispatch(ropa_env: RopaEnv) ->
 
 
 def test_tool_names_cover_the_built_tools(ropa_env: RopaEnv) -> None:
-    assert {
+    expected = {
         "propose_processing_activity",
         "propose_system",
         "propose_vendor",
         "propose_transfer",
         "link_processing_activity_to_system",
         "link_vendor_to_activity",
+        "add_data_subject_categories",
+        "add_data_categories",
         "list_processing_activities",
         "list_systems",
         "list_vendors",
         "list_transfers",
-    } == ROPA_TOOL_NAMES
+        "list_data_subject_categories",
+        "list_data_categories",
+    }
+    assert expected == ROPA_TOOL_NAMES
+    # The R6 grant set (ROPA_TOOL_NAMES, used as GuardContext.granted) must match
+    # the closures build_ropa_tools actually returns — else a tool is silently
+    # R6-denied (dead) or a stale name advertises an uninvokable capability.
+    assert ropa_env.built_tool_names == ROPA_TOOL_NAMES
 
 
 async def test_tools_expose_model_facing_schema(ropa_env: RopaEnv) -> None:
@@ -717,10 +928,20 @@ async def test_tools_expose_model_facing_schema(ropa_env: RopaEnv) -> None:
         "processing_activity_id",
         "vendor_id",
     ]
+    assert list(inspect.signature(ropa_env.add_data_subjects).parameters) == [
+        "processing_activity_id",
+        "names",
+    ]
+    assert list(inspect.signature(ropa_env.add_data_categories).parameters) == [
+        "processing_activity_id",
+        "names",
+    ]
     assert list(inspect.signature(ropa_env.list_activities).parameters) == []
     assert list(inspect.signature(ropa_env.list_systems).parameters) == []
     assert list(inspect.signature(ropa_env.list_vendors).parameters) == []
     assert list(inspect.signature(ropa_env.list_transfers).parameters) == []
+    assert list(inspect.signature(ropa_env.list_data_subjects).parameters) == []
+    assert list(inspect.signature(ropa_env.list_data_categories).parameters) == []
     for tool in (
         ropa_env.propose,
         ropa_env.propose_system,
@@ -728,10 +949,14 @@ async def test_tools_expose_model_facing_schema(ropa_env: RopaEnv) -> None:
         ropa_env.propose_transfer,
         ropa_env.link,
         ropa_env.link_vendor,
+        ropa_env.add_data_subjects,
+        ropa_env.add_data_categories,
         ropa_env.list_activities,
         ropa_env.list_systems,
         ropa_env.list_vendors,
         ropa_env.list_transfers,
+        ropa_env.list_data_subjects,
+        ropa_env.list_data_categories,
     ):
         assert inspect.iscoroutinefunction(tool)
 

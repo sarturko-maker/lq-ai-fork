@@ -163,4 +163,36 @@
 			</ul>
 		{/if}
 	</div>
+
+	<div class="space-y-2">
+		<h3 class="text-sm font-semibold tracking-tight text-foreground">
+			Categories of data subjects
+			<span class="text-muted-foreground">({activity.data_subject_categories.length})</span>
+		</h3>
+		{#if activity.data_subject_categories.length === 0}
+			<p class="text-sm text-muted-foreground">No categories of data subjects recorded yet.</p>
+		{:else}
+			<ul class="flex flex-wrap gap-1.5">
+				{#each activity.data_subject_categories as category (category.id)}
+					<li><Badge variant="secondary">{category.name}</Badge></li>
+				{/each}
+			</ul>
+		{/if}
+	</div>
+
+	<div class="space-y-2">
+		<h3 class="text-sm font-semibold tracking-tight text-foreground">
+			Categories of personal data
+			<span class="text-muted-foreground">({activity.data_categories.length})</span>
+		</h3>
+		{#if activity.data_categories.length === 0}
+			<p class="text-sm text-muted-foreground">No categories of personal data recorded yet.</p>
+		{:else}
+			<ul class="flex flex-wrap gap-1.5">
+				{#each activity.data_categories as category (category.id)}
+					<li><Badge variant="secondary">{category.name}</Badge></li>
+				{/each}
+			</ul>
+		{/if}
+	</div>
 </div>
