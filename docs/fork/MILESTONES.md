@@ -301,7 +301,8 @@ short-slice**.
   (thin vertical + the OneTrust/TrustArc-equivalent ROPA register UI + first export + scenario calibration) →
   PRIV-4+ (broaden, incl. the full programme cockpit). **Module-UI requirement (2026-06-18):** a module must
   render its domain UI like the reference product — users must SEE the ROPA register in the cockpit, not just
-  download an export (decomposition § Module UI requirement). The genuinely-large GDPR programme is also the
+  download an export — but rendered in **LQ.AI's own F013 design language, NOT Oscar/OneTrust's look** (IA
+  borrowed, style ours) (decomposition § Module UI requirement). The genuinely-large GDPR programme is also the
   natural test of whether a tier-4 model fans out to subagents (open UX-B-4 question).
 - **Module 2 — Redlining (NEXT track, Commercial/M&A).** "Redline like a lawyer": **adeu** (MIT, mechanical
   OpenXML tracked-changes — clean, no LLM calls, no gateway entanglement) as the RENDER layer + a redlining
