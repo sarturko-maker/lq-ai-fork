@@ -10,7 +10,18 @@ Oscar's engine are dropped. Builds on UX-B ([[ux-b-milestone-complete]]).
 
 A user opens a Privacy matter ("Programme — GDPR / ROPA"), the agent reads the client's documents and
 **proposes** ROPA entries, **code validates** them before commit, and the matter accumulates a real,
-queryable ROPA that exports as a deliverable — agent proposes, code disposes, human owns.
+queryable ROPA that the user **SEES and browses as a OneTrust / TrustArc-equivalent register UI** in the
+cockpit (not merely an export) and can export as a deliverable — agent proposes, code disposes, human owns.
+
+## Module UI requirement (maintainer, 2026-06-18)
+
+A "module" in LQ.AI must **render its domain UI** the way the reference product does. For Privacy that means
+the user can **SEE the OneTrust / TrustArc-equivalent ROPA UI** Oscar Privacy gave them — a browsable Records
+of Processing Activities register (list + entry detail, lawful-basis / special-category / retention visible
+at a glance), surfaced in the cockpit, not just a file you download. The agent maintains it; the user reads
+and owns it. We rebuild this in LQ.AI style (calm F013 design language, [[f013-design-language-vercel]]) —
+take the *information architecture* from Oscar/OneTrust, not the code. This is a **first-class module
+surface**, sequenced into PRIV-3 (read view) → PRIV-4+ (the full programme cockpit), below.
 
 ## Working rules (per maintainer, 2026-06-17)
 
@@ -44,17 +55,21 @@ domain + the validated write path — that is all this milestone adds on the api
   failure (propose→validate→commit, or propose→reject→retry — never silent write/fix). Scripted-model test of
   both paths (valid commit; invalid rejected + surfaced). **Compact after.**
 
-- **PRIV-3 — Thin vertical end-to-end + first deliverable.** Ingest a doc into a Privacy matter → agent
-  extracts + proposes processing-activity entries → code validates → commit → a **ROPA export** deliverable
-  (start minimal: structured export view/DOCX-or-XLSX) on the run-artifact surface. Live scenario-harness
-  calibration (does the qualified model extract + propose valid entries? does a multi-document programme
-  trigger subagent delegation — the open UX-B-4 question?). Evidence report under `docs/fork/evidence/priv-3/`.
-  **Compact after.**
+- **PRIV-3 — Thin vertical end-to-end + first deliverable + the ROPA register UI (read).** Ingest a doc into
+  a Privacy matter → agent extracts + proposes processing-activity entries → code validates → commit → the
+  user **SEES the ROPA**: a read-only **OneTrust/TrustArc-equivalent register view** in the cockpit (the
+  matter's processing activities as a browsable list + entry detail, lawful-basis/special-category/retention
+  visible, F013 calm design) **plus** a **ROPA export** deliverable (structured export view / DOCX-or-XLSX) on
+  the run-artifact surface. Live scenario-harness calibration (does the qualified model extract + propose
+  valid entries? does a multi-document programme trigger subagent delegation — the open UX-B-4 question?).
+  Evidence report under `docs/fork/evidence/priv-3/`. (The read UI may itself split into its own short slice
+  if the vertical + export already fill PRIV-3 — re-plan at the boundary.) **Compact after.**
 
-- **PRIV-4+ — Broaden (each its own short slice, re-planned at the boundary):** more ROPA entities (systems,
+- **PRIV-4+ — Broaden (each its own short slice, re-planned at the boundary):** the **full privacy-programme
+  cockpit** (the OneTrust/TrustArc-equivalent surface: ROPA register with create/edit/filter, programme
+  dashboard, gap view) — the module's first-class UI per the requirement above; more ROPA entities (systems,
   vendors/processors, data subjects, transfers + transfer-mechanism invariant); gap detection; DPIA/LIA
-  deliverables; the privacy-programme cockpit surface. Sequence decided at the PRIV-3 boundary against what
-  the vertical taught us.
+  deliverables. Sequence decided at the PRIV-3 boundary against what the vertical taught us.
 
 ## Non-goals (this milestone — recorded)
 
