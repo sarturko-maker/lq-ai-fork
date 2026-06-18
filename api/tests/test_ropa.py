@@ -27,6 +27,8 @@ from app.schemas.ropa import (
     ControllerRole,
     LawfulBasis,
     ProcessingActivityInput,
+    SystemInput,
+    SystemType,
 )
 from tests.agents.test_agent_runs_api import _make_user
 
@@ -104,6 +106,51 @@ def test_unknown_field_is_rejected() -> None:
         ProcessingActivityInput(**_valid_kwargs(categories_of_data="employees"))
 
 
+# --- SystemInput invariants (PRIV-3, pure) -----------------------------------
+
+
+def test_minimal_system_passes() -> None:
+    s = SystemInput(name="Production database", system_type=SystemType.DATABASE)
+    assert s.system_type is SystemType.DATABASE
+    # Optional fields default to None.
+    assert s.description is None and s.owner is None and s.ai_usage is False
+
+
+def test_full_system_passes() -> None:
+    s = SystemInput(
+        name="Salesforce",
+        system_type="crm",
+        description="CRM of record",
+        owner="RevOps",
+        hosting_location="EU (Frankfurt)",
+        retention="Life of account + 2 years",
+        security_measures="SSO, field-level encryption",
+        ai_usage=True,
+    )
+    assert s.system_type is SystemType.CRM
+    assert s.ai_usage is True
+
+
+def test_off_enum_system_type_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        SystemInput(name="Mystery", system_type="quantum_orb")
+
+
+def test_blank_name_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        SystemInput(name="   ", system_type=SystemType.OTHER)
+
+
+def test_blank_optional_normalises_to_none() -> None:
+    s = SystemInput(name="Logs", system_type=SystemType.LOGS, owner="   ")
+    assert s.owner is None
+
+
+def test_system_unknown_field_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        SystemInput(name="X", system_type=SystemType.OTHER, vendor="Acme")
+
+
 # --- DB defense-in-depth (integration) ---------------------------------------
 
 
@@ -123,7 +170,7 @@ async def test_valid_row_persists(db_session: AsyncSession) -> None:
     owner = await _make_user(db_session, suffix="ropa-valid")
     matter = await _make_matter(db_session, owner)
     row = ProcessingActivity(
-        project_id=matter.id,
+        source_project_id=matter.id,
         name="Payroll processing",
         purpose="Run monthly payroll.",
         lawful_basis=LawfulBasis.CONTRACT.value,
@@ -142,7 +189,7 @@ async def test_db_check_rejects_special_without_art9(db_session: AsyncSession) -
     owner = await _make_user(db_session, suffix="ropa-check")
     matter = await _make_matter(db_session, owner)
     row = ProcessingActivity(
-        project_id=matter.id,
+        source_project_id=matter.id,
         name="Health records",
         purpose="Store occupational health data.",
         lawful_basis=LawfulBasis.LEGAL_OBLIGATION.value,
@@ -162,7 +209,7 @@ async def test_db_check_rejects_off_enum_lawful_basis(db_session: AsyncSession) 
     owner = await _make_user(db_session, suffix="ropa-enum")
     matter = await _make_matter(db_session, owner)
     row = ProcessingActivity(
-        project_id=matter.id,
+        source_project_id=matter.id,
         name="Marketing",
         purpose="Send marketing emails.",
         lawful_basis="best_interests",  # off-enum → CHECK rejects

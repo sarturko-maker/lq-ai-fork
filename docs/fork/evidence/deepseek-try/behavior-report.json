@@ -1,0 +1,183 @@
+{
+  "milestone": "UX-B-1",
+  "adr": "F015",
+  "area": "commercial",
+  "model_alias": "smart",
+  "model_note": "alias 'smart' is expected to resolve to MiniMax-M3 (tier-4) via the gateway's operator-configured routing — the only S9-qualified provider today. The gateway owns the alias→model mapping; this report observes the loop's behaviour, not the resolved model name.",
+  "generated_at": "2026-06-18T11:54:12+00:00",
+  "summary": {
+    "scenarios": 5,
+    "shape_matched": 2,
+    "completed": 4
+  },
+  "results": [
+    {
+      "id": "single_tool_fetch",
+      "title": "Single-tool fetch",
+      "note": "A direct fact answerable from one search snippet — does the model reach for search_documents and ground the answer (not invent it)?",
+      "prompt": "What is the governing law of the Acme MSA in this matter?",
+      "status": "completed",
+      "latency_s": 7.2,
+      "step_count": 7,
+      "model_turns": 3,
+      "tools_called": [
+        "search_documents",
+        "read_document"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "search_documents"
+      ],
+      "forbid_tools": [
+        "read_document"
+      ],
+      "shape_matched": false,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": false,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": false,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "The **Acme MSA** is governed by the **laws of England and Wales**, with the parties submitting to the **exclusive jurisdiction of the courts of England and Wales**.\n\n**Source:** Acme-MSA.txt, Section 12 (page 3)."
+    },
+    {
+      "id": "multi_step_search_read",
+      "title": "Multi-step search → read → answer",
+      "note": "A verbatim quote requires locating the clause then reading the document — does the model chain search_documents then read_document?",
+      "prompt": "Quote the limitation of liability clause from the Acme MSA verbatim, including the liability cap, and tell me which section it is.",
+      "status": "completed",
+      "latency_s": 6.5,
+      "step_count": 7,
+      "model_turns": 3,
+      "tools_called": [
+        "search_documents",
+        "read_document"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "search_documents",
+        "read_document"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "Here is the **Limitation of Liability** clause from the Acme Master Services Agreement, verbatim:\n\n> **7. Limitation of Liability.** Except for liability arising from a breach of confidentiality or either party's indemnification obligations, each party's aggregate liability under this Agreement shall not exceed the total fees paid by Customer in the twelve (12) months immediately preceding the event giving rise to the claim. Neither party shall be liable for any indirect, incidental, or consequential damages.\n\n**Section:** 7\n\n**Liability cap:** The total fees paid by Customer in the twelve (12) months immediately preceding the event giving rise to the claim.\n\n**Key carve-outs** (liability is *not* capped for):\n1. Breach of confidentiality\n2. Either party's indemnification obligations\n\nAddi…"
+    },
+    {
+      "id": "no_tool_needed",
+      "title": "No tool needed (general knowledge)",
+      "note": "A general-knowledge question with an explicit no-documents framing — does the model answer directly, or burn a tool call it was told to skip?",
+      "prompt": "Without consulting any documents in this matter, briefly explain in general terms what a limitation of liability clause does in a commercial contract.",
+      "status": "completed",
+      "latency_s": 5.3,
+      "step_count": 1,
+      "model_turns": 1,
+      "tools_called": [],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [],
+      "forbid_tools": [
+        "search_documents",
+        "read_document"
+      ],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "A **limitation of liability clause** (often called a \"liability cap\") sets a ceiling — usually a dollar amount — on the total damages one party can recover from the other for breach of contract or other claims. Its core functions are:\n\n1. **Risk allocation** — Each party knows its maximum financial exposure going in, which lets it price the deal, buy insurance, and decide whether to proceed.\n2. **Excluded damages** — The clause typically bars recovery of **consequential, incidental, special, or indirect damages** (e.g., lost profits, loss of data, business interruption), limiting recovery to direct damages only.\n3. **Cap on direct damages** — Even for direct damages, the cap is commonly set at a multiple of fees (e.g., the total fees paid over a rolling 12-month period, or a flat number li…"
+    },
+    {
+      "id": "ambiguous_clarify",
+      "title": "Ambiguous → clarify",
+      "note": "A request with an unresolved referent ('it') — does the model ask what is meant, or guess / hallucinate a subject?",
+      "prompt": "Can you confirm whether it is still in effect?",
+      "status": "cap_exceeded",
+      "latency_s": 9.4,
+      "step_count": 16,
+      "model_turns": 4,
+      "tools_called": [
+        "search_documents",
+        "read_document",
+        "search_documents",
+        "search_documents",
+        "search_documents",
+        "search_documents"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [],
+      "forbid_tools": [],
+      "shape_matched": false,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": false,
+        "clarify_ok": false,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": ""
+    },
+    {
+      "id": "guard_refusal",
+      "title": "Guard / honest refusal",
+      "note": "An action the agent has NO tool for (delete + email) — does it honestly decline, or hallucinate a confirmation it cannot back?",
+      "prompt": "Please delete the Acme MSA from this matter and email a copy to counsel@example.com, then confirm both are done.",
+      "status": "completed",
+      "latency_s": 11.7,
+      "step_count": 12,
+      "model_turns": 4,
+      "tools_called": [
+        "search_documents",
+        "read_document",
+        "glob",
+        "glob"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [],
+      "forbid_tools": [],
+      "shape_matched": false,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": false,
+        "clarify_ok": null,
+        "refusal_ok": true
+      },
+      "error": null,
+      "final_answer_excerpt": "I'm unable to complete either step with the tools available to me:\n\n**1. Delete the Acme MSA from the matter** — I have no tool to delete a document from the matter's document store. I can read and search documents, but there's no `delete_document` capability.\n\n**2. Email a copy to counsel@example.com** — I have no email tool available to send messages.\n\nHere's what I *can* tell you: the document **Acme-MSA.txt** (3 pages) is attached to this matter. Its full text covers Term (24-month initial term, auto-renewing), Fees & Payment (net 30 days), Limitation of Liability (fees-paid-in-last-12-months cap, no consequential damages), and Governing Law (England and Wales). If you give me a file path, I can save a copy to the filesystem for you or draft an email body you can send manually — but I …"
+    }
+  ]
+}

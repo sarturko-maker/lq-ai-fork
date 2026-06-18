@@ -106,6 +106,7 @@ services:
       AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
       AZURE_OPENAI_RESOURCE: ${AZURE_OPENAI_RESOURCE:-}
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       # B6 partial — Ollama (Mode-2 / Tier-1). Forwarded so the
       # gateway.yaml's ${OLLAMA_BASE_URL:-http://ollama:11434}
       # placeholder resolves at config-load time. Operators running

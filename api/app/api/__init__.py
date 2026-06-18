@@ -44,6 +44,7 @@ from app.api import (
     playbooks as playbooks_api,
     practice_areas,
     projects,
+    ropa,
     saved_prompts,
     skills,
     tabular,
@@ -101,6 +102,10 @@ api_router.include_router(files.router, dependencies=_active)
 api_router.include_router(knowledge_bases.router, dependencies=_active)
 api_router.include_router(organization_profile.router, dependencies=_active)
 api_router.include_router(saved_prompts.router, dependencies=_active)
+# PRIV-3 (ADR-F019): the deployment-global ROPA register read API. Mounted under
+# `_active` (active firm user); the register is shared firm-wide, so no per-user
+# scoping — 404 means a missing record id, not an existence-hiding refusal.
+api_router.include_router(ropa.router, dependencies=_active)
 api_router.include_router(user_skills.router, dependencies=_active)
 api_router.include_router(teams.user_router, dependencies=_active)
 api_router.include_router(teams.admin_router, dependencies=_active)

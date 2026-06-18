@@ -12,6 +12,7 @@ gateway URL/key all flow from settings exactly as in production.
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -255,6 +256,7 @@ async def run_scenario(
     *,
     skill_registry: SkillRegistry | None = None,
     max_steps: int = _MAX_STEPS,
+    model_alias: str | None = None,
 ) -> Receipt:
     """Drive one scenario through the production loop; read back receipts.
 
@@ -267,7 +269,14 @@ async def run_scenario(
     UX-B-4: ``max_steps`` overrides the hard run cap — a delegating run
     (parent search → task → subagent search/read → report → parent answer)
     needs more headroom than a single-turn fetch.
+
+    ``model_alias`` selects which gateway alias the run targets. The fork is
+    model-agnostic (any LLM is injected via the gateway, not a MiniMax app),
+    so the harness must be able to point at a candidate provider when
+    qualifying it (ADR-F015). Resolution: explicit arg → ``LQ_AI_SCENARIO_MODEL``
+    env → ``"smart"`` (the operator-configured, currently-qualified default).
     """
+    resolved_alias = model_alias or os.environ.get("LQ_AI_SCENARIO_MODEL", "smart")
     factory = seeded.factory
     async with factory() as db:
         thread = AgentThread(
@@ -281,7 +290,7 @@ async def run_scenario(
             project_id=seeded.project_id,
             status="running",
             prompt=scenario.prompt,
-            model_alias="smart",
+            model_alias=resolved_alias,
             max_steps=max_steps,
         )
         db.add(run)

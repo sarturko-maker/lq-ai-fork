@@ -31,7 +31,7 @@ from app.models.playbook import Playbook, PlaybookExecution, PlaybookPosition
 from app.models.practice_area import PracticeArea, PracticeAreaSkill
 from app.models.project import Project, ProjectFile, ProjectSkill
 from app.models.project_knowledge_base import ProjectKnowledgeBase
-from app.models.ropa import ProcessingActivity
+from app.models.ropa import ProcessingActivity, System, processing_activity_systems
 from app.models.saved_prompt import SavedPrompt
 from app.models.slack_workspace import SlackWorkspace
 from app.models.tabular import TabularExecution
@@ -74,6 +74,7 @@ __all__ = [
     "ProjectSkill",
     "SavedPrompt",
     "SlackWorkspace",
+    "System",
     "TabularExecution",
     "Team",
     "TeamMember",
@@ -83,4 +84,5 @@ __all__ = [
     "UserSession",
     "UserSkill",
     "WorkProductAttribution",
+    "processing_activity_systems",
 ]

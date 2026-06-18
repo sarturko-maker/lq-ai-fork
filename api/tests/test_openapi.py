@@ -207,6 +207,11 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/practice-areas/{key}",
         "/api/v1/practice-areas/{key}/skills",
         "/api/v1/practice-areas/{key}/skills/{skill_name}",
+        # PRIV-3 (fork) — ROPA register read API (ADR-F019)
+        "/api/v1/ropa/processing-activities",
+        "/api/v1/ropa/processing-activities/{activity_id}",
+        "/api/v1/ropa/systems",
+        "/api/v1/ropa/systems/{system_id}",
     }
 )
 
@@ -312,7 +317,7 @@ async def test_openapi_paths_match_sketch() -> None:
     # /api/v1/agents/threads/{thread_id}
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
-    assert len(actual) == 129  # +3: F1-S3 practice-area config/admin (ADR-F002/F010)
+    assert len(actual) == 133  # +4: PRIV-3 ROPA register read API (ADR-F019)
 
 
 @pytest.mark.unit

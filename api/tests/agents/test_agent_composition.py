@@ -145,6 +145,16 @@ async def comp_env(
         await db.execute(delete(AuditLog).where(AuditLog.user_id == user_id))
         await db.execute(delete(AgentRun).where(AgentRun.user_id == user_id))
         await db.execute(delete(AgentThread).where(AgentThread.user_id == user_id))
+        # The deployment-global ROPA register (ADR-F019) is shared across the
+        # test DB, so the Privacy-matter test's rows must be cleaned by their
+        # provenance BEFORE the project delete (which would only SET NULL the
+        # source_project_id and orphan them into other tests' global view).
+        from app.models.ropa import ProcessingActivity, System
+
+        await db.execute(
+            delete(ProcessingActivity).where(ProcessingActivity.source_project_id == project_id)
+        )
+        await db.execute(delete(System).where(System.source_project_id == project_id))
         await db.execute(delete(Project).where(Project.id == project_id))
         await db.execute(delete(User).where(User.id == user_id))
         # Restore the shared seeded Commercial row: the tier-floor test
@@ -491,7 +501,9 @@ async def test_privacy_matter_grants_ropa_tools_and_validated_write_commits(
             (
                 await db.execute(
                     select(ProcessingActivity).where(
-                        ProcessingActivity.project_id == comp_env.project_id
+                        # Deployment-global register (ADR-F019): the matter is
+                        # provenance (source_project_id), not ownership.
+                        ProcessingActivity.source_project_id == comp_env.project_id
                     )
                 )
             )

@@ -300,12 +300,19 @@ short-slice**.
   invariants + DB CHECK defense-in-depth, migration 0058) → PRIV-2 ✅ (validated agent write path:
   `propose_processing_activity`/`list_processing_activities` guarded ROPA tools on the Privacy area agent —
   validate against `ProcessingActivityInput` before commit, reject-back-to-model on failure; PR #100)** →
-  PRIV-3 (thin vertical + the OneTrust/TrustArc-equivalent ROPA register UI + first export + scenario calibration) →
-  PRIV-4+ (broaden, incl. the full programme cockpit). **Module-UI requirement (2026-06-18):** a module must
-  render its domain UI like the reference product — users must SEE the ROPA register in the cockpit, not just
-  download an export — but rendered in **LQ.AI's own F013 design language, NOT Oscar/OneTrust's look** (IA
-  borrowed, style ours) (decomposition § Module UI requirement). The genuinely-large GDPR programme is also the
-  natural test of whether a tier-4 model fans out to subagents (open UX-B-4 question).
+  **PRIV-3 ✅ BUILT/live, pre-PR** (two-tier RELATIONAL spine System↔ProcessingActivity M:N + deployment-global
+  re-scope, **ADR-F019**; read API + the two-tier register read UI in F013 style; `propose_system`/`link`/
+  `list_systems` tools; migration 0059; branch `priv-3-ropa-read-ui`) → PRIV-4a (Article 30 export) → PRIV-5
+  (Vendor + Transfer + mechanism invariant) → PRIV-6 (data-flow view + Legal-Entity scope + programme dashboard)
+  → **P1 flagship** PRIV-A1 (assessment domain+skill) / PRIV-A2 (**conversational-link external intake** — the
+  differentiator, **ADR-F020**) → P2 tracks (DSAR, breach, DPA review, reg-gap, reporting). **Full capability
+  plan: `docs/fork/plans/PRIV-onetrust-to-lqai-functionality-map.md`** (OneTrust→LQ.AI, P0–P3; **P3
+  deferred/non-goals: consent platform, cookie CMP, data-store discovery, regulatory RAG**). **The
+  differentiator** = assessments via a LINK to a conversation with the agent (vs OneTrust/TrustArc's static
+  questionnaire) → agent files code-validated ROPA → queryable/extractable. **Module-UI requirement
+  (2026-06-18):** render the domain UI like the reference product (SEE the register, not just an export) but in
+  **LQ.AI's own F013 design language, NOT Oscar/OneTrust's look** (IA borrowed, style ours). MiniMax + DeepSeek
+  are **dev models only**; clients run a Western model via the gateway.
 - **Module 2 — Redlining (NEXT track, Commercial/M&A).** "Redline like a lawyer": **adeu** (MIT, mechanical
   OpenXML tracked-changes — clean, no LLM calls, no gateway entanglement) as the RENDER layer + a redlining
   skill / positions-playbook (acceptable terms, fallback language, defined-term + cross-ref consistency,
