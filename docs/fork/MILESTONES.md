@@ -345,7 +345,12 @@ domain rows kept separate from provenance, agent writes through `guarded_dispatc
 practice_area_id with the actor's area set resolved once at GuardContext build, owner-OR-area-member never
 area-only). **Closes the PRIV-6a confused-deputy gap** (it is the symptom: the ROPA register is read by every
 authenticated user). Grounded + designed via the `permissions-roadmap-design` workflow (28/32 code claims
-verified). Phased rollout (each its own slice, re-planned at the boundary):
+verified). **Reference (clean-room, no code/identity copied):** the maintainer's private
+`sarturko-maker/EU_AI_Act` repo ships a working analogue of this exact area-scope model —
+`packages/profile/src/access.ts` (pure RBAC capability predicates) + a `DepartmentAssignment` M:N join
+scoping a user to one or more departments + a server-side `authorize()` seam. `DEPT_SME ↔
+DepartmentAssignment` ≈ our `user ↔ user_practice_areas`; consult it as prior art when implementing
+Phase 1–2 (see Backlog: EU AI Act register module). Phased rollout (each its own slice, re-planned at the boundary):
 
 - **Track 0 — ADR-F021 + this roadmap entry (no code; THIS slice).** Maintainer accepts before any enforcement
   flip. Settles the open questions (owner-retains-own-matter; ROPA backfill; `area_owner` scope; catalog
@@ -505,3 +510,28 @@ verified). Phased rollout (each its own slice, re-planned at the boundary):
     for Citation-Engine output.
   - **CONTRAST, do NOT copy:** mike holds LLM keys per-user client-side; our gateway is the sole
     egress + key-holder ([[llm-is-injected-replaceable]]) — keep that boundary.
+- **EU AI Act register module — BANKED (2026-06-19; reference-only prior art).** A second
+  regulatory-register module for the agentic-modules substrate (ADR-F018), the near-twin of Module 1
+  (Privacy/ROPA): a register of an enterprise's **AI systems** that a Deep Agent maintains, with system
+  owners / SMEs invited to **chat to the agent via a link** to describe each system; a **deterministic
+  rules engine — not the model — issues the verdict of record** (EU AI Act role + risk tier + obligations
+  + article refs + deadlines), the LLM only *proposes* structured answers. This is exactly ADR-F018
+  code-validated writes / "system proposes, user owns". The shape maps almost 1:1 onto Privacy: AI-system
+  register ≈ processing-activity register; conversational-link intake ≈ **PRIV-A2 / ADR-F020**; per-area
+  RBAC (DEPT_SME ↔ department) ≈ **ADR-F021** (user ↔ practice area). **Prior art = the maintainer's
+  private repo `sarturko-maker/EU_AI_Act` (Next.js / Prisma).** **REFERENCE-ONLY, clean-room** (same
+  posture as scira / willchen96-mike): take the *design + domain patterns*, re-author on our stack
+  (FastAPI / SQLAlchemy / SvelteKit); copy **no** code, seed data, brand tokens, prompt copy, subsidiary
+  list, docs, or git history. **HARD RULE — the employer's name / branding / corporate identity must
+  appear NOWHERE in the fork**; clean-room re-implementation satisfies this *by construction* (the engine
+  has no intrinsic employer dependency — "employer" is only the source repo's first seeded tenant, layered
+  on top). Ports as *design*: the decision tree + named predicates + a signed verdict hash; the proposal
+  envelope (value / confidence / state / evidenceQuote / citedRefs) + omit-don't-coerce + a **server-side
+  presence gate** (the model can't self-certify into a classification); primary-source-only grounding with
+  "every citedRef must resolve". Re-author (not port) as code: the Next.js/React/Prisma/zod/undici layer
+  → our stack; and **improve** on the source's single stateless-HTTP intake turn → a real deepagents
+  tool loop. Domain caveats to **re-validate, not copy**: the rules encode a *draft* Commission Art 6(3)
+  guideline, do **not** model GPAI Chapter V, and straddle BASELINE vs the unpublished Digital Omnibus
+  deadline set. **Promote → its own plan + ADR (~F022); it should RIDE ADR-F018 (module) + ADR-F021
+  (permissions) + ADR-F020 (conversational intake), never precede them.** Assessment: this session's
+  7-agent parallel read.
