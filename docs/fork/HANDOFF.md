@@ -2,7 +2,45 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (**Oscar Edition / Agentic Modules milestone OPEN** — PRIV-4a Article 30 export **SHIPPED (PR #102, squash-merged to `main`)**, on top of PRIV-3 (PR #101, ADR-F019 accepted). Pickup = **PRIV-5** (Vendor + Transfer entities + the outside-UK/EEA⇒mechanism invariant). The OneTrust→LQ.AI functionality map is logged.)
+## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-5a Vendor/recipient entity SHIPPED (PR #TBD, on branch `priv-5a-vendors`)**, on top of PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). Maintainer split PRIV-5 → **PRIV-5a (Vendors, done) + PRIV-5b (Transfers + the outside-UK/EEA⇒mechanism invariant, NEXT)**. Plan: `docs/fork/plans/PRIV-5-vendors-and-transfers.md` (decisions recorded: split; vendor lean / risk→assessments; restricted = declared bool).)
+
+- **PRIV-5a (PR #TBD) — Vendor (recipient) entity + recipients in the Article 30 export. Migration 0060.**
+  Extends the ADR-F019 graph with the Article 30(1)(e) **categories of recipients** axis (F019 named this slice).
+  **Domain:** new `Vendor` (`app/models/ropa.py`) — **lean by maintainer decision** (name, `vendor_role`,
+  `description`, `country`, `dpa_status`; **risk DEFERRED to the assessment track PRIV-A1**, not an inventory
+  field) + `processing_activity_vendors` **M:N** (mirrors `processing_activity_systems`: composite PK, CASCADE
+  both ends, index on `vendor_id`); Pydantic **`VendorInput`** write contract (`VendorRole`/`DpaStatus`
+  StrEnums, `extra="forbid"`, blank-optional→None) + `VendorRead`/`VendorSummary` read DTOs; `vendors` rides
+  `ProcessingActivityRead`. CHECK mirror in the model + migration (the established literal-tuple pattern —
+  `_VENDOR_ROLES`/`_DPA_STATUSES`, like `_SYSTEM_TYPES`). **Migration 0060** (head 0059→0060) — **verified
+  up/down/up on a throwaway pgvector** (2 tables + 5 CHECKs + index appear on up, gone on down, return on
+  re-up); applied to the dev DB by rebuilding api+arq-worker+ingest-worker together (dev head = 0060).
+  **Agent tools** (`app/agents/ropa_tools.py`, now 8 — `ROPA_TOOL_NAMES` extended): `propose_vendor` (code-
+  validated write — validates `VendorInput`, reject-back-to-model on failure), `link_vendor_to_activity`
+  (recipient M:N link, membership-checked, idempotent), `list_vendors`; all guarded (R5/R6 + audit),
+  `source_project_id` closure-injected B-class, model-facing signatures A-class-only. **Read API**
+  (`app/api/ropa.py`): `GET /ropa/vendors` + `/vendors/{vendor_id}` (shared-read `_active`, ADR-F019 — 404 =
+  missing id only); activity reads `selectinload` vendors. **Export** (`app/ropa_export.py`): **Recipients
+  (Art 30(1)(e)) column** on the activity row + a **Vendors sheet** in the XLSX; `Article30Export` gains
+  `vendors`; **coverage note dropped the "Categories of recipients" line** (transfers → PRIV-5b, data-subject/
+  data-category taxonomy → PRIV-6 remain, honestly); `_csv_safe` guards every new cell (CSV + XLSX). **Web**
+  (`api/ropa.ts` + `components/ropa/`): wire types + `listVendors`/`getVendor`; **Vendors register tab** + table;
+  `VendorDetail.svelte`; **Recipients** cross-link section in `ProcessingActivityDetail`; `format.ts`
+  humanizers. **Verify:** migration throwaway up/down/up; **full api suite 2226 passed / 10 skipped** (+16 over
+  PRIV-4a; +1 unit test post-review = 2227, re-run pending in PR CI); ruff + mypy clean (166 files); web
+  svelte-check **0 err** + vitest **877**; **LIVE on dev stack** (head 0060): `/ropa/vendors` 200, recipients on
+  the activity, all 3 export formats download (XLSX = **3 sheets** incl. Vendors), Recipients column + shrunk
+  coverage note confirmed, bad-format 422 / no-auth 401 / missing-id 404; **screenshots
+  `docs/fork/evidence/priv-5a/`** (Vendors tab + activity Recipients). Global contracts updated (route
+  **134→136**; `_PARAM_VALUES += vendor_id`). **Fresh-context review (3 parallel finders — correctness /
+  removed-behavior+cross-file / security+simplification): 0 blockers, 0 correctness defects.** Applied 2
+  non-blocking fixes: export `none`→**"No DPA on record"** (was bare "None", ambiguous next to blank cells) +
+  `VendorDetail` heading "Discloses from"→**"Receives data from"**. **Accepted/deferred (documented):** the
+  `_link`/`_link_vendor` duplication + the role/status tuple copied across enum+model+migration are the
+  **pre-existing deliberate ROPA pattern** (literal mirror with an explaining comment; System↔Vendor by design)
+  — a cross-cutting enum-mirror test is a good later follow-up, out of this slice. **No new ADR** (implementation
+  of accepted ADR-F018/F019). **Known-deferred (carried):** `updated_at` has no `onupdate` (fix when an edit
+  path lands — now also `vendors`). **Pickup: PRIV-5b** (Transfer entity + the invariant).
 
 - **PRIV-4a (PR #102) — SHIPPED. Article 30 RoPA export (JSON / CSV / XLSX). Read-and-render, no migration.**
   The extractable RoPA deliverable over the PRIV-3 deployment-global register (ADR-F019). **`GET

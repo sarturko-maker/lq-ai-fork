@@ -28,8 +28,8 @@ from sqlalchemy.orm import selectinload
 
 from app import ropa_export
 from app.db.session import get_db
-from app.models.ropa import ProcessingActivity, System
-from app.schemas.ropa import ProcessingActivityRead, SystemRead
+from app.models.ropa import ProcessingActivity, System, Vendor
+from app.schemas.ropa import ProcessingActivityRead, SystemRead, VendorRead
 
 router = APIRouter(prefix="/ropa", tags=["ropa"])
 
@@ -51,7 +51,10 @@ async def list_processing_activities(db: _Db) -> list[ProcessingActivity]:
         (
             await db.execute(
                 select(ProcessingActivity)
-                .options(selectinload(ProcessingActivity.systems))
+                .options(
+                    selectinload(ProcessingActivity.systems),
+                    selectinload(ProcessingActivity.vendors),
+                )
                 .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
             )
         )
@@ -67,7 +70,10 @@ async def get_processing_activity(activity_id: uuid.UUID, db: _Db) -> Processing
     row = (
         await db.execute(
             select(ProcessingActivity)
-            .options(selectinload(ProcessingActivity.systems))
+            .options(
+                selectinload(ProcessingActivity.systems),
+                selectinload(ProcessingActivity.vendors),
+            )
             .where(ProcessingActivity.id == activity_id)
         )
     ).scalar_one_or_none()
@@ -110,23 +116,59 @@ async def get_system(system_id: uuid.UUID, db: _Db) -> System:
     return row
 
 
+@router.get("/vendors", response_model=list[VendorRead])
+async def list_vendors(db: _Db) -> list[Vendor]:
+    """The company vendor/recipient register — all vendors (with linked activities)."""
+    rows = (
+        (
+            await db.execute(
+                select(Vendor)
+                .options(selectinload(Vendor.processing_activities))
+                .order_by(Vendor.created_at.asc(), Vendor.name.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
+@router.get("/vendors/{vendor_id}", response_model=VendorRead)
+async def get_vendor(vendor_id: uuid.UUID, db: _Db) -> Vendor:
+    """One vendor/recipient + the processing activities that disclose to it."""
+    row = (
+        await db.execute(
+            select(Vendor)
+            .options(selectinload(Vendor.processing_activities))
+            .where(Vendor.id == vendor_id)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="vendor not found")
+    return row
+
+
 @router.get("/export")
 async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -> Response:
     """Export the company ROPA as an Article 30 deliverable (JSON / CSV / XLSX).
 
     Read-and-render over the deployment-global register (ADR-F019): every
     processing activity with its lawful basis / retention / special-category,
-    joined across the M:N to its linked systems, plus the system inventory.
-    Shared-read posture (``_active`` at the mount) — the register is the
-    company's standing record, not a per-user artifact. The export is HONEST
-    about the Article 30(1) fields the domain does not yet capture (see the
-    coverage note; transfers/recipients/data categories arrive with PRIV-5).
+    joined across the M:N to its linked systems and recipients (vendors), plus
+    the system and vendor inventories. Shared-read posture (``_active`` at the
+    mount) — the register is the company's standing record, not a per-user
+    artifact. The export is HONEST about the Article 30(1) fields the domain
+    does not yet capture (see the coverage note; transfers arrive with PRIV-5b,
+    the data-subject/data-category taxonomy with PRIV-6).
     """
     activities = (
         (
             await db.execute(
                 select(ProcessingActivity)
-                .options(selectinload(ProcessingActivity.systems))
+                .options(
+                    selectinload(ProcessingActivity.systems),
+                    selectinload(ProcessingActivity.vendors),
+                )
                 .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
             )
         )
@@ -144,10 +186,22 @@ async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -
         .scalars()
         .all()
     )
+    vendors = (
+        (
+            await db.execute(
+                select(Vendor)
+                .options(selectinload(Vendor.processing_activities))
+                .order_by(Vendor.created_at.asc(), Vendor.name.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     export = ropa_export.build_export(
         [ProcessingActivityRead.model_validate(a) for a in activities],
         [SystemRead.model_validate(s) for s in systems],
+        [VendorRead.model_validate(v) for v in vendors],
         generated_at=datetime.now(UTC),
     )
 

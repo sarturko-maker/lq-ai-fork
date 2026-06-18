@@ -28,17 +28,19 @@ from app.schemas.ropa import (
     Article30Export,
     ProcessingActivityRead,
     SystemRead,
+    VendorRead,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from openpyxl.worksheet.worksheet import Worksheet  # type: ignore[import-untyped]
 
-# Article 30(1) content the domain does not yet model (PRIV-5). Surfaced in the
-# export's coverage note so the deliverable is honest about what it omits.
+# Article 30(1) content the domain does not yet model. Surfaced in the export's
+# coverage note so the deliverable is honest about what it omits. PRIV-5a filled
+# "categories of recipients" (vendors); third-country transfers arrive with
+# PRIV-5b; the data-subject/personal-data taxonomy with PRIV-6.
 ART30_FIELDS_NOT_YET_RECORDED: tuple[str, ...] = (
     "Categories of data subjects",
     "Categories of personal data (beyond the special-category flag)",
-    "Categories of recipients",
     "Third-country transfers and the safeguards applied",
 )
 
@@ -56,6 +58,7 @@ ACTIVITY_HEADER: tuple[str, ...] = (
     "Art 9 condition",
     "Retention",
     "Linked systems",
+    "Recipients (Art 30(1)(e))",
     "Created",
     "Last updated",
 )
@@ -74,6 +77,17 @@ SYSTEM_HEADER: tuple[str, ...] = (
     "Last updated",
 )
 
+VENDOR_HEADER: tuple[str, ...] = (
+    "Name",
+    "Role",
+    "Country",
+    "DPA status",
+    "Description",
+    "Linked processing activities",
+    "Created",
+    "Last updated",
+)
+
 
 # System types whose plain capitalisation reads wrong in a lawyer-facing sheet
 # (acronyms / hyphenation). Everything else falls back to generic humanisation.
@@ -81,6 +95,19 @@ _SYSTEM_TYPE_LABELS = {
     "crm": "CRM",
     "email_marketing": "Email marketing",
     "third_party_processor": "Third-party processor",
+}
+
+# Vendor roles whose plain capitalisation reads wrong (hyphenation).
+_VENDOR_ROLE_LABELS = {
+    "sub_processor": "Sub-processor",
+}
+
+# DPA statuses: ``none`` humanises to "None", which in an auditor-facing Article
+# 30 sheet — sitting next to genuinely-empty Country/Description cells — reads
+# ambiguously (Python null? not recorded?). Spell out the deliberate "no DPA on
+# record" state so the deliverable is honest. The rest humanise cleanly.
+_DPA_STATUS_LABELS = {
+    "none": "No DPA on record",
 }
 
 
@@ -92,6 +119,16 @@ def _humanize(value: str) -> str:
 def _system_type_label(value: str) -> str:
     """Human label for a system type, with acronyms/hyphenation preserved."""
     return _SYSTEM_TYPE_LABELS.get(value, _humanize(value))
+
+
+def _vendor_role_label(value: str) -> str:
+    """Human label for a vendor role, with hyphenation preserved."""
+    return _VENDOR_ROLE_LABELS.get(value, _humanize(value))
+
+
+def _dpa_status_label(value: str) -> str:
+    """Human label for a DPA status; spells out ``none`` so the export is unambiguous."""
+    return _DPA_STATUS_LABELS.get(value, _humanize(value))
 
 
 def _csv_safe(value: str) -> str:
@@ -111,14 +148,20 @@ def _systems_cell(activity: ProcessingActivityRead) -> str:
     return "; ".join(f"{s.name} ({_system_type_label(s.system_type)})" for s in activity.systems)
 
 
-def _activities_cell(system: SystemRead) -> str:
-    """Join a system's linked processing activities into one cell."""
-    return "; ".join(a.name for a in system.processing_activities)
+def _vendors_cell(activity: ProcessingActivityRead) -> str:
+    """Join an activity's recipients into one cell: ``Name (role); Name (role)``."""
+    return "; ".join(f"{v.name} ({_vendor_role_label(v.vendor_role)})" for v in activity.vendors)
+
+
+def _activities_cell(record: SystemRead | VendorRead) -> str:
+    """Join a system's / vendor's linked processing activities into one cell."""
+    return "; ".join(a.name for a in record.processing_activities)
 
 
 def build_export(
     activities: list[ProcessingActivityRead],
     systems: list[SystemRead],
+    vendors: list[VendorRead],
     *,
     generated_at: datetime,
 ) -> Article30Export:
@@ -128,6 +171,7 @@ def build_export(
         coverage=Article30Coverage(fields_not_yet_recorded=list(ART30_FIELDS_NOT_YET_RECORDED)),
         processing_activities=activities,
         systems=systems,
+        vendors=vendors,
     )
 
 
@@ -141,6 +185,7 @@ def _activity_row(a: ProcessingActivityRead) -> list[str]:
         _humanize(a.art9_condition) if a.art9_condition else "",
         a.retention,
         _systems_cell(a),
+        _vendors_cell(a),
         _date(a.created_at),
         _date(a.updated_at),
     ]
@@ -162,6 +207,19 @@ def _system_row(s: SystemRead) -> list[str]:
     ]
 
 
+def _vendor_row(v: VendorRead) -> list[str]:
+    return [
+        v.name,
+        _vendor_role_label(v.vendor_role),
+        v.country or "",
+        _dpa_status_label(v.dpa_status),
+        v.description or "",
+        _activities_cell(v),
+        _date(v.created_at),
+        _date(v.updated_at),
+    ]
+
+
 def to_csv(export: Article30Export) -> str:
     """Render the processing-activities register as CSV (one row per activity).
 
@@ -178,7 +236,7 @@ def to_csv(export: Article30Export) -> str:
 
 
 def to_xlsx(export: Article30Export) -> bytes:
-    """Render a two-sheet workbook (OneTrust's shape): Processing Activities + Systems.
+    """Render a multi-sheet workbook (OneTrust's shape): Activities + Systems + Vendors.
 
     ``openpyxl`` is imported lazily so the dependency-free JSON/CSV paths never
     pay for it.
@@ -196,6 +254,9 @@ def to_xlsx(export: Article30Export) -> bytes:
 
     systems_ws = wb.create_sheet("Systems")
     _write_sheet(systems_ws, SYSTEM_HEADER, [_system_row(s) for s in export.systems])
+
+    vendors_ws = wb.create_sheet("Vendors")
+    _write_sheet(vendors_ws, VENDOR_HEADER, [_vendor_row(v) for v in export.vendors])
 
     out = io.BytesIO()
     wb.save(out)

@@ -1,10 +1,10 @@
-"""Article 30 RoPA export — PRIV-4a (fork, ADR-F018/F019).
+"""Article 30 RoPA export — PRIV-4a + PRIV-5a (fork, ADR-F018/F019).
 
 Two layers:
 
 * **Pure formatter** (no DB) — the JSON envelope's honest coverage note, the CSV
-  header/rows + systems-join cell + the OWASP CSV-injection guard, and the
-  two-sheet XLSX workbook.
+  header/rows + systems-join + recipients-join cells + the OWASP CSV-injection
+  guard, and the three-sheet XLSX workbook (Activities + Systems + Vendors).
 * **Endpoint** (integration) — ``GET /ropa/export`` in each format, the empty
   register, an off-enum ``format`` → 422, and the shared-read auth gate (401).
 """
@@ -26,9 +26,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import ropa_export
 from app.db.session import get_db
 from app.main import app
-from app.models.ropa import ProcessingActivity, System, processing_activity_systems
+from app.models.ropa import (
+    ProcessingActivity,
+    System,
+    Vendor,
+    processing_activity_systems,
+    processing_activity_vendors,
+)
 from app.models.user import User
-from app.schemas.ropa import ProcessingActivityRead, SystemRead
+from app.schemas.ropa import ProcessingActivityRead, SystemRead, VendorRead
 from app.security import create_access_token, hash_password
 
 _NOW = datetime(2026, 6, 18, 9, 30, tzinfo=UTC)
@@ -50,6 +56,7 @@ def _activity(**over: object) -> ProcessingActivityRead:
         "created_at": _NOW,
         "updated_at": _NOW,
         "systems": [],
+        "vendors": [],
     }
     base.update(over)
     return ProcessingActivityRead.model_validate(base)
@@ -74,16 +81,35 @@ def _system(**over: object) -> SystemRead:
     return SystemRead.model_validate(base)
 
 
+def _vendor(**over: object) -> VendorRead:
+    base: dict[str, object] = {
+        "id": uuid.uuid4(),
+        "name": "Acme Payroll Ltd",
+        "vendor_role": "processor",
+        "description": None,
+        "country": "UK",
+        "dpa_status": "in_place",
+        "created_at": _NOW,
+        "updated_at": _NOW,
+        "processing_activities": [],
+    }
+    base.update(over)
+    return VendorRead.model_validate(base)
+
+
 @pytest.mark.unit
 def test_build_export_carries_honest_coverage_note() -> None:
-    export = ropa_export.build_export([_activity()], [_system()], generated_at=_NOW)
+    export = ropa_export.build_export([_activity()], [_system()], [_vendor()], generated_at=_NOW)
     assert export.generated_at == _NOW
     assert export.register_name == "Article 30 Records of Processing Activities"
-    # The Art 30(1) fields the domain does not yet model are named, not hidden.
-    assert "Categories of recipients" in export.coverage.fields_not_yet_recorded
+    # PRIV-5a filled "categories of recipients" — it is no longer in the gap note.
+    assert "Categories of recipients" not in export.coverage.fields_not_yet_recorded
+    # The Art 30(1) fields still missing are named, not hidden.
+    assert any("data subjects" in f.lower() for f in export.coverage.fields_not_yet_recorded)
     assert any("transfer" in f.lower() for f in export.coverage.fields_not_yet_recorded)
     assert len(export.processing_activities) == 1
     assert len(export.systems) == 1
+    assert len(export.vendors) == 1
 
 
 @pytest.mark.unit
@@ -94,11 +120,12 @@ def test_to_csv_header_row_and_humanized_values() -> None:
         art9_condition="employment_social_security",
         systems=[{"id": sysid, "name": "Prod DB", "system_type": "database"}],
     )
-    export = ropa_export.build_export([a], [], generated_at=_NOW)
+    export = ropa_export.build_export([a], [], [], generated_at=_NOW)
     text = ropa_export.to_csv(export)
     lines = text.splitlines()
     assert lines[0].split(",")[0] == "Name"
     assert "Linked systems" in lines[0]
+    assert "Recipients" in lines[0]
     # Enum values are humanized for the spreadsheet; the special-category +
     # systems-join cell render as expected.
     assert "Legal obligation" in lines[1]
@@ -110,11 +137,26 @@ def test_to_csv_header_row_and_humanized_values() -> None:
 
 
 @pytest.mark.unit
+def test_recipients_cell_joins_vendors_with_humanized_role() -> None:
+    a = _activity(
+        vendors=[
+            {"id": uuid.uuid4(), "name": "Acme Payroll Ltd", "vendor_role": "processor"},
+            {"id": uuid.uuid4(), "name": "SubCo", "vendor_role": "sub_processor"},
+        ]
+    )
+    export = ropa_export.build_export([a], [], [], generated_at=_NOW)
+    text = ropa_export.to_csv(export)
+    # Recipients joined "Name (role)" with hyphenated sub-processor label.
+    assert "Acme Payroll Ltd (Processor)" in text
+    assert "SubCo (Sub-processor)" in text
+
+
+@pytest.mark.unit
 def test_system_type_acronyms_read_professionally() -> None:
     # crm → "CRM" (not "Crm"); the join cell + the Systems sheet both use it.
     a = _activity(systems=[{"id": uuid.uuid4(), "name": "Salesforce", "system_type": "crm"}])
     s = _system(name="Salesforce", system_type="crm")
-    export = ropa_export.build_export([a], [s], generated_at=_NOW)
+    export = ropa_export.build_export([a], [s], [], generated_at=_NOW)
     assert "Salesforce (CRM)" in ropa_export.to_csv(export)
     wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
     assert wb["Systems"]["B2"].value == "CRM"
@@ -123,7 +165,7 @@ def test_system_type_acronyms_read_professionally() -> None:
 @pytest.mark.unit
 def test_to_csv_neutralises_formula_injection() -> None:
     a = _activity(name="=cmd|'/c calc'!A1", purpose="+SUM(1)")
-    export = ropa_export.build_export([a], [], generated_at=_NOW)
+    export = ropa_export.build_export([a], [], [], generated_at=_NOW)
     text = ropa_export.to_csv(export)
     # Both formula-trigger cells are prefixed with a single quote so a
     # spreadsheet won't execute them; the raw "=cmd" never starts a field.
@@ -132,23 +174,42 @@ def test_to_csv_neutralises_formula_injection() -> None:
 
 
 @pytest.mark.unit
-def test_to_xlsx_two_sheets_with_headers() -> None:
-    export = ropa_export.build_export([_activity()], [_system()], generated_at=_NOW)
+def test_to_xlsx_three_sheets_with_headers() -> None:
+    export = ropa_export.build_export([_activity()], [_system()], [_vendor()], generated_at=_NOW)
     wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
-    assert wb.sheetnames == ["Processing Activities", "Systems"]
+    assert wb.sheetnames == ["Processing Activities", "Systems", "Vendors"]
     activities = wb["Processing Activities"]
     assert activities["A1"].value == "Name"
     assert activities["A2"].value == "Payroll processing"
     systems = wb["Systems"]
     assert systems["A1"].value == "Name"
     assert systems["A2"].value == "Production database"
+    vendors = wb["Vendors"]
+    assert vendors["A1"].value == "Name"
+    assert vendors["A2"].value == "Acme Payroll Ltd"
+    assert vendors["B2"].value == "Processor"
+    assert vendors["D2"].value == "In place"
 
 
 @pytest.mark.unit
-def test_to_xlsx_neutralises_formula_injection() -> None:
-    export = ropa_export.build_export([_activity(name="=danger()")], [], generated_at=_NOW)
+def test_vendor_none_dpa_status_reads_unambiguously() -> None:
+    # ``none`` must not render as the bare "None" (mistakable for a blank cell in
+    # an auditor-facing sheet) — it spells out the deliberate no-DPA state.
+    export = ropa_export.build_export(
+        [], [], [_vendor(name="NoDPA Co", dpa_status="none")], generated_at=_NOW
+    )
+    wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
+    assert wb["Vendors"]["D2"].value == "No DPA on record"
+
+
+@pytest.mark.unit
+def test_to_xlsx_neutralises_formula_injection_in_vendor_sheet() -> None:
+    export = ropa_export.build_export(
+        [_activity(name="=danger()")], [], [_vendor(name="@evil")], generated_at=_NOW
+    )
     wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
     assert wb["Processing Activities"]["A2"].value == "'=danger()"
+    assert wb["Vendors"]["A2"].value == "'@evil"
 
 
 # --- endpoint (integration) ---------------------------------------------------
@@ -194,8 +255,10 @@ def _bearer(u: User) -> dict[str, str]:
 
 async def _clean(db_session: AsyncSession) -> None:
     await db_session.execute(delete(processing_activity_systems))
+    await db_session.execute(delete(processing_activity_vendors))
     await db_session.execute(delete(ProcessingActivity))
     await db_session.execute(delete(System))
+    await db_session.execute(delete(Vendor))
     await db_session.flush()
 
 
@@ -211,11 +274,22 @@ async def _seed_linked(db_session: AsyncSession) -> None:
         art9_condition=None,
     )
     system = System(name="Production database", system_type="database", hosting_location="UK")
-    db_session.add_all([pa, system])
+    vendor = Vendor(
+        name="Acme Payroll Ltd",
+        vendor_role="processor",
+        dpa_status="in_place",
+        country="UK",
+    )
+    db_session.add_all([pa, system, vendor])
     await db_session.flush()
     await db_session.execute(
         processing_activity_systems.insert().values(
             processing_activity_id=pa.id, system_id=system.id
+        )
+    )
+    await db_session.execute(
+        processing_activity_vendors.insert().values(
+            processing_activity_id=pa.id, vendor_id=vendor.id
         )
     )
     await db_session.flush()
@@ -234,7 +308,9 @@ async def test_export_json(client: AsyncClient, db_session: AsyncSession, user: 
     assert body["coverage"]["fields_not_yet_recorded"]
     assert body["processing_activities"][0]["name"] == "Payroll processing"
     assert body["processing_activities"][0]["systems"][0]["name"] == "Production database"
+    assert body["processing_activities"][0]["vendors"][0]["name"] == "Acme Payroll Ltd"
     assert body["systems"][0]["name"] == "Production database"
+    assert body["vendors"][0]["name"] == "Acme Payroll Ltd"
 
 
 @pytest_integration
@@ -248,6 +324,7 @@ async def test_export_csv(client: AsyncClient, db_session: AsyncSession, user: U
     assert lines[0].startswith("Name,")
     assert "Payroll processing" in lines[1]
     assert "Production database (Database)" in resp.text
+    assert "Acme Payroll Ltd (Processor)" in resp.text
 
 
 @pytest_integration
@@ -258,8 +335,9 @@ async def test_export_xlsx(client: AsyncClient, db_session: AsyncSession, user: 
     assert "spreadsheetml" in resp.headers["content-type"]
     assert resp.headers["content-disposition"].endswith('.xlsx"')
     wb = load_workbook(io.BytesIO(resp.content))
-    assert wb.sheetnames == ["Processing Activities", "Systems"]
+    assert wb.sheetnames == ["Processing Activities", "Systems", "Vendors"]
     assert wb["Processing Activities"]["A2"].value == "Payroll processing"
+    assert wb["Vendors"]["A2"].value == "Acme Payroll Ltd"
 
 
 @pytest_integration
@@ -272,6 +350,7 @@ async def test_export_empty_register(
     body = resp.json()
     assert body["processing_activities"] == []
     assert body["systems"] == []
+    assert body["vendors"] == []
     # Coverage note is present even when the register is empty (honest scope).
     assert body["coverage"]["fields_not_yet_recorded"]
 

@@ -23,7 +23,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.main import app
-from app.models.ropa import ProcessingActivity, System, processing_activity_systems
+from app.models.ropa import (
+    ProcessingActivity,
+    System,
+    Vendor,
+    processing_activity_systems,
+    processing_activity_vendors,
+)
 from app.models.user import User
 from app.security import create_access_token, hash_password
 
@@ -70,12 +76,14 @@ async def _clean(db_session: AsyncSession) -> None:
     # Guarantee a clean register view within this rolled-back transaction,
     # regardless of any committed leftovers from earlier tests.
     await db_session.execute(delete(processing_activity_systems))
+    await db_session.execute(delete(processing_activity_vendors))
     await db_session.execute(delete(ProcessingActivity))
     await db_session.execute(delete(System))
+    await db_session.execute(delete(Vendor))
     await db_session.flush()
 
 
-async def _seed_linked(db_session: AsyncSession) -> tuple[ProcessingActivity, System]:
+async def _seed_linked(db_session: AsyncSession) -> tuple[ProcessingActivity, System, Vendor]:
     await _clean(db_session)
     pa = ProcessingActivity(
         name="Payroll processing",
@@ -87,15 +95,26 @@ async def _seed_linked(db_session: AsyncSession) -> tuple[ProcessingActivity, Sy
         art9_condition=None,
     )
     system = System(name="Production database", system_type="database", hosting_location="UK")
-    db_session.add_all([pa, system])
+    vendor = Vendor(
+        name="Acme Payroll Ltd",
+        vendor_role="processor",
+        dpa_status="in_place",
+        country="UK",
+    )
+    db_session.add_all([pa, system, vendor])
     await db_session.flush()
     await db_session.execute(
         processing_activity_systems.insert().values(
             processing_activity_id=pa.id, system_id=system.id
         )
     )
+    await db_session.execute(
+        processing_activity_vendors.insert().values(
+            processing_activity_id=pa.id, vendor_id=vendor.id
+        )
+    )
     await db_session.flush()
-    return pa, system
+    return pa, system, vendor
 
 
 async def test_list_empty(client: AsyncClient, db_session: AsyncSession, user: User) -> None:
@@ -106,14 +125,17 @@ async def test_list_empty(client: AsyncClient, db_session: AsyncSession, user: U
     resp = await client.get("/api/v1/ropa/systems", headers=_bearer(user))
     assert resp.status_code == 200
     assert resp.json() == []
+    resp = await client.get("/api/v1/ropa/vendors", headers=_bearer(user))
+    assert resp.status_code == 200
+    assert resp.json() == []
 
 
 async def test_list_and_detail_render_cross_links(
     client: AsyncClient, db_session: AsyncSession, user: User
 ) -> None:
-    pa, system = await _seed_linked(db_session)
+    pa, system, _vendor = await _seed_linked(db_session)
 
-    # Processing-activities list carries the linked system summary.
+    # Processing-activities list carries the linked system + recipient summaries.
     resp = await client.get("/api/v1/ropa/processing-activities", headers=_bearer(user))
     assert resp.status_code == 200
     body = resp.json()
@@ -121,6 +143,8 @@ async def test_list_and_detail_render_cross_links(
     assert body[0]["name"] == "Payroll processing"
     assert body[0]["lawful_basis"] == "legal_obligation"
     assert [s["name"] for s in body[0]["systems"]] == ["Production database"]
+    assert [v["name"] for v in body[0]["vendors"]] == ["Acme Payroll Ltd"]
+    assert body[0]["vendors"][0]["vendor_role"] == "processor"
 
     # Activity detail.
     resp = await client.get(f"/api/v1/ropa/processing-activities/{pa.id}", headers=_bearer(user))
@@ -136,6 +160,27 @@ async def test_list_and_detail_render_cross_links(
     assert [a["name"] for a in sbody["processing_activities"]] == ["Payroll processing"]
 
 
+async def test_vendor_list_and_detail_render_reverse_link(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    _, _, vendor = await _seed_linked(db_session)
+
+    resp = await client.get("/api/v1/ropa/vendors", headers=_bearer(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["name"] == "Acme Payroll Ltd"
+    assert body[0]["vendor_role"] == "processor"
+    assert body[0]["dpa_status"] == "in_place"
+    assert body[0]["country"] == "UK"
+
+    # Vendor detail carries the reverse link back to the disclosing activities.
+    resp = await client.get(f"/api/v1/ropa/vendors/{vendor.id}", headers=_bearer(user))
+    assert resp.status_code == 200
+    vbody = resp.json()
+    assert [a["name"] for a in vbody["processing_activities"]] == ["Payroll processing"]
+
+
 async def test_unknown_ids_return_404(
     client: AsyncClient, db_session: AsyncSession, user: User
 ) -> None:
@@ -146,6 +191,8 @@ async def test_unknown_ids_return_404(
     assert r1.status_code == 404
     r2 = await client.get(f"/api/v1/ropa/systems/{missing}", headers=_bearer(user))
     assert r2.status_code == 404
+    r3 = await client.get(f"/api/v1/ropa/vendors/{missing}", headers=_bearer(user))
+    assert r3.status_code == 404
 
 
 async def test_requires_authentication(client: AsyncClient) -> None:

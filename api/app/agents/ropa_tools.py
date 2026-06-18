@@ -13,10 +13,15 @@ per-matter artifact). Five guarded tools over the two-tier graph
   proposes → code disposes → commit OR reject-and-retry; never a silent write/fix.
 * :func:`propose_system` — same loop for an IT system/asset
   (:class:`app.schemas.ropa.SystemInput`).
-* :func:`link_processing_activity_to_system` — record that an activity uses a
-  system (the M:N data-flow link), by the IDs the list tools surface.
-* :func:`list_processing_activities` / :func:`list_systems` — the current register
-  (with IDs), so the agent can see what exists and link records.
+* :func:`propose_vendor` — same loop for a vendor/recipient
+  (:class:`app.schemas.ropa.VendorInput`) — the Article 30(1)(e) categories of
+  recipients (PRIV-5a).
+* :func:`link_processing_activity_to_system` / :func:`link_vendor_to_activity` —
+  record that an activity uses a system / discloses to a vendor (the M:N links),
+  by the IDs the list tools surface.
+* :func:`list_processing_activities` / :func:`list_systems` / :func:`list_vendors`
+  — the current register (with IDs), so the agent can see what exists and link
+  records.
 
 **Scope / authz (ADR-F019).** The register is company-wide, NOT matter- or
 user-scoped — so the tools do not filter by ``project_id``. The matter still
@@ -41,8 +46,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.agents.tools import MatterBinding
-from app.models.ropa import ProcessingActivity, System, processing_activity_systems
-from app.schemas.ropa import ProcessingActivityInput, SystemInput
+from app.models.ropa import (
+    ProcessingActivity,
+    System,
+    Vendor,
+    processing_activity_systems,
+    processing_activity_vendors,
+)
+from app.schemas.ropa import ProcessingActivityInput, SystemInput, VendorInput
 
 # The stable key of the Privacy practice area (migration 0053). The composition
 # point grants the ROPA tools only to a matter filed under this area.
@@ -52,9 +63,12 @@ ROPA_TOOL_NAMES = frozenset(
     {
         "propose_processing_activity",
         "propose_system",
+        "propose_vendor",
         "link_processing_activity_to_system",
+        "link_vendor_to_activity",
         "list_processing_activities",
         "list_systems",
+        "list_vendors",
     }
 )
 
@@ -166,6 +180,40 @@ def build_ropa_tools(
             ctx,
         )
 
+    async def propose_vendor(
+        name: str,
+        vendor_role: str,
+        dpa_status: str,
+        description: str | None = None,
+        country: str | None = None,
+    ) -> str:
+        """Propose one vendor / third party (recipient) the company discloses data to.
+
+        Only ``name``, ``vendor_role`` and ``dpa_status`` are required; fill the
+        rest as you learn it. The proposal is validated before recording; a
+        failure comes back with the reasons to fix and re-propose.
+
+        - ``vendor_role``: one of processor, sub_processor, joint_controller,
+          separate_controller, recipient (the GDPR recipient/relationship
+          category).
+        - ``dpa_status``: status of the Article 28 data-processing agreement —
+          one of in_place, pending, not_required, none.
+        - ``country``: where the vendor is established (informs transfers).
+        """
+        return await guarded_dispatch(
+            "propose_vendor",
+            lambda db: _propose_vendor(
+                db,
+                binding,
+                name=name,
+                vendor_role=vendor_role,
+                dpa_status=dpa_status,
+                description=description,
+                country=country,
+            ),
+            ctx,
+        )
+
     async def link_processing_activity_to_system(
         processing_activity_id: str,
         system_id: str,
@@ -186,6 +234,26 @@ def build_ropa_tools(
             ctx,
         )
 
+    async def link_vendor_to_activity(
+        processing_activity_id: str,
+        vendor_id: str,
+    ) -> str:
+        """Record that a processing activity discloses data to a vendor (recipient link).
+
+        Pass the IDs shown by list_processing_activities and list_vendors. If
+        either ID is unknown the link is refused with the reason. Linking an
+        already-linked pair is a no-op.
+        """
+        return await guarded_dispatch(
+            "link_vendor_to_activity",
+            lambda db: _link_vendor(
+                db,
+                processing_activity_id=processing_activity_id,
+                vendor_id=vendor_id,
+            ),
+            ctx,
+        )
+
     async def list_processing_activities() -> str:
         """List the processing activities in the company ROPA register (with IDs)."""
         return await guarded_dispatch(
@@ -196,12 +264,19 @@ def build_ropa_tools(
         """List the systems in the company inventory (with IDs)."""
         return await guarded_dispatch("list_systems", lambda db: _list_systems(db), ctx)
 
+    async def list_vendors() -> str:
+        """List the vendors/recipients in the company register (with IDs)."""
+        return await guarded_dispatch("list_vendors", lambda db: _list_vendors(db), ctx)
+
     return [
         propose_processing_activity,
         propose_system,
+        propose_vendor,
         link_processing_activity_to_system,
+        link_vendor_to_activity,
         list_processing_activities,
         list_systems,
+        list_vendors,
     ]
 
 
@@ -299,6 +374,45 @@ async def _propose_system(
     return f'Recorded system "{proposal.name}" ({proposal.system_type.value}) in the company inventory.'
 
 
+async def _propose_vendor(
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    name: str,
+    vendor_role: str,
+    dpa_status: str,
+    description: str | None,
+    country: str | None,
+) -> str:
+    """Validate the vendor proposal, then write it (or return the rejection)."""
+    try:
+        proposal = VendorInput(
+            name=name,
+            vendor_role=vendor_role,  # type: ignore[arg-type]  # str → enum coercion
+            dpa_status=dpa_status,  # type: ignore[arg-type]
+            description=description,
+            country=country,
+        )
+    except ValidationError as exc:
+        return _rejection_text(exc, "propose_vendor")
+
+    db.add(
+        Vendor(
+            source_project_id=binding.project_id,
+            name=proposal.name,
+            vendor_role=proposal.vendor_role.value,
+            dpa_status=proposal.dpa_status.value,
+            description=proposal.description,
+            country=proposal.country,
+        )
+    )
+    await db.flush()
+    return (
+        f'Recorded vendor "{proposal.name}" ({proposal.vendor_role.value}; '
+        f"DPA: {proposal.dpa_status.value}) in the company register."
+    )
+
+
 async def _link(
     db: AsyncSession,
     *,
@@ -344,6 +458,53 @@ async def _link(
     )
     await db.flush()
     return f'Linked processing activity "{activity.name}" to system "{system.name}".'
+
+
+async def _link_vendor(
+    db: AsyncSession,
+    *,
+    processing_activity_id: str,
+    vendor_id: str,
+) -> str:
+    """Link an activity to a vendor/recipient after checking both exist (else reject)."""
+    try:
+        pa_uuid = uuid.UUID(processing_activity_id)
+        vendor_uuid = uuid.UUID(vendor_id)
+    except ValueError:
+        return (
+            "Link refused — processing_activity_id and vendor_id must be the IDs "
+            "shown by list_processing_activities / list_vendors. Nothing was linked."
+        )
+
+    activity = await db.get(ProcessingActivity, pa_uuid)
+    vendor = await db.get(Vendor, vendor_uuid)
+    missing = []
+    if activity is None:
+        missing.append(f"no processing activity with id {processing_activity_id}")
+    if vendor is None:
+        missing.append(f"no vendor with id {vendor_id}")
+    if missing:
+        return "Link refused — " + "; ".join(missing) + ". Nothing was linked."
+    assert activity is not None and vendor is not None  # narrowed by the checks above
+
+    existing = (
+        await db.execute(
+            select(processing_activity_vendors).where(
+                processing_activity_vendors.c.processing_activity_id == pa_uuid,
+                processing_activity_vendors.c.vendor_id == vendor_uuid,
+            )
+        )
+    ).first()
+    if existing is not None:
+        return f'"{activity.name}" already discloses to vendor "{vendor.name}".'
+
+    await db.execute(
+        processing_activity_vendors.insert().values(
+            processing_activity_id=pa_uuid, vendor_id=vendor_uuid
+        )
+    )
+    await db.flush()
+    return f'Linked processing activity "{activity.name}" to vendor "{vendor.name}".'
 
 
 async def _list_activities(db: AsyncSession) -> str:
@@ -406,6 +567,30 @@ async def _list_systems(db: AsyncSession) -> str:
         blocks.append(f"- [{row.id}] {row.name} — {row.system_type}{tail}")
     noun = "system" if len(rows) == 1 else "systems"
     return f"Company inventory — {len(rows)} {noun}:\n\n" + "\n".join(blocks)
+
+
+async def _list_vendors(db: AsyncSession) -> str:
+    """Format the company vendor/recipient register (oldest first), with IDs for linking."""
+    rows = (
+        (
+            await db.execute(
+                select(Vendor)
+                .order_by(Vendor.created_at.asc(), Vendor.name.asc())
+                .limit(_LIST_LIMIT)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return "The company register has no vendors/recipients yet."
+
+    blocks: list[str] = []
+    for row in rows:
+        tail = f"; based in {row.country}" if row.country else ""
+        blocks.append(f"- [{row.id}] {row.name} — {row.vendor_role} (DPA: {row.dpa_status}{tail})")
+    noun = "vendor" if len(rows) == 1 else "vendors"
+    return f"Company register — {len(rows)} {noun}:\n\n" + "\n".join(blocks)
 
 
 def _rejection_text(exc: ValidationError, tool_name: str) -> str:

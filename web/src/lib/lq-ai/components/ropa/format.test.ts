@@ -11,12 +11,15 @@ import { describe, expect, it } from 'vitest';
 import {
 	EMPTY_ACTIVITIES,
 	EMPTY_SYSTEMS,
+	EMPTY_VENDORS,
 	REGISTER_TABS,
 	art9ConditionLabel,
 	controllerRoleLabel,
+	dpaStatusLabel,
 	humanize,
 	lawfulBasisLabel,
-	systemTypeLabel
+	systemTypeLabel,
+	vendorRoleLabel
 } from './format';
 
 describe('humanize', () => {
@@ -60,6 +63,25 @@ describe('systemTypeLabel', () => {
 	});
 });
 
+describe('vendorRoleLabel', () => {
+	it('maps vendor roles, with the hyphenated sub-processor', () => {
+		expect(vendorRoleLabel('processor')).toBe('Processor');
+		expect(vendorRoleLabel('sub_processor')).toBe('Sub-processor');
+		expect(vendorRoleLabel('joint_controller')).toBe('Joint controller');
+		expect(vendorRoleLabel('separate_controller')).toBe('Separate controller');
+		expect(vendorRoleLabel('recipient')).toBe('Recipient');
+	});
+});
+
+describe('dpaStatusLabel', () => {
+	it('maps DPA statuses', () => {
+		expect(dpaStatusLabel('in_place')).toBe('In place');
+		expect(dpaStatusLabel('not_required')).toBe('Not required');
+		expect(dpaStatusLabel('pending')).toBe('Pending');
+		expect(dpaStatusLabel('none')).toBe('None');
+	});
+});
+
 describe('art9ConditionLabel', () => {
 	it('maps Article 9 conditions', () => {
 		expect(art9ConditionLabel('health_or_social_care')).toBe('Health or social care');
@@ -71,14 +93,20 @@ describe('art9ConditionLabel', () => {
 });
 
 describe('register tabs + empty states', () => {
-	it('exposes the two tiers in order', () => {
-		expect(REGISTER_TABS.map((t) => t.id)).toEqual(['activities', 'systems']);
-		expect(REGISTER_TABS.map((t) => t.label)).toEqual(['Processing activities', 'Systems']);
+	it('exposes the three tiers in order', () => {
+		expect(REGISTER_TABS.map((t) => t.id)).toEqual(['activities', 'systems', 'vendors']);
+		expect(REGISTER_TABS.map((t) => t.label)).toEqual([
+			'Processing activities',
+			'Systems',
+			'Vendors'
+		]);
 	});
 	it('has honest, agent-attributed empty-state copy', () => {
 		expect(EMPTY_ACTIVITIES).toContain('Privacy agent');
 		expect(EMPTY_ACTIVITIES.toLowerCase()).toContain('no processing activities');
 		expect(EMPTY_SYSTEMS).toContain('Privacy agent');
 		expect(EMPTY_SYSTEMS.toLowerCase()).toContain('no systems');
+		expect(EMPTY_VENDORS).toContain('Privacy agent');
+		expect(EMPTY_VENDORS.toLowerCase()).toContain('no vendors');
 	});
 });

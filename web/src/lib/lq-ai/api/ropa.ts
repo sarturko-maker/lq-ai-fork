@@ -32,6 +32,15 @@ export type SystemType =
 	| 'third_party_processor'
 	| 'other';
 
+export type VendorRole =
+	| 'processor'
+	| 'sub_processor'
+	| 'joint_controller'
+	| 'separate_controller'
+	| 'recipient';
+
+export type DpaStatus = 'in_place' | 'pending' | 'not_required' | 'none';
+
 /** A system as it appears linked under a processing activity. */
 export interface SystemSummary {
 	id: string;
@@ -39,7 +48,14 @@ export interface SystemSummary {
 	system_type: SystemType;
 }
 
-/** A processing activity as it appears linked under a system. */
+/** A vendor/recipient as it appears linked under a processing activity. */
+export interface VendorSummary {
+	id: string;
+	name: string;
+	vendor_role: VendorRole;
+}
+
+/** A processing activity as it appears linked under a system or vendor. */
 export interface ProcessingActivitySummary {
 	id: string;
 	name: string;
@@ -59,6 +75,19 @@ export interface ProcessingActivityRead {
 	created_at: string;
 	updated_at: string;
 	systems: SystemSummary[];
+	vendors: VendorSummary[];
+}
+
+export interface VendorRead {
+	id: string;
+	name: string;
+	vendor_role: VendorRole;
+	description: string | null;
+	country: string | null;
+	dpa_status: DpaStatus;
+	created_at: string;
+	updated_at: string;
+	processing_activities: ProcessingActivitySummary[];
 }
 
 export interface SystemRead {
@@ -92,6 +121,14 @@ export function listSystems(): Promise<SystemRead[]> {
 
 export function getSystem(id: string): Promise<SystemRead> {
 	return apiRequest<SystemRead>(`/ropa/systems/${encodeURIComponent(id)}`);
+}
+
+export function listVendors(): Promise<VendorRead[]> {
+	return apiRequest<VendorRead[]>('/ropa/vendors');
+}
+
+export function getVendor(id: string): Promise<VendorRead> {
+	return apiRequest<VendorRead>(`/ropa/vendors/${encodeURIComponent(id)}`);
 }
 
 // --- Article 30 export (PRIV-4a) ---------------------------------------------

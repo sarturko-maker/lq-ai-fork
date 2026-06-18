@@ -96,6 +96,17 @@ _SYSTEM_TYPES = (
     "other",
 )
 
+# Vendor/recipient relationship + DPA-status sets (PRIV-5a / ADR-F019).
+# Authoritative lists: app.schemas.ropa.VendorRole / DpaStatus.
+_VENDOR_ROLES = (
+    "processor",
+    "sub_processor",
+    "joint_controller",
+    "separate_controller",
+    "recipient",
+)
+_DPA_STATUSES = ("in_place", "pending", "not_required", "none")
+
 
 def _in_set(column: str, values: tuple[str, ...]) -> str:
     quoted = ", ".join(f"'{v}'" for v in values)
@@ -127,6 +138,31 @@ processing_activity_systems = Table(
         "system_id",
         UUID(as_uuid=True),
         ForeignKey("systems.id", ondelete="CASCADE", name="fk_pa_systems_system_id"),
+        primary_key=True,
+    ),
+)
+
+
+# Many-to-many link between processing activities and the vendors/recipients they
+# disclose to (Article 30(1)(e) categories of recipients; PRIV-5a / ADR-F019).
+# Same shape as ``processing_activity_systems``: composite PK, CASCADE both ends.
+processing_activity_vendors = Table(
+    "processing_activity_vendors",
+    Base.metadata,
+    Column(
+        "processing_activity_id",
+        UUID(as_uuid=True),
+        ForeignKey(
+            "processing_activities.id",
+            ondelete="CASCADE",
+            name="fk_pa_vendors_processing_activity_id",
+        ),
+        primary_key=True,
+    ),
+    Column(
+        "vendor_id",
+        UUID(as_uuid=True),
+        ForeignKey("vendors.id", ondelete="CASCADE", name="fk_pa_vendors_vendor_id"),
         primary_key=True,
     ),
 )
@@ -220,6 +256,11 @@ class ProcessingActivity(Base):
         back_populates="processing_activities",
         order_by="System.name",
     )
+    vendors: Mapped[list[Vendor]] = relationship(
+        secondary=processing_activity_vendors,
+        back_populates="processing_activities",
+        order_by="Vendor.name",
+    )
 
     def __repr__(self) -> str:
         return (
@@ -291,3 +332,63 @@ class System(Base):
 
     def __repr__(self) -> str:
         return f"<System id={self.id} name={self.name!r} type={self.system_type!r}>"
+
+
+class Vendor(Base):
+    """One vendor / third party (recipient) — company-wide (ADR-F019).
+
+    The "categories of recipients" axis of Article 30(1)(e) (PRIV-5a): a third
+    party to whom processing activities disclose personal data. Invariants mirror
+    ``app.schemas.ropa.VendorInput``:
+
+    * ``name`` is non-empty (≤200).
+    * ``vendor_role`` is one of the canonical recipient/relationship categories.
+    * ``dpa_status`` is one of the canonical Article 28 DPA states.
+    * the optional descriptive fields stay within length bounds.
+
+    Risk rating is deliberately absent — risk is an assessment-track concept
+    (PRIV-A1), not an inventory field.
+    """
+
+    __tablename__ = "vendors"
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(name) > 0 AND char_length(name) <= 200",
+            name="chk_vendors_name_len",
+        ),
+        CheckConstraint(_in_set("vendor_role", _VENDOR_ROLES), name="chk_vendors_vendor_role"),
+        CheckConstraint(_in_set("dpa_status", _DPA_STATUSES), name="chk_vendors_dpa_status"),
+        CheckConstraint(_opt_len("description", 2000), name="chk_vendors_description_len"),
+        CheckConstraint(_opt_len("country", 200), name="chk_vendors_country_len"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    source_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL", name="fk_vendors_source_project_id"),
+        nullable=True,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    vendor_role: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    country: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dpa_status: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    processing_activities: Mapped[list[ProcessingActivity]] = relationship(
+        secondary=processing_activity_vendors,
+        back_populates="vendors",
+        order_by="ProcessingActivity.name",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Vendor id={self.id} name={self.name!r} role={self.vendor_role!r}>"
