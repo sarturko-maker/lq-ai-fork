@@ -28,8 +28,21 @@ from sqlalchemy.orm import selectinload
 
 from app import ropa_export
 from app.db.session import get_db
-from app.models.ropa import ProcessingActivity, System, Transfer, Vendor
-from app.schemas.ropa import ProcessingActivityRead, SystemRead, VendorRead
+from app.models.ropa import (
+    DataCategory,
+    DataSubjectCategory,
+    ProcessingActivity,
+    System,
+    Transfer,
+    Vendor,
+)
+from app.schemas.ropa import (
+    DataCategoryRead,
+    DataSubjectCategoryRead,
+    ProcessingActivityRead,
+    SystemRead,
+    VendorRead,
+)
 
 router = APIRouter(prefix="/ropa", tags=["ropa"])
 
@@ -55,6 +68,8 @@ async def list_processing_activities(db: _Db) -> list[ProcessingActivity]:
                     selectinload(ProcessingActivity.systems),
                     selectinload(ProcessingActivity.vendors),
                     selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
+                    selectinload(ProcessingActivity.data_subject_categories),
+                    selectinload(ProcessingActivity.data_categories),
                 )
                 .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
             )
@@ -75,6 +90,8 @@ async def get_processing_activity(activity_id: uuid.UUID, db: _Db) -> Processing
                 selectinload(ProcessingActivity.systems),
                 selectinload(ProcessingActivity.vendors),
                 selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
+                selectinload(ProcessingActivity.data_subject_categories),
+                selectinload(ProcessingActivity.data_categories),
             )
             .where(ProcessingActivity.id == activity_id)
         )
@@ -150,6 +167,41 @@ async def get_vendor(vendor_id: uuid.UUID, db: _Db) -> Vendor:
     return row
 
 
+async def _all_categories[M: (DataSubjectCategory, DataCategory)](
+    db: AsyncSession, model: type[M]
+) -> list[M]:
+    """The full ordered, activity-eager-loaded category vocabulary (PRIV-6a).
+
+    Shared by the two list endpoints + the export so ordering/eager-loading stay
+    in lockstep. Ordered created_at-then-name to match the agent's ``list_*``
+    tools and the System/Vendor surfaces (one register order everywhere).
+    """
+    rows = (
+        (
+            await db.execute(
+                select(model)
+                .options(selectinload(model.processing_activities))
+                .order_by(model.created_at.asc(), model.name.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
+@router.get("/data-subject-categories", response_model=list[DataSubjectCategoryRead])
+async def list_data_subject_categories(db: _Db) -> list[DataSubjectCategory]:
+    """The company ROPA vocabulary of data-subject categories (Article 30(1)(c))."""
+    return await _all_categories(db, DataSubjectCategory)
+
+
+@router.get("/data-categories", response_model=list[DataCategoryRead])
+async def list_data_categories(db: _Db) -> list[DataCategory]:
+    """The company ROPA vocabulary of personal-data categories (Article 30(1)(c))."""
+    return await _all_categories(db, DataCategory)
+
+
 @router.get("/export")
 async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -> Response:
     """Export the company ROPA as an Article 30 deliverable (JSON / CSV / XLSX).
@@ -159,9 +211,10 @@ async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -
     joined across the M:N to its linked systems and recipients (vendors) and its
     child third-country transfers, plus the system and vendor inventories.
     Shared-read posture (``_active`` at the mount) — the register is the
-    company's standing record, not a per-user artifact. The export is HONEST
-    about the Article 30(1) fields the domain does not yet capture (see the
-    coverage note; the data-subject/data-category taxonomy arrives with PRIV-6).
+    company's standing record, not a per-user artifact. As of PRIV-6a the export
+    captures the full Article 30(1) content set, including the 30(1)(c)
+    data-subject / personal-data taxonomy, so the coverage note is empty; the note
+    mechanism is retained (still honest) for any future Article 30(1) gap.
     """
     activities = (
         (
@@ -171,6 +224,8 @@ async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -
                     selectinload(ProcessingActivity.systems),
                     selectinload(ProcessingActivity.vendors),
                     selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
+                    selectinload(ProcessingActivity.data_subject_categories),
+                    selectinload(ProcessingActivity.data_categories),
                 )
                 .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
             )
@@ -200,11 +255,15 @@ async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -
         .scalars()
         .all()
     )
+    data_subject_categories = await _all_categories(db, DataSubjectCategory)
+    data_categories = await _all_categories(db, DataCategory)
 
     export = ropa_export.build_export(
         [ProcessingActivityRead.model_validate(a) for a in activities],
         [SystemRead.model_validate(s) for s in systems],
         [VendorRead.model_validate(v) for v in vendors],
+        [DataSubjectCategoryRead.model_validate(c) for c in data_subject_categories],
+        [DataCategoryRead.model_validate(c) for c in data_categories],
         generated_at=datetime.now(UTC),
     )
 

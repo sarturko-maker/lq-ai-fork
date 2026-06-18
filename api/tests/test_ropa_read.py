@@ -24,10 +24,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.main import app
 from app.models.ropa import (
+    DataCategory,
+    DataSubjectCategory,
     ProcessingActivity,
     System,
     Transfer,
     Vendor,
+    processing_activity_data_categories,
+    processing_activity_data_subject_categories,
     processing_activity_systems,
     processing_activity_vendors,
 )
@@ -78,10 +82,14 @@ async def _clean(db_session: AsyncSession) -> None:
     # regardless of any committed leftovers from earlier tests.
     await db_session.execute(delete(processing_activity_systems))
     await db_session.execute(delete(processing_activity_vendors))
+    await db_session.execute(delete(processing_activity_data_subject_categories))
+    await db_session.execute(delete(processing_activity_data_categories))
     await db_session.execute(delete(Transfer))
     await db_session.execute(delete(ProcessingActivity))
     await db_session.execute(delete(System))
     await db_session.execute(delete(Vendor))
+    await db_session.execute(delete(DataSubjectCategory))
+    await db_session.execute(delete(DataCategory))
     await db_session.flush()
 
 
@@ -124,6 +132,21 @@ async def _seed_linked(db_session: AsyncSession) -> tuple[ProcessingActivity, Sy
         mechanism="standard_contractual_clauses",
     )
     db_session.add(transfer)
+    # Article 30(1)(c) personal-data taxonomy tagged on the activity (PRIV-6a).
+    dsc = DataSubjectCategory(name="Employees")
+    dc = DataCategory(name="Payroll data")
+    db_session.add_all([dsc, dc])
+    await db_session.flush()
+    await db_session.execute(
+        processing_activity_data_subject_categories.insert().values(
+            processing_activity_id=pa.id, data_subject_category_id=dsc.id
+        )
+    )
+    await db_session.execute(
+        processing_activity_data_categories.insert().values(
+            processing_activity_id=pa.id, data_category_id=dc.id
+        )
+    )
     await db_session.flush()
     return pa, system, vendor
 
@@ -163,6 +186,9 @@ async def test_list_and_detail_render_cross_links(
     assert transfer["restricted"] is True
     assert transfer["mechanism"] == "standard_contractual_clauses"
     assert transfer["vendor"]["name"] == "Acme Payroll Ltd"
+    # The Article 30(1)(c) taxonomy rides on the activity (PRIV-6a).
+    assert [c["name"] for c in body[0]["data_subject_categories"]] == ["Employees"]
+    assert [c["name"] for c in body[0]["data_categories"]] == ["Payroll data"]
 
     # Activity detail.
     resp = await client.get(f"/api/v1/ropa/processing-activities/{pa.id}", headers=_bearer(user))
@@ -170,6 +196,8 @@ async def test_list_and_detail_render_cross_links(
     detail = resp.json()
     assert detail["systems"][0]["system_type"] == "database"
     assert detail["transfers"][0]["destination"] == "United States"
+    assert [c["name"] for c in detail["data_subject_categories"]] == ["Employees"]
+    assert [c["name"] for c in detail["data_categories"]] == ["Payroll data"]
 
     # System detail carries the reverse link.
     resp = await client.get(f"/api/v1/ropa/systems/{system.id}", headers=_bearer(user))
@@ -201,6 +229,33 @@ async def test_vendor_list_and_detail_render_reverse_link(
     assert [a["name"] for a in vbody["processing_activities"]] == ["Payroll processing"]
 
 
+async def test_data_taxonomy_list_endpoints_render_usage(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    await _seed_linked(db_session)
+
+    resp = await client.get("/api/v1/ropa/data-subject-categories", headers=_bearer(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["name"] == "Employees"
+    assert [a["name"] for a in body[0]["processing_activities"]] == ["Payroll processing"]
+
+    resp = await client.get("/api/v1/ropa/data-categories", headers=_bearer(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["name"] == "Payroll data"
+    assert [a["name"] for a in body[0]["processing_activities"]] == ["Payroll processing"]
+
+
+async def test_data_taxonomy_lists_require_authentication(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/ropa/data-subject-categories")
+    assert resp.status_code == 401
+    resp = await client.get("/api/v1/ropa/data-categories")
+    assert resp.status_code == 401
+
+
 async def test_unknown_ids_return_404(
     client: AsyncClient, db_session: AsyncSession, user: User
 ) -> None:
@@ -213,6 +268,60 @@ async def test_unknown_ids_return_404(
     assert r2.status_code == 404
     r3 = await client.get(f"/api/v1/ropa/vendors/{missing}", headers=_bearer(user))
     assert r3.status_code == 404
+
+
+async def test_shared_read_crosses_users_without_leaking_provenance(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    """ADR-F019 posture lock: a row created under user A's matter is readable by a
+    different authenticated user B (the register is firm-wide), and the wire shape
+    never leaks the source_project_id / owner provenance."""
+    from app.models.project import Project
+
+    await _clean(db_session)
+    # User A owns a matter; an activity is recorded with that matter as provenance.
+    matter = Project(owner_id=user.id, name="A's private matter", slug="a-priv-readtest")
+    db_session.add(matter)
+    await db_session.flush()
+    pa = ProcessingActivity(
+        source_project_id=matter.id,
+        name="Provenance-stamped activity",
+        purpose="seeded with a non-null source_project_id",
+        lawful_basis="legal_obligation",
+        controller_role="controller",
+        retention="7 years",
+        special_category=False,
+        art9_condition=None,
+    )
+    db_session.add(pa)
+    await db_session.flush()
+
+    # User B (no relation to the matter) reads the shared register.
+    user_b = User(
+        email="ropa-reader-b@example.com",
+        display_name="Reader B",
+        hashed_password=hash_password("correct-horse-battery-staple"),
+        is_admin=False,
+        mfa_enabled=False,
+        must_change_password=False,
+    )
+    db_session.add(user_b)
+    await db_session.flush()
+
+    resp = await client.get("/api/v1/ropa/processing-activities", headers=_bearer(user_b))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [a["name"] for a in body] == ["Provenance-stamped activity"]
+    # Provenance/ownership must NOT be on the wire (the Read DTO shape is the guard).
+    for forbidden in ("source_project_id", "project_id", "owner", "owner_id"):
+        assert forbidden not in body[0]
+
+    detail = await client.get(
+        f"/api/v1/ropa/processing-activities/{pa.id}", headers=_bearer(user_b)
+    )
+    assert detail.status_code == 200
+    for forbidden in ("source_project_id", "project_id", "owner", "owner_id"):
+        assert forbidden not in detail.json()
 
 
 async def test_requires_authentication(client: AsyncClient) -> None:

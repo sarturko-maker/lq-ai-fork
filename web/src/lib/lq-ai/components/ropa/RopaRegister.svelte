@@ -26,9 +26,13 @@
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
 	import {
 		downloadArticle30,
+		listDataCategories,
+		listDataSubjectCategories,
 		listProcessingActivities,
 		listSystems,
 		listVendors,
+		type DataCategoryRead,
+		type DataSubjectCategoryRead,
 		type ExportFormat,
 		type ProcessingActivityRead,
 		type SystemRead,
@@ -40,6 +44,8 @@
 	import VendorDetail from './VendorDetail.svelte';
 	import {
 		EMPTY_ACTIVITIES,
+		EMPTY_DATA_CATEGORIES,
+		EMPTY_DATA_SUBJECTS,
 		EMPTY_SYSTEMS,
 		EMPTY_VENDORS,
 		REGISTER_TABS,
@@ -54,6 +60,8 @@
 	let activities = $state<ProcessingActivityRead[] | null>(null);
 	let systems = $state<SystemRead[] | null>(null);
 	let vendors = $state<VendorRead[] | null>(null);
+	let dataSubjects = $state<DataSubjectCategoryRead[] | null>(null);
+	let dataCategories = $state<DataCategoryRead[] | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let tab = $state<RegisterTab>('activities');
@@ -61,16 +69,16 @@
 	let selectedSystemId = $state<string | null>(null);
 	let selectedVendorId = $state<string | null>(null);
 
-	const selectedActivity = $derived(
-		activities?.find((a) => a.id === selectedActivityId) ?? null
-	);
+	const selectedActivity = $derived(activities?.find((a) => a.id === selectedActivityId) ?? null);
 	const selectedSystem = $derived(systems?.find((s) => s.id === selectedSystemId) ?? null);
 	const selectedVendor = $derived(vendors?.find((v) => v.id === selectedVendorId) ?? null);
 
 	const registerEmpty = $derived(
 		(activities?.length ?? 0) === 0 &&
 			(systems?.length ?? 0) === 0 &&
-			(vendors?.length ?? 0) === 0
+			(vendors?.length ?? 0) === 0 &&
+			(dataSubjects?.length ?? 0) === 0 &&
+			(dataCategories?.length ?? 0) === 0
 	);
 
 	const EXPORT_FORMATS: { fmt: ExportFormat; label: string }[] = [
@@ -97,14 +105,18 @@
 		loading = true;
 		error = null;
 		try {
-			const [a, s, v] = await Promise.all([
+			const [a, s, v, ds, dc] = await Promise.all([
 				listProcessingActivities(),
 				listSystems(),
-				listVendors()
+				listVendors(),
+				listDataSubjectCategories(),
+				listDataCategories()
 			]);
 			activities = a;
 			systems = s;
 			vendors = v;
+			dataSubjects = ds;
+			dataCategories = dc;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load the ROPA register.';
 		} finally {
@@ -287,39 +299,93 @@
 												<span class="text-muted-foreground">—</span>
 											{/if}
 										</TableCell>
-										<TableCell class="text-muted-foreground">{s.processing_activities.length}</TableCell>
+										<TableCell class="text-muted-foreground"
+											>{s.processing_activities.length}</TableCell
+										>
 									</TableRow>
 								{/each}
 							</TableBody>
 						</Table>
 					</div>
 				{/if}
-			{:else if (vendors?.length ?? 0) === 0}
-				<p class="max-w-prose text-sm text-muted-foreground">{EMPTY_VENDORS}</p>
+			{:else if tab === 'vendors'}
+				{#if (vendors?.length ?? 0) === 0}
+					<p class="max-w-prose text-sm text-muted-foreground">{EMPTY_VENDORS}</p>
+				{:else}
+					<div class="rounded-lg border border-border">
+						<Table>
+							<TableHeader>
+								<TableRow>
+									<TableHead>Name</TableHead>
+									<TableHead>Role</TableHead>
+									<TableHead>Country</TableHead>
+									<TableHead>DPA status</TableHead>
+									<TableHead>Activities</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{#each vendors ?? [] as v (v.id)}
+									<TableRow class="cursor-pointer" onclick={() => openVendor(v.id)}>
+										<TableCell class="font-medium text-foreground">{v.name}</TableCell>
+										<TableCell>
+											<Badge variant="secondary">{vendorRoleLabel(v.vendor_role)}</Badge>
+										</TableCell>
+										<TableCell class="text-muted-foreground">{v.country ?? '—'}</TableCell>
+										<TableCell>
+											<Badge variant="outline">{dpaStatusLabel(v.dpa_status)}</Badge>
+										</TableCell>
+										<TableCell class="text-muted-foreground"
+											>{v.processing_activities.length}</TableCell
+										>
+									</TableRow>
+								{/each}
+							</TableBody>
+						</Table>
+					</div>
+				{/if}
+			{:else if tab === 'data-subjects'}
+				{#if (dataSubjects?.length ?? 0) === 0}
+					<p class="max-w-prose text-sm text-muted-foreground">{EMPTY_DATA_SUBJECTS}</p>
+				{:else}
+					<div class="rounded-lg border border-border">
+						<Table>
+							<TableHeader>
+								<TableRow>
+									<TableHead>Category of data subjects</TableHead>
+									<TableHead>Activities</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{#each dataSubjects ?? [] as c (c.id)}
+									<TableRow>
+										<TableCell class="font-medium text-foreground">{c.name}</TableCell>
+										<TableCell class="text-muted-foreground"
+											>{c.processing_activities.length}</TableCell
+										>
+									</TableRow>
+								{/each}
+							</TableBody>
+						</Table>
+					</div>
+				{/if}
+			{:else if (dataCategories?.length ?? 0) === 0}
+				<p class="max-w-prose text-sm text-muted-foreground">{EMPTY_DATA_CATEGORIES}</p>
 			{:else}
 				<div class="rounded-lg border border-border">
 					<Table>
 						<TableHeader>
 							<TableRow>
-								<TableHead>Name</TableHead>
-								<TableHead>Role</TableHead>
-								<TableHead>Country</TableHead>
-								<TableHead>DPA status</TableHead>
+								<TableHead>Category of personal data</TableHead>
 								<TableHead>Activities</TableHead>
 							</TableRow>
 						</TableHeader>
 						<TableBody>
-							{#each vendors ?? [] as v (v.id)}
-								<TableRow class="cursor-pointer" onclick={() => openVendor(v.id)}>
-									<TableCell class="font-medium text-foreground">{v.name}</TableCell>
-									<TableCell>
-										<Badge variant="secondary">{vendorRoleLabel(v.vendor_role)}</Badge>
-									</TableCell>
-									<TableCell class="text-muted-foreground">{v.country ?? '—'}</TableCell>
-									<TableCell>
-										<Badge variant="outline">{dpaStatusLabel(v.dpa_status)}</Badge>
-									</TableCell>
-									<TableCell class="text-muted-foreground">{v.processing_activities.length}</TableCell>
+							{#each dataCategories ?? [] as c (c.id)}
+								<TableRow>
+									<TableCell class="font-medium text-foreground">{c.name}</TableCell>
+									<TableCell class="text-muted-foreground"
+										>{c.processing_activities.length}</TableCell
+									>
 								</TableRow>
 							{/each}
 						</TableBody>

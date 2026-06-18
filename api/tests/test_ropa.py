@@ -20,11 +20,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.project import Project
-from app.models.ropa import ProcessingActivity, Transfer, Vendor
+from app.models.ropa import (
+    DataCategory,
+    DataSubjectCategory,
+    ProcessingActivity,
+    Transfer,
+    Vendor,
+)
 from app.models.user import User
 from app.schemas.ropa import (
     Art9Condition,
     ControllerRole,
+    DataCategoryInput,
+    DataSubjectCategoryInput,
     DpaStatus,
     LawfulBasis,
     ProcessingActivityInput,
@@ -257,6 +265,50 @@ def test_transfer_unknown_field_is_rejected() -> None:
         TransferInput(destination="US", restricted=True, mechanism="uk_idta", country="US")
 
 
+# --- DataSubjectCategoryInput / DataCategoryInput invariants (PRIV-6a, pure) --
+
+
+def test_minimal_data_subject_category_passes() -> None:
+    c = DataSubjectCategoryInput(name="Employees")
+    assert c.name == "Employees"
+
+
+def test_data_subject_category_blank_name_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        DataSubjectCategoryInput(name="   ")
+
+
+def test_data_subject_category_too_long_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        DataSubjectCategoryInput(name="x" * 201)
+
+
+def test_data_subject_category_unknown_field_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        DataSubjectCategoryInput(name="Employees", description="people")
+
+
+def test_data_subject_category_collapses_internal_whitespace() -> None:
+    # Spacing variants converge so the controlled vocabulary stays a vocabulary.
+    assert DataSubjectCategoryInput(name="Job   applicants").name == "Job applicants"
+    assert DataCategoryInput(name="  Health\tdata  ").name == "Health data"
+
+
+def test_minimal_data_category_passes() -> None:
+    c = DataCategoryInput(name="Health data")
+    assert c.name == "Health data"
+
+
+def test_data_category_blank_name_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        DataCategoryInput(name="")
+
+
+def test_data_category_unknown_field_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        DataCategoryInput(name="Health data", sensitivity="high")
+
+
 # --- DB defense-in-depth (integration) ---------------------------------------
 
 
@@ -430,6 +482,62 @@ async def test_db_check_rejects_mechanism_on_unrestricted_transfer(
         mechanism=TransferMechanism.UK_IDTA.value,  # incoherent → CHECK rejects
     )
     db_session.add(row)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_valid_data_subject_category_row_persists(db_session: AsyncSession) -> None:
+    owner = await _make_user(db_session, suffix="dsc-valid")
+    matter = await _make_matter(db_session, owner)
+    row = DataSubjectCategory(source_project_id=matter.id, name="Employees")
+    db_session.add(row)
+    await db_session.flush()
+    assert row.id is not None
+
+
+@pytest.mark.integration
+async def test_db_unique_rejects_duplicate_data_subject_category_name(
+    db_session: AsyncSession,
+) -> None:
+    # The controlled-vocabulary uniqueness backstop (uq_data_subject_categories_name).
+    db_session.add(DataSubjectCategory(name="Customers"))
+    await db_session.flush()
+    db_session.add(DataSubjectCategory(name="Customers"))
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_db_unique_rejects_case_variant_data_subject_category_name(
+    db_session: AsyncSession,
+) -> None:
+    # Uniqueness is on lower(name) (PRIV-6a) — a case variant is rejected at the DB
+    # boundary, not just by the case-insensitive find in the write tool.
+    db_session.add(DataSubjectCategory(name="Customers"))
+    await db_session.flush()
+    db_session.add(DataSubjectCategory(name="customers"))
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_db_check_rejects_blank_data_category_name(db_session: AsyncSession) -> None:
+    row = DataCategory(name="")  # violates chk_data_categories_name_len
+    db_session.add(row)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_db_unique_rejects_duplicate_data_category_name(db_session: AsyncSession) -> None:
+    db_session.add(DataCategory(name="Health data"))
+    await db_session.flush()
+    db_session.add(DataCategory(name="Health data"))
     with pytest.raises(IntegrityError):
         await db_session.flush()
     await db_session.rollback()

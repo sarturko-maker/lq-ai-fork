@@ -8,12 +8,13 @@ CSV (spreadsheet, dependency-free), and XLSX (OneTrust's multi-sheet shape).
 No DB, no HTTP, no ORM here — the endpoint (``app.api.ropa``) fetches + builds
 the DTOs and hands them in, so this module is pure and unit-testable.
 
-**Honest scope.** GDPR Article 30(1) lists content the current domain does not
-yet capture (categories of data subjects / personal data — those arrive with
-PRIV-6; recipients landed in PRIV-5a, third-country transfers in PRIV-5b). The
-export RENDERS WHAT EXISTS and names the remaining gap in a coverage note; it
-never invents the missing fields. "System proposes, user owns" — the deliverable
-is honest, not falsely complete.
+**Honest scope.** As of PRIV-6a the domain captures every GDPR Article 30(1)
+content field — recipients (PRIV-5a), third-country transfers + safeguards
+(PRIV-5b) and the categories-of-data-subjects / categories-of-personal-data
+taxonomy (PRIV-6a, Article 30(1)(c)). The coverage note is therefore empty; the
+mechanism stays in place (still honest) so a future Article 30(1) gap can
+re-populate it. The export RENDERS WHAT EXISTS and never invents fields —
+"system proposes, user owns".
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ from typing import TYPE_CHECKING
 from app.schemas.ropa import (
     Article30Coverage,
     Article30Export,
+    DataCategoryRead,
+    DataSubjectCategoryRead,
     ProcessingActivityRead,
     SystemRead,
     VendorRead,
@@ -35,13 +38,12 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from openpyxl.worksheet.worksheet import Worksheet  # type: ignore[import-untyped]
 
 # Article 30(1) content the domain does not yet model. Surfaced in the export's
-# coverage note so the deliverable is honest about what it omits. PRIV-5a filled
+# coverage note so the deliverable stays honest about any gap. PRIV-5a filled
 # "categories of recipients" (vendors); PRIV-5b filled third-country transfers +
-# safeguards; the data-subject/personal-data taxonomy arrives with PRIV-6.
-ART30_FIELDS_NOT_YET_RECORDED: tuple[str, ...] = (
-    "Categories of data subjects",
-    "Categories of personal data (beyond the special-category flag)",
-)
+# safeguards; PRIV-6a filled the data-subject / personal-data taxonomy (Article
+# 30(1)(c)) — so the register now captures every Article 30(1) content field and
+# this tuple is empty. Kept (not deleted) so a future gap can re-populate it.
+ART30_FIELDS_NOT_YET_RECORDED: tuple[str, ...] = ()
 
 # Spreadsheet-formula trigger characters (OWASP CSV-injection). The register
 # holds model-proposed strings; treat them as untrusted on the way OUT too, so a
@@ -56,6 +58,8 @@ ACTIVITY_HEADER: tuple[str, ...] = (
     "Special category",
     "Art 9 condition",
     "Retention",
+    "Categories of data subjects (Art 30(1)(c))",
+    "Categories of personal data (Art 30(1)(c))",
     "Linked systems",
     "Recipients (Art 30(1)(e))",
     "Transfers (Art 30(1)(e))",
@@ -95,6 +99,16 @@ TRANSFER_HEADER: tuple[str, ...] = (
     "Transfer mechanism (Chapter V)",
     "Recipient",
     "Safeguard details",
+)
+
+DATA_SUBJECT_CATEGORY_HEADER: tuple[str, ...] = (
+    "Category of data subjects",
+    "Linked processing activities",
+)
+
+DATA_CATEGORY_HEADER: tuple[str, ...] = (
+    "Category of personal data",
+    "Linked processing activities",
 )
 
 
@@ -194,8 +208,20 @@ def _transfers_cell(activity: ProcessingActivityRead) -> str:
     return "; ".join(parts)
 
 
-def _activities_cell(record: SystemRead | VendorRead) -> str:
-    """Join a system's / vendor's linked processing activities into one cell."""
+def _data_subject_categories_cell(activity: ProcessingActivityRead) -> str:
+    """Join an activity's categories of data subjects into one cell."""
+    return "; ".join(c.name for c in activity.data_subject_categories)
+
+
+def _data_categories_cell(activity: ProcessingActivityRead) -> str:
+    """Join an activity's categories of personal data into one cell."""
+    return "; ".join(c.name for c in activity.data_categories)
+
+
+def _activities_cell(
+    record: SystemRead | VendorRead | DataSubjectCategoryRead | DataCategoryRead,
+) -> str:
+    """Join a record's linked processing activities into one cell."""
     return "; ".join(a.name for a in record.processing_activities)
 
 
@@ -203,6 +229,8 @@ def build_export(
     activities: list[ProcessingActivityRead],
     systems: list[SystemRead],
     vendors: list[VendorRead],
+    data_subject_categories: list[DataSubjectCategoryRead] | None = None,
+    data_categories: list[DataCategoryRead] | None = None,
     *,
     generated_at: datetime,
 ) -> Article30Export:
@@ -213,6 +241,8 @@ def build_export(
         processing_activities=activities,
         systems=systems,
         vendors=vendors,
+        data_subject_categories=data_subject_categories or [],
+        data_categories=data_categories or [],
     )
 
 
@@ -225,12 +255,19 @@ def _activity_row(a: ProcessingActivityRead) -> list[str]:
         "Yes" if a.special_category else "No",
         _humanize(a.art9_condition) if a.art9_condition else "",
         a.retention,
+        _data_subject_categories_cell(a),
+        _data_categories_cell(a),
         _systems_cell(a),
         _vendors_cell(a),
         _transfers_cell(a),
         _date(a.created_at),
         _date(a.updated_at),
     ]
+
+
+def _category_row(c: DataSubjectCategoryRead | DataCategoryRead) -> list[str]:
+    """One taxonomy row: the category name + its linked processing activities."""
+    return [c.name, _activities_cell(c)]
 
 
 def _transfer_rows(export: Article30Export) -> list[list[str]]:
@@ -300,10 +337,11 @@ def to_csv(export: Article30Export) -> str:
 
 
 def to_xlsx(export: Article30Export) -> bytes:
-    """Render a multi-sheet workbook (OneTrust's shape): Activities + Systems + Vendors + Transfers.
+    """Render a multi-sheet workbook (OneTrust's shape).
 
-    ``openpyxl`` is imported lazily so the dependency-free JSON/CSV paths never
-    pay for it.
+    Sheets: Activities + Systems + Vendors + Transfers + Data Subjects + Data
+    Categories. ``openpyxl`` is imported lazily so the dependency-free JSON/CSV
+    paths never pay for it.
     """
     from openpyxl import Workbook  # type: ignore[import-untyped]
 
@@ -324,6 +362,20 @@ def to_xlsx(export: Article30Export) -> bytes:
 
     transfers_ws = wb.create_sheet("Transfers")
     _write_sheet(transfers_ws, TRANSFER_HEADER, _transfer_rows(export))
+
+    data_subjects_ws = wb.create_sheet("Data Subjects")
+    _write_sheet(
+        data_subjects_ws,
+        DATA_SUBJECT_CATEGORY_HEADER,
+        [_category_row(c) for c in export.data_subject_categories],
+    )
+
+    data_categories_ws = wb.create_sheet("Data Categories")
+    _write_sheet(
+        data_categories_ws,
+        DATA_CATEGORY_HEADER,
+        [_category_row(c) for c in export.data_categories],
+    )
 
     out = io.BytesIO()
     wb.save(out)

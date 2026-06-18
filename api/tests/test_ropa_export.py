@@ -2,10 +2,10 @@
 
 Two layers:
 
-* **Pure formatter** (no DB) — the JSON envelope's honest coverage note, the CSV
-  header/rows + systems-join + recipients-join + transfers-join cells + the OWASP
-  CSV-injection guard, and the four-sheet XLSX workbook (Activities + Systems +
-  Vendors + Transfers).
+* **Pure formatter** (no DB) — the JSON envelope's (now empty) coverage note, the
+  CSV header/rows + systems-join + recipients-join + transfers-join + taxonomy
+  cells + the OWASP CSV-injection guard, and the six-sheet XLSX workbook
+  (Activities + Systems + Vendors + Transfers + Data Subjects + Data Categories).
 * **Endpoint** (integration) — ``GET /ropa/export`` in each format, the empty
   register, an off-enum ``format`` → 422, and the shared-read auth gate (401).
 """
@@ -28,15 +28,25 @@ from app import ropa_export
 from app.db.session import get_db
 from app.main import app
 from app.models.ropa import (
+    DataCategory,
+    DataSubjectCategory,
     ProcessingActivity,
     System,
     Transfer,
     Vendor,
+    processing_activity_data_categories,
+    processing_activity_data_subject_categories,
     processing_activity_systems,
     processing_activity_vendors,
 )
 from app.models.user import User
-from app.schemas.ropa import ProcessingActivityRead, SystemRead, VendorRead
+from app.schemas.ropa import (
+    DataCategoryRead,
+    DataSubjectCategoryRead,
+    ProcessingActivityRead,
+    SystemRead,
+    VendorRead,
+)
 from app.security import create_access_token, hash_password
 
 _NOW = datetime(2026, 6, 18, 9, 30, tzinfo=UTC)
@@ -60,6 +70,8 @@ def _activity(**over: object) -> ProcessingActivityRead:
         "systems": [],
         "vendors": [],
         "transfers": [],
+        "data_subject_categories": [],
+        "data_categories": [],
     }
     base.update(over)
     return ProcessingActivityRead.model_validate(base)
@@ -114,22 +126,52 @@ def _vendor(**over: object) -> VendorRead:
     return VendorRead.model_validate(base)
 
 
+def _dsc(name: str = "Employees", **over: object) -> DataSubjectCategoryRead:
+    base: dict[str, object] = {
+        "id": uuid.uuid4(),
+        "name": name,
+        "created_at": _NOW,
+        "processing_activities": [],
+    }
+    base.update(over)
+    return DataSubjectCategoryRead.model_validate(base)
+
+
+def _dc(name: str = "Health data", **over: object) -> DataCategoryRead:
+    base: dict[str, object] = {
+        "id": uuid.uuid4(),
+        "name": name,
+        "created_at": _NOW,
+        "processing_activities": [],
+    }
+    base.update(over)
+    return DataCategoryRead.model_validate(base)
+
+
 @pytest.mark.unit
-def test_build_export_carries_honest_coverage_note() -> None:
+def test_build_export_coverage_note_is_empty_when_all_captured() -> None:
     export = ropa_export.build_export([_activity()], [_system()], [_vendor()], generated_at=_NOW)
     assert export.generated_at == _NOW
     assert export.register_name == "Article 30 Records of Processing Activities"
-    # PRIV-5a filled "categories of recipients"; PRIV-5b filled transfers — neither
-    # is in the gap note any more.
-    assert "Categories of recipients" not in export.coverage.fields_not_yet_recorded
-    assert not any("transfer" in f.lower() for f in export.coverage.fields_not_yet_recorded)
-    # The Art 30(1) fields still missing (the data-subject/personal-data taxonomy)
-    # are named, not hidden.
-    assert any("data subjects" in f.lower() for f in export.coverage.fields_not_yet_recorded)
-    assert any("personal data" in f.lower() for f in export.coverage.fields_not_yet_recorded)
+    # PRIV-6a closed the last Article 30(1) content gap (the data-subject/
+    # personal-data taxonomy), so the coverage note is now empty — the register
+    # captures every Article 30(1) field. The mechanism stays in place (honest)
+    # so a future gap can re-populate it.
+    assert export.coverage.fields_not_yet_recorded == []
     assert len(export.processing_activities) == 1
     assert len(export.systems) == 1
     assert len(export.vendors) == 1
+
+
+@pytest.mark.unit
+def test_coverage_note_renders_gaps_when_populated(monkeypatch: pytest.MonkeyPatch) -> None:
+    # PRIV-6a emptied ART30_FIELDS_NOT_YET_RECORDED, but the honest-coverage
+    # mechanism must still surface gaps if a future Article 30(1) field is added —
+    # keep that populate path covered even though the production tuple is empty.
+    monkeypatch.setattr(ropa_export, "ART30_FIELDS_NOT_YET_RECORDED", ("Some future Art 30 field",))
+    export = ropa_export.build_export([_activity()], [], [], generated_at=_NOW)
+    assert export.coverage.fields_not_yet_recorded == ["Some future Art 30 field"]
+    assert "Some future Art 30 field" in export.model_dump_json()
 
 
 @pytest.mark.unit
@@ -144,6 +186,8 @@ def test_to_csv_header_row_and_humanized_values() -> None:
     text = ropa_export.to_csv(export)
     lines = text.splitlines()
     assert lines[0].split(",")[0] == "Name"
+    assert "Categories of data subjects (Art 30(1)(c))" in lines[0]
+    assert "Categories of personal data (Art 30(1)(c))" in lines[0]
     assert "Linked systems" in lines[0]
     assert "Recipients" in lines[0]
     # Enum values are humanized for the spreadsheet; the special-category +
@@ -194,7 +238,7 @@ def test_to_csv_neutralises_formula_injection() -> None:
 
 
 @pytest.mark.unit
-def test_to_xlsx_four_sheets_with_headers() -> None:
+def test_to_xlsx_six_sheets_with_headers() -> None:
     a = _activity(
         transfers=[
             _transfer(
@@ -207,9 +251,18 @@ def test_to_xlsx_four_sheets_with_headers() -> None:
             ),
         ]
     )
-    export = ropa_export.build_export([a], [_system()], [_vendor()], generated_at=_NOW)
+    export = ropa_export.build_export(
+        [a], [_system()], [_vendor()], [_dsc()], [_dc()], generated_at=_NOW
+    )
     wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
-    assert wb.sheetnames == ["Processing Activities", "Systems", "Vendors", "Transfers"]
+    assert wb.sheetnames == [
+        "Processing Activities",
+        "Systems",
+        "Vendors",
+        "Transfers",
+        "Data Subjects",
+        "Data Categories",
+    ]
     activities = wb["Processing Activities"]
     assert activities["A1"].value == "Name"
     assert activities["A2"].value == "Payroll processing"
@@ -290,6 +343,56 @@ def test_to_xlsx_neutralises_formula_injection_in_transfer_sheet() -> None:
     assert wb["Transfers"]["B2"].value == "'=danger()"
 
 
+@pytest.mark.unit
+def test_activity_row_carries_personal_data_taxonomy_cells() -> None:
+    a = _activity(
+        data_subject_categories=[
+            {"id": uuid.uuid4(), "name": "Employees"},
+            {"id": uuid.uuid4(), "name": "Job applicants"},
+        ],
+        data_categories=[{"id": uuid.uuid4(), "name": "Payroll data"}],
+    )
+    export = ropa_export.build_export([a], [], [], generated_at=_NOW)
+    text = ropa_export.to_csv(export)
+    assert "Employees; Job applicants" in text
+    assert "Payroll data" in text
+
+
+@pytest.mark.unit
+def test_taxonomy_sheets_list_terms_with_linked_activities() -> None:
+    dsc = _dsc(
+        name="Employees",
+        processing_activities=[
+            {
+                "id": uuid.uuid4(),
+                "name": "Payroll processing",
+                "lawful_basis": "legal_obligation",
+                "special_category": False,
+            }
+        ],
+    )
+    dc = _dc(name="Health data")
+    export = ropa_export.build_export([], [], [], [dsc], [dc], generated_at=_NOW)
+    wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
+    subjects = wb["Data Subjects"]
+    assert subjects["A1"].value == "Category of data subjects"
+    assert subjects["A2"].value == "Employees"
+    assert subjects["B2"].value == "Payroll processing"
+    categories = wb["Data Categories"]
+    assert categories["A1"].value == "Category of personal data"
+    assert categories["A2"].value == "Health data"
+
+
+@pytest.mark.unit
+def test_to_xlsx_neutralises_formula_injection_in_taxonomy_sheets() -> None:
+    export = ropa_export.build_export(
+        [], [], [], [_dsc(name="=danger()")], [_dc(name="@evil")], generated_at=_NOW
+    )
+    wb = load_workbook(io.BytesIO(ropa_export.to_xlsx(export)))
+    assert wb["Data Subjects"]["A2"].value == "'=danger()"
+    assert wb["Data Categories"]["A2"].value == "'@evil"
+
+
 # --- endpoint (integration) ---------------------------------------------------
 
 pytest_integration = pytest.mark.integration
@@ -334,10 +437,14 @@ def _bearer(u: User) -> dict[str, str]:
 async def _clean(db_session: AsyncSession) -> None:
     await db_session.execute(delete(processing_activity_systems))
     await db_session.execute(delete(processing_activity_vendors))
+    await db_session.execute(delete(processing_activity_data_subject_categories))
+    await db_session.execute(delete(processing_activity_data_categories))
     await db_session.execute(delete(Transfer))
     await db_session.execute(delete(ProcessingActivity))
     await db_session.execute(delete(System))
     await db_session.execute(delete(Vendor))
+    await db_session.execute(delete(DataSubjectCategory))
+    await db_session.execute(delete(DataCategory))
     await db_session.flush()
 
 
@@ -380,6 +487,20 @@ async def _seed_linked(db_session: AsyncSession) -> None:
             mechanism="standard_contractual_clauses",
         )
     )
+    dsc = DataSubjectCategory(name="Employees")
+    dc = DataCategory(name="Payroll data")
+    db_session.add_all([dsc, dc])
+    await db_session.flush()
+    await db_session.execute(
+        processing_activity_data_subject_categories.insert().values(
+            processing_activity_id=pa.id, data_subject_category_id=dsc.id
+        )
+    )
+    await db_session.execute(
+        processing_activity_data_categories.insert().values(
+            processing_activity_id=pa.id, data_category_id=dc.id
+        )
+    )
     await db_session.flush()
 
 
@@ -393,15 +514,24 @@ async def test_export_json(client: AsyncClient, db_session: AsyncSession, user: 
     assert resp.headers["content-disposition"].endswith('.json"')
     body = resp.json()
     assert body["register_name"] == "Article 30 Records of Processing Activities"
-    assert body["coverage"]["fields_not_yet_recorded"]
+    # PRIV-6a closed the last Article 30(1) gap → coverage note empty.
+    assert body["coverage"]["fields_not_yet_recorded"] == []
     assert body["processing_activities"][0]["name"] == "Payroll processing"
     assert body["processing_activities"][0]["systems"][0]["name"] == "Production database"
     assert body["processing_activities"][0]["vendors"][0]["name"] == "Acme Payroll Ltd"
     transfer = body["processing_activities"][0]["transfers"][0]
     assert transfer["destination"] == "United States"
     assert transfer["restricted"] is True
+    assert [c["name"] for c in body["processing_activities"][0]["data_subject_categories"]] == [
+        "Employees"
+    ]
+    assert [c["name"] for c in body["processing_activities"][0]["data_categories"]] == [
+        "Payroll data"
+    ]
     assert body["systems"][0]["name"] == "Production database"
     assert body["vendors"][0]["name"] == "Acme Payroll Ltd"
+    assert body["data_subject_categories"][0]["name"] == "Employees"
+    assert body["data_categories"][0]["name"] == "Payroll data"
 
 
 @pytest_integration
@@ -427,12 +557,22 @@ async def test_export_xlsx(client: AsyncClient, db_session: AsyncSession, user: 
     assert "spreadsheetml" in resp.headers["content-type"]
     assert resp.headers["content-disposition"].endswith('.xlsx"')
     wb = load_workbook(io.BytesIO(resp.content))
-    assert wb.sheetnames == ["Processing Activities", "Systems", "Vendors", "Transfers"]
+    assert wb.sheetnames == [
+        "Processing Activities",
+        "Systems",
+        "Vendors",
+        "Transfers",
+        "Data Subjects",
+        "Data Categories",
+    ]
     assert wb["Processing Activities"]["A2"].value == "Payroll processing"
     assert wb["Vendors"]["A2"].value == "Acme Payroll Ltd"
     # The seeded restricted transfer appears on the Transfers sheet.
     assert wb["Transfers"]["A2"].value == "Payroll processing"
     assert wb["Transfers"]["B2"].value == "United States"
+    # The seeded taxonomy appears on its sheets.
+    assert wb["Data Subjects"]["A2"].value == "Employees"
+    assert wb["Data Categories"]["A2"].value == "Payroll data"
 
 
 @pytest_integration
@@ -446,8 +586,11 @@ async def test_export_empty_register(
     assert body["processing_activities"] == []
     assert body["systems"] == []
     assert body["vendors"] == []
-    # Coverage note is present even when the register is empty (honest scope).
-    assert body["coverage"]["fields_not_yet_recorded"]
+    assert body["data_subject_categories"] == []
+    assert body["data_categories"] == []
+    # The coverage note is empty now that every Article 30(1) field is captured
+    # (PRIV-6a); the key is still present (honest scope mechanism).
+    assert body["coverage"]["fields_not_yet_recorded"] == []
 
 
 @pytest_integration

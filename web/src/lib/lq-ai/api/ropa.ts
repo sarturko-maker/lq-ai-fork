@@ -76,6 +76,21 @@ export interface TransferSummary {
 	vendor: VendorSummary | null;
 }
 
+/**
+ * A category of data subjects / personal data as it appears tagged on a
+ * processing activity (Article 30(1)(c); PRIV-6a). A pure controlled-vocabulary
+ * label.
+ */
+export interface DataSubjectCategorySummary {
+	id: string;
+	name: string;
+}
+
+export interface DataCategorySummary {
+	id: string;
+	name: string;
+}
+
 /** A processing activity as it appears linked under a system or vendor. */
 export interface ProcessingActivitySummary {
 	id: string;
@@ -98,6 +113,8 @@ export interface ProcessingActivityRead {
 	systems: SystemSummary[];
 	vendors: VendorSummary[];
 	transfers: TransferSummary[];
+	data_subject_categories: DataSubjectCategorySummary[];
+	data_categories: DataCategorySummary[];
 }
 
 export interface VendorRead {
@@ -109,6 +126,24 @@ export interface VendorRead {
 	dpa_status: DpaStatus;
 	created_at: string;
 	updated_at: string;
+	processing_activities: ProcessingActivitySummary[];
+}
+
+/**
+ * A category of data subjects / personal data + the activities tagged with it
+ * (Article 30(1)(c); PRIV-6a). Immutable label — no `updated_at`.
+ */
+export interface DataSubjectCategoryRead {
+	id: string;
+	name: string;
+	created_at: string;
+	processing_activities: ProcessingActivitySummary[];
+}
+
+export interface DataCategoryRead {
+	id: string;
+	name: string;
+	created_at: string;
 	processing_activities: ProcessingActivitySummary[];
 }
 
@@ -153,6 +188,14 @@ export function getVendor(id: string): Promise<VendorRead> {
 	return apiRequest<VendorRead>(`/ropa/vendors/${encodeURIComponent(id)}`);
 }
 
+export function listDataSubjectCategories(): Promise<DataSubjectCategoryRead[]> {
+	return apiRequest<DataSubjectCategoryRead[]>('/ropa/data-subject-categories');
+}
+
+export function listDataCategories(): Promise<DataCategoryRead[]> {
+	return apiRequest<DataCategoryRead[]>('/ropa/data-categories');
+}
+
 // --- Article 30 export (PRIV-4a) ---------------------------------------------
 
 /** Export formats the backend serves (api/app/api/ropa.py ExportFormat). */
@@ -163,10 +206,7 @@ export type ExportFormat = 'json' | 'csv' | 'xlsx';
  * back to a sensible default when the header is absent (e.g. under a proxy that
  * strips it). Pure — unit-tested separately from the DOM download.
  */
-export function filenameFromDisposition(
-	disposition: string | null,
-	format: ExportFormat
-): string {
+export function filenameFromDisposition(disposition: string | null, format: ExportFormat): string {
 	const match = disposition?.match(/filename="([^"]+)"/);
 	return match ? match[1] : `article-30-ropa.${format}`;
 }

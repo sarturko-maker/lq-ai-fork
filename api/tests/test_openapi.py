@@ -215,6 +215,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # PRIV-5a (fork) — vendors/recipients
         "/api/v1/ropa/vendors",
         "/api/v1/ropa/vendors/{vendor_id}",
+        # PRIV-6a (fork) — Article 30(1)(c) personal-data taxonomy
+        "/api/v1/ropa/data-subject-categories",
+        "/api/v1/ropa/data-categories",
         # PRIV-4a (fork) — Article 30 export
         "/api/v1/ropa/export",
     }
@@ -322,7 +325,7 @@ async def test_openapi_paths_match_sketch() -> None:
     # /api/v1/agents/threads/{thread_id}
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
-    assert len(actual) == 136  # +2: PRIV-5a vendor read endpoints (ADR-F019)
+    assert len(actual) == 138  # +2: PRIV-6a personal-data taxonomy list endpoints (ADR-F019)
 
 
 @pytest.mark.unit

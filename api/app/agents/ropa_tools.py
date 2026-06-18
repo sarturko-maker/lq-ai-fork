@@ -25,8 +25,14 @@ each activity):
 * :func:`link_processing_activity_to_system` / :func:`link_vendor_to_activity` —
   record that an activity uses a system / discloses to a vendor (the M:N links),
   by the IDs the list tools surface.
+* :func:`add_data_subject_categories` / :func:`add_data_categories` — tag an
+  activity with the Article 30(1)(c) categories of data subjects / personal data
+  (PRIV-6a). List-valued + find-or-create against the controlled vocabulary: each
+  name is validated, then found-or-created by name and linked (idempotent), so a
+  vocabulary term is reused, never duplicated.
 * :func:`list_processing_activities` / :func:`list_systems` / :func:`list_vendors`
-  / :func:`list_transfers` — the current register (with IDs), so the agent can
+  / :func:`list_transfers` / :func:`list_data_subject_categories` /
+  :func:`list_data_categories` — the current register (with IDs), so the agent can
   see what exists and link records.
 
 **Scope / authz (ADR-F019).** The register is company-wide, NOT matter- or
@@ -47,21 +53,28 @@ from collections.abc import Callable
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import Table, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.agents.tools import MatterBinding
 from app.models.ropa import (
+    DataCategory,
+    DataSubjectCategory,
     ProcessingActivity,
     System,
     Transfer,
     Vendor,
+    processing_activity_data_categories,
+    processing_activity_data_subject_categories,
     processing_activity_systems,
     processing_activity_vendors,
 )
 from app.schemas.ropa import (
+    DataCategoryInput,
+    DataSubjectCategoryInput,
     ProcessingActivityInput,
     SystemInput,
     TransferInput,
@@ -80,16 +93,24 @@ ROPA_TOOL_NAMES = frozenset(
         "propose_transfer",
         "link_processing_activity_to_system",
         "link_vendor_to_activity",
+        "add_data_subject_categories",
+        "add_data_categories",
         "list_processing_activities",
         "list_systems",
         "list_vendors",
         "list_transfers",
+        "list_data_subject_categories",
+        "list_data_categories",
     }
 )
 
 # Cap the register dump so a large register's tool result stays inside the model's
 # working context; the read UI (PRIV-3) is the place to browse a long register.
 _LIST_LIMIT = 100
+
+# The two Article 30(1)(c) controlled-vocabulary entities share an identical
+# shape, so the tag/list helpers below are generic over them (PEP 695 constrained
+# type parameter — ``[CatT: (DataSubjectCategory, DataCategory)]``).
 
 
 def build_ropa_tools(
@@ -311,6 +332,66 @@ def build_ropa_tools(
             ctx,
         )
 
+    async def add_data_subject_categories(
+        processing_activity_id: str,
+        names: list[str],
+    ) -> str:
+        """Tag a processing activity with the categories of data subjects it processes.
+
+        Pass the activity id (from list_processing_activities) and one or more
+        category names (the classes of individuals whose data is processed — e.g.
+        "Employees", "Customers", "Job applicants"). Each name is validated, then
+        found-or-created in the company's controlled vocabulary and linked to the
+        activity (a name already in the vocabulary is reused, not duplicated;
+        re-tagging an already-tagged category is a no-op). If a name is invalid or
+        the activity id is unknown the call is refused with the reason and nothing
+        is recorded. Use Title Case for consistent vocabulary terms.
+        """
+        return await guarded_dispatch(
+            "add_data_subject_categories",
+            lambda db: _add_categories(
+                db,
+                binding,
+                model=DataSubjectCategory,
+                input_cls=DataSubjectCategoryInput,
+                link_table=processing_activity_data_subject_categories,
+                link_col="data_subject_category_id",
+                kind="data subject categories",
+                processing_activity_id=processing_activity_id,
+                names=names,
+            ),
+            ctx,
+        )
+
+    async def add_data_categories(
+        processing_activity_id: str,
+        names: list[str],
+    ) -> str:
+        """Tag a processing activity with the categories of personal data it processes.
+
+        Pass the activity id (from list_processing_activities) and one or more
+        category names (the classes of personal data processed — e.g. "Contact
+        details", "Financial data", "Health data", "Location data"). Same
+        find-or-create + idempotent-link behaviour as add_data_subject_categories;
+        an invalid name or unknown activity id is refused with the reason and
+        nothing is recorded. Use Title Case for consistent vocabulary terms.
+        """
+        return await guarded_dispatch(
+            "add_data_categories",
+            lambda db: _add_categories(
+                db,
+                binding,
+                model=DataCategory,
+                input_cls=DataCategoryInput,
+                link_table=processing_activity_data_categories,
+                link_col="data_category_id",
+                kind="data categories",
+                processing_activity_id=processing_activity_id,
+                names=names,
+            ),
+            ctx,
+        )
+
     async def list_processing_activities() -> str:
         """List the processing activities in the company ROPA register (with IDs)."""
         return await guarded_dispatch(
@@ -329,6 +410,32 @@ def build_ropa_tools(
         """List the third-country transfers in the company ROPA (with IDs)."""
         return await guarded_dispatch("list_transfers", lambda db: _list_transfers(db), ctx)
 
+    async def list_data_subject_categories() -> str:
+        """List the categories of data subjects in the company ROPA vocabulary (with IDs)."""
+        return await guarded_dispatch(
+            "list_data_subject_categories",
+            lambda db: _list_categories(
+                db,
+                model=DataSubjectCategory,
+                empty="The company ROPA has no categories of data subjects yet.",
+                heading="categories of data subjects",
+            ),
+            ctx,
+        )
+
+    async def list_data_categories() -> str:
+        """List the categories of personal data in the company ROPA vocabulary (with IDs)."""
+        return await guarded_dispatch(
+            "list_data_categories",
+            lambda db: _list_categories(
+                db,
+                model=DataCategory,
+                empty="The company ROPA has no categories of personal data yet.",
+                heading="categories of personal data",
+            ),
+            ctx,
+        )
+
     return [
         propose_processing_activity,
         propose_system,
@@ -336,10 +443,14 @@ def build_ropa_tools(
         propose_transfer,
         link_processing_activity_to_system,
         link_vendor_to_activity,
+        add_data_subject_categories,
+        add_data_categories,
         list_processing_activities,
         list_systems,
         list_vendors,
         list_transfers,
+        list_data_subject_categories,
+        list_data_categories,
     ]
 
 
@@ -756,6 +867,167 @@ async def _list_transfers(db: AsyncSession) -> str:
         )
     noun = "transfer" if len(rows) == 1 else "transfers"
     return f"Company ROPA — {len(rows)} third-country {noun}:\n\n" + "\n".join(blocks)
+
+
+async def _add_categories[CatT: (DataSubjectCategory, DataCategory)](
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    model: type[CatT],
+    input_cls: type[DataSubjectCategoryInput] | type[DataCategoryInput],
+    link_table: Table,
+    link_col: str,
+    kind: str,
+    processing_activity_id: str,
+    names: list[str],
+) -> str:
+    """Validate each category name, then find-or-create + idempotently link it.
+
+    Article 30(1)(c) tagging (PRIV-6a): a name already in the controlled
+    vocabulary is reused (matched **case-insensitively** on ``lower(name)``, so
+    "Health data"/"Health Data" are one term, not two); a new one is created. The
+    whole call is refused (nothing written) if the activity id is unknown or any
+    name fails validation — never a silent fix.
+
+    Create is race-safe: the lookup→insert window over the deployment-global
+    register (ADR-F019; concurrent runs / subagent fan-out) is closed by a
+    SAVEPOINT — a lost race raises ``IntegrityError`` against the
+    ``lower(name)`` unique index, which we absorb and re-select the winning row
+    (so the dispatch returns a normal result, never a raised DB error that would
+    leak SQL/params into the run error and discard sibling links).
+    """
+    if not names:
+        return f"No {kind} given — pass one or more category names. Nothing was recorded."
+
+    # Validate every name first; reject the whole call on any failure.
+    validated: list[str] = []
+    problems: list[str] = []
+    for raw in names:
+        try:
+            validated.append(input_cls(name=raw).name)
+        except ValidationError as exc:
+            for err in exc.errors():
+                loc = ".".join(str(p) for p in err["loc"]) or "(name)"
+                problems.append(f"- {raw!r} ({loc}): {err['msg']}")
+    if problems:
+        return (
+            f"Tagging refused — one or more {kind} are invalid. Nothing was recorded. "
+            "Fix and call again:\n" + "\n".join(problems)
+        )
+
+    try:
+        pa_uuid = uuid.UUID(processing_activity_id)
+    except ValueError:
+        return (
+            "Tagging refused — processing_activity_id must be an id shown by "
+            "list_processing_activities. Nothing was recorded."
+        )
+    activity = await db.get(ProcessingActivity, pa_uuid)
+    if activity is None:
+        return (
+            f"Tagging refused — no processing activity with id {processing_activity_id}. "
+            "Nothing was recorded."
+        )
+
+    added: list[str] = []
+    already: list[str] = []
+    created: list[str] = []
+    seen: set[str] = set()
+    for name in validated:
+        key = name.casefold()
+        if key in seen:  # de-dupe (case-insensitively) within this one call
+            continue
+        seen.add(key)
+        category = await _find_or_create_category(db, model, binding, name, created)
+        existing_link = (
+            await db.execute(
+                select(link_table).where(
+                    link_table.c.processing_activity_id == pa_uuid,
+                    link_table.c[link_col] == category.id,
+                )
+            )
+        ).first()
+        if existing_link is None:
+            await db.execute(
+                link_table.insert().values(
+                    processing_activity_id=pa_uuid, **{link_col: category.id}
+                )
+            )
+            added.append(category.name)
+        else:
+            already.append(category.name)
+    await db.flush()
+
+    parts = [f'Tagged "{activity.name}" with {kind}.']
+    if added:
+        parts.append("Added: " + ", ".join(added) + ".")
+    if already:
+        parts.append("Already tagged: " + ", ".join(already) + ".")
+    if created:
+        parts.append("New to the vocabulary: " + ", ".join(created) + ".")
+    return " ".join(parts)
+
+
+async def _find_or_create_category[CatT: (DataSubjectCategory, DataCategory)](
+    db: AsyncSession,
+    model: type[CatT],
+    binding: MatterBinding,
+    name: str,
+    created: list[str],
+) -> CatT:
+    """Find a vocabulary term case-insensitively, or create it race-safely.
+
+    The find + the unique backstop both key on ``lower(name)`` (PRIV-6a). The
+    create runs in a SAVEPOINT so a concurrent insert of the same term (its
+    ``IntegrityError`` against the ``lower(name)`` unique index) is absorbed and
+    the winning row re-selected — the dispatch never raises a DB error.
+    """
+    lowered = func.lower(model.name)
+    key = name.casefold()
+    found = (await db.execute(select(model).where(lowered == key))).scalar_one_or_none()
+    if found is not None:
+        return found
+    try:
+        async with db.begin_nested():  # SAVEPOINT — isolate a possible unique violation
+            category = model(source_project_id=binding.project_id, name=name)
+            db.add(category)
+            await db.flush()
+        created.append(name)
+        return category
+    except IntegrityError:
+        # Lost the race (or a case-variant exists): reuse the committed winner.
+        return (await db.execute(select(model).where(lowered == key))).scalar_one()
+
+
+async def _list_categories[CatT: (DataSubjectCategory, DataCategory)](
+    db: AsyncSession,
+    *,
+    model: type[CatT],
+    empty: str,
+    heading: str,
+) -> str:
+    """Format a category vocabulary (oldest first), with IDs and per-term usage counts."""
+    rows = (
+        (
+            await db.execute(
+                select(model)
+                .options(selectinload(model.processing_activities))
+                .order_by(model.created_at.asc(), model.name.asc())
+                .limit(_LIST_LIMIT)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return empty
+
+    blocks: list[str] = []
+    for row in rows:
+        n = len(row.processing_activities)
+        noun = "activity" if n == 1 else "activities"
+        blocks.append(f"- [{row.id}] {row.name} ({n} {noun})")
+    return f"Company ROPA — {len(rows)} {heading}:\n\n" + "\n".join(blocks)
 
 
 def _rejection_text(exc: ValidationError, tool_name: str) -> str:
