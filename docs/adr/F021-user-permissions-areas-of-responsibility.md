@@ -170,3 +170,51 @@ per-seam one-line predicate change, not a rewrite. Each new slice's security pas
    verb-level authority.) Maintainer call since the column is in the DB CHECK.
 6. **Granularity ceiling:** area-grain = "responsible for Privacy" grants the whole Privacy set, not
    per-matter sharing. Sufficient, or is per-matter ACL a near-term need (a further model)?
+
+## Update — maintainer decisions + expanded scope (2026-06-19)
+
+The maintainer answered the open questions and **expanded the scope** beyond v1's "area membership only". The
+six answers (now settled): **(1)** an owner ALWAYS keeps access to matters they created. **(2)** existing ROPA
+rows → stamp **Privacy**; the register is a **programme-level** artifact (area-owned, like OneTrust/TrustArc),
+**not** traced per matter, so register reads scope to Privacy-**area** membership. **(4)** non-responsible
+areas show **greyed-out** (not hidden) — and the product needs a real **admin-setup + sharing/invitation
+system** (below). **(5)** **KEEP roles** — areas must be genuinely segregated + enforced (this **reverses v1's
+"retire `users.role`" lean**: an enterprise client needs real area segregation; do not gut roles — wire them
+up). **(1/3/6)** confirmed via the expansions below.
+
+**Expanded target (decided; supersedes v1's "area-grain only"):** authorization is **two tiers of grant** plus
+cross-area collaboration, all consulted through the one ADR-F021 seam:
+
+- **Area membership** (`user_practice_areas`, v1) — "I handle Privacy" → the area's programme + matters.
+- **Per-matter sharing** (NEW, near-term) — share a *single* matter with specific user(s) + a role
+  (e.g. `matter_collaborators(project_id, user_id, role)`). The seam's read predicate becomes
+  **owner OR area-member OR matter-collaborator** (owner always allowed — decision 1).
+- **Invitations** (NEW) — a user invites another **into an area** or **onto a matter**; an issued, auditable,
+  revocable grant with a lifecycle (invited → accepted/revoked). Who may invite: admin, area_owner (their
+  area), matter owner/collaborator (their matter). Build on the tokenized-link/notification prior art noted
+  for PRIV-A2/ADR-F020 where it fits.
+- **Cross-area collaboration — person** (NEW) — a Commercial matter needing TUPE input invites an Employment
+  **colleague** as a **matter-collaborator**. The matter STAYS single-area (ADR-F002: one matter → one area →
+  one agent identity); the colleague is a guest *on that matter*, not a second owning area.
+- **Cross-area collaboration — agent ("@ Deep Agent")** (NEW) — the matter's lead agent calls in **another
+  area's Deep Agent as a GUEST**: a **time-boxed, matter-scoped, default read-only loan** of that area's
+  agent/skills for one consult (the TUPE weigh-in). **Maintainer-confirmed direction.** It honors ADR-F002
+  (the matter keeps its own identity; the guest is a scoped subagent à la ADR-F017 multi-source skills), the
+  gateway-only egress, and the `guarded_dispatch` chokepoint; **gated by the permission model** (who may
+  invoke a guest agent on a matter). **Implementation mechanics are deferred to a dedicated design slice** —
+  grounding is in flight (workflow `wf_815d3f81-70e`, to fold next session) and it lands as **rollout Phase 5+
+  / its own ADR** when built; this ADR fixes only the *direction* + the *permission gate*.
+
+**Design-readiness contract — additions (v2):** beyond the v1 list — (a) module reads scope through
+**owner OR area-member OR matter-collaborator**, never area-only; (b) any "who can see/act on this matter"
+decision goes through the seam so per-matter sharing is a predicate change, not a rewrite; (c) invitations/
+shares are **first-class auditable grant records** (subject → scope{area|matter} → role, with granted_by +
+lifecycle), not ad-hoc flags; (d) a guest (person or agent) added to a matter is a **scoped, revocable grant**
+— a guest agent's tool/skill loan is matter-scoped + time-boxed + (default) read-only and still flows through
+the gateway + guard.
+
+**Remaining open questions** (the rest are settled above): **(3)** may an `area_owner` *configure* the area
+(today admin-only) or only *invite/grant membership*? (lean: invite-only; config stays admin). **(B-invite)**
+who exactly may issue each invite type, and is there an email/notification surface or in-app only?
+**(guest-agent)** the detailed mechanism (guest subagent vs skills-loan) + its permission verb — deferred to
+the dedicated slice.

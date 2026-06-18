@@ -353,9 +353,12 @@ verified). Phased rollout (each its own slice, re-planned at the boundary):
 - **Phase 1 — ship the decision seam, behavior-identical (no schema).** `app/authz/policy.py` with `can()` +
   `visible_filter()` returning today's results; refactor the scattered `_load_visible_*` helpers + the ropa
   read handlers to delegate; no-op-on-ship test. The one (desirable) one-way door.
-- **Phase 2 — `user_practice_areas` table + admin grant surface (schema only; policy ignores it).** Migration
-  **0063+**; ORM copying `TeamMember`'s shape into a separate fork-owned table; AdminUser-gated, audited,
-  `granted_by` RESTRICT grant/revoke endpoints (mirror `admin.update_user_role` + `teams.py` admin_router).
+- **Phase 2 — membership + per-matter sharing + invitations (schema + admin/grant surface; policy ignores it).**
+  Migration **0063+**: `user_practice_areas` (area membership) **+ `matter_collaborators(project_id, user_id,
+  role)`** (per-matter sharing — decision 6) + an auditable **invitation/grant** record (lifecycle
+  invited→accepted/revoked, `granted_by` RESTRICT). ORM copies `TeamMember`'s shape into separate fork-owned
+  tables. Grant/revoke + invite endpoints (admin, area_owner for their area, matter owner/collaborator for
+  their matter; mirror `admin.update_user_role` + `teams.py` admin_router). Behavior unchanged until Phase 4.
 - **Phase 3 — durable area attribution on ROPA rows + backfill (the hard prerequisite).** Non-null
   `practice_area_id` on `processing_activities` + `systems` (keep `source_project_id` as separate provenance);
   forward/backward migration + backfill (open question 2).
@@ -363,7 +366,14 @@ verified). Phased rollout (each its own slice, re-planned at the boundary):
   creation; agent-run launch + worker re-validation; the guard R6-sibling per-call check; owned-resource reads
   (owner OR area-member); and **LAST** the register read-filter (`true()` → area-membership) — which closes
   PRIV-6a and supersedes ADR-F019's §Authz read-posture clause (single-tenant/schema untouched).
-- **Phase 5 — new modules (redlining, assessments) born flip-ready** from the contract — no retrofit.
+- **Phase 4b — the read flip extends to per-matter sharing**: matter reads = owner OR area-member OR
+  matter-collaborator (decision 1 keeps owner unconditional).
+- **Phase 5 — cross-area collaboration + new modules born flip-ready.** Cross-area **person** (invite an
+  Employment colleague onto a Commercial matter as a matter-collaborator). Cross-area **agent** ("@ Deep Agent")
+  — another area's Deep Agent as a **time-boxed, matter-scoped, default read-only GUEST** (honors ADR-F002
+  one-matter-one-identity + the gateway/guard chokepoint; gated by the permission model) — **its own design
+  slice + ADR** (grounding workflow `wf_815d3f81-70e` to fold). New modules (redlining, assessments) follow the
+  readiness contract from birth — no retrofit.
 
 ## Backlog
 
