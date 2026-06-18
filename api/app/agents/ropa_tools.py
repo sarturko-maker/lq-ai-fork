@@ -324,6 +324,7 @@ async def _link(
         missing.append(f"no system with id {system_id}")
     if missing:
         return "Link refused — " + "; ".join(missing) + ". Nothing was linked."
+    assert activity is not None and system is not None  # narrowed by the checks above
 
     existing = (
         await db.execute(
