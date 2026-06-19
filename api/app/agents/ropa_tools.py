@@ -60,6 +60,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload, with_loader_criteria
 
 from app.agents.guard import GuardContext, guarded_dispatch
+from app.agents.ropa_changes import RopaChangeLedger
 from app.agents.tools import MatterBinding
 from app.models.ropa import (
     DataCategory,
@@ -115,6 +116,19 @@ ROPA_TOOL_NAMES = frozenset(
     }
 )
 
+# PRIV-9b (ADR-F024): the change-signal's entity kinds map to the THREE top-level
+# register tables the UI renders + highlights. Links/tags/transfers map to the
+# affected *activity* (and a link also records the system/vendor it touched), so a
+# change always washes a visible top-level row.
+_KIND_ACTIVITY = "processing_activity"
+_KIND_SYSTEM = "system"
+_KIND_VENDOR = "vendor"
+_RETIRE_KIND: dict[type, str] = {
+    ProcessingActivity: _KIND_ACTIVITY,
+    System: _KIND_SYSTEM,
+    Vendor: _KIND_VENDOR,
+}
+
 # Cap the register dump so a large register's tool result stays inside the model's
 # working context; the read UI (PRIV-3) is the place to browse a long register.
 _LIST_LIMIT = 100
@@ -134,12 +148,18 @@ def build_ropa_tools(
     *,
     run_id: uuid.UUID,
     binding: MatterBinding,
+    change_ledger: RopaChangeLedger | None = None,
 ) -> list[Callable[..., Any]]:
     """Build the Privacy matter's guarded ROPA tools for one run.
 
     The guard context grants exactly the ROPA tool names (R6's grant set). The
     run's matter (``binding.project_id``) is closure-injected as row provenance
     (``source_project_id``), never as a scoping filter (ADR-F019).
+
+    ``change_ledger`` (PRIV-9b, ADR-F024) is the run-scoped, B-class (never
+    model-visible) sink each mutating tool records its ``(kind, id, verb)`` into
+    after a successful flush — drives the cockpit's live changed-row highlight.
+    ``None`` ⇒ no recording (the qualified default behaviour is unchanged).
     """
     ctx = GuardContext(
         session_factory=session_factory,
@@ -189,6 +209,7 @@ def build_ropa_tools(
                 retention=retention,
                 special_category=special_category,
                 art9_condition=art9_condition,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -228,6 +249,7 @@ def build_ropa_tools(
                 retention=retention,
                 security_measures=security_measures,
                 ai_usage=ai_usage,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -262,6 +284,7 @@ def build_ropa_tools(
                 dpa_status=dpa_status,
                 description=description,
                 country=country,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -304,6 +327,7 @@ def build_ropa_tools(
                 mechanism=mechanism,
                 vendor_id=vendor_id,
                 details=details,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -324,6 +348,7 @@ def build_ropa_tools(
                 db,
                 processing_activity_id=processing_activity_id,
                 system_id=system_id,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -344,6 +369,7 @@ def build_ropa_tools(
                 db,
                 processing_activity_id=processing_activity_id,
                 vendor_id=vendor_id,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -375,6 +401,7 @@ def build_ropa_tools(
                 kind="data subject categories",
                 processing_activity_id=processing_activity_id,
                 names=names,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -404,6 +431,7 @@ def build_ropa_tools(
                 kind="data categories",
                 processing_activity_id=processing_activity_id,
                 names=names,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -430,6 +458,7 @@ def build_ropa_tools(
                 noun="processing activity",
                 list_hint="list_processing_activities",
                 reason=reason,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -453,6 +482,7 @@ def build_ropa_tools(
                 noun="system",
                 list_hint="list_systems",
                 reason=reason,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -477,6 +507,7 @@ def build_ropa_tools(
                 noun="vendor",
                 list_hint="list_vendors",
                 reason=reason,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -497,6 +528,7 @@ def build_ropa_tools(
                 noun="transfer",
                 list_hint="list_transfers",
                 reason=reason,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -520,6 +552,7 @@ def build_ropa_tools(
                 list_hint="list_systems",
                 processing_activity_id=processing_activity_id,
                 other_id=system_id,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -543,6 +576,7 @@ def build_ropa_tools(
                 list_hint="list_vendors",
                 processing_activity_id=processing_activity_id,
                 other_id=vendor_id,
+                ledger=change_ledger,
             ),
             ctx,
         )
@@ -626,6 +660,7 @@ async def _propose_activity(
     retention: str,
     special_category: bool,
     art9_condition: str | None,
+    ledger: RopaChangeLedger | None = None,
 ) -> str:
     """Validate the proposal, then write it (or return the rejection)."""
     try:
@@ -641,22 +676,24 @@ async def _propose_activity(
     except ValidationError as exc:
         return _rejection_text(exc, "propose_processing_activity")
 
-    db.add(
-        ProcessingActivity(
-            source_project_id=binding.project_id,
-            name=proposal.name,
-            purpose=proposal.purpose,
-            lawful_basis=proposal.lawful_basis.value,
-            controller_role=proposal.controller_role.value,
-            retention=proposal.retention,
-            special_category=proposal.special_category,
-            art9_condition=(proposal.art9_condition.value if proposal.art9_condition else None),
-        )
+    row = ProcessingActivity(
+        source_project_id=binding.project_id,
+        name=proposal.name,
+        purpose=proposal.purpose,
+        lawful_basis=proposal.lawful_basis.value,
+        controller_role=proposal.controller_role.value,
+        retention=proposal.retention,
+        special_category=proposal.special_category,
+        art9_condition=(proposal.art9_condition.value if proposal.art9_condition else None),
     )
+    db.add(row)
     # Flush (not commit) so a DB CHECK violation — the defense-in-depth mirror of
     # the same invariants — surfaces INSIDE the guard's try (audited as an error,
     # rolled back). The guard commits the row together with its audit row.
     await db.flush()
+    # PRIV-9b (ADR-F024): the flushed id is now known — record the live change.
+    if ledger is not None:
+        ledger.record(_KIND_ACTIVITY, row.id, "create")
     return (
         f'Recorded processing activity "{proposal.name}" in the company ROPA '
         f"(lawful basis: {proposal.lawful_basis.value}; role: "
@@ -676,6 +713,7 @@ async def _propose_system(
     retention: str | None,
     security_measures: str | None,
     ai_usage: bool,
+    ledger: RopaChangeLedger | None = None,
 ) -> str:
     """Validate the system proposal, then write it (or return the rejection)."""
     try:
@@ -692,20 +730,21 @@ async def _propose_system(
     except ValidationError as exc:
         return _rejection_text(exc, "propose_system")
 
-    db.add(
-        System(
-            source_project_id=binding.project_id,
-            name=proposal.name,
-            system_type=proposal.system_type.value,
-            description=proposal.description,
-            owner=proposal.owner,
-            hosting_location=proposal.hosting_location,
-            retention=proposal.retention,
-            security_measures=proposal.security_measures,
-            ai_usage=proposal.ai_usage,
-        )
+    row = System(
+        source_project_id=binding.project_id,
+        name=proposal.name,
+        system_type=proposal.system_type.value,
+        description=proposal.description,
+        owner=proposal.owner,
+        hosting_location=proposal.hosting_location,
+        retention=proposal.retention,
+        security_measures=proposal.security_measures,
+        ai_usage=proposal.ai_usage,
     )
+    db.add(row)
     await db.flush()
+    if ledger is not None:  # PRIV-9b (ADR-F024)
+        ledger.record(_KIND_SYSTEM, row.id, "create")
     return f'Recorded system "{proposal.name}" ({proposal.system_type.value}) in the company inventory.'
 
 
@@ -718,6 +757,7 @@ async def _propose_vendor(
     dpa_status: str,
     description: str | None,
     country: str | None,
+    ledger: RopaChangeLedger | None = None,
 ) -> str:
     """Validate the vendor proposal, then write it (or return the rejection)."""
     try:
@@ -731,17 +771,18 @@ async def _propose_vendor(
     except ValidationError as exc:
         return _rejection_text(exc, "propose_vendor")
 
-    db.add(
-        Vendor(
-            source_project_id=binding.project_id,
-            name=proposal.name,
-            vendor_role=proposal.vendor_role.value,
-            dpa_status=proposal.dpa_status.value,
-            description=proposal.description,
-            country=proposal.country,
-        )
+    row = Vendor(
+        source_project_id=binding.project_id,
+        name=proposal.name,
+        vendor_role=proposal.vendor_role.value,
+        dpa_status=proposal.dpa_status.value,
+        description=proposal.description,
+        country=proposal.country,
     )
+    db.add(row)
     await db.flush()
+    if ledger is not None:  # PRIV-9b (ADR-F024)
+        ledger.record(_KIND_VENDOR, row.id, "create")
     return (
         f'Recorded vendor "{proposal.name}" ({proposal.vendor_role.value}; '
         f"DPA: {proposal.dpa_status.value}) in the company register."
@@ -758,6 +799,7 @@ async def _propose_transfer(
     mechanism: str | None,
     vendor_id: str | None,
     details: str | None,
+    ledger: RopaChangeLedger | None = None,
 ) -> str:
     """Validate the transfer proposal + resolve its FKs, then write it (or reject).
 
@@ -814,6 +856,10 @@ async def _propose_transfer(
     # Flush so the DB CHECK mirror (the restricted⇔mechanism invariant) surfaces
     # inside the guard's try, audited and rolled back together with the audit row.
     await db.flush()
+    # PRIV-9b (ADR-F024): a transfer is a child of an activity (no top-level row of
+    # its own in the register), so the PARENT activity row is what washes.
+    if ledger is not None:
+        ledger.record(_KIND_ACTIVITY, pa_uuid, "create")
     safeguard = (
         f"; mechanism: {proposal.mechanism.value}" if proposal.mechanism else "; not restricted"
     )
@@ -825,6 +871,7 @@ async def _link(
     *,
     processing_activity_id: str,
     system_id: str,
+    ledger: RopaChangeLedger | None = None,
 ) -> str:
     """Link an activity to a system after checking both exist (else reject)."""
     try:
@@ -868,6 +915,10 @@ async def _link(
         )
     )
     await db.flush()
+    # PRIV-9b (ADR-F024): a real link changes BOTH rows' linked-counts — wash both.
+    if ledger is not None:
+        ledger.record(_KIND_ACTIVITY, pa_uuid, "link")
+        ledger.record(_KIND_SYSTEM, sys_uuid, "link")
     return f'Linked processing activity "{activity.name}" to system "{system.name}".'
 
 
@@ -876,6 +927,7 @@ async def _link_vendor(
     *,
     processing_activity_id: str,
     vendor_id: str,
+    ledger: RopaChangeLedger | None = None,
 ) -> str:
     """Link an activity to a vendor/recipient after checking both exist (else reject)."""
     try:
@@ -919,6 +971,10 @@ async def _link_vendor(
         )
     )
     await db.flush()
+    # PRIV-9b (ADR-F024): a real link changes BOTH rows' linked-counts — wash both.
+    if ledger is not None:
+        ledger.record(_KIND_ACTIVITY, pa_uuid, "link")
+        ledger.record(_KIND_VENDOR, vendor_uuid, "link")
     return f'Linked processing activity "{activity.name}" to vendor "{vendor.name}".'
 
 
@@ -963,6 +1019,7 @@ async def _retire[R: (ProcessingActivity, System, Vendor, Transfer)](
     noun: str,
     list_hint: str,
     reason: str | None,
+    ledger: RopaChangeLedger | None = None,
 ) -> str:
     """Soft-retire one register row (set ``retired_at``); never delete it.
 
@@ -991,6 +1048,13 @@ async def _retire[R: (ProcessingActivity, System, Vendor, Transfer)](
     if reason is not None and reason.strip():
         row.retirement_reason = reason.strip()
     await db.flush()
+    # PRIV-9b (ADR-F024): a real retirement (this row was live until now). A transfer
+    # has no top-level register row, so its PARENT activity is what washes.
+    if ledger is not None:
+        if isinstance(row, Transfer):
+            ledger.record(_KIND_ACTIVITY, row.processing_activity_id, "retire")
+        else:
+            ledger.record(_RETIRE_KIND[model], eid, "retire")
     return (
         f'Retired the {noun} "{label}" from the live register — it is hidden from the '
         "register but kept on record for audit."
@@ -1007,6 +1071,7 @@ async def _unlink[O: (System, Vendor)](
     list_hint: str,
     processing_activity_id: str,
     other_id: str,
+    ledger: RopaChangeLedger | None = None,
 ) -> str:
     """Delete one M:N link row after checking both ends exist (else reject).
 
@@ -1048,6 +1113,10 @@ async def _unlink[O: (System, Vendor)](
         return (
             f'"{activity.name}" was not linked to {other_noun} "{other.name}" — nothing to unlink.'
         )
+    # PRIV-9b (ADR-F024): a real unlink changes BOTH rows' linked-counts — wash both.
+    if ledger is not None:
+        ledger.record(_KIND_ACTIVITY, pa_uuid, "unlink")
+        ledger.record(_RETIRE_KIND[other_model], other_uuid, "unlink")
     return f'Unlinked {other_noun} "{other.name}" from processing activity "{activity.name}".'
 
 
@@ -1234,6 +1303,7 @@ async def _add_categories[CatT: (DataSubjectCategory, DataCategory)](
     kind: str,
     processing_activity_id: str,
     names: list[str],
+    ledger: RopaChangeLedger | None = None,
 ) -> str:
     """Validate each category name, then find-or-create + idempotently link it.
 
@@ -1316,6 +1386,11 @@ async def _add_categories[CatT: (DataSubjectCategory, DataCategory)](
         else:
             already.append(category.name)
     await db.flush()
+    # PRIV-9b (ADR-F024): tagging changes the ACTIVITY's category set — wash the
+    # activity row, and only when a NEW link was actually added (re-tagging an
+    # already-tagged category is a no-op, so it records nothing).
+    if ledger is not None and added:
+        ledger.record(_KIND_ACTIVITY, pa_uuid, "tag")
 
     parts = [f'Tagged "{activity.name}" with {kind}.']
     if added:

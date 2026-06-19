@@ -55,6 +55,7 @@
 		applyAnswerText,
 		applyRunPart,
 		applyStepPart,
+		parseRopaChangePayload,
 		parseRunPayload,
 		parseStepPayload
 	} from '$lib/lq-ai/agents/run-stream';
@@ -97,6 +98,9 @@
 		settled: void;
 		newmatter: void;
 		threadcreated: { threadId: string; projectId: string | null };
+		/** PRIV-9b (ADR-F024): one ROPA register row the agent just changed — the
+		 * host lifts the id into a recently-changed set that washes the matching row. */
+		ropachange: { kind: string; id: string; verb: string };
 	}>();
 
 	let submitting = false;
@@ -475,6 +479,15 @@
 				detail = applyRunPart(detail, runId, payload);
 				liveReasoning = '';
 				liveReasoningBlock = null;
+				return;
+			}
+			case 'data-ropa-change': {
+				// PRIV-9b (ADR-F024): a ROPA register row just changed. Relay the id
+				// up to the host, which washes the matching row in the co-visible
+				// register. Animation only — the register's own poll/reconcile carries
+				// the true rows (ADR-F004), so a dropped frame loses a flash, not data.
+				const payload = parseRopaChangePayload(part.data);
+				if (payload) dispatch('ropachange', payload);
 				return;
 			}
 			default:

@@ -71,8 +71,12 @@
 		runActive = false,
 		// Bumped by the host when a run settles — triggers one reconcile fetch so
 		// the final write is never missed even if the last poll tick raced it.
-		reloadKey = 0
-	}: { runActive?: boolean; reloadKey?: number } = $props();
+		reloadKey = 0,
+		// PRIV-9b (ADR-F024): ids of register rows the agent just changed (hoisted
+		// + decayed by the host). A matching activity/system/vendor row gets a
+		// transient wash. Animation only — the polled rows above are the truth.
+		changedIds = new Set<string>()
+	}: { runActive?: boolean; reloadKey?: number; changedIds?: Set<string> } = $props();
 
 	let activities = $state<ProcessingActivityRead[] | null>(null);
 	let systems = $state<SystemRead[] | null>(null);
@@ -355,7 +359,12 @@
 							</TableHeader>
 							<TableBody>
 								{#each activities ?? [] as a (a.id)}
-									<TableRow class="cursor-pointer" onclick={() => openActivity(a.id)}>
+									<TableRow
+										class="lq-reg-row cursor-pointer{changedIds.has(a.id)
+											? ' lq-row-changed'
+											: ''}"
+										onclick={() => openActivity(a.id)}
+									>
 										<TableCell class="font-medium text-foreground">{a.name}</TableCell>
 										<TableCell>
 											<Badge variant="secondary">{lawfulBasisLabel(a.lawful_basis)}</Badge>
@@ -395,7 +404,12 @@
 							</TableHeader>
 							<TableBody>
 								{#each systems ?? [] as s (s.id)}
-									<TableRow class="cursor-pointer" onclick={() => openSystem(s.id)}>
+									<TableRow
+										class="lq-reg-row cursor-pointer{changedIds.has(s.id)
+											? ' lq-row-changed'
+											: ''}"
+										onclick={() => openSystem(s.id)}
+									>
 										<TableCell class="font-medium text-foreground">{s.name}</TableCell>
 										<TableCell>
 											<Badge variant="secondary">{systemTypeLabel(s.system_type)}</Badge>
@@ -434,7 +448,12 @@
 							</TableHeader>
 							<TableBody>
 								{#each vendors ?? [] as v (v.id)}
-									<TableRow class="cursor-pointer" onclick={() => openVendor(v.id)}>
+									<TableRow
+										class="lq-reg-row cursor-pointer{changedIds.has(v.id)
+											? ' lq-row-changed'
+											: ''}"
+										onclick={() => openVendor(v.id)}
+									>
 										<TableCell class="font-medium text-foreground">{v.name}</TableCell>
 										<TableCell>
 											<Badge variant="secondary">{vendorRoleLabel(v.vendor_role)}</Badge>
@@ -506,3 +525,24 @@
 		</div>
 	{/if}
 </PageShell>
+
+<style>
+	/* PRIV-9b (ADR-F024): a row the agent just changed gets a brief green wash
+	   (the `--status-completed` intent: "just written") so the eye lands on where
+	   the change happened, then fades. The transition lives on the BASE row so
+	   both the wash-in (class added when the id enters the host's recently-changed
+	   set) and the fade-out (class removed when the host's decay clears it) animate.
+	   `:global` because shadcn `TableRow` renders the <tr> outside this scope.
+	   Reduced-motion → the wash applies and clears instantly (no animation). */
+	:global(tr.lq-reg-row) {
+		transition: background-color 600ms ease-out;
+	}
+	:global(tr.lq-reg-row.lq-row-changed) {
+		background-color: var(--color-status-completed-wash);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		:global(tr.lq-reg-row) {
+			transition: none;
+		}
+	}
+</style>

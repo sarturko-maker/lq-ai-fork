@@ -71,6 +71,7 @@ async def execute_run_job(
     *,
     claimed_by: str,
     compose: Callable[..., Awaitable[None]] | None = None,
+    broker: Any | None = None,
 ) -> dict[str, Any]:
     """Claim → compose → execute one run, at-most-once (core).
 
@@ -110,7 +111,10 @@ async def execute_run_job(
         )
         return {"run_id": str(run_id), "executed": False}
     try:
-        await compose(run_id=run_id, lease=lease)
+        # F025: the cross-process stream broker (when the worker wired one in
+        # on_startup) carries this run's live parts to the api's SSE endpoint via
+        # Redis. None ⇒ the F1-S1 behaviour (settled-rows-only / DB-tail).
+        await compose(run_id=run_id, lease=lease, broker=broker)
     except BaseException as exc:
         settled = await settle_run(
             session_factory,
@@ -133,7 +137,12 @@ async def execute_run_job(
 async def agent_run_job(ctx: dict[str, Any], run_id: str) -> dict[str, Any]:
     """arq wrapper around :func:`execute_run_job` (process globals)."""
     return await execute_run_job(
-        get_session_factory(), uuid.UUID(run_id), claimed_by=_WORKER_BOOT_TAG
+        get_session_factory(),
+        uuid.UUID(run_id),
+        claimed_by=_WORKER_BOOT_TAG,
+        # F025: the per-process Redis stream broker, wired in on_startup. Absent
+        # (None) ⇒ settled-rows-only streaming (the F1-S1 fallback).
+        broker=ctx.get("agent_stream_broker"),
     )
 
 

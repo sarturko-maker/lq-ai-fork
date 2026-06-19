@@ -27,9 +27,9 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.admin_bootstrap import ensure_first_run_admin
 from app.agents.checkpointer import close_agent_checkpointer, init_agent_checkpointer
-from app.agents.stream import RunStreamBroker
+from app.agents.stream import RedisStreamBridge, RunStreamBroker
 from app.api import api_router
-from app.cache import check_redis, close_redis
+from app.cache import check_redis, close_redis, get_redis
 from app.clients.gateway import close_gateway_client, get_gateway_client
 from app.config import get_settings
 from app.db.session import check_db, dispose_engine, get_session_factory
@@ -105,7 +105,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # SSE v2 run-stream broker (F0-S7, ADR-F006): process-local pub/sub
     # between the runner and the stream endpoint. Composition root —
     # endpoints reach it through get_stream_broker (app/api/agent_runs).
-    app.state.agent_stream_broker = RunStreamBroker()
+    broker = RunStreamBroker()
+    app.state.agent_stream_broker = broker
+
+    # F025: cross-process stream bridge. Agent runs execute in the arq worker,
+    # which publishes their live parts onto Redis pub/sub; this bridge relays
+    # them into the process-local broker so the SSE endpoint serves them
+    # unchanged. Constructed lazily-connecting (get_redis builds a client whose
+    # TCP connect happens on first command) — if Redis is down the endpoint's
+    # attach fails soft and the stream serves the DB-tail.
+    app.state.agent_stream_bridge = RedisStreamBridge(get_redis(), broker)
 
     try:
         yield
@@ -114,6 +123,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Close clients in reverse order of dependency. Failures here are
         # logged but never propagate — shutdown is best-effort.
         for closer_name, closer in (
+            ("run-stream bridge", app.state.agent_stream_bridge.aclose),
             ("agent checkpointer", close_agent_checkpointer),
             ("gateway client", close_gateway_client),
             ("redis", close_redis),

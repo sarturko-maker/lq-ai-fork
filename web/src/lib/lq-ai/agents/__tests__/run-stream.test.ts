@@ -4,6 +4,7 @@ import {
 	applyAnswerText,
 	applyRunPart,
 	applyStepPart,
+	parseRopaChangePayload,
 	parseRunPayload,
 	parseStepPayload,
 	type StreamStepPayload
@@ -153,5 +154,25 @@ describe('applyRunPart / applyAnswerText', () => {
 	it('sets the final answer from the terminal text block', () => {
 		const next = applyAnswerText(makeDetail(), 'run-1', 'Twelve months of fees.');
 		expect(next.runs[0].run.final_answer).toBe('Twelve months of fees.');
+	});
+});
+
+describe('parseRopaChangePayload (PRIV-9b, ADR-F024)', () => {
+	it('parses a well-formed change frame', () => {
+		expect(
+			parseRopaChangePayload({ kind: 'system', id: 'sys-1', verb: 'create' })
+		).toEqual({ kind: 'system', id: 'sys-1', verb: 'create' });
+	});
+
+	it('keeps id load-bearing and defaults missing kind/verb to empty strings', () => {
+		expect(parseRopaChangePayload({ id: 'v-1' })).toEqual({ kind: '', id: 'v-1', verb: '' });
+	});
+
+	it('drops a frame with no usable id (no highlight; the poller carries the truth)', () => {
+		expect(parseRopaChangePayload({ kind: 'vendor', verb: 'retire' })).toBeNull();
+		expect(parseRopaChangePayload({ id: '' })).toBeNull();
+		expect(parseRopaChangePayload({ id: 42 })).toBeNull();
+		expect(parseRopaChangePayload(null)).toBeNull();
+		expect(parseRopaChangePayload('nope')).toBeNull();
 	});
 });

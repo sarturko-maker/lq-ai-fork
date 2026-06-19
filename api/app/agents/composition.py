@@ -36,10 +36,11 @@ from app.agents.area_agent import AreaAgentSpec, combine_tier_floors, render_are
 from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.lease import RunLease, settle_run
+from app.agents.ropa_changes import RopaChangeLedger
 from app.agents.ropa_tools import PRIVACY_AREA_KEY, build_ropa_tools
 from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
 from app.agents.skill_backend import SkillWiring, build_area_skill_wiring
-from app.agents.stream import RunStreamBroker
+from app.agents.stream import RedisStreamBroker, RunStreamBroker
 from app.agents.tools import MatterBinding, build_matter_tools
 from app.db.session import get_session_factory
 from app.models.agent_run import AgentRun
@@ -97,7 +98,7 @@ async def compose_and_execute_run(
     *,
     run_id: uuid.UUID,
     lease: RunLease | None = None,
-    broker: RunStreamBroker | None = None,
+    broker: RunStreamBroker | RedisStreamBroker | None = None,
     model_builder: Callable[..., BaseChatModel] = build_gateway_chat_model,
     session_factory_provider: Callable[[], async_sessionmaker[AsyncSession]] = get_session_factory,
     checkpointer_provider: Callable[[], BaseCheckpointSaver | None] = get_agent_checkpointer,
@@ -215,8 +216,15 @@ async def compose_and_execute_run(
         # ROPA domain tools — propose (the code-validated write) + list. Tool
         # selection is area-keyed at the composition point (the area row is the
         # agent identity, ADR-F002); other areas never grant these.
+        # PRIV-9b (ADR-F024): the run-scoped change ledger is the producer (the ROPA
+        # tools) → consumer (the runner's stream drain) seam for the live changed-row
+        # highlight. Only Privacy runs make one — others leave it None (no drain).
+        change_ledger: RopaChangeLedger | None = None
         if binding is not None and area_key == PRIVACY_AREA_KEY:
-            tools = tools + build_ropa_tools(session_factory, run_id=run_id, binding=binding)
+            change_ledger = RopaChangeLedger()
+            tools = tools + build_ropa_tools(
+                session_factory, run_id=run_id, binding=binding, change_ledger=change_ledger
+            )
 
         # F1-S3: the gateway tier floor is the strongest (lowest) of the
         # matter floor and the area's default floor — the gateway combiner
@@ -267,6 +275,7 @@ async def compose_and_execute_run(
                 thread_id=thread_id,
                 publisher=publisher,
                 lease=lease,
+                change_ledger=change_ledger,
             )
         finally:
             await http_client.aclose()
