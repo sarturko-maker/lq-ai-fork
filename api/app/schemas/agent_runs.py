@@ -65,7 +65,14 @@ class AgentRunCreate(BaseModel):
 
     prompt: str = Field(min_length=1, max_length=32_768)
     model_alias: str = Field(default="smart", min_length=1, max_length=64)
-    max_steps: int = Field(default=20, ge=1, le=100)
+    # Cockpit default budget (ADR-F026): a single ROPA edit is ~10-20 settled steps
+    # (read register -> locate -> propose/link/retire -> re-read, with a
+    # model turn between each), and a multi-change ask stacks several. The
+    # old default of 20 capped real privacy work mid-run. 100 is both the
+    # default and the hard ceiling here; the R4 cost cap (not this) is the
+    # money guard, and the run's wall clock (runner.DEFAULT_WALL_CLOCK_SECONDS)
+    # bounds time. Raising the ceiling above 100 is a deliberate follow-up.
+    max_steps: int = Field(default=100, ge=1, le=100)
     # F0-S4: optional Matter binding — the run's agent gets the matter's
     # document tools and the gateway envelope carries the matter's
     # privilege/tier floor. Validated against ownership at the endpoint

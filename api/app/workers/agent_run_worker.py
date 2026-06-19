@@ -52,10 +52,13 @@ AGENT_RUN_JOB_NAME = "agent_run_job"
 """Function name the api-side enqueue helper targets — must match
 :data:`app.workers.queue.AGENT_RUN_JOB_NAME`."""
 
-# Runner wall clock (300s) + composition/finalize slack. Per-function
-# override on the shared worker (its default job_timeout=900 serves the
-# legacy playbook/tabular jobs).
-AGENT_RUN_JOB_TIMEOUT_SECONDS = 420
+# Runner wall clock + ~120s composition/finalize slack (ADR-F026): this MUST
+# exceed runner.DEFAULT_WALL_CLOCK_SECONDS so the run's own clean cap fires
+# before arq hard-cancels the worker. Per-function override on the shared
+# worker (whose default job_timeout=900 serves the legacy playbook/tabular
+# jobs); agent runs need more, so we override UP. The ordering invariant is
+# guarded by test_agent_run_worker.test_agent_run_timeout_layering.
+AGENT_RUN_JOB_TIMEOUT_SECONDS = 1020
 
 # One tag per worker boot: host:pid:boot-uuid. The uuid component is
 # what makes the tag unique across PID recycling / container restarts —
@@ -121,7 +124,8 @@ async def execute_run_job(
             run_id,
             status=AgentRunStatus.failed,
             # Covers arq abort, worker SIGTERM shutdown, AND the arq
-            # job timeout (420s) — all delivered as CancelledError.
+            # job timeout (AGENT_RUN_JOB_TIMEOUT_SECONDS) — all delivered
+            # as CancelledError.
             error=f"run interrupted: worker shutdown, abort, or job timeout ({type(exc).__name__})",
             lease_token=lease.token,
         )
@@ -164,7 +168,7 @@ async def run_orphan_sweep(
       ADR-F009). ``abort_job`` is then fired per settled run: a
       false-orphaned ZOMBIE is still executing and its checkpoint/step
       writes are not lease-fenced — the abort kills it within delivery
-      latency instead of the 300s wall clock (review fix).
+      latency instead of waiting out the full run wall clock (review fix).
     * UNCLAIMED row older than the claim grace → the enqueue was lost
       after acceptance, the worker died between dequeue and claim, or
       the row predates F1-S1 (BackgroundTasks rows have no live runner

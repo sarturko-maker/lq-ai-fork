@@ -741,7 +741,7 @@ async def stream_agent_run(
     Another user's ``run_id`` returns 404 (not 403) — no existence
     disclosure. The request-scoped session is explicitly closed before
     streaming starts (FastAPI tears yield-deps down only after the
-    response body completes — a 300s stream must not pin a pool
+    response body completes — a long-lived stream must not pin a pool
     connection); the generator reads through short-lived sessions.
     """
     run = await db.get(AgentRun, run_id)
