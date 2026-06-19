@@ -198,7 +198,7 @@ async def test_create_run_returns_202_with_running_row(
     assert body["status"] == "running"
     assert body["prompt"] == "What is the liability cap?"
     assert body["model_alias"] == "smart"
-    assert body["max_steps"] == 20
+    assert body["max_steps"] == 100
     assert body["purpose"] == "agent_loop"
     assert body["final_answer"] is None
     assert body["finished_at"] is None

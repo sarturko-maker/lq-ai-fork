@@ -426,3 +426,22 @@ async def test_arq_registration_pins_at_most_once() -> None:
     assert WorkerSettings.allow_abort_jobs is True
     cron_names = {cj.coroutine.__name__ for cj in WorkerSettings.cron_jobs}  # type: ignore[attr-defined]
     assert {"agent_run_orphan_sweep", "checkpoint_gc_job"} <= cron_names
+
+
+def test_agent_run_timeout_layering() -> None:
+    """The in-run wall clock must fire BEFORE arq's hard job timeout.
+
+    Ordering: a run that exhausts its time should settle as a CLEAN cap
+    (the runner's asyncio.timeout -> failed/timeout with steps preserved),
+    not as the arq job-timeout CancelledError that surfaces the uglier
+    "run interrupted". So DEFAULT_WALL_CLOCK_SECONDS < the arq per-job
+    timeout, with slack for composition/finalize. Inverting these (e.g. a
+    future budget bump that raises the wall clock past the arq timeout)
+    would silently turn graceful caps into interruptions — this guards it.
+    """
+    from app.agents.runner import DEFAULT_WALL_CLOCK_SECONDS
+    from app.workers.agent_run_worker import AGENT_RUN_JOB_TIMEOUT_SECONDS
+
+    assert DEFAULT_WALL_CLOCK_SECONDS < AGENT_RUN_JOB_TIMEOUT_SECONDS
+    # Slack must be enough to settle the run row after the clean cap fires.
+    assert AGENT_RUN_JOB_TIMEOUT_SECONDS - DEFAULT_WALL_CLOCK_SECONDS >= 60

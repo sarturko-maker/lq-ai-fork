@@ -53,7 +53,13 @@ from app.schemas.agent_runs import AgentRunStatus, AgentRunStepKind
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_WALL_CLOCK_SECONDS = 300.0
+# In-run wall clock (ADR-F026): the run's own clean brake (-> cap_exceeded/timeout with
+# steps preserved). It MUST stay below the arq job timeout
+# (agent_run_worker.AGENT_RUN_JOB_TIMEOUT_SECONDS) so the graceful in-run cap
+# fires before arq hard-cancels the worker (which settles a worse "run
+# interrupted"). 900s pairs with a 100-step budget on a reasoning model like
+# DeepSeek flash, where each settled step costs real wall time.
+DEFAULT_WALL_CLOCK_SECONDS = 900.0
 
 # langgraph's default graph recursion_limit (25) is an UNINTENDED ceiling far
 # below our real brakes (max_steps, the wall clock, the R4/R5/R6 guards): with
