@@ -1,6 +1,8 @@
-# OneTrust (privacy arena) → LQ.AI functionality map
+# OneTrust + TrustArc (privacy arena) → LQ.AI functionality map
 
-**Status:** DRAFT for maintainer edit. **Date:** 2026-06-18. Feeds the PRIV roadmap
+**Status:** DRAFT for maintainer edit. **Date:** 2026-06-18; **refreshed 2026-06-19** (TrustArc added,
+shipped-state reconciled, transfer-map + AI-layer findings — see § Update 2026-06-19 at the foot, which is
+the current view; the body below is the original OneTrust-only draft). Feeds the PRIV roadmap
 (`PRIV-privacy-ropa-module-decomposition.md`, `PRIV-3-ropa-read-ui-and-relational-reshape.md`).
 Governing: ADR-F018 (agentic modules), ADR-F019 (relational, deployment-global ROPA). Memory:
 [[oscar-privacy-modules-vision]].
@@ -168,3 +170,103 @@ ingestion + the write path. Full live-data-store discovery → backlog/partner.
 Cookie CMP + scanner; runtime consent/preference platform + MarTech SDKs; enterprise data-store discovery
 connector fleet; a proprietary regulatory-content library (we cite, we don't license a RAG — ICO RAG dropped).
 These are where OneTrust's moat is *infrastructure*, not lawyering — not LQ.AI's wedge.
+
+---
+
+## Update 2026-06-19 — refreshed vs current OneTrust + TrustArc + our shipped state
+
+Three cited web-research runs (OneTrust 2025–26 docs, TrustArc/Nymity 2025–26 docs, OSS map libraries) +
+reconciliation against what we actually shipped (PRIV-3→9b). Source URLs inline. Marketing figures (e.g.
+"80% autofill") are vendor-sourced — not treated as fact. Both vendors' help centers are JS/403-gated, so a
+few deep UI mechanics are flagged "unverified" rather than asserted.
+
+### A. What we have now (reconciled — the RoPA spine is ~at parity)
+
+Shipped & live: relational two-tier register (System↔Activity, PRIV-3), vendors/recipients (PRIV-5a),
+transfers + the **restricted⇒mechanism invariant** (PRIV-5b), personal-data taxonomy **closing all of
+Article 30(1)** (PRIV-6a), Article 30 export JSON/CSV/XLSX (PRIV-4a), programme dashboard + gaps (PRIV-6b),
+**node-link** data-flow map (PRIV-6c, `@xyflow/svelte`), agent population/change/swap with live cockpit +
+changed-row highlight (PRIV-7…9b). This is the surface both vendors lead with; we're there.
+
+### B. The data-transfer-map finding (the headline of this refresh)
+
+**Both incumbents ship TWO visualizations — a node-link graph AND a geographic map. We have only the
+node-link one.**
+- **OneTrust:** explicitly names "an improved **cross-border map to visualize transfers**, a **new data
+  graph visualization**" as separate features
+  (https://www.onetrust.com/blog/onetrust-unveils-latest-platform-innovations-to-drive-responsible-data-use-and-business-resilience/).
+  The **Asset Map** is a world map "organized by hosting location" with per-country counters (hover splits
+  3rd-party/internal); a separate patent-described "Cross-Border Visualization Generation System" draws
+  transfers between locations (https://www.onetrust.com/schrems-solutions/). Node-link side = "AI Inventory
+  Graph" + manual **Data Lineage Diagrams** (drag-icons-on-canvas).
+- **TrustArc:** one Business Process Record renders as a switchable **Flowchart View** (node-link:
+  systems/data-subjects/vendors via "Sends Data To" connectors) **and** a **Map View** plotted "by hosting
+  location"; product page names "interactive data flow maps, **transfer maps**, and relationship views"
+  (https://trustarc.com/products/privacy-data-governance/data-mapping-risk-manager/).
+
+**The opening:** neither vendor's geographic map could be confirmed to show the **legal transfer mechanism**
+inline — both look like hosting-location plots with counters/pins. We already store destination + restricted
++ mechanism + recipient (PRIV-5b) and enforce restricted⇒mechanism. A geo arc map that surfaces the Chapter
+V safeguard on click and **flags restricted-without-mechanism** beats them on legal substance. → **Plan:
+`PRIV-6e-geographic-transfer-map.md`.**
+
+**OSS library verdict (for PRIV-6e):** **Apache ECharts** (Apache-2.0; native animated geo arcs; no WebGL;
+tree-shakeable; Svelte-5 wrapper; also does Sankey) — top pick. Runner-up **d3-geo** (ISC, ~20KB, on-brand,
+hand-rolled, we already have d3 transitively). **amCharts DISQUALIFIED** — proprietary "linkware" forcing a
+visible logo unless licensed (https://github.com/amcharts/amcharts5/blob/master/LICENSE). New dep → ADR +
+NOTICES, the ADR-F022 precedent.
+
+### C. Genuine gaps that fit our wedge (build these)
+
+1. **Assessment automation — biggest gap; it IS our P1 flagship.** Both vendors strong: PIA/DPIA/TIA/LIA +
+   AI-impact templates, conditional logic, risk register/scoring, stakeholder questionnaires, write-back.
+   We have **none** yet. TrustArc Assessment Manager: 10+ templates incl. **AI Risk Assessment**, role-based
+   routing, automated scoring → remediation tasks
+   (https://trustarc.com/products/privacy-data-governance/assessment-manager/). OneTrust: PIA/DPIA/AIIA/EU
+   AI Act conformity, Skip/Show logic, consolidated Risk Register, auto-trigger follow-on assessments
+   (https://www.onetrust.com/news/onetreust-announces-collaboration-features-assessment-automation-pia-dpia/).
+   → **Track PRIV-A (decomposition: `PRIV-A-assessment-automation-decomposition.md`).**
+2. **Legal-Entity report scope** (controller/processor Article 30 outputs; OneTrust parent/child entity
+   hierarchy). We deferred it (PRIV-6d, needs migration). Real Article-30 completeness gap.
+3. **Attestation / recertification** (staleness triggers → scheduled re-confirmation). Both ship it
+   (OneTrust: record-not-updated-in-N-days / recurring-cycle / contract-expiry triggers, prior answers
+   pre-populate). We have the `/schedule` substrate, unbuilt. Strong agentic fit.
+4. **Discovery-from-documents** (PRIV-J): agent classifies personal data in the matter's own ingested docs →
+   proposes ROPA. Lighter than their connector fleets, rides our ingestion, high value.
+5. Lower: bulk CSV/Excel import (both have it; backlog); a **seeded common-systems/vendors record library**
+   (TrustArc "Record Exchange" 800+ pre-built records; OneTrust template packs) — nice-to-have population
+   accelerator.
+
+P2 tracks (DSAR, Incident/Breach, DPA review, regulatory gap) remain unbuilt but already sequenced, each
+with a differentiator (systems inventory makes the DSAR "walk" real; we cite primary sources, no licensed
+RAG).
+
+### D. Deliberate non-goals (NOT gaps — restating so they're not misread)
+
+Consent & preference platform; cookie CMP/scanner (OneTrust 45M-cookie DB + scanner, TrustArc #1 enterprise
+CMP per G2); enterprise data-store discovery connector fleet (OneTrust 200+ connectors + SDK); proprietary
+regulatory-content RAG (TrustArc Nymity Research ~52k references / OneTrust DataGuidance). These are
+**infrastructure moats, not lawyering** — conscious non-goals; the agent can *advise on* consent/transfer
+architecture and *cite* regulators without us building the runtime infra or licensing a content library.
+
+### E. The AI-layer contrast — do NOT mistake their 2025 launches for parity-closing
+
+Both shipped AI in 2025: **OneTrust Copilot** (NL query, Azure OpenAI, Oct 2024) + Privacy Agent (Sept 2025,
+docs→PIA responses) + Winter-'26 agents (AI Evidence Analysis, Copilot Analytics) — several still
+preview/roadmap, names drift across announcements
+(https://www.onetrust.com/blog/evolving-privacy-programs-with-ai-whats-new-in-the-onetrust-winter-26-release/).
+**TrustArc Arc** (GA **Dec 18 2025**): Ask Arc (cited answers over program data) + Arc Intelligence,
+grounded in Nymity content; AI Analyzer still preview
+(https://trustarc.com/press/trustarc-launches-arc-the-ai-powered-privacy-management-platform-built-for-modern-teams/).
+**These are retrieval-and-cite assistants + autofill bolt-ons, not agent-native workflow execution.** Our
+ADR-F018 loop (agent proposes → deterministic code validates → human owns), code-validated writes, and the
+planned **conversational-link intake** (ADR-F020, our PRIV-A2 differentiator) remain architecturally
+distinct. Their AI narrows the optics gap; it does not replicate the validated agentic write path.
+
+### F. Revised near-term priority
+
+1. **P1 NOW — PRIV-A assessment automation** (start with PRIV-A1: `assessment`+`risk` domain + code-validated
+   write + a PIA/DPIA skill; then PRIV-A2 = ADR-F020 conversational-link intake, the differentiator).
+2. **PRIV-6e geographic transfer map** — self-contained, visible, out-classes incumbents on legal substance;
+   slot when convenient (independent of P1).
+3. Then PRIV-6d (legal entity), attestation/recertification, discovery-from-documents.
