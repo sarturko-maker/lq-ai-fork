@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { createRun, getRun, getThread, listRuns, listThreads } from '../agents';
+import { cancelRun, createRun, getRun, getThread, listRuns, listThreads } from '../agents';
 
 /** Minimal Response-shaped stub. apiRequest reads content-type to decide json/text. */
 function jsonResponseLike(status: number, body: unknown) {
@@ -142,6 +142,22 @@ describe('agents API client', () => {
 		const detail = await getThread('a/b');
 		expect(detail.continuable).toBe(false);
 		expect(firstCall(fetchMock)[0]).toMatch(/\/agents\/threads\/a%2Fb$/);
+	});
+
+	it('cancelRun POSTs to /agents/runs/{id}/cancel with the id URL-encoded (PRIV-9a)', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponseLike(200, { id: 'a/b', status: 'cancelled', thread_id: 't1' })
+		);
+		const run = await cancelRun('a/b');
+		expect(run.status).toBe('cancelled');
+		const [url, init] = firstCall(fetchMock);
+		expect(url).toMatch(/\/agents\/runs\/a%2Fb\/cancel$/);
+		expect(init.method).toBe('POST');
+	});
+
+	it('cancelRun surfaces a 404 (cross-user / unknown run) as a typed error', async () => {
+		fetchMock.mockResolvedValueOnce(jsonResponseLike(404, { detail: 'run not found' }));
+		await expect(cancelRun('nope')).rejects.toMatchObject({ status: 404 });
 	});
 
 	it('translates the 409 thread brakes into typed errors (plain-string detail)', async () => {

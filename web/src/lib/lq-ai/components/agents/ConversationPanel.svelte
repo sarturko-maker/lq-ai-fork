@@ -23,6 +23,7 @@
 	import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import SearchIcon from '@lucide/svelte/icons/search';
+	import SquareIcon from '@lucide/svelte/icons/square';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import { renderModelMarkdown } from '$lib/lq-ai/sanitize-markdown';
 	import StepRow from './StepRow.svelte';
@@ -33,6 +34,8 @@
 	import {
 		MAX_POLL_FAILURES,
 		POLL_INTERVAL_MS,
+		agentWorking,
+		cancellableRunId,
 		composerEnabled,
 		isStaleRunning,
 		latestRunOf,
@@ -77,6 +80,13 @@
 	export let rail: Record<string, RailState> = {};
 	export let matterBound = false;
 	export let hasConversation = false;
+	/**
+	 * Bound OUT to the host (PRIV-9a): true while the agent is actively
+	 * working. The cockpit host relays it to the co-visible ROPA register so
+	 * the register polls live while the agent writes — mirroring the
+	 * composer's own run-lock (`working` below).
+	 */
+	export let runActive = false;
 
 	// `newmatter`: the user asked to create a matter from the composer —
 	// the HOST owns the modal (page chrome) and writes the created id back
@@ -91,6 +101,12 @@
 
 	let submitting = false;
 	let submitError: string | null = null;
+	// PRIV-9a run-lock: the Stop control's in-flight + error state.
+	let cancelling = false;
+	let cancelError: string | null = null;
+	// The run id from createRun, before the first poll surfaces it — bridges the
+	// gap so Stop is targetable the instant the lock engages.
+	let pendingRunId: string | null = null;
 
 	// F0-S4: selectedMatterId (prop above) binds the conversation to a
 	// Matter so the agent gets the matter's document tools. '' = blank
@@ -288,6 +304,10 @@
 					? { prompt: text, thread_id: detail.thread.id }
 					: { prompt: text, project_id: selectedMatterId }
 			);
+			// PRIV-9a: createRun returns the run already 'running' — seed it so the
+			// Stop button is targetable before the first poll lands (no locked-but-
+			// uncancellable window).
+			pendingRunId = created.id;
 			prompt = '';
 			if (isNewThread) {
 				dispatch('threadcreated', {
@@ -313,6 +333,27 @@
 		} finally {
 			submitting = false;
 		}
+	}
+
+	// PRIV-9a: while the agent works the composer collapses to a single Stop
+	// control. Stop calls the REAL backend cancel (not just a client stream
+	// abort) so the durable run actually settles, then re-syncs by polling —
+	// the settled `cancelled` row re-enables the composer (ADR-F004). Idempotent
+	// server-side, so a finish-vs-stop race is harmless.
+	async function cancelCurrentRun() {
+		const runId = liveRunId;
+		if (!runId || cancelling) return;
+		cancelling = true;
+		cancelError = null;
+		try {
+			await agentsApi.cancelRun(runId);
+		} catch (e) {
+			cancelError = e instanceof Error ? e.message : 'Failed to stop the run';
+		} finally {
+			cancelling = false;
+		}
+		// Re-sync to the settled status (startPolling also tears down the stream).
+		if (currentThreadId) startPolling(currentThreadId);
 	}
 
 	// ---------------------------------------------------------------------
@@ -650,6 +691,16 @@
 	$: needsMatter = !detail && !selectedMatterId;
 	// Live reasoning rendered as markdown, sanitized like any model output.
 	$: liveReasoningHtml = liveReasoning ? renderModelMarkdown(liveReasoning) : '';
+	// PRIV-9a run-lock + co-visible-register signal: the agent is actively
+	// working (createRun in flight or the newest run still running, not stale)
+	// → the composer shows only Stop, and `runActive` drives the host's register
+	// poll. `liveRunId` is the run a Stop press cancels (null = nothing yet).
+	$: working = agentWorking(detail, nowMs, submitting);
+	// `pendingRunId` bridges the createRun→first-poll gap so Stop is never shown
+	// without a run to cancel; cleared once the run is no longer active.
+	$: liveRunId = cancellableRunId(detail, streamRunId) ?? pendingRunId;
+	$: if (!working && pendingRunId) pendingRunId = null;
+	$: runActive = working;
 </script>
 
 <!-- Reading order (F0-S8, maintainer feedback: "chatbox at the top makes
@@ -851,113 +902,136 @@
 	data-testid="lq-ai-agents-composer"
 	on:submit|preventDefault={submit}
 >
-	{#if !detail}
-		<div class="ag-matter">
-			<label class="lq-text-label" for="ag-matter">Matter</label>
-			<div class="ag-matter__row">
-				<select
-					id="ag-matter"
-					data-testid="lq-ai-agents-matter-select"
-					bind:value={selectedMatterId}
-					disabled={submitting}
-				>
-					<!-- ADR-F002 (F0-S8): no blank-workspace option — a conversation
+	{#if working}
+		<!-- PRIV-9a: "the chat locks — only a Stop button is clickable". The
+		     input, matter select and attach are removed from the DOM (not just
+		     disabled) so the only affordance is Stop. -->
+		<div class="ag-working" data-testid="lq-ai-agents-working" role="status" aria-live="polite">
+			<span class="lq-text-body-sm ag-working__label">
+				<span class="ag-shimmer">The agent is working…</span>
+			</span>
+			<button
+				type="button"
+				class="ag-btn-stop"
+				data-testid="lq-ai-agents-stop"
+				aria-label="Stop the agent"
+				disabled={!liveRunId || cancelling}
+				on:click={cancelCurrentRun}
+			>
+				<SquareIcon class="size-3.5" aria-hidden="true" />
+				{cancelling ? 'Stopping…' : 'Stop'}
+			</button>
+		</div>
+		{#if cancelError}
+			<p class="lq-text-body-sm ag-error">Couldn't stop the run: {cancelError}</p>
+		{/if}
+	{:else}
+		{#if !detail}
+			<div class="ag-matter">
+				<label class="lq-text-label" for="ag-matter">Matter</label>
+				<div class="ag-matter__row">
+					<select
+						id="ag-matter"
+						data-testid="lq-ai-agents-matter-select"
+						bind:value={selectedMatterId}
+					>
+						<!-- ADR-F002 (F0-S8): no blank-workspace option — a conversation
                needs a matter; "+ New matter" covers the zero-matter case. -->
-					<option value="" disabled>Select a matter…</option>
-					{#each matters as m (m.id)}
-						<option value={m.id}>{m.name}</option>
-					{/each}
-				</select>
-				<button
-					type="button"
-					class="ag-btn-ghost"
-					data-testid="lq-ai-agents-new-matter"
-					disabled={submitting}
-					on:click={() => dispatch('newmatter')}
-				>
-					+ New matter
-				</button>
+						<option value="" disabled>Select a matter…</option>
+						{#each matters as m (m.id)}
+							<option value={m.id}>{m.name}</option>
+						{/each}
+					</select>
+					<button
+						type="button"
+						class="ag-btn-ghost"
+						data-testid="lq-ai-agents-new-matter"
+						on:click={() => dispatch('newmatter')}
+					>
+						+ New matter
+					</button>
+				</div>
+				{#if mattersError}
+					<p class="lq-text-caption ag-error">Couldn't load matters: {mattersError}</p>
+				{/if}
 			</div>
-			{#if mattersError}
-				<p class="lq-text-caption ag-error">Couldn't load matters: {mattersError}</p>
+		{/if}
+
+		<label class="lq-text-label" for="ag-prompt">
+			{detail ? 'Continue the conversation' : 'Ask the Commercial agent'}
+		</label>
+		<div
+			class="ag-dropzone"
+			class:ag-dropzone--over={dragOver}
+			role="region"
+			aria-label="Message and file drop area"
+			on:dragover={handleDragOver}
+			on:dragleave={handleDragLeave}
+			on:drop={handleDrop}
+		>
+			<textarea
+				id="ag-prompt"
+				rows="3"
+				placeholder={detail
+					? 'e.g. And what about the indemnity?'
+					: 'e.g. What is the liability cap under this contract?'}
+				bind:value={prompt}
+				disabled={!canSend}
+			></textarea>
+			{#if dragOver}
+				<div class="ag-dropzone__hint lq-text-body-sm">Drop to upload into the matter</div>
 			{/if}
 		</div>
-	{/if}
 
-	<label class="lq-text-label" for="ag-prompt">
-		{detail ? 'Continue the conversation' : 'Ask the Commercial agent'}
-	</label>
-	<div
-		class="ag-dropzone"
-		class:ag-dropzone--over={dragOver}
-		role="region"
-		aria-label="Message and file drop area"
-		on:dragover={handleDragOver}
-		on:dragleave={handleDragLeave}
-		on:drop={handleDrop}
-	>
-		<textarea
-			id="ag-prompt"
-			rows="3"
-			placeholder={detail
-				? 'e.g. And what about the indemnity?'
-				: 'e.g. What is the liability cap under this contract?'}
-			bind:value={prompt}
-			disabled={submitting || !canSend}
-		></textarea>
-		{#if dragOver}
-			<div class="ag-dropzone__hint lq-text-body-sm">Drop to upload into the matter</div>
+		{#if uploads.length > 0 || uploadError}
+			<ul class="ag-uploads" data-testid="lq-ai-agents-uploads">
+				{#each uploads as f (f.id)}
+					<li
+						class="ag-upload ag-upload--{f.ingestion_status ?? 'pending'}"
+						data-testid="lq-ai-agents-upload-chip"
+						title={f.ingestion_error ?? f.filename}
+					>
+						<span class="ag-upload__name">{f.filename}</span>
+						<span class="ag-upload__status lq-text-caption">{uploadStatusLabel(f)}</span>
+					</li>
+				{/each}
+				{#if uploadError}
+					<li class="lq-text-caption ag-error">{uploadError}</li>
+				{/if}
+			</ul>
 		{/if}
-	</div>
 
-	{#if uploads.length > 0 || uploadError}
-		<ul class="ag-uploads" data-testid="lq-ai-agents-uploads">
-			{#each uploads as f (f.id)}
-				<li
-					class="ag-upload ag-upload--{f.ingestion_status ?? 'pending'}"
-					data-testid="lq-ai-agents-upload-chip"
-					title={f.ingestion_error ?? f.filename}
-				>
-					<span class="ag-upload__name">{f.filename}</span>
-					<span class="ag-upload__status lq-text-caption">{uploadStatusLabel(f)}</span>
-				</li>
-			{/each}
-			{#if uploadError}
-				<li class="lq-text-caption ag-error">{uploadError}</li>
-			{/if}
-		</ul>
+		<div class="ag-composer__actions">
+			<input
+				bind:this={fileInput}
+				type="file"
+				class="ag-hidden-input"
+				multiple
+				on:change={handlePicked}
+				data-testid="lq-ai-agents-file-input"
+			/>
+			<button
+				type="button"
+				class="ag-btn-ghost"
+				data-testid="lq-ai-agents-attach-btn"
+				disabled={!bindingProjectId || uploading}
+				title={bindingProjectId
+					? 'Upload documents into the matter — the agent can search them once ready'
+					: 'Select a Matter first — an upload needs a home'}
+				on:click={() => fileInput?.click()}
+			>
+				{uploading ? 'Uploading…' : '+ Attach'}
+			</button>
+			<button
+				type="submit"
+				class="ag-btn-primary"
+				title={needsMatter ? 'Select or create a matter first' : undefined}
+				disabled={!canSend || needsMatter || !prompt.trim()}
+			>
+				{detail ? 'Send' : 'Run'}
+			</button>
+		</div>
 	{/if}
-
-	<div class="ag-composer__actions">
-		<input
-			bind:this={fileInput}
-			type="file"
-			class="ag-hidden-input"
-			multiple
-			on:change={handlePicked}
-			data-testid="lq-ai-agents-file-input"
-		/>
-		<button
-			type="button"
-			class="ag-btn-ghost"
-			data-testid="lq-ai-agents-attach-btn"
-			disabled={!bindingProjectId || uploading || submitting}
-			title={bindingProjectId
-				? 'Upload documents into the matter — the agent can search them once ready'
-				: 'Select a Matter first — an upload needs a home'}
-			on:click={() => fileInput?.click()}
-		>
-			{uploading ? 'Uploading…' : '+ Attach'}
-		</button>
-		<button
-			type="submit"
-			class="ag-btn-primary"
-			title={needsMatter ? 'Select or create a matter first' : undefined}
-			disabled={submitting || !canSend || needsMatter || !prompt.trim()}
-		>
-			{submitting ? 'Starting…' : detail ? 'Send' : 'Run'}
-		</button>
-	</div>
 	{#if detail && !detail.continuable && !shouldContinuePollingThread(detail, nowMs)}
 		<p class="lq-text-body-sm ag-note" data-testid="lq-ai-agents-not-continuable">
 			This conversation can't take a follow-up{latestRun && latestRun.status !== 'completed'
@@ -1188,6 +1262,46 @@
 	}
 
 	.ag-btn-primary:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+
+	/* PRIV-9a run-lock: while the agent works the composer is replaced by a
+	   single Stop control (the input/select/attach leave the DOM, not just
+	   disabled) — "only the Stop button is clickable". */
+	.ag-working {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--lq-space-3);
+		padding: var(--lq-space-1) var(--lq-space-1) var(--lq-space-1) var(--lq-space-2);
+	}
+
+	.ag-btn-stop {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--lq-space-1);
+		background: var(--color-muted);
+		color: var(--color-foreground);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		padding: var(--lq-space-2) var(--lq-space-4);
+		cursor: pointer;
+		font: inherit;
+		font-weight: 500;
+		font-size: 14px;
+		line-height: 1.5;
+		transition:
+			border-color 150ms ease-out,
+			color 150ms ease-out;
+	}
+
+	.ag-btn-stop:hover:not(:disabled) {
+		border-color: color-mix(in oklch, var(--color-destructive) 50%, transparent);
+		color: var(--color-destructive);
+	}
+
+	.ag-btn-stop:disabled {
 		opacity: 0.5;
 		cursor: default;
 	}

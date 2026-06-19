@@ -170,6 +170,19 @@ export async function getRun(id: string): Promise<AgentRunDetailResponse> {
 	return apiRequest<AgentRunDetailResponse>(`/agents/runs/${encodeURIComponent(id)}`);
 }
 
+/**
+ * POST /api/v1/agents/runs/{id}/cancel — settle a running run as
+ * `cancelled` (F1-S1, ADR-F009). Drives the cockpit composer's Stop button
+ * (PRIV-9a). Idempotent + first-writer-wins server-side (cancelling an
+ * already-settled run returns its real terminal row, not an error); another
+ * user's run → 404, never 403. Returns the updated run; the caller then
+ * re-syncs by polling so the SETTLED row decides the UI (ADR-F004), never an
+ * optimistic local mutation.
+ */
+export async function cancelRun(id: string): Promise<AgentRun> {
+	return apiRequest<AgentRun>(`/agents/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+}
+
 /** GET /api/v1/agents/runs — caller's runs, newest first. */
 export async function listRuns(
 	opts: { limit?: number; offset?: number } = {}

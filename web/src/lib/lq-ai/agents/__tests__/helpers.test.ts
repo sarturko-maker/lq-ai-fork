@@ -7,6 +7,8 @@ import {
 	RAIL_TOOLS,
 	STALE_RUNNING_AFTER_MS,
 	STEP_SUMMARY_LIMIT,
+	agentWorking,
+	cancellableRunId,
 	composerEnabled,
 	groupTurnSteps,
 	groupTurnTree,
@@ -567,6 +569,33 @@ describe('conversations (F0-S5)', () => {
 		expect(composerEnabled(detailWith([completed], false), T0 + 1000)).toBe(false);
 		const running = { run: makeRun({ status: 'running' }), steps: [] };
 		expect(composerEnabled(detailWith([running], false), T0 + 1000)).toBe(false);
+	});
+
+	it('agentWorking: createRun in flight OR newest run still running (PRIV-9a)', () => {
+		// submitting true → working even before a run row exists to poll.
+		expect(agentWorking(null, T0, true)).toBe(true);
+		// idle new chat, not submitting → not working.
+		expect(agentWorking(null, T0, false)).toBe(false);
+		const running = { run: makeRun({ status: 'running' }), steps: [] };
+		const completed = { run: makeRun({ status: 'completed' }), steps: [] };
+		expect(agentWorking(detailWith([running], false), T0 + 1000, false)).toBe(true);
+		expect(agentWorking(detailWith([completed], false), T0 + 1000, false)).toBe(false);
+		// A stale 'running' run is NOT working (same cutoff as the poll).
+		expect(
+			agentWorking(detailWith([running], false), T0 + STALE_RUNNING_AFTER_MS + 1000, false)
+		).toBe(false);
+	});
+
+	it('cancellableRunId: the live stream run, else the newest run iff running (PRIV-9a)', () => {
+		const running = { run: makeRun({ id: 'run-2', status: 'running' }), steps: [] };
+		const completed = { run: makeRun({ id: 'run-1', status: 'completed' }), steps: [] };
+		// Streaming: cancel the streamed run regardless of the polled snapshot.
+		expect(cancellableRunId(detailWith([running], false), 'stream-run')).toBe('stream-run');
+		// Not streaming: cancel the newest run only when it's actually running.
+		expect(cancellableRunId(detailWith([running], false), null)).toBe('run-2');
+		expect(cancellableRunId(detailWith([completed], false), null)).toBeNull();
+		// Nothing to cancel yet (createRun POST hasn't returned a run to poll).
+		expect(cancellableRunId(null, null)).toBeNull();
 	});
 
 	it('uploadsSettled is true only when every file is ready or failed', () => {

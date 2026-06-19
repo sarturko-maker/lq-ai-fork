@@ -18,6 +18,7 @@
 	import ShieldIcon from '@lucide/svelte/icons/shield';
 
 	import { Button } from '$lib/components/ui/button/index.js';
+	import * as Resizable from '$lib/components/ui/resizable';
 	import { agentsApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import type { AgentThread, MatterActivity } from '$lib/lq-ai/api/agents';
@@ -114,6 +115,22 @@
 	const isPrivacyMatter = $derived(matter?.practice_area_key === 'privacy');
 	let matterTab = $state<'conversation' | 'register'>('conversation');
 
+	// PRIV-9a: when a Privacy matter has the width, show chat + the ROPA
+	// register side by side (resizable) instead of the one-at-a-time toggle, so
+	// the user watches the register change as the agent works. Below the budget
+	// (register ~400px + chat ~480px) we fall back to the toggle. The outer
+	// thread list (w-72 = 288px) is subtracted from the host width.
+	const SPLIT_MIN_PANEL = 880;
+	const canSplitRegister = $derived(
+		isPrivacyMatter && !isStacked && hostWidth - 288 >= SPLIT_MIN_PANEL
+	);
+
+	// Run-lock + live-register signals (PRIV-9a). `runActive` is bound OUT of the
+	// conversation panel (the agent is working); `registerReloadKey` is bumped on
+	// settle so the co-visible register does one final reconcile fetch.
+	let runActive = $state(false);
+	let registerReloadKey = $state(0);
+
 	// Keep the stacked pane in sync with URL-driven thread changes (review
 	// fix): a threadId ARRIVING (composer-created sync, history forward)
 	// must show the panel — otherwise crossing the width threshold later
@@ -159,6 +176,9 @@
 	function handleSettled() {
 		loadThreads();
 		onActivity();
+		// PRIV-9a: a run settled — nudge the co-visible register to reconcile its
+		// final state (the live poll stops a tick before the very last write).
+		registerReloadKey += 1;
 	}
 
 	function selectThread(id: string | null) {
@@ -191,6 +211,28 @@
 		loadThreads();
 	}
 </script>
+
+{#snippet conversationPane()}
+	{#key panelKey}
+		<!-- F2-M6: the conversation column shares the PageShell idiom (`narrow`
+		     width + `tight` pad). Fade on an inner div (PageShell is a component). -->
+		<PageShell size="narrow" pad="tight">
+			<div in:fade={{ duration: motionMs(MOTION.fast) }}>
+				<ConversationPanel
+					initialThreadId={threadId}
+					matters={projects}
+					mattersError={projectsError}
+					bind:prompt
+					bind:selectedMatterId
+					bind:runActive
+					on:settled={handleSettled}
+					on:newmatter={() => (createOpen = true)}
+					on:threadcreated={handleThreadCreated}
+				/>
+			</div>
+		</PageShell>
+	{/key}
+{/snippet}
 
 <!-- The conversation workspace FLOATS as one card on the canvas (F1-S2.1
      elevation scale): recessed thread list inside it, conversation column
@@ -318,7 +360,7 @@
 						</button>
 					</div>
 				{/if}
-				{#if isPrivacyMatter}
+				{#if isPrivacyMatter && !canSplitRegister}
 					<!-- PRIV-3: switch the panel column between the conversation and the
 					     company ROPA register (read-only). Privacy matters only. -->
 					<div
@@ -342,44 +384,66 @@
 						{/each}
 					</div>
 				{/if}
-				<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
-					{#if isPrivacyMatter && matterTab === 'register'}
-						<RopaRegister />
-					{:else if matter || threadId}
-						{#key panelKey}
-							<!-- F2-M6: the conversation column shares the PageShell idiom
-							     (`narrow` width + `tight` pad = px-4 py-4 sm:px-6). Fade on an
-							     inner div (PageShell is a component; transitions need an element). -->
-							<PageShell size="narrow" pad="tight">
-								<div in:fade={{ duration: motionMs(MOTION.fast) }}>
-									<ConversationPanel
-										initialThreadId={threadId}
-										matters={projects}
-										mattersError={projectsError}
-										bind:prompt
-										bind:selectedMatterId
-										on:settled={handleSettled}
-										on:newmatter={() => (createOpen = true)}
-										on:threadcreated={handleThreadCreated}
-									/>
+				{#if canSplitRegister}
+					<!-- PRIV-9a co-visible: chat | register, resizable, each scrolls
+					     independently — watch the register change as the agent works. -->
+					<div class="min-h-0 flex-1">
+						<Resizable.PaneGroup
+							direction="horizontal"
+							autoSaveId="lq-priv-covisible"
+							class="h-full"
+						>
+							<Resizable.Pane id="priv-chat" order={1} defaultSize={56} minSize={38}>
+								<div class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain">
+									{@render conversationPane()}
 								</div>
-							</PageShell>
-						{/key}
-					{:else}
-						<div class="flex h-full items-center justify-center px-8">
-							<div class="max-w-sm text-center">
-								<div class="mx-auto flex size-10 items-center justify-center rounded-full bg-muted">
-									<InboxIcon class="size-5 text-muted-foreground" aria-hidden="true" />
+							</Resizable.Pane>
+							<Resizable.Handle
+								class="transition-colors duration-150 ease-out hover:bg-primary/40 data-[active]:bg-primary/60"
+							/>
+							<Resizable.Pane id="priv-register" order={2} defaultSize={44} minSize={30}>
+								<div
+									class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain border-l border-border"
+								>
+									<RopaRegister {runActive} reloadKey={registerReloadKey} />
 								</div>
-								<h2 class="mt-3 text-base font-semibold text-foreground">Pick a conversation</h2>
-								<p class="mt-1 text-sm text-muted-foreground">
-									Unfiled conversations are read-and-resume only. Select one on the left to continue
-									it.
-								</p>
+							</Resizable.Pane>
+						</Resizable.PaneGroup>
+					</div>
+				{:else}
+					<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
+						{#if isPrivacyMatter}
+							<!-- Narrow fallback: chat and register are one-at-a-time, but the
+							     conversation stays MOUNTED (hidden while the register shows) so its
+							     run-state keeps flowing — the register still live-updates as the
+							     agent works, just not side by side, and switching tabs never drops a
+							     live stream. -->
+							<div class="h-full" class:hidden={matterTab === 'register'}>
+								{@render conversationPane()}
 							</div>
-						</div>
-					{/if}
-				</div>
+							{#if matterTab === 'register'}
+								<RopaRegister {runActive} reloadKey={registerReloadKey} />
+							{/if}
+						{:else if matter || threadId}
+							{@render conversationPane()}
+						{:else}
+							<div class="flex h-full items-center justify-center px-8">
+								<div class="max-w-sm text-center">
+									<div
+										class="mx-auto flex size-10 items-center justify-center rounded-full bg-muted"
+									>
+										<InboxIcon class="size-5 text-muted-foreground" aria-hidden="true" />
+									</div>
+									<h2 class="mt-3 text-base font-semibold text-foreground">Pick a conversation</h2>
+									<p class="mt-1 text-sm text-muted-foreground">
+										Unfiled conversations are read-and-resume only. Select one on the left to
+										continue it.
+									</p>
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</section>
 		{/if}
 	</div>
