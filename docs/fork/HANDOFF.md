@@ -16,7 +16,7 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   ADR-F020). **Independent queued slice:** PRIV-6e geographic transfer map
   (`docs/fork/plans/PRIV-6e-geographic-transfer-map.md`, ECharts geo-arcs + new-dep ADR).
 
-- **PRIV-A1 (PR #PENDING, branch `priv-a1-assessment-domain-spine`) — assessment domain spine + code validation. API-only (migration `0064`); NO agent, NO UI; ADR-F027.**
+- **PRIV-A1 (PR #118, branch `priv-a1-assessment-domain-spine`) — assessment domain spine + code validation. API-only (migration `0064`); NO agent, NO UI; ADR-F027.**
   P1 flagship start, mirroring the ROPA PRIV-1 spine. New `app/schemas/assessment.py` (write contracts:
   `AssessmentInput`/`RiskInput`, StrEnums `AssessmentType` pia|dpia|lia|tia / `AssessmentStatus`
   draft|in_progress|completed / `RiskLevel` low|medium|high reused for rating+likelihood+impact / `RiskStatus`
