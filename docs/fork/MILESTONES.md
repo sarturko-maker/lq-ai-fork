@@ -317,9 +317,12 @@ short-slice**.
   taxonomy — categories of data subjects + personal data; closes Article 30(1)) → **PRIV-6b ✅ (PR #108)**
   (privacy **programme dashboard** — read-only Overview tab over the register: totals, lawful-basis/controller-
   role/DPA-status breakdowns, special-category & restricted-transfer counts, "needs attention" gaps;
-  `GET /ropa/programme-summary` + pure `ropa_summary.build_summary`; no migration) → **PRIV-6c** (data-flow /
-  lineage view, auto-drawn from the System↔Activity↔Vendor↔Transfer graph) + **PRIV-6d** (Legal-Entity /
-  controller scope + per-controller Article 30 export — needs a migration)
+  `GET /ropa/programme-summary` + pure `ropa_summary.build_summary`; no migration) → **PRIV-6c ✅ (PR #109)**
+  (data-flow / lineage view — interactive node-link graph auto-drawn from the System↔Activity↔Vendor↔Transfer
+  relationships; `GET /ropa/data-flow` + pure `ropa_graph.build_graph`; rendered with `@xyflow/svelte` per
+  **ADR-F022** (the fork's first deliberate new-dep exception, maintainer-authorised) but in our F013 style;
+  no migration) → **PRIV-6d** (Legal-Entity / controller scope + per-controller Article 30 export — needs a
+  migration)
   → **P1 flagship** PRIV-A1 (assessment domain+skill) / PRIV-A2 (**conversational-link external intake** — the
   differentiator, **ADR-F020**) → P2 tracks (DSAR, breach, DPA review, reg-gap, reporting). **Full capability
   plan: `docs/fork/plans/PRIV-onetrust-to-lqai-functionality-map.md`** (OneTrust→LQ.AI, P0–P3; **P3
