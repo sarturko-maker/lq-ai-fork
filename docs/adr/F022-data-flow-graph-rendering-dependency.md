@@ -1,7 +1,7 @@
 # F022 — Interactive data-flow graph rendering (adopt `@xyflow/svelte`)
 
-- Status: proposed
-- Date: 2026-06-19
+- Status: accepted
+- Date: 2026-06-19 (accepted 2026-06-19 by the maintainer)
 - Extends: ADR-F018 (agentic modules = typed domain + domain UI), ADR-F019 (relational, deployment-global
   ROPA inventory graph), ADR-F013 (F013 design language)
 - Milestone: PRIV-6c (Privacy / ROPA module — data-flow / lineage view)

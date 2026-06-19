@@ -393,6 +393,24 @@ Phase 1–2 (see Backlog: EU AI Act register module). Phased rollout (each its o
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+- **ROPA onboarding flow + "ROPA-from-privacy-notice" end-to-end test (maintainer, 2026-06-19 — strong
+  near-term candidate; also THE validation of PRIV-1…6c).** Vision: an onboarding flow where the operator
+  (1) hands the Privacy agent a real company **privacy notice** and (2) answers a structured **~50-question
+  intake**, and the agent **auto-populates ~80% of the ROPA** from the two. Maps onto the existing/planned
+  stack in two halves: **(a) document-extraction → ROPA** — already possible with the PRIV-2…6c guarded,
+  code-validated write tools (`propose_processing_activity`/`_system`/`_vendor`/`_transfer`,
+  `add_data_*_categories`, `link_*`); the gap is **calibration + a guided bulk-extraction UX**, not new write
+  plumbing. **(b) the ~50-question intake** ≈ the **conversational-link assessment track** (PRIV-A2,
+  **ADR-F020**) — a structured questionnaire the agent runs, then files code-validated ROPA. **First-class
+  TEST (do this first):** run it **live on DeepSeek via the scenario harness** (`api/tests/agents/scenarios/`,
+  `harness.seed_matter(..., area_key="privacy")` + `build_document`), feeding a reputable company's PUBLIC
+  privacy notice into a Privacy matter and checking the agent builds a coherent, valid ROPA — an honest
+  end-to-end validation of PRIV-1…6c against a real document, whose payoff renders in the register + Overview
+  dashboard + the new **Data flow** view. Capture an evidence report under `docs/fork/evidence/`; if it
+  reveals a needed capability (a bulk-extract tool, the intake), that becomes its own sliced milestone + ADR.
+  Providers are dev-only (MiniMax/DeepSeek; a client runs a Western model via the gateway —
+  [[llm-is-injected-replaceable]]). Relates to [[oscar-privacy-modules-vision]] and the assessment track.
+
 - **ROPA private→shared information-flow gap (from the PRIV-6a ultracode audit, 2026-06-18 — medium) → now
   owned by the Authorization track (ADR-F021).** The deployment-global ROPA register (ADR-F019, shared-read)
   means a privileged/private matter's confidential narrative could be distilled by the Privacy agent into a
