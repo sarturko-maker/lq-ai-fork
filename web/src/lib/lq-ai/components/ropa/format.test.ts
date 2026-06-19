@@ -113,6 +113,7 @@ describe('art9ConditionLabel', () => {
 describe('register tabs + empty states', () => {
 	it('exposes the register tabs in order', () => {
 		expect(REGISTER_TABS.map((t) => t.id)).toEqual([
+			'overview',
 			'activities',
 			'systems',
 			'vendors',
@@ -120,6 +121,7 @@ describe('register tabs + empty states', () => {
 			'data-categories'
 		]);
 		expect(REGISTER_TABS.map((t) => t.label)).toEqual([
+			'Overview',
 			'Processing activities',
 			'Systems',
 			'Vendors',

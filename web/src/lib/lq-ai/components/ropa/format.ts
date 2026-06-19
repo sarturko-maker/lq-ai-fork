@@ -116,14 +116,16 @@ export const EMPTY_DATA_CATEGORIES =
 	'No categories of personal data recorded yet — the Privacy agent tags activities with them as it works.';
 
 export type RegisterTab =
+	| 'overview'
 	| 'activities'
 	| 'systems'
 	| 'vendors'
 	| 'data-subjects'
 	| 'data-categories';
 
-/** The register's tabs, in display order. */
+/** The register's tabs, in display order. Overview (the programme dashboard) leads. */
 export const REGISTER_TABS: { id: RegisterTab; label: string }[] = [
+	{ id: 'overview', label: 'Overview' },
 	{ id: 'activities', label: 'Processing activities' },
 	{ id: 'systems', label: 'Systems' },
 	{ id: 'vendors', label: 'Vendors' },

@@ -162,6 +162,39 @@ export interface SystemRead {
 	processing_activities: ProcessingActivitySummary[];
 }
 
+/**
+ * Programme summary (PRIV-6b) — a read-only aggregate over the whole register:
+ * totals, categorical breakdowns (canonical enum order, incl. zero buckets) and
+ * "needs attention" gaps. Counts only — no free-text. Mirrors
+ * api/app/schemas/ropa.py ProgrammeSummary.
+ */
+export interface CountByValue {
+	value: string;
+	count: number;
+}
+
+export interface ProgrammeGaps {
+	activities_without_systems: number;
+	activities_without_recipients: number;
+	activities_without_data_categories: number;
+	activities_without_data_subjects: number;
+	vendors_without_dpa: number;
+}
+
+export interface ProgrammeSummary {
+	activities_total: number;
+	systems_total: number;
+	vendors_total: number;
+	transfers_total: number;
+	transfers_restricted: number;
+	special_category_activities: number;
+	systems_using_ai: number;
+	lawful_basis: CountByValue[];
+	controller_role: CountByValue[];
+	dpa_status: CountByValue[];
+	gaps: ProgrammeGaps;
+}
+
 export function listProcessingActivities(): Promise<ProcessingActivityRead[]> {
 	return apiRequest<ProcessingActivityRead[]>('/ropa/processing-activities');
 }
@@ -194,6 +227,10 @@ export function listDataSubjectCategories(): Promise<DataSubjectCategoryRead[]> 
 
 export function listDataCategories(): Promise<DataCategoryRead[]> {
 	return apiRequest<DataCategoryRead[]>('/ropa/data-categories');
+}
+
+export function getProgrammeSummary(): Promise<ProgrammeSummary> {
+	return apiRequest<ProgrammeSummary>('/ropa/programme-summary');
 }
 
 // --- Article 30 export (PRIV-4a) ---------------------------------------------
