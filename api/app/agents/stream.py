@@ -38,9 +38,22 @@ import contextlib
 import json
 import logging
 import uuid
-from typing import Any
+from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
+
+
+class _StreamSink(Protocol):
+    """What :class:`RunStreamPublisher` needs of a broker — F025.
+
+    Both the in-process :class:`RunStreamBroker` and the cross-process
+    :class:`RedisStreamBroker` satisfy it structurally, so the SAME publisher
+    drives either transport.
+    """
+
+    def publish(self, run_id: uuid.UUID, part: dict[str, Any]) -> None: ...
+    def close(self, run_id: uuid.UUID) -> None: ...
+
 
 # Wire headers required by the spec (mirrors the SDK's
 # UI_MESSAGE_STREAM_HEADERS): the version marker plus standard SSE
@@ -298,7 +311,7 @@ class RunStreamPublisher:
     mirrors are already durable).
     """
 
-    def __init__(self, broker: RunStreamBroker, run_id: uuid.UUID) -> None:
+    def __init__(self, broker: _StreamSink, run_id: uuid.UUID) -> None:
         self._broker = broker
         self._run_id = run_id
         self._open_reasoning: set[str] = set()
@@ -373,6 +386,24 @@ class RunStreamPublisher:
             )
         self._publish(step_part(step))
 
+    def ropa_changed(self, *, kind: str, entity_id: str, verb: str) -> None:
+        """Announce one ROPA register row the agent just changed — PRIV-9b (ADR-F024).
+
+        A TRANSIENT ``data-ropa-change`` part (the spec's ``data-*`` extension, like
+        ``data-plan``) carrying ``{kind, id, verb}``. Drives the cockpit's live
+        changed-row highlight: the client lifts the id into a recently-changed set
+        and washes the matching register row. Transient ⇒ not tracked as an open
+        block (``_track_open_blocks``), so a late subscriber simply misses it —
+        animation only; the settled re-read remains the truth (ADR-F004). Ids are
+        audit-safe (the audit contract allows counts/types/**IDs**)."""
+        self._publish(
+            {
+                "type": "data-ropa-change",
+                "transient": True,
+                "data": {"kind": kind, "id": entity_id, "verb": verb},
+            }
+        )
+
     def run_finished(
         self,
         *,
@@ -424,3 +455,222 @@ def _parsed_or_raw(summary: str | None) -> Any:
     except (TypeError, ValueError):
         return {"raw": summary}
     return parsed if isinstance(parsed, dict | list) else {"raw": summary}
+
+
+# ---------------------------------------------------------------------------
+# Cross-process transport — F025 (the worker publishes, the api relays)
+# ---------------------------------------------------------------------------
+
+_STREAM_CHANNEL_PREFIX = "agent_run_stream:"
+# Distinct from any wire part (parts always carry "type") — the publish-side
+# close() rides the channel after the terminal parts so the api bridge knows to
+# close the local channel (→ CHANNEL_CLOSED to subscribers).
+_STREAM_CLOSED_MARKER = {"__stream_closed__": True}
+# Bound the publish-side buffer: a wedged drain drops parts (logged) rather than
+# blocking the run — animation degrades, the run is never the stream's hostage.
+_REDIS_PUBLISH_QUEUE_MAX = 2000
+
+
+def stream_channel(run_id: uuid.UUID | str) -> str:
+    """The Redis pub/sub channel one run's stream parts ride (F025)."""
+    return f"{_STREAM_CHANNEL_PREFIX}{run_id}"
+
+
+class RedisStreamBroker:
+    """Publish-only, broker-shaped facade that fans run-stream parts onto Redis
+    pub/sub so the api process can relay them to the browser — F025 (ADR-F025).
+
+    Quacks like :class:`RunStreamBroker` for the publisher's needs
+    (``publisher``/``publish``/``close``), so the SAME :class:`RunStreamPublisher`
+    is reused unchanged in the worker. ``publish`` is sync + fire-and-forget (it
+    must never raise into the runner): it enqueues onto one asyncio queue drained
+    by a single background task that ``PUBLISH``es JSON parts IN ORDER — so
+    ``start`` precedes ``delta`` and ``tool-input`` precedes ``tool-output``.
+    One broker per worker process (created in the arq ``on_startup`` from
+    ``ctx['redis']``); ``aclose`` cancels the drain on shutdown.
+    """
+
+    def __init__(self, redis: Any) -> None:
+        self._redis = redis
+        self._queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue(
+            maxsize=_REDIS_PUBLISH_QUEUE_MAX
+        )
+        self._drain_task: asyncio.Task[None] | None = None
+        # Set by aclose() at worker shutdown: a late publish()/close() racing
+        # teardown must NOT resurrect the drain task (review nit).
+        self._closed = False
+
+    def publisher(self, run_id: uuid.UUID) -> RunStreamPublisher:
+        self._ensure_drain()
+        return RunStreamPublisher(self, run_id)
+
+    def publish(self, run_id: uuid.UUID, part: dict[str, Any]) -> None:
+        if self._closed:
+            return  # post-shutdown: drop the part rather than re-spawn the drain
+        self._ensure_drain()
+        try:
+            self._queue.put_nowait((str(run_id), part))
+        except asyncio.QueueFull:
+            logger.warning(
+                "redis run-stream publish queue full; dropping part",
+                extra={"event": "agent_stream_redis_queue_full", "run_id": str(run_id)},
+            )
+
+    def close(self, run_id: uuid.UUID) -> None:
+        """End the run's channel — rides AFTER the terminal parts (FIFO)."""
+        self.publish(run_id, _STREAM_CLOSED_MARKER)
+
+    def _ensure_drain(self) -> None:
+        if self._closed:
+            return
+        if self._drain_task is None or self._drain_task.done():
+            self._drain_task = asyncio.create_task(self._drain())
+
+    async def _drain(self) -> None:
+        while True:
+            run_id, part = await self._queue.get()
+            try:
+                await self._redis.publish(
+                    stream_channel(run_id),
+                    json.dumps(part, separators=(",", ":"), default=str),
+                )
+            except Exception:  # best-effort animation — a blip costs a part, not the run
+                logger.warning(
+                    "redis run-stream publish failed; dropping part",
+                    extra={"event": "agent_stream_redis_publish_failed", "run_id": run_id},
+                )
+
+    async def aclose(self) -> None:
+        """Cancel the drain task (worker shutdown). Idempotent, best-effort."""
+        self._closed = True
+        task = self._drain_task
+        self._drain_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+
+class _BridgeSub:
+    __slots__ = ("pubsub", "refcount", "task")
+
+    def __init__(self, task: asyncio.Task[None], pubsub: Any) -> None:
+        self.task = task
+        self.pubsub = pubsub
+        self.refcount = 1
+
+
+class RedisStreamBridge:
+    """Relays a run's Redis pub/sub parts into the process-local broker — F025.
+
+    The api side of the transport: it subscribes to ``agent_run_stream:{run_id}``
+    and republishes each part into the existing :class:`RunStreamBroker`, which
+    fans it to the SSE endpoint's subscriber queue exactly as an in-process part.
+    The endpoint and runner are untouched. Reference-counted per run id — ONE
+    Redis subscription per run no matter how many browsers watch it (the local
+    broker fans out), torn down when the last viewer detaches. Attach is called
+    AFTER the endpoint's ownership check, so a run a user can't see is never
+    bridged.
+    """
+
+    def __init__(self, redis: Any, broker: RunStreamBroker) -> None:
+        self._redis = redis
+        self._broker = broker
+        self._subs: dict[str, _BridgeSub] = {}
+        self._lock = asyncio.Lock()
+
+    async def attach(self, run_id: uuid.UUID) -> None:
+        """Ensure a Redis subscription is relaying ``run_id`` into the broker."""
+        key = str(run_id)
+        async with self._lock:
+            sub = self._subs.get(key)
+            if sub is not None:
+                sub.refcount += 1
+                return
+            pubsub = self._redis.pubsub()
+            try:
+                await pubsub.subscribe(stream_channel(run_id))
+            except Exception:
+                # subscribe() can fail AFTER checking out a pooled connection
+                # (a transient post-connect blip) — close the pubsub so that
+                # connection is released, never leaked, then let the caller
+                # fail soft to the DB-tail (review fix).
+                with contextlib.suppress(Exception):
+                    await pubsub.aclose()
+                raise
+            task = asyncio.create_task(self._pump(run_id, pubsub))
+            self._subs[key] = _BridgeSub(task=task, pubsub=pubsub)
+
+    async def detach(self, run_id: uuid.UUID) -> None:
+        """Drop one viewer; tear the subscription down when the last one leaves."""
+        key = str(run_id)
+        async with self._lock:
+            sub = self._subs.get(key)
+            if sub is None:
+                return
+            sub.refcount -= 1
+            if sub.refcount > 0:
+                return
+            del self._subs[key]
+        sub.task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await sub.task
+        with contextlib.suppress(Exception):
+            await sub.pubsub.aclose()
+
+    async def _pump(self, run_id: uuid.UUID, pubsub: Any) -> None:
+        key = str(run_id)
+        try:
+            async for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue  # skip the subscribe/unsubscribe confirmations
+                raw = message.get("data")
+                try:
+                    part = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(part, dict):
+                    continue
+                if part.get("__stream_closed__"):
+                    self._broker.close(run_id)
+                    continue
+                self._broker.publish(run_id, part)
+        except asyncio.CancelledError:
+            raise  # detach()/aclose() is tearing us down — normal teardown
+        except Exception:
+            # A mid-stream Redis drop (ConnectionError, …) ends THIS relay. Live
+            # parts stop for the open stream — the SSE endpoint's DB-tail carries
+            # the run on (ADR-F004/F025). Drop the now-dead subscription below so a
+            # FUTURE viewer of this run rebuilds a fresh one instead of bumping
+            # refcount on a corpse (review fix).
+            logger.warning(
+                "run-stream bridge pump failed; dropping subscription (DB-tail carries the run)",
+                extra={"event": "agent_stream_bridge_pump_failed", "run_id": key},
+            )
+        finally:
+            # If we exited on our own (error or clean channel end) — not via
+            # detach()/aclose(), which already removed + closed us — drop the dead
+            # entry and release its connection. The lock-then-release ordering in
+            # detach() means the lock is free here; the identity check avoids
+            # racing a concurrent detach that already swapped/removed the entry.
+            dead = None
+            async with self._lock:
+                existing = self._subs.get(key)
+                if existing is not None and existing.task is asyncio.current_task():
+                    del self._subs[key]
+                    dead = existing
+            if dead is not None:
+                with contextlib.suppress(Exception):
+                    await dead.pubsub.aclose()
+
+    async def aclose(self) -> None:
+        """Tear down every subscription (api shutdown). Idempotent, best-effort."""
+        async with self._lock:
+            subs = list(self._subs.values())
+            self._subs.clear()
+        for sub in subs:
+            sub.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await sub.task
+            with contextlib.suppress(Exception):
+                await sub.pubsub.aclose()

@@ -36,6 +36,7 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from app.agents.ropa_changes import RopaChangeLedger
 from app.agents.ropa_tools import ROPA_TOOL_NAMES, build_ropa_tools
 from app.agents.tools import MatterBinding
 from app.models.agent_run import AgentRun, AgentThread
@@ -110,6 +111,8 @@ class RopaEnv:
     # The actual __name__s of the built closures (the returned list) — so the
     # grant-set drift test compares against what build_ropa_tools really returns.
     built_tool_names: frozenset[str]
+    # PRIV-9b (ADR-F024): the run-scoped change ledger the tools record into.
+    ledger: RopaChangeLedger
 
 
 @pytest_asyncio.fixture
@@ -170,7 +173,10 @@ async def ropa_env(
             minimum_inference_tier=None,
             practice_area_id=privacy_area_id,
         )
-        tools = build_ropa_tools(commit_factory, run_id=run.id, binding=binding)
+        ledger = RopaChangeLedger()
+        tools = build_ropa_tools(
+            commit_factory, run_id=run.id, binding=binding, change_ledger=ledger
+        )
         by_name = {t.__name__: t for t in tools}
         env = RopaEnv(
             factory=commit_factory,
@@ -199,6 +205,7 @@ async def ropa_env(
             list_data_subjects=by_name["list_data_subject_categories"],
             list_data_categories=by_name["list_data_categories"],
             built_tool_names=frozenset(t.__name__ for t in tools),
+            ledger=ledger,
         )
 
     yield env
@@ -1368,3 +1375,136 @@ async def test_real_loop_proposes_valid_then_rejects_invalid(ropa_env: RopaEnv) 
     results = [s.summary or "" for s in steps if s.kind == "tool_result"]
     assert any("Recorded processing activity" in r for r in results)
     assert any("rejected" in r.lower() for r in results)
+
+
+# ---------------------------------------------------------------------------
+# PRIV-9b (ADR-F024): the change-signal recorded into the run-scoped ledger.
+# The contract: every REAL change records exactly its affected top-level
+# row(s) as (kind, id, verb); every idempotent no-op and every rejection
+# records NOTHING (so the cockpit highlight never fires on a non-change).
+# ---------------------------------------------------------------------------
+
+
+def _drained(env: RopaEnv) -> list[tuple[str, str, str]]:
+    """The ledger's new changes as comparable (kind, id, verb) tuples."""
+    return [(c.kind, c.id, c.verb) for c in env.ledger.drain()]
+
+
+async def test_propose_records_create_change_with_the_flushed_id(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    assert _drained(ropa_env) == [("processing_activity", str(activity.id), "create")]
+
+    await ropa_env.propose_system(**_VALID_SYSTEM)
+    system = (await _systems(ropa_env))[0]
+    assert _drained(ropa_env) == [("system", str(system.id), "create")]
+
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    vendor = (await _vendors(ropa_env))[0]
+    assert _drained(ropa_env) == [("vendor", str(vendor.id), "create")]
+
+
+async def test_rejected_proposal_records_no_change(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.propose(**{**_VALID, "lawful_basis": "because_we_want_to"})
+    assert "rejected" in result.lower()
+    assert _drained(ropa_env) == []  # nothing written → nothing to highlight
+
+
+async def test_link_records_both_ends_only_on_a_real_link(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose_system(**_VALID_SYSTEM)
+    activity = (await _activities(ropa_env))[0]
+    system = (await _systems(ropa_env))[0]
+    ropa_env.ledger.drain()  # discard the two create changes
+
+    await ropa_env.link(processing_activity_id=str(activity.id), system_id=str(system.id))
+    assert _drained(ropa_env) == [
+        ("processing_activity", str(activity.id), "link"),
+        ("system", str(system.id), "link"),
+    ]
+
+    # Idempotent re-link is a no-op → records nothing.
+    await ropa_env.link(processing_activity_id=str(activity.id), system_id=str(system.id))
+    assert _drained(ropa_env) == []
+
+
+async def test_link_vendor_records_both_ends(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    activity = (await _activities(ropa_env))[0]
+    vendor = (await _vendors(ropa_env))[0]
+    ropa_env.ledger.drain()
+
+    await ropa_env.link_vendor(processing_activity_id=str(activity.id), vendor_id=str(vendor.id))
+    assert _drained(ropa_env) == [
+        ("processing_activity", str(activity.id), "link"),
+        ("vendor", str(vendor.id), "link"),
+    ]
+
+
+async def test_retire_records_change_then_noop_records_nothing(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    vendor = (await _vendors(ropa_env))[0]
+    ropa_env.ledger.drain()
+
+    await ropa_env.retire_vendor(vendor_id=str(vendor.id))
+    assert _drained(ropa_env) == [("vendor", str(vendor.id), "retire")]
+
+    # Re-retiring an already-retired row is a friendly no-op → records nothing.
+    await ropa_env.retire_vendor(vendor_id=str(vendor.id))
+    assert _drained(ropa_env) == []
+
+
+async def test_unlink_records_both_ends_only_when_linked(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose_system(**_VALID_SYSTEM)
+    activity = (await _activities(ropa_env))[0]
+    system = (await _systems(ropa_env))[0]
+    await ropa_env.link(processing_activity_id=str(activity.id), system_id=str(system.id))
+    ropa_env.ledger.drain()  # discard creates + link
+
+    await ropa_env.unlink_system(processing_activity_id=str(activity.id), system_id=str(system.id))
+    assert _drained(ropa_env) == [
+        ("processing_activity", str(activity.id), "unlink"),
+        ("system", str(system.id), "unlink"),
+    ]
+
+    # Unlinking an unlinked pair is a no-op → records nothing.
+    await ropa_env.unlink_system(processing_activity_id=str(activity.id), system_id=str(system.id))
+    assert _drained(ropa_env) == []
+
+
+async def test_tag_records_the_activity_only_when_a_new_link_is_added(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    ropa_env.ledger.drain()
+
+    await ropa_env.add_data_categories(
+        processing_activity_id=str(activity.id), names=["Contact details"]
+    )
+    assert _drained(ropa_env) == [("processing_activity", str(activity.id), "tag")]
+
+    # Re-tagging the same category is a no-op (already tagged) → records nothing.
+    await ropa_env.add_data_categories(
+        processing_activity_id=str(activity.id), names=["Contact details"]
+    )
+    assert _drained(ropa_env) == []
+
+
+async def test_transfer_records_its_parent_activity(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    ropa_env.ledger.drain()
+
+    await ropa_env.propose_transfer(
+        processing_activity_id=str(activity.id),
+        destination="United States",
+        restricted=True,
+        mechanism="standard_contractual_clauses",
+    )
+    # A transfer has no top-level register row → its parent activity washes.
+    assert _drained(ropa_env) == [("processing_activity", str(activity.id), "create")]
+
+    transfer = (await _transfers(ropa_env))[0]
+    await ropa_env.retire_transfer(transfer_id=str(transfer.id))
+    assert _drained(ropa_env) == [("processing_activity", str(activity.id), "retire")]

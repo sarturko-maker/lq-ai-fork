@@ -131,6 +131,34 @@
 	let runActive = $state(false);
 	let registerReloadKey = $state(0);
 
+	// PRIV-9b (ADR-F024): the ids of ROPA rows the agent just changed, hoisted
+	// HERE (survives any register remount) and passed to RopaRegister to wash the
+	// matching rows. The window must comfortably exceed the register's ~2s poll so
+	// a row that only arrives on the NEXT poll still flashes; it resets on each new
+	// change, so a burst of edits keeps the wash alive then fades together. The
+	// fade itself is CSS (RopaRegister); this just bounds how long ids stay "fresh".
+	const CHANGED_DECAY_MS = 5000;
+	let recentlyChangedIds = $state<Set<string>>(new Set());
+	let changedDecayTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function handleRopaChange(event: CustomEvent<{ kind: string; id: string; verb: string }>) {
+		// Reassign (not mutate) so the prop reference changes — Svelte reactivity is
+		// assignment-driven, and RopaRegister re-evaluates `changedIds.has(id)`.
+		const next = new Set(recentlyChangedIds);
+		next.add(event.detail.id);
+		recentlyChangedIds = next;
+		if (changedDecayTimer !== null) clearTimeout(changedDecayTimer);
+		changedDecayTimer = setTimeout(() => {
+			recentlyChangedIds = new Set();
+			changedDecayTimer = null;
+		}, CHANGED_DECAY_MS);
+	}
+
+	// Clear the decay timer if the host unmounts mid-window (per-matter remount).
+	$effect(() => () => {
+		if (changedDecayTimer !== null) clearTimeout(changedDecayTimer);
+	});
+
 	// Keep the stacked pane in sync with URL-driven thread changes (review
 	// fix): a threadId ARRIVING (composer-created sync, history forward)
 	// must show the panel — otherwise crossing the width threshold later
@@ -228,6 +256,7 @@
 					on:settled={handleSettled}
 					on:newmatter={() => (createOpen = true)}
 					on:threadcreated={handleThreadCreated}
+					on:ropachange={handleRopaChange}
 				/>
 			</div>
 		</PageShell>
@@ -405,7 +434,11 @@
 								<div
 									class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain border-l border-border"
 								>
-									<RopaRegister {runActive} reloadKey={registerReloadKey} />
+									<RopaRegister
+										{runActive}
+										reloadKey={registerReloadKey}
+										changedIds={recentlyChangedIds}
+									/>
 								</div>
 							</Resizable.Pane>
 						</Resizable.PaneGroup>
@@ -422,7 +455,11 @@
 								{@render conversationPane()}
 							</div>
 							{#if matterTab === 'register'}
-								<RopaRegister {runActive} reloadKey={registerReloadKey} />
+								<RopaRegister
+									{runActive}
+									reloadKey={registerReloadKey}
+									changedIds={recentlyChangedIds}
+								/>
 							{/if}
 						{:else if matter || threadId}
 							{@render conversationPane()}

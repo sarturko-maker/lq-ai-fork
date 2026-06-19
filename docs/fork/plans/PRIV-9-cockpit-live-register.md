@@ -2,7 +2,8 @@
 
 **Status:** **PRIV-9a DELIVERED** (co-visible + run-lock + live-refresh; evidence
 `docs/fork/evidence/priv-9a/`, measured commit→visible ≈ 1.1 s; full ADR-F005 gate + adversarial review)
-· PRIV-9b PENDING (changed-row highlight + the agent→register change-signal + ADR-F024) · **Date:** 2026-06-19 ·
+· **PRIV-9b IN PROGRESS** (changed-row highlight + the agent→register change-signal + ADR-F024;
+mechanism settled after a 5-reader backend seam map — see D4 refinement below) · **Date:** 2026-06-19 ·
 **Decisions taken (maintainer, this session):** (1) **two slices** — 9a (co-visible + run-lock +
 live-refresh, frontend-only, no ADR) then 9b (changed-row highlight + the backend change-signal + ADR-F024);
 (2) **poll-while-running** — the register re-reads live as the agent works, not only once on settle.
@@ -104,8 +105,9 @@ matter" + ADR-F009/F004 run semantics).
   (ADR-F004). The stream signal only *targets the highlight + triggers the refetch*; a missed frame loses a
   highlight, never data.
 - **No `updated_at onupdate` migration / timestamp-diff route** (rejected above as non-viable + less honest).
-- **No `include_retired` audit toggle UI** in v1 — deferred to Backlog (the client DTOs gaining `retired_at`
-  in 9b is enough; a retiring row simply leaves the live view).
+- **No `include_retired` audit toggle UI** in v1 — deferred to Backlog. A retiring row simply leaves the live
+  view on the next reload (reads exclude retired by default); the client DTOs do **not** gain `retired_at` in
+  9b (revised — it would be dead code until the deferred "removed outro" animation that would consume it).
 - **No change to the legacy single-turn `ChatPanel`** beyond using it as copy-reference for the Stop pattern.
 
 ## Key decisions
@@ -140,13 +142,33 @@ chatting** (it isn't today — plain `{#if}`), so the live view and any highligh
 > acceptance* below) so we ship a responsive UX *before* the optimization — optimization is for cost/volume,
 > not for the user-facing wait. **Surfaced, not silently capped.**
 
-### D4 — Highlight signal = structured change on the agent stream (ADR-F024)
-ROPA tools return the affected **entity id + verb + kind** (keep the human prose too); `stream.py`'s
-`tool-output-available` carries a structured `changed: {kind, id, verb}` payload (not buried in the 2000-char
-prose summary). The client lifts touched ids into a **`recentlyChangedIds` set hoisted to `ConversationHost`**
-(robust to any register remount; fed from the stream consumed in `ConversationPanel`). `RopaRegister` accepts
-that set and applies a transient highlight to matching `{#each}` rows (already keyed by entity id:
-L268/308/347/379/404).
+### D4 — Highlight signal = a run-scoped change ledger → a dedicated transient stream frame (ADR-F024)
+**Refined after the backend seam map** (the brief said "structured field on `tool-output-available`"; grounding
+in the code chose a cleaner mechanism):
+
+- **Why not return the id through the tool / `tool-output-available`.** Every guarded tool returns a *plain
+  prose string* (`guarded_dispatch` is typed `-> str`); the runner's `on_tool_end` sees only that string
+  (`runner.py:_step_from_event`). Getting structured data onto the tool output would mean either polluting the
+  model-visible prose (fragile parse, truncation-prone at 2000 chars) or relying on langchain
+  `content_and_artifact` (version-coupled, and the event-output shape is not guaranteed across our pin).
+- **Chosen: a run-scoped `RopaChangeLedger` (B-class, injected — never model-visible).** New
+  `api/app/agents/ropa_changes.py` (`RopaChange{kind,id,verb}` + a cursor-draining `RopaChangeLedger`).
+  `build_ropa_tools` takes the ledger; each mutating tool body, **after a successful `flush`** (where the id is
+  known — `propose_*` capture the flushed row id; retire/link/unlink/tag already hold the ids), records the
+  change — **only on a real change**, never on an idempotent no-op or a rejection. The model-facing prose is
+  unchanged. The ledger is per-run, so no cross-run leakage; appends + drains are same-event-loop (safe).
+- **Drain → a dedicated `data-ropa-change` frame.** `_drive_agent` drains the ledger at each `tool_result`
+  step and calls a new `RunStreamPublisher.ropa_changed(...)` that emits a **transient** `data-ropa-change`
+  part (`{kind, id, verb}`) — the spec's sanctioned `data-*` extension (same shape as the existing
+  `data-plan`). A dedicated frame **decouples the signal from `toolCallId` correlation**, so concurrent tool
+  calls (the known find-or-create parallelism) can't mis-attribute a change to the wrong tool-output frame.
+  Transient ⇒ not tracked as an open block ⇒ a late subscriber simply misses it (ADR-F004: lose a flash, never
+  data).
+- **Client.** `run-stream.ts` gains a pure `parseRopaChangePayload`; `ConversationPanel.handleStreamPart`
+  dispatches a `ropachange` event per frame; `ConversationHost` accumulates ids into a `recentlyChangedIds`
+  `$state` **set hoisted at the host** (robust to register remount), decayed by one timer (reset on each new
+  change, window > poll interval so a row that arrives on the *next* poll still flashes). `RopaRegister` takes
+  the set and washes matching `{#each}` rows (already keyed by entity id).
 
 ### D5 — Highlight presentation
 Transient `bg-status-completed-wash` on the matched row, fading via `--motion-*` through `motionMs()`
@@ -176,24 +198,48 @@ The whole watch-it-happen foundation, no backend or schema change.
   changing live across a (mocked or live) run; copy to `docs/fork/evidence/priv-9a/`.
 
 ### PRIV-9b — live changed-row highlight + the change-signal (backend + client + ADR-F024)
-- `api/app/agents/ropa_tools.py`: tool results carry `entity id + verb + kind` (propose_* return the flushed
-  id; link/unlink/retire/tag echo affected ids). Prose unchanged for humans.
-- `api/app/agents/stream.py` (+ `runner.py` `_step_from_event` as needed): structured `changed: {kind, id,
-  verb}` on the `tool-output-available` frame / step row.
-- `web/.../sse/ui-message-stream.ts` + `agents/run-stream.ts`: parse `changed`; accumulate into
-  `recentlyChangedIds`, hoisted to `ConversationHost`.
-- `web/.../api/ropa.ts`: add `retired_at` to `ProcessingActivityRead`/`SystemRead`/`VendorRead` (client lags
-  the backend, which already emits it).
-- `web/.../components/ropa/RopaRegister.svelte`: accept `changedIds`; transient highlight + motion decay on
-  matched rows (D5).
-- **ADR `docs/adr/F024-agent-run-register-change-signal.md`** (new): the change-signal contract, considered
-  options (timestamp-diff rejected, prose-parsing rejected, structured stream field chosen), consequences,
-  the ADR-F004 "stream animates / settled read decides" boundary, the audit-contract safety of emitting ids.
-- **Tests:** api unit tests that each ROPA tool result includes the id/verb/kind and the stream frame carries
-  `changed`; web tests that the highlight set is built from frames and applied to the right rows; a missed
-  frame degrades gracefully (no highlight, data still correct via reload).
-- **Verification:** live run on the dev gateway (reuse the PRIV-8b mixpanel→hotjar flow) screenshotted with
-  rows highlighting as the swap lands; evidence to `docs/fork/evidence/priv-9b/`.
+- **`api/app/agents/ropa_changes.py` (new):** `RopaChange{kind,id,verb}` + `RopaChangeLedger` (append +
+  cursor `drain()`). The one piece both the tools (producer) and the runner (consumer) share — its own module
+  to keep `guard.py`/`runner.py`/`ropa_tools.py` free of a circular import.
+- `api/app/agents/ropa_tools.py`: `build_ropa_tools(..., change_ledger=None)`; each mutating helper records
+  `(kind, id, verb)` **after a successful flush** and **only on a real change** (no-ops/rejections record
+  nothing). `kind ∈ {processing_activity, system, vendor}` — links/tags/transfers map to the affected
+  **activity** id (and a link also records the system/vendor it touched) so the visible top-level row washes.
+  The model-facing prose is byte-for-byte unchanged.
+- `api/app/agents/composition.py`: build one ledger per run; pass to `build_ropa_tools` **and**
+  `execute_agent_run`.
+- `api/app/agents/runner.py`: `execute_agent_run(..., change_ledger=None)` → `_drive_agent(...)`; drain the
+  ledger at each `tool_result` and emit via the publisher.
+- `api/app/agents/stream.py`: `RunStreamPublisher.ropa_changed(kind, entity_id, verb)` → a **transient**
+  `data-ropa-change` part (`{kind,id,verb}`), the `data-plan` precedent. Not tracked as an open block.
+- `web/.../sse/ui-message-stream.ts`: no change (the loose parser already forwards `data-*`).
+- `web/.../agents/run-stream.ts`: pure `parseRopaChangePayload(data) -> {kind,id,verb} | null` (drop
+  malformed; the poller remains truth).
+- `web/.../components/agents/ConversationPanel.svelte`: `handleStreamPart` `case 'data-ropa-change'` →
+  `dispatch('ropachange', payload)`.
+- `web/.../cockpit/ConversationHost.svelte`: hoist `recentlyChangedIds` `$state` set + one decay timer
+  (window > poll interval, reset per change); `on:ropachange`; pass `changedIds` to **both** `RopaRegister`
+  sites (the split pane + the toggle fallback).
+- `web/.../components/ropa/RopaRegister.svelte`: accept `changedIds`; transient `--status-completed-wash`
+  on matched activity/system/vendor rows, fading via a base transition (reduced-motion → instant) (D5).
+- **NOT adding `retired_at` to the web DTOs** (the earlier plan step): it has **no consumer** until the
+  deferred "removed outro" animation — reads exclude retired rows by default, so a retire simply drops the row
+  on the next reload (the disappearance is the signal). Adding the field now would be dead code (simplification
+  discipline). Logged as Backlog with the outro animation.
+- **ADR `docs/adr/F024-agent-run-register-change-signal.md`** (new): the change-signal contract; considered
+  options — timestamp-diff (rejected), prose-parsing (rejected), piggyback-on-`tool-output-available`
+  (rejected: `toolCallId` mis-attribution under concurrent tools), langchain `content_and_artifact` (rejected:
+  version-coupling), **ledger + dedicated transient frame (chosen)**; consequences; the ADR-F004 "stream
+  animates / settled read decides" boundary; the audit-contract safety of emitting ids (counts/types/**IDs**).
+- **Tests:** api unit tests — the ledger drains FIFO once; each mutating tool records the right `(kind,id,verb)`
+  on a real change and **nothing** on a no-op/rejection; the publisher emits a `data-ropa-change` part. Web
+  vitest — `parseRopaChangePayload` accept/reject; a malformed frame degrades to no highlight.
+- **Verification (two-track, per the maintainer):** (1) deterministic headed Cypress (scripted stream emits
+  `data-ropa-change`, intercepts include the row) proving the wash lands on the right row — in CI; (2) **live
+  DeepSeek** driven through **multiple change use-cases** (add a system, swap a vendor, retire + relink) with
+  screenshots of rows washing as each change lands. Evidence to `docs/fork/evidence/priv-9b/`. (Live coherence
+  needs `ropa-maintenance` bound to Privacy — bound in the dev DB for the test; the production default-binding
+  migration stays the standing Backlog item.)
 
 ## UX acceptance — measured in 9a, not deferred (maintainer: "we don't want users waiting for minutes")
 Optimization (conditional/ETag refetch) is a **separate** Backlog slice, but 9a's tests must *capture the

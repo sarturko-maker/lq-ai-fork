@@ -186,6 +186,19 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     # crashes the worker — the api's posture, mirrored.
     await init_agent_checkpointer()
 
+    # F025: the cross-process run-stream broker. Agent runs execute in THIS
+    # process; this publishes their live parts (reasoning/tool frames + the
+    # PRIV-9b changed-row highlight) onto Redis pub/sub so the api's SSE
+    # endpoint relays them to the browser. ``ctx['redis']`` is arq's pool.
+    # Best-effort: a build failure degrades to settled-rows-only streaming
+    # (None broker), never crashes the worker.
+    try:
+        from app.agents.stream import RedisStreamBroker
+
+        ctx["agent_stream_broker"] = RedisStreamBroker(ctx["redis"])
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("arq-worker startup: run-stream broker unavailable: %s (continuing)", exc)
+
     # Startup orphan sweep: settle any 'running' rows left behind by a
     # dead worker (or by the pre-S1 BackgroundTasks model) before this
     # worker takes new jobs — the ingest worker's startup-sweep
@@ -216,6 +229,12 @@ async def on_shutdown(ctx: dict[str, Any]) -> None:
     """
 
     log.info("arq-worker shutdown: closing checkpointer + disposing DB engine")
+    broker = ctx.get("agent_stream_broker")
+    if broker is not None:
+        try:
+            await broker.aclose()  # F025: cancel the Redis publish drain
+        except Exception as exc:  # pragma: no cover - shutdown best-effort
+            log.warning("arq-worker shutdown: run-stream broker close failed: %s", exc)
     try:
         await close_agent_checkpointer()
     except Exception as exc:  # pragma: no cover - shutdown best-effort

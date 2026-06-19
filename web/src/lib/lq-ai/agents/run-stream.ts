@@ -61,6 +61,36 @@ export function parseStepPayload(data: unknown): StreamStepPayload | null {
 	};
 }
 
+/**
+ * The `data-ropa-change` part payload (PRIV-9b, ADR-F024) — one ROPA register
+ * row the agent just changed. Drives the cockpit's live changed-row highlight;
+ * nothing durable derives from it (the settled re-read decides — ADR-F004).
+ */
+export interface RopaChangePayload {
+	/** Register table the row lives in: processing_activity | system | vendor. */
+	kind: string;
+	/** The entity id — matched against the register's `{#each}` row ids. */
+	id: string;
+	/** create | retire | link | unlink | tag — carried for honesty; v1 wash is verb-agnostic. */
+	verb: string;
+}
+
+/**
+ * Validate a `data-ropa-change` part's payload. Only `id` is load-bearing (the
+ * highlight matches rows by id); a malformed frame is dropped (null) and simply
+ * doesn't highlight — the poller still carries the true register.
+ */
+export function parseRopaChangePayload(data: unknown): RopaChangePayload | null {
+	if (typeof data !== 'object' || data === null) return null;
+	const d = data as Record<string, unknown>;
+	if (typeof d.id !== 'string' || d.id === '') return null;
+	return {
+		kind: typeof d.kind === 'string' ? d.kind : '',
+		id: d.id,
+		verb: typeof d.verb === 'string' ? d.verb : ''
+	};
+}
+
 /** Validate a `data-run` part's payload (see parseStepPayload). */
 export function parseRunPayload(data: unknown): StreamRunPayload | null {
 	if (typeof data !== 'object' || data === null) return null;

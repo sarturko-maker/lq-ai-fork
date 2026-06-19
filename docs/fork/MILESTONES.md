@@ -500,8 +500,11 @@ Phase 1–2 (see Backlog: EU AI Act register module). Phased rollout (each its o
 - Thread management: rename (delete SHIPPED in F1-S1 with `adelete_thread` + daily GC cron),
   pagination past the 20-thread list cap (a cockpit grouping client-side from it under-reports
   older matters) — F1/F2.
-- Redis pub/sub run-stream publisher (live token deltas across the api/worker boundary; F1-S1
-  moved execution to arq, so live streams currently degrade to the 2s DB-tail — animation only).
+- ~~Redis pub/sub run-stream publisher (live token deltas across the api/worker boundary; F1-S1
+  moved execution to arq, so live streams currently degrade to the 2s DB-tail — animation only).~~
+  **DONE in PRIV-9b (ADR-F025):** `RedisStreamBroker` (worker, publish) + `RedisStreamBridge` (api,
+  relays into the existing local broker) — the full live stream (reasoning ribbon, tool frames, the
+  `data-ropa-change` highlight) now crosses worker→Redis→api→SSE; proven live on DeepSeek.
 - Checkpoint history pruning inside LIVE threads + ShallowPostgresSaver evaluation (needs a
   measured bloat problem AND a legal-retention policy decision; F1-S1 ships orphan-lineage GC only).
 - Ingest-orphan cron (cut from F1-S1: `files` lacks `updated_at`, cron re-enqueue can race a live

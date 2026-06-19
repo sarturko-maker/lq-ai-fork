@@ -73,6 +73,7 @@ from app.agents.stream import (
     SSE_DONE,
     SSE_PING,
     UI_MESSAGE_STREAM_HEADERS,
+    RedisStreamBridge,
     RunStreamBroker,
     encode_sse,
     step_part,
@@ -160,6 +161,20 @@ def get_stream_broker(request: Request) -> RunStreamBroker:
 
 
 StreamBroker = Annotated[RunStreamBroker, Depends(get_stream_broker)]
+
+
+def get_stream_bridge(request: Request) -> RedisStreamBridge | None:
+    """FastAPI seam for the cross-process run-stream bridge (F025, ADR-F025).
+
+    The lifespan constructs it on ``app.state`` from the shared Redis client.
+    ``None`` (bare test apps that skip the lifespan, or no bridge configured) ⇒
+    the endpoint serves the DB-tail only — the F1-S1 behaviour. Never lazily
+    built here: a bridge needs the lifespan's Redis client + shutdown teardown.
+    """
+    return getattr(request.app.state, "agent_stream_bridge", None)
+
+
+StreamBridge = Annotated[RedisStreamBridge | None, Depends(get_stream_bridge)]
 
 
 def get_stream_session_factory() -> async_sessionmaker[AsyncSession]:
@@ -548,6 +563,7 @@ async def _stream_run_events(
     run_id: uuid.UUID,
     session_factory: async_sessionmaker[AsyncSession],
     broker: RunStreamBroker,
+    bridge: RedisStreamBridge | None = None,
 ) -> AsyncIterator[str]:
     """The SSE v2 frame source for one run (AI SDK UI Message Stream v1).
 
@@ -573,6 +589,21 @@ async def _stream_run_events(
     """
     yield encode_sse({"type": "start", "messageId": str(run_id)})
     queue = broker.subscribe(run_id)
+    # F025: relay the worker's Redis-published live parts into THIS process's
+    # broker so the loop below sees them on `queue` exactly like in-process
+    # parts. Attach AFTER subscribe (so the queue exists to receive them) and
+    # AFTER the route's ownership check (so an unowned run is never bridged).
+    # Fail-soft: a Redis hiccup degrades to the settled-rows DB-tail below.
+    bridged = False
+    if bridge is not None:
+        try:
+            await bridge.attach(run_id)
+            bridged = True
+        except Exception:
+            logger.warning(
+                "run-stream bridge attach failed; serving DB-tail",
+                extra={"event": "agent_stream_bridge_attach_failed", "run_id": str(run_id)},
+            )
     try:
         max_seq = 0
         run, steps, db_now = await _read_stream_state(session_factory, run_id, after_seq=0)
@@ -683,6 +714,8 @@ async def _stream_run_events(
                 return
     finally:
         broker.unsubscribe(run_id, queue)
+        if bridged and bridge is not None:
+            await bridge.detach(run_id)
 
 
 @router.get(
@@ -694,6 +727,7 @@ async def stream_agent_run(
     user: ActiveUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     broker: StreamBroker,
+    bridge: StreamBridge,
     session_factory: StreamSessionFactory,
 ) -> StreamingResponse:
     """GET /api/v1/agents/runs/{run_id}/stream — SSE v2 (F0-S7).
@@ -716,7 +750,7 @@ async def stream_agent_run(
     await db.close()
 
     return StreamingResponse(
-        _stream_run_events(run_id, session_factory, broker),
+        _stream_run_events(run_id, session_factory, broker, bridge),
         media_type="text/event-stream",
         headers=UI_MESSAGE_STREAM_HEADERS,
     )

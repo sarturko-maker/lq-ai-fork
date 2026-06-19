@@ -247,6 +247,38 @@ async def test_publisher_step_settled_tool_parts_and_plan() -> None:
     assert step_parts[0]["data"]["parent_step_id"] is None
 
 
+async def test_publisher_ropa_changed_emits_transient_data_frame() -> None:
+    """PRIV-9b (ADR-F024): ropa_changed → a transient data-ropa-change part."""
+    broker = RunStreamBroker()
+    run_id = uuid.uuid4()
+    queue = broker.subscribe(run_id)
+    publisher = broker.publisher(run_id)
+    entity_id = str(uuid.uuid4())
+
+    publisher.ropa_changed(kind="vendor", entity_id=entity_id, verb="create")
+
+    parts = [p for p in _drain(queue) if p["type"] != "start"]
+    assert parts == [
+        {
+            "type": "data-ropa-change",
+            "transient": True,
+            "data": {"kind": "vendor", "id": entity_id, "verb": "create"},
+        }
+    ]
+
+
+async def test_publisher_ropa_changed_is_not_seeded_to_late_subscribers() -> None:
+    """A transient change is animation only — a mid-run subscriber must NOT be
+    seeded with it (it isn't an open block; ADR-F004 — lose a flash, not data)."""
+    broker = RunStreamBroker()
+    run_id = uuid.uuid4()
+    publisher = broker.publisher(run_id)
+    publisher.ropa_changed(kind="system", entity_id=str(uuid.uuid4()), verb="retire")
+
+    late = broker.subscribe(run_id)
+    assert _drain(late) == []
+
+
 async def test_publisher_truncated_tool_args_ride_as_raw() -> None:
     broker = RunStreamBroker()
     run_id = uuid.uuid4()

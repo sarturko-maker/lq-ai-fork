@@ -580,6 +580,56 @@ async def test_publisher_mirrors_the_real_loop_onto_the_wire(
     assert data_run["data"]["status"] == "completed"
 
 
+async def test_run_drains_the_change_ledger_onto_the_stream_at_tool_result(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """PRIV-9b (ADR-F024): the runner glue — at each tool_result step the loop
+    drains the run-scoped change ledger and publishes each entry as a
+    data-ropa-change part. (The ledger, the publisher frame, the tool-body
+    recording, and the cross-process transport are each tested in isolation;
+    this is the seam that wires them together.)"""
+    from app.agents.ropa_changes import RopaChangeLedger
+    from app.agents.stream import RunStreamBroker
+
+    run_id = await make_run()
+    broker = RunStreamBroker()
+    queue = broker.subscribe(run_id)
+    # A ROPA tool body would record this after its flush; pre-seed it so the test
+    # exercises ONLY the runner's drain-at-tool_result glue, not a real tool.
+    ledger = RopaChangeLedger()
+    ledger.record("system", "11111111-1111-4111-8111-111111111111", "create")
+
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("read_clause", {"topic": "liability"}),
+            final_message("done"),
+        ]
+    )
+    await execute_agent_run(
+        run_id,
+        commit_factory,
+        tools=[read_clause],
+        model=model,
+        publisher=broker.publisher(run_id),
+        change_ledger=ledger,
+    )
+
+    parts: list[Any] = []
+    while not queue.empty():
+        parts.append(queue.get_nowait())
+    changes = [p for p in parts if isinstance(p, dict) and p.get("type") == "data-ropa-change"]
+    assert len(changes) == 1
+    assert changes[0]["data"] == {
+        "kind": "system",
+        "id": "11111111-1111-4111-8111-111111111111",
+        "verb": "create",
+    }
+    assert changes[0]["transient"] is True
+    # Drained exactly once — a second (answer) turn carries no further change.
+    assert ledger.drain() == []
+
+
 async def test_step_write_survives_a_transient_db_failure(
     make_run: Callable[..., Awaitable[uuid.UUID]],
     commit_factory: async_sessionmaker[AsyncSession],

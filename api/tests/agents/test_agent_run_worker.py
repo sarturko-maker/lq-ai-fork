@@ -217,15 +217,18 @@ async def test_job_claims_then_composes_with_the_lease(
     run_id = await make_run()
     seen: dict[str, Any] = {}
 
-    async def fake_compose(*, run_id: uuid.UUID, lease: RunLease) -> None:
+    async def fake_compose(*, run_id: uuid.UUID, lease: RunLease, broker: Any = None) -> None:
         seen["run_id"] = run_id
         seen["lease"] = lease
+        seen["broker"] = broker
 
     result = await execute_run_job(commit_factory, run_id, claimed_by="w1", compose=fake_compose)
 
     assert result["executed"] is True
     assert seen["run_id"] == run_id
     assert isinstance(seen["lease"], RunLease)
+    # F025: no broker injected here → compose receives None (DB-tail streaming).
+    assert seen["broker"] is None
     row = await _row(commit_factory, run_id)
     assert row.claimed_by == "w1"
     assert row.lease_token == seen["lease"].token
@@ -280,7 +283,9 @@ async def test_job_interruption_never_overwrites_a_cancel(
     run_id = await make_run()
     from app.agents.lease import settle_run
 
-    async def compose_then_cancelled(*, run_id: uuid.UUID, lease: RunLease) -> None:
+    async def compose_then_cancelled(
+        *, run_id: uuid.UUID, lease: RunLease, broker: Any = None
+    ) -> None:
         # Simulate the cancel endpoint winning mid-flight, then the
         # arq abort's CancelledError arriving.
         await settle_run(commit_factory, run_id, status=AgentRunStatus.cancelled)
