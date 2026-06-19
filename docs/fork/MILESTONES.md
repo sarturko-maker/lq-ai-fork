@@ -330,7 +330,7 @@ short-slice**.
   skill** (link-as-you-go method; test-only bound — recommend shipping via a binding migration), and a
   **production runner fix**: `runner.py` now ties langgraph's graph `recursion_limit` to the run's `max_steps`
   (the default 25 was crashing any long/skilled run before `max_steps` fired). Findings:
-  `docs/fork/evidence/priv-7/FINDINGS.md`) → **PRIV-8a ✅ (PR open)** (ROPA **change verbs**: the agent can
+  `docs/fork/evidence/priv-7/FINDINGS.md`) → **PRIV-8a ✅ (PR #112)** (ROPA **change verbs**: the agent can
   now *change* the register in plain language, not only append — 6 guarded tools `retire_*`×4 + `unlink_*`×2,
   **soft-retire** (`retired_at`, never delete → auditable), reads hide retired everywhere by default
   (`?include_retired=true` = audit), write verbs refuse retired targets; migration 0063; **ADR-F023**;
