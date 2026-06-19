@@ -50,13 +50,14 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import Table, func, select
+from sqlalchemy import CursorResult, Table, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, with_loader_criteria
 
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.agents.tools import MatterBinding
@@ -95,6 +96,16 @@ ROPA_TOOL_NAMES = frozenset(
         "link_vendor_to_activity",
         "add_data_subject_categories",
         "add_data_categories",
+        # PRIV-8a (ADR-F023): the change verbs — soft-retire + unlink. The agent
+        # can now *change* the register (replace a vendor/system, drop a link), not
+        # only append. Retire never destroys a row (it stays for audit); unlink
+        # removes one M:N link.
+        "retire_processing_activity",
+        "retire_system",
+        "retire_vendor",
+        "retire_transfer",
+        "unlink_system_from_activity",
+        "unlink_vendor_from_activity",
         "list_processing_activities",
         "list_systems",
         "list_vendors",
@@ -107,6 +118,11 @@ ROPA_TOOL_NAMES = frozenset(
 # Cap the register dump so a large register's tool result stays inside the model's
 # working context; the read UI (PRIV-3) is the place to browse a long register.
 _LIST_LIMIT = 100
+
+# Max length of a soft-retire reason note (PRIV-8a, ADR-F023) — mirrors the
+# ``retirement_reason`` CHECK in app.models.ropa (defense-in-depth; reject, don't
+# truncate). One source for the bound so the tool and the DB agree.
+_MAX_RETIREMENT_REASON = 1000
 
 # The two Article 30(1)(c) controlled-vocabulary entities share an identical
 # shape, so the tag/list helpers below are generic over them (PEP 695 constrained
@@ -392,6 +408,145 @@ def build_ropa_tools(
             ctx,
         )
 
+    async def retire_processing_activity(
+        processing_activity_id: str, reason: str | None = None
+    ) -> str:
+        """Retire a processing activity — the company no longer carries out this processing.
+
+        Soft, auditable: the record is removed from the LIVE register (and from the
+        export, summary and data-flow) but is never destroyed — it stays on record
+        so the change can be audited. Pass the id from list_processing_activities and
+        optionally a short ``reason`` (e.g. "process discontinued 2026-06"). Use this
+        only when the whole activity has ended — to stop using ONE system/vendor for an
+        activity that continues, use unlink_* instead. Retiring an already-retired
+        record is a no-op.
+        """
+        return await guarded_dispatch(
+            "retire_processing_activity",
+            lambda db: _retire(
+                db,
+                model=ProcessingActivity,
+                entity_id=processing_activity_id,
+                noun="processing activity",
+                list_hint="list_processing_activities",
+                reason=reason,
+            ),
+            ctx,
+        )
+
+    async def retire_system(system_id: str, reason: str | None = None) -> str:
+        """Retire a system/asset — the company no longer uses this system at all.
+
+        Soft, auditable (see retire_processing_activity): the system leaves the live
+        register but stays on record. This is company-wide — it drops the system from
+        EVERY activity that used it. To stop using it for just one activity that keeps
+        running, use unlink_system_from_activity instead. Pass the id from list_systems
+        and an optional ``reason`` (e.g. "decommissioned; replaced by X"). Retiring an
+        already-retired system is a no-op.
+        """
+        return await guarded_dispatch(
+            "retire_system",
+            lambda db: _retire(
+                db,
+                model=System,
+                entity_id=system_id,
+                noun="system",
+                list_hint="list_systems",
+                reason=reason,
+            ),
+            ctx,
+        )
+
+    async def retire_vendor(vendor_id: str, reason: str | None = None) -> str:
+        """Retire a vendor/recipient — the company no longer discloses data to it.
+
+        Soft, auditable (see retire_processing_activity): the vendor leaves the live
+        register but stays on record. This is company-wide — it drops the vendor as a
+        recipient of EVERY activity. To stop disclosing to it for just one activity,
+        use unlink_vendor_from_activity instead. Typical use: replacing a vendor — add
+        the new one (propose_vendor + link_vendor_to_activity), then retire the old one
+        here. Pass the id from list_vendors and an optional ``reason`` (e.g. "moved off
+        Mixpanel; replaced by Hotjar"). Retiring an already-retired vendor is a no-op.
+        """
+        return await guarded_dispatch(
+            "retire_vendor",
+            lambda db: _retire(
+                db,
+                model=Vendor,
+                entity_id=vendor_id,
+                noun="vendor",
+                list_hint="list_vendors",
+                reason=reason,
+            ),
+            ctx,
+        )
+
+    async def retire_transfer(transfer_id: str, reason: str | None = None) -> str:
+        """Retire a third-country transfer — this transfer no longer happens.
+
+        Soft, auditable (see retire_processing_activity): the transfer leaves the live
+        register but stays on record. Pass the id from list_transfers and an optional
+        ``reason``. Retiring an already-retired transfer is a no-op.
+        """
+        return await guarded_dispatch(
+            "retire_transfer",
+            lambda db: _retire(
+                db,
+                model=Transfer,
+                entity_id=transfer_id,
+                noun="transfer",
+                list_hint="list_transfers",
+                reason=reason,
+            ),
+            ctx,
+        )
+
+    async def unlink_system_from_activity(processing_activity_id: str, system_id: str) -> str:
+        """Remove the link between a processing activity and a system.
+
+        The activity no longer uses this system, but BOTH records stay live (the
+        system may still serve other activities). Pass the IDs from
+        list_processing_activities / list_systems. If they were not linked it is a
+        no-op. To remove the system from the register entirely, use retire_system.
+        """
+        return await guarded_dispatch(
+            "unlink_system_from_activity",
+            lambda db: _unlink(
+                db,
+                link_table=processing_activity_systems,
+                other_col="system_id",
+                other_model=System,
+                other_noun="system",
+                list_hint="list_systems",
+                processing_activity_id=processing_activity_id,
+                other_id=system_id,
+            ),
+            ctx,
+        )
+
+    async def unlink_vendor_from_activity(processing_activity_id: str, vendor_id: str) -> str:
+        """Remove the link between a processing activity and a vendor/recipient.
+
+        The activity no longer discloses to this vendor, but BOTH records stay live
+        (the vendor may still receive data for other activities). Pass the IDs from
+        list_processing_activities / list_vendors. If they were not linked it is a
+        no-op. To remove the vendor from the register entirely, use retire_vendor.
+        """
+        return await guarded_dispatch(
+            "unlink_vendor_from_activity",
+            lambda db: _unlink(
+                db,
+                link_table=processing_activity_vendors,
+                other_col="vendor_id",
+                other_model=Vendor,
+                other_noun="vendor",
+                list_hint="list_vendors",
+                processing_activity_id=processing_activity_id,
+                other_id=vendor_id,
+            ),
+            ctx,
+        )
+
     async def list_processing_activities() -> str:
         """List the processing activities in the company ROPA register (with IDs)."""
         return await guarded_dispatch(
@@ -445,6 +600,12 @@ def build_ropa_tools(
         link_vendor_to_activity,
         add_data_subject_categories,
         add_data_categories,
+        retire_processing_activity,
+        retire_system,
+        retire_vendor,
+        retire_transfer,
+        unlink_system_from_activity,
+        unlink_vendor_from_activity,
         list_processing_activities,
         list_systems,
         list_vendors,
@@ -635,6 +796,10 @@ async def _propose_transfer(
         return "Transfer refused — " + "; ".join(missing) + ". Nothing was recorded."
     assert activity is not None  # narrowed by the check above
 
+    blocked = _retired_target_block((activity, "processing activity"), (vendor, "vendor"))
+    if blocked is not None:
+        return blocked
+
     db.add(
         Transfer(
             source_project_id=binding.project_id,
@@ -681,6 +846,10 @@ async def _link(
     if missing:
         return "Link refused — " + "; ".join(missing) + ". Nothing was linked."
     assert activity is not None and system is not None  # narrowed by the checks above
+
+    blocked = _retired_target_block((activity, "processing activity"), (system, "system"))
+    if blocked is not None:
+        return blocked
 
     existing = (
         await db.execute(
@@ -729,6 +898,10 @@ async def _link_vendor(
         return "Link refused — " + "; ".join(missing) + ". Nothing was linked."
     assert activity is not None and vendor is not None  # narrowed by the checks above
 
+    blocked = _retired_target_block((activity, "processing activity"), (vendor, "vendor"))
+    if blocked is not None:
+        return blocked
+
     existing = (
         await db.execute(
             select(processing_activity_vendors).where(
@@ -749,12 +922,166 @@ async def _link_vendor(
     return f'Linked processing activity "{activity.name}" to vendor "{vendor.name}".'
 
 
+# ---------------------------------------------------------------------------
+# Change verbs (PRIV-8a, ADR-F023): soft-retire + unlink
+# ---------------------------------------------------------------------------
+
+
+def _retire_label(row: ProcessingActivity | System | Vendor | Transfer) -> str:
+    """A human label for a register row — the name for the named entities, the
+    destination for a transfer (which carries no name)."""
+    if isinstance(row, Transfer):
+        return row.destination
+    return row.name
+
+
+def _retired_target_block(
+    *candidates: tuple[ProcessingActivity | System | Vendor | None, str],
+) -> str | None:
+    """Refuse a link/tag/transfer that targets a RETIRED record (ADR-F023).
+
+    The live register must never grow a link to a retired row: the reads hide it,
+    so the join would be latent, invisible state that resurfaces incoherently on a
+    future un-retire. Returns the refusal text for the first retired target, or
+    ``None`` if every target is live. ``None`` candidates (e.g. an absent optional
+    vendor) are skipped.
+    """
+    for row, noun in candidates:
+        if row is not None and row.retired_at is not None:
+            return (
+                f'Refused — {noun} "{row.name}" is retired; link/tag a live record instead. '
+                "Nothing was changed."
+            )
+    return None
+
+
+async def _retire[R: (ProcessingActivity, System, Vendor, Transfer)](
+    db: AsyncSession,
+    *,
+    model: type[R],
+    entity_id: str,
+    noun: str,
+    list_hint: str,
+    reason: str | None,
+) -> str:
+    """Soft-retire one register row (set ``retired_at``); never delete it.
+
+    Idempotent (an already-retired row is a friendly no-op); an unknown id is
+    refused with the reason (never a silent change). The row stays on record for
+    audit; the reads exclude it from the live register. ``reason`` is an optional
+    note — rejected (not silently truncated) if it exceeds the stored length, per
+    ADR-F018 (reject, don't sanitize).
+    """
+    try:
+        eid = uuid.UUID(entity_id)
+    except ValueError:
+        return f"Retire refused — the id must be one shown by {list_hint}. Nothing was changed."
+    if reason is not None and len(reason.strip()) > _MAX_RETIREMENT_REASON:
+        return (
+            f"Retire refused — reason is too long (max {_MAX_RETIREMENT_REASON} characters). "
+            "Shorten it and call again. Nothing was changed."
+        )
+    row: R | None = await db.get(model, eid)
+    if row is None:
+        return f"Retire refused — no {noun} with id {entity_id}. Nothing was changed."
+    label = _retire_label(row)
+    if row.retired_at is not None:
+        return f'The {noun} "{label}" is already retired — nothing to do.'
+    row.retired_at = datetime.now(UTC)
+    if reason is not None and reason.strip():
+        row.retirement_reason = reason.strip()
+    await db.flush()
+    return (
+        f'Retired the {noun} "{label}" from the live register — it is hidden from the '
+        "register but kept on record for audit."
+    )
+
+
+async def _unlink[O: (System, Vendor)](
+    db: AsyncSession,
+    *,
+    link_table: Table,
+    other_col: str,
+    other_model: type[O],
+    other_noun: str,
+    list_hint: str,
+    processing_activity_id: str,
+    other_id: str,
+) -> str:
+    """Delete one M:N link row after checking both ends exist (else reject).
+
+    The mirror of ``_link`` / ``_link_vendor``: removes the single
+    (activity, system|vendor) pair. Idempotent — if the pair was not linked it is a
+    no-op. The entities themselves are untouched (use the retire verbs to remove a
+    record from the register entirely).
+    """
+    try:
+        pa_uuid = uuid.UUID(processing_activity_id)
+        other_uuid = uuid.UUID(other_id)
+    except ValueError:
+        return (
+            f"Unlink refused — processing_activity_id and the {other_noun} id must be the IDs "
+            f"shown by list_processing_activities / {list_hint}. Nothing was unlinked."
+        )
+
+    activity = await db.get(ProcessingActivity, pa_uuid)
+    other = await db.get(other_model, other_uuid)
+    missing = []
+    if activity is None:
+        missing.append(f"no processing activity with id {processing_activity_id}")
+    if other is None:
+        missing.append(f"no {other_noun} with id {other_id}")
+    if missing:
+        return "Unlink refused — " + "; ".join(missing) + ". Nothing was unlinked."
+    assert activity is not None and other is not None  # narrowed by the checks above
+
+    # One DELETE; rowcount tells us whether the pair was actually linked (idempotent
+    # no-op message when it wasn't) — no separate existence SELECT needed.
+    result: CursorResult[Any] = await db.execute(  # type: ignore[assignment]
+        delete(link_table).where(
+            link_table.c.processing_activity_id == pa_uuid,
+            link_table.c[other_col] == other_uuid,
+        )
+    )
+    await db.flush()
+    if result.rowcount == 0:
+        return (
+            f'"{activity.name}" was not linked to {other_noun} "{other.name}" — nothing to unlink.'
+        )
+    return f'Unlinked {other_noun} "{other.name}" from processing activity "{activity.name}".'
+
+
+async def _retired_count[R: (ProcessingActivity, System, Vendor, Transfer)](
+    db: AsyncSession, model: type[R]
+) -> int:
+    """How many rows of ``model`` are retired (for the list tools' hidden-count footer)."""
+    count = (
+        await db.execute(
+            select(func.count()).select_from(model).where(model.retired_at.is_not(None))
+        )
+    ).scalar_one()
+    return int(count)
+
+
+def _hidden_footer(retired: int) -> str:
+    """A one-line note appended to a live list when retired rows exist (PRIV-8a).
+
+    So the agent knows a name it can't see is retired (won't recreate it) without
+    a tool to list retired rows — they are audit-only this slice.
+    """
+    if retired <= 0:
+        return ""
+    noun = "record" if retired == 1 else "records"
+    return f"\n\n({retired} retired {noun} hidden — retired entries stay on record for audit.)"
+
+
 async def _list_activities(db: AsyncSession) -> str:
     """Format the company ROPA register (oldest first), with IDs for linking."""
     rows = (
         (
             await db.execute(
                 select(ProcessingActivity)
+                .where(ProcessingActivity.retired_at.is_(None))
                 .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
                 .limit(_LIST_LIMIT)
             )
@@ -762,8 +1089,9 @@ async def _list_activities(db: AsyncSession) -> str:
         .scalars()
         .all()
     )
+    retired = await _retired_count(db, ProcessingActivity)
     if not rows:
-        return "The company ROPA has no processing activities yet."
+        return "The company ROPA has no processing activities yet." + _hidden_footer(retired)
 
     blocks: list[str] = []
     for row in rows:
@@ -779,7 +1107,11 @@ async def _list_activities(db: AsyncSession) -> str:
             f"retention: {row.retention}; {sc}"
         )
     noun = "activity" if len(rows) == 1 else "activities"
-    return f"Company ROPA — {len(rows)} processing {noun}:\n\n" + "\n".join(blocks)
+    return (
+        f"Company ROPA — {len(rows)} processing {noun}:\n\n"
+        + "\n".join(blocks)
+        + _hidden_footer(retired)
+    )
 
 
 async def _list_systems(db: AsyncSession) -> str:
@@ -788,6 +1120,7 @@ async def _list_systems(db: AsyncSession) -> str:
         (
             await db.execute(
                 select(System)
+                .where(System.retired_at.is_(None))
                 .order_by(System.created_at.asc(), System.name.asc())
                 .limit(_LIST_LIMIT)
             )
@@ -795,8 +1128,9 @@ async def _list_systems(db: AsyncSession) -> str:
         .scalars()
         .all()
     )
+    retired = await _retired_count(db, System)
     if not rows:
-        return "The company system inventory has no systems yet."
+        return "The company system inventory has no systems yet." + _hidden_footer(retired)
 
     blocks: list[str] = []
     for row in rows:
@@ -808,7 +1142,9 @@ async def _list_systems(db: AsyncSession) -> str:
         tail = f" ({'; '.join(extras)})" if extras else ""
         blocks.append(f"- [{row.id}] {row.name} — {row.system_type}{tail}")
     noun = "system" if len(rows) == 1 else "systems"
-    return f"Company inventory — {len(rows)} {noun}:\n\n" + "\n".join(blocks)
+    return (
+        f"Company inventory — {len(rows)} {noun}:\n\n" + "\n".join(blocks) + _hidden_footer(retired)
+    )
 
 
 async def _list_vendors(db: AsyncSession) -> str:
@@ -817,6 +1153,7 @@ async def _list_vendors(db: AsyncSession) -> str:
         (
             await db.execute(
                 select(Vendor)
+                .where(Vendor.retired_at.is_(None))
                 .order_by(Vendor.created_at.asc(), Vendor.name.asc())
                 .limit(_LIST_LIMIT)
             )
@@ -824,15 +1161,18 @@ async def _list_vendors(db: AsyncSession) -> str:
         .scalars()
         .all()
     )
+    retired = await _retired_count(db, Vendor)
     if not rows:
-        return "The company register has no vendors/recipients yet."
+        return "The company register has no vendors/recipients yet." + _hidden_footer(retired)
 
     blocks: list[str] = []
     for row in rows:
         tail = f"; based in {row.country}" if row.country else ""
         blocks.append(f"- [{row.id}] {row.name} — {row.vendor_role} (DPA: {row.dpa_status}{tail})")
     noun = "vendor" if len(rows) == 1 else "vendors"
-    return f"Company register — {len(rows)} {noun}:\n\n" + "\n".join(blocks)
+    return (
+        f"Company register — {len(rows)} {noun}:\n\n" + "\n".join(blocks) + _hidden_footer(retired)
+    )
 
 
 async def _list_transfers(db: AsyncSession) -> str:
@@ -841,9 +1181,18 @@ async def _list_transfers(db: AsyncSession) -> str:
         (
             await db.execute(
                 select(Transfer)
+                # Hide a transfer that is itself retired OR whose parent activity is
+                # retired (the activity has vanished from the register, so its
+                # transfer must too — matches the API _load_register; ADR-F023).
+                .where(
+                    Transfer.retired_at.is_(None),
+                    Transfer.processing_activity.has(ProcessingActivity.retired_at.is_(None)),
+                )
                 .options(
                     selectinload(Transfer.processing_activity),
                     selectinload(Transfer.vendor),
+                    # A retired recipient vendor renders as no recipient (not its name).
+                    with_loader_criteria(Vendor, Vendor.retired_at.is_(None)),
                 )
                 .order_by(Transfer.created_at.asc(), Transfer.destination.asc())
                 .limit(_LIST_LIMIT)
@@ -852,8 +1201,9 @@ async def _list_transfers(db: AsyncSession) -> str:
         .scalars()
         .all()
     )
+    retired = await _retired_count(db, Transfer)
     if not rows:
-        return "The company ROPA has no third-country transfers yet."
+        return "The company ROPA has no third-country transfers yet." + _hidden_footer(retired)
 
     blocks: list[str] = []
     for row in rows:
@@ -866,7 +1216,11 @@ async def _list_transfers(db: AsyncSession) -> str:
             f"({safeguard}){recipient}"
         )
     noun = "transfer" if len(rows) == 1 else "transfers"
-    return f"Company ROPA — {len(rows)} third-country {noun}:\n\n" + "\n".join(blocks)
+    return (
+        f"Company ROPA — {len(rows)} third-country {noun}:\n\n"
+        + "\n".join(blocks)
+        + _hidden_footer(retired)
+    )
 
 
 async def _add_categories[CatT: (DataSubjectCategory, DataCategory)](
@@ -927,6 +1281,11 @@ async def _add_categories[CatT: (DataSubjectCategory, DataCategory)](
         return (
             f"Tagging refused — no processing activity with id {processing_activity_id}. "
             "Nothing was recorded."
+        )
+    if activity.retired_at is not None:
+        return (
+            f'Tagging refused — processing activity "{activity.name}" is retired; '
+            "tag a live activity instead. Nothing was recorded."
         )
 
     added: list[str] = []
@@ -1011,7 +1370,16 @@ async def _list_categories[CatT: (DataSubjectCategory, DataCategory)](
         (
             await db.execute(
                 select(model)
-                .options(selectinload(model.processing_activities))
+                .options(
+                    selectinload(model.processing_activities),
+                    # The per-term usage count must reflect LIVE activities only —
+                    # a retired activity no longer "uses" the term (matches the API
+                    # _all_categories; ADR-F023). Without this, an orphaned term reads
+                    # as still in use.
+                    with_loader_criteria(
+                        ProcessingActivity, ProcessingActivity.retired_at.is_(None)
+                    ),
+                )
                 .order_by(model.created_at.asc(), model.name.asc())
                 .limit(_LIST_LIMIT)
             )

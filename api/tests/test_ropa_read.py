@@ -14,11 +14,12 @@ bearer → 401.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
+from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -448,3 +449,122 @@ async def test_data_flow_requires_authentication(client: AsyncClient) -> None:
 async def test_requires_authentication(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/ropa/processing-activities")
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Soft-retire read behaviour (PRIV-8a, ADR-F023)
+# ---------------------------------------------------------------------------
+
+
+async def test_retired_rows_hidden_by_default_shown_with_include_retired(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    _pa, system, vendor = await _seed_linked(db_session)
+    vendor.retired_at = datetime.now(UTC)
+    system.retired_at = datetime.now(UTC)
+    await db_session.flush()
+
+    # Default: the live register hides retired vendor + system.
+    r = await client.get("/api/v1/ropa/vendors", headers=_bearer(user))
+    assert [v["name"] for v in r.json()] == []
+    r = await client.get("/api/v1/ropa/systems", headers=_bearer(user))
+    assert [s["name"] for s in r.json()] == []
+
+    # include_retired=true surfaces them for audit, with retired_at populated.
+    r = await client.get("/api/v1/ropa/vendors?include_retired=true", headers=_bearer(user))
+    body = r.json()
+    assert [v["name"] for v in body] == ["Acme Payroll Ltd"]
+    assert body[0]["retired_at"] is not None
+    r = await client.get("/api/v1/ropa/systems?include_retired=true", headers=_bearer(user))
+    assert [s["name"] for s in r.json()] == ["Production database"]
+
+
+async def test_retired_links_drop_from_activity_nested_reads(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    """A live activity's retired system/vendor links disappear, and a transfer whose
+    recipient vendor is retired renders with a null recipient (ADR-F023 D2)."""
+    _pa, system, vendor = await _seed_linked(db_session)
+    vendor.retired_at = datetime.now(UTC)
+    system.retired_at = datetime.now(UTC)
+    await db_session.flush()
+
+    r = await client.get("/api/v1/ropa/processing-activities", headers=_bearer(user))
+    body = r.json()
+    assert len(body) == 1  # the activity itself is live
+    assert body[0]["systems"] == []
+    assert body[0]["vendors"] == []
+    # The transfer is still live, but its retired recipient vendor is dropped to null.
+    assert len(body[0]["transfers"]) == 1
+    assert body[0]["transfers"][0]["vendor"] is None
+
+
+async def test_retired_transfer_drops_from_activity(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    await _seed_linked(db_session)
+    transfer = (await db_session.execute(select(Transfer))).scalars().first()
+    assert transfer is not None
+    transfer.retired_at = datetime.now(UTC)
+    await db_session.flush()
+
+    r = await client.get("/api/v1/ropa/processing-activities", headers=_bearer(user))
+    assert r.json()[0]["transfers"] == []
+
+
+async def test_retired_activity_hidden_from_list_reverse_links_and_summary(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    pa, system, _vendor = await _seed_linked(db_session)
+    pa.retired_at = datetime.now(UTC)
+    await db_session.flush()
+
+    # Hidden from the activities list…
+    r = await client.get("/api/v1/ropa/processing-activities", headers=_bearer(user))
+    assert r.json() == []
+    # …from a live system's reverse link…
+    r = await client.get(f"/api/v1/ropa/systems/{system.id}", headers=_bearer(user))
+    assert r.json()["processing_activities"] == []
+    # …and from the programme summary (the "current register" view).
+    r = await client.get("/api/v1/ropa/programme-summary", headers=_bearer(user))
+    assert r.json()["activities_total"] == 0
+
+
+async def test_detail_resolves_retired_row_by_id(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    """A retired row still resolves by id (deep-link / audit) — only the LIST hides it."""
+    _pa, _system, vendor = await _seed_linked(db_session)
+    vendor.retired_at = datetime.now(UTC)
+    await db_session.flush()
+
+    r = await client.get(f"/api/v1/ropa/vendors/{vendor.id}", headers=_bearer(user))
+    assert r.status_code == 200
+    assert r.json()["name"] == "Acme Payroll Ltd"
+    assert r.json()["retired_at"] is not None
+
+
+async def test_data_flow_excludes_retired_recipient(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    _pa, _system, vendor = await _seed_linked(db_session)
+    vendor.retired_at = datetime.now(UTC)
+    await db_session.flush()
+
+    r = await client.get("/api/v1/ropa/data-flow", headers=_bearer(user))
+    node_ids = {n["id"] for n in r.json()["nodes"]}
+    assert f"recipient:{vendor.id}" not in node_ids
+
+
+async def test_article30_export_excludes_retired(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    """The Article 30 export is the 'current register' — a retired vendor must not
+    appear (neither in the vendor inventory nor nested under an activity)."""
+    _pa, _system, vendor = await _seed_linked(db_session)
+    vendor.retired_at = datetime.now(UTC)
+    await db_session.flush()
+
+    r = await client.get("/api/v1/ropa/export?format=json", headers=_bearer(user))
+    assert r.status_code == 200
+    assert "Acme Payroll Ltd" not in r.text

@@ -94,6 +94,13 @@ class RopaEnv:
     link_vendor: Callable[..., Awaitable[str]]
     add_data_subjects: Callable[..., Awaitable[str]]
     add_data_categories: Callable[..., Awaitable[str]]
+    # PRIV-8a (ADR-F023): the change verbs — soft-retire + unlink.
+    retire_activity: Callable[..., Awaitable[str]]
+    retire_system: Callable[..., Awaitable[str]]
+    retire_vendor: Callable[..., Awaitable[str]]
+    retire_transfer: Callable[..., Awaitable[str]]
+    unlink_system: Callable[..., Awaitable[str]]
+    unlink_vendor: Callable[..., Awaitable[str]]
     list_activities: Callable[..., Awaitable[str]]
     list_systems: Callable[..., Awaitable[str]]
     list_vendors: Callable[..., Awaitable[str]]
@@ -179,6 +186,12 @@ async def ropa_env(
             link_vendor=by_name["link_vendor_to_activity"],
             add_data_subjects=by_name["add_data_subject_categories"],
             add_data_categories=by_name["add_data_categories"],
+            retire_activity=by_name["retire_processing_activity"],
+            retire_system=by_name["retire_system"],
+            retire_vendor=by_name["retire_vendor"],
+            retire_transfer=by_name["retire_transfer"],
+            unlink_system=by_name["unlink_system_from_activity"],
+            unlink_vendor=by_name["unlink_vendor_from_activity"],
             list_activities=by_name["list_processing_activities"],
             list_systems=by_name["list_systems"],
             list_vendors=by_name["list_vendors"],
@@ -823,6 +836,301 @@ async def test_list_data_subjects_and_categories_reflect_tags(ropa_env: RopaEnv)
 
 
 # ---------------------------------------------------------------------------
+# Change verbs (PRIV-8a, ADR-F023): soft-retire + unlink
+# ---------------------------------------------------------------------------
+
+
+async def test_retire_vendor_soft_retires_keeps_row_and_hides_from_list(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    vendor = (await _vendors(ropa_env))[0]
+
+    result = await ropa_env.retire_vendor(
+        vendor_id=str(vendor.id), reason="moved off Acme; replaced by Hotjar"
+    )
+    assert "Retired the vendor" in result
+    assert "Acme Payroll Ltd" in result
+
+    # Soft: the row is NOT destroyed — it stays on record for audit, stamped.
+    rows = await _vendors(ropa_env)
+    assert len(rows) == 1
+    assert rows[0].retired_at is not None
+    assert rows[0].retirement_reason == "moved off Acme; replaced by Hotjar"
+
+    # …but it is gone from the agent's live list, which footers the hidden count.
+    listed = await ropa_env.list_vendors()
+    assert "Acme Payroll Ltd" not in listed
+    assert "1 retired record hidden" in listed
+
+
+async def test_retire_vendor_is_idempotent(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    vendor = (await _vendors(ropa_env))[0]
+    await ropa_env.retire_vendor(vendor_id=str(vendor.id))
+    again = await ropa_env.retire_vendor(vendor_id=str(vendor.id))
+    assert "already retired" in again
+    # Still exactly one row, still retired (no second write, no error).
+    rows = await _vendors(ropa_env)
+    assert len(rows) == 1 and rows[0].retired_at is not None
+
+
+async def test_retire_unknown_id_is_refused(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.retire_vendor(vendor_id=str(uuid.uuid4()))
+    assert "refused" in result.lower()
+    assert "no vendor" in result
+
+
+async def test_retire_non_uuid_is_refused(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.retire_system(system_id="not-a-uuid")
+    assert "refused" in result.lower()
+    assert await _systems(ropa_env) == []
+
+
+async def test_retire_reason_too_long_is_refused_and_nothing_changed(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    vendor = (await _vendors(ropa_env))[0]
+    result = await ropa_env.retire_vendor(vendor_id=str(vendor.id), reason="x" * 1001)
+    assert "refused" in result.lower()
+    assert "too long" in result.lower()
+    # Reject, don't sanitize (ADR-F018): not retired, reason not stored.
+    rows = await _vendors(ropa_env)
+    assert rows[0].retired_at is None
+    assert rows[0].retirement_reason is None
+
+
+async def test_retire_system_activity_and_transfer_each_set_retired_at(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose_system(**_VALID_SYSTEM)
+    activity = (await _activities(ropa_env))[0]
+    system = (await _systems(ropa_env))[0]
+    await ropa_env.propose_transfer(
+        processing_activity_id=str(activity.id),
+        destination="United States",
+        restricted=True,
+        mechanism="standard_contractual_clauses",
+    )
+    transfer = (await _transfers(ropa_env))[0]
+
+    assert "Retired the system" in await ropa_env.retire_system(system_id=str(system.id))
+    assert "Retired the transfer" in await ropa_env.retire_transfer(transfer_id=str(transfer.id))
+    # Retire the activity last (it would cascade-hide its children anyway).
+    assert "Retired the processing activity" in await ropa_env.retire_activity(
+        processing_activity_id=str(activity.id)
+    )
+
+    assert (await _systems(ropa_env))[0].retired_at is not None
+    assert (await _transfers(ropa_env))[0].retired_at is not None
+    assert (await _activities(ropa_env))[0].retired_at is not None
+    # All hidden from the live agent lists.
+    assert "no systems yet" in await ropa_env.list_systems()
+    assert "no third-country transfers" in await ropa_env.list_transfers()
+    assert "no processing activities yet" in await ropa_env.list_activities()
+
+
+async def test_unlink_vendor_from_activity_removes_link_keeps_both_live(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    activity = (await _activities(ropa_env))[0]
+    vendor = (await _vendors(ropa_env))[0]
+    await ropa_env.link_vendor(processing_activity_id=str(activity.id), vendor_id=str(vendor.id))
+
+    result = await ropa_env.unlink_vendor(
+        processing_activity_id=str(activity.id), vendor_id=str(vendor.id)
+    )
+    assert "Unlinked vendor" in result
+
+    # The link is gone; BOTH records stay live (unlink ≠ retire).
+    from sqlalchemy.orm import selectinload
+
+    async with ropa_env.factory() as db:
+        loaded = (
+            await db.execute(
+                select(ProcessingActivity)
+                .options(selectinload(ProcessingActivity.vendors))
+                .where(ProcessingActivity.id == activity.id)
+            )
+        ).scalar_one()
+        assert loaded.vendors == []
+    assert "Acme Payroll Ltd" in await ropa_env.list_vendors()  # vendor still live
+
+    # Idempotent: unlinking again is a friendly no-op.
+    again = await ropa_env.unlink_vendor(
+        processing_activity_id=str(activity.id), vendor_id=str(vendor.id)
+    )
+    assert "was not linked" in again
+
+
+async def test_unlink_system_from_activity_removes_link(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose_system(**_VALID_SYSTEM)
+    activity = (await _activities(ropa_env))[0]
+    system = (await _systems(ropa_env))[0]
+    await ropa_env.link(processing_activity_id=str(activity.id), system_id=str(system.id))
+
+    result = await ropa_env.unlink_system(
+        processing_activity_id=str(activity.id), system_id=str(system.id)
+    )
+    assert "Unlinked system" in result
+
+    from sqlalchemy.orm import selectinload
+
+    async with ropa_env.factory() as db:
+        loaded = (
+            await db.execute(
+                select(ProcessingActivity)
+                .options(selectinload(ProcessingActivity.systems))
+                .where(ProcessingActivity.id == activity.id)
+            )
+        ).scalar_one()
+        assert loaded.systems == []
+
+
+async def test_unlink_unknown_ids_is_refused(ropa_env: RopaEnv) -> None:
+    result = await ropa_env.unlink_vendor(
+        processing_activity_id=str(uuid.uuid4()), vendor_id=str(uuid.uuid4())
+    )
+    assert "refused" in result.lower()
+    assert "no processing activity" in result
+    assert "no vendor" in result
+
+
+async def test_the_swap_replaces_a_vendor_leaving_the_register_coherent(ropa_env: RopaEnv) -> None:
+    """The mixpanel→hotjar shape, composed from the primitives: add the new vendor,
+    link it, unlink the old one, retire the old one. The live register then shows
+    only the replacement (the old vendor stays on record for audit)."""
+    await ropa_env.propose(**{**_VALID, "name": "Product analytics"})
+    await ropa_env.propose_vendor(
+        name="Mixpanel", vendor_role="processor", dpa_status="in_place", country="US"
+    )
+    activity = (await _activities(ropa_env))[0]
+    old = (await _vendors(ropa_env))[0]
+    await ropa_env.link_vendor(processing_activity_id=str(activity.id), vendor_id=str(old.id))
+
+    # The swap.
+    await ropa_env.propose_vendor(
+        name="Hotjar", vendor_role="processor", dpa_status="in_place", country="US"
+    )
+    new = next(v for v in await _vendors(ropa_env) if v.name == "Hotjar")
+    await ropa_env.link_vendor(processing_activity_id=str(activity.id), vendor_id=str(new.id))
+    await ropa_env.unlink_vendor(processing_activity_id=str(activity.id), vendor_id=str(old.id))
+    await ropa_env.retire_vendor(vendor_id=str(old.id), reason="moved off Mixpanel")
+
+    # Live list shows Hotjar, not Mixpanel; Mixpanel is retired-not-deleted.
+    listed = await ropa_env.list_vendors()
+    assert "Hotjar" in listed
+    assert "Mixpanel" not in listed
+    assert "1 retired record hidden" in listed
+    mixpanel = next(v for v in await _vendors(ropa_env) if v.name == "Mixpanel")
+    assert mixpanel.retired_at is not None
+    # The activity now links only Hotjar.
+    from sqlalchemy.orm import selectinload
+
+    async with ropa_env.factory() as db:
+        loaded = (
+            await db.execute(
+                select(ProcessingActivity)
+                .options(selectinload(ProcessingActivity.vendors))
+                .where(ProcessingActivity.id == activity.id)
+            )
+        ).scalar_one()
+        assert [v.name for v in loaded.vendors] == ["Hotjar"]
+
+
+async def test_list_categories_count_excludes_retired_activities(ropa_env: RopaEnv) -> None:
+    """The per-term usage count reflects LIVE activities only — a retired sole user
+    must not leave the term reading as still in use (agent vs API parity)."""
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    await ropa_env.add_data_categories(
+        processing_activity_id=str(activity.id), names=["Health data"]
+    )
+    assert "Health data (1 activity)" in await ropa_env.list_data_categories()
+
+    await ropa_env.retire_activity(processing_activity_id=str(activity.id))
+    # The term is still in the vocabulary, but now reads 0 (not a stale 1).
+    assert "Health data (0 activities)" in await ropa_env.list_data_categories()
+
+
+async def test_list_transfers_hides_transfer_of_retired_parent_activity(ropa_env: RopaEnv) -> None:
+    """Retire ONLY the parent activity (the transfer row stays live) — the transfer
+    must still vanish from the list, since its activity has left the register."""
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    await ropa_env.propose_transfer(
+        processing_activity_id=str(activity.id),
+        destination="United States",
+        restricted=True,
+        mechanism="standard_contractual_clauses",
+    )
+    assert "United States" in await ropa_env.list_transfers()
+
+    await ropa_env.retire_activity(processing_activity_id=str(activity.id))
+    listed = await ropa_env.list_transfers()
+    assert "United States" not in listed
+    assert "no third-country transfers" in listed
+
+
+async def test_list_transfers_drops_retired_recipient_vendor(ropa_env: RopaEnv) -> None:
+    """Retire ONLY the recipient vendor — the transfer stays, but renders with no
+    recipient (matching the API), never the retired vendor's name."""
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    activity = (await _activities(ropa_env))[0]
+    vendor = (await _vendors(ropa_env))[0]
+    await ropa_env.propose_transfer(
+        processing_activity_id=str(activity.id),
+        destination="United States",
+        restricted=True,
+        mechanism="standard_contractual_clauses",
+        vendor_id=str(vendor.id),
+    )
+    assert "Acme Payroll Ltd" in await ropa_env.list_transfers()
+
+    await ropa_env.retire_vendor(vendor_id=str(vendor.id))
+    listed = await ropa_env.list_transfers()
+    assert "United States" in listed  # the transfer is still live
+    assert "Acme Payroll Ltd" not in listed  # but its retired recipient is dropped
+
+
+async def test_link_to_retired_vendor_is_refused(ropa_env: RopaEnv) -> None:
+    """The write path refuses a RETIRED target so the live register never grows a
+    hidden link to a retired row (ADR-F023)."""
+    await ropa_env.propose(**_VALID)
+    await ropa_env.propose_vendor(**_VALID_VENDOR)
+    activity = (await _activities(ropa_env))[0]
+    vendor = (await _vendors(ropa_env))[0]
+    await ropa_env.retire_vendor(vendor_id=str(vendor.id))
+
+    result = await ropa_env.link_vendor(
+        processing_activity_id=str(activity.id), vendor_id=str(vendor.id)
+    )
+    assert "refused" in result.lower()
+    assert "retired" in result.lower()
+    from sqlalchemy.orm import selectinload
+
+    async with ropa_env.factory() as db:
+        loaded = (
+            await db.execute(
+                select(ProcessingActivity)
+                .options(selectinload(ProcessingActivity.vendors))
+                .where(ProcessingActivity.id == activity.id)
+            )
+        ).scalar_one()
+        assert loaded.vendors == []  # no hidden link created
+
+
+async def test_tag_retired_activity_is_refused(ropa_env: RopaEnv) -> None:
+    await ropa_env.propose(**_VALID)
+    activity = (await _activities(ropa_env))[0]
+    await ropa_env.retire_activity(processing_activity_id=str(activity.id))
+    result = await ropa_env.add_data_categories(
+        processing_activity_id=str(activity.id), names=["Health data"]
+    )
+    assert "refused" in result.lower()
+    assert "retired" in result.lower()
+    assert await _data_categories(ropa_env) == []
+
+
+# ---------------------------------------------------------------------------
 # The guard chokepoint + the model-facing surface
 # ---------------------------------------------------------------------------
 
@@ -869,6 +1177,12 @@ def test_tool_names_cover_the_built_tools(ropa_env: RopaEnv) -> None:
         "link_vendor_to_activity",
         "add_data_subject_categories",
         "add_data_categories",
+        "retire_processing_activity",
+        "retire_system",
+        "retire_vendor",
+        "retire_transfer",
+        "unlink_system_from_activity",
+        "unlink_vendor_from_activity",
         "list_processing_activities",
         "list_systems",
         "list_vendors",
@@ -936,6 +1250,23 @@ async def test_tools_expose_model_facing_schema(ropa_env: RopaEnv) -> None:
         "processing_activity_id",
         "names",
     ]
+    # The change verbs (PRIV-8a): retire takes the entity id + an optional reason;
+    # unlink takes the activity id + the other end's id. No B-class leakage.
+    assert list(inspect.signature(ropa_env.retire_activity).parameters) == [
+        "processing_activity_id",
+        "reason",
+    ]
+    assert list(inspect.signature(ropa_env.retire_system).parameters) == ["system_id", "reason"]
+    assert list(inspect.signature(ropa_env.retire_vendor).parameters) == ["vendor_id", "reason"]
+    assert list(inspect.signature(ropa_env.retire_transfer).parameters) == ["transfer_id", "reason"]
+    assert list(inspect.signature(ropa_env.unlink_system).parameters) == [
+        "processing_activity_id",
+        "system_id",
+    ]
+    assert list(inspect.signature(ropa_env.unlink_vendor).parameters) == [
+        "processing_activity_id",
+        "vendor_id",
+    ]
     assert list(inspect.signature(ropa_env.list_activities).parameters) == []
     assert list(inspect.signature(ropa_env.list_systems).parameters) == []
     assert list(inspect.signature(ropa_env.list_vendors).parameters) == []
@@ -951,6 +1282,12 @@ async def test_tools_expose_model_facing_schema(ropa_env: RopaEnv) -> None:
         ropa_env.link_vendor,
         ropa_env.add_data_subjects,
         ropa_env.add_data_categories,
+        ropa_env.retire_activity,
+        ropa_env.retire_system,
+        ropa_env.retire_vendor,
+        ropa_env.retire_transfer,
+        ropa_env.unlink_system,
+        ropa_env.unlink_vendor,
         ropa_env.list_activities,
         ropa_env.list_systems,
         ropa_env.list_vendors,
