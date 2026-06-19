@@ -1,6 +1,8 @@
 # PRIV-8 — ROPA change verbs: the agent can *change/retire*, not only *add*
 
-**Status:** PRIV-8a DELIVERED (PR #112, branch `priv-8a-ropa-change-verbs`); PRIV-8b + PRIV-9 PENDING ·
+**Status:** PRIV-8a MERGED (PR #112, main `0702e79`); **PRIV-8b DELIVERED (PR #113)** — the live
+mixpanel→hotjar swap PROVEN on DeepSeek V4 (both skilled arms → coherent swap; no-skill baseline → "lists
+both", so the `ropa-maintenance` skill is load-bearing; evidence `docs/fork/evidence/priv-8/`); PRIV-9 PENDING ·
 **Date:** 2026-06-19 · **Decisions taken:** change-verbs first; **soft-retire / supersede** semantics
 (maintainer choice — global retire is correct, soft-retire so it's auditable). ADR landed as **F023**
 (F022 was already the data-flow ADR).

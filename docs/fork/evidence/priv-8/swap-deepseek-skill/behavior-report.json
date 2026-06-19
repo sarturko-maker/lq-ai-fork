@@ -1,0 +1,195 @@
+{
+  "milestone": "PRIV-8b",
+  "adr": "F023",
+  "mode": "swap · skill=ropa-maintenance",
+  "model_alias": "deepseek",
+  "model_note": "alias 'deepseek' resolves via the gateway to a DeepSeek V4 model (deepseek-v4-flash for 'deepseek', deepseek-v4-pro for 'deepseek-pro'). DeepSeek is NOT scenario-qualified (ADR-F015) — this run is kept verbatim, not tuned green.",
+  "scenario": {
+    "activity": "Product analytics",
+    "replaced": "Mixpanel",
+    "with": "Hotjar"
+  },
+  "generated_at": "2026-06-19T14:07:28+00:00",
+  "verdict": {
+    "activity": "Product analytics",
+    "found_activity": true,
+    "activity_retired": false,
+    "old": "Mixpanel",
+    "new": "Hotjar",
+    "recipient": {
+      "new_present": true,
+      "old_present": true,
+      "new_linked": true,
+      "old_linked": false,
+      "new_retired": false,
+      "old_retired": true,
+      "new_live_visible": true,
+      "old_live_visible": false,
+      "coherent": true,
+      "both_visible": false
+    },
+    "system": {
+      "new_present": true,
+      "old_present": true,
+      "new_linked": true,
+      "old_linked": false,
+      "new_retired": false,
+      "old_retired": true,
+      "new_live_visible": true,
+      "old_live_visible": false,
+      "coherent": true,
+      "both_visible": false
+    },
+    "coherent": true,
+    "lists_both": false,
+    "old_soft_retired": true,
+    "old_still_on_record": true,
+    "duplicate_names": []
+  },
+  "register_before": {
+    "activities": [
+      {
+        "name": "Product analytics",
+        "purpose_excerpt": "Understand product usage to improve the service.",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "26 months from collection",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [
+          "Mixpanel"
+        ],
+        "recipients": [
+          "Mixpanel"
+        ],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": [],
+        "retired": false
+      }
+    ],
+    "systems": [
+      {
+        "name": "Mixpanel",
+        "system_type": "analytics",
+        "ai_usage": false,
+        "retired": false
+      }
+    ],
+    "vendors": [
+      {
+        "name": "Mixpanel",
+        "vendor_role": "processor",
+        "dpa_status": "in_place",
+        "country": "United States",
+        "retired": false
+      }
+    ]
+  },
+  "register_after": {
+    "activities": [
+      {
+        "name": "Product analytics",
+        "purpose_excerpt": "Understand product usage to improve the service.",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "26 months from collection",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [
+          "Hotjar"
+        ],
+        "recipients": [
+          "Hotjar"
+        ],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": [],
+        "retired": false
+      }
+    ],
+    "systems": [
+      {
+        "name": "Hotjar",
+        "system_type": "analytics",
+        "ai_usage": false,
+        "retired": false
+      },
+      {
+        "name": "Mixpanel",
+        "system_type": "analytics",
+        "ai_usage": false,
+        "retired": true
+      }
+    ],
+    "vendors": [
+      {
+        "name": "Hotjar",
+        "vendor_role": "processor",
+        "dpa_status": "pending",
+        "country": "Malta",
+        "retired": false
+      },
+      {
+        "name": "Mixpanel",
+        "vendor_role": "processor",
+        "dpa_status": "in_place",
+        "country": "United States",
+        "retired": true
+      }
+    ]
+  },
+  "run": {
+    "id": "ropa_swap_mixpanel_hotjar",
+    "title": "Swap — replace Mixpanel with Hotjar (the maintainer's literal test)",
+    "note": "Plain-language maintenance ask. A coherent swap leaves the live register showing Hotjar where Mixpanel was, with Mixpanel gone-from-live but kept on record (soft-retired, ADR-F023) — never both.",
+    "prompt": "We've moved off Mixpanel — we use Hotjar now for our product analytics. Please update our Record of Processing Activities to reflect that, and tell me exactly what you changed.",
+    "status": "completed",
+    "latency_s": 38.4,
+    "step_count": 53,
+    "model_turns": 9,
+    "tools_called": [
+      "read_file",
+      "search_documents",
+      "list_vendors",
+      "list_systems",
+      "list_processing_activities",
+      "read_document",
+      "list_data_subject_categories",
+      "list_data_categories",
+      "list_transfers",
+      "propose_vendor",
+      "propose_system",
+      "list_vendors",
+      "list_systems",
+      "link_vendor_to_activity",
+      "link_processing_activity_to_system",
+      "unlink_vendor_from_activity",
+      "unlink_system_from_activity",
+      "retire_vendor",
+      "retire_system",
+      "list_vendors",
+      "list_systems",
+      "list_processing_activities"
+    ],
+    "task_calls": 0,
+    "delegated": false,
+    "ancestry": [],
+    "expect_tools": [
+      "propose_vendor"
+    ],
+    "forbid_tools": [],
+    "shape_matched": true,
+    "checks": {
+      "expected_tools_present": true,
+      "forbidden_tools_absent": true,
+      "must_include_ok": true,
+      "should_not_ok": true,
+      "within_step_bound": true,
+      "clarify_ok": null,
+      "refusal_ok": null
+    },
+    "error": null,
+    "final_answer_excerpt": "All done. Here's exactly what I changed:\n\n---\n\n### Changes made to the ROPA register\n\n| Step | What happened |\n|------|--------------|\n| **Added** | **Hotjar** as a **vendor** (processor, Malta) — DPA status set to **pending** (I don't have the actual status; the DPA needs to be put in place — see flag below) |\n| **Added** | **Hotjar** as a **system** (analytics, hosted in the European Union) |\n| **Linked** | Hotjar (vendor + system) to the **Product analytics** processing activity |\n| **Unlinked** | Mixpanel (vendor + system) from **Product analytics** |\n| **Retired** | **Mixpanel vendor** — company-wide removal, kept on record for audit with reason \"Replaced by Hotjar for product analytics\" |\n| **Retired** | **Mixpanel system** — company-wide removal, kept on record for audit with reason…"
+  }
+}

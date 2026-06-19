@@ -334,8 +334,11 @@ short-slice**.
   now *change* the register in plain language, not only append — 6 guarded tools `retire_*`×4 + `unlink_*`×2,
   **soft-retire** (`retired_at`, never delete → auditable), reads hide retired everywhere by default
   (`?include_retired=true` = audit), write verbs refuse retired targets; migration 0063; **ADR-F023**;
-  `docs/fork/plans/PRIV-8-ropa-change-verbs.md`) → **PRIV-8b** (the LIVE mixpanel→hotjar proof on DeepSeek +
-  the `ropa-maintenance` skill + a `seed_ropa_register` harness helper + evidence) → **PRIV-9** (cockpit UX:
+  `docs/fork/plans/PRIV-8-ropa-change-verbs.md`) → **PRIV-8b ✅ (PR #113)** (the LIVE mixpanel→hotjar proof on
+  DeepSeek V4 — both skilled arms produced a *coherent* swap (Hotjar linked, Mixpanel unlinked + soft-retired,
+  reported), the no-skill baseline left the register listing *both* → the new `ropa-maintenance` skill is
+  load-bearing; + `seed_ropa_register` harness helper + `evaluate_swap` scorer; evidence
+  `docs/fork/evidence/priv-8/`) → **PRIV-9** (cockpit UX:
   chat + register **co-visible** + **poll-while-running** live updates — the group-chat "side-panel chatbox
   that updates the UI as the agent works" idea) → **PRIV-6d** (Legal-Entity / controller scope + per-controller
   Article 30 export — needs a migration)
