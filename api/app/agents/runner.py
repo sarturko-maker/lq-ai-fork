@@ -54,6 +54,25 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WALL_CLOCK_SECONDS = 300.0
 
+# langgraph's default graph recursion_limit (25) is an UNINTENDED ceiling far
+# below our real brakes (max_steps, the wall clock, the R4/R5/R6 guards): with
+# skills on, a run burns graph supersteps on skill machinery (ls / read_file the
+# SKILL.md) and a long, legitimate tool loop blows 25 mid-run
+# (``GraphRecursionError``) before max_steps ever fires — losing the work
+# (surfaced by PRIV-7's ROPA-population runs). Tie the langgraph ceiling to the
+# run's own max_steps so the INTENDED cap governs; one settled step can span
+# several supersteps (subagent fan-out, skill middleware, nested tool calls),
+# hence the multiplier + floor. This only RAISES langgraph's abort threshold —
+# max_steps / the wall clock / the guards still fire first in normal operation.
+_RECURSION_LIMIT_FLOOR = 50
+_RECURSION_STEPS_MULTIPLIER = 4
+
+
+def _recursion_limit(max_steps: int) -> int:
+    """langgraph recursion_limit for a run capped at ``max_steps`` settled steps."""
+    return max(_RECURSION_LIMIT_FLOOR, max_steps * _RECURSION_STEPS_MULTIPLIER)
+
+
 # Bounded step digests — the polled UI renders these verbatim, so tool
 # args/results are truncated here, before they ever reach a row.
 _SUMMARY_LIMIT = 2000
@@ -288,8 +307,11 @@ async def _drive_agent(
     tool_step_ids: dict[str, uuid.UUID] = {}
 
     stream_kwargs: dict[str, Any] = {"version": "v2"}
+    # Always pin the graph recursion_limit to the run's max_steps (see
+    # _recursion_limit) so langgraph's default 25 never pre-empts our brakes.
+    config: dict[str, Any] = {"recursion_limit": _recursion_limit(max_steps)}
     if thread_id is not None:
-        stream_kwargs["config"] = thread_config(thread_id)
+        config.update(thread_config(thread_id))
         # ADR-F009: the default "async" durability can lose the checkpoint
         # of a superstep whose side effects already ran — correctness
         # first; revisit only if checkpoint write latency measures badly.
@@ -298,6 +320,7 @@ async def _drive_agent(
         # AttributeError at langgraph 1.2.x, beyond the documented
         # "no effect" warning).
         stream_kwargs["durability"] = "sync"
+    stream_kwargs["config"] = config
     stream = agent.astream_events(
         {"messages": [{"role": "user", "content": prompt}]},
         **stream_kwargs,

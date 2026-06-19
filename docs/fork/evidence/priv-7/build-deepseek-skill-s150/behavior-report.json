@@ -1,0 +1,682 @@
+{
+  "milestone": "PRIV-7",
+  "adr": "F015",
+  "mode": "build · skill=ropa-population · max_steps=150",
+  "model_alias": "deepseek",
+  "model_note": "alias 'deepseek' resolves via the gateway to a DeepSeek V4 model (deepseek-v4-flash for 'deepseek', deepseek-v4-pro for 'deepseek-pro'). DeepSeek is NOT yet scenario-qualified (ADR-F015) — this run is a qualification data point, kept verbatim, not tuned green.",
+  "source": {
+    "company": "Zendesk",
+    "url": "https://www.zendesk.co.uk/company/agreements-and-terms/privacy-notice/",
+    "retrieved": "2026-06-19",
+    "note": "Real public notice, testing-only — held transiently, not committed."
+  },
+  "generated_at": "2026-06-19T09:55:11+00:00",
+  "coverage": {
+    "counts": {
+      "activities": 9,
+      "systems": 6,
+      "vendors": 8,
+      "transfers": 0,
+      "restricted_transfers": 0,
+      "distinct_data_subject_categories": 10,
+      "distinct_data_categories": 7
+    },
+    "distinct_data_subject_categories": [
+      "Customers",
+      "Employees",
+      "Event Attendees",
+      "Job Applicants",
+      "Marketing Contacts",
+      "Office Visitors",
+      "Referral Contacts",
+      "Survey Participants",
+      "Users",
+      "Website Visitors"
+    ],
+    "distinct_data_categories": [
+      "Audio Visual And Sensory Information",
+      "Commercial Information",
+      "Geolocation Information",
+      "Identifiers",
+      "Inferences",
+      "Internet And Electronic Network Activity",
+      "Sensitive Personal Data"
+    ],
+    "activities_fully_linked": 9,
+    "linkage_axis_fractions": {
+      "has_system": 1.0,
+      "has_recipient": 1.0,
+      "has_data_subject_category": 1.0,
+      "has_data_category": 1.0
+    },
+    "per_activity": [
+      {
+        "name": "Corporate transactions",
+        "has_system": true,
+        "has_recipient": true,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Diversity, equity and inclusion initiatives",
+        "has_system": true,
+        "has_recipient": true,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Internal business operations and analytics",
+        "has_system": true,
+        "has_recipient": true,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Legal, security and fraud prevention",
+        "has_system": true,
+        "has_recipient": true,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Marketing and advertising",
+        "has_system": true,
+        "has_recipient": true,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "On-premises security and visitor management",
+        "has_system": true,
+        "has_recipient": true,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Referral programme",
+        "has_system": true,
+        "has_recipient": true,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Service delivery and product operations",
+        "has_system": true,
+        "has_recipient": true,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Webinar and event management",
+        "has_system": true,
+        "has_recipient": true,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": false,
+        "special_category_handled": true
+      }
+    ],
+    "integrity_ok": true
+  },
+  "register": {
+    "activities": [
+      {
+        "name": "Corporate transactions",
+        "purpose_excerpt": "Process personal data in connection with corporate transactions including sales, mergers, acquisitions, and bankruptcy",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "Retained as long as necessary for the transaction and any surviving legal obligations; deleted, anonymised or aggregated when no longer needed",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [
+          "Internal IT and Business Systems",
+          "Zendesk.com and Digital Properties"
+        ],
+        "recipients": [
+          "Corporate Transaction Entities",
+          "Professional Advisors",
+          "Transaction Partners",
+          "Zendesk Affiliates"
+        ],
+        "data_subject_categories": [
+          "Customers",
+          "Employees",
+          "Users"
+        ],
+        "data_categories": [
+          "Audio Visual And Sensory Information",
+          "Commercial Information",
+          "Identifiers"
+        ],
+        "transfers": []
+      },
+      {
+        "name": "Diversity, equity and inclusion initiatives",
+        "purpose_excerpt": "Collect and process optional sensitive personal data (race/ethnicity, vaccination proof) for diversity, equity and inclusion monitoring",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Retained as long as necessary for DEI purposes; deleted, anonymised or aggregated when no legitimate need exists",
+        "special_category": true,
+        "art9_condition": "explicit_consent",
+        "systems": [
+          "Internal IT and Business Systems"
+        ],
+        "recipients": [
+          "Service Providers",
+          "Zendesk Affiliates"
+        ],
+        "data_subject_categories": [
+          "Employees",
+          "Job Applicants"
+        ],
+        "data_categories": [
+          "Identifiers",
+          "Sensitive Personal Data"
+        ],
+        "transfers": []
+      },
+      {
+        "name": "Internal business operations and analytics",
+        "purpose_excerpt": "Internal business records; accounting; auditing; IT security; business evaluation; research and development; survey response analysis",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "Retained as long as necessary for business purposes; deleted, anonymised or aggregated when no legitimate need exists",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [
+          "CRM and Marketing System",
+          "Internal IT and Business Systems"
+        ],
+        "recipients": [
+          "Professional Advisors",
+          "Service Providers",
+          "Zendesk Affiliates"
+        ],
+        "data_subject_categories": [
+          "Customers",
+          "Employees",
+          "Job Applicants",
+          "Survey Participants",
+          "Users",
+          "Website Visitors"
+        ],
+        "data_categories": [
+          "Commercial Information",
+          "Identifiers",
+          "Inferences"
+        ],
+        "transfers": []
+      },
+      {
+        "name": "Legal, security and fraud prevention",
+        "purpose_excerpt": "Legal, safety and security compliance; establish and defend legal claims; protect safety and integrity of services; investigate violations; detect and prevent f…",
+        "lawful_basis": "legal_obligation",
+        "controller_role": "controller",
+        "retention": "Retained as long as necessary for legal and compliance purposes; deleted, anonymised or aggregated when no legitimate need exists",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [
+          "CCTV and Office Security Systems",
+          "Internal IT and Business Systems",
+          "Zendesk.com and Digital Properties"
+        ],
+        "recipients": [
+          "Government and Law Enforcement",
+          "Professional Advisors",
+          "Service Providers",
+          "Zendesk Affiliates"
+        ],
+        "data_subject_categories": [
+          "Customers",
+          "Employees",
+          "Office Visitors",
+          "Users",
+          "Website Visitors"
+        ],
+        "data_categories": [
+          "Audio Visual And Sensory Information",
+          "Identifiers",
+          "Internet And Electronic Network Activity"
+        ],
+        "transfers": []
+      },
+      {
+        "name": "Marketing and advertising",
+        "purpose_excerpt": "Market products and services; solicit testimonials; send marketing communications; facilitate contests; customise advertising based on browsing and interaction …",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Retained as long as necessary for the collection purposes; deleted, anonymised or aggregated when no legitimate need exists",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [
+          "Branded Social Media",
+          "Cookie and Tracking Infrastructure",
+          "CRM and Marketing System",
+          "Zendesk.com and Digital Properties"
+        ],
+        "recipients": [
+          "Business Partners",
+          "Cookie and Tracking Companies",
+          "Service Providers",
+          "Zendesk Affiliates"
+        ],
+        "data_subject_categories": [
+          "Customers",
+          "Marketing Contacts",
+          "Users",
+          "Website Visitors"
+        ],
+        "data_categories": [
+          "Geolocation Information",
+          "Identifiers",
+          "Inferences",
+          "Internet And Electronic Network Activity"
+        ],
+        "transfers": []
+      },
+      {
+        "name": "On-premises security and visitor management",
+        "purpose_excerpt": "Process CCTV recordings and interaction recordings for office security; manage visitor data for in-person interactions at offices",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "Retained as long as necessary for security purposes; deleted, anonymised or aggregated when no legitimate need exists",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [
+          "CCTV and Office Security Systems"
+        ],
+        "recipients": [
+          "Service Providers",
+          "Zendesk Affiliates"
+        ],
+        "data_subject_categories": [
+          "Employees",
+          "Office Visitors"
+        ],
+        "data_categories": [
+          "Audio Visual And Sensory Information",
+          "Identifiers"
+        ],
+        "transfers": []
+      },
+      {
+        "name": "Referral programme",
+        "purpose_excerpt": "Fulfil referral requests using provided name, email, title and company information",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Retained as long as necessary for referral fulfilment; deleted when no longer needed",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [
+          "CRM and Marketing System",
+          "Zendesk.com and Digital Properties"
+        ],
+        "recipients": [
+          "Service Providers",
+          "Zendesk Affiliates"
+        ],
+        "data_subject_categories": [
+          "Customers",
+          "Referral Contacts"
+        ],
+        "data_categories": [
+          "Identifiers"
+        ],
+        "transfers": []
+      },
+      {
+        "name": "Service delivery and product operations",
+        "purpose_excerpt": "Provide products, services, and Digital Properties; process transactions; enable customer access; operate, maintain and improve services; communicate with users…",
+        "lawful_basis": "contract",
+        "controller_role": "controller",
+        "retention": "Retained as long as necessary for the collection purposes; after relationship termination, retained for surviving contract provisions, business purposes, and le…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [
+          "Internal IT and Business Systems",
+          "Zendesk.com and Digital Properties"
+        ],
+        "recipients": [
+          "Business Partners",
+          "Service Providers",
+          "Transaction Partners",
+          "Zendesk Affiliates"
+        ],
+        "data_subject_categories": [
+          "Customers",
+          "Users",
+          "Website Visitors"
+        ],
+        "data_categories": [
+          "Audio Visual And Sensory Information",
+          "Commercial Information",
+          "Geolocation Information",
+          "Identifiers",
+          "Inferences",
+          "Internet And Electronic Network Activity",
+          "Sensitive Personal Data"
+        ],
+        "transfers": []
+      },
+      {
+        "name": "Webinar and event management",
+        "purpose_excerpt": "Register and manage attendees for webinars, events, programmes and marketing activities; communicate with attendees about event logistics",
+        "lawful_basis": "contract",
+        "controller_role": "controller",
+        "retention": "Retained as long as necessary for event purposes; deleted, anonymised or aggregated when no legitimate need exists",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [
+          "CRM and Marketing System",
+          "Zendesk.com and Digital Properties"
+        ],
+        "recipients": [
+          "Business Partners",
+          "Service Providers",
+          "Zendesk Affiliates"
+        ],
+        "data_subject_categories": [
+          "Customers",
+          "Event Attendees",
+          "Marketing Contacts"
+        ],
+        "data_categories": [
+          "Commercial Information",
+          "Identifiers"
+        ],
+        "transfers": []
+      }
+    ],
+    "systems": [
+      {
+        "name": "Branded Social Media",
+        "system_type": "other",
+        "ai_usage": false
+      },
+      {
+        "name": "CCTV and Office Security Systems",
+        "system_type": "other",
+        "ai_usage": false
+      },
+      {
+        "name": "Cookie and Tracking Infrastructure",
+        "system_type": "analytics",
+        "ai_usage": false
+      },
+      {
+        "name": "CRM and Marketing System",
+        "system_type": "crm",
+        "ai_usage": false
+      },
+      {
+        "name": "Internal IT and Business Systems",
+        "system_type": "other",
+        "ai_usage": false
+      },
+      {
+        "name": "Zendesk.com and Digital Properties",
+        "system_type": "other",
+        "ai_usage": false
+      }
+    ],
+    "vendors": [
+      {
+        "name": "Business Partners",
+        "vendor_role": "separate_controller",
+        "dpa_status": "not_required",
+        "country": null
+      },
+      {
+        "name": "Cookie and Tracking Companies",
+        "vendor_role": "processor",
+        "dpa_status": "pending",
+        "country": null
+      },
+      {
+        "name": "Corporate Transaction Entities",
+        "vendor_role": "recipient",
+        "dpa_status": "not_required",
+        "country": null
+      },
+      {
+        "name": "Government and Law Enforcement",
+        "vendor_role": "recipient",
+        "dpa_status": "not_required",
+        "country": null
+      },
+      {
+        "name": "Professional Advisors",
+        "vendor_role": "processor",
+        "dpa_status": "pending",
+        "country": null
+      },
+      {
+        "name": "Service Providers",
+        "vendor_role": "processor",
+        "dpa_status": "pending",
+        "country": "Multiple jurisdictions"
+      },
+      {
+        "name": "Transaction Partners",
+        "vendor_role": "separate_controller",
+        "dpa_status": "not_required",
+        "country": null
+      },
+      {
+        "name": "Zendesk Affiliates",
+        "vendor_role": "recipient",
+        "dpa_status": "pending",
+        "country": "Multiple jurisdictions"
+      }
+    ]
+  },
+  "runs": [
+    {
+      "id": "ropa_build_pass1",
+      "title": "Build pass 1 — populate the ROPA from the notice",
+      "note": "Naive build ask; the skill (if bound) supplies the activity-to-completion method.",
+      "prompt": "Our organisation's privacy notice is in this programme. Build our Article 30 Record of Processing Activities from it using your ROPA tools: capture the processing activities, the categories of data subjects and personal data, the systems and the recipients involved, and any international transfers. Cover as much as you can in this pass.",
+      "status": "failed",
+      "latency_s": 74.3,
+      "step_count": 113,
+      "model_turns": 12,
+      "tools_called": [
+        "search_documents",
+        "read_document",
+        "write_todos",
+        "list_processing_activities",
+        "list_systems",
+        "list_vendors",
+        "list_data_subject_categories",
+        "list_data_categories",
+        "list_transfers",
+        "write_todos",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "list_processing_activities",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "write_todos",
+        "list_systems",
+        "list_vendors",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "propose_processing_activity"
+      ],
+      "forbid_tools": [],
+      "shape_matched": false,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": false,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": "DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.DeadlockDetectedError'>: deadlock detected\nDETAIL:  Process 21529 waits for ShareLock on transaction 60599; blocked by process 21549.\nProcess 21549 waits for ShareLock on transaction 60579; blocked by process 21529.\nHINT:  See server log for query details.\n[SQL: INSERT INTO data_categories (source_project_id, name) VALUES ($1::UUID, $2::VARCHAR) RETURNING data_categories.id, data_categories.created_at]\n[parame…",
+      "final_answer_excerpt": ""
+    },
+    {
+      "id": "ropa_build_pass2",
+      "title": "Build pass 2 — fill gaps without duplicating",
+      "note": "Continue the build: complete partial records and add any missing activities.",
+      "prompt": "Continue building our Article 30 register from the privacy notice. Use the list_* tools to see what is already recorded, then complete any partially-recorded activities (missing systems, recipients, data or data-subject categories, or transfers) and add any activities not yet captured. Do not duplicate existing entries.",
+      "status": "cap_exceeded",
+      "latency_s": 89.9,
+      "step_count": 150,
+      "model_turns": 12,
+      "tools_called": [
+        "search_documents",
+        "list_processing_activities",
+        "list_systems",
+        "list_vendors",
+        "list_transfers",
+        "list_data_subject_categories",
+        "list_data_categories",
+        "read_document",
+        "write_todos",
+        "add_data_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "write_todos",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "write_todos",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "list_processing_activities"
+      ],
+      "forbid_tools": [],
+      "shape_matched": false,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": false,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": ""
+    }
+  ]
+}

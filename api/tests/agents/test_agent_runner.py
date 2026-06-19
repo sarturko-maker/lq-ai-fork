@@ -28,7 +28,7 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.agents.runner import _innermost_tool_parent, execute_agent_run
+from app.agents.runner import _innermost_tool_parent, _recursion_limit, execute_agent_run
 from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
 from app.models.user import User
 from app.security import hash_password
@@ -169,6 +169,16 @@ class _FlakySessionFactory:
         if self.calls in self._fail_on_calls:
             return _PoisonedSession(session)
         return session
+
+
+def test_recursion_limit_scales_with_max_steps_above_langgraph_default() -> None:
+    # langgraph's default recursion_limit is 25; ours must scale with max_steps so
+    # the intended cap (not the graph default) governs, with a floor that still
+    # clears 25 for small runs (PRIV-7: skill-on runs blew 25 mid-build).
+    assert _recursion_limit(60) == 240
+    assert _recursion_limit(5) == 50  # floor
+    assert _recursion_limit(16) == 64
+    assert _recursion_limit(1) > 25  # never below the langgraph default
 
 
 async def test_run_completes_with_ordered_steps(

@@ -1,0 +1,420 @@
+{
+  "milestone": "PRIV-7",
+  "adr": "F015",
+  "mode": "build · skill=ropa-population",
+  "model_alias": "deepseek",
+  "model_note": "alias 'deepseek' resolves via the gateway to a DeepSeek V4 model (deepseek-v4-flash for 'deepseek', deepseek-v4-pro for 'deepseek-pro'). DeepSeek is NOT yet scenario-qualified (ADR-F015) — this run is a qualification data point, kept verbatim, not tuned green.",
+  "source": {
+    "company": "Zendesk",
+    "url": "https://www.zendesk.co.uk/company/agreements-and-terms/privacy-notice/",
+    "retrieved": "2026-06-19",
+    "note": "Real public notice, testing-only — held transiently, not committed."
+  },
+  "generated_at": "2026-06-19T09:47:20+00:00",
+  "coverage": {
+    "counts": {
+      "activities": 8,
+      "systems": 3,
+      "vendors": 3,
+      "transfers": 2,
+      "restricted_transfers": 2,
+      "distinct_data_subject_categories": 3,
+      "distinct_data_categories": 6
+    },
+    "distinct_data_subject_categories": [
+      "Business Partners",
+      "Customers",
+      "Website Visitors"
+    ],
+    "distinct_data_categories": [
+      "Audio And Visual Data",
+      "Commercial Information",
+      "Geolocation Data",
+      "Identifiers",
+      "Inferences",
+      "Internet Activity"
+    ],
+    "activities_fully_linked": 1,
+    "linkage_axis_fractions": {
+      "has_system": 0.12,
+      "has_recipient": 0.12,
+      "has_data_subject_category": 0.12,
+      "has_data_category": 0.12
+    },
+    "per_activity": [
+      {
+        "name": "Corporate Transactions",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Diversity, Equity and Inclusion Initiatives",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Internal Business Administration",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Legal and Safety Compliance",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Marketing and Advertising",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Referral Program",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Service Delivery and Operations",
+        "has_system": true,
+        "has_recipient": true,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": true,
+        "special_category_handled": true
+      },
+      {
+        "name": "Voluntary Consent-Based Processing",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      }
+    ],
+    "integrity_ok": true
+  },
+  "register": {
+    "activities": [
+      {
+        "name": "Corporate Transactions",
+        "purpose_excerpt": "Evaluate and execute corporate transactions including sales, mergers, acquisitions, bankruptcies, and other restructuring activities; disclosure of personal dat…",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "Personal data shared for transaction evaluation retained only during the transaction process; if transaction completes, data retained per successor entity's ret…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Diversity, Equity and Inclusion Initiatives",
+        "purpose_excerpt": "Process optional diversity data (race, ethnicity) for diversity, equity and inclusion monitoring and initiatives, where permitted by law and with explicit conse…",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Until consent withdrawn or the specific DEI purpose is achieved; anonymised/aggregated statistics retained indefinitely for reporting purposes.",
+        "special_category": true,
+        "art9_condition": "explicit_consent",
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Internal Business Administration",
+        "purpose_excerpt": "Maintain internal business records; accounting and auditing; IT security monitoring; business evaluation and research/development; survey response analysis.",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "Duration of the business relationship plus 7 years after termination for legal/tax/accounting compliance; survey data retained as long as necessary for the purp…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Legal and Safety Compliance",
+        "purpose_excerpt": "Comply with legal obligations and safety/security requirements; establish and defend legal claims; protect safety, rights and integrity of individuals; investig…",
+        "lawful_basis": "legal_obligation",
+        "controller_role": "controller",
+        "retention": "As long as necessary for the specific legal/safety purpose; retained for the duration of any legal proceedings plus applicable statutory limitation periods (typ…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Marketing and Advertising",
+        "purpose_excerpt": "Market products and services; solicit testimonials; send marketing communications; facilitate contests and promotions; customise advertising (including cross-de…",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Until consent withdrawn or marketing relationship ends; after opt-out, retained on suppression list for compliance purposes. Cookie data retained per Cookie Not…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Referral Program",
+        "purpose_excerpt": "Fulfil referral requests using provided name, email, job title, and company name of the referred individual.",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Until the referral purpose is fulfilled plus a reasonable period (e.g. 6 months) for follow-up, unless consent renewed.",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Service Delivery and Operations",
+        "purpose_excerpt": "Provide products, services, and Digital Properties; process transactions; enable access; operate, maintain and improve services; communicate with users; diagnos…",
+        "lawful_basis": "contract",
+        "controller_role": "controller",
+        "retention": "Duration of the customer relationship plus 7 years after termination for legal/tax/accounting compliance (assumption based on general retention statement: \"as l…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [
+          "CCTV and Physical Security Systems",
+          "Cookie and Tracking Technologies",
+          "Zendesk Platform and Digital Properties"
+        ],
+        "recipients": [
+          "Business Partners",
+          "Service Providers (Processors)",
+          "Zendesk Affiliates"
+        ],
+        "data_subject_categories": [
+          "Business Partners",
+          "Customers",
+          "Website Visitors"
+        ],
+        "data_categories": [
+          "Audio And Visual Data",
+          "Commercial Information",
+          "Geolocation Data",
+          "Identifiers",
+          "Inferences",
+          "Internet Activity"
+        ],
+        "transfers": [
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Zendesk Affiliates"
+          },
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Service Providers (Processors)"
+          }
+        ]
+      },
+      {
+        "name": "Voluntary Consent-Based Processing",
+        "purpose_excerpt": "Process personal data for specific voluntary purposes where individuals have given their consent (e.g. optional surveys, additional marketing activities, non-es…",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Until consent is withdrawn or the specific consented purpose is achieved; thereafter retained only as anonymised/aggregated data.",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      }
+    ],
+    "systems": [
+      {
+        "name": "CCTV and Physical Security Systems",
+        "system_type": "other",
+        "ai_usage": false
+      },
+      {
+        "name": "Cookie and Tracking Technologies",
+        "system_type": "analytics",
+        "ai_usage": false
+      },
+      {
+        "name": "Zendesk Platform and Digital Properties",
+        "system_type": "other",
+        "ai_usage": false
+      }
+    ],
+    "vendors": [
+      {
+        "name": "Business Partners",
+        "vendor_role": "separate_controller",
+        "dpa_status": "not_required",
+        "country": "Global"
+      },
+      {
+        "name": "Service Providers (Processors)",
+        "vendor_role": "processor",
+        "dpa_status": "in_place",
+        "country": "Global"
+      },
+      {
+        "name": "Zendesk Affiliates",
+        "vendor_role": "joint_controller",
+        "dpa_status": "in_place",
+        "country": "Global (multiple jurisdictions)"
+      }
+    ]
+  },
+  "runs": [
+    {
+      "id": "ropa_build_pass1",
+      "title": "Build pass 1 — populate the ROPA from the notice",
+      "note": "Naive build ask; the skill (if bound) supplies the activity-to-completion method.",
+      "prompt": "Our organisation's privacy notice is in this programme. Build our Article 30 Record of Processing Activities from it using your ROPA tools: capture the processing activities, the categories of data subjects and personal data, the systems and the recipients involved, and any international transfers. Cover as much as you can in this pass.",
+      "status": "cap_exceeded",
+      "latency_s": 57.2,
+      "step_count": 60,
+      "model_turns": 13,
+      "tools_called": [
+        "search_documents",
+        "read_document",
+        "write_todos",
+        "read_file",
+        "list_processing_activities",
+        "list_systems",
+        "list_vendors",
+        "list_data_subject_categories",
+        "list_data_categories",
+        "list_transfers",
+        "write_todos",
+        "propose_processing_activity",
+        "add_data_subject_categories",
+        "list_processing_activities",
+        "add_data_subject_categories",
+        "add_data_categories",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "list_systems",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "propose_processing_activity"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": ""
+    },
+    {
+      "id": "ropa_build_pass2",
+      "title": "Build pass 2 — fill gaps without duplicating",
+      "note": "Continue the build: complete partial records and add any missing activities.",
+      "prompt": "Continue building our Article 30 register from the privacy notice. Use the list_* tools to see what is already recorded, then complete any partially-recorded activities (missing systems, recipients, data or data-subject categories, or transfers) and add any activities not yet captured. Do not duplicate existing entries.",
+      "status": "cap_exceeded",
+      "latency_s": 58.3,
+      "step_count": 60,
+      "model_turns": 8,
+      "tools_called": [
+        "search_documents",
+        "list_processing_activities",
+        "list_systems",
+        "list_vendors",
+        "list_transfers",
+        "list_data_subject_categories",
+        "list_data_categories",
+        "read_document",
+        "write_todos",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_processing_activity_to_system",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "link_vendor_to_activity",
+        "propose_transfer",
+        "propose_transfer",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "list_processing_activities",
+        "propose_processing_activity",
+        "list_processing_activities"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "list_processing_activities"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": ""
+    }
+  ]
+}
