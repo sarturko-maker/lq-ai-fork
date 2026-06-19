@@ -364,16 +364,14 @@ async def test_programme_summary_aggregates_register(
     assert s["special_category_activities"] == 1
     assert s["systems_using_ai"] == 1
 
+    # Spot-check that each breakdown axis + a gap reach the wire; the pure unit
+    # test (test_ropa_summary.py) owns the exhaustive arithmetic + enum order, so
+    # this HTTP test stays a load→build→serialize path check, not a second
+    # arithmetic oracle (no full-dict equality → no dual edit-site on bucket adds).
     assert _bd(s["lawful_basis"])["legal_obligation"] == 1
-    assert _bd(s["lawful_basis"])["consent"] == 1
-    assert _bd(s["controller_role"]) == {"controller": 1, "joint_controller": 0, "processor": 1}
-    assert _bd(s["dpa_status"]) == {"in_place": 1, "pending": 1, "not_required": 0, "none": 0}
-
-    # Only activity 2 is unlinked on every axis; the pending vendor is outstanding.
-    assert s["gaps"]["activities_without_systems"] == 1
+    assert _bd(s["controller_role"])["controller"] == 1
+    assert _bd(s["dpa_status"])["pending"] == 1
     assert s["gaps"]["activities_without_recipients"] == 1
-    assert s["gaps"]["activities_without_data_categories"] == 1
-    assert s["gaps"]["activities_without_data_subjects"] == 1
     assert s["gaps"]["vendors_without_dpa"] == 1
 
 
