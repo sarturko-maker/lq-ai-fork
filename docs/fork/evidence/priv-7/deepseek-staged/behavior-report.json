@@ -1,0 +1,751 @@
+{
+  "milestone": "PRIV-7",
+  "adr": "F015",
+  "mode": "staged",
+  "model_alias": "deepseek",
+  "model_note": "alias 'deepseek' resolves via the gateway to a DeepSeek V4 model (deepseek-v4-flash for 'deepseek', deepseek-v4-pro for 'deepseek-pro'). DeepSeek is NOT yet scenario-qualified (ADR-F015) — this run is a qualification data point, kept verbatim, not tuned green.",
+  "source": {
+    "company": "Zendesk",
+    "url": "https://www.zendesk.co.uk/company/agreements-and-terms/privacy-notice/",
+    "retrieved": "2026-06-19",
+    "note": "Real public notice, testing-only — held transiently, not committed."
+  },
+  "generated_at": "2026-06-19T08:17:28+00:00",
+  "coverage": {
+    "counts": {
+      "activities": 10,
+      "systems": 10,
+      "vendors": 9,
+      "transfers": 10,
+      "restricted_transfers": 10,
+      "distinct_data_subject_categories": 7,
+      "distinct_data_categories": 11
+    },
+    "distinct_data_subject_categories": [
+      "Customers",
+      "Employees",
+      "Job Applicants",
+      "Marketing Contacts",
+      "Referred Individuals",
+      "Users",
+      "Website Visitors"
+    ],
+    "distinct_data_categories": [
+      "Commercial Information",
+      "Contact Details",
+      "Device Information",
+      "Financial Data",
+      "Geolocation Data",
+      "Inferences",
+      "Internet Activity",
+      "Marketing Preferences",
+      "Race And Ethnicity",
+      "Sensitive Personal Data",
+      "Vaccination Data"
+    ],
+    "activities_fully_linked": 0,
+    "linkage_axis_fractions": {
+      "has_system": 0.0,
+      "has_recipient": 0.0,
+      "has_data_subject_category": 0.7,
+      "has_data_category": 0.8
+    },
+    "per_activity": [
+      {
+        "name": "Business Operations and Administration",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": true,
+        "special_category_handled": true
+      },
+      {
+        "name": "Consent-Based Voluntary Processing",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": true,
+        "special_category_handled": true
+      },
+      {
+        "name": "Cookie and Online Tracking Technologies",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": true,
+        "special_category_handled": true
+      },
+      {
+        "name": "Corporate Transactions",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": true,
+        "has_transfer": true,
+        "special_category_handled": true
+      },
+      {
+        "name": "Diversity, Equity and Inclusion Initiatives",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": true,
+        "special_category_handled": true
+      },
+      {
+        "name": "Legal Compliance and Fraud Prevention",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": true,
+        "special_category_handled": true
+      },
+      {
+        "name": "Marketing and Advertising",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": true,
+        "special_category_handled": true
+      },
+      {
+        "name": "Physical Security and CCTV Monitoring",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": true,
+        "special_category_handled": true
+      },
+      {
+        "name": "Referral Programme",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": true,
+        "special_category_handled": true
+      },
+      {
+        "name": "Service Provision and Account Management",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": true,
+        "has_data_category": true,
+        "has_transfer": true,
+        "special_category_handled": true
+      }
+    ],
+    "integrity_ok": true
+  },
+  "register": {
+    "activities": [
+      {
+        "name": "Business Operations and Administration",
+        "purpose_excerpt": "Internal business records; accounting and auditing; IT security monitoring; business evaluation and forecasting; research and development; customer and user sur…",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "7 years after the end of the financial year to which the records relate (standard limitation period for contractual and legal claims)",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [
+          "Customers",
+          "Employees"
+        ],
+        "data_categories": [
+          "Commercial Information",
+          "Contact Details",
+          "Device Information",
+          "Financial Data"
+        ],
+        "transfers": [
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Zendesk Affiliates (Group Companies)"
+          }
+        ]
+      },
+      {
+        "name": "Consent-Based Voluntary Processing",
+        "purpose_excerpt": "Processing personal data for specific voluntary purposes where the individual has given freely given, specific, informed and unambiguous consent, including part…",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Until consent is withdrawn or the specific purpose is fulfilled, whichever is sooner; thereafter securely deleted or anonymised within 90 days",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": [
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Zendesk Affiliates (Group Companies)"
+          }
+        ]
+      },
+      {
+        "name": "Cookie and Online Tracking Technologies",
+        "purpose_excerpt": "Operating cookies, web beacons, analytics tools and similar tracking technologies on Zendesk Digital Properties for functionality, analytics, advertising and cr…",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Duration of the cookie lifespan as set out in the Cookie Notice (typically session to 24 months); analytics data anonymised after 26 months",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [
+          "Users",
+          "Website Visitors"
+        ],
+        "data_categories": [
+          "Device Information",
+          "Geolocation Data",
+          "Inferences",
+          "Internet Activity",
+          "Marketing Preferences"
+        ],
+        "transfers": [
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Zendesk Affiliates (Group Companies)"
+          }
+        ]
+      },
+      {
+        "name": "Corporate Transactions",
+        "purpose_excerpt": "Processing personal data in connection with potential or actual corporate transactions including sales, mergers, acquisitions, reorganisations and bankruptcy pr…",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "Until transaction completion plus 7 years for post-transaction legal, tax and regulatory record-keeping; abandoned transaction data deleted within 12 months of …",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [
+          "Commercial Information",
+          "Contact Details",
+          "Financial Data"
+        ],
+        "transfers": [
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Zendesk Affiliates (Group Companies)"
+          }
+        ]
+      },
+      {
+        "name": "Diversity, Equity and Inclusion Initiatives",
+        "purpose_excerpt": "Processing voluntarily provided race, ethnicity and vaccination data for diversity, equity and inclusion analytics and reporting",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Anonymised or deleted upon consent withdrawal; identifiable data retained no longer than 3 years for longitudinal trend analysis unless consent renewed",
+        "special_category": true,
+        "art9_condition": "explicit_consent",
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [
+          "Employees",
+          "Job Applicants"
+        ],
+        "data_categories": [
+          "Race And Ethnicity",
+          "Sensitive Personal Data",
+          "Vaccination Data"
+        ],
+        "transfers": [
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Zendesk Affiliates (Group Companies)"
+          }
+        ]
+      },
+      {
+        "name": "Legal Compliance and Fraud Prevention",
+        "purpose_excerpt": "Complying with legal, safety and security obligations; establishing, exercising and defending legal claims; protecting the safety and integrity of Zendesk's ser…",
+        "lawful_basis": "legal_obligation",
+        "controller_role": "controller",
+        "retention": "Duration of the legal obligation or 7 years after case closure, whichever is longer",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [
+          "Customers",
+          "Employees",
+          "Website Visitors"
+        ],
+        "data_categories": [
+          "Commercial Information",
+          "Contact Details",
+          "Device Information",
+          "Financial Data",
+          "Internet Activity"
+        ],
+        "transfers": [
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Zendesk Affiliates (Group Companies)"
+          }
+        ]
+      },
+      {
+        "name": "Marketing and Advertising",
+        "purpose_excerpt": "Marketing Zendesk products and services; soliciting testimonials; sending marketing and promotional communications; facilitating contests and promotions; custom…",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "Until consent is withdrawn or 2 years after last interaction, whichever is sooner, unless a longer period is justified by an ongoing commercial relationship",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [
+          "Customers",
+          "Marketing Contacts",
+          "Website Visitors"
+        ],
+        "data_categories": [
+          "Contact Details",
+          "Geolocation Data",
+          "Inferences",
+          "Internet Activity",
+          "Marketing Preferences"
+        ],
+        "transfers": [
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Zendesk Affiliates (Group Companies)"
+          }
+        ]
+      },
+      {
+        "name": "Physical Security and CCTV Monitoring",
+        "purpose_excerpt": "Operating CCTV systems and visitor logs at Zendesk office premises; recording in-person interactions for security, safety and incident investigation purposes",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "30 days for standard CCTV footage; extended to 90 days where an incident is being investigated; visitor logs retained for 12 months",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": [
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Zendesk Affiliates (Group Companies)"
+          }
+        ]
+      },
+      {
+        "name": "Referral Programme",
+        "purpose_excerpt": "Fulfilling referral requests using the referrer's and referred individual's name, email, job title and company name",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "Until the referral is fulfilled plus 90 days, unless the referrer has separately consented to longer marketing retention",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [
+          "Customers",
+          "Referred Individuals"
+        ],
+        "data_categories": [
+          "Contact Details"
+        ],
+        "transfers": [
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Zendesk Affiliates (Group Companies)"
+          }
+        ]
+      },
+      {
+        "name": "Service Provision and Account Management",
+        "purpose_excerpt": "Providing access to Zendesk Digital Properties (website, mobile apps, Marketplace, Developer Portal); processing transactions; enabling account access; operatin…",
+        "lawful_basis": "contract",
+        "controller_role": "controller",
+        "retention": "Duration of the contractual relationship plus 90 days, subject to longer retention where required by legal/tax/accounting obligations (e.g., 7 years for financi…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [
+          "Customers",
+          "Users",
+          "Website Visitors"
+        ],
+        "data_categories": [
+          "Commercial Information",
+          "Contact Details",
+          "Device Information",
+          "Financial Data",
+          "Internet Activity"
+        ],
+        "transfers": [
+          {
+            "destination": "United States",
+            "restricted": true,
+            "mechanism": "standard_contractual_clauses",
+            "recipient": "Zendesk Affiliates (Group Companies)"
+          }
+        ]
+      }
+    ],
+    "systems": [
+      {
+        "name": "CCTV and Physical Access Control Systems",
+        "system_type": "other",
+        "ai_usage": false
+      },
+      {
+        "name": "Cookie and Analytics Tracking Infrastructure",
+        "system_type": "analytics",
+        "ai_usage": false
+      },
+      {
+        "name": "Finance and Accounting Systems",
+        "system_type": "database",
+        "ai_usage": false
+      },
+      {
+        "name": "HR and People Operations Systems",
+        "system_type": "database",
+        "ai_usage": false
+      },
+      {
+        "name": "Internal IT and Security Monitoring Systems",
+        "system_type": "logs",
+        "ai_usage": false
+      },
+      {
+        "name": "Marketing and Advertising Platform",
+        "system_type": "email_marketing",
+        "ai_usage": false
+      },
+      {
+        "name": "Referral Programme System",
+        "system_type": "other",
+        "ai_usage": false
+      },
+      {
+        "name": "Survey and Feedback Platform",
+        "system_type": "other",
+        "ai_usage": false
+      },
+      {
+        "name": "Zendesk Customer Platform (CRM / Support)",
+        "system_type": "crm",
+        "ai_usage": false
+      },
+      {
+        "name": "Zendesk Digital Properties",
+        "system_type": "other",
+        "ai_usage": false
+      }
+    ],
+    "vendors": [
+      {
+        "name": "Business Partners",
+        "vendor_role": "separate_controller",
+        "dpa_status": "not_required",
+        "country": "United States (and global)"
+      },
+      {
+        "name": "Consenting Third Parties",
+        "vendor_role": "recipient",
+        "dpa_status": "not_required",
+        "country": "United States (and global)"
+      },
+      {
+        "name": "Cookie and Tracking Technology Providers",
+        "vendor_role": "separate_controller",
+        "dpa_status": "pending",
+        "country": "United States (and global)"
+      },
+      {
+        "name": "Corporate Transaction Counterparties",
+        "vendor_role": "recipient",
+        "dpa_status": "not_required",
+        "country": "United States (and global)"
+      },
+      {
+        "name": "Law Enforcement and Government Bodies",
+        "vendor_role": "recipient",
+        "dpa_status": "not_required",
+        "country": "United States (and global)"
+      },
+      {
+        "name": "Professional Advisors",
+        "vendor_role": "separate_controller",
+        "dpa_status": "not_required",
+        "country": "United States (and global)"
+      },
+      {
+        "name": "Service Providers (Processors)",
+        "vendor_role": "processor",
+        "dpa_status": "in_place",
+        "country": "United States (and global)"
+      },
+      {
+        "name": "Transaction Partners",
+        "vendor_role": "separate_controller",
+        "dpa_status": "not_required",
+        "country": "United States (and global)"
+      },
+      {
+        "name": "Zendesk Affiliates (Group Companies)",
+        "vendor_role": "recipient",
+        "dpa_status": "in_place",
+        "country": "Multiple (US, UK, Ireland, Germany, France, Australia, Japan, Brazil, Singapore, India, Canada, Sweden, Mexico, Spain, Italy, Netherlands, Poland, Serbia, Portugal, Korea)"
+      }
+    ]
+  },
+  "runs": [
+    {
+      "id": "ropa_stage1_activities",
+      "title": "Stage 1 — processing activities",
+      "note": "Record the distinct Article 30 activities the notice describes.",
+      "prompt": "Our organisation's privacy notice is in this programme. Read it and record the distinct processing activities it describes in our Article 30 register, calling propose_processing_activity for each. For every activity capture: a clear name, the purpose, the Article 6 lawful basis, the controller/processor role and a concise retention period (if the notice gives only a general retention approach, state a defensible retention). Where an activity processes special-category (Article 9) data, set special_category and the matching Article 9 condition. Cover the principal activities a privacy officer would expect from this notice.",
+      "status": "completed",
+      "latency_s": 52.9,
+      "step_count": 48,
+      "model_turns": 8,
+      "tools_called": [
+        "search_documents",
+        "read_document",
+        "list_processing_activities",
+        "list_systems",
+        "list_vendors",
+        "list_data_subject_categories",
+        "list_data_categories",
+        "write_todos",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "list_processing_activities",
+        "write_todos"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "propose_processing_activity"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "All 10 distinct processing activities from the privacy notice have been recorded. Here's the summary:\n\n---\n\n## Recorded Processing Activities (Article 30 ROPA)\n\nAll activities are **controller** processing where Zendesk controls the personal data (not the processor-side subscriber data excluded by the notice).\n\n| # | Activity | Lawful Basis | Special Cat. | Retention |\n|---|----------|-------------|-------------|-----------|\n| 1 | **Service Provision and Account Management** | Contract | No | Contract duration + 90 days (subject to legal/tax holds) |\n| 2 | **Business Operations and Administration** | Legitimate interests | No | 7 years after financial year-end |\n| 3 | **Legal Compliance and Fraud Prevention** | Legal obligation | No | Duration of obligation or 7 years after case closure |\n…"
+    },
+    {
+      "id": "ropa_stage2_systems_recipients",
+      "title": "Stage 2 — systems & recipients",
+      "note": "Record the systems/assets and the categories of recipients (vendors).",
+      "prompt": "Continue building our Article 30 register from the privacy notice in this programme. Record (a) the systems/assets where personal data lives using propose_system, and (b) the categories of recipients / third parties we disclose personal data to using propose_vendor — give each a role (processor, sub_processor, joint_controller, separate_controller or recipient) and a DPA status. Base these on the recipients and processing described in the notice.",
+      "status": "cap_exceeded",
+      "latency_s": 70.0,
+      "step_count": 50,
+      "model_turns": 7,
+      "tools_called": [
+        "search_documents",
+        "read_document",
+        "list_systems",
+        "list_vendors",
+        "list_processing_activities",
+        "write_todos",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "write_todos",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "propose_vendor"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": ""
+    },
+    {
+      "id": "ropa_stage3_transfers",
+      "title": "Stage 3 — international transfers",
+      "note": "Record third-country transfers + Chapter V safeguards against activities.",
+      "prompt": "Continue our Article 30 register. Record our international (third-country) transfers of personal data and their Chapter V safeguards. First call list_processing_activities to get the activity ids, then for each relevant activity call propose_transfer with the destination, whether it is restricted (recipient outside the UK/EEA) and — when restricted — the safeguard mechanism (e.g. standard_contractual_clauses, uk_idta, binding_corporate_rules). Ground the destinations and mechanisms in the notice.",
+      "status": "cap_exceeded",
+      "latency_s": 64.0,
+      "step_count": 50,
+      "model_turns": 7,
+      "tools_called": [
+        "search_documents",
+        "list_processing_activities",
+        "search_documents",
+        "search_documents",
+        "search_documents",
+        "read_document",
+        "list_systems",
+        "list_vendors",
+        "list_transfers",
+        "list_data_subject_categories",
+        "list_data_categories",
+        "write_todos",
+        "propose_transfer",
+        "propose_transfer",
+        "propose_transfer",
+        "propose_transfer",
+        "propose_transfer",
+        "propose_transfer",
+        "propose_transfer",
+        "propose_transfer",
+        "propose_transfer",
+        "propose_transfer"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "propose_transfer"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": ""
+    },
+    {
+      "id": "ropa_stage4_links_categories",
+      "title": "Stage 4 — links & categories",
+      "note": "Link activities↔systems/recipients and tag data-subject + data categories.",
+      "prompt": "Finish tying our Article 30 register together. Using the list_* tools to find ids: link each processing activity to the systems it uses (link_processing_activity_to_system) and to the recipients it discloses to (link_vendor_to_activity); and tag each activity with its categories of data subjects (add_data_subject_categories) and categories of personal data (add_data_categories), based on the notice.",
+      "status": "cap_exceeded",
+      "latency_s": 39.4,
+      "step_count": 50,
+      "model_turns": 6,
+      "tools_called": [
+        "list_processing_activities",
+        "list_systems",
+        "list_vendors",
+        "list_data_subject_categories",
+        "list_data_categories",
+        "list_transfers",
+        "search_documents",
+        "read_document",
+        "write_todos",
+        "add_data_subject_categories",
+        "add_data_categories",
+        "add_data_subject_categories",
+        "add_data_categories",
+        "add_data_subject_categories",
+        "add_data_categories",
+        "add_data_subject_categories",
+        "add_data_subject_categories",
+        "add_data_categories",
+        "add_data_categories",
+        "add_data_subject_categories",
+        "add_data_categories",
+        "add_data_subject_categories",
+        "add_data_categories",
+        "add_data_subject_categories",
+        "add_data_categories"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "add_data_categories"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": ""
+    }
+  ]
+}

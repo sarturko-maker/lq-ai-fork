@@ -1,0 +1,366 @@
+{
+  "milestone": "PRIV-7",
+  "adr": "F015",
+  "mode": "one-shot",
+  "model_alias": "deepseek",
+  "model_note": "alias 'deepseek' resolves via the gateway to a DeepSeek V4 model (deepseek-v4-flash for 'deepseek', deepseek-v4-pro for 'deepseek-pro'). DeepSeek is NOT yet scenario-qualified (ADR-F015) — this run is a qualification data point, kept verbatim, not tuned green.",
+  "source": {
+    "company": "Zendesk",
+    "url": "https://www.zendesk.co.uk/company/agreements-and-terms/privacy-notice/",
+    "retrieved": "2026-06-19",
+    "note": "Real public notice, testing-only — held transiently, not committed."
+  },
+  "generated_at": "2026-06-19T08:13:41+00:00",
+  "coverage": {
+    "counts": {
+      "activities": 8,
+      "systems": 6,
+      "vendors": 8,
+      "transfers": 0,
+      "restricted_transfers": 0,
+      "distinct_data_subject_categories": 0,
+      "distinct_data_categories": 0
+    },
+    "distinct_data_subject_categories": [],
+    "distinct_data_categories": [],
+    "activities_fully_linked": 0,
+    "linkage_axis_fractions": {
+      "has_system": 0.0,
+      "has_recipient": 0.0,
+      "has_data_subject_category": 0.0,
+      "has_data_category": 0.0
+    },
+    "per_activity": [
+      {
+        "name": "Cookie & Tracking Data Processing",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Corporate Transactions",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Diversity, Equity & Inclusion Initiatives",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Internal Business Operations",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Legal & Security Compliance",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Marketing & Advertising",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Referral Programs",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      },
+      {
+        "name": "Service Delivery & Product Operations",
+        "has_system": false,
+        "has_recipient": false,
+        "has_data_subject_category": false,
+        "has_data_category": false,
+        "has_transfer": false,
+        "special_category_handled": true
+      }
+    ],
+    "integrity_ok": true
+  },
+  "register": {
+    "activities": [
+      {
+        "name": "Cookie & Tracking Data Processing",
+        "purpose_excerpt": "Collect and process browsing history, device information, search history, and interaction data via cookies and similar tracking technologies for analytics, site…",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Duration set in cookie preference manager; reviewed periodically and deleted upon consent withdrawal (Section 5 — cookies and tracking technologies described in…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Corporate Transactions",
+        "purpose_excerpt": "Evaluate and execute corporate transactions including sales, mergers, acquisitions, and bankruptcy proceedings; conduct due diligence and post-transition integr…",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "Duration of the transaction plus 6 years after completion for legal/audit purposes (Section 6 — retained for legal/tax/accounting compliance; Section 3 — corpor…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Diversity, Equity & Inclusion Initiatives",
+        "purpose_excerpt": "Collect and process optional demographic data (race, ethnicity, vaccination proof) for diversity, equity, and inclusion initiatives and reporting",
+        "lawful_basis": "consent",
+        "controller_role": "controller",
+        "retention": "Until consent is withdrawn, or data is anonymised for aggregate reporting purposes (Section 6 — deleted when no legitimate need exists; Section 2 — data optiona…",
+        "special_category": true,
+        "art9_condition": "explicit_consent",
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Internal Business Operations",
+        "purpose_excerpt": "Maintain internal business records; perform accounting and auditing; ensure IT security; conduct business evaluation, research and development; analyse survey r…",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "6 years after creation/collection for accounting and audit compliance (Section 6 — retained for business purposes and legal/tax/accounting compliance; deleted, …",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Legal & Security Compliance",
+        "purpose_excerpt": "Comply with legal and safety requirements; establish and defend legal claims; protect safety and integrity of systems and premises; investigate policy violation…",
+        "lawful_basis": "legal_obligation",
+        "controller_role": "controller",
+        "retention": "Duration required by applicable law plus 6 years for litigation holds (Section 6 — retained for legal/tax/accounting compliance; CCTV retention: assumed 30 days…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Marketing & Advertising",
+        "purpose_excerpt": "Market products and services; solicit testimonials; send marketing communications; facilitate contests and promotions; customise advertising on digital properti…",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "Until consent is withdrawn or 2 years after last engagement for legitimate-interest marketing; consent-based marketing data deleted upon withdrawal (Section 6 —…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Referral Programs",
+        "purpose_excerpt": "Process and fulfil referral requests using provided name, email, job title, and company name",
+        "lawful_basis": "legitimate_interests",
+        "controller_role": "controller",
+        "retention": "2 years after referral completion (assumption — the notice states retained as long as necessary for collection purposes; Section 6)",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      },
+      {
+        "name": "Service Delivery & Product Operations",
+        "purpose_excerpt": "Provide products, services, and digital properties; process transactions; enable user access; operate, maintain, and improve services; communicate with users; d…",
+        "lawful_basis": "contract",
+        "controller_role": "controller",
+        "retention": "Duration of the user relationship plus 6 years after last interaction for legal/accounting compliance (Section 6 — personal data retained as long as necessary f…",
+        "special_category": false,
+        "art9_condition": null,
+        "systems": [],
+        "recipients": [],
+        "data_subject_categories": [],
+        "data_categories": [],
+        "transfers": []
+      }
+    ],
+    "systems": [
+      {
+        "name": "CCTV & Physical Security Systems",
+        "system_type": "other",
+        "ai_usage": false
+      },
+      {
+        "name": "Cookie & Analytics Infrastructure",
+        "system_type": "analytics",
+        "ai_usage": false
+      },
+      {
+        "name": "Internal Corporate Systems",
+        "system_type": "other",
+        "ai_usage": false
+      },
+      {
+        "name": "Marketing & Event Systems",
+        "system_type": "email_marketing",
+        "ai_usage": false
+      },
+      {
+        "name": "Zendesk.com & Digital Properties",
+        "system_type": "other",
+        "ai_usage": false
+      },
+      {
+        "name": "Zendesk Product Platform",
+        "system_type": "support",
+        "ai_usage": false
+      }
+    ],
+    "vendors": [
+      {
+        "name": "Business Partners",
+        "vendor_role": "separate_controller",
+        "dpa_status": "not_required",
+        "country": "United States (primary); potentially global"
+      },
+      {
+        "name": "Cookie & Tracking Companies",
+        "vendor_role": "processor",
+        "dpa_status": "in_place",
+        "country": "United States (primary); potentially global"
+      },
+      {
+        "name": "Corporate Transaction Counterparties",
+        "vendor_role": "separate_controller",
+        "dpa_status": "not_required",
+        "country": "Global"
+      },
+      {
+        "name": "Government & Law Enforcement Agencies",
+        "vendor_role": "recipient",
+        "dpa_status": "not_required",
+        "country": "Global"
+      },
+      {
+        "name": "Professional Advisors",
+        "vendor_role": "separate_controller",
+        "dpa_status": "not_required",
+        "country": "United States (primary); local advisors in other jurisdictions"
+      },
+      {
+        "name": "Service Providers (Processors)",
+        "vendor_role": "processor",
+        "dpa_status": "in_place",
+        "country": "United States (primary); potentially global"
+      },
+      {
+        "name": "Transaction Partners",
+        "vendor_role": "separate_controller",
+        "dpa_status": "not_required",
+        "country": "United States (primary)"
+      },
+      {
+        "name": "Zendesk Affiliates",
+        "vendor_role": "joint_controller",
+        "dpa_status": "in_place",
+        "country": "Multiple (US, UK, Ireland, Germany, France, India, Brazil, Australia, Japan, Singapore, Canada, Spain, Italy, Netherlands, Sweden, Mexico, Portugal, Poland, Serbia)"
+      }
+    ]
+  },
+  "runs": [
+    {
+      "id": "ropa_oneshot",
+      "title": "One-shot — build the full ROPA from the notice",
+      "note": "The naive path: one broad ask. Tests whether a single bounded run (300s wall clock) can read a real notice and build a coherent Article 30 register.",
+      "prompt": "You maintain this organisation's Article 30 Record of Processing Activities (ROPA). Our privacy notice has been added to this programme. Read it, then build the ROPA from it using your ROPA tools: (1) record each distinct processing activity with its purpose, Article 6 lawful basis, controller/processor role and a retention period — set the special-category flag and an Article 9 condition where it processes special-category data; (2) record the systems/assets and the categories of recipients/vendors involved, with each vendor's role and DPA status; (3) record any international (third-country) transfers with their Chapter V safeguards; (4) link each activity to its systems and recipients and tag it with its categories of data subjects and personal data. Ground everything in the notice; where the notice is silent on a required field, choose the most defensible value and note your assumption.",
+      "status": "cap_exceeded",
+      "latency_s": 88.5,
+      "step_count": 60,
+      "model_turns": 8,
+      "tools_called": [
+        "search_documents",
+        "read_document",
+        "write_todos",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "propose_processing_activity",
+        "list_processing_activities",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_system",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor",
+        "propose_vendor"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "propose_processing_activity"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": ""
+    }
+  ]
+}

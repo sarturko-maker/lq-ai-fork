@@ -321,8 +321,17 @@ short-slice**.
   (data-flow / lineage view — interactive node-link graph auto-drawn from the System↔Activity↔Vendor↔Transfer
   relationships; `GET /ropa/data-flow` + pure `ropa_graph.build_graph`; rendered with `@xyflow/svelte` per
   **ADR-F022** (the fork's first deliberate new-dep exception, maintainer-authorised) but in our F013 style;
-  no migration) → **PRIV-6d** (Legal-Entity / controller scope + per-controller Article 30 export — needs a
-  migration)
+  no migration) → **PRIV-7 ✅ (PR #TBD)** (live **ROPA-population** validation: the maintainer's
+  privacy-notice→ROPA onboarding test, run live on **DeepSeek-flash** against Zendesk's real notice via the
+  scenario harness. Built a **fully-linked register (9/9 activities)** through the guarded write tools once two
+  budget ceilings were lifted — proved the gap was budget, not model capability. Deliverables: reusable
+  read-back/coverage scorer (`tests/agents/scenarios/ropa_eval.py`), the live scenario
+  (`test_ropa_population_scenario.py`, provider-+notice-gated, self-skips in CI), the new **`ropa-population`
+  skill** (link-as-you-go method; test-only bound — recommend shipping via a binding migration), and a
+  **production runner fix**: `runner.py` now ties langgraph's graph `recursion_limit` to the run's `max_steps`
+  (the default 25 was crashing any long/skilled run before `max_steps` fired). Findings:
+  `docs/fork/evidence/priv-7/FINDINGS.md`) → **PRIV-6d** (Legal-Entity / controller scope + per-controller
+  Article 30 export — needs a migration)
   → **P1 flagship** PRIV-A1 (assessment domain+skill) / PRIV-A2 (**conversational-link external intake** — the
   differentiator, **ADR-F020**) → P2 tracks (DSAR, breach, DPA review, reg-gap, reporting). **Full capability
   plan: `docs/fork/plans/PRIV-onetrust-to-lqai-functionality-map.md`** (OneTrust→LQ.AI, P0–P3; **P3
@@ -393,8 +402,13 @@ Phase 1–2 (see Backlog: EU AI Act register module). Phased rollout (each its o
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
-- **ROPA onboarding flow + "ROPA-from-privacy-notice" end-to-end test (maintainer, 2026-06-19 — strong
-  near-term candidate; also THE validation of PRIV-1…6c).** Vision: an onboarding flow where the operator
+- **ROPA onboarding flow + "ROPA-from-privacy-notice" end-to-end test — half (a) DELIVERED by PRIV-7
+  (PR #TBD).** The live notice→ROPA validation ran on DeepSeek-flash against Zendesk's real notice and built a
+  **fully-linked register (9/9 activities)** through the guarded write tools — proving the document-extraction
+  half works (the gap was budget + the recursion ceiling, both now fixed; the `ropa-population` skill carries
+  the method). **Remaining:** ship the skill via a binding migration; the **~50-question intake** half (b)
+  (≈ PRIV-A2 / ADR-F020); and a guided bulk-extraction **UX**. See `docs/fork/evidence/priv-7/FINDINGS.md`.
+  Original vision (for context): an onboarding flow where the operator
   (1) hands the Privacy agent a real company **privacy notice** and (2) answers a structured **~50-question
   intake**, and the agent **auto-populates ~80% of the ROPA** from the two. Maps onto the existing/planned
   stack in two halves: **(a) document-extraction → ROPA** — already possible with the PRIV-2…6c guarded,
@@ -411,6 +425,22 @@ Phase 1–2 (see Backlog: EU AI Act register module). Phased rollout (each its o
   Providers are dev-only (MiniMax/DeepSeek; a client runs a Western model via the gateway —
   [[llm-is-injected-replaceable]]). Relates to [[oscar-privacy-modules-vision]] and the assessment track.
 
+- **Find-or-create category deadlock under parallel tool calls (from PRIV-7, 2026-06-19 — real bug, HIGH).**
+  `add_data_subject_categories` / `add_data_categories` find-or-create can hit a Postgres
+  `DeadlockDetectedError` on the `lower(name)` unique index when deepagents executes a turn's tool calls
+  concurrently and two overlapping category writes race. PRIV-6a's SAVEPOINT absorbs `IntegrityError` (lost
+  race) but **not** a deadlock → the whole run fails. Fix = catch `DeadlockDetectedError` and retry the
+  SAVEPOINT (bounded). Guarded write path → its own slice + security review. Evidence: PRIV-7
+  `build-deepseek-skill-s150` pass 1.
+- **Ship the `ropa-population` skill (from PRIV-7) — bind it to the Privacy area via a migration** (the 0056
+  pattern; rebuild workers) so the live cockpit Privacy agent gets it, not just the harness. Validated
+  test-only in PRIV-7 (the maintainer's "test-only first, ship once proven" — now proven, 9/9).
+- **Register a deepagents harness profile for `deepseek` (from PRIV-7 — cheap).** deepagents logs "no profile
+  matched … 'deepseek'; using defaults" every run; a tuned profile may improve loop/token budgeting.
+- **"Populate records from a source" family (from PRIV-7's framing).** Notice→ROPA is the first; the same
+  reusable scorer + skill pattern extends to populating/maintaining records from **files, interviews, client
+  instructions, and analytics**, and to the **orchestrator/reader** subagent split (pro orchestrates, flash
+  reads). Each its own slice.
 - **ROPA private→shared information-flow gap (from the PRIV-6a ultracode audit, 2026-06-18 — medium) → now
   owned by the Authorization track (ADR-F021).** The deployment-global ROPA register (ADR-F019, shared-read)
   means a privileged/private matter's confidential narrative could be distilled by the Privacy agent into a

@@ -2,7 +2,34 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-6c data-flow / lineage view SHIPPED (PR #109, branch `priv-6c-data-flow-lineage`)**, on top of PRIV-6b (PR #108) + PRIV-6a (PR #105) + PRIV-5b (PR #104) + PRIV-5a (PR #103) + PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). **Article 30(1) content set complete since 6a**; PRIV-6b added the read-only programme **Overview**; PRIV-6c adds the interactive **Data flow** lineage graph over the register (no migration). Plan: `docs/fork/plans/PRIV-6c-data-flow-lineage.md`; ADR: **F022 (ACCEPTED 2026-06-19)** — the fork's first deliberate new-dep exception: `@xyflow/svelte`); evidence (live light/dark × wide/narrow): `docs/fork/evidence/priv-6c/`. **RECOMMENDED next pickup — ROPA-from-privacy-notice end-to-end test + onboarding-flow validation** (maintainer 2026-06-19: hand the agent a real company privacy notice → ~80% of the ROPA auto-populated, a structured ~50-question intake fills the rest. Run it LIVE on DeepSeek via the scenario harness — a genuine end-to-end validation of PRIV-1…6c against a real document, and the seed of an onboarding flow — see **MILESTONES § Backlog "ROPA onboarding"**). Other pickups: **PRIV-6d** (Legal-Entity / controller scope + per-controller Art 30 export — needs a migration); the P1 assessment track (PRIV-A1/A2, **ADR-F020** — the questionnaire half of the onboarding flow); or **Authorization Phase 1** (ship the behavior-identical `can()`/`visible_filter()` seam — see MILESTONES § Authorization; the private `sarturko-maker/EU_AI_Act` `access.ts` is a clean-room reference for it). **NOTE:** still fold the in-flight ADR-F021 collaboration-model workflow output (`wajbzaq82`, journaled) into ADR-F021's guest-agent mechanism when Authorization is picked up.)
+## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-7 ROPA-population validation + `ropa-population` skill + a production runner fix SHIPPED (PR #TBD, branch `priv-7-ropa-population-from-notice`)**, on top of PRIV-6c (PR #109) + PRIV-6b (PR #108) + PRIV-6a (PR #105) + PRIV-5b/5a/4a/3 (ADR-F019). PRIV-7 ran the maintainer's **privacy-notice→ROPA onboarding test LIVE on DeepSeek-flash** against Zendesk's real notice via the scenario harness: it built a **fully-linked register (9/9 activities)** through the guarded write tools — proving the gap was **budget + a recursion ceiling, NOT model capability** (the `ropa-population` skill's link-as-you-go method + adequate `max_steps` got there; pro went deepest per-activity). Evidence + the honest verdict: `docs/fork/evidence/priv-7/FINDINGS.md` (+ 6 behavior reports). **RECOMMENDED next pickups (PRIV-7 follow-ups, all in MILESTONES § Backlog):** (1) **fix the find-or-create deadlock** — `add_data_*_categories` can hit a Postgres `DeadlockDetectedError` under parallel tool calls (guarded path, HIGH, own slice + security review); (2) **ship the `ropa-population` skill via a binding migration** (validated test-only — now proven, so bind it for the live cockpit Privacy agent); (3) register a deepagents profile for `deepseek` (cheap). Other pickups: **PRIV-6d** (Legal-Entity / controller scope — needs a migration); the **intake half** of onboarding (PRIV-A2, **ADR-F020**); or **Authorization Phase 1** (the `can()`/`visible_filter()` seam — MILESTONES § Authorization; the private `sarturko-maker/EU_AI_Act` `access.ts` is a clean-room reference). **NOTE:** still fold the in-flight ADR-F021 collaboration-model workflow output (`wajbzaq82`, journaled) into ADR-F021's guest-agent mechanism when Authorization is picked up.)
+
+- **PRIV-7 (PR #TBD) — live ROPA-population validation + `ropa-population` skill + a runner fix. Tests + 1 skill + a core runner change; NO migration (skill bound test-only).**
+  The maintainer's onboarding test (hand the Privacy agent a real privacy notice → it builds the ROPA), run
+  **live on DeepSeek-flash** against **Zendesk's** real UK notice (testing-only, fetched transiently, **not
+  committed** — gitignored `_local/`; evidence carries URL + the agent's own output, never the notice verbatim).
+  **Reusable eval substrate** (`tests/agents/scenarios/ropa_eval.py`): notice→`FixtureDocument` loader, a
+  register read-back (`snapshot_register` by `source_project_id`), an Article-30 coverage scorer
+  (`score_coverage`), `bind/unbind_area_skill` (test-only, idempotent + unbind-in-finally), `cleanup_register`.
+  **Live scenario** (`test_ropa_population_scenario.py`, provider-+notice-gated → **self-skips in CI**):
+  one-shot + staged baselines, and a 4-config **build comparison** (flash-noskill / flash+skill / pro+skill /
+  flash+skill@150-steps). **Result:** flash+skill at max_steps=150 → **9/9 activities fully linked**
+  (system+recipient+both category axes), valid by construction; the skill is the only thing that produced any
+  links/vendors on flash (control: 0). **New skill** `skills/ropa-population/SKILL.md` (link-as-you-go method;
+  bound test-only per maintainer — ship via migration next). **Production fix** `app/agents/runner.py`:
+  langgraph's default graph `recursion_limit=25` was crashing long/skilled runs (`GraphRecursionError`) before
+  `max_steps` fired; now tied to the run's `max_steps` (`max(50, max_steps*4)`), unit-tested. **Verify:** ruff +
+  mypy clean (168 files); **full api suite 2300 passed / 15 skipped** (+6: `test_ropa_eval.py` 5 + the
+  recursion_limit unit test; provider ROPA tests self-skip in CI); **LIVE on dev stack** (gateway→DeepSeek,
+  throwaway test DBs, dev register untouched). **Fresh-context adversarial review (4 lenses → refute-by-default
+  verify): 0 confirmed blockers/should-fixes, 3 nits** (settlement-only assertions are ADR-F015 report-not-gate
+  + the deadlock surfaces honestly as `failed`; bind/unbind serial-only — comment added; `integrity_ok`
+  tautological on live data — all accepted/documented). Security pass: no secrets/keys in committed files or
+  reports; notice not committed; SQL parameterized; recursion change only RAISES the langgraph ceiling (real
+  brakes intact). **No new ADR** (under ADR-F015/F016/F018/F019). **Flagged follow-ups (NOT fixed here):** the
+  find-or-create **deadlock** under parallel tool calls (HIGH), the skill-binding migration, a `deepseek`
+  deepagents profile, the 0-transfers budget-priority gap, and the broader "populate-from-source" family.
+  **Pickup: the deadlock fix or the skill-binding migration (see State).**
 
 - **PRIV-6c (PR #109) — data-flow / lineage view. Read API + web + 1 new web dep, NO migration.**
   An interactive **node-link data map** of the deployment-global register (the OneTrust/TrustArc "data flow"),
