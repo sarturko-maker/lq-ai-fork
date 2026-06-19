@@ -388,29 +388,31 @@
 						</Table>
 					</div>
 				{/if}
-			{:else if (dataCategories?.length ?? 0) === 0}
-				<p class="max-w-prose text-sm text-muted-foreground">{EMPTY_DATA_CATEGORIES}</p>
-			{:else}
-				<div class="rounded-lg border border-border">
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Category of personal data</TableHead>
-								<TableHead>Activities</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{#each dataCategories ?? [] as c (c.id)}
+			{:else if tab === 'data-categories'}
+				{#if (dataCategories?.length ?? 0) === 0}
+					<p class="max-w-prose text-sm text-muted-foreground">{EMPTY_DATA_CATEGORIES}</p>
+				{:else}
+					<div class="rounded-lg border border-border">
+						<Table>
+							<TableHeader>
 								<TableRow>
-									<TableCell class="font-medium text-foreground">{c.name}</TableCell>
-									<TableCell class="text-muted-foreground"
-										>{c.processing_activities.length}</TableCell
-									>
+									<TableHead>Category of personal data</TableHead>
+									<TableHead>Activities</TableHead>
 								</TableRow>
-							{/each}
-						</TableBody>
-					</Table>
-				</div>
+							</TableHeader>
+							<TableBody>
+								{#each dataCategories ?? [] as c (c.id)}
+									<TableRow>
+										<TableCell class="font-medium text-foreground">{c.name}</TableCell>
+										<TableCell class="text-muted-foreground"
+											>{c.processing_activities.length}</TableCell
+										>
+									</TableRow>
+								{/each}
+							</TableBody>
+						</Table>
+					</div>
+				{/if}
 			{/if}
 		</div>
 	{/if}

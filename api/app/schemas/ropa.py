@@ -24,6 +24,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -577,6 +578,12 @@ class ProgrammeSummary(BaseModel):
 # (Backlog / ADR-F021) is heightened. Computed by the pure
 # ``app.ropa_graph.build_graph`` over the same Read DTOs the export/summary use.
 
+# The node families and edge relationships, as closed sets (mirrored in the web
+# client's DataFlow{Node,Edge}Kind unions). Literal — not bare str — so a typo in
+# the projector is a type error and the OpenAPI schema documents the allowed set.
+DataFlowNodeKind = Literal["system", "activity", "recipient", "destination"]
+DataFlowEdgeKind = Literal["processed_by", "disclosed_to", "transferred_to"]
+
 
 class DataFlowNode(BaseModel):
     """One node in the data-flow graph — a system, activity, recipient or destination.
@@ -590,7 +597,7 @@ class DataFlowNode(BaseModel):
     """
 
     id: str
-    kind: str  # "system" | "activity" | "recipient" | "destination"
+    kind: DataFlowNodeKind
     label: str
     # System badges.
     system_type: str | None = None
@@ -616,7 +623,7 @@ class DataFlowEdge(BaseModel):
 
     source: str
     target: str
-    kind: str  # "processed_by" | "disclosed_to" | "transferred_to"
+    kind: DataFlowEdgeKind
     restricted: bool | None = None
     mechanism: str | None = None
     recipient: str | None = None
