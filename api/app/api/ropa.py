@@ -19,12 +19,12 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, with_loader_criteria
 
 from app import ropa_export, ropa_graph, ropa_summary
 from app.db.session import get_db
@@ -50,6 +50,40 @@ router = APIRouter(prefix="/ropa", tags=["ropa"])
 
 _Db = Annotated[AsyncSession, Depends(get_db)]
 
+# Soft-retire (PRIV-8a, ADR-F023): the four mutable register entities. Reads
+# exclude retired rows by default so the live register is the "current" record;
+# ``?include_retired=true`` on the list endpoints shows them for audit.
+_RETIRABLE = (ProcessingActivity, System, Vendor, Transfer)
+
+
+def _live_only(*, exclude: type | None = None) -> list[Any]:
+    """``with_loader_criteria`` options that drop retired rows from EAGER-LOADED
+    relationships (a retired system/vendor disappears from an activity; a retired
+    activity from a system's reverse link; a transfer's retired recipient vendor
+    becomes null). ``exclude`` skips one entity — used on the detail endpoints so
+    the lead row still resolves by id even when itself retired.
+    """
+    return [
+        with_loader_criteria(model, model.retired_at.is_(None))
+        for model in _RETIRABLE
+        if model is not exclude
+    ]
+
+
+def _hide_retired[M: (ProcessingActivity, System, Vendor)](
+    stmt: Select[Any], model: type[M], *, include_retired: bool
+) -> Select[Any]:
+    """Apply the live-register filter to a list query unless ``include_retired``.
+
+    One place for "exclude retired" so a new list endpoint can't forget it (the
+    slice's load-bearing risk): filters the lead row (``.where``) and every
+    eager-loaded relationship (``_live_only``; the lead is excluded there since the
+    ``.where`` already covers it).
+    """
+    if include_retired:
+        return stmt
+    return stmt.where(model.retired_at.is_(None)).options(*_live_only(exclude=model))
+
 
 class ExportFormat(StrEnum):
     """Article 30 export formats (PRIV-4a). An off-enum value is a 422 at the boundary."""
@@ -59,26 +93,32 @@ class ExportFormat(StrEnum):
     XLSX = "xlsx"
 
 
+_INCLUDE_RETIRED = Query(
+    False, description="Include soft-retired rows (ADR-F023); default false (live register only)."
+)
+
+
 @router.get("/processing-activities", response_model=list[ProcessingActivityRead])
-async def list_processing_activities(db: _Db) -> list[ProcessingActivity]:
-    """The company ROPA register — all processing activities (with linked systems)."""
-    rows = (
-        (
-            await db.execute(
-                select(ProcessingActivity)
-                .options(
-                    selectinload(ProcessingActivity.systems),
-                    selectinload(ProcessingActivity.vendors),
-                    selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
-                    selectinload(ProcessingActivity.data_subject_categories),
-                    selectinload(ProcessingActivity.data_categories),
-                )
-                .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
-            )
+async def list_processing_activities(
+    db: _Db, include_retired: bool = _INCLUDE_RETIRED
+) -> list[ProcessingActivity]:
+    """The company ROPA register — all processing activities (with linked systems).
+
+    Retired entries are hidden unless ``include_retired=true`` (PRIV-8a, ADR-F023).
+    """
+    stmt = (
+        select(ProcessingActivity)
+        .options(
+            selectinload(ProcessingActivity.systems),
+            selectinload(ProcessingActivity.vendors),
+            selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
+            selectinload(ProcessingActivity.data_subject_categories),
+            selectinload(ProcessingActivity.data_categories),
         )
-        .scalars()
-        .all()
+        .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
     )
+    stmt = _hide_retired(stmt, ProcessingActivity, include_retired=include_retired)
+    rows = (await db.execute(stmt)).scalars().all()
     return list(rows)
 
 
@@ -94,6 +134,9 @@ async def get_processing_activity(activity_id: uuid.UUID, db: _Db) -> Processing
                 selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
                 selectinload(ProcessingActivity.data_subject_categories),
                 selectinload(ProcessingActivity.data_categories),
+                # The activity itself resolves even if retired (deep-link/audit), but
+                # its linked records are shown live-only (PRIV-8a, ADR-F023).
+                *_live_only(exclude=ProcessingActivity),
             )
             .where(ProcessingActivity.id == activity_id)
         )
@@ -106,19 +149,18 @@ async def get_processing_activity(activity_id: uuid.UUID, db: _Db) -> Processing
 
 
 @router.get("/systems", response_model=list[SystemRead])
-async def list_systems(db: _Db) -> list[System]:
-    """The company system inventory — all systems (with linked processing activities)."""
-    rows = (
-        (
-            await db.execute(
-                select(System)
-                .options(selectinload(System.processing_activities))
-                .order_by(System.created_at.asc(), System.name.asc())
-            )
-        )
-        .scalars()
-        .all()
+async def list_systems(db: _Db, include_retired: bool = _INCLUDE_RETIRED) -> list[System]:
+    """The company system inventory — all systems (with linked processing activities).
+
+    Retired systems are hidden unless ``include_retired=true`` (PRIV-8a, ADR-F023).
+    """
+    stmt = (
+        select(System)
+        .options(selectinload(System.processing_activities))
+        .order_by(System.created_at.asc(), System.name.asc())
     )
+    stmt = _hide_retired(stmt, System, include_retired=include_retired)
+    rows = (await db.execute(stmt)).scalars().all()
     return list(rows)
 
 
@@ -128,7 +170,10 @@ async def get_system(system_id: uuid.UUID, db: _Db) -> System:
     row = (
         await db.execute(
             select(System)
-            .options(selectinload(System.processing_activities))
+            .options(
+                selectinload(System.processing_activities),
+                *_live_only(exclude=System),
+            )
             .where(System.id == system_id)
         )
     ).scalar_one_or_none()
@@ -138,19 +183,18 @@ async def get_system(system_id: uuid.UUID, db: _Db) -> System:
 
 
 @router.get("/vendors", response_model=list[VendorRead])
-async def list_vendors(db: _Db) -> list[Vendor]:
-    """The company vendor/recipient register — all vendors (with linked activities)."""
-    rows = (
-        (
-            await db.execute(
-                select(Vendor)
-                .options(selectinload(Vendor.processing_activities))
-                .order_by(Vendor.created_at.asc(), Vendor.name.asc())
-            )
-        )
-        .scalars()
-        .all()
+async def list_vendors(db: _Db, include_retired: bool = _INCLUDE_RETIRED) -> list[Vendor]:
+    """The company vendor/recipient register — all vendors (with linked activities).
+
+    Retired vendors are hidden unless ``include_retired=true`` (PRIV-8a, ADR-F023).
+    """
+    stmt = (
+        select(Vendor)
+        .options(selectinload(Vendor.processing_activities))
+        .order_by(Vendor.created_at.asc(), Vendor.name.asc())
     )
+    stmt = _hide_retired(stmt, Vendor, include_retired=include_retired)
+    rows = (await db.execute(stmt)).scalars().all()
     return list(rows)
 
 
@@ -160,7 +204,10 @@ async def get_vendor(vendor_id: uuid.UUID, db: _Db) -> Vendor:
     row = (
         await db.execute(
             select(Vendor)
-            .options(selectinload(Vendor.processing_activities))
+            .options(
+                selectinload(Vendor.processing_activities),
+                *_live_only(exclude=Vendor),
+            )
             .where(Vendor.id == vendor_id)
         )
     ).scalar_one_or_none()
@@ -182,7 +229,7 @@ async def _all_categories[M: (DataSubjectCategory, DataCategory)](
         (
             await db.execute(
                 select(model)
-                .options(selectinload(model.processing_activities))
+                .options(selectinload(model.processing_activities), *_live_only())
                 .order_by(model.created_at.asc(), model.name.asc())
             )
         )
@@ -229,7 +276,9 @@ async def _load_register(
                     selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
                     selectinload(ProcessingActivity.data_subject_categories),
                     selectinload(ProcessingActivity.data_categories),
+                    *_live_only(exclude=ProcessingActivity),
                 )
+                .where(ProcessingActivity.retired_at.is_(None))
                 .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
             )
         )
@@ -240,7 +289,8 @@ async def _load_register(
         (
             await db.execute(
                 select(System)
-                .options(selectinload(System.processing_activities))
+                .options(selectinload(System.processing_activities), *_live_only(exclude=System))
+                .where(System.retired_at.is_(None))
                 .order_by(System.created_at.asc(), System.name.asc())
             )
         )
@@ -251,7 +301,8 @@ async def _load_register(
         (
             await db.execute(
                 select(Vendor)
-                .options(selectinload(Vendor.processing_activities))
+                .options(selectinload(Vendor.processing_activities), *_live_only(exclude=Vendor))
+                .where(Vendor.retired_at.is_(None))
                 .order_by(Vendor.created_at.asc(), Vendor.name.asc())
             )
         )

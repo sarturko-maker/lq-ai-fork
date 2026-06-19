@@ -330,7 +330,14 @@ short-slice**.
   skill** (link-as-you-go method; test-only bound — recommend shipping via a binding migration), and a
   **production runner fix**: `runner.py` now ties langgraph's graph `recursion_limit` to the run's `max_steps`
   (the default 25 was crashing any long/skilled run before `max_steps` fired). Findings:
-  `docs/fork/evidence/priv-7/FINDINGS.md`) → **PRIV-6d** (Legal-Entity / controller scope + per-controller
+  `docs/fork/evidence/priv-7/FINDINGS.md`) → **PRIV-8a ✅ (PR #112)** (ROPA **change verbs**: the agent can
+  now *change* the register in plain language, not only append — 6 guarded tools `retire_*`×4 + `unlink_*`×2,
+  **soft-retire** (`retired_at`, never delete → auditable), reads hide retired everywhere by default
+  (`?include_retired=true` = audit), write verbs refuse retired targets; migration 0063; **ADR-F023**;
+  `docs/fork/plans/PRIV-8-ropa-change-verbs.md`) → **PRIV-8b** (the LIVE mixpanel→hotjar proof on DeepSeek +
+  the `ropa-maintenance` skill + a `seed_ropa_register` harness helper + evidence) → **PRIV-9** (cockpit UX:
+  chat + register **co-visible** + **poll-while-running** live updates — the group-chat "side-panel chatbox
+  that updates the UI as the agent works" idea) → **PRIV-6d** (Legal-Entity / controller scope + per-controller
   Article 30 export — needs a migration)
   → **P1 flagship** PRIV-A1 (assessment domain+skill) / PRIV-A2 (**conversational-link external intake** — the
   differentiator, **ADR-F020**) → P2 tracks (DSAR, breach, DPA review, reg-gap, reporting). **Full capability

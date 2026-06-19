@@ -376,6 +376,7 @@ class TransferSummary(BaseModel):
     restricted: bool
     mechanism: str | None
     details: str | None
+    retired_at: datetime | None = None  # PRIV-8a, ADR-F023 — NULL = live.
     vendor: VendorSummary | None = None
 
 
@@ -412,6 +413,9 @@ class ProcessingActivityRead(BaseModel):
     art9_condition: str | None
     created_at: datetime
     updated_at: datetime
+    # Soft-retire (PRIV-8a, ADR-F023): NULL = live. Reads exclude retired rows by
+    # default; under ?include_retired=true this carries the retirement timestamp.
+    retired_at: datetime | None = None
     systems: list[SystemSummary] = Field(default_factory=list)
     vendors: list[VendorSummary] = Field(default_factory=list)
     transfers: list[TransferSummary] = Field(default_factory=list)
@@ -435,6 +439,7 @@ class SystemRead(BaseModel):
     ai_usage: bool
     created_at: datetime
     updated_at: datetime
+    retired_at: datetime | None = None  # PRIV-8a, ADR-F023 — NULL = live.
     processing_activities: list[ProcessingActivitySummary] = Field(default_factory=list)
 
 
@@ -451,6 +456,7 @@ class VendorRead(BaseModel):
     dpa_status: str
     created_at: datetime
     updated_at: datetime
+    retired_at: datetime | None = None  # PRIV-8a, ADR-F023 — NULL = live.
     processing_activities: list[ProcessingActivitySummary] = Field(default_factory=list)
 
 

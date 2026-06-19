@@ -284,6 +284,10 @@ class ProcessingActivity(Base):
             f"art9_condition IS NULL OR {_in_set('art9_condition', _ART9_CONDITIONS)}",
             name="chk_processing_activities_art9_condition",
         ),
+        CheckConstraint(
+            _opt_len("retirement_reason", 1000),
+            name="chk_processing_activities_retirement_reason_len",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -318,6 +322,11 @@ class ProcessingActivity(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+    # Soft-retire (PRIV-8a, ADR-F023): NULL = live. Set on retire so the change
+    # is auditable (the row is never destroyed). Reads exclude retired rows by
+    # default; the agent's list tools hide them so a retired record is not re-linked.
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retirement_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     systems: Mapped[list[System]] = relationship(
         secondary=processing_activity_systems,
@@ -386,6 +395,9 @@ class System(Base):
         CheckConstraint(
             _opt_len("security_measures", 2000), name="chk_systems_security_measures_len"
         ),
+        CheckConstraint(
+            _opt_len("retirement_reason", 1000), name="chk_systems_retirement_reason_len"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -412,6 +424,9 @@ class System(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+    # Soft-retire (PRIV-8a, ADR-F023): NULL = live — see ProcessingActivity.
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retirement_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     processing_activities: Mapped[list[ProcessingActivity]] = relationship(
         secondary=processing_activity_systems,
@@ -449,6 +464,9 @@ class Vendor(Base):
         CheckConstraint(_in_set("dpa_status", _DPA_STATUSES), name="chk_vendors_dpa_status"),
         CheckConstraint(_opt_len("description", 2000), name="chk_vendors_description_len"),
         CheckConstraint(_opt_len("country", 200), name="chk_vendors_country_len"),
+        CheckConstraint(
+            _opt_len("retirement_reason", 1000), name="chk_vendors_retirement_reason_len"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -472,6 +490,9 @@ class Vendor(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+    # Soft-retire (PRIV-8a, ADR-F023): NULL = live — see ProcessingActivity.
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retirement_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     processing_activities: Mapped[list[ProcessingActivity]] = relationship(
         secondary=processing_activity_vendors,
@@ -518,6 +539,9 @@ class Transfer(Base):
             name="chk_transfers_restricted_requires_mechanism",
         ),
         CheckConstraint(_opt_len("details", 2000), name="chk_transfers_details_len"),
+        CheckConstraint(
+            _opt_len("retirement_reason", 1000), name="chk_transfers_retirement_reason_len"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -557,6 +581,9 @@ class Transfer(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+    # Soft-retire (PRIV-8a, ADR-F023): NULL = live — see ProcessingActivity.
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retirement_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     processing_activity: Mapped[ProcessingActivity] = relationship(back_populates="transfers")
     vendor: Mapped[Vendor | None] = relationship()
