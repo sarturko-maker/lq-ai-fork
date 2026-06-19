@@ -10,7 +10,10 @@ DeepSeek not yet ADR-F015 scenario-qualified — these are its first data points
 9/9 activities linked across all four axes (systems, recipients, data-subject categories, data categories).**
 The earlier "it only reaches ~50%" result was **not a model-capability limit** — it was two budget ceilings:
 (1) langgraph's default `recursion_limit=25` crashing skilled runs mid-build, and (2) too small a `max_steps`.
-With both lifted, **flash** hits the maintainer's ~80% aspiration (100% linkage on the activities it recorded).
+With both lifted, **flash** hits the maintainer's ~80% aspiration **structurally** (100% linkage on the
+activities it recorded). **Structural completeness ≠ legal quality, though** — an independent privacy-lawyer
+audit grades the substance **C+** (a usable first-draft skeleton with real defects; see § Substantive quality
+audit below). The two are different claims and this report keeps them separate.
 
 ## What this slice surfaced and fixed in-flight: the recursion ceiling
 
@@ -87,6 +90,48 @@ pass, a transfers-specific nudge, or more budget would close it.
   real notice). The formal ADR-F015 qualification call is the maintainer's.
 - The **orchestrator/reader split** (pro orchestrates, flash reads) remains a strong future direction but is
   no longer required to hit the target — flash alone clears it with the skill + budget.
+
+## Substantive quality audit (independent privacy-lawyer panel) — overall **C+**
+
+The coverage scorer measures **structure** (did it link?), not **legal substance**. A 5-lens adversarial
+audit of the 9/9 register against the real notice (grades: lawful-basis B, decomposition B, special-category
+B, recipients/retention/**transfers D**, grounding B) gives the honest picture: **a usable first-draft
+skeleton, NOT a sign-off-ready ROPA.**
+
+**Genuine strengths.** DEI special-category handling is correct and non-trivial (inferred the Art 9 dimension
+the notice never states, flagged `special_category` + `explicit_consent` Art 9(2)(a), paired to the Art 6
+consent limb). Lawful bases are conservative in the *right* direction (Marketing → consent, correctly
+resisting the notice's own legitimate-interests hedge — PECR-aware). Faithful 1:1 decomposition of the §3
+purpose table with no hallucinated activity, and correctly respecting the notice's controller-only scope (it
+did NOT invent a support-ticketing activity, which is Zendesk's processor role). No data/vendor confabulation;
+honest restatement of vague retention rather than inventing fake periods.
+
+**Serious issues a privacy lawyer would red-pen.**
+1. **Zero transfers (Art 30(1)(e)/(f) absent) — most serious.** The notice itemises the full Art 46 stack
+   (SCCs, UK Addendum, BCRs, adequacy, 3 named DPF entities, ~28 affiliate jurisdictions); the register
+   recorded **0**. Root cause is the budget/deadlock (pass 1 deadlocked, pass 2 hit the step cap before
+   transfers) — but the deliverable reads as "no international transfers exist," which would mislead.
+2. **Special-category data on a contract-based activity with no Art 9 condition.** "Service delivery" carries
+   the `Sensitive Personal Data` category yet is `special_category=false` / `art9_condition=null` /
+   `lawful_basis=contract` — internally incoherent (contract is not an Art 9 gateway; likely spillover that
+   belongs only on DEI). **The write-path invariant only checks `special_category=true ⇒ art9 present`, NOT
+   the inverse**, so this passed as `integrity_ok=true` — a **false-clean signal**. (→ backlog: tighten the
+   invariant / flag special-flavoured category names on non-special activities.)
+3. **Recipient-role misclassifications.** "Cookie & Tracking Companies" tagged `processor` (should be
+   `separate_controller` — §10 CPRA lists them as sold/shared ad-tech parties); "Professional Advisors"
+   tagged `processor` (independent controllers per EDPB 07/2020). These invent Art 28 obligations and hide
+   controller-to-controller disclosures.
+4. **Questionable:** Legal/security collapsed to sole `legal_obligation` (notice gave 3 bases; LI is more
+   defensible); webinar → `contract` (a stretch); "Job Applicants" inferred though the notice never names
+   them as a subject; retentions are non-committal restatements, not concrete Art 30(1)(f) limits (CCTV
+   especially should be quantified).
+
+**Bottom line:** trust the activity/basis/special-category scaffolding as a *starting point* a privacy officer
+can refine (it genuinely saves time on the §3 substance), but **rebuild transfers from scratch, re-derive
+every recipient role, resolve the Service-delivery Art 9 contradiction, and replace boilerplate retention with
+concrete periods.** Shipped as-is and trusted, it would understate the controller's transfer obligations. The
+two failure modes that would mislead an unwary reader — `transfers:0` and the `integrity_ok=true` masking the
+Art 9 contradiction — are the ones to fix first. (Full panel + synthesis: workflow `wf_ff1eeb6d-b22`.)
 
 ## Caveats
 

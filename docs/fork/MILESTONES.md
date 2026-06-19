@@ -432,6 +432,16 @@ Phase 1–2 (see Backlog: EU AI Act register module). Phased rollout (each its o
   race) but **not** a deadlock → the whole run fails. Fix = catch `DeadlockDetectedError` and retry the
   SAVEPOINT (bounded). Guarded write path → its own slice + security review. Evidence: PRIV-7
   `build-deepseek-skill-s150` pass 1.
+- **ROPA quality gaps from the PRIV-7 privacy-lawyer audit (overall C+; real defects the structural scorer
+  missed).** (a) **Invariant gap (code):** the write path enforces `special_category=true ⇒ art9_condition`
+  but NOT the inverse — an activity can carry a special-flavoured data category (e.g. "Sensitive Personal
+  Data") while `special_category=false`/no Art 9, and it passes as `integrity_ok=true` (a false-clean signal).
+  Tighten the validation (flag/reject special-category-named data categories on non-special activities,
+  or a controlled-vocabulary "is_special" flag). (b) **Transfers get dropped** under budget pressure — the
+  most serious quality defect (Art 30(1)(e)/(f) absent despite an explicit transfer disclosure); the
+  `ropa-population` skill should foreground transfers (or transfers get their own orchestrated step). (c)
+  **Recipient-role calibration** (model tends to over-use `processor` where `separate_controller` is right for
+  ad-tech / advisors). Evidence: `docs/fork/evidence/priv-7/FINDINGS.md` § Substantive quality audit.
 - **Ship the `ropa-population` skill (from PRIV-7) — bind it to the Privacy area via a migration** (the 0056
   pattern; rebuild workers) so the live cockpit Privacy agent gets it, not just the harness. Validated
   test-only in PRIV-7 (the maintainer's "test-only first, ship once proven" — now proven, 9/9).
