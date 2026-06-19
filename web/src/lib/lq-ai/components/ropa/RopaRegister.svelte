@@ -26,6 +26,7 @@
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
 	import {
 		downloadArticle30,
+		getDataFlow,
 		getProgrammeSummary,
 		listDataCategories,
 		listDataSubjectCategories,
@@ -33,6 +34,7 @@
 		listSystems,
 		listVendors,
 		type DataCategoryRead,
+		type DataFlowGraph,
 		type DataSubjectCategoryRead,
 		type ExportFormat,
 		type ProcessingActivityRead,
@@ -41,6 +43,7 @@
 		type VendorRead
 	} from '$lib/lq-ai/api/ropa';
 	import { MOTION, motionMs } from '$lib/lq-ai/cockpit/helpers';
+	import DataFlowView from './DataFlowView.svelte';
 	import ProcessingActivityDetail from './ProcessingActivityDetail.svelte';
 	import ProgrammeDashboard from './ProgrammeDashboard.svelte';
 	import SystemDetail from './SystemDetail.svelte';
@@ -66,6 +69,7 @@
 	let dataSubjects = $state<DataSubjectCategoryRead[] | null>(null);
 	let dataCategories = $state<DataCategoryRead[] | null>(null);
 	let summary = $state<ProgrammeSummary | null>(null);
+	let graph = $state<DataFlowGraph | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let tab = $state<RegisterTab>('overview');
@@ -109,13 +113,14 @@
 		loading = true;
 		error = null;
 		try {
-			const [a, s, v, ds, dc, sum] = await Promise.all([
+			const [a, s, v, ds, dc, sum, gr] = await Promise.all([
 				listProcessingActivities(),
 				listSystems(),
 				listVendors(),
 				listDataSubjectCategories(),
 				listDataCategories(),
-				getProgrammeSummary()
+				getProgrammeSummary(),
+				getDataFlow()
 			]);
 			activities = a;
 			systems = s;
@@ -123,6 +128,7 @@
 			dataSubjects = ds;
 			dataCategories = dc;
 			summary = sum;
+			graph = gr;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load the ROPA register.';
 		} finally {
@@ -237,6 +243,10 @@
 			{:else if tab === 'overview'}
 				{#if summary}
 					<ProgrammeDashboard {summary} />
+				{/if}
+			{:else if tab === 'data-flow'}
+				{#if graph}
+					<DataFlowView {graph} />
 				{/if}
 			{:else if tab === 'activities'}
 				{#if (activities?.length ?? 0) === 0}

@@ -195,6 +195,46 @@ export interface ProgrammeSummary {
 	gaps: ProgrammeGaps;
 }
 
+/**
+ * Data-flow / lineage graph (PRIV-6c) — a read-only node-link projection of the
+ * register: systems feed the activities that process their data, which disclose
+ * to recipients and transfer to third-country destinations (the Chapter V
+ * safeguard rides each transfer edge). Labels + categorical badges only — no
+ * free-text. Mirrors api/app/schemas/ropa.py DataFlow{Node,Edge,Graph}.
+ */
+export type DataFlowNodeKind = 'system' | 'activity' | 'recipient' | 'destination';
+export type DataFlowEdgeKind = 'processed_by' | 'disclosed_to' | 'transferred_to';
+
+export interface DataFlowNode {
+	id: string;
+	kind: DataFlowNodeKind;
+	label: string;
+	// System badges.
+	system_type?: string | null;
+	ai_usage?: boolean | null;
+	// Activity badges.
+	lawful_basis?: string | null;
+	controller_role?: string | null;
+	special_category?: boolean | null;
+	// Recipient (vendor) badges.
+	vendor_role?: string | null;
+	dpa_status?: string | null;
+}
+
+export interface DataFlowEdge {
+	source: string;
+	target: string;
+	kind: DataFlowEdgeKind;
+	restricted?: boolean | null;
+	mechanism?: string | null;
+	recipient?: string | null;
+}
+
+export interface DataFlowGraph {
+	nodes: DataFlowNode[];
+	edges: DataFlowEdge[];
+}
+
 export function listProcessingActivities(): Promise<ProcessingActivityRead[]> {
 	return apiRequest<ProcessingActivityRead[]>('/ropa/processing-activities');
 }
@@ -231,6 +271,10 @@ export function listDataCategories(): Promise<DataCategoryRead[]> {
 
 export function getProgrammeSummary(): Promise<ProgrammeSummary> {
 	return apiRequest<ProgrammeSummary>('/ropa/programme-summary');
+}
+
+export function getDataFlow(): Promise<DataFlowGraph> {
+	return apiRequest<DataFlowGraph>('/ropa/data-flow');
 }
 
 // --- Article 30 export (PRIV-4a) ---------------------------------------------

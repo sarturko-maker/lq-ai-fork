@@ -114,6 +114,7 @@ describe('register tabs + empty states', () => {
 	it('exposes the register tabs in order', () => {
 		expect(REGISTER_TABS.map((t) => t.id)).toEqual([
 			'overview',
+			'data-flow',
 			'activities',
 			'systems',
 			'vendors',
@@ -122,6 +123,7 @@ describe('register tabs + empty states', () => {
 		]);
 		expect(REGISTER_TABS.map((t) => t.label)).toEqual([
 			'Overview',
+			'Data flow',
 			'Processing activities',
 			'Systems',
 			'Vendors',

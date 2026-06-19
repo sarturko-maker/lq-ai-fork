@@ -562,3 +562,68 @@ class ProgrammeSummary(BaseModel):
     controller_role: list[CountByValue] = Field(default_factory=list)
     dpa_status: list[CountByValue] = Field(default_factory=list)
     gaps: ProgrammeGaps
+
+
+# --- Data-flow / lineage graph (PRIV-6c) -------------------------------------
+#
+# A read-only node-link projection of the deployment-global register: the
+# relational graph ADR-F019 stores (System → Processing Activity → Vendor /
+# Transfer) rendered as a data map (the OneTrust/TrustArc "data flow"). Labels +
+# categorical badges only — a node label is the entity name (already exposed by
+# every register read) and the badges are categorical (system_type / lawful_basis
+# / vendor_role / dpa_status / transfer mechanism); no free-text (purpose /
+# retention / description / transfer details) crosses the wire, so neither the
+# shared-read posture (ADR-F019) nor the private→shared confused-deputy concern
+# (Backlog / ADR-F021) is heightened. Computed by the pure
+# ``app.ropa_graph.build_graph`` over the same Read DTOs the export/summary use.
+
+
+class DataFlowNode(BaseModel):
+    """One node in the data-flow graph — a system, activity, recipient or destination.
+
+    ``kind`` selects the node family; only the badge fields relevant to that kind
+    are populated (the rest stay ``None``). ``id`` is kind-prefixed
+    (``"system:{uuid}"`` / ``"activity:{uuid}"`` / ``"recipient:{uuid}"`` /
+    ``"destination:{name}"``) so it is unique across families and stable for the
+    renderer; ``label`` is the entity name (a third-country ``destination`` is its
+    free-text country string — the only "name" that is not an entity row).
+    """
+
+    id: str
+    kind: str  # "system" | "activity" | "recipient" | "destination"
+    label: str
+    # System badges.
+    system_type: str | None = None
+    ai_usage: bool | None = None
+    # Activity badges.
+    lawful_basis: str | None = None
+    controller_role: str | None = None
+    special_category: bool | None = None
+    # Recipient (vendor) badges.
+    vendor_role: str | None = None
+    dpa_status: str | None = None
+
+
+class DataFlowEdge(BaseModel):
+    """One directed edge — personal data flowing from ``source`` to ``target``.
+
+    ``kind`` is ``"processed_by"`` (system → activity), ``"disclosed_to"``
+    (activity → recipient) or ``"transferred_to"`` (activity → destination). For a
+    transfer edge the Chapter V safeguard rides the edge: ``restricted`` +
+    ``mechanism`` (the ROPA invariant) and the optional recipient vendor name
+    (``recipient``).
+    """
+
+    source: str
+    target: str
+    kind: str  # "processed_by" | "disclosed_to" | "transferred_to"
+    restricted: bool | None = None
+    mechanism: str | None = None
+    recipient: str | None = None
+
+
+class DataFlowGraph(BaseModel):
+    """The data-flow / lineage projection over the deployment-global register (PRIV-6c)."""
+
+    nodes: list[DataFlowNode] = Field(default_factory=list)
+    edges: list[DataFlowEdge] = Field(default_factory=list)

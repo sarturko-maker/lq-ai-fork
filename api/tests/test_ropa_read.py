@@ -393,6 +393,58 @@ async def test_programme_summary_requires_authentication(client: AsyncClient) ->
     assert resp.status_code == 401
 
 
+async def test_data_flow_renders_register_graph(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    """PRIV-6c: the data-flow graph projects System→Activity→Vendor/Transfer relationships.
+
+    The pure unit test (test_ropa_graph.py) owns the exhaustive projection; this
+    HTTP test is a load→build→serialize path check (spot-checks + the wire-level
+    free-text guard), not a second projection oracle.
+    """
+    pa, system, vendor = await _seed_linked(db_session)
+
+    resp = await client.get("/api/v1/ropa/data-flow", headers=_bearer(user))
+    assert resp.status_code == 200
+    graph = resp.json()
+
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    assert f"system:{system.id}" in nodes
+    assert f"recipient:{vendor.id}" in nodes
+    assert "destination:United States" in nodes
+    assert nodes[f"activity:{pa.id}"]["kind"] == "activity"
+    assert nodes[f"activity:{pa.id}"]["lawful_basis"] == "legal_obligation"
+
+    edges = {(e["source"], e["target"], e["kind"]): e for e in graph["edges"]}
+    assert (f"system:{system.id}", f"activity:{pa.id}", "processed_by") in edges
+    assert (f"activity:{pa.id}", f"recipient:{vendor.id}", "disclosed_to") in edges
+    transfer_edge = edges[(f"activity:{pa.id}", "destination:United States", "transferred_to")]
+    assert transfer_edge["restricted"] is True
+    assert transfer_edge["mechanism"] == "standard_contractual_clauses"
+    assert transfer_edge["recipient"] == "Acme Payroll Ltd"
+
+    # Confused-deputy guard at the wire: the activity NAME is a label (already
+    # exposed by the register reads), but its free-text PURPOSE must not leak.
+    assert "Payroll processing" in resp.text
+    assert "Pay employees and meet tax obligations" not in resp.text
+
+
+async def test_data_flow_empty_register_is_empty_graph(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    await _clean(db_session)
+    resp = await client.get("/api/v1/ropa/data-flow", headers=_bearer(user))
+    assert resp.status_code == 200
+    graph = resp.json()
+    assert graph["nodes"] == []
+    assert graph["edges"] == []
+
+
+async def test_data_flow_requires_authentication(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/ropa/data-flow")
+    assert resp.status_code == 401
+
+
 async def test_requires_authentication(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/ropa/processing-activities")
     assert resp.status_code == 401

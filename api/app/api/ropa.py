@@ -26,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app import ropa_export, ropa_summary
+from app import ropa_export, ropa_graph, ropa_summary
 from app.db.session import get_db
 from app.models.ropa import (
     DataCategory,
@@ -38,6 +38,7 @@ from app.models.ropa import (
 )
 from app.schemas.ropa import (
     DataCategoryRead,
+    DataFlowGraph,
     DataSubjectCategoryRead,
     ProcessingActivityRead,
     ProgrammeSummary,
@@ -279,6 +280,25 @@ async def get_programme_summary(db: _Db) -> ProgrammeSummary:
     """
     activities, systems, vendors, _, _ = await _load_register(db)
     return ropa_summary.build_summary(
+        [ProcessingActivityRead.model_validate(a) for a in activities],
+        [SystemRead.model_validate(s) for s in systems],
+        [VendorRead.model_validate(v) for v in vendors],
+    )
+
+
+@router.get("/data-flow", response_model=DataFlowGraph)
+async def get_data_flow(db: _Db) -> DataFlowGraph:
+    """The data-flow / lineage projection over the deployment-global ROPA register (PRIV-6c).
+
+    Read-only node-link graph (shared-read, ADR-F019): systems feed the
+    processing activities that use them, which in turn disclose to recipient
+    vendors and transfer to third-country destinations (the Chapter V safeguard
+    rides each transfer edge). Labels + categorical badges only — no free-text —
+    so the payload carries no more than the register read endpoints already
+    expose. Orphan systems/vendors appear as unconnected nodes.
+    """
+    activities, systems, vendors, _, _ = await _load_register(db)
+    return ropa_graph.build_graph(
         [ProcessingActivityRead.model_validate(a) for a in activities],
         [SystemRead.model_validate(s) for s in systems],
         [VendorRead.model_validate(v) for v in vendors],

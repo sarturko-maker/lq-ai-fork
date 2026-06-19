@@ -220,6 +220,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/ropa/data-categories",
         # PRIV-6b (fork) — privacy programme summary
         "/api/v1/ropa/programme-summary",
+        # PRIV-6c (fork) — data-flow / lineage graph
+        "/api/v1/ropa/data-flow",
         # PRIV-4a (fork) — Article 30 export
         "/api/v1/ropa/export",
     }
@@ -328,8 +330,8 @@ async def test_openapi_paths_match_sketch() -> None:
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
     assert (
-        len(actual) == 139
-    )  # +1: PRIV-6b programme summary (ADR-F019); +2 prior: PRIV-6a taxonomy
+        len(actual) == 140
+    )  # +1: PRIV-6c data-flow graph (ADR-F022); +1 prior: PRIV-6b programme summary
 
 
 @pytest.mark.unit
