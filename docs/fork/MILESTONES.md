@@ -321,7 +321,7 @@ short-slice**.
   (data-flow / lineage view — interactive node-link graph auto-drawn from the System↔Activity↔Vendor↔Transfer
   relationships; `GET /ropa/data-flow` + pure `ropa_graph.build_graph`; rendered with `@xyflow/svelte` per
   **ADR-F022** (the fork's first deliberate new-dep exception, maintainer-authorised) but in our F013 style;
-  no migration) → **PRIV-7 ✅ (PR #TBD)** (live **ROPA-population** validation: the maintainer's
+  no migration) → **PRIV-7 ✅ (PR #111)** (live **ROPA-population** validation: the maintainer's
   privacy-notice→ROPA onboarding test, run live on **DeepSeek-flash** against Zendesk's real notice via the
   scenario harness. Built a **fully-linked register (9/9 activities)** through the guarded write tools once two
   budget ceilings were lifted — proved the gap was budget, not model capability. Deliverables: reusable
@@ -403,7 +403,7 @@ Phase 1–2 (see Backlog: EU AI Act register module). Phased rollout (each its o
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
 - **ROPA onboarding flow + "ROPA-from-privacy-notice" end-to-end test — half (a) DELIVERED by PRIV-7
-  (PR #TBD).** The live notice→ROPA validation ran on DeepSeek-flash against Zendesk's real notice and built a
+  (PR #111).** The live notice→ROPA validation ran on DeepSeek-flash against Zendesk's real notice and built a
   **fully-linked register (9/9 activities)** through the guarded write tools — proving the document-extraction
   half works (the gap was budget + the recursion ceiling, both now fixed; the `ropa-population` skill carries
   the method). **Remaining:** ship the skill via a binding migration; the **~50-question intake** half (b)

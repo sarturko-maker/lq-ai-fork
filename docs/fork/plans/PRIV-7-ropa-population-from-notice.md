@@ -1,6 +1,6 @@
 # PRIV-7 — ROPA population from a privacy notice (live DeepSeek validation + a `ropa-population` skill)
 
-**Status:** DELIVERED (PR #TBD) — outcome in `docs/fork/evidence/priv-7/FINDINGS.md`. Phases A (baseline) +
+**Status:** DELIVERED (PR #111) — outcome in `docs/fork/evidence/priv-7/FINDINGS.md`. Phases A (baseline) +
 B (skill) + C (escalation/comparison) all run. Two things diverged from the plan, both for the better:
 (1) the comparison surfaced and **fixed a production blocker** — langgraph's default `recursion_limit=25` was
 crashing skilled runs before `max_steps`; tied it to `max_steps` in `runner.py`. (2) The result exceeded the
