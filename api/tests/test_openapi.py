@@ -327,7 +327,9 @@ async def test_openapi_paths_match_sketch() -> None:
     # /api/v1/agents/threads/{thread_id}
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
-    assert len(actual) == 139  # +1: PRIV-6b programme summary (ADR-F019); +2 prior: PRIV-6a taxonomy
+    assert (
+        len(actual) == 139
+    )  # +1: PRIV-6b programme summary (ADR-F019); +2 prior: PRIV-6a taxonomy
 
 
 @pytest.mark.unit
