@@ -11,6 +11,7 @@ declarative base, so Alembic's autogenerate (when used) sees them.
 from __future__ import annotations
 
 from app.models.agent_run import AgentRun, AgentRunStep
+from app.models.assessment import Assessment, Risk, assessment_processing_activities
 from app.models.audit import AuditLog
 from app.models.autonomous import (
     AutonomousMemory,
@@ -45,6 +46,7 @@ from app.models.work_product import WorkProductAttribution
 __all__ = [
     "AgentRun",
     "AgentRunStep",
+    "Assessment",
     "AuditLog",
     "AutonomousMemory",
     "AutonomousNotification",
@@ -72,6 +74,7 @@ __all__ = [
     "ProjectFile",
     "ProjectKnowledgeBase",
     "ProjectSkill",
+    "Risk",
     "SavedPrompt",
     "SlackWorkspace",
     "System",
@@ -84,5 +87,6 @@ __all__ = [
     "UserSession",
     "UserSkill",
     "WorkProductAttribution",
+    "assessment_processing_activities",
     "processing_activity_systems",
 ]
