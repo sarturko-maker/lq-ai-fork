@@ -1,0 +1,7 @@
+{
+  "metric": "commit_to_row_visible_ms",
+  "value_ms": 1354,
+  "poll_interval_ms": 2000,
+  "bound_ms": 3000,
+  "note": "Deterministic intercept spec; the agent committed a new ROPA activity while the run was active and the co-visible register reflected it within one poll interval."
+}

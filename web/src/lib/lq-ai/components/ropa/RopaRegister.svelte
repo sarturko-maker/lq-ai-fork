@@ -9,7 +9,7 @@
 	 * Oscar's/OneTrust's chrome. Read-only: the Privacy Deep Agent writes the
 	 * register (guarded, code-validated tools); the user reads and owns it.
 	 */
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
 
 	import { Badge } from '$lib/components/ui/badge/index.js';
@@ -42,6 +42,7 @@
 		type SystemRead,
 		type VendorRead
 	} from '$lib/lq-ai/api/ropa';
+	import { POLL_INTERVAL_MS } from '$lib/lq-ai/agents/helpers';
 	import { MOTION, motionMs } from '$lib/lq-ai/cockpit/helpers';
 	import DataFlowView from './DataFlowView.svelte';
 	import ProcessingActivityDetail from './ProcessingActivityDetail.svelte';
@@ -62,6 +63,16 @@
 		vendorRoleLabel,
 		type RegisterTab
 	} from './format';
+
+	let {
+		// PRIV-9a: true while the Privacy agent is actively working — drives the
+		// live poll so the agent's writes appear here as they commit. The host
+		// (ConversationHost) relays it from the conversation's run state.
+		runActive = false,
+		// Bumped by the host when a run settles — triggers one reconcile fetch so
+		// the final write is never missed even if the last poll tick raced it.
+		reloadKey = 0
+	}: { runActive?: boolean; reloadKey?: number } = $props();
 
 	let activities = $state<ProcessingActivityRead[] | null>(null);
 	let systems = $state<SystemRead[] | null>(null);
@@ -109,9 +120,29 @@
 		}
 	}
 
-	async function load() {
-		loading = true;
-		error = null;
+	// Out-of-order guard: a slow fetch must not clobber a fresher one — the
+	// live poll and the settle-reconcile can overlap (mirrors ConversationPanel).
+	let loadGeneration = 0;
+	// Timer-chain ownership guard: bumped on every stop so a tick from a
+	// superseded chain (e.g. runActive flipped false→true during an in-flight
+	// fetch) refuses to re-arm — one live poll loop at a time.
+	let pollGeneration = 0;
+	let pollTimer: ReturnType<typeof setTimeout> | null = null;
+	let destroyed = false;
+
+	/**
+	 * Re-read the whole register. `quiet` = a live refresh (poll tick or settle
+	 * reconcile): keep the current rows on screen — never flip back to the
+	 * skeleton, and never blank the table to an error on a transient blip (the
+	 * PRIV-9a UX bar: no flicker while the agent works). The first mount load is
+	 * loud (shows the skeleton, surfaces a hard error).
+	 */
+	async function load(quiet = false) {
+		const gen = ++loadGeneration;
+		if (!quiet) {
+			loading = true;
+			error = null;
+		}
 		try {
 			const [a, s, v, ds, dc, sum, gr] = await Promise.all([
 				listProcessingActivities(),
@@ -122,6 +153,7 @@
 				getProgrammeSummary(),
 				getDataFlow()
 			]);
+			if (gen !== loadGeneration) return; // superseded by a newer load
 			activities = a;
 			systems = s;
 			vendors = v;
@@ -129,14 +161,71 @@
 			dataCategories = dc;
 			summary = sum;
 			graph = gr;
+			if (!quiet) error = null;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load the ROPA register.';
+			if (gen !== loadGeneration) return;
+			// A quiet refresh swallows transient errors and keeps the last good
+			// register on screen; the next tick (or the settle reconcile) retries.
+			if (!quiet) error = e instanceof Error ? e.message : 'Failed to load the ROPA register.';
 		} finally {
-			loading = false;
+			if (!quiet) loading = false;
 		}
 	}
 
-	onMount(load);
+	// PRIV-9a live update — poll while a run is active (the conversation's 2s
+	// cadence), self-rescheduling so requests can't pile up. The $effect below
+	// starts it when a run begins and tears it down the moment it settles; the
+	// host then bumps `reloadKey` for one final reconcile. `gen` threads the
+	// chain identity so a tick whose chain was superseded never re-arms.
+	function schedulePoll(gen: number) {
+		pollTimer = setTimeout(() => {
+			void pollTick(gen);
+		}, POLL_INTERVAL_MS);
+	}
+
+	async function pollTick(gen: number) {
+		if (gen !== pollGeneration) return; // chain superseded before this fired
+		await load(true);
+		// Settled mid-flight, unmounted, or superseded during the fetch: don't re-arm.
+		if (destroyed || !runActive || gen !== pollGeneration) return;
+		schedulePoll(gen);
+	}
+
+	function stopPoll() {
+		pollGeneration += 1; // retire the current chain
+		if (pollTimer !== null) {
+			clearTimeout(pollTimer);
+			pollTimer = null;
+		}
+	}
+
+	onMount(() => {
+		void load();
+	});
+
+	onDestroy(() => {
+		destroyed = true;
+		stopPoll();
+	});
+
+	// Start/stop the live poll as the run starts/ends; the cleanup retires the
+	// chain when `runActive` flips false or the component unmounts.
+	$effect(() => {
+		if (!runActive) return;
+		const gen = pollGeneration;
+		schedulePoll(gen);
+		return () => stopPoll();
+	});
+
+	// Settle reconcile: when the host bumps reloadKey (a run just settled), pull
+	// once more so the final write lands even if it raced the last poll tick.
+	// svelte-ignore state_referenced_locally
+	let lastReloadKey = reloadKey;
+	$effect(() => {
+		if (reloadKey === lastReloadKey) return;
+		lastReloadKey = reloadKey;
+		void load(true);
+	});
 
 	function clearSelection() {
 		selectedActivityId = null;

@@ -338,9 +338,12 @@ short-slice**.
   DeepSeek V4 — both skilled arms produced a *coherent* swap (Hotjar linked, Mixpanel unlinked + soft-retired,
   reported), the no-skill baseline left the register listing *both* → the new `ropa-maintenance` skill is
   load-bearing; + `seed_ropa_register` harness helper + `evaluate_swap` scorer; evidence
-  `docs/fork/evidence/priv-8/`) → **PRIV-9** (cockpit UX:
-  chat + register **co-visible** + **poll-while-running** live updates — the group-chat "side-panel chatbox
-  that updates the UI as the agent works" idea) → **PRIV-6d** (Legal-Entity / controller scope + per-controller
+  `docs/fork/evidence/priv-8/`) → **PRIV-9a ✅ (PR #114)** (cockpit UX: chat + register **co-visible**
+  (resizable, toggle fallback) + **run-lock** (chat collapses to a real-cancel Stop while the agent works) +
+  **poll-while-running** live register refresh — committed change visible in ≈1.1 s; the group-chat
+  "side-panel chatbox that updates the UI as the agent works"; evidence `docs/fork/evidence/priv-9a/`;
+  `docs/fork/plans/PRIV-9-cockpit-live-register.md`) → **PRIV-9b** (changed-row **highlight** — the agent→register
+  change-signal so the user sees *which* row changed, **ADR-F024**) → **PRIV-6d** (Legal-Entity / controller scope + per-controller
   Article 30 export — needs a migration)
   → **P1 flagship** PRIV-A1 (assessment domain+skill) / PRIV-A2 (**conversational-link external intake** — the
   differentiator, **ADR-F020**) → P2 tracks (DSAR, breach, DPA review, reg-gap, reporting). **Full capability

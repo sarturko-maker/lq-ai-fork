@@ -516,6 +516,37 @@ export function composerEnabled(detail: AgentThreadDetailResponse | null, nowMs:
 	return detail.continuable && !shouldContinuePollingThread(detail, nowMs);
 }
 
+/**
+ * The agent is actively working on this thread right now (PRIV-9a) — a
+ * create-run round-trip is in flight (`submitting`), or the newest run is
+ * still working (and not stale). Drives the composer's run-lock (collapse to
+ * a Stop button) and the co-visible ROPA register's live poll. When `detail`
+ * is null (a thread still opening) `shouldContinuePollingThread` is false, so
+ * a pre-load click can never read as "working".
+ */
+export function agentWorking(
+	detail: AgentThreadDetailResponse | null,
+	nowMs: number,
+	submitting: boolean
+): boolean {
+	return submitting || shouldContinuePollingThread(detail, nowMs);
+}
+
+/**
+ * The run a Stop press should cancel: the live stream's run if one is open,
+ * otherwise the newest run iff it is still `running`. null = nothing
+ * cancellable yet (e.g. the createRun POST hasn't returned a run to poll) —
+ * the Stop control disables rather than targeting an already-settled run.
+ */
+export function cancellableRunId(
+	detail: AgentThreadDetailResponse | null,
+	streamRunId: string | null
+): string | null {
+	if (streamRunId) return streamRunId;
+	const latest = latestRunOf(detail);
+	return latest !== null && latest.status === 'running' ? latest.id : null;
+}
+
 /** All composer uploads settled (ready or failed) — stop the file poller. */
 export function uploadsSettled(files: Pick<FileMeta, 'ingestion_status'>[]): boolean {
 	return files.every((f) => f.ingestion_status === 'ready' || f.ingestion_status === 'failed');
