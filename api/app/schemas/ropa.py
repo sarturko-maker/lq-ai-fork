@@ -507,3 +507,58 @@ class Article30Export(BaseModel):
     vendors: list[VendorRead] = Field(default_factory=list)
     data_subject_categories: list[DataSubjectCategoryRead] = Field(default_factory=list)
     data_categories: list[DataCategoryRead] = Field(default_factory=list)
+
+
+# --- Programme summary (PRIV-6b) ---------------------------------------------
+#
+# A read-only aggregate over the deployment-global register: headline totals, the
+# register's shape (breakdowns by lawful basis / controller role / DPA status,
+# special-category & restricted-transfer counts) and honest "needs attention"
+# gaps. Counts only — no free-text — so the payload carries even less than the
+# register read endpoints (no confused-deputy free-text surface). Computed by the
+# pure ``app.ropa_summary.build_summary`` over the same Read DTOs the export uses.
+
+
+class CountByValue(BaseModel):
+    """One bucket of a categorical breakdown: the canonical enum value + its count.
+
+    ``value`` is the raw enum value (e.g. ``"legitimate_interests"``); the web
+    humanises it with the existing label helpers. Buckets are returned in
+    canonical enum order, including zero counts, so the breakdown renders
+    deterministically.
+    """
+
+    value: str
+    count: int
+
+
+class ProgrammeGaps(BaseModel):
+    """'Needs attention' — register entries missing a recommended Article 30 axis.
+
+    Each is a count of register rows where a recommended link/status is absent.
+    The dashboard *informs*; it never remediates (system proposes, user owns).
+    ``vendors_without_dpa`` counts vendors whose DPA is still outstanding
+    (``pending`` / ``none``; ``in_place`` / ``not_required`` are settled).
+    """
+
+    activities_without_systems: int
+    activities_without_recipients: int
+    activities_without_data_categories: int
+    activities_without_data_subjects: int
+    vendors_without_dpa: int
+
+
+class ProgrammeSummary(BaseModel):
+    """The privacy-programme overview over the deployment-global ROPA register (PRIV-6b)."""
+
+    activities_total: int
+    systems_total: int
+    vendors_total: int
+    transfers_total: int
+    transfers_restricted: int
+    special_category_activities: int
+    systems_using_ai: int
+    lawful_basis: list[CountByValue] = Field(default_factory=list)
+    controller_role: list[CountByValue] = Field(default_factory=list)
+    dpa_status: list[CountByValue] = Field(default_factory=list)
+    gaps: ProgrammeGaps

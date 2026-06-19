@@ -324,6 +324,75 @@ async def test_shared_read_crosses_users_without_leaking_provenance(
         assert forbidden not in detail.json()
 
 
+def _bd(buckets: list[dict]) -> dict[str, int]:
+    """Flatten a summary breakdown ([{value, count}, …]) into {value: count}."""
+    return {b["value"]: b["count"] for b in buckets}
+
+
+async def test_programme_summary_aggregates_register(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    """PRIV-6b: the programme summary aggregates the whole deployment-global register."""
+    # Activity 1 (linked): legal_obligation / controller, 1 system, 1 vendor
+    # (DPA in place), 1 restricted transfer, data-subject + data categories.
+    await _seed_linked(db_session)
+    # Activity 2: special-category / processor with NOTHING linked → fires gaps.
+    pa2 = ProcessingActivity(
+        name="Wellbeing surveys",
+        purpose="Voluntary staff wellbeing analytics",
+        lawful_basis="consent",
+        controller_role="processor",
+        retention="2 years",
+        special_category=True,
+        art9_condition="explicit_consent",
+    )
+    # An AI system + a vendor with an outstanding DPA, both unlinked.
+    sys2 = System(name="Insights model", system_type="analytics", ai_usage=True)
+    vendor2 = Vendor(name="Survey SaaS", vendor_role="recipient", dpa_status="pending")
+    db_session.add_all([pa2, sys2, vendor2])
+    await db_session.flush()
+
+    resp = await client.get("/api/v1/ropa/programme-summary", headers=_bearer(user))
+    assert resp.status_code == 200
+    s = resp.json()
+
+    assert s["activities_total"] == 2
+    assert s["systems_total"] == 2
+    assert s["vendors_total"] == 2
+    assert s["transfers_total"] == 1
+    assert s["transfers_restricted"] == 1
+    assert s["special_category_activities"] == 1
+    assert s["systems_using_ai"] == 1
+
+    # Spot-check that each breakdown axis + a gap reach the wire; the pure unit
+    # test (test_ropa_summary.py) owns the exhaustive arithmetic + enum order, so
+    # this HTTP test stays a load→build→serialize path check, not a second
+    # arithmetic oracle (no full-dict equality → no dual edit-site on bucket adds).
+    assert _bd(s["lawful_basis"])["legal_obligation"] == 1
+    assert _bd(s["controller_role"])["controller"] == 1
+    assert _bd(s["dpa_status"])["pending"] == 1
+    assert s["gaps"]["activities_without_recipients"] == 1
+    assert s["gaps"]["vendors_without_dpa"] == 1
+
+
+async def test_programme_summary_empty_register_is_zeros(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    await _clean(db_session)
+    resp = await client.get("/api/v1/ropa/programme-summary", headers=_bearer(user))
+    assert resp.status_code == 200
+    s = resp.json()
+    assert s["activities_total"] == 0
+    assert s["transfers_restricted"] == 0
+    assert all(b["count"] == 0 for b in s["lawful_basis"])
+    assert s["gaps"]["vendors_without_dpa"] == 0
+
+
+async def test_programme_summary_requires_authentication(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/ropa/programme-summary")
+    assert resp.status_code == 401
+
+
 async def test_requires_authentication(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/ropa/processing-activities")
     assert resp.status_code == 401

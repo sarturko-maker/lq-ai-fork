@@ -2,7 +2,7 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-6a personal-data taxonomy (Article 30(1)(c)) SHIPPED (PR #105, branch `priv-6a-personal-data-taxonomy`)**, on top of PRIV-5b (PR #104) + PRIV-5a (PR #103) + PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). **The full Article 30(1) content set is now captured** — recipients (5a) + transfers (5b) + the categories-of-data-subjects / categories-of-personal-data taxonomy (6a); **the export coverage note is EMPTY** (mechanism retained for any future gap). Migration 0062. Plan: `docs/fork/plans/PRIV-6a-personal-data-taxonomy.md`; **ultracode adversarial audit + dispositions: `docs/fork/evidence/priv-6a/audit-report.md`**. **ALSO OPEN: ADR-F021 — user permissions / areas of responsibility (PR #106, branch `adr-f021-permissions-areas-of-responsibility`, docs-only, PROPOSED, not merged).** Enterprise users have areas of responsibility (M:N users↔areas); maintainer decided the expanded model: area membership + per-matter sharing + invitations + cross-area collaboration (person + **guest Deep Agent**: time-boxed, matter-scoped, default read-only, honors ADR-F002 + gateway/guard); KEEP roles (segregation); owner always keeps own matters; ROPA register = programme-level (Privacy-area-scoped). The PRIV-6a confused-deputy finding is the symptom this closes. **Pickup options: PRIV-6b** (data-flow / lineage view + Legal-Entity scope + programme dashboard); the P1 assessment track (PRIV-A1/A2, ADR-F020); or **Authorization Phase 1** (ship the behavior-identical `can()`/`visible_filter()` seam — see MILESTONES § Authorization).)
+## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-6b privacy programme dashboard SHIPPED (PR #108, branch `priv-6b-programme-dashboard`)**, on top of PRIV-6a (PR #105) + PRIV-5b (PR #104) + PRIV-5a (PR #103) + PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). **Article 30(1) content set complete since 6a**; PRIV-6b adds the read-only **"SEE the programme"** Overview over the register (no migration — pure aggregation). Plan: `docs/fork/plans/PRIV-6b-programme-dashboard.md`; evidence (live light/dark × wide/narrow): `docs/fork/evidence/priv-6b/`. **MERGED THIS SESSION:** ADR-F021 (user permissions / areas of responsibility, PROPOSED, PR #106) + the EU AI Act register module **BANKED** (reference-only prior art, PR #107 — see MILESTONES § Backlog; clean-room, employer-name-free by construction). **Pickup options: PRIV-6c** (data-flow / lineage view, auto-drawn from the System↔Activity↔Vendor↔Transfer graph) or **PRIV-6d** (Legal-Entity / controller scope + per-controller Art 30 export — needs a migration); the P1 assessment track (PRIV-A1/A2, **ADR-F020**); or **Authorization Phase 1** (ship the behavior-identical `can()`/`visible_filter()` seam — see MILESTONES § Authorization; the private `sarturko-maker/EU_AI_Act` `access.ts` is a clean-room reference for it). **NOTE:** still fold the in-flight ADR-F021 collaboration-model workflow output (`wajbzaq82`, journaled) into ADR-F021's guest-agent mechanism when Authorization is picked up.)
 
 - **ADR-F021 (PR #106, OPEN/PROPOSED, docs-only) — user permissions: areas of responsibility + collaboration.**
   Grounded + designed via two ultracode workflows (map authz surface → panel → verify). Target: ONE injected
@@ -24,6 +24,31 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   `wajbzaq82`) into ADR-F021's guest-agent mechanism + Phase 5 (its output journals to the run dir; extract the
   synthesis ECONOMICALLY — python, not full read).** Remaining open Qs in the ADR: area_owner config scope;
   invite issuer/surface; the guest-agent detailed mechanism (its own slice + ADR).
+- **PRIV-6b (PR #108) — privacy programme dashboard. Read API + web, NO migration.**
+  The "SEE the programme" Overview over the now-complete register (ADR-F018/F019). **Backend:**
+  `app/ropa_summary.py` — pure `build_summary(activities, systems, vendors)` over the `*Read` DTOs (mirrors
+  `ropa_export.build_export`): totals (activities/systems/vendors/transfers + restricted), breakdowns by
+  lawful basis / controller role / DPA status (**canonical enum order, zero buckets kept** — web hides
+  zeros), special-category & AI-system counts, and **"needs attention" gaps** (activities missing
+  systems/recipients/data-categories/data-subjects; `vendors_without_dpa` = `pending|none`). **Counts only —
+  no free-text**, so the shared-read posture (ADR-F019) and the confused-deputy backlog item are NOT
+  heightened. `GET /ropa/programme-summary` (rides the router `_active` mount); **`_load_register()` helper**
+  factored out of the export endpoint and shared (one load path, export behavior unchanged). DTOs
+  `CountByValue`/`ProgrammeGaps`/`ProgrammeSummary`. **Web (F013, not OneTrust/Oscar chrome):**
+  `ProgrammeDashboard.svelte` (totals tiles + breakdown bars + gaps, calm all-clear state) rendered as the
+  **default `'overview'` tab** of `RopaRegister` (`REGISTER_TABS` gains it first; summary fetched in the
+  unified `Promise.all`). **Verify:** ruff + mypy clean (167 files); **full api suite 2283 passed / 9
+  skipped** (+6: 3 pure-aggregator `test_ropa_summary.py` + 3 endpoint cases in `test_ropa_read.py`;
+  **contract route-count 138→139** in `test_endpoints.py` + `test_openapi.py`); web svelte-check **0 err** +
+  vitest **879** (format.test.ts tab list updated, no new web test — dashboard is a render-only component,
+  per the no-@testing-library boundary); **LIVE on the dev stack** (api+web rebuilt, no migration/worker
+  rebuild): `GET /ropa/programme-summary` returns the real register aggregate (3 activities / 4 systems / 1
+  vendor / 2 transfers, 1 restricted; gaps computed) + **401 unauth**; **headed Cypress** Overview capture
+  (light/dark × wide/narrow) in `docs/fork/evidence/priv-6b/`. Fresh-context adversarial+security+
+  simplification review: **see PR / workflow `wf_f2656f3c-425`**. **No new ADR** (under ADR-F018/F019).
+  **Known-deferred (carried):** `updated_at` has no `onupdate`. **Pickup: PRIV-6c** (data-flow/lineage) or
+  **PRIV-6d** (Legal-Entity scope, needs a migration); or the assessment track / Authorization Phase 1.
+
 - **PRIV-6a (PR #105) — personal-data taxonomy (categories of data subjects + personal data). Migration 0062. CLOSES Article 30(1).**
   Fills **Article 30(1)(c)** — the **last** uncaptured Article 30(1) content axis — so the RoPA register now
   captures every Article 30(1) field and the **export coverage note is EMPTY** (`ART30_FIELDS_NOT_YET_RECORDED

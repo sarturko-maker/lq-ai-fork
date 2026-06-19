@@ -26,6 +26,7 @@
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
 	import {
 		downloadArticle30,
+		getProgrammeSummary,
 		listDataCategories,
 		listDataSubjectCategories,
 		listProcessingActivities,
@@ -35,11 +36,13 @@
 		type DataSubjectCategoryRead,
 		type ExportFormat,
 		type ProcessingActivityRead,
+		type ProgrammeSummary,
 		type SystemRead,
 		type VendorRead
 	} from '$lib/lq-ai/api/ropa';
 	import { MOTION, motionMs } from '$lib/lq-ai/cockpit/helpers';
 	import ProcessingActivityDetail from './ProcessingActivityDetail.svelte';
+	import ProgrammeDashboard from './ProgrammeDashboard.svelte';
 	import SystemDetail from './SystemDetail.svelte';
 	import VendorDetail from './VendorDetail.svelte';
 	import {
@@ -62,9 +65,10 @@
 	let vendors = $state<VendorRead[] | null>(null);
 	let dataSubjects = $state<DataSubjectCategoryRead[] | null>(null);
 	let dataCategories = $state<DataCategoryRead[] | null>(null);
+	let summary = $state<ProgrammeSummary | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
-	let tab = $state<RegisterTab>('activities');
+	let tab = $state<RegisterTab>('overview');
 	let selectedActivityId = $state<string | null>(null);
 	let selectedSystemId = $state<string | null>(null);
 	let selectedVendorId = $state<string | null>(null);
@@ -105,18 +109,20 @@
 		loading = true;
 		error = null;
 		try {
-			const [a, s, v, ds, dc] = await Promise.all([
+			const [a, s, v, ds, dc, sum] = await Promise.all([
 				listProcessingActivities(),
 				listSystems(),
 				listVendors(),
 				listDataSubjectCategories(),
-				listDataCategories()
+				listDataCategories(),
+				getProgrammeSummary()
 			]);
 			activities = a;
 			systems = s;
 			vendors = v;
 			dataSubjects = ds;
 			dataCategories = dc;
+			summary = sum;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load the ROPA register.';
 		} finally {
@@ -228,6 +234,10 @@
 				<p class="text-sm text-muted-foreground">Loading the register…</p>
 			{:else if error}
 				<p class="text-sm text-destructive">{error}</p>
+			{:else if tab === 'overview'}
+				{#if summary}
+					<ProgrammeDashboard {summary} />
+				{/if}
 			{:else if tab === 'activities'}
 				{#if (activities?.length ?? 0) === 0}
 					<p class="max-w-prose text-sm text-muted-foreground">{EMPTY_ACTIVITIES}</p>

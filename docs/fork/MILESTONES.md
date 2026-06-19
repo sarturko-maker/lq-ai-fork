@@ -313,7 +313,13 @@ short-slice**.
   `propose_transfer`/`list_transfers` tools (now 10), migration 0061; transfers ride `ProcessingActivityRead` + the
   activity-detail UI; Transfers column + Transfers sheet in the Art 30 export; coverage note's last transfer line
   dropped — now 2 lines, both → PRIV-6; **no standalone /ropa/transfers endpoint** — a transfer has no meaning detached
-  from its activity) → PRIV-6 (data-flow view + Legal-Entity scope + programme dashboard)
+  from its activity) → **PRIV-6 split (maintainer): PRIV-6a ✅ (PR #105)** (Article 30(1)(c) personal-data
+  taxonomy — categories of data subjects + personal data; closes Article 30(1)) → **PRIV-6b ✅ (PR #108)**
+  (privacy **programme dashboard** — read-only Overview tab over the register: totals, lawful-basis/controller-
+  role/DPA-status breakdowns, special-category & restricted-transfer counts, "needs attention" gaps;
+  `GET /ropa/programme-summary` + pure `ropa_summary.build_summary`; no migration) → **PRIV-6c** (data-flow /
+  lineage view, auto-drawn from the System↔Activity↔Vendor↔Transfer graph) + **PRIV-6d** (Legal-Entity /
+  controller scope + per-controller Article 30 export — needs a migration)
   → **P1 flagship** PRIV-A1 (assessment domain+skill) / PRIV-A2 (**conversational-link external intake** — the
   differentiator, **ADR-F020**) → P2 tracks (DSAR, breach, DPA review, reg-gap, reporting). **Full capability
   plan: `docs/fork/plans/PRIV-onetrust-to-lqai-functionality-map.md`** (OneTrust→LQ.AI, P0–P3; **P3

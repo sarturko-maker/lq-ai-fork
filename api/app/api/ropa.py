@@ -26,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app import ropa_export
+from app import ropa_export, ropa_summary
 from app.db.session import get_db
 from app.models.ropa import (
     DataCategory,
@@ -40,6 +40,7 @@ from app.schemas.ropa import (
     DataCategoryRead,
     DataSubjectCategoryRead,
     ProcessingActivityRead,
+    ProgrammeSummary,
     SystemRead,
     VendorRead,
 )
@@ -202,19 +203,20 @@ async def list_data_categories(db: _Db) -> list[DataCategory]:
     return await _all_categories(db, DataCategory)
 
 
-@router.get("/export")
-async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -> Response:
-    """Export the company ROPA as an Article 30 deliverable (JSON / CSV / XLSX).
+async def _load_register(
+    db: AsyncSession,
+) -> tuple[
+    list[ProcessingActivity],
+    list[System],
+    list[Vendor],
+    list[DataSubjectCategory],
+    list[DataCategory],
+]:
+    """Load the whole deployment-global register, eager-loaded for read-and-render.
 
-    Read-and-render over the deployment-global register (ADR-F019): every
-    processing activity with its lawful basis / retention / special-category,
-    joined across the M:N to its linked systems and recipients (vendors) and its
-    child third-country transfers, plus the system and vendor inventories.
-    Shared-read posture (``_active`` at the mount) — the register is the
-    company's standing record, not a per-user artifact. As of PRIV-6a the export
-    captures the full Article 30(1) content set, including the 30(1)(c)
-    data-subject / personal-data taxonomy, so the coverage note is empty; the note
-    mechanism is retained (still honest) for any future Article 30(1) gap.
+    Shared by the Article 30 export and the programme summary so both render the
+    same rows through one load path (ADR-F019 shared-read; ordering matches the
+    list endpoints — created_at then name everywhere).
     """
     activities = (
         (
@@ -257,6 +259,49 @@ async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -
     )
     data_subject_categories = await _all_categories(db, DataSubjectCategory)
     data_categories = await _all_categories(db, DataCategory)
+    return (
+        list(activities),
+        list(systems),
+        list(vendors),
+        data_subject_categories,
+        data_categories,
+    )
+
+
+@router.get("/programme-summary", response_model=ProgrammeSummary)
+async def get_programme_summary(db: _Db) -> ProgrammeSummary:
+    """The privacy-programme overview over the deployment-global ROPA register (PRIV-6b).
+
+    Read-only aggregate (shared-read, ADR-F019): headline totals, breakdowns by
+    lawful basis / controller role / DPA status, special-category & restricted-
+    transfer counts, and honest "needs attention" gaps. Counts only — no
+    free-text — so the payload carries even less than the register read endpoints.
+    """
+    activities, systems, vendors, _, _ = await _load_register(db)
+    return ropa_summary.build_summary(
+        [ProcessingActivityRead.model_validate(a) for a in activities],
+        [SystemRead.model_validate(s) for s in systems],
+        [VendorRead.model_validate(v) for v in vendors],
+    )
+
+
+@router.get("/export")
+async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -> Response:
+    """Export the company ROPA as an Article 30 deliverable (JSON / CSV / XLSX).
+
+    Read-and-render over the deployment-global register (ADR-F019): every
+    processing activity with its lawful basis / retention / special-category,
+    joined across the M:N to its linked systems and recipients (vendors) and its
+    child third-country transfers, plus the system and vendor inventories.
+    Shared-read posture (``_active`` at the mount) — the register is the
+    company's standing record, not a per-user artifact. As of PRIV-6a the export
+    captures the full Article 30(1) content set, including the 30(1)(c)
+    data-subject / personal-data taxonomy, so the coverage note is empty; the note
+    mechanism is retained (still honest) for any future Article 30(1) gap.
+    """
+    activities, systems, vendors, data_subject_categories, data_categories = await _load_register(
+        db
+    )
 
     export = ropa_export.build_export(
         [ProcessingActivityRead.model_validate(a) for a in activities],
