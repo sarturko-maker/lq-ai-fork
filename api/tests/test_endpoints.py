@@ -349,6 +349,8 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/ropa/data-categories"),
     # PRIV-6b (fork) — privacy programme summary. Coverage in tests/test_ropa_read.py.
     ("GET", "/api/v1/ropa/programme-summary"),
+    # PRIV-6c (fork) — data-flow / lineage graph. Coverage in tests/test_ropa_read.py.
+    ("GET", "/api/v1/ropa/data-flow"),
     # PRIV-4a (fork) — Article 30 export. Dedicated coverage in tests/test_ropa_export.py.
     ("GET", "/api/v1/ropa/export"),
 }

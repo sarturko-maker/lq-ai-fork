@@ -117,15 +117,21 @@ export const EMPTY_DATA_CATEGORIES =
 
 export type RegisterTab =
 	| 'overview'
+	| 'data-flow'
 	| 'activities'
 	| 'systems'
 	| 'vendors'
 	| 'data-subjects'
 	| 'data-categories';
 
-/** The register's tabs, in display order. Overview (the programme dashboard) leads. */
+/**
+ * The register's tabs, in display order. Overview (the programme dashboard) leads,
+ * then Data flow (the lineage graph) — both programme-level views — then the
+ * per-entity registers.
+ */
 export const REGISTER_TABS: { id: RegisterTab; label: string }[] = [
 	{ id: 'overview', label: 'Overview' },
+	{ id: 'data-flow', label: 'Data flow' },
 	{ id: 'activities', label: 'Processing activities' },
 	{ id: 'systems', label: 'Systems' },
 	{ id: 'vendors', label: 'Vendors' },

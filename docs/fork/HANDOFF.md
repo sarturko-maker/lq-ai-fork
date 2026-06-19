@@ -2,7 +2,38 @@
 
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session.**
 
-## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-6b privacy programme dashboard SHIPPED (PR #108, branch `priv-6b-programme-dashboard`)**, on top of PRIV-6a (PR #105) + PRIV-5b (PR #104) + PRIV-5a (PR #103) + PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). **Article 30(1) content set complete since 6a**; PRIV-6b adds the read-only **"SEE the programme"** Overview over the register (no migration — pure aggregation). Plan: `docs/fork/plans/PRIV-6b-programme-dashboard.md`; evidence (live light/dark × wide/narrow): `docs/fork/evidence/priv-6b/`. **MERGED THIS SESSION:** ADR-F021 (user permissions / areas of responsibility, PROPOSED, PR #106) + the EU AI Act register module **BANKED** (reference-only prior art, PR #107 — see MILESTONES § Backlog; clean-room, employer-name-free by construction). **Pickup options: PRIV-6c** (data-flow / lineage view, auto-drawn from the System↔Activity↔Vendor↔Transfer graph) or **PRIV-6d** (Legal-Entity / controller scope + per-controller Art 30 export — needs a migration); the P1 assessment track (PRIV-A1/A2, **ADR-F020**); or **Authorization Phase 1** (ship the behavior-identical `can()`/`visible_filter()` seam — see MILESTONES § Authorization; the private `sarturko-maker/EU_AI_Act` `access.ts` is a clean-room reference for it). **NOTE:** still fold the in-flight ADR-F021 collaboration-model workflow output (`wajbzaq82`, journaled) into ADR-F021's guest-agent mechanism when Authorization is picked up.)
+## State (**Oscar Edition / Agentic Modules milestone OPEN** — **PRIV-6c data-flow / lineage view SHIPPED (PR #109, branch `priv-6c-data-flow-lineage`)**, on top of PRIV-6b (PR #108) + PRIV-6a (PR #105) + PRIV-5b (PR #104) + PRIV-5a (PR #103) + PRIV-4a (PR #102) + PRIV-3 (PR #101, ADR-F019). **Article 30(1) content set complete since 6a**; PRIV-6b added the read-only programme **Overview**; PRIV-6c adds the interactive **Data flow** lineage graph over the register (no migration). Plan: `docs/fork/plans/PRIV-6c-data-flow-lineage.md`; ADR: **F022** (proposed — the fork's first deliberate new-dep exception: `@xyflow/svelte`); evidence (live light/dark × wide/narrow): `docs/fork/evidence/priv-6c/`. **Pickup options: PRIV-6d** (Legal-Entity / controller scope + per-controller Art 30 export — needs a migration); the P1 assessment track (PRIV-A1/A2, **ADR-F020**); or **Authorization Phase 1** (ship the behavior-identical `can()`/`visible_filter()` seam — see MILESTONES § Authorization; the private `sarturko-maker/EU_AI_Act` `access.ts` is a clean-room reference for it). **NOTE:** still fold the in-flight ADR-F021 collaboration-model workflow output (`wajbzaq82`, journaled) into ADR-F021's guest-agent mechanism when Authorization is picked up.)
+
+- **PRIV-6c (PR #109) — data-flow / lineage view. Read API + web + 1 new web dep, NO migration.**
+  An interactive **node-link data map** of the deployment-global register (the OneTrust/TrustArc "data flow"),
+  in our F013 style. **Backend (pure projector, mirrors `ropa_summary`/`ropa_export`):** `app/ropa_graph.py`
+  `build_graph(activities, systems, vendors) -> DataFlowGraph` — systems **feed** activities (`processed_by`),
+  activities **disclose to** recipients (`disclosed_to`) and **transfer to** third-country destinations
+  (`transferred_to`, carrying `restricted`/`mechanism`/`recipient`); orphan systems/vendors are unconnected
+  nodes; deterministic kind-grouped order; destinations deduped by exact string. **Labels + categorical badges
+  only on the wire** (no `purpose`/`retention`/`description`/transfer `details`) → shared-read (ADR-F019) +
+  the private→shared confused-deputy backlog item NOT heightened (a pure test + a wire-level test assert no
+  free-text leaks). DTOs `DataFlowNode`/`DataFlowEdge`/`DataFlowGraph` (`kind` = `Literal`); `GET
+  /ropa/data-flow` rides the shared `_load_register`; **route count 139→140**. **Web (ADR-F022):** **new dep
+  `@xyflow/svelte`** (MIT, Svelte-5 native) — the fork's **first deliberate new-dep exception**, maintainer-
+  authorised (AskUserQuestion: full interactive diagram > hand-rolled SVG); our own `DataFlowNodeCard` keeps
+  the look F013, layout is **pure/deterministic** (`dataFlow.ts` — no dagre/elk dep); recorded in NOTICES +
+  ADR-F022. `DataFlowView.svelte` (browser-guarded canvas + legend + honest empty state); new **"Data flow"**
+  register tab (2nd, after Overview), fetched in the unified `Promise.all`. **Verify:** ruff + mypy clean (168);
+  **full api suite 2294 passed / 9 skipped** (+11: 8 pure `test_ropa_graph.py` + 3 endpoint cases incl. the
+  wire-level free-text guard); web svelte-check **0 err** / 5 baseline warnings + **vitest 886** (+7 layout);
+  eslint + prettier clean; **LIVE on dev stack** (api+web rebuilt, no migration/worker rebuild): `GET
+  /ropa/data-flow` returns the real projection (10 nodes / 9 edges; US transfer restricted+SCCs+recipient,
+  Germany non-restricted) + **401 unauth**; **headed Cypress** Data flow tab (light/dark × wide/narrow) in
+  `docs/fork/evidence/priv-6c/` (the capture loop re-selects the tab per viewport — the cockpit remounts the
+  register on a responsive breakpoint, pre-existing). **Fresh-context adversarial review (7 agents, 5 lenses →
+  refute-by-default verify): 2 confirmed, 0 refuted — BOTH folded:** a pre-existing data-categories tab-guard
+  fragility (in the chain this slice extends) hardened to a proper `tab === 'data-categories'` guard, and the
+  DTO `kind` fields tightened from `str` to `Literal`. Security pass: no secrets; shared-read intact; no
+  free-text leak; no XSS sink (labels are escaped text, no `{@html}`); new dep MIT (no prod advisory touches
+  its tree); no gateway bypass. **ADR-F022 proposed** (not yet accepted — maintainer ratifies). **Known-deferred
+  (carried):** `updated_at` has no `onupdate`. **Pickup: PRIV-6d** (Legal-Entity scope, needs a migration); or
+  the assessment track / Authorization Phase 1.
 
 - **ADR-F021 (PR #106, OPEN/PROPOSED, docs-only) — user permissions: areas of responsibility + collaboration.**
   Grounded + designed via two ultracode workflows (map authz surface → panel → verify). Target: ONE injected
