@@ -266,9 +266,10 @@ class AssessmentSummary(BaseModel):
 
     The PRIV-A3 **write-back** projection (ADR-F027): a ROPA activity surfaces the
     assessments covering it, so the register can flag e.g. "DPIA on file" (a linked
-    ``dpia`` that is ``completed``). Compact — the marker fields only; the
-    assessment's own read endpoint (``GET /ropa/assessments/{id}``) carries the
-    detail. Read-only (ADR-F019): the projection adds no writer.
+    ``dpia`` that is ``completed`` — ``type`` + ``status`` drive that marker) and
+    deep-link to each (``id`` + ``title``). Compact by design — the rating and the
+    rest live on the assessment's own read (``GET /ropa/assessments/{id}``).
+    Read-only (ADR-F019): the projection adds no writer.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -277,4 +278,3 @@ class AssessmentSummary(BaseModel):
     type: str
     title: str
     status: str
-    risk_rating: str | None

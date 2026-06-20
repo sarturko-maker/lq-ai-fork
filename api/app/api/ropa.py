@@ -391,7 +391,14 @@ async def export_article_30(db: _Db, format: ExportFormat = ExportFormat.JSON) -
     stamp = export.generated_at.date().isoformat()
     if format is ExportFormat.JSON:
         return Response(
-            content=export.model_dump_json(),
+            # The Article 30 deliverable carries the Article 30(1) content set only.
+            # The PRIV-A3 write-back marker (ProcessingActivityRead.assessments) is a
+            # register-UI projection, NOT part of the regulatory record — exclude it
+            # so the export's wire shape does not drift (the activity DTO is shared
+            # with the register reads, which DO carry it). Regression: test_ropa_export.
+            content=export.model_dump_json(
+                exclude={"processing_activities": {"__all__": {"assessments"}}}
+            ),
             media_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="article-30-ropa-{stamp}.json"'},
         )

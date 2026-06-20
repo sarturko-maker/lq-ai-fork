@@ -142,15 +142,14 @@ export interface AssessmentRead {
 
 /**
  * An assessment as it appears linked under a ROPA processing activity — the
- * PRIV-A3 write-back projection (the "DPIA on file" marker). Compact: the
- * assessment's own read endpoint carries the detail.
+ * PRIV-A3 write-back projection (the "DPIA on file" marker, driven by type +
+ * status). Compact: the rating and the rest live on the assessment's own read.
  */
 export interface AssessmentSummary {
 	id: string;
 	type: AssessmentType;
 	title: string;
 	status: AssessmentStatus;
-	risk_rating: RiskLevel | null;
 }
 
 export interface ProcessingActivityRead {

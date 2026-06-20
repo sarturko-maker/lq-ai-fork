@@ -532,6 +532,10 @@ async def test_export_json(client: AsyncClient, db_session: AsyncSession, user: 
     assert body["vendors"][0]["name"] == "Acme Payroll Ltd"
     assert body["data_subject_categories"][0]["name"] == "Employees"
     assert body["data_categories"][0]["name"] == "Payroll data"
+    # PRIV-A3: the write-back marker (ProcessingActivityRead.assessments) is a
+    # register-UI projection, NOT part of the Article 30 deliverable — the export
+    # must not carry it (the activity DTO is shared with the register reads).
+    assert "assessments" not in body["processing_activities"][0]
 
 
 @pytest_integration

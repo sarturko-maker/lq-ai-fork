@@ -229,8 +229,10 @@ async def test_writeback_activity_surfaces_covering_assessments(
     summary = body[0]["assessments"][0]
     assert summary["type"] == "dpia"
     assert summary["status"] == "completed"
-    assert summary["risk_rating"] == "high"
     assert summary["title"] == "Employee monitoring DPIA"
+    # The compact write-back projection carries the marker + deep-link fields only
+    # (PRIV-A3); the rating lives on the assessment's own read, not here.
+    assert "risk_rating" not in summary
 
     # And on the activity detail.
     resp = await client.get(

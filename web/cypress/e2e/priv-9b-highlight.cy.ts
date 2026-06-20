@@ -144,6 +144,7 @@ describe('PRIV-9b — changed-row highlight', { retries: { runMode: 1, openMode:
 		cy.intercept('GET', '**/api/v1/ropa/vendors*', { body: [] });
 		cy.intercept('GET', '**/api/v1/ropa/data-subject-categories*', { body: [] });
 		cy.intercept('GET', '**/api/v1/ropa/data-categories*', { body: [] });
+		cy.intercept('GET', '**/api/v1/ropa/assessments*', { body: [] });
 		cy.intercept('GET', '**/api/v1/ropa/programme-summary*', {
 			body: {
 				activities_total: 0,
