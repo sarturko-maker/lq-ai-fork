@@ -32,7 +32,9 @@ assessment with no documented mitigation.*
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Sequence
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -193,3 +195,86 @@ def validate_assessment_completable(
             "a completed DPIA or high-risk assessment requires at least one risk with a "
             "documented (non-blank) mitigation"
         )
+
+
+# --- Read DTOs (PRIV-A3 read API; from ORM via from_attributes) ---------------
+#
+# The assessment register read surface, mirroring ``app.schemas.ropa``'s Read
+# DTOs. Like the ROPA reads, the enum-ish columns surface as bare strings (the
+# values the StrEnums above define) and datetimes as ISO-8601. ``source_project_id``
+# is never on the wire — it is provenance, not part of the shared-read record
+# (ADR-F019). These are kept self-contained (no import from ``app.schemas.ropa``)
+# so the dependency runs one way — ``ropa`` imports :class:`AssessmentSummary`
+# from here for its write-back projection, never the reverse.
+
+
+class RiskRead(BaseModel):
+    """One risk finding within an assessment (read view)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    description: str
+    likelihood: str
+    impact: str
+    mitigation: str | None
+    owner: str | None
+    status: str
+    created_at: datetime
+
+
+class AssessmentActivityRef(BaseModel):
+    """A processing activity as it appears linked under an assessment.
+
+    Just enough to render a chip that deep-links into the ROPA register (id +
+    name). Kept local to this module so the assessment read schema does not
+    import ``app.schemas.ropa`` (no import cycle).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+
+
+class AssessmentRead(BaseModel):
+    """One privacy assessment + its risks and the activities it covers (read view).
+
+    ``processing_activities`` carries the **live** activities only (a retired
+    activity has left the register; the read endpoint applies the live-only
+    loader criteria, mirroring the agent's ``list_assessments`` and the ROPA
+    reads, ADR-F023).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    type: str
+    title: str
+    summary: str | None
+    status: str
+    risk_rating: str | None
+    conditions: str | None
+    created_at: datetime
+    updated_at: datetime
+    risks: list[RiskRead] = Field(default_factory=list)
+    processing_activities: list[AssessmentActivityRef] = Field(default_factory=list)
+
+
+class AssessmentSummary(BaseModel):
+    """An assessment as it appears linked under a ROPA processing activity.
+
+    The PRIV-A3 **write-back** projection (ADR-F027): a ROPA activity surfaces the
+    assessments covering it, so the register can flag e.g. "DPIA on file" (a linked
+    ``dpia`` that is ``completed`` — ``type`` + ``status`` drive that marker) and
+    deep-link to each (``id`` + ``title``). Compact by design — the rating and the
+    rest live on the assessment's own read (``GET /ropa/assessments/{id}``).
+    Read-only (ADR-F019): the projection adds no writer.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    type: str
+    title: str
+    status: str

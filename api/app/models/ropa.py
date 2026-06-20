@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -54,6 +55,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+if TYPE_CHECKING:
+    # Type-only (PRIV-A3 write-back relationship); runtime resolves the class from
+    # the mapper registry, so importing it here would be a needless circular import
+    # (``app.models.assessment`` imports ``ProcessingActivity``).
+    from app.models.assessment import Assessment
 
 from app.db.base import Base
 
@@ -358,6 +365,20 @@ class ProcessingActivity(Base):
         secondary=processing_activity_data_categories,
         back_populates="processing_activities",
         order_by="DataCategory.name",
+    )
+    # PRIV-A3 write-back (ADR-F027): the assessments (PIA/DPIA/LIA/TIA) that cover
+    # this activity, so the ROPA register can flag e.g. "DPIA on file". A reverse,
+    # READ-ONLY view of the M:N link the assessment write path owns (``viewonly`` —
+    # the Privacy agent stays the sole audited writer, ADR-F019; the UI only GETs).
+    # String refs (class + secondary) avoid a circular import — ``app.models.assessment``
+    # imports ``ProcessingActivity`` — resolved lazily from the registry. The reverse
+    # selectinload (link table by ``processing_activity_id``) is index-backed by
+    # ``ix_apa_processing_activity_id`` (migration 0065, the PRIV-1 reverse-FK fix).
+    assessments: Mapped[list[Assessment]] = relationship(
+        "Assessment",
+        secondary="assessment_processing_activities",
+        viewonly=True,
+        order_by="Assessment.created_at",
     )
 
     def __repr__(self) -> str:

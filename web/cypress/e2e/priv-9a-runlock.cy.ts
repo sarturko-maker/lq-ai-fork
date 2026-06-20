@@ -142,6 +142,7 @@ describe('PRIV-9a — run-lock + live register', { retries: { runMode: 1, openMo
 		cy.intercept('GET', '**/api/v1/ropa/vendors*', { body: [] });
 		cy.intercept('GET', '**/api/v1/ropa/data-subject-categories*', { body: [] });
 		cy.intercept('GET', '**/api/v1/ropa/data-categories*', { body: [] });
+		cy.intercept('GET', '**/api/v1/ropa/assessments*', { body: [] });
 		cy.intercept('GET', '**/api/v1/ropa/programme-summary*', { body: SUMMARY });
 		cy.intercept('GET', '**/api/v1/ropa/data-flow*', { body: { nodes: [], edges: [] } });
 

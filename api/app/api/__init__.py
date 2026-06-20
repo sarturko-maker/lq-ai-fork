@@ -26,6 +26,7 @@ from app.api import (
     admin,
     admin_intake_bridges,
     agent_runs,
+    assessments,
     auth,
     autonomous,
     bootstrap,
@@ -106,6 +107,10 @@ api_router.include_router(saved_prompts.router, dependencies=_active)
 # `_active` (active firm user); the register is shared firm-wide, so no per-user
 # scoping — 404 means a missing record id, not an existence-hiding refusal.
 api_router.include_router(ropa.router, dependencies=_active)
+# PRIV-A3 (ADR-F019/F027): the deployment-global assessment register read API
+# (PIA/DPIA/LIA/TIA + risks). Same shared-read posture and `/ropa` prefix as the
+# ROPA reads; tagged separately for OpenAPI grouping.
+api_router.include_router(assessments.router, dependencies=_active)
 api_router.include_router(user_skills.router, dependencies=_active)
 api_router.include_router(teams.user_router, dependencies=_active)
 api_router.include_router(teams.admin_router, dependencies=_active)
