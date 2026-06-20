@@ -149,8 +149,13 @@ async def comp_env(
         # test DB, so the Privacy-matter test's rows must be cleaned by their
         # provenance BEFORE the project delete (which would only SET NULL the
         # source_project_id and orphan them into other tests' global view).
+        from app.models.assessment import Assessment
         from app.models.ropa import ProcessingActivity, System
 
+        # Assessments are deployment-global too (ADR-F019/F027) — clean by provenance
+        # before the project delete (its SET NULL would orphan them into the shared
+        # view and pollute test_assessment_tools' global list assertions).
+        await db.execute(delete(Assessment).where(Assessment.source_project_id == project_id))
         await db.execute(
             delete(ProcessingActivity).where(ProcessingActivity.source_project_id == project_id)
         )
@@ -527,6 +532,77 @@ async def test_privacy_matter_grants_ropa_tools_and_validated_write_commits(
     assert rows[0].name == "Marketing emails"
     assert rows[0].lawful_basis == "consent"
     assert [r.details["tool"] for r in audit] == ["propose_processing_activity"]
+
+
+async def test_privacy_matter_grants_assessment_tools_and_validated_write_commits(
+    comp_env: CompositionEnv,
+) -> None:
+    """PRIV-A2 (ADR-F018/F027): the SAME Privacy matter also gets the assessment
+    tools, granted at the composition point alongside the ROPA tools. A scripted
+    model proposes a DPIA; the real loop dispatches the guarded, code-validated
+    write and one assessment row is persisted to the matter (provenance only)."""
+    from app.models.assessment import Assessment
+    from app.models.practice_area import PracticeArea
+
+    async with comp_env.factory() as db:
+        area_id = (
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == "privacy"))
+        ).scalar_one()
+        await db.execute(
+            Project.__table__.update()
+            .where(Project.id == comp_env.project_id)
+            .values(practice_area_id=area_id)
+        )
+        await db.commit()
+
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message(
+                "propose_assessment",
+                {"type": "dpia", "title": "New analytics pipeline DPIA"},
+            ),
+            final_message("Opened the analytics-pipeline DPIA as a draft."),
+        ]
+    )
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+    )
+
+    run = await _run_row(comp_env, run_id)
+    assert run.status == "completed", run.error
+
+    async with comp_env.factory() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(Assessment).where(Assessment.source_project_id == comp_env.project_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        audit = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.resource_type == "agent_run",
+                        AuditLog.resource_id == str(run_id),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert len(rows) == 1
+    assert rows[0].type == "dpia"
+    assert rows[0].title == "New analytics pipeline DPIA"
+    assert rows[0].status == "draft"
+    assert [r.details["tool"] for r in audit] == ["propose_assessment"]
+    # The assessment row is cleaned by the comp_env fixture teardown (by provenance).
 
 
 async def test_unbound_run_gets_no_matter_tools_and_no_envelope(
