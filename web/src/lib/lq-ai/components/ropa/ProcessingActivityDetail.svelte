@@ -10,7 +10,10 @@
 	import type { ProcessingActivityRead } from '$lib/lq-ai/api/ropa';
 	import {
 		art9ConditionLabel,
+		assessmentStatusLabel,
+		assessmentTypeLabel,
 		controllerRoleLabel,
+		dpiaOnFile,
 		lawfulBasisLabel,
 		systemTypeLabel,
 		transferMechanismLabel,
@@ -21,12 +24,14 @@
 		activity,
 		onBack,
 		onOpenSystem,
-		onOpenVendor
+		onOpenVendor,
+		onOpenAssessment
 	}: {
 		activity: ProcessingActivityRead;
 		onBack: () => void;
 		onOpenSystem: (id: string) => void;
 		onOpenVendor: (id: string) => void;
+		onOpenAssessment: (id: string) => void;
 	} = $props();
 </script>
 
@@ -47,6 +52,10 @@
 			<Badge variant="outline">{controllerRoleLabel(activity.controller_role)}</Badge>
 			{#if activity.special_category}
 				<Badge variant="destructive">Special category</Badge>
+			{/if}
+			{#if dpiaOnFile(activity.assessments)}
+				<!-- PRIV-A3 write-back marker: a completed DPIA covers this activity. -->
+				<Badge variant="outline">DPIA on file</Badge>
 			{/if}
 		</div>
 	</div>
@@ -191,6 +200,35 @@
 			<ul class="flex flex-wrap gap-1.5">
 				{#each activity.data_categories as category (category.id)}
 					<li><Badge variant="secondary">{category.name}</Badge></li>
+				{/each}
+			</ul>
+		{/if}
+	</div>
+
+	<!-- PRIV-A3 write-back: the assessments covering this activity, deep-linking to
+	     the assessment detail. This is how a completed DPIA "writes back" onto the
+	     ROPA register (read-only projection; the agent stays the sole writer). -->
+	<div class="space-y-2">
+		<h3 class="text-sm font-semibold tracking-tight text-foreground">
+			Assessments
+			<span class="text-muted-foreground">({activity.assessments.length})</span>
+		</h3>
+		{#if activity.assessments.length === 0}
+			<p class="text-sm text-muted-foreground">No assessments cover this activity yet.</p>
+		{:else}
+			<ul class="flex flex-wrap gap-1.5">
+				{#each activity.assessments as assessment (assessment.id)}
+					<li>
+						<button
+							type="button"
+							class="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-foreground transition-colors duration-150 hover:bg-muted"
+							onclick={() => onOpenAssessment(assessment.id)}
+						>
+							<span class="font-medium">{assessmentTypeLabel(assessment.type)}</span>
+							{assessment.title}
+							<span class="text-muted-foreground">{assessmentStatusLabel(assessment.status)}</span>
+						</button>
+					</li>
 				{/each}
 			</ul>
 		{/if}

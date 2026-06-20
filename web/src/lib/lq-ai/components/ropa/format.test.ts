@@ -10,14 +10,20 @@
 import { describe, expect, it } from 'vitest';
 import {
 	EMPTY_ACTIVITIES,
+	EMPTY_ASSESSMENTS,
 	EMPTY_SYSTEMS,
 	EMPTY_VENDORS,
 	REGISTER_TABS,
 	art9ConditionLabel,
+	assessmentStatusLabel,
+	assessmentTypeLabel,
 	controllerRoleLabel,
 	dpaStatusLabel,
+	dpiaOnFile,
 	humanize,
 	lawfulBasisLabel,
+	riskLevelLabel,
+	riskStatusLabel,
 	systemTypeLabel,
 	transferMechanismLabel,
 	vendorRoleLabel
@@ -110,6 +116,59 @@ describe('art9ConditionLabel', () => {
 	});
 });
 
+describe('assessmentTypeLabel', () => {
+	it('maps PIA/DPIA/LIA/TIA to upper-case acronyms', () => {
+		expect(assessmentTypeLabel('pia')).toBe('PIA');
+		expect(assessmentTypeLabel('dpia')).toBe('DPIA');
+		expect(assessmentTypeLabel('lia')).toBe('LIA');
+		expect(assessmentTypeLabel('tia')).toBe('TIA');
+	});
+	it('shows an em dash for null/undefined', () => {
+		expect(assessmentTypeLabel(null)).toBe('—');
+	});
+});
+
+describe('assessmentStatusLabel', () => {
+	it('maps assessment statuses, with the multi-word one', () => {
+		expect(assessmentStatusLabel('draft')).toBe('Draft');
+		expect(assessmentStatusLabel('in_progress')).toBe('In progress');
+		expect(assessmentStatusLabel('completed')).toBe('Completed');
+	});
+});
+
+describe('riskLevelLabel / riskStatusLabel', () => {
+	it('maps the low/medium/high band', () => {
+		expect(riskLevelLabel('low')).toBe('Low');
+		expect(riskLevelLabel('medium')).toBe('Medium');
+		expect(riskLevelLabel('high')).toBe('High');
+	});
+	it('maps risk dispositions', () => {
+		expect(riskStatusLabel('open')).toBe('Open');
+		expect(riskStatusLabel('mitigated')).toBe('Mitigated');
+		expect(riskStatusLabel('accepted')).toBe('Accepted');
+	});
+});
+
+describe('dpiaOnFile', () => {
+	it('is true only when a completed DPIA covers the activity', () => {
+		expect(dpiaOnFile([{ type: 'dpia', status: 'completed' }])).toBe(true);
+		expect(
+			dpiaOnFile([
+				{ type: 'pia', status: 'completed' },
+				{ type: 'dpia', status: 'completed' }
+			])
+		).toBe(true);
+	});
+	it('is false for a draft/in-progress DPIA, a non-DPIA, or no assessments', () => {
+		expect(dpiaOnFile([{ type: 'dpia', status: 'draft' }])).toBe(false);
+		expect(dpiaOnFile([{ type: 'dpia', status: 'in_progress' }])).toBe(false);
+		expect(dpiaOnFile([{ type: 'pia', status: 'completed' }])).toBe(false);
+		expect(dpiaOnFile([])).toBe(false);
+		expect(dpiaOnFile(null)).toBe(false);
+		expect(dpiaOnFile(undefined)).toBe(false);
+	});
+});
+
 describe('register tabs + empty states', () => {
 	it('exposes the register tabs in order', () => {
 		expect(REGISTER_TABS.map((t) => t.id)).toEqual([
@@ -119,7 +178,8 @@ describe('register tabs + empty states', () => {
 			'systems',
 			'vendors',
 			'data-subjects',
-			'data-categories'
+			'data-categories',
+			'assessments'
 		]);
 		expect(REGISTER_TABS.map((t) => t.label)).toEqual([
 			'Overview',
@@ -128,7 +188,8 @@ describe('register tabs + empty states', () => {
 			'Systems',
 			'Vendors',
 			'Data subjects',
-			'Data categories'
+			'Data categories',
+			'Assessments'
 		]);
 	});
 	it('has honest, agent-attributed empty-state copy', () => {
@@ -138,5 +199,7 @@ describe('register tabs + empty states', () => {
 		expect(EMPTY_SYSTEMS.toLowerCase()).toContain('no systems');
 		expect(EMPTY_VENDORS).toContain('Privacy agent');
 		expect(EMPTY_VENDORS.toLowerCase()).toContain('no vendors');
+		expect(EMPTY_ASSESSMENTS).toContain('Privacy agent');
+		expect(EMPTY_ASSESSMENTS.toLowerCase()).toContain('no privacy assessments');
 	});
 });

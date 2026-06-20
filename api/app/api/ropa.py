@@ -114,6 +114,7 @@ async def list_processing_activities(
             selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
             selectinload(ProcessingActivity.data_subject_categories),
             selectinload(ProcessingActivity.data_categories),
+            selectinload(ProcessingActivity.assessments),  # PRIV-A3 write-back marker
         )
         .order_by(ProcessingActivity.created_at.asc(), ProcessingActivity.name.asc())
     )
@@ -134,6 +135,7 @@ async def get_processing_activity(activity_id: uuid.UUID, db: _Db) -> Processing
                 selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
                 selectinload(ProcessingActivity.data_subject_categories),
                 selectinload(ProcessingActivity.data_categories),
+                selectinload(ProcessingActivity.assessments),  # PRIV-A3 write-back marker
                 # The activity itself resolves even if retired (deep-link/audit), but
                 # its linked records are shown live-only (PRIV-8a, ADR-F023).
                 *_live_only(exclude=ProcessingActivity),
@@ -276,6 +278,9 @@ async def _load_register(
                     selectinload(ProcessingActivity.transfers).selectinload(Transfer.vendor),
                     selectinload(ProcessingActivity.data_subject_categories),
                     selectinload(ProcessingActivity.data_categories),
+                    # PRIV-A3 write-back projection — loaded so ProcessingActivityRead
+                    # serializes ``assessments`` without an async lazy-load here too.
+                    selectinload(ProcessingActivity.assessments),
                     *_live_only(exclude=ProcessingActivity),
                 )
                 .where(ProcessingActivity.retired_at.is_(None))

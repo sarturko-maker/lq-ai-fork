@@ -99,6 +99,60 @@ export interface ProcessingActivitySummary {
 	special_category: boolean;
 }
 
+// --- Assessment register (PRIV-A3) — PIA / DPIA / LIA / TIA + risk findings.
+// Wire shapes mirror api/app/schemas/assessment.py (the Read DTOs). The register
+// is deployment-global and read-only (the Privacy agent is the sole writer).
+
+export type AssessmentType = 'pia' | 'dpia' | 'lia' | 'tia';
+export type AssessmentStatus = 'draft' | 'in_progress' | 'completed';
+export type RiskLevel = 'low' | 'medium' | 'high';
+export type RiskStatus = 'open' | 'mitigated' | 'accepted';
+
+/** A risk finding within an assessment. */
+export interface RiskRead {
+	id: string;
+	description: string;
+	likelihood: RiskLevel;
+	impact: RiskLevel;
+	mitigation: string | null;
+	owner: string | null;
+	status: RiskStatus;
+	created_at: string;
+}
+
+/** A processing activity as it appears linked under an assessment (chip + deep-link). */
+export interface AssessmentActivityRef {
+	id: string;
+	name: string;
+}
+
+export interface AssessmentRead {
+	id: string;
+	type: AssessmentType;
+	title: string;
+	summary: string | null;
+	status: AssessmentStatus;
+	risk_rating: RiskLevel | null;
+	conditions: string | null;
+	created_at: string;
+	updated_at: string;
+	risks: RiskRead[];
+	processing_activities: AssessmentActivityRef[];
+}
+
+/**
+ * An assessment as it appears linked under a ROPA processing activity — the
+ * PRIV-A3 write-back projection (the "DPIA on file" marker). Compact: the
+ * assessment's own read endpoint carries the detail.
+ */
+export interface AssessmentSummary {
+	id: string;
+	type: AssessmentType;
+	title: string;
+	status: AssessmentStatus;
+	risk_rating: RiskLevel | null;
+}
+
 export interface ProcessingActivityRead {
 	id: string;
 	name: string;
@@ -115,6 +169,8 @@ export interface ProcessingActivityRead {
 	transfers: TransferSummary[];
 	data_subject_categories: DataSubjectCategorySummary[];
 	data_categories: DataCategorySummary[];
+	// PRIV-A3 write-back: the assessments covering this activity ("DPIA on file").
+	assessments: AssessmentSummary[];
 }
 
 export interface VendorRead {
@@ -275,6 +331,14 @@ export function getProgrammeSummary(): Promise<ProgrammeSummary> {
 
 export function getDataFlow(): Promise<DataFlowGraph> {
 	return apiRequest<DataFlowGraph>('/ropa/data-flow');
+}
+
+export function listAssessments(): Promise<AssessmentRead[]> {
+	return apiRequest<AssessmentRead[]>('/ropa/assessments');
+}
+
+export function getAssessment(id: string): Promise<AssessmentRead> {
+	return apiRequest<AssessmentRead>(`/ropa/assessments/${encodeURIComponent(id)}`);
 }
 
 // --- Article 30 export (PRIV-4a) ---------------------------------------------

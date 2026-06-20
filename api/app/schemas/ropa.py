@@ -28,6 +28,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+# One-way dependency (PRIV-A3 write-back): ropa surfaces the assessments covering
+# an activity; ``app.schemas.assessment`` imports nothing from here (no cycle).
+from app.schemas.assessment import AssessmentSummary
+
 
 class LawfulBasis(StrEnum):
     """Article 6(1) GDPR lawful bases for processing."""
@@ -421,6 +425,10 @@ class ProcessingActivityRead(BaseModel):
     transfers: list[TransferSummary] = Field(default_factory=list)
     data_subject_categories: list[DataSubjectCategorySummary] = Field(default_factory=list)
     data_categories: list[DataCategorySummary] = Field(default_factory=list)
+    # PRIV-A3 write-back (ADR-F027): the assessments (PIA/DPIA/LIA/TIA) covering
+    # this activity, so the register can flag e.g. "DPIA on file". Read-only
+    # projection of the reverse M:N link (ADR-F019 — the agent stays sole writer).
+    assessments: list[AssessmentSummary] = Field(default_factory=list)
 
 
 class SystemRead(BaseModel):

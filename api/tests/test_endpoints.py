@@ -76,6 +76,8 @@ _PARAM_VALUES: dict[str, str] = {
     "system_id": _DUMMY_UUID,
     # PRIV-5a (fork) — vendors/recipients
     "vendor_id": _DUMMY_UUID,
+    # PRIV-A3 (fork) — assessment register read API (ADR-F027)
+    "assessment_id": _DUMMY_UUID,
 }
 
 
@@ -353,6 +355,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/ropa/data-flow"),
     # PRIV-4a (fork) — Article 30 export. Dedicated coverage in tests/test_ropa_export.py.
     ("GET", "/api/v1/ropa/export"),
+    # PRIV-A3 (fork) — assessment register reads. Coverage in tests/test_assessment_read.py.
+    ("GET", "/api/v1/ropa/assessments"),
+    ("GET", "/api/v1/ropa/assessments/{assessment_id}"),
 }
 
 

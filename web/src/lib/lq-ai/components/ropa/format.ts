@@ -61,6 +61,31 @@ const TRANSFER_MECHANISM_LABELS: Record<string, string> = {
 	derogation: 'Derogation (Art 49)'
 };
 
+const ASSESSMENT_TYPE_LABELS: Record<string, string> = {
+	pia: 'PIA',
+	dpia: 'DPIA',
+	lia: 'LIA',
+	tia: 'TIA'
+};
+
+const ASSESSMENT_STATUS_LABELS: Record<string, string> = {
+	draft: 'Draft',
+	in_progress: 'In progress',
+	completed: 'Completed'
+};
+
+const RISK_LEVEL_LABELS: Record<string, string> = {
+	low: 'Low',
+	medium: 'Medium',
+	high: 'High'
+};
+
+const RISK_STATUS_LABELS: Record<string, string> = {
+	open: 'Open',
+	mitigated: 'Mitigated',
+	accepted: 'Accepted'
+};
+
 const ART9_CONDITION_LABELS: Record<string, string> = {
 	explicit_consent: 'Explicit consent',
 	employment_social_security: 'Employment / social security',
@@ -102,6 +127,25 @@ export const transferMechanismLabel = (t: string | null | undefined): string =>
 	labelFrom(TRANSFER_MECHANISM_LABELS, t);
 export const art9ConditionLabel = (t: string | null | undefined): string =>
 	labelFrom(ART9_CONDITION_LABELS, t);
+export const assessmentTypeLabel = (t: string | null | undefined): string =>
+	labelFrom(ASSESSMENT_TYPE_LABELS, t);
+export const assessmentStatusLabel = (t: string | null | undefined): string =>
+	labelFrom(ASSESSMENT_STATUS_LABELS, t);
+export const riskLevelLabel = (t: string | null | undefined): string =>
+	labelFrom(RISK_LEVEL_LABELS, t);
+export const riskStatusLabel = (t: string | null | undefined): string =>
+	labelFrom(RISK_STATUS_LABELS, t);
+
+/**
+ * The PRIV-A3 write-back marker: an activity has a "DPIA on file" iff a *completed*
+ * DPIA covers it. Pure + structural so it is unit-testable and reusable from the
+ * activity table and detail. (A draft/in-progress DPIA is not yet "on file".)
+ */
+export function dpiaOnFile(
+	assessments: { type: string; status: string }[] | null | undefined
+): boolean {
+	return (assessments ?? []).some((a) => a.type === 'dpia' && a.status === 'completed');
+}
 
 /** Honest empty-state copy — the register shows only what the agent has written. */
 export const EMPTY_ACTIVITIES =
@@ -114,6 +158,8 @@ export const EMPTY_DATA_SUBJECTS =
 	'No categories of data subjects recorded yet — the Privacy agent tags activities with them as it works.';
 export const EMPTY_DATA_CATEGORIES =
 	'No categories of personal data recorded yet — the Privacy agent tags activities with them as it works.';
+export const EMPTY_ASSESSMENTS =
+	'No privacy assessments recorded yet — the Privacy agent builds PIAs / DPIAs / LIAs / TIAs here as it works.';
 
 export type RegisterTab =
 	| 'overview'
@@ -122,7 +168,8 @@ export type RegisterTab =
 	| 'systems'
 	| 'vendors'
 	| 'data-subjects'
-	| 'data-categories';
+	| 'data-categories'
+	| 'assessments';
 
 /**
  * The register's tabs, in display order. Overview (the programme dashboard) leads,
@@ -136,5 +183,6 @@ export const REGISTER_TABS: { id: RegisterTab; label: string }[] = [
 	{ id: 'systems', label: 'Systems' },
 	{ id: 'vendors', label: 'Vendors' },
 	{ id: 'data-subjects', label: 'Data subjects' },
-	{ id: 'data-categories', label: 'Data categories' }
+	{ id: 'data-categories', label: 'Data categories' },
+	{ id: 'assessments', label: 'Assessments' }
 ];

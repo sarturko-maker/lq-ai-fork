@@ -28,11 +28,13 @@
 		downloadArticle30,
 		getDataFlow,
 		getProgrammeSummary,
+		listAssessments,
 		listDataCategories,
 		listDataSubjectCategories,
 		listProcessingActivities,
 		listSystems,
 		listVendors,
+		type AssessmentRead,
 		type DataCategoryRead,
 		type DataFlowGraph,
 		type DataSubjectCategoryRead,
@@ -44,6 +46,7 @@
 	} from '$lib/lq-ai/api/ropa';
 	import { POLL_INTERVAL_MS } from '$lib/lq-ai/agents/helpers';
 	import { MOTION, motionMs } from '$lib/lq-ai/cockpit/helpers';
+	import AssessmentDetail from './AssessmentDetail.svelte';
 	import DataFlowView from './DataFlowView.svelte';
 	import ProcessingActivityDetail from './ProcessingActivityDetail.svelte';
 	import ProgrammeDashboard from './ProgrammeDashboard.svelte';
@@ -51,14 +54,19 @@
 	import VendorDetail from './VendorDetail.svelte';
 	import {
 		EMPTY_ACTIVITIES,
+		EMPTY_ASSESSMENTS,
 		EMPTY_DATA_CATEGORIES,
 		EMPTY_DATA_SUBJECTS,
 		EMPTY_SYSTEMS,
 		EMPTY_VENDORS,
 		REGISTER_TABS,
+		assessmentStatusLabel,
+		assessmentTypeLabel,
 		controllerRoleLabel,
 		dpaStatusLabel,
+		dpiaOnFile,
 		lawfulBasisLabel,
+		riskLevelLabel,
 		systemTypeLabel,
 		vendorRoleLabel,
 		type RegisterTab
@@ -83,6 +91,7 @@
 	let vendors = $state<VendorRead[] | null>(null);
 	let dataSubjects = $state<DataSubjectCategoryRead[] | null>(null);
 	let dataCategories = $state<DataCategoryRead[] | null>(null);
+	let assessments = $state<AssessmentRead[] | null>(null);
 	let summary = $state<ProgrammeSummary | null>(null);
 	let graph = $state<DataFlowGraph | null>(null);
 	let loading = $state(true);
@@ -91,10 +100,14 @@
 	let selectedActivityId = $state<string | null>(null);
 	let selectedSystemId = $state<string | null>(null);
 	let selectedVendorId = $state<string | null>(null);
+	let selectedAssessmentId = $state<string | null>(null);
 
 	const selectedActivity = $derived(activities?.find((a) => a.id === selectedActivityId) ?? null);
 	const selectedSystem = $derived(systems?.find((s) => s.id === selectedSystemId) ?? null);
 	const selectedVendor = $derived(vendors?.find((v) => v.id === selectedVendorId) ?? null);
+	const selectedAssessment = $derived(
+		assessments?.find((a) => a.id === selectedAssessmentId) ?? null
+	);
 
 	const registerEmpty = $derived(
 		(activities?.length ?? 0) === 0 &&
@@ -148,12 +161,13 @@
 			error = null;
 		}
 		try {
-			const [a, s, v, ds, dc, sum, gr] = await Promise.all([
+			const [a, s, v, ds, dc, asmt, sum, gr] = await Promise.all([
 				listProcessingActivities(),
 				listSystems(),
 				listVendors(),
 				listDataSubjectCategories(),
 				listDataCategories(),
+				listAssessments(),
 				getProgrammeSummary(),
 				getDataFlow()
 			]);
@@ -163,6 +177,7 @@
 			vendors = v;
 			dataSubjects = ds;
 			dataCategories = dc;
+			assessments = asmt;
 			summary = sum;
 			graph = gr;
 			if (!quiet) error = null;
@@ -235,6 +250,7 @@
 		selectedActivityId = null;
 		selectedSystemId = null;
 		selectedVendorId = null;
+		selectedAssessmentId = null;
 	}
 
 	function selectTab(next: RegisterTab) {
@@ -260,6 +276,12 @@
 		selectedVendorId = id;
 	}
 
+	function openAssessment(id: string) {
+		tab = 'assessments';
+		clearSelection();
+		selectedAssessmentId = id;
+	}
+
 	function backToList() {
 		clearSelection();
 	}
@@ -272,11 +294,18 @@
 			onBack={backToList}
 			onOpenSystem={openSystem}
 			onOpenVendor={openVendor}
+			onOpenAssessment={openAssessment}
 		/>
 	{:else if selectedSystem}
 		<SystemDetail system={selectedSystem} onBack={backToList} onOpenActivity={openActivity} />
 	{:else if selectedVendor}
 		<VendorDetail vendor={selectedVendor} onBack={backToList} onOpenActivity={openActivity} />
+	{:else if selectedAssessment}
+		<AssessmentDetail
+			assessment={selectedAssessment}
+			onBack={backToList}
+			onOpenActivity={openActivity}
+		/>
 	{:else}
 		<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 			<SectionHeader
@@ -360,12 +389,18 @@
 							<TableBody>
 								{#each activities ?? [] as a (a.id)}
 									<TableRow
-										class="lq-reg-row cursor-pointer{changedIds.has(a.id)
-											? ' lq-row-changed'
-											: ''}"
+										class="lq-reg-row cursor-pointer{changedIds.has(a.id) ? ' lq-row-changed' : ''}"
 										onclick={() => openActivity(a.id)}
 									>
-										<TableCell class="font-medium text-foreground">{a.name}</TableCell>
+										<TableCell class="font-medium text-foreground">
+											{a.name}
+											{#if dpiaOnFile(a.assessments)}
+												<!-- PRIV-A3 write-back marker: a completed DPIA covers this activity. -->
+												<Badge variant="outline" class="ml-2 align-middle font-normal"
+													>DPIA on file</Badge
+												>
+											{/if}
+										</TableCell>
 										<TableCell>
 											<Badge variant="secondary">{lawfulBasisLabel(a.lawful_basis)}</Badge>
 										</TableCell>
@@ -405,9 +440,7 @@
 							<TableBody>
 								{#each systems ?? [] as s (s.id)}
 									<TableRow
-										class="lq-reg-row cursor-pointer{changedIds.has(s.id)
-											? ' lq-row-changed'
-											: ''}"
+										class="lq-reg-row cursor-pointer{changedIds.has(s.id) ? ' lq-row-changed' : ''}"
 										onclick={() => openSystem(s.id)}
 									>
 										<TableCell class="font-medium text-foreground">{s.name}</TableCell>
@@ -449,9 +482,7 @@
 							<TableBody>
 								{#each vendors ?? [] as v (v.id)}
 									<TableRow
-										class="lq-reg-row cursor-pointer{changedIds.has(v.id)
-											? ' lq-row-changed'
-											: ''}"
+										class="lq-reg-row cursor-pointer{changedIds.has(v.id) ? ' lq-row-changed' : ''}"
 										onclick={() => openVendor(v.id)}
 									>
 										<TableCell class="font-medium text-foreground">{v.name}</TableCell>
@@ -514,6 +545,51 @@
 										<TableCell class="font-medium text-foreground">{c.name}</TableCell>
 										<TableCell class="text-muted-foreground"
 											>{c.processing_activities.length}</TableCell
+										>
+									</TableRow>
+								{/each}
+							</TableBody>
+						</Table>
+					</div>
+				{/if}
+			{:else if tab === 'assessments'}
+				{#if (assessments?.length ?? 0) === 0}
+					<p class="max-w-prose text-sm text-muted-foreground">{EMPTY_ASSESSMENTS}</p>
+				{:else}
+					<div class="rounded-lg border border-border" data-testid="lq-assessments-table">
+						<Table>
+							<TableHeader>
+								<TableRow>
+									<TableHead>Title</TableHead>
+									<TableHead>Type</TableHead>
+									<TableHead>Status</TableHead>
+									<TableHead>Risk rating</TableHead>
+									<TableHead>Risks</TableHead>
+									<TableHead>Activities</TableHead>
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{#each assessments ?? [] as a (a.id)}
+									<TableRow class="cursor-pointer" onclick={() => openAssessment(a.id)}>
+										<TableCell class="font-medium text-foreground">{a.title}</TableCell>
+										<TableCell>
+											<Badge variant="secondary">{assessmentTypeLabel(a.type)}</Badge>
+										</TableCell>
+										<TableCell class="text-muted-foreground"
+											>{assessmentStatusLabel(a.status)}</TableCell
+										>
+										<TableCell>
+											{#if a.risk_rating === 'high'}
+												<Badge variant="destructive">{riskLevelLabel(a.risk_rating)}</Badge>
+											{:else if a.risk_rating}
+												<Badge variant="outline">{riskLevelLabel(a.risk_rating)}</Badge>
+											{:else}
+												<span class="text-muted-foreground">—</span>
+											{/if}
+										</TableCell>
+										<TableCell class="text-muted-foreground">{a.risks.length}</TableCell>
+										<TableCell class="text-muted-foreground"
+											>{a.processing_activities.length}</TableCell
 										>
 									</TableRow>
 								{/each}
