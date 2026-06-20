@@ -346,6 +346,29 @@ def test_load_real_skills_corpus_has_all_starter_skills() -> None:
     assert "skill-creator" in names
 
 
+@pytest.mark.unit
+def test_pia_generation_skill_loads_and_is_well_formed() -> None:
+    """PRIV-A2: the PIA/DPIA skill round-trips through the real loader.
+
+    Bound test-only this slice (no default practice_area_skills binding yet — the
+    PRIV-7 precedent); this pins that it parses and carries the expected
+    frontmatter + teaches the assessment tools.
+    """
+    if not REAL_SKILLS_DIR.is_dir():
+        pytest.skip(f"real skills directory not present: {REAL_SKILLS_DIR}")
+
+    registry = load_registry(REAL_SKILLS_DIR)
+    assert "pia-generation" in registry.names()
+    skill = registry.get_skill("pia-generation")
+    assert skill is not None
+    assert skill.name == "pia-generation"
+    assert skill.title == "Privacy Impact Assessment (PIA / DPIA / LIA / TIA)"
+    assert "dpia" in skill.tags
+    # It teaches the assessment write tools, including the completion gate.
+    assert "complete_assessment" in skill.content_md
+    assert "add_risk" in skill.content_md
+
+
 # --- Registry / lazy materialisation tests -----------------------------------
 
 

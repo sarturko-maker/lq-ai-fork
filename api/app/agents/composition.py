@@ -33,6 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.area_agent import AreaAgentSpec, combine_tier_floors, render_area_agent
+from app.agents.assessment_tools import build_assessment_tools
 from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.lease import RunLease, settle_run
@@ -225,6 +226,11 @@ async def compose_and_execute_run(
             tools = tools + build_ropa_tools(
                 session_factory, run_id=run_id, binding=binding, change_ledger=change_ledger
             )
+            # PRIV-A2 (ADR-F018/F027): the same Privacy matter also gets the
+            # assessment write tools (PIA/DPIA/LIA/TIA + risk register). They reach
+            # ROPA activity IDs through the ROPA tools' list above, so no separate
+            # list is needed; no change ledger yet (the assessment read UI is A3).
+            tools = tools + build_assessment_tools(session_factory, run_id=run_id, binding=binding)
 
         # F1-S3: the gateway tier floor is the strongest (lowest) of the
         # matter floor and the area's default floor — the gateway combiner
