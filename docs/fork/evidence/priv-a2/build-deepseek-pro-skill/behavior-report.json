@@ -1,0 +1,176 @@
+{
+  "milestone": "PRIV-A2",
+  "adr": "F018/F027",
+  "mode": "build · skill=pia-generation",
+  "model_alias": "deepseek-pro",
+  "model_note": "alias 'deepseek-pro' resolves via the gateway to a DeepSeek V4 model (deepseek-v4-flash for 'deepseek', deepseek-v4-pro for 'deepseek-pro'). DeepSeek is NOT scenario-qualified (ADR-F015) — this run is kept verbatim, not tuned green.",
+  "generated_at": "2026-06-20T22:24:20+00:00",
+  "score": {
+    "counts": {
+      "assessments": 1,
+      "by_type": {
+        "dpia": 1
+      },
+      "by_status": {
+        "completed": 1
+      },
+      "completed": 1,
+      "total_risks": 6,
+      "risks_with_documented_mitigation": 6
+    },
+    "fractions": {
+      "assessments_linked_to_activity": 1.0,
+      "risks_with_documented_mitigation": 1.0
+    },
+    "per_assessment": [
+      {
+        "title": "DPIA: AI-driven churn prediction and personalised retention/pricing",
+        "type": "dpia",
+        "status": "completed",
+        "risk_rating": "high",
+        "risk_count": 6,
+        "risks_with_documented_mitigation": 6,
+        "linked_activity_count": 1,
+        "is_high_risk": true,
+        "completed": true,
+        "completion_rule_satisfied": true
+      }
+    ],
+    "completion_integrity_ok": true
+  },
+  "assessments": {
+    "assessments": [
+      {
+        "type": "dpia",
+        "title": "DPIA: AI-driven churn prediction and personalised retention/pricing",
+        "status": "completed",
+        "risk_rating": "high",
+        "summary_excerpt": "Article 35 DPIA for the AI profiling layer being added to the existing Product analytics pipeline. The processing applies an AI model to the whole customer base, combining in-app behavioural events with account and demographic data to produ…",
+        "conditions_excerpt": null,
+        "risks": [
+          {
+            "description": "Inadequate transparency — Articles 13-15 &amp; 22(2)(b): Individuals are unlikely to know they are being profiled by AI or understand how the model's logic affects the pricing and offers they see. GDPR requires meaningful information about …",
+            "likelihood": "high",
+            "impact": "medium",
+            "mitigation": "Before launch: (1) Publish a plain-English notice in the privacy policy and in-app at the point users first see a personalised offer, explaining: that AI profiling is used, the categories of data used (behavioural, account, demographic), ho…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Article 22 — Unlawful automated individual decision-making: The AI model automatically determines the retention offers and pricing shown to each user with no human intervention. These decisions have a significant financial effect on individ…",
+            "likelihood": "high",
+            "impact": "high",
+            "mitigation": "Before launch: (1) Conduct a legal analysis to identify the correct Article 22(2) gateway — if contract necessity cannot be established (i.e., churn prediction is not essential to perform the service), obtain explicit consent from each data…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Discriminatory or biased outcomes: The AI model combines demographic data with behavioural events to predict churn and set pricing. If demographic data includes protected characteristics (age, gender, ethnicity, postcode-proxy for socioecon…",
+            "likelihood": "medium",
+            "impact": "high",
+            "mitigation": "Before launch: (1) Conduct a bias audit of the training data and model outputs — test for statistically significant disparities in churn scores and offer/pricing decisions across demographic subgroups (age band, gender, geography). Publish …",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "International transfer risk — Mixpanel (US): Behavioural and account data flows to Mixpanel in the United States for analytics processing and then feeds the AI model. The DPA with SCCs is in place but no transfer risk assessment (TRA) has b…",
+            "likelihood": "medium",
+            "impact": "medium",
+            "mitigation": "Before launch: (1) Conduct and document a transfer risk assessment for the Mixpanel US transfer, assessing US intelligence services' access powers against the data categories in transit (behavioural events, account data) and the likelihood/…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Purpose limitation breach — repurposing analytics data for automated decisions: The existing Product analytics processing collects behavioural and account data for the purpose \"Understand product usage to improve the service.\" Feeding that …",
+            "likelihood": "high",
+            "impact": "medium",
+            "mitigation": "Before launch: (1) Conduct and document an Article 6(4) compatibility assessment — evaluate: (a) the link between the original analytics purpose and the new profiling/pricing purpose, (b) the context of collection (did users reasonably expe…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Data minimisation — unbounded demographic data: The processing combines \"demographic data\" with behavioural events, but the scope of demographic data is not defined. If it includes unnecessary or excessive categories (e.g., precise age, eth…",
+            "likelihood": "medium",
+            "impact": "medium",
+            "mitigation": "Before launch: (1) Produce a definitive list of the demographic data fields that will be used by the model, with a written necessity justification for each field tied to its predictive value for churn. (2) Any demographic field that cannot …",
+            "status": "open",
+            "has_documented_mitigation": true
+          }
+        ],
+        "linked_activities": [
+          "AI-driven churn prediction and personalised retention/pricing"
+        ],
+        "is_high_risk": true,
+        "completion_rule_satisfied": true
+      }
+    ]
+  },
+  "run": {
+    "id": "assessment_build_ai_profiling_dpia",
+    "title": "Build — run a DPIA for the AI profiling layer and complete it",
+    "note": "Plain-language assessment ask on clearly high-risk processing. A defensible result is a completed DPIA, linked to the Product analytics activity, with concrete risks to individuals and at least one documented (design-tied) mitigation — the ADR-F027 completion rule satisfied.",
+    "prompt": "We're launching an AI layer on our product analytics that profiles individual users to predict churn and decide which retention offers and pricing each person sees. Please run a DPIA for this: link it to the relevant activity in our Record of Processing Activities, set out the key risks to individuals with concrete mitigations, and complete it with an overall risk rating. Tell me what you recorded.",
+    "status": "completed",
+    "latency_s": 109.7,
+    "step_count": 95,
+    "model_turns": 21,
+    "tools_called": [
+      "read_file",
+      "list_processing_activities",
+      "list_assessments",
+      "list_systems",
+      "list_vendors",
+      "list_transfers",
+      "search_documents",
+      "read_document",
+      "write_todos",
+      "propose_processing_activity",
+      "add_data_subject_categories",
+      "add_data_categories",
+      "list_processing_activities",
+      "add_data_subject_categories",
+      "add_data_categories",
+      "write_todos",
+      "propose_system",
+      "link_processing_activity_to_system",
+      "link_processing_activity_to_system",
+      "link_vendor_to_activity",
+      "propose_transfer",
+      "list_systems",
+      "link_processing_activity_to_system",
+      "write_todos",
+      "propose_assessment",
+      "list_assessments",
+      "link_assessment_to_activity",
+      "write_todos",
+      "add_risk",
+      "add_risk",
+      "add_risk",
+      "add_risk",
+      "add_risk",
+      "add_risk",
+      "complete_assessment",
+      "list_assessments",
+      "write_todos"
+    ],
+    "task_calls": 0,
+    "delegated": false,
+    "ancestry": [],
+    "expect_tools": [
+      "propose_assessment"
+    ],
+    "forbid_tools": [],
+    "shape_matched": true,
+    "checks": {
+      "expected_tools_present": true,
+      "forbidden_tools_absent": true,
+      "must_include_ok": true,
+      "should_not_ok": true,
+      "within_step_bound": true,
+      "clarify_ok": null,
+      "refusal_ok": null
+    },
+    "error": null,
+    "final_answer_excerpt": "---\n\n## DPIA Complete — AI-driven churn prediction and personalised retention/pricing\n\n**Assessment ID:** `17ecf5a3-332d-43cd-812a-3caa6ab66060`  \n**Status:** Completed | **Risk rating:** **HIGH**\n\n### What was recorded\n\n#### New ROPA activity\nCreated **\"AI-driven churn prediction and personalised retention/pricing\"** (`ac961311-ba85-4944-9df8-953464de3783`) — separate from the existing \"Product analytics\" activity because the purpose (automated decisions affecting individuals' financial terms) is materially different and higher risk. Key attributes:\n\n| Field | Value |\n|---|---|\n| Purpose | AI profiling of in-app behaviour + account + demographic data to predict churn and determine per-user retention offers and pricing |\n| Lawful basis | Legitimate interests (flagged for Article 22 review …"
+  }
+}

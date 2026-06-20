@@ -1,0 +1,202 @@
+{
+  "milestone": "PRIV-A2",
+  "adr": "F018/F027",
+  "mode": "build · skill=off",
+  "model_alias": "deepseek",
+  "model_note": "alias 'deepseek' resolves via the gateway to a DeepSeek V4 model (deepseek-v4-flash for 'deepseek', deepseek-v4-pro for 'deepseek-pro'). DeepSeek is NOT scenario-qualified (ADR-F015) — this run is kept verbatim, not tuned green.",
+  "generated_at": "2026-06-20T22:21:01+00:00",
+  "score": {
+    "counts": {
+      "assessments": 2,
+      "by_type": {
+        "dpia": 2
+      },
+      "by_status": {
+        "completed": 1,
+        "draft": 1
+      },
+      "completed": 1,
+      "total_risks": 6,
+      "risks_with_documented_mitigation": 6
+    },
+    "fractions": {
+      "assessments_linked_to_activity": 0.5,
+      "risks_with_documented_mitigation": 1.0
+    },
+    "per_assessment": [
+      {
+        "title": "AI User Profiling for Churn Prediction & Personalised Pricing",
+        "type": "dpia",
+        "status": "completed",
+        "risk_rating": "high",
+        "risk_count": 6,
+        "risks_with_documented_mitigation": 6,
+        "linked_activity_count": 1,
+        "is_high_risk": true,
+        "completed": true,
+        "completion_rule_satisfied": true
+      },
+      {
+        "title": "AI User Profiling for Churn Prediction & Personalised Pricing",
+        "type": "dpia",
+        "status": "draft",
+        "risk_rating": null,
+        "risk_count": 0,
+        "risks_with_documented_mitigation": 0,
+        "linked_activity_count": 0,
+        "is_high_risk": true,
+        "completed": false,
+        "completion_rule_satisfied": true
+      }
+    ],
+    "completion_integrity_ok": true
+  },
+  "assessments": {
+    "assessments": [
+      {
+        "type": "dpia",
+        "title": "AI User Profiling for Churn Prediction & Personalised Pricing",
+        "status": "completed",
+        "risk_rating": "high",
+        "summary_excerpt": "DPIA for an AI/ML model that profiles individual customers from in-app behaviour, account data and demographic data to predict churn risk and determine personalised retention offers and pricing. This involves automated decision-making under…",
+        "conditions_excerpt": null,
+        "risks": [
+          {
+            "description": "Automated pricing decisions without a valid Article 22 UK GDPR basis — the current lawful basis (legitimate interests) does not satisfy Article 22(2), which requires either contract necessity or explicit consent for automated decisions prod…",
+            "likelihood": "medium",
+            "impact": "high",
+            "mitigation": "Identify and document the Article 22(2) gateway: if pricing is part of the contractual relationship, rely on 22(2)(a) (contract necessity) and implement suitable safeguards (human review right, explainability). Alternatively, obtain explici…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Model bias or unfair discrimination — the AI model could systematically disadvantage certain customer groups (e.g. newer users, lower-engagement users, specific demographic cohorts) by assigning them higher prices based on churn predictions…",
+            "likelihood": "medium",
+            "impact": "high",
+            "mitigation": "Conduct pre-launch bias testing across protected characteristics (age, gender, location). Implement ongoing fairness monitoring with automated drift detection. Set price bands so the model cannot produce prices outside a pre-approved range.…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Lack of transparency — customers are not informed that their behaviour, account and demographic data are being used for AI profiling that determines what they pay. This breaches Articles 13-14 UK GDPR (fair processing information), undermin…",
+            "likelihood": "high",
+            "impact": "medium",
+            "mitigation": "Update the privacy notice to clearly disclose: (a) the profiling and automated decision-making; (b) the categories of data used; (c) the logic involved and the significance of the decisions; (d) the right to obtain human intervention and co…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "International transfer to the United States via Mixpanel — personal data of UK data subjects is transferred to a US processor. The EU SCCs (2021) + UK Addendum are in place but no Transfer Impact Assessment has been completed to confirm tha…",
+            "likelihood": "medium",
+            "impact": "medium",
+            "mitigation": "Complete a Transfer Impact Assessment (TIA) for the Mixpanel transfer, documenting supplementary measures (technical encryption, contractual provisions) sufficient to address the gap identified in the ICO's guidance on US transfers. If the …",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Data inaccuracy causing incorrect churn predictions or pricing — stale or incorrect behavioural, account or demographic data could produce a misclassification (e.g. predicting a loyal user as high-churn and offering a discount they don't ne…",
+            "likelihood": "medium",
+            "impact": "medium",
+            "mitigation": "Implement data-quality checks and staleness rules on all feature inputs. Give users a means to view and correct their account and demographic data. Include a confidence threshold: if the model's prediction confidence is below a set level, d…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Data security incident exposing profiling data and churn scores — the AI model's input data (behavioural, account, demographic) and output scores (churn prediction, personalised pricing) are sensitive commercial data. A breach could expose …",
+            "likelihood": "low",
+            "impact": "high",
+            "mitigation": "Encryption at rest and in transit; role-based access control limiting model outputs to authorised personnel only; audit logging of all model inference requests; regular penetration testing; separate the model scoring API from the customer-f…",
+            "status": "open",
+            "has_documented_mitigation": true
+          }
+        ],
+        "linked_activities": [
+          "AI User Profiling for Churn & Pricing"
+        ],
+        "is_high_risk": true,
+        "completion_rule_satisfied": true
+      },
+      {
+        "type": "dpia",
+        "title": "AI User Profiling for Churn Prediction & Personalised Pricing",
+        "status": "draft",
+        "risk_rating": null,
+        "summary_excerpt": "DPIA for an AI/ML model that profiles individual customers from in-app behaviour, account data and demographic data to predict churn risk and determine personalised retention offers and pricing. This involves automated decision-making under…",
+        "conditions_excerpt": "BEFORE LAUNCH: (1) Establish a valid Article 22(2) gateway — document contract necessity or implement explicit consent; (2) Update privacy notice with full profiling/ADS transparency; (3) Complete model bias testing with fairness report; (4…",
+        "risks": [],
+        "linked_activities": [],
+        "is_high_risk": true,
+        "completion_rule_satisfied": true
+      }
+    ]
+  },
+  "run": {
+    "id": "assessment_build_ai_profiling_dpia",
+    "title": "Build — run a DPIA for the AI profiling layer and complete it",
+    "note": "Plain-language assessment ask on clearly high-risk processing. A defensible result is a completed DPIA, linked to the Product analytics activity, with concrete risks to individuals and at least one documented (design-tied) mitigation — the ADR-F027 completion rule satisfied.",
+    "prompt": "We're launching an AI layer on our product analytics that profiles individual users to predict churn and decide which retention offers and pricing each person sees. Please run a DPIA for this: link it to the relevant activity in our Record of Processing Activities, set out the key risks to individuals with concrete mitigations, and complete it with an overall risk rating. Tell me what you recorded.",
+    "status": "cap_exceeded",
+    "latency_s": 117.3,
+    "step_count": 100,
+    "model_turns": 25,
+    "tools_called": [
+      "search_documents",
+      "list_processing_activities",
+      "list_systems",
+      "list_vendors",
+      "read_document",
+      "list_data_categories",
+      "list_data_subject_categories",
+      "list_assessments",
+      "write_todos",
+      "propose_processing_activity",
+      "list_processing_activities",
+      "write_todos",
+      "add_data_subject_categories",
+      "add_data_categories",
+      "write_todos",
+      "link_processing_activity_to_system",
+      "link_vendor_to_activity",
+      "propose_system",
+      "list_systems",
+      "link_processing_activity_to_system",
+      "list_transfers",
+      "propose_transfer",
+      "write_todos",
+      "propose_assessment",
+      "list_assessments",
+      "add_risk",
+      "add_risk",
+      "add_risk",
+      "add_risk",
+      "add_risk",
+      "add_risk",
+      "write_todos",
+      "complete_assessment",
+      "propose_assessment",
+      "link_assessment_to_activity",
+      "list_assessments",
+      "propose_assessment",
+      "list_assessments"
+    ],
+    "task_calls": 0,
+    "delegated": false,
+    "ancestry": [],
+    "expect_tools": [
+      "propose_assessment"
+    ],
+    "forbid_tools": [],
+    "shape_matched": true,
+    "checks": {
+      "expected_tools_present": true,
+      "forbidden_tools_absent": true,
+      "must_include_ok": true,
+      "should_not_ok": true,
+      "within_step_bound": true,
+      "clarify_ok": null,
+      "refusal_ok": null
+    },
+    "error": null,
+    "final_answer_excerpt": ""
+  }
+}

@@ -1,0 +1,161 @@
+{
+  "milestone": "PRIV-A2",
+  "adr": "F018/F027",
+  "mode": "build · skill=pia-generation",
+  "model_alias": "deepseek",
+  "model_note": "alias 'deepseek' resolves via the gateway to a DeepSeek V4 model (deepseek-v4-flash for 'deepseek', deepseek-v4-pro for 'deepseek-pro'). DeepSeek is NOT scenario-qualified (ADR-F015) — this run is kept verbatim, not tuned green.",
+  "generated_at": "2026-06-20T22:22:30+00:00",
+  "score": {
+    "counts": {
+      "assessments": 1,
+      "by_type": {
+        "dpia": 1
+      },
+      "by_status": {
+        "completed": 1
+      },
+      "completed": 1,
+      "total_risks": 5,
+      "risks_with_documented_mitigation": 5
+    },
+    "fractions": {
+      "assessments_linked_to_activity": 1.0,
+      "risks_with_documented_mitigation": 1.0
+    },
+    "per_assessment": [
+      {
+        "title": "DPIA — AI User Profiling for Churn Prediction and Personalised Offers",
+        "type": "dpia",
+        "status": "completed",
+        "risk_rating": "high",
+        "risk_count": 5,
+        "risks_with_documented_mitigation": 5,
+        "linked_activity_count": 1,
+        "is_high_risk": true,
+        "completed": true,
+        "completion_rule_satisfied": true
+      }
+    ],
+    "completion_integrity_ok": true
+  },
+  "assessments": {
+    "assessments": [
+      {
+        "type": "dpia",
+        "title": "DPIA — AI User Profiling for Churn Prediction and Personalised Offers",
+        "status": "completed",
+        "risk_rating": "high",
+        "summary_excerpt": "DPIA for the new AI profiling layer on our Product analytics stack. The model ingests in-app behavioural events (from Mixpanel) combined with account and demographic data to profile each customer, predict churn probability, and determine pe…",
+        "conditions_excerpt": null,
+        "risks": [
+          {
+            "description": "Automated pricing and offer decisions without human review (Article 22 UK GDPR): the AI model directly determines what retention offers and prices each customer sees. If the model misclassifies a user or produces an anomalous score, the use…",
+            "likelihood": "medium",
+            "impact": "high",
+            "mitigation": "Implement a clear human-review right: any user can request manual review of their profiling score and resulting offer/price by a human agent within 7 calendar days, with a documented outcome and right to correction. Additionally, flag any p…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Model inaccuracy and false churn classification: the AI model will inevitably produce false positives (users incorrectly flagged as churn risks) and false negatives. False positives may lead to unnecessary, unsolicited retention offers or d…",
+            "likelihood": "medium",
+            "impact": "medium",
+            "mitigation": "Quarterly model accuracy monitoring against holdout ground-truth data, with documented precision/recall metrics and automatic retraining if F1 score drops below 0.85. Maintain a dispute log where users can challenge a price or offer decisio…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Intrusive inferences from combined data sources: combining behavioural events (in-app actions), account data (contact details, plan type), and demographic data enables the model to infer sensitive attributes the user has not disclosed — suc…",
+            "likelihood": "medium",
+            "impact": "high",
+            "mitigation": "(1) Pre-deployment feature-inference mapping: data science team documents every model feature and identifies what latent/sensitive attributes it could serve as a proxy for. (2) Hard-blocking rule: any feature flagged as a proxy for special-…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Lack of transparency and individual-rights friction: users are not clearly told that their in-app behaviour, account data, and demographic data are combined to profile them for automated pricing decisions. This makes it difficult for indivi…",
+            "likelihood": "high",
+            "impact": "medium",
+            "mitigation": "(1) Update the privacy notice before launch with a dedicated \"Profiling and automated decisions\" section describing: the categories of data combined, the logic of the churn model in plain language, the fact that pricing and offers are deter…",
+            "status": "open",
+            "has_documented_mitigation": true
+          },
+          {
+            "description": "Bias and indirect discrimination in pricing outcomes: the model uses demographic data alongside behavioural and account data. If the training data contains historical pricing patterns or behavioural correlations linked to protected characte…",
+            "likelihood": "medium",
+            "impact": "high",
+            "mitigation": "(1) Pre-launch differential-impact audit: test model outputs across all demographic groups available in the data; publish the results to the DPO and product lead before go-live. (2) Exclude protected characteristics (age band, geo-region) f…",
+            "status": "open",
+            "has_documented_mitigation": true
+          }
+        ],
+        "linked_activities": [
+          "AI User Profiling for Churn Prediction and Personalised Offers"
+        ],
+        "is_high_risk": true,
+        "completion_rule_satisfied": true
+      }
+    ]
+  },
+  "run": {
+    "id": "assessment_build_ai_profiling_dpia",
+    "title": "Build — run a DPIA for the AI profiling layer and complete it",
+    "note": "Plain-language assessment ask on clearly high-risk processing. A defensible result is a completed DPIA, linked to the Product analytics activity, with concrete risks to individuals and at least one documented (design-tied) mitigation — the ADR-F027 completion rule satisfied.",
+    "prompt": "We're launching an AI layer on our product analytics that profiles individual users to predict churn and decide which retention offers and pricing each person sees. Please run a DPIA for this: link it to the relevant activity in our Record of Processing Activities, set out the key risks to individuals with concrete mitigations, and complete it with an overall risk rating. Tell me what you recorded.",
+    "status": "completed",
+    "latency_s": 88.4,
+    "step_count": 75,
+    "model_turns": 15,
+    "tools_called": [
+      "search_documents",
+      "list_processing_activities",
+      "list_systems",
+      "list_vendors",
+      "list_assessments",
+      "read_document",
+      "propose_processing_activity",
+      "propose_system",
+      "list_processing_activities",
+      "list_systems",
+      "list_data_subject_categories",
+      "list_data_categories",
+      "add_data_subject_categories",
+      "add_data_categories",
+      "link_processing_activity_to_system",
+      "link_vendor_to_activity",
+      "read_file",
+      "propose_assessment",
+      "link_assessment_to_activity",
+      "list_assessments",
+      "link_assessment_to_activity",
+      "add_risk",
+      "add_risk",
+      "add_risk",
+      "add_risk",
+      "add_risk",
+      "complete_assessment",
+      "list_assessments",
+      "list_processing_activities",
+      "list_systems"
+    ],
+    "task_calls": 0,
+    "delegated": false,
+    "ancestry": [],
+    "expect_tools": [
+      "propose_assessment"
+    ],
+    "forbid_tools": [],
+    "shape_matched": true,
+    "checks": {
+      "expected_tools_present": true,
+      "forbidden_tools_absent": true,
+      "must_include_ok": true,
+      "should_not_ok": true,
+      "within_step_bound": true,
+      "clarify_ok": null,
+      "refusal_ok": null
+    },
+    "error": null,
+    "final_answer_excerpt": "Here is what I recorded, in full.\n\n---\n\n## DPIA — Completed\n\n**Assessment:** DPIA — AI User Profiling for Churn Prediction and Personalised Offers  \n**Status:** Completed · **Residual risk rating:** High  \n**ID:** `7b5e4ce5-3942-414a-b79d-c4bf7c4571c8`\n\n**Linked to ROPA activity:** \"AI User Profiling for Churn Prediction and Personalised Offers\" (`abbc7201-f97d-4d34-8998-e52795d2ff58`)\n\n---\n\n### ROPA entry created for the new processing\n\n| Field | Value |\n|---|---|\n| **Name** | AI User Profiling for Churn Prediction and Personalised Offers |\n| **Purpose** | Profile individual users from in-app behaviour + account + demographic data to predict churn risk and determine personalised retention offers/pricing — automated decisions with significant effects |\n| **Lawful basis** | Legitimate inter…"
+  }
+}
