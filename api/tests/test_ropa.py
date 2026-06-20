@@ -16,6 +16,7 @@ import uuid
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -541,3 +542,39 @@ async def test_db_unique_rejects_duplicate_data_category_name(db_session: AsyncS
     with pytest.raises(IntegrityError):
         await db_session.flush()
     await db_session.rollback()
+
+
+# --- Link-table reverse-FK index parity (PRIV-1 review fix, migration 0065) ----
+
+
+@pytest.mark.integration
+async def test_every_privacy_link_table_has_a_reverse_fk_index(
+    db_session: AsyncSession,
+) -> None:
+    """Every M:N link table indexes its TRAILING composite-PK / FK column.
+
+    A composite PK indexes only its leading column, so the reverse lookup
+    (system/vendor/category/activity -> activities/assessments, via
+    ``selectinload``) seq-scans without a standalone index. 0059/0060 added this
+    reverse index; 0062 (taxonomy) and 0064 (assessments) missed it; 0065 closes
+    the gap. This pins the parity so the precedent PRIV-A mirrors cannot regress.
+    """
+    expected = {
+        "ix_processing_activity_systems_system_id",  # 0059
+        "ix_processing_activity_vendors_vendor_id",  # 0060
+        "ix_pa_dsc_data_subject_category_id",  # 0065 (was missing in 0062)
+        "ix_pa_dc_data_category_id",  # 0065 (was missing in 0062)
+        "ix_apa_processing_activity_id",  # 0065 (was missing in 0064)
+    }
+    present = set(
+        (
+            await db_session.execute(
+                text("SELECT indexname FROM pg_indexes WHERE indexname = ANY(:names)").bindparams(
+                    names=list(expected)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert expected == present, f"missing reverse-FK indexes: {expected - present}"

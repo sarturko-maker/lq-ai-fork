@@ -16,6 +16,23 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
   ADR-F020). **Independent queued slice:** PRIV-6e geographic transfer map
   (`docs/fork/plans/PRIV-6e-geographic-transfer-map.md`, ECharts geo-arcs + new-dep ADR).
 
+- **PRIV-1 review fix (branch `priv-1-link-index-parity`) — link-table reverse-FK index parity. Migration `0065`; additive; NO ADR.**
+  An adversarial multi-lens review of the ROPA (PRIV-1) spine (5 lenses × refute-by-default verify, 23 agents:
+  **6 raised, 5 confirmed, 1 refuted**) surfaced ONE genuine bug class: the M:N link tables created in `0062`
+  (taxonomy) and `0064` (assessments) **omit the reverse-direction FK index** on their TRAILING composite-PK
+  column that the sibling link tables `0059` (`ix_processing_activity_systems_system_id`) and `0060`
+  (`ix_processing_activity_vendors_vendor_id`) deliberately add — so a `category→activities` /
+  `activity→assessments` `selectinload` (live read paths in `api/ropa.py` + `ropa_tools._list_categories`) and a
+  CASCADE seq-scan the link table. Fix: additive migration `0065` adds the three missing reverse indexes
+  (`ix_pa_dsc_data_subject_category_id`, `ix_pa_dc_data_category_id`, `ix_apa_processing_activity_id`;
+  abbreviated names because the full form exceeds Postgres's 63-char limit). **Migration-only by design** (the ORM
+  `Table()` defs declare no reverse index for ANY link table — they stay mutually consistent; verifiers flagged
+  that adding `Index()` to the model would over-correct). Regression guard `test_every_privacy_link_table_has_a_reverse_fk_index`
+  pins all five reverse indexes. **Gate:** ruff+mypy clean from repo root; migration **up/down/up clean on a
+  throwaway pgvector** with index columns asserted via `pg_indexes` (never the dev DB); ropa + ropa-tools suites
+  **112 passed**. The 1 refuted finding (no index on `source_project_id` SET-NULL FK) is correct as-is — the
+  project_id index was intentionally dropped going deployment-global (ADR-F019).
+
 - **PRIV-A1 (PR #118, branch `priv-a1-assessment-domain-spine`) — assessment domain spine + code validation. API-only (migration `0064`); NO agent, NO UI; ADR-F027.**
   P1 flagship start, mirroring the ROPA PRIV-1 spine. New `app/schemas/assessment.py` (write contracts:
   `AssessmentInput`/`RiskInput`, StrEnums `AssessmentType` pia|dpia|lia|tia / `AssessmentStatus`
