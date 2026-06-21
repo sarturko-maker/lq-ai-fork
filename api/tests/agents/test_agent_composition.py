@@ -213,6 +213,52 @@ def test_system_prompt_appends_area_profile() -> None:
     assert prompt.endswith("You are the Commercial agent.")
 
 
+async def test_seeded_commercial_profile_carries_doctrine_in_system_prompt(
+    db_session: AsyncSession,
+) -> None:
+    """C0 (ADR-F028): the seeded Commercial profile IS the lawyer-method
+    doctrine (migration 0066), and rendered through the area spec it reaches the
+    assembled run system prompt — the area voice that grounds every Commercial
+    matter. Drives the real render → compose path; nothing monkeypatched."""
+    from app.agents.area_agent import render_area_agent
+    from app.models.practice_area import PracticeArea
+
+    profile = (
+        await db_session.execute(
+            select(PracticeArea.profile_md).where(PracticeArea.key == "commercial")
+        )
+    ).scalar_one()
+    assert profile, "Commercial seeds a profile"
+    spec = render_area_agent(
+        profile_md=profile,
+        default_tier_floor=None,
+        agent_config=None,
+        bound_skill_names=[],
+        known_skill_names=[],
+    )
+    binding = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Acme MSA",
+        privileged=False,
+        minimum_inference_tier=None,
+    )
+    prompt = system_prompt_for(binding, spec)
+    # The doctrine clauses land in the prompt the model actually receives.
+    for marker in (
+        "controlling",
+        "nda-review",
+        "msa-review-commercial-purchase",
+        "smallest change",
+        "Items requiring human judgment",
+        "accept",
+        "counter",
+        "jurisdiction",
+    ):
+        assert marker in prompt, marker
+    assert prompt.endswith(profile.strip())
+
+
 async def test_bound_run_composes_matter_tools_and_privilege_envelope(
     comp_env: CompositionEnv,
 ) -> None:
@@ -365,8 +411,13 @@ async def test_area_bound_skill_reaches_agent_system_prompt(
     prompt_text = "\n".join(
         str(getattr(m, "content", "")) for msgs in model.seen_messages for m in msgs
     )
-    assert "nda-review" in prompt_text  # exposed via the backend
-    assert "msa-review-saas" not in prompt_text  # not known to the registry → filtered
+    # The Commercial profile now NAMES the controlling review skills (C0/ADR-F028),
+    # so a bare skill name reaches the prompt via the profile regardless of skill
+    # exposure. Assert on exposure-ONLY signals instead: the SkillsMiddleware lists
+    # each EXPOSED skill as "- **<name>**: <description>" (deepagents skills.py),
+    # and a description exists only for a registry-known skill.
+    assert "Use when reviewing an NDA." in prompt_text  # nda-review EXPOSED (its description)
+    assert "- **msa-review-saas**:" not in prompt_text  # bound-but-unknown → NOT exposed
 
 
 async def test_subagent_delegation_nests_steps_via_parent_step_id(
