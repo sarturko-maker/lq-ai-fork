@@ -229,7 +229,20 @@ org. Live (DeepSeek): a Commercial run visibly reflects the client's risk postur
 **ADR.** Records the **company-tier** decision under F030 (memory model for Commercial: company + matter tiers)
 — no separate ADR unless the injection mechanism proves novel.
 
-### C1 — Document-reader registry: DOCX/PPTX/XLSX/EML *(3d)*
+### C1 — Document-reader registry: DOCX/PPTX/XLSX/EML *(3d)* — ✓ DELIVERED (PR pending)
+> **Delivered (2026-06-21).** New `api/app/pipeline/readers/` pkg (DocumentReader protocol + ReaderRegistry +
+> `join_units` offset-truth + `guard_ooxml` DOCTYPE/zip-bomb + `ooxml_subtype` deep sniff; PdfReader wraps the
+> existing `parse_pdf` so **fitz/AGPL stays contained**, enforced by a CI AST import-guard). `ingest_file` takes
+> an **injected** registry (defaults to `build_default_registry`); dispatch by declared MIME + server-side
+> `sniff()` spoof-reject. Each reader returns the existing `ParsedDocument` → chunker/Document/persist
+> UNTOUCHED, Citation invariant holds. +python-docx +python-pptx (both MIT); **dropped** the planned
+> filetype/defusedxml (dep-free sniff + DOCTYPE pre-scan are more precise). OOXML readers **fail closed**
+> (library errors → ParserError). **ADR-F029 accepted**; **no migration**. Tests: `test_readers.py` (invariant +
+> spans + sniff/spoof + DOCTYPE/zip-bomb across all OOXML + fitz import-guard + EML non-recursion/plain>html +
+> malformed-fails-closed + empties) + 5 per-format ingest e2e. Verify: ruff/mypy clean; full suite **2476
+> passed / 2 skipped**; **live** (real image+MinIO+DB) all 4 formats `ready` + fidelity OK; 28-agent review →
+> SHIP. Pickup → **C2**. The first live scenario it unlocks: `scenarios/scenario-a-securescan.md`.
+
 **Goal.** Replace the single PDF MIME gate with an injected **MIME→reader registry** so a matter ingests the
 formats a deal arrives in. Each reader returns the existing `ParsedDocument`; chunker/embed/Document model
 untouched. Cheapest first: XLSX (openpyxl already a dep), EML (stdlib, zero new dep), DOCX (python-docx), PPTX
