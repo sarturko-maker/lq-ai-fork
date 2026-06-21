@@ -65,6 +65,7 @@ pipelines, no legacy-executor edits.
 | F | **Use DeepSeek** (cost-efficient). | Live-qualification target = DeepSeek (OpenAI-surface gateway path). Open Q #4 resolved. |
 | G | **python-docx cannot redline; models choke on XML → Adeu is required.** | C4 has **no python-docx/lxml fallback**; Adeu is the **sole** redline path. Its whole reason for being is to abstract the OOXML `w:ins`/`w:del` so the model only proposes find/replace edits. |
 | H | **Multi-turn redlining is the next project** (held). | Added as a **held follow-on milestone**; C5 (negotiation rounds) is its foundation, not the full system. |
+| I | **"Adeu is an MCP, Kevin's building MCPs — simpler path?"** (2026-06-21) | **Adeu integrated via its Python SDK in-process, NOT its MCP server** — C4's validated-write gate needs our code *between* the agent's proposal and the applied edit, which an in-process call gives for free; routing a *local, zero-network* tool through MCP adds a client+server+transport and still needs our validator interposed. C-R0 **empirically verified** the pin (`adeu==1.12.1`, MIT, offline under `--network=none`, no *new* copyleft — `certifi`/MPL-2.0 already in-tree). **MCP-as-a-capability is its own APPROVED milestone** — planned around a *sanction-sync* of upstream's **gateway-brokered MCP client** (Kevin-Tucuxi; ADRs 0014/0015 — already matches our gateway-only egress rule), approval-gated per ADR-F001. See `MILESTONES.md` § MCP capability. |
 
 ---
 
@@ -151,7 +152,11 @@ C-R0 ─► C0 ─┬─► C-CLIENT ─┐
    C0,C-R0,C1 ─► C4 ──────┘   C4 ─► C6 (needs F036+F038)   C4 ─► O0 (deferred-track spike)
 ```
 
-### C-R0 — Research spike: lawyer-method doctrine + Adeu pinning *(2d, gates C0 & C4)*
+### C-R0 — Research spike: lawyer-method doctrine + Adeu pinning *(2d, gates C0 & C4)* — ✓ DELIVERED (PR pending)
+**Delivered (2026-06-21).** `commercial-lawyer-method.md` (verified sources; adversarially reviewed — 7
+fixes folded, incl. the minimal-diff reframing + fail-close + jurisdiction-competence) + `adeu-pinning.md`
+(`adeu==1.12.1` pin empirically verified: SDK signatures, offline under `--network=none`, all-permissive tree)
++ **ADR-F028** (proposed). Decision **I** folded (Adeu via SDK; MCP its own milestone).
 **Goal.** Two grounded deliverables. (a) **Lawyer method** — a committed method-doctrine doc grounded in
 practitioner/theory sources (Alnajafi, Sterling Miller, Fisher & Ury), reconciled against the four existing
 review skills so `profile_md` *derives from sources + extends shipped skills*. (b) **Adeu pinning** (Adeu is
@@ -629,7 +634,10 @@ the only copyleft dep in the tree.
 *Resolved by this revision:* Adeu (confirmed, MIT, sole path — A/G); provider (DeepSeek — F); client identity
 (= org profile, C-CLIENT — E); orchestration feasibility (subagents suffice for C0–C7; guarantees are the
 deferred O-track — C); the tools/skills capability model (gate-vs-flow decision rule + controlling/advisory
-split, adversarially reviewed — folded into "Tools & skills architecture").
+split, adversarially reviewed — folded into "Tools & skills architecture"); **Adeu integration path** (SDK
+in-process, not MCP — decision I; pin `adeu==1.12.1` empirically verified in `adeu-pinning.md`);
+**MCP-as-a-capability** (its own approved milestone, sanction-sync of upstream's gateway-brokered MCP client —
+decision I; see `MILESTONES.md`).
 
 ---
 
