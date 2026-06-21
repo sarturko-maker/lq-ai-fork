@@ -81,16 +81,22 @@ class PageSpan:
 
 @dataclass(slots=True)
 class ParsedDocument:
-    """The canonical view of a parsed PDF.
+    """The canonical view of a parsed document.
+
+    Returned by every reader in the MIME->reader registry (ADR-F029) —
+    PDF (PyMuPDF), DOCX, XLSX, PPTX, EML — not just PDF.
 
     Attributes:
         canonical_text: The full, concatenated, character-precise text
-            of the PDF as produced by PyMuPDF. This is the load-bearing
-            artifact: every chunk's ``[char_offset_start:char_offset_end]``
-            slice of this string equals the chunk's ``content``.
-        pages: One :class:`PageSpan` per page; ``pages[i].page_number``
-            is 1-based.
-        page_count: Total page count; equals ``len(pages)``.
+            of the document as produced by the matched reader. This is the
+            load-bearing artifact: every chunk's
+            ``[char_offset_start:char_offset_end]`` slice of this string
+            equals the chunk's ``content``.
+        pages: One :class:`PageSpan` per unit; ``pages[i].page_number`` is
+            1-based. The *unit* is format-dependent (ADR-F029): a PDF page,
+            an XLSX worksheet, a PPTX slide, a DOCX paragraph block, or the
+            whole EML message.
+        page_count: Total unit count; equals ``len(pages)``.
         parser: Which parser cascade produced this result —
             ``'docling+pymupdf'`` (both succeeded), ``'pymupdf'``
             (Docling fell through), or ``'pymupdf-only'``

@@ -163,7 +163,22 @@ dependencies = [
     # from the spreadsheet back into the deployment. CSV export uses
     # stdlib csv; no pandas dependency. MIT-licensed; no new SBOM
     # family beyond openpyxl + its single transitive `et-xmlfile`.
+    # C1 (COMM) ALSO reads .xlsx with openpyxl (read-only) — no new dep.
     "openpyxl>=3.1,<4",
+    # C1 (COMM) — document-reader registry (ADR-F029). A deal arrives as
+    # DOCX/XLSX/PPTX/EML, not just PDF; each reader returns the existing
+    # ParsedDocument and holds the Citation-Engine offset invariant. All
+    # PERMISSIVE (no copyleft — CLAUDE.md rule B). XLSX uses openpyxl
+    # (above); EML uses the stdlib `email` package (no dep). PyMuPDF/fitz
+    # stays the ONLY AGPL parser, contained behind PdfReader (CI
+    # import-guard test). License posture recorded in NOTICES.md.
+    #
+    # python-docx: DOCX paragraph text. MIT. Transitive: lxml (BSD-3,
+    # already in-tree) — no new copyleft.
+    "python-docx>=1.1,<2",
+    # python-pptx: PPTX per-slide text. MIT. Transitives: lxml (BSD-3),
+    # Pillow (HPND/MIT-style), XlsxWriter (BSD-2) — all permissive.
+    "python-pptx>=1.0,<2",
 ]
 
 [project.optional-dependencies]
@@ -252,4 +267,11 @@ ignore_missing_imports = true
 # does not ship a `py.typed` marker). Imported in app.security.totp.
 [[tool.mypy.overrides]]
 module = ["pyotp", "pyotp.*"]
+ignore_missing_imports = true
+
+# C1 (COMM) — the document-reader libraries don't ship usable type stubs.
+# python-docx (`docx`), python-pptx (`pptx`), and openpyxl are imported
+# lazily inside app.pipeline.readers.* and used at runtime.
+[[tool.mypy.overrides]]
+module = ["docx", "docx.*", "pptx", "pptx.*", "openpyxl", "openpyxl.*"]
 ignore_missing_imports = true

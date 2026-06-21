@@ -595,7 +595,7 @@ def _build_xlsx(*, columns: list[ColumnSpec], results: TabularResults) -> bytes:
 
     # Lazy import keeps the openpyxl dependency from being imported on
     # the FastAPI app's hot path (export is the only consumer).
-    from openpyxl import Workbook  # type: ignore[import-untyped]
+    from openpyxl import Workbook
 
     wb = Workbook()
     ws = wb.active
@@ -680,7 +680,7 @@ def _build_xlsx_comment(citations: list[Citation]) -> object:
     summary is complete.
     """
 
-    from openpyxl.comments import Comment  # type: ignore[import-untyped]
+    from openpyxl.comments import Comment
 
     total = len(citations)
     shown = citations[:5]

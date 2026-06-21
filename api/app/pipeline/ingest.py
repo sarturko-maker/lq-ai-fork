@@ -4,10 +4,13 @@ This module is the entry point invoked by the ``arq`` worker. Given a
 ``files.id``, it:
 
 1. Loads the file row (refusing to ingest soft-deleted rows).
-2. Pulls the bytes from MinIO via :func:`app.storage.stream_download`.
-3. Runs :func:`app.pipeline.parsers.parse_pdf` (PyMuPDF mandatory,
-   Docling best-effort) on the byte stream — wrapped in
-   :func:`asyncio.to_thread` because the parsers are sync.
+2. Picks a reader for the file's declared MIME from the injected
+   :class:`app.pipeline.readers.ReaderRegistry` (C1, ADR-F029) — PDF,
+   DOCX, XLSX, PPTX, or EML — rejecting unsupported types up front.
+3. Pulls the bytes from MinIO via :func:`app.storage.stream_download`,
+   content-sniffs them against the declared type, then runs the matched
+   reader (wrapped in :func:`asyncio.to_thread` because readers are
+   sync). Each reader returns the same ``ParsedDocument`` contract.
 4. Runs :func:`app.pipeline.chunker.chunk_document` to produce
    character-precise chunks.
 5. Persists a :class:`Document` row and the :class:`DocumentChunk`
@@ -16,7 +19,8 @@ This module is the entry point invoked by the ``arq`` worker. Given a
 
 Failure paths:
 
-* **Unsupported file type** (non-PDF MIME): row goes to
+* **Unsupported file type** (no reader for the declared MIME, or a
+  content sniff that contradicts the declared type): row goes to
   ``ingestion_status='failed'`` with
   ``ingestion_error='unsupported_type'``. C4 leaves project_id and
   other metadata intact.
@@ -54,9 +58,11 @@ from app.pipeline.parsers import (
     ParsedDocument,
     ParserError,
     ParserUnsupported,
-    is_pdf_mime,
-    parse_pdf,
 )
+
+# C1 (ADR-F029): the injected MIME->reader registry replaces the single
+# PDF gate, so a matter ingests the formats a deal arrives in.
+from app.pipeline.readers import ReaderRegistry, build_default_registry
 from app.storage import stream_download
 
 log = logging.getLogger(__name__)
@@ -95,6 +101,7 @@ async def ingest_file(
     *,
     target_chars: int | None = None,
     overlap_chars: int | None = None,
+    registry: ReaderRegistry | None = None,
 ) -> IngestResult:
     """Run the document pipeline against ``file_id``.
 
@@ -111,6 +118,9 @@ async def ingest_file(
             Defaults to :data:`LQ_AI_CHUNK_TARGET_CHARS` from settings.
         overlap_chars: Override for the chunker's overlap. Defaults to
             :data:`LQ_AI_CHUNK_OVERLAP_CHARS` from settings.
+        registry: The MIME->reader registry (C1, ADR-F029). Defaults to
+            :func:`app.pipeline.readers.build_default_registry`; tests
+            inject a fake through this seam rather than monkeypatching.
 
     Returns:
         :class:`IngestResult` describing the run's outcome.
@@ -119,6 +129,7 @@ async def ingest_file(
     settings = get_settings()
     target = target_chars if target_chars is not None else settings.lq_ai_chunk_target_chars
     overlap = overlap_chars if overlap_chars is not None else settings.lq_ai_chunk_overlap_chars
+    reader_registry = registry if registry is not None else build_default_registry(settings)
 
     # ---- Load the file row.
     stmt = select(FileModel).where(FileModel.id == file_id)
@@ -151,8 +162,9 @@ async def ingest_file(
             error="soft_deleted",
         )
 
-    # ---- Reject unsupported types early.
-    if not is_pdf_mime(row.mime_type):
+    # ---- Reject unsupported declared types early (no bytes needed).
+    reader = reader_registry.for_mime(row.mime_type)
+    if reader is None:
         await _mark_failed(db, row, error="unsupported_type", reason=f"mime={row.mime_type!r}")
         return IngestResult(
             file_id=file_id,
@@ -172,7 +184,7 @@ async def ingest_file(
 
     # ---- Pull bytes from MinIO.
     try:
-        pdf_bytes = await _read_all_bytes(row.storage_path)
+        file_bytes = await _read_all_bytes(row.storage_path)
     except Exception as exc:
         # Storage failures: log and re-raise so arq retries. Don't flip
         # status to failed — operator-side fixes (MinIO restart) should
@@ -187,13 +199,28 @@ async def ingest_file(
         )
         raise
 
-    # ---- Run parsers in a thread (sync libraries).
-    try:
-        parsed = await asyncio.to_thread(
-            parse_pdf,
-            pdf_bytes,
-            run_docling=settings.lq_ai_docling_enabled,
+    # ---- Server-side content sniff: reject a file whose bytes contradict
+    # its declared type (reject-don't-guess; e.g. a .txt renamed .docx, or
+    # a payload declared application/pdf). C1 / ADR-F029.
+    if not reader.sniff(file_bytes):
+        await _mark_failed(
+            db,
+            row,
+            error="unsupported_type",
+            reason=f"content_sniff_mismatch mime={row.mime_type!r}",
         )
+        return IngestResult(
+            file_id=file_id,
+            status="failed",
+            document_id=None,
+            chunk_count=0,
+            parser=None,
+            error="unsupported_type",
+        )
+
+    # ---- Run the matched reader in a thread (sync libraries).
+    try:
+        parsed = await asyncio.to_thread(reader.read, file_bytes)
     except ParserUnsupported as exc:
         await _mark_failed(db, row, error="unsupported_content", reason=str(exc))
         return IngestResult(

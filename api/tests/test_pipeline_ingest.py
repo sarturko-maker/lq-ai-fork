@@ -24,6 +24,7 @@ What the tests check:
 
 from __future__ import annotations
 
+import io
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -38,6 +39,12 @@ from app.models.document import Document, DocumentChunk
 from app.models.file import File as FileModel
 from app.models.user import User
 from app.pipeline.ingest import ingest_file
+from app.pipeline.readers._base import (
+    EML_MIME,
+    OOXML_DOCX_MIME,
+    OOXML_PPTX_MIME,
+    OOXML_XLSX_MIME,
+)
 from app.security import hash_password
 from tests.test_storage_streaming import FakeS3Client
 
@@ -370,21 +377,28 @@ async def test_ingest_corrupt_pdf_marks_failed(
     patched_storage: FakeS3Client,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A corrupt PDF flips the row to failed with parse_failed."""
+    """A corrupt PDF flips the row to failed with parse_failed.
+
+    The bytes start with ``%PDF`` so they pass the C1 content sniff (a
+    file that looks like a PDF) but PyMuPDF cannot open the malformed
+    body — exercising the parse-failure path rather than the sniff's
+    ``unsupported_type`` reject (which covers non-PDF bytes).
+    """
 
     from app.config import get_settings
 
     settings = get_settings()
     monkeypatch.setattr(settings, "lq_ai_docling_enabled", False)
 
+    corrupt_pdf = b"%PDF-1.4\nthis is not a valid PDF body and cannot be parsed"
     storage_key = f"{uuid.uuid4()}"
-    _put_in_fake_s3(fake_s3, storage_key, b"NOT A PDF")
+    _put_in_fake_s3(fake_s3, storage_key, corrupt_pdf)
 
     file_row = await _create_file_row(
         db_session,
         db_user,
         storage_path=storage_key,
-        pdf_bytes=b"NOT A PDF",
+        pdf_bytes=corrupt_pdf,
     )
 
     result = await ingest_file(db_session, file_row.id)
@@ -546,3 +560,198 @@ async def test_ingest_re_run_refreshes_normalized_content(
     parsed = parse_pdf(pdf_bytes, run_docling=False)
     assert doc.normalized_content == parsed.canonical_text
     assert doc.was_ocrd is False
+
+
+# ---------------------------------------------------------------------------
+# C1 (ADR-F029): multi-format ingest through the reader registry
+# ---------------------------------------------------------------------------
+
+
+def _make_docx_bytes() -> bytes:
+    docx = pytest.importorskip("docx")
+    document = docx.Document()
+    document.add_paragraph("Mutual Non-Disclosure Agreement between the parties.")
+    document.add_paragraph(
+        "1. Confidential Information means any non-public information disclosed."
+    )
+    document.add_paragraph(
+        "2. The term of this Agreement is two (2) years from the Effective Date."
+    )
+    buf = io.BytesIO()
+    document.save(buf)
+    return buf.getvalue()
+
+
+def _make_xlsx_bytes() -> bytes:
+    openpyxl = pytest.importorskip("openpyxl")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Pricing"
+    ws.append(["Item", "Qty", "Unit price"])
+    ws.append(["Support plan", 1, "GBP 12,000 / year"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _make_pptx_bytes() -> bytes:
+    pptx = pytest.importorskip("pptx")
+    presentation = pptx.Presentation()
+    blank = presentation.slide_layouts[6]
+    slide = presentation.slides.add_slide(blank)
+    box = slide.shapes.add_textbox(left=0, top=0, width=914400, height=914400)
+    box.text_frame.text = "Deal overview: counterparty proposes an uncapped indemnity."
+    buf = io.BytesIO()
+    presentation.save(buf)
+    return buf.getvalue()
+
+
+_EML_BYTES = (
+    b"From: counsel@northwind.example\r\n"
+    b"To: legal@operator.example\r\n"
+    b"Subject: Revised MSA - liability\r\n"
+    b"Date: Mon, 1 Jun 2026 09:30:00 +0000\r\n"
+    b"\r\n"
+    b"Attached please find our redline; we have deleted the mutual liability cap.\r\n"
+)
+
+
+async def _ingest_blob(
+    db: AsyncSession,
+    user: User,
+    fake_s3: FakeS3Client,
+    *,
+    blob: bytes,
+    mime: str,
+    filename: str,
+) -> tuple[FileModel, object]:
+    storage_key = f"{uuid.uuid4()}"
+    _put_in_fake_s3(fake_s3, storage_key, blob)
+    file_row = await _create_file_row(
+        db, user, storage_path=storage_key, pdf_bytes=blob, mime=mime, filename=filename
+    )
+    return file_row, await ingest_file(db, file_row.id)
+
+
+async def _assert_ready_and_fidelity(
+    db: AsyncSession, file_id: uuid.UUID, *, expected_parser: str
+) -> Document:
+    doc = (await db.execute(select(Document).where(Document.file_id == file_id))).scalar_one()
+    assert doc.parser == expected_parser
+    chunks = (
+        (
+            await db.execute(
+                select(DocumentChunk)
+                .where(DocumentChunk.document_id == doc.id)
+                .order_by(DocumentChunk.chunk_index)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(chunks) > 0
+    for chunk in chunks:
+        slice_ = doc.normalized_content[chunk.char_offset_start : chunk.char_offset_end]
+        assert slice_ == chunk.content, f"fidelity broken at chunk {chunk.chunk_index}"
+    return doc
+
+
+@pytest.mark.integration
+async def test_ingest_docx_marks_ready_with_fidelity(
+    db_session: AsyncSession,
+    db_user: User,
+    fake_s3: FakeS3Client,
+    patched_storage: FakeS3Client,
+) -> None:
+    file_row, result = await _ingest_blob(
+        db_session,
+        db_user,
+        fake_s3,
+        blob=_make_docx_bytes(),
+        mime=OOXML_DOCX_MIME,
+        filename="nda.docx",
+    )
+    assert result.status == "ready", result.error
+    await _assert_ready_and_fidelity(db_session, file_row.id, expected_parser="python-docx")
+
+
+@pytest.mark.integration
+async def test_ingest_xlsx_marks_ready_with_fidelity(
+    db_session: AsyncSession,
+    db_user: User,
+    fake_s3: FakeS3Client,
+    patched_storage: FakeS3Client,
+) -> None:
+    file_row, result = await _ingest_blob(
+        db_session,
+        db_user,
+        fake_s3,
+        blob=_make_xlsx_bytes(),
+        mime=OOXML_XLSX_MIME,
+        filename="pricing.xlsx",
+    )
+    assert result.status == "ready", result.error
+    await _assert_ready_and_fidelity(db_session, file_row.id, expected_parser="openpyxl")
+
+
+@pytest.mark.integration
+async def test_ingest_pptx_marks_ready_with_fidelity(
+    db_session: AsyncSession,
+    db_user: User,
+    fake_s3: FakeS3Client,
+    patched_storage: FakeS3Client,
+) -> None:
+    file_row, result = await _ingest_blob(
+        db_session,
+        db_user,
+        fake_s3,
+        blob=_make_pptx_bytes(),
+        mime=OOXML_PPTX_MIME,
+        filename="deck.pptx",
+    )
+    assert result.status == "ready", result.error
+    await _assert_ready_and_fidelity(db_session, file_row.id, expected_parser="python-pptx")
+
+
+@pytest.mark.integration
+async def test_ingest_eml_marks_ready_with_fidelity(
+    db_session: AsyncSession,
+    db_user: User,
+    fake_s3: FakeS3Client,
+    patched_storage: FakeS3Client,
+) -> None:
+    file_row, result = await _ingest_blob(
+        db_session,
+        db_user,
+        fake_s3,
+        blob=_EML_BYTES,
+        mime=EML_MIME,
+        filename="thread.eml",
+    )
+    assert result.status == "ready", result.error
+    doc = await _assert_ready_and_fidelity(db_session, file_row.id, expected_parser="eml")
+    assert "deleted the mutual liability cap" in doc.normalized_content
+
+
+@pytest.mark.integration
+async def test_ingest_spoofed_docx_marks_failed(
+    db_session: AsyncSession,
+    db_user: User,
+    fake_s3: FakeS3Client,
+    patched_storage: FakeS3Client,
+) -> None:
+    """Bytes declared as DOCX but not actually OOXML are rejected by the sniff."""
+
+    file_row, result = await _ingest_blob(
+        db_session,
+        db_user,
+        fake_s3,
+        blob=b"this is plain text pretending to be a word document",
+        mime=OOXML_DOCX_MIME,
+        filename="spoof.docx",
+    )
+    assert result.status == "failed"
+    assert result.error == "unsupported_type"
+    await db_session.refresh(file_row)
+    assert file_row.ingestion_status == "failed"
+    assert file_row.ingestion_error == "unsupported_type"

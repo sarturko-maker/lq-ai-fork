@@ -12,7 +12,7 @@ and **controlling skills**; *supervised* = human-owns every material write + esc
 receipts. Generalises to every practice area (cf. `docs/fork/NORTH-STAR.md`). Full statement at the top of the
 COMM plan.
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ DELIVERED; building continues at C1.**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ DELIVERED; building continues at C2.**
 
 The full COMM decomposition is written + adversarially reviewed:
 **`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md` — read it first.** **Privacy is PARKED**
@@ -24,33 +24,45 @@ of Commercial) → `docs/fork/MILESTONES.md` § MCP capability.
 via the `gateway-config` volume). DeepSeek is the qualified live-test target (decision F). Revert when MiniMax
 quota returns.
 
-## Done this slice (C-CLIENT — org profile = company/client memory tier, NO migration)
+## Done this slice (C1 — document-reader registry: DOCX/PPTX/XLSX/EML; NO migration)
 
-- **`api/app/agents/composition.py`** — the company/client tier of the 4-level memory model goes live.
-  `system_prompt_for(binding, area, client_context)` gains a 3rd arg; a new `CLIENT_CONTEXT_PROMPT` fences the
-  operator's `OrganizationProfile.content_md` as a read-only **"Client / house context"** block, injected
-  **BEFORE** the area profile (so the C0 doctrine stays the controlling *last* word — base → matter → client →
-  area). `_load_client_context_md(db)` reads the singleton (migration 0010), treats empty as absent, and is
-  loaded **once per run for EVERY run** (bound/unbound, any area) — closing CLAUDE.md **blocker #5** (plain
-  runs had zero company context). **Read-only**: no agent tool mutates it; the operator owns edits via the
-  existing `PUT /organization-profile`. The block is operator-trusted but still **fenced** (defense in depth).
-- **`docs/adr/F030-commercial-memory-model.md`** — **accepted** (company tier = this slice's injection; matter
-  tier = `context_md` + a code-validated propose/accept path at **C3**). This **satisfies the "F030 before C3"
-  gate**. No counterparty entity, no CompositeBackend yet.
-- **Tests:** composition file now **17/17** — pure `system_prompt_for` (fenced + ordered-before-area +
-  read-only language + None/whitespace degrade) + **e2e seeded-injection** (the org-profile body reaches the
-  model's system prompt; the run does **not** mutate the row) + **empty-degrades-clean**. Fixed the
-  `_seen_system_text` helper (extract content-block text instead of `str(list)`, which repr-escaped
-  apostrophes when a matter name added double quotes — the bug that masked the first e2e run).
-  Plus a provider-marked **A/B live test** (`tests/agents/scenarios/test_commercial_client_context.py` +
-  `zendesk_client.py`).
-- **Verification:** ruff clean (formatted with **CI ruff 0.15.18**, not the dev image's 0.15.17 — see Gotchas);
-  mypy clean; full api suite containerized (CI-parity). Live (DeepSeek, alias `smart`): an **A/B** with a
-  synthetic **Zendesk** house context — same matter + prompt, profile **OFF→ON**. ON holds the house cap
-  position and **escalates uncapped liability to the General Counsel** (+ the 2x-annual super-cap rule); the
-  procurement leg **flips** to buyer and **requires a DPA** — none derivable from the document. Evidence:
-  `docs/fork/evidence/c-client/` (`c-client-verification.md` narrative + `ab-report.md`/`.json` +
-  `zendesk-org-profile.md`).
+- **`api/app/pipeline/readers/`** (NEW pkg) — `_base.py` (`DocumentReader` protocol, `ReaderRegistry`,
+  `join_units` = the single offset-truth helper mirroring `parsers._run_pymupdf`, `build_parsed_document`,
+  `guard_ooxml` = DOCTYPE/ENTITY reject + zip-bomb caps, `ooxml_subtype` = deep `[Content_Types].xml` sniff);
+  `pdf.py` (thin wrapper over the existing `parse_pdf` — **fitz/AGPL stays contained here**), `xlsx.py`,
+  `docx.py`, `pptx.py`, `eml.py`; `__init__.py` (`build_default_registry(settings)` composition root). Heavy
+  libs (openpyxl/python-docx/python-pptx) are **lazy-imported inside each reader** so the pkg imports cleanly
+  without them.
+- **`api/app/pipeline/ingest.py`** — the single PDF gate (`is_pdf_mime`/`parse_pdf`) is replaced by an
+  **injected** `registry: ReaderRegistry | None = None` (defaults to `build_default_registry(settings)`, so
+  every caller is unchanged): look up reader by declared MIME → server-side `sniff()` content cross-check
+  (reject a spoof as `unsupported_type`) → `reader.read` via `to_thread`. Each reader returns the SAME
+  `ParsedDocument`; **chunker / Document model / persist UNTOUCHED**, so the Citation-Engine invariant
+  `normalized_content[start:end] == content` holds by construction. PDF behaviour byte-identical. Error mapping
+  preserved (`ParserUnsupported`→`unsupported_content`, `ParserError`→`parse_failed`).
+- **Deps:** +`python-docx`>=1.1,<2 (MIT), +`python-pptx`>=1.0,<2 (MIT) — both permissive (rule B). XLSX reuses
+  the already-present openpyxl; EML uses stdlib `email` (no dep). **Dropped** the planned `filetype` +
+  `defusedxml`: the dep-free per-reader `sniff` + the pre-parse DOCTYPE reject are more precise + version-proof.
+  mypy overrides added; **NOTICES.md** gained a Python license-posture table (incl. the AGPL PyMuPDF boundary).
+- **Security:** OOXML XXE/entity-expansion killed by rejecting `<!DOCTYPE`/`<!ENTITY` in XML-part prologs
+  **before** lxml opens the file; zip-bomb size/entry caps; MIME-spoof rejected at the boundary; **CI AST
+  import-guard** asserts no reader imports `fitz`. Untrusted-text only (openpyxl `data_only` = no formula eval;
+  no remote fetch; EML reads ONE message, no attachment recursion). The 3 OOXML readers **fail closed**
+  (wrap library errors → `ParserError`) so a malformed-but-sniff-passing file becomes `parse_failed`, not a
+  retriable worker crash (review should-fix).
+- **ADR-F029** accepted (extends/supersedes ADR-0006's PDF-only scope; inherits its offset contract). **No
+  migration** (`parser`/`parser_version` free-text, `page_count` nullable; the `page` field is reinterpreted
+  per format — sheet/paragraph-block/slide/whole-message, documented in F029).
+- **Tests:** `tests/test_readers.py` (offset invariant + tiling spans per format, registry dispatch,
+  sniff/spoof, DOCTYPE + zip-bomb guards across ALL OOXML, **fitz import-guard**, EML non-recursion / HTML-strip
+  / plain>html, **malformed-OOXML-fails-closed**, empty-docs) + 5 per-format ingest e2e in
+  `test_pipeline_ingest.py`. The pre-existing corrupt-PDF test now feeds `%PDF`-prefixed garbage (the new sniff
+  rejects non-PDF-declared-as-PDF earlier — a legitimate behaviour change).
+- **Verification:** ruff clean (**CI ruff 0.15.18**); mypy clean (readers+ingest, 8 files); full api suite
+  containerized **2476 passed / 2 skipped** (the 1 "fail" = `test_ready_reports_per_dependency_status`, which
+  expects services UNREACHABLE — my run was on the live compose network; CI runs it isolated → passes).
+  **Live** (real rebuilt image + real MinIO + real DB): all 4 formats → `ready` + fidelity OK. **28-agent
+  adversarial review → SHIP**, 0 blockers; 2 should-fix fixed (OOXML fail-closed + plain>html test), nits folded.
 
 ## Maintainer decisions already locked (don't re-litigate)
 
@@ -65,30 +77,33 @@ quota returns.
   Commercial; does not block C0–C7.
 - **Multi-turn redlining** = the maintainer's separate next project (held; C5 is its foundation).
 
-## ▶ PICK UP EXACTLY HERE — slice **C1** (Document-reader registry: DOCX/PPTX/XLSX/EML, ~3d) — depends C-R0/C0 ✓
+## ▶ PICK UP EXACTLY HERE — slice **C2** (Email-chain + .msg + nested-attachment reader, ~3d) — depends C1 ✓
 
-**Goal.** Replace the single PDF MIME gate with an injected **MIME→reader registry** so a matter ingests the
-formats a deal arrives in. Each reader returns the existing `ParsedDocument`; the chunker/embed/`Document`
-model stay untouched. Cheapest-first: **XLSX** (openpyxl already a dep), **EML** (stdlib, zero new dep),
-**DOCX** (python-docx), **PPTX** (python-pptx) — all permissive licences (decision B).
-**Non-goals.** No `.msg` (C2); no email-chain threading / nested-attachment recursion (C2); no OCR; no
-Docling/VLM swap (deferred spike).
-**Key files.** `api/app/pipeline/ingest.py`, `parsers.py`, `chunker.py`,
-`api/app/workers/document_pipeline.py`, `api/pyproject.toml`, `NOTICES.md`,
-`docs/adr/0006-document-pipeline-architecture.md`.
-**Watch.** Each reader must hold the **Citation Engine invariant** `content == normalized_content[start:end]`
-byte-for-byte, with generalised unit-spans (slide#/sheet-name/paragraph-block). Server-side **MIME sniff**
-(filetype/python-magic) rejects spoofed types at the boundary (reject-don't-guess). A **CI import-guard test**
-asserts no non-PDF reader imports `fitz`. Parse Office XML with **external entities disabled** (XXE +
-remote-template SSRF). New deps are SBOM entries → update `NOTICES.md`.
-**ADR.** **F029** (extends/supersedes ADR-0006). *(Open question #1 — PyMuPDF/AGPL — is adjacent: C1 keeps
-PyMuPDF for PDF and adds only permissive readers; the grandfather-vs-replace call is the maintainer's, not a
-C1 blocker. Flag it, don't resolve it here.)*
-**Verify.** Per-reader unit tests assert the invariant + spans; spoofed-MIME rejection test; the fitz
-import-guard test. Live: upload one of each format → `ready` + searchable chunks (**rebuild api + arq-worker +
-ingest-worker together** after the migration/dep change). Then HANDOFF → **C2**.
+**Goal.** A deal starts as an email; complex ones are the whole chain + attachments. Add **`.msg`**
+(python-oxmsg, **MIT** — NOT GPLv3 extract-msg; olefile transitive is BSD) and an **email-chain reader** that
+walks multipart parts, stitches by `Message-ID`/`In-Reply-To`/`References`, carries per-message From/Date as
+span metadata, and recurses **ONE level** into attached office docs by delegating to the C1 registry.
+**Non-goals.** No quoted-history splitting lib unless proven needed; no counterparty/deal ENTITY (matter memory
+= C3); no recursion deeper than one level.
+**Key files.** the readers pkg (add `msg.py` + an email-chain reader extending `eml.py`'s single-message
+reader), `ingest.py`, `api/app/models/document.py` (per-message spans in `metadata_json`), `api/pyproject.toml`,
+`NOTICES.md`.
+**Watch.** Extend the C1 **fitz import-guard** to the new readers. The current `EmlReader` reads ONE message
+(`page_count=1`) and does **NOT** recurse — C2 is where threading + the one-level attachment recursion land.
+Reuse `guard_ooxml` for any recursed office doc (zip-bomb/XXE already handled). HTML sanitized (the `eml.py`
+stripper is HTML5-correct); `cid:`/`http(s)` **never** fetched; nesting depth + per-part size capped
+(billion-laughs/zip-bomb). The Citation-Engine invariant holds via `join_units` per message unit.
+**ADR.** F029 (extended).
+**Verify.** Multi-message `.eml` → ordered per-message spans with sender/date; `.msg` parses
+sender/recipients/subject/body+attachment bytes; an attached office doc is recursed + chunked; HTML sanitized +
+no remote fetch. Live: ingest a real multi-attachment deal email; agent answers grounded in a buried
+attachment. **Rebuild api + arq-worker + ingest-worker together** if deps change. Then HANDOFF → **C3**.
 
-**Ladder:** C-R0 ✓ → C0 ✓ → C-CLIENT ✓ → **C1** → C2 → C3 → C4 → C5 → C6 → C7 (+ O0 spike). ADR gates:
+**FIRST live-verification vehicle (buildable NOW): Scenario A — `docs/fork/plans/scenarios/scenario-a-securescan.md`**
+(Zendesk buy-side first-pass on clean SecureScan paper → prose redline; exercises C1 + C-CLIENT + C0, NO C4/C5).
+**Scenario B — `scenario-b-meridian.md`** (inbound redlines) needs C2's chain + C5.
+
+**Ladder:** C-R0 ✓ → C0 ✓ → C-CLIENT ✓ → C1 ✓ → **C2** → C3 → C4 → C5 → C6 → C7 (+ O0 spike). ADR gates:
 **F030 accepted ✓** (C3 unblocked), **F036 + F038 before C6**.
 
 ## Open decisions still pending the maintainer (COMM plan § Open questions)
@@ -104,9 +119,41 @@ ingest-worker together** after the migration/dep change). Then HANDOFF → **C2*
 
 ## Gotchas / durable traps
 
-- **Migration head is still `0066`** (C-CLIENT added none — it reads the existing `OrganizationProfile`).
-  Fresh-head check before any migration (`ls api/alembic/versions | sort | tail`); never reuse a number. C1
-  likely needs none (readers + deps, no schema change); C3/C6/C7 do.
+- **Migration head is still `0066`** (C-CLIENT and **C1 added none** — readers reuse the existing
+  `Document`/`DocumentChunk` schema: `parser` free-text, `page_count` nullable). Fresh-head check before any
+  migration (`ls api/alembic/versions | sort | tail`); never reuse a number. C2 likely needs none (readers +
+  deps); C3/C6/C7 do.
+- **Document-reader registry (C1, ADR-F029) = `api/app/pipeline/readers/`.** `ingest_file(..., registry=None)`
+  defaults to `build_default_registry(settings)`; dispatch is by **declared MIME** then a server-side
+  `reader.sniff(bytes)` content cross-check (PDF magic / OOXML deep `[Content_Types].xml` subtype / EML always
+  True). Every reader returns the existing `ParsedDocument` and owns offset fidelity via `join_units` (the +1
+  join-newline accounting, mirror of `parsers._run_pymupdf`). **fitz lives ONLY behind `PdfReader`** —
+  the AST import-guard test (`test_readers.py::test_no_reader_module_imports_fitz`) fails the build otherwise.
+  OOXML security is `guard_ooxml` (DOCTYPE/ENTITY reject BEFORE lxml + zip-bomb caps); the 3 OOXML readers wrap
+  library errors → `ParserError` (fail closed). NO `filetype`/`defusedxml` dep — dep-free sniff + DOCTYPE scan
+  replace them. `EmlReader` reads ONE message, no attachment recursion (that's C2).
+- **New Python deps need a worker rebuild.** The readers run in the **ingest-worker**, so adding a dep
+  (`docker compose build api arq-worker ingest-worker` then `up -d --force-recreate`) is required before live
+  tests — the running container keeps the old site-packages until recreated. (C1 added python-docx + python-pptx.)
+- **The prod `lq-ai-api` image has NO dev tools** (pytest/mypy/ruff are `[dev]` extras, not installed). To run
+  the suite / mypy / CI-ruff via the dev image: `docker compose run --rm --no-deps --entrypoint bash
+  -v "$PWD/api:/app" -v "$PWD/skills:/skills" -v "$PWD/ruff.toml:/ruff.toml" -e LQ_AI_SKILLS_DIR=/skills -w /app
+  api -c "pip install -q pytest pytest-asyncio respx mypy types-PyYAML 'ruff>=0.6' && <cmds>"`; `--entrypoint
+  bash` skips the auto-`alembic upgrade` so it never touches the dev DB (the conftest builds its own test DB).
+  `chown -R $(id -u):$(id -g) app tests` after (the container writes root-owned files).
+- **`mypy app` via an UNPINNED mypy flags false unused-`type: ignore`** in untouched files
+  (`ropa_export.py`, `tabular.py`) — newer mypy than CI's pinned `mypy>=1.11`. Trust the **targeted** run on
+  your own files (`mypy app/pipeline/readers app/pipeline/ingest.py` was clean); those 2 files are unchanged
+  from green main, so CI passes them. Don't "fix" them in an unrelated slice.
+- **`test_health.py::test_ready_reports_per_dependency_status` is environment-sensitive** — it asserts **503 /
+  not_ready** because it assumes DB/Redis/MinIO/gateway are UNREACHABLE (unit mode). Running the suite inside
+  the live `lq-ai_default` compose network makes `/ready` healthy → it "fails." Not a regression; CI runs it
+  isolated. (Set the suite off-network or ignore that single assertion when running in-stack.)
+- **arq-worker docker network glitch:** a `compose up -d --force-recreate arq-worker` can hit `endpoint with
+  name lq-ai-arq-worker-1 already exists` (a docker daemon network-state bug, endpoint stuck in the name index
+  but not the container index). `disconnect -f`/`rm -f` don't clear it; a docker daemon restart or full
+  `compose down` (NOT `-v`) does. api + ingest-worker are unaffected; arq-worker only runs cron jobs
+  (export-GC / hard-delete) — non-blocking for ingest/dev work.
 - **Company/client tier = the org profile, injected read-only (C-CLIENT, ADR-F030).** `_load_client_context_md`
   + `system_prompt_for(..., client_context)` in `composition.py` inject the **singleton**
   `OrganizationProfile.content_md` for **every** run, BEFORE the area profile. It is **read-only** (no agent
