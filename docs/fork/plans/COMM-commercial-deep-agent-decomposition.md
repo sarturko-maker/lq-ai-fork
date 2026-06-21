@@ -200,7 +200,16 @@ of whole-clause rewrites in favour of surgical edits with rationale.
 **ADR.** F028. *(Encodes the lawyer method as a curated **abstract method skill**; establishes the
 controlling-vs-advisory convention — see Tools & Skills architecture §Plane 2.)*
 
-### C-CLIENT — Org profile = client: inject as read-only company memory *(2d)* — depends C0
+### C-CLIENT — Org profile = client: inject as read-only company memory *(2d)* — depends C0 — ✓ DELIVERED (PR pending)
+> **Delivered (2026-06-21).** `system_prompt_for(binding, area, client_context)` +
+> `_load_client_context_md` in `composition.py` inject the singleton `OrganizationProfile.content_md` as a
+> fenced, read-only **"Client / house context"** block — BEFORE the area profile (the C0 doctrine stays the
+> controlling last word), for EVERY run (closes blocker #5). No migration. **ADR-F030 accepted** (company
+> tier = this; matter tier = C3 direction). CI: 17/17 composition tests (pure fenced/ordered/read-only +
+> e2e seeded-injection + empty-degrades). Live (DeepSeek): an A/B with a synthetic **Zendesk** house context
+> — same matter+prompt, profile OFF→ON — in `docs/fork/evidence/c-client/` (the ON leg holds the house cap
+> position + escalates uncapped liability to the GC; OFF gives generic advice). Pickup → **C1**.
+
 **Goal.** Realise the **company/client memory tier**: inject the `OrganizationProfile.content_md` at the
 composition seam as a **fenced, read-only "Client / house context" block** so the Commercial agent acts *for*
 the operator's org. Today `OrganizationProfile` exists (`models/organization_profile.py`, `internal.py`

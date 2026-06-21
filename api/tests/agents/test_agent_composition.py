@@ -24,11 +24,16 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.agents.composition import MATTER_PROMPT, compose_and_execute_run, system_prompt_for
+from app.agents.composition import (
+    MATTER_PROMPT,
+    compose_and_execute_run,
+    system_prompt_for,
+)
 from app.agents.runner import SYSTEM_PROMPT
 from app.agents.tools import MatterBinding
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
+from app.models.organization_profile import OrganizationProfile
 from app.models.project import Project
 from app.models.user import User
 from app.security import hash_password
@@ -37,6 +42,7 @@ from tests.agents.fakes import (
     final_message,
     tool_call_message,
 )
+from tests.agents.org_profile_fixtures import clear_org_profile, set_org_profile
 
 pytestmark = pytest.mark.integration
 
@@ -211,6 +217,48 @@ def test_system_prompt_appends_area_profile() -> None:
     prompt = system_prompt_for(binding, area)
     assert 'the matter "Acme MSA"' in prompt
     assert prompt.endswith("You are the Commercial agent.")
+
+
+def test_system_prompt_injects_client_context_before_area() -> None:
+    """C-CLIENT (ADR-F030): the company/client tier (org profile body) is
+    injected as a FENCED, read-only block positioned BEFORE the area profile —
+    so the agent knows WHO it acts for, while the area's controlling method
+    stays the final, governing word. Absent/empty client adds nothing."""
+    from app.agents.area_agent import AreaAgentSpec
+    from app.agents.composition import CLIENT_CONTEXT_PROMPT
+
+    binding = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Acme MSA",
+        privileged=False,
+        minimum_inference_tier=None,
+    )
+    area = AreaAgentSpec(system_prompt_suffix="\n\nYou are the Commercial agent.")
+    client = "Zendesk, Inc. House rule: cap aggregate liability at 12 months' fees."
+
+    prompt = system_prompt_for(binding, area, client_context=client)
+    # The body lands inside the fence, and the fence/read-only framing is present.
+    assert client in prompt
+    assert "----- BEGIN CLIENT / HOUSE CONTEXT -----" in prompt
+    assert "----- END CLIENT / HOUSE CONTEXT -----" in prompt
+    assert "read-only" in prompt  # the block is labelled read-only…
+    assert "It is reference you cannot change" in prompt  # …and says so in the framing
+    # Ordering: matter < client block < area profile (doctrine is the last word).
+    assert prompt.index('the matter "Acme MSA"') < prompt.index(
+        "----- BEGIN CLIENT / HOUSE CONTEXT -----"
+    )
+    assert prompt.index("----- END CLIENT / HOUSE CONTEXT -----") < prompt.index(
+        "You are the Commercial agent."
+    )
+    assert prompt.endswith("You are the Commercial agent.")
+
+    # Absent and whitespace-only client both degrade to no block (clean silence).
+    assert CLIENT_CONTEXT_PROMPT.split("{context}")[0] not in system_prompt_for(binding, area)
+    assert system_prompt_for(binding, area, client_context="   ") == system_prompt_for(
+        binding, area
+    )
+    assert system_prompt_for(binding, area, client_context=None) == system_prompt_for(binding, area)
 
 
 async def test_seeded_commercial_profile_carries_doctrine_in_system_prompt(
@@ -418,6 +466,82 @@ async def test_area_bound_skill_reaches_agent_system_prompt(
     # and a description exists only for a registry-known skill.
     assert "Use when reviewing an NDA." in prompt_text  # nda-review EXPOSED (its description)
     assert "- **msa-review-saas**:" not in prompt_text  # bound-but-unknown → NOT exposed
+
+
+def _seen_system_text(model: ScriptedToolCallingModel) -> str:
+    """All text the model saw, with content-block lists flattened to their
+    text. (str() of a block list would repr-escape apostrophes whenever the
+    text also holds a double quote — e.g. a matter name — masking matches.)"""
+    parts: list[str] = []
+    for msgs in model.seen_messages:
+        for m in msgs:
+            content = getattr(m, "content", "")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for block in content:
+                    parts.append(
+                        str(block.get("text", "")) if isinstance(block, dict) else str(block)
+                    )
+            else:
+                parts.append(str(content))
+    return "\n".join(parts)
+
+
+async def test_org_profile_reaches_agent_as_read_only_client_context(
+    comp_env: CompositionEnv,
+) -> None:
+    """C-CLIENT (ADR-F030): the operator's org profile (company/client tier) is
+    injected into the assembled run prompt as a fenced, read-only block — the
+    agent receives WHO it acts for. Drives the REAL composition; nothing
+    monkeypatched. The run does NOT mutate the profile (read-only behaviour)."""
+    marker = "ZENDESK-HOUSE-MARKER: cap aggregate liability at 12 months' fees."
+    content = f"# Zendesk, Inc. — house context\n\n{marker}\n"
+    await set_org_profile(comp_env.factory, content)
+    try:
+        run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+        model = ScriptedToolCallingModel(responses=[final_message("done")])
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(model=model),
+            session_factory_provider=lambda: comp_env.factory,
+        )
+
+        assert model.seen_messages, "model was never called"
+        prompt_text = _seen_system_text(model)
+        # The operator content AND the fence framing reached the model.
+        assert marker in prompt_text
+        assert "----- BEGIN CLIENT / HOUSE CONTEXT -----" in prompt_text
+        assert "Client / house context (read-only)" in prompt_text
+
+        # Read-only: the run did not touch the profile row (no agent writer path).
+        async with comp_env.factory() as db:
+            row = (await db.execute(select(OrganizationProfile).limit(1))).scalar_one()
+            assert row.content_md == content
+    finally:
+        await clear_org_profile(comp_env.factory)
+
+
+async def test_empty_org_profile_degrades_to_no_client_block(
+    comp_env: CompositionEnv,
+) -> None:
+    """C-CLIENT (ADR-F030): a present-but-empty profile (and the default
+    no-row state) must degrade cleanly — no client block in the prompt. The
+    company tier is opt-in: an unconfigured deployment injects nothing."""
+    await set_org_profile(comp_env.factory, "   \n  ")  # whitespace-only == empty
+    try:
+        run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+        model = ScriptedToolCallingModel(responses=[final_message("done")])
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(model=model),
+            session_factory_provider=lambda: comp_env.factory,
+        )
+        prompt_text = _seen_system_text(model)
+        assert "BEGIN CLIENT / HOUSE CONTEXT" not in prompt_text
+        assert "Client / house context" not in prompt_text
+    finally:
+        await clear_org_profile(comp_env.factory)
 
 
 async def test_subagent_delegation_nests_steps_via_parent_step_id(
@@ -779,7 +903,9 @@ async def test_follow_up_run_continues_the_thread(comp_env: CompositionEnv) -> N
     assert joined.index("What is the liability cap?") < joined.index("What did I just ask you?")
 
 
-async def test_runs_on_different_threads_share_nothing(comp_env: CompositionEnv) -> None:
+async def test_runs_on_different_threads_share_nothing(
+    comp_env: CompositionEnv,
+) -> None:
     """Thread isolation (ADR-F008 / ADR-F004 runtime-verified isolation):
     a run on a DIFFERENT thread must not see another thread's history,
     even on the same checkpointer."""
