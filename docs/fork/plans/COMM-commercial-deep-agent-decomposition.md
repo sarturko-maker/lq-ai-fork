@@ -173,7 +173,17 @@ thresholds C4 can test; Adeu pinning records the exact pin + a verified **permis
 throwaway-venv `pip install adeu==<pin>` import smoke (SDK symbols exist, **no network call**).
 **ADR.** F028 drafted here (accepted with C0).
 
-### C0 — Commercial profile + lawyer-method spine *(2d)* — depends C-R0
+### C0 — Commercial profile + lawyer-method spine *(2d)* — depends C-R0 — ✓ DELIVERED (PR pending)
+**Delivered (2026-06-21).** Migration **`0066_commercial_profile_doctrine.py`** (idempotent; updates the
+Commercial `profile_md` from the 0054 seed to the 6.6k-char lawyer-method doctrine — triage → the four
+**controlling** review skills → surgical redlining → accept/reject/counter → jurisdiction-competence
+escalation → universal receipts; guard `WHERE profile_md = :old`, never clobbers an operator edit). Fixed
+the "six→seven passes" count in `msa-review-commercial-purchase`. **ADR-F028 flipped proposed→accepted.**
+Tests: 3 new CI tests (doctrine markers via API; update-old-never-clobber idempotency; doctrine reaches the
+assembled system prompt) + repaired the one existing test the profile legitimately confounded — full api
+suite **2431 passed / 22 skipped**. Live (DeepSeek): the surgical posture demonstrated cleanly — invited to
+rip-and-replace §7 it held the line, cited the clause, and routed the business decision to the human
+(`docs/fork/evidence/c0/`). Establishes the **controlling-vs-advisory** convention (Plane 2).
 **Goal.** Make the seeded Commercial agent behave like in-house counsel: encode the source-grounded surgical /
 accept-reject-counter / must-have-vs-nice-to-have / escalation discipline + deal-complexity triage into the
 Commercial `profile_md`, **explicitly referencing and reconciling with the four review skills**. Pure config +

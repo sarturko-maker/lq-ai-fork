@@ -91,7 +91,7 @@ When optional inputs are not provided, the skill makes default assumptions and n
 
 ## Workflow
 
-Produce the review in six passes. Earlier passes inform later ones.
+Produce the review in seven passes (Passes 5 and 6 are conditional — see below). Earlier passes inform later ones.
 
 ### Pass 1: Document orientation
 

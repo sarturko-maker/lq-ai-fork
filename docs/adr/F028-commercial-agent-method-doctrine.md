@@ -1,6 +1,6 @@
 # F028 — Commercial agent method doctrine (source-grounded; hybrid surgical gate)
 
-- Status: proposed
+- Status: accepted (2026-06-21, with slice C0 — the doctrine landed in the Commercial `profile_md`)
 - Date: 2026-06-21
 - Extends: ADR-F018 (agentic modules = typed domain + code-validated agent writes), ADR-F010 (area
   subagents model-free / gateway-bound)

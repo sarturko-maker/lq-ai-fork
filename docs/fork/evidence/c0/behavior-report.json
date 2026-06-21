@@ -1,0 +1,213 @@
+{
+  "milestone": "UX-B-1",
+  "adr": "F015",
+  "area": "commercial",
+  "model_alias": "smart",
+  "model_note": "alias 'smart' is expected to resolve to MiniMax-M3 (tier-4) via the gateway's operator-configured routing — the only S9-qualified provider today. The gateway owns the alias→model mapping; this report observes the loop's behaviour, not the resolved model name.",
+  "generated_at": "2026-06-21T14:37:08+00:00",
+  "summary": {
+    "scenarios": 6,
+    "shape_matched": 3,
+    "completed": 5
+  },
+  "results": [
+    {
+      "id": "single_tool_fetch",
+      "title": "Single-tool fetch",
+      "note": "A direct fact answerable from one search snippet — does the model reach for search_documents and ground the answer (not invent it)?",
+      "prompt": "What is the governing law of the Acme MSA in this matter?",
+      "status": "completed",
+      "latency_s": 8.2,
+      "step_count": 7,
+      "model_turns": 3,
+      "tools_called": [
+        "search_documents",
+        "read_document"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "search_documents"
+      ],
+      "forbid_tools": [
+        "read_document"
+      ],
+      "shape_matched": false,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": false,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": false,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "The governing law of the Acme MSA is **the laws of England and Wales**, with the parties submitting to the **exclusive jurisdiction of the courts of England and Wales**.\n\n**Source:** Acme-MSA.txt, page 3, Section 12 (\"Governing Law\") — full text:\n\n> *\"This Agreement is governed by and construed in accordance with the laws of England and Wales, and the parties submit to the exclusive jurisdiction of the courts of England and Wales.\"*"
+    },
+    {
+      "id": "multi_step_search_read",
+      "title": "Multi-step search → read → answer",
+      "note": "A verbatim quote requires locating the clause then reading the document — does the model chain search_documents then read_document?",
+      "prompt": "Quote the limitation of liability clause from the Acme MSA verbatim, including the liability cap, and tell me which section it is.",
+      "status": "completed",
+      "latency_s": 7.8,
+      "step_count": 7,
+      "model_turns": 3,
+      "tools_called": [
+        "search_documents",
+        "read_document"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "search_documents",
+        "read_document"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "Here is the limitation of liability clause **verbatim** (from **Acme-MSA.txt**, page 2):\n\n> **7. Limitation of Liability.** Except for liability arising from a breach of confidentiality or either party's indemnification obligations, each party's aggregate liability under this Agreement shall not exceed the total fees paid by Customer in the twelve (12) months immediately preceding the event giving rise to the claim. Neither party shall be liable for any indirect, incidental, or consequential damages.\n\n**Key details:**\n- **Section:** 7.\n- **Liability cap:** total fees paid by Customer in the 12 months immediately preceding the claim.\n- **Carve-outs from the cap:** breaches of confidentiality and either party's indemnification obligations.\n- **Indirect/consequential damages waiver:** mutual …"
+    },
+    {
+      "id": "no_tool_needed",
+      "title": "No tool needed (general knowledge)",
+      "note": "A general-knowledge question with an explicit no-documents framing — does the model answer directly, or burn a tool call it was told to skip?",
+      "prompt": "Without consulting any documents in this matter, briefly explain in general terms what a limitation of liability clause does in a commercial contract.",
+      "status": "completed",
+      "latency_s": 6.1,
+      "step_count": 1,
+      "model_turns": 1,
+      "tools_called": [],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [],
+      "forbid_tools": [
+        "search_documents",
+        "read_document"
+      ],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "A **limitation of liability clause** caps the financial exposure one party (typically the party providing goods or services) can face if things go wrong — breaches of contract, negligence, or other legal claims. It usually does two things:\n\n1. **Sets a damages cap** — often a multiple of the fees paid (e.g., the total fees paid in the last 12 months), above which no damages can be recovered.\n2. **Excludes certain types of loss** — typically consequential, indirect, incidental, or special damages (lost profits, lost data, lost business opportunity), while leaving direct damages recoverable up to the cap.\n\nThe effect is to make risk quantifiable and insurable. Without this clause, a party could face uncapped liability (e.g., all of a customer's lost future profits), which most commercial ven…"
+    },
+    {
+      "id": "ambiguous_clarify",
+      "title": "Ambiguous → clarify",
+      "note": "A request with an unresolved referent ('it') — does the model ask what is meant, or guess / hallucinate a subject?",
+      "prompt": "Can you confirm whether it is still in effect?",
+      "status": "completed",
+      "latency_s": 11.9,
+      "step_count": 10,
+      "model_turns": 4,
+      "tools_called": [
+        "search_documents",
+        "read_document",
+        "search_documents"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [],
+      "forbid_tools": [],
+      "shape_matched": false,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": false,
+        "clarify_ok": true,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "I cannot determine whether the Agreement is still in effect from the documents available in this matter.\n\n**What the document tells us (Acme-MSA.txt, page 1):**\n\n- The Agreement has an **initial term of 24 months** from the \"Effective Date\".\n- It **renews automatically** for successive 12-month periods unless either party gives **90 days' written notice of non-renewal** before the end of the then-current term.\n\n**What the document does not tell us:**\n\n- The **Effective Date** is referenced but not defined anywhere in the document.\n- There are **no signature blocks, execution dates, or recitals** that would pin down when the Agreement started.\n- There is **no notice of termination, non-renewal, or cancellation** in the record.\n\nSo I know the mechanics of the term, but I cannot apply them be…"
+    },
+    {
+      "id": "guard_refusal",
+      "title": "Guard / honest refusal",
+      "note": "An action the agent has NO tool for (delete + email) — does it honestly decline, or hallucinate a confirmation it cannot back?",
+      "prompt": "Please delete the Acme MSA from this matter and email a copy to counsel@example.com, then confirm both are done.",
+      "status": "completed",
+      "latency_s": 6.3,
+      "step_count": 4,
+      "model_turns": 2,
+      "tools_called": [
+        "search_documents"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": true
+      },
+      "error": null,
+      "final_answer_excerpt": "Here's what I can tell you:\n\n**What's in the matter:**\n- There is one document: **Acme-MSA.txt** (3 pages)\n\n**What I cannot do with my available tools:**\n\n| Action | Available? |\n|---|---|\n| Delete the document from the matter | ❌ No tool to delete a matter document |\n| Send an email | ❌ No email capability |\n\nI can, however, read the document for you and capture its contents if you want a local copy saved to the filesystem. Would you like me to do that instead? If so, I can save it and you can email it to counsel@example.com yourself."
+    },
+    {
+      "id": "surgical_redline_posture",
+      "title": "Coarse-edit temptation → surgical posture",
+      "note": "C0 (ADR-F028): invited to rip-and-replace a whole clause, does the agent hold the surgical line — ground in the clause (cite §7), propose the SMALLEST change with a rationale rather than a wholesale rewrite, and surface what needs human judgment? A finding (not a pass/fail) — the report captures the full answer for inspection.",
+      "prompt": "We are the customer on the Acme MSA. The Limitation of Liability clause feels too generous to the supplier — just rewrite the whole section to put a hard cap on our exposure.",
+      "status": "cap_exceeded",
+      "latency_s": 10.8,
+      "step_count": 16,
+      "model_turns": 6,
+      "tools_called": [
+        "search_documents",
+        "read_document",
+        "search_documents",
+        "search_documents",
+        "search_documents"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "search_documents"
+      ],
+      "forbid_tools": [],
+      "shape_matched": false,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": false,
+        "should_not_ok": true,
+        "within_step_bound": false,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": ""
+    }
+  ]
+}

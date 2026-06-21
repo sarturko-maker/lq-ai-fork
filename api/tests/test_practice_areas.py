@@ -492,3 +492,82 @@ async def test_skill_attach_requires_admin(client: AsyncClient, user: User) -> N
         json={"skill_name": "anything"},
     )
     assert resp.status_code == 403
+
+
+# --- C0 Commercial lawyer-method doctrine (migration 0066, ADR-F028) ---------
+
+
+async def test_commercial_doctrine_profile_present(client: AsyncClient, user: User) -> None:
+    """0066 replaced Commercial's short 0054 seed with the source-grounded
+    lawyer-method doctrine (commercial-lawyer-method.md §§2-5,7-10): deal triage,
+    the four controlling review skills, surgical redlining, accept/reject/counter,
+    jurisdiction-competence escalation, and the universal receipts. Readable via
+    the API (transparency rule)."""
+    resp = await client.get("/api/v1/practice-areas", headers=_bearer(user))
+    assert resp.status_code == 200
+    areas = {a["key"]: a for a in resp.json()["practice_areas"]}
+    profile = areas["commercial"]["profile_md"]
+    assert profile
+    # The four controlling review skills are named (the C0 convention).
+    for skill in (
+        "nda-review",
+        "msa-review-commercial-purchase",
+        "msa-review-saas",
+        "contract-qa",
+    ):
+        assert skill in profile, skill
+    # The doctrine pillars.
+    for marker in (
+        "controlling",
+        "advisory only",
+        "smallest change",
+        "Items requiring human judgment",
+        "accept",
+        "counter",
+        "jurisdiction",
+        "escalate",
+        "clarifying question",
+    ):
+        assert marker in profile, marker
+    # Orthogonal assessment layers — the doctrine must NOT impose one severity
+    # scale (would corrupt QA verdicts / snapshot confidence — ADR-F028 3B).
+    assert "layered" in profile.lower()
+
+
+async def test_commercial_doctrine_seed_updates_old_and_never_clobbers_edit(
+    db_session: AsyncSession,
+) -> None:
+    """0066's seed UPDATES a row still carrying the verbatim 0054 profile to the
+    doctrine, but NEVER overwrites an operator's admin-PATCH edit — the WHERE
+    guard matches only the old seed value (0054/0055 check-before-write
+    precedent)."""
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0066", versions / "0066_commercial_profile_doctrine.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["migration_0066"] = module
+    try:
+        spec.loader.exec_module(module)
+        area = (
+            await db_session.execute(select(PracticeArea).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+
+        # A row still on the 0054 seed → the migration upgrades it to the doctrine.
+        area.profile_md = module._OLD_PROFILE_MD
+        await db_session.flush()
+        conn = await db_session.connection()
+        await conn.run_sync(lambda c: module._seed_commercial_doctrine(c))
+        await db_session.refresh(area)
+        assert area.profile_md == module._COMMERCIAL_DOCTRINE_MD
+
+        # An operator edit is preserved (the guard misses a non-seed value).
+        area.profile_md = "operator-edited commercial profile"
+        await db_session.flush()
+        conn = await db_session.connection()
+        await conn.run_sync(lambda c: module._seed_commercial_doctrine(c))
+        await db_session.refresh(area)
+        assert area.profile_md == "operator-edited commercial profile"
+    finally:
+        sys.modules.pop("migration_0066", None)

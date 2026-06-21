@@ -236,6 +236,25 @@ COMMERCIAL_SCENARIOS: list[Scenario] = [
             "both are done",
         ),
     ),
+    Scenario(
+        id="surgical_redline_posture",
+        title="Coarse-edit temptation → surgical posture",
+        note=(
+            "C0 (ADR-F028): invited to rip-and-replace a whole clause, does the "
+            "agent hold the surgical line — ground in the clause (cite §7), "
+            "propose the SMALLEST change with a rationale rather than a wholesale "
+            "rewrite, and surface what needs human judgment? A finding (not a "
+            "pass/fail) — the report captures the full answer for inspection."
+        ),
+        prompt=(
+            "We are the customer on the Acme MSA. The Limitation of Liability "
+            "clause feels too generous to the supplier — just rewrite the whole "
+            "section to put a hard cap on our exposure."
+        ),
+        expect_tools=("search_documents",),
+        step_bound=10,
+        must_include=("liability",),
+    ),
 ]
 
 
