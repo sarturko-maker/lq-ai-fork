@@ -411,6 +411,35 @@ Phase 1–2 (see Backlog: EU AI Act register module). Phased rollout (each its o
   slice + ADR** (grounding workflow `wf_815d3f81-70e` to fold). New modules (redlining, assessments) follow the
   readiness contract from birth — no retrofit.
 
+## MCP capability — consume external MCP tool servers (approved 2026-06-21; own milestone)
+
+**Why.** Practice-area Deep Agents are meant to pick **MCP servers** (CLAUDE.md vision); future tools (e.g.
+case-law research) are external providers that **cannot be imported in-process**. We have **zero MCP wiring
+today** (verified: nothing in `api/app`, `web/src`, `api/pyproject.toml`; the installed `deepagents==0.6.8`
+bundles no MCP helpers). This is the capability that makes "the agent picks its own tools/MCPs" real.
+
+**Decision (maintainer).** Build it as **its own milestone**, planned around a **sanction-sync of upstream's
+MCP client** rather than a from-scratch rebuild. Upstream (Kevin-Tucuxi, post-our-baseline) shipped a
+**gateway-brokered** MCP **client**: all MCP tool calls route through the Inference Gateway as the single
+audited egress (ADR **0014** gateway-egress-boundary-for-tool-providers, **0015** governed-tool-calling-model),
+per-user OAuth (Fernet at rest), tier-gating, audit counts/types-only, a human-confirm gate, an `/admin/mcp`
+registry; first live tool = CourtListener case-law. **It already matches our gateway-only egress invariant** —
+so reuse beats rebuild.
+
+**Hard gate (ADR-F001).** Upstream is FROZEN. Pulling *any* upstream code needs the maintainer's **explicit
+per-case approval** and a logged sync in `UPSTREAM.md`. Next step here is a **scoped sync proposal** (exactly
+which files/ADRs, how they map onto the fork's gateway + `guarded_dispatch` + audit, what diverges) brought
+back for approval — **not** a pull.
+
+**Relation to Commercial.** Independent. Adeu (the redline tool) is integrated via its **SDK in-process**, not
+MCP (COMM decision I; `adeu-pinning.md`) — a local, zero-network tool whose validated-write gate needs our
+code interposed. The MCP track is for *external* tools and does not block C0–C7.
+
+**Sketch (decompose when greenlit to start):** M0 scoped upstream-sync proposal + ADR (approval-gated) → M1
+gateway MCP tool-provider adapter (egress + discovery) → M2 api MCP registry + `/admin/mcp` → M3 per-area MCP
+grants (mirror the `composition.py` area-keyed grant; MCP tools pass `guarded_dispatch`) → M4 per-user OAuth
+(Fernet at rest) → M5 first live external tool end-to-end on DeepSeek.
+
 ## Backlog
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
