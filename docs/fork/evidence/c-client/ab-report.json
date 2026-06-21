@@ -1,0 +1,124 @@
+{
+  "legs": [
+    {
+      "leg": "supplier \u00b7 profile OFF",
+      "id": "supplier_uncapped_liability",
+      "title": "Customer demands uncapped supplier liability (we are the supplier)",
+      "note": "C-CLIENT (ADR-F030): the company tier should make the agent act FOR Zendesk \u2014 recognise we are the Provider, hold the house cap position, and escalate an uncapped-liability demand to the GC. None of that is in the document; it can only come from the injected house context. A/B: OFF vs ON.",
+      "prompt": "We are Zendesk, the Provider on the Northwind MSA in this matter. Northwind's redline deletes the Section 7 liability cap entirely, so our liability to them would be uncapped. What is our position, and what should we do next?",
+      "status": "completed",
+      "latency_s": 29.2,
+      "step_count": 12,
+      "model_turns": 4,
+      "tools_called": [
+        "search_documents",
+        "read_document",
+        "search_documents",
+        "search_documents"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "search_documents"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "The matter only contains the base MSA text \u2014 there's no redline document on file. But working from what you've described, here is the position.\n\n---\n\n## Assessment\n\n**Section 7 \u2014 Limitation of Liability** (as agreed in the base draft):\n\n> Except for liability arising from a breach of confidentiality, either party's indemnification obligations, or a breach of the Data Protection obligations, each party's aggregate liability under this Agreement shall not exceed the total fees paid by Customer in the twelve (12) months immediately preceding the event giving rise to the claim. Neither party shall be liable for any indirect, incidental, or consequential damages.\n\nThis is a standard, mutual, pro-Provider cap \u2014 a 12-month **fee-based cap** (not a fixed dollar amount) with mutual carve-outs for t\u2026",
+      "house_signals_found": [
+        "escalat",
+        "hard no"
+      ],
+      "house_signal_present": true
+    },
+    {
+      "leg": "supplier \u00b7 profile ON",
+      "id": "supplier_uncapped_liability",
+      "title": "Customer demands uncapped supplier liability (we are the supplier)",
+      "note": "C-CLIENT (ADR-F030): the company tier should make the agent act FOR Zendesk \u2014 recognise we are the Provider, hold the house cap position, and escalate an uncapped-liability demand to the GC. None of that is in the document; it can only come from the injected house context. A/B: OFF vs ON.",
+      "prompt": "We are Zendesk, the Provider on the Northwind MSA in this matter. Northwind's redline deletes the Section 7 liability cap entirely, so our liability to them would be uncapped. What is our position, and what should we do next?",
+      "status": "completed",
+      "latency_s": 15.7,
+      "step_count": 7,
+      "model_turns": 3,
+      "tools_called": [
+        "search_documents",
+        "read_document"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [
+        "search_documents"
+      ],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "## Position\n\nNorthwind's redline deletes **Section 7** of the MSA in its entirety. That section is our standard liability cap (mutual, capped at fees paid in the prior 12 months, with carve-outs and an exclusion of indirect damages). Its deletion means **our liability to Northwind would be uncapped** \u2014 no ceiling, no exclusion of consequential damages.\n\nPer our house posture, **uncapped liability of Zendesk is a hard no** \u2014 this is a line we do not cross and it **requires escalation to the General Counsel**.\n\n---\n\n## What we should do next\n\n### 1. Prepare the counter-proposal before escalating\n\nWe don't escalate an open question \u2014 we escalate with a clear recommendation and fallback. The next step is to counter Northwind's deletion by:\n\n**Counter-proposal (restore Section 7 with the liabil\u2026",
+      "house_signals_found": [
+        "escalat",
+        "general counsel",
+        "hard no",
+        "2x annual"
+      ],
+      "house_signal_present": true
+    },
+    {
+      "leg": "procurement \u00b7 profile ON",
+      "id": "customer_procurement_dpa",
+      "title": "We are buying a vendor tool (posture flip + DPA reflex)",
+      "note": "C-CLIENT (ADR-F030): with the house context the agent should FLIP \u2014 recognise that here Zendesk is the CUSTOMER, push for vendor accountability, and require a DPA because the vendor will process personal data. Run ON only; a finding, not a pass/fail.",
+      "prompt": "Separately in this matter, we are buying a vendor tool, SecureScan, to scan our support tickets for threats. SecureScan will process our customers' personal data. Their order form caps SecureScan's total liability at three months' fees and includes no data-processing terms. What should we push back on before we sign?",
+      "status": "completed",
+      "latency_s": 19.9,
+      "step_count": 7,
+      "model_turns": 3,
+      "tools_called": [
+        "search_documents",
+        "read_document"
+      ],
+      "task_calls": 0,
+      "delegated": false,
+      "ancestry": [],
+      "expect_tools": [],
+      "forbid_tools": [],
+      "shape_matched": true,
+      "checks": {
+        "expected_tools_present": true,
+        "forbidden_tools_absent": true,
+        "must_include_ok": true,
+        "should_not_ok": true,
+        "within_step_bound": true,
+        "clarify_ok": null,
+        "refusal_ok": null
+      },
+      "error": null,
+      "final_answer_excerpt": "This is a **procurement** where Zendesk is the customer buying a tool that will process our customers' personal data. Two issues block signature.\n\n---\n\n## 1. Missing Data Processing Addendum \u2014 **Blocker (must-have)**\n\nThe order form includes **no data-processing terms**. SecureScan will process our customers' personal data (scanning the content of support tickets). Per our house position:\n\n> *\"If we are buying a tool that will touch our or our customers' personal data and there are no data-processing terms, that blocks signature \u2014 require a DPA.\"*\n\n**Action:** Require SecureScan to enter into a Data Processing Addendum incorporating Standard Contractual Clauses (SCCs) for any international transfers, before signing. This is non-negotiable.\n\n---\n\n## 2. Liability cap at three months' fees \u2014 \u2026",
+      "house_signals_found": [
+        "dpa",
+        "data processing addendum",
+        "vendor"
+      ],
+      "house_signal_present": true
+    }
+  ]
+}
