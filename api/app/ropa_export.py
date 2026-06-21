@@ -35,7 +35,7 @@ from app.schemas.ropa import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from openpyxl.worksheet.worksheet import Worksheet  # type: ignore[import-untyped]
+    from openpyxl.worksheet.worksheet import Worksheet
 
 # Article 30(1) content the domain does not yet model. Surfaced in the export's
 # coverage note so the deliverable stays honest about any gap. PRIV-5a filled
@@ -343,7 +343,7 @@ def to_xlsx(export: Article30Export) -> bytes:
     Categories. ``openpyxl`` is imported lazily so the dependency-free JSON/CSV
     paths never pay for it.
     """
-    from openpyxl import Workbook  # type: ignore[import-untyped]
+    from openpyxl import Workbook
 
     wb = Workbook()
     activities_ws = wb.active
