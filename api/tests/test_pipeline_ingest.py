@@ -733,6 +733,58 @@ async def test_ingest_eml_marks_ready_with_fidelity(
     assert "deleted the mutual liability cap" in doc.normalized_content
 
 
+def _make_eml_with_docx_attachment_bytes() -> bytes:
+    """A deal email whose attached NDA must be recursed + grounded (C2)."""
+    from email.message import EmailMessage
+
+    pytest.importorskip("docx")
+    msg = EmailMessage()
+    msg["From"] = "counsel@northwind.example"
+    msg["To"] = "legal@operator.example"
+    msg["Subject"] = "Deal paper + order form"
+    msg["Date"] = "Mon, 1 Jun 2026 09:30:00 +0000"
+    msg.set_content("See the attached NDA for our cap position.")
+    msg.add_attachment(
+        _make_docx_bytes(),
+        maintype="application",
+        subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename="nda.docx",
+    )
+    return msg.as_bytes()
+
+
+@pytest.mark.integration
+async def test_ingest_eml_recurses_docx_attachment(
+    db_session: AsyncSession,
+    db_user: User,
+    fake_s3: FakeS3Client,
+    patched_storage: FakeS3Client,
+) -> None:
+    """C2: an attached office doc is recursed one level through the wired registry
+    so the agent can ground answers in a buried attachment, with the auditable
+    thread/attachment map persisted to structured_content."""
+
+    file_row, result = await _ingest_blob(
+        db_session,
+        db_user,
+        fake_s3,
+        blob=_make_eml_with_docx_attachment_bytes(),
+        mime=EML_MIME,
+        filename="deal.eml",
+    )
+    assert result.status == "ready", result.error
+    doc = await _assert_ready_and_fidelity(db_session, file_row.id, expected_parser="eml")
+    # message body + the attachment's EXTRACTED text both grounded in the chunks.
+    assert "See the attached NDA for our cap position." in doc.normalized_content
+    assert "Mutual Non-Disclosure Agreement between the parties." in doc.normalized_content
+    assert "nda.docx" in doc.normalized_content  # inline provenance label
+    # auditable map persisted (NOT agent-visible; receipts + C5/C7 substrate).
+    assert doc.structured_content is not None
+    assert doc.structured_content["format"] == "email"
+    statuses = [a["status"] for a in doc.structured_content["attachments"]]
+    assert any(str(s).startswith("extracted via") for s in statuses)
+
+
 @pytest.mark.integration
 async def test_ingest_spoofed_docx_marks_failed(
     db_session: AsyncSession,

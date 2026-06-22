@@ -260,7 +260,20 @@ disabled (XXE + remote-template SSRF). Live: upload one of each format → ready
 api+arq-worker+ingest-worker together).
 **ADR.** F029 (extends/supersedes ADR-0006).
 
-### C2 — Email-chain + .msg + nested-attachment reader (deal-origin) *(3d)* — depends C1
+### C2 — Email-chain + .msg + nested-attachment reader (deal-origin) *(3d)* — depends C1 — ✓ DELIVERED
+**Shipped (2026-06-22, ADR-F029 extended, no migration).** One `File` → one `ParsedDocument` with one
+top-message unit + one unit per attachment; the shared assembler (`readers/_message.py`) owns provenance,
+recursion, and caps; `eml.py` (stdlib) + new `msg.py` (`python-oxmsg==0.0.2`, MIT, OLE-magic sniff) normalise
+into a format-agnostic `NormalizedMessage`. **One-level** attachment recursion via `AttachmentRecurser`
+(immutable, **per-call depth** → concurrency-safe; fail-soft + sniff-gated; office docs inherit `guard_ooxml`).
+Agent-usable provenance is **inline** (header block + `[Attached file: …]` labels — what `search_documents`
+returns); the thread/attachment map is the audit record in `Document.structured_content`. The recursed-text
+cap bounds **extracted** text (`MAX_RECURSED_TEXT_CHARS`), not compressed input (review fix). Verified: ruff +
+mypy clean; **38** reader unit tests + ingest e2e on real postgres; **live** on the rebuilt image (multi-
+attachment `.eml` → buried docx grounded, fidelity OK); **19-agent adversarial review → SHIP**, 0 blockers, 4
+should-fix all fixed. Evidence: `docs/fork/evidence/c2/`. Pickup → **C3**.
+
+**Original plan (for reference):**
 **Goal.** A deal starts with an email; complex ones are the whole chain + attachments. Add `.msg`
 (python-oxmsg MIT) and an **email-chain reader** that walks multipart parts, stitches by
 `Message-ID`/`In-Reply-To`/`References`, carries per-message From/Date as span metadata, and recurses **one
@@ -304,6 +317,14 @@ definition (per-edit diff-ratio + token-span thresholds + required rationale per
 records counts/types/IDs (accepts/rejects/counters, clause types, escalations), **never raw target/new text**.
 **Adeu is the sole redline path** (decision G — no python-docx/lxml fallback; python-docx can't author
 tracked changes and models choke on OOXML; Adeu abstracts it).
+**Surgical rendering verified + the multi-region rule (2026-06-21, `evidence/c4-prep/`).** `adeu==1.12.1`
+emits genuinely surgical sub-sentence tracked changes (XML-read): it prefix/suffix-trims each `ModifyText` so a
+sentence's unchanged head/tail stay bare. **Caveat that shapes the gate:** the trim is prefix/suffix only — a
+single `ModifyText` spanning *two separated changes* over-marks the unchanged middle while its minimal diff
+stays small (would pass D1). So C4 must enforce surgical *rendering*, not just a small minimal diff —
+**decompose each edit via `adeu.diff.generate_edits_from_text`** (preferred) **or** reject a `ModifyText` whose
+minimal diff has `>1` changed region. Doctrine (method doc § 5.1/§ 6.1): one narrow edit per discrete change;
+balance one-sided clauses via carve-outs / deemed-direct / super-cap, never a sentence rewrite.
 **Non-goals.** No counterparty-markup extraction (C5); no multi-round state machine (C5; the full multi-turn
 system is the held follow-on, see below); no live-Word/COM path (Linux disk `.docx` only); no `langchain-adeu`
 toolkit (WIP, not on PyPI) — use the stable adeu SDK.

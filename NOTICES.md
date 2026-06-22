@@ -77,3 +77,4 @@ To update a row (e.g., if a upstream source moves or a licence changes):
 | `python-docx` | `api/app/pipeline/readers/docx.py` — DOCX (C1, ADR-F029) | MIT | Permissive. Transitive `lxml` BSD-3 (already in-tree). |
 | `python-pptx` | `api/app/pipeline/readers/pptx.py` — PPTX (C1, ADR-F029) | MIT | Permissive. Transitives `lxml` BSD-3, `Pillow` HPND, `XlsxWriter` BSD-2. |
 | `openpyxl` | `api/app/pipeline/readers/xlsx.py` — XLSX (C1) + Tabular export | MIT | Permissive (already in-tree; no new dep for C1). |
+| `python-oxmsg` | `api/app/pipeline/readers/msg.py` — Outlook `.msg` (C2, ADR-F029) | MIT | Permissive. Read-only OLE parsing (no network/eval; egress proven offline). Transitives `olefile` BSD-2, `click` BSD-3. Pinned exact (`==0.0.2`, young package). NOT GPLv3 `extract-msg`. |
