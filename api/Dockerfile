@@ -12,6 +12,10 @@ WORKDIR /app
 # Install runtime deps from pyproject.toml (no dev extras in the image)
 COPY pyproject.toml README.md ./
 RUN pip install --no-cache-dir .
+# C4 (ADR-F031): Adeu installed --no-deps — its hard fastmcp[apps] dep would pull
+# starlette 0.48 / mcp / pydantic 2.13 and break our pinned FastAPI stack. We never
+# use Adeu's FastMCP server (a second egress); its real SDK deps are in pyproject.
+RUN pip install --no-cache-dir --no-deps "adeu==1.12.1"
 
 # Copy application code, migration files, and the entrypoint script
 COPY app/ ./app/

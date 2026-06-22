@@ -101,6 +101,12 @@ jobs:
       - name: Install api package + dev extras
         run: pip install -e ".[dev]"
 
+      - name: Install Adeu (--no-deps — C4/ADR-F031)
+        # Adeu's hard fastmcp[apps] dep would pull starlette 0.48 / mcp / pydantic
+        # 2.13 and break our pinned FastAPI stack; we never use its FastMCP server,
+        # and its real SDK deps (diff-match-patch, structlog, …) are in pyproject.
+        run: pip install --no-deps "adeu==1.12.1"
+
       - name: ruff check (api + scripts via root config)
         # The repo-root ruff.toml excludes web/ and applies to api+gateway+scripts.
         # Run from repo root so the config is picked up correctly.

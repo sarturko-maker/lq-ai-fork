@@ -186,6 +186,22 @@ dependencies = [
     # in the ingest-worker behind MsgReader (egress proven offline at C2).
     # License posture recorded in NOTICES.md.
     "python-oxmsg==0.0.2",
+    # C4 (COMM) — Adeu SDK deps (ADR-F031). Adeu itself is installed **--no-deps**
+    # in the Dockerfiles + CI (NOT listed here), because its hard `fastmcp[apps]`
+    # dependency drags in starlette 0.48 / mcp / pydantic 2.13 — which breaks our
+    # pinned FastAPI/Starlette (APIRouter) stack. We never use Adeu's FastMCP
+    # server (a second egress, ADR-F010), so we provide only the SDK's *real*
+    # runtime deps and skip fastmcp entirely (verified: the RedlineEngine /
+    # ModifyText / process_batch path imports + runs with no fastmcp, and
+    # `adeu.server` then becomes a hard ModuleNotFoundError — the second egress is
+    # structurally absent, not just guarded). Smaller SBOM (~80 fewer pkgs), all
+    # permissive (no copyleft, rule B). The Adeu pin lives in api/Dockerfile,
+    # api/Dockerfile.dev and .github/workflows/ci.yml as `--no-deps adeu==1.12.1`.
+    # diff-match-patch: Apache-2.0, the word-diff engine Adeu uses internally.
+    "diff-match-patch>=20230430",
+    # structlog: MIT/Apache-2.0, Adeu's logger. (lxml, python-docx, rapidfuzz,
+    # pydantic — Adeu's other SDK deps — are already declared above.)
+    "structlog>=24.0.0",
 ]
 
 [project.optional-dependencies]
@@ -282,4 +298,12 @@ ignore_missing_imports = true
 # (.msg) — also stub-less, lazy-imported inside MsgReader.
 [[tool.mypy.overrides]]
 module = ["docx", "docx.*", "pptx", "pptx.*", "openpyxl", "openpyxl.*", "oxmsg", "oxmsg.*"]
+ignore_missing_imports = true
+
+# C4 (COMM) — Adeu ships no usable type stubs (no py.typed). Imported lazily
+# inside app.agents.redline_service (the SDK adapter); used at runtime. The
+# import boundary is SDK-only — app code never imports adeu.server /
+# adeu.mcp_components (enforced by an AST import-guard test, not mypy).
+[[tool.mypy.overrides]]
+module = ["adeu", "adeu.*"]
 ignore_missing_imports = true

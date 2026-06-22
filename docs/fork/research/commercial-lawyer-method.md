@@ -189,6 +189,17 @@ enforce a **surgical *rendering***, not merely a small minimal diff — two ways
 **Doctrine: one narrow edit per discrete change; never a sentence-level rewrite** (the § 5.1 carve-out /
 requalification edits are exactly this shape).
 
+> **C4 empirical update (2026-06-22): decompose option 1 was built and REJECTED; option 2 (raw edit + gate)
+> chosen.** `adeu.diff.generate_edits_from_text` exists on the pin, but decomposing into minimal regions
+> emits **micro-anchors** (a region with `target_text="3"`) that Adeu **fuzzy-matches to the wrong span** —
+> observed live: `"3"` landed on the `d` in "Vendor" → `Ven12or`, silent corruption — and the micro-regions
+> **bypass the D4 unique-anchor gate** (D4 validated the agent's anchor, not the generated fragments). So C4
+> sends the agent's edit as **one raw `ModifyText`**: the anchor is the full, gate-validated *unique*
+> `target_text`, and Adeu's prefix/suffix trim still renders surgically (`"three (3) months" → "twelve (12)
+> months"` marks only `[-three (3)-][+twelve (12)+]`; a carve-out marks only the boundary token it attaches
+> to, e.g. `[-claim.-][+claim, save that …+]`). The §6.1 metric (struck-text ratio, D1) is what bounds
+> over-redlining; the "one narrow edit per change" doctrine is what keeps each raw edit surgical. (ADR-F031.)
+
 ### 6.2 Deterministic gate (pure code — Pydantic `*Input` + a diff computation)
 
 Mirrors the ROPA validated-write `*Input` pattern (`api/app/schemas/ropa.py`). Each is computable with no

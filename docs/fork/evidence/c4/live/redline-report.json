@@ -1,0 +1,40 @@
+{
+  "model": "deepseek",
+  "id": "commercial_redline_msa",
+  "title": "Surgical redline of a vendor-favoured SaaS MSA",
+  "note": "Does the agent read the MSA, then apply_redline with surgical, balanced edits?",
+  "prompt": "You are our in-house commercial counsel and we are the CUSTOMER. Review the attached vendor SaaS agreement \"SecureScan-MSA.docx\" and redline it to protect us \u2014 apply your changes as tracked changes using apply_redline. Make surgical, balanced edits (carve-outs, deemed-direct, super-caps where appropriate); do not rip-and-replace whole clauses. Work through EVERY one-sided clause: the liability cap, the one-sided indemnity, the IP assignment, the Customer Data licence, the warranty disclaimer, the unilateral fee increase and the auto-renewal/no-termination term. Read the whole agreement first, then apply ALL your edits in a SINGLE apply_redline call (it takes a batch of many edits and re-redlines the original on each call, so one call must cover everything).",
+  "status": "completed",
+  "latency_s": 130.7,
+  "step_count": 19,
+  "model_turns": 7,
+  "tools_called": [
+    "search_documents",
+    "read_document",
+    "write_todos",
+    "apply_redline",
+    "apply_redline",
+    "write_todos"
+  ],
+  "task_calls": 0,
+  "delegated": false,
+  "ancestry": [],
+  "expect_tools": [
+    "apply_redline"
+  ],
+  "forbid_tools": [],
+  "shape_matched": true,
+  "checks": {
+    "expected_tools_present": true,
+    "forbidden_tools_absent": true,
+    "must_include_ok": true,
+    "should_not_ok": true,
+    "within_step_bound": true,
+    "clarify_ok": null,
+    "refusal_ok": null
+  },
+  "error": null,
+  "final_answer_excerpt": "All 10 tracked changes applied to **SecureScan-MSA (redlined).docx**. Here is a summary of every edit and the problem it fixes:\n\n| # | Clause | Problem | What we changed |\n|---|--------|---------|-----------------|\n| **1** | \u00a72 Services | Vendor can eliminate any feature at any time, no consent needed | Permits non-material changes without consent; **material reductions** in core functionality require our prior written consent |\n| **2** | \u00a73 Fees | Vendor can raise fees unlimitedly on 30 days' notice | Caps increases at **5% per 12-month period** with **60 days' notice** |\n| **3** | \u00a74 Term | No termination-for-cause right \u2014 locked in for 3 years even if Vendor breaches | Adds **30-day cure / termination for material breach** by either party |\n| **4** | \u00a75 IP (first sentence) | All custom \u2026",
+  "redlined_file": "SecureScan-MSA (redlined).docx",
+  "judge_verdict": "**Verdict: STRONG**\n\n- **Surgical edits** \u2013 targeted inserts (e.g., \u201cnon-material,\u201d fee cap, mutual termination, IP carve-out, data license scope, warranty language) rather than full rewrites; preserves original structure.\n- **Proper balance mechanisms** \u2013 uses carve-outs from cap (confidentiality, indemnity, IP infringement, gross negligence), mutual IP indemnity, and customer-specific IP retention, not just numerical bumps.\n- **Coherent across agreement** \u2013 data license restriction aligns with Section 5; warranty of non-infringement supports mutual indemnity; cap carve-outs track indemnity/confidentiality obligations.\n- **Not over-protective** \u2013 leaves vendor-favoured term length, non-refundable fees, no termination for convenience, \u201cas is\u201d for non-warranty items, and Delaware exclusive jurisdiction.\n- **Not under-protective** \u2013 fixes the critical one-sidedness: unlimited data use, unilateral service changes, no vendor warranties, tiny 1-month cap, missing vendor indemnity."
+}
