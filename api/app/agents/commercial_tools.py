@@ -26,6 +26,7 @@ import hashlib
 import logging
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import ValidationError
@@ -35,7 +36,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import storage
 from app.agents.guard import GuardContext, guarded_dispatch
-from app.agents.redline_service import ProposedEdit, RedlineService
+from app.agents.redline_render import reconstruct_redline
+from app.agents.redline_service import ProposedEdit, RedlineApplyResult, RedlineService
 from app.agents.tools import MatterBinding, _matter_files_query
 from app.audit import audit_action
 from app.models.document import Document
@@ -51,11 +53,26 @@ logger = logging.getLogger(__name__)
 # area — the first Commercial domain-tool grant branch (mirrors PRIVACY_AREA_KEY).
 COMMERCIAL_AREA_KEY = "commercial"
 
-COMMERCIAL_TOOL_NAMES = frozenset({"apply_redline"})
+COMMERCIAL_TOOL_NAMES = frozenset({"apply_redline", "preview_redline"})
 
 # Defense cap on the original .docx we'll load into memory + redline. The upload
 # cap is larger; a deal contract is well under this.
 _MAX_DOCX_BYTES = 25 * 1024 * 1024
+
+# Bound the preview's rendered-redline view so a large/over-broad batch can't
+# blow the agent's context (it is a self-review aid, not the document of record).
+_MAX_PREVIEW_CHARS = 12_000
+
+# Returned when the editor cannot place an edit (e.g. a pure zero-width insertion
+# appended after an unchanged anchor). Reject-and-guide, never crash.
+_EDITOR_ERROR_MSG = (
+    "One or more edits could not be placed by the editor. To ADD text (a carve-out, "
+    "a reciprocal obligation, an extra sentence), fold it into the boundary instead "
+    "of appending after an unchanged anchor: end target_text at the clause's "
+    'punctuation and have new_text replace it and continue — e.g. target "…the '
+    'claim." → new "…the claim, save that …unlimited." Then re-quote a slightly '
+    "longer, unique anchor and call again."
+)
 
 
 def build_commercial_tools(
@@ -129,18 +146,64 @@ def build_commercial_tools(
             ctx,
         )
 
-    return [apply_redline]
+    async def preview_redline(document_name: str, edits: list[dict[str, Any]]) -> str:
+        """Dry-run a redline and SEE the tracked changes — saves NOTHING.
+
+        Use this BEFORE apply_redline to check your own work. It runs the exact
+        same surgical gate and Adeu rendering as apply_redline and returns the
+        rendered ``[-struck-]``/``[+inserted+]`` view of the changed paragraphs,
+        but writes no file. Read the preview as the supervising lawyer will, then:
+        - if any clause was struck-and-retyped instead of edited narrowly, split
+          it into one narrow edit per discrete change and preview again;
+        - keep recognisable boilerplate (verb phrases, defined terms) BARE.
+
+        When the redline reads surgically, call apply_redline with the SAME batch
+        to save it. ``edits`` has the same shape as apply_redline's.
+        """
+        return await guarded_dispatch(
+            "preview_redline",
+            lambda db: _preview_redline(
+                db,
+                binding,
+                document_name=document_name,
+                edits=edits,
+                service=redline_service,
+            ),
+            ctx,
+        )
+
+    return [apply_redline, preview_redline]
 
 
-async def _apply_redline(
+@dataclass(frozen=True)
+class _RenderedRedline:
+    """A validated, gated, in-memory redline — shared by apply + preview.
+
+    Holds the redlined bytes WITHOUT persisting them; the caller decides whether
+    to save (``_apply_redline``) or only show (``_preview_redline``).
+    """
+
+    row: Row[Any]
+    proposal: ApplyRedlineInput
+    redlined: bytes
+    result: RedlineApplyResult
+
+
+async def _render_redline(
     db: AsyncSession,
     binding: MatterBinding,
     *,
     document_name: str,
     edits: list[dict[str, Any]],
     service: RedlineService,
-) -> str:
-    """Validate → gate → decompose → dry-run → apply → persist (or reject)."""
+) -> _RenderedRedline | str:
+    """Validate → fetch (matter-scoped) → gate → dry-run → render in memory.
+
+    Returns a fix-and-retry/error STRING on any rejection (reject, don't
+    sanitize) or the rendered bundle on success. Persists nothing — both
+    ``apply_redline`` (saves) and ``preview_redline`` (shows only) run this same
+    pipeline so the preview is faithful to what apply would write.
+    """
     # 1. Per-edit, document-free gate (D2/D3) + shape (reject, don't sanitize).
     try:
         proposal = ApplyRedlineInput(document_name=document_name, edits=edits)  # type: ignore[arg-type]
@@ -174,7 +237,7 @@ async def _apply_redline(
         guard_ooxml(data)
     except Exception:
         logger.warning(
-            "apply_redline source failed OOXML safety checks",
+            "redline source failed OOXML safety checks",
             extra={"event": "redline_source_unsafe_ooxml"},
         )
         return f'"{row.filename}" failed .docx safety checks and was not redlined.'
@@ -191,31 +254,98 @@ async def _apply_redline(
     if not report.ok:
         return report.rejection_text()
 
-    # 4. Build the logical edits; the service decomposes them into fresh minimal
-    #    regions on each call (most surgical render; fresh objects sidestep Adeu's
-    #    process_batch mutation cycle).
+    # 4. Build the logical edits (fresh objects sidestep Adeu's process_batch
+    #    mutation cycle; one raw ModifyText per edit — no decompose, ADR-F031).
     logical = [
         ProposedEdit(e.target_text, e.new_text, e.rationale.strip() or None) for e in proposal.edits
     ]
 
     # 5. D6: mandatory dry-run self-review. Any edit Adeu can't place (anchor not
     #    found in the document's runs) blocks the write — never a partial redline.
-    preview = service.dry_run(data, logical)
-    if preview.edits_applied == 0:
-        return (
-            "No changes could be applied — nothing was written. Re-quote the exact "
-            "existing text in target_text."
+    #    Adeu operates on untrusted (model-proposed) edits + an untrusted document,
+    #    so a pathological edit (e.g. a pure zero-width insertion the editor can't
+    #    place) must come back as a fix-and-retry, never a 500 (reject, don't crash).
+    try:
+        preview = service.dry_run(data, logical)
+    except Exception:
+        logger.warning(
+            "redline dry-run failed inside the editor",
+            extra={"event": "redline_dry_run_error"},
         )
+        return _EDITOR_ERROR_MSG
+    if preview.edits_applied == 0:
+        return "No changes could be placed — re-quote the exact existing text in target_text."
     if preview.edits_skipped > 0:
         return (
             f"{preview.edits_skipped} edit region(s) could not be located in the "
-            "document (anchors not found in the underlying text). Nothing was "
-            "written — re-quote the exact existing text in target_text."
+            "document (anchors not found in the underlying text) — re-quote the "
+            "exact existing text in target_text."
         )
 
-    # 6. Apply for real → redlined .docx bytes.
-    result = service.apply(data, logical)
-    redlined = result.docx_bytes
+    # 6. Render for real → redlined .docx bytes (in memory).
+    try:
+        result = service.apply(data, logical)
+    except Exception:
+        logger.warning(
+            "redline apply failed inside the editor",
+            extra={"event": "redline_apply_error"},
+        )
+        return _EDITOR_ERROR_MSG
+    return _RenderedRedline(row=row, proposal=proposal, redlined=result.docx_bytes, result=result)
+
+
+async def _preview_redline(
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    document_name: str,
+    edits: list[dict[str, Any]],
+    service: RedlineService,
+) -> str:
+    """Render the redline and return the changed-paragraph view — saves nothing."""
+    rendered = await _render_redline(
+        db, binding, document_name=document_name, edits=edits, service=service
+    )
+    if isinstance(rendered, str):
+        return rendered
+
+    # Only the paragraphs that actually changed — bounded so a large/over-broad
+    # batch can't flood the agent's context.
+    changed = [ln for ln in reconstruct_redline(rendered.redlined) if "[+" in ln or "[-" in ln]
+    view = "\n".join(changed) if changed else "(no tracked changes rendered)"
+    if len(view) > _MAX_PREVIEW_CHARS:
+        view = view[:_MAX_PREVIEW_CHARS] + "\n… (preview truncated — narrow the batch)"
+
+    return (
+        f"Preview of {len(rendered.proposal.edits)} edit(s) on "
+        f'"{rendered.row.filename}" ({rendered.result.edits_applied} tracked change '
+        "region(s)). NOTHING has been saved — this is a dry run.\n\n"
+        "Rendered tracked changes ([-struck-] / [+inserted+]):\n"
+        f"{view}\n\n"
+        "Check each clause: is every change a NARROW edit (not a whole-clause "
+        "strike-and-retype)? Is recognisable boilerplate still bare? When the "
+        "redline reads surgically, call apply_redline with the SAME batch to save it."
+    )
+
+
+async def _apply_redline(
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    document_name: str,
+    edits: list[dict[str, Any]],
+    service: RedlineService,
+) -> str:
+    """Render (validate → gate → dry-run → apply) then persist + audit (or reject)."""
+    rendered = await _render_redline(
+        db, binding, document_name=document_name, edits=edits, service=service
+    )
+    if isinstance(rendered, str):
+        return rendered
+    row = rendered.row
+    proposal = rendered.proposal
+    result = rendered.result
+    redlined = rendered.redlined
 
     # 7. Persist as a new matter document (ready; not re-ingested — work product,
     #    not a search source). Flush BEFORE the object PUT so a constraint failure

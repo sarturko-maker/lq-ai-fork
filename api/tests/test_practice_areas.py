@@ -260,6 +260,90 @@ async def test_default_area_skill_bindings_present(client: AsyncClient, user: Us
         assert want <= set(areas[key]["bound_skills"]), key
 
 
+async def test_commercial_surgical_redline_skill_and_doctrine(
+    client: AsyncClient, user: User
+) -> None:
+    """C8 (0067, ADR-F041): the surgical-redline skill is bound to Commercial and the
+    redline doctrine points at the shipped tools/skill — the stale C0 "lands in a
+    later slice" line is gone (guards the 0067 never-clobber refresh against a silent
+    transcription no-op)."""
+    resp = await client.get("/api/v1/practice-areas", headers=_bearer(user))
+    assert resp.status_code == 200
+    commercial = {a["key"]: a for a in resp.json()["practice_areas"]}["commercial"]
+
+    assert "surgical-redline" in commercial["bound_skills"]
+    profile = commercial["profile_md"]
+    assert "surgical-redline" in profile
+    assert "preview_redline" in profile
+    assert "lands in a later slice" not in profile  # the stale 0066 tail was refreshed
+
+
+async def test_commercial_surgical_redline_migration_is_idempotent(
+    db_session: AsyncSession,
+) -> None:
+    """Re-running the 0067 seed (skill binding + doctrine refresh) is a no-op: no
+    duplicate binding, and the already-refreshed profile_md is untouched (the old
+    0066 tail is gone, so the REPLACE matches nothing)."""
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0067", versions / "0067_commercial_surgical_redline_skill.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["migration_0067"] = module
+    try:
+        spec.loader.exec_module(module)
+        area_id = (
+            await db_session.execute(
+                select(PracticeArea.id).where(PracticeArea.key == "commercial")
+            )
+        ).scalar_one()
+
+        async def _binding_count() -> int:
+            return (
+                await db_session.execute(
+                    select(func.count())
+                    .select_from(PracticeAreaSkill)
+                    .where(
+                        PracticeAreaSkill.practice_area_id == area_id,
+                        PracticeAreaSkill.skill_name == "surgical-redline",
+                    )
+                )
+            ).scalar_one()
+
+        async def _profile() -> str:
+            return (
+                await db_session.execute(
+                    select(PracticeArea.profile_md).where(PracticeArea.key == "commercial")
+                )
+            ).scalar_one()
+
+        before_count = await _binding_count()
+        before_profile = await _profile()
+        assert before_count == 1  # the head migration bound it once
+        assert "preview_redline" in before_profile  # and refreshed the doctrine
+
+        conn = await db_session.connection()
+        await conn.run_sync(lambda c: module._bind_surgical_redline_skill(c))
+        await conn.run_sync(lambda c: module._refresh_redline_doctrine(c))
+
+        assert await _binding_count() == 1  # no duplicate binding
+        assert await _profile() == before_profile  # doctrine unchanged (new tail present)
+
+        # The other half of never-clobber: an operator-edited redline paragraph
+        # (neither the verbatim 0066 nor the C8 tail present) is left untouched.
+        edited = "Commercial agent. Operator-rewritten redline guidance: do as instructed."
+        area = (
+            await db_session.execute(select(PracticeArea).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+        area.profile_md = edited
+        await db_session.flush()
+        await conn.run_sync(lambda c: module._refresh_redline_doctrine(c))
+        assert await _profile() == edited  # operator edit preserved (REPLACE matched nothing)
+    finally:
+        sys.modules.pop("migration_0067", None)
+
+
 async def test_default_area_skill_bindings_seed_is_idempotent(db_session: AsyncSession) -> None:
     """Re-running the 0056 seed inserts no duplicates and never disturbs an
     operator-attached skill."""

@@ -23,10 +23,16 @@ from app.agents import commercial_tools
 from app.agents.commercial_tools import (
     COMMERCIAL_TOOL_NAMES,
     _apply_redline,
+    _preview_redline,
     build_commercial_tools,
 )
 from app.agents.redline_render import reconstruct_redline_text
-from app.agents.redline_service import RedlineService
+from app.agents.redline_service import (
+    ProposedEdit,
+    RedlineApplyResult,
+    RedlinePreview,
+    RedlineService,
+)
 from app.agents.tools import MatterBinding
 from app.models.audit import AuditLog
 from app.models.file import File
@@ -156,7 +162,7 @@ async def matter(
             await db.commit()
 
 
-def test_build_commercial_tools_grants_only_apply_redline() -> None:
+def test_build_commercial_tools_grants_redline_tools() -> None:
     factory = async_sessionmaker()  # not used; the closure captures it
     tools = build_commercial_tools(
         factory,
@@ -164,8 +170,8 @@ def test_build_commercial_tools_grants_only_apply_redline() -> None:
         binding=_binding(uuid.uuid4(), uuid.uuid4()),
         redline_service=RedlineService(),
     )
-    assert [t.__name__ for t in tools] == ["apply_redline"]
-    assert sorted(COMMERCIAL_TOOL_NAMES) == ["apply_redline"]
+    assert [t.__name__ for t in tools] == ["apply_redline", "preview_redline"]
+    assert sorted(COMMERCIAL_TOOL_NAMES) == ["apply_redline", "preview_redline"]
 
 
 async def test_apply_redline_rejects_noop_edit(
@@ -202,6 +208,95 @@ async def test_apply_redline_document_in_another_matter_not_found(
             service=RedlineService(),
         )
     assert "No document named" in out  # matter-scope: invisible across matters
+
+
+async def test_preview_redline_renders_without_persisting(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """preview_redline returns the rendered tracked changes but writes nothing —
+    no upload, no new File row (the self-review primitive, ADR-F041)."""
+    user_id, project_id = matter
+    captured = _patch_storage(monkeypatch, source=_docx_bytes(CAP))
+
+    async with commit_factory() as db:
+        out = await _preview_redline(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            edits=[
+                {"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}
+            ],
+            service=RedlineService(),
+        )
+        await db.commit()
+
+    # the rendered tracked changes come back to the agent...
+    assert "[+twelve" in out and "[-three" in out
+    assert "NOTHING has been saved" in out
+    # ...but nothing was uploaded and no redlined File was created.
+    assert "body" not in captured
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        assert {f.filename for f in files} == {"contract.docx"}
+
+
+async def test_preview_redline_rejects_noop_edit(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    user_id, project_id = matter
+    async with commit_factory() as db:
+        out = await _preview_redline(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            edits=[{"target_text": "the claim", "new_text": "the claim"}],
+            service=RedlineService(),
+        )
+    assert "rejected" in out.lower()
+    assert "no change" in out.lower()
+
+
+class _DryRunRaises(RedlineService):
+    def dry_run(self, docx_bytes: bytes, edits: list[ProposedEdit]) -> RedlinePreview:
+        raise RuntimeError("simulated editor failure")
+
+
+class _ApplyRaises(RedlineService):
+    def apply(self, docx_bytes: bytes, edits: list[ProposedEdit]) -> RedlineApplyResult:
+        raise RuntimeError("simulated editor failure")
+
+
+async def test_apply_redline_editor_exception_is_rejected_not_propagated(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """If the Adeu editor raises on a pathological edit (a real batch CAN — e.g. a
+    zero-width insertion), the tool returns fix-and-retry guidance and persists
+    nothing — never propagates the exception (untrusted input, ADR-F041)."""
+    user_id, project_id = matter
+    _patch_storage(monkeypatch, source=_docx_bytes(CAP))
+    valid = [{"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}]
+
+    for svc in (_DryRunRaises(), _ApplyRaises()):
+        async with commit_factory() as db:
+            out = await _apply_redline(
+                db,
+                _binding(user_id, project_id),
+                document_name="contract.docx",
+                edits=valid,
+                service=svc,
+            )
+            await db.commit()
+        assert "could not be placed by the editor" in out
+
+    # neither attempt persisted a redlined file
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        assert {f.filename for f in files} == {"contract.docx"}
 
 
 async def test_apply_redline_happy_path_persists_redlined_file(

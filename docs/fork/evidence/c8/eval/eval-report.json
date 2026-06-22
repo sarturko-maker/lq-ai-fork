@@ -1,0 +1,82 @@
+{
+  "model": "deepseek",
+  "reps": 3,
+  "rates": {
+    "securescan_saas_msa": {
+      "surgical_pass": 2,
+      "total": 3
+    },
+    "databridge_licence": {
+      "surgical_pass": 0,
+      "total": 3
+    },
+    "overall": {
+      "surgical_pass": 2,
+      "total": 6
+    }
+  },
+  "results": [
+    {
+      "doc": "securescan_saas_msa",
+      "rep": 1,
+      "status": "completed",
+      "model_turns": 14,
+      "redlined": true,
+      "boilerplate_bare": true,
+      "verdict": "STRONG",
+      "surgical": true,
+      "surgical_pass": true
+    },
+    {
+      "doc": "securescan_saas_msa",
+      "rep": 2,
+      "status": "completed",
+      "model_turns": 9,
+      "redlined": true,
+      "boilerplate_bare": false,
+      "verdict": "ADEQUATE",
+      "surgical": false,
+      "surgical_pass": false
+    },
+    {
+      "doc": "securescan_saas_msa",
+      "rep": 3,
+      "status": "completed",
+      "model_turns": 9,
+      "redlined": true,
+      "boilerplate_bare": true,
+      "verdict": "STRONG",
+      "surgical": true,
+      "surgical_pass": true
+    },
+    {
+      "doc": "databridge_licence",
+      "rep": 1,
+      "status": "completed",
+      "model_turns": 12,
+      "redlined": true,
+      "boilerplate_bare": true,
+      "verdict": "STRONG",
+      "surgical": false,
+      "surgical_pass": false
+    },
+    {
+      "doc": "databridge_licence",
+      "rep": 2,
+      "status": "completed",
+      "model_turns": 10,
+      "redlined": true,
+      "boilerplate_bare": true,
+      "verdict": "STRONG",
+      "surgical": false,
+      "surgical_pass": false
+    },
+    {
+      "doc": "databridge_licence",
+      "rep": 3,
+      "status": "completed",
+      "model_turns": 6,
+      "redlined": false
+    }
+  ]
+}
