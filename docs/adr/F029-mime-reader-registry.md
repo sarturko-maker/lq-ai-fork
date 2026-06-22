@@ -96,3 +96,39 @@ DOCX = paragraph block, PPTX = slide, EML = whole message — and that reinterpr
   reads a single message's inline body and never recurses into attachments.
 - **Operational:** new readers run in the worker, so a deps change requires rebuilding **api + arq-worker +
   ingest-worker together**.
+
+## C2 extension — email-chain, `.msg`, one-level attachment recursion (2026-06-22)
+
+Extends (does not supersede) the C1 decision above. A deal arrives as an email; the email's attachments are
+the deal. C2 makes an uploaded `.eml`/`.msg` a fully searchable matter document on the **same**
+`File → ParsedDocument → Document → chunks` contract — **no migration**, chunker/models/persist/`search_documents`
+untouched.
+
+- **One file → one `ParsedDocument`, multiple units.** The email reader emits **one** canonical-text unit for
+  the top message, then **one unit per attachment** (`page_number` = unit ordinal), offsets via the existing
+  `join_units`. A forwarded/nested email is an **attachment** unit, recursed one level (its body extracted, its
+  own attachments only listed); inline-quoted reply history is kept **verbatim**, not split into per-message
+  units (`message_count` is always 1). The shared assembler (`readers/_message.py`) is the single home for
+  recursion, provenance, and caps; the EML (stdlib) and MSG (`python-oxmsg`) readers normalise into a
+  format-agnostic `NormalizedMessage` and call it.
+- **Provenance is inline, because that's what the agent sees.** `search_documents` returns chunk **content
+  verbatim** (it does not read `structured_content`/`metadata_json`), so agent-usable provenance is an inline
+  label per unit — the message header block and an `[Attached file: name (mime) — status]` line. The
+  machine-readable map (the top message's from/date/subject/message-id/in-reply-to/references; per-attachment
+  filename/mime/bytes/status/parser) is written to `Document.structured_content` (already JSONB, already
+  persisted) as the **auditable receipts record** + the C5/C7 substrate — *not* agent-visible.
+- **One-level recursion, depth-safe + fail-soft.** `AttachmentRecurser(registry, depth_remaining)` is immutable
+  and carries depth **per call** (recursing into an email passes a depth-decremented child as an argument, never
+  mutating shared reader state → concurrency-safe under `asyncio.to_thread`); a nested email is read with a
+  depth-0 recurser so its own attachments are listed, not extracted. A bad attachment maps to *not extracted*,
+  never sinks the email. Office-doc attachments recurse through the existing OOXML readers, inheriting
+  `guard_ooxml` (zip-bomb / XXE). Caps: `MAX_EMAIL_ATTACHMENTS=50`, `MAX_RECURSED_BYTES=100 MB`.
+- **`.msg` via `python-oxmsg` (MIT)** — read-only OLE parsing, egress proven offline; transitives `olefile`
+  BSD-2 + `click` BSD-3 (no new copyleft, rule B). Pinned exact (`==0.0.2`, young package). `MsgReader.sniff`
+  checks the OLE/CFB magic (a real spoof check, unlike `.eml`). The fitz import-guard auto-covers the new
+  modules (it globs `readers/*.py`). NOT GPLv3 `extract-msg`.
+- **`cid:`/`http(s)` are never fetched**; HTML is stripped by the shared inert stripper. A **bare** reader (no
+  recurser wired) lists attachments but does not extract — recursion is wired only at the composition root.
+- **Honest scope (C2 non-goals):** no quoted-reply-history splitting (bodies kept verbatim); no recursion
+  beyond one level; no counterparty/deal entity (that is matter memory, C3). The `structured_content` map is an
+  audit/transparency record + C5/C7 base; it is not yet consumed by retrieval.

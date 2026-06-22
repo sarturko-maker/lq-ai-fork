@@ -179,6 +179,13 @@ dependencies = [
     # python-pptx: PPTX per-slide text. MIT. Transitives: lxml (BSD-3),
     # Pillow (HPND/MIT-style), XlsxWriter (BSD-2) — all permissive.
     "python-pptx>=1.0,<2",
+    # C2 (COMM) — Outlook .msg (OLE/CFB) parsing for inbound deal emails.
+    # python-oxmsg: MIT, read-only OLE parsing (no network, no eval).
+    # Transitives: olefile (BSD-2), click (BSD-3) — all permissive (rule B);
+    # NOT GPLv3 `extract-msg`. Young package → pinned exact; the parse runs
+    # in the ingest-worker behind MsgReader (egress proven offline at C2).
+    # License posture recorded in NOTICES.md.
+    "python-oxmsg==0.0.2",
 ]
 
 [project.optional-dependencies]
@@ -271,7 +278,8 @@ ignore_missing_imports = true
 
 # C1 (COMM) — the document-reader libraries don't ship usable type stubs.
 # python-docx (`docx`), python-pptx (`pptx`), and openpyxl are imported
-# lazily inside app.pipeline.readers.* and used at runtime.
+# lazily inside app.pipeline.readers.* and used at runtime. C2 adds oxmsg
+# (.msg) — also stub-less, lazy-imported inside MsgReader.
 [[tool.mypy.overrides]]
-module = ["docx", "docx.*", "pptx", "pptx.*", "openpyxl", "openpyxl.*"]
+module = ["docx", "docx.*", "pptx", "pptx.*", "openpyxl", "openpyxl.*", "oxmsg", "oxmsg.*"]
 ignore_missing_imports = true

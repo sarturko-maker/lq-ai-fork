@@ -31,6 +31,7 @@ imports cleanly in environments where they are not installed.
 from __future__ import annotations
 
 import importlib.metadata
+import logging
 import zipfile
 from collections.abc import Iterable
 from io import BytesIO
@@ -43,11 +44,18 @@ from app.pipeline.parsers import (
     ParserUnsupported,
 )
 
+log = logging.getLogger(__name__)
+
 __all__ = [
     "EML_MIME",
+    "MAX_EMAIL_ATTACHMENTS",
+    "MAX_RECURSED_TEXT_CHARS",
+    "MSG_MIME",
+    "MSG_MIME_ALT",
     "OOXML_DOCX_MIME",
     "OOXML_PPTX_MIME",
     "OOXML_XLSX_MIME",
+    "AttachmentRecurser",
     "DocumentReader",
     "PageSpan",
     "ParsedDocument",
@@ -70,6 +78,28 @@ OOXML_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingm
 OOXML_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 OOXML_PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 EML_MIME = "message/rfc822"
+# Outlook .msg (OLE/CFB container). ``application/vnd.ms-outlook`` is the
+# registered type; ``application/x-msg`` is a common alias browsers emit.
+MSG_MIME = "application/vnd.ms-outlook"
+MSG_MIME_ALT = "application/x-msg"
+
+
+# ---------------------------------------------------------------------------
+# C2 attachment-recursion safety ceilings (untrusted input)
+# ---------------------------------------------------------------------------
+
+# Defensive bounds on the one-level attachment recursion, not tuning knobs.
+# A real deal email is far under them; a hostile email (thousands of parts,
+# or a decompression-amplification fan-out) is far over.
+MAX_EMAIL_ATTACHMENTS = 50
+# Cap on the cumulative *extracted text* spliced from recursed attachments into
+# one canonical_text — the quantity that actually grows in memory and is then
+# chunked + persisted. Measuring the *input* bytes would be inert: each
+# attachment is a subset of the upload, itself capped by LQ_AI_MAX_UPLOAD_SIZE_MB,
+# so a compressed-bytes cap can never bite. guard_ooxml allows up to ~500 MB
+# uncompressed *per* OOXML attachment, so without this cumulative bound a single
+# crafted email (<=50 attachments) could splice tens of GB into one document.
+MAX_RECURSED_TEXT_CHARS = 40_000_000
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +148,73 @@ class ReaderRegistry:
 
     def supported_mimes(self) -> frozenset[str]:
         return frozenset(self._by_mime)
+
+
+# ---------------------------------------------------------------------------
+# Attachment recursion (C2) — one level, depth-safe, fail-soft
+# ---------------------------------------------------------------------------
+
+
+class AttachmentRecurser:
+    """Recurse ONE level into an email attachment via the registry (C2).
+
+    The email/.msg assembler calls :meth:`recurse` per attachment to turn a
+    recursable attachment (an office doc, a nested email) into extracted
+    text. Design constraints:
+
+    * **Depth-safe under concurrency.** This object is *immutable* and depth
+      is carried *per call*: recursing into a reader that itself recurses
+      (an email) constructs a ``depth - 1`` child and passes it as an
+      argument (``read(data, recurser=child)``) — it never mutates shared
+      reader state, so concurrent ingests in ``asyncio.to_thread`` can't
+      clobber each other. A nested email is read with a depth-0 recurser, so
+      *its* attachments are listed but not extracted — the one-level bound.
+    * **Fail-soft.** A bad attachment is recorded as not-extracted by the
+      assembler, never sinks the whole email: any parser error (or unexpected
+      error) maps to ``None`` here.
+    * **Sniff-gated.** The attachment's bytes must pass the candidate
+      reader's content sniff (reject a spoofed/misdeclared attachment).
+
+    Office docs recurse through the existing OOXML readers, so
+    :func:`guard_ooxml` (zip-bomb / XXE) applies automatically. ``cid:`` /
+    ``http(s)`` references are never dereferenced — recursion is over the
+    attachment's own bytes only.
+    """
+
+    def __init__(self, registry: ReaderRegistry, depth_remaining: int) -> None:
+        self._registry = registry
+        self._depth = depth_remaining
+
+    def recurse(self, mime: str, data: bytes) -> ParsedDocument | None:
+        if self._depth <= 0 or not mime or not data:
+            return None
+        reader = self._registry.for_mime(mime)
+        if reader is None:
+            return None
+        try:
+            if not reader.sniff(data):
+                return None
+            if getattr(reader, "accepts_recurser", False):
+                child = AttachmentRecurser(self._registry, self._depth - 1)
+                # Email readers accept a recurser kwarg (marked
+                # ``accepts_recurser``); the Protocol's ``read`` doesn't, so
+                # the ignore is local to this duck-typed dispatch.
+                return reader.read(data, recurser=child)  # type: ignore[call-arg]
+            return reader.read(data)
+        except (ParserError, ParserUnsupported) as exc:
+            log.info(
+                "attachment recursion: parser declined",
+                extra={"event": "c2_attachment_parse_declined", "mime": mime, "error": str(exc)},
+            )
+            return None
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - defensive; a bad attachment never sinks the email
+            log.warning(
+                "attachment recursion: unexpected error",
+                extra={"event": "c2_attachment_recurse_error", "mime": mime, "error": str(exc)},
+            )
+            return None
 
 
 # ---------------------------------------------------------------------------

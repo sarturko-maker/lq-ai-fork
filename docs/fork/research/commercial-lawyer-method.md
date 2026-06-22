@@ -128,6 +128,27 @@ faithfully applies whatever it is sent) is the failure mode the C4 gate exists t
   the document (Sirion). Adeu authors native `w:ins`/`w:del`, so silent text mutation is structurally
   impossible.
 
+### 5.1 Substantive strategy — balance a one-sided clause, don't delete it (maintainer practitioner input, 2026-06-21)
+
+Surgical is not only *small*; it is *strategic*. Against a one-sided clause (the canonical case: a
+vendor-favoured limitation of liability) the lawyer's move is to **balance it by weaving in the protection**,
+not to strike it or merely bump a number (amending a cap 100% → 200% is the naive move). Achieve the
+protection through the **right mechanism**, read across the **whole agreement**:
+
+- **Carve-outs over caps.** Exclude the high-risk heads of loss *from* the cap rather than only raising the
+  figure — breach of confidentiality, data-protection obligations, IP infringement, and (per instructions)
+  indemnified claims sit **outside** the cap or under a higher super-cap.
+- **Requalify losses.** Where a category matters, **deem it direct** so an exclusion of indirect/consequential
+  loss cannot swallow it — a targeted requalification, not a wholesale rewrite of the exclusion.
+- **Whole-agreement view — don't double-protect.** Before editing the cap, ask whether the protection is
+  already obtained through **primary obligations**, **warranties**, or **indemnities** elsewhere; if so, leave
+  the cap and rely on those. The unit of analysis is the *agreement*, not the clause in isolation.
+- **Tiered fallbacks** (playbook § 7): preferred carve-out → super-cap (e.g. 2× annual fees) → walk-away floor.
+
+This is **per-instructions**: depth and aggression follow the brief and the playbook tier, not a fixed rule.
+Mechanically these are exactly the **narrow, multi-region** edits § 6.1 requires — one carve-out, one
+requalification, each its own `ModifyText`, never a single sentence rewrite.
+
 ## 6. Surgical — the code-checkable definition (C4's gate)
 
 > **"Surgical" = the smallest edit that achieves the client protection.** Operationalised as a **hybrid**
@@ -147,6 +168,26 @@ lengths would wrongly flag it. So:
 > metric replaces the contradictory "diff-ratio vs rip-and-replace similarity" pair: because we measure the
 > *minimal* change, a redundant rip-and-replace collapses to its small real diff (and Adeu renders it
 > minimally anyway).
+
+**Empirically confirmed on the pin (2026-06-21, `adeu==1.12.1`, XML read — `evidence/c4-prep/`).** Adeu
+character-trims the common **prefix/suffix** of each `ModifyText` and marks only the changed span, so a
+whole-sentence find/replace with **one** contiguous change leaves the sentence's head/tail **bare** (surgical).
+**But the trim is prefix/suffix only — it does NOT keep an unchanged *interior* run bare.** So a single
+`ModifyText` spanning **two separated changes** renders as one big `<w:del>`/`<w:ins>` block over the unchanged
+middle, even though its minimal-token-diff stays small and would wrongly **pass** D1. The gate must therefore
+enforce a **surgical *rendering***, not merely a small minimal diff — two ways, preferred first:
+
+1. **Decompose before apply.** Route each proposed `ModifyText` through Adeu's bundled word-level
+   `adeu.diff.generate_edits_from_text(target_text, new_text)` (token-encode → `diff_main` →
+   `diff_cleanupSemantic`) to split a multi-region rewrite into the discrete minimal edits Adeu renders cleanly
+   (turns a sentence rewrite into per-change edits). Re-verify the symbol's shape on the pin at C4 (the
+   signature is from 0.7.0 source; `adeu.diff` is exported on 1.12.1) under the `adeu-pinning.md` § 8 check.
+2. **Gate rule.** Reject a `ModifyText` whose minimal token-diff has `>1` changed region separated by `≥ N`
+   equal tokens — force one narrow edit per change. No dependence on `generate_edits_from_text`; costs more
+   model effort decomposing edits.
+
+**Doctrine: one narrow edit per discrete change; never a sentence-level rewrite** (the § 5.1 carve-out /
+requalification edits are exactly this shape).
 
 ### 6.2 Deterministic gate (pure code — Pydantic `*Input` + a diff computation)
 

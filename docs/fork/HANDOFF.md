@@ -12,7 +12,7 @@ and **controlling skills**; *supervised* = human-owns every material write + esc
 receipts. Generalises to every practice area (cf. `docs/fork/NORTH-STAR.md`). Full statement at the top of the
 COMM plan.
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ DELIVERED; building continues at C2.**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ DELIVERED; building continues at C3.**
 
 The full COMM decomposition is written + adversarially reviewed:
 **`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md` — read it first.** **Privacy is PARKED**
@@ -24,45 +24,38 @@ of Commercial) → `docs/fork/MILESTONES.md` § MCP capability.
 via the `gateway-config` volume). DeepSeek is the qualified live-test target (decision F). Revert when MiniMax
 quota returns.
 
-## Done this slice (C1 — document-reader registry: DOCX/PPTX/XLSX/EML; NO migration)
+## Done this slice (C2 — email-chain + `.msg` + one-level attachment recursion; NO migration)
 
-- **`api/app/pipeline/readers/`** (NEW pkg) — `_base.py` (`DocumentReader` protocol, `ReaderRegistry`,
-  `join_units` = the single offset-truth helper mirroring `parsers._run_pymupdf`, `build_parsed_document`,
-  `guard_ooxml` = DOCTYPE/ENTITY reject + zip-bomb caps, `ooxml_subtype` = deep `[Content_Types].xml` sniff);
-  `pdf.py` (thin wrapper over the existing `parse_pdf` — **fitz/AGPL stays contained here**), `xlsx.py`,
-  `docx.py`, `pptx.py`, `eml.py`; `__init__.py` (`build_default_registry(settings)` composition root). Heavy
-  libs (openpyxl/python-docx/python-pptx) are **lazy-imported inside each reader** so the pkg imports cleanly
-  without them.
-- **`api/app/pipeline/ingest.py`** — the single PDF gate (`is_pdf_mime`/`parse_pdf`) is replaced by an
-  **injected** `registry: ReaderRegistry | None = None` (defaults to `build_default_registry(settings)`, so
-  every caller is unchanged): look up reader by declared MIME → server-side `sniff()` content cross-check
-  (reject a spoof as `unsupported_type`) → `reader.read` via `to_thread`. Each reader returns the SAME
-  `ParsedDocument`; **chunker / Document model / persist UNTOUCHED**, so the Citation-Engine invariant
-  `normalized_content[start:end] == content` holds by construction. PDF behaviour byte-identical. Error mapping
-  preserved (`ParserUnsupported`→`unsupported_content`, `ParserError`→`parse_failed`).
-- **Deps:** +`python-docx`>=1.1,<2 (MIT), +`python-pptx`>=1.0,<2 (MIT) — both permissive (rule B). XLSX reuses
-  the already-present openpyxl; EML uses stdlib `email` (no dep). **Dropped** the planned `filetype` +
-  `defusedxml`: the dep-free per-reader `sniff` + the pre-parse DOCTYPE reject are more precise + version-proof.
-  mypy overrides added; **NOTICES.md** gained a Python license-posture table (incl. the AGPL PyMuPDF boundary).
-- **Security:** OOXML XXE/entity-expansion killed by rejecting `<!DOCTYPE`/`<!ENTITY` in XML-part prologs
-  **before** lxml opens the file; zip-bomb size/entry caps; MIME-spoof rejected at the boundary; **CI AST
-  import-guard** asserts no reader imports `fitz`. Untrusted-text only (openpyxl `data_only` = no formula eval;
-  no remote fetch; EML reads ONE message, no attachment recursion). The 3 OOXML readers **fail closed**
-  (wrap library errors → `ParserError`) so a malformed-but-sniff-passing file becomes `parse_failed`, not a
-  retriable worker crash (review should-fix).
-- **ADR-F029** accepted (extends/supersedes ADR-0006's PDF-only scope; inherits its offset contract). **No
-  migration** (`parser`/`parser_version` free-text, `page_count` nullable; the `page` field is reinterpreted
-  per format — sheet/paragraph-block/slide/whole-message, documented in F029).
-- **Tests:** `tests/test_readers.py` (offset invariant + tiling spans per format, registry dispatch,
-  sniff/spoof, DOCTYPE + zip-bomb guards across ALL OOXML, **fitz import-guard**, EML non-recursion / HTML-strip
-  / plain>html, **malformed-OOXML-fails-closed**, empty-docs) + 5 per-format ingest e2e in
-  `test_pipeline_ingest.py`. The pre-existing corrupt-PDF test now feeds `%PDF`-prefixed garbage (the new sniff
-  rejects non-PDF-declared-as-PDF earlier — a legitimate behaviour change).
-- **Verification:** ruff clean (**CI ruff 0.15.18**); mypy clean (readers+ingest, 8 files); full api suite
-  containerized **2476 passed / 2 skipped** (the 1 "fail" = `test_ready_reports_per_dependency_status`, which
-  expects services UNREACHABLE — my run was on the live compose network; CI runs it isolated → passes).
-  **Live** (real rebuilt image + real MinIO + real DB): all 4 formats → `ready` + fidelity OK. **28-agent
-  adversarial review → SHIP**, 0 blockers; 2 should-fix fixed (OOXML fail-closed + plain>html test), nits folded.
+- **`api/app/pipeline/readers/_message.py`** (NEW) — the shared email assembler. `NormalizedMessage(headers,
+  body, attachments)` (format-agnostic intermediate); `assemble_email(message, *, recurser, parser_label,
+  parser_version)` emits **one top-message unit + one unit per attachment**, each prefixed with an **inline
+  provenance label** (header block + `[Attached file: name (mime) — status]`), and writes the thread/attachment
+  map to `structured_content`. Offsets via the existing `join_units`. Houses the shared `strip_html` + a
+  `RecursingReader` mixin (the recurser-wiring seam). Caps enforced here.
+- **`api/app/pipeline/readers/_base.py`** — `AttachmentRecurser(registry, depth_remaining)`: **immutable,
+  per-call depth** (recursing passes a `depth-1` child as an argument → concurrency-safe under `to_thread`),
+  **sniff-gated + fail-soft** (unknown mime / spoof / parse-error / depth-exhausted → `None`). `MSG_MIME` +
+  `MSG_MIME_ALT`; caps `MAX_EMAIL_ATTACHMENTS=50`, `MAX_RECURSED_TEXT_CHARS=40M` (bounds **extracted text**, not
+  compressed input — review fix).
+- **`eml.py`** upgraded (stdlib `email`): collects nested `message/rfc822` parts + attachments → recurser; **`msg.py`**
+  NEW (`python-oxmsg==0.0.2`, MIT; `Message.load`; OLE-magic sniff; `_normalize` split from the load boundary for
+  stub-testability). **`__init__.py`** wires a depth-1 recurser factory onto eml+msg at the composition root.
+  Both inherit `RecursingReader`.
+- **One File → one `ParsedDocument`**: chunker / `Document`/`DocumentChunk` models / persist / `search_documents`
+  **UNTOUCHED**; Citation invariant holds via `join_units`. **No migration** (`structured_content` already JSONB).
+  Provenance the agent uses is **inline** (search returns chunk content verbatim); the map is the audit record.
+- **Deps:** +`python-oxmsg==0.0.2` (MIT; transitives `olefile` BSD-2, `click` BSD-3 — no new copyleft; NOT GPLv3
+  `extract-msg`). mypy override + `NOTICES.md` row added. **ADR-F029 extended** (C2 section).
+- **Security:** depth=1 (nested email lists-but-doesn't-extract its own attachments); attachment-count + extracted-
+  text caps; office-doc recursion inherits `guard_ooxml` (zip-bomb/XXE); `cid:`/`http(s)` never fetched; HTML
+  stripped (inert); fail-soft (a bad attachment never sinks the email); fitz import-guard auto-covers new modules.
+- **Verification:** ruff + mypy clean (`mypy app` 182 files); **53** reader+ingest tests on real postgres (38
+  reader unit + 15 ingest); full api suite containerized **2498 passed / 2 skipped** (the 1 non-pass =
+  `test_ready_reports_per_dependency_status`, env-sensitive — asserts services unreachable, passes isolated in
+  CI). **Live** (rebuilt image + `python-oxmsg` baked): multi-attachment
+  `.eml` → buried docx grounded, png listed-not-extracted, fidelity OK, `.msg` sniff works. **19-agent
+  adversarial review → SHIP**, 0 blockers, 4 should-fix **all fixed** (inert→extracted-text cap; fail-soft test
+  gap; 2 doc corrections), nits folded (recurser mixin DRY + 3 tests). Evidence: `docs/fork/evidence/c2/`.
 
 ## Maintainer decisions already locked (don't re-litigate)
 
@@ -77,33 +70,35 @@ quota returns.
   Commercial; does not block C0–C7.
 - **Multi-turn redlining** = the maintainer's separate next project (held; C5 is its foundation).
 
-## ▶ PICK UP EXACTLY HERE — slice **C2** (Email-chain + .msg + nested-attachment reader, ~3d) — depends C1 ✓
+## ▶ PICK UP EXACTLY HERE — slice **C3** (Deal context as matter memory: inject + propose/accept, ~3d) — depends C0; **F030 accepted ✓**
 
-**Goal.** A deal starts as an email; complex ones are the whole chain + attachments. Add **`.msg`**
-(python-oxmsg, **MIT** — NOT GPLv3 extract-msg; olefile transitive is BSD) and an **email-chain reader** that
-walks multipart parts, stitches by `Message-ID`/`In-Reply-To`/`References`, carries per-message From/Date as
-span metadata, and recurses **ONE level** into attached office docs by delegating to the C1 registry.
-**Non-goals.** No quoted-history splitting lib unless proven needed; no counterparty/deal ENTITY (matter memory
-= C3); no recursion deeper than one level.
-**Key files.** the readers pkg (add `msg.py` + an email-chain reader extending `eml.py`'s single-message
-reader), `ingest.py`, `api/app/models/document.py` (per-message spans in `metadata_json`), `api/pyproject.toml`,
-`NOTICES.md`.
-**Watch.** Extend the C1 **fitz import-guard** to the new readers. The current `EmlReader` reads ONE message
-(`page_count=1`) and does **NOT** recurse — C2 is where threading + the one-level attachment recursion land.
-Reuse `guard_ooxml` for any recursed office doc (zip-bomb/XXE already handled). HTML sanitized (the `eml.py`
-stripper is HTML5-correct); `cid:`/`http(s)` **never** fetched; nesting depth + per-part size capped
-(billion-laughs/zip-bomb). The Citation-Engine invariant holds via `join_units` per message unit.
-**ADR.** F029 (extended).
-**Verify.** Multi-message `.eml` → ordered per-message spans with sender/date; `.msg` parses
-sender/recipients/subject/body+attachment bytes; an attached office doc is recursed + chunked; HTML sanitized +
-no remote fetch. Live: ingest a real multi-attachment deal email; agent answers grounded in a buried
-attachment. **Rebuild api + arq-worker + ingest-worker together** if deps change. Then HANDOFF → **C3**.
+**Goal.** Realise the unit-of-work memory tier: inject `projects.context_md` at the composition seam as a
+**fenced read-only "Deal context" block** (mirror the C-CLIENT company-tier injection in `composition.py`,
+ordered base→matter→**client**→area so C0 doctrine stays the controlling last word), and add a guarded
+`propose_deal_context_update` tool feeding a **proposal → user-accept** write (ADR-0013 D4/D5 "system proposes,
+user owns"). `0041` is precedent-bound → create a **new** deal-context proposal table. Context is
+reconcilable/supersedable.
+**Non-goals.** No typed deal-context schema (free-form `context_md` + proposal table v1); no CompositeBackend
+yet; no reuse of `0041`; no auto-accept of material changes; no counterparty ENTITY (still deferred — Open Q #2).
+**Key files.** `api/app/agents/composition.py`, `api/app/models/project.py`, `api/app/models/autonomous.py`,
+`api/app/api/autonomous.py`, `api/alembic/versions/0067_deal_context_proposals.py` (NEW — **migration head is
+`0066`**, fresh-number check first), `api/app/agents/guard.py`, `ropa_tools.py`.
+**Watch.** This is the first Commercial slice that **needs a migration** (verify on a throwaway pgvector
+container; rebuild api+arq-worker+ingest-worker after; NEVER host-side `alembic upgrade` on the live DB; NEVER
+`compose down -v`). Audit carries counts/types/IDs only (no raw context text). Matter-memory owner-scoped +
+archived-aware; cross-user → **404** (matter-scoped by `binding.project_id`, ADR-F035). Accept applies
+exactly-once (`accepted_at` guard); supersede must not duplicate.
+**ADR.** F030 (**accepted** — covers company + matter tiers; C-CLIENT shipped the company half).
+**Verify.** CI: composition test (`context_md` fenced-injected + read-only); guarded-tool test (`propose`
+writes a **proposal row**, not `context_md`, via `guarded_dispatch`); accept-endpoint exactly-once; supersede
+no-dup; cross-user 404. Live (DeepSeek): two-turn run — agent proposes, user accepts, next run reflects it.
 
-**FIRST live-verification vehicle (buildable NOW): Scenario A — `docs/fork/plans/scenarios/scenario-a-securescan.md`**
-(Zendesk buy-side first-pass on clean SecureScan paper → prose redline; exercises C1 + C-CLIENT + C0, NO C4/C5).
-**Scenario B — `scenario-b-meridian.md`** (inbound redlines) needs C2's chain + C5.
+**Live-verification vehicles:** **Scenario A** (`docs/fork/plans/scenarios/scenario-a-securescan.md`, buy-side
+first-pass, buildable now — C1+C-CLIENT+C0, NO C4/C5; C2's `.eml` chain now makes the multi-attachment intake
+real). **Scenario B** (`scenario-b-meridian.md`, inbound redlines) needs C4/C5. Wiring Scenario A's live run is
+the natural place to exercise C2's email-chain ingest end-to-end through the agent.
 
-**Ladder:** C-R0 ✓ → C0 ✓ → C-CLIENT ✓ → C1 ✓ → **C2** → C3 → C4 → C5 → C6 → C7 (+ O0 spike). ADR gates:
+**Ladder:** C-R0 ✓ → C0 ✓ → C-CLIENT ✓ → C1 ✓ → C2 ✓ → **C3** → C4 → C5 → C6 → C7 (+ O0 spike). ADR gates:
 **F030 accepted ✓** (C3 unblocked), **F036 + F038 before C6**.
 
 ## Open decisions still pending the maintainer (COMM plan § Open questions)
@@ -119,10 +114,11 @@ attachment. **Rebuild api + arq-worker + ingest-worker together** if deps change
 
 ## Gotchas / durable traps
 
-- **Migration head is still `0066`** (C-CLIENT and **C1 added none** — readers reuse the existing
-  `Document`/`DocumentChunk` schema: `parser` free-text, `page_count` nullable). Fresh-head check before any
-  migration (`ls api/alembic/versions | sort | tail`); never reuse a number. C2 likely needs none (readers +
-  deps); C3/C6/C7 do.
+- **Migration head is still `0066`** (C-CLIENT, **C1, and C2 added none** — readers reuse the existing
+  `Document`/`DocumentChunk` schema, and C2's thread/attachment map rides the already-present
+  `Document.structured_content` JSONB). Fresh-head check before any migration
+  (`ls api/alembic/versions | sort | tail`); never reuse a number. **C3 adds `0067`** (deal-context proposals);
+  C6/C7 also need migrations.
 - **Document-reader registry (C1, ADR-F029) = `api/app/pipeline/readers/`.** `ingest_file(..., registry=None)`
   defaults to `build_default_registry(settings)`; dispatch is by **declared MIME** then a server-side
   `reader.sniff(bytes)` content cross-check (PDF magic / OOXML deep `[Content_Types].xml` subtype / EML always
@@ -131,7 +127,29 @@ attachment. **Rebuild api + arq-worker + ingest-worker together** if deps change
   the AST import-guard test (`test_readers.py::test_no_reader_module_imports_fitz`) fails the build otherwise.
   OOXML security is `guard_ooxml` (DOCTYPE/ENTITY reject BEFORE lxml + zip-bomb caps); the 3 OOXML readers wrap
   library errors → `ParserError` (fail closed). NO `filetype`/`defusedxml` dep — dep-free sniff + DOCTYPE scan
-  replace them. `EmlReader` reads ONE message, no attachment recursion (that's C2).
+  replace them.
+- **Email assembly (C2, ADR-F029 ext) = `api/app/pipeline/readers/_message.py`.** EML/MSG readers normalise to
+  `NormalizedMessage` → `assemble_email` emits **one top-message unit + one unit per attachment** (`message_count`
+  is always 1; a forwarded `message/rfc822`/`.msg` is an **attachment** unit, not a message — no per-message
+  tree; inline-quoted history kept verbatim). Provenance the agent sees is **inline** (header block +
+  `[Attached file: …]` labels — `search_documents` returns chunk text verbatim, never `structured_content`); the
+  thread/attachment **map** is the audit record in `Document.structured_content` (no migration; not agent-visible).
+  **`AttachmentRecurser` (in `_base.py`) is immutable + per-call depth** (recursing passes a `depth-1` child as an
+  arg → concurrency-safe; nested email read at depth-0 lists-but-doesn't-extract its own attachments = the
+  one-level bound), **sniff-gated + fail-soft** (bad attachment → `not text-extracted`, never sinks the email).
+  Wired onto eml+msg via `set_recurser_factory` at the composition root (`build_default_registry`); both inherit
+  the `RecursingReader` mixin. **`MAX_RECURSED_TEXT_CHARS` bounds EXTRACTED text, not compressed input** — a
+  compressed-bytes cap is inert (each attachment ⊆ the already-capped upload), so the cap is accounted in
+  `_recurse_attachment` *after* parsing (review fix; the decompression-amplification guard).
+- **`.msg` = `python-oxmsg==0.0.2` (MIT), READ-ONLY** (no `.msg` writer exists). So `.msg` is covered by unit
+  tests — `_normalize` via a stub message + OLE-magic sniff + a patched-`Message.load` e2e — plus the empirical
+  API verification; the first **real** `.msg` byte-parse lands at **Scenario B**. `MsgReader` lazy-imports oxmsg
+  inside `read()`, so the readers pkg imports cleanly without it. `sniff` = OLE magic `D0CF11E0A1B11AE1`.
+- **Running an in-image script (no mounts):** `docker run --rm -e PYTHONPATH=/app -v /tmp/x.py:/x.py:ro
+  --entrypoint python lq-ai-api /x.py` — `docker compose run` shadows `/app` (dev volume) and script execution
+  doesn't add cwd to `sys.path`, so set `PYTHONPATH=/app` and use `docker run` (not compose) to test the BAKED
+  code. (`get_settings()` needs env; pass a `types.SimpleNamespace(lq_ai_docling_enabled=...)` to
+  `build_default_registry` to avoid it in a pure-reader check.)
 - **New Python deps need a worker rebuild.** The readers run in the **ingest-worker**, so adding a dep
   (`docker compose build api arq-worker ingest-worker` then `up -d --force-recreate`) is required before live
   tests — the running container keeps the old site-packages until recreated. (C1 added python-docx + python-pptx.)
