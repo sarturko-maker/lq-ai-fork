@@ -31,8 +31,10 @@ frontmatter parse (which requires ``name`` to match the parent directory)
 succeeds. ``ls`` of a source lists ONLY that source's names — a subagent never
 sees the area catalogue in its prompt. Mutating operations
 (``write``/``edit``/``upload``) return a read-only error; ``grep``/``glob``
-inherit the protocol default (unsupported) — progressive disclosure steers the
-model to ``read_file`` by path.
+return a graceful *unsupported* result (never raise — the deepagents async
+wrappers do not catch a backend ``NotImplementedError``, so raising would crash
+the whole run when a model reaches for those builtins) and steer the model to
+``read_file``/``ls`` by path (progressive disclosure).
 """
 
 from __future__ import annotations
@@ -50,6 +52,8 @@ from deepagents.backends.protocol import (
     FileDownloadResponse,
     FileInfo,
     FileUploadResponse,
+    GlobResult,
+    GrepResult,
     LsResult,
     ReadResult,
     WriteResult,
@@ -212,6 +216,23 @@ class RegistrySkillBackend(BackendProtocol):
                     )
                 )
         return out
+
+    # -- search: unsupported, but never raises -------------------------------
+    # deepagents' agrep/aglob wrap the sync method in to_thread and DO NOT catch
+    # a backend NotImplementedError (only agrep catches TimeoutError), so the
+    # protocol default raise would propagate out of the tools node and fail the
+    # whole run when a model reaches for the builtin grep/glob. Return a graceful
+    # error instead — read_file/ls by path is the intended access (ADR-F016).
+    _SEARCH_UNSUPPORTED = (
+        "search is not supported on the skills library; list skills with ls and "
+        "read a skill by its path with read_file"
+    )
+
+    def grep(self, pattern: str, path: str | None = None, glob: str | None = None) -> GrepResult:
+        return GrepResult(error=self._SEARCH_UNSUPPORTED)
+
+    def glob(self, pattern: str, path: str | None = None) -> GlobResult:
+        return GlobResult(error=self._SEARCH_UNSUPPORTED)
 
     # -- mutations: refused (curated, read-only library) ---------------------
 

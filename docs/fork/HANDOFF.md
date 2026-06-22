@@ -11,7 +11,7 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ DELIVERED. Pickup = maintainer's call (C3 deal-context · C5 · C6 · C7).**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ DELIVERED. Pickup = maintainer's call (C3 deal-context · C5 · C6 · C7).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -19,55 +19,66 @@ produces the work product). The full decomposition: `docs/fork/plans/COMM-commer
 
 **⚠ Gateway aliases (operational, UNCOMMITTED, LOCAL):** `smart`/`fast`/`budget` repointed
 minimax/MiniMax-M3 → deepseek on the local gateway (MiniMax out of quota). **`deepseek` alias has quota** and is
-the qualified live-test target. Revert when MiniMax quota returns.
+the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `deepseek` → `deepseek-v4-flash`;
+**`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
+stronger tier for the "is it the model?" control.
 
-## Done this slice (C8 — surgical-redline craft; ADR-F041; migration 0067)
+## Done this slice (C9 — Claude-judged manual redline tests; no migration; no new ADR)
 
-**Decision (settled with the maintainer in-session):** surgical *craft* is a **prompt-quality property tuned
-by eval, not a runtime gate**. Rejected D7 (a deterministic single-region rule — Adeu already renders each
-edit surgically) and a mandatory per-run LLM critic (too slow). Integrity stays with C4's D1-D6 gate; Adeu
-renders; the human owns the accept.
+**What:** upgraded C8's craft signal from DeepSeek-judging-itself to **Claude (Opus 4.8) judging DeepSeek**
+over a corpus spanning contract types **and** complexity, with the produced `.docx` surfaced for the
+maintainer. Reuses C4/C8 (`apply_redline`/`preview_redline`, `seed_doc_matter`/`capture_redline`,
+reconstruction). Plan `docs/fork/plans/C9-claude-judged-redline-tests.md`.
 
-- **`skills/surgical-redline/SKILL.md`** (NEW) — the curated abstract-method craft skill: decompose a clause
-  into several narrow edits, keep recognisable boilerplate (`shall indemnify, defend and hold harmless`, the
-  cap stem) **bare**, fold insertions into the boundary, preview-then-apply. Worked §8/§9 before/after.
-- **`api/alembic/versions/0067_commercial_surgical_redline_skill.py`** (NEW) — binds `surgical-redline` to
-  Commercial (`practice_area_skills`) + refreshes the stale "lands in a later slice" tail of `profile_md` to
-  point at the tools/skill. Idempotent never-clobber (`REPLACE ... WHERE POSITION(:old)>0` + `NOT EXISTS`).
-- **`api/app/agents/commercial_tools.py`** — NEW guarded **`preview_redline`** tool (dry-run + reconstruct,
-  **persists nothing**) for self-review; shared `_render_redline` pipeline (validate→fetch→gate→dry-run→apply)
-  reused by apply + preview; **editor-error hardening** (Adeu raises → fix-and-retry, never a 500).
-- **`api/app/agents/redline_render.py`** — added shared `bare_text` + `docx_text` (one definition; de-dup).
-- **Eval (the maintainer's "run enough tests"):** `tests/agents/scenarios/test_commercial_redline_eval.py`
-  (NEW, provider-marked) runs a 2-doc corpus (`securescan_msa` + new `databridge_license`) × N reps, judges
-  craft with a sharpened rubric, writes the **surgical-craft rate** to `docs/fork/evidence/c8/`. Shared
-  scaffolding in `commercial_redline_lib.py` (seed+real-cleanup, capture, judge) — this **fixed the C4
-  live-test `_noop_cleanup` leak**.
-- **ADR F041** (proposed). Plan `docs/fork/plans/C8-surgical-redline-craft.md`.
-- **Verification:** ruff + mypy clean; **71** touched-area tests pass; full api suite **2526 passed / 2
-  skipped** (lone failure = the documented env-sensitive `test_ready_reports_per_dependency_status`, which
-  asserts deps are *unreachable* — they're up on the dev network; unrelated to C8, passes in CI).
-  **Live eval (DeepSeek, 3 reps):** overall **2/6** surgical-craft passes; in-distribution SaaS MSA **2/3**;
-  **§8 indemnity surgical in the passing runs** (boilerplate bare); boilerplate-bare in **4/5** redlined
-  runs. NOT yet "reliably surgical" (out-of-distribution licence weaker; 1/6 produced no redline) — a
-  model-bound ceiling, honestly recorded in `docs/fork/evidence/c8/README.md`. **Adversarial review (13
-  agents) → SHIP-WITH-FIXES, 0 blockers**; all 6 findings fixed (helper de-dup, matter-scoped capture,
-  idempotency operator-edit case, registry type, evidence consistency).
+- **7 corpus instruments** (single-source `.docx`==normalized text): *moderate* — `securescan_msa`,
+  `databridge_license`, NEW `aegis_mutual_nda`, `northwind_dpa`, `meridian_services_sow`; *complex*
+  (dense multi-limb, added mid-slice on the maintainer's "the real test is long clauses where most language
+  must be LEFT ALONE") — NEW `helios_master_agreement`, `orion_dev_licence`.
+- **`tests/agents/scenarios/test_commercial_redline_manual.py`** (NEW, provider-marked) — purposive
+  per-instrument prompts (names the one-sided heads, leaves surgical technique to the bound skill); runs the
+  chosen model with the skill registry active; writes `c9/<id>/` (`original-*.docx`, `* (redlined).docx`,
+  `reconstruction.txt`, `accepted-clean.txt`) + a merge-safe `manifest.json`; `LQ_AI_C9_ONLY` runs a subset;
+  `LQ_AI_SCENARIO_MODEL` selects `deepseek` (flash) vs `deepseek-pro`. `complexity` field added to
+  `RedlineScenarioDoc`.
+- **Substrate bugfix `api/app/agents/skill_backend.py`** — `RegistrySkillBackend.grep`/`glob` now return a
+  graceful unsupported `GrepResult`/`GlobResult` instead of inheriting the protocol's `raise
+  NotImplementedError`. deepagents' `agrep`/`aglob` do NOT catch that, so **any run where the model called the
+  builtin grep/glob hard-failed** (observed live: the NDA crashed mid-redline). Fixes every area agent
+  (Privacy too). Test in `tests/agents/test_skill_backend.py`.
+- **Judge deliverables (Claude):** `docs/fork/evidence/c9/SUMMARY.md` + `verdicts/<id>.md` + `flash/` & `pro/`
+  `.docx`. **Finding:** flash surgical-craft **5/7** by the strong judge (vs C8's self-judged 2/6); the
+  **complex** docs scored *among the best on both models* — complexity is NOT the craft predictor. The one
+  consistent weakness is **pervasive mutualisation** (one-directional-throughout clauses → whole-clause
+  rewrite). Pro re-run of the flash failures: fixed the SOW *robustness* (flash produced no redline) but did
+  **worse** on the NDA (looped to `cap_exceeded`) — so the stronger tier does NOT reliably fix craft; the
+  lever is **method** (a mutualisation worked-example in `surgical-redline` + a redline step-budget tier).
+- **Live cockpit UAT (maintainer, end of C9):** drove the agent in the real UI on a "Project Atlas" deal
+  suite (`/home/sarturko/atlas-deal-suite/`: an `.eml` with a **nested** term-sheet PDF, the Cirrus MSA
+  `.docx`, a processor DPA PDF; org profile seeded as Northwind). The agent read all four (incl. the nested
+  attachment), used **company memory**, produced a correct gap analysis + a successful tracked-changes
+  redline. **Real fix committed:** the **arq-worker had no S3/MinIO env** (api/ingest did) → storage-backed
+  agent tools failed in the worker; added the S3 block to `docker-compose.yml`. Dev-only/local (NOT
+  committed): `LQ_AI_DOCLING_ENABLED=false` (Docling hung PDFs to its 300s timeout) and the seeded org
+  profile. Full findings: memory `commercial-agent-live-uat-findings`.
 
-## ▶ PICK UP EXACTLY HERE — slice **C9 — Claude-judged manual redline tests (5 agreements)** (maintainer steer, 2026-06-22)
+## ▶ PICK UP EXACTLY HERE — maintainer's call on the next slice
 
-**Why:** C8's eval used DeepSeek as its own craft-judge (weak signal — same model). The maintainer wants a
-**stronger judge: Claude (this agent) judges whether DeepSeek's redline is lawyer-like**, over **5 full (but
-concise) agreements**, with the **produced `.docx` files surfaced for the maintainer to review**.
+**NEW (cockpit chat UX — surfaced in the UAT; small, high-value, web-only — strong next-slice candidate):**
+- **Markdown not rendered in the chat answer.** Tables/markdown render in the *thinking* stream but the
+  user-facing final answer shows raw markdown (tables don't render). Fix the chat renderer to render GFM
+  (tables, lists) in the assistant message.
+- **Tool-call UI is too noisy by default.** Make tool icons smaller and **hide raw params/JSON behind the
+  expansion toggle** — by default show only the plain-language line of what the model is doing (we stay
+  transparent via expand, but the default view is clean prose). 
+- **No redline download button** — the in-matter download of an agent-produced `.docx` is **C7**
+  ("redline download UI"); the file IS created (matter File, `status ready`) but nothing surfaces it.
+  Consider a minimal download affordance before full C7.
 
-**Scope:** (1) a corpus of **5 concise but complete** vendor-favoured agreements (extend the C8 corpus —
-`securescan_msa`, `databridge_license` + 3 more instruments: e.g. NDA, DPA, professional-services SOW); (2)
-run DeepSeek on each under **purposive instruction** (the agent redlines to protect the client); (3) **the
-agent (Claude) judges each produced redline** for lawyer-like surgical craft — *not* DeepSeek-judging-itself;
-the manual/Claude judgement is the point; (4) **save every redlined `.docx` to an evidence dir** the
-maintainer can open and review. Reuse C8's `apply_redline`/`preview_redline` + `seed_doc_matter`/
-`capture_redline` + the reconstruction; the new piece is the corpus breadth + the Claude-as-judge step +
-packaging the `.docx` deliverables. Likely no migration. Read memory `claude-judged-redline-tests-slice`.
+**C9 follow-up (method, small — feeds the C8/F041 track):** add a worked **mutualisation** example to
+`skills/surgical-redline/SKILL.md` (swap the defined term — `The [-Customer-][+Each party+] shall
+indemnify…` — keep the verb phrase bare) and consider a **redline step-budget tier** for fully-mutual
+instruments (the NDA hit `cap_exceeded` on pro). UAT also showed flash **thrashing the D-gate** (~8 preview
+retries) — pre-teaching the gate rules in the skill would cut that. Re-judge the NDA/SOW after.
 
 **Other COMM slices (after C9, maintainer's call):** **C3** deal-context matter memory (first Commercial
 migration now **`0068`** — C8 took 0067; mapping done) · **C5** negotiation rounds (needs C3+C4) · **C6**
@@ -86,6 +97,14 @@ craft weaker); investigate the ~1/6 no-redline runs; re-run the C8 eval when a s
   `LQ_AI_SCENARIO_MODEL=deepseek LQ_AI_REDLINE_EVAL_REPS=N UX_B1_EVIDENCE_DIR=<repo>/docs/fork/evidence/c8`.
   It regenerates ALL eval files in one run — if a (doc,rep) yields no redline, no per-rep file is written, so
   reconcile the dir against `eval-report.json` before committing (delete stale files from a prior run).
+- **C9 — builtin `grep`/`glob` crash a run if the backend doesn't implement them.** deepagents exposes
+  `grep`/`glob` filesystem tools; `BackendProtocol`'s default `grep`/`glob` `raise NotImplementedError`, and
+  the async wrappers (`agrep`/`aglob`) do NOT catch it → the exception leaves the tools node and fails the
+  whole run. Any custom backend MUST override `grep`/`glob` to return a `GrepResult`/`GlobResult` (even just
+  an `error=`), never inherit the raise. Fixed for `RegistrySkillBackend` (C9); watch for it in any future
+  backend. **C9 manual harness** (`test_commercial_redline_manual.py`, provider-marked) writes per-MODEL dirs
+  (`c9/flash`, `c9/pro`) with a merge-safe `manifest.json`; `LQ_AI_C9_ONLY` runs a subset. The one open craft
+  weakness it found is **pervasive mutualisation** (see pickup) — flash rip-and-replaces, pro can `cap_exceeded`.
 
 - **Adeu is installed `--no-deps`** (4 places: api/Dockerfile, api/Dockerfile.dev, ci.yml, + any dev-image test
   command). Its `fastmcp[apps]` dep bumps starlette 0.48/pydantic 2.13/mcp → breaks `APIRouter`. The SDK

@@ -338,6 +338,16 @@ services:
       # not mutate it (skill authoring is a host-side / human-attestation
       # workflow per CLAUDE.md "Working with skills").
       LQ_AI_SKILLS_DIR: ${LQ_AI_SKILLS_DIR:-/skills}
+      # Object storage — this worker EXECUTES agent runs whose tools read/write
+      # object storage (the Commercial apply_redline source-doc fetch + redlined
+      # output upload; user-export bundles). Same wiring as api/ingest-worker.
+      # Without it, storage-backed tools fail in the worker ("could not be read
+      # from storage") while DB-backed tools (read_document) still work.
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-${MINIO_ROOT_USER:-lq_ai}}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
+      S3_BUCKET: ${S3_BUCKET:-lq-ai-files}
+      S3_REGION: ${S3_REGION:-us-east-1}
     volumes:
       - ./skills:/skills:ro
     command: ["arq", "app.workers.arq_setup.WorkerSettings"]
