@@ -50,7 +50,7 @@ quota returns.
   text caps; office-doc recursion inherits `guard_ooxml` (zip-bomb/XXE); `cid:`/`http(s)` never fetched; HTML
   stripped (inert); fail-soft (a bad attachment never sinks the email); fitz import-guard auto-covers new modules.
 - **Verification:** ruff + mypy clean (`mypy app` 182 files); **53** reader+ingest tests on real postgres (38
-  reader unit + 15 ingest); full api suite containerized **2494 passed / 2 skipped** (the 1 non-pass =
+  reader unit + 15 ingest); full api suite containerized **2498 passed / 2 skipped** (the 1 non-pass =
   `test_ready_reports_per_dependency_status`, env-sensitive — asserts services unreachable, passes isolated in
   CI). **Live** (rebuilt image + `python-oxmsg` baked): multi-attachment
   `.eml` → buried docx grounded, png listed-not-extracted, fidelity OK, `.msg` sniff works. **19-agent

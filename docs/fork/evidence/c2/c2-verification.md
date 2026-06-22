@@ -23,7 +23,7 @@ attachment map is the audit record in `Document.structured_content`.
   through the **wired** registry → persisted `normalized_content` grounds both the email body and the
   **recursed attachment text**, the inline label is present, every chunk slices back byte-for-byte, and the
   `structured_content` map records `extracted via …`.
-- **Full api suite (containerized):** **2494 passed / 2 skipped**; the single non-pass is
+- **Full api suite (containerized, post-fix):** **2498 passed / 2 skipped**; the single non-pass is
   `test_health.py::test_ready_reports_per_dependency_status`, the documented environment-sensitive test that
   asserts services are *unreachable* and flips when the suite runs on the live `lq-ai_default` compose network
   (passes isolated in CI — same non-regression as C1). `mypy app` clean (182 files). Readers + ingest e2e
