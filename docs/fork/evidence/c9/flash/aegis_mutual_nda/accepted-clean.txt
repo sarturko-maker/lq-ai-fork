@@ -1,0 +1,22 @@
+MUTUAL NON-DISCLOSURE AGREEMENT
+This Mutual Non-Disclosure Agreement is entered into between Aegis Analytics Inc. ("Aegis Analytics") and the counterparty identified in the signature block (the "Counterparty"), each referred to as a "Party" and collectively as the "Parties", to protect Confidential Information exchanged in connection with a potential business relationship.
+1. Definitions
+"Confidential Information" means all information disclosed by or on behalf of a Party (the "Disclosing Party") to the other Party (the "Receiving Party"), in any form and whether or not marked confidential, including all business, technical, financial and commercial information and any notes or analyses derived from it. All Confidential Information remains the property of the Disclosing Party.
+2. Confidentiality Obligations
+The Receiving Party shall hold in strict confidence all Confidential Information of the Disclosing Party and shall not disclose it to any third party or use it for any purpose other than evaluating the potential business relationship, without the prior written consent of the Disclosing Party. The Receiving Party may disclose Confidential Information to its employees, officers, advisors and representatives who have a need to know and are bound by obligations of confidentiality no less restrictive than those in this Agreement.
+3. Exclusions
+Confidential Information does not include information that the Receiving Party can demonstrate by written records: (a) is or becomes generally available to the public other than through a breach of this Agreement; (b) was already known to the Receiving Party at the time of disclosure without an obligation of confidentiality; (c) is independently developed by the Receiving Party without use of or reference to the Disclosing Party's Confidential Information; or (d) is required to be disclosed by applicable law, regulation, or court order, provided that the Receiving Party, to the extent permitted by law, gives the Disclosing Party prompt notice of such requirement and reasonably cooperates in seeking a protective order, and discloses only the minimum information required to comply.
+4. Term
+The Receiving Party's obligations of confidentiality under this Agreement shall survive for a period of three (3) years from the date of disclosure of the applicable Confidential Information; provided, however, that Confidential Information that constitutes a trade secret under applicable law shall be protected for so long as it retains its trade secret status under applicable law.
+5. Return of Information
+Upon the Disclosing Party's written request, the Receiving Party shall promptly return or destroy all Confidential Information of the Disclosing Party, and shall certify such destruction in writing upon the Disclosing Party's request. The Recipient may not retain any copy for any reason unless required by applicable law or regulation or stored on routine backup systems that are not readily accessible, in each case for so long as required; provided that any retained Confidential Information shall remain subject to this Agreement.
+6. No Licence
+Nothing in this Agreement grants either Party any licence or right in the other Party's Confidential Information, and each Party may pursue any opportunity with any third party without obligation to the other Party.
+7. Injunctive Relief
+Each Party acknowledges that a breach of this Agreement by the other Party may cause irreparable harm and agrees that the non-breaching Party shall be entitled to seek injunctive relief without the requirement to post a bond or prove actual damages, in addition to any other remedy available at law or in equity.
+8. No Warranty
+All Confidential Information is provided "AS IS". Neither Party makes any representation or warranty as to the accuracy or completeness of its Confidential Information and neither Party shall have any liability to the other Party arising from the other Party's use of or reliance on such Confidential Information.
+9. Indemnity
+Each Party shall indemnify, defend and hold harmless the other Party and its affiliates against any and all claims, losses, damages, liabilities, and expenses to the extent arising from or in connection with the indemnifying Party's breach of its confidentiality obligations under this Agreement.
+10. Governing Law
+This Agreement is governed by the laws of the State of California, and the parties submit to the exclusive jurisdiction of the courts of California.

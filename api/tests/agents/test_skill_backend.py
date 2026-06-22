@@ -135,6 +135,24 @@ def test_mutations_are_refused() -> None:
     assert uploads[0].error == "permission_denied"
 
 
+def test_search_is_unsupported_but_never_raises() -> None:
+    # deepagents' agrep/aglob do not catch a backend NotImplementedError, so the
+    # protocol default raise would crash the whole run when a model calls the
+    # builtin grep/glob. Lock the graceful error on BOTH the sync method and the
+    # async wrapper the filesystem middleware actually invokes.
+    b = _backend("nda-review")
+    assert b.grep("indemnify").error is not None
+    assert b.grep("indemnify").matches in (None, [])
+    assert b.glob("**/*.md").error is not None
+
+    async def _via_middleware_wrappers() -> tuple[object, object]:
+        return (await b.agrep("indemnify"), await b.aglob("**/*.md"))
+
+    grep_res, glob_res = asyncio.run(_via_middleware_wrappers())
+    assert grep_res.error is not None  # type: ignore[attr-defined]
+    assert glob_res.error is not None  # type: ignore[attr-defined]
+
+
 # --- resolve / build (the registry filter + drift) --------------------------
 
 

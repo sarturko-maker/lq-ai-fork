@@ -53,6 +53,10 @@ class RedlineScenarioDoc:
     normalized_text: Callable[[], str]
     prompt: str
     boilerplate_bare: tuple[str, ...] = ()
+    # C9: "moderate" (short-clause) vs "complex" (dense, multi-limb clauses where
+    # the surgical "leave language alone" test bites). Recorded in the manifest so
+    # the evidence foregrounds the hard cases the maintainer cares about.
+    complexity: str = "moderate"
 
 
 async def seed_doc_matter(
