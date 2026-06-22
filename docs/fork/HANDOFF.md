@@ -52,14 +52,33 @@ reconstruction). Plan `docs/fork/plans/C9-claude-judged-redline-tests.md`.
   rewrite). Pro re-run of the flash failures: fixed the SOW *robustness* (flash produced no redline) but did
   **worse** on the NDA (looped to `cap_exceeded`) — so the stronger tier does NOT reliably fix craft; the
   lever is **method** (a mutualisation worked-example in `surgical-redline` + a redline step-budget tier).
+- **Live cockpit UAT (maintainer, end of C9):** drove the agent in the real UI on a "Project Atlas" deal
+  suite (`/home/sarturko/atlas-deal-suite/`: an `.eml` with a **nested** term-sheet PDF, the Cirrus MSA
+  `.docx`, a processor DPA PDF; org profile seeded as Northwind). The agent read all four (incl. the nested
+  attachment), used **company memory**, produced a correct gap analysis + a successful tracked-changes
+  redline. **Real fix committed:** the **arq-worker had no S3/MinIO env** (api/ingest did) → storage-backed
+  agent tools failed in the worker; added the S3 block to `docker-compose.yml`. Dev-only/local (NOT
+  committed): `LQ_AI_DOCLING_ENABLED=false` (Docling hung PDFs to its 300s timeout) and the seeded org
+  profile. Full findings: memory `commercial-agent-live-uat-findings`.
 
-## ▶ PICK UP EXACTLY HERE — maintainer's call on the next COMM slice
+## ▶ PICK UP EXACTLY HERE — maintainer's call on the next slice
+
+**NEW (cockpit chat UX — surfaced in the UAT; small, high-value, web-only — strong next-slice candidate):**
+- **Markdown not rendered in the chat answer.** Tables/markdown render in the *thinking* stream but the
+  user-facing final answer shows raw markdown (tables don't render). Fix the chat renderer to render GFM
+  (tables, lists) in the assistant message.
+- **Tool-call UI is too noisy by default.** Make tool icons smaller and **hide raw params/JSON behind the
+  expansion toggle** — by default show only the plain-language line of what the model is doing (we stay
+  transparent via expand, but the default view is clean prose). 
+- **No redline download button** — the in-matter download of an agent-produced `.docx` is **C7**
+  ("redline download UI"); the file IS created (matter File, `status ready`) but nothing surfaces it.
+  Consider a minimal download affordance before full C7.
 
 **C9 follow-up (method, small — feeds the C8/F041 track):** add a worked **mutualisation** example to
 `skills/surgical-redline/SKILL.md` (swap the defined term — `The [-Customer-][+Each party+] shall
 indemnify…` — keep the verb phrase bare) and consider a **redline step-budget tier** for fully-mutual
-instruments (the NDA hit `cap_exceeded` on pro). Re-judge the NDA/SOW after. This is the only open craft
-weakness C9 surfaced.
+instruments (the NDA hit `cap_exceeded` on pro). UAT also showed flash **thrashing the D-gate** (~8 preview
+retries) — pre-teaching the gate rules in the skill would cut that. Re-judge the NDA/SOW after.
 
 **Other COMM slices (after C9, maintainer's call):** **C3** deal-context matter memory (first Commercial
 migration now **`0068`** — C8 took 0067; mapping done) · **C5** negotiation rounds (needs C3+C4) · **C6**
