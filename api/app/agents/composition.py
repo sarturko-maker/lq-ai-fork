@@ -35,8 +35,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.area_agent import AreaAgentSpec, combine_tier_floors, render_area_agent
 from app.agents.assessment_tools import build_assessment_tools
 from app.agents.checkpointer import get_agent_checkpointer
+from app.agents.commercial_tools import COMMERCIAL_AREA_KEY, build_commercial_tools
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.lease import RunLease, settle_run
+from app.agents.redline_service import RedlineService, build_redline_service
 from app.agents.ropa_changes import RopaChangeLedger
 from app.agents.ropa_tools import PRIVACY_AREA_KEY, build_ropa_tools
 from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
@@ -157,6 +159,7 @@ async def compose_and_execute_run(
     session_factory_provider: Callable[[], async_sessionmaker[AsyncSession]] = get_session_factory,
     checkpointer_provider: Callable[[], BaseCheckpointSaver | None] = get_agent_checkpointer,
     skill_registry_provider: Callable[[], SkillRegistry | None] = _skill_registry_from_app_state,
+    redline_service_provider: Callable[[], RedlineService] = build_redline_service,
 ) -> None:
     """Compose one run's dependencies and execute it end to end.
 
@@ -292,6 +295,18 @@ async def compose_and_execute_run(
             # ROPA activity IDs through the ROPA tools' list above, so no separate
             # list is needed; no change ledger yet (the assessment read UI is A3).
             tools = tools + build_assessment_tools(session_factory, run_id=run_id, binding=binding)
+        elif binding is not None and area_key == COMMERCIAL_AREA_KEY:
+            # C4 (ADR-F031/F035): a matter filed under the Commercial area gets the
+            # surgical-redline tool. The Adeu engine is injected via a
+            # provider-callable (stateless, per-document — no startup singleton),
+            # mirroring model_builder/checkpointer_provider. First Commercial
+            # domain-tool grant branch (matter-scoped, not deployment-global).
+            tools = tools + build_commercial_tools(
+                session_factory,
+                run_id=run_id,
+                binding=binding,
+                redline_service=redline_service_provider(),
+            )
 
         # F1-S3: the gateway tier floor is the strongest (lowest) of the
         # matter floor and the area's default floor — the gateway combiner

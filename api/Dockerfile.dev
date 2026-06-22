@@ -27,6 +27,8 @@ WORKDIR /app
 # factory-boy (see pyproject.toml [project.optional-dependencies]).
 COPY pyproject.toml README.md ./
 RUN pip install --no-cache-dir ".[dev]"
+# C4 (ADR-F031): Adeu --no-deps (see api/Dockerfile — avoids the fastmcp/starlette conflict).
+RUN pip install --no-cache-dir --no-deps "adeu==1.12.1"
 
 # Copy application code and migration files
 COPY app/ ./app/
