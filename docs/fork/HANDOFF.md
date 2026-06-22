@@ -11,7 +11,7 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ DELIVERED. Pickup = C8 (surgical-redline craft).**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ DELIVERED. Pickup = maintainer's call (C3 deal-context · C5 · C6 · C7).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -21,58 +21,71 @@ produces the work product). The full decomposition: `docs/fork/plans/COMM-commer
 minimax/MiniMax-M3 → deepseek on the local gateway (MiniMax out of quota). **`deepseek` alias has quota** and is
 the qualified live-test target. Revert when MiniMax quota returns.
 
-## Done this slice (C4 — Adeu surgical-redline tool `apply_redline`; NO migration)
+## Done this slice (C8 — surgical-redline craft; ADR-F041; migration 0067)
 
-- **`api/app/schemas/commercial.py`** (NEW) — the **model-free D1-D6 surgical gate**. Key refinement vs C-R0
-  §6.1: the ratio measures **struck (deleted) tokens / clause_tokens**, NOT insertions — so adding protective
-  carve-outs (the §5.1 move) is surgical, while *striking* existing text is what stays minimal. `ApplyRedlineInput`
-  /`RedlineEditInput` validators (D2 rationale, D3 bare-deletion, no-op guard) + `evaluate_gate` (D1 tiered
-  strike, D4 unique-anchor, D5 batch ceiling; fail-closed clause resolution). All thresholds are calibration
-  starting values (named module constants).
-- **`api/app/agents/redline_service.py`** (NEW) — the Adeu SDK adapter (`dry_run`/`apply`/`accept_all`). **Raw
-  `ModifyText` per edit — decompose REJECTED** (it emitted micro-anchors like `target_text="3"` that Adeu
-  fuzz-matched to the wrong span → live corruption `Ven12or`, and it bypassed the D4 gate; raw is safe + Adeu's
-  prefix/suffix trim still renders surgically). **Fresh ModifyText per call** (Adeu's `process_batch` mutates
-  them into a cycle → reusing across dry_run+apply was a `RecursionError`).
-- **`api/app/agents/redline_render.py`** (NEW) — `word/document.xml` → readable `[-del-][+ins+]` reconstruction
-  (Layer-2 tests, the judge, evidence).
-- **`api/app/agents/commercial_tools.py`** (NEW) — `COMMERCIAL_AREA_KEY="commercial"`, `build_commercial_tools`,
-  the guarded `apply_redline` + `_apply_redline` (validate → matter-scoped fetch → gate → dry-run → apply →
-  persist as a new `File`). **Matter-scoped (ADR-F035)**: reuses `tools._matter_files_query` (owner+matter,
-  404 cross-deal/cross-user). Audit = counts/types/IDs only (`commercial.redline_applied`), never clause text.
-- **`composition.py`** — `redline_service_provider` provider-callable seam (stateless adapter, no startup
-  singleton) + the **Commercial grant branch** (`elif area_key == COMMERCIAL_AREA_KEY`).
-- **Deps:** Adeu installed **`--no-deps`** (api/Dockerfile, api/Dockerfile.dev, ci.yml) — its `fastmcp[apps]`
-  hard dep would bump starlette/pydantic and break our FastAPI (`APIRouter`, 89 errors). We never use the
-  server, so fastmcp is **absent** → `adeu.server` is a hard `ModuleNotFoundError` (second egress structurally
-  gone). Its real SDK deps `diff-match-patch` (Apache-2.0) + `structlog` are in pyproject. NOTICES updated.
-- **ADRs F031 + F035** (both accepted, written this slice). **No migration** (output is a `File` row).
-- **Verification:** ruff + mypy clean; **42** C4 unit/integration tests; full api suite **2509 passed / 2
-  skipped** (the 11 "failures" = test-DB contamination from a killed mid-run container + the 1 documented
-  env-sensitive health test — all confirmed clean in a fresh container). **Live (DeepSeek):** comprehensive,
-  mostly-surgical redline of a vendor-favoured SaaS MSA; **redline-quality judge → STRONG**; evidence in
-  `docs/fork/evidence/c4/`. **Adversarial review (11 agents) → SHIP, 0 confirmed findings** (every flag refuted
-  as already-correct).
+**Decision (settled with the maintainer in-session):** surgical *craft* is a **prompt-quality property tuned
+by eval, not a runtime gate**. Rejected D7 (a deterministic single-region rule — Adeu already renders each
+edit surgically) and a mandatory per-run LLM critic (too slow). Integrity stays with C4's D1-D6 gate; Adeu
+renders; the human owns the accept.
 
-## ▶ PICK UP EXACTLY HERE — slice **C8 — surgical-redline craft** (the maintainer's next priority)
+- **`skills/surgical-redline/SKILL.md`** (NEW) — the curated abstract-method craft skill: decompose a clause
+  into several narrow edits, keep recognisable boilerplate (`shall indemnify, defend and hold harmless`, the
+  cap stem) **bare**, fold insertions into the boundary, preview-then-apply. Worked §8/§9 before/after.
+- **`api/alembic/versions/0067_commercial_surgical_redline_skill.py`** (NEW) — binds `surgical-redline` to
+  Commercial (`practice_area_skills`) + refreshes the stale "lands in a later slice" tail of `profile_md` to
+  point at the tools/skill. Idempotent never-clobber (`REPLACE ... WHERE POSITION(:old)>0` + `NOT EXISTS`).
+- **`api/app/agents/commercial_tools.py`** — NEW guarded **`preview_redline`** tool (dry-run + reconstruct,
+  **persists nothing**) for self-review; shared `_render_redline` pipeline (validate→fetch→gate→dry-run→apply)
+  reused by apply + preview; **editor-error hardening** (Adeu raises → fix-and-retry, never a 500).
+- **`api/app/agents/redline_render.py`** — added shared `bare_text` + `docx_text` (one definition; de-dup).
+- **Eval (the maintainer's "run enough tests"):** `tests/agents/scenarios/test_commercial_redline_eval.py`
+  (NEW, provider-marked) runs a 2-doc corpus (`securescan_msa` + new `databridge_license`) × N reps, judges
+  craft with a sharpened rubric, writes the **surgical-craft rate** to `docs/fork/evidence/c8/`. Shared
+  scaffolding in `commercial_redline_lib.py` (seed+real-cleanup, capture, judge) — this **fixed the C4
+  live-test `_noop_cleanup` leak**.
+- **ADR F041** (proposed). Plan `docs/fork/plans/C8-surgical-redline-craft.md`.
+- **Verification:** ruff + mypy clean; **71** touched-area tests pass; full api suite **2526 passed / 2
+  skipped** (lone failure = the documented env-sensitive `test_ready_reports_per_dependency_status`, which
+  asserts deps are *unreachable* — they're up on the dev network; unrelated to C8, passes in CI).
+  **Live eval (DeepSeek, 3 reps):** overall **2/6** surgical-craft passes; in-distribution SaaS MSA **2/3**;
+  **§8 indemnity surgical in the passing runs** (boilerplate bare); boilerplate-bare in **4/5** redlined
+  runs. NOT yet "reliably surgical" (out-of-distribution licence weaker; 1/6 produced no redline) — a
+  model-bound ceiling, honestly recorded in `docs/fork/evidence/c8/README.md`. **Adversarial review (13
+  agents) → SHIP-WITH-FIXES, 0 blockers**; all 6 findings fixed (helper de-dup, matter-scoped capture,
+  idempotency operator-edit case, registry type, evidence consistency).
 
-**Why (from the C4 live run):** DeepSeek's §8 indemnity edit **struck the whole clause and retyped it** instead
-of keeping "shall indemnify, defend and hold harmless" bare + making narrow edits (swap party, narrow scope,
-INSERT the third-party indemnity). The C4 gate is *structural* — it proved the edit well-formed but can't prove
-"a surgical alternative existed" (the model set `rewrite_justified=true`). **C8 makes structure-preserving,
-sub-sentence, multi-narrow-edits-per-clause the reliable behaviour.** Full scope + the §8 worked example:
-**memory `surgical-redline-craft-slice.md`** (read it). Sketch: (1) a **controlling redline skill** with
-before/after examples pushing clause-decomposition into several narrow edits; (2) make `rewrite_justified`
-**expensive** — a whole-clause strike triggers a Layer-3 critic that must confirm no structure-preserving
-alternative; (3) reuse C4's batched `apply_redline` + golden corpus + judge harness; likely a new ADR.
+## ▶ PICK UP EXACTLY HERE — slice **C9 — Claude-judged manual redline tests (5 agreements)** (maintainer steer, 2026-06-22)
 
-**Other COMM slices still pending:** **C3** (deal-context matter memory — inject `projects.context_md` +
-propose/accept; first Commercial migration `0067`; mapping already done, see memory + the C3 plan section) ·
-**C5** (negotiation rounds, needs C3+C4) · **C6** (controlling playbook skills, needs F036+F038) · **C7**
-(complex-deal fan-out — the answer for 50-page docs). Order is the maintainer's call; **C8 is next per the
-2026-06-22 steer.**
+**Why:** C8's eval used DeepSeek as its own craft-judge (weak signal — same model). The maintainer wants a
+**stronger judge: Claude (this agent) judges whether DeepSeek's redline is lawyer-like**, over **5 full (but
+concise) agreements**, with the **produced `.docx` files surfaced for the maintainer to review**.
 
-## Gotchas / durable traps (C4 + carried)
+**Scope:** (1) a corpus of **5 concise but complete** vendor-favoured agreements (extend the C8 corpus —
+`securescan_msa`, `databridge_license` + 3 more instruments: e.g. NDA, DPA, professional-services SOW); (2)
+run DeepSeek on each under **purposive instruction** (the agent redlines to protect the client); (3) **the
+agent (Claude) judges each produced redline** for lawyer-like surgical craft — *not* DeepSeek-judging-itself;
+the manual/Claude judgement is the point; (4) **save every redlined `.docx` to an evidence dir** the
+maintainer can open and review. Reuse C8's `apply_redline`/`preview_redline` + `seed_doc_matter`/
+`capture_redline` + the reconstruction; the new piece is the corpus breadth + the Claude-as-judge step +
+packaging the `.docx` deliverables. Likely no migration. Read memory `claude-judged-redline-tests-slice`.
+
+**Other COMM slices (after C9, maintainer's call):** **C3** deal-context matter memory (first Commercial
+migration now **`0068`** — C8 took 0067; mapping done) · **C5** negotiation rounds (needs C3+C4) · **C6**
+controlling playbook skills (needs F036+F038) · **C7** complex-deal fan-out (50-page docs + redline budget
+tier). **C8 follow-ups** (optional): broaden the skill's worked examples beyond MSAs (out-of-distribution
+craft weaker); investigate the ~1/6 no-redline runs; re-run the C8 eval when a stronger model is qualified.
+
+## Gotchas / durable traps (C8 + C4 + carried)
+
+- **C8 — Adeu crashes on a PURE zero-width insertion** (`new_text` that merely appends after an unchanged
+  anchor → `Op=INSERTION at [n:n]` → `AttributeError` in `adeu/redline/engine.py`). Fold an addition into
+  the **boundary** instead (end the anchor at the clause's punctuation, replace it and continue — the working
+  §9 carve-out shape). The skill teaches this; `preview_redline`/`apply_redline` catch the crash and return
+  `_EDITOR_ERROR_MSG` (no partial write). Golden/skill examples MUST use the boundary pattern.
+- **C8 — the surgical-craft eval is provider-marked** (`test_commercial_redline_eval.py`): run live with
+  `LQ_AI_SCENARIO_MODEL=deepseek LQ_AI_REDLINE_EVAL_REPS=N UX_B1_EVIDENCE_DIR=<repo>/docs/fork/evidence/c8`.
+  It regenerates ALL eval files in one run — if a (doc,rep) yields no redline, no per-rep file is written, so
+  reconcile the dir against `eval-report.json` before committing (delete stale files from a prior run).
 
 - **Adeu is installed `--no-deps`** (4 places: api/Dockerfile, api/Dockerfile.dev, ci.yml, + any dev-image test
   command). Its `fastmcp[apps]` dep bumps starlette 0.48/pydantic 2.13/mcp → breaks `APIRouter`. The SDK

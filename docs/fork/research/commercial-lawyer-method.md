@@ -149,6 +149,20 @@ This is **per-instructions**: depth and aggression follow the brief and the play
 Mechanically these are exactly the **narrow, multi-region** edits § 6.1 requires — one carve-out, one
 requalification, each its own `ModifyText`, never a single sentence rewrite.
 
+> **C8 update (2026-06-22, ADR-F041): surgical *craft* is a prompt-quality property, tuned by eval — not a
+> runtime gate.** C4's live runs showed the craft (structure-preserving, multi-narrow-edits, boilerplate
+> left bare) is run-to-run *variable*. The fix is **not** another code gate (Adeu already renders each edit
+> surgically; a deterministic "single-region" rule (§6.1 option 2) over-fires and just papers over a weak
+> prompt) and **not** a mandatory per-run LLM critic (too slow for every production redline). It is: (1) the
+> curated **`surgical-redline`** skill + a tightened `profile_md` redline section with worked §8 before/after
+> examples (the shape-forcing prompt); (2) a read-only **`preview_redline`** self-review tool the agent calls
+> to see its tracked changes and revise before `apply_redline`; (3) an **eval harness** that runs many vendor
+> scenarios × repetitions and measures the **surgical-craft rate** to drive prompt tuning. Integrity stays
+> with the C4 D1–D6 gate; the human owns the accept. **Adeu insertion constraint (found at C8):** a pure
+> zero-width insertion (new_text that merely appends after an unchanged anchor) crashes Adeu's engine — fold
+> an addition into the boundary instead (replace the clause's closing punctuation and continue, the working
+> §9 carve-out shape). The tool catches the crash and returns fix-and-retry guidance.
+
 ## 6. Surgical — the code-checkable definition (C4's gate)
 
 > **"Surgical" = the smallest edit that achieves the client protection.** Operationalised as a **hybrid**

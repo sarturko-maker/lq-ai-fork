@@ -15,6 +15,7 @@ ingestion/redline-input boundary, never reaching this function.
 from __future__ import annotations
 
 import io
+import re
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -50,3 +51,20 @@ def reconstruct_redline(docx_bytes: bytes) -> list[str]:
 def reconstruct_redline_text(docx_bytes: bytes) -> str:
     """The reconstruction as one newline-joined string."""
     return "\n".join(reconstruct_redline(docx_bytes))
+
+
+def bare_text(redline: str) -> str:
+    """Strip tracked-change spans from a reconstruction, leaving only the unchanged
+    (bare) text — what neither side touched. Used to assert recognisable boilerplate
+    stays bare (the C8 surgical-craft check). Single shared definition (ADR-F041)."""
+    no_ins = re.sub(r"\[\+.*?\+\]", "", redline, flags=re.DOTALL)
+    return re.sub(r"\[-.*?-\]", "", no_ins, flags=re.DOTALL)
+
+
+def docx_text(data: bytes) -> str:
+    """Plain text of a ``.docx`` (one line per paragraph), via python-docx. Used by
+    tests/eval to read the accept-to-clean result; python-docx is imported lazily so
+    this module's reconstruction core stays import-light."""
+    from docx import Document
+
+    return "\n".join(p.text for p in Document(io.BytesIO(data)).paragraphs)

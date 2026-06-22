@@ -19,12 +19,11 @@ corpus is the gate's calibration corpus and the live-evidence input.
 from __future__ import annotations
 
 import io
-import re
 from dataclasses import dataclass, field
 
 import pytest
 
-from app.agents.redline_render import reconstruct_redline_text
+from app.agents.redline_render import bare_text, docx_text, reconstruct_redline_text
 from app.agents.redline_service import ProposedEdit, RedlineService
 from app.schemas.commercial import RedlineEditInput, evaluate_gate
 
@@ -54,6 +53,11 @@ _R_MUTUAL = (
 _R_IP = (
     "Preserve each party's pre-existing and independently developed IP and grant only "
     "a licence to background materials, rather than assigning the vendor's own IP away."
+)
+_R_IP_RECIP = (
+    "Add a reciprocal indemnity so the vendor stands behind third-party intellectual "
+    "property infringement claims arising from its own materials, balancing the "
+    "one-sided original that protected only the vendor."
 )
 
 
@@ -130,6 +134,46 @@ GOLDEN: list[GoldenScenario] = [
         expect_in_accepted=["non-exclusive licence", "background materials"],
         forbidden_in_accepted=[],
     ),
+    # C8 (ADR-F041): the §8 mutualisation done SURGICALLY — several narrow edits
+    # (two party swaps + one inserted reciprocal indemnity), each its own
+    # ModifyText, so the verb-phrase boilerplate "shall indemnify, defend and hold
+    # harmless" stays BARE. The C8 craft the surgical-redline skill teaches; the
+    # anti-pattern is one clause-sized strike-and-retype.
+    GoldenScenario(
+        name="indemnity-mutualised-surgically",
+        paragraphs=[
+            "The Customer shall indemnify, defend and hold harmless the Vendor and its "
+            "affiliates against any and all claims, losses, damages and liabilities "
+            "arising from or in connection with the performance of this Agreement."
+        ],
+        edits=[
+            {"target_text": "The Customer", "new_text": "Each party", "rationale": _R_MUTUAL},
+            {
+                "target_text": "the Vendor and its affiliates",
+                "new_text": "the other party and its affiliates",
+                "rationale": _R_MUTUAL,
+            },
+            {
+                # Insertion folded into the boundary (replace the closing ".") — a
+                # pure zero-width append after an unchanged anchor crashes the editor.
+                "target_text": "the performance of this Agreement.",
+                "new_text": (
+                    "the performance of this Agreement, and each party shall indemnify "
+                    "the other against third-party intellectual property infringement claims."
+                ),
+                "rationale": _R_IP_RECIP,
+            },
+        ],
+        expect_bare=[
+            "shall indemnify, defend and hold harmless",  # boilerplate never touched
+            "against any and all claims, losses, damages and liabilities",
+        ],
+        expect_in_accepted=[
+            "Each party shall indemnify",
+            "third-party intellectual property infringement",
+        ],
+        forbidden_in_accepted=["The Customer shall indemnify"],
+    ),
 ]
 
 
@@ -142,18 +186,6 @@ def build_docx(paragraphs: list[str]) -> bytes:
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
-
-
-def docx_text(data: bytes) -> str:
-    from docx import Document
-
-    return "\n".join(p.text for p in Document(io.BytesIO(data)).paragraphs)
-
-
-def _bare_text(redline: str) -> str:
-    """Strip all tracked-change spans, leaving only the UNCHANGED runs."""
-    no_ins = re.sub(r"\[\+.*?\+\]", "", redline, flags=re.DOTALL)
-    return re.sub(r"\[-.*?-\]", "", no_ins, flags=re.DOTALL)
 
 
 def apply_golden(service: RedlineService, scenario: GoldenScenario) -> bytes:
@@ -189,7 +221,7 @@ def test_golden_redline_renders_surgically(scenario: GoldenScenario) -> None:
     redline = reconstruct_redline_text(redlined)
     assert "[+" in redline or "[-" in redline, "no tracked changes rendered"
 
-    bare = _bare_text(redline)
+    bare = bare_text(redline)
     for phrase in scenario.expect_bare:
         assert phrase in bare, (
             f"{scenario.name}: '{phrase}' should stay BARE (unchanged) but was swept "
