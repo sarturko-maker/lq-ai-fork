@@ -45,7 +45,7 @@
 	<details class="ag-tool" data-testid="lq-ai-agents-tool">
 		<summary class="ag-tool__header">
 			<span class="ag-tool__name">
-				<WrenchIcon class="ag-tool__icon size-4" aria-hidden="true" />
+				<WrenchIcon class="ag-tool__icon size-3" aria-hidden="true" />
 				<span class="lq-text-label ag-tool__title">{t.title}</span>
 				<span
 					class="ag-tool__badge ag-tool__badge--{t.status}"
@@ -59,7 +59,7 @@
 					{t.statusLabel}
 				</span>
 			</span>
-			<ChevronDownIcon class="ag-tool__chevron size-4" aria-hidden="true" />
+			<ChevronDownIcon class="ag-tool__chevron size-3.5" aria-hidden="true" />
 		</summary>
 		<div class="ag-tool__body">
 			{#if t.inputBody}
@@ -82,7 +82,7 @@
 	{#if d.thinking}
 		<details class="ag-thinking">
 			<summary class="lq-text-caption">Reasoning</summary>
-			<div class="ag-thinking__body prose prose-sm max-w-none">
+			<div class="ag-thinking__body prose prose-sm dark:prose-invert max-w-none">
 				<!-- eslint-disable-next-line svelte/no-at-html-tags — renderModelMarkdown-sanitized -->
 				{@html renderModelMarkdown(d.thinking)}
 			</div>

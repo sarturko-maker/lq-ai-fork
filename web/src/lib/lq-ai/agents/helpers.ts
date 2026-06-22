@@ -226,6 +226,8 @@ export interface StepDisplay {
 const TOOL_CALL_TITLES: Record<string, string> = {
 	search_documents: "Searching the matter's documents…",
 	read_document: 'Reading a matter document…',
+	apply_redline: 'Applying a tracked-changes redline…',
+	preview_redline: 'Reviewing the proposed redline…',
 	write_todos: 'Updating the plan…',
 	task: 'Delegating to a subagent…',
 	ls: 'Listing workspace files…',
@@ -237,16 +239,29 @@ const TOOL_CALL_TITLES: Record<string, string> = {
 	execute: 'Running a shell command…'
 };
 
+/**
+ * Plain-language fallback for a tool with no curated title: `snake_case` →
+ * "Sentence case" so a collapsed tool row never shows a raw identifier like
+ * `apply_redline` (maintainer feedback: "by default users should just see
+ * plain language text of what the model is doing"). The honest record keeps
+ * the raw `name` + args in the step; this is UI phrasing only.
+ */
+function humanizeToolName(name: string): string {
+	const words = name.replace(/_/g, ' ').trim();
+	if (!words) return 'a tool';
+	return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function toolLabel(name: string): string {
 	const known = [...MATTER_TOOLS, ...RAIL_TOOLS].find((t) => t.name === name);
-	return known?.label ?? name;
+	return known?.label ?? humanizeToolName(name);
 }
 
 export function stepDisplay(step: AgentRunStep): StepDisplay {
 	if (step.kind === 'tool_call') {
 		const name = step.name ?? 'unknown';
 		return {
-			title: TOOL_CALL_TITLES[name] ?? `Calling ${name}…`,
+			title: TOOL_CALL_TITLES[name] ?? `${humanizeToolName(name)}…`,
 			body: step.summary ?? '',
 			thinking: null,
 			mono: true

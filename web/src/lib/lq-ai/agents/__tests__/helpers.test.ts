@@ -266,9 +266,18 @@ describe('stepDisplay', () => {
 		expect(d.thinking).toBeNull();
 	});
 
-	it('falls back to the raw name for unknown tool calls (never hide what ran)', () => {
+	it('renders curated titles for the commercial redline tools', () => {
+		expect(
+			stepDisplay(makeStep({ kind: 'tool_call', name: 'apply_redline', summary: '{}' })).title
+		).toBe('Applying a tracked-changes redline…');
+		expect(
+			stepDisplay(makeStep({ kind: 'tool_call', name: 'preview_redline', summary: '{}' })).title
+		).toBe('Reviewing the proposed redline…');
+	});
+
+	it('humanizes unknown tool calls into plain language (no raw identifier shown)', () => {
 		const d = stepDisplay(makeStep({ kind: 'tool_call', name: 'surprise_tool', summary: '{}' }));
-		expect(d.title).toBe('Calling surprise_tool…');
+		expect(d.title).toBe('Surprise tool…');
 	});
 
 	it('renders tool results as monospace with the tool label', () => {
@@ -279,9 +288,9 @@ describe('stepDisplay', () => {
 		expect(d.mono).toBe(true);
 	});
 
-	it('uses the raw name for unknown tool results', () => {
+	it('humanizes the tool label for unknown tool results', () => {
 		const d = stepDisplay(makeStep({ kind: 'tool_result', name: 'surprise_tool', summary: 'x' }));
-		expect(d.title).toBe('surprise_tool — result');
+		expect(d.title).toBe('Surprise tool — result');
 	});
 
 	it('splits reasoning out of model turns', () => {

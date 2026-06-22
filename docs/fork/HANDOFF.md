@@ -11,7 +11,7 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ DELIVERED. Pickup = maintainer's call (C3 deal-context · C5 · C6 · C7).**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX render polish ✓ DELIVERED. Pickup = maintainer's call (C3 deal-context · C5 · C6 · C7).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -23,7 +23,31 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this slice (C9 — Claude-judged manual redline tests; no migration; no new ADR)
+## Done this slice (cockpit chat-UX render polish — `fork/cockpit-chat-ux`; web-only; no migration; no ADR)
+
+**What:** the two web-only fixes the maintainer flagged at the end of the C9 UAT. Plan
+`docs/fork/plans/cockpit-chat-ux-render-polish.md`; evidence `docs/fork/evidence/cockpit-chat-ux/`.
+
+- **Dark-mode markdown parity ("tables don't render in the answer").** Root-caused NOT to the parser —
+  `marked` 9.1.6 already defaults `gfm:true` and emits `<table>` for the real model output (verified against
+  `agent_runs`), and DOMPurify keeps table tags. The defect was **CSS**: the agent-surface prose containers
+  omitted `dark:prose-invert` (`MessageBubble` had it). In dark mode prose then used light-mode tokens (dark
+  text) on the charcoal page; the settled answer sits on `.ag-answer` (no background) → its table rendered
+  dark-on-charcoal, invisible. Live thinking escaped because `.ag-thinking-live__tail` paints a
+  `--color-muted` panel. **Fix:** `dark:prose-invert` added to the 5 agent-surface prose containers
+  (`ConversationPanel:860/874/881`, `StepRow:85`, `AreaConfigDisclosure:45`). Verified with before/after
+  screenshots rendered against the **production compiled CSS** + real output, and confirmed in the rebuilt
+  bundle (0 bare `prose prose-sm`, 7 now `dark:prose-invert`).
+- **Quieter tool calls.** Curated plain-language titles for `apply_redline`/`preview_redline`; unmapped
+  tools humanised (`snake_case`→"Sentence case…") so a collapsed row never shows a raw identifier; wrench
+  icon `size-4`→`size-3`, chevron→`size-3.5`. Raw params/JSON stay behind the `<details>` expander
+  (unchanged). `helpers.ts` + `StepRow.svelte`; unit-tested in `helpers.test.ts`; new
+  `sanitize-markdown.test.ts` guards the parser config.
+- **Verify:** `npm run check` 0 errors · `vitest` **904/904** · web container rebuilt + live. **Redline
+  download deferred to C7** (the redlined file is deliberately unattached work product → needs C7's
+  structured artifact reference).
+
+## Previous slice (C9 — Claude-judged manual redline tests; merged #131; no migration; no new ADR)
 
 **What:** upgraded C8's craft signal from DeepSeek-judging-itself to **Claude (Opus 4.8) judging DeepSeek**
 over a corpus spanning contract types **and** complexity, with the produced `.docx` surfaced for the
@@ -63,16 +87,10 @@ reconstruction). Plan `docs/fork/plans/C9-claude-judged-redline-tests.md`.
 
 ## ▶ PICK UP EXACTLY HERE — maintainer's call on the next slice
 
-**NEW (cockpit chat UX — surfaced in the UAT; small, high-value, web-only — strong next-slice candidate):**
-- **Markdown not rendered in the chat answer.** Tables/markdown render in the *thinking* stream but the
-  user-facing final answer shows raw markdown (tables don't render). Fix the chat renderer to render GFM
-  (tables, lists) in the assistant message.
-- **Tool-call UI is too noisy by default.** Make tool icons smaller and **hide raw params/JSON behind the
-  expansion toggle** — by default show only the plain-language line of what the model is doing (we stay
-  transparent via expand, but the default view is clean prose). 
-- **No redline download button** — the in-matter download of an agent-produced `.docx` is **C7**
-  ("redline download UI"); the file IS created (matter File, `status ready`) but nothing surfaces it.
-  Consider a minimal download affordance before full C7.
+**Cockpit chat-UX render polish ✓ DONE (this slice): markdown dark-mode parity + tool-call quieting.**
+Remaining from that cluster: the **redline download** affordance → folded into **C7** (the redlined file is
+deliberately unattached work product, so a discoverable download needs C7's structured artifact reference;
+the file IS created — matter `File`, `status ready` — but nothing surfaces it; full UI is "redline download UI").
 
 **C9 follow-up (method, small — feeds the C8/F041 track):** add a worked **mutualisation** example to
 `skills/surgical-redline/SKILL.md` (swap the defined term — `The [-Customer-][+Each party+] shall
