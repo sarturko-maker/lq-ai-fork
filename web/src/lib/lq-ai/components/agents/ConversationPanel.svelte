@@ -857,7 +857,7 @@
 							<span class="ag-shimmer">Thinking…</span>
 						</p>
 						<div class="ag-thinking-live__tail">
-							<div class="prose prose-sm max-w-none">
+							<div class="prose prose-sm dark:prose-invert max-w-none">
 								<!-- eslint-disable-next-line svelte/no-at-html-tags — renderModelMarkdown-sanitized -->
 								{@html liveReasoningHtml}
 							</div>
@@ -871,14 +871,14 @@
 							{#if turnAnswer.thinking}
 								<details class="ag-thinking">
 									<summary class="lq-text-caption">Reasoning</summary>
-									<div class="ag-thinking__body prose prose-sm max-w-none">
+									<div class="ag-thinking__body prose prose-sm dark:prose-invert max-w-none">
 										<!-- eslint-disable-next-line svelte/no-at-html-tags — renderModelMarkdown-sanitized -->
 										{@html renderModelMarkdown(turnAnswer.thinking)}
 									</div>
 								</details>
 							{/if}
 							{#if turnHtml}
-								<div class="prose prose-sm max-w-none">
+								<div class="prose prose-sm dark:prose-invert max-w-none">
 									<!-- eslint-disable-next-line svelte/no-at-html-tags — sanitized above -->
 									{@html turnHtml}
 								</div>

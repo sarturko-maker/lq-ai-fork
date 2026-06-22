@@ -42,7 +42,7 @@
 					<FileTextIcon class="size-3.5" aria-hidden="true" />
 					Profile
 				</h3>
-				<div class="ac__prose prose prose-sm max-w-none">
+				<div class="ac__prose prose prose-sm dark:prose-invert max-w-none">
 					<!-- eslint-disable-next-line svelte/no-at-html-tags — renderModelMarkdown-sanitized -->
 					{@html profileHtml}
 				</div>
