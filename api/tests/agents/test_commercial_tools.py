@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents import commercial_tools
@@ -134,6 +134,28 @@ def _patch_storage(monkeypatch: pytest.MonkeyPatch, *, source: bytes) -> dict[st
     return captured
 
 
+@pytest_asyncio.fixture
+async def matter(
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[tuple[uuid.UUID, uuid.UUID]]:
+    """A committed user+matter+.docx File, torn down after the test.
+
+    commit_factory bypasses the per-test rollback, so these rows MUST be cleaned
+    up or they leak into the shared DB (File.owner_id is ON DELETE RESTRICT, so a
+    leftover file breaks other tests' user deletes + row-count assertions).
+    """
+    user_id, project_id, _ = await _make_matter_file(commit_factory)
+    try:
+        yield user_id, project_id
+    finally:
+        async with commit_factory() as db:
+            await db.execute(delete(AuditLog).where(AuditLog.user_id == user_id))
+            await db.execute(delete(File).where(File.owner_id == user_id))
+            await db.execute(delete(Project).where(Project.owner_id == user_id))
+            await db.execute(delete(User).where(User.id == user_id))
+            await db.commit()
+
+
 def test_build_commercial_tools_grants_only_apply_redline() -> None:
     factory = async_sessionmaker()  # not used; the closure captures it
     tools = build_commercial_tools(
@@ -148,8 +170,9 @@ def test_build_commercial_tools_grants_only_apply_redline() -> None:
 
 async def test_apply_redline_rejects_noop_edit(
     commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
-    user_id, project_id, _ = await _make_matter_file(commit_factory)
+    user_id, project_id = matter
     async with commit_factory() as db:
         out = await _apply_redline(
             db,
@@ -164,8 +187,9 @@ async def test_apply_redline_rejects_noop_edit(
 
 async def test_apply_redline_document_in_another_matter_not_found(
     commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
-    user_id, _project_id, _ = await _make_matter_file(commit_factory)
+    user_id, _project_id = matter
     other_project = uuid.uuid4()  # a matter that doesn't own the file
     async with commit_factory() as db:
         out = await _apply_redline(
@@ -183,8 +207,9 @@ async def test_apply_redline_document_in_another_matter_not_found(
 async def test_apply_redline_happy_path_persists_redlined_file(
     commit_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
-    user_id, project_id, _ = await _make_matter_file(commit_factory)
+    user_id, project_id = matter
     captured = _patch_storage(monkeypatch, source=_docx_bytes(CAP))
 
     async with commit_factory() as db:
@@ -221,7 +246,10 @@ async def test_apply_redline_happy_path_persists_redlined_file(
         audit = (
             (
                 await db.execute(
-                    select(AuditLog).where(AuditLog.action == "commercial.redline_applied")
+                    select(AuditLog).where(
+                        AuditLog.action == "commercial.redline_applied",
+                        AuditLog.user_id == user_id,
+                    )
                 )
             )
             .scalars()
