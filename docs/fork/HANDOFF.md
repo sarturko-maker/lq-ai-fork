@@ -11,7 +11,7 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ (matter-wiki MVP). C3b SPLIT → C3b-1 ✓ (typed bi-temporal fact ledger, ZERO model calls) + C3b-2 ✓ (gateway-routed consolidation/Lint, ADR-F043). C3c SPLIT (maintainer: backend now / cockpit panel next) → C3c-1 ✓ (matter-memory READ backend — agent read tools + composite GET + human-authenticated wiki revert, ADR-F044). NEXT = C3c-2 (cockpit memory panel — pure frontend over the C3c-1 endpoints).**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ (matter-wiki MVP). C3b SPLIT → C3b-1 ✓ (typed bi-temporal fact ledger, ZERO model calls) + C3b-2 ✓ (gateway-routed consolidation/Lint, ADR-F043). C3c SPLIT → C3c-1 ✓ (READ backend, ADR-F044) + C3c-2 ✓ (cockpit Memory panel — frontend over the C3c-1 endpoints). The matter-memory track (C3a/b/c) is COMPLETE. NEXT = maintainer's call: C5 negotiation / C6 controlling-playbook-skills / C7 fan-out + redline-download-UI, or the C8/C9 redline-eval re-run, or the cross-cutting marker-fence hardening.**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -23,42 +23,52 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this session (C3c-1 — matter-memory READ backend SHIPPED; PR #136, branch `fork/c3c1-matter-read-revert`)
+## Done this session (C3c-2 — cockpit matter-memory panel SHIPPED; PR #__, branch `fork/c3c2-cockpit-memory-panel`)
 
-**What:** the read/manage half of the matter-memory tier (ADR-F042 §C3c). **Maintainer split C3c**
-(AskUserQuestion): **backend now (C3c-1) / cockpit panel next (C3c-2)**; **revert = restore a chosen version**
-(not undo-last); **corrections read-only** this slice. Design pressure-test locked **search corpus = LIVE only**.
-**No migration** (head stays `0070`), **zero new deps, no model calls**. Design recorded in **ADR-F044** (proposed).
+**What:** the **frontend half** of the matter-memory tier (ADR-F042 §C3c) — a new **"Memory" tab** in the
+cockpit's matter view rendering the C3c-1 composite + a human-authenticated wiki revert. **Pure frontend over
+existing endpoints: no backend change, NO migration** (head stays `0070`), **zero new deps**. **Maintainer
+chose** (AskUserQuestion): **Memory tab on ALL matters, any area** + **revert behind a confirm dialog**
+(disabled while a run is active). No new ADR — F044 stays the governing decision (noted in the PR).
 
-- **`app/agents/matter_read_tools.py` (NEW)** — `MATTER_READ_TOOL_NAMES` (disjoint), `build_matter_read_tools(...)`,
-  two guarded read tools granted to **every matter-bound run, all areas**: `search_matter_memory(query)`
-  (Python-side keyword match over the LIVE corpus — never builds SQL; superseded facts never resurface) +
-  `matter_facts_as_of(as_of_date)` (bi-temporal as-of; the date is normalised UTC-aware via the schema →
-  reject-and-retry on a bad/numeric date, never a crash).
-- **`app/api/matter_memory.py`** — `GET /matters/{id}/memory` (composite: wiki + live facts + live corrections +
-  capped/counted log, reusing `live_facts`/`memory_log`/the new `live_corrections`) + `POST
-  /matters/{id}/memory/wiki/revert {snapshot_id}` (restore a chosen `wiki_snapshot`, **snapshotting current
-  first** → reversible, append-only; triple-scoped `id+project_id+kind` lookup → 404; audit IDs/counts only;
-  **no agent revert tool** — human-authenticated only).
-- **`app/agents/matter_fact_tools.py`** — added the uncapped `live_corrections(db, project_id)` read helper
-  (the read surface must see EVERY live correction, not the C3a 30-row prompt-injection slice).
-- **`app/agents/matter_memory_tools.py`** — widened `snapshot_and_rewrite_wiki(..., run_id: uuid.UUID | None)`
-  for the run-less human revert. **`composition.py`** — grants the read tools in the unconditional matter block.
-- **`schemas/matter_memory.py`** — `MatterMemorySearchInput` + `MatterFactsAsOfInput` (+ a shared
-  `mode='before'` `_require_iso_date_string` validator on `as_of`/`valid_from` — rejects a bare numeric string
-  before Pydantic reads it as a Unix timestamp).
-- **Adversarial review (workflow, 5 lenses → refute): 16 raised, 6 refuted, 10 confirmed; folded the 2
-  should-fixes** (numeric-date mis-coercion; the 30-correction search cap → `live_corrections`) **+ the cheap
-  nits** (cross-matter revert 404 test, blank-wiki `snapshotted_prior=False` test, truly-empty as-of test,
-  >30-corrections search test, `_fact_line` docstring). **Deferred** (review-scoped out): the 6th near-identical
-  `_rejection_text` copy → a future cross-module cleanup.
-- **Verify:** ruff (CI-exact 0.15.18) + format + `mypy app` clean; full api suite **2610+ passed / 2 skipped**
-  (lone failure = the documented env-sensitive `test_ready`, CI-green). Catalog tests updated (IMPLEMENTED_ROUTES
-  + OpenAPI sketch + the `len(actual)==145` count).
-- **Live (DeepSeek, `docs/fork/evidence/c3c/live-matter-read-revert.json`):** the agent called
-  `search_matter_memory` (×2) + `matter_facts_as_of`; captured the live-only search digest (excludes the
-  superseded draft cap), the as-of at two dates, and the REST GET→revert→GET round-trip (restored the chosen
-  version, `version_count` 1→2, reversible). Provider scenario `tests/agents/scenarios/test_matter_read_scenario.py`.
+- **`web/src/lib/lq-ai/components/matter/MemoryPanel.svelte` (NEW)** — one scrollable view, four sections
+  (Working summary / Facts / Pinned corrections / Activity log). `<script module>` exports the pure helpers
+  (`logKindLabel`/`isRevertable`/`shortRunId`/`logTailNote`/`canRevert`) — the codebase has **no
+  @testing-library/svelte**, so logic is tested at the helper layer (pattern: `MatterCard`/`AttachKBModal`).
+  Mirrors `RopaRegister` for the `loadGeneration` out-of-order guard + the `runActive` `schedulePoll`/`stopPoll`
+  poll + the `reloadKey` settle-reconcile. Revert = a `wiki_snapshot` log row → confirm `Dialog` → POST →
+  refetch; **disabled while `runActive`** (don't race the agent). **Every** model-authored body
+  (`content_md`/`body_md`/`body_preview`) renders through `renderModelMarkdown` (DOMPurify, media-forbid) —
+  the only `{@html}`, never raw.
+- **`web/src/lib/lq-ai/api/matterMemory.ts` (NEW)** — `readMatterMemory(id)` (GET) + `revertWiki(id, snap)`
+  (POST `{snapshot_id}`) over `apiRequest` (base already `/api/v1`); barrel-exported as `matterMemoryApi`.
+- **`web/src/lib/lq-ai/types.ts`** — hand-written interfaces mirroring the C3c-1 Pydantic models exactly
+  (datetimes = ISO strings); **no frontend OpenAPI contract test exists** (verified) so nothing else to update.
+- **`web/src/lib/lq-ai/cockpit/ConversationHost.svelte`** — widened `matterTab` to add `'memory'`; derived
+  `matterTabs` (conversation always; `register` only narrow-Privacy; `memory` whenever a matter is set; **none
+  for the unfiled bucket**). The conversation/register region stays **MOUNTED** under `class:hidden` so the
+  live SSE stream + `runActive` never drop on a tab switch; `MemoryPanel` is a sibling `{#if}`. **No-remount
+  invariant preserved** (verified by the reviewer).
+- **Adversarial review (fresh-context, 8 lenses → per-finding refutation): SHIP — 0 blockers, 0 should-fixes,
+  2 NITs, both folded:** (1) reset `matterTab`→`conversation` when the active tab leaves the strip (Privacy
+  widen retires the register tab → nothing highlighted); (2) clear the revert dialog's target/error on close.
+- **Verify:** `npm run check` 0 errors (5 pre-existing warnings); vitest **915 passed** (+11 new); eslint +
+  prettier clean on all touched files. **Real-stack smoke** (rebuilt `api`): `GET /matters/{id}/memory` → 200
+  with the exact composite shape. **Headed Cypress** (`c3c2-matter-memory.cy.ts`, rebuilt `web`): **2/2** —
+  render-the-four-sections + revert round-trip (confirm dialog → POST `{snapshot_id}` → refetch) + the
+  screenshot matrix → `docs/fork/evidence/c3c2/` (light/dark × wide/narrow, all visually verified clean; the
+  Privacy capture shows Memory **beside** the ROPA register, proving the all-areas placement).
+
+### Previous slice (C3c-1 — matter-memory READ backend; merged #136, ADR-F044, branch `fork/c3c1-matter-read-revert`)
+
+The read/manage **backend** (this slice's dependency): two guarded agent read tools — `search_matter_memory`
+(Python keyword match over the **LIVE** corpus, no SQL from the model, superseded facts never resurface) +
+`matter_facts_as_of` (bi-temporal as-of; the date is reject-not-crash hardened via a `mode='before'`
+`_require_iso_date_string` + `_utc_aware`) — granted to every matter-bound run, all areas, disjoint grant. A
+composite `GET /matters/{id}/memory` (wiki + live facts + live corrections via the new uncapped
+`live_corrections` + capped/counted log) and a human-authenticated `POST .../memory/wiki/revert {snapshot_id}`
+(restore a chosen `wiki_snapshot`, snapshot-current-first → reversible, append-only; triple-scoped lookup →
+404; **no agent revert tool**). **No migration; no model calls.** Full detail: memory `c3c1-matter-read-revert-shipped`.
 
 ### Previous slice (C3b-2 — gateway-routed consolidation/Lint SHIPPED; merged #135; branch `fork/c3b2-gateway-consolidation`)
 
@@ -157,40 +167,48 @@ reconstruction). Plan `docs/fork/plans/C9-claude-judged-redline-tests.md`.
   committed): `LQ_AI_DOCLING_ENABLED=false` (Docling hung PDFs to its 300s timeout) and the seeded org
   profile. Full findings: memory `commercial-agent-live-uat-findings`.
 
-## ▶ PICK UP EXACTLY HERE — C3c-2 (cockpit memory panel — pure frontend over the C3c-1 endpoints)
+## ▶ PICK UP EXACTLY HERE — matter-memory track COMPLETE (C3a/b/c ✓); next is the maintainer's call
 
-**Read first:** `docs/adr/F044` (the read/revert backend this consumes) + `docs/fork/plans/C3-matter-memory-track.md`
-§C3c. The whole READ backend now exists + is live-proven (C3c-1): a composite `GET /api/v1/matters/{id}/memory`
-(wiki + live facts + live corrections + capped/counted log with provenance) and a human-authenticated
-`POST /api/v1/matters/{id}/memory/wiki/revert {snapshot_id}` (restore a chosen version, reversible, append-only).
-C3c-2 is the **frontend panel** in the cockpit:
-- **Where:** `web/src/lib/lq-ai/cockpit/ConversationHost.svelte` already has the tab pattern (conversation |
-  register for Privacy); add a **third "Memory" tab** rendering the GET composite — the wiki + version count, the
-  live facts (typed, with source), the pinned corrections, and the log (`## [date] kind | preview` with
-  author/run_id provenance). New API client module mirroring the existing `*Api.ts` (apiRequest); reuse
-  PageShell/SectionHeader/Card/StatusDot + `prose dark:prose-invert`.
-- **Revert UI:** offer "restore this version" on `kind == 'wiki_snapshot'` log rows → POST the revert → refetch.
-- **DoD:** `npm run check` + vitest + headed Cypress screenshots (light+dark × wide+narrow) → `evidence/c3c2/`.
-- **Deferred to a later slice / backlog (per ADR-F044):** a correction-retire endpoint (DELETE, soft via
-  `superseded_at`); embedding/FTS search (gateway `/v1/embeddings` 501 until B6); log pagination beyond the tail
-  cap; the 6th `_rejection_text` cross-module dedup.
+The whole unit-of-work memory tier (ADR-F042) now exists end-to-end and is live-proven: auto-written wiki +
+pinned corrections (C3a), the bi-temporal fact ledger (C3b-1), gateway-routed consolidation (C3b-2, ADR-F043),
+the read/revert backend (C3c-1, ADR-F044), and the cockpit **Memory tab** over it (C3c-2). No open work inside
+the C3 track. The next slice is a maintainer choice — none is blocked:
 
-**Operational follow-up (if not already done):** rebuild `api` + `arq-worker` + `ingest-worker` on the dev stack
-so the C3c-1 read tools + endpoints are live in the cockpit (no migration — head stays `0070`; the `gateway` was
-already rebuilt for C3b-2's purpose).
+- **C5** negotiation rounds (needs C3+C4) · **C6** controlling playbook skills (needs F036+F038) · **C7**
+  complex-deal fan-out + **redline download UI** (the redlined `File` is created `status ready` but nothing
+  surfaces it).
+- **C8/C9 redline-eval RE-RUN (⚠ priority):** the `surgical-redline` SKILL.md was silently dropped through
+  C8/C9 (frontmatter `": "` bug, fixed in C3a) — so the published craft findings are **CONFOUNDED**; re-run
+  the C8 craft eval + the C9 Claude-judged tests now that the skill actually loads (memory
+  `claude-judged-redline-tests-slice`). **C9 follow-up:** mutualisation worked-example in the skill + a redline
+  step-budget tier; pre-teach the D-gate rules (flash thrashed ~8 preview retries).
+- **Cross-cutting marker-fence hardening** (carried C3a nit): strip/escape a block's own BEGIN/END markers
+  from untrusted bodies (client block + matter-memory blocks), OR a per-run nonce delimiter — one slice.
 
-**Carried C3a follow-up (small):** the deferred nit — marker-fence delimiter-injection hardening (strip/escape
-a block's own BEGIN/END markers from untrusted bodies, OR a per-run nonce delimiter) applies uniformly to the
-client block + matter-memory blocks; do it as a cross-cutting hardening slice, not piecemeal.
-
-**Other COMM slices (maintainer's call, after the C3 track):** **C5** negotiation rounds (needs C3+C4) · **C6**
-controlling playbook skills (needs F036+F038) · **C7** complex-deal fan-out + **redline download UI** (the
-redlined `File` is created `status ready` but nothing surfaces it). **C9 follow-up (small, C8/F041 track):**
-mutualisation worked-example in `skills/surgical-redline/SKILL.md` + a redline step-budget tier (NDA hit
-`cap_exceeded` on pro); pre-teach the D-gate rules (flash thrashed ~8 preview retries). **C8 follow-ups
-(optional):** broaden worked examples beyond MSAs; the ~1/6 no-redline runs; re-run the eval on a stronger model.
+**C3c backlog (deferred, per ADR-F044):** a pin-correction composer + a correction-retire endpoint (the panel
+is read-only for corrections this slice); embedding/FTS search UI (gateway `/v1/embeddings` 501 until B6); log
+pagination beyond the tail cap (the panel shows "N of M"); the 6th `_rejection_text` cross-module dedup.
 
 ## Gotchas / durable traps (C8 + C4 + carried)
+
+- **C3c-2 — the `web` container serves a PRE-BUILT bundle; rebuild it before any UI/Cypress verification**
+  (`docker compose up -d --build web`) or you test stale code (a CLAUDE.md hard rule — bit the cockpit
+  screenshot workflow). Headed Cypress needs `DISPLAY=:0` (`X0`/`X1` sockets present on this box).
+- **C3c-2 — no `@testing-library/svelte` in `web/`.** Test Svelte component LOGIC by exporting pure functions
+  from `<script module>` and unit-testing those (pattern: `MatterCard`/`AttachKBModal`); cover DOM + interaction
+  via Cypress. Don't add the library (CLAUDE.md: justify every dep).
+- **C3c-2 — cockpit Cypress nav:** deep-link `/lq-ai?area=<key>&matter=<id>` and wait for
+  `[data-testid="lq-cockpit-conversation"]`. At narrow/stacked width a fresh deep-link (no `&thread=`) shows the
+  thread LIST, not the panel where the matter tab strip lives — click `lq-cockpit-new-conversation` to enter the
+  panel first, THEN the `lq-cockpit-matter-tab-{id}` tabs (incl. `…-memory`) are reachable.
+- **C3c-2 — adding a cockpit tab must NOT remount the conversation pane.** Keep the conversation/register region
+  MOUNTED behind `class:hidden={matterTab === '…'}` and render the new view as a SIBLING `{#if}`; moving
+  `{@render conversationPane()}` to a new DOM position remounts `ConversationPanel` → drops the live SSE stream
+  and resets the bound `runActive`. Also reset `matterTab` to a tab that's always present when the active tab can
+  leave the derived strip (e.g. a Privacy matter widening past the split budget retires the `register` tab).
+- **C3c-2 — any `{@html}` of model output needs `renderModelMarkdown` + an `eslint-disable-next-line
+  svelte/no-at-html-tags` comment** (the shared sanitizer is DOMPurify media-forbid; raw `{@html}` fails lint
+  and is an XSS sink). Every matter-memory body (`content_md`/`body_md`/`body_preview`) is untrusted model text.
 
 - **C8 — Adeu crashes on a PURE zero-width insertion** (`new_text` that merely appends after an unchanged
   anchor → `Op=INSERTION at [n:n]` → `AttributeError` in `adeu/redline/engine.py`). Fold an addition into

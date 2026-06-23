@@ -26,6 +26,7 @@
 	import type { Project } from '$lib/lq-ai/types';
 	import ConversationPanel from '$lib/lq-ai/components/agents/ConversationPanel.svelte';
 	import RopaRegister from '$lib/lq-ai/components/ropa/RopaRegister.svelte';
+	import MemoryPanel from '$lib/lq-ai/components/matter/MemoryPanel.svelte';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import NewMatterDialog from './NewMatterDialog.svelte';
 	import StatusPill from './StatusPill.svelte';
@@ -113,7 +114,9 @@
 	// register alongside the conversation via one calm toggle. Other areas never
 	// see it; reversible = this derived + the {#if} branch in the panel column.
 	const isPrivacyMatter = $derived(matter?.practice_area_key === 'privacy');
-	let matterTab = $state<'conversation' | 'register'>('conversation');
+	// C3c-2: every matter also gets a "Memory" tab onto its working-memory tier
+	// (area-agnostic — ADR-F042/F044). 'register' stays Privacy-only.
+	let matterTab = $state<'conversation' | 'register' | 'memory'>('conversation');
 
 	// PRIV-9a: when a Privacy matter has the width, show chat + the ROPA
 	// register side by side (resizable) instead of the one-at-a-time toggle, so
@@ -124,6 +127,26 @@
 	const canSplitRegister = $derived(
 		isPrivacyMatter && !isStacked && hostWidth - 288 >= SPLIT_MIN_PANEL
 	);
+
+	// The tab strip for a real matter. 'conversation' always; 'register' only for
+	// a narrow Privacy matter (when wide it's co-visible in the split, not a tab);
+	// 'memory' for every matter (C3c-2). The unfiled bucket (matter === null) gets
+	// no strip — its resume-only flow stays single-pane.
+	const matterTabs = $derived([
+		{ id: 'conversation' as const, label: 'Conversation' },
+		...(isPrivacyMatter && !canSplitRegister
+			? [{ id: 'register' as const, label: 'ROPA register' }]
+			: []),
+		...(matter ? [{ id: 'memory' as const, label: 'Memory' }] : [])
+	]);
+
+	// If the active tab leaves the strip (e.g. a Privacy matter widens past the
+	// split budget, retiring the 'register' tab), fall back to the conversation so
+	// the strip never shows nothing selected. Self-healing, no loop: the reset
+	// lands on 'conversation', which is always present.
+	$effect(() => {
+		if (!matterTabs.some((t) => t.id === matterTab)) matterTab = 'conversation';
+	});
 
 	// Run-lock + live-register signals (PRIV-9a). `runActive` is bound OUT of the
 	// conversation panel (the agent is working); `registerReloadKey` is bumped on
@@ -389,15 +412,15 @@
 						</button>
 					</div>
 				{/if}
-				{#if isPrivacyMatter && !canSplitRegister}
-					<!-- PRIV-3: switch the panel column between the conversation and the
-					     company ROPA register (read-only). Privacy matters only. -->
+				{#if matter}
+					<!-- PRIV-3 + C3c-2: switch the panel column between the conversation,
+					     the company ROPA register (Privacy only), and the matter's Memory. -->
 					<div
 						class="flex shrink-0 gap-1 border-b border-border px-4 py-2"
 						role="tablist"
 						aria-label="Matter view"
 					>
-						{#each [{ id: 'conversation', label: 'Conversation' }, { id: 'register', label: 'ROPA register' }] as t (t.id)}
+						{#each matterTabs as t (t.id)}
 							<button
 								type="button"
 								role="tab"
@@ -406,79 +429,98 @@
 								t.id
 									? 'bg-muted text-foreground'
 									: 'text-muted-foreground hover:text-foreground'}"
-								onclick={() => (matterTab = t.id as 'conversation' | 'register')}
+								data-testid="lq-cockpit-matter-tab-{t.id}"
+								onclick={() => (matterTab = t.id)}
 							>
 								{t.label}
 							</button>
 						{/each}
 					</div>
 				{/if}
-				{#if canSplitRegister}
-					<!-- PRIV-9a co-visible: chat | register, resizable, each scrolls
+				<!-- Conversation + register region: stays MOUNTED (hidden while Memory is
+				     open) so the live run stream + runActive keep flowing — never remounted
+				     on a tab switch (the invariant the narrow fallback below protects). -->
+				<div class="flex min-h-0 flex-1 flex-col" class:hidden={matterTab === 'memory'}>
+					{#if canSplitRegister}
+						<!-- PRIV-9a co-visible: chat | register, resizable, each scrolls
 					     independently — watch the register change as the agent works. -->
-					<div class="min-h-0 flex-1">
-						<Resizable.PaneGroup
-							direction="horizontal"
-							autoSaveId="lq-priv-covisible"
-							class="h-full"
-						>
-							<Resizable.Pane id="priv-chat" order={1} defaultSize={56} minSize={38}>
-								<div class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain">
+						<div class="min-h-0 flex-1">
+							<Resizable.PaneGroup
+								direction="horizontal"
+								autoSaveId="lq-priv-covisible"
+								class="h-full"
+							>
+								<Resizable.Pane id="priv-chat" order={1} defaultSize={56} minSize={38}>
+									<div class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain">
+										{@render conversationPane()}
+									</div>
+								</Resizable.Pane>
+								<Resizable.Handle
+									class="transition-colors duration-150 ease-out hover:bg-primary/40 data-[active]:bg-primary/60"
+								/>
+								<Resizable.Pane id="priv-register" order={2} defaultSize={44} minSize={30}>
+									<div
+										class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain border-l border-border"
+									>
+										<RopaRegister
+											{runActive}
+											reloadKey={registerReloadKey}
+											changedIds={recentlyChangedIds}
+										/>
+									</div>
+								</Resizable.Pane>
+							</Resizable.PaneGroup>
+						</div>
+					{:else}
+						<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
+							{#if isPrivacyMatter}
+								<!-- Narrow fallback: chat and register are one-at-a-time, but the
+							     conversation stays MOUNTED (hidden while the register shows) so its
+							     run-state keeps flowing — the register still live-updates as the
+							     agent works, just not side by side, and switching tabs never drops a
+							     live stream. -->
+								<div class="h-full" class:hidden={matterTab === 'register'}>
 									{@render conversationPane()}
 								</div>
-							</Resizable.Pane>
-							<Resizable.Handle
-								class="transition-colors duration-150 ease-out hover:bg-primary/40 data-[active]:bg-primary/60"
-							/>
-							<Resizable.Pane id="priv-register" order={2} defaultSize={44} minSize={30}>
-								<div
-									class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain border-l border-border"
-								>
+								{#if matterTab === 'register'}
 									<RopaRegister
 										{runActive}
 										reloadKey={registerReloadKey}
 										changedIds={recentlyChangedIds}
 									/>
-								</div>
-							</Resizable.Pane>
-						</Resizable.PaneGroup>
-					</div>
-				{:else}
-					<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
-						{#if isPrivacyMatter}
-							<!-- Narrow fallback: chat and register are one-at-a-time, but the
-							     conversation stays MOUNTED (hidden while the register shows) so its
-							     run-state keeps flowing — the register still live-updates as the
-							     agent works, just not side by side, and switching tabs never drops a
-							     live stream. -->
-							<div class="h-full" class:hidden={matterTab === 'register'}>
+								{/if}
+							{:else if matter || threadId}
 								{@render conversationPane()}
-							</div>
-							{#if matterTab === 'register'}
-								<RopaRegister
-									{runActive}
-									reloadKey={registerReloadKey}
-									changedIds={recentlyChangedIds}
-								/>
-							{/if}
-						{:else if matter || threadId}
-							{@render conversationPane()}
-						{:else}
-							<div class="flex h-full items-center justify-center px-8">
-								<div class="max-w-sm text-center">
-									<div
-										class="mx-auto flex size-10 items-center justify-center rounded-full bg-muted"
-									>
-										<InboxIcon class="size-5 text-muted-foreground" aria-hidden="true" />
+							{:else}
+								<div class="flex h-full items-center justify-center px-8">
+									<div class="max-w-sm text-center">
+										<div
+											class="mx-auto flex size-10 items-center justify-center rounded-full bg-muted"
+										>
+											<InboxIcon class="size-5 text-muted-foreground" aria-hidden="true" />
+										</div>
+										<h2 class="mt-3 text-base font-semibold text-foreground">
+											Pick a conversation
+										</h2>
+										<p class="mt-1 text-sm text-muted-foreground">
+											Unfiled conversations are read-and-resume only. Select one on the left to
+											continue it.
+										</p>
 									</div>
-									<h2 class="mt-3 text-base font-semibold text-foreground">Pick a conversation</h2>
-									<p class="mt-1 text-sm text-muted-foreground">
-										Unfiled conversations are read-and-resume only. Select one on the left to
-										continue it.
-									</p>
 								</div>
-							</div>
-						{/if}
+							{/if}
+						</div>
+					{/if}
+				</div>
+				{#if matterTab === 'memory' && matter}
+					<!-- Memory tab: full-width read panel over the C3c-1 GET/revert. -->
+					<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
+						<MemoryPanel
+							projectId={matter.project_id}
+							{runActive}
+							reloadKey={registerReloadKey}
+							{nowMs}
+						/>
 					</div>
 				{/if}
 			</section>
