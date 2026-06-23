@@ -37,7 +37,10 @@ the orchestration; we keep the substrate (gateway, brakes, audit, citations, ski
   chokepoint pattern (R4 cost cap / R5 halt / R6 grants) for every agent action; the audit contract
   (counts/types/IDs, never raw values); the Citation Engine; the SKILL.md format.
 - Every LLM call routes through the gateway. Never add a direct provider call.
-- "System proposes, user owns" (ADR-0013 D4) holds for all memory writes at every level.
+- "System proposes, user owns" (ADR-0013 D4) holds for the company/practice (read-only to agents) and
+  user/autonomous memory tiers. The **unit-of-work (matter/programme) tier is auto-write-then-correct**
+  (ADR-F042): the agent maintains it automatically; the human owns it *after* the write (correct/undo/delete,
+  human-pinned corrections win). Pinning is an authenticated human action, never an agent tool.
 - Transparency is load-bearing: every prompt, skill, agent instruction and tool grant must be
   readable in the UI or the source.
 

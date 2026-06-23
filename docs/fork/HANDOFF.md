@@ -11,7 +11,7 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX render polish ✓ DELIVERED. Pickup = maintainer's call (C3 deal-context · C5 · C6 · C7).**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); planning + ADR-F042 landed (this session, NO code yet). NEXT = implement C3a.**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -23,29 +23,42 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this slice (cockpit chat-UX render polish — `fork/cockpit-chat-ux`; web-only; no migration; no ADR)
+## Done this session (C3 PLANNING ONLY — `fork/c3-matter-memory`; docs only, NO code, NO migration yet)
 
-**What:** the two web-only fixes the maintainer flagged at the end of the C9 UAT. Plan
-`docs/fork/plans/cockpit-chat-ux-render-polish.md`; evidence `docs/fork/evidence/cockpit-chat-ux/`.
+**What:** the maintainer reframed C3. The old "deal-context propose/accept" plan is **dropped**; the
+unit-of-work memory tier is now **auto-write-then-correct** (the agent maintains a brief, evolving *matter
+wiki* automatically; the lawyer *corrects* rather than approves each write). Decomposed into a 3-slice track;
+governance ADR drafted; reuse research done. **Nothing implemented this session** — next session builds C3a.
 
-- **Dark-mode markdown parity ("tables don't render in the answer").** Root-caused NOT to the parser —
-  `marked` 9.1.6 already defaults `gfm:true` and emits `<table>` for the real model output (verified against
-  `agent_runs`), and DOMPurify keeps table tags. The defect was **CSS**: the agent-surface prose containers
-  omitted `dark:prose-invert` (`MessageBubble` had it). In dark mode prose then used light-mode tokens (dark
-  text) on the charcoal page; the settled answer sits on `.ag-answer` (no background) → its table rendered
-  dark-on-charcoal, invisible. Live thinking escaped because `.ag-thinking-live__tail` paints a
-  `--color-muted` panel. **Fix:** `dark:prose-invert` added to the 5 agent-surface prose containers
-  (`ConversationPanel:860/874/881`, `StepRow:85`, `AreaConfigDisclosure:45`). Verified with before/after
-  screenshots rendered against the **production compiled CSS** + real output, and confirmed in the rebuilt
-  bundle (0 bare `prose prose-sm`, 7 now `dark:prose-invert`).
-- **Quieter tool calls.** Curated plain-language titles for `apply_redline`/`preview_redline`; unmapped
-  tools humanised (`snake_case`→"Sentence case…") so a collapsed row never shows a raw identifier; wrench
-  icon `size-4`→`size-3`, chevron→`size-3.5`. Raw params/JSON stay behind the `<details>` expander
-  (unchanged). `helpers.ts` + `StepRow.svelte`; unit-tested in `helpers.test.ts`; new
-  `sanitize-markdown.test.ts` guards the parser config.
-- **Verify:** `npm run check` 0 errors · `vitest` **904/904** · web container rebuilt + live. **Redline
-  download deferred to C7** (the redlined file is deliberately unattached work product → needs C7's
-  structured artifact reference).
+- **Two research workflows (web, primary-source-verified):** (1) auto-write vs approve landscape — 11/12
+  surveyed systems auto-write-then-manage; per-write approval is the abandoned anti-pattern (Cursor). Both
+  maintainer-named systems resolved REAL: **OpenClaw** (MIT, ~380k★, plain-markdown auto-wiki) and **Hermes**
+  (Nous, hard-capped always-injected wiki + error-then-consolidate). (2) reuse-vs-build — **zero new deps**:
+  take the `MEMORY.md` index+spill+frontmatter format, **port** Graphiti's bi-temporal supersede fields (not
+  the pkg → no graph DB), **copy** mem0's ADD/UPDATE/DELETE/NOOP loop as gateway-routed prompts (C3b). Karpathy
+  "LLM Wiki" = a real ~38k★ gist but a *concept*, not code. Memos: `docs/fork/research/matter-memory-patterns.md`
+  + `matter-memory-reuse.md`.
+- **ADR-F042 (proposed)** `docs/adr/F042-unit-of-work-memory-auto-write.md` — unit-of-work memory =
+  auto-write-then-correct. **Supersedes F030 §2A** (matter-tier propose/accept; F030 Status-line pointer added,
+  body immutable) and **departs from ADR-0013 D4** for the unit-of-work tier ONLY (D4 still governs
+  user/autonomous; company/practice stay read-only). **CLAUDE.md §Architecture-rules line edited** to match.
+  **Accept before C3a builds.**
+- **Track plan** `docs/fork/plans/C3-matter-memory-track.md` — **C3a** (broad MVP: lower-trust fenced injection
+  of the matter wiki + corrections, one agent tool `update_matter_memory`, human-authenticated pin endpoint,
+  migration `0068`, curation skill) → **C3b** (typed bi-temporal facts + supersede + gateway-routed
+  consolidation/Lint) → **C3c** (matter-scoped memory search + cockpit panel + undo endpoint).
+- **Adversarial review folded (4 reviewers → 3 blockers fixed):** **B2** the load-bearing one — corrections are
+  **human-authenticated only** (`author` from the session via the pin endpoint); **no agent tool may mint a
+  `human-pinned` entry** (an agent-asserted "the lawyer said X" is forgeable by injection). Two separate C3a
+  tests: **no-fabrication** + **no-overwrite**. B1 (CLAUDE.md contradiction) + B3 (`unit_label` lives on the
+  `PracticeArea` row, not `AreaAgentSpec`) fixed; should-fixes folded (lower-trust fence, guard-only audit,
+  all-areas + confinement test, additive-nullable C3a→C3b schema, `_load_visible_project` authz, stale-fact
+  accepted-limitation).
+- **Backlog add:** "search past chat within a matter (all areas)" — distinct from the wiki (`MILESTONES.md`).
+
+### Previous slice (cockpit chat-UX render polish — merged #132, on main): dark-mode markdown parity
+(`dark:prose-invert` on the agent-surface prose containers — the GFM-parser theory was a red herring) +
+quieter tool calls. `vitest` 904/904. Redline download deferred to C7.
 
 ## Previous slice (C9 — Claude-judged manual redline tests; merged #131; no migration; no new ADR)
 
@@ -85,24 +98,37 @@ reconstruction). Plan `docs/fork/plans/C9-claude-judged-redline-tests.md`.
   committed): `LQ_AI_DOCLING_ENABLED=false` (Docling hung PDFs to its 300s timeout) and the seeded org
   profile. Full findings: memory `commercial-agent-live-uat-findings`.
 
-## ▶ PICK UP EXACTLY HERE — maintainer's call on the next slice
+## ▶ PICK UP EXACTLY HERE — implement C3a (the matter-wiki MVP)
 
-**Cockpit chat-UX render polish ✓ DONE (this slice): markdown dark-mode parity + tool-call quieting.**
-Remaining from that cluster: the **redline download** affordance → folded into **C7** (the redlined file is
-deliberately unattached work product, so a discoverable download needs C7's structured artifact reference;
-the file IS created — matter `File`, `status ready` — but nothing surfaces it; full UI is "redline download UI").
+**Read first:** `docs/fork/plans/C3-matter-memory-track.md` (§C3a is implementation-ready, every seam
+verified against `main`) + `docs/adr/F042-unit-of-work-memory-auto-write.md`. **Step 0: the maintainer accepts
+ADR-F042** (flip `proposed`→`accepted`) — it supersedes F030 §2A + departs from 0013 D4 for this tier; CLAUDE.md
++ F030 already edited to match in this branch.
 
-**C9 follow-up (method, small — feeds the C8/F041 track):** add a worked **mutualisation** example to
-`skills/surgical-redline/SKILL.md` (swap the defined term — `The [-Customer-][+Each party+] shall
-indemnify…` — keep the verb phrase bare) and consider a **redline step-budget tier** for fully-mutual
-instruments (the NDA hit `cap_exceeded` on pro). UAT also showed flash **thrashing the D-gate** (~8 preview
-retries) — pre-teaching the gate rules in the skill would cut that. Re-judge the NDA/SOW after.
+**C3a build (one PR, at the size line):** ① composition.py — inject the matter wiki (`projects.context_md`) +
+the human-pinned corrections block under a **lower-trust fence**, heading from the **`PracticeArea` row**
+(`composition.py:230-231`, the local `area`, NOT `area_spec`/`AreaAgentSpec` — it has no `unit_label`; default
+"Matter memory" for a no-area matter), area block stays **last**; loads inside the `if project is not None:`
+block. ② `api/app/agents/matter_memory_tools.py` — ONE agent tool `update_matter_memory(content_md)` (rewrite
+wiki, snapshot prior, reject-not-truncate on oversize, **guard auto-audit only — no domain `audit_action`**).
+③ migration `0068_matter_memory_entries.py` (re-check head is `0067`) + ORM (additive-nullable for C3b).
+④ `api/app/api/matter_memory.py` — the **human-authenticated** pin endpoint (the ONLY writer of
+`trust=human-pinned`, `author` from session, `_load_visible_project` → 404). ⑤ `skills/matter-memory/SKILL.md`
++ binding migration. Grant in the **all-areas** `if binding is not None:` path.
 
-**Other COMM slices (after C9, maintainer's call):** **C3** deal-context matter memory (first Commercial
-migration now **`0068`** — C8 took 0067; mapping done) · **C5** negotiation rounds (needs C3+C4) · **C6**
-controlling playbook skills (needs F036+F038) · **C7** complex-deal fan-out (50-page docs + redline budget
-tier). **C8 follow-ups** (optional): broaden the skill's worked examples beyond MSAs (out-of-distribution
-craft weaker); investigate the ~1/6 no-redline runs; re-run the C8 eval when a stronger model is qualified.
+**The two load-bearing C3a tests (B2):** no-fabrication (no agent path mints a `human-pinned` row) AND
+no-overwrite (a later `update_matter_memory` can't drop/alter a pinned correction). Plus reject-not-truncate,
+audit-carries-no-body, lower-trust-fence-not-obeyed, all-areas incl. Privacy, cross-user/archived 404.
+
+**Then C3b** (typed bi-temporal facts + supersede + gateway-routed consolidation/Lint + as-of "what did we
+believe at signing") and **C3c** (matter-scoped memory search + cockpit panel + undo/revert endpoint).
+
+**Other COMM slices (maintainer's call, after the C3 track):** **C5** negotiation rounds (needs C3+C4) · **C6**
+controlling playbook skills (needs F036+F038) · **C7** complex-deal fan-out + **redline download UI** (the
+redlined `File` is created `status ready` but nothing surfaces it). **C9 follow-up (small, C8/F041 track):**
+mutualisation worked-example in `skills/surgical-redline/SKILL.md` + a redline step-budget tier (NDA hit
+`cap_exceeded` on pro); pre-teach the D-gate rules (flash thrashed ~8 preview retries). **C8 follow-ups
+(optional):** broaden worked examples beyond MSAs; the ~1/6 no-redline runs; re-run the eval on a stronger model.
 
 ## Gotchas / durable traps (C8 + C4 + carried)
 
@@ -148,7 +174,8 @@ craft weaker); investigate the ~1/6 no-redline runs; re-run the C8 eval when a s
   accept-clean/judge to `UX_B1_EVIDENCE_DIR`. The judge's input was truncated at first (false WEAK); caps are
   now generous (must fit the full redline). Run via the dev image on `lq-ai_default` with the api gateway env +
   `UX_B1_EVIDENCE_DIR` mounted; `chown` the root-owned evidence before `git add`.
-- **Migration head is still `0066`** (C4 added none — output is a `File` row). **C3 adds `0067`.** Fresh-head
+- **Migration head is `0067`** (`0067_commercial_surgical_redline_skill.py`, C8). **C3a adds `0068`** (the
+  `matter_memory_entries` store — re-check the head before writing in case anything lands first). Fresh-head
   check before any migration; rebuild api+arq-worker+ingest-worker after one; never host-side `alembic upgrade`
   on the dev DB; never `compose down -v`.
 - **The per-area grant seam** is `composition.py` (`area_key == PRIVACY_AREA_KEY` / now `== COMMERCIAL_AREA_KEY`).

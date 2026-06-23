@@ -444,6 +444,12 @@ grants (mirror the `composition.py` area-keyed grant; MCP tools pass `guarded_di
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+- **Search past chat within a matter (ALL areas, not just Commercial) — surfaced 2026-06-22 (maintainer,
+  during C3 design).** Retrieval over a matter's prior conversations so the agent (and the lawyer) can find
+  "what did we say about the indemnity last week" without re-reading every thread. Distinct from the matter
+  wiki (C3): the wiki is the brief, curated standing summary; this is search over the raw chat history.
+  Area-agnostic (every unit of work accumulates conversations). Its own slice + likely an ADR.
+
 - **Cockpit chat UX polish (surfaced in the C9 live UAT, 2026-06-22; web-only, small).** (1) Render
   **GFM markdown in the assistant answer** — tables/lists render in the thinking stream but the user-facing
   final message shows raw markdown (tables don't render). (2) **Quieten tool calls by default** — smaller

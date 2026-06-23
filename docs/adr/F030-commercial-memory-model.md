@@ -1,7 +1,9 @@
 # F030 — Commercial memory model: company/client tier + matter tier
 
 - Status: accepted (2026-06-21, with slice C-CLIENT — the company/client tier landed; the matter tier is
-  decided in direction here and built at C3)
+  decided in direction here and built at C3) — **§2A (matter-tier propose/accept) superseded-by-F042 for the
+  unit-of-work tier; §1A and the company/client tier remain in force** (metadata pointer per the ADR-0009
+  precedent; the body below is unchanged/immutable)
 - Date: 2026-06-21
 - Relates: ADR-F028 (Commercial method doctrine — the area profile this tier sits beside), ADR-F002 (the
   practice area IS the agent identity), ADR-F013/0013 ("system proposes, user owns" for memory writes),
