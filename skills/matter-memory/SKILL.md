@@ -1,6 +1,6 @@
 ---
 name: matter-memory
-description: Use throughout any matter to keep the matter's working memory current — the brief, evolving wiki the agent maintains with the update_matter_memory tool (the "deal context" in Commercial, the "Programme memory" in Privacy). Teaches the craft of a good matter wiki — record durable facts you learn (each with its source), keep it a living one-pager rather than a log, fold new facts in instead of appending, and never contradict a correction the supervising lawyer has recorded.
+description: Use throughout any matter to keep the matter's working memory current — the brief, evolving wiki the agent maintains with the update_matter_memory tool (the "deal context" in Commercial, the "Programme memory" in Privacy) plus a dated fact ledger kept with record_matter_fact. Teaches the craft of a good matter wiki — record durable facts you learn (each with its source), keep it a living one-pager rather than a log, fold new facts in instead of appending, never contradict a correction the supervising lawyer has recorded, and supersede a ledger fact when it changes so the matter can answer what was true at any past date.
 lq_ai:
   title: Matter Memory — the matter's working wiki
   version: 1.0.0
@@ -53,6 +53,26 @@ because it needs checking; record it with its source so the lawyer can.
   and you are asked to consolidate it — that is the signal to tighten, not to drop facts silently.
 - **Update it as you go**, at the natural moments: when you learn a party or a key term, when a term moves,
   when the lawyer decides something. A short, current wiki beats a long, stale one.
+
+## The fact ledger — dated, supersede-able facts (`record_matter_fact`)
+
+Beside the wiki you keep a **fact ledger**: individual, dated facts recorded with `record_matter_fact`. The
+wiki is your brief *current* one-pager; the ledger is the *dated record* of how the matter got there — so the
+matter can always answer **"what did we believe at signing?"**. Use both: record a fact in the ledger **and**
+keep the wiki's summary current.
+
+Record a fact when you learn something durable and worth a dated record — a party and which side you act for
+(`party`), a key commercial or regulatory term and where it stands (`term`), a key date or deadline (`date`),
+something the supervising lawyer has settled (`decision`), an unresolved issue (`open_point`), else (`fact`).
+Keep each fact a **short single statement**, attach its **`source`** (the document and section, e.g. "Cirrus
+MSA §9"), and give **`valid_from`** (an ISO date) when you know *when* the fact became true.
+
+**When a fact changes, supersede it — never silently restate it.** Call `record_matter_fact` again with
+`supersedes` set to the prior fact's id (the receipt gives you the id when you record it). The old fact is
+kept and marked no-longer-current, so the dated history survives. Example: you first read "liability cap = 1
+month (from the draft)", then the markup agrees 12 months — record the new fact with `supersedes` pointing at
+the first, `valid_from` the agreement date. A ledger fact is **yours** (the agent's); you cannot record a
+lawyer's correction through it — that is the lawyer's own authenticated action.
 
 ## Corrections the supervising lawyer has recorded
 
