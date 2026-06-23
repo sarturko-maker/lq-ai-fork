@@ -1210,3 +1210,77 @@ export interface TabularPreviewCostResponse {
 	estimated_cost_usd: string;
 	per_tier_breakdown: Record<string, number>;
 }
+
+// ---------------------------------------------------------------------------
+// Matter memory (C3c, ADR-F042 / F044)
+//
+// The read-only projection of one matter's working-memory tier, served by
+// `GET /api/v1/matters/{id}/memory`, plus the human-authenticated wiki revert
+// (`POST .../memory/wiki/revert`). Mirrors the C3c-1 Pydantic models
+// (`api/app/api/matter_memory.py`); datetimes are ISO strings over JSON. Every
+// `*_md` / `body_preview` string is MODEL-authored (untrusted) — render only
+// through `renderModelMarkdown`, never raw `{@html}`.
+// ---------------------------------------------------------------------------
+
+/** The matter's current wiki + how many prior (revertable) versions exist. */
+export interface MatterWikiRead {
+	content_md: string;
+	char_count: number;
+	/** Count of `wiki_snapshot` rows = revertable prior versions. */
+	version_count: number;
+}
+
+/** One LIVE typed fact (the current ledger; superseded facts are excluded). */
+export interface MatterFactRead {
+	id: string;
+	body_md: string;
+	fact_type: string | null;
+	source_citation: string | null;
+	author: string | null;
+	valid_at: string | null;
+	created_at: string;
+}
+
+/** One LIVE pinned correction (the supervising lawyer's enforced record). */
+export interface MatterCorrectionRead {
+	id: string;
+	body_md: string;
+	trust: string;
+	created_at: string;
+}
+
+/**
+ * One append-only log entry (any kind), with a bounded body preview + provenance.
+ * `superseded` is true when a fact's window has closed or a correction was
+ * retired. The panel offers wiki revert on `kind === 'wiki_snapshot'` rows
+ * (whose `id` is the revert target).
+ */
+export interface MatterLogEntryRead {
+	id: string;
+	kind: string;
+	created_at: string;
+	run_id: string | null;
+	author: string | null;
+	fact_type: string | null;
+	source_citation: string | null;
+	superseded: boolean;
+	body_preview: string;
+}
+
+/** The full read-only projection of one matter's working memory (C3c-2 panel). */
+export interface MatterMemoryRead {
+	project_id: string;
+	wiki: MatterWikiRead;
+	facts: MatterFactRead[];
+	corrections: MatterCorrectionRead[];
+	log: MatterLogEntryRead[];
+	log_total: number;
+}
+
+/** The outcome of a wiki revert: which version was restored + the new state. */
+export interface WikiRevertResponse {
+	reverted_to_snapshot_id: string;
+	/** False only when the pre-revert wiki was blank (nothing to keep). */
+	snapshotted_prior: boolean;
+	wiki: MatterWikiRead;
+}
