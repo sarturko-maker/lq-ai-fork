@@ -286,6 +286,27 @@ async def memory_log(db: AsyncSession, project_id: uuid.UUID) -> list[MatterMemo
     return list(rows.scalars().all())
 
 
+async def live_corrections(db: AsyncSession, project_id: uuid.UUID) -> list[MatterMemoryEntry]:
+    """The matter's CURRENT pinned corrections — live (``superseded_at IS NULL``), oldest first.
+
+    The **uncapped** row form for the read surface (C3c-1 search + the GET projection).
+    Distinct from :func:`app.agents.matter_memory_tools.load_pinned_corrections`, which
+    returns *bodies* newest-first capped to the per-run prompt-injection budget — that
+    bound is correct for prompt injection but wrong for search/read, where every live
+    correction must be visible.
+    """
+    rows = await db.execute(
+        select(MatterMemoryEntry)
+        .where(
+            MatterMemoryEntry.project_id == project_id,
+            MatterMemoryEntry.kind == "correction",
+            MatterMemoryEntry.superseded_at.is_(None),
+        )
+        .order_by(MatterMemoryEntry.created_at.asc(), MatterMemoryEntry.id.asc())
+    )
+    return list(rows.scalars().all())
+
+
 def _rejection_text(exc: ValidationError) -> str:
     """Turn a Pydantic failure into a fix-and-retry message (no body echo)."""
     problems = []

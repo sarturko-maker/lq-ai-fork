@@ -45,8 +45,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.guard import GuardContext, guarded_dispatch
-from app.agents.matter_fact_tools import facts_valid_at, live_facts
-from app.agents.matter_memory_tools import load_pinned_corrections
+from app.agents.matter_fact_tools import facts_valid_at, live_corrections, live_facts
 from app.agents.tools import MatterBinding
 from app.models.project import MatterMemoryEntry, Project
 from app.schemas.matter_memory import MatterFactsAsOfInput, MatterMemorySearchInput
@@ -159,8 +158,11 @@ def _match_score(text: str | None, tokens: list[str]) -> int:
 
 
 def _fact_line(fact: MatterMemoryEntry) -> str:
-    """Render one live fact as a digest line with its provenance (no validity window —
-    live facts are current by definition)."""
+    """Render one live fact as a digest line with its open validity start + provenance.
+
+    No closing window — live facts have none (``invalid_at IS NULL``), unlike
+    :func:`_matter_facts_as_of`, which prints a two-ended ``valid → until`` range.
+    """
     bits = [f"[{fact.fact_type or 'fact'}] {fact.body_md}"]
     if fact.source_citation:
         bits.append(f"source: {fact.source_citation}")
@@ -174,8 +176,10 @@ async def _search_matter_memory(db: AsyncSession, binding: MatterBinding, *, que
     """Validate → load the LIVE corpus → Python-side keyword match → rendered digest.
 
     Reject a blank/oversize query (no crash). Searches live facts + the current wiki +
-    the live pinned corrections; superseded/retired facts are out of scope by
-    construction (live_facts filters ``invalid_at IS NULL``).
+    ALL live pinned corrections; superseded/retired facts are out of scope by
+    construction (live_facts / live_corrections filter on the live window). The corpus
+    is uncapped (the read surface must see every live correction, not the per-run
+    prompt-injection slice).
     """
     try:
         proposal = MatterMemorySearchInput(query=query)
@@ -188,7 +192,7 @@ async def _search_matter_memory(db: AsyncSession, binding: MatterBinding, *, que
 
     tokens = _query_tokens(proposal.query)
     facts = await live_facts(db, project.id)
-    corrections = await load_pinned_corrections(db, project.id)
+    corrections = await live_corrections(db, project.id)
     wiki = (project.context_md or "").strip()
 
     # Rank facts by how many distinct query tokens they hit (body + source), keep order
@@ -202,7 +206,7 @@ async def _search_matter_memory(db: AsyncSession, binding: MatterBinding, *, que
         key=lambda pair: pair[1],
         reverse=True,
     )
-    matched_corrections = [c for c in corrections if _match_score(c, tokens)][
+    matched_corrections = [c.body_md for c in corrections if _match_score(c.body_md, tokens)][
         :_MAX_CORRECTION_MATCHES
     ]
     matched_wiki_lines = [

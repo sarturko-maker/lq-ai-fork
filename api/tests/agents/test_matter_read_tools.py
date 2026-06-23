@@ -226,6 +226,43 @@ async def test_search_matches_pinned_correction(
     assert "supervising lawyer" in out.lower()
 
 
+async def test_search_sees_corrections_beyond_inject_cap(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """Search uses the UNCAPPED live_corrections, not the 30-row per-run inject budget:
+    a matching correction older than the 30 most-recent is still found."""
+    user_id, project_id = matter
+    marker = "ZEBRACORR-oldest"
+    async with commit_factory() as db:
+        # The OLDEST correction carries the marker; then 35 newer ones bury it past the
+        # 30-row inject cap (load_pinned_corrections would never surface it).
+        db.add(
+            MatterMemoryEntry(
+                project_id=project_id,
+                user_id=user_id,
+                kind="correction",
+                body_md=f"{marker}: we act for the seller.",
+                trust="human-pinned",
+            )
+        )
+        await db.flush()
+        for i in range(35):
+            db.add(
+                MatterMemoryEntry(
+                    project_id=project_id,
+                    user_id=user_id,
+                    kind="correction",
+                    body_md=f"later correction {i}",
+                    trust="human-pinned",
+                )
+            )
+        await db.commit()
+    async with commit_factory() as db:
+        out = await _search_matter_memory(db, _binding(user_id, project_id), query=marker)
+    assert marker in out  # the oldest live correction is searchable, not capped out
+
+
 async def test_search_blank_query_rejected_not_crash(
     commit_factory: async_sessionmaker[AsyncSession],
     matter: tuple[uuid.UUID, uuid.UUID],
@@ -314,18 +351,59 @@ async def test_as_of_bad_date_rejected_not_crash(
     assert "matter_facts_as_of" in out
 
 
-async def test_as_of_empty_window_reports_nothing(
+async def test_as_of_numeric_string_rejected_not_misread(
     commit_factory: async_sessionmaker[AsyncSession],
     matter: tuple[uuid.UUID, uuid.UUID],
 ) -> None:
+    """A bare numeric string ("2026") must be REJECTED, not silently read as a Unix
+    timestamp (→ 1970, a confidently-wrong recall). Pydantic's int-string→timestamp
+    coercion is headed off by the mode='before' validator."""
     user_id, project_id = matter
     await _seed_memory(commit_factory, project_id)
-    # Before any dated fact's window AND undated facts are "from the start", so pick a
-    # date so early only the undated fact is valid — assert the dated ones are absent.
+    async with commit_factory() as db:
+        out = await _matter_facts_as_of(db, _binding(user_id, project_id), as_of_date="2026")
+    assert "rejected" in out.lower()
+    assert "1970" not in out  # never silently resolved to the epoch
+    assert "matter_facts_as_of" in out
+
+
+async def test_as_of_undated_fact_holds_from_start(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """A NULL-valid_at fact is "valid from the start", so it appears for an early date
+    while the dated facts (whose windows start later) do not."""
+    user_id, project_id = matter
+    await _seed_memory(commit_factory, project_id)
     async with commit_factory() as db:
         out = await _matter_facts_as_of(db, _binding(user_id, project_id), as_of_date="2025-01-01")
     assert "1 month" not in out and "12 months" not in out
     assert "We act for the buyer" in out  # undated fact valid from the start
+
+
+async def test_as_of_truly_empty_reports_nothing(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """When NO fact's window contains the date, the empty branch reports nothing."""
+    user_id, project_id = matter
+    async with commit_factory() as db:
+        db.add(
+            MatterMemoryEntry(
+                project_id=project_id,
+                user_id=user_id,
+                kind="fact",
+                body_md="cap agreed",
+                trust="normal",
+                author="agent",
+                fact_type="term",
+                valid_at=_T1,  # valid only from 2026-03-01
+            )
+        )
+        await db.commit()
+    async with commit_factory() as db:
+        out = await _matter_facts_as_of(db, _binding(user_id, project_id), as_of_date="2025-01-01")
+    assert "No facts were recorded as valid on 2025-01-01" in out
 
 
 # --------------------------------------------------------------------------- #

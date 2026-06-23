@@ -18,7 +18,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -65,6 +65,21 @@ def _utc_aware(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _require_iso_date_string(value: Any) -> Any:
+    """Reject a bare numeric string BEFORE Pydantic coerces it to a Unix timestamp.
+
+    Pydantic v2 reads an int-like string ("2026", "1700000000") as a Unix timestamp, so a
+    model passing a year like "2026" would silently become 1970-01-01 — a confidently
+    wrong as-of recall, not a reject. The tools ask the model for "an ISO date"; we accept
+    ISO date/datetime strings (and real datetime objects) and reject a purely numeric
+    string back to the model (reject-and-retry, never silent-wrong). A ``mode="before"``
+    validator so it runs ahead of the timestamp coercion.
+    """
+    if isinstance(value, str) and value.strip().lstrip("+-").isdigit():
+        raise ValueError("provide an ISO date (e.g. 2026-05-01), not a bare number")
+    return value
 
 
 def _absent_if_blank(value: str | None) -> str | None:
@@ -151,6 +166,11 @@ class RecordMatterFactInput(BaseModel):
         # str_strip_whitespace already trimmed; treat a blank source as "no source".
         return _absent_if_blank(value)
 
+    @field_validator("valid_from", mode="before")
+    @classmethod
+    def _valid_from_iso(cls, value: Any) -> Any:
+        return _require_iso_date_string(value)
+
     @field_validator("valid_from")
     @classmethod
     def _valid_from_utc(cls, value: datetime | None) -> datetime | None:
@@ -209,6 +229,11 @@ class ReplaceConsolidationOp(BaseModel):
     @classmethod
     def _blank_source_is_absent(cls, value: str | None) -> str | None:
         return _absent_if_blank(value)
+
+    @field_validator("valid_from", mode="before")
+    @classmethod
+    def _valid_from_iso(cls, value: Any) -> Any:
+        return _require_iso_date_string(value)
 
     @field_validator("valid_from")
     @classmethod
@@ -277,6 +302,13 @@ class MatterFactsAsOfInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     as_of: datetime
+
+    @field_validator("as_of", mode="before")
+    @classmethod
+    def _as_of_iso(cls, value: Any) -> Any:
+        # Reject a bare numeric string ("2026") before Pydantic reads it as a Unix
+        # timestamp → 1970 (a silent-wrong recall on a load-bearing arg).
+        return _require_iso_date_string(value)
 
     @field_validator("as_of")
     @classmethod

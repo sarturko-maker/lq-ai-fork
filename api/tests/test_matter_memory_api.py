@@ -458,6 +458,60 @@ async def test_revert_cross_user_is_404(
     assert resp.status_code == 404
 
 
+async def test_revert_snapshot_of_other_matter_is_404(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """Same-user confused-deputy: a snapshot of matter A cannot be reverted into matter B
+    (the triple-scoped lookup's project_id predicate) → 404, B untouched."""
+    matter_a = await _make_project(db_session, db_user)
+    matter_b = await _make_project(db_session, db_user)
+    matter_b.context_md = "B untouched"
+    snap_a = await _add_entry(
+        db_session, matter_a.id, db_user.id, kind="wiki_snapshot", body_md="A's prior wiki"
+    )
+    await db_session.flush()
+    resp = await client.post(
+        _revert_url(matter_b.id), json={"snapshot_id": str(snap_a.id)}, headers=_h(db_user)
+    )
+    assert resp.status_code == 404
+    refreshed = await db_session.get(Project, matter_b.id)
+    assert refreshed is not None and refreshed.context_md == "B untouched"
+
+
+async def test_revert_blank_current_wiki_writes_no_prior_snapshot(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """Reverting when the current wiki is blank: snapshotted_prior is False and no new
+    wiki_snapshot row is written (only the original target remains) — the documented
+    benign edge (ADR-F044)."""
+    project = await _make_project(db_session, db_user)  # context_md is None (blank)
+    v1 = await _add_entry(
+        db_session, project.id, db_user.id, kind="wiki_snapshot", body_md="restore me"
+    )
+    await db_session.flush()
+    resp = await client.post(
+        _revert_url(project.id), json={"snapshot_id": str(v1.id)}, headers=_h(db_user)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["snapshotted_prior"] is False
+    assert body["wiki"]["content_md"] == "restore me"
+    # No new snapshot of the blank prior — only the original target remains.
+    snaps = (
+        (
+            await db_session.execute(
+                select(MatterMemoryEntry).where(
+                    MatterMemoryEntry.project_id == project.id,
+                    MatterMemoryEntry.kind == "wiki_snapshot",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(snaps) == 1 and snaps[0].id == v1.id
+
+
 async def test_revert_audit_carries_no_body(
     client: AsyncClient, db_session: AsyncSession, db_user: User
 ) -> None:

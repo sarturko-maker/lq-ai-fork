@@ -43,7 +43,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.matter_fact_tools import live_facts, memory_log
+from app.agents.matter_fact_tools import live_corrections, live_facts, memory_log
 from app.agents.matter_memory_tools import snapshot_and_rewrite_wiki
 from app.api.dependencies import ActiveUser
 from app.api.projects import _load_visible_project
@@ -261,21 +261,7 @@ async def read_matter_memory(
 
     facts = await live_facts(db, project.id)
     log_rows = await memory_log(db, project.id)
-    corrections = (
-        (
-            await db.execute(
-                select(MatterMemoryEntry)
-                .where(
-                    MatterMemoryEntry.project_id == project.id,
-                    MatterMemoryEntry.kind == "correction",
-                    MatterMemoryEntry.superseded_at.is_(None),
-                )
-                .order_by(MatterMemoryEntry.created_at.asc(), MatterMemoryEntry.id.asc())
-            )
-        )
-        .scalars()
-        .all()
-    )
+    corrections = await live_corrections(db, project.id)
 
     wiki_body = project.context_md or ""
     return MatterMemoryRead(
