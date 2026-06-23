@@ -216,10 +216,11 @@ class ProjectSkill(Base):
 # spine around it: prior-version snapshots (undo substrate) and the
 # human-authenticated pinned corrections the agent's auto-curation may never touch.
 #
-# Two ``kind``s share one table (additive-nullable so C3b layers typed bi-temporal
-# fact columns — valid_at/invalid_at/superseded_by/value/author/source_citation/type
-# — with NO backfill; correction/snapshot rows keep ``body_md``, typed-fact rows
-# will populate the new columns):
+# Three ``kind``s share one table. C3b-1 added ``'fact'`` and the typed bi-temporal
+# columns (author/source_citation/fact_type/valid_at/invalid_at/superseded_by) as
+# additive-nullable with NO backfill: correction/snapshot rows keep ``body_md`` and
+# leave the typed columns NULL; ``fact`` rows reuse ``body_md`` for the statement and
+# populate the typed columns. The kinds:
 #   * ``correction``    — a lawyer's correction. ``trust='human-pinned'``, written
 #     ONLY through the authenticated human endpoint (``author`` = the session user).
 #     No agent-granted tool mints one — an agent-asserted "the lawyer said X" is
@@ -229,16 +230,38 @@ class ProjectSkill(Base):
 #   * ``wiki_snapshot`` — the prior ``context_md`` captured before an
 #     ``update_matter_memory`` rewrite (undo; ``trust='normal'``; ``run_id`` = the
 #     run that triggered the rewrite, provenance).
+#   * ``fact``          — one entry in the agent's dated fact ledger (C3b-1;
+#     ``author='agent'``, ``trust='normal'``). ``body_md`` is the statement;
+#     ``valid_at``/``invalid_at`` are its WORLD-time validity window (supersede sets
+#     ``invalid_at`` + ``superseded_by``, never deletes — "what did we believe at
+#     signing"); ``source_citation`` is the prose source; ``fact_type`` the taxonomy.
+#     The ``record_matter_fact`` tool writes only ``fact`` rows — never a correction,
+#     never ``human-pinned`` (no-fabrication + no-overwrite carry over from C3a).
 # The value sets are the single source of truth for the CHECK constraints below
 # (mirrors app.models.assessment / app.models.ropa: private value tuples wired into
 # the CHECK via ``_in_set``). The migration DDL holds the matching SQL literals.
-_MATTER_MEMORY_KINDS = ("correction", "wiki_snapshot")
+# C3b-1 (ADR-F042): ``'fact'`` is the typed bi-temporal fact-ledger kind (the agent's
+# dated, supersede-able facts) — additive on the C3a table; fact rows reuse ``body_md``
+# for the statement and populate the nullable typed columns below.
+_MATTER_MEMORY_KINDS = ("correction", "wiki_snapshot", "fact")
 _MATTER_MEMORY_TRUST = ("normal", "human-pinned")
+# C3b-1: who recorded a typed fact. ``'agent'`` for the auto-recorded ledger. The
+# CHECK also admits ``'lawyer'``, reserved for a future pin-endpoint change — C3b-1
+# does NOT populate it (existing correction rows keep ``author`` NULL; additive-
+# nullable, no backfill). No agent path mints a ``'lawyer'`` row (B2 — an
+# agent-asserted human author is forgeable).
+_MATTER_MEMORY_AUTHORS = ("agent", "lawyer")
+# C3b-1: a small, area-neutral fact taxonomy (start here; extend additively). Covers
+# both a Commercial deal and a Privacy programme.
+_MATTER_FACT_TYPES = ("party", "term", "date", "decision", "open_point", "fact")
 # DB-level body cap (defense-in-depth; reject, don't truncate). Generous: a
 # ``wiki_snapshot`` stores a prior ``context_md`` which the PATCH path caps at
 # 100 KiB, so this must comfortably exceed that. The agent wiki write and the
 # correction endpoint enforce their own (smaller) caps at the boundary.
 MATTER_MEMORY_BODY_MAX_CHARS = 200_000
+# C3b-1: the prose ``source_citation`` cap (kept in sync with the migration DDL and
+# ``app.schemas.matter_memory``).
+MATTER_FACT_SOURCE_MAX_CHARS = 500
 
 
 def _in_set(column: str, values: tuple[str, ...]) -> str:
@@ -247,15 +270,23 @@ def _in_set(column: str, values: tuple[str, ...]) -> str:
     return f"{column} IN ({quoted})"
 
 
+def _opt_in_set(column: str, values: tuple[str, ...]) -> str:
+    """``column IS NULL OR column IN (…)`` for a nullable-enum CHECK (mirrors _opt_len)."""
+    return f"{column} IS NULL OR {_in_set(column, values)}"
+
+
 class MatterMemoryEntry(Base):
-    """One durable matter-memory entry — a pinned correction or a wiki snapshot.
+    """One durable matter-memory entry — a pinned correction, a wiki snapshot, or a
+    typed fact (the C3b-1 fact ledger).
 
     See the module-level note above. The hot read is "the live pinned corrections
     of this matter" (injected every run) — covered by the
-    ``(project_id, kind, created_at)`` index. ``superseded_at`` is the C3a soft-
-    supersede column (set when a correction is retired; C3b adds the richer
-    bi-temporal columns). Rows are matter-scoped via ``project_id`` (CASCADE) — the
-    write blast radius is confined to the single matter (ADR-F042).
+    ``(project_id, kind, created_at)`` index, which also serves the matter-scoped
+    fact reads (tens of rows per matter). ``superseded_at`` is the C3a soft-supersede
+    column for corrections; the C3b-1 ``valid_at``/``invalid_at``/``superseded_by``
+    columns are the typed-fact bi-temporal supersede (set ``invalid_at``, never
+    delete). Rows are matter-scoped via ``project_id`` (CASCADE) — the write blast
+    radius is confined to the single matter (ADR-F042).
     """
 
     __tablename__ = "matter_memory_entries"
@@ -271,6 +302,24 @@ class MatterMemoryEntry(Base):
         CheckConstraint(
             f"char_length(body_md) BETWEEN 1 AND {MATTER_MEMORY_BODY_MAX_CHARS}",
             name="chk_matter_memory_entries_body_len",
+        ),
+        # C3b-1: nullable-enum + temporal + length guards on the typed-fact columns.
+        CheckConstraint(
+            _opt_in_set("author", _MATTER_MEMORY_AUTHORS),
+            name="chk_matter_memory_entries_author",
+        ),
+        CheckConstraint(
+            _opt_in_set("fact_type", _MATTER_FACT_TYPES),
+            name="chk_matter_memory_entries_fact_type",
+        ),
+        CheckConstraint(
+            "invalid_at IS NULL OR valid_at IS NULL OR invalid_at > valid_at",
+            name="chk_matter_memory_entries_valid_window",
+        ),
+        CheckConstraint(
+            "source_citation IS NULL OR "
+            f"char_length(source_citation) BETWEEN 1 AND {MATTER_FACT_SOURCE_MAX_CHARS}",
+            name="chk_matter_memory_entries_source_len",
         ),
         Index(
             "ix_matter_memory_entries_project_kind_created",
@@ -306,6 +355,17 @@ class MatterMemoryEntry(Base):
     # Provenance: the run that wrote a snapshot. NULL for a human correction (no run).
     run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # C3b-1 (ADR-F042): typed bi-temporal fact columns (NULL for correction/snapshot
+    # rows; populated for ``kind='fact'``). See the module note above.
+    author: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_citation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fact_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # WORLD-time validity window (distinct from created_at = ingestion-time).
+    valid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    invalid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The explicit forward link to the fact that replaced this one (a plain UUID,
+    # mirroring run_id — not a self-FK; the temporal window is the load-bearing part).
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

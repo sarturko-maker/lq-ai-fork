@@ -1088,6 +1088,50 @@ async def test_bound_run_grants_update_matter_memory_and_snapshots(
         assert snaps[0].body_md == "old wiki body"
 
 
+async def test_bound_run_grants_record_matter_fact(
+    comp_env: CompositionEnv,
+) -> None:
+    """C3b-1 (ADR-F042): every matter-bound run also gets the typed fact-ledger tool
+    record_matter_fact (area-agnostic, like the wiki tool). A call writes a
+    kind='fact' row with author='agent'/trust='normal' fixed by the tool — proving
+    the grant + the guarded typed-fact write."""
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message(
+                "record_matter_fact",
+                {"fact": "We act for the buyer.", "fact_type": "party", "source": "term sheet"},
+            ),
+            final_message("recorded a matter fact"),
+        ]
+    )
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+    )
+
+    async with comp_env.factory() as db:
+        facts = (
+            (
+                await db.execute(
+                    select(MatterMemoryEntry).where(
+                        MatterMemoryEntry.project_id == comp_env.project_id,
+                        MatterMemoryEntry.kind == "fact",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(facts) == 1
+    assert facts[0].body_md == "We act for the buyer."
+    assert facts[0].fact_type == "party"
+    assert facts[0].author == "agent"
+    assert facts[0].trust == "normal"
+    assert facts[0].source_citation == "term sheet"
+
+
 async def test_privacy_matter_labels_programme_memory_and_grants_tool(
     comp_env: CompositionEnv,
 ) -> None:
@@ -1117,6 +1161,11 @@ async def test_privacy_matter_labels_programme_memory_and_grants_tool(
                 "update_matter_memory",
                 {"content_md": "Programme: GDPR refresh for Acme. Scope: marketing + HR."},
             ),
+            # C3b-1: the fact-ledger tool is granted in a Privacy run too (area-agnostic).
+            tool_call_message(
+                "record_matter_fact",
+                {"fact": "DPIA due before launch.", "fact_type": "date"},
+            ),
             final_message("Updated the programme memory."),
         ]
     )
@@ -1135,11 +1184,26 @@ async def test_privacy_matter_labels_programme_memory_and_grants_tool(
     assert "## Matter memory (read-only)" not in joined
     assert "Programme seed: GDPR refresh for Acme." in joined
 
-    # update_matter_memory was granted for the Privacy run and the write took effect.
+    # update_matter_memory was granted for the Privacy run and the write took effect;
+    # record_matter_fact was granted too and wrote a kind='fact' row.
     async with comp_env.factory() as db:
         proj = await db.get(Project, comp_env.project_id)
         assert proj is not None
         assert proj.context_md == "Programme: GDPR refresh for Acme. Scope: marketing + HR."
+        facts = (
+            (
+                await db.execute(
+                    select(MatterMemoryEntry).where(
+                        MatterMemoryEntry.project_id == comp_env.project_id,
+                        MatterMemoryEntry.kind == "fact",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [f.body_md for f in facts] == ["DPIA due before launch."]
+        assert facts[0].fact_type == "date"
 
 
 async def test_composition_failure_finalizes_run_as_failed(

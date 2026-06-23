@@ -38,6 +38,7 @@ from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.commercial_tools import COMMERCIAL_AREA_KEY, build_commercial_tools
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.lease import RunLease, settle_run
+from app.agents.matter_fact_tools import build_matter_fact_tools
 from app.agents.matter_memory_tools import (
     build_matter_memory_tools,
     format_corrections_block,
@@ -357,6 +358,11 @@ async def compose_and_execute_run(
             tools = tools + build_matter_memory_tools(
                 session_factory, run_id=run_id, binding=binding
             )
+            # C3b-1 (ADR-F042): the same matter-bound run — any area — also gets the
+            # typed fact-ledger write tool (record_matter_fact). Area-agnostic like the
+            # wiki tool; its grant set is disjoint from the matter-memory + ROPA/
+            # assessment/commercial grants (confinement). C3b-1 makes zero model calls.
+            tools = tools + build_matter_fact_tools(session_factory, run_id=run_id, binding=binding)
         # PRIV-2 (ADR-F018): a matter filed under the Privacy area also gets the
         # ROPA domain tools — propose (the code-validated write) + list. Tool
         # selection is area-keyed at the composition point (the area row is the

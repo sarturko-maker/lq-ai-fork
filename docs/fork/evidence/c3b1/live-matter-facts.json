@@ -1,0 +1,69 @@
+{
+  "model": "deepseek",
+  "run_a": {
+    "status": "completed",
+    "tools_called": [
+      "record_matter_fact",
+      "record_matter_fact",
+      "record_matter_fact",
+      "search_documents",
+      "search_documents",
+      "search_documents",
+      "record_matter_fact"
+    ],
+    "fact_count": 4,
+    "facts": [
+      {
+        "id": "48bbc16e-2d73-43c5-aa1f-b209a0d598b2",
+        "fact_type": "party",
+        "body": "We (this firm) act for the Buyer, Northwind Trading Ltd.",
+        "source": "matter brief",
+        "author": "agent",
+        "trust": "normal",
+        "valid_at": "2026-06-23T06:51:34.488704+00:00",
+        "invalid_at": null,
+        "superseded_by": null
+      },
+      {
+        "id": "04679eea-5d25-4015-b96e-f57cb05ba35f",
+        "fact_type": "party",
+        "body": "The counterparty is Acme Corp.",
+        "source": "matter brief",
+        "author": "agent",
+        "trust": "normal",
+        "valid_at": "2026-06-23T06:51:34.493538+00:00",
+        "invalid_at": null,
+        "superseded_by": null
+      },
+      {
+        "id": "edda7b04-1872-4ed4-9e8d-fe90682358c2",
+        "fact_type": "party",
+        "body": "Acme Corp's counsel is Smith Crowell LLP.",
+        "source": "matter brief",
+        "author": "agent",
+        "trust": "normal",
+        "valid_at": "2026-06-23T06:51:34.509999+00:00",
+        "invalid_at": null,
+        "superseded_by": null
+      },
+      {
+        "id": "f0c086f0-f411-409f-93c7-f66a2fe79e9a",
+        "fact_type": "term",
+        "body": "Liability cap: each party's aggregate liability capped at fees paid by Customer in the 12 months preceding the claim, with carve-outs for breach of confidentiality and indemnification obligations.",
+        "source": "Acme-MSA.txt \u00a77",
+        "author": "agent",
+        "trust": "normal",
+        "valid_at": "2026-06-23T06:51:40.319911+00:00",
+        "invalid_at": null,
+        "superseded_by": null
+      }
+    ],
+    "agent_performed_supersede": false,
+    "live_facts_as_of_now": [
+      "We (this firm) act for the Buyer, Northwind Trading Ltd.",
+      "The counterparty is Acme Corp.",
+      "Acme Corp's counsel is Smith Crowell LLP.",
+      "Liability cap: each party's aggregate liability capped at fees paid by Customer in the 12 months preceding the claim, with carve-outs for breach of confidentiality and indemnification obligations."
+    ]
+  }
+}
