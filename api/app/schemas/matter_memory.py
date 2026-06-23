@@ -45,6 +45,11 @@ MATTER_CONSOLIDATION_MAX_SUPERSEDES = 50
 MATTER_CONSOLIDATION_REASON_MAX_CHARS = 500
 MATTER_CONSOLIDATION_LINT_MAX_CHARS = 2_000
 
+# C3c-1 (ADR-F044): a matter-memory search query is a short keyword string
+# (reject-not-truncate). The corpus is the matter's LIVE memory (tens of facts at
+# matter scale), matched Python-side — never a SQL string built from the query.
+MATTER_SEARCH_QUERY_MAX_CHARS = 500
+
 
 def _utc_aware(value: datetime | None) -> datetime | None:
     """Normalise a model-supplied datetime to UTC-aware (C3b-1 trap, shared).
@@ -234,3 +239,48 @@ class ConsolidationResult(BaseModel):
     )
     new_wiki: str = Field(min_length=1, max_length=MATTER_WIKI_MAX_CHARS)
     lint_notes: str | None = Field(default=None, max_length=MATTER_CONSOLIDATION_LINT_MAX_CHARS)
+
+
+# --- C3c-1 (ADR-F044): the agent-facing read-tool inputs ---------------------
+#
+# The matter-memory read tools (search + as-of) take untrusted model input. Both
+# validate at this boundary (reject-and-retry, never crash). The as-of date is the
+# load-bearing case: a bare ISO date parses tz-NAIVE, and comparing that to the
+# tz-aware ``valid_at``/``invalid_at`` columns raises ``TypeError`` which escapes a
+# guarded tool as a CRASH — so the date is normalised through ``_utc_aware`` here,
+# exactly like ``RecordMatterFactInput.valid_from`` (the C3b-1 trap).
+
+
+class MatterMemorySearchInput(BaseModel):
+    """Validate one ``search_matter_memory`` query (a short keyword string).
+
+    ``str_strip_whitespace`` trims first, so a whitespace-only query collapses to ""
+    and fails ``min_length=1`` (rejected, never an empty search). The query is matched
+    Python-side over the matter's loaded live memory — it never builds SQL.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    query: str = Field(min_length=1, max_length=MATTER_SEARCH_QUERY_MAX_CHARS)
+
+
+class MatterFactsAsOfInput(BaseModel):
+    """Validate one ``matter_facts_as_of`` date (the "what did we believe at T" query).
+
+    Pydantic coerces the model's ISO string → ``datetime`` (a bare date → tz-naive);
+    the validator then normalises to UTC-aware so the downstream temporal comparison in
+    :func:`app.agents.matter_fact_tools.facts_valid_at` never raises. A string Pydantic
+    cannot coerce to a date (e.g. "last Tuesday") raises ``ValidationError`` → the tool
+    returns a reject-and-retry message, never a crash.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    as_of: datetime
+
+    @field_validator("as_of")
+    @classmethod
+    def _as_of_utc(cls, value: datetime) -> datetime:
+        # value is required (non-None), so _utc_aware never returns None here; the
+        # `or value` only narrows the optional return type for the type checker.
+        return _utc_aware(value) or value

@@ -45,6 +45,7 @@ from app.agents.matter_consolidation import (
 )
 from app.agents.matter_fact_tools import MATTER_FACT_TOOL_NAMES, live_facts
 from app.agents.matter_memory_tools import MATTER_MEMORY_TOOL_NAMES
+from app.agents.matter_read_tools import MATTER_READ_TOOL_NAMES
 from app.agents.ropa_tools import ROPA_TOOL_NAMES
 from app.agents.tools import MatterBinding
 from app.models.agent_run import AgentRun, AgentThread
@@ -302,6 +303,7 @@ def test_grant_set_disjoint_from_other_grants() -> None:
     ROPA / assessment / commercial grants."""
     assert MATTER_CONSOLIDATION_TOOL_NAMES.isdisjoint(MATTER_MEMORY_TOOL_NAMES)
     assert MATTER_CONSOLIDATION_TOOL_NAMES.isdisjoint(MATTER_FACT_TOOL_NAMES)
+    assert MATTER_CONSOLIDATION_TOOL_NAMES.isdisjoint(MATTER_READ_TOOL_NAMES)
     assert MATTER_CONSOLIDATION_TOOL_NAMES.isdisjoint(ROPA_TOOL_NAMES)
     assert MATTER_CONSOLIDATION_TOOL_NAMES.isdisjoint(ASSESSMENT_TOOL_NAMES)
     assert MATTER_CONSOLIDATION_TOOL_NAMES.isdisjoint(COMMERCIAL_TOOL_NAMES)

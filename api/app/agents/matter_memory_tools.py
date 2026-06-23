@@ -158,18 +158,22 @@ async def snapshot_and_rewrite_wiki(
     db: AsyncSession,
     project: Project,
     *,
-    run_id: uuid.UUID,
+    run_id: uuid.UUID | None,
     user_id: uuid.UUID,
     new_content: str,
 ) -> None:
     """Snapshot the prior wiki (undo substrate) then rewrite ``context_md`` in place.
 
-    Shared by the C3a ``update_matter_memory`` write and the C3b-2 consolidation
-    apply (ADR-F043) so the snapshot+overwrite lives in one place. The caller has
-    already validated ``new_content`` (non-blank, within the wiki budget) and loaded
-    ``project`` under owner scope. A ``wiki_snapshot`` row (``trust='normal'`` — never
-    a pin) is written BEFORE the overwrite so a CHECK failure on either rolls both
-    back; flush (not commit) so a violation surfaces inside the guard's try.
+    Shared by the C3a ``update_matter_memory`` write, the C3b-2 consolidation apply
+    (ADR-F043), and the C3c-1 human wiki revert (ADR-F044) so the snapshot+overwrite
+    lives in one place — which is also what makes a revert itself reversible (the
+    current wiki is snapshotted BEFORE being overwritten by the chosen prior version).
+    The caller has already validated ``new_content`` (non-blank, within the wiki budget)
+    and loaded ``project`` under owner scope. ``run_id`` is the run that triggered the
+    rewrite, or ``None`` for a human action (the revert endpoint — no run). A
+    ``wiki_snapshot`` row (``trust='normal'`` — never a pin) is written BEFORE the
+    overwrite so a CHECK failure on either rolls both back; flush (not commit) so a
+    violation surfaces inside the guard's try.
     """
     prior = (project.context_md or "").strip()
     if prior:
