@@ -1319,7 +1319,14 @@ def _correlation_ids(
 # F0-S2: ``agent_loop`` tags deep-agent loop traffic (the api's agent
 # factory sets lq_ai_purpose on every agent chat call) so cost and
 # usage queries can separate agent runs from interactive chat.
-_KNOWN_PURPOSES = frozenset({"chat", "judge_paraphrase", "embedding", "agent_loop"})
+# COMM C3b-2 (ADR-F043): ``consolidate_matter_memory`` tags the in-run
+# matter-memory consolidation/Lint tool's one gateway call (the api's
+# ``consolidate_matter_memory`` agent tool sets it) so that spend is
+# separable in the routing log — the audit surface for an agent tool
+# whose in-tool token cost is otherwise R4-no-op until F1's per-run budget.
+_KNOWN_PURPOSES = frozenset(
+    {"chat", "judge_paraphrase", "embedding", "agent_loop", "consolidate_matter_memory"}
+)
 
 
 def _purpose_from_request(chat_request: ChatCompletionRequest) -> str:

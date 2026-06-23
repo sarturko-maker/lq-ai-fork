@@ -1,0 +1,23 @@
+{
+  "model": "deepseek",
+  "consolidation_model": "deepseek-pro",
+  "seeded_fact_ids": [
+    "fb9c762d-f19c-4ed2-8cd8-a48f8e1f25d7",
+    "30e1794e-a152-40f5-b7db-2c97e9d19237",
+    "4db51c5e-9385-4ee1-b30c-66aef8b814a0"
+  ],
+  "run": {
+    "status": "completed",
+    "tools_called": [
+      "consolidate_matter_memory"
+    ],
+    "total_fact_rows": 3,
+    "live_fact_count": 2,
+    "superseded_count": 1,
+    "live_facts": [
+      "Liability cap is 1 month of fees (draft only).",
+      "We act for the buyer, Northwind Trading Ltd."
+    ],
+    "wiki": "We act for the buyer, Northwind Trading Ltd. Liability cap is 1 month of fees (draft only)."
+  }
+}

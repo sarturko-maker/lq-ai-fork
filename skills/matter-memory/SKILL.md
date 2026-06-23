@@ -1,6 +1,6 @@
 ---
 name: matter-memory
-description: Use throughout any matter to keep the matter's working memory current — the brief, evolving wiki the agent maintains with the update_matter_memory tool (the "deal context" in Commercial, the "Programme memory" in Privacy) plus a dated fact ledger kept with record_matter_fact. Teaches the craft of a good matter wiki — record durable facts you learn (each with its source), keep it a living one-pager rather than a log, fold new facts in instead of appending, never contradict a correction the supervising lawyer has recorded, and supersede a ledger fact when it changes so the matter can answer what was true at any past date.
+description: Use throughout any matter to keep the matter's working memory current — the brief, evolving wiki the agent maintains with the update_matter_memory tool (the "deal context" in Commercial, the "Programme memory" in Privacy) plus a dated fact ledger kept with record_matter_fact. Teaches the craft of a good matter wiki — record durable facts you learn (each with its source), keep it a living one-pager rather than a log, fold new facts in instead of appending, never contradict a correction the supervising lawyer has recorded, supersede a ledger fact when it changes so the matter can answer what was true at any past date, and consolidate the whole memory with consolidate_matter_memory when the ledger has grown or facts duplicate or contradict.
 lq_ai:
   title: Matter Memory — the matter's working wiki
   version: 1.0.0
@@ -73,6 +73,19 @@ kept and marked no-longer-current, so the dated history survives. Example: you f
 month (from the draft)", then the markup agrees 12 months — record the new fact with `supersedes` pointing at
 the first, `valid_from` the agreement date. A ledger fact is **yours** (the agent's); you cannot record a
 lawyer's correction through it — that is the lawyer's own authenticated action.
+
+## Consolidating the memory (`consolidate_matter_memory`)
+
+As a matter runs the fact ledger grows: facts duplicate, a later fact contradicts an
+earlier one, some go stale. When that happens — or before you hand the matter on — call
+`consolidate_matter_memory`. In one pass it reviews the matter's live facts and wiki
+together, **supersedes** the stale / duplicate / contradicted facts (keeping their dated
+history — nothing is deleted) and **rewrites the wiki** into a clean current one-pager.
+You pass nothing; it reads the matter's own memory.
+
+Use it **sparingly** — it reviews the whole ledger, so reach for it when the memory has
+genuinely drifted, not after every small change. It never touches a correction the
+supervising lawyer has recorded; those stay ground truth.
 
 ## Corrections the supervising lawyer has recorded
 

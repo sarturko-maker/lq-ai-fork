@@ -11,7 +11,7 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ (matter-wiki MVP). C3b SPLIT (maintainer: split + in-run tool) → C3b-1 ✓ (typed bi-temporal fact ledger + guarded `record_matter_fact` + supersede + as-of query, ZERO model calls, live-proven on DeepSeek). NEXT = C3b-2 (gateway-routed consolidation/Lint — the ADR-F010 egress slice).**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ (matter-wiki MVP). C3b SPLIT (maintainer: split + in-run tool) → C3b-1 ✓ (typed bi-temporal fact ledger, ZERO model calls) + C3b-2 ✓ (gateway-routed consolidation/Lint — the ADR-F010 egress slice; in-run `consolidate_matter_memory` tool, supersede-only + wiki rewrite, ADR-F043). NEXT = C3c (matter-scoped read tools + cockpit memory panel + undo/revert endpoint).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -23,55 +23,60 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this session (C3b-1 — typed bi-temporal fact ledger SHIPPED; branch `fork/c3b1-typed-facts`)
+## Done this session (C3b-2 — gateway-routed consolidation/Lint SHIPPED; branch `fork/c3b2-gateway-consolidation`)
 
-(C3a shipped last session — PR #133, memory `matter-memory-c3a-shipped`: the auto-write matter wiki +
-human-pinned corrections, all areas, live-proven.)
+(C3a — PR #133; C3b-1 — PR #134 [[matter-facts-c3b1-shipped]]: the typed bi-temporal fact ledger, ZERO model
+calls. C3b-2 builds the automated hygiene on top.)
 
-**What:** the matter now keeps a **dated, supersede-able fact ledger** beside the C3a prose wiki — the
-headline answer to *"what did we believe at signing"*. The agent records individual typed facts; superseding
-a fact closes its world-time window (never deletes), so the bi-temporal history is queryable.
-**Maintainer split C3b** (AskUserQuestion): **C3b-1 = the store + write + as-of (ZERO model calls)**;
-**C3b-2 = the gateway-routed consolidation/Lint (the egress slice), in-run guarded tool**. Plan:
-`docs/fork/plans/C3b-typed-facts-consolidation.md`. **Zero new deps; zero model calls in C3b-1.**
+**What:** the matter agent can now **consolidate its own memory** in one tool call — the **first matter-memory
+code that calls a model**, so the **ADR-F010 egress obligation lands here**. `consolidate_matter_memory` loads
+the matter's live fact set whole + the wiki + the pinned corrections, routes **ONE** gateway chat completion
+(mem0 extract→judge + Lint) under a new `lq_ai_purpose`, then applies the proposal **supersede-only** (retire /
+replace — never delete, never edit a body in place) and **rewrites the wiki**. **Maintainer chose** (AskUserQuestion):
+**facts + wiki**, **supersede-only**, **match the R4-no-op cost posture + gateway audit**. **No migration** (reuses
+`0070` + `context_md`); **zero new deps**. Plan `docs/fork/plans/C3b-2-gateway-consolidation.md`; **ADR-F043** (proposed).
 
-- **Migration `0070`** (additive-nullable on `matter_memory_entries`, NO backfill — the `0068` contract):
-  `author`·`source_citation`·`fact_type`·`valid_at`·`invalid_at`·`superseded_by`; extends the `kind` CHECK
-  to add `'fact'`; new nullable-enum + temporal (`invalid_at > valid_at`) + source-length CHECKs. Downgrade
-  deletes `kind='fact'` rows then reverts. **Head is now `0070`.** Up/down/up verified on a throwaway pgvector.
-- **ORM** — extended `MatterMemoryEntry` (`models/project.py`): the 6 nullable columns + enum tuples
-  (`_MATTER_MEMORY_AUTHORS`, `_MATTER_FACT_TYPES`, `'fact'` in `_MATTER_MEMORY_KINDS`) + an `_opt_in_set` helper;
-  CHECK literals mirror the migration (single source of truth). A fact's **statement reuses `body_md`** (no
-  separate `value` column — inherits the body-len CHECK + no-leak audit). `superseded_by` is a plain UUID
-  (forward link, like `run_id`).
-- **`app/agents/matter_fact_tools.py` (NEW)** — `MATTER_FACT_TOOL_NAMES = {record_matter_fact}` (disjoint),
-  `build_matter_fact_tools(...)`; the guarded `record_matter_fact(fact, fact_type, source=, valid_from=,
-  supersedes=)` — validate via `schemas.matter_memory.RecordMatterFactInput` (reject-not-truncate), reload
-  project (owner+active), insert a `kind='fact'` row (`author='agent'`/`trust='normal'` **tool-fixed**), and on
-  supersede close the prior's window (`invalid_at`+`superseded_by`). Guard auto-audit only. + pure read helpers
-  `facts_valid_at` (the as-of query `valid_at ≤ T < invalid_at`), `live_facts`, `memory_log` — the **C3c**
-  retrieval/panel substrate.
-- **`app/agents/composition.py`** — grants `build_matter_fact_tools(...)` to **every** matter-bound run (all
-  areas), beside the matter-memory grant; disjoint from ROPA/assessment/commercial.
-- **`schemas/matter_memory.py`** — `MatterFactType(StrEnum)` (party/term/date/decision/open_point/fact) +
-  `RecordMatterFactInput` (`extra='forbid'`, blank-source→None, **`valid_from` normalised to UTC-aware** —
-  review fix, see gotcha). **`skills/matter-memory/SKILL.md`** — added the fact-ledger craft section.
-- **B2 carries over (structural):** `record_matter_fact` writes only `kind='fact'` rows — it can neither mint a
-  `human-pinned` correction (no-fabrication) nor touch a `correction` row (no-overwrite; `supersedes` filters
-  `kind='fact'`, so it cannot target a correction or another matter's/user's fact). **C3b-1 makes ZERO gateway
-  calls** — the ADR-F010 egress obligation is C3b-2.
-- **Adversarial review (workflow, 4 lenses → per-finding refutation): 0 blockers, 1 should-fix + 1 nit, both
-  fixed.** Should-fix = the `valid_from` tz-naive crash (now normalised + a regression test); nit = the
-  `author='lawyer'` docstrings overstated (softened — the pin endpoint is untouched in C3b-1, so corrections'
-  `author` stays NULL).
-- **Live (DeepSeek, evidence `docs/fork/evidence/c3b1/live-matter-facts.json`):** the agent called
-  `record_matter_fact` 4× — 3 party facts then read the agreement and recorded the liability cap as a `term`
-  fact with a real source (`Acme-MSA.txt §7`); all `author='agent'`/`trust='normal'`; `facts_valid_at(now)`
-  ran live and returned all 4. **Finding:** the agent over-searches before recording (first run thrashed to
-  `cap_exceeded`); a front-loaded prompt fixed it — a craft note, not a code issue.
-- **Verify:** ruff+format+check clean; `mypy` clean; targeted suites green; **full api suite 2564 passed / 2
-  skipped** (the lone "failure" is the documented env-sensitive `test_ready_reports_per_dependency_status`,
-  untouched by this diff). No new endpoint → no `test_openapi`/`test_endpoints` churn.
+- **`app/agents/matter_consolidation.py` (NEW)** — `MATTER_CONSOLIDATION_TOOL_NAMES` (disjoint),
+  `build_matter_consolidation_tools(session_factory, *, run_id, binding, gateway_factory=get_gateway_client)`
+  (the **gateway DI seam** tests override), the zero-arg guarded `consolidate_matter_memory()`, and
+  `_consolidate_matter_memory` = load → ONE `gateway.chat_completion` (`max_tokens` cap, `anonymize=False`,
+  `lq_ai_purpose="consolidate_matter_memory"`) → lenient JSON parse → **pure validation pass** (every op id a
+  LIVE `kind='fact'` row of THIS matter; no double-ref; temporal coherence for retire AND replace) → **all-or-nothing
+  supersede-only apply** + `snapshot_and_rewrite_wiki`. A gateway error / truncation / malformed output / bad id
+  → **reject-and-retry string, never a crash, zero writes**.
+- **`schemas/matter_memory.py`** — `RetireConsolidationOp`/`ReplaceConsolidationOp` (discriminated on `op`) +
+  `ConsolidationResult` (`extra='forbid'`, `new_wiki` ≤ wiki budget); extracted shared `_utc_aware` /
+  `_absent_if_blank` helpers (C3b-1's `RecordMatterFactInput` now reuses them — single-sources the tz fix).
+- **`app/agents/matter_memory_tools.py`** — extracted `snapshot_and_rewrite_wiki(...)` from `_update_matter_memory`
+  (single-sources the snapshot+overwrite for C3a + C3b-2).
+- **`app/agents/composition.py`** — grants `build_matter_consolidation_tools(...)` to **every** matter-bound run
+  (all areas), beside the memory + fact grants; disjoint.
+- **Gateway** — `consolidate_matter_memory` added to `_KNOWN_PURPOSES` (`gateway/app/api/inference.py`) +
+  documented (`openai_schema.py`) + the propagation test (`test_inference_b4.py`). **⚠ frozenset at module load
+  → the gateway must be RESTARTED to recognise the purpose** (unknown purposes fall back to `chat`, so the call
+  still succeeds — only the routing-log tag differs until restart).
+- **B2 carries over (structural):** corrections are read-only prompt input; the apply only touches live
+  `kind='fact'` rows (a correction/cross-matter/superseded/invented id is unreachable) — no-fabrication +
+  no-overwrite hold without prose. The tool's only model access is the injected `GatewayClient` (asserted by a
+  unit test + an AST-parse egress guard — no provider SDK).
+- **Adversarial review (workflow, 5 lenses → per-finding refutation): 0 blockers, 1 should-fix + 6 nits; 2 refuted.**
+  Folded: **should-fix** = a `retire` of a *future-dated* fact set `invalid_at=now < valid_at` → DB CHECK crash
+  (now rejected in validation, + regression test); nits = bound the echoed parse-error text, detect
+  `finish_reason='length'` truncation → diagnosable reject, single-source the resolved `valid_at`
+  (validation→apply), drop the dead `model_alias` builder kwarg, distinct `MAX_SUPERSEDES` constant. **Deferred**
+  (documented): the DB connection held across the gateway await (consistent with every guarded tool; no lock).
+- **Verify:** ruff (CI-exact 0.15.18) + format + mypy `app` clean; gateway mypy `--strict` + ruff clean;
+  gateway suite **595 passed** (purpose test 3/3; lone `test_model_discovery` failure is pre-existing env-sensitive,
+  reproduces in isolation, CI-green on main); **full api suite 2585 passed / 2 skipped** (lone failure = the
+  documented env-sensitive `test_ready`).
+- **Live (DeepSeek, `docs/fork/evidence/c3b2/live-matter-consolidation.json`):** seeded a duplicate party fact +
+  a stale draft cap; the agent called `consolidate_matter_memory` → **`deepseek-pro` retired the duplicate**
+  (`superseded_count=1`, `live_fact_count` 3→2, `total_fact_rows` stays 3 — **supersede-only, history preserved**)
+  + rewrote the wiki; `status=completed`, no crash. **Craft finding (ADR-F015):** flash returned an all-NOOP (didn't
+  dedupe); pro's first attempt set a `valid_from` ≤ the prior's `valid_at` → the temporal check **correctly
+  rejected it** (no crash, agent surfaced "consolidation failed") — proving the validation works; a **prompt fix**
+  (dedupe = RETIRE the redundant copy; `valid_from` only for a genuine LATER value change) then made pro
+  consolidate cleanly. The supersede/wiki mechanics are deterministically covered by 19 unit tests.
 
 ### Previous slice (cockpit chat-UX render polish — merged #132, on main): dark-mode markdown parity
 (`dark:prose-invert` on the agent-surface prose containers — the GFM-parser theory was a red herring) +
@@ -115,25 +120,25 @@ reconstruction). Plan `docs/fork/plans/C9-claude-judged-redline-tests.md`.
   committed): `LQ_AI_DOCLING_ENABLED=false` (Docling hung PDFs to its 300s timeout) and the seeded org
   profile. Full findings: memory `commercial-agent-live-uat-findings`.
 
-## ▶ PICK UP EXACTLY HERE — C3b-2 (gateway-routed consolidation/Lint — the ADR-F010 egress slice)
+## ▶ PICK UP EXACTLY HERE — C3c (matter-scoped read surface + cockpit memory panel + undo/revert endpoint)
 
-**Read first:** `docs/fork/plans/C3b-typed-facts-consolidation.md` §C3b-2 + `docs/adr/F042`. C3b-1 shipped the
-typed fact store + the guarded `record_matter_fact` write + supersede + the as-of/`live_facts`/`memory_log`
-read helpers (all ZERO model calls). C3b-2 adds the **automated** hygiene on top:
-- The **in-run guarded tool** `consolidate_matter_memory` (maintainer's choice — no arq post-run hook exists,
-  agent tools need a running run). It loads the matter's live fact set **whole** (tens of rows — NO embeddings;
-  the gateway `/v1/embeddings` is 501 until B6) + the wiki, routes the mem0 extract→judge
-  ADD/UPDATE/DELETE/NOOP loop + Karpathy/OpenClaw Lint through **`GatewayClient.chat_completion`** (precedent:
-  `playbooks/easy/extractor.py`, `autonomous/guard.py:_handle_gateway_inference`) under a **new `lq_ai_purpose`**
-  (register in `gateway/app/api/inference.py` `_KNOWN_PURPOSES`), then supersedes stale facts (sets
-  `invalid_at`/`superseded_by`) — **pinned corrections stay immutable to the loop**.
-- **This is where the ADR-F010 egress obligation lands** — every model call through the gateway; add the
-  no-`api.openai.com`/no-direct-provider assertion on the path; guard + cost-meter via `guarded_dispatch`.
-  **Draft ADR-F043** (egress + the new purpose + the model-calling tool).
+**Read first:** `docs/adr/F042` + `docs/fork/plans/C3-matter-memory-track.md` §C3c. The whole write/store/egress
+substrate is now built and live-proven: C3a (auto-write wiki + human-pinned corrections), C3b-1 (typed
+bi-temporal fact ledger), C3b-2 (gateway-routed consolidation/Lint). C3c is the **read/UI half**:
+- **Agent-facing read tools** — matter-scoped `memory_search` / `memory_get` over the ledger + wiki + log. The
+  tested substrate already exists in `app/agents/matter_fact_tools.py`: `facts_valid_at` (as-of), `live_facts`,
+  `memory_log` (append-only chronological). Grant them like the other matter tools (own disjoint grant set).
+- **Cockpit memory panel** — see/edit/undo/provenance: render `memory_log` (`## [date] op | title`), the live
+  facts, the wiki, and the pinned corrections; surface provenance (`author`/`source_citation`/`run_id`).
+- **Undo/revert REST endpoint** — C3a writes `wiki_snapshot` rows on every wiki rewrite (incl. C3b-2's), so
+  "undo the last consolidation" = restore the latest snapshot. Human-authenticated (owner-scoped); the agent
+  has no undo tool. Pairs with the existing pin endpoint (`app.api.matter_memory`).
+- **No embeddings** for search until B6 (gateway `/v1/embeddings` is 501) — FTS or whole-set load suffices at
+  matter scale, same as C3b-2.
 
-**Then C3c** (matter-scoped `memory_search`/`memory_get` + cockpit memory panel: see/edit/undo/provenance +
-the undo/revert REST endpoint — C3a writes `wiki_snapshot` rows, C3b-1 ships `facts_valid_at`/`live_facts`/
-`memory_log` as the read substrate).
+**Operational follow-up before C3c uses the live cockpit:** rebuild `gateway` (new purpose) + `api` + `arq-worker`
++ `ingest-worker` on the dev stack so `consolidate_matter_memory` + the purpose tag are live (no migration —
+head stays `0070`).
 
 **Carried C3a follow-up (small):** the deferred nit — marker-fence delimiter-injection hardening (strip/escape
 a block's own BEGIN/END markers from untrusted bodies, OR a per-run nonce delimiter) applies uniformly to the
@@ -191,15 +196,29 @@ mutualisation worked-example in `skills/surgical-redline/SKILL.md` + a redline s
   now generous (must fit the full redline). Run via the dev image on `lq-ai_default` with the api gateway env +
   `UX_B1_EVIDENCE_DIR` mounted; `chown` the root-owned evidence before `git add`.
 - **Migration head is `0070`** (`0070_matter_memory_typed_facts.py`, C3b-1 — additive-nullable typed-fact
-  columns on `matter_memory_entries`; `0068` is the store, `0069` the skill binding). Re-check the head before
-  writing in case anything lands first. Fresh-head check before any migration; rebuild api+arq-worker+
+  columns on `matter_memory_entries`; `0068` is the store, `0069` the skill binding; **C3b-2 added NO
+  migration** — it reuses `0070` + `context_md`). Re-check the head before writing in case anything lands first. Fresh-head check before any migration; rebuild api+arq-worker+
   ingest-worker after one; never host-side `alembic upgrade` on the dev DB; never `compose down -v`.
 - **C3b-1 — a Pydantic `datetime` field accepts a tz-NAIVE value from a bare ISO date** ("2026-01-01" parses
   with `tzinfo=None`). Comparing it against a tz-aware `DateTime(timezone=True)` column raises `TypeError`,
   which escapes a guarded tool as a CRASH (audited error + re-raised), not a reject-and-retry. Any datetime the
-  model supplies must be normalised to UTC-aware at the schema boundary (`RecordMatterFactInput._valid_from_utc`
-  is the pattern: `replace(tzinfo=UTC)` if naive, else `astimezone(UTC)`). Tests using only `+00:00` offsets
-  mask it — add a bare-date case.
+  model supplies must be normalised to UTC-aware at the schema boundary (now the shared `_utc_aware` helper in
+  `schemas/matter_memory.py`, used by `RecordMatterFactInput` + the C3b-2 `ReplaceConsolidationOp`). Tests using
+  only `+00:00` offsets mask it — add a bare-date case.
+- **C3b-2 — closing a bi-temporal window must respect the `invalid_at > valid_at` CHECK or the flush CRASHES.**
+  Setting `invalid_at` to a time **at or before** a fact's `valid_at` (e.g. retiring a *future-dated* fact at
+  `now`) violates `chk_matter_memory_entries_valid_window` → `IntegrityError` on flush → escapes the guarded
+  tool as a crash, not a reject. The consolidation validation pass guards BOTH op kinds (`retire`: `now > valid_at`;
+  `replace`: `new_valid_at > prior.valid_at`) BEFORE any write. Any future window-closing code must do the same
+  pre-flush check. `record_matter_fact`'s supersede already enforces this for its one path; a *retire* (no
+  replacement) was the new gap.
+- **C3b-2 — a new `lq_ai_purpose` only takes effect after a GATEWAY RESTART** (`_KNOWN_PURPOSES` is a
+  module-load frozenset in `gateway/app/api/inference.py`). An unknown purpose falls back to `chat` (the call
+  still succeeds), so a live agent run works against an un-rebuilt gateway — only the routing-log tag is wrong
+  until the gateway is rebuilt. Rebuild `gateway` when adding a purpose. **Egress-guard test pattern:** assert a
+  module's only model access is the injected `GatewayClient` by AST-parsing its imports (forbid
+  openai/anthropic/httpx/requests roots) — grepping the source text is fooled by a docstring that *names*
+  `api.openai.com` (`test_module_has_no_direct_provider_egress`).
 - **🔴 SKILL.md frontmatter must not contain an unquoted `": "` (colon-space) in any value (`description:` is
   the usual culprit).** The loader does `yaml.safe_load`; an unquoted plain scalar with `": "` parses as a
   mapping → `frontmatter YAML is invalid: mapping values are not allowed here` → the loader logs a WARNING and

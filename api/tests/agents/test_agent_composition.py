@@ -12,6 +12,7 @@ monkeypatching.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
@@ -31,6 +32,7 @@ from app.agents.composition import (
 )
 from app.agents.runner import SYSTEM_PROMPT
 from app.agents.tools import MatterBinding
+from app.clients.gateway import set_gateway_client
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.organization_profile import OrganizationProfile
@@ -60,6 +62,34 @@ class CapturingBuilder:
         if self.boom is not None:
             raise self.boom
         return self.model
+
+
+@dataclass
+class _ConsolidationGatewayStub:
+    """A process-global GatewayClient stand-in for the C3b-2 consolidation tool.
+
+    The composition path builds the consolidation tool with the default
+    ``get_gateway_client`` (no DI seam through ``compose_and_execute_run``), so the
+    grant test swaps the global via ``set_gateway_client`` — the established pattern
+    (``test_chats_endpoints.py``). Returns one fixed consolidation result.
+    """
+
+    result: dict[str, Any]
+
+    async def chat_completion(self, request: Any, **_: Any) -> Any:
+        @dataclass
+        class _Msg:
+            content: str
+
+        @dataclass
+        class _Choice:
+            message: _Msg
+
+        @dataclass
+        class _Resp:
+            choices: list[_Choice]
+
+        return _Resp(choices=[_Choice(message=_Msg(content=json.dumps(self.result)))])
 
 
 @dataclass
@@ -1130,6 +1160,65 @@ async def test_bound_run_grants_record_matter_fact(
     assert facts[0].author == "agent"
     assert facts[0].trust == "normal"
     assert facts[0].source_citation == "term sheet"
+
+
+async def test_bound_run_grants_consolidate_matter_memory(
+    comp_env: CompositionEnv,
+) -> None:
+    """C3b-2 (ADR-F043): every matter-bound run also gets the in-run consolidation tool
+    consolidate_matter_memory (area-agnostic, in the same unconditional block as the
+    wiki + fact grants). Drives the full composition→guard→gateway path with a global
+    gateway stub: the agent calls it, a stale fact is superseded and the wiki rewritten —
+    proving the tool is granted, wired, and routes through the gateway."""
+    async with comp_env.factory() as db:
+        proj = await db.get(Project, comp_env.project_id)
+        assert proj is not None
+        proj.context_md = "stale one-pager"
+        fact = MatterMemoryEntry(
+            project_id=comp_env.project_id,
+            user_id=comp_env.user_id,
+            kind="fact",
+            body_md="Old cap 1 month (draft).",
+            trust="normal",
+            author="agent",
+            fact_type="term",
+            valid_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        db.add(fact)
+        await db.commit()
+        fact_id = fact.id
+
+    stub = _ConsolidationGatewayStub(
+        result={
+            "operations": [{"op": "retire", "fact_id": str(fact_id), "reason": "stale draft"}],
+            "new_wiki": "Consolidated one-pager.",
+            "lint_notes": "retired the stale draft cap",
+        }
+    )
+    set_gateway_client(stub)  # type: ignore[arg-type]
+    try:
+        run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+        model = ScriptedToolCallingModel(
+            responses=[
+                tool_call_message("consolidate_matter_memory", {}),
+                final_message("consolidated the matter memory"),
+            ]
+        )
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(model=model),
+            session_factory_provider=lambda: comp_env.factory,
+        )
+    finally:
+        set_gateway_client(None)
+
+    run = await _run_row(comp_env, run_id)
+    assert run.status == "completed", run.error
+    async with comp_env.factory() as db:
+        proj = await db.get(Project, comp_env.project_id)
+        assert proj is not None and proj.context_md == "Consolidated one-pager."
+        retired = await db.get(MatterMemoryEntry, fact_id)
+        assert retired is not None and retired.invalid_at is not None  # superseded, not deleted
 
 
 async def test_privacy_matter_labels_programme_memory_and_grants_tool(
