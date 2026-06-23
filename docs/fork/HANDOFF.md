@@ -11,7 +11,7 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ (matter-wiki MVP). C3b SPLIT → C3b-1 ✓ (typed bi-temporal fact ledger, ZERO model calls) + C3b-2 ✓ (gateway-routed consolidation/Lint, ADR-F043). C3c SPLIT → C3c-1 ✓ (READ backend, ADR-F044) + C3c-2 ✓ (cockpit Memory panel — frontend over the C3c-1 endpoints). The matter-memory track (C3a/b/c) is COMPLETE. NEXT = maintainer's call: C5 negotiation / C6 controlling-playbook-skills / C7 fan-out + redline-download-UI, or the C8/C9 redline-eval re-run, or the cross-cutting marker-fence hardening.**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ (matter-wiki MVP). C3b SPLIT → C3b-1 ✓ (typed bi-temporal fact ledger, ZERO model calls) + C3b-2 ✓ (gateway-routed consolidation/Lint, ADR-F043). C3c SPLIT → C3c-1 ✓ (READ backend, ADR-F044) + C3c-2 ✓ (cockpit Memory panel — frontend over the C3c-1 endpoints). The matter-memory READ track (C3a/b/c) shipped. NOW IN PROGRESS = **C3-UM, the human "update memory" UX slice** (branch `fork/c3-update-memory-ux`): pin composer + inline correct-a-fact + retire, all overlay/append-only per ADR-F042. **Pin VISUAL done** (brand-left-accent, maintainer-chosen); composer + retire + the open decisions are the next session's first work — see the PICK-UP section.**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -167,27 +167,59 @@ reconstruction). Plan `docs/fork/plans/C9-claude-judged-redline-tests.md`.
   committed): `LQ_AI_DOCLING_ENABLED=false` (Docling hung PDFs to its 300s timeout) and the seeded org
   profile. Full findings: memory `commercial-agent-live-uat-findings`.
 
-## ▶ PICK UP EXACTLY HERE — matter-memory track COMPLETE (C3a/b/c ✓); next is the maintainer's call
+## ▶ PICK UP EXACTLY HERE — C3-UM: the human "update memory" UX slice (IN PROGRESS, branch `fork/c3-update-memory-ux`)
 
-The whole unit-of-work memory tier (ADR-F042) now exists end-to-end and is live-proven: auto-written wiki +
-pinned corrections (C3a), the bi-temporal fact ledger (C3b-1), gateway-routed consolidation (C3b-2, ADR-F043),
-the read/revert backend (C3c-1, ADR-F044), and the cockpit **Memory tab** over it (C3c-2). No open work inside
-the C3 track. The next slice is a maintainer choice — none is blocked:
+**Maintainer asked for the FULL update-memory slice** (the C3c-deferred follow-up). The matter-memory tier is
+auto-write-then-correct (ADR-F042): the agent owns the ledger; the human **overlays / retires / reverts** — it
+must NEVER edit agent memory in place (append-only, auditable). The slice = three human gestures layered on the
+existing read-only `MemoryPanel.svelte`:
 
-- **C5** negotiation rounds (needs C3+C4) · **C6** controlling playbook skills (needs F036+F038) · **C7**
-  complex-deal fan-out + **redline download UI** (the redlined `File` is created `status ready` but nothing
-  surfaces it).
-- **C8/C9 redline-eval RE-RUN (⚠ priority):** the `surgical-redline` SKILL.md was silently dropped through
-  C8/C9 (frontmatter `": "` bug, fixed in C3a) — so the published craft findings are **CONFOUNDED**; re-run
-  the C8 craft eval + the C9 Claude-judged tests now that the skill actually loads (memory
-  `claude-judged-redline-tests-slice`). **C9 follow-up:** mutualisation worked-example in the skill + a redline
-  step-budget tier; pre-teach the D-gate rules (flash thrashed ~8 preview retries).
-- **Cross-cutting marker-fence hardening** (carried C3a nit): strip/escape a block's own BEGIN/END markers
-  from untrusted bodies (client block + matter-memory blocks), OR a per-run nonce delimiter — one slice.
+1. **Pin a correction** (primary) — a **`+ Pin a correction`** button in the Corrections section header → small
+   inline composer (markdown textarea, optional "applies to" anchor) → POST the human-authenticated pin →
+   appears instantly. Because pins win, the next agent run reads it as ground truth.
+2. **Correct a specific fact** (inline) — a quiet **Correct** action on each Fact row opens the SAME composer
+   pre-anchored to that fact ("Re: '…' →"). Still creates a *correction* (no in-place edit; B2 no-overwrite).
+3. **Retire** — a quiet **Retire** on a pinned correction (sets `superseded_at`) or a stale fact (closes the
+   validity window). Confirm step, append-only, **disabled while a run is active** (like revert).
 
-**C3c backlog (deferred, per ADR-F044):** a pin-correction composer + a correction-retire endpoint (the panel
-is read-only for corrections this slice); embedding/FTS search UI (gateway `/v1/embeddings` 501 until B6); log
-pagination beyond the tail cap (the panel shows "N of M"); the 6th `_rejection_text` cross-module dedup.
+**DONE already on this branch (uncommitted→committed here):** the **pin VISUAL** — the pinned-correction row in
+`MemoryPanel.svelte` now uses the F013 **brand-left-accent** (maintainer chose via AskUserQuestion): a 2px
+`border-l-brand` rail + a `text-brand` Lucide `Pin` icon + `text-label uppercase` "PINNED", gated on
+`trust === 'human-pinned'`, body monochrome (replaces the old generic outline badge). Verified live light+dark on
+the real Atlas matter. **`Pin` icon = `@lucide/svelte/icons/pin`.** This row is the surface the composer/retire
+hang off.
+
+**Resolve these decisions FIRST (EnterPlanMode → AskUserQuestion), then plan:**
+- **Anchored vs free corrections** — does gesture 2 store a real link from correction→fact (needs a column / a
+  convention in `body_md`, and powers an `overrides ▸ "…"` line in the pin), or do corrections stay free-text
+  and "Correct" just pre-fills the composer? (The `overrides ▸` line in the design mockup needs anchoring.)
+- **Retire scope** — corrections-only this slice (soft `superseded_at`, the ADR-F044 4B item), or also
+  fact-level retire (close `invalid_at` — but closing a fact's window is normally the agent's job via supersede;
+  a human-retire-fact is a bigger semantic call)?
+- **Edit the working summary?** Recommend NO free-edit (it's agent-regenerated → clobbered on consolidation); the
+  human levers are pin + revert. A "pin/freeze the summary" feature is a separate, bigger thing — don't sneak in.
+
+**Backend reality (what exists vs what's new):** EXISTS — `matter_memory_entries` with `kind='correction'`,
+`trust='human-pinned'`, `author='lawyer'`, `superseded_at` column; C3a added the **human-authenticated pin path**
+(find it: an authenticated POST in the matter-memory API / `matter_memory_tools.py` — verify the exact endpoint &
+schema before wiring the composer). NEW work — a **correction-retire endpoint** (soft via `superseded_at`,
+owner-scoped 404, audit IDs-only), maybe a fact-anchor column (migration — re-check head, was `0070`), and the
+**composer + inline-correct + retire UI** in `MemoryPanel.svelte`. Reuse `Dialog`/the revert-confirm pattern,
+`apiRequest`, `renderModelMarkdown`. Frontend tests = `<script module>` pure helpers + Cypress (no
+@testing-library/svelte); **rebuild the prebuilt `web` container before any UI/Cypress** (`DISPLAY=:0`).
+
+**Test vehicle on the dev stack:** the **Atlas** Commercial matter (`905720d1-5d17-43cd-a8f0-3a76d095de34`, owner
+admin) is **seeded** with a current wiki + 2 restorable wiki snapshots + 5 live facts + 1 superseded fact + 1
+**human-pinned correction** (direct SQL seed — clearly synthetic test data). Deep-link
+`/lq-ai?area=commercial&matter=905720d1-5d17-43cd-a8f0-3a76d095de34` → **Memory** tab. (Remove the seed when done,
+or reuse it.) An agent run also writes memory live (the "Project Orion" scenario in the prior session).
+
+**After C3-UM (maintainer's call, not blocked):** **C5** negotiation rounds · **C6** controlling playbook skills
+(needs F036+F038) · **C7** fan-out + **redline-download UI**. **⚠ C8/C9 redline-eval RE-RUN** — the
+`surgical-redline` SKILL.md was silently dropped through C8/C9 (frontmatter `": "` bug, fixed in C3a) → those
+craft findings are **CONFOUNDED**; re-run now that the skill loads (memory `claude-judged-redline-tests-slice`).
+**Cross-cutting marker-fence hardening** (carried C3a nit). **Other C3 backlog:** embedding/FTS search UI
+(gateway `/v1/embeddings` 501 until B6); log pagination beyond the tail cap; the 6th `_rejection_text` dedup.
 
 ## Gotchas / durable traps (C8 + C4 + carried)
 

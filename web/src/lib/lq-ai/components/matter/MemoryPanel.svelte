@@ -60,6 +60,7 @@
 	 */
 	import { onDestroy, onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
+	import PinIcon from '@lucide/svelte/icons/pin';
 
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -338,12 +339,25 @@
 					{:else}
 						<ul class="mt-2 space-y-3">
 							{#each memory.corrections as c (c.id)}
-								<li class="rounded-lg border border-border bg-card p-3">
-									<Badge variant="outline" class="mb-1.5">{c.trust}</Badge>
+								{@const pinned = c.trust === 'human-pinned'}
+								<!-- Human-pinned correction: the ONE scarce-blue accent (F013) — a 2px
+								     brand rail + brand Pin icon mark the lawyer's enforced truth that the
+								     agent must defer to; body stays monochrome. -->
+								<li
+									class="rounded-lg border border-border bg-card p-3 {pinned
+										? 'border-l-2 border-l-brand'
+										: ''}"
+								>
+									<div
+										class="mb-1.5 flex items-center gap-1.5 {pinned
+											? 'text-brand'
+											: 'text-muted-foreground'}"
+									>
+										<PinIcon class="size-3.5" aria-hidden="true" />
+										<span class="text-label uppercase">{pinned ? 'Pinned' : c.trust}</span>
+									</div>
 									{@render md(c.body_md)}
-									<p class="mt-1.5 text-xs text-muted-foreground">
-										Pinned {timeAgo(c.created_at, nowMs)}
-									</p>
+									<p class="mt-1.5 text-xs text-muted-foreground">{timeAgo(c.created_at, nowMs)}</p>
 								</li>
 							{/each}
 						</ul>
