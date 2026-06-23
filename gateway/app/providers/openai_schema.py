@@ -279,11 +279,14 @@ class ChatCompletionRequest(BaseModel):
 
     lq_ai_purpose: str | None = None
     """M2-E2: tag for the routing-log ``purpose`` column. Distinguishes
-    judge calls (Citation Engine Stage 3/4) from regular chat
-    completions so per-model cost calibration filters down to judge
-    traffic. Known values used in code: ``'judge_paraphrase'``;
-    ``None`` or any unknown value falls back to ``'chat'`` in the
-    persisted row. Stripped from the outbound provider body."""
+    non-chat callers from regular chat completions so per-model cost
+    calibration / usage queries can filter down to a specific traffic
+    class. Known values used in code: ``'judge_paraphrase'`` (Citation
+    Engine Stage 3/4), ``'agent_loop'`` (the deep-agent runner),
+    ``'embedding'``, and ``'consolidate_matter_memory'`` (the in-run
+    matter-memory consolidation tool, ADR-F043); ``None`` or any unknown
+    value falls back to ``'chat'`` in the persisted row. Stripped from
+    the outbound provider body."""
 
 
 # --- Chat completion response -------------------------------------------------

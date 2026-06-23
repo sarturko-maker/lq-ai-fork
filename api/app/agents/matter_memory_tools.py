@@ -143,14 +143,40 @@ async def _update_matter_memory(
     if project is None:
         return "This matter is no longer available; nothing was recorded."
 
+    await snapshot_and_rewrite_wiki(
+        db, project, run_id=run_id, user_id=binding.user_id, new_content=proposal.content_md
+    )
+
+    return (
+        f"Updated this matter's memory ({len(proposal.content_md)} characters). It is "
+        "saved and will be available in future runs on this matter; the prior version "
+        "was snapshotted so the change can be undone."
+    )
+
+
+async def snapshot_and_rewrite_wiki(
+    db: AsyncSession,
+    project: Project,
+    *,
+    run_id: uuid.UUID,
+    user_id: uuid.UUID,
+    new_content: str,
+) -> None:
+    """Snapshot the prior wiki (undo substrate) then rewrite ``context_md`` in place.
+
+    Shared by the C3a ``update_matter_memory`` write and the C3b-2 consolidation
+    apply (ADR-F043) so the snapshot+overwrite lives in one place. The caller has
+    already validated ``new_content`` (non-blank, within the wiki budget) and loaded
+    ``project`` under owner scope. A ``wiki_snapshot`` row (``trust='normal'`` — never
+    a pin) is written BEFORE the overwrite so a CHECK failure on either rolls both
+    back; flush (not commit) so a violation surfaces inside the guard's try.
+    """
     prior = (project.context_md or "").strip()
     if prior:
-        # Snapshot the prior body for undo (trust='normal'; never a pin). Created
-        # BEFORE the overwrite so a constraint failure on either rolls both back.
         db.add(
             MatterMemoryEntry(
                 project_id=project.id,
-                user_id=binding.user_id,
+                user_id=user_id,
                 kind="wiki_snapshot",
                 body_md=prior,
                 trust="normal",
@@ -158,16 +184,8 @@ async def _update_matter_memory(
             )
         )
 
-    project.context_md = proposal.content_md
-    # Flush (not commit) so a DB CHECK violation surfaces inside the guard's try
-    # (audited as an error, rolled back); the guard commits the row + its audit row.
+    project.context_md = new_content
     await db.flush()
-
-    return (
-        f"Updated this matter's memory ({len(proposal.content_md)} characters). It is "
-        "saved and will be available in future runs on this matter; the prior version "
-        "was snapshotted so the change can be undone."
-    )
 
 
 async def load_pinned_corrections(db: AsyncSession, project_id: uuid.UUID) -> list[str]:

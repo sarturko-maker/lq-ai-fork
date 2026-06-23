@@ -38,6 +38,7 @@ from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.commercial_tools import COMMERCIAL_AREA_KEY, build_commercial_tools
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.lease import RunLease, settle_run
+from app.agents.matter_consolidation import build_matter_consolidation_tools
 from app.agents.matter_fact_tools import build_matter_fact_tools
 from app.agents.matter_memory_tools import (
     build_matter_memory_tools,
@@ -363,6 +364,15 @@ async def compose_and_execute_run(
             # wiki tool; its grant set is disjoint from the matter-memory + ROPA/
             # assessment/commercial grants (confinement). C3b-1 makes zero model calls.
             tools = tools + build_matter_fact_tools(session_factory, run_id=run_id, binding=binding)
+            # C3b-2 (ADR-F043): the same matter-bound run — any area — also gets the
+            # in-run consolidation/Lint tool (consolidate_matter_memory). This is the
+            # FIRST matter-memory tool that calls a model: it routes ONE gateway chat
+            # completion (purpose 'consolidate_matter_memory') to supersede stale facts
+            # and rewrite the wiki — the ADR-F010 egress obligation. The gateway is the
+            # default-injected get_gateway_client (the DI seam tests override).
+            tools = tools + build_matter_consolidation_tools(
+                session_factory, run_id=run_id, binding=binding
+            )
         # PRIV-2 (ADR-F018): a matter filed under the Privacy area also gets the
         # ROPA domain tools — propose (the code-validated write) + list. Tool
         # selection is area-keyed at the composition point (the area row is the

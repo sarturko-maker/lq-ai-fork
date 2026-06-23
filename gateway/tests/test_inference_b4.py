@@ -371,7 +371,7 @@ async def test_routing_log_purpose_defaults_to_chat(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("purpose", ["judge_paraphrase", "agent_loop"])
+@pytest.mark.parametrize("purpose", ["judge_paraphrase", "agent_loop", "consolidate_matter_memory"])
 @respx.mock
 async def test_routing_log_known_purpose_propagates(
     client_with_recorder: tuple[AsyncClient, RecordingRoutingLogWriter],
@@ -383,7 +383,9 @@ async def test_routing_log_known_purpose_propagates(
     api/-side cost calibration can filter routing-log rows down to judge
     traffic only. ``agent_loop``: the deep-agent runner's gateway chat
     model sets this so agent traffic is separable from interactive chat
-    (and feeds the F1 R4 per-run cost cap).
+    (and feeds the F1 R4 per-run cost cap). ``consolidate_matter_memory``
+    (ADR-F043): the in-run matter-memory consolidation tool's one gateway
+    call, so its spend is separable in the routing log.
     """
 
     client, recorder = client_with_recorder
