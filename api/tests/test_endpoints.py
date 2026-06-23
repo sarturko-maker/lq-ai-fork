@@ -126,6 +126,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/internal/organization-profile"),
     # C3a (fork) — matter-memory: the human-authenticated pin endpoint (ADR-F042).
     ("POST", "/api/v1/matters/{project_id}/memory/corrections"),
+    # C3c-1 (fork) — matter-memory read surface + human-authenticated wiki revert (ADR-F044).
+    ("GET", "/api/v1/matters/{project_id}/memory"),
+    ("POST", "/api/v1/matters/{project_id}/memory/wiki/revert"),
     # B5 + C3 — backend chats + messages with persistence; SSE streaming.
     ("POST", "/api/v1/chats"),
     ("GET", "/api/v1/chats"),

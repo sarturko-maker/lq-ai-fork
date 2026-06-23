@@ -1221,6 +1221,69 @@ async def test_bound_run_grants_consolidate_matter_memory(
         assert retired is not None and retired.invalid_at is not None  # superseded, not deleted
 
 
+async def test_bound_run_grants_matter_read_tools(
+    comp_env: CompositionEnv,
+) -> None:
+    """C3c-1 (ADR-F044): every matter-bound run also gets the matter-memory READ tools
+    search_matter_memory + matter_facts_as_of (area-agnostic, in the same unconditional
+    block as the wiki/fact/consolidation grants). Seeds a live fact, drives a run that
+    calls BOTH tools, and asserts the run completes (a missing grant would deny the
+    dispatch and fail the run), both tools are audited, and the seeded fact's body flowed
+    back to the model — proving the grant + the guarded read path end-to-end."""
+    async with comp_env.factory() as db:
+        fact = MatterMemoryEntry(
+            project_id=comp_env.project_id,
+            user_id=comp_env.user_id,
+            kind="fact",
+            body_md="We act for the buyer.",
+            trust="normal",
+            author="agent",
+            fact_type="party",
+            valid_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        db.add(fact)
+        await db.commit()
+
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("search_matter_memory", {"query": "buyer"}),
+            tool_call_message("matter_facts_as_of", {"as_of_date": "2026-06-01"}),
+            final_message("recalled what the matter knows"),
+        ]
+    )
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+    )
+
+    run = await _run_row(comp_env, run_id)
+    assert run.status == "completed", run.error
+
+    # Both read tools were granted + dispatched (guarded) — the audit rows prove it.
+    async with comp_env.factory() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "agent_run.tool_call",
+                        AuditLog.resource_id == str(run_id),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    audited = "\n".join(str(r.details) for r in rows)
+    assert "search_matter_memory" in audited
+    assert "matter_facts_as_of" in audited
+
+    # The search result (the live fact body) flowed back to the model.
+    all_seen = "\n".join(str(m.content) for turn in model.seen_messages for m in turn)
+    assert "We act for the buyer." in all_seen
+
+
 async def test_privacy_matter_labels_programme_memory_and_grants_tool(
     comp_env: CompositionEnv,
 ) -> None:
@@ -1255,6 +1318,9 @@ async def test_privacy_matter_labels_programme_memory_and_grants_tool(
                 "record_matter_fact",
                 {"fact": "DPIA due before launch.", "fact_type": "date"},
             ),
+            # C3c-1: the read tool is granted in a Privacy run too (area-agnostic) — a
+            # missing grant would deny the dispatch and fail the run.
+            tool_call_message("search_matter_memory", {"query": "GDPR"}),
             final_message("Updated the programme memory."),
         ]
     )

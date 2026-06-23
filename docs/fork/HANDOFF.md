@@ -11,7 +11,7 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ (matter-wiki MVP). C3b SPLIT (maintainer: split + in-run tool) → C3b-1 ✓ (typed bi-temporal fact ledger, ZERO model calls) + C3b-2 ✓ (gateway-routed consolidation/Lint — the ADR-F010 egress slice; in-run `consolidate_matter_memory` tool, supersede-only + wiki rewrite, ADR-F043). NEXT = C3c (matter-scoped read tools + cockpit memory panel + undo/revert endpoint).**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ (matter-wiki MVP). C3b SPLIT → C3b-1 ✓ (typed bi-temporal fact ledger, ZERO model calls) + C3b-2 ✓ (gateway-routed consolidation/Lint, ADR-F043). C3c SPLIT (maintainer: backend now / cockpit panel next) → C3c-1 ✓ (matter-memory READ backend — agent read tools + composite GET + human-authenticated wiki revert, ADR-F044). NEXT = C3c-2 (cockpit memory panel — pure frontend over the C3c-1 endpoints).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -23,7 +23,44 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this session (C3b-2 — gateway-routed consolidation/Lint SHIPPED; branch `fork/c3b2-gateway-consolidation`)
+## Done this session (C3c-1 — matter-memory READ backend SHIPPED; PR #136, branch `fork/c3c1-matter-read-revert`)
+
+**What:** the read/manage half of the matter-memory tier (ADR-F042 §C3c). **Maintainer split C3c**
+(AskUserQuestion): **backend now (C3c-1) / cockpit panel next (C3c-2)**; **revert = restore a chosen version**
+(not undo-last); **corrections read-only** this slice. Design pressure-test locked **search corpus = LIVE only**.
+**No migration** (head stays `0070`), **zero new deps, no model calls**. Design recorded in **ADR-F044** (proposed).
+
+- **`app/agents/matter_read_tools.py` (NEW)** — `MATTER_READ_TOOL_NAMES` (disjoint), `build_matter_read_tools(...)`,
+  two guarded read tools granted to **every matter-bound run, all areas**: `search_matter_memory(query)`
+  (Python-side keyword match over the LIVE corpus — never builds SQL; superseded facts never resurface) +
+  `matter_facts_as_of(as_of_date)` (bi-temporal as-of; the date is normalised UTC-aware via the schema →
+  reject-and-retry on a bad/numeric date, never a crash).
+- **`app/api/matter_memory.py`** — `GET /matters/{id}/memory` (composite: wiki + live facts + live corrections +
+  capped/counted log, reusing `live_facts`/`memory_log`/the new `live_corrections`) + `POST
+  /matters/{id}/memory/wiki/revert {snapshot_id}` (restore a chosen `wiki_snapshot`, **snapshotting current
+  first** → reversible, append-only; triple-scoped `id+project_id+kind` lookup → 404; audit IDs/counts only;
+  **no agent revert tool** — human-authenticated only).
+- **`app/agents/matter_fact_tools.py`** — added the uncapped `live_corrections(db, project_id)` read helper
+  (the read surface must see EVERY live correction, not the C3a 30-row prompt-injection slice).
+- **`app/agents/matter_memory_tools.py`** — widened `snapshot_and_rewrite_wiki(..., run_id: uuid.UUID | None)`
+  for the run-less human revert. **`composition.py`** — grants the read tools in the unconditional matter block.
+- **`schemas/matter_memory.py`** — `MatterMemorySearchInput` + `MatterFactsAsOfInput` (+ a shared
+  `mode='before'` `_require_iso_date_string` validator on `as_of`/`valid_from` — rejects a bare numeric string
+  before Pydantic reads it as a Unix timestamp).
+- **Adversarial review (workflow, 5 lenses → refute): 16 raised, 6 refuted, 10 confirmed; folded the 2
+  should-fixes** (numeric-date mis-coercion; the 30-correction search cap → `live_corrections`) **+ the cheap
+  nits** (cross-matter revert 404 test, blank-wiki `snapshotted_prior=False` test, truly-empty as-of test,
+  >30-corrections search test, `_fact_line` docstring). **Deferred** (review-scoped out): the 6th near-identical
+  `_rejection_text` copy → a future cross-module cleanup.
+- **Verify:** ruff (CI-exact 0.15.18) + format + `mypy app` clean; full api suite **2610+ passed / 2 skipped**
+  (lone failure = the documented env-sensitive `test_ready`, CI-green). Catalog tests updated (IMPLEMENTED_ROUTES
+  + OpenAPI sketch + the `len(actual)==145` count).
+- **Live (DeepSeek, `docs/fork/evidence/c3c/live-matter-read-revert.json`):** the agent called
+  `search_matter_memory` (×2) + `matter_facts_as_of`; captured the live-only search digest (excludes the
+  superseded draft cap), the as-of at two dates, and the REST GET→revert→GET round-trip (restored the chosen
+  version, `version_count` 1→2, reversible). Provider scenario `tests/agents/scenarios/test_matter_read_scenario.py`.
+
+### Previous slice (C3b-2 — gateway-routed consolidation/Lint SHIPPED; merged #135; branch `fork/c3b2-gateway-consolidation`)
 
 (C3a — PR #133; C3b-1 — PR #134 [[matter-facts-c3b1-shipped]]: the typed bi-temporal fact ledger, ZERO model
 calls. C3b-2 builds the automated hygiene on top.)
@@ -120,25 +157,27 @@ reconstruction). Plan `docs/fork/plans/C9-claude-judged-redline-tests.md`.
   committed): `LQ_AI_DOCLING_ENABLED=false` (Docling hung PDFs to its 300s timeout) and the seeded org
   profile. Full findings: memory `commercial-agent-live-uat-findings`.
 
-## ▶ PICK UP EXACTLY HERE — C3c (matter-scoped read surface + cockpit memory panel + undo/revert endpoint)
+## ▶ PICK UP EXACTLY HERE — C3c-2 (cockpit memory panel — pure frontend over the C3c-1 endpoints)
 
-**Read first:** `docs/adr/F042` + `docs/fork/plans/C3-matter-memory-track.md` §C3c. The whole write/store/egress
-substrate is now built and live-proven: C3a (auto-write wiki + human-pinned corrections), C3b-1 (typed
-bi-temporal fact ledger), C3b-2 (gateway-routed consolidation/Lint). C3c is the **read/UI half**:
-- **Agent-facing read tools** — matter-scoped `memory_search` / `memory_get` over the ledger + wiki + log. The
-  tested substrate already exists in `app/agents/matter_fact_tools.py`: `facts_valid_at` (as-of), `live_facts`,
-  `memory_log` (append-only chronological). Grant them like the other matter tools (own disjoint grant set).
-- **Cockpit memory panel** — see/edit/undo/provenance: render `memory_log` (`## [date] op | title`), the live
-  facts, the wiki, and the pinned corrections; surface provenance (`author`/`source_citation`/`run_id`).
-- **Undo/revert REST endpoint** — C3a writes `wiki_snapshot` rows on every wiki rewrite (incl. C3b-2's), so
-  "undo the last consolidation" = restore the latest snapshot. Human-authenticated (owner-scoped); the agent
-  has no undo tool. Pairs with the existing pin endpoint (`app.api.matter_memory`).
-- **No embeddings** for search until B6 (gateway `/v1/embeddings` is 501) — FTS or whole-set load suffices at
-  matter scale, same as C3b-2.
+**Read first:** `docs/adr/F044` (the read/revert backend this consumes) + `docs/fork/plans/C3-matter-memory-track.md`
+§C3c. The whole READ backend now exists + is live-proven (C3c-1): a composite `GET /api/v1/matters/{id}/memory`
+(wiki + live facts + live corrections + capped/counted log with provenance) and a human-authenticated
+`POST /api/v1/matters/{id}/memory/wiki/revert {snapshot_id}` (restore a chosen version, reversible, append-only).
+C3c-2 is the **frontend panel** in the cockpit:
+- **Where:** `web/src/lib/lq-ai/cockpit/ConversationHost.svelte` already has the tab pattern (conversation |
+  register for Privacy); add a **third "Memory" tab** rendering the GET composite — the wiki + version count, the
+  live facts (typed, with source), the pinned corrections, and the log (`## [date] kind | preview` with
+  author/run_id provenance). New API client module mirroring the existing `*Api.ts` (apiRequest); reuse
+  PageShell/SectionHeader/Card/StatusDot + `prose dark:prose-invert`.
+- **Revert UI:** offer "restore this version" on `kind == 'wiki_snapshot'` log rows → POST the revert → refetch.
+- **DoD:** `npm run check` + vitest + headed Cypress screenshots (light+dark × wide+narrow) → `evidence/c3c2/`.
+- **Deferred to a later slice / backlog (per ADR-F044):** a correction-retire endpoint (DELETE, soft via
+  `superseded_at`); embedding/FTS search (gateway `/v1/embeddings` 501 until B6); log pagination beyond the tail
+  cap; the 6th `_rejection_text` cross-module dedup.
 
-**Operational follow-up before C3c uses the live cockpit:** rebuild `gateway` (new purpose) + `api` + `arq-worker`
-+ `ingest-worker` on the dev stack so `consolidate_matter_memory` + the purpose tag are live (no migration —
-head stays `0070`).
+**Operational follow-up (if not already done):** rebuild `api` + `arq-worker` + `ingest-worker` on the dev stack
+so the C3c-1 read tools + endpoints are live in the cockpit (no migration — head stays `0070`; the `gateway` was
+already rebuilt for C3b-2's purpose).
 
 **Carried C3a follow-up (small):** the deferred nit — marker-fence delimiter-injection hardening (strip/escape
 a block's own BEGIN/END markers from untrusted bodies, OR a per-run nonce delimiter) applies uniformly to the
@@ -199,12 +238,24 @@ mutualisation worked-example in `skills/surgical-redline/SKILL.md` + a redline s
   columns on `matter_memory_entries`; `0068` is the store, `0069` the skill binding; **C3b-2 added NO
   migration** — it reuses `0070` + `context_md`). Re-check the head before writing in case anything lands first. Fresh-head check before any migration; rebuild api+arq-worker+
   ingest-worker after one; never host-side `alembic upgrade` on the dev DB; never `compose down -v`.
+  (**C3c-1 added NO migration** — pure read + revert over existing rows/columns; head stays `0070`.)
 - **C3b-1 — a Pydantic `datetime` field accepts a tz-NAIVE value from a bare ISO date** ("2026-01-01" parses
   with `tzinfo=None`). Comparing it against a tz-aware `DateTime(timezone=True)` column raises `TypeError`,
   which escapes a guarded tool as a CRASH (audited error + re-raised), not a reject-and-retry. Any datetime the
   model supplies must be normalised to UTC-aware at the schema boundary (now the shared `_utc_aware` helper in
   `schemas/matter_memory.py`, used by `RecordMatterFactInput` + the C3b-2 `ReplaceConsolidationOp`). Tests using
   only `+00:00` offsets mask it — add a bare-date case.
+- **C3c-1 — a Pydantic `datetime` field reads a BARE NUMERIC string as a Unix timestamp, not a year.** `"2026"`
+  becomes `1970-01-01`, `"1700000000"` becomes 2023 — silently, no reject. On a load-bearing arg (the
+  `matter_facts_as_of` date) that is a confidently-wrong recall, not a crash, so `_utc_aware` (a `mode='after'`
+  validator) can't catch it. Reject an all-digit string at the boundary with a `mode='before'` validator (the
+  shared `_require_iso_date_string` in `schemas/matter_memory.py`, on `as_of` + both `valid_from`s). A `"2026-05"`/
+  `"last Tuesday"` is already rejected by Pydantic; only the all-numeric case slips through. Add a `"2026"` test.
+- **C3c-1 — `load_pinned_corrections` is the per-run prompt-INJECT slice (newest 30, capped), NOT the search/read
+  corpus.** It exists to bound prompt size; reusing it for a read surface silently hides older live corrections.
+  The read surface (search + the GET) uses the UNCAPPED `live_corrections(db, project_id)` (oldest-first rows) in
+  `matter_fact_tools.py`. Keep the two distinct: capped-bodies-newest-first for injection, uncapped-rows-oldest
+  for read.
 - **C3b-2 — closing a bi-temporal window must respect the `invalid_at > valid_at` CHECK or the flush CRASHES.**
   Setting `invalid_at` to a time **at or before** a fact's `valid_at` (e.g. retiring a *future-dated* fact at
   `now`) violates `chk_matter_memory_entries_valid_window` → `IntegrityError` on flush → escapes the guarded

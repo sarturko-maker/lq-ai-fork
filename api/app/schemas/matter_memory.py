@@ -18,7 +18,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -45,6 +45,11 @@ MATTER_CONSOLIDATION_MAX_SUPERSEDES = 50
 MATTER_CONSOLIDATION_REASON_MAX_CHARS = 500
 MATTER_CONSOLIDATION_LINT_MAX_CHARS = 2_000
 
+# C3c-1 (ADR-F044): a matter-memory search query is a short keyword string
+# (reject-not-truncate). The corpus is the matter's LIVE memory (tens of facts at
+# matter scale), matched Python-side — never a SQL string built from the query.
+MATTER_SEARCH_QUERY_MAX_CHARS = 500
+
 
 def _utc_aware(value: datetime | None) -> datetime | None:
     """Normalise a model-supplied datetime to UTC-aware (C3b-1 trap, shared).
@@ -60,6 +65,21 @@ def _utc_aware(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _require_iso_date_string(value: Any) -> Any:
+    """Reject a bare numeric string BEFORE Pydantic coerces it to a Unix timestamp.
+
+    Pydantic v2 reads an int-like string ("2026", "1700000000") as a Unix timestamp, so a
+    model passing a year like "2026" would silently become 1970-01-01 — a confidently
+    wrong as-of recall, not a reject. The tools ask the model for "an ISO date"; we accept
+    ISO date/datetime strings (and real datetime objects) and reject a purely numeric
+    string back to the model (reject-and-retry, never silent-wrong). A ``mode="before"``
+    validator so it runs ahead of the timestamp coercion.
+    """
+    if isinstance(value, str) and value.strip().lstrip("+-").isdigit():
+        raise ValueError("provide an ISO date (e.g. 2026-05-01), not a bare number")
+    return value
 
 
 def _absent_if_blank(value: str | None) -> str | None:
@@ -146,6 +166,11 @@ class RecordMatterFactInput(BaseModel):
         # str_strip_whitespace already trimmed; treat a blank source as "no source".
         return _absent_if_blank(value)
 
+    @field_validator("valid_from", mode="before")
+    @classmethod
+    def _valid_from_iso(cls, value: Any) -> Any:
+        return _require_iso_date_string(value)
+
     @field_validator("valid_from")
     @classmethod
     def _valid_from_utc(cls, value: datetime | None) -> datetime | None:
@@ -205,6 +230,11 @@ class ReplaceConsolidationOp(BaseModel):
     def _blank_source_is_absent(cls, value: str | None) -> str | None:
         return _absent_if_blank(value)
 
+    @field_validator("valid_from", mode="before")
+    @classmethod
+    def _valid_from_iso(cls, value: Any) -> Any:
+        return _require_iso_date_string(value)
+
     @field_validator("valid_from")
     @classmethod
     def _valid_from_utc(cls, value: datetime | None) -> datetime | None:
@@ -234,3 +264,55 @@ class ConsolidationResult(BaseModel):
     )
     new_wiki: str = Field(min_length=1, max_length=MATTER_WIKI_MAX_CHARS)
     lint_notes: str | None = Field(default=None, max_length=MATTER_CONSOLIDATION_LINT_MAX_CHARS)
+
+
+# --- C3c-1 (ADR-F044): the agent-facing read-tool inputs ---------------------
+#
+# The matter-memory read tools (search + as-of) take untrusted model input. Both
+# validate at this boundary (reject-and-retry, never crash). The as-of date is the
+# load-bearing case: a bare ISO date parses tz-NAIVE, and comparing that to the
+# tz-aware ``valid_at``/``invalid_at`` columns raises ``TypeError`` which escapes a
+# guarded tool as a CRASH — so the date is normalised through ``_utc_aware`` here,
+# exactly like ``RecordMatterFactInput.valid_from`` (the C3b-1 trap).
+
+
+class MatterMemorySearchInput(BaseModel):
+    """Validate one ``search_matter_memory`` query (a short keyword string).
+
+    ``str_strip_whitespace`` trims first, so a whitespace-only query collapses to ""
+    and fails ``min_length=1`` (rejected, never an empty search). The query is matched
+    Python-side over the matter's loaded live memory — it never builds SQL.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    query: str = Field(min_length=1, max_length=MATTER_SEARCH_QUERY_MAX_CHARS)
+
+
+class MatterFactsAsOfInput(BaseModel):
+    """Validate one ``matter_facts_as_of`` date (the "what did we believe at T" query).
+
+    Pydantic coerces the model's ISO string → ``datetime`` (a bare date → tz-naive);
+    the validator then normalises to UTC-aware so the downstream temporal comparison in
+    :func:`app.agents.matter_fact_tools.facts_valid_at` never raises. A string Pydantic
+    cannot coerce to a date (e.g. "last Tuesday") raises ``ValidationError`` → the tool
+    returns a reject-and-retry message, never a crash.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    as_of: datetime
+
+    @field_validator("as_of", mode="before")
+    @classmethod
+    def _as_of_iso(cls, value: Any) -> Any:
+        # Reject a bare numeric string ("2026") before Pydantic reads it as a Unix
+        # timestamp → 1970 (a silent-wrong recall on a load-bearing arg).
+        return _require_iso_date_string(value)
+
+    @field_validator("as_of")
+    @classmethod
+    def _as_of_utc(cls, value: datetime) -> datetime:
+        # value is required (non-None), so _utc_aware never returns None here; the
+        # `or value` only narrows the optional return type for the type checker.
+        return _utc_aware(value) or value

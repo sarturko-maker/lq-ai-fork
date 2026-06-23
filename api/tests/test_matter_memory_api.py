@@ -209,3 +209,337 @@ async def test_pin_audit_carries_no_body(
     details = str(audit[0].details)
     assert "entry_id" in details and "body_chars" in details
     assert marker not in details  # the correction body never reaches the audit row
+
+
+# --------------------------------------------------------------------------- #
+# C3c-1 (ADR-F044): the read surface (GET) + the human-authenticated wiki revert
+# --------------------------------------------------------------------------- #
+
+
+def _memory_url(project_id: uuid.UUID) -> str:
+    return f"/api/v1/matters/{project_id}/memory"
+
+
+def _revert_url(project_id: uuid.UUID) -> str:
+    return f"/api/v1/matters/{project_id}/memory/wiki/revert"
+
+
+async def _add_entry(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    kind: str,
+    body_md: str,
+    trust: str = "normal",
+    **kw: object,
+) -> MatterMemoryEntry:
+    entry = MatterMemoryEntry(
+        project_id=project_id, user_id=user_id, kind=kind, body_md=body_md, trust=trust, **kw
+    )
+    db.add(entry)
+    await db.flush()
+    return entry
+
+
+async def test_get_memory_unauthenticated_401(client: AsyncClient) -> None:
+    resp = await client.get(_memory_url(uuid.uuid4()))
+    assert resp.status_code == 401
+
+
+async def test_get_memory_returns_composite(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    project = await _make_project(db_session, db_user)
+    project.context_md = "Deal one-pager."
+    await _add_entry(
+        db_session,
+        project.id,
+        db_user.id,
+        kind="fact",
+        body_md="We act for the buyer.",
+        author="agent",
+        fact_type="party",
+    )
+    await _add_entry(
+        db_session,
+        project.id,
+        db_user.id,
+        kind="correction",
+        body_md="Counsel is Smith Crowell.",
+        trust="human-pinned",
+    )
+    await _add_entry(
+        db_session, project.id, db_user.id, kind="wiki_snapshot", body_md="older one-pager"
+    )
+    await db_session.flush()
+
+    resp = await client.get(_memory_url(project.id), headers=_h(db_user))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["project_id"] == str(project.id)
+    assert body["wiki"]["content_md"] == "Deal one-pager."
+    assert body["wiki"]["version_count"] == 1  # one revertable wiki_snapshot
+    assert [f["body_md"] for f in body["facts"]] == ["We act for the buyer."]
+    assert [c["body_md"] for c in body["corrections"]] == ["Counsel is Smith Crowell."]
+    assert sorted(e["kind"] for e in body["log"]) == ["correction", "fact", "wiki_snapshot"]
+    assert body["log_total"] == 3
+
+
+async def test_get_memory_excludes_superseded_facts(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """The live facts projection excludes a superseded fact (invalid_at set); it still
+    appears in the append-only log (marked superseded)."""
+    from datetime import UTC, datetime
+
+    project = await _make_project(db_session, db_user)
+    await _add_entry(
+        db_session,
+        project.id,
+        db_user.id,
+        kind="fact",
+        body_md="cap 1 month (draft)",
+        author="agent",
+        fact_type="term",
+        valid_at=datetime(2026, 1, 1, tzinfo=UTC),
+        invalid_at=datetime(2026, 3, 1, tzinfo=UTC),
+    )
+    await _add_entry(
+        db_session,
+        project.id,
+        db_user.id,
+        kind="fact",
+        body_md="cap 12 months",
+        author="agent",
+        fact_type="term",
+        valid_at=datetime(2026, 3, 1, tzinfo=UTC),
+    )
+    await db_session.flush()
+
+    resp = await client.get(_memory_url(project.id), headers=_h(db_user))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [f["body_md"] for f in body["facts"]] == ["cap 12 months"]  # live only
+    assert body["log_total"] == 2  # both kept in the log
+    superseded = {e["body_preview"]: e["superseded"] for e in body["log"]}
+    assert superseded["cap 1 month (draft)"] is True
+    assert superseded["cap 12 months"] is False
+
+
+async def test_get_memory_empty_matter_returns_empty_lists(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    project = await _make_project(db_session, db_user)
+    await db_session.flush()
+    resp = await client.get(_memory_url(project.id), headers=_h(db_user))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["facts"] == [] and body["corrections"] == [] and body["log"] == []
+    assert body["wiki"]["content_md"] == "" and body["wiki"]["version_count"] == 0
+    assert body["log_total"] == 0
+
+
+async def test_get_memory_cross_user_is_404(
+    client: AsyncClient, db_session: AsyncSession, db_user: User, other_user: User
+) -> None:
+    project = await _make_project(db_session, db_user)
+    await db_session.flush()
+    resp = await client.get(_memory_url(project.id), headers=_h(other_user))
+    assert resp.status_code == 404
+
+
+async def test_get_memory_archived_is_404(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    project = await _make_project(db_session, db_user, archived=True)
+    await db_session.flush()
+    resp = await client.get(_memory_url(project.id), headers=_h(db_user))
+    assert resp.status_code == 404
+
+
+async def test_revert_unauthenticated_401(client: AsyncClient) -> None:
+    resp = await client.post(_revert_url(uuid.uuid4()), json={"snapshot_id": str(uuid.uuid4())})
+    assert resp.status_code == 401
+
+
+async def test_revert_restores_chosen_version_and_is_reversible(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    project = await _make_project(db_session, db_user)
+    project.context_md = "current wiki v2"
+    v1 = await _add_entry(
+        db_session, project.id, db_user.id, kind="wiki_snapshot", body_md="wiki v1"
+    )
+    await db_session.flush()
+    v1_id = v1.id
+
+    resp = await client.post(
+        _revert_url(project.id), json={"snapshot_id": str(v1_id)}, headers=_h(db_user)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["reverted_to_snapshot_id"] == str(v1_id)
+    assert body["snapshotted_prior"] is True
+    assert body["wiki"]["content_md"] == "wiki v1"
+
+    # The pre-revert state was snapshotted FIRST → the revert is itself reversible.
+    snaps = (
+        (
+            await db_session.execute(
+                select(MatterMemoryEntry).where(
+                    MatterMemoryEntry.project_id == project.id,
+                    MatterMemoryEntry.kind == "wiki_snapshot",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert sorted(s.body_md for s in snaps) == ["current wiki v2", "wiki v1"]
+    refreshed = await db_session.get(Project, project.id)
+    assert refreshed is not None and refreshed.context_md == "wiki v1"
+
+    # Reverting to the freshly-snapshotted v2 restores it (reversibility proven).
+    new_snap = next(s for s in snaps if s.body_md == "current wiki v2")
+    resp2 = await client.post(
+        _revert_url(project.id), json={"snapshot_id": str(new_snap.id)}, headers=_h(db_user)
+    )
+    assert resp2.status_code == 200, resp2.text
+    assert resp2.json()["wiki"]["content_md"] == "current wiki v2"
+
+
+async def test_revert_unknown_snapshot_is_404(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    project = await _make_project(db_session, db_user)
+    await db_session.flush()
+    resp = await client.post(
+        _revert_url(project.id), json={"snapshot_id": str(uuid.uuid4())}, headers=_h(db_user)
+    )
+    assert resp.status_code == 404
+
+
+async def test_revert_non_snapshot_id_is_404(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """A fact / correction id is not a wiki_snapshot → 404 (kind scope), wiki untouched."""
+    project = await _make_project(db_session, db_user)
+    project.context_md = "untouched"
+    fact = await _add_entry(
+        db_session,
+        project.id,
+        db_user.id,
+        kind="fact",
+        body_md="a fact",
+        author="agent",
+        fact_type="fact",
+    )
+    await db_session.flush()
+    resp = await client.post(
+        _revert_url(project.id), json={"snapshot_id": str(fact.id)}, headers=_h(db_user)
+    )
+    assert resp.status_code == 404
+    refreshed = await db_session.get(Project, project.id)
+    assert refreshed is not None and refreshed.context_md == "untouched"
+
+
+async def test_revert_cross_user_is_404(
+    client: AsyncClient, db_session: AsyncSession, db_user: User, other_user: User
+) -> None:
+    project = await _make_project(db_session, db_user)
+    v1 = await _add_entry(
+        db_session, project.id, db_user.id, kind="wiki_snapshot", body_md="wiki v1"
+    )
+    await db_session.flush()
+    resp = await client.post(
+        _revert_url(project.id), json={"snapshot_id": str(v1.id)}, headers=_h(other_user)
+    )
+    assert resp.status_code == 404
+
+
+async def test_revert_snapshot_of_other_matter_is_404(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """Same-user confused-deputy: a snapshot of matter A cannot be reverted into matter B
+    (the triple-scoped lookup's project_id predicate) → 404, B untouched."""
+    matter_a = await _make_project(db_session, db_user)
+    matter_b = await _make_project(db_session, db_user)
+    matter_b.context_md = "B untouched"
+    snap_a = await _add_entry(
+        db_session, matter_a.id, db_user.id, kind="wiki_snapshot", body_md="A's prior wiki"
+    )
+    await db_session.flush()
+    resp = await client.post(
+        _revert_url(matter_b.id), json={"snapshot_id": str(snap_a.id)}, headers=_h(db_user)
+    )
+    assert resp.status_code == 404
+    refreshed = await db_session.get(Project, matter_b.id)
+    assert refreshed is not None and refreshed.context_md == "B untouched"
+
+
+async def test_revert_blank_current_wiki_writes_no_prior_snapshot(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """Reverting when the current wiki is blank: snapshotted_prior is False and no new
+    wiki_snapshot row is written (only the original target remains) — the documented
+    benign edge (ADR-F044)."""
+    project = await _make_project(db_session, db_user)  # context_md is None (blank)
+    v1 = await _add_entry(
+        db_session, project.id, db_user.id, kind="wiki_snapshot", body_md="restore me"
+    )
+    await db_session.flush()
+    resp = await client.post(
+        _revert_url(project.id), json={"snapshot_id": str(v1.id)}, headers=_h(db_user)
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["snapshotted_prior"] is False
+    assert body["wiki"]["content_md"] == "restore me"
+    # No new snapshot of the blank prior — only the original target remains.
+    snaps = (
+        (
+            await db_session.execute(
+                select(MatterMemoryEntry).where(
+                    MatterMemoryEntry.project_id == project.id,
+                    MatterMemoryEntry.kind == "wiki_snapshot",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(snaps) == 1 and snaps[0].id == v1.id
+
+
+async def test_revert_audit_carries_no_body(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    project = await _make_project(db_session, db_user)
+    project.context_md = "current"
+    marker = "WALRUS-secret-wiki-text"
+    v1 = await _add_entry(
+        db_session, project.id, db_user.id, kind="wiki_snapshot", body_md=f"prior {marker}"
+    )
+    await db_session.flush()
+    resp = await client.post(
+        _revert_url(project.id), json={"snapshot_id": str(v1.id)}, headers=_h(db_user)
+    )
+    assert resp.status_code == 200, resp.text
+
+    audit = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "matter_memory.wiki_revert",
+                    AuditLog.user_id == db_user.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(audit) == 1
+    details = str(audit[0].details)
+    assert "reverted_to_snapshot_id" in details and "new_chars" in details
+    assert marker not in details  # the wiki body never reaches the audit row

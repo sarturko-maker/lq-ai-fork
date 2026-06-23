@@ -76,6 +76,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/organization-profile/raw",
         # C3a (fork) — matter-memory: the human-authenticated pin endpoint (ADR-F042).
         "/api/v1/matters/{project_id}/memory/corrections",
+        # C3c-1 (fork) — matter-memory read surface + wiki revert (ADR-F044).
+        "/api/v1/matters/{project_id}/memory",
+        "/api/v1/matters/{project_id}/memory/wiki/revert",
         # saved prompts
         "/api/v1/saved-prompts",
         "/api/v1/saved-prompts/{prompt_id}",
@@ -335,8 +338,9 @@ async def test_openapi_paths_match_sketch() -> None:
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
     assert (
-        len(actual) == 143
-    )  # +1: C3a matter-memory pin endpoint (ADR-F042); +2 prior: PRIV-A3 assessment
+        len(actual) == 145
+    )  # +2: C3c-1 matter-memory read surface + wiki revert (ADR-F044); +1 prior: C3a
+    # matter-memory pin endpoint (ADR-F042); +2 prior: PRIV-A3 assessment
     # register reads (list + detail, ADR-F027); +1 prior: PRIV-6c data-flow graph
     # (ADR-F022); +1 prior: PRIV-6b programme summary
 

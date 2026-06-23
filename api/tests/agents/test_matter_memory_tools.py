@@ -32,6 +32,7 @@ from app.agents.matter_memory_tools import (
     format_corrections_block,
     load_pinned_corrections,
 )
+from app.agents.matter_read_tools import MATTER_READ_TOOL_NAMES
 from app.agents.ropa_tools import ROPA_TOOL_NAMES
 from app.agents.tools import MatterBinding
 from app.models.agent_run import AgentRun, AgentThread
@@ -121,6 +122,7 @@ def test_build_grants_exactly_one_tool() -> None:
 def test_grant_set_disjoint_from_domain_grants() -> None:
     """Confinement (plan S3): the matter store shares no tool with the typed
     ROPA/assessment/commercial stores — additive grant, no collision."""
+    assert MATTER_MEMORY_TOOL_NAMES.isdisjoint(MATTER_READ_TOOL_NAMES)
     assert MATTER_MEMORY_TOOL_NAMES.isdisjoint(ROPA_TOOL_NAMES)
     assert MATTER_MEMORY_TOOL_NAMES.isdisjoint(ASSESSMENT_TOOL_NAMES)
     assert MATTER_MEMORY_TOOL_NAMES.isdisjoint(COMMERCIAL_TOOL_NAMES)
