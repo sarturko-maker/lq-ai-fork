@@ -1,0 +1,54 @@
+{
+  "model": "deepseek",
+  "run": {
+    "status": "completed",
+    "tools_called": [
+      "search_matter_memory",
+      "search_matter_memory",
+      "matter_facts_as_of"
+    ],
+    "read_tools_called": [
+      "matter_facts_as_of",
+      "search_matter_memory"
+    ]
+  },
+  "sample_search_output": "Matter memory matching 'liability cap':\n\nLive facts:\n- [term] Liability cap is 12 months' fees. \u2014 source: Cirrus MSA \u00a79 \u2014 since 2026-03-01 \u2014 id 07845081-625a-43bd-ae52-1a48cc0aaa6a\n\nFrom the matter wiki:\n- Deal: Acme acquires Cirrus. Liability cap: 12 months' fees.",
+  "sample_as_of_2026_02_01": "Facts the matter believed true on 2026-02-01:\n- [party] We act for the buyer. \u2014 valid the start \u2192 current \u2014 id 29d847fd-61ef-4a74-8dd5-0c73e2e66e7d\n- [term] Liability cap is 1 month of fees (from the draft). \u2014 source: draft MSA \u00a79 \u2014 valid 2026-01-01 \u2192 2026-03-01 \u2014 id 3b8c7c42-cbf6-44cc-8c45-85a89ce646cd",
+  "sample_as_of_2026_04_01": "Facts the matter believed true on 2026-04-01:\n- [party] We act for the buyer. \u2014 valid the start \u2192 current \u2014 id 29d847fd-61ef-4a74-8dd5-0c73e2e66e7d\n- [term] Liability cap is 12 months' fees. \u2014 source: Cirrus MSA \u00a79 \u2014 valid 2026-03-01 \u2192 current \u2014 id 07845081-625a-43bd-ae52-1a48cc0aaa6a",
+  "api_get": {
+    "status_code": 200,
+    "wiki": {
+      "content_md": "REVERT-DEMO: current wiki (v2).",
+      "char_count": 31,
+      "version_count": 1
+    },
+    "live_facts": [
+      "Liability cap is 12 months' fees.",
+      "We act for the buyer."
+    ],
+    "corrections": [
+      "Counterparty counsel is Smith Crowell."
+    ],
+    "log_total": 5
+  },
+  "api_revert": {
+    "status_code": 200,
+    "body": {
+      "reverted_to_snapshot_id": "10895cb5-c756-4a77-b190-9b02db6a4fcc",
+      "snapshotted_prior": true,
+      "wiki": {
+        "content_md": "REVERT-DEMO: prior wiki (v1).",
+        "char_count": 29,
+        "version_count": 2
+      }
+    }
+  },
+  "api_get_after_revert": {
+    "status_code": 200,
+    "wiki": {
+      "content_md": "REVERT-DEMO: prior wiki (v1).",
+      "char_count": 29,
+      "version_count": 2
+    }
+  }
+}
