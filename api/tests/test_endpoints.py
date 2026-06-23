@@ -124,6 +124,8 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # (X-LQ-AI-Gateway-Key auth, returns Skill-shaped JSON for the
     # gateway's prompt-assembly path).
     ("GET", "/api/v1/internal/organization-profile"),
+    # C3a (fork) — matter-memory: the human-authenticated pin endpoint (ADR-F042).
+    ("POST", "/api/v1/matters/{project_id}/memory/corrections"),
     # B5 + C3 — backend chats + messages with persistence; SSE streaming.
     ("POST", "/api/v1/chats"),
     ("GET", "/api/v1/chats"),

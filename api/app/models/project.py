@@ -34,6 +34,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     PrimaryKeyConstraint,
     SmallInteger,
     String,
@@ -207,3 +208,112 @@ class ProjectSkill(Base):
 
     def __repr__(self) -> str:
         return f"<ProjectSkill project_id={self.project_id} skill_name={self.skill_name!r}>"
+
+
+# C3a (ADR-F042): the unit-of-work memory tier — the auto-maintained "matter wiki".
+# The wiki itself is the existing free-form ``projects.context_md`` (rewritten in
+# place by the agent's ``update_matter_memory`` tool); THIS table is the durable
+# spine around it: prior-version snapshots (undo substrate) and the
+# human-authenticated pinned corrections the agent's auto-curation may never touch.
+#
+# Two ``kind``s share one table (additive-nullable so C3b layers typed bi-temporal
+# fact columns — valid_at/invalid_at/superseded_by/value/author/source_citation/type
+# — with NO backfill; correction/snapshot rows keep ``body_md``, typed-fact rows
+# will populate the new columns):
+#   * ``correction``    — a lawyer's correction. ``trust='human-pinned'``, written
+#     ONLY through the authenticated human endpoint (``author`` = the session user).
+#     No agent-granted tool mints one — an agent-asserted "the lawyer said X" is
+#     forgeable by document/prompt injection (ADR-F042 §Decision; B2). The agent's
+#     auto-curation is structurally unable to alter/drop these (it writes only
+#     ``context_md`` + ``wiki_snapshot`` rows — the no-overwrite guarantee).
+#   * ``wiki_snapshot`` — the prior ``context_md`` captured before an
+#     ``update_matter_memory`` rewrite (undo; ``trust='normal'``; ``run_id`` = the
+#     run that triggered the rewrite, provenance).
+# The value sets are the single source of truth for the CHECK constraints below
+# (mirrors app.models.assessment / app.models.ropa: private value tuples wired into
+# the CHECK via ``_in_set``). The migration DDL holds the matching SQL literals.
+_MATTER_MEMORY_KINDS = ("correction", "wiki_snapshot")
+_MATTER_MEMORY_TRUST = ("normal", "human-pinned")
+# DB-level body cap (defense-in-depth; reject, don't truncate). Generous: a
+# ``wiki_snapshot`` stores a prior ``context_md`` which the PATCH path caps at
+# 100 KiB, so this must comfortably exceed that. The agent wiki write and the
+# correction endpoint enforce their own (smaller) caps at the boundary.
+MATTER_MEMORY_BODY_MAX_CHARS = 200_000
+
+
+def _in_set(column: str, values: tuple[str, ...]) -> str:
+    """Render ``column IN ('a', 'b', …)`` for a CHECK (mirrors models.assessment)."""
+    quoted = ", ".join(f"'{v}'" for v in values)
+    return f"{column} IN ({quoted})"
+
+
+class MatterMemoryEntry(Base):
+    """One durable matter-memory entry — a pinned correction or a wiki snapshot.
+
+    See the module-level note above. The hot read is "the live pinned corrections
+    of this matter" (injected every run) — covered by the
+    ``(project_id, kind, created_at)`` index. ``superseded_at`` is the C3a soft-
+    supersede column (set when a correction is retired; C3b adds the richer
+    bi-temporal columns). Rows are matter-scoped via ``project_id`` (CASCADE) — the
+    write blast radius is confined to the single matter (ADR-F042).
+    """
+
+    __tablename__ = "matter_memory_entries"
+    __table_args__ = (
+        CheckConstraint(
+            _in_set("kind", _MATTER_MEMORY_KINDS),
+            name="chk_matter_memory_entries_kind",
+        ),
+        CheckConstraint(
+            _in_set("trust", _MATTER_MEMORY_TRUST),
+            name="chk_matter_memory_entries_trust",
+        ),
+        CheckConstraint(
+            f"char_length(body_md) BETWEEN 1 AND {MATTER_MEMORY_BODY_MAX_CHARS}",
+            name="chk_matter_memory_entries_body_len",
+        ),
+        Index(
+            "ix_matter_memory_entries_project_kind_created",
+            "project_id",
+            "kind",
+            "created_at",
+        ),
+        Index("ix_matter_memory_entries_user_id", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE", name="fk_matter_memory_entries_project_id"),
+        nullable=False,
+    )
+    # The author. For a correction this is the authenticated human; for a snapshot
+    # it is the run's user. CASCADE is academic in practice (projects.owner_id is
+    # RESTRICT, so a user with matters can't be deleted), but keeps the row from
+    # outliving its author on a D6 hard-delete.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE", name="fk_matter_memory_entries_user_id"),
+        nullable=False,
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    body_md: Mapped[str] = mapped_column(Text, nullable=False)
+    trust: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'normal'"))
+    # Provenance: the run that wrote a snapshot. NULL for a human correction (no run).
+    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<MatterMemoryEntry id={self.id} project_id={self.project_id} "
+            f"kind={self.kind!r} trust={self.trust!r}>"
+        )

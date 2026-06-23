@@ -1,6 +1,6 @@
 ---
 name: surgical-redline
-description: Use when redlining the other side's contract draft with tracked changes (the apply_redline / preview_redline tools) — for any clause you amend. Teaches the craft of surgical, structure-preserving edits: decompose a clause into several NARROW edits (swap a party, narrow a trigger, insert a carve-out) instead of striking the whole clause and retyping it, keep recognisable boilerplate bare, balance a one-sided clause by weaving protection in, and preview the rendered tracked changes before you apply.
+description: Use when redlining the other side's contract draft with tracked changes (the apply_redline / preview_redline tools) — for any clause you amend. Teaches the craft of surgical, structure-preserving edits — decompose a clause into several NARROW edits (swap a party, narrow a trigger, insert a carve-out) instead of striking the whole clause and retyping it, keep recognisable boilerplate bare, balance a one-sided clause by weaving protection in, and preview the rendered tracked changes before you apply.
 lq_ai:
   title: Surgical Redline Craft
   version: 1.0.0

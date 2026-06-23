@@ -11,7 +11,7 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX render polish ✓ DELIVERED. Pickup = maintainer's call (C3 deal-context · C5 · C6 · C7).**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ (matter-wiki MVP — auto-write tool + human-pinned corrections + injection, all areas; live-proven on DeepSeek). NEXT = C3b (typed bi-temporal facts + gateway-routed consolidation).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -23,29 +23,56 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this slice (cockpit chat-UX render polish — `fork/cockpit-chat-ux`; web-only; no migration; no ADR)
+## Done this session (C3a — matter-wiki MVP SHIPPED; branch `fork/c3-matter-memory`)
 
-**What:** the two web-only fixes the maintainer flagged at the end of the C9 UAT. Plan
-`docs/fork/plans/cockpit-chat-ux-render-polish.md`; evidence `docs/fork/evidence/cockpit-chat-ux/`.
+**What:** the unit-of-work memory tier is now **auto-write-then-correct** (ADR-F042, accepted). The agent
+auto-maintains a brief *matter wiki* (the existing `projects.context_md`) via ONE guarded tool; the lawyer
+*corrects* via a human-authenticated endpoint; both inject read-only into every run under a lower-trust fence.
+**All areas** ("Matter memory" / "Programme memory"). Proven live on DeepSeek.
 
-- **Dark-mode markdown parity ("tables don't render in the answer").** Root-caused NOT to the parser —
-  `marked` 9.1.6 already defaults `gfm:true` and emits `<table>` for the real model output (verified against
-  `agent_runs`), and DOMPurify keeps table tags. The defect was **CSS**: the agent-surface prose containers
-  omitted `dark:prose-invert` (`MessageBubble` had it). In dark mode prose then used light-mode tokens (dark
-  text) on the charcoal page; the settled answer sits on `.ag-answer` (no background) → its table rendered
-  dark-on-charcoal, invisible. Live thinking escaped because `.ag-thinking-live__tail` paints a
-  `--color-muted` panel. **Fix:** `dark:prose-invert` added to the 5 agent-surface prose containers
-  (`ConversationPanel:860/874/881`, `StepRow:85`, `AreaConfigDisclosure:45`). Verified with before/after
-  screenshots rendered against the **production compiled CSS** + real output, and confirmed in the rebuilt
-  bundle (0 bare `prose prose-sm`, 7 now `dark:prose-invert`).
-- **Quieter tool calls.** Curated plain-language titles for `apply_redline`/`preview_redline`; unmapped
-  tools humanised (`snake_case`→"Sentence case…") so a collapsed row never shows a raw identifier; wrench
-  icon `size-4`→`size-3`, chevron→`size-3.5`. Raw params/JSON stay behind the `<details>` expander
-  (unchanged). `helpers.ts` + `StepRow.svelte`; unit-tested in `helpers.test.ts`; new
-  `sanitize-markdown.test.ts` guards the parser config.
-- **Verify:** `npm run check` 0 errors · `vitest` **904/904** · web container rebuilt + live. **Redline
-  download deferred to C7** (the redlined file is deliberately unattached work product → needs C7's
-  structured artifact reference).
+- **Migration `0068`** (`matter_memory_entries`: id·project_id·user_id·kind(correction|wiki_snapshot)·body_md·
+  trust(normal|human-pinned)·run_id·superseded_at·created_at; additive-nullable so C3b layers typed bi-temporal
+  columns with no backfill) + **`0069`** (binds the `matter-memory` skill to all 5 areas) + ORM
+  `MatterMemoryEntry` in `models/project.py`. **Head is now `0069`.** Up/down/up verified on a throwaway DB.
+- **`app/agents/matter_memory_tools.py`** — the ONE agent tool `update_matter_memory(content_md)`: rewrite the
+  wiki in place through `guarded_dispatch` (validate via `schemas/matter_memory.UpdateMatterMemoryInput`,
+  **reject-not-truncate** on oversize/blank), snapshot the prior body (`kind='wiki_snapshot'`, undo), **guard
+  auto-audit ONLY** (no domain audit row — no body leak). Writes only the wiki + snapshot, **never** a
+  correction/`human-pinned` row. + `load_pinned_corrections` / `format_corrections_block` for injection.
+- **`app/agents/composition.py`** — inject the wiki + pinned corrections under a **lower-trust fence**
+  (`MATTER_MEMORY_PROMPT` / `MATTER_CORRECTIONS_PROMPT`), order base→matter→client→**wiki→corrections**→area
+  (area LAST); heading from the **`PracticeArea` ORM row** `unit_label` (default "Matter memory"); loaded inside
+  `if project is not None:`; the tool granted to **every** matter-bound run (disjoint from ROPA/commercial grants).
+- **`app/api/matter_memory.py`** — `POST /api/v1/matters/{project_id}/memory/corrections`, the **only** writer
+  of `trust='human-pinned'`: `author` from the **session** (B2 — no agent path can mint a pin), `_load_visible_project`
+  → **404** on cross-user/archived, audited `matter_memory.pin` (IDs/counts only).
+- **`skills/matter-memory/SKILL.md`** — curation craft (keep brief, fold in, record facts with source, never
+  contradict a pin); bound to all areas via `0069`.
+- **ADR-F042 accepted**; CLAUDE.md + F030 §2A pointer were aligned in the prior planning commit.
+- **Adversarial review (workflow, 3 lenses → per-finding verify): 0 blockers, 2 should-fix + 5 nits, all
+  addressed** (Privacy end-to-end heading test added; dead constants wired live via `_in_set`; `extra="forbid"`;
+  deterministic ordering; archived re-check; redundant `.strip()` dropped). 1 nit deferred (marker-fence
+  delimiter-injection — inherited convention shared with the client block; cross-cutting hardening, not C3a).
+- **🔴 Discovered + fixed a PRE-EXISTING bug:** `skills/surgical-redline/SKILL.md` (C8) had an unquoted `": "`
+  in its `description:` frontmatter → **silently failed to load** (the loader logs a warning + skips). The C8
+  craft skill was **never in the registry** — plausibly part of C9's "pervasive mutualisation" craft weakness.
+  Fixed (same `": "` bug bit matter-memory). Added a **CI guard** (`test_every_real_skill_loads_no_silent_drops`)
+  asserting no on-disk SKILL.md is silently dropped. **19/19 skills now load (was 17/19).**
+- **Live (DeepSeek, evidence `docs/fork/evidence/c3a/live-matter-memory.json`):** run A — the agent called
+  `update_matter_memory` and wrote a high-quality structured wiki (parties/roles/doc/headline-terms table);
+  the lawyer pinned a correction; run B (new run) — the agent recalled the matter AND the **pinned correction
+  survived** the agent's own re-curation. (Run predated the skill-load fix; the agent succeeded on the tool
+  docstring alone — the skill is additive craft, now loading.)
+- **Tests:** `test_matter_memory_tools.py` (grant/disjoint, auto-write+snapshot, reject-not-truncate, blank,
+  no-fabrication, no-overwrite, audit-no-body) · `test_matter_memory_api.py` (pin author-from-session,
+  cross-user/archived 404, blank/oversize 422, audit-no-body) · `test_agent_composition.py` (+lower-trust fence
+  ordering, empty-degrades, default + **Privacy "Programme memory"** heading end-to-end, all-areas grant) ·
+  `test_skill_loader.py` (no-silent-drops guard). Full local gate green: ruff+format+mypy (189 files);
+  new+affected+regression suites pass.
+
+### Previous slice (cockpit chat-UX render polish — merged #132, on main): dark-mode markdown parity
+(`dark:prose-invert` on the agent-surface prose containers — the GFM-parser theory was a red herring) +
+quieter tool calls. `vitest` 904/904. Redline download deferred to C7.
 
 ## Previous slice (C9 — Claude-judged manual redline tests; merged #131; no migration; no new ADR)
 
@@ -85,24 +112,32 @@ reconstruction). Plan `docs/fork/plans/C9-claude-judged-redline-tests.md`.
   committed): `LQ_AI_DOCLING_ENABLED=false` (Docling hung PDFs to its 300s timeout) and the seeded org
   profile. Full findings: memory `commercial-agent-live-uat-findings`.
 
-## ▶ PICK UP EXACTLY HERE — maintainer's call on the next slice
+## ▶ PICK UP EXACTLY HERE — C3b (typed bi-temporal facts + gateway-routed consolidation)
 
-**Cockpit chat-UX render polish ✓ DONE (this slice): markdown dark-mode parity + tool-call quieting.**
-Remaining from that cluster: the **redline download** affordance → folded into **C7** (the redlined file is
-deliberately unattached work product, so a discoverable download needs C7's structured artifact reference;
-the file IS created — matter `File`, `status ready` — but nothing surfaces it; full UI is "redline download UI").
+**Read first:** `docs/fork/plans/C3-matter-memory-track.md` §C3b + `docs/adr/F042-...`. C3a shipped the wiki +
+enforced corrections; C3b adds the typed depth over the **same `0068` store** (additive-nullable, no backfill):
+- Typed entry columns (port Graphiti): `value/fact`, `author`, `source_citation` (→ Citation Engine ids),
+  `superseded_by`, `valid_at`, `invalid_at`, `type`. Supersede = set `invalid_at`, never delete; pinned
+  corrections stay immutable to the loop.
+- The append-only **log** + a **gateway-routed consolidation/Lint pass** (port mem0's extract→retrieve→
+  ADD/UPDATE/DELETE/NOOP loop + Karpathy/OpenClaw Lint). **C3b is where the ADR-F010 egress obligation lands** —
+  every model/embedding call routes through `guarded_tool_call`; add the no-`api.openai.com` assertion on any
+  ported path (C3a made ZERO model calls).
+- The "**what did we believe at signing**" as-of query (`valid_at ≤ T < invalid_at`).
 
-**C9 follow-up (method, small — feeds the C8/F041 track):** add a worked **mutualisation** example to
-`skills/surgical-redline/SKILL.md` (swap the defined term — `The [-Customer-][+Each party+] shall
-indemnify…` — keep the verb phrase bare) and consider a **redline step-budget tier** for fully-mutual
-instruments (the NDA hit `cap_exceeded` on pro). UAT also showed flash **thrashing the D-gate** (~8 preview
-retries) — pre-teaching the gate rules in the skill would cut that. Re-judge the NDA/SOW after.
+**Then C3c** (matter-scoped `memory_search`/`memory_get` + cockpit memory panel: see/edit/undo/provenance +
+the undo/revert REST endpoint — C3a already writes `wiki_snapshot` rows as the undo substrate).
 
-**Other COMM slices (after C9, maintainer's call):** **C3** deal-context matter memory (first Commercial
-migration now **`0068`** — C8 took 0067; mapping done) · **C5** negotiation rounds (needs C3+C4) · **C6**
-controlling playbook skills (needs F036+F038) · **C7** complex-deal fan-out (50-page docs + redline budget
-tier). **C8 follow-ups** (optional): broaden the skill's worked examples beyond MSAs (out-of-distribution
-craft weaker); investigate the ~1/6 no-redline runs; re-run the C8 eval when a stronger model is qualified.
+**Carried C3a follow-up (small):** the deferred nit — marker-fence delimiter-injection hardening (strip/escape
+a block's own BEGIN/END markers from untrusted bodies, OR a per-run nonce delimiter) applies uniformly to the
+client block + matter-memory blocks; do it as a cross-cutting hardening slice, not piecemeal.
+
+**Other COMM slices (maintainer's call, after the C3 track):** **C5** negotiation rounds (needs C3+C4) · **C6**
+controlling playbook skills (needs F036+F038) · **C7** complex-deal fan-out + **redline download UI** (the
+redlined `File` is created `status ready` but nothing surfaces it). **C9 follow-up (small, C8/F041 track):**
+mutualisation worked-example in `skills/surgical-redline/SKILL.md` + a redline step-budget tier (NDA hit
+`cap_exceeded` on pro); pre-teach the D-gate rules (flash thrashed ~8 preview retries). **C8 follow-ups
+(optional):** broaden worked examples beyond MSAs; the ~1/6 no-redline runs; re-run the eval on a stronger model.
 
 ## Gotchas / durable traps (C8 + C4 + carried)
 
@@ -148,9 +183,17 @@ craft weaker); investigate the ~1/6 no-redline runs; re-run the C8 eval when a s
   accept-clean/judge to `UX_B1_EVIDENCE_DIR`. The judge's input was truncated at first (false WEAK); caps are
   now generous (must fit the full redline). Run via the dev image on `lq-ai_default` with the api gateway env +
   `UX_B1_EVIDENCE_DIR` mounted; `chown` the root-owned evidence before `git add`.
-- **Migration head is still `0066`** (C4 added none — output is a `File` row). **C3 adds `0067`.** Fresh-head
-  check before any migration; rebuild api+arq-worker+ingest-worker after one; never host-side `alembic upgrade`
-  on the dev DB; never `compose down -v`.
+- **Migration head is `0069`** (`0069_matter_memory_skill_binding.py`, C3a; `0068_matter_memory_entries.py` is
+  the store). Re-check the head before writing in case anything lands first. Fresh-head check before any
+  migration; rebuild api+arq-worker+ingest-worker after one; never host-side `alembic upgrade` on the dev DB;
+  never `compose down -v`.
+- **🔴 SKILL.md frontmatter must not contain an unquoted `": "` (colon-space) in any value (`description:` is
+  the usual culprit).** The loader does `yaml.safe_load`; an unquoted plain scalar with `": "` parses as a
+  mapping → `frontmatter YAML is invalid: mapping values are not allowed here` → the loader logs a WARNING and
+  **silently skips the skill** (it vanishes from the registry; bound skills are filtered to known names, so the
+  binding is silently dropped). This bit C8's `surgical-redline` (never loaded until C3a fixed it) and C3a's
+  `matter-memory`. Use " — " / "," / "(…)", or quote the value. Guarded now by
+  `test_every_real_skill_loads_no_silent_drops` (`tests/test_skill_loader.py`) — run it after adding/editing any SKILL.md.
 - **The per-area grant seam** is `composition.py` (`area_key == PRIVACY_AREA_KEY` / now `== COMMERCIAL_AREA_KEY`).
   `COMMERCIAL_AREA_KEY = "commercial"` lives in `commercial_tools.py` (mirrors `PRIVACY_AREA_KEY` in ropa_tools).
 - **Dev-image suite/lint recipe:** `docker compose run --rm --no-deps --entrypoint bash -v "$PWD/api:/app"

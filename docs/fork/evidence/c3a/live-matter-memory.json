@@ -1,0 +1,27 @@
+{
+  "model": "deepseek",
+  "run_a": {
+    "status": "completed",
+    "tools_called": [
+      "search_documents",
+      "read_document",
+      "search_documents",
+      "read_file",
+      "update_matter_memory"
+    ],
+    "wiki_after_a": "# Acme \u2014 Master Services Agreement\n\n## Parties & Roles\n- **Our client (BUYER / Customer)**: Northwind Trading Ltd\n- **Counterparty (Vendor / Supplier)**: Acme Corp\n- **Counterparty's counsel**: Smith Crowell LLP\n\n## Document in Play\n- **Acme-MSA.txt** \u2014 Master Services Agreement (3 pages; appears to be a short-form or extract version)\n\n## Headline Commercial Terms\n\n| Term | Detail |\n|---|---|\n| **Initial Term** | 24 months from Effective Date |\n| **Renewal** | Automatic 12-month rollovers; 90 days' written notice to opt out |\n| **Payment** | 30 days from invoice; late interest at 4% p.a. above Bank of England base rate |\n| **Liability Cap** | Aggregate liability capped at fees paid in preceding 12 months; exceptions for breach of confidentiality and indemnification obligations. No indirect / consequential damages exclusion applies. |\n| **Governing Law / Jurisdiction** | England and Wales; exclusive jurisdiction of English courts |\n\n## Notable Observations\n- The agreement text is brief \u2014 sections identified so far cover Term (s.1), Fees & Payment (s.2), Limitation of Liability (s.7), and Governing Law (s.12). Key areas not yet seen include: scope of services, warranties, IP ownership, indemnification (referenced but not detailed), data protection, termination for cause, and confidentiality \u2014 these may be in attachments, SOWs, or a fuller version of the document.\n- Governing law is England & Wales, consistent with an English-law transaction."
+  },
+  "run_b": {
+    "status": "completed",
+    "tools_called": [
+      "search_documents",
+      "read_document"
+    ],
+    "answer_excerpt": "Here is a concise summary of this matter as it stands.\n\n---\n\n**Matter:** Acme \u2014 Master Services Agreement\n\n**Parties:**\n- **Our client (Buyer/Customer):** Northwind Trading Ltd\n- **Counterparty (Vendor):** Acme Corp (represented by Smith Crowell LLP)\n\n**Document in play:** `Acme-MSA.txt` \u2014 a 3-page Master Services Agreement (likely an extract; several standard sections are absent).\n\n**Key terms found in the document:**\n\n| Term | Detail |\n|---|---|\n| **Initial Term** | 24 months |\n| **Renewal** | Automatic 12-month rollovers; 90 days' written notice to opt out |\n| **Payment** | 30 days from inv",
+    "wiki_after_b": "# Acme \u2014 Master Services Agreement\n\n## Parties & Roles\n- **Our client (BUYER / Customer)**: Northwind Trading Ltd\n- **Counterparty (Vendor / Supplier)**: Acme Corp\n- **Counterparty's counsel**: Smith Crowell LLP\n\n## Document in Play\n- **Acme-MSA.txt** \u2014 Master Services Agreement (3 pages; appears to be a short-form or extract version)\n\n## Headline Commercial Terms\n\n| Term | Detail |\n|---|---|\n| **Initial Term** | 24 months from Effective Date |\n| **Renewal** | Automatic 12-month rollovers; 90 days' written notice to opt out |\n| **Payment** | 30 days from invoice; late interest at 4% p.a. above Bank of England base rate |\n| **Liability Cap** | Aggregate liability capped at fees paid in preceding 12 months; exceptions for breach of confidentiality and indemnification obligations. No indirect / consequential damages exclusion applies. |\n| **Governing Law / Jurisdiction** | England and Wales; exclusive jurisdiction of English courts |\n\n## Notable Observations\n- The agreement text is brief \u2014 sections identified so far cover Term (s.1), Fees & Payment (s.2), Limitation of Liability (s.7), and Governing Law (s.12). Key areas not yet seen include: scope of services, warranties, IP ownership, indemnification (referenced but not detailed), data protection, termination for cause, and confidentiality \u2014 these may be in attachments, SOWs, or a fuller version of the document.\n- Governing law is England & Wales, consistent with an English-law transaction.",
+    "pinned_correction_count": 1,
+    "pinned_bodies": [
+      "Correction: we are NOT taking the auto-renewal as-is \u2014 the lawyer requires a right to terminate for convenience on 60 days' notice. Treat this as settled."
+    ]
+  }
+}
