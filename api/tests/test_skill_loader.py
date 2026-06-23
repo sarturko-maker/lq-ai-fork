@@ -347,6 +347,26 @@ def test_load_real_skills_corpus_has_all_starter_skills() -> None:
 
 
 @pytest.mark.unit
+def test_every_real_skill_loads_no_silent_drops() -> None:
+    """No SKILL.md in the real corpus may SILENTLY fail to load.
+
+    The loader logs a warning and skips a skill whose frontmatter is malformed
+    (e.g. an unquoted ``": "`` in ``description:`` — YAML reads it as a mapping),
+    so a bound skill can vanish from the registry with no test failure. This guard
+    asserts every on-disk ``SKILL.md`` directory round-trips, which catches that
+    whole class of regression (it would have caught matter-memory + surgical-redline).
+    """
+
+    if not REAL_SKILLS_DIR.is_dir():
+        pytest.skip(f"real skills directory not present: {REAL_SKILLS_DIR}")
+
+    on_disk = {p.parent.name for p in REAL_SKILLS_DIR.glob("*/SKILL.md")}
+    loaded = set(load_registry(REAL_SKILLS_DIR).names())
+    dropped = sorted(on_disk - loaded)
+    assert not dropped, f"these on-disk skills failed to load (check their frontmatter): {dropped}"
+
+
+@pytest.mark.unit
 def test_pia_generation_skill_loads_and_is_well_formed() -> None:
     """PRIV-A2: the PIA/DPIA skill round-trips through the real loader.
 

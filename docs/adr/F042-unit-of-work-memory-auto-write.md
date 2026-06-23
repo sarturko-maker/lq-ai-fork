@@ -1,6 +1,6 @@
 # F042 — Unit-of-work memory: auto-write-then-correct (the matter / programme wiki)
 
-- Status: proposed
+- Status: accepted (2026-06-23, with slice C3a — the matter-wiki MVP that builds on it)
 - Date: 2026-06-23
 - Supersedes: **ADR-F030 §2A** (matter tier built as agent-**proposes** → user-**accepts**) — for the
   unit-of-work tier only. **Departs from ADR-0013 D4** ("system proposes, user owns … applied only after the
