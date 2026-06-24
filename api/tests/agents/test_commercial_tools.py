@@ -34,6 +34,7 @@ from app.agents.redline_service import (
     RedlineService,
 )
 from app.agents.tools import MatterBinding
+from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.file import File
 from app.models.project import Project
@@ -107,6 +108,26 @@ async def _make_matter_file(
         db.add(file)
         await db.commit()
         return user.id, project.id, file.id
+
+
+async def _make_run(
+    factory: async_sessionmaker[AsyncSession], *, user_id: uuid.UUID, project_id: uuid.UUID
+) -> uuid.UUID:
+    """Seed a thread + run so a redlined File can carry a valid ``created_by_run_id``
+    FK (ADR-F046). Returns the run id."""
+    async with factory() as db:
+        thread = AgentThread(user_id=user_id, project_id=project_id, title="redline")
+        db.add(thread)
+        await db.flush()
+        run = AgentRun(
+            user_id=user_id,
+            thread_id=thread.id,
+            project_id=project_id,
+            prompt="redline the MSA",
+        )
+        db.add(run)
+        await db.commit()
+        return run.id
 
 
 def _binding(user_id: uuid.UUID, project_id: uuid.UUID) -> MatterBinding:
@@ -186,6 +207,7 @@ async def test_apply_redline_rejects_noop_edit(
             document_name="contract.docx",
             edits=[{"target_text": "the claim", "new_text": "the claim"}],
             service=RedlineService(),
+            run_id=uuid.uuid4(),  # rejected → no File row → FK never exercised
         )
     assert "rejected" in out.lower()
     assert "no change" in out.lower()
@@ -206,6 +228,7 @@ async def test_apply_redline_document_in_another_matter_not_found(
                 {"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}
             ],
             service=RedlineService(),
+            run_id=uuid.uuid4(),  # not found → no File row → FK never exercised
         )
     assert "No document named" in out  # matter-scope: invisible across matters
 
@@ -289,6 +312,7 @@ async def test_apply_redline_editor_exception_is_rejected_not_propagated(
                 document_name="contract.docx",
                 edits=valid,
                 service=svc,
+                run_id=uuid.uuid4(),  # editor failure → no File row → FK never exercised
             )
             await db.commit()
         assert "could not be placed by the editor" in out
@@ -306,6 +330,7 @@ async def test_apply_redline_happy_path_persists_redlined_file(
 ) -> None:
     user_id, project_id = matter
     captured = _patch_storage(monkeypatch, source=_docx_bytes(CAP))
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
 
     async with commit_factory() as db:
         out = await _apply_redline(
@@ -316,6 +341,7 @@ async def test_apply_redline_happy_path_persists_redlined_file(
                 {"target_text": "three (3)", "new_text": "twelve (12)", "rationale": _RATIONALE}
             ],
             service=RedlineService(),
+            run_id=run_id,
         )
         await db.commit()
 
@@ -336,6 +362,8 @@ async def test_apply_redline_happy_path_persists_redlined_file(
         assert redlined.project_id == project_id
         assert redlined.mime_type == OOXML_DOCX_MIME
         assert redlined.ingestion_status == "ready"
+        # work-product provenance (ADR-F046): the output is tied to the run
+        assert redlined.created_by_run_id == run_id
 
         # audit receipt: counts/types/IDs only, never clause text
         audit = (

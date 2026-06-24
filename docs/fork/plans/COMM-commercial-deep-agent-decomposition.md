@@ -386,6 +386,17 @@ controlling namespace is **non-shadowable** (Tools & Skills §Plane 2). The rele
 judgment" framing now applies to *advisory* supplementary skills, not the controlling position.
 
 ### C7 — Complex-deal fan-out: roster + deal-context live signal + redline download UI *(3d)* — depends C2, C3, C5
+
+> **SPLIT (2026-06-24).** This 3-feature slice exceeds the one-PR ≤2–3-day discipline, so it was
+> split. **C7a — redline-download surface SHIPPED** (`docs/fork/plans/C7a-redline-download-surface.md`,
+> ADR-F046): the Documents tab + inline run-timeline download over a new `GET /matters/{id}/files` +
+> a `File.created_by_run_id` provenance column (migration 0071), reusing the existing
+> `GET /files/{id}/content`. **Deferred: C7b** — the drafter/reviewer fan-out roster + post-fan-out
+> reconciliation (the §below) — and the **accept/reject/counter classification + deal-context live
+> signal → C5** (negotiation, where the classification concept lives). Note: blocker #6
+> (`work_product_attributions`) is a *legacy-chat* concern — agent runs nest via `parent_step_id`, so
+> it does not block C7b's fan-out.
+
 **Goal.** Not every deal is complex; the complex ones need fan-out. **Extend the existing `0057`
 `document-researcher`** (do **not** introduce a parallel roster) with a drafter/reviewer roster via a fresh
 idempotent migration (reconcile by editing the same `agent_config.subagents`, check-before-write), model-free

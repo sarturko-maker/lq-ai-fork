@@ -67,6 +67,15 @@ class File(Base):
         server_default=text("'pending'"),
     )
     ingestion_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Work-product provenance (C7a, ADR-F046): the agent run that produced this
+    # file (e.g. a redline output). NULL for human uploads. ``SET NULL`` on run
+    # delete keeps the file (the work product outlives the run record). Lets the
+    # cockpit tie a downloadable output back to the run that made it.
+    created_by_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="SET NULL", name="fk_files_created_by_run_id"),
+        nullable=True,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

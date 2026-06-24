@@ -1303,3 +1303,25 @@ export interface MatterEntryRetired {
 	id: string;
 	retired_at: string;
 }
+
+/**
+ * One file in a matter, as the cockpit Documents tab renders it (C7a, ADR-F046).
+ * Mirrors the backend `MatterFileRead`. `created_by_run_id` is the work-product
+ * provenance: non-null for an agent output (e.g. a redline), null for a human upload;
+ * the run timeline filters on it to surface the download inline under the run.
+ */
+export interface MatterFile {
+	id: string;
+	filename: string;
+	mime_type: string;
+	size_bytes: number;
+	ingestion_status: string;
+	created_at: string;
+	created_by_run_id: string | null;
+}
+
+/** The matter's files, newest-first (backend `MatterFilesRead`). */
+export interface MatterFilesRead {
+	project_id: string;
+	files: MatterFile[];
+}
