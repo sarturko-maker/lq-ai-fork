@@ -115,65 +115,8 @@ class RedlineService:
         return self._author
 
     def _word_diff_edits(self, engine: Any, edits: list[ProposedEdit]) -> list[Any]:
-        """Expand each logical edit into positioned ``ModifyText`` sub-edits via
-        Adeu's native word-level diff, in **full-document coordinates**.
-
-        For each ``(target_text, new_text)``: when ``target_text`` occurs exactly
-        once in the engine's text, diff ``full`` against ``full`` with this one
-        edit applied — ``generate_edits_from_text`` then returns sub-edits whose
-        ``_match_start_index`` is an offset into the full document, so
-        ``apply_edits`` places each changed word region exactly (unchanged wording
-        stays bare). The edit's rationale rides as the Word comment on the first
-        sub-edit (one comment per logical edit, not per region).
-
-        Fallback: when ``target_text`` is not uniquely locatable in the engine's
-        text (a rare whitespace-normalisation mismatch — the gate's D4 already
-        requires uniqueness in the document text), emit a single wholesale
-        ``ModifyText`` for that edit; ``apply_edits`` resolves it heuristically
-        (prefix/suffix trim — the prior behaviour, no worse).
-
-        Fresh objects every call (see class docstring on the reuse cycle).
-        """
-        from adeu import ModifyText
-        from adeu.diff import generate_edits_from_text
-
-        full = engine.mapper.full_text
-        if not full:
-            engine.mapper._build_map()
-            full = engine.mapper.full_text
-
-        out: list[Any] = []
-        fallbacks = 0
-        for edit in edits:
-            if full and full.count(edit.target_text) == 1:
-                modified = full.replace(edit.target_text, edit.new_text)
-                sub_edits = generate_edits_from_text(full, modified)
-                if sub_edits:
-                    for i, sub in enumerate(sub_edits):
-                        # apply_edits trusts _match_start_index positionally; set
-                        # _resolved_start_idx to the same to skip re-resolution.
-                        sub._resolved_start_idx = sub._match_start_index
-                        sub.comment = edit.comment if i == 0 else None
-                    out.extend(sub_edits)
-                    continue
-            # Fallback (non-unique anchor, or a diff that produced no sub-edits).
-            fallbacks += 1
-            out.append(
-                ModifyText(
-                    target_text=edit.target_text,
-                    new_text=edit.new_text,
-                    comment=edit.comment,
-                )
-            )
-        if fallbacks:
-            # Counts only (no clause text) — keeps the audit/log contract.
-            logger.info(
-                "redline word-diff fell back to wholesale for %d/%d edit(s)",
-                fallbacks,
-                len(edits),
-                extra={"event": "redline_worddiff_fallback"},
-            )
-        return out
+        """Instance shim onto :func:`word_diff_edits` (kept for call-site stability)."""
+        return word_diff_edits(engine, edits)
 
     def dry_run(self, docx_bytes: bytes, edits: list[ProposedEdit]) -> RedlinePreview:
         """D6's mandatory self-review — render on a throwaway engine, save nothing.
@@ -210,6 +153,69 @@ class RedlineService:
         if accept is not None:
             accept()
         return _engine_bytes(engine)
+
+
+def word_diff_edits(engine: Any, edits: list[ProposedEdit]) -> list[Any]:
+    """Expand each logical edit into positioned ``ModifyText`` sub-edits via Adeu's
+    native word-level diff, in **full-document coordinates** (ADR-F045).
+
+    For each ``(target_text, new_text)``: when ``target_text`` occurs exactly once in
+    the engine's text, diff ``full`` against ``full`` with this one edit applied —
+    ``generate_edits_from_text`` then returns sub-edits whose ``_match_start_index`` is
+    an offset into the full document, so ``apply_edits`` places each changed word region
+    exactly (unchanged wording stays bare). The edit's rationale rides as the Word
+    comment on the first sub-edit (one comment per logical edit, not per region).
+
+    Fallback: when ``target_text`` is not uniquely locatable in the engine's text (a
+    rare whitespace-normalisation mismatch — the gate's D4 already requires uniqueness
+    in the document text), emit a single wholesale ``ModifyText`` for that edit;
+    ``apply_edits`` resolves it heuristically (prefix/suffix trim — no worse than the
+    prior behaviour).
+
+    Module-level so both :class:`RedlineService` (C4 redline) and the C5a negotiation
+    adapter can render a counter surgically on the **same** engine. Fresh objects every
+    call (see :class:`RedlineService` docstring on the reuse cycle).
+    """
+    from adeu import ModifyText
+    from adeu.diff import generate_edits_from_text
+
+    full = engine.mapper.full_text
+    if not full:
+        engine.mapper._build_map()
+        full = engine.mapper.full_text
+
+    out: list[Any] = []
+    fallbacks = 0
+    for edit in edits:
+        if full and full.count(edit.target_text) == 1:
+            modified = full.replace(edit.target_text, edit.new_text)
+            sub_edits = generate_edits_from_text(full, modified)
+            if sub_edits:
+                for i, sub in enumerate(sub_edits):
+                    # apply_edits trusts _match_start_index positionally; set
+                    # _resolved_start_idx to the same to skip re-resolution.
+                    sub._resolved_start_idx = sub._match_start_index
+                    sub.comment = edit.comment if i == 0 else None
+                out.extend(sub_edits)
+                continue
+        # Fallback (non-unique anchor, or a diff that produced no sub-edits).
+        fallbacks += 1
+        out.append(
+            ModifyText(
+                target_text=edit.target_text,
+                new_text=edit.new_text,
+                comment=edit.comment,
+            )
+        )
+    if fallbacks:
+        # Counts only (no clause text) — keeps the audit/log contract.
+        logger.info(
+            "redline word-diff fell back to wholesale for %d/%d edit(s)",
+            fallbacks,
+            len(edits),
+            extra={"event": "redline_worddiff_fallback"},
+        )
+    return out
 
 
 def build_redline_service() -> RedlineService:

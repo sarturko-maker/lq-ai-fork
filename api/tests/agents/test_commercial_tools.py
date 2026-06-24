@@ -23,9 +23,12 @@ from app.agents import commercial_tools
 from app.agents.commercial_tools import (
     COMMERCIAL_TOOL_NAMES,
     _apply_redline,
+    _extract_counterparty_position,
     _preview_redline,
+    _respond_to_counterparty,
     build_commercial_tools,
 )
+from app.agents.negotiation_service import read_state_of_play
 from app.agents.redline_render import reconstruct_redline_text
 from app.agents.redline_service import (
     ProposedEdit,
@@ -37,7 +40,7 @@ from app.agents.tools import MatterBinding
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.file import File
-from app.models.project import Project
+from app.models.project import MatterMemoryEntry, Project
 from app.models.user import User
 from app.pipeline.readers._base import OOXML_DOCX_MIME
 from app.security import hash_password
@@ -191,8 +194,18 @@ def test_build_commercial_tools_grants_redline_tools() -> None:
         binding=_binding(uuid.uuid4(), uuid.uuid4()),
         redline_service=RedlineService(),
     )
-    assert [t.__name__ for t in tools] == ["apply_redline", "preview_redline"]
-    assert sorted(COMMERCIAL_TOOL_NAMES) == ["apply_redline", "preview_redline"]
+    assert [t.__name__ for t in tools] == [
+        "apply_redline",
+        "preview_redline",
+        "extract_counterparty_position",
+        "respond_to_counterparty",
+    ]
+    assert sorted(COMMERCIAL_TOOL_NAMES) == [
+        "apply_redline",
+        "extract_counterparty_position",
+        "preview_redline",
+        "respond_to_counterparty",
+    ]
 
 
 async def test_apply_redline_rejects_noop_edit(
@@ -381,3 +394,254 @@ async def test_apply_redline_happy_path_persists_redlined_file(
         assert len(audit) == 1
         details = str(audit[0].details)
         assert "twelve" not in details and "three" not in details
+
+
+# --------------------------------------------------------------------------- #
+# C5a — negotiation rounds: extract + respond + the no-silent-action gate (ADR-F032)
+# --------------------------------------------------------------------------- #
+
+_NEG_BASE = (
+    "The Vendor shall indemnify the Customer for all losses arising from the Services. "
+    "The term of this Agreement is three (3) years from the Effective Date. "
+    "Liability is capped at fees paid in the prior twelve (12) months."
+)
+
+
+def _counterparty_docx() -> bytes:
+    """A .docx with 3 counterparty tracked changes + 1 anchored comment (their markup)."""
+    from adeu import ModifyText, RedlineEngine
+
+    doc = _docx_bytes(_NEG_BASE)
+    eng = RedlineEngine(io.BytesIO(doc), author="Opposing Counsel")
+    eng.apply_edits(
+        [
+            ModifyText(
+                target_text="all losses",
+                new_text="direct losses only",
+                comment="Cap our exposure to direct losses please.",
+            ),
+            ModifyText(target_text="three (3)", new_text="five (5)"),
+            ModifyText(target_text="twelve (12)", new_text="twenty-four (24)"),
+        ]
+    )
+    out = eng.save_to_stream()
+    return out.getvalue() if hasattr(out, "getvalue") else bytes(out)
+
+
+def _full_coverage_decisions(source: bytes) -> list[dict[str, object]]:
+    """One decision per change/comment ref in ``source`` — accept/reject/counter/reply."""
+    state = read_state_of_play(source)
+    decisions: list[dict[str, object]] = []
+    for c in state.changes:
+        if c.kind == "modify" and c.inserted_text == "twenty-four (24)":
+            decisions.append(
+                {
+                    "ref": c.ref,
+                    "verdict": "counter",
+                    "target_text": "twenty-four (24)",
+                    "new_text": "eighteen (18)",
+                    "rationale": (
+                        "Eighteen months is the house fallback for the liability survival "
+                        "window; twenty-four exceeds our standard position on this deal."
+                    ),
+                }
+            )
+        elif c.kind == "modify" and c.inserted_text == "five (5)":
+            decisions.append(
+                {
+                    "ref": c.ref,
+                    "verdict": "reject",
+                    "rationale": "Five years is too long; revert to three.",
+                }
+            )
+        else:
+            decisions.append({"ref": c.ref, "verdict": "accept", "rationale": "Acceptable."})
+    for cm in state.comments:
+        if cm.parent_id is None and not cm.is_ours:
+            decisions.append(
+                {
+                    "ref": cm.ref,
+                    "verdict": "reply",
+                    "reply_text": "Noted — see our counter on the cap period.",
+                }
+            )
+    return decisions
+
+
+async def test_extract_counterparty_position_lists_changes_and_comments(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    user_id, project_id = matter
+    _patch_storage(monkeypatch, source=_counterparty_docx())
+
+    async with commit_factory() as db:
+        out = await _extract_counterparty_position(
+            db, _binding(user_id, project_id), document_name="contract.docx"
+        )
+        await db.commit()
+
+    assert "provenance=counterparty" in out
+    assert "TRACKED CHANGES" in out and "[C1]" in out and "[C2]" in out and "[C3]" in out
+    assert "[Com:" in out  # the anchored comment is surfaced
+    assert "respond_to_counterparty" in out
+
+    # audit receipt: counts only, no clause text
+    async with commit_factory() as db:
+        audit = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "commercial.counterparty_extracted",
+                        AuditLog.user_id == user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(audit) == 1
+        assert "losses" not in str(audit[0].details)
+
+
+async def test_extract_counterparty_position_other_matter_not_found(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    user_id, _project_id = matter
+    async with commit_factory() as db:
+        out = await _extract_counterparty_position(
+            db, _binding(user_id, uuid.uuid4()), document_name="contract.docx"
+        )
+    assert "No document named" in out  # matter-scope: 404-conflated across matters
+
+
+async def test_respond_rejects_incomplete_coverage(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """The no-silent-action gate: omit one ref → the whole batch is rejected, nothing
+    is written (a silent accept is impossible)."""
+    user_id, project_id = matter
+    source = _counterparty_docx()
+    _patch_storage(monkeypatch, source=source)
+    decisions = _full_coverage_decisions(source)[:-2]  # drop the last change + the comment
+
+    async with commit_factory() as db:
+        out = await _respond_to_counterparty(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            decisions=decisions,
+            run_id=uuid.uuid4(),  # rejected pre-write → no File → FK never exercised
+        )
+        await db.commit()
+
+    assert "UNADDRESSED" in out
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        assert {f.filename for f in files} == {"contract.docx"}  # nothing written
+
+
+async def test_respond_counter_violating_surgical_gate_rejected(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """A counter is held to the same surgical gate as apply_redline — a substantive
+    change with no rationale is rejected (and nothing is written)."""
+    user_id, project_id = matter
+    source = _counterparty_docx()
+    _patch_storage(monkeypatch, source=source)
+    decisions = _full_coverage_decisions(source)
+    for d in decisions:
+        if d["verdict"] == "counter":
+            d["rationale"] = "no"  # too short for a substantive (number) change → D2 fail
+
+    async with commit_factory() as db:
+        out = await _respond_to_counterparty(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            decisions=decisions,
+            run_id=uuid.uuid4(),
+        )
+        await db.commit()
+
+    assert "ejected" in out  # "Rejected"/"rejected"
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        assert {f.filename for f in files} == {"contract.docx"}
+
+
+async def test_respond_full_coverage_persists_and_audits(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    user_id, project_id = matter
+    source = _counterparty_docx()
+    captured = _patch_storage(monkeypatch, source=source)
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    decisions = _full_coverage_decisions(source)
+
+    async with commit_factory() as db:
+        out = await _respond_to_counterparty(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            decisions=decisions,
+            run_id=run_id,
+        )
+        await db.commit()
+
+    assert "Responded to all" in out and "coverage verified" in out
+
+    # the response .docx was uploaded with native tracked changes + comments
+    body = captured["body"]
+    assert isinstance(body, bytes)
+    redline = reconstruct_redline_text(body)
+    assert "[+" in redline or "[-" in redline  # our layered tracked changes
+
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        names = {f.filename for f in files}
+        assert "contract (response).docx" in names
+        response = next(f for f in files if f.filename == "contract (response).docx")
+        assert response.project_id == project_id
+        assert response.mime_type == OOXML_DOCX_MIME
+        assert response.created_by_run_id == run_id  # work-product provenance (ADR-F046)
+
+        # domain audit receipt — counts/types/IDs only, never clause text
+        audit = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "commercial.counterparty_responded",
+                        AuditLog.user_id == user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(audit) == 1
+        details = str(audit[0].details)
+        assert "losses" not in details and "eighteen" not in details
+
+        # matter-memory receipt fact for round-to-round continuity
+        facts = (
+            (
+                await db.execute(
+                    select(MatterMemoryEntry).where(
+                        MatterMemoryEntry.project_id == project_id,
+                        MatterMemoryEntry.kind == "fact",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert any("Counterparty round" in f.body_md for f in facts)
