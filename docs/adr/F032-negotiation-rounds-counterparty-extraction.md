@@ -109,3 +109,26 @@ dependency.**
   `PlaybookPosition` classification — C5a uses prose positions.
 - **Counter-anchoring is gated against the counterparty's "final ask"** (the accept-all view), with
   the post-write reconciliation as the backstop if a target does not anchor.
+
+## Addendum — C5b-1 (2026-06-24): the comment-wipe fix (document-level guarantee)
+
+Raw-OOXML inspection of the C5a live output found the guarantee was **lossy at the document level**:
+when the agent *replied* to a counterparty comment **and** accepted/rejected the change that comment
+was anchored to, Adeu deletes the whole thread — **silently wiping the reply** while still reporting
+the action as `applied` (so the count-based reconciliation above missed it). The "Adeu-imposed limits"
+note that reconciliation may "trust applied/skipped counts rather than re-counting threads" is
+**superseded** for replies by this fix.
+
+Three code layers close it, no migration / endpoint / dep: (1) `read_state_of_play` captures
+`StateOfPlay.comment_anchors` (`Com:N → Cn`, from the `[Com:N]` token sharing a change's `{>>…<<}`
+meta block); (2) a model-free **`evaluate_anchoring`** gate rejects a `reply` on a comment anchored to
+an `accept`/`reject` change *before any write* (counter/leave_open are safe); (3) `apply_decisions`
+re-reads the output and **proves every reply survived** (a wiped reply → reject, persist nothing) —
+the false-fail the old code avoided is gone because the gate guarantees no reply sits on an
+accept/reject change. `extract_counterparty_position` also teaches the coupling up front. Probed on the
+pin: `comments_manager.add_comment(author, text, parent_id=None)` has **no text-range anchor**, so a
+pure standalone margin comment is still unavailable — the gate is the guarantee, not a re-homing trick.
+Live-re-verified at the OOXML level (`docs/fork/evidence/c5b1/`): the counterparty comment now
+**survives** the round (it was deleted before); the agent adapted (4 `respond_to_counterparty` calls).
+Coaching the agent to *prefer counter-with-reply* over reject-then-leave-open (so the comment stays
+anchored + visibly answered) is craft → **C5b-2** (the `negotiation-review` skill).

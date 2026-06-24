@@ -56,6 +56,7 @@ from app.schemas.commercial import (
     CounterpartyDecision,
     RedlineEditInput,
     RespondToCounterpartyInput,
+    evaluate_anchoring,
     evaluate_coverage,
     evaluate_gate,
 )
@@ -251,7 +252,9 @@ def build_commercial_tools(
           / ``escalate`` (supply ``rationale``).
 
         Counters obey the surgical gate (quote the clause, change only the necessary
-        words). Accepting a change resolves their comment anchored to it.
+        words). A reply to a comment anchored to a change cannot survive accepting or
+        rejecting that change (Word deletes the thread, reply and all) — counter the change
+        or leave the comment open instead; the tool rejects the batch otherwise.
         """
         return await guarded_dispatch(
             "respond_to_counterparty",
@@ -588,8 +591,22 @@ def _render_state_of_play(filename: str, state: Any) -> str:
     if open_comments:
         lines += ["", "COMMENTS — decide one verdict per ref (reply | leave_open | escalate):"]
         for cm in open_comments:
-            lines.append(f'- [{cm.ref}] {cm.author}: "{cm.text}"')
+            anchor = state.comment_anchors.get(cm.ref)
+            note = (
+                f"  [anchored to change {anchor} — accepting or rejecting {anchor} removes "
+                f"this thread; to reply AND change it, counter {anchor} instead]"
+                if anchor
+                else ""
+            )
+            lines.append(f'- [{cm.ref}] {cm.author}: "{cm.text}"{note}')
     refs = [c.ref for c in state.changes] + [cm.ref for cm in open_comments]
+    if any(cm.ref in state.comment_anchors for cm in open_comments):
+        lines += [
+            "",
+            "RULE: a reply to a comment anchored to a change cannot survive accepting or "
+            "rejecting that change (the thread is deleted) — counter the change or leave "
+            "the comment open instead.",
+        ]
     lines += [
         "",
         "Now call respond_to_counterparty with exactly ONE decision for EVERY ref: "
@@ -643,6 +660,13 @@ async def _respond_to_counterparty(
     coverage = evaluate_coverage(state.change_refs, state.open_comment_refs, proposal.decisions)
     if not coverage.ok:
         return coverage.rejection_text()
+
+    # 3.5 ANCHORING gate (C5b-1) — a reply can't survive accept/reject of the change its
+    #     comment is anchored to (Adeu deletes the thread). Reject up front, before any
+    #     mutation, so the model counters/leaves-open instead of silently losing the reply.
+    anchoring = evaluate_anchoring(state.comment_anchors, proposal.decisions)
+    if not anchoring.ok:
+        return anchoring.rejection_text()
 
     # 4. Counter gate — counters obey the same surgical rules as apply_redline
     #    (D2/D3 via RedlineEditInput, D1/D4/D5 via evaluate_gate against their final ask).

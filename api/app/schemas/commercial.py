@@ -571,3 +571,60 @@ def evaluate_coverage(
         unknown=unknown,
         duplicate=duplicate,
     )
+
+
+@dataclass(frozen=True)
+class AnchorReport:
+    """The comment-wipe gate outcome — refs only, never clause text (ADR-F018).
+
+    A reply written under a comment anchored to a tracked change is DELETED by Adeu when
+    that change is accepted or rejected (the accept/reject resolves the thread, taking our
+    reply with it — verified live). So a ``reply`` must not co-occur with ``accept``/
+    ``reject`` on its anchored change, or the reply silently vanishes from the delivered
+    document. A ``counter`` (layers a new edit, leaves the original change + its comment
+    thread intact) and ``leave_open`` (writes nothing) are safe."""
+
+    ok: bool
+    # (comment_ref, change_ref, change_verdict) per reply that would be wiped
+    wiped: list[tuple[str, str, str]] = field(default_factory=list)
+
+    def rejection_text(self) -> str:
+        lines = [
+            f"- {com} (your reply) is anchored to {chg}, which you set to '{verdict}' — Word "
+            f"deletes the comment thread (and your reply) when an anchored change is "
+            f"accepted or rejected, so your reply would silently vanish."
+            for com, chg, verdict in sorted(self.wiped)
+        ]
+        return (
+            "Response rejected — nothing was written. A comment reply cannot survive on a "
+            "change you accept or reject. For each item below, either counter the change "
+            "instead (a counter layers a new edit and keeps the original change + its "
+            "comment thread, so your reply survives), or leave_open the comment instead of "
+            "replying (a recorded decision that writes nothing). Then call "
+            "respond_to_counterparty again:\n" + "\n".join(lines)
+        )
+
+
+# A reply cannot survive these verdicts on its anchored change (the thread is deleted).
+_WIPING_CHANGE_VERDICTS = frozenset({"accept", "reject"})
+
+
+def evaluate_anchoring(
+    comment_anchors: dict[str, str],
+    decisions: list[CounterpartyDecision],
+) -> AnchorReport:
+    """The comment-wipe gate: a ``reply`` cannot survive accept/reject of the change its
+    comment is anchored to. Collect-all-errors (the model fixes in one pass). Assumes
+    coverage already holds (exactly one decision per ref)."""
+    verdict_by_ref = {d.ref: d.verdict for d in decisions}
+    wiped: list[tuple[str, str, str]] = []
+    for d in decisions:
+        if d.verdict != "reply":
+            continue
+        change_ref = comment_anchors.get(d.ref)
+        if change_ref is None:
+            continue  # anchored to plain text / standalone — wipe-safe
+        chg_verdict = verdict_by_ref.get(change_ref)
+        if chg_verdict in _WIPING_CHANGE_VERDICTS:
+            wiped.append((d.ref, change_ref, chg_verdict))
+    return AnchorReport(ok=not wiped, wiped=wiped)

@@ -454,6 +454,17 @@ def _full_coverage_decisions(source: bytes) -> list[dict[str, object]]:
                     "rationale": "Five years is too long; revert to three.",
                 }
             )
+        elif c.kind == "modify" and c.inserted_text == "direct losses only":
+            # The comment is anchored to THIS change; we reply to that comment below, so we
+            # must not accept/reject this change (that would wipe the reply — C5b-1). Leave
+            # it open: a recorded decision that keeps the thread (and our reply) alive.
+            decisions.append(
+                {
+                    "ref": c.ref,
+                    "verdict": "leave_open",
+                    "rationale": "Parking the indemnity scope pending the reply on their comment.",
+                }
+            )
         else:
             decisions.append({"ref": c.ref, "verdict": "accept", "rationale": "Acceptable."})
     for cm in state.comments:
@@ -645,3 +656,54 @@ async def test_respond_full_coverage_persists_and_audits(
             .all()
         )
         assert any("Counterparty round" in f.body_md for f in facts)
+
+
+async def test_respond_rejects_reply_on_accepted_anchored_change(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """C5b-1 comment-wipe gate: replying to a comment while accepting the change it is
+    anchored to would silently delete the reply — the batch is rejected up front and
+    nothing is written (full coverage holds, so this is the anchoring gate, not coverage)."""
+    user_id, project_id = matter
+    source = _counterparty_docx()
+    _patch_storage(monkeypatch, source=source)
+
+    state = read_state_of_play(source)
+    com_ref = next(iter(state.open_comment_refs))
+    anchored_ref = state.comment_anchors[com_ref]  # the change the comment sits on
+    decisions: list[dict[str, object]] = [
+        {"ref": c.ref, "verdict": "accept", "rationale": "Acceptable."} for c in state.changes
+    ]
+    # accept the anchored change AND reply to its comment → the wipe combination
+    decisions.append({"ref": com_ref, "verdict": "reply", "reply_text": "We want full indemnity."})
+
+    async with commit_factory() as db:
+        out = await _respond_to_counterparty(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            decisions=decisions,
+            run_id=uuid.uuid4(),  # rejected pre-write → no File → FK never exercised
+        )
+        await db.commit()
+
+    assert "anchored to" in out and anchored_ref in out  # the gate names the offending change
+    assert "Responded to all" not in out
+    async with commit_factory() as db:
+        files = (await db.execute(select(File).where(File.owner_id == user_id))).scalars().all()
+        assert {f.filename for f in files} == {"contract.docx"}  # nothing written
+        audit = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "commercial.counterparty_responded",
+                        AuditLog.user_id == user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert not audit  # no response receipt
