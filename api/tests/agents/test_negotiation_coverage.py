@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from app.schemas.commercial import (
     CounterpartyDecision,
     RespondToCounterpartyInput,
+    evaluate_anchoring,
     evaluate_coverage,
 )
 
@@ -69,6 +70,94 @@ def test_coverage_collects_all_errors_at_once() -> None:
     assert report.missing == ["C1", "Com:1"]  # C2 present, Com:1 + C1 missing
     assert report.unknown == ["C7"]
     assert report.duplicate == ["C2"]
+
+
+# ----------------------------- evaluate_anchoring ---------------------------- #
+# The comment-wipe gate (C5b-1): a reply cannot survive accept/reject of the change its
+# comment is anchored to (Adeu deletes the thread). counter/leave_open on the change are
+# safe; leave_open/escalate on the comment write nothing.
+
+
+def test_anchoring_reply_on_accepted_change_rejected() -> None:
+    report = evaluate_anchoring(
+        {"Com:1": "C1"},
+        [_dec("C1", "accept"), _dec("Com:1", "reply", reply_text="agreed")],
+    )
+    assert not report.ok
+    assert report.wiped == [("Com:1", "C1", "accept")]
+    text = report.rejection_text()
+    assert "Com:1" in text and "C1" in text and "counter" in text
+
+
+def test_anchoring_reply_on_rejected_change_rejected() -> None:
+    report = evaluate_anchoring(
+        {"Com:1": "C1"},
+        [_dec("C1", "reject", rationale="one-sided"), _dec("Com:1", "reply", reply_text="no")],
+    )
+    assert not report.ok
+    assert report.wiped == [("Com:1", "C1", "reject")]
+
+
+def test_anchoring_reply_on_countered_change_ok() -> None:
+    # A counter layers a new edit; the original change + its thread + our reply survive.
+    report = evaluate_anchoring(
+        {"Com:1": "C1"},
+        [
+            _dec("C1", "counter", target_text="x", new_text="y", rationale="our wording"),
+            _dec("Com:1", "reply", reply_text="see our counter"),
+        ],
+    )
+    assert report.ok
+    assert not report.wiped
+
+
+def test_anchoring_reply_on_leftopen_change_ok() -> None:
+    report = evaluate_anchoring(
+        {"Com:1": "C1"},
+        [_dec("C1", "leave_open", rationale="parking"), _dec("Com:1", "reply", reply_text="ok")],
+    )
+    assert report.ok
+
+
+def test_anchoring_leaveopen_comment_on_accepted_change_ok() -> None:
+    # leave_open writes nothing, so nothing is lost even though the change is accepted.
+    report = evaluate_anchoring(
+        {"Com:1": "C1"},
+        [_dec("C1", "accept"), _dec("Com:1", "leave_open", rationale="their accept is the answer")],
+    )
+    assert report.ok
+
+
+def test_anchoring_unanchored_reply_ok() -> None:
+    # A comment anchored to plain text (absent from the map) is wipe-safe.
+    report = evaluate_anchoring(
+        {}, [_dec("C1", "accept"), _dec("Com:1", "reply", reply_text="on a plain-text comment")]
+    )
+    assert report.ok
+
+
+def test_anchoring_escalate_change_with_reply_ok() -> None:
+    report = evaluate_anchoring(
+        {"Com:1": "C1"},
+        [_dec("C1", "escalate", rationale="below floor"), _dec("Com:1", "reply", reply_text="ok")],
+    )
+    assert report.ok
+
+
+def test_anchoring_collects_all_errors() -> None:
+    report = evaluate_anchoring(
+        {"Com:1": "C1", "Com:2": "C2"},
+        [
+            _dec("C1", "accept"),
+            _dec("Com:1", "reply", reply_text="a"),
+            _dec("C2", "reject", rationale="no"),
+            _dec("Com:2", "reply", reply_text="b"),
+        ],
+    )
+    assert not report.ok
+    assert len(report.wiped) == 2
+    text = report.rejection_text()
+    assert "Com:1" in text and "Com:2" in text
 
 
 # ------------------------- CounterpartyDecision shape ------------------------ #

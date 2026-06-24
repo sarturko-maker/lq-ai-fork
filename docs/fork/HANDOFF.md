@@ -31,9 +31,16 @@ reads the counterparty's marked-up `.docx` (Adeu-native tracked changes + commen
 reconciliation: every decision proved to land). Live-proven on DeepSeek: round-2 NDA → extract→respond,
 accepted benign edits, rejected the one-directional swap (reverted to mutual), **escalated the below-floor
 perpetuity demand (left visible, not conceded)**, replied to the comment; full coverage in one pass
-(`docs/fork/evidence/c5a/`). **NEXT = maintainer's call: C5b (negotiation-review skill calibration + inline
-`data-deal-change` live chips + multi-round eval) / C7b (drafter/reviewer fan-out roster) / C6 (controlling
-playbook skills).**
+(`docs/fork/evidence/c5a/`). **C5 SPLIT further → C5b-1 COMMENT-WIPE FIX SHIPPED** (2026-06-24, branch
+`fork/c5b1-comment-wipe-fix`, ADR-F032 addendum, NO migration/endpoint/dep): the C5a guarantee was lossy at the
+*document* level — a comment `reply` was silently deleted when the agent accept/reject-ed the change it was
+anchored to (Adeu reports it `applied`; only raw-OOXML inspection caught it). Fixed with three code layers —
+anchor-map capture (`StateOfPlay.comment_anchors`), an upfront `evaluate_anchoring` gate (reject `reply` on an
+accept/reject-ed anchored change), and document-level reply-survival reconciliation. Live-re-verified at the
+OOXML level (`docs/fork/evidence/c5b1/`): the counterparty comment now SURVIVES the round (it was deleted
+before). **NEXT = maintainer's call: C5b-2 (negotiation-review skill + binding migration + multi-round eval) /
+C5b-3 (inline `data-deal-change` live chips) / C7b (drafter/reviewer fan-out roster) / C6 (controlling playbook
+skills).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -45,7 +52,33 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this session (C5a — PROVABLE NEGOTIATION LOOP — branch `fork/c5a-negotiation-core`; ADR-F032; NO migration/endpoint/dep)
+## Done this session (C5b-1 — COMMENT-WIPE FIX — branch `fork/c5b1-comment-wipe-fix`; ADR-F032 addendum; NO migration/endpoint/dep)
+
+**What:** make C5a's no-silent-action guarantee hold at the **document** level for comments. Raw-OOXML
+inspection of the C5a live output found a real gap: when the agent `reply`-ed to a counterparty comment **and**
+accepted/rejected the change it was anchored to, Adeu deletes the whole thread — silently wiping the reply while
+reporting it `applied` (count-based reconciliation missed it). Three code layers (model judges, code disposes):
+- **`negotiation_service.py` (A + C):** `read_state_of_play` now captures `StateOfPlay.comment_anchors`
+  (`Com:N → Cn`, from a `[Com:N]` token sharing a change's `{>>…<<}` meta block); `apply_decisions` re-reads the
+  output and **proves every reply survived** (raw `parent_id` match) — a wiped reply → `Reconciliation.ok=False`
+  → persist nothing. Replaces the old corruption-only re-read that deliberately didn't count threads.
+- **`schemas/commercial.py` (B):** model-free `evaluate_anchoring(comment_anchors, decisions)` + `AnchorReport`
+  — rejects a `reply` on a comment anchored to an `accept`/`reject`-ed change (counter/leave_open are safe),
+  collect-all-errors, refs-only message telling the model to counter or leave_open instead.
+- **`commercial_tools.py` (E):** gate wired as step 3.5 in `_respond_to_counterparty` (after coverage, before
+  the counter gate); `_render_state_of_play` annotates anchored comments + a coupling RULE so the model
+  self-corrects up front.
+- **Probed on the pin (Step 0, like F045):** `[Com:N]` co-occurs with `[Chg:N]` in the meta block (the anchor
+  signal); `extract_comments_data` keys by RAW unprefixed ids (`"1"`); `add_comment(author,text,parent_id)` has
+  **no text-range anchor** → no pure margin comment → the gate is the guarantee (not a re-homing trick); reject
+  of an anchored change with a reply wipes the whole thread (applied=3/skipped=0 yet reply gone).
+- **Verify:** 48 negotiation tests + `tests/agents` 502 green; **full api suite 2680 passed / 1 failed (the
+  documented `test_ready` env-flake) / 2 skipped**; ruff + mypy clean. **Live (DeepSeek, `docs/fork/evidence/c5b1/`):**
+  re-ran the round-2 NDA → the counterparty comment now **survives** the round (was deleted in C5a); the agent
+  adapted across **4 `respond_to_counterparty` calls** when the gate refused reply+reject; swap reverted to
+  mutual, perpetuity escalated (visible). Adversarial review: SHIP, 0 blockers, NITs folded.
+
+## Done earlier this session (C5a — PROVABLE NEGOTIATION LOOP — branch `fork/c5a-negotiation-core`; ADR-F032; NO migration/endpoint/dep)
 
 **What:** the commercial agent's **second round**. The counterparty returns a marked-up `.docx`; the agent
 reads their tracked changes + comments and responds to **every** item, with a **code-enforced guarantee it
@@ -327,14 +360,19 @@ btrfs subvolumes persist, `apt-get install btrfs-progs`, stop docker, delete `/v
 admin) seeded with a wiki + 2 wiki snapshots + 5 live facts + 1 superseded fact + 1 human-pinned correction.
 Deep-link `/lq-ai?area=commercial&matter=905720d1-5d17-43cd-a8f0-3a76d095de34` → **Memory** tab.
 
-**▶▶ PICK UP HERE — C5a PROVABLE NEGOTIATION LOOP SHIPPED; next slice = maintainer's call.** The agent reads the
-counterparty's marked-up `.docx` and responds to every change/comment under the code-enforced no-silent-action
-gate (extract → respond, ADR-F032) — proven live on DeepSeek (round-2 NDA, escalated the below-floor demand).
-C5 was split. **Remaining open commercial slices (maintainer picks):**
-- **C5b** — the negotiation UX + craft layer over the C5a core: a `negotiation-review` SKILL.md (materiality /
-  authority zones / worked examples + skill-binding migration); the **inline live verdict chips** (clone the
-  `data-ropa-change` ledger→drain→transient-frame seam to a `data-deal-change` frame rendered in the
-  conversation, NOT a panel); a multi-round Claude-judged eval (like C9).
+**▶▶ PICK UP HERE — C5b-1 COMMENT-WIPE FIX SHIPPED; next slice = maintainer's call.** C5a's negotiation loop is
+now document-level-honest for comments (a reply can no longer be silently wiped — anchor map + `evaluate_anchoring`
+gate + reply-survival reconciliation, ADR-F032 addendum; live-re-verified at the OOXML level). C5 split into
+C5a (core) + C5b-1 (this fix) + C5b-2/C5b-3 (below). **Remaining open commercial slices (maintainer picks):**
+- **C5b-2** — the negotiation craft layer: a `negotiation-review` SKILL.md (materiality / authority zones /
+  worked examples — incl. *prefer counter-with-reply over reject-then-leave-open when there's a comment to
+  engage*, so the comment stays anchored + visibly answered; this is the C5b-1 craft follow-up) + skill-binding
+  migration `0072` (mirror `0067`, down_revision `0071`); a multi-round Claude-judged eval (like C9).
+- **C5b-3** — the **inline live verdict chips**: clone the `data-ropa-change` ledger→drain→transient-frame seam
+  to a `data-deal-change` frame rendered as a transient chip **in the conversation** (NOT a register-row wash —
+  there is no deal-terms panel; chip keyed by ref/verdict). Full clone recipe mapped (ropa_changes.py →
+  deal_changes.py, composition COMMERCIAL_AREA_KEY branch, runner drain on tool_result, stream.deal_changed,
+  run-stream.ts parseDealChangePayload, ConversationPanel dispatch).
 - **C7b** — drafter/reviewer **fan-out roster** + post-fan-out reconciliation. The fan-out *infrastructure*
   already works (subagent steps nest via `parent_step_id`, mirrored to SSE + parsed by the web, tested in
   `test_agent_composition.py`); **blocker #6 (`work_product_attributions`) is a legacy-chat concern, NOT on the
@@ -363,6 +401,19 @@ search UI (gateway `/v1/embeddings` 501 until B6); log pagination.
   state.open_comment_refs, decisions)` — exactly one decision per ref. A silent omission → reject; the
   reconciliation then proves each decision landed (skipped/under-applied counter → reject, persist nothing).
   This is the no-silent-action guarantee; keep it prompt-independent.
+- **C5b-1 — accepting OR rejecting a change DELETES the comment thread anchored to it (incl. a reply we made),
+  and Adeu reports it `applied` — so a reply could silently vanish.** Three things close it and must stay
+  together: (1) `read_state_of_play` builds `StateOfPlay.comment_anchors` (`Com:N → Cn`) from a `[Com:N]` token
+  sharing a change's `{>>…<<}` meta block; (2) `schemas.commercial.evaluate_anchoring` rejects a `reply` on an
+  `accept`/`reject`-ed anchored change BEFORE any write (counter/leave_open are safe — a counter layers a new
+  edit and keeps the original change + thread); (3) `apply_decisions` re-reads the output and proves each reply
+  survived. **`extract_comments_data` keys comments by RAW unprefixed ids** (`"1"`, not `"Com:1"`) for both the
+  id and `parent_id` — the survival match normalizes `Com:N → N` (`split(":")[-1]`). **There is NO public
+  margin-comment API** (`add_comment` has no text-range anchor), so the gate is the guarantee, not a re-homing
+  trick. Rejecting a commented change *orphans* the counterparty comment (text preserved, anchor gone — may not
+  render in Word) — not a silent loss, but the *ideal* is to **counter** (keeps it anchored) + reply; that
+  coaching is C5b-2. **Always re-verify redline/comment output at the OOXML level (`word/comments*.xml`), not the
+  reconstruction text — the reconstruction masked this bug.**
 - **C7a — `api`, `arq-worker`, `ingest-worker` are SEPARATE per-service images** (`lq-ai-api` /
   `lq-ai-arq-worker` / `lq-ai-ingest-worker`), all built from `./api`. `docker compose build api` rebuilds ONLY
   `lq-ai-api` — the workers keep their old image. After a code/migration change you must

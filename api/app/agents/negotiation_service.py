@@ -19,6 +19,15 @@ fails), and :class:`Reconciliation` here proves each decision provably took effe
 (silent-accept can't happen — no decision is a failure; silent-reject can't happen — a
 reject is a recorded ``RejectChange``). The agent reasons; code disposes (ADR-F018).
 
+The guarantee holds at the **document** level too, not just the decision level (C5b-1):
+the reconciliation re-reads the output and proves every reply we made still survives.
+Adeu *deletes* the comment thread anchored to a change when that change is accepted or
+rejected (it reports the action as ``applied`` — count-based checks miss the loss), so a
+reply placed on such a change would silently vanish. Two layers close this: the tool's
+upfront ``evaluate_anchoring`` gate keeps a reply off an accept/reject change
+(``StateOfPlay.comment_anchors`` is the anchor map), and the reply-survival check here is
+the backstop. ``leave_open`` / ``escalate`` make no document mutation.
+
 **Import boundary (STRICT).** Only ``adeu`` SDK surface — ``RedlineEngine``,
 ``extract_text_from_stream``, ``adeu.models`` review actions, and the engine's
 ``comments_manager``. NEVER ``adeu.server`` / ``adeu.mcp_components`` (enforced by
@@ -30,8 +39,12 @@ reject is a recorded ``RejectChange``). The agent reasons; code disposes (ADR-F0
 single logical *modify* is a ``del``+``ins`` pair with two ``Chg`` ids; accept/reject of
 that change acts on **both** ids. ``apply_review_actions`` accepts only
 ``AcceptChange`` / ``RejectChange`` / ``ReplyComment`` and returns ``(applied, skipped)``
-with failures in ``engine.skipped_details``. Replies are applied **before** accepts (an
-accept on a region unanchors a reply sitting on it).
+with failures in ``engine.skipped_details``. Replies are applied **before** accepts/rejects
+(an accept/reject of a change deletes the comment thread anchored to it — including any
+reply on it). ``comments_manager.extract_comments_data()`` keys comments by RAW, unprefixed
+ids (``"1"``) for both the id and ``parent_id``; there is no public API to place a comment
+on a text range with no edit (so a reply cannot be re-homed off a wiped change — verified
+on the pin, ``add_comment(author, text, parent_id=None)`` has no range anchor).
 """
 
 from __future__ import annotations
@@ -62,6 +75,10 @@ _REGION = re.compile(
     re.DOTALL,
 )
 _CHG_LINE = re.compile(r"\[Chg:(\d+)\s+(delete|insert|format)\]\s*(.*)")
+# A comment anchored to a change shares the change's {>>…<<} meta block (verified live):
+# `[Chg:3 delete] … [Chg:4 insert] … [Com:1] …`. So a `[Com:N]` co-occurring with a
+# `[Chg:…]` line marks Com:N as anchored to that region's logical change.
+_COM_LINE = re.compile(r"\[Com:(\d+)\]")
 
 # Bounds: keep the model-facing projection and the stored context snippets small.
 _CONTEXT_PAD = 90
@@ -98,6 +115,11 @@ class StateOfPlay:
     clean_view: str  # the counterparty's accept-all "final ask" (bounded, model-facing)
     marked_view: str  # the full CriticMarkup (bounded, model-facing)
     clean_text_full: str  # the UNTRUNCATED accept-all text — for the counter gate (D4/D5)
+    # "Com:N" -> "Cn": a comment anchored to a tracked change. Accepting/rejecting that
+    # change deletes the anchored thread (incl. a reply), so a reply here can't survive an
+    # accept/reject of its change (the comment-wipe gate keys on this — C5b-1). A comment
+    # absent from this map is anchored to plain text and is wipe-safe.
+    comment_anchors: dict[str, str] = field(default_factory=dict)
 
     @property
     def change_refs(self) -> set[str]:
@@ -175,6 +197,7 @@ def read_state_of_play(docx_bytes: bytes, *, our_author: str = DEFAULT_AUTHOR) -
     )
 
     changes: list[TrackedChange] = []
+    comment_anchors: dict[str, str] = {}
     n = 0
     for m in _REGION.finditer(marked):
         meta = m.group("meta") or ""
@@ -183,6 +206,9 @@ def read_state_of_play(docx_bytes: bytes, *, our_author: str = DEFAULT_AUTHOR) -
             continue  # a comment-only region (no tracked change) — handled below
         n += 1
         ids = tuple(f"Chg:{cid}" for cid, _typ, _auth in chg)
+        # Any comment in this same meta block is anchored to this logical change (Cn).
+        for com_cid in _COM_LINE.findall(meta):
+            comment_anchors[f"Com:{com_cid}"] = f"C{n}"
         types = {typ for _cid, typ, _auth in chg}
         author = next((auth.strip() for _cid, _typ, auth in chg if auth.strip()), "unknown")
         deleted = (m.group("del") or "").strip()
@@ -233,6 +259,7 @@ def read_state_of_play(docx_bytes: bytes, *, our_author: str = DEFAULT_AUTHOR) -
         clean_view=_bounded(clean, 8000),
         marked_view=_bounded(marked, 12000),
         clean_text_full=clean,  # untruncated — the counter gate (D4 anchor / D5 ratio) keys on this
+        comment_anchors=comment_anchors,
     )
 
 
@@ -264,6 +291,11 @@ def apply_decisions(
     rejects: list[tuple[int, Any]] = []
     accepts: list[tuple[int, Any]] = []
     counters: list[ProposedEdit] = []
+    # RAW comment ids ("1", not "Com:1") we reply to — the survival check matches these
+    # against extract_comments_data's raw parent_id. split(":")[-1] is robust to a ref that
+    # is already raw (a hand-built Decision), so a malformed reply ref fails the check
+    # (persist nothing) rather than crashing.
+    intended_reply_raw_ids: set[str] = set()
 
     def _chg_sort_key(adeu_id: str) -> int:
         try:
@@ -274,6 +306,7 @@ def apply_decisions(
     for d in decisions:
         if d.verdict == "reply":
             replies.append(ReplyComment(target_id=d.ref, text=d.reply_text))
+            intended_reply_raw_ids.add(d.ref.split(":", 1)[-1])
         elif d.verdict in ("accept", "reject"):
             change = by_change.get(d.ref)
             if change is None:
@@ -320,15 +353,36 @@ def apply_decisions(
 
     out_bytes = _engine_bytes(engine)
 
-    # Post-write reconciliation: the output must re-read cleanly (corruption guard).
-    # The authoritative "every action took effect" signal is Adeu's (applied, skipped)
-    # above — NOT a thread re-count: accepting a counterparty change deletes the comment
-    # thread anchored to it (including a reply we just made), which is correct (the
-    # acceptance resolves their comment), so a thread-survival check would false-fail.
+    # Post-write reconciliation, two proofs (C5b-1):
+    #  1) the output must re-read cleanly (corruption guard);
+    #  2) every reply we made must STILL be present in the output. Adeu's
+    #     (applied, skipped) above only says an action was *attempted* successfully —
+    #     but accepting/rejecting a change DELETES the comment thread anchored to it,
+    #     wiping any reply we placed there (verified live: applied=3/skipped=0, yet the
+    #     reply is gone). The upfront anchoring gate keeps a reply off an accept/reject
+    #     change, so a reply that is nonetheless absent here is a real, otherwise-silent
+    #     document-level loss → fail and persist nothing. We assert survival ONLY for the
+    #     replies we made, so a thread that legitimately vanished (its change accepted,
+    #     no reply) is never checked — no false-fail (the bug the old code avoided).
     try:
-        read_state_of_play(out_bytes, our_author=our_author)
+        out_state = read_state_of_play(out_bytes, our_author=our_author)
     except Exception as exc:  # pragma: no cover - corrupt output is itself a failure
         issues.append(f"output failed to re-read: {type(exc).__name__}")
+    else:
+        if intended_reply_raw_ids:
+            # extract_comments_data keys (and parent_id) are RAW, unprefixed ids; our
+            # reply is a comment authored by us whose parent is the thread we replied to.
+            surviving = {
+                str(cm.parent_id)
+                for cm in out_state.comments
+                if cm.is_ours and cm.parent_id is not None
+            }
+            wiped = intended_reply_raw_ids - surviving
+            if wiped:
+                issues.append(
+                    f"{len(wiped)} comment repl(y/ies) did not survive in the output "
+                    "(an anchored change was accepted/rejected)"
+                )
 
     return out_bytes, Reconciliation(
         ok=not issues,
