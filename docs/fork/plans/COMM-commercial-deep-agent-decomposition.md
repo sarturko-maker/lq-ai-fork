@@ -340,6 +340,20 @@ Live (DeepSeek): a surgical tracked-changes `.docx` on a real NDA, narrow edits 
 **ADR.** F031. Cites F018, F010, **F035**.
 
 ### C5 — Negotiation rounds + counterparty-position extraction *(3d)* — depends C3, C4
+
+> **SPLIT (2026-06-24).** Reshaped after two findings: **Adeu 1.12.1 reads/writes the counterparty's
+> tracked changes + comments natively** (no OOXML code of ours), and the maintainer raised the
+> load-bearing requirement — **a code-enforced guarantee that the agent never silently accepts/rejects**
+> (every change/comment is provably addressed). **C5a — provable negotiation loop SHIPPED**
+> (`docs/fork/plans/C5a-provable-negotiation-loop.md`, **ADR-F032**): `extract_counterparty_position`
+> (Adeu read → a `StateOfPlay` checklist) + `respond_to_counterparty` (closed taxonomy
+> accept/reject/counter/leave_open/escalate + reply, layered tracked changes/threaded comments) with a
+> two-phase **coverage + reconciliation gate** (exactly one decision per ref; every decision proved to
+> land). No migration / endpoint / dep. **Deferred → C5b:** the `negotiation-review` skill calibration,
+> the inline live verdict chips (`data-deal-change`, clone of `data-ropa-change`), and a multi-round
+> Claude-judged eval. C5a classifies against **prose** house positions — structured `PlaybookPosition`
+> classification stays C6 (needs F036).
+
 **Goal.** Teach the agent rounds: a guarded **read-side** `extract_counterparty_position` tool/skill reads the
 other side's markup (tracked changes surfaced by C1/C2) as their revealed position, classifies each change
 **accept/reject/counter** against the playbook tier, and where it counters **drafts concrete replacement

@@ -423,3 +423,151 @@ def evaluate_gate(document_text: str, edits: list[RedlineEditInput]) -> GateRepo
     return GateReport(
         ok=ok, edits=verdicts, batch_reasons=batch_reasons, doc_struck_ratio=doc_ratio
     )
+
+
+# --------------------------------------------------------------------------- #
+# C5a — negotiation rounds: counterparty-position decisions + the COVERAGE gate
+# (ADR-F032). The model reads the counterparty's tracked changes + comments (the
+# StateOfPlay, enumerated by ``negotiation_service.read_state_of_play``) and emits
+# one decision per item; this model-free layer enforces the **no-silent-action**
+# guarantee — exactly one decision per change/comment ref, nothing omitted — before
+# the agent layer touches Adeu. Counter edits are gated by the same D1-D6 surgical
+# gate above (the tool builds a ``RedlineEditInput`` and calls ``evaluate_gate``).
+# --------------------------------------------------------------------------- #
+
+# Closed action taxonomy (the Adeu-1.12.1 review-action surface + two recorded-only
+# verdicts). A counterparty CHANGE can be accepted, rejected, countered (a layered
+# surgical edit), left open, or escalated; a COMMENT can be replied to, left open, or
+# escalated. "leave_open"/"escalate" make no document mutation — their receipt is the
+# audit row + the matter-memory fact at the tool layer (they are still *recorded*
+# decisions, so the item is never silently dropped).
+CHANGE_VERDICTS = frozenset({"accept", "reject", "counter", "leave_open", "escalate"})
+COMMENT_VERDICTS = frozenset({"reply", "leave_open", "escalate"})
+REASON_VERDICTS = frozenset({"reject", "counter", "leave_open", "escalate"})
+
+# Ref grammar: a logical change is "C<n>" (document order); a comment is its native
+# Adeu "Com:<n>" id (so a reply targets it directly).
+_CHANGE_REF = re.compile(r"^C\d+$")
+_COMMENT_REF = re.compile(r"^Com:\d+$")
+MAX_DECISIONS_PER_BATCH = 200  # a round addresses dozens-to-low-hundreds of items
+
+
+class CounterpartyDecision(BaseModel):
+    """The agent's verdict on one counterparty change or comment. Reject, don't
+    sanitize (ADR-F018) — a malformed decision comes back for the model to fix."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ref: str  # "C<n>" (a change) or "Com:<n>" (a comment)
+    verdict: str
+    target_text: str = ""  # counter: the exact existing text to change (unique anchor)
+    new_text: str = ""  # counter: the replacement
+    rationale: str = ""  # counter/reject/leave_open/escalate: the recorded reason
+    reply_text: str = ""  # reply: the threaded reply body
+
+    @model_validator(mode="after")
+    def _shape(self) -> Self:
+        is_change = bool(_CHANGE_REF.match(self.ref))
+        is_comment = bool(_COMMENT_REF.match(self.ref))
+        if not (is_change or is_comment):
+            raise ValueError(f"ref {self.ref!r} must be a change 'C<n>' or a comment 'Com:<n>'")
+        if is_change and self.verdict not in CHANGE_VERDICTS:
+            raise ValueError(f"change {self.ref}: verdict must be one of {sorted(CHANGE_VERDICTS)}")
+        if is_comment and self.verdict not in COMMENT_VERDICTS:
+            raise ValueError(
+                f"comment {self.ref}: verdict must be one of {sorted(COMMENT_VERDICTS)} "
+                f"(a comment can't be accepted/rejected/countered — reply, leave_open, or escalate)"
+            )
+        if self.verdict == "counter" and (
+            not self.target_text.strip() or not self.new_text.strip()
+        ):
+            raise ValueError(
+                f"{self.ref}: a counter must supply both target_text (the existing "
+                f"wording to change) and new_text (your replacement)"
+            )
+        if self.verdict == "reply" and not self.reply_text.strip():
+            raise ValueError(f"{self.ref}: a reply must supply reply_text")
+        if self.verdict in REASON_VERDICTS and not self.rationale.strip():
+            raise ValueError(
+                f"{self.ref}: a {self.verdict} must supply a rationale (the recorded reason)"
+            )
+        return self
+
+
+class RespondToCounterpartyInput(BaseModel):
+    """A full round's response — one decision per counterparty change and comment."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    document_name: str
+    decisions: list[CounterpartyDecision]
+
+    @field_validator("document_name")
+    @classmethod
+    def _doc_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("document_name must name the counterparty's marked-up document")
+        return v
+
+    @field_validator("decisions")
+    @classmethod
+    def _decisions_bounded(cls, v: list[CounterpartyDecision]) -> list[CounterpartyDecision]:
+        if not v:
+            raise ValueError("respond to at least one item")
+        if len(v) > MAX_DECISIONS_PER_BATCH:
+            raise ValueError(
+                f"too many decisions ({len(v)} > {MAX_DECISIONS_PER_BATCH}) in one call"
+            )
+        return v
+
+
+@dataclass(frozen=True)
+class CoverageReport:
+    """The no-silent-action gate outcome — counts/refs only (no clause text)."""
+
+    ok: bool
+    missing: list[str] = field(default_factory=list)  # refs with no decision
+    unknown: list[str] = field(default_factory=list)  # decisions for a non-existent ref
+    duplicate: list[str] = field(default_factory=list)  # refs decided more than once
+
+    def rejection_text(self) -> str:
+        lines: list[str] = []
+        if self.missing:
+            lines.append(
+                "- UNADDRESSED (every counterparty change/comment must get exactly one "
+                f"decision — nothing silent): {', '.join(sorted(self.missing))}"
+            )
+        if self.unknown:
+            lines.append(
+                f"- unknown ref(s) (not in this document): {', '.join(sorted(self.unknown))}"
+            )
+        if self.duplicate:
+            lines.append(f"- decided more than once: {', '.join(sorted(self.duplicate))}")
+        return (
+            "Response rejected — nothing was written. Every counterparty change and "
+            "comment must be addressed exactly once. Fix the following and call "
+            "respond_to_counterparty again:\n" + "\n".join(lines)
+        )
+
+
+def evaluate_coverage(
+    change_refs: set[str],
+    comment_refs: set[str],
+    decisions: list[CounterpartyDecision],
+) -> CoverageReport:
+    """The completeness gate: exactly one decision per known ref, none missing, none
+    unknown, none duplicated. Collect-all-errors (the model fixes in one pass)."""
+    required = set(change_refs) | set(comment_refs)
+    seen: dict[str, int] = {}
+    for d in decisions:
+        seen[d.ref] = seen.get(d.ref, 0) + 1
+    decided = set(seen)
+    missing = sorted(required - decided)
+    unknown = sorted(decided - required)
+    duplicate = sorted(r for r, n in seen.items() if n > 1)
+    return CoverageReport(
+        ok=not (missing or unknown or duplicate),
+        missing=missing,
+        unknown=unknown,
+        duplicate=duplicate,
+    )

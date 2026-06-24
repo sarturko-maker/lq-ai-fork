@@ -22,9 +22,18 @@ C7a redline-download SHIPPED** (2026-06-24, branch `fork/c7a-redline-download`, 
 cockpit **Documents tab** + an **inline run-timeline download** surface the agent's redlined `.docx` over a new
 `GET /matters/{id}/files` + a `File.created_by_run_id` provenance column, reusing the existing
 `GET /files/{id}/content` (no new bytes path / SSE change). Live-proven on Atlas: a real DeepSeek redline →
-output carries `created_by_run_id` → appears in the tab + inline. **NEXT = maintainer's call: C7b (drafter/reviewer
-fan-out roster) / C5 (negotiation rounds + the accept/reject/counter classification) / C6 (controlling playbook
-skills).**
+output carries `created_by_run_id` → appears in the tab + inline. **C5 SPLIT → C5a PROVABLE NEGOTIATION LOOP
+SHIPPED** (2026-06-24, branch `fork/c5a-negotiation-core`, **ADR-F032**, NO migration/endpoint/dep): the agent
+reads the counterparty's marked-up `.docx` (Adeu-native tracked changes + comments) via
+`extract_counterparty_position` → a `StateOfPlay` checklist, and responds to **every** change/comment via
+`respond_to_counterparty` (closed taxonomy accept/reject/counter/leave_open/escalate + reply) under a
+**code-enforced no-silent-action gate** (upfront coverage: exactly one decision per ref; post-write
+reconciliation: every decision proved to land). Live-proven on DeepSeek: round-2 NDA → extract→respond,
+accepted benign edits, rejected the one-directional swap (reverted to mutual), **escalated the below-floor
+perpetuity demand (left visible, not conceded)**, replied to the comment; full coverage in one pass
+(`docs/fork/evidence/c5a/`). **NEXT = maintainer's call: C5b (negotiation-review skill calibration + inline
+`data-deal-change` live chips + multi-round eval) / C7b (drafter/reviewer fan-out roster) / C6 (controlling
+playbook skills).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -36,7 +45,39 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this session (C7a — REDLINE-DOWNLOAD surface — branch `fork/c7a-redline-download`; ADR-F046; migration `0071`)
+## Done this session (C5a — PROVABLE NEGOTIATION LOOP — branch `fork/c5a-negotiation-core`; ADR-F032; NO migration/endpoint/dep)
+
+**What:** the commercial agent's **second round**. The counterparty returns a marked-up `.docx`; the agent
+reads their tracked changes + comments and responds to **every** item, with a **code-enforced guarantee it
+never silently accepts/rejects** (the maintainer's hard requirement). C5 was SPLIT: **C5a = the provable
+backend core**; deferred → **C5b** (skill calibration + inline live chips + multi-round eval). Plan
+`docs/fork/plans/C5a-provable-negotiation-loop.md`; ADR-F032.
+
+- **Adeu 1.12.1 reads/writes the markup natively** (no OOXML code of ours; verified live then built on):
+  `extract_text_from_stream(clean_view=False/True)` (CriticMarkup + `Chg:N` ids / accept-all) +
+  `engine.comments_manager.extract_comments_data()` (`Com:N`); `engine.apply_review_actions([AcceptChange|
+  RejectChange|ReplyComment])` + `apply_edits([ModifyText(comment=)])` for a counter. The maintainer's prior
+  art `Claude-Plugin-MCP` (MIT) gave the *concepts* (closed taxonomy, layer-don't-reject, per-id state) but
+  left completeness to the prompt — the **gate is the net-new piece**.
+- **`api/app/agents/negotiation_service.py` (NEW)** — `read_state_of_play(docx)→StateOfPlay` (parses the
+  CriticMarkup regions into synthetic refs `C1..Cn` in doc order + comments from `extract_comments_data`) and
+  `apply_decisions(docx, state, decisions)→(bytes, Reconciliation)` (replies→rejects→accepts then counters;
+  re-reads to prove each landed). SDK-only.
+- **`api/app/schemas/commercial.py`** — `CounterpartyDecision` (closed taxonomy), `RespondToCounterpartyInput`,
+  `evaluate_coverage` + `CoverageReport` (the **upfront coverage gate**: exactly one decision per ref).
+- **`api/app/agents/commercial_tools.py`** — `extract_counterparty_position` + `respond_to_counterparty`
+  closures (guarded, matter-scoped via `_matter_files_query`, 404-conflated); `respond` re-extracts ground
+  truth → coverage gate → counter gate (D1–D6) → `apply_decisions` → reconcile → persist a `(response).docx`
+  File (`created_by_run_id`) + a matter-memory `open_point` receipt fact; audit counts/IDs only. Both names in
+  `COMMERCIAL_TOOL_NAMES` (auto-granted via the existing `build_commercial_tools`).
+- **`api/app/agents/redline_service.py`** — extracted `word_diff_edits` to a module function (single-sourced
+  for the counter path; the instance method delegates). Redline path unchanged (10/10 regression green).
+- **Verify:** unit/integration (negotiation service + tools) green; ruff + mypy clean; redline regression
+  10/10. **Live (DeepSeek, `docs/fork/evidence/c5a/`):** round-2 NDA, `status=completed`, both tools called,
+  full coverage in one pass, **escalated** the below-floor perpetuity demand (left as a visible tracked
+  change, not conceded). No new HTTP route (no `test_endpoints`/`test_openapi` change).
+
+## Done earlier this session (C7a — REDLINE-DOWNLOAD surface — branch `fork/c7a-redline-download`; ADR-F046; migration `0071`)
 
 **What:** the lawyer can now **download the redlined `.docx`** the commercial agent produces — both from a cockpit
 **Documents tab** (every matter, all areas) and **inline** under the completed run that made it. Closes the stranded
@@ -286,22 +327,42 @@ btrfs subvolumes persist, `apt-get install btrfs-progs`, stop docker, delete `/v
 admin) seeded with a wiki + 2 wiki snapshots + 5 live facts + 1 superseded fact + 1 human-pinned correction.
 Deep-link `/lq-ai?area=commercial&matter=905720d1-5d17-43cd-a8f0-3a76d095de34` → **Memory** tab.
 
-**▶▶ PICK UP HERE — C7a REDLINE-DOWNLOAD SHIPPED; next slice = maintainer's call.** The lawyer can now download
-the redlined `.docx` (Documents tab + inline run-timeline download, ADR-F046, mig `0071`) — proven live on Atlas.
-C7 was split: the download surface is done; **C7b** (drafter/reviewer fan-out roster + post-fan-out reconciliation)
-and the accept/reject/counter **classification + deal-context live signal → C5** are deferred. The fan-out
-*infrastructure* already works (subagent steps nest via `parent_step_id`, mirrored to SSE + parsed by the web,
-tested in `test_agent_composition.py`), and **blocker #6 (`work_product_attributions`) is a legacy-chat concern,
-NOT on the agent path** — so C7b is "define drafter/reviewer subagents (mig reconciling `0057`) + a reconciliation
-pass," not an attribution rebuild. **Remaining open commercial slices (maintainer picks):** **C7b** fan-out roster;
-**C5** negotiation rounds (+ the classification/live-signal); **C6** controlling playbook skills. **Optional deeper
-verification** (not blocking): a multi-rep × strong-judge redline eval (n=1 today). **Carried cross-cutting:**
-in-app redline *viewer/accept* (the bigger evolution beyond download — [[redline-viewing-direction]], MCP-gated /
-AGPL caveat); marker-fence hardening (C3a nit); embedding/FTS search UI (gateway `/v1/embeddings` 501 until B6);
-log pagination.
+**▶▶ PICK UP HERE — C5a PROVABLE NEGOTIATION LOOP SHIPPED; next slice = maintainer's call.** The agent reads the
+counterparty's marked-up `.docx` and responds to every change/comment under the code-enforced no-silent-action
+gate (extract → respond, ADR-F032) — proven live on DeepSeek (round-2 NDA, escalated the below-floor demand).
+C5 was split. **Remaining open commercial slices (maintainer picks):**
+- **C5b** — the negotiation UX + craft layer over the C5a core: a `negotiation-review` SKILL.md (materiality /
+  authority zones / worked examples + skill-binding migration); the **inline live verdict chips** (clone the
+  `data-ropa-change` ledger→drain→transient-frame seam to a `data-deal-change` frame rendered in the
+  conversation, NOT a panel); a multi-round Claude-judged eval (like C9).
+- **C7b** — drafter/reviewer **fan-out roster** + post-fan-out reconciliation. The fan-out *infrastructure*
+  already works (subagent steps nest via `parent_step_id`, mirrored to SSE + parsed by the web, tested in
+  `test_agent_composition.py`); **blocker #6 (`work_product_attributions`) is a legacy-chat concern, NOT on the
+  agent path** — so C7b is "define drafter/reviewer subagents (mig reconciling `0057`) + a reconciliation pass."
+- **C6** — controlling playbook skills (blocked by ADRs **F036 + F038** — canonical severity scale + the
+  controlling-skill plane — which must be decided first). C5a deliberately uses **prose** house positions, not
+  the `PlaybookPosition` mechanism, to stay unblocked.
+**C5a backlog (Adeu gaps, recorded):** no public pure-margin-comment (comment with no edit) — C5a anchors a
+comment to a change/counter, and accept/reject carry their reason in the receipt not a Word comment;
+per-revision dates not surfaced. **Carried cross-cutting:** in-app redline *viewer/accept*
+([[redline-viewing-direction]], MCP-gated / AGPL caveat); marker-fence hardening (C3a nit); embedding/FTS
+search UI (gateway `/v1/embeddings` 501 until B6); log pagination.
 
 ## Gotchas / durable traps (C8 + C4 + carried)
 
+- **C5a — Adeu `Chg:N`/`Com:N` ids are internal and RENUMBER after accept/reject; a *modify* is a del+ins
+  PAIR.** So (1) the model must reference the ids from the **extract** step (C5a hands it synthetic `C1..Cn`
+  refs that decouple it from Adeu's numbering — `negotiation_service` re-derives the map on respond from the
+  same unchanged doc); (2) accept/reject of one logical change acts on **both** Adeu ids; (3) reconciliation
+  must NOT re-diff ids across the apply — trust Adeu's `(applied, skipped)` + `skipped_details`. **Accepting a
+  change deletes the comment thread anchored to it** (correct — the acceptance resolves their comment), so
+  apply **replies before accepts** and do NOT post-count threads (it false-fails). `apply_review_actions`
+  takes ONLY `AcceptChange`/`RejectChange`/`ReplyComment` — no public resolve / no pure-margin comment.
+- **C5a — the coverage gate must re-extract the StateOfPlay as GROUND TRUTH, not trust the model's view.**
+  `respond_to_counterparty` re-reads the doc and runs `evaluate_coverage(state.change_refs,
+  state.open_comment_refs, decisions)` — exactly one decision per ref. A silent omission → reject; the
+  reconciliation then proves each decision landed (skipped/under-applied counter → reject, persist nothing).
+  This is the no-silent-action guarantee; keep it prompt-independent.
 - **C7a — `api`, `arq-worker`, `ingest-worker` are SEPARATE per-service images** (`lq-ai-api` /
   `lq-ai-arq-worker` / `lq-ai-ingest-worker`), all built from `./api`. `docker compose build api` rebuilds ONLY
   `lq-ai-api` — the workers keep their old image. After a code/migration change you must
