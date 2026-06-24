@@ -3,7 +3,7 @@
   "reps": 3,
   "rates": {
     "securescan_saas_msa": {
-      "surgical_pass": 2,
+      "surgical_pass": 0,
       "total": 3
     },
     "databridge_licence": {
@@ -11,7 +11,7 @@
       "total": 3
     },
     "overall": {
-      "surgical_pass": 2,
+      "surgical_pass": 0,
       "total": 6
     }
   },
@@ -20,20 +20,20 @@
       "doc": "securescan_saas_msa",
       "rep": 1,
       "status": "completed",
-      "model_turns": 14,
+      "model_turns": 15,
       "redlined": true,
       "boilerplate_bare": true,
-      "verdict": "STRONG",
-      "surgical": true,
-      "surgical_pass": true
+      "verdict": "ADEQUATE",
+      "surgical": false,
+      "surgical_pass": false
     },
     {
       "doc": "securescan_saas_msa",
       "rep": 2,
       "status": "completed",
-      "model_turns": 9,
+      "model_turns": 11,
       "redlined": true,
-      "boilerplate_bare": false,
+      "boilerplate_bare": true,
       "verdict": "ADEQUATE",
       "surgical": false,
       "surgical_pass": false
@@ -41,22 +41,18 @@
     {
       "doc": "securescan_saas_msa",
       "rep": 3,
-      "status": "completed",
-      "model_turns": 9,
-      "redlined": true,
-      "boilerplate_bare": true,
-      "verdict": "STRONG",
-      "surgical": true,
-      "surgical_pass": true
+      "status": "cap_exceeded",
+      "model_turns": 29,
+      "redlined": false
     },
     {
       "doc": "databridge_licence",
       "rep": 1,
       "status": "completed",
-      "model_turns": 12,
+      "model_turns": 20,
       "redlined": true,
-      "boilerplate_bare": true,
-      "verdict": "STRONG",
+      "boilerplate_bare": false,
+      "verdict": "ADEQUATE",
       "surgical": false,
       "surgical_pass": false
     },
@@ -64,10 +60,10 @@
       "doc": "databridge_licence",
       "rep": 2,
       "status": "completed",
-      "model_turns": 10,
+      "model_turns": 13,
       "redlined": true,
       "boilerplate_bare": true,
-      "verdict": "STRONG",
+      "verdict": "WEAK",
       "surgical": false,
       "surgical_pass": false
     },
@@ -75,8 +71,12 @@
       "doc": "databridge_licence",
       "rep": 3,
       "status": "completed",
-      "model_turns": 6,
-      "redlined": false
+      "model_turns": 15,
+      "redlined": true,
+      "boilerplate_bare": true,
+      "verdict": "STRONG",
+      "surgical": false,
+      "surgical_pass": false
     }
   ]
 }

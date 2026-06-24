@@ -1,15 +1,20 @@
-# Verdict — Northwind DPA (moderate)
+# northwind_dpa (moderate) — C9 v2 (surgical-redline skill LOADED)
 
-**Judge:** Claude (Opus 4.8). Acting-for: Controller. Run: flash (`boilerplate_bare`=True, 18 turns / 14 previews).
+_Judge: Claude (Opus 4.8), sharp/sceptical panel (surgical=false if ANY material clause is struck-and-retyped wholesale). Single run per (instrument, model) — n=1; read as one strong-judged data point, not a rate._
 
-**VERDICT: STRONG (with minor completeness gaps)** · **SURGICAL: yes**
+## flash (deepseek-v4-flash)
 
-- **§3 Use of Data** — the surgical ideal: a two-word edit `[-may-][+shall not+]` flips the entire own-purpose/model-training clause; everything else **bare**.
-- **§2 Instructions / §5 Security / §6 Breach** — narrow in-clause edits, recognisable stems ("The Processor shall process the Personal Data", "The Processor shall implement", "The Processor shall notify the Controller") left **bare**.
-- **§8 Audit** — converted "no right to audit … or" → "the right … to audit …", keeping "The Controller shall have" and "records" bare.
-- **§9 Transfers** — appended an SCC-safeguards requirement.
-- §4 sub-processing and §10 return/deletion are fuller rewrites — justified (both needed substantial additions: flow-down + liability; return-or-destroy + legal-retention).
+**Verdict: ADEQUATE · surgical: no** · boilerplate-bare (deterministic): yes · status: `completed` · model turns: 18
 
-**Completeness gaps a partner would flag (not craft defects):** §7 (sub-processor liability) left untouched, and §8's "*which the Controller agrees to accept as sufficient*" tail left bare — it undercuts the audit right just added. §11's one-month cap was out of scope of the instruction (not listed). The §9 boundary edit leaves a small "discretion and , and" artifact.
+All eight controller-side heads are hit with mostly-good bare-verb discipline, but three clauses (§3, §4, §9) came out garbled in the accepted text and §3/§8 are whole-limb retypes, so the craft is competent-but-flawed rather than clean-surgical.
 
-Net: strong, surgical craft; a couple of missed limbs. Took the most previews (14) of any moderate run — laborious but converged.
+- SURGICAL (good): §2 documented-instructions and §5 security are clean defined-term/limb swaps — §5 keeps 'The Processor shall implement' bare, flips '[- not be required to-]', and inserts the Art.32 risk formula by mechanism; §6 keeps 'The Processor shall notify the Controller of a personal data breach' bare with two narrow swaps.
+- GARBLED OUTPUT (craft fail): §3 accepted reads 'shall not use the Personal Data the Personal Data for any purpose...' — the insert retyped 'the Personal Data' while the original object was left un-struck, a doubled-object bug from a wholesale operative-limb rewrite.
+- GARBLED OUTPUT: §4 accepted reads 'shall not engage or replace Sub-processors any Sub-processor without prior written authorisation...' — same doubled-object defect; substance (prior authorisation + flow-down + 'remain fully liable') is correct but the sentence is broken.
+- COHERENCE: §9 transfers leaves a dangling original fragment 'implementing any specific transfer safeguard.' after the inserted SCC/IDTA 'prior to any transfer.' sentence — grammatically broken accepted text despite correct substance.
+- UNDER-PROTECTION / LEAVE-ALONE miss: §8 created the audit right but left the poison-pill final sentence ('Processor may instead provide a summary certificate... Controller agrees to accept as sufficient') untouched, gutting it; and the §4 'remain fully liable' insert directly contradicts the untouched §7 Sub-processor Liability exclusion.
+- boilerplate_bare reported true and the instructed bare phrase 'The Processor shall implement' was honoured, but §3 and §8 effectively struck-and-retyped whole operative limbs, so surgical=false.
+
+## pro (deepseek-v4-pro) — model-vs-method control
+
+**No redline produced** (status: `failed`, model turns: 5). The stronger tier was *less* robust here — it failed to produce any tracked changes. (Any auto-generated verdict for this cell was discarded: with no pro reconstruction on disk the judge harness read a different run's file.)

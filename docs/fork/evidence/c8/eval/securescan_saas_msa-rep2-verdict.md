@@ -1,7 +1,6 @@
 VERDICT: ADEQUATE
 SURGICAL: no
-
-- Several material clauses (IP ownership, Customer Data licence, warranties, indemnities, limitation of liability) were struck and retyped wholesale rather than narrowly edited – violating the “surgical” requirement.
-- The changes meaningfully improve the customer’s position (e.g., service modification restriction, fee‑increase cap, termination for convenience, express warranties, mutual IP indemnity, liability cap carve-outs), showing good judgment on mechanism and balance.
-- The IP clause still vests all deliverables in the Vendor without a licence back to the Customer, and the warranty remedy is limited to reperformance/refund only – both are under-protective for the customer.
-- Coherence is generally sound, though the feedback licence wording is slightly garbled (“to use in any feedback”).
+- Sections 5 and 6 were struck and retyped wholesale rather than narrowly edited, which detracts from craft; a more surgical approach (e.g., adding a Customer-ownership carve-out within the original vesting clause, or limiting the original licence with usage restrictions) would have preserved the vendor’s structure while achieving the same protection.
+- Balanced protection is achieved through appropriate mechanisms: cap raised to 12 months with carve-outs for indemnity, data obligations, IP infringement, and gross negligence; deemed-direct for indemnity; mutual IP indemnity added; Customer retains data ownership with a narrow, purpose-limited licence; feedback changed from assignment to non-exclusive licence.
+- Coherent overall: added limited warranties, mutual termination for material breach, and refund rights for Vendor breach all work together; the warranty disclaimer still stands except for the added affirmative warranties.
+- No over- or under-protection from the Customer’s perspective – the redline appropriately flips the most egregious vendor-favoured terms while leaving standard disclaimers (e.g., no guarantee of uninterrupted service) intact.

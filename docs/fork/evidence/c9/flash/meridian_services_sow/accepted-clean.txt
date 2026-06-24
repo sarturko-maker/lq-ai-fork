@@ -1,0 +1,22 @@
+PROFESSIONAL SERVICES AGREEMENT
+This Professional Services Agreement is entered into between Meridian Consulting Group LLC (the "Supplier") and the customer identified in the Statement of Work (the "Customer"), under which the Supplier will provide the consulting services and deliverables described in each Statement of Work.
+1. Services
+The Supplier shall provide the services described in each Statement of Work on a time-and-materials basis. Any timelines, estimates or staffing levels are indicative only and do not bind the Supplier.
+2. Acceptance
+Each deliverable shall be deemed accepted unless the Customer gives written notice of rejection within thirty (30) days of delivery. The Customer shall pay for all deliverables that have been accepted, and the Supplier is obliged to correct any deliverable that does not conform to the specification in the applicable Statement of Work at its own cost.
+3. Fees and Expenses
+The Customer shall pay all fees on a time-and-materials basis subject to the maximum fees set out in the applicable Statement of Work, together with all expenses at cost, within fifteen (15) days of the invoice date. The Supplier may revise its rates no more than once per twelve-month period, on at least sixty (60) days' written notice. All fees are non-refundable.
+4. Intellectual Property
+All intellectual property rights in any deliverables, work product, methodologies and materials created under this Agreement shall vest in the Customer (for deliverables created specifically for the Customer) and in the Supplier (for its pre-existing methodologies, tools and materials). The Customer is granted a non-exclusive, non-transferable licence to use the deliverables for its internal business purposes only.
+5. Warranties
+The services and deliverables are provided 'AS IS', except that the Supplier warrants that the services will be performed in a professional and workmanlike manner and that each deliverable will conform in all material respects to the specification in the applicable Statement of Work. If a deliverable does not conform, the Supplier shall re-perform at no additional cost. The Supplier does not warrant that any deliverable will conform to any specification, be fit for any particular purpose, or be free from defects, and disclaims all warranties to the fullest extent permitted by law.
+6. Personnel
+The Supplier may substitute, reassign or remove any personnel on reasonable notice to the Customer. The Supplier shall not substitute any key personnel identified in the Statement of Work without the Customer's prior written consent, not to be unreasonably withheld. The Supplier gives no commitment that any named individual will perform the services.
+7. Indemnity
+Each party shall indemnify, defend and hold harmless the other party and its personnel against any and all claims, losses, damages, liabilities and expenses arising from the indemnifying party's breach of this Agreement. The Supplier shall additionally indemnify the Customer against any claim that the deliverables infringe a third party's intellectual property rights.
+8. Limitation of Liability
+The Supplier's aggregate liability arising out of or in connection with this Agreement shall not exceed the fees paid by the Customer in the twelve (12) months preceding the claim; provided that this limitation shall not apply to (i) the Supplier's breach of confidentiality, (ii) infringement of the Customer's intellectual property, (iii) the Supplier's indemnity obligations under Section 7, or (iv) the Supplier's gross negligence or wilful misconduct. In no event shall the Supplier be liable for any indirect, incidental or consequential damages, or for any loss of profits, revenue or data.
+9. Term and Termination
+This Agreement continues until each Statement of Work is completed. Either party may terminate this Agreement or any Statement of Work for convenience on thirty (30) days' written notice to the other party; The other party may also terminate this Agreement or any Statement of Work for convenience on thirty (30) days' written notice to the Supplier. On termination the Customer shall pay fees only for services actually performed and accepted up to the termination date.
+10. Governing Law
+This Agreement is governed by the laws of the State of Illinois, and the parties submit to the exclusive jurisdiction of the courts of Illinois.
