@@ -197,7 +197,7 @@ def apply_golden(service: RedlineService, scenario: GoldenScenario) -> bytes:
     docx = build_docx(scenario.paragraphs)
     preview = service.dry_run(docx, logical)
     assert preview.edits_skipped == 0 and preview.edits_applied > 0, (
-        f"{scenario.name}: applied={preview.edits_applied} skipped={preview.skipped_details}"
+        f"{scenario.name}: applied={preview.edits_applied} skipped={preview.edits_skipped}"
     )
     return service.apply(docx, logical).docx_bytes
 

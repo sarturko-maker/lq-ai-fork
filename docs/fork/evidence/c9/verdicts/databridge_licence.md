@@ -1,20 +1,14 @@
-# databridge_licence (moderate) — C9 v2 (surgical-redline skill LOADED)
+# databridge_licence — C9 v3 (word-diff render) · flash
 
-_Judge: Claude (Opus 4.8), sharp/sceptical panel (surgical=false if ANY material clause is struck-and-retyped wholesale). Single run per (instrument, model) — n=1; read as one strong-judged data point, not a rate._
+**Verdict:** STRONG · **surgical:** True · complexity: moderate
 
-## flash (deepseek-v4-flash)
+_A genuinely surgical, partner-grade LICENSEE redline: every one-sided limb narrowed by excision + proviso/licence-back, boilerplate left bare across all heads, no wholesale clause rewrite._
 
-**Verdict: STRONG · surgical: no** · boilerplate-bare (deterministic): yes · status: `completed` · model turns: 11
+- redlined: True · mutualisation_surgical: True · left_good_language_alone: True
 
-Partner-grade balance with mostly scalpel edits and bare boilerplate, but the flagged §5 content-licence is one continuous strike-and-retype of the whole grant, so not fully surgical.
-
-- §7 indemnity mutualised the surgical way: 'The Licensee'→'Each party', 'Licensor'→'other party', trigger narrowed to 'that party's breach', and the boilerplate 'shall indemnify, defend and hold harmless' left BARE; Licensor IP indemnity appended (mutualisation_surgical=true).
-- §5 Licensee Content (the prompt's watch-item) is a wholesale rewrite: the entire grant body [-perpetual, irrevocable, worldwide... improve its products.-] struck and retyped — a long continuous block spanning the whole limb, when striking just 'perpetual, irrevocable,' + the training tail would have sufficed. This is the surgical=false tell.
-- §8 cap done by the right mechanism: 'shall not exceed the fees paid... three (3) months' left bare, only 'claim.' struck, with a four-limb carve-out (indemnity/confidentiality/IP/data) appended and the consequential-loss exclusion mutualised to 'either party' with its own carve-outs.
-- §4 IP handled with a licence-back, not a rewrite: struck only 'configurations, integrations and' from the vesting limb (feedback-vesting left intact) and appended a Licensee-ownership + royalty-free licence-back sentence.
-- §2/§6/§9 all narrow: suspension got 'sole discretion and without notice'→'reasonable grounds' + notice procedure; warranty struck only 'NON-INFRINGEMENT.' and appended express warranties as carve-outs from the bare 'AS IS' disclaimer; §9 mutualised termination by defined-term swaps with cure period.
-- Manifest confirms boilerplate_bare:true, single apply_redline after 5 previews, 11 turns — coherent, no over-reach, no NO-REDLINE robustness fail.
-
-## pro (deepseek-v4-pro) — model-vs-method control
-
-**No redline produced** (status: `completed`, model turns: 5). The stronger tier was *less* robust here — it failed to produce any tracked changes. (Any auto-generated verdict for this cell was discarded: with no pro reconstruction on disk the judge harness read a different run's file.)
+- §8 cap is textbook: cap verb phrase 'shall not exceed the fees paid... three (3) months preceding the claim' left BARE, a 'provided that' super-carve-out (confidentiality/IP/indemnity/gross negligence) appended, and 'the Licensor'->'either party' on the consequential-loss limb — carve-outs not a number bump.
+- §5 Licensee Content (watch item) handled surgically: struck only 'perpetual, irrevocable'->'non-exclusive' and 'for any purpose, including to train the Licensor's'->narrowed-purpose + anti-training covenant; 'worldwide, royalty-free licence to use, reproduce and create derivative works' left bare. No wholesale rewrite.
+- §4 IP (watch item) is the most invasive edit but is targeted restructuring, not strike-and-retype: it splits the conflated configurations/integrations/feedback limb, vests configs/integrations in the Licensee with a licence-back, and keeps 'shall vest ... in the Licensor upon creation' for feedback — the original verb survives.
+- §7 indemnity mutualised by defined-scope swap + mirror clause: 'shall indemnify, defend and hold harmless the Licensor and its officers against any and all claims, losses, damages and expenses' left bare, scope narrowed to Content-IP-infringement, and a parallel Licensor IP indemnity appended.
+- §6 warranty: added an affirmative conformance warranty + 'maximum extent permitted' qualifier and reinstated NON-INFRINGEMENT by striking it from the disclaimer, leaving the ALL-CAPS 'DISCLAIMS ALL WARRANTIES ... MERCHANTABILITY ... FITNESS FOR A PARTICULAR PURPOSE' bare.
+- §2/§3/§9 are narrow trigger-narrowing inserts and party swaps ('The Licensor'->'Either party', 'may not terminate for convenience'->mutual right) with cure-period provisos — no continuous strike spans a whole clause; manifest boilerplate_bare:true is corroborated.

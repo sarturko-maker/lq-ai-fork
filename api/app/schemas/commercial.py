@@ -147,16 +147,6 @@ def changed_tokens(target: str, new: str) -> int:
     return deleted_tokens(target, new) + inserted_tokens(target, new)
 
 
-def changed_regions(target: str, new: str) -> int:
-    """Count of discrete non-equal regions in the minimal diff (§6.1).
-
-    >1 region means a single edit spans separated changes — Adeu's prefix/
-    suffix trim would over-mark the unchanged middle, so the tool decomposes
-    such an edit before applying. Surfaced here for tests/diagnostics.
-    """
-    return sum(1 for op, *_ in _diff_opcodes(target, new) if op != "equal")
-
-
 def is_substantive_change(target: str, new: str) -> bool:
     """True if any added/removed token in the minimal diff is substantive."""
     a, b = _tokens(target), _tokens(new)

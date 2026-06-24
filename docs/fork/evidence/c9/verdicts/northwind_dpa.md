@@ -1,20 +1,14 @@
-# northwind_dpa (moderate) — C9 v2 (surgical-redline skill LOADED)
+# northwind_dpa — C9 v3 (word-diff render) · flash
 
-_Judge: Claude (Opus 4.8), sharp/sceptical panel (surgical=false if ANY material clause is struck-and-retyped wholesale). Single run per (instrument, model) — n=1; read as one strong-judged data point, not a rate._
+**Verdict:** STRONG · **surgical:** True · complexity: moderate
 
-## flash (deepseek-v4-flash)
+_All eight DPA heads hit with mostly in-sentence phrase swaps; the protective verb phrase is left bare and the lone continuous-block strike (sub-processing) replaced a wholly one-sided limb with the correct GDPR mechanism — partner-acceptable craft._
 
-**Verdict: ADEQUATE · surgical: no** · boilerplate-bare (deterministic): yes · status: `completed` · model turns: 18
+- redlined: True · mutualisation_surgical: True · left_good_language_alone: True
 
-All eight controller-side heads are hit with mostly-good bare-verb discipline, but three clauses (§3, §4, §9) came out garbled in the accepted text and §3/§8 are whole-limb retypes, so the craft is competent-but-flawed rather than clean-surgical.
-
-- SURGICAL (good): §2 documented-instructions and §5 security are clean defined-term/limb swaps — §5 keeps 'The Processor shall implement' bare, flips '[- not be required to-]', and inserts the Art.32 risk formula by mechanism; §6 keeps 'The Processor shall notify the Controller of a personal data breach' bare with two narrow swaps.
-- GARBLED OUTPUT (craft fail): §3 accepted reads 'shall not use the Personal Data the Personal Data for any purpose...' — the insert retyped 'the Personal Data' while the original object was left un-struck, a doubled-object bug from a wholesale operative-limb rewrite.
-- GARBLED OUTPUT: §4 accepted reads 'shall not engage or replace Sub-processors any Sub-processor without prior written authorisation...' — same doubled-object defect; substance (prior authorisation + flow-down + 'remain fully liable') is correct but the sentence is broken.
-- COHERENCE: §9 transfers leaves a dangling original fragment 'implementing any specific transfer safeguard.' after the inserted SCC/IDTA 'prior to any transfer.' sentence — grammatically broken accepted text despite correct substance.
-- UNDER-PROTECTION / LEAVE-ALONE miss: §8 created the audit right but left the poison-pill final sentence ('Processor may instead provide a summary certificate... Controller agrees to accept as sufficient') untouched, gutting it; and the §4 'remain fully liable' insert directly contradicts the untouched §7 Sub-processor Liability exclusion.
-- boilerplate_bare reported true and the instructed bare phrase 'The Processor shall implement' was honoured, but §3 and §8 effectively struck-and-retyped whole operative limbs, so surgical=false.
-
-## pro (deepseek-v4-pro) — model-vs-method control
-
-**No redline produced** (status: `failed`, model turns: 5). The stronger tier was *less* robust here — it failed to produce any tracked changes. (Any auto-generated verdict for this cell was discarded: with no pro reconstruction on disk the judge harness read a different run's file.)
+- §2 documented-instructions and §3 model-training-strike done as scattered token swaps inside the existing sentences ('may'→'shall not', inserted 'not', struck the de-identified/aggregated and 'own-account' limbs) — verb stems kept bare, not retyped.
+- §5 security-to-risk is textbook surgical: 'The Processor shall implement ... technical and organisational measures' left BARE, only the 'sole discretion / not required to implement any specific measure' limb swapped for 'appropriate to the risk' + 'specific measures reasonably requested'.
+- §4 sub-processing is the only long continuous [-...-] block, but it struck a wholly objectionable limb (sole-discretion, no notice, deemed consent) with no sound language to save and rebuilt the right mechanism: prior written authorisation + notice/objection + flow-down 'no less protective' + 'remain fully liable' — defensible rewrite, keeps 'The Processor may engage' bare.
+- §8 audit and §9 transfers use mechanism not word-bumps: 'no'→'the' right to audit + scope/notice + proviso that the compliance certificate 'shall not replace the Controller's audit rights'; transfers gated on 'appropriate transfer safeguards in accordance with applicable data protection law'.
+- §6 breach ('without undue delay after becoming aware', struck the 30-day/no-assist limb) and §10 deletion ('shall not retain ... for its own business or analytics purposes', open-ended retention struck) both hit as narrow in-sentence edits.
+- Correctly LEFT ALONE §11 liability cap (not a DPA head in this brief) and the §1 definitions/§12 governing-law — no over-reach.

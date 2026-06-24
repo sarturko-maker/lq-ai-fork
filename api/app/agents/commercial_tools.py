@@ -112,23 +112,31 @@ def build_commercial_tools(
         apply_redline call covering every change.
 
         Redline like a lawyer (this is enforced — over-broad edits are rejected):
-        - **One narrow edit per discrete change.** Change the few words that need
-          changing; never restate a whole sentence/clause to alter part of it.
+        - **Quote the clause; change only the necessary words.** Set
+          ``target_text`` to the existing clause (or the unique sentence you are
+          amending) and ``new_text`` to that SAME text with only the words that
+          must change altered — keep every other word identical. The tool computes
+          the word-level diff, so unchanged wording (the indemnity verb phrase, the
+          cap stem, defined terms) stays bare automatically — you do NOT decompose
+          into tiny edits or hand-craft anchors.
         - **Balance a one-sided clause; don't rip-and-replace it.** Against a
           vendor-favoured cap, weave in protection through the right mechanism —
           carve high-risk heads of loss (confidentiality, data protection, IP,
           indemnified claims) OUT of the cap or under a super-cap; deem key losses
-          direct; read the whole agreement. Bumping a number is the naive move.
+          direct; read the whole agreement. Bumping a number is the naive move. Do
+          not paraphrase a clause you are only narrowing — re-typing every word
+          reads as a full rewrite and will be flagged.
         - **You supply the replacement language.** Never delete substantive text
           and leave a gap — put the redrafted wording in ``new_text``.
         - **Explain substantive changes.** A change to an obligation, amount,
           period, or defined term needs a ``rationale`` (it becomes a Word comment).
 
         Each edit is an object:
-        - ``target_text`` (required): the EXACT existing text to change — must
-          appear once in the document (quote a longer span if it's not unique).
-        - ``new_text``: the replacement (omit/empty only for a non-substantive
-          deletion).
+        - ``target_text`` (required): the EXACT existing text to amend — must
+          appear once in the document (quote the whole clause/sentence so it is
+          unique and contains all your changes for it).
+        - ``new_text``: that same text with only the necessary words changed
+          (omit/empty only for a non-substantive deletion).
         - ``rationale``: why the change protects the client (required for
           substantive edits; ≥15 words).
         - ``rewrite_justified``: set true only when a full-clause rewrite is
@@ -153,9 +161,10 @@ def build_commercial_tools(
         same surgical gate and Adeu rendering as apply_redline and returns the
         rendered ``[-struck-]``/``[+inserted+]`` view of the changed paragraphs,
         but writes no file. Read the preview as the supervising lawyer will, then:
-        - if any clause was struck-and-retyped instead of edited narrowly, split
-          it into one narrow edit per discrete change and preview again;
-        - keep recognisable boilerplate (verb phrases, defined terms) BARE.
+        - if a clause shows a large struck-and-retyped block, you re-worded more
+          than necessary — revise ``new_text`` to keep the unchanged wording
+          identical (the tool only strikes words that actually differ);
+        - confirm recognisable boilerplate (verb phrases, defined terms) is BARE.
 
         When the redline reads surgically, call apply_redline with the SAME batch
         to save it. ``edits`` has the same shape as apply_redline's.
@@ -254,8 +263,9 @@ async def _render_redline(
     if not report.ok:
         return report.rejection_text()
 
-    # 4. Build the logical edits (fresh objects sidestep Adeu's process_batch
-    #    mutation cycle; one raw ModifyText per edit — no decompose, ADR-F031).
+    # 4. Build the logical edits. The service renders each as native tracked
+    #    changes via Adeu's word-level diff, keeping unchanged wording bare
+    #    (ADR-F045) — the model quotes the clause; the tool makes it surgical.
     logical = [
         ProposedEdit(e.target_text, e.new_text, e.rationale.strip() or None) for e in proposal.edits
     ]
@@ -322,9 +332,11 @@ async def _preview_redline(
         "region(s)). NOTHING has been saved — this is a dry run.\n\n"
         "Rendered tracked changes ([-struck-] / [+inserted+]):\n"
         f"{view}\n\n"
-        "Check each clause: is every change a NARROW edit (not a whole-clause "
-        "strike-and-retype)? Is recognisable boilerplate still bare? When the "
-        "redline reads surgically, call apply_redline with the SAME batch to save it."
+        "Check each clause: are only the words that needed changing struck (the "
+        "rest bare), and is recognisable boilerplate still bare? A large "
+        "struck-and-retyped block means you re-worded more than necessary — revise "
+        "new_text to keep the unchanged wording identical. When the redline reads "
+        "surgically, call apply_redline with the SAME batch to save it."
     )
 
 

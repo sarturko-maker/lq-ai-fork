@@ -462,19 +462,17 @@ grants (mirror the `composition.py` area-keyed grant; MCP tools pass `guarded_di
   to `rewrite_justified` whole-clause rewrites. Levers: pre-teach the gate rules in `surgical-redline`;
   have the gate return all violations at once; give up faster on persistent tool errors. Feeds C8/F041.
 
-- **C8/C9 redline-craft follow-ups (surfaced in the 2026-06-24 confound-corrected re-run; see
-  `docs/fork/evidence/c9/SUMMARY.md`).** The re-run (skill now loaded) confirmed the prior craft finding rather
-  than overturning it; these are the precise, evidence-grounded fixes — each **deferred because n=1 can't verify a
-  craft change** (the methodological lesson). (a) **Grant-clause-narrowing worked-example** in
-  `skills/surgical-redline/SKILL.md` — strike only the toxic adjectives/purpose tail of a one-sided data/content
-  licence or IP-assignment, keep the grant verb bare (the skill has indemnity + cap examples but none for grant
-  clauses, the #1 residual). **Must be paired with a multi-rep × strong-judge eval** — the only instrument that can
-  measure a craft-rate change (C8's 3-rep is the weak self-judge; C9 is n=1). (b) **Overlap/duplication guard** in
-  `preview_redline`/`apply_redline` — reject or merge edits whose anchors overlap, and dedupe an insertion already
-  present; this kills the observed *seam* defects (`In no event In no event`, `the Personal Data the Personal
-  Data`, duplicated termination sentence). Deterministic + unit-testable → the clearest actionable fix. (c)
-  **Multi-rep mutualisation eval** (NDA × N reps, Claude-judged) to turn "NDA mutualisation is unreliable" from an
-  n=1 observation into a rate. (Step-budget tier is **deprioritised** — pro loops to cap_exceeded regardless.)
+- **C8/C9 redline-craft follow-ups — ✅ LARGELY RESOLVED by the word-diff renderer (ADR-F045, 2026-06-24; see
+  `docs/fork/evidence/c9/SUMMARY.md` v3, [[redline-worddiff-shipped]]).** The 2026-06-24 re-run confirmed the prior
+  craft finding; root-causing it showed the residuals were a *renderer* limit (Adeu's wholesale prefix/suffix trim
+  swallowed interiors), not only model craft. Re-rendering via Adeu's native word-diff fixed them: (a) the
+  **grant-clause-narrowing** worked-example is **no longer needed** — the renderer keeps grant interiors bare
+  regardless of how the model quotes the clause (SecureScan/DataBridge/Northwind grant clauses went surgical in v3);
+  (b) the **overlap/duplication guard** is **no longer needed** — one diff per clause + Adeu's overlap detection
+  eliminated the *seam* defects (`In no event In no event` etc.; deterministic scan shows zero in v3). **Remaining
+  (optional, not blocking):** a **multi-rep × strong-judge eval** to put a confidence interval on the v3 6/7
+  surgical-pass — the renderer's interior-bare property is already unit-test-proven, so this only tightens the
+  *model-behaviour* estimate. (Step-budget tier still **deprioritised** — pro loops to cap_exceeded regardless.)
 
 - **Redline-viewing direction — "the lawyer SEES the redlines" (surfaced 2026-06-24, maintainer; strategic).**
   Today the agent produces a tracked-changes `.docx` the user must download + open in Word. Competitors

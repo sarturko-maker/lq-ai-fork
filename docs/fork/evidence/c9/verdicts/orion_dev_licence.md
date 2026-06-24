@@ -1,16 +1,14 @@
-# orion_dev_licence (complex) — C9 v2 (surgical-redline skill LOADED)
+# orion_dev_licence — C9 v3 (word-diff render) · flash
 
-_Judge: Claude (Opus 4.8), sharp/sceptical panel (surgical=false if ANY material clause is struck-and-retyped wholesale). Single run per (instrument, model) — n=1; read as one strong-judged data point, not a rate._
+**Verdict:** STRONG · **surgical:** True · complexity: complex
 
-## flash (deepseek-v4-flash)
+_A genuinely surgical, partner-grade redline that edits the offending limb of every targeted clause, leaves all sound boilerplate/procedure bare, and weaves protection via the right mechanisms — only minor under-protection in §4 where "sole and exclusive remedy" was left standing._
 
-**Verdict: STRONG · surgical: yes** · boilerplate-bare (deterministic): yes · status: `completed` · model turns: 23
+- redlined: True · mutualisation_surgical: True · left_good_language_alone: True
 
-A genuinely partner-grade complex-doc redline: every one of the eight checklist limbs was fixed with narrow edits, sound machinery (SLA credit mechanics, indemnity procedure, indirect-loss exclusion, Background-IP split) left bare, and only the §8 dangling "; ." marring an otherwise clean job.
-
-- §8 termination mutualised surgically by defined-party swap: [-The Developer-][+Either party+] plus striking [-the Client may not terminate for convenience.-] to [+.+] — verb phrase 'may terminate for convenience on sixty (60) days notice' kept bare (only blemish: leaves a dangling '; .' in clean text)
-- §4 SLA handled with restraint a partner would respect: chronic-failure exit + pre-paid-fee refund added as a clean INSERTION, while the 'sole and exclusive remedy', 99.0% availability, 8-hour response and service-credit mechanics were all left untouched
-- §6 indemnity narrowed via mechanism not strike: [-arising from or in connection with the Client's use-][+to the extent arising from the Client's misuse...or breach+], and settlement-consent proviso INSERTED onto the existing notice/control/cooperation procedure, which stays bare
-- §7 cap fixed by number swap ([-three (3)-][+twelve (12)+]) + extension of the existing carve-out list (confidentiality, data, IP added to the negligence/fraud limb); the indirect-loss exclusion sentence left entirely bare
-- §3 bespoke-vesting necessarily re-architected ([-the Deliverables, including any bespoke...-][+any bespoke...vest in the Client. All other...Deliverables+]) — not gratuitous; the Background-IP retention sentence and the perpetual licence grant kept bare
-- §2 deemed-acceptance number swapped ([-five (5)-][+fifteen (15)+]) and pay-regardless tail re-typed to accepted-Deliverable/30-day terms, with rejection right inserted; delivery→test→re-deliver procedure untouched — manifest boilerplate_bare:true, single apply_redline
+- §2: pure number swaps [-five-][+fifteen+]/[-5-][+15+] left bare; pay-regardless limb [-on delivery whether or not the Deliverable has been accepted-] struck at the limb only (verb phrase 'The Client shall pay the milestone fee' kept bare) and replaced with pay-on-acceptance + a new two-cycle reject right; deliver/test/re-deliver/restart procedure untouched
+- §3: interior weave — struck '[-the Deliverables, including-]' and the comma, inserted '[+specifically+]...[+under a Statement of Work shall vest in the Client. All other Deliverables+]' so paid-for bespoke vests in Client; Background-IP split and licence grant left bare — narrow, not a clause rewrite
+- §6: Client indemnity narrowed at the limb ('[+breach of this Agreement or unlawful+] use of the Software') and a settlement-consent proviso added as a pure insertion; the notice/control-of-defence/cooperation procedure left entirely bare (textbook leave-alone)
+- §7: '[-three-][+twelve+]' cap-period swap bare; excluded matters extended via '[- and-][+,+]' + insertion of confidentiality/IP/data-protection heads, leaving the indirect-loss exclusion and death-PI/fraud carve-outs bare
+- §5 escrow ('[- only-]' struck, cease-support event inserted) and §8 termination (mutualised by '[-The Developer-][+Either party+]' swap and striking 'may [-not -]terminate') are minimal-edit fixes — no whole clause struck and retyped anywhere
+- Gap: §4 added the chronic-SLA exit right as a clean insertion but did NOT strike 'sole and exclusive remedy' (the other named target) — minor under-protection; SLA targets/credit mechanics correctly left alone

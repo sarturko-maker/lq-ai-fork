@@ -11,11 +11,14 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ · C3b-1 ✓ · C3b-2 ✓ (ADR-F043) · C3c-1 ✓ (READ backend, ADR-F044) · C3c-2 ✓ (cockpit Memory panel) · C3-UM ✓ (the human "update memory" UX — pin composer + inline correct-a-fact + retire). The ENTIRE matter-memory track (read + write + human-correct) is SHIPPED. **C8/C9 redline-eval RE-RUN ✓** (2026-06-24,
-branch `fork/c8c9-redline-eval-rerun`): re-ran both craft evals with the `surgical-redline` skill now LOADED — the
-confound is removed and the original finding is **CONFIRMED, not overturned** (robustness improved 6/7→7/7, the taught
-indemnity/cap moves apply, but pervasive-mutualisation persists and a stronger model is *worse*). NEXT = maintainer's
-call: **C7** (fan-out + redline-download UI), then **C5/C6**. See the "After C3-UM" + "Redline-viewing direction" notes below.**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ · C3b-1 ✓ · C3b-2 ✓ (ADR-F043) · C3c-1 ✓ (READ backend, ADR-F044) · C3c-2 ✓ (cockpit Memory panel) · C3-UM ✓ (the human "update memory" UX — pin composer + inline correct-a-fact + retire). The ENTIRE matter-memory track (read + write + human-correct) is SHIPPED. **C8/C9 redline-eval RE-RUN ✓** (2026-06-24): re-ran both
+craft evals with the `surgical-redline` skill LOADED — confound removed, finding CONFIRMED. **REDLINE WORD-DIFF ✓**
+(2026-06-24, branch `fork/redline-worddiff-adeu`, **ADR-F045**): the redline tool now renders surgically via Adeu's
+NATIVE `adeu.diff.generate_edits_from_text` (applied via `engine.apply_edits` to bypass `validate_edits`) instead of
+the wholesale prefix/suffix-trim path that SWALLOWED interiors; skill simplified to "quote the clause, change only the
+necessary words — the tool diffs it." **Live-judged (Claude Opus 4.8): C9 surgical-pass 3/7 → 6/7, the Aegis NDA
+pervasive-mutualisation case now STRONG·surgical (survived the refuter), seam defects eliminated.** **NEXT = maintainer's
+call: C7 (fan-out + redline-download UI) / C5 (negotiation rounds) / C6 (controlling playbook skills).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -27,25 +30,37 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this session (C8/C9 redline-eval RE-RUN — branch `fork/c8c9-redline-eval-rerun`; NO migration / deps / production code)
+## Done this session (REDLINE WORD-DIFF — branch `fork/redline-worddiff-adeu`; ADR-F045; NO migration / deps)
 
-**What:** re-ran C8 (auto-rate, 2 docs × 3 reps) + C9 (Claude-judged, 7 instruments) with the `surgical-redline`
-skill **loaded** (it was silently dropped in v1 — frontmatter `": "` bug, fixed C3a). Plan + full outcome:
-`docs/fork/plans/C8C9-redline-eval-rerun.md`; headline `docs/fork/evidence/c9/SUMMARY.md`. **Maintainer chose**
-both harnesses + flash-then-conditional-pro.
+**What:** the redline TOOL now produces surgical tracked changes itself, so the model only has to preserve unchanged
+wording. Root cause of the C8/C9 swallow (read from Adeu's engine source): our adapter sent ONE wholesale
+`ModifyText` per edit → Adeu's `_pre_resolve_heuristic_edit` trims only common prefix/suffix → **swallows unchanged
+interiors**. Plan `docs/fork/plans/redline-worddiff-via-adeu.md`; ADR-F045; headline `docs/fork/evidence/c9/SUMMARY.md`.
 
-- **Premise gate (deterministic):** skill loads (19/19, no silent drops) + binds to Commercial; the harnesses
-  inject the real registry. Corroborated: every run calls the on-demand `read_file` skill tool and reproduces the
-  skill's worked examples (Meridian §7 near-verbatim).
-- **Result: confound removed, finding CONFIRMED not overturned.** Robustness 6/7→7/7 redlined (Meridian no-redline
-  → STRONG·surgical), bare 5/7→6/7, taught indemnity/cap moves applied — BUT surgical-pass rate flat at n=1 (same
-  panel 5/7→3/7 = noise), pervasive mutualisation persists (Aegis §9), and **pro is *worse*** (2/4 no-redline, NDA
-  cap_exceeded → model tier doesn't fix it).
-- **Decision: NO production change** (n=1 can't verify a craft fix → defer all fixes to slices that pair each with
-  a verification; see MILESTONES § Backlog "C8/C9 redline-craft follow-ups").
-- **Evidence:** `c8/eval/` (v2) + `c8/eval-v1-skill-absent/` (archived); `c9/{flash,pro}/`, `c9/verdicts/*.md`,
-  `c9/SUMMARY.md` (v2) + `c9/v1-skill-absent/` (archived); both READMEs bannered confounded. v1 archived with
-  `git mv` (history preserved); nothing erased.
+- **`api/app/agents/redline_service.py` (the fix):** new `_word_diff_edits(engine, edits)` — for each
+  `(target,new)`, diff `full` vs `full.replace(target,new)` via `adeu.diff.generate_edits_from_text` (sub-edits carry
+  full-document `_match_start_index`), rationale on the first sub-edit; `dry_run`/`apply` now call
+  **`engine.apply_edits(...)` directly, NOT `process_batch`** (the canonical `adeu.sanitize.core` pattern — bypasses
+  `validate_edits`' per-sub-edit uniqueness check, which would reject a short region like "the Customer"; `apply_edits`
+  trusts the positional index). **Wholesale fallback** when `full.count(target)!=1` (rare whitespace mismatch; D4
+  already guarantees uniqueness in the doc text) — logged counts-only. Removed dead `_counts`.
+- **`skills/surgical-redline/SKILL.md` → v2.0.0:** dropped the anchor-mechanics / decompose / "split the block" /
+  "fold into the boundary" coaching; teaches "quote the clause, change only the necessary words, keep the rest
+  verbatim — the tool diffs it." Skill-loader guard re-run green (no `": "` silent-drop).
+- **`api/app/agents/commercial_tools.py`:** tool docstrings + preview self-review text realigned to the new approach.
+- **`api/app/schemas/commercial.py`:** removed dead `changed_regions()`. **Gate D1–D5 UNCHANGED** — it keys on the
+  minimal token diff (renderer-agnostic) and still guards genuine over-rewording; no threshold change (unverifiable
+  at n=1, ADR-F045).
+- **Empirically proven before coding** (read Adeu's `engine.py`/`diff.py`/`sanitize/core.py`; scratchpad
+  `worddiff_design_probe2.py`): indemnity → 3 regions verb-phrase bare, multi-edit batches don't cross-contaminate,
+  genuine rewrite still ONE block (renderer doesn't fake surgery), hyphen/underscore no corruption.
+- **Verify:** `test_redline_service.py` 10/10 (5 new word-diff cases) · gate/loader/tools 52 · broad non-provider
+  regression **513 passed** · ruff check+format clean · mypy clean on changed files. **Live (DeepSeek flash, C9
+  harness, all 7 instruments + Claude-judge via `scratchpad/c9-judge.js`): surgical-pass 3/7 → 6/7, STRONG 6/7,
+  redlined 7/7, boilerplate-bare 6/7 → 7/7; Aegis NDA mutualisation STRONG·surgical (refuter held); seam-defect
+  duplication eliminated (deterministic scan).** The lone ADEQUATE (Meridian) is the model *choosing* to
+  wholesale-rewrite a warranty disclaimer — a genuine rewrite the renderer correctly preserves, NOT a swallow.
+  Evidence: `c9/flash`, `c9/verdicts/*.md`, `c9/SUMMARY.md` (v3) + `c9/v2-wholesale-render/` (archived v2).
 
 ### Earlier (C3c-2 — cockpit matter-memory panel SHIPPED; PR #137, branch `fork/c3c2-cockpit-memory-panel`)
 
@@ -191,7 +206,7 @@ reconstruction). Plan `docs/fork/plans/C9-claude-judged-redline-tests.md`.
   committed): `LQ_AI_DOCLING_ENABLED=false` (Docling hung PDFs to its 300s timeout) and the seeded org
   profile. Full findings: memory `commercial-agent-live-uat-findings`.
 
-## ▶ PICK UP — C3-UM SHIPPED; next = maintainer's call (recommend C8/C9 redline-eval re-run)
+## ▶ PICK UP — REDLINE WORD-DIFF SHIPPED (ADR-F045); next = maintainer's call (C7 / C5 / C6)
 
 **C3-UM (the human "update memory" UX) is DONE** on branch `fork/c3-update-memory-ux` (squash-merged; the whole
 matter-memory track is now complete). What shipped — three human gestures on `MemoryPanel.svelte`, all
@@ -233,14 +248,18 @@ btrfs subvolumes persist, `apt-get install btrfs-progs`, stop docker, delete `/v
 admin) seeded with a wiki + 2 wiki snapshots + 5 live facts + 1 superseded fact + 1 human-pinned correction.
 Deep-link `/lq-ai?area=commercial&matter=905720d1-5d17-43cd-a8f0-3a76d095de34` → **Memory** tab.
 
-**Next (maintainer's call, not blocked):** **C5** negotiation rounds · **C6** controlling playbook skills
-(needs F036+F038) · **C7** fan-out + **redline-download UI**. **✅ C8/C9 redline-eval RE-RUN DONE** (2026-06-24) —
-the confound (silently-dropped `surgical-redline` SKILL.md, fixed in C3a) is removed; the re-run **confirms** the
-prior craft finding (`docs/fork/evidence/c9/SUMMARY.md`). **Evidence-grounded craft follow-ups are now in MILESTONES
-§ Backlog** ("C8/C9 redline-craft follow-ups"): grant-clause worked-example + a multi-rep×strong-judge eval; an
-overlap/duplication guard in the redline tools (the clearest fix — kills the seam defects); a multi-rep mutualisation
-eval. Each deferred because **n=1 can't verify a craft change**. **Cross-cutting marker-fence hardening** (carried
-C3a nit). **Other C3 backlog:** embedding/FTS search UI (gateway `/v1/embeddings` 501 until B6); log pagination.
+**▶▶ PICK UP HERE — REDLINE WORD-DIFF SHIPPED; next slice = maintainer's call.** The redline-craft track's
+renderer fix is done (ADR-F045): the tool keeps interiors bare via Adeu's native word-diff, the skill is
+simplified, and the live C9 re-judge confirms surgical-pass 3/7→6/7 with the NDA mutualisation case (the prior
+slices' headline weakness) RESOLVED. The MILESTONES § Backlog "C8/C9 redline-craft follow-ups" are now largely
+**addressed**: the grant-clause wholesale-strike + the seam/duplication defect are both fixed by the renderer (no
+separate worked-example or overlap-guard slice needed). **Remaining open commercial slices (maintainer picks):**
+**C7** fan-out + **redline-download UI** (the most-requested — lets a lawyer download the redlined `.docx`); **C5**
+negotiation rounds; **C6** controlling playbook skills. **Optional deeper verification** (not blocking): a
+multi-rep × strong-judge eval to put a confidence interval on the 6/7 surgical-pass (n=1 today; the renderer's
+interior-bare property is already unit-test-proven, so this only tightens the *model-behaviour* estimate). **Carried
+cross-cutting:** marker-fence hardening (C3a nit); embedding/FTS search UI (gateway `/v1/embeddings` 501 until B6);
+log pagination.
 
 ## Gotchas / durable traps (C8 + C4 + carried)
 
@@ -263,11 +282,20 @@ C3a nit). **Other C3 backlog:** embedding/FTS search UI (gateway `/v1/embeddings
   svelte/no-at-html-tags` comment** (the shared sanitizer is DOMPurify media-forbid; raw `{@html}` fails lint
   and is an XSS sink). Every matter-memory body (`content_md`/`body_md`/`body_preview`) is untrusted model text.
 
-- **C8 — Adeu crashes on a PURE zero-width insertion** (`new_text` that merely appends after an unchanged
-  anchor → `Op=INSERTION at [n:n]` → `AttributeError` in `adeu/redline/engine.py`). Fold an addition into
-  the **boundary** instead (end the anchor at the clause's punctuation, replace it and continue — the working
-  §9 carve-out shape). The skill teaches this; `preview_redline`/`apply_redline` catch the crash and return
-  `_EDITOR_ERROR_MSG` (no partial write). Golden/skill examples MUST use the boundary pattern.
+- **F045 — the redline renderer uses Adeu's NATIVE word-diff applied via `engine.apply_edits`, NOT
+  `process_batch`.** `redline_service._word_diff_edits` diffs `full` vs `full.replace(target,new)` with
+  `adeu.diff.generate_edits_from_text` (sub-edits carry full-document `_match_start_index`), then
+  `engine.apply_edits(subs)` applies them positionally. **Do NOT switch back to `process_batch`** — it runs
+  `validate_edits`, which re-checks each sub-edit's `target_text` for uniqueness and REJECTS a short region
+  ("the Customer" recurs) with `BatchValidationError: Ambiguous match`. `apply_edits` trusts the index and
+  skips that check (the canonical `adeu.sanitize.core` pattern). The fragment-relative trap: diff the FULL doc
+  text, never the bare clause, or `_match_start_index` is relative to the fragment and misplaces. Fallback to a
+  wholesale `ModifyText` only when `full.count(target)!=1`. Proof scripts: `scratchpad/worddiff_design_probe2.py`.
+- **F045 — a genuine rewrite (every word changed) correctly renders as ONE block; the renderer does not fake
+  surgery.** So the surgical signal still depends on the model preserving unchanged wording (the skill teaches
+  it) and the gate (D1–D5, minimal-diff) still guards genuine over-rewording. A carve-out APPEND now renders as
+  a clean insertion via the word-diff (no more zero-width-insertion crash to dodge) — the skill no longer needs
+  the "fold into the boundary" mechanic, though `_EDITOR_ERROR_MSG` remains as a defensive catch.
 - **C8 — the surgical-craft eval is provider-marked** (`test_commercial_redline_eval.py`): run live with
   `LQ_AI_SCENARIO_MODEL=deepseek LQ_AI_REDLINE_EVAL_REPS=N UX_B1_EVIDENCE_DIR=<repo>/docs/fork/evidence/c8`.
   It regenerates ALL eval files in one run — if a (doc,rep) yields no redline, no per-rep file is written, so

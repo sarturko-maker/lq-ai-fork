@@ -1,16 +1,14 @@
-# meridian_services_sow (moderate) — C9 v2 (surgical-redline skill LOADED)
+# meridian_services_sow — C9 v3 (word-diff render) · flash
 
-_Judge: Claude (Opus 4.8), sharp/sceptical panel (surgical=false if ANY material clause is struck-and-retyped wholesale). Single run per (instrument, model) — n=1; read as one strong-judged data point, not a rate._
+**Verdict:** ADEQUATE · **surgical:** False · complexity: moderate · weak-case
 
-## flash (deepseek-v4-flash)
+_A complete, well-mechanised redline that handles the mutualisation heads (§7/§8/§9) with exemplary bare-verb party-swaps, but the §5 warranty disclaimer and §6 personnel tail are struck-and-retyped as long continuous blocks, so it is not fully surgical._
 
-**Verdict: STRONG · surgical: yes** · boilerplate-bare (deterministic): yes · status: `completed` · model turns: 26
+- redlined: True · mutualisation_surgical: True · left_good_language_alone: True
 
-A genuinely surgical, mechanism-correct CUSTOMER-side redline across all eight heads — the §7 mutualisation is done by bare defined-term swaps keeping "shall indemnify, defend and hold harmless" untouched — marred only by an incoherent duplicated termination sentence (§9) and a latent §5 warrant-vs-disclaimer tension.
-
-- §7 indemnity (mutualisation case): fixed by party-swaps [-The Customer-][+Each party+] / [-Supplier-][+other party+] with the verb phrase 'shall indemnify, defend and hold harmless' left BARE, plus a narrowed trigger ('arising from the indemnifying party's breach') and an added Supplier IP indemnity — textbook surgical mutualisation, not a strike-and-retype; manifest boilerplate_bare:true confirms.
-- §8 cap done by the right mechanism: period bump [-one (1) month-][+twelve (12) months+] PLUS carve-outs inserted as a 'provided that this limitation shall not apply to (i)-(iv)' proviso after [-claim.-]; the bare 'shall not exceed' and the indirect-loss exclusion sentence left untouched. Strong balance work.
-- §4 IP: only the vesting limb swapped [-exclusively in the Supplier-][+in the Customer (for bespoke) and in the Supplier (for pre-existing)+]; the existing licence sentence left bare — clean LEAVE-ALONE.
-- §2/§3/§6: each is a narrow swap of the one-sided limb (3→30 days; uncapped→SOW cap; rate-revise window; sole-discretion→key-person consent) with surrounding text preserved. No wholesale clause rewrite anywhere.
-- COHERENCE FAIL §9: the for-convenience fix produces two overlapping inserts — '[+Either party may terminate... to the other party;+]' then a redundant '[+The other party may also terminate... to the Supplier+]' — duplicative and internally contradictory (Either party already covers both); a partner would cut the second sentence.
-- Minor §5 tension: inserts a conformance warranty after 'AS IS' but leaves the full disclaimer ('does not warrant... conform to any specification') bare, so the clause now both warrants and disclaims conformance — should have struck the disclaimer limb.
+- §7 indemnity (the flagged mutualisation case) is GOLD-STANDARD surgical: [-The Customer-][+Each party+] ... the [-Supplier-][+other party+] leaves the boilerplate verb phrase 'shall indemnify, defend and hold harmless' BARE, then adds a Supplier IP-infringement limb by insert rather than rewrite.
+- §8 cap is the strongest balance move: 'shall not exceed' left bare, period bumped one(1)->twelve(12) months and mutualised, with protection delivered via an APPENDED carve-out block (confidentiality, indemnity, IP, gross negligence/wilful misconduct) — mechanism, not just a bigger number.
+- §5 warranties FAILS surgical: the entire disclaimer body [-does not warrant that any deliverable will conform...disclaims all warranties-] is one continuous strike replaced by a long inserted (a)/(b)/(c)+sole-remedy block — a wholesale strike-and-retype of a material clause (the inherent AS-IS->affirmative-warranty flip excuses it but it is still wholesale).
+- §6 personnel similarly strikes a long tail 'at any time in its sole discretion...perform the services' and retypes the key-person-consent + reasonable-efforts regime as one block, rather than a narrow inserted carve-out.
+- §2/§3/§4/§9 are genuinely surgical: trigger/defined-term swaps (three(3)->fifteen(15) days, may->may not revise rates, Supplier->Customer IP vesting, ten(10)->thirty(30) day mutual termination) with sentence skeletons preserved; 'to the fullest extent permitted by law' left bare in §5.
+- Robustness PASS on this DeepSeek re-run (manifest 'deepseek', 23 turns, full preview_redline x12 -> apply_redline loop, record_matter_fact) — the flash v1 NO-REDLINE gap is resolved; coverage spans all eight requested heads with no over-reach.
