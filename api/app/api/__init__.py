@@ -40,6 +40,7 @@ from app.api import (
     integrations_teams,
     internal,
     knowledge_bases,
+    matter_files,
     matter_memory,
     models,
     organization_profile,
@@ -108,6 +109,7 @@ api_router.include_router(organization_profile.router, dependencies=_active)
 # cross-user). The agent's matter-wiki auto-write has no endpoint (it is a guarded
 # agent tool); this surface exists solely for the authenticated human correction.
 api_router.include_router(matter_memory.router, dependencies=_active)
+api_router.include_router(matter_files.router, dependencies=_active)
 api_router.include_router(saved_prompts.router, dependencies=_active)
 # PRIV-3 (ADR-F019): the deployment-global ROPA register read API. Mounted under
 # `_active` (active firm user); the register is shared firm-wide, so no per-user

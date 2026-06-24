@@ -22,15 +22,16 @@
 	 */
 	import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import DownloadIcon from '@lucide/svelte/icons/download';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import SquareIcon from '@lucide/svelte/icons/square';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import { renderModelMarkdown } from '$lib/lq-ai/sanitize-markdown';
 	import StepRow from './StepRow.svelte';
-	import { agentsApi, filesApi } from '$lib/lq-ai/api';
+	import { agentsApi, filesApi, matterFilesApi } from '$lib/lq-ai/api';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import type { AgentRun, AgentRunStep, AgentThreadDetailResponse } from '$lib/lq-ai/api/agents';
-	import type { FileMeta, Project } from '$lib/lq-ai/types';
+	import type { FileMeta, MatterFile, Project } from '$lib/lq-ai/types';
 	import {
 		MAX_POLL_FAILURES,
 		POLL_INTERVAL_MS,
@@ -124,6 +125,45 @@
 	let detail: AgentThreadDetailResponse | null = null;
 	let currentThreadId: string | null = null;
 	let pollError: string | null = null;
+
+	// C7a (ADR-F046): the redline-download surface, inline under the run that made it.
+	// `producedByRun[runId]` = the work-product files that run created (e.g. a redlined
+	// .docx), keyed by File.created_by_run_id. Refreshed when the set of completed runs
+	// changes; the durable surface is the matter Documents tab, so a fetch failure here
+	// is non-fatal (the inline convenience just stays empty).
+	let producedByRun: Record<string, MatterFile[]> = {};
+	let producedGen = 0;
+	let downloadingFileId: string | null = null;
+	let inlineDownloadError = '';
+
+	async function loadProducedFiles(projectId: string) {
+		const gen = ++producedGen;
+		try {
+			const { files } = await matterFilesApi.listMatterFiles(projectId);
+			if (gen !== producedGen) return;
+			const map: Record<string, MatterFile[]> = {};
+			for (const f of files) {
+				if (f.created_by_run_id) (map[f.created_by_run_id] ??= []).push(f);
+			}
+			producedByRun = map;
+		} catch {
+			// non-fatal — the Documents tab is the durable download surface.
+		}
+	}
+
+	async function downloadProduced(file: MatterFile) {
+		if (downloadingFileId) return; // one at a time
+		downloadingFileId = file.id;
+		inlineDownloadError = '';
+		try {
+			await filesApi.downloadFile(file.id, file.filename);
+		} catch (e) {
+			inlineDownloadError =
+				e instanceof LQAIApiError ? e.message : 'Could not download — it may have been removed.';
+		} finally {
+			downloadingFileId = null;
+		}
+	}
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	// Bumped on every start/stop; a settling response from an older generation
 	// is discarded, so stale snapshots can never overwrite a settled thread.
@@ -690,6 +730,20 @@
 	// a matter is selected in the composer).
 	$: matterBound = detail ? detail.thread.project_id !== null : selectedMatterId !== '';
 	$: hasConversation = detail !== null;
+
+	// C7a (ADR-F046): refresh the produced-files map when the set of COMPLETED runs
+	// changes — a redline that just settled wrote an output File. Keyed on a cheap
+	// signature so it doesn't refetch on every poll tick of a still-running turn.
+	$: completedRunSig = detail
+		? detail.runs
+				.filter((t) => t.run.status === 'completed')
+				.map((t) => t.run.id)
+				.join(',')
+		: '';
+	$: matterFilesProjectId = detail?.thread.project_id ?? null;
+	$: if (matterFilesProjectId && completedRunSig) {
+		void loadProducedFiles(matterFilesProjectId);
+	}
 	// The Matter the composer would upload into: the open conversation's
 	// binding, or the selected matter for a new chat. null = no home → no
 	// attach (ADR-F002).
@@ -900,6 +954,35 @@
 					<p class="lq-text-body-sm ag-error">
 						Run failed: {turn.run.error ?? 'unknown error'}
 					</p>
+				{/if}
+
+				{#if producedByRun[turn.run.id]?.length}
+					<!-- C7a (ADR-F046): the run's work product, downloadable inline. The
+					     redlined .docx is persisted as a matter file; this hits the existing
+					     GET /files/{id}/content. The Documents tab is the durable surface. -->
+					<div class="ag-produced" data-testid="lq-ai-agents-produced">
+						<p class="lq-text-label ag-produced__head">
+							Document{producedByRun[turn.run.id].length === 1 ? '' : 's'} produced
+						</p>
+						{#each producedByRun[turn.run.id] as f (f.id)}
+							<button
+								type="button"
+								class="ag-produced__file"
+								disabled={downloadingFileId === f.id}
+								data-testid="lq-ai-agents-download"
+								on:click={() => downloadProduced(f)}
+							>
+								<DownloadIcon class="size-4" aria-hidden="true" />
+								<!-- filename is plain text (a work-product label), never markdown/HTML -->
+								<span class="ag-produced__name"
+									>{downloadingFileId === f.id ? 'Downloading…' : f.filename}</span
+								>
+							</button>
+						{/each}
+						{#if inlineDownloadError}
+							<p class="lq-text-caption ag-error">{inlineDownloadError}</p>
+						{/if}
+					</div>
 				{/if}
 			</section>
 		{/each}
@@ -1546,6 +1629,53 @@
 
 	.ag-note {
 		color: var(--color-muted-foreground);
+	}
+
+	/* C7a — produced work product (e.g. a redline output) download, inline under the run. */
+	.ag-produced {
+		margin-top: var(--lq-space-3);
+		display: flex;
+		flex-direction: column;
+		gap: var(--lq-space-2);
+	}
+
+	.ag-produced__head {
+		color: var(--color-muted-foreground);
+	}
+
+	.ag-produced__file {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--lq-space-2);
+		align-self: flex-start;
+		max-width: 100%;
+		background: var(--color-card);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		padding: var(--lq-space-2) var(--lq-space-3);
+		cursor: pointer;
+		font: inherit;
+		font-size: 13px;
+		color: var(--color-foreground);
+		transition:
+			border-color 150ms ease-out,
+			color 150ms ease-out;
+	}
+
+	.ag-produced__file:hover {
+		border-color: color-mix(in oklch, var(--color-primary) 40%, transparent);
+		color: var(--color-primary);
+	}
+
+	.ag-produced__file:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+
+	.ag-produced__name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	@keyframes ag-pulse {

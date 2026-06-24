@@ -17,8 +17,14 @@ craft evals with the `surgical-redline` skill LOADED — confound removed, findi
 NATIVE `adeu.diff.generate_edits_from_text` (applied via `engine.apply_edits` to bypass `validate_edits`) instead of
 the wholesale prefix/suffix-trim path that SWALLOWED interiors; skill simplified to "quote the clause, change only the
 necessary words — the tool diffs it." **Live-judged (Claude Opus 4.8): C9 surgical-pass 3/7 → 6/7, the Aegis NDA
-pervasive-mutualisation case now STRONG·surgical (survived the refuter), seam defects eliminated.** **NEXT = maintainer's
-call: C7 (fan-out + redline-download UI) / C5 (negotiation rounds) / C6 (controlling playbook skills).**
+pervasive-mutualisation case now STRONG·surgical (survived the refuter), seam defects eliminated.** **C7 SPLIT →
+C7a redline-download SHIPPED** (2026-06-24, branch `fork/c7a-redline-download`, **ADR-F046**, migration `0071`): a
+cockpit **Documents tab** + an **inline run-timeline download** surface the agent's redlined `.docx` over a new
+`GET /matters/{id}/files` + a `File.created_by_run_id` provenance column, reusing the existing
+`GET /files/{id}/content` (no new bytes path / SSE change). Live-proven on Atlas: a real DeepSeek redline →
+output carries `created_by_run_id` → appears in the tab + inline. **NEXT = maintainer's call: C7b (drafter/reviewer
+fan-out roster) / C5 (negotiation rounds + the accept/reject/counter classification) / C6 (controlling playbook
+skills).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -30,7 +36,39 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this session (REDLINE WORD-DIFF — branch `fork/redline-worddiff-adeu`; ADR-F045; NO migration / deps)
+## Done this session (C7a — REDLINE-DOWNLOAD surface — branch `fork/c7a-redline-download`; ADR-F046; migration `0071`)
+
+**What:** the lawyer can now **download the redlined `.docx`** the commercial agent produces — both from a cockpit
+**Documents tab** (every matter, all areas) and **inline** under the completed run that made it. Closes the stranded
+work-product gap (the redline was persisted + audited but never surfaced). C7 was SPLIT (3 features > one-PR
+discipline): **C7a = download only**; deferred = **C7b** drafter/reviewer fan-out roster, and the accept/reject/counter
+**classification + deal-context live signal → C5**. Plan `docs/fork/plans/C7a-redline-download-surface.md`; ADR-F046.
+
+- **Reused, not rebuilt:** `GET /api/v1/files/{file_id}/content` already streams bytes (owner-scoped 404). The
+  download path is unchanged; C7a only adds a way to *find* the file + the UI. **No SSE/step protocol change** —
+  `AgentRunStep` has only a text summary (no structured-artifact channel), so one matter-files endpoint feeds BOTH
+  surfaces instead of threading a new frame (settled-rows-decide intact).
+- **`File.created_by_run_id`** (mig `0071`, nullable FK → `agent_runs.id`, `ON DELETE SET NULL`, additive/no-backfill);
+  `_apply_redline` stamps it (`run_id` already in scope at `build_commercial_tools`). Honest run→file provenance → the
+  inline button filters to `created_by_run_id === run.id` (precise, not a filename heuristic).
+- **`GET /matters/{project_id}/files`** — new `api/app/api/matter_files.py` on the `/matters` router, owner-scoped via
+  `_load_visible_project` (404 cross-user/archived). Metadata only, newest-first, membership-union scope (mirrors
+  `tools._matter_files_query`). Registered in `api/__init__.py`; meta-tests updated (`test_endpoints` IMPLEMENTED_ROUTES
+  + `test_openapi` EXPECTED_PATHS, count 147→148).
+- **Web:** `files.ts` `downloadFile` + pure `pickDownloadFilename`; `matterFiles.ts` `listMatterFiles`; `types.ts`
+  `MatterFile`. `DocumentsPanel.svelte` (new, Svelte-5 runes; load/poll/reconcile mirror MemoryPanel; pure helpers in
+  `<script module>`). `ConversationHost` — `'documents'` tab whenever a matter is set; conversation region stays MOUNTED
+  behind `class:hidden` via `matterPanelOpen` (no-remount invariant); reset-on-leave. `ConversationPanel` (Svelte-4) —
+  inline Download under each completed run, refetched when the completed-run set changes.
+- **Verify:** migration upgrade+**downgrade** round-trip on a throwaway DB (live DB untouched); full api suite **2639
+  passed / 2 skipped** (lone failure = the documented env-flake `test_ready`); targeted endpoint/commercial-tools/meta
+  tests green; ruff + mypy clean. Web: `npm run check` 0 errors, vitest **938 passed** (+12), prettier/eslint clean on
+  touched files. **Headed Cypress 2/2** (`c7a-documents.cy.ts`) + screenshot matrix → `docs/fork/evidence/c7a/`.
+  **Live (Atlas, DeepSeek):** real redline run `b588d8f8…` completed → output `…(redlined).docx` carries
+  `created_by_run_id` == the run id; uploads carry `null`; nonexistent matter → 404. Full chain proven through the
+  rebuilt arq-worker.
+
+## Previous slice (REDLINE WORD-DIFF — branch `fork/redline-worddiff-adeu`; ADR-F045; NO migration / deps)
 
 **What:** the redline TOOL now produces surgical tracked changes itself, so the model only has to preserve unchanged
 wording. Root cause of the C8/C9 swallow (read from Adeu's engine source): our adapter sent ONE wholesale
@@ -248,21 +286,36 @@ btrfs subvolumes persist, `apt-get install btrfs-progs`, stop docker, delete `/v
 admin) seeded with a wiki + 2 wiki snapshots + 5 live facts + 1 superseded fact + 1 human-pinned correction.
 Deep-link `/lq-ai?area=commercial&matter=905720d1-5d17-43cd-a8f0-3a76d095de34` → **Memory** tab.
 
-**▶▶ PICK UP HERE — REDLINE WORD-DIFF SHIPPED; next slice = maintainer's call.** The redline-craft track's
-renderer fix is done (ADR-F045): the tool keeps interiors bare via Adeu's native word-diff, the skill is
-simplified, and the live C9 re-judge confirms surgical-pass 3/7→6/7 with the NDA mutualisation case (the prior
-slices' headline weakness) RESOLVED. The MILESTONES § Backlog "C8/C9 redline-craft follow-ups" are now largely
-**addressed**: the grant-clause wholesale-strike + the seam/duplication defect are both fixed by the renderer (no
-separate worked-example or overlap-guard slice needed). **Remaining open commercial slices (maintainer picks):**
-**C7** fan-out + **redline-download UI** (the most-requested — lets a lawyer download the redlined `.docx`); **C5**
-negotiation rounds; **C6** controlling playbook skills. **Optional deeper verification** (not blocking): a
-multi-rep × strong-judge eval to put a confidence interval on the 6/7 surgical-pass (n=1 today; the renderer's
-interior-bare property is already unit-test-proven, so this only tightens the *model-behaviour* estimate). **Carried
-cross-cutting:** marker-fence hardening (C3a nit); embedding/FTS search UI (gateway `/v1/embeddings` 501 until B6);
+**▶▶ PICK UP HERE — C7a REDLINE-DOWNLOAD SHIPPED; next slice = maintainer's call.** The lawyer can now download
+the redlined `.docx` (Documents tab + inline run-timeline download, ADR-F046, mig `0071`) — proven live on Atlas.
+C7 was split: the download surface is done; **C7b** (drafter/reviewer fan-out roster + post-fan-out reconciliation)
+and the accept/reject/counter **classification + deal-context live signal → C5** are deferred. The fan-out
+*infrastructure* already works (subagent steps nest via `parent_step_id`, mirrored to SSE + parsed by the web,
+tested in `test_agent_composition.py`), and **blocker #6 (`work_product_attributions`) is a legacy-chat concern,
+NOT on the agent path** — so C7b is "define drafter/reviewer subagents (mig reconciling `0057`) + a reconciliation
+pass," not an attribution rebuild. **Remaining open commercial slices (maintainer picks):** **C7b** fan-out roster;
+**C5** negotiation rounds (+ the classification/live-signal); **C6** controlling playbook skills. **Optional deeper
+verification** (not blocking): a multi-rep × strong-judge redline eval (n=1 today). **Carried cross-cutting:**
+in-app redline *viewer/accept* (the bigger evolution beyond download — [[redline-viewing-direction]], MCP-gated /
+AGPL caveat); marker-fence hardening (C3a nit); embedding/FTS search UI (gateway `/v1/embeddings` 501 until B6);
 log pagination.
 
 ## Gotchas / durable traps (C8 + C4 + carried)
 
+- **C7a — `api`, `arq-worker`, `ingest-worker` are SEPARATE per-service images** (`lq-ai-api` /
+  `lq-ai-arq-worker` / `lq-ai-ingest-worker`), all built from `./api`. `docker compose build api` rebuilds ONLY
+  `lq-ai-api` — the workers keep their old image. After a code/migration change you must
+  `docker compose build api arq-worker ingest-worker` (then `up -d --force-recreate` them) or the **agent loop
+  runs stale worker code** (the agent run executes in arq-worker — confirmed by the C9 UAT S3-env finding). Verify
+  with `docker inspect --format '{{.Image}}' lq-ai-<svc>-1` after a rebuild. The CLAUDE.md "rebuild all three
+  together" rule means three SEPARATE builds, not one.
+- **C7a — Postgres `now()` is CONSTANT within a transaction.** Two rows inserted in the same test transaction
+  share `created_at`, so a "newest-first" ordering assertion falls back to the id tiebreaker and flaps. Set an
+  explicit `created_at` per row in ordering tests (in production each file is its own transaction, so it's fine).
+- **C7a — a new FK column means a unit test that INSERTS the row must satisfy it.** `_apply_redline`'s
+  `created_by_run_id` FK → `agent_runs.id` forced the happy-path test to seed a real thread+run; the
+  reject/scope tests never persist a File so a bare `uuid` passes. And **Svelte merges `<script module>` +
+  `<script>` into one module** — importing a type in both blocks is a "Duplicate identifier" (import once).
 - **C3c-2 — the `web` container serves a PRE-BUILT bundle; rebuild it before any UI/Cypress verification**
   (`docker compose up -d --build web`) or you test stale code (a CLAUDE.md hard rule — bit the cockpit
   screenshot workflow). Headed Cypress needs `DISPLAY=:0` (`X0`/`X1` sockets present on this box).

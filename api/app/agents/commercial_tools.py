@@ -150,6 +150,7 @@ def build_commercial_tools(
                 document_name=document_name,
                 edits=edits,
                 service=redline_service,
+                run_id=run_id,
             ),
             ctx,
         )
@@ -347,6 +348,7 @@ async def _apply_redline(
     document_name: str,
     edits: list[dict[str, Any]],
     service: RedlineService,
+    run_id: uuid.UUID,
 ) -> str:
     """Render (validate → gate → dry-run → apply) then persist + audit (or reject)."""
     rendered = await _render_redline(
@@ -375,6 +377,9 @@ async def _apply_redline(
         hash_sha256=hashlib.sha256(redlined).hexdigest(),
         storage_path=str(new_file_id),
         ingestion_status="ready",
+        # Work-product provenance (ADR-F046): ties this output to the run that
+        # produced it, so the cockpit can surface the download inline under the run.
+        created_by_run_id=run_id,
     )
     db.add(file_row)
     await db.flush()

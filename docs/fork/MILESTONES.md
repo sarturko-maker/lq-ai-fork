@@ -454,9 +454,10 @@ grants (mirror the `composition.py` area-keyed grant; MCP tools pass `guarded_di
   **GFM markdown in the assistant answer** — tables/lists render in the thinking stream but the user-facing
   final message shows raw markdown (tables don't render). (2) **Quieten tool calls by default** — smaller
   tool icons; hide raw params/JSON behind the expansion toggle; default view shows only the plain-language
-  line of what the model is doing (transparency stays via expand). (3) **Redline download affordance** —
-  surface the agent-produced `(redlined).docx` matter File with a download link (the file is created but
-  nothing surfaces it; the full version is C7's "redline download UI").
+  line of what the model is doing (transparency stays via expand). (3) ~~**Redline download affordance**~~
+  ✅ **SHIPPED as C7a** (ADR-F046, 2026-06-24): a matter **Documents tab** + an **inline run-timeline
+  download** surface the agent-produced `(redlined).docx` (and every matter file) over a new
+  `GET /matters/{id}/files` + `File.created_by_run_id` provenance, reusing `GET /files/{id}/content`.
 - **Surgical-gate friction + agent thrash (C9 UAT).** Flash retried `preview_redline` ~8× fixing D-gate
   violations one batch at a time (renumbering edits, <15-word rationales, anchor mismatches), then fell back
   to `rewrite_justified` whole-clause rewrites. Levers: pre-teach the gate rules in `surgical-redline`;
@@ -491,8 +492,8 @@ grants (mirror the `composition.py` area-keyed grant; MCP tools pass `guarded_di
     round-trip back to `.docx`; and **LICENSING** — Collabora Online is **AGPL** (matters for the fork's license
     posture; cf. the PyMuPDF AGPL server-side-only boundary in CLAUDE.md/NOTICES.md). Output = a research report
     (`docs/fork/evidence/`) → an ADR + its own milestone. This is a research spike, not a code slice yet.
-  Both relate to **C7** (redline-download UI) — C7 ships the download affordance now; this backlog item is the
-  bigger "review in-app" evolution beyond it.
+  Both relate to **C7** (redline-download UI) — **C7a shipped the download affordance** (download the
+  `.docx`, open in Word); this backlog item is the bigger "review/accept in-app" evolution beyond it.
 
 - **ROPA onboarding flow + "ROPA-from-privacy-notice" end-to-end test — half (a) DELIVERED by PRIV-7
   (PR #111).** The live notice→ROPA validation ran on DeepSeek-flash against Zendesk's real notice and built a

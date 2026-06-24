@@ -27,6 +27,7 @@
 	import ConversationPanel from '$lib/lq-ai/components/agents/ConversationPanel.svelte';
 	import RopaRegister from '$lib/lq-ai/components/ropa/RopaRegister.svelte';
 	import MemoryPanel from '$lib/lq-ai/components/matter/MemoryPanel.svelte';
+	import DocumentsPanel from '$lib/lq-ai/components/matter/DocumentsPanel.svelte';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import NewMatterDialog from './NewMatterDialog.svelte';
 	import StatusPill from './StatusPill.svelte';
@@ -115,8 +116,9 @@
 	// see it; reversible = this derived + the {#if} branch in the panel column.
 	const isPrivacyMatter = $derived(matter?.practice_area_key === 'privacy');
 	// C3c-2: every matter also gets a "Memory" tab onto its working-memory tier
-	// (area-agnostic — ADR-F042/F044). 'register' stays Privacy-only.
-	let matterTab = $state<'conversation' | 'register' | 'memory'>('conversation');
+	// (area-agnostic — ADR-F042/F044). C7a adds a "Documents" tab onto the matter's
+	// files (incl. downloadable redline outputs — ADR-F046). 'register' stays Privacy-only.
+	let matterTab = $state<'conversation' | 'register' | 'memory' | 'documents'>('conversation');
 
 	// PRIV-9a: when a Privacy matter has the width, show chat + the ROPA
 	// register side by side (resizable) instead of the one-at-a-time toggle, so
@@ -137,8 +139,17 @@
 		...(isPrivacyMatter && !canSplitRegister
 			? [{ id: 'register' as const, label: 'ROPA register' }]
 			: []),
-		...(matter ? [{ id: 'memory' as const, label: 'Memory' }] : [])
+		...(matter
+			? [
+					{ id: 'memory' as const, label: 'Memory' },
+					{ id: 'documents' as const, label: 'Documents' }
+				]
+			: [])
 	]);
+
+	// Both Memory and Documents are full-width read panels: the conversation region
+	// stays mounted but hidden behind either (the no-remount invariant — C3c-2).
+	const matterPanelOpen = $derived(matterTab === 'memory' || matterTab === 'documents');
 
 	// If the active tab leaves the strip (e.g. a Privacy matter widens past the
 	// split budget, retiring the 'register' tab), fall back to the conversation so
@@ -437,10 +448,10 @@
 						{/each}
 					</div>
 				{/if}
-				<!-- Conversation + register region: stays MOUNTED (hidden while Memory is
-				     open) so the live run stream + runActive keep flowing — never remounted
-				     on a tab switch (the invariant the narrow fallback below protects). -->
-				<div class="flex min-h-0 flex-1 flex-col" class:hidden={matterTab === 'memory'}>
+				<!-- Conversation + register region: stays MOUNTED (hidden while Memory or
+				     Documents is open) so the live run stream + runActive keep flowing — never
+				     remounted on a tab switch (the invariant the narrow fallback below protects). -->
+				<div class="flex min-h-0 flex-1 flex-col" class:hidden={matterPanelOpen}>
 					{#if canSplitRegister}
 						<!-- PRIV-9a co-visible: chat | register, resizable, each scrolls
 					     independently — watch the register change as the agent works. -->
@@ -516,6 +527,18 @@
 					<!-- Memory tab: full-width read panel over the C3c-1 GET/revert. -->
 					<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
 						<MemoryPanel
+							projectId={matter.project_id}
+							{runActive}
+							reloadKey={registerReloadKey}
+							{nowMs}
+						/>
+					</div>
+				{/if}
+				{#if matterTab === 'documents' && matter}
+					<!-- Documents tab (C7a, ADR-F046): full-width read panel onto the matter's
+					     files; each row downloads via GET /files/{id}/content. -->
+					<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
+						<DocumentsPanel
 							projectId={matter.project_id}
 							{runActive}
 							reloadKey={registerReloadKey}
