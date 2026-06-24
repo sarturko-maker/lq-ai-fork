@@ -1284,3 +1284,22 @@ export interface WikiRevertResponse {
 	snapshotted_prior: boolean;
 	wiki: MatterWikiRead;
 }
+
+/** The 201 body of a human-authenticated pin (C3-UM); mirrors the backend CorrectionResponse. */
+export interface MatterCorrectionCreated {
+	id: string;
+	project_id: string;
+	body_md: string;
+	trust: string;
+	created_at: string;
+}
+
+/**
+ * The outcome of a human retire (C3-UM) — a soft, append-only retire of a pinned
+ * correction (`superseded_at`) or a fact's validity window (`invalid_at`). Idempotent:
+ * `retired_at` is the original instant, not moved by a repeat call.
+ */
+export interface MatterEntryRetired {
+	id: string;
+	retired_at: string;
+}

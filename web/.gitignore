@@ -13,3 +13,6 @@ cypress/downloads/
 # see word-addin/README.md for the build flow). Not tracked in git — the
 # contributor's local build or the image-build stage populates this.
 static/word-addin/
+
+# Transient Vite/esbuild config-bundle artifact (not gitignore-matched by default)
+vite.config.ts.timestamp-*

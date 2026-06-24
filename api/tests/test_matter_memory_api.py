@@ -543,3 +543,280 @@ async def test_revert_audit_carries_no_body(
     details = str(audit[0].details)
     assert "reverted_to_snapshot_id" in details and "new_chars" in details
     assert marker not in details  # the wiki body never reaches the audit row
+
+
+# --------------------------------------------------------------------------- #
+# C3-UM (ADR-F042 / F044 §4B): the human retire gestures (soft, append-only)
+# --------------------------------------------------------------------------- #
+
+
+def _correction_retire_url(project_id: uuid.UUID, entry_id: uuid.UUID) -> str:
+    return f"/api/v1/matters/{project_id}/memory/corrections/{entry_id}/retire"
+
+
+def _fact_retire_url(project_id: uuid.UUID, entry_id: uuid.UUID) -> str:
+    return f"/api/v1/matters/{project_id}/memory/facts/{entry_id}/retire"
+
+
+async def _reload(db: AsyncSession, entry_id: uuid.UUID) -> MatterMemoryEntry:
+    """Re-read a row fresh (the endpoint commits → ORM objects expire)."""
+    return (
+        await db.execute(select(MatterMemoryEntry).where(MatterMemoryEntry.id == entry_id))
+    ).scalar_one()
+
+
+async def test_retire_correction_unauthenticated_401(client: AsyncClient) -> None:
+    # The router-level ActiveUser gate fires before the handler — no project needed.
+    resp = await client.post(_correction_retire_url(uuid.uuid4(), uuid.uuid4()))
+    assert resp.status_code == 401
+
+
+async def test_retire_correction_sets_superseded_at(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """Retiring a pinned correction sets superseded_at → it drops out of the LIVE
+    corrections but stays in the append-only log marked superseded."""
+    project = await _make_project(db_session, db_user)
+    entry = await _add_entry(
+        db_session,
+        project.id,
+        db_user.id,
+        kind="correction",
+        body_md="We are the SELLER, not the buyer.",
+        trust="human-pinned",
+    )
+    await db_session.flush()
+
+    resp = await client.post(_correction_retire_url(project.id, entry.id), headers=_h(db_user))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == str(entry.id)
+    assert body["retired_at"] is not None
+
+    row = await _reload(db_session, entry.id)
+    assert row.superseded_at is not None  # soft-retired, NOT deleted
+
+    # The live projection drops it; the log keeps it (marked superseded).
+    mem = (await client.get(_memory_url(project.id), headers=_h(db_user))).json()
+    assert mem["corrections"] == []
+    log_superseded = {e["body_preview"]: e["superseded"] for e in mem["log"]}
+    assert log_superseded["We are the SELLER, not the buyer."] is True
+
+
+async def test_retire_correction_idempotent(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    project = await _make_project(db_session, db_user)
+    entry = await _add_entry(
+        db_session, project.id, db_user.id, kind="correction", body_md="x", trust="human-pinned"
+    )
+    await db_session.flush()
+
+    first = await client.post(_correction_retire_url(project.id, entry.id), headers=_h(db_user))
+    assert first.status_code == 200, first.text
+    second = await client.post(_correction_retire_url(project.id, entry.id), headers=_h(db_user))
+    assert second.status_code == 200, second.text
+    # The retirement instant is not moved by a repeat call.
+    assert first.json()["retired_at"] == second.json()["retired_at"]
+
+
+async def test_retire_correction_cross_user_is_404(
+    client: AsyncClient, db_session: AsyncSession, db_user: User, other_user: User
+) -> None:
+    project = await _make_project(db_session, db_user)
+    entry = await _add_entry(
+        db_session, project.id, db_user.id, kind="correction", body_md="x", trust="human-pinned"
+    )
+    await db_session.flush()
+    resp = await client.post(_correction_retire_url(project.id, entry.id), headers=_h(other_user))
+    assert resp.status_code == 404  # never 403 (no existence leak)
+    row = await _reload(db_session, entry.id)
+    assert row.superseded_at is None  # nothing changed
+
+
+async def test_retire_correction_on_fact_id_is_404(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """The kind guard: a fact id can't be retired via the corrections route (404)."""
+    project = await _make_project(db_session, db_user)
+    fact = await _add_entry(
+        db_session, project.id, db_user.id, kind="fact", body_md="a fact", author="agent"
+    )
+    await db_session.flush()
+    resp = await client.post(_correction_retire_url(project.id, fact.id), headers=_h(db_user))
+    assert resp.status_code == 404
+    row = await _reload(db_session, fact.id)
+    assert row.invalid_at is None and row.superseded_at is None
+
+
+async def test_retire_correction_audit_carries_no_body(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    project = await _make_project(db_session, db_user)
+    marker = "BADGER-secret-correction-text"
+    entry = await _add_entry(
+        db_session,
+        project.id,
+        db_user.id,
+        kind="correction",
+        body_md=f"Pinned: {marker}",
+        trust="human-pinned",
+    )
+    await db_session.flush()
+    resp = await client.post(_correction_retire_url(project.id, entry.id), headers=_h(db_user))
+    assert resp.status_code == 200, resp.text
+
+    audit = (
+        (
+            await db_session.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "matter_memory.correction_retire",
+                    AuditLog.user_id == db_user.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(audit) == 1
+    details = str(audit[0].details)
+    assert "entry_id" in details
+    assert marker not in details  # the correction body never reaches the audit row
+
+
+async def test_retire_fact_unauthenticated_401(client: AsyncClient) -> None:
+    resp = await client.post(_fact_retire_url(uuid.uuid4(), uuid.uuid4()))
+    assert resp.status_code == 401
+
+
+async def test_retire_fact_closes_window(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """Retiring a live fact sets invalid_at → it drops out of the LIVE ledger but stays
+    in the log marked superseded."""
+    from datetime import UTC, datetime
+
+    project = await _make_project(db_session, db_user)
+    fact = await _add_entry(
+        db_session,
+        project.id,
+        db_user.id,
+        kind="fact",
+        body_md="Liability cap is 12 months of fees.",
+        author="agent",
+        fact_type="term",
+        valid_at=datetime(2020, 1, 1, tzinfo=UTC),  # in the past → window can close at now
+    )
+    await db_session.flush()
+
+    resp = await client.post(_fact_retire_url(project.id, fact.id), headers=_h(db_user))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["id"] == str(fact.id)
+
+    row = await _reload(db_session, fact.id)
+    assert row.invalid_at is not None  # window closed, NOT deleted
+    assert row.superseded_by is None  # a pure retire has no replacement
+
+    mem = (await client.get(_memory_url(project.id), headers=_h(db_user))).json()
+    assert mem["facts"] == []  # live ledger drops it
+    log_superseded = {e["body_preview"]: e["superseded"] for e in mem["log"]}
+    assert log_superseded["Liability cap is 12 months of fees."] is True
+
+
+async def test_retire_fact_future_dated_is_409(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """A fact whose validity has not begun (valid_at in the future) can't be retired —
+    closing the window at `now` would violate invalid_at > valid_at. Reject 409, not 500."""
+    from datetime import UTC, datetime
+
+    project = await _make_project(db_session, db_user)
+    fact = await _add_entry(
+        db_session,
+        project.id,
+        db_user.id,
+        kind="fact",
+        body_md="A term that becomes effective in 2099.",
+        author="agent",
+        fact_type="term",
+        valid_at=datetime(2099, 1, 1, tzinfo=UTC),  # clearly in the future
+    )
+    await db_session.flush()
+
+    resp = await client.post(_fact_retire_url(project.id, fact.id), headers=_h(db_user))
+    assert resp.status_code == 409, resp.text
+    row = await _reload(db_session, fact.id)
+    assert row.invalid_at is None  # the window stays open — no crash, no partial write
+
+
+async def test_retire_fact_null_valid_at_ok(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """A fact with no valid_at (NULL) has no lower bound → the CHECK passes; retire OK."""
+    project = await _make_project(db_session, db_user)
+    fact = await _add_entry(
+        db_session,
+        project.id,
+        db_user.id,
+        kind="fact",
+        body_md="An undated fact.",
+        author="agent",
+    )
+    await db_session.flush()
+    resp = await client.post(_fact_retire_url(project.id, fact.id), headers=_h(db_user))
+    assert resp.status_code == 200, resp.text
+    row = await _reload(db_session, fact.id)
+    assert row.invalid_at is not None
+
+
+async def test_retire_fact_idempotent(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    from datetime import UTC, datetime
+
+    project = await _make_project(db_session, db_user)
+    fact = await _add_entry(
+        db_session,
+        project.id,
+        db_user.id,
+        kind="fact",
+        body_md="Already-superseded fact.",
+        author="agent",
+        valid_at=datetime(2020, 1, 1, tzinfo=UTC),
+        invalid_at=datetime(2021, 1, 1, tzinfo=UTC),  # already closed
+    )
+    await db_session.flush()
+    resp = await client.post(_fact_retire_url(project.id, fact.id), headers=_h(db_user))
+    assert resp.status_code == 200, resp.text
+    row = await _reload(db_session, fact.id)
+    # The original window-close instant is preserved, not moved to now.
+    assert row.invalid_at == datetime(2021, 1, 1, tzinfo=UTC)
+
+
+async def test_retire_fact_cross_user_is_404(
+    client: AsyncClient, db_session: AsyncSession, db_user: User, other_user: User
+) -> None:
+    project = await _make_project(db_session, db_user)
+    fact = await _add_entry(
+        db_session, project.id, db_user.id, kind="fact", body_md="a fact", author="agent"
+    )
+    await db_session.flush()
+    resp = await client.post(_fact_retire_url(project.id, fact.id), headers=_h(other_user))
+    assert resp.status_code == 404
+    row = await _reload(db_session, fact.id)
+    assert row.invalid_at is None
+
+
+async def test_retire_fact_on_correction_id_is_404(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """The kind guard: a correction id can't be retired via the facts route (404)."""
+    project = await _make_project(db_session, db_user)
+    corr = await _add_entry(
+        db_session, project.id, db_user.id, kind="correction", body_md="x", trust="human-pinned"
+    )
+    await db_session.flush()
+    resp = await client.post(_fact_retire_url(project.id, corr.id), headers=_h(db_user))
+    assert resp.status_code == 404
+    row = await _reload(db_session, corr.id)
+    assert row.superseded_at is None and row.invalid_at is None

@@ -30,12 +30,22 @@ C3c-1 (ADR-F044) adds the **read + revert** half on the same owner-scoped router
   restore the wiki to a chosen prior version. The current wiki is snapshotted FIRST (so
   the revert is itself reversible) and nothing is deleted (append-only). The agent has
   no revert tool — only an authenticated human action here can revert (ADR-F044).
+
+C3-UM (ADR-F042 / F044 §4B) completes the human's "own the tier" surface with two
+SOFT, append-only retire actions (the row is never deleted — it drops off the LIVE
+projection and stays in the log marked superseded):
+
+* ``POST /matters/{project_id}/memory/corrections/{entry_id}/retire`` — stop a pinned
+  correction from overriding the agent (sets ``superseded_at``).
+* ``POST /matters/{project_id}/memory/facts/{entry_id}/retire`` — close a stale fact's
+  validity window (sets ``invalid_at``; a future-dated fact is rejected with a 409, not
+  a DB CHECK 500). Both are human-authenticated; no agent tool retires either.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
@@ -49,7 +59,7 @@ from app.api.dependencies import ActiveUser
 from app.api.projects import _load_visible_project
 from app.audit import audit_action
 from app.db.session import get_db
-from app.errors import NotFound
+from app.errors import Conflict, NotFound
 from app.models.project import MatterMemoryEntry
 
 router = APIRouter(prefix="/matters", tags=["matter-memory"])
@@ -379,3 +389,165 @@ async def revert_matter_wiki(
             version_count=version_count,
         ),
     )
+
+
+# --- C3-UM (ADR-F042 / F044 §4B): the human retire gestures --------------------------
+#
+# The human "owns the tier" (ADR-F042): beyond pinning a correction and reverting the
+# wiki, the supervising lawyer can RETIRE a pinned correction (it stops overriding what
+# the agent believes) or close a stale fact's validity window. Both are SOFT +
+# append-only — the row is never deleted, it just drops out of the LIVE projection
+# (``live_corrections`` / ``live_facts``) and stays in the activity log marked
+# superseded. No agent-granted tool retires a human pin or closes a fact window this
+# way; only an authenticated human action here can (B2 — the agent's auto-curation
+# cannot mutate either). Audited with IDs/counts only (never the body; audit contract).
+
+
+class RetireResponse(BaseModel):
+    """The outcome of a human retire: the entry id + when its window/pin closed.
+
+    Idempotent — a second retire of the same entry returns the original instant rather
+    than moving it.
+    """
+
+    id: uuid.UUID
+    retired_at: datetime
+
+
+@router.post(
+    "/{project_id}/memory/corrections/{entry_id}/retire",
+    response_model=RetireResponse,
+)
+async def retire_matter_correction(
+    project_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> RetireResponse:
+    """Soft-retire a pinned correction (human-authenticated; ADR-F042 / F044 §4B).
+
+    Sets ``superseded_at`` so the correction drops out of the LIVE corrections the agent
+    is shown, without deleting it (it stays in the append-only log, marked superseded).
+    Owner-scoped (404 on miss / cross-user / archived). The id+project+kind lookup also
+    404s a fact/snapshot id or a cross-matter id. Idempotent: a second call leaves the
+    original timestamp. Audited with IDs only (never the body).
+    """
+    # 404 on miss / cross-user / archived (no existence leak) — projects posture.
+    project = await _load_visible_project(db, project_id, user.id)
+
+    # id + project + kind together block a cross-matter id and a non-correction row (a
+    # fact/snapshot id); the project load above blocks another user's matter.
+    entry = (
+        await db.execute(
+            select(MatterMemoryEntry).where(
+                MatterMemoryEntry.id == entry_id,
+                MatterMemoryEntry.project_id == project.id,
+                MatterMemoryEntry.kind == "correction",
+            )
+        )
+    ).scalar_one_or_none()
+    if entry is None:
+        raise NotFound(
+            f"Correction {entry_id} not found for this matter.",
+            details={"entry_id": str(entry_id)},
+        )
+
+    # Idempotent: only stamp if still live; never move an existing retirement instant.
+    now = datetime.now(UTC)
+    if entry.superseded_at is None:
+        entry.superseded_at = now
+        retired_at = now
+    else:
+        retired_at = entry.superseded_at
+    entry_id_out = entry.id
+
+    # Counts/IDs only — never the correction body (audit contract).
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="matter_memory.correction_retire",
+        resource_type="project",
+        resource_id=str(project.id),
+        project=project,
+        request=request,
+        details={"entry_id": str(entry_id_out)},
+    )
+    await db.commit()
+
+    return RetireResponse(id=entry_id_out, retired_at=retired_at)
+
+
+@router.post(
+    "/{project_id}/memory/facts/{entry_id}/retire",
+    response_model=RetireResponse,
+)
+async def retire_matter_fact(
+    project_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> RetireResponse:
+    """Close a fact's validity window (human-authenticated; ADR-F042 / F044 §4B).
+
+    Sets ``invalid_at = now`` so the fact drops out of the LIVE ledger without deleting
+    it (it stays in the log marked superseded). Owner-scoped (404); the id+project+kind
+    lookup also 404s a correction/snapshot id or a cross-matter id. Idempotent: an
+    already-closed window is left as-is. **A fact whose validity has not begun yet
+    (``valid_at >= now``) cannot be retired** — closing the window at ``now`` would
+    violate the ``invalid_at > valid_at`` CHECK, so it is rejected with a 409 (never a
+    DB 500; the C3b-2 future-dated trap). A pure retire has no replacement, so
+    ``superseded_by`` stays NULL. Audited with IDs only.
+    """
+    # 404 on miss / cross-user / archived (no existence leak) — projects posture.
+    project = await _load_visible_project(db, project_id, user.id)
+
+    entry = (
+        await db.execute(
+            select(MatterMemoryEntry).where(
+                MatterMemoryEntry.id == entry_id,
+                MatterMemoryEntry.project_id == project.id,
+                MatterMemoryEntry.kind == "fact",
+            )
+        )
+    ).scalar_one_or_none()
+    if entry is None:
+        raise NotFound(
+            f"Fact {entry_id} not found for this matter.",
+            details={"entry_id": str(entry_id)},
+        )
+
+    now = datetime.now(UTC)
+    # Idempotent: an already-retired fact keeps its original window-close instant.
+    if entry.invalid_at is None:
+        # Guard the invalid_at > valid_at CHECK: a future-dated fact (validity not yet
+        # begun) can't be closed at `now` — reject, don't crash the flush.
+        if entry.valid_at is not None and entry.valid_at >= now:
+            raise Conflict(
+                "Cannot retire a fact whose validity has not begun yet.",
+                details={
+                    "entry_id": str(entry_id),
+                    "valid_at": entry.valid_at.isoformat(),
+                },
+            )
+        entry.invalid_at = now
+        retired_at = now
+    else:
+        retired_at = entry.invalid_at
+    entry_id_out = entry.id
+
+    # Counts/IDs only — never the fact body (audit contract).
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="matter_memory.fact_retire",
+        resource_type="project",
+        resource_id=str(project.id),
+        project=project,
+        request=request,
+        details={"entry_id": str(entry_id_out)},
+    )
+    await db.commit()
+
+    return RetireResponse(id=entry_id_out, retired_at=retired_at)

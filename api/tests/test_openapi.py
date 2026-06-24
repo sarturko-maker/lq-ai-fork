@@ -79,6 +79,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # C3c-1 (fork) — matter-memory read surface + wiki revert (ADR-F044).
         "/api/v1/matters/{project_id}/memory",
         "/api/v1/matters/{project_id}/memory/wiki/revert",
+        # C3-UM (fork) — matter-memory human retire gestures (ADR-F042 / F044 §4B).
+        "/api/v1/matters/{project_id}/memory/corrections/{entry_id}/retire",
+        "/api/v1/matters/{project_id}/memory/facts/{entry_id}/retire",
         # saved prompts
         "/api/v1/saved-prompts",
         "/api/v1/saved-prompts/{prompt_id}",
@@ -338,8 +341,9 @@ async def test_openapi_paths_match_sketch() -> None:
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
     assert (
-        len(actual) == 145
-    )  # +2: C3c-1 matter-memory read surface + wiki revert (ADR-F044); +1 prior: C3a
+        len(actual) == 147
+    )  # +2: C3-UM matter-memory retire gestures (corrections + facts, ADR-F042/F044);
+    # +2 prior: C3c-1 matter-memory read surface + wiki revert (ADR-F044); +1 prior: C3a
     # matter-memory pin endpoint (ADR-F042); +2 prior: PRIV-A3 assessment
     # register reads (list + detail, ADR-F027); +1 prior: PRIV-6c data-flow graph
     # (ADR-F022); +1 prior: PRIV-6b programme summary

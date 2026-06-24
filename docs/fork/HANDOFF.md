@@ -11,7 +11,7 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ (matter-wiki MVP). C3b SPLIT → C3b-1 ✓ (typed bi-temporal fact ledger, ZERO model calls) + C3b-2 ✓ (gateway-routed consolidation/Lint, ADR-F043). C3c SPLIT → C3c-1 ✓ (READ backend, ADR-F044) + C3c-2 ✓ (cockpit Memory panel — frontend over the C3c-1 endpoints). The matter-memory track (C3a/b/c) is COMPLETE. NEXT = maintainer's call: C5 negotiation / C6 controlling-playbook-skills / C7 fan-out + redline-download-UI, or the C8/C9 redline-eval re-run, or the cross-cutting marker-fence hardening.**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ · C3b-1 ✓ · C3b-2 ✓ (ADR-F043) · C3c-1 ✓ (READ backend, ADR-F044) · C3c-2 ✓ (cockpit Memory panel) · C3-UM ✓ (the human "update memory" UX — pin composer + inline correct-a-fact + retire). The ENTIRE matter-memory track (read + write + human-correct) is now SHIPPED. NEXT = maintainer's call: **C8/C9 redline-eval RE-RUN** (recommended — those craft findings are confounded, the surgical-redline skill never loaded; do this first), then **C7** (fan-out + redline-download UI), then **C5/C6**. See the "After C3-UM" + "Redline-viewing direction" notes below.**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -167,27 +167,54 @@ reconstruction). Plan `docs/fork/plans/C9-claude-judged-redline-tests.md`.
   committed): `LQ_AI_DOCLING_ENABLED=false` (Docling hung PDFs to its 300s timeout) and the seeded org
   profile. Full findings: memory `commercial-agent-live-uat-findings`.
 
-## ▶ PICK UP EXACTLY HERE — matter-memory track COMPLETE (C3a/b/c ✓); next is the maintainer's call
+## ▶ PICK UP — C3-UM SHIPPED; next = maintainer's call (recommend C8/C9 redline-eval re-run)
 
-The whole unit-of-work memory tier (ADR-F042) now exists end-to-end and is live-proven: auto-written wiki +
-pinned corrections (C3a), the bi-temporal fact ledger (C3b-1), gateway-routed consolidation (C3b-2, ADR-F043),
-the read/revert backend (C3c-1, ADR-F044), and the cockpit **Memory tab** over it (C3c-2). No open work inside
-the C3 track. The next slice is a maintainer choice — none is blocked:
+**C3-UM (the human "update memory" UX) is DONE** on branch `fork/c3-update-memory-ux` (squash-merged; the whole
+matter-memory track is now complete). What shipped — three human gestures on `MemoryPanel.svelte`, all
+overlay/append-only per ADR-F042, disabled while a run is active:
+1. **Pin a correction** — `+ Pin a correction` composer (textarea + char cap) → `POST .../memory/corrections`
+   (the existing C3a human-authenticated pin, `trust='human-pinned'`). Pin VISUAL = F013 brand-left-accent.
+2. **Correct a fact** — a quiet `Correct` on each Fact row pre-fills the composer with a `Re: "…" →` stub
+   (free-text, **no DB link** — maintainer chose free-text over an anchor column → NO migration). Still a
+   plain correction (B2 no-overwrite).
+3. **Retire** — quiet `Retire` on a correction (soft `superseded_at`) AND on a fact (close `invalid_at`),
+   shared confirm dialog. **Maintainer chose corrections + facts.** NO free-edit of the working summary (it's
+   agent-regenerated; levers stay pin + revert).
 
-- **C5** negotiation rounds (needs C3+C4) · **C6** controlling playbook skills (needs F036+F038) · **C7**
-  complex-deal fan-out + **redline download UI** (the redlined `File` is created `status ready` but nothing
-  surfaces it).
-- **C8/C9 redline-eval RE-RUN (⚠ priority):** the `surgical-redline` SKILL.md was silently dropped through
-  C8/C9 (frontmatter `": "` bug, fixed in C3a) — so the published craft findings are **CONFOUNDED**; re-run
-  the C8 craft eval + the C9 Claude-judged tests now that the skill actually loads (memory
-  `claude-judged-redline-tests-slice`). **C9 follow-up:** mutualisation worked-example in the skill + a redline
-  step-budget tier; pre-teach the D-gate rules (flash thrashed ~8 preview retries).
-- **Cross-cutting marker-fence hardening** (carried C3a nit): strip/escape a block's own BEGIN/END markers
-  from untrusted bodies (client block + matter-memory blocks), OR a per-run nonce delimiter — one slice.
+**Backend (NO migration, head stays `0070`):** two new endpoints in `api/app/api/matter_memory.py` —
+`POST .../memory/corrections/{entry_id}/retire` (idempotent soft-retire) + `POST .../memory/facts/{entry_id}/retire`
+(close window; **future-dated fact `valid_at >= now` → 409 Conflict**, never the `invalid_at > valid_at` CHECK 500;
+the C3b-2 trap). Both owner-scoped 404 + kind-scoped, audit IDs-only, tz-aware `datetime.now(UTC)`. Frontend:
+`api/matterMemory.ts` (`pinCorrection`/`retireCorrection`/`retireFact`) + `types.ts` + the `MemoryPanel.svelte`
+gestures (`canWrite` aliases `canRevert`; one shared retire dialog). **Traps hit:** new endpoints must be
+registered in BOTH `tests/test_endpoints.py` `IMPLEMENTED_ROUTES` AND `tests/test_openapi.py` `EXPECTED_PATHS`
+(+ bump the hardcoded `len(actual) == N` path count) or the meta-tests fail; new path params need a value in
+`test_endpoints.py` `_PARAM_VALUES` (`entry_id`).
+**Verify:** api 2627 passed (lone failure = the documented env-flake `test_ready` — expects 503 but the dev-image
+runs on the live network so deps are reachable → 200; CI-green in a clean env). web 926 vitest + `npm run check`
+0 err + Cypress 2/2 + live Atlas smoke (pin→retire-correction→retire-fact, idempotent, cross-kind 404). Evidence
+`docs/fork/evidence/c3-um/`. No new ADR (F042/F044 govern).
 
-**C3c backlog (deferred, per ADR-F044):** a pin-correction composer + a correction-retire endpoint (the panel
-is read-only for corrections this slice); embedding/FTS search UI (gateway `/v1/embeddings` 501 until B6); log
-pagination beyond the tail cap (the panel shows "N of M"); the 6th `_rejection_text` cross-module dedup.
+**Disk-cleanup folded into the same PR** (Crostini hit 100% full, 2026-06-24): root cause = btrfs storage-driver
+subvolume leak (690+ orphaned layers from frequent ~6 GB rebuilds). Reclaimed ~100 GB (3.9 GB → 82 GB free; rebuild
+brought it to ~74 GB). Prevention = CLAUDE.md rebuild-time rule (`docker image prune -f` after every build,
+dangling-only) + `scripts/docker-prune.sh` (dangling + stopped containers + leftover `lq_ai_test_*`), no cron.
+**Recovery playbook if it recurs:** `docker system prune -af` (keeps running-stack images + volumes); if orphaned
+btrfs subvolumes persist, `apt-get install btrfs-progs`, stop docker, delete `/var/lib/docker/btrfs/subvolumes/*`
+(safe when `docker images` is empty), then `rm -rf /var/lib/docker/{image,buildkit,btrfs,containers}` (KEEP
+`volumes`+`network`), restart docker, `compose up -d --build`. The btrfs cleaner reclaims on the first commit
+(starting docker triggers it). See [[redline-viewing-direction]] memory for the new redline-viewer roadmap input.
+
+**Test vehicle on the dev stack:** the **Atlas** Commercial matter (`905720d1-5d17-43cd-a8f0-3a76d095de34`, owner
+admin) seeded with a wiki + 2 wiki snapshots + 5 live facts + 1 superseded fact + 1 human-pinned correction.
+Deep-link `/lq-ai?area=commercial&matter=905720d1-5d17-43cd-a8f0-3a76d095de34` → **Memory** tab.
+
+**After C3-UM (maintainer's call, not blocked):** **C5** negotiation rounds · **C6** controlling playbook skills
+(needs F036+F038) · **C7** fan-out + **redline-download UI**. **⚠ C8/C9 redline-eval RE-RUN** — the
+`surgical-redline` SKILL.md was silently dropped through C8/C9 (frontmatter `": "` bug, fixed in C3a) → those
+craft findings are **CONFOUNDED**; re-run now that the skill loads (memory `claude-judged-redline-tests-slice`).
+**Cross-cutting marker-fence hardening** (carried C3a nit). **Other C3 backlog:** embedding/FTS search UI
+(gateway `/v1/embeddings` 501 until B6); log pagination beyond the tail cap; the 6th `_rejection_text` dedup.
 
 ## Gotchas / durable traps (C8 + C4 + carried)
 

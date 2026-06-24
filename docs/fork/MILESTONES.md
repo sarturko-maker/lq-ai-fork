@@ -462,6 +462,26 @@ grants (mirror the `composition.py` area-keyed grant; MCP tools pass `guarded_di
   to `rewrite_justified` whole-clause rewrites. Levers: pre-teach the gate rules in `surgical-redline`;
   have the gate return all violations at once; give up faster on persistent tool errors. Feeds C8/F041.
 
+- **Redline-viewing direction — "the lawyer SEES the redlines" (surfaced 2026-06-24, maintainer; strategic).**
+  Today the agent produces a tracked-changes `.docx` the user must download + open in Word. Competitors
+  (Harvey, Legora) embed a **Word editor in-product** via a Microsoft licensing arrangement so redlines are
+  reviewed/accepted in-app. We can't license Word, but want the same UX. Two complementary tracks to evaluate:
+  - **(a) Adeu MCP Apps — interactive "show proposed redlines" mode.** Adeu supports **MCP Apps**, so instead
+    of only emitting a `.docx` it can surface proposed redlines as an interactive review surface (see/accept/
+    reject per edit). **Dependency:** the fork has **zero MCP wiring today** and uses Adeu **SDK in-process,
+    not MCP** ([[mcp-capability-decision]], [[surgical-redline-craft-slice]]); MCP is its own approved milestone
+    (ADRs 0014/0015, approval-gated). So this is **gated behind the MCP milestone** + an Adeu-MCP-Apps spike.
+  - **(b) In-app Word-fidelity viewer/editor (LibreOffice-based) — DETAILED RESEARCH NEEDED.** Goal: render a
+    `.docx` (incl. tracked changes) **close to Word fidelity** but **lightweight, running within the app**.
+    Candidate substrate = LibreOffice: headless convert (docx→PDF/HTML) for read-only fidelity, vs **Collabora
+    Online / LOOL** (web-based LibreOffice editor) for in-app edit/accept. **Research must cover:** Word-fidelity
+    of tracked-changes rendering; weight/self-host footprint (a "lightweight" LOOL is non-trivial); accept/reject
+    round-trip back to `.docx`; and **LICENSING** — Collabora Online is **AGPL** (matters for the fork's license
+    posture; cf. the PyMuPDF AGPL server-side-only boundary in CLAUDE.md/NOTICES.md). Output = a research report
+    (`docs/fork/evidence/`) → an ADR + its own milestone. This is a research spike, not a code slice yet.
+  Both relate to **C7** (redline-download UI) — C7 ships the download affordance now; this backlog item is the
+  bigger "review in-app" evolution beyond it.
+
 - **ROPA onboarding flow + "ROPA-from-privacy-notice" end-to-end test — half (a) DELIVERED by PRIV-7
   (PR #111).** The live notice→ROPA validation ran on DeepSeek-flash against Zendesk's real notice and built a
   **fully-linked register (9/9 activities)** through the guarded write tools — proving the document-extraction
