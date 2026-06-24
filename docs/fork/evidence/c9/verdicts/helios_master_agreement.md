@@ -1,16 +1,14 @@
-# helios_master_agreement (complex) — C9 v2 (surgical-redline skill LOADED)
+# helios_master_agreement — C9 v3 (word-diff render) · flash
 
-_Judge: Claude (Opus 4.8), sharp/sceptical panel (surgical=false if ANY material clause is struck-and-retyped wholesale). Single run per (instrument, model) — n=1; read as one strong-judged data point, not a rate._
+**Verdict:** STRONG · **surgical:** True · complexity: complex
 
-## flash (deepseek-v4-flash)
+_A genuinely surgical, mechanism-aware redline on a dense master agreement: every targeted one-sided limb is fixed in place, every LEAVE-ALONE trap is respected, and no material clause is struck-and-retyped wholesale._
 
-**Verdict: STRONG · surgical: yes** · boilerplate-bare (deterministic): yes · status: `completed` · model turns: 11
+- redlined: True · mutualisation_surgical: True · left_good_language_alone: True
 
-A genuinely partner-grade surgical redline: every numbered LEAVE-ALONE trap is navigated precisely, boilerplate left bare, and protection woven through the right mechanisms rather than crude number-bumping.
-
-- §3: strikes ONLY 'NON-INFRINGEMENT, ' from the AS-IS disclaimer list — express warranty, correct-or-refund remedy, and the rest of the disclaimer (merchantability/fitness/uninterrupted) all left bare; textbook restraint.
-- §5: scope narrowed via in-place splice ('[+to the extent arising from the Customer's breach... or violation of applicable law in its+]') and sole-discretion settlement converted to a consent proviso — the notice/control-of-defence/cooperation PROCEDURE left entirely untouched (the key trap).
-- §4: two narrow fragment-splices give Customer ownership of Deliverables and a perpetual/irrevocable/worldwide licence to configs; background-IP and feedback sentence left bare. No whole-clause rewrite.
-- §6 excluded matters re-typed but ADDITIVE: re-states (a) death/PI and (b) fraud verbatim and adds (c) confidentiality, (d) data protection, (e) IP — no existing carve-out destroyed; only mildly non-surgical limb but no good language lost.
-- §6: loss of Customer Data appended as deemed-direct; cap 6→12 mo and time-bar 6→12 mo — number bumps paired with the right structural heads, indirect-loss list left bare.
-- §2: mid-term unilateral increase struck, renewal-increase right and good-faith withholding right preserved; manifest confirms redlined=true, boilerplate_bare=true, single apply_redline, 11 turns.
+- §2: in-place swap of the mid-term increase only ('at any time in its sole discretion on thirty (30) days notice' -> 'by mutual written agreement'); renewal increase and good-faith withholding left untouched — correct target.
+- §3: strikes only 'NON-INFRINGEMENT, ' from the disclaimer list; express warranty, correct-or-refund remedy and the rest of the AS-IS disclaimer left bare — single-limb surgery that protects the §5 IP indemnity.
+- §5: indemnity scope narrowed by defined-term swaps ('use'->'breach', 'the Services'->'this Agreement or violation of applicable law') with 'shall indemnify, defend and hold harmless' left BARE; settle limb fixed by inserting 'not' + consent proviso; the entire notice/control-of-defence/cooperation PROCEDURE preserved intact.
+- §6: cap 6->12 months and time-bar 6->24 months are clean number swaps; deemed-direct Customer Data sentence inserted; confidentiality/data-protection/IP heads APPENDED to the excluded matters with the pre-existing death/PI + fraud carve-outs and indirect-loss list preserved — additive, the trap avoided.
+- §4: vesting flipped via bare defined-term swap (Provider->Customer); the one-sided 'only a non-exclusive licence' limb replaced with a balanced licence-back (right mechanism); background-IP, platform-retention and feedback sentences untouched.
+- Manifest corroborates craft: status completed, redlined true, boilerplate_bare true, single apply_redline after 3 previews — no whole-clause continuous [-...-] strike spans any sentence.

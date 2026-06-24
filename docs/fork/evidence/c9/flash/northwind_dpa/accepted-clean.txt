@@ -3,23 +3,23 @@ This Data Processing Agreement is entered into between the customer identified i
 1. Definitions
 "Personal Data", "processing", "controller", "processor" and "data subject" have the meanings given in applicable data protection law. "Sub-processor" means any third party engaged by the Processor to process Personal Data.
 2. Processing Instructions
-The Processor shall process the Personal Data only on the Controller's documented instructions, and may process the Personal Data only for the purpose of providing the Services to the Controller.
+The Processor shall process the Personal Data in accordance with the documented instructions of the Controller and as necessary to provide the Services, and may not process the Personal Data for any other purpose.
 3. Use of Data
-The Processor shall not use the Personal Datathe Personal Data for any purpose other than providing the Services in accordance with the Controller's documented instructions, and shall not use it to develop, train or improve any product, service, analytics or machine-learning model.
+The Processor shall not use the Personal Data to develop, train or improve its products, analytics or machine-learning models, and shall not compile statistics for its own account.
 4. Sub-processing
-The Processor shall not engage or replace Sub-processors any Sub-processor without the prior written authorisation of the Controller. The Processor shall notify the Controller of any intended changes concerning the addition or replacement of Sub-processors, thereby giving the Controller the opportunity to object. The Processor shall impose on each Sub-processor data protection obligations equivalent to those set out in this Agreement, and shall remain fully liable to the Controller for the performance of each Sub-processor's obligations.
+The Processor may engage Sub-processors only with the prior written authorisation of the Controller. The Processor shall notify the Controller of any intended change concerning the addition or replacement of Sub-processors, and the Controller shall have a reasonable period to object. The Processor shall impose on each Sub-processor data protection obligations no less protective than those in this Agreement, and the Processor shall remain fully liable for all acts and omissions of its Sub-processors.
 5. Security
-The Processor shall implement such technical and organisational measures as are appropriate to the risk presented by the processing, taking into account the state of the art, the costs of implementation and the nature, scope, context and purposes of the processing, and shall implement any specific measure requested by the Controller.
+The Processor shall implement appropriate technical and organisational measures to ensure a level of security appropriate to the risk presented by the processing, and shall implement specific measures reasonably requested by the Controller.
 6. Personal Data Breach
-The Processor shall notify the Controller of a personal data breach affecting the Controller's Personal Data without undue delay after becoming aware of the breach, and shall assist the Controller in complying with the Controller's notification obligations under applicable data protection law.
+The Processor shall notify the Controller without undue delay after becoming aware of a personal data breach affecting the Controller's Personal Data, and shall assist the Controller with its notification duties under applicable data protection law.
 7. Sub-processor Liability
-The Processor shall not be liable for any act or omission of any Sub-processor, and the Controller's sole recourse in respect of a Sub-processor shall be against that Sub-processor directly.
+The Processor shall be liable for any act or omission of any Sub-processor, and the Controller's recourse in respect of a Sub-processor shall not be limited to recourse against that Sub-processor directly.
 8. Audit
-The Controller shall have the right to audit and inspect the Processor's facilities, systems and records relevant to the processing upon reasonable notice and during normal business hours, no more than once per calendar year, to verify the Processor's compliance with this Agreement and applicable data protection law. The Processor may instead provide a summary certificate of compliance once per year, which the Controller agrees to accept as sufficient.
+The Controller shall have the right to audit or inspect the Processor's facilities, systems or records relevant to the processing of the Personal Data upon reasonable notice. The Processor may provide a summary certificate of compliance, which the Controller agrees to accept as sufficient; provided that such certificate shall not replace the Controller's audit rights under this clause.
 9. International Transfers
-The Processor may transfer the Personal Data to, and process it in, any country in which the Processor or its Sub-processors operate, only in compliance with applicable data protection law, including by implementing the Standard Contractual Clauses adopted by the European Commission or the UK Information Commissioner's Office (as applicable), or another valid transfer safeguard recognised under applicable data protection law, prior to any transfer. implementing any specific transfer safeguard.
+The Processor may transfer the Personal Data to, and process it in, any country in which the Processor or its Sub-processors operate, provided that the Processor implements appropriate transfer safeguards in accordance with applicable data protection law.
 10. Return and Deletion
-On termination the Processor shall delete the Personal Data within a reasonable period and no later than thirty (30) days following the termination date, and shall delete existing copies unless applicable law requires retention. If retention is required by law, the Processor shall: (a) retain only the Personal Data strictly necessary for the mandated purpose, (b) maintain the same data protection obligations set out in this Agreement for such retained data, and (c) delete it promptly when the legal retention period expires.
+On termination of this Agreement, the Processor shall delete the Personal Data where required by applicable law, and shall not retain the Personal Data for its own business or analytics purposes.
 11. Liability
 The Processor's aggregate liability arising out of or in connection with this Agreement and any processing of Personal Data shall not exceed the fees paid by the Controller in the one (1) month preceding the claim.
 12. Governing Law

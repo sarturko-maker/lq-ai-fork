@@ -1,12 +1,14 @@
 # C9 evidence — Claude-judged manual redline tests
 
-> **⚠ v1 was CONFOUNDED — see `v1-skill-absent/`.** Despite the "How it was produced" note below saying the
-> run used "the bound `surgical-redline` skill active", the skill was in fact **silently absent from the
-> registry** (frontmatter `": "` bug, fixed in C3a). So the v1 result matrix — including the headline
-> "pervasive mutualisation is a *method* weakness" — was produced **without the skill that teaches exactly
-> that mutualisation move**. v1 is preserved verbatim in `v1-skill-absent/` (SUMMARY, flash, pro, verdicts).
-> The corrected v2 run (skill loaded) repopulates `flash/`, `pro/`, `verdicts/`, and `SUMMARY.md`; the
-> `SUMMARY.md` carries the v1→v2 delta and the corrected conclusion.
+> **Current run = v3 (Adeu native word-diff render, ADR-F045).** `flash/`, `verdicts/` and `SUMMARY.md` hold
+> the v3 result: the tool now keeps unchanged wording bare via Adeu's word-level diff, and the skill is
+> simplified to "quote the clause, change only the necessary words." `SUMMARY.md` carries the v1→v2→v3 matrix.
+> Earlier runs are preserved verbatim:
+> - **`v2-wholesale-render/`** — skill loaded but the old wholesale prefix/suffix renderer (the swallow). v2's
+>   own SUMMARY/verdicts are inside it.
+> - **`v1-skill-absent/`** — the original CONFOUNDED run: the `surgical-redline` skill was **silently absent
+>   from the registry** (frontmatter `": "` bug, fixed in C3a), so its "pervasive mutualisation is a *method*
+>   weakness" headline was produced without the skill that teaches that move.
 
 C9 upgrades C8's craft signal from **DeepSeek-judging-itself** to **Claude (Opus 4.8) judging DeepSeek**, over
 a corpus that spans contract types **and** complexity, with the produced `.docx` surfaced for the maintainer
@@ -41,8 +43,9 @@ All instruments are **synthetic** (fictional parties; no real data, PII or secre
 ## How it was produced
 
 Provider-marked harness `api/tests/agents/scenarios/test_commercial_redline_manual.py`, run live on the dev
-stack with the bound `surgical-redline` skill active. DeepSeek is instructed *purposively* (named one-sided
-heads, surgical technique left to the skill); Claude then judges the produced document.
+stack with the bound `surgical-redline` skill (v2.0.0) active and the word-diff renderer (ADR-F045). DeepSeek
+is instructed *purposively* (named one-sided heads, surgical technique left to the skill); Claude then judges
+the produced document.
 
 ```
 # flash baseline (all 7 → c9/flash); pro re-run of the complex pair + flash failures (→ c9/pro)
