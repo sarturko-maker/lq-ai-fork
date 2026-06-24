@@ -160,6 +160,12 @@ StoreBackend namespaces keyed `(org_id, …)`; company and practice levels read-
 - When a migration lands, rebuild `api` + `arq-worker` + `ingest-worker` together.
 - NEVER `docker compose down -v` (wipes volumes). Rebuild single services instead.
 - The `web` container serves a pre-built bundle — rebuild it before debugging a UI change.
+- After ANY `docker compose build` / `up --build`, run `docker image prune -f` (dangling only).
+  Each rebuild orphans the prior ~6 GB image as a dangling `<none>` layer; on the Crostini/btrfs
+  driver these pile up and filled the disk (2026-06: 65 GB reclaimable, disk hit 100%). Prune
+  dangling at the source — do NOT `prune -a` (keeps tagged stack images) and do NOT touch the build
+  cache or volumes. `scripts/docker-prune.sh` is the fuller manual sweep (dangling + stopped
+  containers + leftover `lq_ai_test_*` DBs). No cron — this is rebuild-time discipline.
 
 ## Where to look (read on demand — do not preload)
 - **Current state + where to pick up: `docs/fork/HANDOFF.md` — read first in every session**

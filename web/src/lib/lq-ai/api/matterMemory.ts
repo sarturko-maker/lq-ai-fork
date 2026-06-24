@@ -6,7 +6,12 @@
  * matter — surfaced here as a plain `LQAIApiError` for the caller to render.
  */
 import { apiRequest } from './client';
-import type { MatterMemoryRead, WikiRevertResponse } from '../types';
+import type {
+	MatterCorrectionCreated,
+	MatterEntryRetired,
+	MatterMemoryRead,
+	WikiRevertResponse
+} from '../types';
 
 /** GET /api/v1/matters/{id}/memory — the full read-only memory projection. */
 export async function readMatterMemory(projectId: string): Promise<MatterMemoryRead> {
@@ -25,5 +30,47 @@ export async function revertWiki(
 	return apiRequest<WikiRevertResponse>(
 		`/matters/${encodeURIComponent(projectId)}/memory/wiki/revert`,
 		{ method: 'POST', body: { snapshot_id: snapshotId } }
+	);
+}
+
+/**
+ * POST /api/v1/matters/{id}/memory/corrections — pin a human correction (C3-UM).
+ * Always written `trust='human-pinned'` with the author from the session; the agent
+ * cannot mint a pin. The next agent run reads it as ground truth.
+ */
+export async function pinCorrection(
+	projectId: string,
+	bodyMd: string
+): Promise<MatterCorrectionCreated> {
+	return apiRequest<MatterCorrectionCreated>(
+		`/matters/${encodeURIComponent(projectId)}/memory/corrections`,
+		{ method: 'POST', body: { body_md: bodyMd } }
+	);
+}
+
+/**
+ * POST /api/v1/matters/{id}/memory/corrections/{entryId}/retire — soft-retire a pinned
+ * correction (C3-UM). Sets `superseded_at`; the row stays in the log marked superseded.
+ * Idempotent; human-authenticated (the agent has no retire tool).
+ */
+export async function retireCorrection(
+	projectId: string,
+	entryId: string
+): Promise<MatterEntryRetired> {
+	return apiRequest<MatterEntryRetired>(
+		`/matters/${encodeURIComponent(projectId)}/memory/corrections/${encodeURIComponent(entryId)}/retire`,
+		{ method: 'POST' }
+	);
+}
+
+/**
+ * POST /api/v1/matters/{id}/memory/facts/{entryId}/retire — close a fact's validity
+ * window (C3-UM). Sets `invalid_at`; idempotent. A fact whose validity has not begun
+ * yet is rejected (409) — surfaced here as an `LQAIApiError`.
+ */
+export async function retireFact(projectId: string, entryId: string): Promise<MatterEntryRetired> {
+	return apiRequest<MatterEntryRetired>(
+		`/matters/${encodeURIComponent(projectId)}/memory/facts/${encodeURIComponent(entryId)}/retire`,
+		{ method: 'POST' }
 	);
 }

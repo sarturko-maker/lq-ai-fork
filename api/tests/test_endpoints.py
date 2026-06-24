@@ -78,6 +78,8 @@ _PARAM_VALUES: dict[str, str] = {
     "vendor_id": _DUMMY_UUID,
     # PRIV-A3 (fork) — assessment register read API (ADR-F027)
     "assessment_id": _DUMMY_UUID,
+    # COMM C3-UM (fork) — matter-memory retire endpoints (ADR-F042 / F044)
+    "entry_id": _DUMMY_UUID,
 }
 
 
@@ -129,6 +131,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # C3c-1 (fork) — matter-memory read surface + human-authenticated wiki revert (ADR-F044).
     ("GET", "/api/v1/matters/{project_id}/memory"),
     ("POST", "/api/v1/matters/{project_id}/memory/wiki/revert"),
+    # C3-UM (fork) — matter-memory human retire gestures (ADR-F042 / F044 §4B).
+    ("POST", "/api/v1/matters/{project_id}/memory/corrections/{entry_id}/retire"),
+    ("POST", "/api/v1/matters/{project_id}/memory/facts/{entry_id}/retire"),
     # B5 + C3 — backend chats + messages with persistence; SSE streaming.
     ("POST", "/api/v1/chats"),
     ("GET", "/api/v1/chats"),

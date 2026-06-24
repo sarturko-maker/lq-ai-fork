@@ -8,8 +8,19 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { readMatterMemory, revertWiki } from '../api/matterMemory';
-import type { MatterMemoryRead, WikiRevertResponse } from '../types';
+import {
+	pinCorrection,
+	readMatterMemory,
+	retireCorrection,
+	retireFact,
+	revertWiki
+} from '../api/matterMemory';
+import type {
+	MatterCorrectionCreated,
+	MatterEntryRetired,
+	MatterMemoryRead,
+	WikiRevertResponse
+} from '../types';
 import { clearSession, setSession } from '../auth/store';
 
 const realFetch = global.fetch;
@@ -63,6 +74,19 @@ const SAMPLE_REVERT: WikiRevertResponse = {
 	reverted_to_snapshot_id: 'snap-1',
 	snapshotted_prior: true,
 	wiki: { content_md: 'Prior summary', char_count: 13, version_count: 3 }
+};
+
+const SAMPLE_PIN: MatterCorrectionCreated = {
+	id: 'corr-new',
+	project_id: 'proj-abc123',
+	body_md: 'We act for the seller.',
+	trust: 'human-pinned',
+	created_at: '2026-06-23T00:00:00Z'
+};
+
+const SAMPLE_RETIRE: MatterEntryRetired = {
+	id: 'entry-1',
+	retired_at: '2026-06-23T12:00:00Z'
 };
 
 describe('matter memory API', () => {
@@ -120,5 +144,46 @@ describe('matter memory API', () => {
 		expect(init.method).toBe('POST');
 		const body = JSON.parse(init.body as string);
 		expect(body).toEqual({ snapshot_id: 'snap-1' });
+	});
+
+	it('pinCorrection POSTs /memory/corrections with {body_md} and parses the 201', async () => {
+		const fetchSpy = vi.fn(async () => jsonResponse(201, SAMPLE_PIN));
+		global.fetch = fetchSpy as unknown as typeof fetch;
+
+		const result = await pinCorrection('proj-abc123', 'We act for the seller.');
+
+		expect(result.id).toBe('corr-new');
+		expect(result.trust).toBe('human-pinned');
+
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+		expect(url).toContain('/matters/proj-abc123/memory/corrections');
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(init.body as string)).toEqual({ body_md: 'We act for the seller.' });
+	});
+
+	it('retireCorrection POSTs the correction-retire URL (no body) and parses the response', async () => {
+		const fetchSpy = vi.fn(async () => jsonResponse(200, SAMPLE_RETIRE));
+		global.fetch = fetchSpy as unknown as typeof fetch;
+
+		const result = await retireCorrection('proj-abc123', 'corr-1');
+
+		expect(result.id).toBe('entry-1');
+		expect(result.retired_at).toBe('2026-06-23T12:00:00Z');
+
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+		expect(url).toContain('/matters/proj-abc123/memory/corrections/corr-1/retire');
+		expect(init.method).toBe('POST');
+		expect(init.body).toBeUndefined();
+	});
+
+	it('retireFact POSTs the fact-retire URL and URL-encodes both ids', async () => {
+		const fetchSpy = vi.fn(async () => jsonResponse(200, SAMPLE_RETIRE));
+		global.fetch = fetchSpy as unknown as typeof fetch;
+
+		await retireFact('a/b', 'f/1');
+
+		const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+		expect(url).toContain('/matters/a%2Fb/memory/facts/f%2F1/retire');
+		expect(init.method).toBe('POST');
 	});
 });

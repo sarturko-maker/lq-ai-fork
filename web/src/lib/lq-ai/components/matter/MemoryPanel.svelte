@@ -36,9 +36,38 @@
 		return total > shown ? `Showing the ${shown} most recent of ${total} entries.` : '';
 	}
 
-	/** A human may revert only when no run is mid-write (don't race the agent). */
-	export function canRevert(runActive: boolean): boolean {
+	/**
+	 * A human may write to the tier (pin / correct / retire / revert) only when no run is
+	 * mid-write — don't race the agent's own memory writes. (ADR-F042: the human owns the
+	 * tier, but never mid-flight.)
+	 */
+	export function canWrite(runActive: boolean): boolean {
 		return !runActive;
+	}
+
+	/** Revert is one such write; a named alias keeps the existing revert call sites clear. */
+	export const canRevert = canWrite;
+
+	/** Boundary cap on a pinned correction — mirrors the API (CORRECTION_MAX_CHARS). */
+	export const CORRECTION_MAX_CHARS = 4_000;
+
+	/** A correction is submittable when it's non-empty and within the body cap (after trim). */
+	export function isPinSubmittable(text: string): boolean {
+		const t = text.trim();
+		return t.length >= 1 && t.length <= CORRECTION_MAX_CHARS;
+	}
+
+	/**
+	 * Seed the pin composer when correcting a specific fact: quote a short, single-line
+	 * excerpt of the fact so the pinned correction reads as a reply (`Re: "…" →`). The
+	 * lawyer types the correction after the stub; it's still stored as an ordinary pinned
+	 * correction (no in-place edit of the fact — ADR-F042 B2 no-overwrite).
+	 */
+	export function factCorrectionPrefill(factBody: string): string {
+		const oneLine = factBody.replace(/\s+/g, ' ').trim();
+		const MAX = 80;
+		const excerpt = oneLine.length > MAX ? oneLine.slice(0, MAX).trimEnd() + '…' : oneLine;
+		return `Re: "${excerpt}" → `;
 	}
 </script>
 
@@ -58,7 +87,7 @@
 	 * first load, a quiet poll while `runActive`, and a quiet reconcile when the
 	 * host bumps `reloadKey` on settle.
 	 */
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import PinIcon from '@lucide/svelte/icons/pin';
 
@@ -72,9 +101,15 @@
 	import { renderModelMarkdown } from '$lib/lq-ai/sanitize-markdown';
 	import { POLL_INTERVAL_MS } from '$lib/lq-ai/agents/helpers';
 	import { MOTION, motionMs, timeAgo } from '$lib/lq-ai/cockpit/helpers';
-	import { readMatterMemory, revertWiki } from '$lib/lq-ai/api/matterMemory';
+	import {
+		readMatterMemory,
+		revertWiki,
+		pinCorrection,
+		retireCorrection,
+		retireFact
+	} from '$lib/lq-ai/api/matterMemory';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
-	import type { MatterLogEntryRead, MatterMemoryRead } from '$lib/lq-ai/types';
+	import type { MatterFactRead, MatterLogEntryRead, MatterMemoryRead } from '$lib/lq-ai/types';
 
 	let {
 		projectId,
@@ -96,6 +131,21 @@
 	let revertTarget = $state<MatterLogEntryRead | null>(null);
 	let reverting = $state(false);
 	let revertError = $state<string | null>(null);
+
+	// C3-UM — pin composer: the human pins a correction the agent must defer to. Shared
+	// by the section-header "+ Pin a correction" button and the per-fact "Correct" action.
+	let composerOpen = $state(false);
+	let composerText = $state('');
+	let pinning = $state(false);
+	let pinError = $state<string | null>(null);
+	let composerTextareaEl = $state<HTMLTextAreaElement | null>(null);
+
+	// C3-UM — retire confirm: soft-retire a pinned correction or close a fact's window.
+	type RetireTarget = { kind: 'correction' | 'fact'; id: string };
+	let retireOpen = $state(false);
+	let retireTarget = $state<RetireTarget | null>(null);
+	let retiring = $state(false);
+	let retireError = $state<string | null>(null);
 
 	const allEmpty = $derived(
 		memory !== null &&
@@ -228,6 +278,88 @@
 		const t = Date.parse(iso);
 		return Number.isNaN(t) ? '' : new Date(t).toLocaleDateString();
 	}
+
+	// --- C3-UM: the three human "update memory" gestures ---------------------------
+
+	/** Open the pin composer (preserves any draft) and focus the textarea. */
+	function openComposer() {
+		pinError = null;
+		composerOpen = true;
+		void tick().then(() => composerTextareaEl?.focus());
+	}
+
+	/** Cancel = discard: close the composer and drop the draft + any error. */
+	function closeComposer() {
+		composerOpen = false;
+		composerText = '';
+		pinError = null;
+	}
+
+	/** Correct a specific fact: seed the composer with a "Re: '…' →" stub, focus + reveal it. */
+	function correctFact(fact: MatterFactRead) {
+		composerText = factCorrectionPrefill(fact.body_md);
+		pinError = null;
+		composerOpen = true;
+		void tick().then(() => {
+			composerTextareaEl?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+			composerTextareaEl?.focus();
+			// Caret at the end, so the lawyer types after the stub.
+			composerTextareaEl?.setSelectionRange(composerText.length, composerText.length);
+		});
+	}
+
+	async function submitPin() {
+		if (!isPinSubmittable(composerText) || !canWrite(runActive)) return;
+		pinning = true;
+		pinError = null;
+		try {
+			await pinCorrection(projectId, composerText.trim());
+			composerText = '';
+			composerOpen = false;
+			await load(true); // refetch so the new pin appears
+		} catch (e) {
+			pinError = e instanceof LQAIApiError ? e.message : 'Could not pin — try again.';
+		} finally {
+			pinning = false;
+		}
+	}
+
+	function askRetire(target: RetireTarget) {
+		retireTarget = target;
+		retireError = null;
+		retireOpen = true;
+	}
+
+	async function confirmRetire() {
+		if (!retireTarget) return;
+		const target = retireTarget; // capture before await (the close effect clears state)
+		retiring = true;
+		retireError = null;
+		try {
+			if (target.kind === 'correction') {
+				await retireCorrection(projectId, target.id);
+			} else {
+				await retireFact(projectId, target.id);
+			}
+			retireOpen = false;
+			retireTarget = null;
+			await load(true); // refetch so the retired entry drops off the live lists
+		} catch (e) {
+			retireError = e instanceof LQAIApiError ? e.message : 'Could not retire — try again.';
+		} finally {
+			retiring = false;
+		}
+	}
+
+	// Clear the retire dialog's target + error on close (Cancel, Esc, overlay, or success)
+	// so a reopen never shows a stale target. `confirmRetire` captures the target before
+	// its await, so this can't disturb an in-flight POST.
+	$effect(() => {
+		if (!retireOpen) {
+			retireTarget = null;
+			retireError = null;
+		}
+	});
 </script>
 
 {#snippet md(text: string)}
@@ -235,6 +367,46 @@
 	<div class="prose prose-sm max-w-none dark:prose-invert">
 		<!-- eslint-disable-next-line svelte/no-at-html-tags — renderModelMarkdown-sanitized (DOMPurify, media-forbid) -->
 		{@html renderModelMarkdown(text)}
+	</div>
+{/snippet}
+
+{#snippet pinComposer()}
+	<!-- The human pins a correction the agent must treat as ground truth (ADR-F042). The
+	     body is the lawyer's own text; the server caps + validates it, the read surface
+	     renders it through renderModelMarkdown. -->
+	<div
+		class="mt-3 rounded-lg border border-border bg-card p-3 text-left"
+		data-testid="lq-memory-composer"
+	>
+		<textarea
+			bind:this={composerTextareaEl}
+			bind:value={composerText}
+			rows="3"
+			maxlength={CORRECTION_MAX_CHARS}
+			placeholder="Pin a correction the agent must treat as ground truth — e.g. “We act for the seller, not the buyer.”"
+			class="w-full resize-y rounded-md border border-input bg-background p-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+			data-testid="lq-memory-composer-input"
+		></textarea>
+		{#if pinError}
+			<p class="mt-1.5 text-sm text-destructive" data-testid="lq-memory-pin-error">{pinError}</p>
+		{/if}
+		<div class="mt-2 flex items-center justify-between gap-3">
+			<span class="text-xs text-muted-foreground tabular-nums">
+				{composerText.trim().length.toLocaleString()}/{CORRECTION_MAX_CHARS.toLocaleString()}
+			</span>
+			<div class="flex items-center gap-2">
+				<Button type="button" variant="ghost" size="sm" onclick={closeComposer}>Cancel</Button>
+				<Button
+					type="button"
+					size="sm"
+					disabled={!isPinSubmittable(composerText) || !canWrite(runActive) || pinning}
+					data-testid="lq-memory-pin-submit"
+					onclick={submitPin}
+				>
+					{pinning ? 'Pinning…' : 'Pin correction'}
+				</Button>
+			</div>
+		</div>
 	</div>
 {/snippet}
 
@@ -276,6 +448,25 @@
 						As the agent works this matter it records a working summary, typed facts, and the
 						corrections you pin — they’ll appear here.
 					</p>
+					<div class="mx-auto mt-4 max-w-prose">
+						{#if composerOpen}
+							{@render pinComposer()}
+						{:else}
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								disabled={!canWrite(runActive)}
+								title={canWrite(runActive)
+									? 'Pin a correction'
+									: 'Paused while the agent is working'}
+								data-testid="lq-memory-pin-open-empty"
+								onclick={openComposer}
+							>
+								+ Pin a correction
+							</Button>
+						{/if}
+					</div>
 				</div>
 			{:else}
 				<!-- Working summary (the auto-written wiki) -->
@@ -312,9 +503,43 @@
 						<ul class="mt-2 space-y-3">
 							{#each memory.facts as f (f.id)}
 								<li class="rounded-lg border border-border bg-card p-3">
-									{#if f.fact_type}
-										<Badge variant="secondary" class="mb-1.5">{f.fact_type}</Badge>
-									{/if}
+									<div class="mb-1.5 flex items-start justify-between gap-2">
+										<div>
+											{#if f.fact_type}
+												<Badge variant="secondary">{f.fact_type}</Badge>
+											{/if}
+										</div>
+										<div class="flex shrink-0 items-center gap-1">
+											<Button
+												type="button"
+												variant="ghost"
+												size="sm"
+												class="h-auto px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+												disabled={!canWrite(runActive)}
+												title={canWrite(runActive)
+													? 'Pin a correction to this fact'
+													: 'Paused while the agent is working'}
+												data-testid="lq-memory-fact-correct"
+												onclick={() => correctFact(f)}
+											>
+												Correct
+											</Button>
+											<Button
+												type="button"
+												variant="ghost"
+												size="sm"
+												class="h-auto px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+												disabled={!canWrite(runActive)}
+												title={canWrite(runActive)
+													? 'Close this fact’s validity window'
+													: 'Paused while the agent is working'}
+												data-testid="lq-memory-fact-retire"
+												onclick={() => askRetire({ kind: 'fact', id: f.id })}
+											>
+												Retire
+											</Button>
+										</div>
+									</div>
 									{@render md(f.body_md)}
 									<p class="mt-1.5 text-xs text-muted-foreground">
 										{#if f.source_citation}<span class="italic">{f.source_citation}</span> ·{/if}
@@ -331,7 +556,31 @@
 
 				<!-- Pinned corrections (the lawyer's enforced record) -->
 				<section data-testid="lq-memory-corrections">
-					<SectionHeader size="section" title="Pinned corrections ({memory.corrections.length})" />
+					<div class="flex items-center justify-between gap-3">
+						<SectionHeader
+							size="section"
+							title="Pinned corrections ({memory.corrections.length})"
+						/>
+						{#if !composerOpen}
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								class="shrink-0"
+								disabled={!canWrite(runActive)}
+								title={canWrite(runActive)
+									? 'Pin a correction'
+									: 'Paused while the agent is working'}
+								data-testid="lq-memory-pin-open"
+								onclick={openComposer}
+							>
+								+ Pin a correction
+							</Button>
+						{/if}
+					</div>
+					{#if composerOpen}
+						{@render pinComposer()}
+					{/if}
 					{#if memory.corrections.length === 0}
 						<p class="mt-2 text-sm text-muted-foreground">
 							No corrections pinned. Pin one to override what the agent believes.
@@ -348,13 +597,29 @@
 										? 'border-l-2 border-l-brand'
 										: ''}"
 								>
-									<div
-										class="mb-1.5 flex items-center gap-1.5 {pinned
-											? 'text-brand'
-											: 'text-muted-foreground'}"
-									>
-										<PinIcon class="size-3.5" aria-hidden="true" />
-										<span class="text-label uppercase">{pinned ? 'Pinned' : c.trust}</span>
+									<div class="mb-1.5 flex items-center justify-between gap-2">
+										<div
+											class="flex items-center gap-1.5 {pinned
+												? 'text-brand'
+												: 'text-muted-foreground'}"
+										>
+											<PinIcon class="size-3.5" aria-hidden="true" />
+											<span class="text-label uppercase">{pinned ? 'Pinned' : c.trust}</span>
+										</div>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											class="h-auto shrink-0 px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+											disabled={!canWrite(runActive)}
+											title={canWrite(runActive)
+												? 'Retire this correction'
+												: 'Paused while the agent is working'}
+											data-testid="lq-memory-correction-retire"
+											onclick={() => askRetire({ kind: 'correction', id: c.id })}
+										>
+											Retire
+										</Button>
 									</div>
 									{@render md(c.body_md)}
 									<p class="mt-1.5 text-xs text-muted-foreground">{timeAgo(c.created_at, nowMs)}</p>
@@ -453,6 +718,42 @@
 				onclick={confirmRevert}
 			>
 				{reverting ? 'Restoring…' : 'Restore version'}
+			</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- Retire confirm (C3-UM): a soft, append-only retire — the correction/fact drops off
+     the live lists but stays in the activity log. Disabled-during-run is enforced on the
+     trigger buttons, not here. -->
+<Dialog.Root bind:open={retireOpen}>
+	<Dialog.Content class="shadow-lg sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>
+				{retireTarget?.kind === 'fact' ? 'Retire this fact?' : 'Retire this correction?'}
+			</Dialog.Title>
+			<Dialog.Description>
+				{#if retireTarget?.kind === 'fact'}
+					This closes the fact’s validity window so the agent stops treating it as current. Nothing
+					is deleted — it stays in the activity log, marked superseded.
+				{:else}
+					This stops the correction from overriding what the agent believes. Nothing is deleted — it
+					stays in the activity log, marked superseded.
+				{/if}
+			</Dialog.Description>
+		</Dialog.Header>
+		{#if retireError}
+			<p class="text-sm text-destructive" data-testid="lq-memory-retire-error">{retireError}</p>
+		{/if}
+		<Dialog.Footer class="mt-2">
+			<Button type="button" variant="outline" onclick={() => (retireOpen = false)}>Cancel</Button>
+			<Button
+				type="button"
+				disabled={retiring}
+				data-testid="lq-memory-retire-confirm"
+				onclick={confirmRetire}
+			>
+				{retiring ? 'Retiring…' : 'Retire'}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
