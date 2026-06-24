@@ -1,13 +1,20 @@
-# Verdict — DataBridge software licence (moderate)
+# databridge_licence (moderate) — C9 v2 (surgical-redline skill LOADED)
 
-**Judge:** Claude (Opus 4.8). Acting-for: Licensee. Run: flash (`boilerplate_bare`=True, 10 turns).
+_Judge: Claude (Opus 4.8), sharp/sceptical panel (surgical=false if ANY material clause is struck-and-retyped wholesale). Single run per (instrument, model) — n=1; read as one strong-judged data point, not a rate._
 
-**VERDICT: STRONG** · **SURGICAL: yes**
+## flash (deepseek-v4-flash)
 
-- **§2 Suspension** — kept "The Licensor may suspend access" + "notice" **bare**; replaced only "at any time in its sole discretion and without" with a material-breach-and-cure condition.
-- **§5 Content licence** — kept "The Licensee grants the Licensor a" bare and the tail "improve its products" bare; replaced the perpetual/model-training scope with a provide-the-Software-only licence.
-- **§7 Indemnity** — left the one-sided Licensee indemnity entirely **bare** and *inserted* a reciprocal Licensor indemnity as a new paragraph (a clean paragraph-level insertion).
-- **§8 Liability** — kept the cap stem **bare**, appended a full carve-out list.
-- §3 fees, §9 term/termination: multiple narrow in-clause edits.
+**Verdict: STRONG · surgical: no** · boilerplate-bare (deterministic): yes · status: `completed` · model turns: 11
 
-Only §4 (IP) is a fuller rewrite, and even there the operative tail "shall vest exclusively in the Licensor upon creation" is preserved and narrowed to feedback. Partner-acceptable.
+Partner-grade balance with mostly scalpel edits and bare boilerplate, but the flagged §5 content-licence is one continuous strike-and-retype of the whole grant, so not fully surgical.
+
+- §7 indemnity mutualised the surgical way: 'The Licensee'→'Each party', 'Licensor'→'other party', trigger narrowed to 'that party's breach', and the boilerplate 'shall indemnify, defend and hold harmless' left BARE; Licensor IP indemnity appended (mutualisation_surgical=true).
+- §5 Licensee Content (the prompt's watch-item) is a wholesale rewrite: the entire grant body [-perpetual, irrevocable, worldwide... improve its products.-] struck and retyped — a long continuous block spanning the whole limb, when striking just 'perpetual, irrevocable,' + the training tail would have sufficed. This is the surgical=false tell.
+- §8 cap done by the right mechanism: 'shall not exceed the fees paid... three (3) months' left bare, only 'claim.' struck, with a four-limb carve-out (indemnity/confidentiality/IP/data) appended and the consequential-loss exclusion mutualised to 'either party' with its own carve-outs.
+- §4 IP handled with a licence-back, not a rewrite: struck only 'configurations, integrations and' from the vesting limb (feedback-vesting left intact) and appended a Licensee-ownership + royalty-free licence-back sentence.
+- §2/§6/§9 all narrow: suspension got 'sole discretion and without notice'→'reasonable grounds' + notice procedure; warranty struck only 'NON-INFRINGEMENT.' and appended express warranties as carve-outs from the bare 'AS IS' disclaimer; §9 mutualised termination by defined-term swaps with cure period.
+- Manifest confirms boilerplate_bare:true, single apply_redline after 5 previews, 11 turns — coherent, no over-reach, no NO-REDLINE robustness fail.
+
+## pro (deepseek-v4-pro) — model-vs-method control
+
+**No redline produced** (status: `completed`, model turns: 5). The stronger tier was *less* robust here — it failed to produce any tracked changes. (Any auto-generated verdict for this cell was discarded: with no pro reconstruction on disk the judge harness read a different run's file.)

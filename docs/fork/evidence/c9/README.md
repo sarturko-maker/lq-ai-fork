@@ -1,5 +1,13 @@
 # C9 evidence — Claude-judged manual redline tests
 
+> **⚠ v1 was CONFOUNDED — see `v1-skill-absent/`.** Despite the "How it was produced" note below saying the
+> run used "the bound `surgical-redline` skill active", the skill was in fact **silently absent from the
+> registry** (frontmatter `": "` bug, fixed in C3a). So the v1 result matrix — including the headline
+> "pervasive mutualisation is a *method* weakness" — was produced **without the skill that teaches exactly
+> that mutualisation move**. v1 is preserved verbatim in `v1-skill-absent/` (SUMMARY, flash, pro, verdicts).
+> The corrected v2 run (skill loaded) repopulates `flash/`, `pro/`, `verdicts/`, and `SUMMARY.md`; the
+> `SUMMARY.md` carries the v1→v2 delta and the corrected conclusion.
+
 C9 upgrades C8's craft signal from **DeepSeek-judging-itself** to **Claude (Opus 4.8) judging DeepSeek**, over
 a corpus that spans contract types **and** complexity, with the produced `.docx` surfaced for the maintainer
 to open in Word. (Maintainer steer, 2026-06-22.) Plan: `docs/fork/plans/C9-claude-judged-redline-tests.md`.

@@ -462,6 +462,20 @@ grants (mirror the `composition.py` area-keyed grant; MCP tools pass `guarded_di
   to `rewrite_justified` whole-clause rewrites. Levers: pre-teach the gate rules in `surgical-redline`;
   have the gate return all violations at once; give up faster on persistent tool errors. Feeds C8/F041.
 
+- **C8/C9 redline-craft follow-ups (surfaced in the 2026-06-24 confound-corrected re-run; see
+  `docs/fork/evidence/c9/SUMMARY.md`).** The re-run (skill now loaded) confirmed the prior craft finding rather
+  than overturning it; these are the precise, evidence-grounded fixes — each **deferred because n=1 can't verify a
+  craft change** (the methodological lesson). (a) **Grant-clause-narrowing worked-example** in
+  `skills/surgical-redline/SKILL.md` — strike only the toxic adjectives/purpose tail of a one-sided data/content
+  licence or IP-assignment, keep the grant verb bare (the skill has indemnity + cap examples but none for grant
+  clauses, the #1 residual). **Must be paired with a multi-rep × strong-judge eval** — the only instrument that can
+  measure a craft-rate change (C8's 3-rep is the weak self-judge; C9 is n=1). (b) **Overlap/duplication guard** in
+  `preview_redline`/`apply_redline` — reject or merge edits whose anchors overlap, and dedupe an insertion already
+  present; this kills the observed *seam* defects (`In no event In no event`, `the Personal Data the Personal
+  Data`, duplicated termination sentence). Deterministic + unit-testable → the clearest actionable fix. (c)
+  **Multi-rep mutualisation eval** (NDA × N reps, Claude-judged) to turn "NDA mutualisation is unreliable" from an
+  n=1 observation into a rate. (Step-budget tier is **deprioritised** — pro loops to cap_exceeded regardless.)
+
 - **Redline-viewing direction — "the lawyer SEES the redlines" (surfaced 2026-06-24, maintainer; strategic).**
   Today the agent produces a tracked-changes `.docx` the user must download + open in Word. Competitors
   (Harvey, Legora) embed a **Word editor in-product** via a Microsoft licensing arrangement so redlines are

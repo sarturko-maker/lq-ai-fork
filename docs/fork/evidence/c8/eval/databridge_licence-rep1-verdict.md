@@ -1,7 +1,8 @@
-VERDICT: STRONG
-SURGICAL: no
+VERDICT: ADEQUATE  
+SURGICAL: no  
 
-- Comprehensive customer-friendly rewrite of every key clause: suspension, fees, IP ownership, data licence, warranties, indemnity, liability cap (extended to 12 months plus carve-outs), and termination rights.
-- Correctly uses mutual indemnity (IP infringement from both sides) and liability-cap carve-outs for indemnity, confidentiality, IP infringement and fraud – good protective architecture.
-- Missing a confidentiality clause; its carve-out in the liability cap implies an obligation that isn’t stated, a minor coherence gap.
-- Whole-clause replacement in Sections 4 and 6 makes the redline non-surgical, but the substance is well-crafted and appropriate for the customer side.
+- Sections 5 (Licensee Content) and 7 (Indemnity) were struck and retyped wholesale rather than narrowly edited, failing the surgical standard.  
+- Balance is strong: mutual indemnity, IP indemnity from Licensor, cap carve-outs for confidentiality/indemnity/IP/gross negligence, and restricted use of Licensee Content.  
+- Good use of standard mechanisms: deemed direct loss carve-outs, super-cap exclusions, mutual termination, and refund for Licensor breach.  
+- Coherent and internally consistent; no over-protection (cap remains fee-based but with necessary exceptions) and no under-protection for a customer-side redline.  
+- The overall effect shifts the agreement from vendor-favoured to reasonably customer-protective, but the drafting technique is not surgical.

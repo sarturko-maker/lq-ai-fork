@@ -1,5 +1,13 @@
 # C8 evidence — surgical-redline craft (ADR-F041)
 
+> **⚠ v1 was CONFOUNDED — see `eval-v1-skill-absent/`.** The original C8 eval ran with the
+> `surgical-redline` SKILL.md **silently absent from the registry** (an unquoted `": "` in its
+> `description:` frontmatter made `yaml.safe_load` parse it as a mapping → the loader skipped it; fixed in
+> C3a + guarded by `test_every_real_skill_loads_no_silent_drops`). So every figure below the line "Recorded
+> figure" was produced **without the craft skill the eval was meant to measure**. It is preserved verbatim in
+> `eval-v1-skill-absent/` and must NOT be read as the craft of the loaded skill. The corrected v2 run (skill
+> loaded) lives in `eval/`; the v1→v2 delta is in `../c9/SUMMARY.md`.
+
 C8 makes structure-preserving, multi-narrow-edit redlines the *reliable* default — via a curated
 `surgical-redline` skill + a refreshed Commercial doctrine, a `preview_redline` self-review tool, and an
 **eval** that measures the surgical-craft rate. (Craft is a prompt-quality property tuned by eval, not a
@@ -34,25 +42,28 @@ Corpus: the vendor-favoured SaaS MSA (`securescan_msa`) + a vendor-favoured soft
 
 A run counts as a surgical pass when the judge rates it STRONG/ADEQUATE **and** calls it surgical.
 
-### Recorded figure (DeepSeek, 3 reps/scenario, tuned skill)
+### Recorded figure — v2 (skill LOADED), DeepSeek flash, 3 reps/scenario
 
-| scenario | surgical-craft pass | boilerplate-bare (deterministic) |
+| scenario | surgical-craft pass (self-judge) | boilerplate-bare (deterministic) |
 |---|---|---|
-| `securescan_saas_msa` (in-distribution) | **2 / 3** | 2 / 3 |
-| `databridge_licence` (out-of-distribution) | 0 / 3 | 2 / 2 redlined |
-| **overall** | **2 / 6** | 4 / 5 redlined runs keep the key phrases bare |
+| `securescan_saas_msa` | 0 / 3 *(2 ADEQUATE·not-surgical, 1 cap_exceeded/no-redline)* | 2 / 2 redlined |
+| `databridge_licence` | 0 / 3 *(STRONG/ADEQUATE/WEAK substance, all not-surgical)* | 2 / 3 |
+| **overall** | **0 / 6** *(was 2/6 in the confounded v1)* | 4 / 5 redlined runs keep the key phrases bare (v1 also 4/5) |
 
-**Honest read.** The mechanism works and the flagged **§8 indemnity is surgical in the passing runs** (the
-`shall indemnify, defend and hold harmless` verb phrase stays bare; the scope is narrowed and the reciprocal
-indemnity *inserted*) — a clear improvement over the C4 baseline that struck-and-retyped it. The skill keeps
-the **key boilerplate bare in 4/5 redlined runs** (incl. the §9 cap stem). But the strict craft judge is
-**not** yet "reliably surgical": the out-of-distribution licence still gets some clauses wholesale-rewritten
-(judge says STRONG substance, not-surgical), and **1/6 runs produced no redline at all**. This is a
-model-bound ceiling on DeepSeek, honestly measured — *not* a claim that surgical craft is solved.
+**Honest read — this is the WEAK self-judge; do not read 0/6 as a craft regression.** C8 uses DeepSeek to
+judge DeepSeek with an all-or-nothing `surgical` boolean ("no if ANY material clause was struck wholesale"),
+which is exactly why C9's **stronger Claude judge** exists. The v2 self-judge verdicts themselves describe
+*mostly* surgical redlines — e.g. "*§8 indemnity is textbook surgical … shall indemnify, defend and hold
+harmless left BARE … Elsewhere, changes are surgical: narrow insertions … standard boilerplate left intact*"
+— tripped to `surgical=false` by one or two dense licence/data clauses rewritten wholesale. Deterministic
+boilerplate-bare held at **4/6** (v1 was 4/5). **The authoritative craft read is the Claude-judged C9, not
+this self-judged rate — see `../c9/SUMMARY.md`.**
 
-### Limitations / next levers (the eval makes these cheap to re-measure)
+### Limitations / next levers
 
-- Out-of-distribution craft (non-MSA instruments) is weaker — broader worked examples or a stronger
-  qualified model would lift it.
-- ~1/6 runs fail to produce a redline (robustness gap — investigate step budget / editor-error recovery).
-- Re-run this eval when a stronger model is qualified, or after further skill tuning, to track the rate.
+- The DeepSeek self-judge under-credits surgical work and is unstable on the borderline `surgical` boolean —
+  use it only as a relative, judge-held-constant signal; the absolute craft signal is C9 (Claude judge).
+- The residual (dense single-party grant/data-licence clauses rewritten wholesale; occasional no-redline /
+  cap_exceeded robustness) is characterised in `../c9/SUMMARY.md`; the model tier does NOT fix it (pro is worse).
+- A proper craft-rate needs **multi-rep × strong-judge** — C8 is multi-rep but weak-judge, C9 is strong-judge
+  but n=1. See the C9 SUMMARY follow-ups.

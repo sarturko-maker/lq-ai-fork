@@ -11,7 +11,11 @@ qualification (F0-S9 tier floor) + area competence via curated tools and **contr
 human-owns every material write + escalation gates + auditable receipts. Full statement at the top of the COMM
 plan (`docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`).
 
-## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ · C3b-1 ✓ · C3b-2 ✓ (ADR-F043) · C3c-1 ✓ (READ backend, ADR-F044) · C3c-2 ✓ (cockpit Memory panel) · C3-UM ✓ (the human "update memory" UX — pin composer + inline correct-a-fact + retire). The ENTIRE matter-memory track (read + write + human-correct) is now SHIPPED. NEXT = maintainer's call: **C8/C9 redline-eval RE-RUN** (recommended — those craft findings are confounded, the surgical-redline skill never loaded; do this first), then **C7** (fan-out + redline-download UI), then **C5/C6**. See the "After C3-UM" + "Redline-viewing direction" notes below.**
+## State — **COMMERCIAL milestone OPEN; C-R0 ✓ C0 ✓ C-CLIENT ✓ C1 ✓ C2 ✓ C4 ✓ C8 ✓ C9 ✓ + cockpit chat-UX ✓. C3 REFRAMED → matter-memory track (C3a/b/c); ADR-F042 ACCEPTED. C3a ✓ · C3b-1 ✓ · C3b-2 ✓ (ADR-F043) · C3c-1 ✓ (READ backend, ADR-F044) · C3c-2 ✓ (cockpit Memory panel) · C3-UM ✓ (the human "update memory" UX — pin composer + inline correct-a-fact + retire). The ENTIRE matter-memory track (read + write + human-correct) is SHIPPED. **C8/C9 redline-eval RE-RUN ✓** (2026-06-24,
+branch `fork/c8c9-redline-eval-rerun`): re-ran both craft evals with the `surgical-redline` skill now LOADED — the
+confound is removed and the original finding is **CONFIRMED, not overturned** (robustness improved 6/7→7/7, the taught
+indemnity/cap moves apply, but pervasive-mutualisation persists and a stronger model is *worse*). NEXT = maintainer's
+call: **C7** (fan-out + redline-download UI), then **C5/C6**. See the "After C3-UM" + "Redline-viewing direction" notes below.**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -23,7 +27,27 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this session (C3c-2 — cockpit matter-memory panel SHIPPED; PR #__, branch `fork/c3c2-cockpit-memory-panel`)
+## Done this session (C8/C9 redline-eval RE-RUN — branch `fork/c8c9-redline-eval-rerun`; NO migration / deps / production code)
+
+**What:** re-ran C8 (auto-rate, 2 docs × 3 reps) + C9 (Claude-judged, 7 instruments) with the `surgical-redline`
+skill **loaded** (it was silently dropped in v1 — frontmatter `": "` bug, fixed C3a). Plan + full outcome:
+`docs/fork/plans/C8C9-redline-eval-rerun.md`; headline `docs/fork/evidence/c9/SUMMARY.md`. **Maintainer chose**
+both harnesses + flash-then-conditional-pro.
+
+- **Premise gate (deterministic):** skill loads (19/19, no silent drops) + binds to Commercial; the harnesses
+  inject the real registry. Corroborated: every run calls the on-demand `read_file` skill tool and reproduces the
+  skill's worked examples (Meridian §7 near-verbatim).
+- **Result: confound removed, finding CONFIRMED not overturned.** Robustness 6/7→7/7 redlined (Meridian no-redline
+  → STRONG·surgical), bare 5/7→6/7, taught indemnity/cap moves applied — BUT surgical-pass rate flat at n=1 (same
+  panel 5/7→3/7 = noise), pervasive mutualisation persists (Aegis §9), and **pro is *worse*** (2/4 no-redline, NDA
+  cap_exceeded → model tier doesn't fix it).
+- **Decision: NO production change** (n=1 can't verify a craft fix → defer all fixes to slices that pair each with
+  a verification; see MILESTONES § Backlog "C8/C9 redline-craft follow-ups").
+- **Evidence:** `c8/eval/` (v2) + `c8/eval-v1-skill-absent/` (archived); `c9/{flash,pro}/`, `c9/verdicts/*.md`,
+  `c9/SUMMARY.md` (v2) + `c9/v1-skill-absent/` (archived); both READMEs bannered confounded. v1 archived with
+  `git mv` (history preserved); nothing erased.
+
+### Earlier (C3c-2 — cockpit matter-memory panel SHIPPED; PR #137, branch `fork/c3c2-cockpit-memory-panel`)
 
 **What:** the **frontend half** of the matter-memory tier (ADR-F042 §C3c) — a new **"Memory" tab** in the
 cockpit's matter view rendering the C3c-1 composite + a human-authenticated wiki revert. **Pure frontend over
@@ -209,12 +233,14 @@ btrfs subvolumes persist, `apt-get install btrfs-progs`, stop docker, delete `/v
 admin) seeded with a wiki + 2 wiki snapshots + 5 live facts + 1 superseded fact + 1 human-pinned correction.
 Deep-link `/lq-ai?area=commercial&matter=905720d1-5d17-43cd-a8f0-3a76d095de34` → **Memory** tab.
 
-**After C3-UM (maintainer's call, not blocked):** **C5** negotiation rounds · **C6** controlling playbook skills
-(needs F036+F038) · **C7** fan-out + **redline-download UI**. **⚠ C8/C9 redline-eval RE-RUN** — the
-`surgical-redline` SKILL.md was silently dropped through C8/C9 (frontmatter `": "` bug, fixed in C3a) → those
-craft findings are **CONFOUNDED**; re-run now that the skill loads (memory `claude-judged-redline-tests-slice`).
-**Cross-cutting marker-fence hardening** (carried C3a nit). **Other C3 backlog:** embedding/FTS search UI
-(gateway `/v1/embeddings` 501 until B6); log pagination beyond the tail cap; the 6th `_rejection_text` dedup.
+**Next (maintainer's call, not blocked):** **C5** negotiation rounds · **C6** controlling playbook skills
+(needs F036+F038) · **C7** fan-out + **redline-download UI**. **✅ C8/C9 redline-eval RE-RUN DONE** (2026-06-24) —
+the confound (silently-dropped `surgical-redline` SKILL.md, fixed in C3a) is removed; the re-run **confirms** the
+prior craft finding (`docs/fork/evidence/c9/SUMMARY.md`). **Evidence-grounded craft follow-ups are now in MILESTONES
+§ Backlog** ("C8/C9 redline-craft follow-ups"): grant-clause worked-example + a multi-rep×strong-judge eval; an
+overlap/duplication guard in the redline tools (the clearest fix — kills the seam defects); a multi-rep mutualisation
+eval. Each deferred because **n=1 can't verify a craft change**. **Cross-cutting marker-fence hardening** (carried
+C3a nit). **Other C3 backlog:** embedding/FTS search UI (gateway `/v1/embeddings` 501 until B6); log pagination.
 
 ## Gotchas / durable traps (C8 + C4 + carried)
 
@@ -254,6 +280,24 @@ craft findings are **CONFOUNDED**; re-run now that the skill loads (memory `clau
   backend. **C9 manual harness** (`test_commercial_redline_manual.py`, provider-marked) writes per-MODEL dirs
   (`c9/flash`, `c9/pro`) with a merge-safe `manifest.json`; `LQ_AI_C9_ONLY` runs a subset. The one open craft
   weakness it found is **pervasive mutualisation** (see pickup) — flash rip-and-replaces, pro can `cap_exceeded`.
+
+- **C8/C9 re-run — a bound skill's BODY reaches the model ONLY on-demand (ADR-F016 progressive disclosure).**
+  deepagents' SkillsMiddleware auto-injects only the skill **index** (name + `description:`) into the system
+  prompt; the full SKILL.md body is fetched by the model calling the builtin **`read_file`** on
+  `/skills/<name>/SKILL.md`. So "skill loaded + bound" (the premise gate) ≠ "the worked examples are in context"
+  — the model must choose to read them. So (1) make the `description:` itself carry the core directive (always
+  present); (2) to confirm the body was consulted, look for `read_file` in the manifest `tools_called` (distinct
+  from `read_document`, the matter-doc reader) and/or the redline reproducing the skill's worked examples.
+- **C8/C9 re-run — redline craft at n=1 is NOISE; the `surgical` boolean is judge-borderline.** C9 is one run per
+  (instrument, model); the surgical-pass *count* swings on borderline "is a bare-grant-clause wholesale rewrite
+  surgical?" calls — even the *same* Claude panel split on it across two runs. Read deterministic signals
+  (manifest `redlined`/`boilerplate_bare`) + direct text inspection as primary; treat verdict counts as
+  qualitative. A real craft-rate change needs **multi-rep × strong-judge** → **don't ship a craft tweak you can't
+  measure**. To compare two runs fairly, re-judge BOTH with the *identical* panel (removes judge drift).
+- **C8/C9 re-run — a judge agent given a path to a MISSING `reconstruction.txt` (a no-redline run) will hunt and
+  read a DIFFERENT run's file → a verdict for the wrong artifact.** Bit the v1 Meridian + pro DataBridge/Northwind
+  cells. **Gate trust on file-existence**: a verdict is valid only if its `reconstruction.txt` exists on disk;
+  otherwise use the manifest ground-truth (no-redline).
 
 - **Adeu is installed `--no-deps`** (4 places: api/Dockerfile, api/Dockerfile.dev, ci.yml, + any dev-image test
   command). Its `fastmcp[apps]` dep bumps starlette 0.48/pydantic 2.13/mcp → breaks `APIRouter`. The SDK

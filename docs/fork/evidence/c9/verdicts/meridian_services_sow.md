@@ -1,27 +1,16 @@
-# Verdict — Meridian professional-services agreement (moderate; flash *robustness* failure)
+# meridian_services_sow (moderate) — C9 v2 (surgical-redline skill LOADED)
 
-**Judge:** Claude (Opus 4.8). Acting-for: Customer.
+_Judge: Claude (Opus 4.8), sharp/sceptical panel (surgical=false if ANY material clause is struck-and-retyped wholesale). Single run per (instrument, model) — n=1; read as one strong-judged data point, not a rate._
 
 ## flash (deepseek-v4-flash)
 
-**VERDICT: FAIL (no output)** · **SURGICAL: n/a** (`completed`, 4 turns, 1 preview, **0** apply, no redline)
+**Verdict: STRONG · surgical: yes** · boilerplate-bare (deterministic): yes · status: `completed` · model turns: 26
 
-Flash read the document, previewed once, and then ended the turn without ever calling `apply_redline` — the ~1/6 no-redline robustness gap also seen in C8. No artifact to judge.
+A genuinely surgical, mechanism-correct CUSTOMER-side redline across all eight heads — the §7 mutualisation is done by bare defined-term swaps keeping "shall indemnify, defend and hold harmless" untouched — marred only by an incoherent duplicated termination sentence (§9) and a latent §5 warrant-vs-disclaimer tension.
 
-## pro (deepseek-v4-pro)
-
-**VERDICT: STRONG (substance) / ADEQUATE (craft)** · **SURGICAL: mostly** (`boilerplate_bare`=False, 16 turns)
-
-Pro produced a redline where flash produced none — the clearest model-vs-method win for pro: robustness. The substance is strong and most edits are surgical:
-
-- **§2 Acceptance** — narrow edits: `three (3)`→`fifteen (15) business` days, pay-for-all → pay-only-for-accepted, and added supplier-corrects-at-its-cost. Procedure bare.
-- **§3 Fees** — capped T&M to the estimate, added a 5%/yr rate-cap with notice, kept the structure.
-- **§6 Personnel** — added key-person continuity + substitution-with-consent, narrow.
-- **§8 Liability** — kept the cap stem **bare**, `one (1) month`→`twelve (12) months`, made the consequential exclusion mutual, appended carve-outs.
-- §4 IP and §5 warranty restructured (defensible — assigning bespoke deliverables and adding a conformance warranty need restructuring).
-
-`boilerplate_bare`=False is driven by **§7**: pro mutualised the indemnity by striking-and-retyping it ("The Customer shall indemnify…" → "Each party shall indemnify…") instead of a defined-term swap that keeps the verb phrase bare — the same pervasive-change reflex as the NDA, but isolated to one clause here.
-
-## Read
-
-Pro is the better tool for this instrument purely on **robustness** (it produced a redline at all). Craft is good but for the §7 indemnity rewrite — again the mutualisation-as-rip-and-replace pattern, the one consistent craft weakness across the corpus.
+- §7 indemnity (mutualisation case): fixed by party-swaps [-The Customer-][+Each party+] / [-Supplier-][+other party+] with the verb phrase 'shall indemnify, defend and hold harmless' left BARE, plus a narrowed trigger ('arising from the indemnifying party's breach') and an added Supplier IP indemnity — textbook surgical mutualisation, not a strike-and-retype; manifest boilerplate_bare:true confirms.
+- §8 cap done by the right mechanism: period bump [-one (1) month-][+twelve (12) months+] PLUS carve-outs inserted as a 'provided that this limitation shall not apply to (i)-(iv)' proviso after [-claim.-]; the bare 'shall not exceed' and the indirect-loss exclusion sentence left untouched. Strong balance work.
+- §4 IP: only the vesting limb swapped [-exclusively in the Supplier-][+in the Customer (for bespoke) and in the Supplier (for pre-existing)+]; the existing licence sentence left bare — clean LEAVE-ALONE.
+- §2/§3/§6: each is a narrow swap of the one-sided limb (3→30 days; uncapped→SOW cap; rate-revise window; sole-discretion→key-person consent) with surrounding text preserved. No wholesale clause rewrite anywhere.
+- COHERENCE FAIL §9: the for-convenience fix produces two overlapping inserts — '[+Either party may terminate... to the other party;+]' then a redundant '[+The other party may also terminate... to the Supplier+]' — duplicative and internally contradictory (Either party already covers both); a partner would cut the second sentence.
+- Minor §5 tension: inserts a conformance warranty after 'AS IS' but leaves the full disclaimer ('does not warrant... conform to any specification') bare, so the clause now both warrants and disclaims conformance — should have struck the disclaimer limb.

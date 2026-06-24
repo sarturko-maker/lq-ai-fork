@@ -1,0 +1,23 @@
+SOFTWARE LICENCE AND SUPPORT AGREEMENT
+This Software Licence and Support Agreement is entered into between DataBridge Systems LLC (the "Licensor") and the customer identified in the Order (the "Licensee").
+1. Definitions
+"Software" means the DataBridge platform licensed under the Order. "Licensor" means DataBridge Systems LLC. "Licensee" means the customer identified in the Order. "Licensee Content" means data the Licensee loads into the Software.
+2. Licence
+The Licensor grants the Licensee a non-exclusive, non-transferable licence to use the Software during the term. The Licensor may suspend access only if the Licensee is in material breach of this Agreement and fails to cure that breach within fifteen (15) days of written notice from the Licensor, or if the Licensee fails to pay undisputed amounts when due and fails to cure within five (5) days of written notice.
+3. Fees
+The Licensee shall pay all fees within fifteen (15) days of the invoice date. The Licensor may increase the fees no more than once per twelve (12) month period on at least sixty (60) days' written notice. All fees are non-refundable except where this Agreement is terminated by the Licensee due to the Licensor's uncured material breach, in which case the Licensor shall refund any prepaid fees for the remaining portion of the Term.
+4. Intellectual Property
+The Licensee retains all intellectual property rights in any configurations and integrations created by or specifically for the Licensee in connection with its use of the Software. The Licensee grants the Licensor a non-exclusive, royalty-free, worldwide licence to use such configurations and integrations solely to provide the Software to the Licensee. Any intellectual property rights in any feedback provided by the Licensee shall vest exclusively in the Licensor upon creation.
+5. Licensee Content
+The Licensee grants the Licensor a non-exclusive, royalty-free, worldwide licence to use, reproduce and create derivative works from Licensee Content solely to the extent necessary to provide the Software to the Licensee during the Term. The Licensor shall not use Licensee Content to train its models or improve its products.
+6. Warranties
+The Licensor warrants that (a) the Software will materially perform in accordance with its applicable documentation, (b) the Licensor has the right and authority to grant the licences granted under this Agreement, and (c) the Software does not contain any viruses, malware or other harmful code. EXCEPT AS EXPRESSLY SET FORTH IN THIS AGREEMENT, THE SOFTWARE IS PROVIDED "AS IS" AND THE LICENSOR DISCLAIMS ALL OTHER WARRANTIES, WHETHER EXPRESS, IMPLIED OR STATUTORY, INCLUDING MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+7. Indemnity
+The Licensee shall indemnify, defend and hold harmless the Licensor and its officers against any and all claims, losses, damages and expenses arising from or in connection with the Licensee's use of the Software or the Licensee Content.
+The Licensor shall indemnify, defend and hold harmless the Licensee and its officers against any and all claims, losses, damages and expenses arising from or in connection with (a) any claim that the Software infringes any third-party intellectual property rights, or (b) the Licensor's breach of its obligations under this Agreement.
+8. Limitation of Liability
+The Licensor's total liability arising out of or in connection with this Agreement shall not exceed the fees paid by the Licensee in the three (3) months preceding the claim, provided that this limitation shall not apply to (a) the Licensor's indemnification obligations under this Agreement, (b) claims arising from the Licensor's infringement of third-party intellectual property rights, (c) breach of confidentiality, (d) death or personal injury caused by the Licensor's negligence, or (e) fraud or wilful misconduct. In no event shall the Licensor be liable for any indirect, incidental or consequential damages, or any loss of profits, revenue or data.
+9. Term and Termination
+This Agreement renews automatically for successive one (1) year terms unless either party gives written notice of non-renewal at least thirty (30) days before the end of the then-current term. The Licensee may terminate this Agreement for convenience at any time on thirty (30) days' written notice, in which case fees shall be prorated to the effective date of termination. Either party may terminate this Agreement on written notice if the other party materially breaches this Agreement and fails to cure that breach within thirty (30) days of written notice.
+10. Governing Law
+This Agreement is governed by the laws of the State of New York, and the parties submit to the exclusive jurisdiction of the courts of New York.

@@ -1,7 +1,8 @@
-VERDICT: STRONG  
+VERDICT: WEAK  
 SURGICAL: no  
-- Wholesale rewrite of IP ownership (cl.4) and warranties (cl.6) instead of narrow edits  
-- Effectively uses carve-outs from liability cap, mutual indemnity, and deemed-indirect damages exception  
-- Protects Licensee Content from model training, adds refund rights on termination, and ensures bilateral termination  
-- Suspension tied to material breach with cure; fee increases limited to renewal term with notice  
-- Limitations are balanced with exceptions for confidentiality, indemnity, gross negligence, and IP infringement
+
+- Multiple material clauses (IP ownership, Licensee Content grant, warranty, indemnity, limitation of liability, termination) were struck and retyped wholesale rather than edited narrowly.  
+- While the substantive balance is vastly improved for the customer (carve-outs, mutual indemnity, capped damages with exceptions, data return), the redlining technique does not follow surgical principles.  
+- The IP clause deleting the entire vesting provision and inserting new language is a clear wholesale replacement, as is the complete rewrite of the warranty clause.  
+- The non-surgical approach undermines the review’s credibility and could obscure changes in a collaborative negotiation context.  
+- Although the redline correctly uses carve-outs and structural mechanisms (e.g., deemed-direct damages via cap exceptions), the failure to preserve original language through narrow edits makes the craft weak.
