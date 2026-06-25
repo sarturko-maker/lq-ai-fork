@@ -1,0 +1,41 @@
+{
+  "model_alias": "deepseek",
+  "status": "cap_exceeded",
+  "step_count": 80,
+  "tool_calls": [
+    "search_documents",
+    "read_document",
+    "search_documents",
+    "search_documents",
+    "search_documents",
+    "read_document",
+    "search_documents",
+    "update_matter_memory",
+    "read_file",
+    "task",
+    "task",
+    "task",
+    "search_documents",
+    "search_matter_memory",
+    "read_document",
+    "read_file",
+    "read_file",
+    "search_documents",
+    "read_document",
+    "search_documents",
+    "write_todos",
+    "read_document",
+    "write_todos",
+    "record_matter_fact",
+    "write_todos",
+    "write_todos",
+    "reconcile_positions"
+  ],
+  "task_delegations": 3,
+  "nested_under_task": 43,
+  "reconcile_positions_calls": 2,
+  "reconciliation_receipts": [
+    "Reconciled 3 drafted position(s) into 3 head(s) (0 divergence(s) resolved): Indemnity (missing \u2014 new clause), Limitation of Liability (\u00a77), Term & Termination (\u00a71)."
+  ],
+  "final_answer_excerpt": ""
+}

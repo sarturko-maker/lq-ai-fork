@@ -25,6 +25,7 @@ from app.agents.commercial_tools import (
     _apply_redline,
     _extract_counterparty_position,
     _preview_redline,
+    _reconcile_positions,
     _respond_to_counterparty,
     build_commercial_tools,
 )
@@ -200,11 +201,13 @@ def test_build_commercial_tools_grants_redline_tools() -> None:
         "preview_redline",
         "extract_counterparty_position",
         "respond_to_counterparty",
+        "reconcile_positions",
     ]
     assert sorted(COMMERCIAL_TOOL_NAMES) == [
         "apply_redline",
         "extract_counterparty_position",
         "preview_redline",
+        "reconcile_positions",
         "respond_to_counterparty",
     ]
 
@@ -768,3 +771,145 @@ async def test_respond_rejects_reply_on_accepted_anchored_change(
             .all()
         )
         assert not audit  # no response receipt
+
+
+# ----------------------- C7b reconcile_positions (ADR-F034) ------------------ #
+
+
+async def test_reconcile_positions_records_receipt_and_audits(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """A consistent (or fully-resolved) reconciliation records one counts-only receipt
+    + audit row — never position text — and returns the reconciled position per head."""
+    user_id, project_id = matter
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    positions = [
+        {"head": "liability", "position": "uncapped", "source": "clause-drafter"},
+        {"head": "liability", "position": "cap at fees", "source": "clause-reviewer"},
+        {"head": "indemnity", "position": "mutual, IP carve-out", "source": "clause-drafter"},
+    ]
+    resolutions = {"liability": "super-cap at 2x fees, data/IP uncapped"}
+
+    async with commit_factory() as db:
+        out = await _reconcile_positions(
+            db,
+            _binding(user_id, project_id),
+            positions=positions,
+            resolutions=resolutions,
+            run_id=run_id,
+        )
+        await db.commit()
+
+    assert "Reconciled" in out and "1 divergence(s) resolved" in out
+    assert "super-cap" in out  # the reconciled position is handed back to the lead
+
+    async with commit_factory() as db:
+        facts = (
+            (
+                await db.execute(
+                    select(MatterMemoryEntry).where(
+                        MatterMemoryEntry.project_id == project_id,
+                        MatterMemoryEntry.kind == "fact",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        receipt = [f for f in facts if "Reconciled" in f.body_md]
+        assert len(receipt) == 1
+        assert receipt[0].fact_type == "open_point"
+        assert receipt[0].run_id == run_id
+        # the receipt names the heads (continuity) but never the position text
+        assert "liability" in receipt[0].body_md
+        assert "super-cap" not in receipt[0].body_md and "uncapped" not in receipt[0].body_md
+
+        audit = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "commercial.positions_reconciled",
+                        AuditLog.user_id == user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(audit) == 1
+        details = str(audit[0].details)
+        assert "super-cap" not in details and "uncapped" not in details  # counts only
+        assert "liability" not in details and "indemnity" not in details
+
+
+async def test_reconcile_positions_unresolved_divergence_records_nothing(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """A head where the drafts diverge with no resolution is rejected — nothing recorded."""
+    user_id, project_id = matter
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    positions = [
+        {"head": "liability", "position": "uncapped", "source": "clause-drafter"},
+        {"head": "liability", "position": "cap at fees", "source": "clause-reviewer"},
+    ]
+
+    async with commit_factory() as db:
+        out = await _reconcile_positions(
+            db,
+            _binding(user_id, project_id),
+            positions=positions,
+            resolutions={},
+            run_id=run_id,
+        )
+        await db.commit()
+
+    assert "Reconciliation rejected" in out and "liability" in out
+
+    async with commit_factory() as db:
+        facts = (
+            (
+                await db.execute(
+                    select(MatterMemoryEntry).where(
+                        MatterMemoryEntry.project_id == project_id,
+                        MatterMemoryEntry.kind == "fact",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert not [f for f in facts if "Reconciled" in f.body_md]
+        audit = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "commercial.positions_reconciled",
+                        AuditLog.user_id == user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert not audit  # no receipt on a rejected reconciliation
+
+
+async def test_reconcile_positions_malformed_input_rejected(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """An empty batch returns a fix-and-retry string (reject, don't crash); nothing written."""
+    user_id, project_id = matter
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    async with commit_factory() as db:
+        out = await _reconcile_positions(
+            db,
+            _binding(user_id, project_id),
+            positions=[],
+            resolutions={},
+            run_id=run_id,
+        )
+        await db.commit()
+    assert "Rejected" in out and "reconcile_positions" in out

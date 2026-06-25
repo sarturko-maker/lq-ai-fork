@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # --------------------------------------------------------------------------- #
 # Gate thresholds — CALIBRATION STARTING VALUES (C-R0 §6.2/§11), not sourced.
@@ -628,3 +628,131 @@ def evaluate_anchoring(
         if chg_verdict in _WIPING_CHANGE_VERDICTS:
             wiped.append((d.ref, change_ref, chg_verdict))
     return AnchorReport(ok=not wiped, wiped=wiped)
+
+
+# --------------------------------------------------------------------------- #
+# C7b (ADR-F034) — post-fan-out reconciliation. When the lead fans out drafting
+# across material heads (the clause-drafter/clause-reviewer roster), the drafts
+# must be reconciled into ONE position per head before a work product is emitted —
+# independence across drafts is a defect, not a feature. This is the model-free
+# half (like evaluate_coverage): a deterministic consistency check the
+# reconcile_positions tool calls. Heads/counts only — no position text in audit.
+# --------------------------------------------------------------------------- #
+MAX_POSITIONS_PER_RECONCILE = 200  # a deal has dozens of heads/drafts, not thousands
+_HEAD_MAX_CHARS = 200
+_POSITION_MAX_CHARS = 4000
+
+
+def _normalize_reconcile(text: str) -> str:
+    """Case/whitespace-fold for grouping heads and comparing positions."""
+    return " ".join(text.split()).casefold()
+
+
+class ProposedPosition(BaseModel):
+    """One draft's proposed position on one deal head. Reject, don't sanitize (ADR-F018)
+    — a malformed position comes back for the model to fix."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    head: str  # the deal point / clause group, e.g. "limitation of liability"
+    position: str  # the proposed stance / drafted-language summary
+    source: str  # which draft produced it, e.g. "clause-drafter (liability)"
+
+    @model_validator(mode="after")
+    def _shape(self) -> Self:
+        if not self.head:
+            raise ValueError("each position must name the deal head it concerns")
+        if not self.position:
+            raise ValueError(f"{self.head!r}: a position must state the proposed stance")
+        if not self.source:
+            raise ValueError(f"{self.head!r}: a position must name its source draft")
+        if len(self.head) > _HEAD_MAX_CHARS:
+            raise ValueError(f"head too long (> {_HEAD_MAX_CHARS} chars)")
+        if len(self.position) > _POSITION_MAX_CHARS:
+            raise ValueError(f"position too long (> {_POSITION_MAX_CHARS} chars)")
+        return self
+
+
+class ReconcilePositionsInput(BaseModel):
+    """The full set of fanned-out positions to reconcile, plus the lead's resolution for
+    any head where the drafts diverge (head → the single position to carry forward)."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    positions: list[ProposedPosition]
+    resolutions: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("positions")
+    @classmethod
+    def _positions_bounded(cls, v: list[ProposedPosition]) -> list[ProposedPosition]:
+        if not v:
+            raise ValueError("reconcile at least one proposed position")
+        if len(v) > MAX_POSITIONS_PER_RECONCILE:
+            raise ValueError(
+                f"too many positions ({len(v)} > {MAX_POSITIONS_PER_RECONCILE}) in one call"
+            )
+        return v
+
+
+@dataclass(frozen=True)
+class ConsistencyReport:
+    """The reconciliation outcome — heads/counts only, never position text (ADR-F018)."""
+
+    ok: bool
+    divergent: list[str] = field(default_factory=list)  # heads with ≥2 distinct, no resolution
+    resolved: dict[str, str] = field(default_factory=dict)  # head → the single reconciled position
+    position_count: int = 0
+    head_count: int = 0
+    divergences_resolved: int = 0  # heads that had ≥2 distinct drafts and a supplied resolution
+
+    def rejection_text(self) -> str:
+        lines = [
+            f"- {head!r}: the drafts proposed divergent positions and you supplied no "
+            f"resolution — decide the single position and pass it as resolutions[{head!r}]."
+            for head in sorted(self.divergent)
+        ]
+        return (
+            "Reconciliation rejected — nothing was recorded. Independent drafts must be "
+            "reconciled into one position per head before a work product is emitted; the "
+            "heads below still carry divergent drafts. Resolve each and call "
+            "reconcile_positions again:\n" + "\n".join(lines)
+        )
+
+
+def evaluate_position_consistency(
+    positions: list[ProposedPosition],
+    resolutions: dict[str, str],
+) -> ConsistencyReport:
+    """Group proposed positions by head. A head with one agreed position uses it — a
+    resolution can never override an undisputed position (the safe direction). A head with
+    ≥2 distinct positions needs a resolutions[head], or it is divergent (ok=False); when
+    supplied, that resolution becomes the reconciled position. Model-free,
+    collect-all-errors — the lead fixes every divergence in one pass."""
+    by_head: dict[str, dict[str, str]] = {}  # norm-head → {norm-position: original-position}
+    head_label: dict[str, str] = {}  # norm-head → display label (first seen)
+    for p in positions:
+        nh = _normalize_reconcile(p.head)
+        head_label.setdefault(nh, p.head)
+        by_head.setdefault(nh, {})[_normalize_reconcile(p.position)] = p.position
+    norm_resolutions = {_normalize_reconcile(h): v for h, v in resolutions.items() if v.strip()}
+
+    divergent: list[str] = []
+    resolved: dict[str, str] = {}
+    divergences_resolved = 0
+    for nh, distinct in by_head.items():
+        label = head_label[nh]
+        if len(distinct) == 1:
+            resolved[label] = next(iter(distinct.values()))
+        elif nh in norm_resolutions:
+            resolved[label] = norm_resolutions[nh]
+            divergences_resolved += 1
+        else:
+            divergent.append(label)
+    return ConsistencyReport(
+        ok=not divergent,
+        divergent=sorted(divergent),
+        resolved=resolved,
+        position_count=len(positions),
+        head_count=len(by_head),
+        divergences_resolved=divergences_resolved,
+    )

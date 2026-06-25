@@ -3,13 +3,22 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶ **PICKUP (2026-06-25): C5b-2 MERGED (#144) + C5b-3 SHIPPED on branch `fork/c5b3-deal-change-chips`
-> (PR opened this session).** The whole **C5b sub-track is complete** (negotiation loop + comment-fix +
-> craft skill + live verdict chips). **Next slice = maintainer's call: C7b (drafter/reviewer fan-out roster)
-> or C6 (controlling playbook skills — needs ADRs F036/F038 first).** Dev image `lq-ai-api-dev` is built;
-> test recipe in [[c5b2-negotiation-skill-shipped]] (run ruff/pytest with the **repo root mounted**,
-> `DATABASE_URL` → dev postgres). If C5b-3's PR isn't merged yet, confirm its CI green then squash-merge
-> under the ADR-F005 gate.
+> ▶ **PICKUP (2026-06-25): C7b SHIPPED on branch `fork/c7b-fan-out-roster` (PR opened this session).** The
+> drafter/reviewer **fan-out roster** + the **post-fan-out reconciliation pass** (migration `0073`, ADR-F034).
+> C7 is now fully delivered (C7a download + C5b-3 live signal + C7b roster/reconcile). **Next slice = maintainer's
+> call: C6 (controlling playbook skills — needs ADRs F036/F038 decided FIRST; neither exists yet) or a backlog
+> item (counter-with-reply skill tuning; a Claude-judged eval re-run when the gateway has an Anthropic key;
+> a deal-review craft eval).** Dev image `lq-ai-api-dev` is built; test recipe = run ruff/pytest in the dev image
+> with the **repo root mounted** + `DATABASE_URL` → dev postgres on the `lq-ai_default` network (the throwaway
+> test DBs spin from it). If C7b's PR isn't merged yet, confirm its CI green then squash-merge under ADR-F005.
+>
+> **Fan-out is deepagents-native + model-driven (no fork scaffolding).** Fan-out = deepagents' `task` tool
+> (`SubAgentMiddleware`, v0.6.8); the model decides when to delegate (guidance is PROSE only — the `task` tool
+> description + each subagent's `description` field + the `deal-review` skill + `profile_md`). C7b added ZERO
+> orchestration: two declarative subagent dicts (migration), a `reconcile_positions` tool, a skill. No
+> graph/Send/reducer (that's the deferred O-series). The thin fork seams the specs flow through
+> (`reject_model_bearing_subagents` ADR-F010, skill-wiring ADR-F017, runner `parent_step_id` nesting) PRE-DATE
+> C7b — adapters, not a fan-out engine.
 
 ## North star (the goal, not a prompt)
 
@@ -76,7 +85,36 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this session (C5b-3 — NEGOTIATION LIVE VERDICT CHIPS — branch `fork/c5b3-deal-change-chips`; ADR-F032 + ADR-F024 addenda; NO migration/endpoint/dep)
+## Done this session (C7b — DRAFTER/REVIEWER FAN-OUT ROSTER + POST-FAN-OUT RECONCILIATION — branch `fork/c7b-fan-out-roster`; ADR-F034; migration `0073`; NO endpoint/dep)
+
+**What:** the complex-deal **roster** + the **reconciliation pass**. The lead fans out `clause-drafter` (one per
+material head) + consults `clause-reviewer`, then reconciles the drafts into ONE position per head before emitting
+one work product. Completes C7 (C7a download + C5b-3 live signal already shipped).
+- **Fan-out is deepagents-native + model-driven — C7b added NO orchestration** (see the pickup note above). The
+  roster is two declarative subagent dicts; the reconciliation is a single-dispatch tool gate, NOT a guaranteed
+  flow (the flow guarantee is the deferred O-series — ADR-F034 names this boundary honestly).
+- **Migration `0073`** (`down_revision 0072`): `_extend_commercial_roster` — a **reconciling** never-clobber JSONB
+  swap of the verbatim 0057 single-researcher config → `[document-researcher, clause-drafter, clause-reviewer]`
+  (0057's `= '{}'` guard is dead now; mirror 0066/0072's `WHERE col = :old` instead) + `_bind_deal_review_skill`
+  (NOT EXISTS). Both module-level for the idempotency test. New subagents: model-free (ADR-F010), no `tools`
+  (inherit guarded matter tools), `skills` ⊆ area (ADR-F017).
+- **`skills/deal-review/SKILL.md`** (ADR-F041 craft layer, bound in 0073): triage → fan out per head → review
+  (over-reach/under-protection/inconsistency/gaps) → `reconcile_positions` → emit one work product.
+- **`reconcile_positions` tool** (in `COMMERCIAL_TOOL_NAMES`) + pure `evaluate_position_consistency`
+  (`schemas/commercial.py`, mirrors `evaluate_coverage`): a head where drafts diverge needs an explicit
+  `resolutions[head]` or the batch is **rejected** (no-silent-divergence). On success records a SAVEPOINT-isolated
+  **counts+head-names-only** matter receipt (`_record_reconciliation_receipt`) + audits **counts only**. Records
+  only on success.
+- **Verify:** full api suite **2708 passed / 32 skipped / 0 failed**; ruff + mypy clean; migration round-trip
+  (upgrade→downgrade→upgrade) on a throwaway pgvector DB. **Live (DeepSeek, `docs/fork/evidence/c7b/`):** the real
+  agent fanned out **3 `task` delegations / 43 nested steps** and called **`reconcile_positions` (2 calls → 1
+  receipt)** end-to-end — fan-out + reconcile + receipt all proven live (run ends `cap_exceeded` only because
+  deepseek-flash keeps exploring AFTER reconciling — an honest ADR-F015 over-exploration finding, not a mechanism
+  defect; mechanics are deterministically pinned). Adversarial review: **0 blockers / 0 should-fixes / 1 nit
+  folded** (a docstring overstated resolution precedence — code is correct), 4 refuted; security clean
+  (audit counts-only + receipt head-labels-only verified, matter-scoped, no leaks).
+
+## Done earlier this session (C5b-3 — NEGOTIATION LIVE VERDICT CHIPS — branch `fork/c5b3-deal-change-chips`; ADR-F032 + ADR-F024 addenda; NO migration/endpoint/dep)
 
 **What:** the **live signal** on the round-2 loop — the C5 analogue of PRIV-9b's changed-row highlight. As the
 agent responds to the counterparty, the cockpit flashes a transient **verdict chip per item** inline in the
