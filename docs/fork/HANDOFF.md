@@ -3,14 +3,14 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶ **PICKUP (2026-06-25): C7b SHIPPED on branch `fork/c7b-fan-out-roster` (PR opened this session).** The
-> drafter/reviewer **fan-out roster** + the **post-fan-out reconciliation pass** (migration `0073`, ADR-F034).
-> C7 is now fully delivered (C7a download + C5b-3 live signal + C7b roster/reconcile). **Next slice = maintainer's
-> call: C6 (controlling playbook skills — needs ADRs F036/F038 decided FIRST; neither exists yet) or a backlog
-> item (counter-with-reply skill tuning; a Claude-judged eval re-run when the gateway has an Anthropic key;
-> a deal-review craft eval).** Dev image `lq-ai-api-dev` is built; test recipe = run ruff/pytest in the dev image
-> with the **repo root mounted** + `DATABASE_URL` → dev postgres on the `lq-ai_default` network (the throwaway
-> test DBs spin from it). If C7b's PR isn't merged yet, confirm its CI green then squash-merge under ADR-F005.
+> ▶ **PICKUP (2026-06-25): C7b MERGED to `main` (#146, squash `e0dde61`); branch deleted; CI green on all three
+> jobs (API/Gateway/Web).** The drafter/reviewer **fan-out roster** + the **post-fan-out reconciliation pass**
+> (migration `0073`, ADR-F034). C7 is now fully delivered (C7a download + C5b-3 live signal + C7b roster/reconcile).
+> **Next slice = maintainer's call: C6 (controlling playbook skills — needs ADRs F036/F038 decided FIRST; neither
+> exists yet) or a backlog item (counter-with-reply skill tuning; a Claude-judged eval re-run when the gateway has
+> an Anthropic key; a deal-review craft eval).** Dev image `lq-ai-api-dev` is built; test recipe = run ruff/pytest
+> in the dev image with the **repo root mounted** + `DATABASE_URL` → dev postgres on the `lq-ai_default` network
+> (the throwaway test DBs spin from it). Dev stack is already rebuilt + migrated to head `0073`.
 >
 > **Fan-out is deepagents-native + model-driven (no fork scaffolding).** Fan-out = deepagents' `task` tool
 > (`SubAgentMiddleware`, v0.6.8); the model decides when to delegate (guidance is PROSE only — the `task` tool
