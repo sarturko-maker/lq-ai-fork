@@ -54,12 +54,15 @@ from app.models.project import MatterMemoryEntry, Project, ProjectFile
 from app.pipeline.readers._base import OOXML_DOCX_MIME, guard_ooxml, ooxml_subtype
 from app.schemas.commercial import (
     ApplyRedlineInput,
+    ConsistencyReport,
     CounterpartyDecision,
+    ReconcilePositionsInput,
     RedlineEditInput,
     RespondToCounterpartyInput,
     evaluate_anchoring,
     evaluate_coverage,
     evaluate_gate,
+    evaluate_position_consistency,
 )
 from app.schemas.matter_memory import MATTER_FACT_MAX_CHARS
 
@@ -78,6 +81,9 @@ COMMERCIAL_TOOL_NAMES = frozenset(
         # respond to every change/comment under the no-silent-action coverage gate.
         "extract_counterparty_position",
         "respond_to_counterparty",
+        # C7b (ADR-F034) — post-fan-out reconciliation: collapse the drafters'/reviewer's
+        # proposed positions into one position per head before a work product is emitted.
+        "reconcile_positions",
     }
 )
 
@@ -276,7 +282,47 @@ def build_commercial_tools(
             ctx,
         )
 
-    return [apply_redline, preview_redline, extract_counterparty_position, respond_to_counterparty]
+    async def reconcile_positions(
+        positions: list[dict[str, Any]], resolutions: dict[str, str] | None = None
+    ) -> str:
+        """Reconcile the fanned-out drafts into ONE position per deal head.
+
+        Call this after you fan out drafting (the ``clause-drafter`` subagent, one per
+        material head) and review the drafts (``clause-reviewer``), BEFORE you emit a
+        single work product. It is the post-fan-out reconciliation step: independent
+        drafts are a defect, not a feature — the client gets one position per head.
+
+        Pass ``positions`` as the full list of proposed positions across every draft,
+        each an object:
+        - ``head``: the deal point / clause group (e.g. "limitation of liability").
+        - ``position``: the proposed stance (and, briefly, the drafted language).
+        - ``source``: which draft produced it (e.g. "clause-drafter (liability)").
+
+        Where two drafts diverge on the SAME head, the tool REJECTS the batch until you
+        supply ``resolutions[head]`` = the single position you will carry forward (no
+        disagreement is shipped silently — the same no-silent-action discipline as the
+        negotiation gate). On success it records a reconciliation receipt to the matter
+        and returns the reconciled position per head; redline/draft once from those.
+        """
+        return await guarded_dispatch(
+            "reconcile_positions",
+            lambda db: _reconcile_positions(
+                db,
+                binding,
+                positions=positions,
+                resolutions=resolutions or {},
+                run_id=run_id,
+            ),
+            ctx,
+        )
+
+    return [
+        apply_redline,
+        preview_redline,
+        extract_counterparty_position,
+        respond_to_counterparty,
+        reconcile_positions,
+    ]
 
 
 @dataclass(frozen=True)
@@ -844,6 +890,106 @@ async def _record_negotiation_receipt(
         logger.warning(
             "negotiation receipt write failed; the response is already saved",
             extra={"event": "negotiation_receipt_failed"},
+        )
+
+
+async def _reconcile_positions(
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    positions: list[dict[str, Any]],
+    resolutions: dict[str, str],
+    run_id: uuid.UUID,
+) -> str:
+    """Reconcile the fanned-out positions into one per head (C7b, ADR-F034).
+
+    Model-free check (``evaluate_position_consistency``): every head where the drafts
+    diverge must carry a resolution, or the batch is rejected and nothing is recorded
+    (the C5a no-silent-action shape). On success, record a counts-only reconciliation
+    receipt into matter memory and audit (IDs/counts only — never position text)."""
+    try:
+        payload = ReconcilePositionsInput(positions=positions, resolutions=resolutions)  # type: ignore[arg-type]
+    except ValidationError as exc:
+        return _rejection_text(exc, tool="reconcile_positions")
+
+    report = evaluate_position_consistency(payload.positions, payload.resolutions)
+    if not report.ok:
+        return report.rejection_text()
+
+    await _record_reconciliation_receipt(db, binding, run_id=run_id, report=report)
+    await audit_action(
+        db,
+        user_id=binding.user_id,
+        action="commercial.positions_reconciled",
+        resource_type="project",
+        resource_id=str(binding.project_id),
+        project_id=binding.project_id,
+        practice_area_id=binding.practice_area_id,
+        details={
+            "positions": report.position_count,
+            "heads": report.head_count,
+            "divergences_resolved": report.divergences_resolved,
+        },
+    )
+
+    body = "\n".join(f"- {head}: {report.resolved[head]}" for head in sorted(report.resolved))
+    return (
+        f"Reconciled {report.position_count} proposed position(s) into {report.head_count} "
+        f"head(s) ({report.divergences_resolved} divergence(s) resolved); no head left in "
+        "disagreement. Carry these reconciled positions into the single work product:\n" + body
+    )
+
+
+async def _record_reconciliation_receipt(
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    run_id: uuid.UUID,
+    report: ConsistencyReport,
+) -> None:
+    """Record one counts-only ``open_point`` receipt summarising the reconciliation.
+
+    Same posture as ``_record_negotiation_receipt`` — tool-generated (trusted, capped),
+    constructed directly, **best-effort in a SAVEPOINT** so a receipt failure can't poison
+    the (already-validated) reconciliation, and skipped if the matter vanished mid-run."""
+    project = (
+        await db.execute(
+            select(Project).where(
+                Project.id == binding.project_id,
+                Project.owner_id == binding.user_id,
+                Project.archived_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if project is None:
+        return
+    heads = ", ".join(sorted(report.resolved))
+    summary = (
+        f"Reconciled {report.position_count} drafted position(s) into "
+        f"{report.head_count} head(s) ({report.divergences_resolved} divergence(s) "
+        f"resolved): {heads}."
+    )[:MATTER_FACT_MAX_CHARS]
+    try:
+        async with db.begin_nested():  # SAVEPOINT — receipt failure can't poison the reconciliation
+            db.add(
+                MatterMemoryEntry(
+                    project_id=project.id,
+                    user_id=binding.user_id,
+                    kind="fact",
+                    body_md=summary,
+                    trust="normal",
+                    author="agent",
+                    source_citation="post-fan-out reconciliation",
+                    fact_type="open_point",
+                    valid_at=datetime.now(UTC),
+                    run_id=run_id,
+                )
+            )
+            await db.flush()
+    except Exception:
+        logger.warning(
+            "reconciliation receipt write failed; the reconciliation is complete",
+            extra={"event": "reconciliation_receipt_failed"},
         )
 
 

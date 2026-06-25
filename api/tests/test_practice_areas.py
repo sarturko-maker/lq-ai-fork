@@ -151,11 +151,18 @@ async def test_seed_commercial_config_present_and_derived_configured(
     # UX-B-3 (0056): Commercial now carries its default skill bindings.
     assert "contract-qa" in commercial["bound_skills"]
     assert "nda-review" in commercial["bound_skills"]
-    # UX-B-4 (0057): Commercial carries the live document-researcher subagent.
+    # C7b (0073): Commercial carries the drafter/reviewer fan-out roster (the 0057
+    # document-researcher extended with clause-drafter + clause-reviewer).
     subagents = commercial["agent_config"].get("subagents", [])
-    assert [s["name"] for s in subagents] == ["document-researcher"]
-    assert set(subagents[0]["skills"]) <= set(commercial["bound_skills"])  # ⊆ area (ADR-F017)
-    assert "model" not in subagents[0]  # inherits the gateway-bound parent (ADR-F010)
+    assert [s["name"] for s in subagents] == [
+        "document-researcher",
+        "clause-drafter",
+        "clause-reviewer",
+    ]
+    bound = set(commercial["bound_skills"])
+    for sub in subagents:
+        assert set(sub.get("skills", [])) <= bound  # ⊆ area (ADR-F017)
+        assert "model" not in sub  # inherits the gateway-bound parent (ADR-F010)
 
 
 async def test_seed_commercial_config_is_idempotent(db_session: AsyncSession) -> None:
@@ -250,6 +257,7 @@ async def test_default_area_skill_bindings_present(client: AsyncClient, user: Us
             "msa-review-saas",
             "contract-qa",
             "nda-review",
+            "deal-review",  # C7b (0073): the reconciliation craft skill
         },
         "privacy": {"dpa-checklist-review", "vendor-privacy-policy-first-pass", "contract-qa"},
         "m-and-a": {"nda-review", "contract-qa", "contract-snapshot"},
@@ -515,6 +523,78 @@ async def test_commercial_subagent_seed_is_idempotent(db_session: AsyncSession) 
         sys.modules.pop("migration_0057", None)
 
 
+# --- C7b drafter/reviewer roster + deal-review binding (migration 0073) -------
+
+
+async def test_commercial_roster_migration_is_idempotent(db_session: AsyncSession) -> None:
+    """C7b (0073): the roster extension + deal-review binding reconciles and never-clobbers.
+    The verbatim 0057 config upgrades to the drafter/reviewer roster; a re-run is a no-op
+    (no duplicate binding, config unchanged); an operator-edited agent_config is preserved
+    (the UPDATE matches only the verbatim 0057 value)."""
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0073", versions / "0073_commercial_roster_and_reconciliation.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["migration_0073"] = module
+    try:
+        spec.loader.exec_module(module)
+        area_id = (
+            await db_session.execute(
+                select(PracticeArea.id).where(PracticeArea.key == "commercial")
+            )
+        ).scalar_one()
+
+        async def _binding_count() -> int:
+            return (
+                await db_session.execute(
+                    select(func.count())
+                    .select_from(PracticeAreaSkill)
+                    .where(
+                        PracticeAreaSkill.practice_area_id == area_id,
+                        PracticeAreaSkill.skill_name == "deal-review",
+                    )
+                )
+            ).scalar_one()
+
+        area = (
+            await db_session.execute(select(PracticeArea).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+        roster = ["document-researcher", "clause-drafter", "clause-reviewer"]
+        # The head migration already extended the roster + bound deal-review once.
+        assert [s["name"] for s in area.agent_config["subagents"]] == roster
+        assert await _binding_count() == 1
+
+        conn = await db_session.connection()
+        # Re-run: idempotent — config already holds the roster (≠ the 0057 value) and the
+        # binding NOT EXISTS guard skips the dup.
+        await conn.run_sync(lambda c: module._extend_commercial_roster(c))
+        await conn.run_sync(lambda c: module._bind_deal_review_skill(c))
+        await db_session.refresh(area)
+        assert [s["name"] for s in area.agent_config["subagents"]] == roster
+        assert await _binding_count() == 1  # no duplicate binding
+
+        # The reconciling swap upgrades a row still carrying the verbatim 0057 config.
+        area.agent_config = module._OLD_COMMERCIAL_AGENT_CONFIG
+        await db_session.flush()
+        await conn.run_sync(lambda c: module._extend_commercial_roster(c))
+        await db_session.refresh(area)
+        assert area.agent_config == module._NEW_COMMERCIAL_AGENT_CONFIG
+
+        # Never-clobber: an operator-edited config (≠ the 0057 value) is left untouched.
+        edited = {
+            "subagents": [{"name": "operator-edit", "description": "d", "system_prompt": "p"}]
+        }
+        area.agent_config = edited
+        await db_session.flush()
+        await conn.run_sync(lambda c: module._extend_commercial_roster(c))
+        await db_session.refresh(area)
+        assert area.agent_config == edited
+    finally:
+        sys.modules.pop("migration_0073", None)
+
+
 async def test_admin_patch_rejects_subagent_skill_outside_area(
     client: AsyncClient, admin: User
 ) -> None:
@@ -621,7 +701,8 @@ async def test_admin_patch_rejects_model_bearing_subagent(client: AsyncClient, a
     )
     assert resp.status_code == 400
     # And the bad subagent was not persisted — Commercial still carries only its
-    # seeded document-researcher (0057), never the rejected "x".
+    # seeded roster (0057 document-researcher + 0073 clause-drafter/clause-reviewer),
+    # never the rejected "x".
     read = await client.get("/api/v1/practice-areas", headers=_bearer(admin))
     commercial = next(a for a in read.json()["practice_areas"] if a["key"] == "commercial")
     names = [s["name"] for s in commercial["agent_config"].get("subagents", [])]

@@ -660,6 +660,89 @@ async def test_subagent_delegation_nests_steps_via_parent_step_id(
     )
 
 
+async def test_multi_subagent_fan_out_nests_every_delegate(
+    comp_env: CompositionEnv,
+) -> None:
+    """C7b (ADR-F034): the drafter/reviewer roster (migration 0073) fans out — the lead
+    delegates to MORE THAN ONE subagent and each delegate's turn nests under its own
+    ``task`` step via ``parent_step_id``. Proves the new ``clause-drafter`` /
+    ``clause-reviewer`` members are real, invokable, and correctly nested (the fan-out
+    timeline the cockpit renders). Deterministic; scripted model (two sequential
+    delegations + a synthesis). Skill-less here — this probes the roster ancestry."""
+    from app.models.agent_run import AgentRunStep
+    from app.models.practice_area import PracticeArea
+    from app.schemas.agent_runs import AgentRunStepKind
+
+    async with comp_env.factory() as db:
+        area_id = (
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+        await db.execute(
+            Project.__table__.update()
+            .where(Project.id == comp_env.project_id)
+            .values(practice_area_id=area_id)
+        )
+        await db.commit()
+
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message(
+                "task",
+                {
+                    "description": "Draft the client-protective liability position.",
+                    "subagent_type": "clause-drafter",
+                },
+            ),
+            final_message("Drafter: cap liability at 12 months' fees, data/IP carved out."),
+            tool_call_message(
+                "task",
+                {
+                    "description": "Review the drafted positions for over-reach and gaps.",
+                    "subagent_type": "clause-reviewer",
+                },
+            ),
+            final_message("Reviewer: positions consistent; no over-reach; indemnity gap noted."),
+            final_message("Reconciled the drafts into one position per head."),
+        ]
+    )
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+        skill_registry_provider=lambda: None,  # skill-less — probes ancestry, not skills
+    )
+
+    run = await _run_row(comp_env, run_id)
+    assert run.status == "completed", run.error
+
+    async with comp_env.factory() as db:
+        steps = (
+            (
+                await db.execute(
+                    select(AgentRunStep)
+                    .where(AgentRunStep.run_id == run_id)
+                    .order_by(AgentRunStep.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    task_steps = [
+        s for s in steps if s.kind == AgentRunStepKind.tool_call.value and s.name == "task"
+    ]
+    assert len(task_steps) >= 2, (
+        f"expected ≥2 task delegations (fan-out); steps={[(s.kind, s.name) for s in steps]}"
+    )
+    # Each task delegation has at least one step nested beneath it (the delegate's turn).
+    for task in task_steps:
+        assert any(s.parent_step_id == task.id for s in steps), (
+            f"task step {task.id} has no nested delegate turn; "
+            f"parents={[(s.seq, s.parent_step_id) for s in steps]}"
+        )
+
+
 async def test_privacy_matter_grants_ropa_tools_and_validated_write_commits(
     comp_env: CompositionEnv,
 ) -> None:
