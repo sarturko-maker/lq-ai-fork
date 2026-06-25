@@ -1,0 +1,10 @@
+1. Purpose. The parties wish to explore a potential business relationship and may disclose confidential information to one another for that purpose.
+2. Confidential Information. Each party may disclose to the other certain non-public business and technical information designated as confidential in writing.
+3. Obligations. Each party shall protect the other party's Confidential Information using the same degree of care it uses for its own, and shall not disclose it to third parties without prior written consent, except to its affiliates and advisers.
+4. Term. [-The obligations of confidentiality shall survive for -][-three (3) years from the date of disclosure-][-perpetuity-][-.-][+The obligations of confidentiality shall survive for three (3) years from the date of disclosure.+]
+5. Return of Materials. Upon written request, each party shall return or destroy the other party's Confidential Information.
+6. Governing Law. This Agreement is governed by the laws of England and Wales.
+
+COMMENTS:
+- [Com:1] Opposing Counsel (comment): We act for both sides equally — this should stay mutual.
+- [Com:2] us (comment): A perpetual confidentiality obligation is outside our acceptable range (floor 3 years, ceiling 5 years) and may raise enforceability concerns as an unreasonable restraint. A defined three-year survival period balances the need to protect c…

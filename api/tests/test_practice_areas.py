@@ -344,6 +344,92 @@ async def test_commercial_surgical_redline_migration_is_idempotent(
         sys.modules.pop("migration_0067", None)
 
 
+async def test_commercial_negotiation_review_skill_and_doctrine(
+    client: AsyncClient, user: User
+) -> None:
+    """C5b-2 (0072, ADR-F041): the negotiation-review skill is bound to Commercial and the
+    negotiation doctrine points at the shipped tools/skill — the stale 0066 "accept,
+    reject, or counter" paragraph (no comment verbs, no tool) is gone (guards the 0072
+    never-clobber refresh against a silent transcription no-op)."""
+    resp = await client.get("/api/v1/practice-areas", headers=_bearer(user))
+    assert resp.status_code == 200
+    commercial = {a["key"]: a for a in resp.json()["practice_areas"]}["commercial"]
+
+    assert "negotiation-review" in commercial["bound_skills"]
+    profile = commercial["profile_md"]
+    assert "negotiation-review" in profile
+    assert "respond_to_counterparty" in profile
+    assert "extract_counterparty_position" in profile
+    # the stale 0066 paragraph body was refreshed (its exact phrasing is gone)
+    assert "classify **every** change as **accept**, **reject**, or **counter**" not in profile
+
+
+async def test_commercial_negotiation_review_migration_is_idempotent(
+    db_session: AsyncSession,
+) -> None:
+    """Re-running the 0072 seed (skill binding + doctrine refresh) is a no-op: no
+    duplicate binding, and the already-refreshed profile_md is untouched (the old 0066
+    paragraph is gone, so the REPLACE matches nothing)."""
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0072", versions / "0072_commercial_negotiation_review_skill.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["migration_0072"] = module
+    try:
+        spec.loader.exec_module(module)
+        area_id = (
+            await db_session.execute(
+                select(PracticeArea.id).where(PracticeArea.key == "commercial")
+            )
+        ).scalar_one()
+
+        async def _binding_count() -> int:
+            return (
+                await db_session.execute(
+                    select(func.count())
+                    .select_from(PracticeAreaSkill)
+                    .where(
+                        PracticeAreaSkill.practice_area_id == area_id,
+                        PracticeAreaSkill.skill_name == "negotiation-review",
+                    )
+                )
+            ).scalar_one()
+
+        async def _profile() -> str:
+            return (
+                await db_session.execute(
+                    select(PracticeArea.profile_md).where(PracticeArea.key == "commercial")
+                )
+            ).scalar_one()
+
+        before_count = await _binding_count()
+        before_profile = await _profile()
+        assert before_count == 1  # the head migration bound it once
+        assert "respond_to_counterparty" in before_profile  # and refreshed the doctrine
+
+        conn = await db_session.connection()
+        await conn.run_sync(lambda c: module._bind_negotiation_review_skill(c))
+        await conn.run_sync(lambda c: module._refresh_negotiation_doctrine(c))
+
+        assert await _binding_count() == 1  # no duplicate binding
+        assert await _profile() == before_profile  # doctrine unchanged (new tail present)
+
+        # The other half of never-clobber: an operator-edited negotiation paragraph
+        # (neither the verbatim 0066 nor the C5b-2 tail present) is left untouched.
+        edited = "Commercial agent. Operator-rewritten negotiation guidance: do as instructed."
+        area = (
+            await db_session.execute(select(PracticeArea).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+        area.profile_md = edited
+        await db_session.flush()
+        await conn.run_sync(lambda c: module._refresh_negotiation_doctrine(c))
+        assert await _profile() == edited  # operator edit preserved (REPLACE matched nothing)
+    finally:
+        sys.modules.pop("migration_0072", None)
+
+
 async def test_default_area_skill_bindings_seed_is_idempotent(db_session: AsyncSession) -> None:
     """Re-running the 0056 seed inserts no duplicates and never disturbs an
     operator-attached skill."""

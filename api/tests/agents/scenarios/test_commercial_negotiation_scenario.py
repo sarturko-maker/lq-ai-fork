@@ -21,20 +21,20 @@ from __future__ import annotations
 
 import json
 import os
-import uuid
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app import storage
 from app.agents.negotiation_service import read_state_of_play
 from app.agents.redline_render import reconstruct_redline_text
-from app.models.file import File
 from app.skills import load_registry
-from tests.agents.scenarios.commercial_redline_lib import RedlineScenarioDoc, seed_doc_matter
+from tests.agents.scenarios.commercial_redline_lib import (
+    RedlineScenarioDoc,
+    capture_output_file,
+    seed_doc_matter,
+)
 from tests.agents.scenarios.harness import run_scenario
 from tests.agents.scenarios.negotiation_nda import (
     NDA_FILENAME,
@@ -100,31 +100,6 @@ async def commit_factory(test_engine: AsyncEngine) -> async_sessionmaker[AsyncSe
     return async_sessionmaker(bind=test_engine, expire_on_commit=False, class_=AsyncSession)
 
 
-async def _capture_response(
-    factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID, project_id: uuid.UUID
-) -> tuple[bytes, str] | None:
-    """Download the agent's response ``.docx`` (most recent), matter-scoped (ADR-F035)."""
-    async with factory() as db:
-        row = (
-            await db.execute(
-                select(File.storage_path, File.filename)
-                .where(
-                    File.owner_id == user_id,
-                    File.project_id == project_id,
-                    File.filename.like("%(response)%"),
-                )
-                .order_by(File.created_at.desc())
-            )
-        ).first()
-    if row is None:
-        return None
-    chunks: list[bytes] = []
-    async with storage.stream_download(storage_path=row.storage_path) as stream:
-        async for chunk in stream:
-            chunks.append(chunk)
-    return b"".join(chunks), row.filename
-
-
 async def test_commercial_negotiation_round_live(
     commit_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -150,7 +125,9 @@ async def test_commercial_negotiation_round_live(
             "counterparty_open_comments": len(state.open_comment_refs),
             **receipt.to_dict(),
         }
-        captured = await _capture_response(commit_factory, seeded.user_id, seeded.project_id)
+        captured = await capture_output_file(
+            commit_factory, seeded.user_id, seeded.project_id, "%(response)%"
+        )
         if captured is not None:
             resp_bytes, resp_name = captured
             (_EVIDENCE_DIR / resp_name).write_bytes(resp_bytes)
