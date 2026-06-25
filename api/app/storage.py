@@ -477,6 +477,32 @@ async def upload_bytes(*, storage_path: str, body: bytes, content_type: str) -> 
         )
 
 
+async def copy_object(*, source_path: str, dest_path: str) -> None:
+    """Server-side copy of an object within the bucket (no bytes through api).
+
+    Used by the editor save-back (ADR-F047 Slice 3): before overwriting the
+    live object with the lawyer's edited bytes, the agent's untouched redline is
+    snapshotted to a new key (``str(snapshot_id)``) so it survives as an
+    immutable prior version (key == row id, per ADR 0005). Copy-first ordering
+    is the data-safety invariant — the old bytes exist at the snapshot key
+    before the live key is overwritten, so a crash never loses them.
+
+    A missing source raises (the caller is mutating a file it just loaded, so
+    this should not happen; surface it rather than silently produce an empty
+    snapshot).
+    """
+
+    settings = get_settings()
+    bucket = settings.s3_bucket
+
+    async with s3_client() as s3:
+        await s3.copy_object(
+            Bucket=bucket,
+            Key=dest_path,
+            CopySource={"Bucket": bucket, "Key": source_path},
+        )
+
+
 async def presigned_get_url(*, storage_path: str, expires_in_seconds: int) -> str:
     """Return a presigned GET URL for ``storage_path``.
 

@@ -1,0 +1,11 @@
+# Migration 0075 round-trip on a throwaway DB (live DB untouched)
+## upgrade head
+INFO  [alembic.runtime.migration] Running upgrade 0073 -> 0074, editor_locks — WOPI lock state for the in-app Word editor (Slice 2, ADR-F047)
+INFO  [alembic.runtime.migration] Running upgrade 0074 -> 0075, files.updated_at — content last-modified time for editor save-back (Slice 3, ADR-F047)
+files.updated_at present (expect 1): 1
+## downgrade -1 (0075 -> 0074)
+INFO  [alembic.runtime.migration] Running downgrade 0075 -> 0074, files.updated_at — content last-modified time for editor save-back (Slice 3, ADR-F047)
+files.updated_at present (expect 0): 0
+## re-upgrade head
+INFO  [alembic.runtime.migration] Running upgrade 0074 -> 0075, files.updated_at — content last-modified time for editor save-back (Slice 3, ADR-F047)
+files.updated_at present (expect 1): 1

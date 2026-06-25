@@ -1,13 +1,13 @@
-"""WOPI host schemas + the pure lock state machine (libreoffice-editor Slice 2, ADR-F047).
+"""WOPI host schemas + the pure lock state machine (libreoffice-editor Slice 2/3, ADR-F047).
 
-Three pieces, all model-call-free:
+Pieces, all model-call-free:
 
 * ``CheckFileInfoResponse`` — the WOPI ``CheckFileInfo`` body. Field names are the
   WOPI property names verbatim (PascalCase) so the JSON is the wire contract;
   ``None`` fields are excluded (WOPI: omit a property to take its default, never
-  send ``null``). Slice 2 is a **read-only** session — ``UserCanWrite=false`` /
-  ``ReadOnly=true`` / ``SupportsUpdate`` omitted — so the lawyer can SEE the
-  agent's redline with no save path (PutFile + editable land in Slice 3).
+  send ``null``). Slice 3 makes the session **editable** — ``UserCanWrite=true`` /
+  ``SupportsUpdate=true`` / ``ReadOnly=false`` — so the lawyer's edits save back
+  through PutFile (the read-only Slice-2 viewer is now read-write).
 * ``decide_lock`` — the pure WOPI lock state machine (LOCK / GET_LOCK /
   REFRESH_LOCK / UNLOCK / UNLOCK_AND_RELOCK). Takes the *effective* current lock
   (``None`` if absent or expired) + the request headers, returns a ``LockOutcome``
@@ -48,7 +48,7 @@ LOCK_OVERRIDES = frozenset({"LOCK", "GET_LOCK", "REFRESH_LOCK", "UNLOCK"})
 
 
 class CheckFileInfoResponse(BaseModel):
-    """WOPI ``CheckFileInfo`` response (read-only edit session, Slice 2).
+    """WOPI ``CheckFileInfo`` response (editable edit session, Slice 3).
 
     PascalCase field names are the WOPI wire property names. Serialize with
     ``model_dump(exclude_none=True)`` / FastAPI's ``response_model_exclude_none``
@@ -64,9 +64,12 @@ class CheckFileInfoResponse(BaseModel):
     UserId: str = Field(description="Stable current-user id, alphanumeric (uuid hex).")
     Version: str = Field(description="Opaque version string; changes on content change.")
 
-    # Session capabilities. Slice 2 = read-only viewer.
-    UserCanWrite: bool = False
-    ReadOnly: bool = True
+    # Session capabilities. Slice 3 = editable (PutFile save-back enabled).
+    # PutRelativeFile/RenameFile stay disabled (UserCanNotWriteRelative) — the
+    # save-back is in-place to the same WOPI id (ADR-F047 Slice-3 snapshot model).
+    UserCanWrite: bool = True
+    ReadOnly: bool = False
+    SupportsUpdate: bool = True
     UserCanNotWriteRelative: bool = True
     SupportsLocks: bool = True
     SupportsGetLock: bool = True
@@ -195,6 +198,27 @@ def decide_lock(
     if current_lock is not None and current_lock == x_wopi_lock:
         return LockOutcome(status=200, action=LockAction.CLEAR)
     return _conflict(current_lock, "lock mismatch or not locked")
+
+
+def decide_putfile_lock(*, x_wopi_lock: str | None, current_lock: str | None) -> LockOutcome:
+    """Pure WOPI PutFile lock precondition (no lock mutation, just allow/deny).
+
+    PutFile never changes the lock — it only checks whether the caller may write:
+
+    * **Unlocked** (``current_lock is None``) → proceed (200). WOPI permits a
+      PutFile on an unlocked file; Collabora locks before editing in practice, so
+      this also tolerates a lock that expired mid-session rather than 409-ing a
+      legitimate save.
+    * **Locked, header matches** → proceed (200).
+    * **Locked, header missing/mismatched** → 409 echoing the current lock (the
+      same shape the lock family uses), so the editor surfaces the conflict.
+
+    Returns a :class:`LockOutcome` with ``action == NONE`` always (the lock row is
+    untouched); only ``status`` / ``response_lock`` matter to the caller.
+    """
+    if current_lock is None or current_lock == x_wopi_lock:
+        return LockOutcome(status=200, action=LockAction.NONE)
+    return _conflict(current_lock, "lock mismatch on PutFile")
 
 
 # ---------------------------------------------------------------------------
