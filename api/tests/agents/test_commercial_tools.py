@@ -28,6 +28,7 @@ from app.agents.commercial_tools import (
     _respond_to_counterparty,
     build_commercial_tools,
 )
+from app.agents.deal_changes import DealChangeLedger
 from app.agents.negotiation_service import read_state_of_play
 from app.agents.redline_render import reconstruct_redline_text
 from app.agents.redline_service import (
@@ -656,6 +657,66 @@ async def test_respond_full_coverage_persists_and_audits(
             .all()
         )
         assert any("Counterparty round" in f.body_md for f in facts)
+
+
+async def test_respond_records_each_verdict_into_the_deal_change_ledger(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """C5b-3 (ADR-F032): a verified+saved round records one verdict per decision into
+    the run-scoped ledger (ref + verdict only), which the runner drains into the live
+    chips. One entry per decision, refs/verdicts match the proposal."""
+    user_id, project_id = matter
+    source = _counterparty_docx()
+    _patch_storage(monkeypatch, source=source)
+    run_id = await _make_run(commit_factory, user_id=user_id, project_id=project_id)
+    decisions = _full_coverage_decisions(source)
+    ledger = DealChangeLedger()
+
+    async with commit_factory() as db:
+        out = await _respond_to_counterparty(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            decisions=decisions,
+            run_id=run_id,
+            change_ledger=ledger,
+        )
+        await db.commit()
+
+    assert "Responded to all" in out
+    drained = ledger.drain()
+    assert {(c.ref, c.verdict) for c in drained} == {(d["ref"], d["verdict"]) for d in decisions}
+    assert len(drained) == len(decisions)  # one chip per decision, no dupes
+
+
+async def test_respond_rejection_records_nothing_into_the_deal_change_ledger(
+    commit_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """C5b-3: a chip can never fire on a silent/rejected round — incomplete coverage is
+    rejected pre-write, so nothing is recorded (mirrors 'record only on a real change')."""
+    user_id, project_id = matter
+    source = _counterparty_docx()
+    _patch_storage(monkeypatch, source=source)
+    decisions = _full_coverage_decisions(source)[:-2]  # drop refs → coverage gate rejects
+    ledger = DealChangeLedger()
+
+    async with commit_factory() as db:
+        out = await _respond_to_counterparty(
+            db,
+            _binding(user_id, project_id),
+            document_name="contract.docx",
+            decisions=decisions,
+            run_id=uuid.uuid4(),
+            change_ledger=ledger,
+        )
+        await db.commit()
+
+    assert "UNADDRESSED" in out
+    assert ledger.drain() == []  # nothing recorded on a rejected round
 
 
 async def test_respond_rejects_reply_on_accepted_anchored_change(

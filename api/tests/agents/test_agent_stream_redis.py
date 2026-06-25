@@ -152,6 +152,29 @@ async def test_ropa_change_frame_survives_the_round_trip() -> None:
     await bridge.detach(run_id)
 
 
+async def test_deal_change_frame_survives_the_round_trip() -> None:
+    """The C5b-3 verdict-chip signal (ADR-F032) reaches the browser cross-process."""
+    run_id = uuid.uuid4()
+    fake = _FakeRedis()
+    local = RunStreamBroker()
+    bridge = RedisStreamBridge(fake, local)
+    worker = RedisStreamBroker(fake)
+
+    queue = local.subscribe(run_id)
+    await bridge.attach(run_id)
+
+    worker.publisher(run_id).deal_changed(ref="C3", verdict="escalate")
+
+    parts = await _drain_until(queue, 2)  # start + the change frame
+    change = next(
+        p for p in parts if p is not CHANNEL_CLOSED and p.get("type") == "data-deal-change"
+    )
+    assert change["data"] == {"ref": "C3", "verdict": "escalate"}
+    assert change["transient"] is True
+
+    await bridge.detach(run_id)
+
+
 async def test_bridge_is_reference_counted_one_subscription_per_run() -> None:
     run_id = uuid.uuid4()
     fake = _FakeRedis()

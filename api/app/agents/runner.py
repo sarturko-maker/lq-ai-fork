@@ -46,7 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.checkpointer import thread_config
 from app.agents.factory import build_deep_agent
 from app.agents.lease import RunLease, RunSettledElsewhere, heartbeat_run, settle_run
-from app.agents.ropa_changes import RopaChangeLedger
+from app.agents.live_changes import ChangeLedger
 from app.agents.stream import RunStreamPublisher, step_payload
 from app.models.agent_run import AgentRun, AgentRunStep
 from app.schemas.agent_runs import AgentRunStatus, AgentRunStepKind
@@ -271,7 +271,7 @@ async def _drive_agent(
     publisher: RunStreamPublisher | None = None,
     lease: RunLease | None = None,
     heartbeat_seconds: float | None = None,
-    change_ledger: RopaChangeLedger | None = None,
+    change_ledger: ChangeLedger | None = None,
 ) -> tuple[str | None, bool]:
     """Stream the agent, persisting one step row + COMMIT per event.
 
@@ -400,15 +400,15 @@ async def _drive_agent(
                             else None
                         ),
                     )
-                    # PRIV-9b (ADR-F024): a tool just returned — drain any register
-                    # changes its body recorded and announce them on the stream. The
-                    # cursor-draining ledger makes this once-each + concurrency-safe,
-                    # so attributing the drain to THIS tool_result is harmless.
+                    # PRIV-9b/C5b-3 (ADR-F024/F032): a tool just returned — drain any
+                    # live changes its body recorded and announce them on the stream.
+                    # The cursor-draining ledger makes this once-each + concurrency-safe,
+                    # so attributing the drain to THIS tool_result is harmless. Each
+                    # change publishes its own transient frame (the LiveChange seam), so
+                    # this loop is area-agnostic (ROPA row washes, deal verdict chips, …).
                     if change_ledger is not None and kind is AgentRunStepKind.tool_result:
                         for change in change_ledger.drain():
-                            publisher.ropa_changed(
-                                kind=change.kind, entity_id=change.id, verb=change.verb
-                            )
+                            change.publish(publisher)
                     if kind is AgentRunStepKind.model_turn and not nested:
                         publisher.turn_finished()
                 if is_final:
@@ -542,7 +542,7 @@ async def execute_agent_run(
     publisher: RunStreamPublisher | None = None,
     lease: RunLease | None = None,
     heartbeat_seconds: float | None = None,
-    change_ledger: RopaChangeLedger | None = None,
+    change_ledger: ChangeLedger | None = None,
 ) -> None:
     """Execute one persisted agent run end to end.
 

@@ -36,8 +36,10 @@ from app.agents.area_agent import AreaAgentSpec, combine_tier_floors, render_are
 from app.agents.assessment_tools import build_assessment_tools
 from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.commercial_tools import COMMERCIAL_AREA_KEY, build_commercial_tools
+from app.agents.deal_changes import DealChangeLedger
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.lease import RunLease, settle_run
+from app.agents.live_changes import ChangeLedger
 from app.agents.matter_consolidation import build_matter_consolidation_tools
 from app.agents.matter_fact_tools import build_matter_fact_tools
 from app.agents.matter_memory_tools import (
@@ -384,10 +386,12 @@ async def compose_and_execute_run(
         # ROPA domain tools — propose (the code-validated write) + list. Tool
         # selection is area-keyed at the composition point (the area row is the
         # agent identity, ADR-F002); other areas never grant these.
-        # PRIV-9b (ADR-F024): the run-scoped change ledger is the producer (the ROPA
-        # tools) → consumer (the runner's stream drain) seam for the live changed-row
-        # highlight. Only Privacy runs make one — others leave it None (no drain).
-        change_ledger: RopaChangeLedger | None = None
+        # PRIV-9b/C5b-3 (ADR-F024/F032): the run-scoped change ledger is the producer
+        # (an area's tools) → consumer (the runner's stream drain) seam for the live
+        # "watch it happen" signal. Each area that produces one makes its own concrete
+        # ledger (the LiveChange seam keeps the drain area-agnostic); other areas leave
+        # it None (no drain). Privacy → ROPA row washes; Commercial → deal verdict chips.
+        change_ledger: ChangeLedger | None = None
         if binding is not None and area_key == PRIVACY_AREA_KEY:
             change_ledger = RopaChangeLedger()
             tools = tools + build_ropa_tools(
@@ -407,11 +411,16 @@ async def compose_and_execute_run(
             # provider-callable (stateless, per-document — no startup singleton),
             # mirroring model_builder/checkpointer_provider. First Commercial
             # domain-tool grant branch (matter-scoped, not deployment-global).
+            # C5b-3 (ADR-F032): the same Commercial run gets a deal-change ledger —
+            # respond_to_counterparty records each verdict, the runner drains it into
+            # the inline live verdict chips (the Commercial analogue of ROPA's wash).
+            change_ledger = DealChangeLedger()
             tools = tools + build_commercial_tools(
                 session_factory,
                 run_id=run_id,
                 binding=binding,
                 redline_service=redline_service_provider(),
+                change_ledger=change_ledger,
             )
 
         # F1-S3: the gateway tier floor is the strongest (lowest) of the

@@ -91,6 +91,86 @@ export function parseRopaChangePayload(data: unknown): RopaChangePayload | null 
 	};
 }
 
+/**
+ * The closed negotiation verdict taxonomy — mirrors
+ * `commercial_tools._RESPOND_VERDICTS`. A change is
+ * accept|reject|counter|leave_open|escalate; a comment is reply|leave_open|escalate.
+ */
+export const DEAL_VERDICTS = [
+	'accept',
+	'reject',
+	'counter',
+	'leave_open',
+	'escalate',
+	'reply'
+] as const;
+export type DealVerdict = (typeof DEAL_VERDICTS)[number];
+
+/**
+ * The `data-deal-change` part payload (C5b-3, ADR-F032) — one counterparty item
+ * the Commercial agent just decided. Drives the cockpit's live verdict chips;
+ * nothing durable derives from it (the saved response .docx + run timeline are the
+ * truth — ADR-F004).
+ */
+export interface DealChangePayload {
+	/** Synthetic decision ref: `C1`..`Cn` for a tracked change, `Com:N` for a comment. */
+	ref: string;
+	/** The closed-taxonomy verdict (colours + identifies the chip). */
+	verdict: DealVerdict;
+}
+
+/**
+ * Validate a `data-deal-change` part's payload. BOTH `ref` and `verdict` are
+ * load-bearing (the chip needs a stable identity and a verdict to colour by), and
+ * the verdict must be in the known taxonomy — a malformed/unknown frame is dropped
+ * (null) and simply doesn't flash a chip; the saved document still carries the truth.
+ */
+export function parseDealChangePayload(data: unknown): DealChangePayload | null {
+	if (typeof data !== 'object' || data === null) return null;
+	const d = data as Record<string, unknown>;
+	if (typeof d.ref !== 'string' || d.ref === '') return null;
+	if (typeof d.verdict !== 'string') return null;
+	if (!(DEAL_VERDICTS as readonly string[]).includes(d.verdict)) return null;
+	return { ref: d.ref, verdict: d.verdict as DealVerdict };
+}
+
+/** Human label for a verdict chip ("accepted", "countered", …). */
+export function dealVerdictLabel(verdict: DealVerdict): string {
+	switch (verdict) {
+		case 'accept':
+			return 'accepted';
+		case 'reject':
+			return 'rejected';
+		case 'counter':
+			return 'countered';
+		case 'leave_open':
+			return 'left open';
+		case 'escalate':
+			return 'escalated';
+		case 'reply':
+			return 'replied';
+	}
+}
+
+/** Intent tone for a verdict chip's colour (maps to the cockpit's status tokens). */
+export function dealVerdictTone(
+	verdict: DealVerdict
+): 'positive' | 'negative' | 'info' | 'warning' | 'neutral' {
+	switch (verdict) {
+		case 'accept':
+			return 'positive';
+		case 'reject':
+			return 'negative';
+		case 'counter':
+		case 'reply':
+			return 'info';
+		case 'escalate':
+			return 'warning';
+		case 'leave_open':
+			return 'neutral';
+	}
+}
+
 /** Validate a `data-run` part's payload (see parseStepPayload). */
 export function parseRunPayload(data: unknown): StreamRunPayload | null {
 	if (typeof data !== 'object' || data === null) return null;
