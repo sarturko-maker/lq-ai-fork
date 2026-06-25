@@ -1,13 +1,18 @@
-"""Tests for the WOPI host + editor-session mint (libreoffice-editor Slice 2, ADR-F047).
+"""Tests for the WOPI host + editor-session mint (libreoffice-editor Slice 2/3, ADR-F047).
 
-Three layers:
+Layers:
 
 * **Pure unit** — the WOPI token round-trip (`create_wopi_token`/`decode_wopi_token`)
-  and the lock state machine (`decide_lock`); no DB, no app.
+  and the lock state machines (`decide_lock`, `decide_putfile_lock`); no DB, no app.
 * **Integration** — CheckFileInfo / GetFile / the Lock family over the bare WOPI
   router, authenticated by a minted `access_token` query param; plus the
   owner-scoped editor-session mint endpoint. The 404/401 split and per-file /
   per-user scoping are exercised here.
+* **PutFile save-back (Slice 3)** — the snapshot-then-mutate matrix: snapshot the
+  agent redline on the first human save (provenance flip), no-op on identical
+  bytes, no re-snapshot on later saves (incl. the retry-after-commit-failure
+  guard), the lock precondition (409 + echo), OOXML/`.docx` validation (400), the
+  size cap (413), and the `X-COOL-WOPI-Timestamp` save-race backstop (1010).
 
 Storage is the in-memory `FakeS3Client` (no live MinIO); the DB is the per-test
 SAVEPOINT-rolled-back session from `conftest.py`.
@@ -863,6 +868,69 @@ async def test_putfile_second_save_does_not_snapshot_again(
         .all()
     )
     assert len(others) == 1
+
+
+@pytest.mark.integration
+async def test_putfile_retry_after_commit_failure_does_not_resnapshot(
+    client: AsyncClient, db_user: User, db_session, fake_s3: FakeS3Client, monkeypatch
+) -> None:
+    """Two-commit guard: a retry after a post-overwrite commit failure must NOT
+    re-snapshot the edited bytes under the agent's provenance.
+
+    Inject a failure at the (post-overwrite) audit step of the FIRST save: the
+    snapshot+provenance-flip commit has already landed and the live object is
+    already overwritten, but the save's own commit fails -> 500. The client's
+    retry must see created_by_run_id=NULL and skip the snapshot entirely, so
+    exactly ONE snapshot exists and it holds the AGENT bytes, not the human edit.
+    """
+    import app.api.wopi as wopi_mod
+    from app.errors import InternalError
+
+    run_id = await _make_run(db_session, db_user)
+    original = _make_ooxml("docx", marker=b"agent-redline")
+    f = await _seed_editable(
+        db_session, fake_s3, db_user, content=original, created_by_run_id=run_id
+    )
+    # Capture locals up front: the handler's rollback (on the injected failure)
+    # expires the `f` instance, so a later sync attribute access would lazy-load.
+    f_id, storage_path = f.id, f.storage_path
+    orig_hash = hashlib.sha256(original).hexdigest()
+    token = create_wopi_token(db_user.id, f_id, name="Jane")
+
+    real_audit = wopi_mod.audit_action
+    calls = {"n": 0}
+
+    async def flaky_audit(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise InternalError("simulated commit-time failure")
+        return await real_audit(*a, **k)
+
+    monkeypatch.setattr(wopi_mod, "audit_action", flaky_audit)
+
+    edited = _make_ooxml("docx", marker=b"human-edited")
+    edited_hash = hashlib.sha256(edited).hexdigest()
+    r1 = await _putfile(client, f_id, token, edited)
+    assert r1.status_code == 500
+    # The overwrite happened before the (failed) commit; the edit is durable.
+    assert fake_s3.objects[storage_path] == edited
+
+    # Retry: provenance already flipped -> no second snapshot.
+    r2 = await _putfile(client, f_id, token, edited)
+    assert r2.status_code == 200
+
+    snaps = (
+        (await db_session.execute(select(FileModel).where(FileModel.created_by_run_id == run_id)))
+        .scalars()
+        .all()
+    )
+    assert len(snaps) == 1  # exactly one snapshot, from the first (committed) step
+    assert snaps[0].hash_sha256 == orig_hash  # the AGENT bytes, not the human edit
+    assert fake_s3.objects[snaps[0].storage_path] == original
+
+    live = (await db_session.execute(select(FileModel).where(FileModel.id == f_id))).scalar_one()
+    assert live.created_by_run_id is None
+    assert live.hash_sha256 == edited_hash
 
 
 @pytest.mark.integration

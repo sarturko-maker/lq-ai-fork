@@ -153,11 +153,25 @@ the kickoff flagged — **the version model** — was decided by the maintainer:
   snapshot). A no-op autosave (identical hash) writes nothing and does not flip provenance. **Why:**
   the editor stays coherent across reloads AND the agent's work product is preserved as a recoverable
   prior version — the data-loss risk a plain mutate-in-place carries for legal work.
-- **Data-safety ordering.** Copy-first is the invariant: the old bytes exist at the snapshot key
-  before the live object is overwritten, so no crash loses them. Storage and DB are not one
-  transaction; on a pre-overwrite failure the snapshot orphan is best-effort deleted (live bytes
-  intact), and on a post-overwrite/commit failure the snapshot orphan is **kept** (it is then the sole
-  copy of the redline — GC-recoverable; Collabora retries PutFile and converges).
+- **Data-safety ordering = two durable steps** (refined in adversarial review). Storage and DB are not
+  one transaction, so the save-back is two commits so that a partial failure + the client's PutFile
+  retry can neither re-snapshot the edited bytes nor lose the edit: **(1)** on the first human save,
+  copy the agent's current bytes to the snapshot key (copy-first), then **commit the snapshot row +
+  the provenance flip (`created_by_run_id → NULL`) BEFORE any overwrite**; **(2)** overwrite the live
+  object, then commit the new `hash`/`size`/`updated_at`. Because the provenance flip is durable before
+  the overwrite, a retry after a step-2 failure sees `created_by_run_id=NULL` and skips the snapshot
+  entirely (it never copies the already-overwritten edited bytes under the agent's provenance — the bug
+  a single-transaction ordering would have had). The overwrite precedes its own commit, so the edit is
+  durable in storage before it is recorded; a step-2 commit failure self-heals on the idempotent retry.
+  If step-1's commit fails the snapshot copy is a row-less orphan and is best-effort deleted (the live
+  object is untouched).
+- **GetFile streams chunked** (no pinned `Content-Length`). The row's `size_bytes` and the stored bytes
+  are separate sources; during the brief self-healing window after a step-2 commit failure they can
+  disagree, so pinning Content-Length to the row would emit a malformed response. Letting the ASGI
+  layer use chunked transfer-encoding keeps the declared length equal to the bytes actually streamed
+  (Collabora handles chunked GetFile). The same DB-vs-storage window theoretically affects the C7a
+  `GET /files/{id}/content` download; that is a manual, rare path and is left as-is (a fix there would
+  drop the download size header) — deferred, on record.
 - **`files.updated_at`** (migration `0075`, nullable, additive) is the in-place save's last-modified
   stamp. PutFile is the only path that mutates bytes in place (every other path creates a new row), so
   `LastModifiedTime = updated_at or created_at` is now honest, and the **`X-COOL-WOPI-Timestamp`

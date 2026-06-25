@@ -469,12 +469,27 @@ async def upload_bytes(*, storage_path: str, body: bytes, content_type: str) -> 
     bucket = settings.s3_bucket
 
     async with s3_client() as s3:
-        await s3.put_object(
-            Bucket=bucket,
-            Key=storage_path,
-            Body=body,
-            ContentType=content_type,
-        )
+        try:
+            await s3.put_object(
+                Bucket=bucket,
+                Key=storage_path,
+                Body=body,
+                ContentType=content_type,
+            )
+        except Exception as exc:
+            log.warning(
+                "put_object failed",
+                extra={
+                    "event": "storage_put_object_failed",
+                    "bucket": bucket,
+                    "storage_path": storage_path,
+                    "error": str(exc),
+                },
+            )
+            raise InternalError(
+                "Failed to write object to object storage",
+                details={"storage_path": storage_path},
+            ) from exc
 
 
 async def copy_object(*, source_path: str, dest_path: str) -> None:
@@ -496,11 +511,27 @@ async def copy_object(*, source_path: str, dest_path: str) -> None:
     bucket = settings.s3_bucket
 
     async with s3_client() as s3:
-        await s3.copy_object(
-            Bucket=bucket,
-            Key=dest_path,
-            CopySource={"Bucket": bucket, "Key": source_path},
-        )
+        try:
+            await s3.copy_object(
+                Bucket=bucket,
+                Key=dest_path,
+                CopySource={"Bucket": bucket, "Key": source_path},
+            )
+        except Exception as exc:
+            log.warning(
+                "copy_object failed",
+                extra={
+                    "event": "storage_copy_object_failed",
+                    "bucket": bucket,
+                    "source_path": source_path,
+                    "dest_path": dest_path,
+                    "error": str(exc),
+                },
+            )
+            raise InternalError(
+                "Failed to copy object in object storage",
+                details={"dest_path": dest_path},
+            ) from exc
 
 
 async def presigned_get_url(*, storage_path: str, expires_in_seconds: int) -> str:

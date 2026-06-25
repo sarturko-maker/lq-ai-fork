@@ -232,12 +232,21 @@ async def get_file_contents(
 
     ``X-WOPI-ItemVersion`` echoes CheckFileInfo's ``Version`` (the content hash)
     so the client can detect an out-of-band change.
+
+    We deliberately do NOT set an explicit ``Content-Length`` here: the bytes are
+    streamed from object storage, while the row's ``size_bytes`` is a *separate*
+    source of truth, and a PutFile save-back mutates the live object in place.
+    Across the (rare, self-healing) window where a post-overwrite commit failed,
+    the DB row's size could momentarily disagree with the bytes on disk; pinning
+    Content-Length to the row would then emit a malformed response (truncated /
+    hung). Letting the ASGI layer stream with chunked transfer-encoding keeps the
+    declared length always equal to the bytes actually sent (Collabora handles
+    chunked GetFile fine).
     """
     _claims, file_row = await _authorize_wopi(file_id, access_token, authorization, db)
 
     headers = {
         "X-WOPI-ItemVersion": file_row.hash_sha256,
-        "Content-Length": str(file_row.size_bytes),
         "X-Content-Type-Options": "nosniff",
     }
 
@@ -431,21 +440,21 @@ async def put_file_contents(
             headers={"X-WOPI-ItemVersion": new_hash},
         )
 
-    # 5) Snapshot-then-mutate. The agent's untouched redline is preserved on the
-    # FIRST human save; later saves (created_by_run_id already NULL) mutate only.
-    should_snapshot = file_row.created_by_run_id is not None
-    snapshot_id: uuid.UUID | None = None
-    if should_snapshot:
+    # 5) Snapshot-then-mutate, as TWO durable steps so a partial failure + the
+    # client's PutFile retry can never re-snapshot the edited bytes or lose the
+    # edit. The agent's untouched redline is preserved only on the FIRST human
+    # save (created_by_run_id set); later saves skip straight to the overwrite.
+    #
+    # Step 1 (only when snapshotting): preserve the agent's CURRENT bytes as an
+    # immutable prior version and flip the live row to human-authored, COMMITTED
+    # *before* any overwrite. Copy-first means the agent's bytes exist at the
+    # snapshot key before this commit; committing the provenance flip here means a
+    # retry after a later failure sees created_by_run_id=NULL and never snapshots
+    # the (by then overwritten) edited bytes under the agent's provenance.
+    if file_row.created_by_run_id is not None:
         snapshot_id = uuid.uuid4()
-        # Copy FIRST — the old bytes must exist at the snapshot key before the
-        # live object is overwritten, so a crash can never lose them.
         await copy_object(source_path=file_row.storage_path, dest_path=str(snapshot_id))
-
-    saved_at = datetime.now(UTC)
-    live_overwritten = False
-    try:
-        if should_snapshot:
-            assert snapshot_id is not None
+        try:
             db.add(
                 FileModel(
                     id=snapshot_id,
@@ -460,8 +469,33 @@ async def put_file_contents(
                     created_by_run_id=file_row.created_by_run_id,
                 )
             )
-            # The live row is now human-authored — its provenance moves to the snapshot.
-            file_row.created_by_run_id = None
+            file_row.created_by_run_id = None  # now human-authored; a retry won't re-snapshot
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            # The live object was NOT overwritten yet, so the snapshot copy is a
+            # row-less orphan — delete it; the agent's bytes are still at the live key.
+            try:
+                await delete_object(storage_path=str(snapshot_id))
+            except Exception:
+                log.warning(
+                    "Failed to clean up orphan editor snapshot after save failure",
+                    extra={
+                        "event": "editor_snapshot_cleanup_failed",
+                        "snapshot_id": str(snapshot_id),
+                    },
+                )
+            raise
+
+    # Step 2: overwrite the live object in place + bump the live row. The overwrite
+    # precedes the commit so the user's edit is durable in storage before we record
+    # it; if the commit fails, storage already holds the edit and the client's retry
+    # re-overwrites (idempotent) + re-commits, converging — the edit is never lost.
+    saved_at = datetime.now(UTC)
+    try:
+        await upload_bytes(
+            storage_path=file_row.storage_path, body=body, content_type=OOXML_DOCX_MIME
+        )
         file_row.hash_sha256 = new_hash
         file_row.size_bytes = new_size
         file_row.updated_at = saved_at
@@ -473,32 +507,11 @@ async def put_file_contents(
             resource_id=str(file_row.id),
             project_id=file_row.project_id,
             request=request,
-            details={"size_bytes": new_size, "snapshotted": should_snapshot},
+            details={"size_bytes": new_size},
         )
-        await db.flush()
-        # Overwrite the live object only after the row writes are staged.
-        await upload_bytes(
-            storage_path=file_row.storage_path, body=body, content_type=OOXML_DOCX_MIME
-        )
-        live_overwritten = True
         await db.commit()
     except Exception:
         await db.rollback()
-        # Only delete the snapshot orphan if the live object was NOT overwritten
-        # (a pre-upload failure). If the overwrite already happened, the snapshot
-        # is the sole copy of the agent's redline — KEEP it (orphan, GC-able)
-        # rather than lose it; Collabora retries PutFile and converges.
-        if snapshot_id is not None and not live_overwritten:
-            try:
-                await delete_object(storage_path=str(snapshot_id))
-            except Exception:
-                log.warning(
-                    "Failed to clean up orphan editor snapshot after save failure",
-                    extra={
-                        "event": "editor_snapshot_cleanup_failed",
-                        "snapshot_id": str(snapshot_id),
-                    },
-                )
         raise
 
     return JSONResponse(
