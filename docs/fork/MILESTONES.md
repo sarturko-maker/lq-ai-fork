@@ -480,8 +480,20 @@ decision (Backlog), triggered at real deployment; engine behaviour is identical,
   `guard_ooxml` + `.docx` subtype (400); lock enforced (409 + `X-WOPI-Lock`); `X-COOL-WOPI-Timestamp`
   save-race → `409 {COOLStatusCode:1010}`; `files.updated_at` (migration **0075**) makes
   `LastModifiedTime` honest. Counts-only audit; no model calls / no gateway reach / no new dependency.
-- **S4** — the cockpit **Editor** panel: our Vercel-style Svelte toolbar driving the canvas via
-  postMessage/UNO (the reskin); resolve sub-path asset-URL hosting (the S1 finding).
+- **S4 ✅ (2026-06-25)** — the cockpit **Editor** panel (ADR-F047 addendum). Resolved the S1 asset-URL
+  finding: host Collabora at its **native root paths** in nginx (`/browser/`, `/cool/`, `/hosting/`, no
+  strip; admin-404 regex still wins) + `ssl.termination=false` for HTTP dev (→ `ws://`); the frontend
+  re-homes the discovery `urlsrc` pathname onto `window.location.origin`. Maintainer-specified UX: when the
+  agent **redlines** a doc (or the lawyer clicks *Edit* in Documents), the editor **slides in from the
+  right**, the conversation stays on the left, and the practice-area **rail gracefully collapses** (shared
+  `cockpit.editorOpen` signal); the conversation never remounts (live SSE). Launch = `editor-session` token
+  +`/hosting/discovery` urlsrc → iframe + hidden-form POST of `access_token` (never in a URL). Reskin via
+  WOPI `ui_defaults` (classic toolbar, no sidebar/ruler) + best-effort `Hide_Menubar`/save-pill postMessage.
+  No backend change / no migration / no new dependency. **Live-verified** (headed Cypress, real Collabora):
+  the agent redline renders with tracked changes + comments; edit→save round-trips through the S3 PutFile
+  (`(agent draft)` snapshot + live doc mutated + `editor.file_saved` audit). Evidence
+  `docs/fork/evidence/libreoffice-slice4/`. **Deferred (incremental):** charcoal toolbar theming
+  (`css_variables`) + reliable menubar-hide.
 - **S5** — **"Hand back to agent"**: save → resume the run on the same `thread_id`; the agent re-reads the
   lawyer's tracked changes + comments via the existing **C5a** path — **zero new agent code**.
 

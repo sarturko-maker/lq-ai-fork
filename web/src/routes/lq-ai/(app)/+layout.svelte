@@ -51,6 +51,9 @@
 	let railCollapsed = $state(false);
 	let drawerOpen = $state(false);
 	let resizing = $state(false);
+	// We collapsed the rail because the editor opened (ADR-F047) — so we know to
+	// restore it on close, and to leave a manually-collapsed rail alone.
+	let railAutoCollapsed = $state(false);
 	const reducedMotion =
 		typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -65,6 +68,25 @@
 	let drawerEl = $state<HTMLElement | null>(null);
 	$effect(() => {
 		if (drawerOpen) drawerEl?.focus();
+	});
+
+	// In-app editor ↔ rail coordination (ADR-F047, Slice 4): when the editor
+	// opens in the canvas, gracefully collapse the practice-area rail so the
+	// conversation + editor get the full width (the rail pane already animates
+	// its flex-grow). Restore it on close — but only if WE collapsed it, so a
+	// rail the user collapsed by hand stays collapsed. Narrow viewports use the
+	// off-canvas drawer (nothing to collapse).
+	$effect(() => {
+		if (isNarrow || !railPane) return;
+		if (cockpit.editorOpen) {
+			if (!railPane.isCollapsed()) {
+				railPane.collapse();
+				railAutoCollapsed = true;
+			}
+		} else if (railAutoCollapsed) {
+			railPane.expand();
+			railAutoCollapsed = false;
+		}
 	});
 
 	function toggleRail() {
@@ -148,10 +170,7 @@
 {/snippet}
 
 <div class="bg-background text-foreground flex h-dvh min-h-0 flex-col" data-testid="lq-cockpit">
-	<CockpitHeader
-		railHidden={isNarrow ? !drawerOpen : railCollapsed}
-		onToggleRail={toggleRail}
-	/>
+	<CockpitHeader railHidden={isNarrow ? !drawerOpen : railCollapsed} onToggleRail={toggleRail} />
 	<div class="relative min-h-0 flex-1">
 		<!-- ONE pane group: the rail pane (+ handle) leave the group below the
 		     breakpoint, but the MAIN pane never remounts — a live canvas (a

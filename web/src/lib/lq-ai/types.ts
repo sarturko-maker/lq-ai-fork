@@ -1325,3 +1325,18 @@ export interface MatterFilesRead {
 	project_id: string;
 	files: MatterFile[];
 }
+
+/**
+ * A minted WOPI editor session (ADR-F047, in-app Word editor). Mirrors the
+ * backend `EditorSessionResponse` from `POST /files/{id}/editor-session`. The
+ * `access_token` is file-scoped (bound to this single user+file) and is POSTed
+ * into the editor iframe — never placed in a URL. `wopi_src` is the host's
+ * CheckFileInfo URL the editor calls back to (an in-Compose-network address, not
+ * a browser origin). `access_token_ttl` is the token's absolute expiry in epoch
+ * milliseconds (WOPI convention).
+ */
+export interface EditorSession {
+	access_token: string;
+	access_token_ttl: number;
+	wopi_src: string;
+}

@@ -32,6 +32,15 @@ export class CockpitShellState {
 	activityError = $state<string | null>(null);
 	/** Server-derived 'now' for relative times (the layout ticks it). */
 	nowMs = $state(Date.now());
+	/**
+	 * The in-app Word editor is open in the canvas (ADR-F047, Slice 4). The
+	 * canvas (ConversationHost) sets this; the shell layout reacts by gracefully
+	 * collapsing the practice-area rail so the conversation + editor get the full
+	 * width, then restoring the rail when the editor closes. A shared signal
+	 * (not a callback) because the editor and the rail live in different parts of
+	 * the shell tree.
+	 */
+	editorOpen = $state(false);
 
 	async loadAreas(): Promise<void> {
 		try {

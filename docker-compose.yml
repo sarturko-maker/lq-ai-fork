@@ -420,8 +420,10 @@ services:
       # WOPI host allow-list — the only origin coolwsd accepts a WOPISrc from
       # (Slice 2 mints tokens against this; harmless now).
       aliasgroup1: http://api:8000
-      # Browser-facing origin coolwsd builds asset URLs for = the same-origin
-      # host the `web` nginx serves /collabora/ under.
+      # Browser-facing origin coolwsd builds asset URLs + the editing-socket host
+      # (`data-host`) from. Same-origin host the `web` nginx serves the editor
+      # under (Slice 4 hosts Collabora at its native root paths /browser /cool
+      # /hosting).
       server_name: ${COLLABORA_SERVER_NAME:-localhost:3000}
       dictionaries: en_GB en_US
       DONT_GEN_SSL_CERT: "true"
@@ -429,12 +431,13 @@ services:
       # proxied); set only so coolwsd does not default-open.
       username: ${COLLABORA_ADMIN_USER:-admin}
       password: ${COLLABORA_ADMIN_PASSWORD:-admin}
-      # TLS terminates at the proxy; only our web origin may frame the editor
-      # (defence-in-depth with the nginx CSP frame-ancestors). The web nginx
-      # strips the /collabora/ prefix so coolwsd routes at root (Slice 1);
-      # emitting /collabora/-prefixed asset URLs for the iframe is a Slice-4
-      # concern, so no proxy_prefix flag is shipped yet.
-      extra_params: "--o:ssl.enable=false --o:ssl.termination=true --o:net.frame_ancestors=${COLLABORA_FRAME_ANCESTORS:-http://localhost:3000}"
+      # ssl.termination tells coolwsd the PUBLIC scheme so it builds the right
+      # asset/websocket URLs: true → https/wss (TLS terminated at the operator's
+      # proxy in prod), false → http/ws (plain-HTTP dev origin). Dev defaults to
+      # false so the editing socket is ws:// over our http://localhost:3000;
+      # PROD MUST set COLLABORA_SSL_TERMINATION=true. Only our web origin may
+      # frame the editor (defence-in-depth with the nginx CSP frame-ancestors).
+      extra_params: "--o:ssl.enable=false --o:ssl.termination=${COLLABORA_SSL_TERMINATION:-false} --o:net.frame_ancestors=${COLLABORA_FRAME_ANCESTORS:-http://localhost:3000}"
     healthcheck:
       # The CODE image ships neither curl nor wget — only bash. Probe the WOPI
       # discovery endpoint over bash's /dev/tcp and assert HTTP 200.

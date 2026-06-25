@@ -29,6 +29,7 @@
 	import { renderModelMarkdown } from '$lib/lq-ai/sanitize-markdown';
 	import StepRow from './StepRow.svelte';
 	import { agentsApi, filesApi, matterFilesApi } from '$lib/lq-ai/api';
+	import { isRedlineOutput } from '$lib/lq-ai/api/editor';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import type { AgentRun, AgentRunStep, AgentThreadDetailResponse } from '$lib/lq-ai/api/agents';
 	import type { FileMeta, MatterFile, Project } from '$lib/lq-ai/types';
@@ -106,6 +107,9 @@
 		/** PRIV-9b (ADR-F024): one ROPA register row the agent just changed — the
 		 * host lifts the id into a recently-changed set that washes the matching row. */
 		ropachange: { kind: string; id: string; verb: string };
+		/** ADR-F047 (Slice 4): the agent FRESHLY produced a redline .docx — the host
+		 * slides the in-app editor in so the lawyer can review/edit it right away. */
+		redlineready: { fileId: string; filename: string };
 	}>();
 
 	let submitting = false;
@@ -140,8 +144,37 @@
 	let downloadingFileId: string | null = null;
 	let inlineDownloadError = '';
 
+	// ADR-F047 (Slice 4): auto-open the in-app editor when the agent FRESHLY produces
+	// a redline — but never when merely revisiting a matter that already has old
+	// outputs. We snapshot the redline ids that exist when the thread is FIRST opened
+	// (the baseline) and only announce ids that appear later. The baseline must be
+	// captured independently of the completed-run trigger below: in the headline flow
+	// (a fresh conversation whose first ask is a redline) the redline-producing run is
+	// itself the first completion, so seeding off "the first loadProducedFiles call"
+	// would mark the new redline as already-seen and never open it. A memoized promise
+	// guarantees the baseline is settled before any announcement.
+	const announcedRedlineIds = new Set<string>();
+	let redlineBaseline: Promise<void> | null = null;
+	function ensureRedlineBaseline(projectId: string): Promise<void> {
+		if (!redlineBaseline) {
+			redlineBaseline = (async () => {
+				try {
+					const { files } = await matterFilesApi.listMatterFiles(projectId);
+					for (const f of files) {
+						if (f.created_by_run_id && isRedlineOutput(f.filename)) announcedRedlineIds.add(f.id);
+					}
+				} catch {
+					// non-fatal — worst case a pre-existing redline auto-opens once.
+				}
+			})();
+		}
+		return redlineBaseline;
+	}
+
 	async function loadProducedFiles(projectId: string) {
 		const gen = ++producedGen;
+		// Don't announce a redline until the baseline (existing-at-thread-open) is settled.
+		await ensureRedlineBaseline(projectId);
 		try {
 			const { files } = await matterFilesApi.listMatterFiles(projectId);
 			if (gen !== producedGen) return;
@@ -150,6 +183,13 @@
 				if (f.created_by_run_id) (map[f.created_by_run_id] ??= []).push(f);
 			}
 			producedByRun = map;
+
+			for (const f of files) {
+				if (f.created_by_run_id && isRedlineOutput(f.filename) && !announcedRedlineIds.has(f.id)) {
+					announcedRedlineIds.add(f.id);
+					dispatch('redlineready', { fileId: f.id, filename: f.filename });
+				}
+			}
 		} catch {
 			// non-fatal — the Documents tab is the durable download surface.
 		}
@@ -801,6 +841,9 @@
 				.join(',')
 		: '';
 	$: matterFilesProjectId = detail?.thread.project_id ?? null;
+	// Capture the redline baseline as soon as the thread's matter is known (before any
+	// run completes), so a redline produced THIS session auto-opens (ADR-F047 Slice 4).
+	$: if (matterFilesProjectId) void ensureRedlineBaseline(matterFilesProjectId);
 	$: if (matterFilesProjectId && completedRunSig) {
 		void loadProducedFiles(matterFilesProjectId);
 	}
