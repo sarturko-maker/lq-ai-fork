@@ -3,6 +3,18 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
+> ⚠ **PICKUP — MERGE FIRST (2026-06-25, compaction boundary):** C5b-2 is committed on branch
+> `fork/c5b2-negotiation-review-skill` as **PR #144** (Gateway + Web CI green; the API job was still running at
+> compaction). It is **NOT yet merged** — the maintainer chose to merge after compaction. **First action next
+> session:** confirm PR #144 API CI is green (`gh pr checks 144 --repo sarturko-maker/lq-ai-fork`), then
+> **squash-merge** under the ADR-F005 gate (`gh pr merge 144 --repo sarturko-maker/lq-ai-fork --squash
+> --delete-branch`), `git checkout main && git pull`, `docker image prune -f` (dangling only). THEN pick the next
+> slice (C5b-3 inline `data-deal-change` live chips / C7b drafter-reviewer fan-out / C6 controlling playbooks).
+> The slice is fully verified (api suite **2684 passed / 31 skipped / 0 failed**; ruff + mypy clean; live eval
+> `docs/fork/evidence/c5b2/`; adversarial review **SHIP**, 0 blockers) — **only the merge remains.** Dev image
+> `lq-ai-api-dev` is built; test recipe is in [[c5b2-negotiation-skill-shipped]] memory (run ruff/pytest with the
+> **repo root mounted**, `DATABASE_URL` → dev postgres for throwaway test DBs).
+
 ## North star (the goal, not a prompt)
 
 **A practice-area agent is, in effect, a legal counsel a human is supervising — qualified in that area.**
