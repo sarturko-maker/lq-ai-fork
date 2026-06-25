@@ -11,7 +11,8 @@
 	 * start inside a matter.
 	 */
 	import { onMount } from 'svelte';
-	import { fade } from 'svelte/transition';
+	import { fade, fly } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -28,10 +29,14 @@
 	import RopaRegister from '$lib/lq-ai/components/ropa/RopaRegister.svelte';
 	import MemoryPanel from '$lib/lq-ai/components/matter/MemoryPanel.svelte';
 	import DocumentsPanel from '$lib/lq-ai/components/matter/DocumentsPanel.svelte';
+	import DocumentEditorPanel from '$lib/lq-ai/components/matter/DocumentEditorPanel.svelte';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import NewMatterDialog from './NewMatterDialog.svelte';
 	import StatusPill from './StatusPill.svelte';
+	import { getCockpitState } from './context.svelte';
 	import { MOTION, motionMs, timeAgo } from './helpers';
+
+	const cockpit = getCockpitState();
 
 	let {
 		matter = null,
@@ -108,7 +113,22 @@
 	const isStacked = $derived(hostWidth < 720);
 	// svelte-ignore state_referenced_locally
 	let stackedShowPanel = $state(threadId !== null);
-	const showList = $derived(!isStacked || !stackedShowPanel);
+
+	// In-app Word editor (ADR-F047, Slice 4): when the agent redlines a document
+	// (or the lawyer opens one from Documents), the editor slides in on the RIGHT
+	// while the conversation stays on the left — so the lawyer edits the doc and
+	// keeps talking to the agent side by side (the round-2 hand-back loop). The
+	// shell collapses its practice-area rail (via cockpit.editorOpen) to free the
+	// width. The conversation NEVER remounts when the editor opens/closes (the
+	// live-SSE invariant): the conversation card is always the first flex child;
+	// the editor is a sibling that flies in.
+	let editorOpen = $state(false);
+	let editorFileId = $state<string | null>(null);
+	let editorFilename = $state('');
+
+	// The thread list yields to the editor (focus on edit + the live chat); the
+	// conversation column stays mounted and takes the freed width.
+	const showList = $derived((!isStacked || !stackedShowPanel) && !editorOpen);
 	const showPanel = $derived(!isStacked || stackedShowPanel);
 
 	// PRIV-3 (ADR-F019): a Privacy matter surfaces the company's read-only ROPA
@@ -127,7 +147,7 @@
 	// thread list (w-72 = 288px) is subtracted from the host width.
 	const SPLIT_MIN_PANEL = 880;
 	const canSplitRegister = $derived(
-		isPrivacyMatter && !isStacked && hostWidth - 288 >= SPLIT_MIN_PANEL
+		isPrivacyMatter && !isStacked && !editorOpen && hostWidth - 288 >= SPLIT_MIN_PANEL
 	);
 
 	// The tab strip for a real matter. 'conversation' always; 'register' only for
@@ -272,6 +292,41 @@
 		onThreadCreated(event.detail);
 		loadThreads();
 	}
+
+	function openEditor(fileId: string, filename: string) {
+		editorFileId = fileId;
+		editorFilename = filename;
+		editorOpen = true;
+		// Bring the conversation back beside the editor (don't leave Memory/Documents
+		// occupying the left column).
+		matterTab = 'conversation';
+		// Below the side-by-side budget the editor needs the whole pane to be usable.
+		if (isStacked) stackedShowPanel = true;
+	}
+
+	function closeEditor() {
+		editorOpen = false;
+		editorFileId = null;
+	}
+
+	// The agent just produced a redline → slide the editor in automatically
+	// (the maintainer's flow: the document opens for review the moment it's ready).
+	// But never yank the lawyer off a DIFFERENT document they're already editing — a
+	// new redline (e.g. from a parallel run) waits in the Documents tab instead.
+	function handleRedlineReady(event: CustomEvent<{ fileId: string; filename: string }>) {
+		if (editorOpen && editorFileId !== event.detail.fileId) return;
+		openEditor(event.detail.fileId, event.detail.filename);
+	}
+
+	// Reflect editor state to the shell so it gracefully collapses the practice-area
+	// rail while editing, and restore it (reset to false) when this host unmounts
+	// (per-matter remount) or the editor closes.
+	$effect(() => {
+		cockpit.editorOpen = editorOpen;
+		return () => {
+			cockpit.editorOpen = false;
+		};
+	});
 </script>
 
 {#snippet conversationPane()}
@@ -291,6 +346,7 @@
 					on:newmatter={() => (createOpen = true)}
 					on:threadcreated={handleThreadCreated}
 					on:ropachange={handleRopaChange}
+					on:redlineready={handleRedlineReady}
 				/>
 			</div>
 		</PageShell>
@@ -306,247 +362,271 @@
 	bind:clientWidth={hostWidth}
 	in:fade|global={{ duration: motionMs(MOTION.base) }}
 >
-	<div
-		class="flex h-full min-h-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm"
-	>
-		{#if showList}
-			<aside
-				class="flex min-h-0 shrink-0 flex-col {isStacked
-					? 'w-full'
-					: 'w-72 border-r border-border bg-muted/40'}"
-			>
-				<div class="shrink-0 border-b border-border px-4 py-3">
-					<button
-						type="button"
-						class="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground"
-						onclick={onBack}
-					>
-						<ChevronLeftIcon class="size-3.5" aria-hidden="true" />
-						{matter ? `${unitLabel}s` : 'Practice areas'}
-					</button>
-					<h2 class="mt-1.5 truncate text-sm font-semibold text-foreground">
-						{#if matter}
-							{matter.name}
-							{#if matter.privileged}
-								<ShieldIcon
-									class="ml-1 inline size-3.5 align-[-2px] text-muted-foreground"
-									aria-label="Privileged"
-								/>
-							{/if}
-						{:else}
-							Unfiled conversations
-						{/if}
-					</h2>
-					{#if matter}
-						<Button
-							size="sm"
-							variant="outline"
-							class="mt-2.5 w-full gap-1.5"
-							data-testid="lq-cockpit-new-conversation"
-							onclick={newConversation}
-						>
-							<PlusIcon class="size-4" aria-hidden="true" />
-							New conversation
-						</Button>
-					{:else}
-						<p class="mt-1.5 text-xs text-muted-foreground">
-							Legacy conversations without a {unitLabel.toLowerCase()}. Resume them here — new
-							conversations start inside a {unitLabel.toLowerCase()}.
-						</p>
-					{/if}
-				</div>
-				<nav
-					class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain px-2 py-2"
-					aria-label="Conversations"
+	<!-- Conversation card + (optional) editor, side by side. The card is ALWAYS the
+	     first child so the live conversation never remounts when the editor opens or
+	     closes (ADR-F047); the editor flies in from the right as a sibling. On a narrow
+	     (stacked) host a 50/50 split is unusable, so the card is hidden (kept MOUNTED —
+	     live SSE survives) and the editor takes the whole pane. -->
+	<div class="flex h-full min-h-0 gap-2 sm:gap-3">
+		<div
+			class="flex h-full min-h-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-[flex-grow] duration-200 ease-out {editorOpen
+				? 'min-w-0 flex-1 basis-0'
+				: 'w-full'}"
+			class:hidden={editorOpen && isStacked}
+		>
+			{#if showList}
+				<aside
+					class="flex min-h-0 shrink-0 flex-col {isStacked
+						? 'w-full'
+						: 'w-72 border-r border-border bg-muted/40'}"
 				>
-					{#if threadsError}
-						<p class="px-2 py-1 text-sm text-destructive">
-							Couldn't load conversations: {threadsError}
-						</p>
-					{:else if threads === null}
-						<div class="space-y-1 px-2 py-1" aria-hidden="true">
-							{#each [0, 1, 2] as i (i)}
-								<div class="h-12 animate-pulse rounded-md bg-muted/70"></div>
-							{/each}
-						</div>
-					{:else if threads.length === 0}
-						<p class="px-2 py-1 text-xs text-muted-foreground">
-							{matter ? 'No conversations yet — ask the agent something.' : 'Nothing here.'}
-						</p>
-					{:else}
-						<ul class="space-y-0.5">
-							{#each threads as t (t.id)}
-								<li>
-									<button
-										type="button"
-										class="flex w-full flex-col gap-0.5 rounded-md px-2.5 py-2 text-left text-foreground transition-colors duration-150 ease-out hover:bg-muted/60 {threadId ===
-										t.id
-											? 'bg-accent text-accent-foreground'
-											: ''}"
-										data-testid="lq-cockpit-thread-row"
-										onclick={() => selectThread(t.id)}
-									>
-										<span class="line-clamp-2 text-xs font-medium">{t.title}</span>
-										<span class="flex items-center justify-between gap-2">
-											<StatusPill status={t.last_run_status} lastRunAt={t.last_run_at} {nowMs} />
-											<span class="text-[11px] text-muted-foreground tabular-nums">
-												{timeAgo(t.last_run_at, nowMs)}
-											</span>
-										</span>
-									</button>
-								</li>
-							{/each}
-						</ul>
-						{#if threads !== null && threadsTotal > threads.length}
-							<p class="px-2.5 py-2 text-[11px] text-muted-foreground tabular-nums">
-								Showing {threads.length} of {threadsTotal} — older conversations are on the legacy agents
-								page.
-							</p>
-						{/if}
-					{/if}
-				</nav>
-			</aside>
-		{/if}
-
-		{#if showPanel}
-			<section class="flex min-h-0 min-w-0 flex-1 flex-col">
-				{#if isStacked}
-					<div class="shrink-0 border-b border-border px-4 py-2">
+					<div class="shrink-0 border-b border-border px-4 py-3">
 						<button
 							type="button"
 							class="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground"
-							data-testid="lq-cockpit-back-to-list"
-							onclick={backToList}
+							onclick={onBack}
 						>
 							<ChevronLeftIcon class="size-3.5" aria-hidden="true" />
-							Conversations
+							{matter ? `${unitLabel}s` : 'Practice areas'}
 						</button>
+						<h2 class="mt-1.5 truncate text-sm font-semibold text-foreground">
+							{#if matter}
+								{matter.name}
+								{#if matter.privileged}
+									<ShieldIcon
+										class="ml-1 inline size-3.5 align-[-2px] text-muted-foreground"
+										aria-label="Privileged"
+									/>
+								{/if}
+							{:else}
+								Unfiled conversations
+							{/if}
+						</h2>
+						{#if matter}
+							<Button
+								size="sm"
+								variant="outline"
+								class="mt-2.5 w-full gap-1.5"
+								data-testid="lq-cockpit-new-conversation"
+								onclick={newConversation}
+							>
+								<PlusIcon class="size-4" aria-hidden="true" />
+								New conversation
+							</Button>
+						{:else}
+							<p class="mt-1.5 text-xs text-muted-foreground">
+								Legacy conversations without a {unitLabel.toLowerCase()}. Resume them here — new
+								conversations start inside a {unitLabel.toLowerCase()}.
+							</p>
+						{/if}
 					</div>
-				{/if}
-				{#if matter}
-					<!-- PRIV-3 + C3c-2: switch the panel column between the conversation,
-					     the company ROPA register (Privacy only), and the matter's Memory. -->
-					<div
-						class="flex shrink-0 gap-1 border-b border-border px-4 py-2"
-						role="tablist"
-						aria-label="Matter view"
+					<nav
+						class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain px-2 py-2"
+						aria-label="Conversations"
 					>
-						{#each matterTabs as t (t.id)}
+						{#if threadsError}
+							<p class="px-2 py-1 text-sm text-destructive">
+								Couldn't load conversations: {threadsError}
+							</p>
+						{:else if threads === null}
+							<div class="space-y-1 px-2 py-1" aria-hidden="true">
+								{#each [0, 1, 2] as i (i)}
+									<div class="h-12 animate-pulse rounded-md bg-muted/70"></div>
+								{/each}
+							</div>
+						{:else if threads.length === 0}
+							<p class="px-2 py-1 text-xs text-muted-foreground">
+								{matter ? 'No conversations yet — ask the agent something.' : 'Nothing here.'}
+							</p>
+						{:else}
+							<ul class="space-y-0.5">
+								{#each threads as t (t.id)}
+									<li>
+										<button
+											type="button"
+											class="flex w-full flex-col gap-0.5 rounded-md px-2.5 py-2 text-left text-foreground transition-colors duration-150 ease-out hover:bg-muted/60 {threadId ===
+											t.id
+												? 'bg-accent text-accent-foreground'
+												: ''}"
+											data-testid="lq-cockpit-thread-row"
+											onclick={() => selectThread(t.id)}
+										>
+											<span class="line-clamp-2 text-xs font-medium">{t.title}</span>
+											<span class="flex items-center justify-between gap-2">
+												<StatusPill status={t.last_run_status} lastRunAt={t.last_run_at} {nowMs} />
+												<span class="text-[11px] text-muted-foreground tabular-nums">
+													{timeAgo(t.last_run_at, nowMs)}
+												</span>
+											</span>
+										</button>
+									</li>
+								{/each}
+							</ul>
+							{#if threads !== null && threadsTotal > threads.length}
+								<p class="px-2.5 py-2 text-[11px] text-muted-foreground tabular-nums">
+									Showing {threads.length} of {threadsTotal} — older conversations are on the legacy agents
+									page.
+								</p>
+							{/if}
+						{/if}
+					</nav>
+				</aside>
+			{/if}
+
+			{#if showPanel}
+				<section class="flex min-h-0 min-w-0 flex-1 flex-col">
+					{#if isStacked}
+						<div class="shrink-0 border-b border-border px-4 py-2">
 							<button
 								type="button"
-								role="tab"
-								aria-selected={matterTab === t.id}
-								class="rounded-md px-2.5 py-1 text-xs font-medium transition-colors duration-150 {matterTab ===
-								t.id
-									? 'bg-muted text-foreground'
-									: 'text-muted-foreground hover:text-foreground'}"
-								data-testid="lq-cockpit-matter-tab-{t.id}"
-								onclick={() => (matterTab = t.id)}
+								class="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground"
+								data-testid="lq-cockpit-back-to-list"
+								onclick={backToList}
 							>
-								{t.label}
+								<ChevronLeftIcon class="size-3.5" aria-hidden="true" />
+								Conversations
 							</button>
-						{/each}
-					</div>
-				{/if}
-				<!-- Conversation + register region: stays MOUNTED (hidden while Memory or
+						</div>
+					{/if}
+					{#if matter}
+						<!-- PRIV-3 + C3c-2: switch the panel column between the conversation,
+					     the company ROPA register (Privacy only), and the matter's Memory. -->
+						<div
+							class="flex shrink-0 gap-1 border-b border-border px-4 py-2"
+							role="tablist"
+							aria-label="Matter view"
+						>
+							{#each matterTabs as t (t.id)}
+								<button
+									type="button"
+									role="tab"
+									aria-selected={matterTab === t.id}
+									class="rounded-md px-2.5 py-1 text-xs font-medium transition-colors duration-150 {matterTab ===
+									t.id
+										? 'bg-muted text-foreground'
+										: 'text-muted-foreground hover:text-foreground'}"
+									data-testid="lq-cockpit-matter-tab-{t.id}"
+									onclick={() => (matterTab = t.id)}
+								>
+									{t.label}
+								</button>
+							{/each}
+						</div>
+					{/if}
+					<!-- Conversation + register region: stays MOUNTED (hidden while Memory or
 				     Documents is open) so the live run stream + runActive keep flowing — never
 				     remounted on a tab switch (the invariant the narrow fallback below protects). -->
-				<div class="flex min-h-0 flex-1 flex-col" class:hidden={matterPanelOpen}>
-					{#if canSplitRegister}
-						<!-- PRIV-9a co-visible: chat | register, resizable, each scrolls
+					<div class="flex min-h-0 flex-1 flex-col" class:hidden={matterPanelOpen}>
+						{#if canSplitRegister}
+							<!-- PRIV-9a co-visible: chat | register, resizable, each scrolls
 					     independently — watch the register change as the agent works. -->
-						<div class="min-h-0 flex-1">
-							<Resizable.PaneGroup
-								direction="horizontal"
-								autoSaveId="lq-priv-covisible"
-								class="h-full"
-							>
-								<Resizable.Pane id="priv-chat" order={1} defaultSize={56} minSize={38}>
-									<div class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain">
+							<div class="min-h-0 flex-1">
+								<Resizable.PaneGroup
+									direction="horizontal"
+									autoSaveId="lq-priv-covisible"
+									class="h-full"
+								>
+									<Resizable.Pane id="priv-chat" order={1} defaultSize={56} minSize={38}>
+										<div class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain">
+											{@render conversationPane()}
+										</div>
+									</Resizable.Pane>
+									<Resizable.Handle
+										class="transition-colors duration-150 ease-out hover:bg-primary/40 data-[active]:bg-primary/60"
+									/>
+									<Resizable.Pane id="priv-register" order={2} defaultSize={44} minSize={30}>
+										<div
+											class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain border-l border-border"
+										>
+											<RopaRegister
+												{runActive}
+												reloadKey={registerReloadKey}
+												changedIds={recentlyChangedIds}
+											/>
+										</div>
+									</Resizable.Pane>
+								</Resizable.PaneGroup>
+							</div>
+						{:else}
+							<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
+								{#if isPrivacyMatter}
+									<!-- Narrow fallback: chat and register are one-at-a-time, but the
+							     conversation stays MOUNTED (hidden while the register shows) so its
+							     run-state keeps flowing — the register still live-updates as the
+							     agent works, just not side by side, and switching tabs never drops a
+							     live stream. -->
+									<div class="h-full" class:hidden={matterTab === 'register'}>
 										{@render conversationPane()}
 									</div>
-								</Resizable.Pane>
-								<Resizable.Handle
-									class="transition-colors duration-150 ease-out hover:bg-primary/40 data-[active]:bg-primary/60"
-								/>
-								<Resizable.Pane id="priv-register" order={2} defaultSize={44} minSize={30}>
-									<div
-										class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain border-l border-border"
-									>
+									{#if matterTab === 'register'}
 										<RopaRegister
 											{runActive}
 											reloadKey={registerReloadKey}
 											changedIds={recentlyChangedIds}
 										/>
-									</div>
-								</Resizable.Pane>
-							</Resizable.PaneGroup>
-						</div>
-					{:else}
-						<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
-							{#if isPrivacyMatter}
-								<!-- Narrow fallback: chat and register are one-at-a-time, but the
-							     conversation stays MOUNTED (hidden while the register shows) so its
-							     run-state keeps flowing — the register still live-updates as the
-							     agent works, just not side by side, and switching tabs never drops a
-							     live stream. -->
-								<div class="h-full" class:hidden={matterTab === 'register'}>
+									{/if}
+								{:else if matter || threadId}
 									{@render conversationPane()}
-								</div>
-								{#if matterTab === 'register'}
-									<RopaRegister
-										{runActive}
-										reloadKey={registerReloadKey}
-										changedIds={recentlyChangedIds}
-									/>
-								{/if}
-							{:else if matter || threadId}
-								{@render conversationPane()}
-							{:else}
-								<div class="flex h-full items-center justify-center px-8">
-									<div class="max-w-sm text-center">
-										<div
-											class="mx-auto flex size-10 items-center justify-center rounded-full bg-muted"
-										>
-											<InboxIcon class="size-5 text-muted-foreground" aria-hidden="true" />
+								{:else}
+									<div class="flex h-full items-center justify-center px-8">
+										<div class="max-w-sm text-center">
+											<div
+												class="mx-auto flex size-10 items-center justify-center rounded-full bg-muted"
+											>
+												<InboxIcon class="size-5 text-muted-foreground" aria-hidden="true" />
+											</div>
+											<h2 class="mt-3 text-base font-semibold text-foreground">
+												Pick a conversation
+											</h2>
+											<p class="mt-1 text-sm text-muted-foreground">
+												Unfiled conversations are read-and-resume only. Select one on the left to
+												continue it.
+											</p>
 										</div>
-										<h2 class="mt-3 text-base font-semibold text-foreground">
-											Pick a conversation
-										</h2>
-										<p class="mt-1 text-sm text-muted-foreground">
-											Unfiled conversations are read-and-resume only. Select one on the left to
-											continue it.
-										</p>
 									</div>
-								</div>
-							{/if}
+								{/if}
+							</div>
+						{/if}
+					</div>
+					{#if matterTab === 'memory' && matter}
+						<!-- Memory tab: full-width read panel over the C3c-1 GET/revert. -->
+						<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
+							<MemoryPanel
+								projectId={matter.project_id}
+								{runActive}
+								reloadKey={registerReloadKey}
+								{nowMs}
+							/>
 						</div>
 					{/if}
-				</div>
-				{#if matterTab === 'memory' && matter}
-					<!-- Memory tab: full-width read panel over the C3c-1 GET/revert. -->
-					<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
-						<MemoryPanel
-							projectId={matter.project_id}
-							{runActive}
-							reloadKey={registerReloadKey}
-							{nowMs}
-						/>
-					</div>
-				{/if}
-				{#if matterTab === 'documents' && matter}
-					<!-- Documents tab (C7a, ADR-F046): full-width read panel onto the matter's
+					{#if matterTab === 'documents' && matter}
+						<!-- Documents tab (C7a, ADR-F046): full-width read panel onto the matter's
 					     files; each row downloads via GET /files/{id}/content. -->
-					<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
-						<DocumentsPanel
-							projectId={matter.project_id}
-							{runActive}
-							reloadKey={registerReloadKey}
-							{nowMs}
-						/>
-					</div>
-				{/if}
-			</section>
+						<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
+							<DocumentsPanel
+								projectId={matter.project_id}
+								{runActive}
+								reloadKey={registerReloadKey}
+								{nowMs}
+								onOpenEditor={openEditor}
+							/>
+						</div>
+					{/if}
+				</section>
+			{/if}
+		</div>
+		{#if editorOpen && editorFileId}
+			<div
+				class="flex h-full min-h-0 min-w-0 flex-1 basis-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+				transition:fly={{ x: 28, duration: motionMs(MOTION.base), opacity: 0.5, easing: cubicOut }}
+				data-testid="lq-cockpit-editor"
+			>
+				<DocumentEditorPanel
+					fileId={editorFileId}
+					filename={editorFilename}
+					onClose={closeEditor}
+				/>
+			</div>
 		{/if}
 	</div>
 </div>

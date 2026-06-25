@@ -186,3 +186,49 @@ the kickoff flagged — **the version model** — was decided by the maintainer:
   beyond `0075`; no new dependency (`copy_object` added to `app/storage.py`). Re-ingestion of edited
   content (RAG re-index) and a view/edit session toggle are out of scope (backlog); the agent-resume
   loop reads the `.docx` bytes directly (Adeu), so it is unaffected.
+
+## Addendum — Slice 4: cockpit editor panel + asset-URL fix (2026-06-25)
+
+Slice 4 is the browser half: the lawyer opens an agent-redlined `.docx` **in the cockpit** and the
+Collabora editor renders + saves through the Slice-2/3 WOPI host. Two decisions resolved here.
+
+- **Asset-URL fix = host Collabora at its NATIVE ROOT paths, NOT a sub-path** (the Slice-1 open
+  question). `cool.html` references every asset by an **absolute root path** (`href="/browser/<hash>/
+  bundle.css"`, …) and the editing websocket connects to `/cool/<wopisrc>/ws`; `data-service-root=""`
+  confirms root hosting is coolwsd's intended mode. So Slice-1's `/collabora/` sub-path (which stripped
+  the prefix) could never serve the iframe, and `net.proxy_prefix` does not fix it (coolwsd 400s on a
+  prefixed path). The web nginx now reverse-proxies `/browser/`, `/cool/` (websocket-upgrade), and
+  `/hosting/` straight through to `collabora:9980` with **no prefix strip**; the admin deny
+  (`/cool/adminws`, `/cool/getMetrics`, `/browser/<hash>/admin` → 404) stays a regex location, which
+  nginx evaluates *before* the plain-prefix proxy locations, so it still wins. `/browser/` and `/cool/`
+  do not collide with the SvelteKit SPA (which lives under `/lq-ai`, `/_app`, `/api`).
+- **Dev scheme = `ssl.termination=false`.** coolwsd builds asset/websocket URLs for the public scheme:
+  `true` → `https`/`wss`, `false` → `http`/`ws`. The dev origin is plain HTTP, so the compose default
+  is now `COLLABORA_SSL_TERMINATION=false` (→ `data-host="ws://…"`); **production, terminating TLS at
+  the operator proxy, MUST set it `true`.** The frontend belt-and-braces this: it takes the discovery
+  `urlsrc` **pathname only** and re-homes it on `window.location.origin`, so coolwsd's advertised
+  `server_name`/scheme never has to match how the page is actually served.
+- **Launch = standard WOPI form-POST.** `POST /files/{id}/editor-session` mints the file-scoped token;
+  `GET /hosting/discovery` yields the loader `urlsrc`; the iframe `src` carries only `WOPISrc` (the host
+  callback), and a hidden `<form method=POST target=iframe>` POSTs the `access_token` — so the token
+  never lands in a URL/history, and Collabora never sees the user's session JWT. No backend change
+  (`PostMessageOrigin` was already wired in CheckFileInfo); no migration; no new dependency.
+- **UX (maintainer-specified) = slide-in beside the conversation, not an overlay/tab.** When the agent
+  produces a redline (or the lawyer clicks *Edit* on a `.docx` in the Documents tab), the editor slides
+  in from the **right** while the conversation stays on the **left** — so the lawyer edits the document
+  and keeps talking to the agent side by side (the round-2 hand-back loop). The shell **gracefully
+  collapses the practice-area rail** (a shared `cockpit.editorOpen` signal → `railPane.collapse()`,
+  restored only if we collapsed it) and the in-card thread list yields, giving the conversation +
+  editor the full width (on a narrow/stacked host the conversation card is hidden — kept mounted — so the
+  editor takes the whole pane). The conversation **never remounts** when the editor opens/closes (the
+  live-SSE invariant): it is always the first flex child; the editor is a sibling that flies in. Auto-open
+  fires only for a **freshly** produced redline: the panel snapshots the redline ids that exist when the
+  thread is first opened (a memoized baseline captured eagerly when the matter is known — *not* on the first
+  completed-run-driven file refresh, which in the headline "fresh conversation, first ask is a redline" flow
+  would otherwise mark the new redline as already-seen and never open it) and announces only ids that appear
+  later; it also yields to a document the lawyer is already editing rather than swapping it out.
+- **Save-state chrome** maps Collabora's same-origin postMessage events (`App_LoadingStatus`,
+  `Doc_ModifiedStatus`, `Action_Save_Resp`) to a Saved / Unsaved indicator; the listener rejects any
+  message whose `event.origin` is not our own. Deeper de-branding of Collabora's in-canvas toolbar
+  (Hide_Command / UI customisation, issue #13224) is incremental and deferred — Slice 4 delivers a
+  clean framed editor under our charcoal chrome. Hand-back → agent resume is Slice 5.

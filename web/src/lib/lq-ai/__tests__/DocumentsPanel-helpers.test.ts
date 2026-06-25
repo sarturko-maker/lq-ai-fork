@@ -11,7 +11,6 @@ import { describe, expect, it } from 'vitest';
 import {
 	fileOriginBadge,
 	formatBytes,
-	isRedlineOutput,
 	isUpdatingLive
 } from '../components/matter/DocumentsPanel.svelte';
 
@@ -30,17 +29,7 @@ describe('formatBytes', () => {
 	});
 });
 
-describe('isRedlineOutput', () => {
-	it('matches the redline-output filename convention, case-insensitively', () => {
-		expect(isRedlineOutput({ filename: 'Cirrus MSA (redlined).docx' })).toBe(true);
-		expect(isRedlineOutput({ filename: 'cirrus msa (REDLINED).DOCX' })).toBe(true);
-	});
-
-	it('is false for an ordinary upload', () => {
-		expect(isRedlineOutput({ filename: 'Cirrus MSA.docx' })).toBe(false);
-		expect(isRedlineOutput({ filename: 'redlined-notes.txt' })).toBe(false);
-	});
-});
+// isRedlineOutput now lives in api/editor.ts (single source) — tested in editor-api.test.ts.
 
 describe('fileOriginBadge', () => {
 	it('labels a redline output "Redline"', () => {

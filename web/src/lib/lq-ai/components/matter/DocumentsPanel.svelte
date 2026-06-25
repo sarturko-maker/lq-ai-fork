@@ -5,6 +5,8 @@
 	 * helper layer (pattern: MemoryPanel / MatterCard) and the template is glue.
 	 */
 	import type { MatterFile } from '$lib/lq-ai/types';
+	// Single source of truth for the redline-output check (ADR-F047 dedup).
+	import { isRedlineOutput } from '$lib/lq-ai/api/editor';
 
 	/** Human-readable file size (1024-based), e.g. 2048 → "2.0 KB", 0 → "0 B". */
 	export function formatBytes(bytes: number): string {
@@ -15,11 +17,6 @@
 		return `${i === 0 ? value : value.toFixed(1)} ${units[i]}`;
 	}
 
-	/** A file the lawyer recognises as a redline output (the agent's tracked-changes work product). */
-	export function isRedlineOutput(file: Pick<MatterFile, 'filename'>): boolean {
-		return /\(redlined\)\.docx$/i.test(file.filename);
-	}
-
 	/**
 	 * Short badge label for a file's origin, or null for a plain human upload:
 	 * "Redline" for a redline output, else "Agent output" for any agent-produced
@@ -28,7 +25,7 @@
 	export function fileOriginBadge(
 		file: Pick<MatterFile, 'filename' | 'created_by_run_id'>
 	): string | null {
-		if (isRedlineOutput(file)) return 'Redline';
+		if (isRedlineOutput(file.filename)) return 'Redline';
 		if (file.created_by_run_id) return 'Agent output';
 		return null;
 	}
@@ -56,6 +53,7 @@
 	import { fade } from 'svelte/transition';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
+	import PencilIcon from '@lucide/svelte/icons/pencil';
 
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -66,6 +64,7 @@
 	import { MOTION, motionMs, timeAgo } from '$lib/lq-ai/cockpit/helpers';
 	import { listMatterFiles } from '$lib/lq-ai/api/matterFiles';
 	import { downloadFile } from '$lib/lq-ai/api/files';
+	import { isEditableDocx } from '$lib/lq-ai/api/editor';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	// `MatterFile` is imported in `<script module>` above (Svelte merges both script
 	// blocks into one module, so a second import here would be a duplicate identifier).
@@ -78,8 +77,17 @@
 		// Bumped by the host when a run settles — one reconcile fetch so a final
 		// output is never missed even if the last poll tick raced it.
 		reloadKey = 0,
-		nowMs
-	}: { projectId: string; runActive?: boolean; reloadKey?: number; nowMs: number } = $props();
+		nowMs,
+		// Open a .docx in the in-app Word editor (ADR-F047). Absent → no editor
+		// affordance (the panel still downloads).
+		onOpenEditor
+	}: {
+		projectId: string;
+		runActive?: boolean;
+		reloadKey?: number;
+		nowMs: number;
+		onOpenEditor?: (fileId: string, filename: string) => void;
+	} = $props();
 
 	let files = $state<MatterFile[] | null>(null);
 	let loading = $state(true);
@@ -254,18 +262,31 @@
 									</p>
 								</div>
 							</div>
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								class="shrink-0"
-								disabled={downloadingId === f.id}
-								data-testid="lq-documents-download"
-								onclick={() => download(f)}
-							>
-								<DownloadIcon class="size-3.5" aria-hidden="true" />
-								{downloadingId === f.id ? 'Downloading…' : 'Download'}
-							</Button>
+							<div class="flex shrink-0 items-center gap-2">
+								{#if onOpenEditor && isEditableDocx(f.filename)}
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										data-testid="lq-documents-edit"
+										onclick={() => onOpenEditor?.(f.id, f.filename)}
+									>
+										<PencilIcon class="size-3.5" aria-hidden="true" />
+										Edit
+									</Button>
+								{/if}
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									disabled={downloadingId === f.id}
+									data-testid="lq-documents-download"
+									onclick={() => download(f)}
+								>
+									<DownloadIcon class="size-3.5" aria-hidden="true" />
+									{downloadingId === f.id ? 'Downloading…' : 'Download'}
+								</Button>
+							</div>
 						</li>
 					{/each}
 				</ul>
