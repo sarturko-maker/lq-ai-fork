@@ -132,3 +132,24 @@ Live-re-verified at the OOXML level (`docs/fork/evidence/c5b1/`): the counterpar
 **survives** the round (it was deleted before); the agent adapted (4 `respond_to_counterparty` calls).
 Coaching the agent to *prefer counter-with-reply* over reject-then-leave-open (so the comment stays
 anchored + visibly answered) is craft → **C5b-2** (the `negotiation-review` skill).
+
+## Addendum — C5b-2 (2026-06-25): the negotiation-review skill + binding + craft eval
+
+C5b-2 delivers the craft layer the C5b-1 note pointed to — **prompt quality tuned by eval, not a runtime
+gate** (ADR-F041), so it adds no gate and changes no guarantee. Three pure-data/test changes:
+
+- **`skills/negotiation-review/SKILL.md`** (curated, bound to Commercial by migration 0072, ADR-F016) — the
+  round-2 companion to `surgical-redline`. It teaches decide-every-item, the closed taxonomy, materiality,
+  countering a one-sided change **surgically** (a term-swap, not a wholesale rewrite — the C9 mutualisation
+  lesson), **counter-with-reply over reject-then-orphan** (the C5b-1 nuance), and escalate-don't-concede. It
+  *teaches*; the code (`evaluate_coverage` / `evaluate_anchoring` / `evaluate_gate` + reconciliation)
+  *enforces* — the same teach-vs-enforce split as surgical-redline (ADR-F041).
+- **Migration 0072** binds the skill (idempotent `NOT EXISTS`) and refreshes the stale 0066 negotiation
+  doctrine paragraph (it predated the C5a tools) to point at `extract_counterparty_position` /
+  `respond_to_counterparty` + the skill + the full taxonomy (never-clobber `REPLACE`, mirroring 0067).
+- **A provider-marked craft eval** (`tests/agents/scenarios/test_commercial_negotiation_eval.py`, ADR-F015 —
+  a finding, never a hard gate): a plain task drives the bound skill; a judge grades the response `.docx`
+  for mutuality-restored / floor-held / comment-engaged. Agent and judge model aliases are decoupled.
+
+No change to the guarantee, no new endpoint, no new dependency. C5b-3 (inline `data-deal-change` live
+verdict chips) remains the next sub-slice.

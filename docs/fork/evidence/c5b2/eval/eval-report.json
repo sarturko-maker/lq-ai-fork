@@ -1,0 +1,46 @@
+{
+  "agent": "deepseek",
+  "judge": "deepseek-pro",
+  "reps": 3,
+  "craft_pass": 3,
+  "comment_engaged": 0,
+  "total": 3,
+  "results": [
+    {
+      "rep": 1,
+      "status": "completed",
+      "model_turns": 14,
+      "respond_calls": 7,
+      "responded": true,
+      "verdict": "ADEQUATE",
+      "mutuality_restored": true,
+      "floor_held": true,
+      "comment_engaged": false,
+      "craft_pass": true
+    },
+    {
+      "rep": 2,
+      "status": "completed",
+      "model_turns": 14,
+      "respond_calls": 7,
+      "responded": true,
+      "verdict": "ADEQUATE",
+      "mutuality_restored": true,
+      "floor_held": true,
+      "comment_engaged": false,
+      "craft_pass": true
+    },
+    {
+      "rep": 3,
+      "status": "completed",
+      "model_turns": 10,
+      "respond_calls": 4,
+      "responded": true,
+      "verdict": "ADEQUATE",
+      "mutuality_restored": true,
+      "floor_held": true,
+      "comment_engaged": false,
+      "craft_pass": true
+    }
+  ]
+}

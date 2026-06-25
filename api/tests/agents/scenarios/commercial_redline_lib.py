@@ -162,11 +162,16 @@ async def seed_doc_matter(
     )
 
 
-async def capture_redline(
-    factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID, project_id: uuid.UUID
+async def capture_output_file(
+    factory: async_sessionmaker[AsyncSession],
+    user_id: uuid.UUID,
+    project_id: uuid.UUID,
+    name_like: str,
 ) -> tuple[bytes, str] | None:
-    """Download the redlined output File the agent produced (most recent), scoped to
-    the matter (owner + project) per the ADR-F035 matter-scope convention."""
+    """Download the most-recent matter File whose filename matches ``name_like``, scoped
+    to the matter (owner + project) per the ADR-F035 matter-scope convention. The shared
+    fetch behind ``capture_redline`` (``%(redlined)%``) and the negotiation eval's response
+    capture (``%(response)%``)."""
     async with factory() as db:
         row = (
             await db.execute(
@@ -174,7 +179,7 @@ async def capture_redline(
                 .where(
                     File.owner_id == user_id,
                     File.project_id == project_id,
-                    File.filename.like("%(redlined)%"),
+                    File.filename.like(name_like),
                 )
                 .order_by(File.created_at.desc())
             )
@@ -186,6 +191,14 @@ async def capture_redline(
         async for chunk in stream:
             chunks.append(chunk)
     return b"".join(chunks), row.filename
+
+
+async def capture_redline(
+    factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID, project_id: uuid.UUID
+) -> tuple[bytes, str] | None:
+    """Download the redlined output File the agent produced (most recent), scoped to
+    the matter (owner + project) per the ADR-F035 matter-scope convention."""
+    return await capture_output_file(factory, user_id, project_id, "%(redlined)%")
 
 
 @dataclass(frozen=True)

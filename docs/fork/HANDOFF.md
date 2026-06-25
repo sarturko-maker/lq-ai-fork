@@ -38,9 +38,16 @@ anchored to (Adeu reports it `applied`; only raw-OOXML inspection caught it). Fi
 anchor-map capture (`StateOfPlay.comment_anchors`), an upfront `evaluate_anchoring` gate (reject `reply` on an
 accept/reject-ed anchored change), and document-level reply-survival reconciliation. Live-re-verified at the
 OOXML level (`docs/fork/evidence/c5b1/`): the counterparty comment now SURVIVES the round (it was deleted
-before). **NEXT = maintainer's call: C5b-2 (negotiation-review skill + binding migration + multi-round eval) /
-C5b-3 (inline `data-deal-change` live chips) / C7b (drafter/reviewer fan-out roster) / C6 (controlling playbook
-skills).**
+before). **C5b-2 NEGOTIATION-REVIEW SKILL SHIPPED** (2026-06-25, branch `fork/c5b2-negotiation-review-skill`,
+ADR-F032 addendum + ADR-F041, migration `0072`): the **craft layer** — a curated `negotiation-review` skill
+(round-2 companion to `surgical-redline`) bound to Commercial + the stale 0066 negotiation doctrine refreshed +
+a provider-marked DeepSeek/Claude-judged craft eval. Live (DeepSeek, `docs/fork/evidence/c5b2/`): **3/3
+substantive craft pass** (one-sided strip reverted to mutual, below-floor perpetuity held, full coverage,
+nothing conceded); **counter-with-reply 0/3** — an honest recorded tuning finding (the model reverts §3 rather
+than counter-with-reply, so the comment is preserved-but-orphaned; the guarantee holds, no silent loss).
+**NEXT = maintainer's call: C5b-3 (inline `data-deal-change` live chips) / C7b (drafter/reviewer fan-out roster) /
+C6 (controlling playbook skills). Backlog: counter-with-reply skill tuning + a Claude-judged eval re-run when the
+gateway has an Anthropic key (deepseek-pro stood in as judge — Claude not reachable locally).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -52,7 +59,37 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this session (C5b-1 — COMMENT-WIPE FIX — branch `fork/c5b1-comment-wipe-fix`; ADR-F032 addendum; NO migration/endpoint/dep)
+## Done this session (C5b-2 — NEGOTIATION-REVIEW SKILL + BINDING + CRAFT EVAL — branch `fork/c5b2-negotiation-review-skill`; ADR-F041/F032 addendum; migration `0072`; NO endpoint/dep)
+
+**What:** the **craft layer** on the round-2 negotiation loop — *prompt quality tuned by eval, not a runtime
+gate* (ADR-F041), so it adds no gate and changes no guarantee. The negotiation companion to `surgical-redline`.
+- **`skills/negotiation-review/SKILL.md` (NEW curated skill):** decide-every-item + the closed taxonomy +
+  materiality + counter **surgically** (term-swap, cross-refs `surgical-redline`) + **counter-with-reply over
+  reject-then-orphan** (the C5b-1 nuance) + escalate-don't-concede + untrusted-input framing (ADR-F028). Bound to
+  Commercial. It *teaches*; the code (`evaluate_coverage`/`evaluate_anchoring`/`evaluate_gate` + reconciliation)
+  *enforces*.
+- **Migration `0072` (NEW, mirrors 0067):** `_bind_negotiation_review_skill` (idempotent `NOT EXISTS`) +
+  `_refresh_negotiation_doctrine` (never-clobber `REPLACE` of the stale 0066 "accept, reject, or counter"
+  paragraph — it predated the C5a tools — pointing at `extract_counterparty_position`/`respond_to_counterparty` +
+  the skill + the full taxonomy). down_revision `0071`. No schema/route/openapi change.
+- **`api/tests/agents/scenarios/test_commercial_negotiation_eval.py` (NEW, provider-marked):** fuses the C5a
+  scenario with the C9 judge pattern — a plain task drives the **bound** skill; judge grades the response `.docx`
+  for mutuality-restored / floor-held / comment-engaged. RIG assertions only (ADR-F015). Agent vs judge aliases
+  decoupled (`LQ_AI_SCENARIO_MODEL` / `LQ_AI_JUDGE_MODEL`).
+- **Tests + simplification:** two mirrored tests in `test_practice_areas.py` (binding+doctrine API assertion +
+  migration idempotency/never-clobber); factored a generic `capture_output_file` into `commercial_redline_lib.py`
+  (single-sources the storage fetch; `capture_redline` delegates; C5a scenario test refactored to use it).
+- **Verify:** **full api suite 2684 passed / 31 skipped / 0 failed** (dev-image, throwaway test DBs); ruff
+  (CI-exact, root config) + mypy clean. **Live (DeepSeek agent, deepseek-pro judge, 3 reps,
+  `docs/fork/evidence/c5b2/`):** 3/3 substantive craft pass (§3 reverted to mutual surgically, §4 below-floor
+  perpetuity held, §2 benign accepted, full coverage, `respond_calls` 7/7/4 = the gate adapting). **Honest
+  finding: counter-with-reply 0/3** — the model reverts §3 (orphaning Com:1) rather than counter+reply; the
+  guarantee holds (comment preserved, reply never silently lost), the *ideal* isn't yet driven on deepseek-flash
+  → backlog tuning item (the skill carries the coaching; the model under-follows it). Claude (Opus 4.8) read the
+  artifacts directly and **concurs** with the deepseek-pro verdicts (Claude not reachable on the local gateway —
+  `ANTHROPIC_API_KEY` unset / no `claude` alias). Adversarial review: **SHIP**, 0 blockers/should-fixes/nits.
+
+## Done earlier this session (C5b-1 — COMMENT-WIPE FIX — branch `fork/c5b1-comment-wipe-fix`; ADR-F032 addendum; NO migration/endpoint/dep)
 
 **What:** make C5a's no-silent-action guarantee hold at the **document** level for comments. Raw-OOXML
 inspection of the C5a live output found a real gap: when the agent `reply`-ed to a counterparty comment **and**
