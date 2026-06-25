@@ -440,6 +440,40 @@ gateway MCP tool-provider adapter (egress + discovery) → M2 api MCP registry +
 grants (mirror the `composition.py` area-keyed grant; MCP tools pass `guarded_dispatch`) → M4 per-user OAuth
 (Fernet at rest) → M5 first live external tool end-to-end on DeepSeek.
 
+## In-app Word editor — Collabora / LibreOffice over WOPI (ADR-F047; started 2026-06-25)
+
+**Why.** After the agent redlines a `.docx`, the lawyer should view / edit / comment / export it **inside the
+tool**, then hand it back so the agent **resumes reading the markup** — the Harvey/Legora "review in-product"
+UX, without licensing Word. Promoted from the Backlog "redline-viewing" item after a full research pass
+(`docs/fork/research/libreoffice-editor.md`, 9 research + 4 verifier agents) + a throwaway **Spike 0 = GO**
+(`docs/fork/evidence/libreoffice-spike0/`).
+
+**Decision (ADR-F047).** **Collabora Online (CODE) — LibreOffice on LibreOfficeKit — over WOPI, `api` as the
+WOPI host, reskinned via our own Svelte chrome.** The engine is **MPL-2.0, NOT AGPL** (the research corrected
+the long-held AGPL assumption) — strictly lighter than the grandfathered PyMuPDF AGPL. WASM/ZetaOffice and
+custom-LOK were rejected (per-row rationale in the research doc).
+
+**Build / licence posture.** Dev + every integration slice run the **prebuilt `collabora/code` image** (the
+doc/connection cap is gone in current CODE; "not for production" is a support/warranty framing, not a licence
+prohibition; Collabora chrome is hidden via our UI + CSS config). The clean unbranded / supported **production**
+posture — **self-build from MPL-2.0 source OR a Collabora subscription** — is a deferred productionisation
+decision (Backlog), triggered at real deployment; engine behaviour is identical, so deferring blocks nothing.
+
+**Slices (≤2–3 days, one PR each):**
+- **S1 ✅ (2026-06-25)** — local **isolated** `collabora` service (no host port, MKNOD-only sandbox, WOPI
+  allow-list = `api`, no gateway reachability) behind the same-origin web `/collabora/` proxy + a minimal
+  framing CSP + the `NOTICES.md` row + ADR-F047. Engine reachable same-origin, isolated, licensed, decided.
+  **No app code.** (S1 finding: coolwsd 400s on a prefixed path — nginx strips `/collabora/`; making coolwsd
+  EMIT prefixed asset URLs for the iframe is an S4 task — proxy-prefix / `<base>` / dedicated origin.)
+- **S2** — the **WOPI host** in `api`: CheckFileInfo / GetFile / Lock family + a file-scoped editor-session
+  token, all on the existing owner-scoped seams (cross-user → **404**). Collabora opens a matter file.
+- **S3** — **PutFile save-back** → a new **user-authored** `File` version (`created_by_run_id=NULL`) +
+  counts-only audit; lock enforcement.
+- **S4** — the cockpit **Editor** panel: our Vercel-style Svelte toolbar driving the canvas via
+  postMessage/UNO (the reskin); resolve sub-path asset-URL hosting (the S1 finding).
+- **S5** — **"Hand back to agent"**: save → resume the run on the same `thread_id`; the agent re-reads the
+  lawyer's tracked changes + comments via the existing **C5a** path — **zero new agent code**.
+
 ## Backlog
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
@@ -484,16 +518,26 @@ grants (mirror the `composition.py` area-keyed grant; MCP tools pass `guarded_di
     reject per edit). **Dependency:** the fork has **zero MCP wiring today** and uses Adeu **SDK in-process,
     not MCP** ([[mcp-capability-decision]], [[surgical-redline-craft-slice]]); MCP is its own approved milestone
     (ADRs 0014/0015, approval-gated). So this is **gated behind the MCP milestone** + an Adeu-MCP-Apps spike.
-  - **(b) In-app Word-fidelity viewer/editor (LibreOffice-based) — DETAILED RESEARCH NEEDED.** Goal: render a
-    `.docx` (incl. tracked changes) **close to Word fidelity** but **lightweight, running within the app**.
-    Candidate substrate = LibreOffice: headless convert (docx→PDF/HTML) for read-only fidelity, vs **Collabora
-    Online / LOOL** (web-based LibreOffice editor) for in-app edit/accept. **Research must cover:** Word-fidelity
-    of tracked-changes rendering; weight/self-host footprint (a "lightweight" LOOL is non-trivial); accept/reject
-    round-trip back to `.docx`; and **LICENSING** — Collabora Online is **AGPL** (matters for the fork's license
-    posture; cf. the PyMuPDF AGPL server-side-only boundary in CLAUDE.md/NOTICES.md). Output = a research report
-    (`docs/fork/evidence/`) → an ADR + its own milestone. This is a research spike, not a code slice yet.
+  - **(b) In-app Word-fidelity editor (LibreOffice-based) — ✅ PROMOTED to its own milestone (ADR-F047,
+    2026-06-25): "In-app Word editor — Collabora / LibreOffice over WOPI" above; S1 shipped.** The research
+    spike is DONE (`docs/fork/research/libreoffice-editor.md` + Spike 0 GO). **Correction:** Collabora Online is
+    **MPL-2.0, NOT AGPL** — the old assumption recorded here was wrong (verified against the COOL `COPYING` +
+    Collabora's terms). So the licence question is the build-or-subscribe **production** posture, not a copyleft
+    problem; it is *lighter* than the PyMuPDF AGPL row, not heavier.
   Both relate to **C7** (redline-download UI) — **C7a shipped the download affordance** (download the
-  `.docx`, open in Word); this backlog item is the bigger "review/accept in-app" evolution beyond it.
+  `.docx`, open in Word); the (b) editor milestone is the bigger "review/accept in-app" evolution beyond it.
+
+- **Collabora editor — production licence posture (deferred from ADR-F047, 2026-06-25).** Dev + integration run
+  the prebuilt `collabora/code` image. Before any real deployment, decide + execute the clean posture:
+  **self-build the unbranded image from MPL-2.0 source** (≈30 GB-peak build, run once on a throwaway/CI machine
+  → private registry, ~1.5 GB at runtime; re-run per version bump) **OR a Collabora subscription**. Its own
+  slice (+ a build script if self-building). Engine behaviour is identical, so this gates production, not
+  internal use.
+
+- **PyMuPDF AGPL cleanup (surfaced 2026-06-25, maintainer).** Replace/remove `pymupdf` (the *only* AGPL dep,
+  grandfathered, server-side-only behind `PdfReader` — `NOTICES.md`, ADR-F029) with a permissive PDF parser. If
+  done, the codebase carries **zero AGPL anywhere** (the self-built Collabora is MPL). Its own slice + ADR
+  (COMM open question #1). Independent of the editor milestone.
 
 - **ROPA onboarding flow + "ROPA-from-privacy-notice" end-to-end test — half (a) DELIVERED by PRIV-7
   (PR #111).** The live notice→ROPA validation ran on DeepSeek-flash against Zendesk's real notice and built a
