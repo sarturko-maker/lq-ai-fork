@@ -617,7 +617,7 @@
 		</div>
 		{#if editorOpen && editorFileId}
 			<div
-				class="flex h-full min-h-0 min-w-0 flex-1 basis-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+				class="flex h-full min-h-0 min-w-0 flex-[2_1_0%] overflow-hidden rounded-xl border border-border bg-card shadow-sm"
 				transition:fly={{ x: 28, duration: motionMs(MOTION.base), opacity: 0.5, easing: cubicOut }}
 				data-testid="lq-cockpit-editor"
 			>

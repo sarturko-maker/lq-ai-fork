@@ -232,3 +232,49 @@ Collabora editor renders + saves through the Slice-2/3 WOPI host. Two decisions 
   message whose `event.origin` is not our own. Deeper de-branding of Collabora's in-canvas toolbar
   (Hide_Command / UI customisation, issue #13224) is incremental and deferred — Slice 4 delivers a
   clean framed editor under our charcoal chrome. Hand-back → agent resume is Slice 5.
+
+## Addendum — Slice 4b: editor-panel polish (width, popups, fit-to-width) (2026-06-26)
+
+Maintainer review of the live Slice-4 editor surfaced four UX defects; this slice fixes them
+(frontend + compose only — no backend, migration, or new dependency).
+
+- **Editor pane is 2/3 of the workspace, not 1/2.** The `ConversationHost` editor card is
+  `flex-[2_1_0%]` against the conversation card's `flex-1` (2:1). Load-bearing companion fix: the
+  `DocumentEditorPanel` root `<section>` carries `w-full` — without it the section is a flex child that
+  shrinks to its content (~the iframe's intrinsic width) and leaves a wide blank gap to the right of
+  the document inside the 2/3 slot (the maintainer's "white space as if reserved for a panel").
+- **Collabora's "What's New" / feedback / update popups are suppressed.** The only lever that sticks on
+  the prebuilt `collabora/code` image is `--o:home_mode.enable=true` (it is built
+  `ENABLE_WELCOME_MESSAGE=1` and force-re-enables `welcome.enable` at boot otherwise), plus
+  `--o:allow_update_popup=false`. **Trade-off:** `home_mode` also caps coolwsd to **20 concurrent
+  connections / 10 open documents** — fine for an in-house embedded editor, env-overridable
+  (`COLLABORA_HOME_MODE=false`), and the cap-free unbranded posture remains the deferred self-build
+  productionisation decision (below).
+- **Fit-to-width is computed in the client, by iteration, off the same-origin map.** Collabora opens a
+  Writer doc at a stuck low zoom (~30%) and exposes **no zoom postMessage**, so we drive its internal
+  client map (`iframe.contentWindow.app.map.setZoom`) directly — the editor is same-origin (the nginx
+  proxy), which is what makes this reach legal; it is fully `try/catch`-guarded so a Collabora rename
+  degrades to "keep Collabora's zoom", never a crash. Three findings shaped the algorithm, each found
+  empirically (probe specs, since discarded):
+  - The lifecycle is **driven by a poll**, not the one-shot `Document_Loaded` postMessage (that event
+    is ~50/50 under load and the doc-pixel size lags it). The poll also installs a `ResizeObserver` so
+    the page **re-fits on any later width change** (slide-in, the rail collapsing, a window resize).
+  - The fit **iterates one zoom level at a time off the measured doc width**. Collabora's `getScaleZoom`
+    reports a base-2 zoom delta, but its real pixel scaling is **~1.2×/level**, so a single computed
+    jump lands far short (observed ~0.68 of the pane). The pure, unit-tested `nextFitAction` grows
+    toward a 92–99% band and backs off one level on overflow (no horizontal scroll); discrete 1.2×
+    steps mean the achieved fill is ~0.83–0.99 (≈0.98 at a 1920 pane).
+  - Convergence is **gated on the measured pane width being stable across ticks** — Collabora's
+    `getSize()` lags the iframe resize, so a shrink computed against a stale (large) width would look
+    fitted and leave the doc overflowing the new, smaller pane. The poll also separates a long
+    "waiting for the doc to boot" ceiling from the short post-ready iteration budget, so a ~15–20s cold
+    boot never consumes the fit budget. A spinner overlay masks the cold-zoom→fit jump until converged.
+- **Verification.** svelte-check 0 errors; Vitest **969** (6 new `nextFitAction` cases incl. a
+  convergence/no-oscillation simulation); a live headed-Cypress check asserts the doc fills the pane
+  (ratio ∈ [0.8, 1.0], no overflow) at **1920 / 1440 / 1024** (light + dark) — evidence in
+  `docs/fork/evidence/libreoffice-slice4b/`.
+
+The **internal-map reach is version-fragile by nature** (it uses `app.map` / `_docLayer._docPixelSize`
+/ `getSize` / `setZoom`); it is isolated behind `getCoolMap()` + `nextFitAction`, fully guarded, and a
+no-op degrades to Collabora's own (worse) default zoom rather than breaking the editor. If a future
+Collabora ships a real fit-to-width host command, prefer it over this reach.
