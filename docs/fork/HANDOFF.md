@@ -3,9 +3,42 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
+> ▶▶ **PICKUP (2026-06-26): editor POLISH slice (4b) — SHIPPED on branch `fork/libreoffice-editor-slice4b`
+> (ADR-F047 Slice-4b addendum; frontend + compose only — NO backend/migration/dependency). NEXT = Slice 5.**
+> Fixed the 4 maintainer-reported Slice-4 UX defects, live-verified at 1920/1440/1024 (light+dark):
+> 1. *Editor too narrow* → `ConversationHost` editor card `flex-[2_1_0%]` vs conversation `flex-1` (2/3 : 1/3)
+>    **+ the load-bearing companion: `DocumentEditorPanel` `<section>` needs `w-full`** or it shrinks to ~iframe
+>    intrinsic width and leaves the blank gap (the "white space reserved for a panel" — was complaint #4).
+> 2. *"What's New"/feedback/update popups* → compose `extra_params`: `--o:home_mode.enable=${COLLABORA_HOME_MODE:-true}`
+>    (**the ONLY lever that sticks on prebuilt `collabora/code`**; **TRADE-OFF: caps 20 conn / 10 docs**, env-override)
+>    + `--o:allow_update_popup=false`. `COLLABORA_HOME_MODE` + `COLLABORA_SSL_TERMINATION` now in `.env.example`.
+> 3+4. *Doc tiny at 30% / whitespace-right* → **client-side iterative fit-to-width** off the **same-origin** internal
+>    map (`iframe.contentWindow.app.map.setZoom` — there is **NO zoom postMessage**), fully `try/catch`-guarded.
+>    THREE hard-won facts (all probe-verified, probes since deleted): **(a)** drive it from a **poll + ResizeObserver**,
+>    NOT the one-shot `Document_Loaded` postMessage (unreliable + docPx lags it); the observer re-fits on every width
+>    change (slide-in / rail-collapse / window-resize). **(b)** `getScaleZoom` is **base-2 but Collabora's real pixel
+>    scaling is ~1.2×/level**, so a single computed jump lands ~0.68 short → **iterate ONE level/tick off the MEASURED
+>    docPx** (pure unit-tested `nextFitAction`: grow to a 92–99% band, back off 1 level on overflow). **(c)** gate
+>    convergence on **`getSize()` being STABLE across ticks** (it lags the iframe resize → a shrink vs a stale large
+>    width leaves the doc overflowing the new pane) + separate the long cold-boot wait from the short fit budget.
+>    A `fitted` spinner overlay masks the cold-zoom→fit jump.
+>
+> **DURABLE TRAPS (4b):** the internal-map reach (`app.map`/`_docLayer._docPixelSize`/`getSize`/`setZoom`) is
+> version-fragile — keep it isolated behind `getCoolMap()`+`nextFitAction`, fully guarded (no-op → Collabora's default
+> zoom, never a crash). `getScaleZoom` ≠ Collabora's pixel scaling (don't trust it; iterate off measured docPx).
+> `getSize()` lags element resize (gate on stability). The `<section>` filling its flex slot needs **`w-full`** not
+> just `h-full`. **Verify:** svelte-check 0; Vitest **969** (+6 `nextFitAction`); headed Cypress asserts doc fills pane
+> (ratio∈[0.8,1.0]) at 3 widths; evidence `docs/fork/evidence/libreoffice-slice4b/`. Adversarial review (4-dim×verify,
+> 20 agents): **0 blockers / 0 should-fixes**; all confirmed nice-to-haves folded (resize-refit, fit overlay,
+> `nextFitAction` unit tests, `.env.example` vars, symmetric `load()` teardown).
+>
+> **NEXT = Slice 5 = "Hand back to agent"** (editor milestone's last slice): "Done — hand back" action beside Close →
+> save → resume the run on the same `thread_id`; the agent re-reads the lawyer's tracked changes + comments via the
+> existing **C5a** `extract_counterparty_position` path — **zero new agent code**.
+>
 > ▶ **PICKUP (2026-06-25): in-app Word editor — Slice 4 (cockpit Editor panel + reskin) SHIPPED**
 > (branch `fork/libreoffice-editor-slice4`; **ADR-F047 Slice-4 addendum**; NO backend/gateway change, NO
-> migration, NO new dependency). Slices 1–3 MERGED (S3 = PR #151, `8710af4`). **NEXT = Slice 5 = "Hand back to
+> migration, NO new dependency). Slices 1–3 MERGED (S3 = PR #151, `8710af4`). **NEXT (after 4b) = Slice 5 = "Hand back to
 > agent"** (the editor milestone's last slice): save → resume the run on the same `thread_id`; the agent re-reads
 > the lawyer's tracked changes + comments via the existing **C5a** `extract_counterparty_position` path — **zero
 > new agent code**. Put the hand-back affordance in the editor chrome (a "Done — hand back" action beside Close).

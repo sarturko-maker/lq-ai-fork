@@ -32,6 +32,58 @@
 	export function saveStatePulses(s: EditorSaveState): boolean {
 		return s === 'loading' || s === 'saving';
 	}
+
+	/**
+	 * Minimal shape of Collabora's same-origin client map (internal API). We do NOT
+	 * use its `getScaleZoom` (it reports a base-2 zoom delta, but the real pixel
+	 * scaling is ~1.2×/level, so a computed jump undershoots) — we iterate off the
+	 * MEASURED `_docPixelSize` instead (see `nextFitAction`).
+	 */
+	export type CoolMap = {
+		getSize?: () => { x: number };
+		getZoom?: () => number;
+		getMinZoom?: () => number;
+		getMaxZoom?: () => number;
+		setZoom?: (z: number) => void;
+		_docLayer?: { _docPixelSize?: { x: number } | null } | null;
+	};
+
+	export type FitAction = { kind: 'grow' | 'shrink' | 'done'; zoom?: number };
+
+	// The target band for the doc width as a fraction of the pane width: fill at
+	// least 92% but never overflow (a touch under 100% leaves the page edge inside
+	// the pane). Discrete zoom steps mean we can't always land inside the band; the
+	// caller grows toward it and backs off one level on overflow.
+	const FIT_MIN_RATIO = 0.92;
+	const FIT_MAX_RATIO = 0.99;
+
+	/**
+	 * One step of an ITERATIVE fit-to-width, given the current doc width, pane
+	 * width and zoom level. Collabora's `getScaleZoom` reports a base-2 zoom delta
+	 * but its actual doc-pixel scaling is ~1.2×/level, so a single computed jump
+	 * lands short — instead we adjust ONE level at a time off the MEASURED doc width
+	 * (version-agnostic) and re-measure next tick:
+	 *   - overflowing the pane → shrink one level and accept (no horizontal scroll);
+	 *   - underfilling → grow one level toward the pane;
+	 *   - within the band (or clamped at min/max) → done.
+	 * Pure + defensive: not-ready inputs return `done` so a caller never loops.
+	 */
+	export function nextFitAction(s: {
+		docPx: number | null | undefined;
+		containerW: number | null | undefined;
+		zoom: number;
+		min: number;
+		max: number;
+	}): FitAction {
+		const { docPx, containerW, zoom, min, max } = s;
+		if (!containerW || !docPx || docPx <= 0 || !Number.isFinite(zoom)) return { kind: 'done' };
+		const ratio = docPx / containerW;
+		if (ratio > FIT_MAX_RATIO)
+			return zoom > min ? { kind: 'shrink', zoom: zoom - 1 } : { kind: 'done' };
+		if (ratio < FIT_MIN_RATIO)
+			return zoom < max ? { kind: 'grow', zoom: zoom + 1 } : { kind: 'done' };
+		return { kind: 'done' };
+	}
 </script>
 
 <script lang="ts">
@@ -71,6 +123,10 @@
 	let saveState = $state<EditorSaveState>('loading');
 	let formEl = $state<HTMLFormElement | null>(null);
 	let iframeEl = $state<HTMLIFrameElement | null>(null);
+	// False until the fit-to-width has converged (or its safety cap fires). Drives
+	// an overlay so the lawyer never sees Collabora's cold ~30% render jump to the
+	// fitted size — they just see a spinner, then the document at the right width.
+	let fitted = $state(false);
 
 	// Reskin: open Collabora in its slim CLASSIC toolbar (not the heavy tabbed
 	// notebookbar) and drop the properties sidebar + ruler, so the editor reads
@@ -89,6 +145,9 @@
 
 	async function load(id: string = fileId) {
 		const gen = ++loadGen;
+		teardownFit();
+		stopReadyPings();
+		fitted = false;
 		phase = 'loading';
 		saveState = 'loading';
 		errorMsg = '';
@@ -98,7 +157,10 @@
 			editorSrc = src;
 			session = s;
 			phase = 'ready';
-			// The iframe + hidden form render now; POST the token into the frame.
+			// The iframe + hidden form render now; POST the file-scoped token into the
+			// frame. Collabora's initial fit doesn't matter — the fit poll + the resize
+			// observer (scheduleFitToWidth) drive the page to the pane width once the
+			// client map appears and re-fit on any later width change.
 			await tick();
 			if (gen !== loadGen) return;
 			formEl?.submit();
@@ -138,16 +200,154 @@
 			| undefined;
 		const next = editorApi.saveStateFromMessage(msg.MessageId, values);
 		if (next) saveState = next;
-		// Once the document is up, drop Collabora's own menubar — our chrome owns
-		// the frame (the toolbar stays for editing actions).
+		// Once the document is up, drop Collabora's own menubar (our chrome owns the
+		// frame) and (re)start the fit-to-width poll. This is belt-and-suspenders
+		// with the onFrameLoad trigger — whichever signal lands first starts it.
 		if (msg.MessageId === 'App_LoadingStatus' && values?.Status === 'Document_Loaded') {
 			postToEditor({ MessageId: 'Hide_Menubar' });
+			scheduleFitToWidth();
 		}
 	}
 
 	// Send a command to the editor iframe (Collabora's postMessage API).
 	function postToEditor(message: Record<string, unknown>) {
 		iframeEl?.contentWindow?.postMessage(JSON.stringify(message), window.location.origin);
+	}
+
+	// `CoolMap` + the pure `nextFitAction(...)` live in the `<script module>` block
+	// above (unit-tested); this reaches the live map off the same-origin iframe.
+	function getCoolMap(): CoolMap | undefined {
+		return (iframeEl?.contentWindow as unknown as { app?: { map?: CoolMap } } | null | undefined)
+			?.app?.map;
+	}
+
+	// One iterative fit step against the live map. Collabora opens a Writer doc at a
+	// stuck low zoom and exposes NO zoom postMessage, so we drive the same-origin
+	// client map directly — adjusting ONE level per call off the MEASURED doc width
+	// (its getScaleZoom is base-2 but the real pixel scaling is ~1.2×/level, so a
+	// single computed jump lands short). Returns true once converged (so the poll
+	// stops). Fully guarded — if a Collabora version renames these internals every
+	// call no-ops and we simply keep Collabora's default zoom.
+	function applyFitStep(): boolean {
+		try {
+			const map = getCoolMap();
+			const docPx = map?._docLayer?._docPixelSize?.x;
+			const containerW = map?.getSize?.().x;
+			if (!map?.setZoom || !map.getZoom || !docPx || docPx <= 0 || !containerW) return false;
+			const action = nextFitAction({
+				docPx,
+				containerW,
+				zoom: map.getZoom(),
+				min: map.getMinZoom?.() ?? 1,
+				max: map.getMaxZoom?.() ?? 18
+			});
+			if (action.kind === 'done') return true;
+			map.setZoom(action.zoom as number);
+			// A shrink is the overflow back-off → the highest no-overflow level → done;
+			// a grow keeps iterating next tick.
+			return action.kind === 'shrink';
+		} catch {
+			/* graceful: keep Collabora's default zoom */
+			return false;
+		}
+	}
+
+	// Two cooperating mechanisms, both off the same-origin map (NOT the unreliable
+	// one-shot Document_Loaded postMessage): (1) a readiness POLL that iterates the
+	// fit as soon as the client map appears — the doc just loaded and there may be
+	// no resize event to drive it — and reveals the editor (fitted=true) once it
+	// converges or a safety cap fires; (2) a ResizeObserver that re-runs the poll
+	// after the pane settles at a NEW width (slide-in, the practice-area rail
+	// collapsing, a browser-window resize), so the page keeps filling the pane
+	// instead of leaving whitespace to the right.
+	let fitPoll: ReturnType<typeof setInterval> | null = null;
+	let fitObserver: ResizeObserver | null = null;
+	let fitObserverTimer: ReturnType<typeof setTimeout> | null = null;
+	function stopFitPoll() {
+		if (fitPoll) {
+			clearInterval(fitPoll);
+			fitPoll = null;
+		}
+	}
+	function teardownFit() {
+		stopFitPoll();
+		if (fitObserver) {
+			fitObserver.disconnect();
+			fitObserver = null;
+		}
+		if (fitObserverTimer) {
+			clearTimeout(fitObserverTimer);
+			fitObserverTimer = null;
+		}
+	}
+	function mapReadyToFit(): boolean {
+		const map = getCoolMap();
+		return !!(
+			map?.setZoom &&
+			map.getZoom &&
+			map.getSize?.().x &&
+			(map._docLayer?._docPixelSize?.x ?? 0) > 0
+		);
+	}
+	function startFitPoll() {
+		stopFitPoll();
+		// Count the two phases SEPARATELY: Collabora's cold boot can take ~15-20s
+		// before the doc renders, and we must not burn the iteration budget waiting.
+		let waitTicks = 0; // ticks before the client map + doc pixels exist
+		let fitTicks = 0; // ticks spent actually iterating the fit, once ready
+		let lastPaneW = -1; // Collabora's getSize().x last tick (it lags element resize)
+		fitPoll = setInterval(() => {
+			// The WHOLE tick is guarded: every same-origin map reach below
+			// (mapReadyToFit, getSize, applyFitStep) can in principle throw on a
+			// cross-navigated/torn-down frame, and a throw must never pin the spinner
+			// or leak the interval — on any failure we reveal and stop, degrading to
+			// Collabora's own zoom (the slice's "never breaks the editor" contract).
+			try {
+				if (!mapReadyToFit()) {
+					waitTicks += 1;
+					if (waitTicks >= 100) {
+						fitted = true; // ~40s ceiling for the doc to appear at all → reveal
+						stopFitPoll();
+					}
+					return;
+				}
+				fitTicks += 1;
+				const paneW = getCoolMap()?.getSize?.().x ?? -1;
+				const done = applyFitStep();
+				// Collabora's getSize() can lag the iframe resize by a tick or two; only
+				// conclude when the fit is done AND the measured pane width has stopped
+				// changing — otherwise a shrink computed against a stale (large) width
+				// would wrongly look fitted and leave the doc overflowing the new width.
+				const stable = paneW === lastPaneW;
+				lastPaneW = paneW;
+				if (done && stable) {
+					fitted = true; // converged at a settled width → reveal the editor
+					stopFitPoll();
+					return;
+				}
+				if (fitTicks >= 30) {
+					fitted = true; // ~12s of iterating: reveal regardless so we never hang
+					stopFitPoll();
+				}
+			} catch {
+				fitted = true; // a thrown reach must not hang the spinner / leak the timer
+				stopFitPoll();
+			}
+		}, 400);
+	}
+	function installFitObserver() {
+		if (fitObserver || typeof ResizeObserver === 'undefined' || !iframeEl) return;
+		fitObserver = new ResizeObserver(() => {
+			if (fitObserverTimer) clearTimeout(fitObserverTimer);
+			// Re-converge after the pane settles. fitted stays true, so this never
+			// re-shows the overlay — it just keeps the page filling the new width.
+			fitObserverTimer = setTimeout(() => startFitPoll(), 200);
+		});
+		fitObserver.observe(iframeEl);
+	}
+	function scheduleFitToWidth() {
+		installFitObserver();
+		startFitPoll();
 	}
 
 	// Collabora only starts emitting its lifecycle postMessages (App_LoadingStatus,
@@ -162,6 +362,10 @@
 		}
 	}
 	function onFrameLoad() {
+		// The iframe navigated (the form-POST landed the document). Start the
+		// fit-to-width poll here too — it does NOT depend on the unreliable
+		// Document_Loaded postMessage, just the same-origin client map appearing.
+		scheduleFitToWidth();
 		let tries = 0;
 		stopReadyPings();
 		readyPings = setInterval(() => {
@@ -176,13 +380,18 @@
 	onDestroy(() => {
 		window.removeEventListener('message', onMessage);
 		stopReadyPings();
+		teardownFit();
 	});
 
 	const tone = $derived(saveStateTone(saveState));
 </script>
 
+<!-- `w-full` is load-bearing: this section is the flex child of the 2/3 editor
+     card slot (ConversationHost `lq-cockpit-editor`); without it the section
+     shrinks to its content (~iframe intrinsic width) and leaves whitespace to the
+     right of the document instead of filling the slot. -->
 <section
-	class="flex h-full min-h-0 flex-col bg-card"
+	class="flex h-full w-full min-h-0 flex-col bg-card"
 	data-testid="lq-document-editor"
 	aria-label="Document editor"
 >
@@ -278,6 +487,22 @@
 				data-testid="lq-editor-frame"
 				allow="clipboard-read; clipboard-write"
 			></iframe>
+			{#if !fitted}
+				<!-- Cover Collabora's cold ~30% first render until the fit converges, then
+				     fade out — the lawyer sees a spinner, then the document already at the
+				     right width (no visible zoom jump). -->
+				<div
+					class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-card"
+					data-testid="lq-editor-fitting"
+					out:fade={{ duration: 160 }}
+				>
+					<span
+						class="size-6 animate-spin rounded-full border-2 border-border border-t-brand"
+						aria-hidden="true"
+					></span>
+					<p class="text-sm text-muted-foreground">Opening document…</p>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </section>

@@ -437,7 +437,19 @@ services:
       # false so the editing socket is ws:// over our http://localhost:3000;
       # PROD MUST set COLLABORA_SSL_TERMINATION=true. Only our web origin may
       # frame the editor (defence-in-depth with the nginx CSP frame-ancestors).
-      extra_params: "--o:ssl.enable=false --o:ssl.termination=${COLLABORA_SSL_TERMINATION:-false} --o:net.frame_ancestors=${COLLABORA_FRAME_ANCESTORS:-http://localhost:3000}"
+      #
+      # home_mode.enable=true is the ONLY lever that suppresses Collabora's
+      # first-open "What's New" welcome + the "rate us" feedback popups on the
+      # prebuilt collabora/code image (that image is built with
+      # ENABLE_WELCOME_MESSAGE=1 and force-re-enables welcome.enable at boot unless
+      # home_mode is on — verified in coolwsd source). TRADE-OFF: it also caps
+      # coolwsd to 20 concurrent connections / 10 open documents — fine for an
+      # in-house embedded editor, a limit at scale. A deployment that needs more can
+      # set COLLABORA_HOME_MODE=false (accepting the once-per-version welcome popup);
+      # the clean unbranded posture without the cap is the deferred ADR-F047
+      # self-build productionisation decision. allow_update_popup=false drops the
+      # separate update-notification nag.
+      extra_params: "--o:ssl.enable=false --o:ssl.termination=${COLLABORA_SSL_TERMINATION:-false} --o:net.frame_ancestors=${COLLABORA_FRAME_ANCESTORS:-http://localhost:3000} --o:home_mode.enable=${COLLABORA_HOME_MODE:-true} --o:allow_update_popup=false"
     healthcheck:
       # The CODE image ships neither curl nor wget — only bash. Probe the WOPI
       # discovery endpoint over bash's /dev/tcp and assert HTTP 200.

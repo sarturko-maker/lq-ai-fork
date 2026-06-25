@@ -61,6 +61,29 @@ function waitForDocumentRender() {
 	});
 }
 
+// The fitted document must fill the pane width without overflowing. Collabora's
+// zoom steps are ~1.2×/level so the guaranteed no-overflow fill is >0.99/1.2 ≈
+// 0.83 (≈0.98 at the 1920 pane); 0.8 catches the ~0.68 undershoot regression. We
+// also assert <1.0 so an overflow (which would clip text at the right edge) fails.
+function assertDocFillsPane(label: string) {
+	cy.get('[data-testid="lq-editor-frame"]').should(($f) => {
+		const map = (
+			($f[0] as HTMLIFrameElement).contentWindow as unknown as {
+				app?: {
+					map?: { getSize?: () => { x: number }; _docLayer?: { _docPixelSize?: { x: number } } };
+				};
+			} | null
+		)?.app?.map;
+		const docPx = map?._docLayer?._docPixelSize?.x;
+		const paneX = map?.getSize?.().x;
+		const ratio = docPx && paneX ? docPx / paneX : 0;
+		expect(
+			ratio,
+			`document fills the pane width @ ${label} (no whitespace, no overflow)`
+		).to.be.within(0.8, 1.0);
+	});
+}
+
 describe('in-app Word editor (ADR-F047, Slice 4)', () => {
 	it('opens an agent redline and renders it in the cockpit editor', () => {
 		cy.viewport(1440, 900);
@@ -75,16 +98,36 @@ describe('in-app Word editor (ADR-F047, Slice 4)', () => {
 
 		waitForDocumentRender();
 
+		// 4b regression A: the editor section must FILL its 2/3 card slot. The bug was
+		// the <section> lacked w-full, so it shrank to ~iframe intrinsic width (~544px)
+		// and left whitespace to the right of the document inside the 2/3 pane.
+		cy.get('[data-testid="lq-cockpit-editor"]').then(($card) => {
+			const cardW = ($card[0] as HTMLElement).offsetWidth;
+			cy.get('[data-testid="lq-document-editor"]').should(($sec) => {
+				const secW = ($sec[0] as HTMLElement).offsetWidth;
+				expect(secW / cardW, 'editor section fills its card slot').to.be.greaterThan(0.98);
+			});
+		});
+
+		// 4b regression B: prove the iterative fit-to-width filled the pane.
+		assertDocFillsPane('1440');
+
 		// Capture the conversation-left / editor-right layout in both themes + sizes.
+		// 1920 matches a real wide monitor (where the un-filled-section bug was stark).
 		const sizes = [
+			{ name: 'ultrawide', w: 1920, h: 1080 },
 			{ name: 'wide', w: 1440, h: 900 },
 			{ name: 'narrow', w: 1024, h: 768 }
 		];
 		for (const s of sizes) {
 			cy.viewport(s.w, s.h);
+			// Let the resize-driven re-fit re-converge to the new pane width, then assert
+			// the fit holds at THIS width before capturing.
+			cy.wait(4000);
+			assertDocFillsPane(s.name);
 			for (const theme of ['light', 'dark'] as const) {
 				pinTheme(theme);
-				cy.wait(700);
+				cy.wait(500);
 				cy.screenshot(`slice4-editor-${s.name}-${theme}`, { capture: 'viewport' });
 			}
 		}
