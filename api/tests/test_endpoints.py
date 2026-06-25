@@ -240,6 +240,13 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/admin/word-addin/manifest"),
     # M3-B8 — Word add-in version handshake (unauthenticated)
     ("GET", "/api/v1/word-addin/version"),
+    # libreoffice-editor Slice 2 (fork, ADR-F047) — the WOPI host (token-auth,
+    # NOT the user bearer) + the owner-scoped editor-session mint. Dedicated
+    # coverage in tests/test_wopi.py.
+    ("GET", "/api/v1/wopi/files/{file_id}"),
+    ("POST", "/api/v1/wopi/files/{file_id}"),
+    ("GET", "/api/v1/wopi/files/{file_id}/contents"),
+    ("POST", "/api/v1/files/{file_id}/editor-session"),
     # M3-D1 — slack-bridge persistence surface (bridge-token bearer auth)
     ("POST", "/api/v1/integrations/slack/workspaces"),
     # M3-D3 — teams-bridge persistence surface (bridge-token bearer auth)

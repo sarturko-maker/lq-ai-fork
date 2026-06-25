@@ -51,6 +51,8 @@ from app.models.document import Document
 from app.models.file import File as FileModel
 from app.models.project import Project
 from app.schemas.files import FileMetadata
+from app.schemas.wopi import EditorSessionResponse
+from app.security import create_wopi_token, decode_wopi_token
 from app.storage import (
     StreamUploadResult,
     delete_object,
@@ -436,6 +438,67 @@ async def get_file_content(
         _generator(),
         media_type=row.mime_type or DEFAULT_MIME,
         headers=headers,
+    )
+
+
+@router.post(
+    "/{file_id}/editor-session",
+    response_model=EditorSessionResponse,
+    summary="Mint a WOPI editor session for the file",
+    description=(
+        "Mints a file-scoped WOPI access token (ADR-F047) so the in-app "
+        "editor can open this file through the WOPI host (`/api/v1/wopi/files/"
+        "{id}`). Owner-scoped: cross-user/missing → 404. The token is bound to "
+        "this single `(user, file)` pair and expires after "
+        "`wopi_token_ttl_seconds`. The cockpit (Slice 4) combines the returned "
+        "`wopi_src` + `access_token` with Collabora's discovery `urlsrc` to "
+        "launch the editor iframe."
+    ),
+)
+async def create_editor_session(
+    file_id: str,
+    user: ActiveUser,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> EditorSessionResponse:
+    """Mint a WOPI editor-session token for ``file_id`` (owner-scoped, 404 on miss).
+
+    The session is read-only this slice (the WOPI host advertises
+    ``UserCanWrite=false``); editing + save-back land in Slice 3.
+    """
+    file_uuid = _validate_file_id(file_id)
+    row = await _load_visible_file(db, file_uuid, user.id)
+
+    # WOPI UserFriendlyName becomes the w:author on any edit (Slice 3), so it
+    # must be a real, non-empty name distinct from the agent's DEFAULT_AUTHOR;
+    # display_name is nullable, so fall back to the email.
+    friendly_name = user.display_name or user.email
+    token = create_wopi_token(user.id, row.id, name=friendly_name)
+    # access_token_ttl is the token's absolute expiry in epoch MILLISECONDS
+    # (WOPI convention). Read it back from the minted token so it can never
+    # drift from the signed `exp`.
+    claims = decode_wopi_token(token)
+    assert claims is not None  # we just minted it
+    access_token_ttl_ms = int(claims.expires_at.timestamp() * 1000)
+
+    settings = get_settings()
+    wopi_src = f"{settings.collabora_wopi_host.rstrip('/')}/api/v1/wopi/files/{row.id}"
+
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="editor.session_created",
+        resource_type="file",
+        resource_id=str(row.id),
+        project_id=row.project_id,
+        request=request,
+    )
+    await db.commit()
+
+    return EditorSessionResponse(
+        access_token=token,
+        access_token_ttl=access_token_ttl_ms,
+        wopi_src=wopi_src,
     )
 
 

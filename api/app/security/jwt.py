@@ -47,6 +47,7 @@ _JWT_ALGORITHM = "HS256"
 # an access token.
 _TYPE_ACCESS = "access"
 _TYPE_MFA = "mfa"
+_TYPE_WOPI = "wopi"
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,26 @@ class MfaTokenClaims:
     """Claims extracted from a validated MFA challenge token."""
 
     user_id: uuid.UUID
+    issued_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class WopiTokenClaims:
+    """Claims extracted from a validated WOPI editor-session token.
+
+    The WOPI ``access_token`` (ADR-F047, libreoffice-editor Slice 2). It is a
+    host-minted opaque string from Collabora's perspective; we make it a signed
+    JWT scoped to a single ``(user, file)`` pair so the WOPI host can validate
+    it without a server-side session table. ``file_id`` binds the token to one
+    file so it cannot be replayed against another file (the handler asserts the
+    claim equals the URL file id), and ``name`` carries the editing user's
+    display name for the WOPI ``UserFriendlyName`` without a second DB query.
+    """
+
+    user_id: uuid.UUID
+    file_id: uuid.UUID
+    name: str
     issued_at: datetime
     expires_at: datetime
 
@@ -185,6 +206,66 @@ def decode_mfa_token(token: str) -> MfaTokenClaims | None:
 
     return MfaTokenClaims(
         user_id=user_id,
+        issued_at=datetime.fromtimestamp(int(iat), tz=UTC),
+        expires_at=datetime.fromtimestamp(int(exp), tz=UTC),
+    )
+
+
+def create_wopi_token(user_id: uuid.UUID, file_id: uuid.UUID, *, name: str) -> str:
+    """Mint a signed WOPI editor-session token for ``(user_id, file_id)``.
+
+    Scoped to a single file: the WOPI host (``app.api.wopi``) asserts the ``fid``
+    claim equals the URL file id, so a token minted for one file cannot open
+    another even for the same user. ``name`` is the editing user's display name,
+    surfaced as the WOPI ``UserFriendlyName``. TTL is ``wopi_token_ttl_seconds``.
+    """
+    settings = get_settings()
+    now = _utcnow()
+    payload: dict[str, object] = {
+        "sub": str(user_id),
+        "fid": str(file_id),
+        "name": name,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(seconds=settings.wopi_token_ttl_seconds)).timestamp()),
+        "typ": _TYPE_WOPI,
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=_JWT_ALGORITHM)
+
+
+def decode_wopi_token(token: str) -> WopiTokenClaims | None:
+    """Decode and validate a WOPI editor-session token.
+
+    Returns the claims on success; ``None`` for a bad signature, expiry,
+    malformed payload, missing claim, or wrong ``typ`` (so an access/MFA token
+    can never be presented as a WOPI token). The caller maps ``None`` to 401.
+    """
+    settings = get_settings()
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[_JWT_ALGORITHM])
+    except jwt.PyJWTError:
+        return None
+
+    if payload.get("typ") != _TYPE_WOPI:
+        return None
+
+    sub = payload.get("sub")
+    fid = payload.get("fid")
+    name = payload.get("name")
+    iat = payload.get("iat")
+    exp = payload.get("exp")
+    if sub is None or fid is None or name is None or iat is None or exp is None:
+        return None
+
+    try:
+        user_id = uuid.UUID(str(sub))
+        file_id = uuid.UUID(str(fid))
+    except (TypeError, ValueError):
+        return None
+
+    return WopiTokenClaims(
+        user_id=user_id,
+        file_id=file_id,
+        name=str(name),
         issued_at=datetime.fromtimestamp(int(iat), tz=UTC),
         expires_at=datetime.fromtimestamp(int(exp), tz=UTC),
     )

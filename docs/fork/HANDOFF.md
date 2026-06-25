@@ -3,32 +3,50 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶ **PICKUP (2026-06-25): in-app Word editor — Slice 1 shipped on branch `fork/libreoffice-editor-slice1`
-> (PR opened this session). Pick up Slice 2 = the WOPI host in `api`.** New milestone **In-app Word editor —
+> ▶ **PICKUP (2026-06-25): in-app Word editor — Slice 2 (the WOPI host) shipped on branch
+> `fork/libreoffice-editor-slice2`. Pick up Slice 3 = PutFile save-back.** Milestone **In-app Word editor —
 > Collabora / LibreOffice over WOPI (ADR-F047)**: agent redlines → lawyer edits/comments/exports in-app → hands
-> back → agent resumes reading the markup (zero new agent code — the existing C5a path). Backed by
-> `docs/fork/research/libreoffice-editor.md` + **Spike 0 GO** (`docs/fork/evidence/libreoffice-spike0/`).
-> **Slice 1 = infra+docs only (NO app code):** a local **isolated** `collabora` (CODE) compose service — no host
-> port, `cap_add: [MKNOD]` only, WOPI allow-list `aliasgroup1=http://api:8000`, no gateway reachability — behind
-> the same-origin web nginx `/collabora/` proxy + a minimal framing CSP (`frame-src 'self'; frame-ancestors
-> 'self'`) + the `NOTICES.md` row + ADR-F047. Live-verified: discovery `200` via the proxy, `9980/tcp` unmapped,
-> admin `403`, nginx `-t` clean, web suite green.
+> back → agent resumes (zero new agent code — the C5a path). Research `docs/fork/research/libreoffice-editor.md`
+> + Spike 0 GO; Slice 1 = the isolated `collabora` service + same-origin `/collabora/` proxy (still current — see
+> "carry" below).
 >
-> **Build/licence posture (resolved):** **Collabora is MPL-2.0, NOT AGPL** (lighter than the grandfathered
-> PyMuPDF AGPL). Dev + every integration slice run the **prebuilt `collabora/code` image** pinned **by digest**
-> (`sha256:75859dc9…` = Collabora Office **26.04.1.4**, Spike-0-validated); the cap is gone, "not for production"
-> is a support framing not a prohibition, chrome is hidden via our UI + config. The clean unbranded / supported
-> **production** posture (self-build from MPL source **OR** subscription) is a deferred productionisation
-> decision (MILESTONES Backlog). PyMuPDF-AGPL-cleanup is a separate backlog slice.
+> **Slice 2 = the WOPI host in `api` (read half; NO web/nginx change — WOPI is server-to-server on the compose
+> net).** `app/api/wopi.py` (bare router, no user-bearer gate): **CheckFileInfo** / **GetFile** / the full **Lock
+> family** + a file-scoped **editor token** (`create_wopi_token`, `typ="wopi"`, claims sub/fid/name/exp) minted by
+> `POST /files/{id}/editor-session`. Authz = mint behind `ActiveUser`+`_load_visible_file` (cross-user→404), the
+> `fid` claim must equal the URL file id (no cross-file replay), every handler re-runs `_load_visible_file`; token
+> failure → **401**, file not visible → **404**. Locks = `editor_locks` table (mig **0074**, PK file_id, FK→files
+> CASCADE, 30-min TTL) + the pure `decide_lock` state machine; a LOCK INSERT-race re-resolves to 409 (not 500).
+> `Version`/`X-WOPI-ItemVersion` = `hash_sha256`; `OwnerId`/`UserId` = `uuid.hex` (WOPI needs alphanumeric).
+> **Read-only viewer** (`UserCanWrite=false`/`ReadOnly=true`) — no save path yet, no data-loss window. No model
+> calls / no gateway reach. New settings: `collabora_wopi_host` (WOPISrc base `http://api:8000`),
+> `wopi_token_ttl_seconds`, `collabora_post_message_origin`. **Live-proven** (rebuilt api at mig 0074):
+> mint→CheckFileInfo→GetFile→Lock lifecycle, 409-echo, 404/401 splits, PutFile→501, collabora→api reachable
+> (`docs/fork/evidence/libreoffice-slice2/`). Decisions recorded as the **ADR-F047 Slice-2 addendum**.
 >
-> **Slice-1 gotchas (carry into Slice 2/4):** the `collabora/code` image ships **only bash** (no curl/wget) →
-> the healthcheck uses a bash `/dev/tcp` discovery-200 probe (`start_period: 60s`). The sandbox runs on
-> **MKNOD alone** (namespaces auto-degrade to false; seccomp+contained ok — **no `SYS_ADMIN`/`privileged`**).
-> coolwsd **400s "Unknown resource" on a prefixed path** → nginx **strips** `/collabora/` (trailing slash on
-> `proxy_pass`); `net.proxy_prefix=true` did NOT make it route a sub-path. Discovery then emits root + `https`
-> asset URLs (`https://localhost:3000/browser/…`) — making coolwsd EMIT `/collabora/`-prefixed URLs for the
-> **iframe** is the **Slice-4** task (proxy-prefix done right / a `<base>` tag / a dedicated origin). Rebuild the
-> prebuilt `web` bundle before debugging any UI/nginx change; `docker image prune -f` (dangling) after a rebuild.
+> **Slice 3 = PutFile save-back:** `POST /wopi/files/{id}/contents` with `X-WOPI-Override: PUT` → verify the lock
+> (409 + `X-WOPI-Lock` on mismatch) → `guard_ooxml` + size cap → a NEW user-authored `File` version
+> (`created_by_run_id=NULL`) → counts-only audit; flip `CheckFileInfoResponse` to `UserCanWrite=true` +
+> `SupportsUpdate=true` (editable). Carry the VibeLegalStudio quirks: JSON `LastModifiedTime` in the PutFile
+> response + the `409 {"COOLStatusCode": 1010}` ("changed in storage") AI-write-vs-editor-save backstop. Then
+> Slice 4 = cockpit editor panel + discovery→urlsrc launch + reskin (+ the sub-path asset-URL fix), Slice 5 =
+> hand-back/resume.
+>
+> **Build/licence posture (resolved, unchanged):** **Collabora is MPL-2.0, NOT AGPL** (lighter than the
+> grandfathered PyMuPDF AGPL). Dev + every integration slice run the **prebuilt `collabora/code`** pinned by
+> digest (`sha256:75859dc9…` = 26.04.1.4). Clean unbranded/supported **production** posture (self-build OR
+> subscription) is a deferred productionisation decision (MILESTONES Backlog). PyMuPDF-AGPL-cleanup is a separate
+> backlog slice.
+>
+> **Carry into Slice 3/4 (durable traps):** run api ruff/pytest in the **dev image** (`lq-ai-api-dev`) with
+> **`./api` mounted at `/app` AND `./skills` at `/skills:ro`** (migration 0032 seeds builtin playbooks from
+> `/skills`) on `--network lq-ai_default` with `DATABASE_URL` → postgres; ruff uses the **repo-root** `ruff.toml`
+> (mount repo root). When a migration lands, **rebuild api (+arq-worker) — api auto-migrates on boot**; NEVER
+> host-side `alembic upgrade` on the live DB; `docker image prune -f` (dangling) after a build. New api routes
+> must be added to BOTH `test_endpoints.IMPLEMENTED_ROUTES` AND `test_openapi.EXPECTED_PATHS` (+ bump the hardcoded
+> path count) or the meta-tests fail. The `collabora/code` image ships **only bash**; the sandbox runs on **MKNOD
+> alone**; coolwsd **400s on a prefixed path** so nginx strips `/collabora/` and emitting prefixed iframe asset
+> URLs is the **Slice-4** task. Rebuild the prebuilt `web` bundle before debugging any UI/nginx change.
 
 ## North star (the goal, not a prompt)
 

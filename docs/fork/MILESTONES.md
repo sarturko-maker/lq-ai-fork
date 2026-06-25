@@ -465,8 +465,12 @@ decision (Backlog), triggered at real deployment; engine behaviour is identical,
   framing CSP + the `NOTICES.md` row + ADR-F047. Engine reachable same-origin, isolated, licensed, decided.
   **No app code.** (S1 finding: coolwsd 400s on a prefixed path — nginx strips `/collabora/`; making coolwsd
   EMIT prefixed asset URLs for the iframe is an S4 task — proxy-prefix / `<base>` / dedicated origin.)
-- **S2** — the **WOPI host** in `api`: CheckFileInfo / GetFile / Lock family + a file-scoped editor-session
-  token, all on the existing owner-scoped seams (cross-user → **404**). Collabora opens a matter file.
+- **S2 ✅ (2026-06-25)** — the **WOPI host** in `api` (`app/api/wopi.py`, bare router, ADR-F047 addendum):
+  `CheckFileInfo` / `GetFile` / the full **Lock family** + a file-scoped editor-session **token**
+  (`create_wopi_token`, `typ="wopi"`) minted by `POST /files/{id}/editor-session`, all on the owner-scoped
+  `_load_visible_file` seam (token failure → **401**; file not visible → **404**; no cross-file replay).
+  Locks = the `editor_locks` table (migration **0074**) with a pure state machine. **Read-only viewer**
+  (`UserCanWrite=false`) — no save path yet, no data-loss window. No model calls / no gateway reach.
 - **S3** — **PutFile save-back** → a new **user-authored** `File` version (`created_by_run_id=NULL`) +
   counts-only audit; lock enforcement.
 - **S4** — the cockpit **Editor** panel: our Vercel-style Svelte toolbar driving the canvas via

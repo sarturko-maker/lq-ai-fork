@@ -272,6 +272,36 @@ class Settings(BaseSettings):
         description="MFA challenge token TTL in seconds. Default: 5 minutes.",
     )
 
+    # ----- In-app Word editor / Collabora over WOPI (ADR-F047, libreoffice-editor) -----
+    # The absolute URL the Collabora container uses to reach this api as the
+    # WOPI host (the WOPISrc callback origin). It must be the in-Compose-network
+    # address, NOT the browser origin, and must be present in the collabora
+    # service's `aliasgroup1` allow-list. Default matches Slice-1's
+    # `aliasgroup1: http://api:8000`.
+    collabora_wopi_host: str = Field(
+        default="http://api:8000",
+        description=(
+            "Origin Collabora reaches the WOPI host (api) at; the WOPISrc callback "
+            "base. In-network address, not the browser origin. Must match the "
+            "collabora service aliasgroup1 allow-list."
+        ),
+    )
+    # Editor-session (WOPI access) token TTL. WOPI sessions are long-lived
+    # (a lawyer reading/annotating a redline), so the default is generous; it
+    # still bounds the exposure window of a leaked token. Surfaced to the
+    # client as `access_token_ttl` (epoch ms) at mint time.
+    wopi_token_ttl_seconds: int = Field(
+        default=36000,
+        description="Editor-session (WOPI) token TTL in seconds. Default: 10 hours.",
+    )
+    # The browser origin Collabora may postMessage to (CheckFileInfo
+    # PostMessageOrigin). Consumed by the Slice-4 reskin; harmless to advertise
+    # now. Default matches the dev web origin.
+    collabora_post_message_origin: str = Field(
+        default="http://localhost:3000",
+        description="Browser origin Collabora may postMessage to (CheckFileInfo PostMessageOrigin).",
+    )
+
     # ----- GDPR Article 17 grace period (per Task D6 / PRD §5.3) -----
     # When a user calls /users/me/delete, deletion_scheduled_at is set to
     # now() + this many days. The hard-delete worker scans daily and only
