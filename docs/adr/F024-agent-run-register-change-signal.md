@@ -117,3 +117,22 @@ stays inside both the ADR-F004 boundary and the audit contract.
   tag — the *activity* does (the user's mental model: "activity X now has these categories"); washing a newly
   created vocabulary term too is a possible follow-up. The "removed outro" animation for a retired row (needs
   the `retired_at` DTO + `include_retired` read) stays deferred.
+
+## Addendum — C5b-3 (2026-06-25): the ledger seam is now area-agnostic
+
+The Commercial negotiation loop became the **second** consumer of this ledger→drain→transient-frame seam
+(inline live verdict chips — `data-deal-change`, ADR-F032), and the composition root already anticipated a
+**third** (the assessment register). So the seam was generalised rather than duplicated:
+
+- **`app/agents/live_changes.py`** defines two tiny Protocols — `LiveChange` (`publish(publisher)`) and
+  `ChangeLedger` (`drain() -> Sequence[LiveChange]`). The runner's drain at each `tool_result` is now
+  `for change in change_ledger.drain(): change.publish(publisher)` — area-agnostic, one loop for all.
+- `RopaChange` gained a 2-line `publish` (→ `publisher.ropa_changed`); behaviour and the
+  `data-ropa-change` frame are byte-identical (the existing ropa tests are unchanged and green). The new
+  `DealChange` (`app/agents/deal_changes.py`) publishes `data-deal-change`.
+- Each area still creates its **own** concrete ledger at the composition point (Privacy →
+  `RopaChangeLedger`, Commercial → `DealChangeLedger`), left `None` for areas that produce no signal — the
+  "non-Privacy runs unaffected" property generalises to "areas without a ledger are unaffected".
+
+No schema change, no frame-shape change, no new gate. The render-determinism + audit-safety properties
+above hold verbatim for `data-deal-change` (it carries only `{ref, verdict}`).

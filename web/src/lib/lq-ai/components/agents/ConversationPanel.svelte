@@ -56,9 +56,13 @@
 		applyAnswerText,
 		applyRunPart,
 		applyStepPart,
+		dealVerdictLabel,
+		dealVerdictTone,
+		parseDealChangePayload,
 		parseRopaChangePayload,
 		parseRunPayload,
-		parseStepPayload
+		parseStepPayload,
+		type DealChangePayload
 	} from '$lib/lq-ai/agents/run-stream';
 	import { serverNowMs } from '$lib/lq-ai/agents/server-clock';
 	import { consumeUIMessageStream, type UIMessagePart } from '$lib/lq-ai/sse/ui-message-stream';
@@ -269,6 +273,7 @@
 		stopPolling();
 		stopUploadPolling();
 		stopStream();
+		clearDealChips();
 		if (nowTimer !== null) clearInterval(nowTimer);
 	});
 
@@ -318,6 +323,7 @@
 		if (destroyed) return;
 		stopPolling();
 		stopStream();
+		clearDealChips(); // a new thread context — drop any prior run's verdict chips
 		const gen = pollGeneration;
 		currentThreadId = id;
 		pollFailures = 0;
@@ -411,7 +417,52 @@
 	let liveReasoningBlock: string | null = null;
 	let answerBuffers: Record<string, string> = {};
 
+	/**
+	 * C5b-3 (ADR-F032/F004): live negotiation verdict chips. As the agent responds to
+	 * the counterparty (`respond_to_counterparty`), the backend drains one
+	 * `data-deal-change` frame per item; we flash a transient chip per ref in the
+	 * conversation. Animation only — the saved response .docx + run timeline are the
+	 * record, so a dropped frame loses a chip, never data. Deduped by ref (latest
+	 * verdict wins across retries); the whole set decays together after a short window.
+	 */
+	const DEAL_CHIP_DECAY_MS = 6000;
+	let recentDealChanges: DealChangePayload[] = [];
+	let dealChipTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Which run the live chips belong to — frames from a NEW run reset the set. */
+	let dealChipRunId: string | null = null;
+
+	function pushDealChip(runId: string, payload: DealChangePayload) {
+		// Reset when a different run starts emitting (a fresh round / new thread run).
+		// The chips are owned by the client-side decay timer (below), NOT re-delivered
+		// by the server — data-deal-change is transient (drained once, no replay buffer,
+		// not seeded to late subscribers), so they must survive stream transport churn
+		// (clearStreamState deliberately leaves them — a clean-end-then-reopen of the
+		// same run must not cut a still-valid chip short).
+		if (dealChipRunId !== runId) {
+			dealChipRunId = runId;
+			recentDealChanges = [];
+		}
+		recentDealChanges = [...recentDealChanges.filter((c) => c.ref !== payload.ref), payload];
+		if (dealChipTimer) clearTimeout(dealChipTimer);
+		dealChipTimer = setTimeout(() => {
+			recentDealChanges = [];
+			dealChipTimer = null;
+		}, DEAL_CHIP_DECAY_MS);
+	}
+
+	function clearDealChips() {
+		if (dealChipTimer) clearTimeout(dealChipTimer);
+		dealChipTimer = null;
+		recentDealChanges = [];
+		dealChipRunId = null;
+	}
+
 	function clearStreamState() {
+		// NB: deliberately does NOT clear the live verdict chips. data-deal-change is
+		// transient (drained once; no server replay), so the chips are kept alive by
+		// their own decay timer — wiping them here would cut a still-valid chip short
+		// on a clean stream end + re-open of the same running run. Chips reset on a run
+		// change (pushDealChip) / thread switch (startPolling) / decay / destroy.
 		streamAbort = null;
 		streamRunId = null;
 		liveReasoning = '';
@@ -528,6 +579,15 @@
 				// the true rows (ADR-F004), so a dropped frame loses a flash, not data.
 				const payload = parseRopaChangePayload(part.data);
 				if (payload) dispatch('ropachange', payload);
+				return;
+			}
+			case 'data-deal-change': {
+				// C5b-3 (ADR-F032): the agent just decided a counterparty item. Flash a
+				// transient verdict chip inline (Commercial has no register to wash).
+				// Animation only — the saved response .docx + timeline are the record
+				// (ADR-F004), so a dropped frame loses a chip, not data.
+				const payload = parseDealChangePayload(part.data);
+				if (payload) pushDealChip(runId, payload);
 				return;
 			}
 			default:
@@ -899,6 +959,25 @@
 					<p class="lq-text-body-sm ag-note">Waiting for the first step…</p>
 				{/if}
 
+				{#if i === detail.runs.length - 1 && turn.run.status === 'running' && !stale && recentDealChanges.length && turn.run.id === dealChipRunId}
+					<!-- C5b-3 (ADR-F032): live negotiation verdict chips — one per
+               counterparty item the agent just decided. Transient animation;
+               the saved response .docx + timeline are the record (ADR-F004). The
+               `turn.run.id === dealChipRunId` guard keeps chips under the run that
+               emitted them (no mis-render if a different run becomes last). -->
+					<ul class="ag-deal-chips" data-testid="lq-ai-agents-deal-chips">
+						{#each recentDealChanges as chip (chip.ref)}
+							<li
+								class="ag-deal-chip ag-deal-chip--{dealVerdictTone(chip.verdict)}"
+								data-testid="lq-ai-agents-deal-chip"
+							>
+								<span class="ag-deal-chip__ref">{chip.ref}</span>
+								<span class="ag-deal-chip__verdict">{dealVerdictLabel(chip.verdict)}</span>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+
 				{#if i === detail.runs.length - 1 && turn.run.status === 'running' && !stale && liveReasoning}
 					<!-- SSE v2 thinking ribbon (F0-S7): live reasoning deltas. Since
                F0-S8 it is AUTO-EXPANDED, markdown-rendered, and clamped to
@@ -1168,6 +1247,82 @@
 		padding: 0 var(--lq-space-2);
 		font-size: 11px;
 		line-height: 18px;
+	}
+
+	/* C5b-3 (ADR-F032): live negotiation verdict chips — one transient pill per
+	   counterparty item the agent just decided, coloured by verdict tone on the
+	   cockpit's status tokens. Animation only (the saved .docx is the record). */
+	.ag-deal-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--lq-space-1);
+		margin: var(--lq-space-1) 0 var(--lq-space-2);
+		padding: 0;
+		list-style: none;
+	}
+
+	.ag-deal-chip {
+		display: inline-flex;
+		align-items: baseline;
+		gap: var(--lq-space-1);
+		border: 1px solid var(--chip-color, var(--color-border));
+		background: var(--chip-wash, var(--color-muted));
+		border-radius: var(--lq-radius-pill);
+		padding: 0 var(--lq-space-2);
+		font-size: 11px;
+		line-height: 18px;
+		animation: ag-deal-chip-in 160ms ease-out;
+	}
+
+	.ag-deal-chip__ref {
+		font-weight: 600;
+		color: var(--chip-color, var(--color-foreground));
+	}
+
+	.ag-deal-chip__verdict {
+		color: var(--color-muted-foreground);
+	}
+
+	.ag-deal-chip--positive {
+		--chip-color: var(--color-status-completed);
+		--chip-wash: var(--color-status-completed-wash);
+	}
+
+	.ag-deal-chip--negative {
+		--chip-color: var(--color-status-failed);
+		--chip-wash: var(--color-status-failed-wash);
+	}
+
+	.ag-deal-chip--info {
+		--chip-color: var(--color-status-running);
+		--chip-wash: var(--color-status-running-wash);
+	}
+
+	.ag-deal-chip--warning {
+		--chip-color: var(--color-status-attention);
+		--chip-wash: var(--color-status-attention-wash);
+	}
+
+	.ag-deal-chip--neutral {
+		--chip-color: var(--color-status-cancelled);
+		--chip-wash: var(--color-status-cancelled-wash);
+	}
+
+	@keyframes ag-deal-chip-in {
+		from {
+			opacity: 0;
+			transform: translateY(2px);
+		}
+		to {
+			opacity: 1;
+			transform: none;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.ag-deal-chip {
+			animation: none;
+		}
 	}
 
 	/* Docked composer (F0-S8): its own card, stuck to the viewport bottom

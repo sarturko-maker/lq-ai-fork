@@ -404,6 +404,25 @@ class RunStreamPublisher:
             }
         )
 
+    def deal_changed(self, *, ref: str, verdict: str) -> None:
+        """Announce one counterparty item the agent just decided — C5b-3 (ADR-F032).
+
+        The negotiation companion to :meth:`ropa_changed`: a TRANSIENT
+        ``data-deal-change`` part carrying ``{ref, verdict}``. Drives the cockpit's
+        live verdict chips — the conversation flashes a per-verdict chip keyed by
+        ref ("C1 · accepted", "Com:1 · escalated"). Transient ⇒ not tracked as an
+        open block (``_track_open_blocks``), so a late subscriber simply misses it —
+        animation only; the saved response ``.docx`` and the run timeline remain the
+        truth (ADR-F004). ``ref`` + ``verdict`` are audit-safe (refs/types, never raw
+        clause text)."""
+        self._publish(
+            {
+                "type": "data-deal-change",
+                "transient": True,
+                "data": {"ref": ref, "verdict": verdict},
+            }
+        )
+
     def run_finished(
         self,
         *,

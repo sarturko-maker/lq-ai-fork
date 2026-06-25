@@ -1,0 +1,27 @@
+{
+  "model": "deepseek",
+  "latency_seconds": 82.4,
+  "deal_change_frames": 5,
+  "frames": [
+    {
+      "ref": "C1",
+      "verdict": "accept"
+    },
+    {
+      "ref": "C2",
+      "verdict": "reject"
+    },
+    {
+      "ref": "C3",
+      "verdict": "accept"
+    },
+    {
+      "ref": "C4",
+      "verdict": "escalate"
+    },
+    {
+      "ref": "Com:1",
+      "verdict": "leave_open"
+    }
+  ]
+}

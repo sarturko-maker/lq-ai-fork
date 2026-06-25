@@ -630,6 +630,51 @@ async def test_run_drains_the_change_ledger_onto_the_stream_at_tool_result(
     assert ledger.drain() == []
 
 
+async def test_run_drains_a_deal_change_ledger_onto_the_stream_at_tool_result(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """C5b-3 (ADR-F032): the SAME runner drain seam is area-agnostic — a
+    DealChangeLedger drains to data-deal-change parts via the LiveChange.publish
+    contract (no runner change between areas). respond_to_counterparty would record
+    these after its reconcile; pre-seed so the test exercises ONLY the drain glue."""
+    from app.agents.deal_changes import DealChangeLedger
+    from app.agents.stream import RunStreamBroker
+
+    run_id = await make_run()
+    broker = RunStreamBroker()
+    queue = broker.subscribe(run_id)
+    ledger = DealChangeLedger()
+    ledger.record("C1", "accept")
+    ledger.record("Com:1", "escalate")
+
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("read_clause", {"topic": "liability"}),
+            final_message("done"),
+        ]
+    )
+    await execute_agent_run(
+        run_id,
+        commit_factory,
+        tools=[read_clause],
+        model=model,
+        publisher=broker.publisher(run_id),
+        change_ledger=ledger,
+    )
+
+    parts: list[Any] = []
+    while not queue.empty():
+        parts.append(queue.get_nowait())
+    changes = [p for p in parts if isinstance(p, dict) and p.get("type") == "data-deal-change"]
+    assert [c["data"] for c in changes] == [
+        {"ref": "C1", "verdict": "accept"},
+        {"ref": "Com:1", "verdict": "escalate"},
+    ]
+    assert all(c["transient"] is True for c in changes)
+    assert ledger.drain() == []  # drained exactly once
+
+
 async def test_step_write_survives_a_transient_db_failure(
     make_run: Callable[..., Awaitable[uuid.UUID]],
     commit_factory: async_sessionmaker[AsyncSession],

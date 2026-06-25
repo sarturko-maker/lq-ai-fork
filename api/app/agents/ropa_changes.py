@@ -31,6 +31,10 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # publisher typed structurally; importing it at runtime would cycle
+    from app.agents.stream import RunStreamPublisher
 
 # The register's three top-level rows (the tables the UI renders + highlights).
 # Links/tags/transfers map to the affected *activity* (and a link also records
@@ -52,6 +56,14 @@ class RopaChange:
     kind: RopaChangeKind
     id: str
     verb: RopaChangeVerb
+
+    def publish(self, publisher: RunStreamPublisher) -> None:
+        """Announce this register change as its transient ``data-ropa-change`` frame.
+
+        The :class:`~app.agents.live_changes.LiveChange` contract — lets the runner
+        drain any area's ledger uniformly (PRIV-9b's wash, C5b-3's verdict chips, …).
+        """
+        publisher.ropa_changed(kind=self.kind, entity_id=self.id, verb=self.verb)
 
 
 @dataclass

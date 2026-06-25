@@ -4,6 +4,9 @@ import {
 	applyAnswerText,
 	applyRunPart,
 	applyStepPart,
+	dealVerdictLabel,
+	dealVerdictTone,
+	parseDealChangePayload,
 	parseRopaChangePayload,
 	parseRunPayload,
 	parseStepPayload,
@@ -102,7 +105,10 @@ describe('parseRunPayload', () => {
 describe('applyStepPart', () => {
 	it('inserts a new step in seq order', () => {
 		let detail = makeDetail();
-		detail = applyStepPart(detail, payload({ id: 'step-2', seq: 2, kind: 'tool_call', name: 'task' }));
+		detail = applyStepPart(
+			detail,
+			payload({ id: 'step-2', seq: 2, kind: 'tool_call', name: 'task' })
+		);
 		detail = applyStepPart(detail, payload({ id: 'step-1', seq: 1 }));
 		expect(detail.runs[0].steps.map((s) => s.seq)).toEqual([1, 2]);
 		expect(detail.runs[0].steps[1].name).toBe('task');
@@ -159,9 +165,11 @@ describe('applyRunPart / applyAnswerText', () => {
 
 describe('parseRopaChangePayload (PRIV-9b, ADR-F024)', () => {
 	it('parses a well-formed change frame', () => {
-		expect(
-			parseRopaChangePayload({ kind: 'system', id: 'sys-1', verb: 'create' })
-		).toEqual({ kind: 'system', id: 'sys-1', verb: 'create' });
+		expect(parseRopaChangePayload({ kind: 'system', id: 'sys-1', verb: 'create' })).toEqual({
+			kind: 'system',
+			id: 'sys-1',
+			verb: 'create'
+		});
 	});
 
 	it('keeps id load-bearing and defaults missing kind/verb to empty strings', () => {
@@ -174,5 +182,48 @@ describe('parseRopaChangePayload (PRIV-9b, ADR-F024)', () => {
 		expect(parseRopaChangePayload({ id: 42 })).toBeNull();
 		expect(parseRopaChangePayload(null)).toBeNull();
 		expect(parseRopaChangePayload('nope')).toBeNull();
+	});
+});
+
+describe('parseDealChangePayload (C5b-3, ADR-F032)', () => {
+	it('parses a well-formed verdict frame for a change and a comment', () => {
+		expect(parseDealChangePayload({ ref: 'C1', verdict: 'accept' })).toEqual({
+			ref: 'C1',
+			verdict: 'accept'
+		});
+		expect(parseDealChangePayload({ ref: 'Com:2', verdict: 'reply' })).toEqual({
+			ref: 'Com:2',
+			verdict: 'reply'
+		});
+	});
+
+	it('drops a frame missing the ref (no chip; the saved .docx carries the truth)', () => {
+		expect(parseDealChangePayload({ verdict: 'accept' })).toBeNull();
+		expect(parseDealChangePayload({ ref: '', verdict: 'accept' })).toBeNull();
+		expect(parseDealChangePayload({ ref: 7, verdict: 'accept' })).toBeNull();
+	});
+
+	it('drops a frame whose verdict is missing or outside the taxonomy', () => {
+		expect(parseDealChangePayload({ ref: 'C1' })).toBeNull();
+		expect(parseDealChangePayload({ ref: 'C1', verdict: 'maybe' })).toBeNull();
+		expect(parseDealChangePayload({ ref: 'C1', verdict: 99 })).toBeNull();
+		expect(parseDealChangePayload(null)).toBeNull();
+		expect(parseDealChangePayload('nope')).toBeNull();
+	});
+
+	it('labels and tones every verdict in the closed taxonomy', () => {
+		expect(dealVerdictLabel('accept')).toBe('accepted');
+		expect(dealVerdictLabel('reject')).toBe('rejected');
+		expect(dealVerdictLabel('counter')).toBe('countered');
+		expect(dealVerdictLabel('leave_open')).toBe('left open');
+		expect(dealVerdictLabel('escalate')).toBe('escalated');
+		expect(dealVerdictLabel('reply')).toBe('replied');
+
+		expect(dealVerdictTone('accept')).toBe('positive');
+		expect(dealVerdictTone('reject')).toBe('negative');
+		expect(dealVerdictTone('counter')).toBe('info');
+		expect(dealVerdictTone('reply')).toBe('info');
+		expect(dealVerdictTone('escalate')).toBe('warning');
+		expect(dealVerdictTone('leave_open')).toBe('neutral');
 	});
 });

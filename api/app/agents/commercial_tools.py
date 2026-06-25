@@ -36,6 +36,7 @@ from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import storage
+from app.agents.deal_changes import DealChangeLedger
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.agents.negotiation_service import Decision, apply_decisions, read_state_of_play
 from app.agents.redline_render import reconstruct_redline
@@ -106,6 +107,7 @@ def build_commercial_tools(
     run_id: uuid.UUID,
     binding: MatterBinding,
     redline_service: RedlineService,
+    change_ledger: DealChangeLedger | None = None,
 ) -> list[Callable[..., Any]]:
     """Build the Commercial matter's guarded tools for one run.
 
@@ -113,6 +115,11 @@ def build_commercial_tools(
     ``composition.py``; tests pass a fake). The guard context grants exactly the
     Commercial tool names; the matter (``binding.project_id``) scopes both the
     source-document fetch and the redlined output (ADR-F035).
+
+    ``change_ledger`` (C5b-3, ADR-F032/F024) is the run-scoped deal-change ledger
+    ``respond_to_counterparty`` records each verdict into; the runner drains it into
+    the cockpit's live verdict chips. ``None`` ⇒ no live signal (the response is
+    still saved + audited as usual). Best-effort animation (ADR-F004).
     """
     ctx = GuardContext(
         session_factory=session_factory,
@@ -264,6 +271,7 @@ def build_commercial_tools(
                 document_name=document_name,
                 decisions=decisions,
                 run_id=run_id,
+                change_ledger=change_ledger,
             ),
             ctx,
         )
@@ -633,6 +641,7 @@ async def _respond_to_counterparty(
     document_name: str,
     decisions: list[dict[str, Any]],
     run_id: uuid.UUID,
+    change_ledger: DealChangeLedger | None = None,
 ) -> str:
     """Validate → coverage gate → counter gate → apply → reconcile → persist (or reject).
 
@@ -761,6 +770,15 @@ async def _respond_to_counterparty(
     await _record_negotiation_receipt(
         db, binding, run_id=run_id, filename=row.filename, counts=counts
     )
+
+    # 9. Live verdict chips (C5b-3, ADR-F032/F004): announce each verdict as a
+    #    transient cockpit chip. Recorded ONLY here — the response is verified
+    #    (recon.ok proved every decision landed) and saved — so a chip can never fire
+    #    on a rejected/silent round. Best-effort animation; the saved .docx + run
+    #    timeline are the record. ref + verdict only (no clause text on the wire).
+    if change_ledger is not None:
+        for d in proposal.decisions:
+            change_ledger.record(ref=d.ref, verdict=d.verdict)
 
     plural = "y" if counts["reply"] == 1 else "ies"
     return (

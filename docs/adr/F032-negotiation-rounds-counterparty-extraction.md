@@ -153,3 +153,30 @@ gate** (ADR-F041), so it adds no gate and changes no guarantee. Three pure-data/
 
 No change to the guarantee, no new endpoint, no new dependency. C5b-3 (inline `data-deal-change` live
 verdict chips) remains the next sub-slice.
+
+## Addendum — C5b-3 (2026-06-25): inline live verdict chips
+
+C5b-3 delivers the **live signal** on the round-2 loop — the C5 analogue of PRIV-9b's changed-row
+highlight. As the agent responds to the counterparty, the cockpit flashes a transient **verdict chip per
+item** inline in the conversation ("C1 · accepted", "C3 · countered", "Com:1 · escalated"). It **clones
+the `data-ropa-change` ledger→drain→transient-frame seam** (ADR-F024); the one divergence is the render
+location — ropa washes a co-visible register row, but Commercial has no deal-terms panel, so the chip
+renders **inline in `ConversationPanel`** itself (no host dispatch).
+
+- **The seam is now area-agnostic** (see the ADR-F024 addendum): a `LiveChange` / `ChangeLedger`
+  **Protocol** (`app/agents/live_changes.py`) lets each change publish itself, so the runner drain loop
+  serves any area. Privacy's `RopaChange` and Commercial's new `DealChange` (`app/agents/deal_changes.py`)
+  each implement `publish(publisher)`.
+- **`respond_to_counterparty`** records one `(ref, verdict)` per decision into a run-scoped
+  `DealChangeLedger` **only after** the response is verified (`recon.ok`) **and saved** — never on a
+  rejected/silent round (the "record only on a real change" rule). `RunStreamPublisher.deal_changed`
+  publishes a transient `data-deal-change` frame `{ref, verdict}` (audit-safe — a synthetic ref + a
+  taxonomy enum, never raw clause text).
+- **Render-determinism (ADR-F004) holds**: the chip is best-effort animation; the saved response `.docx`
+  + the run timeline are the record. A dropped/duplicate/spurious frame loses or mis-fires a chip, never
+  corrupts anything. The chips persist across stream re-opens (the poll re-delivers the transient frames)
+  and reset on a run change / thread switch / a short decay.
+
+No new gate, no change to the no-silent-action guarantee, no migration, no new endpoint, no new
+dependency. Live-proven end-to-end on DeepSeek + deterministic browser render (`docs/fork/evidence/c5b3/`).
+This completes the C5b sub-track; C7b (drafter/reviewer fan-out) and C6 (controlling playbooks) remain.

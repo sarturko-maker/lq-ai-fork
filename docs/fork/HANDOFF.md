@@ -3,17 +3,13 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ⚠ **PICKUP — MERGE FIRST (2026-06-25, compaction boundary):** C5b-2 is committed on branch
-> `fork/c5b2-negotiation-review-skill` as **PR #144** (Gateway + Web CI green; the API job was still running at
-> compaction). It is **NOT yet merged** — the maintainer chose to merge after compaction. **First action next
-> session:** confirm PR #144 API CI is green (`gh pr checks 144 --repo sarturko-maker/lq-ai-fork`), then
-> **squash-merge** under the ADR-F005 gate (`gh pr merge 144 --repo sarturko-maker/lq-ai-fork --squash
-> --delete-branch`), `git checkout main && git pull`, `docker image prune -f` (dangling only). THEN pick the next
-> slice (C5b-3 inline `data-deal-change` live chips / C7b drafter-reviewer fan-out / C6 controlling playbooks).
-> The slice is fully verified (api suite **2684 passed / 31 skipped / 0 failed**; ruff + mypy clean; live eval
-> `docs/fork/evidence/c5b2/`; adversarial review **SHIP**, 0 blockers) — **only the merge remains.** Dev image
-> `lq-ai-api-dev` is built; test recipe is in [[c5b2-negotiation-skill-shipped]] memory (run ruff/pytest with the
-> **repo root mounted**, `DATABASE_URL` → dev postgres for throwaway test DBs).
+> ▶ **PICKUP (2026-06-25): C5b-2 MERGED (#144) + C5b-3 SHIPPED on branch `fork/c5b3-deal-change-chips`
+> (PR opened this session).** The whole **C5b sub-track is complete** (negotiation loop + comment-fix +
+> craft skill + live verdict chips). **Next slice = maintainer's call: C7b (drafter/reviewer fan-out roster)
+> or C6 (controlling playbook skills — needs ADRs F036/F038 first).** Dev image `lq-ai-api-dev` is built;
+> test recipe in [[c5b2-negotiation-skill-shipped]] (run ruff/pytest with the **repo root mounted**,
+> `DATABASE_URL` → dev postgres). If C5b-3's PR isn't merged yet, confirm its CI green then squash-merge
+> under the ADR-F005 gate.
 
 ## North star (the goal, not a prompt)
 
@@ -57,9 +53,18 @@ a provider-marked DeepSeek/Claude-judged craft eval. Live (DeepSeek, `docs/fork/
 substantive craft pass** (one-sided strip reverted to mutual, below-floor perpetuity held, full coverage,
 nothing conceded); **counter-with-reply 0/3** — an honest recorded tuning finding (the model reverts §3 rather
 than counter-with-reply, so the comment is preserved-but-orphaned; the guarantee holds, no silent loss).
-**NEXT = maintainer's call: C5b-3 (inline `data-deal-change` live chips) / C7b (drafter/reviewer fan-out roster) /
-C6 (controlling playbook skills). Backlog: counter-with-reply skill tuning + a Claude-judged eval re-run when the
-gateway has an Anthropic key (deepseek-pro stood in as judge — Claude not reachable locally).**
+**C5b-3 NEGOTIATION LIVE VERDICT CHIPS SHIPPED** (2026-06-25, branch `fork/c5b3-deal-change-chips`, ADR-F032 +
+ADR-F024 addenda, NO migration/endpoint/dep): the **live signal** on the round-2 loop — as the agent responds to
+the counterparty, the cockpit flashes a transient **verdict chip per item** inline in the conversation ("C1 ·
+accepted", "C3 · countered", "Com:1 · escalated"). Clones the `data-ropa-change` ledger→drain→transient-frame
+seam (PRIV-9b), generalised to a `LiveChange`/`ChangeLedger` Protocol (area-agnostic runner drain; `RopaChange` +
+new `DealChange` each `publish` themselves). `respond_to_counterparty` records `(ref, verdict)` per decision ONLY
+on a verified+saved round; `data-deal-change` frame is `{ref, verdict}` (audit-safe, no clause text). Chip lives
+in `ConversationPanel` (Commercial has no register), persists across stream re-opens, decays. Live-proven
+end-to-end on DeepSeek (5 frames) + deterministic Cypress light/dark (`docs/fork/evidence/c5b3/`).
+**NEXT = maintainer's call: C7b (drafter/reviewer fan-out roster) / C6 (controlling playbook skills — needs ADRs
+F036/F038 first). Backlog: counter-with-reply skill tuning + a Claude-judged eval re-run when the gateway has an
+Anthropic key (deepseek-pro stood in as judge — Claude not reachable locally).**
 
 C4 was built **ahead of C3** (maintainer reprioritised 2026-06-22: C4 retires the milestone's central risk +
 produces the work product). The full decomposition: `docs/fork/plans/COMM-commercial-deep-agent-decomposition.md`.
@@ -71,7 +76,34 @@ the qualified live-test target. Revert when MiniMax quota returns. C9 fact: `dee
 **`deepseek-pro` → `deepseek-v4-pro`** (both wired in `gateway.yaml`, same DeepSeek account/quota) — the
 stronger tier for the "is it the model?" control.
 
-## Done this session (C5b-2 — NEGOTIATION-REVIEW SKILL + BINDING + CRAFT EVAL — branch `fork/c5b2-negotiation-review-skill`; ADR-F041/F032 addendum; migration `0072`; NO endpoint/dep)
+## Done this session (C5b-3 — NEGOTIATION LIVE VERDICT CHIPS — branch `fork/c5b3-deal-change-chips`; ADR-F032 + ADR-F024 addenda; NO migration/endpoint/dep)
+
+**What:** the **live signal** on the round-2 loop — the C5 analogue of PRIV-9b's changed-row highlight. As the
+agent responds to the counterparty, the cockpit flashes a transient **verdict chip per item** inline in the
+conversation. Clones the `data-ropa-change` ledger→drain→transient-frame seam.
+- **Seam generalised (the one structural call):** new `app/agents/live_changes.py` = a `LiveChange`
+  (`publish(publisher)`) + `ChangeLedger` (`drain()`) **Protocol**. The runner drain is now area-agnostic
+  (`for change in change_ledger.drain(): change.publish(publisher)`). `RopaChange` gained a 2-line `publish`
+  (byte-identical Privacy behaviour); the new `app/agents/deal_changes.py` `DealChange`/`DealChangeLedger` is
+  the 2nd implementer (composition root already anticipated a 3rd — assessments). ADR-F024 addendum.
+- **Backend:** `RunStreamPublisher.deal_changed(ref, verdict)` → transient `data-deal-change` `{ref, verdict}`
+  (audit-safe; no clause text). `composition.py` creates a `DealChangeLedger()` in the COMMERCIAL branch +
+  passes it to `build_commercial_tools`. `respond_to_counterparty` records one `(ref, verdict)` per decision
+  ONLY after `recon.ok` + persist (record-only-on-a-real-change; nothing on a rejected round).
+- **Web:** `run-stream.ts` `parseDealChangePayload` (both `ref`+`verdict` load-bearing; unknown verdict → null)
+  + pure `dealVerdictLabel`/`dealVerdictTone` presenters. `ConversationPanel.svelte` `case 'data-deal-change'`
+  → `pushDealChip` (dedupe by ref, 6s decay, reset on run change via `dealChipRunId`); chips render inline in
+  the running turn, coloured per verdict tone via `--color-status-*` tokens. **Key fix:** chips are NOT cleared
+  in `clearStreamState` (the poll re-opens the stream + re-delivers the transient frames every 2s, keeping them
+  lit) — reset on run change / thread switch (`startPolling`) / decay / `onDestroy`.
+- **Verify:** backend `tests/agents` 489 passed/1 skipped + 8 new tests green; full api suite green (see below);
+  ruff + mypy clean. Web `npm run check` 0 err, vitest **942** (+ deal-change parser/presenter tests),
+  prettier clean (lone eslint error = pre-existing `catch (e)` in untouched code). **Live (DeepSeek):** the
+  provider-marked `test_commercial_deal_change_frames_live` captured **5 real `data-deal-change` frames**
+  end-to-end (C1 accept / C2 reject / C3 accept / C4 escalate / Com:1 leave_open). **Cypress 2/2** light+dark,
+  screenshots verified (`docs/fork/evidence/c5b3/`). NO migration/endpoint/dep; NO gate/guarantee change.
+
+## Done earlier this session (C5b-2 — NEGOTIATION-REVIEW SKILL + BINDING + CRAFT EVAL — branch `fork/c5b2-negotiation-review-skill`; ADR-F041/F032 addendum; migration `0072`; NO endpoint/dep)
 
 **What:** the **craft layer** on the round-2 negotiation loop — *prompt quality tuned by eval, not a runtime
 gate* (ADR-F041), so it adds no gate and changes no guarantee. The negotiation companion to `surgical-redline`.

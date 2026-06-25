@@ -279,6 +279,37 @@ async def test_publisher_ropa_changed_is_not_seeded_to_late_subscribers() -> Non
     assert _drain(late) == []
 
 
+async def test_publisher_deal_changed_emits_transient_data_frame() -> None:
+    """C5b-3 (ADR-F032): deal_changed → a transient data-deal-change part."""
+    broker = RunStreamBroker()
+    run_id = uuid.uuid4()
+    queue = broker.subscribe(run_id)
+    publisher = broker.publisher(run_id)
+
+    publisher.deal_changed(ref="C1", verdict="counter")
+
+    parts = [p for p in _drain(queue) if p["type"] != "start"]
+    assert parts == [
+        {
+            "type": "data-deal-change",
+            "transient": True,
+            "data": {"ref": "C1", "verdict": "counter"},
+        }
+    ]
+
+
+async def test_publisher_deal_changed_is_not_seeded_to_late_subscribers() -> None:
+    """A deal-change chip is animation only — a mid-run subscriber must NOT be
+    seeded with it (the saved .docx + timeline are the record; ADR-F004)."""
+    broker = RunStreamBroker()
+    run_id = uuid.uuid4()
+    publisher = broker.publisher(run_id)
+    publisher.deal_changed(ref="Com:1", verdict="escalate")
+
+    late = broker.subscribe(run_id)
+    assert _drain(late) == []
+
+
 async def test_publisher_truncated_tool_args_ride_as_raw() -> None:
     broker = RunStreamBroker()
     run_id = uuid.uuid4()
