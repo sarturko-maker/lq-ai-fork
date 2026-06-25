@@ -98,3 +98,37 @@ Slice 1 specifics:
   there extend or supersede this ADR.
 - This ADR takes the next free fork number after **F046**; the WASM and custom-LOK paths are
   recorded as rejected so a future reader does not re-litigate them.
+
+## Addendum — Slice 2: the WOPI host (2026-06-25)
+
+Slice 2 implemented the WOPI **read** half (`api/app/api/wopi.py`): `CheckFileInfo`, `GetFile`, and
+the **Lock family** (LOCK / GET_LOCK / REFRESH_LOCK / UNLOCK / UNLOCK_AND_RELOCK). These calls
+materialise this ADR's "WOPI host endpoints + file-scoped token + cross-user-404" deferral. The
+architectural calls made within that envelope (recorded here rather than minting a new ADR — F047
+governs the editor):
+
+- **Read-only viewer this slice.** `CheckFileInfo` advertises `UserCanWrite=false` / `ReadOnly=true`
+  and omits `SupportsUpdate`, so the lawyer SEES the agent's redline with **no save path** — no
+  data-loss window. Slice 3 flips to editable and adds `PutFile` atomically. (Milestone sequence:
+  WOPI read → save-back.)
+- **File-scoped editor token = a stateless signed JWT** (`create_wopi_token`, `typ="wopi"`), HS256
+  on the existing `jwt_secret`, claims `sub`/`fid`/`name`/`exp`. No server-side session table.
+  Three-layer authz: mint is gated by `ActiveUser` + `_load_visible_file` (cross-user → 404); the
+  `fid` claim must equal the URL `{file_id}` (no cross-file replay); every WOPI handler re-runs
+  `_load_visible_file(db, fid, claims.user_id)`. Token failure → **401**; file not visible → **404**.
+  The router is mounted WITHOUT the user-bearer gate (same posture as `word_addin.public_router`).
+- **Locks = a small `editor_locks` table** (migration `0074`, PK `file_id`, FK→files `CASCADE`,
+  30-min TTL; expired ⇒ treated as unlocked). The WOPI lock state machine is a **pure function**
+  (`app/schemas/wopi.decide_lock`) the handler wires DB I/O around — fully unit-tested incl. the
+  409 + `X-WOPI-Lock`-echo / empty-string-when-unlocked semantics. `SupportsExtendedLockLength=true`
+  → lock ids up to 1024 chars (`Text`). Implemented this slice (HANDOFF-recorded Slice-2 scope,
+  de-risks Slice 3); a read-only session won't drive them live, so they're proven by unit tests + a
+  curl smoke replicating Collabora's exact lock sequence.
+- **`Version`/`X-WOPI-ItemVersion` = `File.hash_sha256`** (content-addressed); `OwnerId`/`UserId` =
+  `uuid.hex` (WOPI requires **alphanumeric** — the hyphenated form is invalid).
+- **No model calls; the host never reaches the gateway** (ADR-F010 trivially intact). Proof-key
+  (`X-WOPI-Proof`) validation stays **deferred** — the threat model is the file-scoped short-TTL
+  token + the private compose network + the `aliasgroup1` allow-list. New settings:
+  `collabora_wopi_host` (WOPISrc base = `http://api:8000`), `wopi_token_ttl_seconds`,
+  `collabora_post_message_origin`. No `docker-compose.yml`/nginx change (WOPI is server-to-server
+  on the compose network).

@@ -23,6 +23,7 @@ from app.models.autonomous import (
 )
 from app.models.chat import Chat, Message
 from app.models.document import Document, DocumentChunk
+from app.models.editor_lock import EditorLock
 from app.models.enhance_prompt import EnhancePromptInteraction
 from app.models.file import File
 from app.models.inference import InferenceRoutingLog
@@ -56,6 +57,7 @@ __all__ = [
     "Chat",
     "Document",
     "DocumentChunk",
+    "EditorLock",
     "EnhancePromptInteraction",
     "File",
     "InferenceRoutingLog",

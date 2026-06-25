@@ -1,0 +1,26 @@
+[PASS] mint editor-session 200 {"access_token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMzE3NDUwYi0xZGEwLTQ2ZDctYWE4Zi1lMGM3MzA4YmVmNjgiLCJmaWQiOiIxM2FkMDg5YS02NGYwLTQwODYtYWM5OS0xZGU5MzViZDg5ZTQiLCJuYW1lIjoiTFEuQUkgQWRtaW
+[PASS] wopi_src is the in-network api callback http://api:8000/api/v1/wopi/files/13ad089a-64f0-4086-ac99-1de935bd89e4
+[PASS] access_token_ttl is epoch ms (future) 
+[PASS] CheckFileInfo 200 {"BaseFileName":"02_Cirrus-Analytics-MSA-Draft (redlined).docx","OwnerId":"0317450b1da046d7aa8fe0c7308bef68","Size":40723,"UserId":"0317450b1da046d7aa8fe0c7308bef68","Version":"b1fe5b365dcb99632c80d27
+    CheckFileInfo: {'BaseFileName': '02_Cirrus-Analytics-MSA-Draft (redlined).docx', 'Size': 40723, 'Version': 'b1fe5b365dcb99632c80d27613146109aab8c8a2d2ebb53013f1eedfee6127d9', 'UserCanWrite': False, 'ReadOnly': True, 'SupportsLocks': True, 'UserFriendlyName': 'LQ.AI Administrator'}
+[PASS] OwnerId is uuid hex (alphanumeric) 
+[PASS] read-only viewer (UserCanWrite false / ReadOnly true) 
+[PASS] no null properties on the wire 
+[PASS] GetFile 200 
+[PASS] GetFile bytes match Size 40723 vs 40723
+[PASS] X-WOPI-ItemVersion == Version 
+[PASS] GET_LOCK (no lock) 200 + empty X-WOPI-Lock 
+[PASS] LOCK 200 
+[PASS] GET_LOCK returns the lock 
+[PASS] LOCK conflict 409 + current lock echoed 
+[PASS] UNLOCK 200 
+[PASS] GET_LOCK empty after unlock 
+[PASS] PUT (PutFile, Slice 3) -> 501 
+[PASS] cross-user (synthetic) -> 404 404
+[PASS] bad token -> 401 401
+[PASS] token for a different file -> 401 401
+
+=== SMOKE PASS ===
+=== collabora -> api:8000 reachability (WOPISrc callback path) ===
+HTTP/1.1 401 Unauthorized
+(401 expected: reachable, and the WOPI host correctly rejects the missing token)

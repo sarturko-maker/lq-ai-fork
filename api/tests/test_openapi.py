@@ -129,6 +129,11 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/admin/word-addin/manifest",
         # M3-B8 — Word add-in version handshake (unauthenticated)
         "/api/v1/word-addin/version",
+        # libreoffice-editor Slice 2 (fork, ADR-F047) — WOPI host + editor-session mint.
+        # CheckFileInfo (GET) + Lock family (POST) share one path; GetFile is /contents.
+        "/api/v1/wopi/files/{file_id}",
+        "/api/v1/wopi/files/{file_id}/contents",
+        "/api/v1/files/{file_id}/editor-session",
         # M3-A2 — Playbook executor surface
         "/api/v1/playbooks/{playbook_id}/execute",
         "/api/v1/playbook-executions/{execution_id}",
@@ -342,7 +347,10 @@ async def test_openapi_paths_match_sketch() -> None:
     # /api/v1/agents/threads/{thread_id}
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
-    assert len(actual) == 148  # +1: C7a matter-files read surface (redline-download, ADR-F046);
+    assert len(actual) == 151  # +3: libreoffice-editor Slice 2 WOPI host + mint (ADR-F047)
+    #   — /wopi/files/{id} (CheckFileInfo GET + Lock POST share the path),
+    #     /wopi/files/{id}/contents (GetFile), /files/{id}/editor-session (mint).
+    # +1 prior: C7a matter-files read surface (redline-download, ADR-F046);
     # +2 prior: C3-UM matter-memory retire gestures (corrections + facts, ADR-F042/F044);
     # +2 prior: C3c-1 matter-memory read surface + wiki revert (ADR-F044); +1 prior: C3a
     # matter-memory pin endpoint (ADR-F042); +2 prior: PRIV-A3 assessment

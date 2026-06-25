@@ -54,6 +54,7 @@ from app.api import (
     teams,
     user_skills,
     users,
+    wopi,
     word_addin,
 )
 from app.api.dependencies import get_active_user
@@ -91,6 +92,15 @@ api_router.include_router(integrations_teams.router)
 # add-in can surface an "Update needed" overlay before the OAuth dialog
 # even tries to load.
 api_router.include_router(word_addin.public_router)
+
+# libreoffice-editor Slice 2 (ADR-F047): the WOPI host Collabora calls to open a
+# matter's .docx in the in-app editor. Mounted WITHOUT the `_active` gate (same
+# posture as `word_addin.public_router`): WOPI clients authenticate with a
+# file-scoped `access_token` (a signed editor-session JWT) carried per-request,
+# NOT the user bearer. Every handler re-validates the token + re-runs the
+# owner-scoped `_load_visible_file` (cross-user → 404). The token is minted only
+# by `POST /files/{id}/editor-session` behind the `_active` gate.
+api_router.include_router(wopi.router)
 
 # Routers that uniformly require an authenticated, must_change_password=false
 # user. Applying this at the router level means every current stub and every
