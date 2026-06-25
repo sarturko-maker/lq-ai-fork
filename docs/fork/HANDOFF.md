@@ -3,22 +3,32 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶ **PICKUP (2026-06-25): C7b MERGED to `main` (#146, squash `e0dde61`); branch deleted; CI green on all three
-> jobs (API/Gateway/Web).** The drafter/reviewer **fan-out roster** + the **post-fan-out reconciliation pass**
-> (migration `0073`, ADR-F034). C7 is now fully delivered (C7a download + C5b-3 live signal + C7b roster/reconcile).
-> **Next slice = maintainer's call: C6 (controlling playbook skills — needs ADRs F036/F038 decided FIRST; neither
-> exists yet) or a backlog item (counter-with-reply skill tuning; a Claude-judged eval re-run when the gateway has
-> an Anthropic key; a deal-review craft eval).** Dev image `lq-ai-api-dev` is built; test recipe = run ruff/pytest
-> in the dev image with the **repo root mounted** + `DATABASE_URL` → dev postgres on the `lq-ai_default` network
-> (the throwaway test DBs spin from it). Dev stack is already rebuilt + migrated to head `0073`.
+> ▶ **PICKUP (2026-06-25): in-app Word editor — Slice 1 shipped on branch `fork/libreoffice-editor-slice1`
+> (PR opened this session). Pick up Slice 2 = the WOPI host in `api`.** New milestone **In-app Word editor —
+> Collabora / LibreOffice over WOPI (ADR-F047)**: agent redlines → lawyer edits/comments/exports in-app → hands
+> back → agent resumes reading the markup (zero new agent code — the existing C5a path). Backed by
+> `docs/fork/research/libreoffice-editor.md` + **Spike 0 GO** (`docs/fork/evidence/libreoffice-spike0/`).
+> **Slice 1 = infra+docs only (NO app code):** a local **isolated** `collabora` (CODE) compose service — no host
+> port, `cap_add: [MKNOD]` only, WOPI allow-list `aliasgroup1=http://api:8000`, no gateway reachability — behind
+> the same-origin web nginx `/collabora/` proxy + a minimal framing CSP (`frame-src 'self'; frame-ancestors
+> 'self'`) + the `NOTICES.md` row + ADR-F047. Live-verified: discovery `200` via the proxy, `9980/tcp` unmapped,
+> admin `403`, nginx `-t` clean, web suite green.
 >
-> **Fan-out is deepagents-native + model-driven (no fork scaffolding).** Fan-out = deepagents' `task` tool
-> (`SubAgentMiddleware`, v0.6.8); the model decides when to delegate (guidance is PROSE only — the `task` tool
-> description + each subagent's `description` field + the `deal-review` skill + `profile_md`). C7b added ZERO
-> orchestration: two declarative subagent dicts (migration), a `reconcile_positions` tool, a skill. No
-> graph/Send/reducer (that's the deferred O-series). The thin fork seams the specs flow through
-> (`reject_model_bearing_subagents` ADR-F010, skill-wiring ADR-F017, runner `parent_step_id` nesting) PRE-DATE
-> C7b — adapters, not a fan-out engine.
+> **Build/licence posture (resolved):** **Collabora is MPL-2.0, NOT AGPL** (lighter than the grandfathered
+> PyMuPDF AGPL). Dev + every integration slice run the **prebuilt `collabora/code` image** pinned **by digest**
+> (`sha256:75859dc9…` = Collabora Office **26.04.1.4**, Spike-0-validated); the cap is gone, "not for production"
+> is a support framing not a prohibition, chrome is hidden via our UI + config. The clean unbranded / supported
+> **production** posture (self-build from MPL source **OR** subscription) is a deferred productionisation
+> decision (MILESTONES Backlog). PyMuPDF-AGPL-cleanup is a separate backlog slice.
+>
+> **Slice-1 gotchas (carry into Slice 2/4):** the `collabora/code` image ships **only bash** (no curl/wget) →
+> the healthcheck uses a bash `/dev/tcp` discovery-200 probe (`start_period: 60s`). The sandbox runs on
+> **MKNOD alone** (namespaces auto-degrade to false; seccomp+contained ok — **no `SYS_ADMIN`/`privileged`**).
+> coolwsd **400s "Unknown resource" on a prefixed path** → nginx **strips** `/collabora/` (trailing slash on
+> `proxy_pass`); `net.proxy_prefix=true` did NOT make it route a sub-path. Discovery then emits root + `https`
+> asset URLs (`https://localhost:3000/browser/…`) — making coolwsd EMIT `/collabora/`-prefixed URLs for the
+> **iframe** is the **Slice-4** task (proxy-prefix done right / a `<base>` tag / a dedicated origin). Rebuild the
+> prebuilt `web` bundle before debugging any UI/nginx change; `docker image prune -f` (dangling) after a rebuild.
 
 ## North star (the goal, not a prompt)
 

@@ -395,6 +395,60 @@ services:
       timeout: 5s
       retries: 10
 
+  collabora:
+    # In-app Word editor engine — Collabora Online / CODE (LibreOffice on
+    # LibreOfficeKit) over WOPI (ADR-F047; libreoffice-editor Slice 1).
+    # PREBUILT image, pinned BY DIGEST (Spike-0-validated Collabora Office
+    # 26.04.1.4 — docs/fork/evidence/libreoffice-spike0/). Internal, self-hosted,
+    # server-side-only, NOT redistributed; licence posture in NOTICES.md.
+    #
+    # Isolation: NO host port — reachable only over lq-ai_default by `web`
+    # (the same-origin /collabora/ proxy) and able to reach `api` (the WOPI
+    # host, Slice 2). Not publicly reachable; the admin console is credential-
+    # gated AND hard-404'd at the web proxy (see web/nginx.conf). No gateway
+    # reachability — the editor data plane never calls an LLM, so the ADR-F010
+    # gateway-only-egress invariant is untouched.
+    image: collabora/code@sha256:75859dc9f9084d1877ce36cf96ec86600f495bade33289c9cbc27e0a0ee23b81  # collabora/code 26.04.1.4
+    restart: unless-stopped
+    # MKNOD is all coolwsd's chroot sandbox needs; we deliberately avoid
+    # privileged / SYS_ADMIN. If the mount-namespace sandbox cannot start on
+    # this host's kernel, set `--o:mount_namespaces=false` in extra_params
+    # (record it in the PR) rather than widening capabilities.
+    cap_add:
+      - MKNOD
+    environment:
+      # WOPI host allow-list — the only origin coolwsd accepts a WOPISrc from
+      # (Slice 2 mints tokens against this; harmless now).
+      aliasgroup1: http://api:8000
+      # Browser-facing origin coolwsd builds asset URLs for = the same-origin
+      # host the `web` nginx serves /collabora/ under.
+      server_name: ${COLLABORA_SERVER_NAME:-localhost:3000}
+      dictionaries: en_GB en_US
+      DONT_GEN_SSL_CERT: "true"
+      # Admin console creds — console stays unreachable (no host port, not
+      # proxied); set only so coolwsd does not default-open.
+      username: ${COLLABORA_ADMIN_USER:-admin}
+      password: ${COLLABORA_ADMIN_PASSWORD:-admin}
+      # TLS terminates at the proxy; only our web origin may frame the editor
+      # (defence-in-depth with the nginx CSP frame-ancestors). The web nginx
+      # strips the /collabora/ prefix so coolwsd routes at root (Slice 1);
+      # emitting /collabora/-prefixed asset URLs for the iframe is a Slice-4
+      # concern, so no proxy_prefix flag is shipped yet.
+      extra_params: "--o:ssl.enable=false --o:ssl.termination=true --o:net.frame_ancestors=${COLLABORA_FRAME_ANCESTORS:-http://localhost:3000}"
+    healthcheck:
+      # The CODE image ships neither curl nor wget — only bash. Probe the WOPI
+      # discovery endpoint over bash's /dev/tcp and assert HTTP 200.
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/9980 && printf "GET /hosting/discovery HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && head -n1 <&3 | grep -q 200'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      # coolwsd spawns its first jailed child (~10-30s) before it is ready.
+      start_period: 60s
+
   # ============================================================
   # Mode 2 — local inference (PRD §1.5.1, §6.1)
   # Only started with --profile local
