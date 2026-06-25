@@ -1,0 +1,23 @@
+[PASS] CheckFileInfo 200 editable 
+[PASS] caps: UserCanWrite/SupportsUpdate true, ReadOnly false 
+[PASS] PutFile (lock held) 200 200
+[PASS] X-WOPI-ItemVersion == new hash 
+[PASS] PutFile JSON carries LastModifiedTime 
+[PASS] GetFile returns the edited bytes (real MinIO round-trip) 
+[PASS] GetFile X-WOPI-ItemVersion bumped 
+[PASS] save-race stale timestamp -> 409 {COOLStatusCode:1010} 
+[PASS] PutFile lock mismatch -> 409 + X-WOPI-Lock echo 
+[PASS] PutFile non-OOXML -> 400 400
+[PASS] PutFile agent redline (first save) 200 200
+[PASS] live row mutated in place (new hash) 
+[PASS] live row flipped to human-authored (created_by_run_id NULL) 
+[PASS] live row updated_at stamped 
+[PASS] exactly one snapshot row for the run 
+[PASS] snapshot preserves the agent's hash 
+[PASS] snapshot named '(agent draft)' deal (redlined) (agent draft).docx
+[PASS] snapshot key == row id (ADR-0005) 
+[PASS] snapshot bytes in MinIO == agent redline 
+[PASS] live bytes in MinIO == human edit 
+cleanup done
+
+=== SMOKE PASS ===

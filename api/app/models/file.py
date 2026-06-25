@@ -82,6 +82,16 @@ class File(Base):
         nullable=False,
         server_default=text("now()"),
     )
+    # Content last-modified time. NULL until the file's bytes are first mutated
+    # in place (the in-app editor's PutFile save-back, ADR-F047 Slice 3): every
+    # other write path creates a NEW row rather than mutating one, so for them
+    # ``created_at`` already IS the last-modified time. WOPI ``LastModifiedTime``
+    # therefore reads ``updated_at or created_at`` (and a save-back also makes
+    # the ``X-COOL-WOPI-Timestamp`` "changed in storage" race-check meaningful).
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

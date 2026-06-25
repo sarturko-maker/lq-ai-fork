@@ -187,6 +187,29 @@ class FakeS3Client:
         del self.objects[Key]
         return {}
 
+    async def put_object(
+        self, *, Bucket: str, Key: str, Body: bytes, ContentType: str
+    ) -> dict[str, Any]:
+        self.events.append(("put_object", {"Bucket": Bucket, "Key": Key, "Body_len": len(Body)}))
+        self.objects[Key] = Body
+        self.content_types[Key] = ContentType
+        return {}
+
+    async def copy_object(
+        self, *, Bucket: str, Key: str, CopySource: dict[str, str]
+    ) -> dict[str, Any]:
+        self.events.append(
+            ("copy_object", {"Bucket": Bucket, "Key": Key, "CopySource": CopySource})
+        )
+        src = CopySource["Key"]
+        if src not in self.objects:
+            err = RuntimeError("NoSuchKey")
+            err.response = {"Error": {"Code": "NoSuchKey"}}  # type: ignore[attr-defined]
+            raise err
+        self.objects[Key] = self.objects[src]
+        self.content_types[Key] = self.content_types.get(src, "application/octet-stream")
+        return {}
+
 
 @pytest.fixture
 def fake_s3() -> FakeS3Client:

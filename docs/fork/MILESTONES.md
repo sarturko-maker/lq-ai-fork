@@ -471,8 +471,15 @@ decision (Backlog), triggered at real deployment; engine behaviour is identical,
   `_load_visible_file` seam (token failure → **401**; file not visible → **404**; no cross-file replay).
   Locks = the `editor_locks` table (migration **0074**) with a pure state machine. **Read-only viewer**
   (`UserCanWrite=false`) — no save path yet, no data-loss window. No model calls / no gateway reach.
-- **S3** — **PutFile save-back** → a new **user-authored** `File` version (`created_by_run_id=NULL`) +
-  counts-only audit; lock enforcement.
+- **S3 ✅ (2026-06-25)** — **PutFile save-back** (`POST /wopi/files/{id}/contents`, ADR-F047 addendum):
+  session now **editable** (`UserCanWrite=true`/`SupportsUpdate=true`). Version model =
+  **snapshot-then-mutate** (maintainer's call): the agent's untouched redline is copied to a new
+  immutable `File` row (`(agent draft)`, provenance kept → C7a Documents tab) on the FIRST human save,
+  then the live row mutates in place (keeping its WOPI id + the ADR-0005 `key==id` convention) and flips
+  to `created_by_run_id=NULL`; later saves mutate only. Untrusted bytes gated by size cap (413) +
+  `guard_ooxml` + `.docx` subtype (400); lock enforced (409 + `X-WOPI-Lock`); `X-COOL-WOPI-Timestamp`
+  save-race → `409 {COOLStatusCode:1010}`; `files.updated_at` (migration **0075**) makes
+  `LastModifiedTime` honest. Counts-only audit; no model calls / no gateway reach / no new dependency.
 - **S4** — the cockpit **Editor** panel: our Vercel-style Svelte toolbar driving the canvas via
   postMessage/UNO (the reskin); resolve sub-path asset-URL hosting (the S1 finding).
 - **S5** — **"Hand back to agent"**: save → resume the run on the same `thread_id`; the agent re-reads the

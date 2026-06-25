@@ -246,6 +246,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/wopi/files/{file_id}"),
     ("POST", "/api/v1/wopi/files/{file_id}"),
     ("GET", "/api/v1/wopi/files/{file_id}/contents"),
+    # libreoffice-editor Slice 3 (fork, ADR-F047) — PutFile save-back (same path
+    # as GetFile, adds the POST method; no new OpenAPI path).
+    ("POST", "/api/v1/wopi/files/{file_id}/contents"),
     ("POST", "/api/v1/files/{file_id}/editor-session"),
     # M3-D1 — slack-bridge persistence surface (bridge-token bearer auth)
     ("POST", "/api/v1/integrations/slack/workspaces"),

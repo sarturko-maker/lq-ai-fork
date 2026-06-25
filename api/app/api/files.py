@@ -463,8 +463,8 @@ async def create_editor_session(
 ) -> EditorSessionResponse:
     """Mint a WOPI editor-session token for ``file_id`` (owner-scoped, 404 on miss).
 
-    The session is read-only this slice (the WOPI host advertises
-    ``UserCanWrite=false``); editing + save-back land in Slice 3.
+    The session is editable (the WOPI host advertises ``UserCanWrite=true`` and
+    PutFile saves back, ADR-F047 Slice 3). The cockpit launch UI is Slice 4.
     """
     file_uuid = _validate_file_id(file_id)
     row = await _load_visible_file(db, file_uuid, user.id)

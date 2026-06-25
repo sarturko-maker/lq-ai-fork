@@ -3,34 +3,65 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶ **PICKUP (2026-06-25): in-app Word editor — Slice 2 (the WOPI host) shipped on branch
-> `fork/libreoffice-editor-slice2`. Pick up Slice 3 = PutFile save-back.** Milestone **In-app Word editor —
-> Collabora / LibreOffice over WOPI (ADR-F047)**: agent redlines → lawyer edits/comments/exports in-app → hands
-> back → agent resumes (zero new agent code — the C5a path). Research `docs/fork/research/libreoffice-editor.md`
-> + Spike 0 GO; Slice 1 = the isolated `collabora` service + same-origin `/collabora/` proxy (still current — see
-> "carry" below).
+> ▶ **PICKUP (2026-06-25): in-app Word editor — Slice 3 (PutFile save-back) is COMMITTED + fully verified on
+> branch `fork/libreoffice-editor-slice3` but NOT YET pushed/PR'd/merged.** Two commits: `bbce075` (impl) +
+> `cb99692` (adversarial-review fixes). The ONLY thing outstanding at compaction was the full-suite re-run (it
+> was running in the background); finish the merge, then start Slice 4.
 >
-> **Slice 2 = the WOPI host in `api` (read half; NO web/nginx change — WOPI is server-to-server on the compose
-> net).** `app/api/wopi.py` (bare router, no user-bearer gate): **CheckFileInfo** / **GetFile** / the full **Lock
-> family** + a file-scoped **editor token** (`create_wopi_token`, `typ="wopi"`, claims sub/fid/name/exp) minted by
-> `POST /files/{id}/editor-session`. Authz = mint behind `ActiveUser`+`_load_visible_file` (cross-user→404), the
-> `fid` claim must equal the URL file id (no cross-file replay), every handler re-runs `_load_visible_file`; token
-> failure → **401**, file not visible → **404**. Locks = `editor_locks` table (mig **0074**, PK file_id, FK→files
-> CASCADE, 30-min TTL) + the pure `decide_lock` state machine; a LOCK INSERT-race re-resolves to 409 (not 500).
-> `Version`/`X-WOPI-ItemVersion` = `hash_sha256`; `OwnerId`/`UserId` = `uuid.hex` (WOPI needs alphanumeric).
-> **Read-only viewer** (`UserCanWrite=false`/`ReadOnly=true`) — no save path yet, no data-loss window. No model
-> calls / no gateway reach. New settings: `collabora_wopi_host` (WOPISrc base `http://api:8000`),
-> `wopi_token_ttl_seconds`, `collabora_post_message_origin`. **Live-proven** (rebuilt api at mig 0074):
-> mint→CheckFileInfo→GetFile→Lock lifecycle, 409-echo, 404/401 splits, PutFile→501, collabora→api reachable
-> (`docs/fork/evidence/libreoffice-slice2/`). Decisions recorded as the **ADR-F047 Slice-2 addendum**.
+> **FINISH SLICE 3 FIRST (exact steps):**
+> 1. Confirm the full non-provider api suite is green. If the background result is gone, re-run it in the dev
+>    image: `docker run --rm --network lq-ai_default -v "$PWD/api":/app -v "$PWD/skills":/skills:ro -w /app -e
+>    DATABASE_URL=postgresql+asyncpg://lq_ai:<pw>@lq-ai-postgres-1:5432/lq_ai lq-ai-api-dev bash -lc 'python -m
+>    pytest -m "not provider" -q'` (pw from `docker inspect lq-ai-postgres-1`). The pre-review-fix run was
+>    **2757 passed / 2 skipped / 0 failed**; the re-run only adds the review-fix files + 1 regression test → expect green.
+> 2. `git push -u origin fork/libreoffice-editor-slice3`.
+> 3. `gh pr create --repo sarturko-maker/lq-ai-fork --base main --head fork/libreoffice-editor-slice3` — PR body
+>    drafted at `…/scratchpad/pr-body.md` (fill the `<SUITE_RESULT>` with the re-run count). **MUST pass
+>    `--repo sarturko-maker/lq-ai-fork`** (an `upstream` remote = LegalQuants/lq-ai exists; default resolves there
+>    → ADR-F001 violation).
+> 4. Watch CI; squash-merge under the **ADR-F005 gate** when green (CI + the containerized suite counts already in
+>    the PR + this adversarial review + the live smoke). Delete the branch; `git checkout main && git pull --ff-only`.
+> 5. Update memory `libreoffice-editor-research-spike0` → "Slice 3 MERGED (PR #…, squash …)"; flip this HANDOFF to
+>    "Slice 3 merged → pick up Slice 4".
 >
-> **Slice 3 = PutFile save-back:** `POST /wopi/files/{id}/contents` with `X-WOPI-Override: PUT` → verify the lock
-> (409 + `X-WOPI-Lock` on mismatch) → `guard_ooxml` + size cap → a NEW user-authored `File` version
-> (`created_by_run_id=NULL`) → counts-only audit; flip `CheckFileInfoResponse` to `UserCanWrite=true` +
-> `SupportsUpdate=true` (editable). Carry the VibeLegalStudio quirks: JSON `LastModifiedTime` in the PutFile
-> response + the `409 {"COOLStatusCode": 1010}` ("changed in storage") AI-write-vs-editor-save backstop. Then
-> Slice 4 = cockpit editor panel + discovery→urlsrc launch + reskin (+ the sub-path asset-URL fix), Slice 5 =
-> hand-back/resume.
+> **Slice 3 verified (all green except the in-flight suite re-run):** ruff + mypy clean; migration **0075**
+> round-trip on a throwaway DB; targeted `test_wopi`+storage+meta **68 passed**; **live smoke 20/20** on the
+> rebuilt api (real MinIO+DB) incl. snapshot-then-mutate at the storage level
+> (`docs/fork/evidence/libreoffice-slice3/`); adversarial review (4-dim × verify, 11 agents) **5 confirmed / 2
+> refuted**, all confirmed folded in `cb99692`. **The live dev stack is already at mig 0075 with api+arq rebuilt on
+> the FINAL code** (the review fixes), so no rebuild is needed to merge.
+>
+> **Slice 3 what shipped (the WOPI write half; api only — no web/nginx change).** `POST /wopi/files/{id}/contents`
+> (`X-WOPI-Override: PUT`); session now **editable** (`UserCanWrite=true`/`SupportsUpdate=true`/`ReadOnly=false`).
+> **Version model = snapshot-then-mutate (maintainer's call), as TWO durable commits:** on the FIRST human save of
+> an agent redline (`created_by_run_id` set) the agent's bytes are `copy_object`'d to a NEW immutable `File` row
+> (`(agent draft)`, provenance kept → C7a Documents tab, key==id per ADR-0005) and the live row is flipped to
+> `created_by_run_id=NULL` — **committed BEFORE** the live object is overwritten — so a PutFile retry after a later
+> commit failure never re-snapshots the edited bytes. Then the live row is overwritten in place (`hash`/`size`/
+> `updated_at`). Later saves mutate only; identical-hash = no-op. Untrusted body gated: size cap → 413,
+> `guard_ooxml` (REUSED, in `pipeline/readers/_base.py`) + `ooxml_subtype=='docx'` → 400; lock via pure
+> `decide_putfile_lock` (409 + `X-WOPI-Lock`); `X-COOL-WOPI-Timestamp` save-race → `409 {"COOLStatusCode":1010}`.
+> **GetFile streams CHUNKED (no pinned Content-Length)** so it's correct across any DB/storage divergence window.
+> **`files.updated_at`** (mig **0075**, nullable) makes `LastModifiedTime = updated_at or created_at` honest.
+> Counts-only audit `editor.file_saved`; no model calls / no gateway reach / no new dependency. Decisions =
+> **ADR-F047 Slice-3 addendum**. Research `docs/fork/research/libreoffice-editor.md`; Slice 1 = isolated
+> `collabora` service + `/collabora/` proxy; Slice 2 = the WOPI read host (Slice-2 addendum).
+>
+> **NEXT = Slice 4 = the cockpit Editor panel + reskin — and the maintainer's EXPLICIT mandate (2026-06-25): this
+> slice REQUIRES a real VISUAL UI CHECK *and* my own UX JUDGEMENT, not just protocol/tests.** Build a cockpit
+> "Editor" tab that fetches Collabora's discovery → `urlsrc`, mints an editor-session (`POST
+> /files/{id}/editor-session` — already exists), launches the iframe via the hidden-form POST of `access_token` +
+> `WOPISrc`, then reskins (our Vercel-clean Svelte toolbar/chrome over the canvas; postMessage/UNO). **VERIFY
+> VISUALLY:** rebuild the prebuilt `web` bundle, open the editor in the cockpit, **screenshot the `.docx` actually
+> rendering in-iframe (light + dark, wide + narrow)**, drive an edit → Ctrl-S → confirm it round-trips through the
+> Slice-3 PutFile (the agent redline becomes a `(agent draft)` snapshot; the live doc shows the edit). **Then apply
+> UX JUDGEMENT** (does it feel like Claude Code / the fork's Vercel-charcoal design system; is the toolbar/reskin
+> clean and not Collabora-branded; is the open→edit→save→"hand back to agent" flow legible; loading/empty/error
+> states). **MUST resolve the Slice-1 finding:** coolwsd **400s on a prefixed path** so nginx strips `/collabora/`
+> and discovery emits ROOT + `https` asset URLs — emitting `/collabora/`-prefixed iframe asset URLs (proxy-prefix
+> done right / a `<base>` tag / a dedicated origin) is THE Slice-4 blocker to get the iframe to actually load.
+> Watch Collabora reskin issue #13224 (Hide_Command surface). Then Slice 5 = hand-back → agent resume (the C5a
+> read path, zero new agent code).
 >
 > **Build/licence posture (resolved, unchanged):** **Collabora is MPL-2.0, NOT AGPL** (lighter than the
 > grandfathered PyMuPDF AGPL). Dev + every integration slice run the **prebuilt `collabora/code`** pinned by
@@ -38,15 +69,16 @@ then CLAUDE.md, then the ADRs/plans named below.
 > subscription) is a deferred productionisation decision (MILESTONES Backlog). PyMuPDF-AGPL-cleanup is a separate
 > backlog slice.
 >
-> **Carry into Slice 3/4 (durable traps):** run api ruff/pytest in the **dev image** (`lq-ai-api-dev`) with
-> **`./api` mounted at `/app` AND `./skills` at `/skills:ro`** (migration 0032 seeds builtin playbooks from
-> `/skills`) on `--network lq-ai_default` with `DATABASE_URL` → postgres; ruff uses the **repo-root** `ruff.toml`
-> (mount repo root). When a migration lands, **rebuild api (+arq-worker) — api auto-migrates on boot**; NEVER
-> host-side `alembic upgrade` on the live DB; `docker image prune -f` (dangling) after a build. New api routes
-> must be added to BOTH `test_endpoints.IMPLEMENTED_ROUTES` AND `test_openapi.EXPECTED_PATHS` (+ bump the hardcoded
-> path count) or the meta-tests fail. The `collabora/code` image ships **only bash**; the sandbox runs on **MKNOD
-> alone**; coolwsd **400s on a prefixed path** so nginx strips `/collabora/` and emitting prefixed iframe asset
-> URLs is the **Slice-4** task. Rebuild the prebuilt `web` bundle before debugging any UI/nginx change.
+> **Carry into Slice 4 (durable traps):** run api ruff/pytest in the **dev image** (`lq-ai-api-dev`) with
+> **`./api` mounted at `/app` AND `./skills` at `/skills:ro`** on `--network lq-ai_default` with `DATABASE_URL` →
+> postgres; ruff uses the **repo-root** `ruff.toml` (mount repo root). Web: `cd web && npm run check && npm run
+> test:frontend`; **rebuild the prebuilt `web` container before any UI/Cypress check** (it serves a built bundle).
+> Cockpit Cypress nav: narrow needs `lq-cockpit-new-conversation` first; tabs use `class:hidden` (no-remount
+> invariant); `{@html}` only via `renderModelMarkdown`. When a migration lands, rebuild api (+arq-worker) — api
+> auto-migrates on boot; NEVER host-side `alembic upgrade` on the live DB; `docker image prune -f` (dangling) after
+> a build. New api routes → BOTH `test_endpoints.IMPLEMENTED_ROUTES` AND `test_openapi.EXPECTED_PATHS` (a GET+POST
+> on the same path string is ONE OpenAPI path). `gh pr create` → **`--repo sarturko-maker/lq-ai-fork`**. The
+> `collabora/code` image ships **only bash**; the sandbox runs on **MKNOD alone**.
 
 ## North star (the goal, not a prompt)
 

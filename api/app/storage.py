@@ -469,12 +469,69 @@ async def upload_bytes(*, storage_path: str, body: bytes, content_type: str) -> 
     bucket = settings.s3_bucket
 
     async with s3_client() as s3:
-        await s3.put_object(
-            Bucket=bucket,
-            Key=storage_path,
-            Body=body,
-            ContentType=content_type,
-        )
+        try:
+            await s3.put_object(
+                Bucket=bucket,
+                Key=storage_path,
+                Body=body,
+                ContentType=content_type,
+            )
+        except Exception as exc:
+            log.warning(
+                "put_object failed",
+                extra={
+                    "event": "storage_put_object_failed",
+                    "bucket": bucket,
+                    "storage_path": storage_path,
+                    "error": str(exc),
+                },
+            )
+            raise InternalError(
+                "Failed to write object to object storage",
+                details={"storage_path": storage_path},
+            ) from exc
+
+
+async def copy_object(*, source_path: str, dest_path: str) -> None:
+    """Server-side copy of an object within the bucket (no bytes through api).
+
+    Used by the editor save-back (ADR-F047 Slice 3): before overwriting the
+    live object with the lawyer's edited bytes, the agent's untouched redline is
+    snapshotted to a new key (``str(snapshot_id)``) so it survives as an
+    immutable prior version (key == row id, per ADR 0005). Copy-first ordering
+    is the data-safety invariant — the old bytes exist at the snapshot key
+    before the live key is overwritten, so a crash never loses them.
+
+    A missing source raises (the caller is mutating a file it just loaded, so
+    this should not happen; surface it rather than silently produce an empty
+    snapshot).
+    """
+
+    settings = get_settings()
+    bucket = settings.s3_bucket
+
+    async with s3_client() as s3:
+        try:
+            await s3.copy_object(
+                Bucket=bucket,
+                Key=dest_path,
+                CopySource={"Bucket": bucket, "Key": source_path},
+            )
+        except Exception as exc:
+            log.warning(
+                "copy_object failed",
+                extra={
+                    "event": "storage_copy_object_failed",
+                    "bucket": bucket,
+                    "source_path": source_path,
+                    "dest_path": dest_path,
+                    "error": str(exc),
+                },
+            )
+            raise InternalError(
+                "Failed to copy object in object storage",
+                details={"dest_path": dest_path},
+            ) from exc
 
 
 async def presigned_get_url(*, storage_path: str, expires_in_seconds: int) -> str:

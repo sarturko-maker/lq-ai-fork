@@ -132,3 +132,57 @@ governs the editor):
   `collabora_wopi_host` (WOPISrc base = `http://api:8000`), `wopi_token_ttl_seconds`,
   `collabora_post_message_origin`. No `docker-compose.yml`/nginx change (WOPI is server-to-server
   on the compose network).
+
+## Addendum — Slice 3: PutFile save-back (2026-06-25)
+
+Slice 3 made the session **editable** and added WOPI `PutFile`
+(`POST /wopi/files/{id}/contents`, `X-WOPI-Override: PUT`) so the lawyer's edits in Collabora save
+back. `CheckFileInfo` now advertises `UserCanWrite=true` / `SupportsUpdate=true` / `ReadOnly=false`
+(`PutRelativeFile`/`RenameFile` stay disabled via `UserCanNotWriteRelative`). The architectural call
+the kickoff flagged — **the version model** — was decided by the maintainer:
+
+- **Version model = snapshot-then-mutate** (chosen over mutate-in-place-no-history and the rejected
+  new-row-only, which would leave the editor's `WOPISrc` serving stale bytes on reload). WOPI requires
+  the **row id** in the `WOPISrc` URL to keep serving the latest bytes; the **storage key** is
+  internal, so we keep the ADR-0005 `key == row id` convention for *both* rows. On the **first** human
+  save of an agent redline (`created_by_run_id` set), the agent's current bytes are **copied to a new
+  immutable `File` row** (key `str(snapshot_id)`, provenance `created_by_run_id` carried over, name
+  `… (agent draft).docx` → visible in the C7a Documents tab) **before** the live object is overwritten;
+  the live row keeps its id, is mutated in place (new `hash`/`size`/`updated_at`), and flips to
+  `created_by_run_id = NULL` (human-authored). Later saves just mutate in place (no per-autosave
+  snapshot). A no-op autosave (identical hash) writes nothing and does not flip provenance. **Why:**
+  the editor stays coherent across reloads AND the agent's work product is preserved as a recoverable
+  prior version — the data-loss risk a plain mutate-in-place carries for legal work.
+- **Data-safety ordering = two durable steps** (refined in adversarial review). Storage and DB are not
+  one transaction, so the save-back is two commits so that a partial failure + the client's PutFile
+  retry can neither re-snapshot the edited bytes nor lose the edit: **(1)** on the first human save,
+  copy the agent's current bytes to the snapshot key (copy-first), then **commit the snapshot row +
+  the provenance flip (`created_by_run_id → NULL`) BEFORE any overwrite**; **(2)** overwrite the live
+  object, then commit the new `hash`/`size`/`updated_at`. Because the provenance flip is durable before
+  the overwrite, a retry after a step-2 failure sees `created_by_run_id=NULL` and skips the snapshot
+  entirely (it never copies the already-overwritten edited bytes under the agent's provenance — the bug
+  a single-transaction ordering would have had). The overwrite precedes its own commit, so the edit is
+  durable in storage before it is recorded; a step-2 commit failure self-heals on the idempotent retry.
+  If step-1's commit fails the snapshot copy is a row-less orphan and is best-effort deleted (the live
+  object is untouched).
+- **GetFile streams chunked** (no pinned `Content-Length`). The row's `size_bytes` and the stored bytes
+  are separate sources; during the brief self-healing window after a step-2 commit failure they can
+  disagree, so pinning Content-Length to the row would emit a malformed response. Letting the ASGI
+  layer use chunked transfer-encoding keeps the declared length equal to the bytes actually streamed
+  (Collabora handles chunked GetFile). The same DB-vs-storage window theoretically affects the C7a
+  `GET /files/{id}/content` download; that is a manual, rare path and is left as-is (a fix there would
+  drop the download size header) — deferred, on record.
+- **`files.updated_at`** (migration `0075`, nullable, additive) is the in-place save's last-modified
+  stamp. PutFile is the only path that mutates bytes in place (every other path creates a new row), so
+  `LastModifiedTime = updated_at or created_at` is now honest, and the **`X-COOL-WOPI-Timestamp`
+  save-race backstop** (→ `409 {"COOLStatusCode": 1010}` when the stored file changed since the editor
+  loaded it) is meaningful. PutFile's JSON response carries the new `LastModifiedTime` (the documented
+  Collabora quirk).
+- **Untrusted upload surface.** The PutFile body is browser-supplied bytes → a size cap
+  (`lq_ai_max_upload_size_mb`, streamed → 413), the existing `guard_ooxml` (zip-bomb / XXE → 400), and
+  a `ooxml_subtype == "docx"` check (reject a renamed `.xlsx`/`.pptx` → 400) gate every save. Lock
+  enforcement reuses a pure `decide_putfile_lock` (held-lock mismatch → 409 + `X-WOPI-Lock` echo;
+  unlocked or matching → proceed). Counts-only audit `editor.file_saved`. No model calls; no migration
+  beyond `0075`; no new dependency (`copy_object` added to `app/storage.py`). Re-ingestion of edited
+  content (RAG re-index) and a view/edit session toggle are out of scope (backlog); the agent-resume
+  loop reads the `.docx` bytes directly (Adeu), so it is unaffected.
