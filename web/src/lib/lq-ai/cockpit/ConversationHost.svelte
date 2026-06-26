@@ -10,7 +10,7 @@
 	 * legacy threads stay readable and continuable, new conversations
 	 * start inside a matter.
 	 */
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
@@ -29,7 +29,9 @@
 	import RopaRegister from '$lib/lq-ai/components/ropa/RopaRegister.svelte';
 	import MemoryPanel from '$lib/lq-ai/components/matter/MemoryPanel.svelte';
 	import DocumentsPanel from '$lib/lq-ai/components/matter/DocumentsPanel.svelte';
-	import DocumentEditorPanel from '$lib/lq-ai/components/matter/DocumentEditorPanel.svelte';
+	import DocumentEditorPanel, {
+		handBackInstruction
+	} from '$lib/lq-ai/components/matter/DocumentEditorPanel.svelte';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import NewMatterDialog from './NewMatterDialog.svelte';
 	import StatusPill from './StatusPill.svelte';
@@ -307,6 +309,21 @@
 	function closeEditor() {
 		editorOpen = false;
 		editorFileId = null;
+	}
+
+	// ADR-F047 Slice 5 "Done — hand back": the editor has confirmed the save. Return
+	// control to the conversation — close the editor, bring the conversation into view,
+	// and prime the composer with an editable suggested instruction. The lawyer's own
+	// chat message resumes the run (the existing submit() → createRun({prompt, thread_id})
+	// path); on the next turn the agent calls review_edited_document to re-read the edits.
+	async function handBackFromEditor(filename: string) {
+		closeEditor();
+		if (isStacked) stackedShowPanel = true;
+		prompt = handBackInstruction(filename);
+		// Focus the composer so the lawyer can edit/send immediately (best-effort;
+		// the conversation pane must be mounted first).
+		await tick();
+		document.getElementById('ag-prompt')?.focus();
 	}
 
 	// The agent just produced a redline → slide the editor in automatically
@@ -625,6 +642,7 @@
 					fileId={editorFileId}
 					filename={editorFilename}
 					onClose={closeEditor}
+					onHandBack={handBackFromEditor}
 				/>
 			</div>
 		{/if}

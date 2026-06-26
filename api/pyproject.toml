@@ -297,7 +297,7 @@ ignore_missing_imports = true
 # lazily inside app.pipeline.readers.* and used at runtime. C2 adds oxmsg
 # (.msg) — also stub-less, lazy-imported inside MsgReader.
 [[tool.mypy.overrides]]
-module = ["docx", "docx.*", "pptx", "pptx.*", "openpyxl", "openpyxl.*", "oxmsg", "oxmsg.*"]
+module = ["docx", "docx.*", "pptx", "pptx.*", "openpyxl", "openpyxl.*", "oxmsg", "oxmsg.*", "lxml", "lxml.*"]
 ignore_missing_imports = true
 
 # C4 (COMM) — Adeu ships no usable type stubs (no py.typed). Imported lazily

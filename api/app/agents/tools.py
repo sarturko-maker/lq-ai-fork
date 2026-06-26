@@ -36,19 +36,25 @@ tier floor travels on the run's gateway envelope instead
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.selectable import Select
 
+from app import storage
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.models.document import Document
 from app.models.file import File
 from app.models.project import ProjectFile
+from app.pipeline.readers._base import OOXML_DOCX_MIME, guard_ooxml, ooxml_subtype
+
+logger = logging.getLogger(__name__)
 
 # Top-k passages per search; chunks are paragraph-sized so 8 keeps the
 # tool result well inside the model's working context.
@@ -262,6 +268,102 @@ def _matter_files_query(binding: MatterBinding, *columns: Any) -> Select[Any]:
             File.deleted_at.is_(None),
         )
     )
+
+
+# Defense cap on a .docx we'll buffer into memory (parse / redline). The upload
+# cap is larger; a deal contract or policy is well under this.
+_MAX_DOCX_BYTES = 25 * 1024 * 1024
+
+
+async def fetch_matter_docx(
+    db: AsyncSession, binding: MatterBinding, document_name: str
+) -> Row[Any] | None:
+    """Resolve one matter document by filename (owner + matter scoped).
+
+    Mirrors ``read_document``'s resolution: prefer an ingested (readable) copy,
+    then the most recently added. Returns ``None`` when no such document exists
+    in this matter (cross-user is the same 404-conflated absence — ADR-F035).
+
+    Generic (any area): shared by the Commercial redline/negotiation read+write
+    tools and the area-agnostic ``review_edited_document`` re-read (ADR-F047 S5).
+    """
+    wanted = document_name.strip()
+    stmt = (
+        _matter_files_query(
+            binding,
+            File.id.label("file_id"),
+            File.filename,
+            File.mime_type,
+            File.storage_path,
+            Document.id.label("document_id"),
+            Document.normalized_content,
+        )
+        .where(func.lower(File.filename) == wanted.lower())
+        .order_by(
+            Document.id.is_(None),
+            func.coalesce(ProjectFile.attached_at, File.created_at).desc(),
+        )
+    )
+    rows = (await db.execute(stmt)).all()
+    return rows[0] if rows else None
+
+
+async def download_matter_docx(storage_path: str) -> bytes | None:
+    """Buffer a .docx's bytes from object storage (size-capped). ``None`` on cap/error."""
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        async with storage.stream_download(storage_path=storage_path) as stream:
+            async for chunk in stream:
+                total += len(chunk)
+                if total > _MAX_DOCX_BYTES:
+                    logger.warning(
+                        "matter docx exceeds cap",
+                        extra={"event": "matter_docx_too_large", "bytes": total},
+                    )
+                    return None
+                chunks.append(chunk)
+    except Exception:
+        logger.warning(
+            "matter docx download failed",
+            extra={"event": "matter_docx_download_failed"},
+        )
+        return None
+    return b"".join(chunks)
+
+
+async def load_matter_docx_bytes(
+    db: AsyncSession, binding: MatterBinding, document_name: str
+) -> tuple[Row[Any], bytes] | str:
+    """Fetch a matter ``.docx`` (owner+matter scoped, 404-conflated) and return its
+    safety-checked bytes, or a fix-and-retry STRING.
+
+    Generic (any area): the Commercial negotiation read/respond tools and the
+    area-agnostic ``review_edited_document`` re-read both load through here so the
+    matter-scope + OOXML safety gate lives in one place (the redline path inlines
+    the same steps in ``_render_redline``)."""
+    row = await fetch_matter_docx(db, binding, document_name.strip())
+    if row is None:
+        return (
+            f'No document named "{document_name}" in this matter. Use search_documents '
+            "(empty query) to list the matter's documents."
+        )
+    if row.mime_type != OOXML_DOCX_MIME:
+        return f'"{row.filename}" is not a Word .docx (it is {row.mime_type}).'
+    data = await download_matter_docx(row.storage_path)
+    if data is None:
+        return f'"{row.filename}" could not be read from storage. Try again shortly.'
+    if ooxml_subtype(data) != "docx":
+        return f'"{row.filename}" is not a valid .docx.'
+    try:
+        guard_ooxml(data)
+    except Exception:
+        logger.warning(
+            "matter docx failed OOXML safety checks",
+            extra={"event": "matter_docx_unsafe_ooxml"},
+        )
+        return f'"{row.filename}" failed .docx safety checks and was not read.'
+    return row, data
 
 
 async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -> str:

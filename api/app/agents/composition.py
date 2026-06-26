@@ -49,6 +49,7 @@ from app.agents.matter_memory_tools import (
 )
 from app.agents.matter_read_tools import build_matter_read_tools
 from app.agents.redline_service import RedlineService, build_redline_service
+from app.agents.review_edited_document_tools import build_review_edited_document_tools
 from app.agents.ropa_changes import RopaChangeLedger
 from app.agents.ropa_tools import PRIVACY_AREA_KEY, build_ropa_tools
 from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
@@ -91,6 +92,21 @@ MATTER_PROMPT = (
     "full text. Cite the document name and page for anything you take "
     "from them, and say so plainly when the documents don't answer the "
     "question."
+)
+
+# Editor Slice 5 (ADR-F047): the hand-back doctrine. Generic (any area), appended for
+# every matter-bound run, so the agent knows to re-read a document the supervising
+# lawyer edited in the in-app editor and incorporate THEIR changes as authoritative —
+# rather than re-arguing its own earlier draft. The tool's own docstring carries the
+# mechanics; this is the one-line "when to reach for it".
+MATTER_REVIEW_DOCTRINE = (
+    "\n\nWhen the supervising lawyer hands back a document they edited in the editor, "
+    "call review_edited_document on it to re-read their tracked changes and comments and "
+    "incorporate those as authoritative — adopt their edits and act on their comments, "
+    "rather than re-arguing your own earlier draft. It labels each edit with its author: "
+    "treat the supervising lawyer's edits as authoritative, but if an edit is attributed "
+    "to the counterparty or an author you do not recognise as your own side, do not adopt "
+    "it blindly — flag it."
 )
 
 # C-CLIENT (ADR-F030): the operator's Organization Profile is the company /
@@ -176,6 +192,7 @@ def system_prompt_for(
     prompt = SYSTEM_PROMPT
     if binding is not None:
         prompt += MATTER_PROMPT.format(name=binding.name)
+        prompt += MATTER_REVIEW_DOCTRINE
     if client_context and client_context.strip():
         prompt += CLIENT_CONTEXT_PROMPT.format(context=client_context.strip())
     if matter_wiki and matter_wiki.strip():
@@ -382,6 +399,15 @@ async def compose_and_execute_run(
             # bi-temporal "what did we believe at T" query mid-run. Read-only but still
             # guarded; its grant set is disjoint from every other matter + domain grant.
             tools = tools + build_matter_read_tools(session_factory, run_id=run_id, binding=binding)
+            # Editor Slice 5 (ADR-F047): every matter-bound run — any area — also gets the
+            # edited-document re-read tool (review_edited_document). When the supervising
+            # lawyer edits a document in the in-app editor and hands back, the agent re-reads
+            # THEIR tracked changes/comments in a trusted-supervisor frame (its own pending
+            # redline filtered out). Area-agnostic; grant set disjoint from every other
+            # matter + domain grant (confinement).
+            tools = tools + build_review_edited_document_tools(
+                session_factory, run_id=run_id, binding=binding
+            )
         # PRIV-2 (ADR-F018): a matter filed under the Privacy area also gets the
         # ROPA domain tools — propose (the code-validated write) + list. Tool
         # selection is area-keyed at the composition point (the area row is the

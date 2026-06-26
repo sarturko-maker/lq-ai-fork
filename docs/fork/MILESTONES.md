@@ -440,7 +440,7 @@ gateway MCP tool-provider adapter (egress + discovery) → M2 api MCP registry +
 grants (mirror the `composition.py` area-keyed grant; MCP tools pass `guarded_dispatch`) → M4 per-user OAuth
 (Fernet at rest) → M5 first live external tool end-to-end on DeepSeek.
 
-## In-app Word editor — Collabora / LibreOffice over WOPI (ADR-F047; started 2026-06-25)
+## In-app Word editor — Collabora / LibreOffice over WOPI (ADR-F047; 2026-06-25 → ✅ COMPLETE 2026-06-26)
 
 **Why.** After the agent redlines a `.docx`, the lawyer should view / edit / comment / export it **inside the
 tool**, then hand it back so the agent **resumes reading the markup** — the Harvey/Legora "review in-product"
@@ -494,13 +494,40 @@ decision (Backlog), triggered at real deployment; engine behaviour is identical,
   (`(agent draft)` snapshot + live doc mutated + `editor.file_saved` audit). Evidence
   `docs/fork/evidence/libreoffice-slice4/`. **Deferred (incremental):** charcoal toolbar theming
   (`css_variables`) + reliable menubar-hide.
-- **S5** — **"Hand back to agent"**: save → resume the run on the same `thread_id`; the agent re-reads the
-  lawyer's tracked changes + comments via the existing **C5a** path — **zero new agent code**.
+- **S4b ✅ (2026-06-26)** — editor-panel **polish** (ADR-F047 Slice-4b addendum; frontend + compose only):
+  the 4 maintainer-reported UX defects — editor pane → **2/3** (`flex-[2_1_0%]` + the load-bearing
+  `<section> w-full`), Collabora popups suppressed (`--o:home_mode.enable`), and a **client-side iterative
+  fit-to-width** (poll + ResizeObserver off the same-origin map; `nextFitAction` grows to a 92–99% band).
+  Evidence `docs/fork/evidence/libreoffice-slice4b/`.
+- **S5 ✅ (2026-06-26)** — **"Done — hand back to agent"** (ADR-F047 Slice-5 addendum). The lawyer clicks
+  **Done — hand back** → the doc is saved → the editor closes and the conversation composer is **primed +
+  focused** with an editable instruction naming the document; the lawyer sends it (the existing
+  `createRun({prompt, thread_id})` path resumes the run on the same thread) and the agent re-reads their
+  edits. **Resume is real** — the agent-run subsystem already continues a thread via the langgraph
+  checkpointer (the "single-turn" blocker is the legacy *chat* endpoint, not agent runs). **"Zero new agent
+  code" proved too optimistic** (maintainer-confirmed): C5a `extract_counterparty_position` frames markup as
+  the *untrusted other side* — wrong for a *trusted supervising lawyer* — so this slice adds a thin
+  **generic, area-agnostic** re-read tool **`review_edited_document`** (granted to every matter-bound run
+  beside the matter-memory tools): it reuses the proven Adeu parse (`read_state_of_play`) in a TRUSTED frame
+  and **filters out the agent's own still-pending redline** (author == `DEFAULT_AUTHOR`). The matter-docx
+  loaders were factored from `commercial_tools` into the generic `tools.py` (DRY). **Track-changes
+  prerequisite:** an Adeu redline carries tracked content but not the `<w:trackChanges/>` recording flag, so
+  the editor would open with recording OFF and the lawyer's edits would be untracked — fixed deterministically
+  by `ensure_track_changes_recording` (forces the flag in the redline output's `settings.xml`, surgical +
+  idempotent). No migration / no new HTTP route / no new dependency. **Live-verified** (headed Cypress):
+  evidence `docs/fork/evidence/libreoffice-slice5/`. **→ The editor milestone is COMPLETE** (the production
+  licence posture remains the deferred Backlog decision below).
 
 ## Backlog
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+- **Authorship / "who's on our team" identity model (surfaced 2026-06-26, maintainer, in editor S5).**
+  The S5 `review_edited_document` filter equates "ours" with the single agent author `DEFAULT_AUTHOR`
+  ("LQ.AI Commercial counsel") — naive: it can't tell one operator-side lawyer from another, and treats
+  every non-agent author as "the supervising lawyer". A proper model (the operator's team / authorised
+  reviewers vs. the counterparty) would let the agent distinguish our-side edits, counterparty edits, and
+  a specific lawyer's edits across rounds. Its own slice + likely an ADR; supersedes the naive filter.
 - **Search past chat within a matter (ALL areas, not just Commercial) — surfaced 2026-06-22 (maintainer,
   during C3 design).** Retrieval over a matter's prior conversations so the agent (and the lawyer) can find
   "what did we say about the indemnity last week" without re-reading every thread. Distinct from the matter

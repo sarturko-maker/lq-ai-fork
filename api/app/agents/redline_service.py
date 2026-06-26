@@ -57,13 +57,111 @@ from __future__ import annotations
 
 import io
 import logging
+import zipfile
 from dataclasses import dataclass
 from typing import Any
+
+from lxml import etree
 
 logger = logging.getLogger(__name__)
 
 # Author stamped on every tracked change + comment (visible in Word's review pane).
 DEFAULT_AUTHOR = "LQ.AI Commercial counsel"
+
+# The OOXML settings part + the WordprocessingML namespace (ECMA-376 §17).
+_SETTINGS_PART = "word/settings.xml"
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_W = f"{{{_W_NS}}}"
+# CT_Settings (§17.15.1.78) is an ORDERED sequence; ``trackChanges`` (§17.15.1.93)
+# sits late in it. These local-names all come AFTER ``trackChanges``, so inserting the
+# new element before the first one present keeps the sequence schema-valid (a superset
+# is safe — we insert before the earliest later element).
+_AFTER_TRACK_CHANGES = frozenset(
+    {
+        "doNotTrackMoves",
+        "doNotTrackFormatting",
+        "documentProtection",
+        "autoFormatOverride",
+        "styleLockTheme",
+        "styleLockQFSet",
+        "defaultTabStop",
+        "autoHyphenation",
+        "consecutiveHyphenLimit",
+        "hyphenationZone",
+        "doNotHyphenateCaps",
+        "characterSpacingControl",
+        "savePreviewPicture",
+        "doNotValidateAgainstSchema",
+        "saveInvalidXml",
+        "ignoreMixedContent",
+        "alwaysShowPlaceholderText",
+        "updateFields",
+        "hdrShapeDefaults",
+        "footnotePr",
+        "endnotePr",
+        "compat",
+        "rsids",
+        "mathPr",
+        "themeFontLang",
+        "clrSchemeMapping",
+        "shapeDefaults",
+        "decimalSymbol",
+        "listSeparator",
+    }
+)
+# Hardened parser — settings.xml is derived from an (already guard_ooxml'd) upload, but
+# parse it with entity resolution + network access OFF as defense in depth (no XXE).
+_SETTINGS_PARSER = etree.XMLParser(resolve_entities=False, no_network=True)
+
+
+def ensure_track_changes_recording(docx_bytes: bytes) -> bytes:
+    """Force document-wide "Record Changes" ON in a redline's ``settings.xml`` so a
+    supervising lawyer's edits in the in-app editor are captured as TRACKED changes
+    (ADR-F047 Slice 5). Adeu emits tracked *content* (``w:ins``/``w:del``) but not the
+    ``<w:trackChanges/>`` recording flag, so without this the editor opens with recording
+    OFF and the lawyer's edits would be untracked — invisible to ``review_edited_document``.
+
+    Three cases: no ``trackChanges`` element → insert one (schema-ordered); an explicit
+    OFF (``w:val`` in {false, 0, off}, as Word writes when a user toggles tracking off) →
+    flip it ON by dropping the ``w:val`` (a bare element defaults ON); already ON → no-op.
+
+    Surgical + safe: rewrite ONLY ``settings.xml`` (every other part byte-identical),
+    and graceful — any failure returns the original bytes, so the redline still ships and
+    the hand-back simply degrades to the clean view."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(docx_bytes)) as zin:
+            names = zin.namelist()
+            if _SETTINGS_PART not in names:
+                return docx_bytes
+            entries = [(name, zin.read(name)) for name in names]
+        settings = next(d for n, d in entries if n == _SETTINGS_PART)
+        root = etree.fromstring(settings, _SETTINGS_PARSER)
+        existing = root.find(f"{_W}trackChanges")
+        if existing is not None:
+            val = existing.get(f"{_W}val")
+            if val is None or val.lower() not in ("false", "0", "off"):
+                return docx_bytes  # already recording → byte-identical no-op
+            del existing.attrib[f"{_W}val"]  # explicit OFF → flip ON (bare element = on)
+        else:
+            el = root.makeelement(f"{_W}trackChanges", {})
+            insert_at = len(root)
+            for i, child in enumerate(root):
+                if etree.QName(child).localname in _AFTER_TRACK_CHANGES:
+                    insert_at = i
+                    break
+            root.insert(insert_at, el)
+        new_settings = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+            for name, data in entries:
+                zout.writestr(name, new_settings if name == _SETTINGS_PART else data)
+        return out.getvalue()
+    except Exception:
+        logger.warning(
+            "could not force track-changes recording on the redline",
+            extra={"event": "redline_trackchanges_force_failed"},
+        )
+        return docx_bytes
 
 
 @dataclass(frozen=True)
@@ -139,7 +237,10 @@ class RedlineService:
         engine = RedlineEngine(io.BytesIO(docx_bytes), author=self._author)
         applied, skipped = engine.apply_edits(self._word_diff_edits(engine, edits))
         return RedlineApplyResult(
-            docx_bytes=_engine_bytes(engine),
+            # Force "Record Changes" ON so the lawyer's later edits in the editor are
+            # captured as tracked changes (ADR-F047 Slice 5 hand-back) — Adeu emits the
+            # tracked content but not the recording flag.
+            docx_bytes=ensure_track_changes_recording(_engine_bytes(engine)),
             edits_applied=applied,
             edits_skipped=skipped,
         )
