@@ -213,6 +213,36 @@ async def test_update_replaces_aliases(
     assert aliases == ["new@acme.com"]  # replaced; display name excluded
 
 
+async def test_update_rename_with_aliases_preserves_old_name(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """SF2: a simultaneous rename + aliases edit (what the panel always sends) must keep
+    the OLD name as an alias so prior edits under it still match."""
+    project = await _make_project(db_session, db_user)
+    entry = MatterParticipant(
+        project_id=project.id,
+        user_id=db_user.id,
+        display_name="Jane",
+        side="ours",
+        aliases=["jsmith@acme.com"],
+        trust="inferred",
+    )
+    db_session.add(entry)
+    await db_session.flush()
+
+    resp = await client.patch(
+        f"{_roster_url(project.id)}/{entry.id}",
+        json={"display_name": "Jane Smith", "aliases": ["jsmith@acme.com"]},
+        headers=_h(db_user),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["display_name"] == "Jane Smith"
+    # The old display name 'Jane' is folded into aliases (not clobbered by the replace).
+    assert "Jane" in body["aliases"]
+    assert "jsmith@acme.com" in body["aliases"]
+
+
 async def test_retire_is_soft_then_404(
     client: AsyncClient, db_session: AsyncSession, db_user: User
 ) -> None:

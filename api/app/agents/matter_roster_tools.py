@@ -353,7 +353,9 @@ def _aliases_excluding_name(display_name: str, *lists: list[str]) -> list[str]:
     """
     flat = [a for lst in lists for a in (lst or [])]
     dn = _normalize(display_name)
-    return [a for a in clean_alias_list(flat) if _normalize(a) != dn]
+    # clamp=True: a merge of already-validated sets must never crash the guarded tool on
+    # the count cap (reject-not-crash) — it is internal upkeep, not a fresh proposal.
+    return [a for a in clean_alias_list(flat, clamp=True) if _normalize(a) != dn]
 
 
 async def _list_matter_roster(db: AsyncSession, binding: MatterBinding) -> str:

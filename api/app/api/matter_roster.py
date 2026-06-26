@@ -114,7 +114,9 @@ class ParticipantUpdateRequest(BaseModel):
 class ParticipantRetireResponse(BaseModel):
     """The outcome of a human remove: the entry id + when it left the active roster.
 
-    Idempotent — a second remove returns the original instant rather than moving it.
+    A removed participant drops off the active roster, so a second remove of the same id
+    is a 404 (it reads as absent) — unlike the memory-tier correction/fact retires, which
+    are idempotent on a still-present row.
     """
 
     id: uuid.UUID
@@ -137,9 +139,14 @@ def _to_read(p: MatterParticipant) -> ParticipantRead:
 
 
 def _aliases_excluding_name(display_name: str, aliases: list[str]) -> list[str]:
-    """Store aliases as the extra match strings minus the display name (it always matches)."""
+    """Store aliases as the extra match strings minus the display name (it always matches).
+
+    ``clamp=True``: a rename folds the old name into the (already-validated) alias set,
+    which can tip a near-cap entry over — clamp rather than 500 (the request validator
+    already rejected an over-count *proposal*; this is internal upkeep).
+    """
     dn = display_name.strip().casefold()
-    return [a for a in clean_alias_list(aliases) if a.strip().casefold() != dn]
+    return [a for a in clean_alias_list(aliases, clamp=True) if a.strip().casefold() != dn]
 
 
 async def _load_active_participant(
@@ -238,6 +245,11 @@ async def update_matter_participant(
     entry = await _load_active_participant(db, project.id, entry_id)
 
     fields = payload.model_fields_set
+    # Apply the aliases REPLACE first (the panel sends the full list), so a simultaneous
+    # rename below can still fold the OLD name into the set — if display_name ran first,
+    # the replace would clobber that preservation (the panel always sends both fields).
+    if "aliases" in fields:
+        entry.aliases = _aliases_excluding_name(entry.display_name, payload.aliases or [])
     if "display_name" in fields and payload.display_name is not None:
         # Preserve the old name as an alias so prior edits under it still match.
         entry.aliases = _aliases_excluding_name(
@@ -252,9 +264,6 @@ async def update_matter_participant(
         entry.organization = payload.organization
     if "source_citation" in fields:
         entry.source_citation = payload.source_citation
-    if "aliases" in fields:
-        # Replace the alias set (the panel sends the full list), minus the display name.
-        entry.aliases = _aliases_excluding_name(entry.display_name, payload.aliases or [])
 
     # A human edit (re)confirms the entry — it becomes lawyer-owned (B2).
     entry.trust = "confirmed"

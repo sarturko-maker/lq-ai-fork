@@ -248,6 +248,10 @@ def _change_lines(changes: list[TrackedChange]) -> list[str]:
     return lines
 
 
+def _comment_lines(comments: list[CounterpartyComment]) -> list[str]:
+    return [f'- [{cm.ref}] {cm.author}: "{cm.text}"' for cm in comments]
+
+
 def _render_supervised_edits(filename: str, state: StateOfPlay, edits: _ClassifiedEdits) -> str:
     """The model-facing checklist of the handed-back edits, classified by side (ADR-F048).
 
@@ -280,7 +284,7 @@ def _render_supervised_edits(filename: str, state: StateOfPlay, edits: _Classifi
         lines += _change_lines(edits.ours_changes)
     if edits.ours_comments:
         lines += ["", "OUR SIDE'S COMMENTS — act on each:"]
-        lines += [f'- [{cm.ref}] {cm.author}: "{cm.text}"' for cm in edits.ours_comments]
+        lines += _comment_lines(edits.ours_comments)
     if edits.counterparty_changes or edits.counterparty_comments:
         lines += [
             "",
@@ -289,7 +293,7 @@ def _render_supervised_edits(filename: str, state: StateOfPlay, edits: _Classifi
             "lawyer):",
         ]
         lines += _change_lines(edits.counterparty_changes)
-        lines += [f'- [{cm.ref}] {cm.author}: "{cm.text}"' for cm in edits.counterparty_comments]
+        lines += _comment_lines(edits.counterparty_comments)
     if edits.unknown_changes or edits.unknown_comments:
         names = ", ".join(edits.unknown_authors)
         lines += [
@@ -300,7 +304,7 @@ def _render_supervised_edits(filename: str, state: StateOfPlay, edits: _Classifi
             "Their items:",
         ]
         lines += _change_lines(edits.unknown_changes)
-        lines += [f'- [{cm.ref}] {cm.author}: "{cm.text}"' for cm in edits.unknown_comments]
+        lines += _comment_lines(edits.unknown_comments)
     lines += [
         "",
         "Incorporate our side's edits into your work product; handle counterparty and "

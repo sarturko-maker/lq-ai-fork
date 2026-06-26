@@ -351,14 +351,20 @@ class MatterParticipantSide(StrEnum):
     UNKNOWN = "unknown"  # not yet identified → ask the user before trusting their edits
 
 
-def clean_alias_list(value: list[str] | None) -> list[str]:
+def clean_alias_list(value: list[str] | None, *, clamp: bool = False) -> list[str]:
     """Normalise a proposed alias list — strip, drop blanks, case-insensitive dedupe.
 
     The aliases are the match set (author strings / emails). Stored in display form
     (stripped) and matched case-insensitively downstream, so we dedupe case-insensitively
-    here (keep first form seen). Reject (raise) an over-long alias or an over-count list
-    — never truncate (ADR-F018). ``None``/empty → ``[]`` (a participant may have no
-    alias yet; the display name still matches).
+    here (keep first form seen). Reject (raise) an over-long alias — never truncate a
+    single value (ADR-F018). ``None``/empty → ``[]`` (a participant may have no alias yet;
+    the display name still matches).
+
+    The over-COUNT cap depends on the caller: validating a fresh PROPOSAL rejects (raise)
+    so the model/lawyer fixes it; an internal MERGE of two already-validated sets (the
+    agent re-recording someone, or a rename folding the old name in) passes ``clamp=True``
+    to keep the first ``MATTER_PARTICIPANT_MAX_ALIASES`` rather than crash the guarded tool
+    / 500 the endpoint — merge upkeep is not a user proposal to reject.
     """
     if not value:
         return []
@@ -379,6 +385,8 @@ def clean_alias_list(value: list[str] | None) -> list[str]:
         seen.add(key)
         cleaned.append(item)
     if len(cleaned) > MATTER_PARTICIPANT_MAX_ALIASES:
+        if clamp:
+            return cleaned[:MATTER_PARTICIPANT_MAX_ALIASES]
         raise ValueError(f"too many aliases ({len(cleaned)}; max {MATTER_PARTICIPANT_MAX_ALIASES})")
     return cleaned
 

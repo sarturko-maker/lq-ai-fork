@@ -41,6 +41,7 @@ from app.agents.ropa_tools import ROPA_TOOL_NAMES
 from app.agents.tools import MatterBinding
 from app.models.project import MatterParticipant, Project
 from app.models.user import User
+from app.schemas.matter_memory import MATTER_PARTICIPANT_MAX_ALIASES, clean_alias_list
 from app.security import hash_password
 
 pytestmark = pytest.mark.integration
@@ -277,6 +278,49 @@ async def test_record_matter_gone(
     user_id, _project_id = matter
     out = await _record(commit_factory, _binding(user_id, uuid.uuid4()), name="X", side="ours")
     assert "no longer available" in out
+
+
+def test_clean_alias_list_clamp_vs_reject() -> None:
+    """A fresh proposal over the count cap REJECTS (raise); a merge CLAMPS (no crash)."""
+    many = [f"alias{i}@x.example" for i in range(MATTER_PARTICIPANT_MAX_ALIASES + 5)]
+    with pytest.raises(ValueError, match="too many aliases"):
+        clean_alias_list(many)
+    clamped = clean_alias_list(many, clamp=True)
+    assert len(clamped) == MATTER_PARTICIPANT_MAX_ALIASES
+
+
+async def test_record_merge_over_cap_clamps_not_crashes(
+    commit_factory: async_sessionmaker[AsyncSession], matter: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """An agent re-record that pushes an at-cap entry over the alias cap clamps, never
+    crashes the guarded tool (reject-not-crash — the SF1 fix)."""
+    user_id, project_id = matter
+    # Seed an inferred entry already AT the alias cap.
+    async with commit_factory() as db:
+        db.add(
+            MatterParticipant(
+                project_id=project_id,
+                user_id=user_id,
+                display_name="Jane Smith",
+                side="ours",
+                aliases=[f"a{i}@x.example" for i in range(MATTER_PARTICIPANT_MAX_ALIASES)],
+                trust="inferred",
+            )
+        )
+        await db.commit()
+    # Re-record the same person (matched via an existing alias) with fresh aliases.
+    out = await _record(
+        commit_factory,
+        _binding(user_id, project_id),
+        name="Jane Smith",
+        side="ours",
+        aliases=["a0@x.example", "brand-new@x.example"],
+    )
+    assert "Updated Jane Smith" in out  # a normal receipt, not a crash
+    async with commit_factory() as db:
+        rows = await live_participants(db, project_id)
+    assert len(rows) == 1
+    assert len(rows[0].aliases) <= MATTER_PARTICIPANT_MAX_ALIASES  # clamped
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,35 @@
+{
+  "model": "deepseek",
+  "run": {
+    "status": "completed",
+    "tools_called": [
+      "record_matter_participant",
+      "record_matter_participant"
+    ],
+    "participant_count": 2,
+    "roster": [
+      {
+        "display_name": "Northwind Trading Ltd",
+        "side": "ours",
+        "role_label": "Client",
+        "organization": null,
+        "aliases": [],
+        "trust": "inferred"
+      },
+      {
+        "display_name": "Mark Counsel",
+        "side": "counterparty",
+        "role_label": "Lead counsel (counterparty)",
+        "organization": "Beta LLP",
+        "aliases": [
+          "mcounsel@beta.example"
+        ],
+        "trust": "inferred"
+      }
+    ],
+    "sides": [
+      "counterparty",
+      "ours"
+    ]
+  }
+}
