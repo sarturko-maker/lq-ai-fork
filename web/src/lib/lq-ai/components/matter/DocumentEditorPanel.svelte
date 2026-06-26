@@ -33,6 +33,53 @@
 		return s === 'loading' || s === 'saving';
 	}
 
+	export type EditorPhase = 'loading' | 'error' | 'ready';
+
+	/**
+	 * Whether "Done — hand back" is clickable (ADR-F047 Slice 5): the editor is up
+	 * ('ready') and no save / hand-back is currently in flight. Enablement deliberately
+	 * does NOT wait on Collabora's `Document_Loaded` postMessage (reliable on a real open
+	 * but it can lag/flake) — the click itself guarantees the save (a dirty/unknown doc
+	 * is saved before handing back), so a stuck postMessage never traps the lawyer with a
+	 * dead button.
+	 */
+	export function canHandBack(
+		phase: EditorPhase,
+		saveState: EditorSaveState,
+		handingBack: boolean
+	): boolean {
+		return phase === 'ready' && saveState !== 'saving' && !handingBack;
+	}
+
+	/**
+	 * The editable suggested chat message the hand-back primes into the composer
+	 * (ADR-F047 Slice 5). The lawyer instructs the agent via the normal chat box; this
+	 * is just a sensible default they can edit or replace — it names the document and
+	 * asks the agent to re-read + incorporate, which drives review_edited_document.
+	 */
+	export function handBackInstruction(filename: string): string {
+		return (
+			`I've reviewed and edited "${filename}" in the editor. ` +
+			'Please re-read it, incorporate my changes, and continue.'
+		);
+	}
+
+	/**
+	 * One tick of the save-before-hand-back wait (ADR-F047 Slice 5): given whether a
+	 * 'saving' has been observed and the current save-state, decide whether the save has
+	 * LANDED, FAILED (came back to 'dirty' after saving — edits still unsaved), or is
+	 * still PENDING. Pure so the load-bearing "never hand back unsaved work" decision is
+	 * unit-tested; only the polling loop + timeout around it are untested glue.
+	 */
+	export function saveTickOutcome(
+		sawSaving: boolean,
+		s: EditorSaveState
+	): 'saved' | 'failed' | 'pending' {
+		if (s === 'saved' || s === 'clean') return 'saved';
+		if (sawSaving && s === 'dirty') return 'failed';
+		return 'pending';
+	}
+
 	/**
 	 * Minimal shape of Collabora's same-origin client map (internal API). We do NOT
 	 * use its `getScaleZoom` (it reports a base-2 zoom delta, but the real pixel
@@ -103,6 +150,7 @@
 	 */
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
+	import CheckIcon from '@lucide/svelte/icons/check';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import XIcon from '@lucide/svelte/icons/x';
 
@@ -113,10 +161,21 @@
 	// `EditorSaveState` is imported in the `<script module>` block above; Svelte
 	// merges both blocks into one module, so a re-import here is a duplicate.
 
-	let { fileId, filename, onClose }: { fileId: string; filename: string; onClose: () => void } =
-		$props();
+	let {
+		fileId,
+		filename,
+		onClose,
+		onHandBack
+	}: {
+		fileId: string;
+		filename: string;
+		onClose: () => void;
+		// ADR-F047 Slice 5: hand back to the agent. Optional — when absent (e.g. a
+		// view-only mount) the button is not rendered and the editor is save+close only.
+		onHandBack?: (filename: string) => void;
+	} = $props();
 
-	let phase = $state<'loading' | 'error' | 'ready'>('loading');
+	let phase = $state<EditorPhase>('loading');
 	let errorMsg = $state('');
 	let editorSrc = $state('');
 	let session = $state<EditorSession | null>(null);
@@ -127,6 +186,10 @@
 	// an overlay so the lawyer never sees Collabora's cold ~30% render jump to the
 	// fitted size — they just see a spinner, then the document at the right width.
 	let fitted = $state(false);
+	// ADR-F047 Slice 5 "Done — hand back": true while saving-before-handing-back; the
+	// error shows if that save fails (we never hand back unsaved work).
+	let handingBack = $state(false);
+	let handBackError = $state('');
 
 	// Reskin: open Collabora in its slim CLASSIC toolbar (not the heavy tabbed
 	// notebookbar) and drop the properties sidebar + ruler, so the editor reads
@@ -374,6 +437,44 @@
 		}, 500);
 	}
 
+	// "Done — hand back" (ADR-F047 Slice 5): guarantee the lawyer's edits are saved,
+	// then return control to the conversation (the parent closes the editor + primes
+	// the composer; the lawyer's own chat message resumes the run). Never hand back on
+	// unsaved work — a dirty doc is saved first and only handed back once the save lands.
+	function waitForSaved(timeoutMs: number): Promise<boolean> {
+		return new Promise((resolve) => {
+			let sawSaving = saveState === 'saving';
+			const started = Date.now();
+			const iv = setInterval(() => {
+				if (saveState === 'saving') sawSaving = true;
+				const outcome = saveTickOutcome(sawSaving, saveState);
+				if (outcome === 'saved') {
+					clearInterval(iv);
+					resolve(true);
+				} else if (outcome === 'failed' || Date.now() - started > timeoutMs) {
+					// failed = save came back to 'dirty' (edits still unsaved); or timed out.
+					clearInterval(iv);
+					resolve(false);
+				}
+			}, 150);
+		});
+	}
+
+	async function requestHandBack() {
+		if (handingBack || !onHandBack) return;
+		handBackError = '';
+		if (saveState === 'saved' || saveState === 'clean') {
+			onHandBack(filename); // nothing unsaved — hand back immediately
+			return;
+		}
+		handingBack = true;
+		postToEditor({ MessageId: 'Action_Save' });
+		const ok = await waitForSaved(15000);
+		handingBack = false;
+		if (ok) onHandBack(filename);
+		else handBackError = 'Could not save your changes — please try again before handing back.';
+	}
+
 	onMount(() => {
 		window.addEventListener('message', onMessage);
 	});
@@ -421,6 +522,36 @@
 					></span>
 					{saveStateLabel(saveState)}
 				</span>
+			{/if}
+			{#if onHandBack}
+				{#if handBackError}
+					<span
+						class="max-w-xs truncate text-xs text-destructive"
+						data-testid="lq-editor-handback-error"
+					>
+						{handBackError}
+					</span>
+				{/if}
+				<Button
+					type="button"
+					variant="default"
+					size="sm"
+					class="h-7 gap-1.5 px-2.5"
+					data-testid="lq-editor-handback"
+					disabled={!canHandBack(phase, saveState, handingBack)}
+					onclick={requestHandBack}
+				>
+					{#if handingBack}
+						<span
+							class="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+							aria-hidden="true"
+						></span>
+						Saving…
+					{:else}
+						<CheckIcon class="size-3.5" aria-hidden="true" />
+						Done — hand back
+					{/if}
+				</Button>
 			{/if}
 			<Button
 				type="button"

@@ -7,10 +7,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	canHandBack,
+	handBackInstruction,
 	nextFitAction,
 	saveStateLabel,
 	saveStatePulses,
-	saveStateTone
+	saveStateTone,
+	saveTickOutcome
 } from '../components/matter/DocumentEditorPanel.svelte';
 import type { EditorSaveState } from '../api/editor';
 
@@ -50,6 +53,50 @@ describe('saveStatePulses', () => {
 		expect(saveStatePulses('dirty')).toBe(false);
 		expect(saveStatePulses('saved')).toBe(false);
 		expect(saveStatePulses('clean')).toBe(false);
+	});
+});
+
+describe('canHandBack', () => {
+	it('is clickable once the editor is ready and nothing is in flight', () => {
+		expect(canHandBack('ready', 'clean', false)).toBe(true);
+		expect(canHandBack('ready', 'dirty', false)).toBe(true);
+		expect(canHandBack('ready', 'saved', false)).toBe(true);
+		// 'loading' (no Document_Loaded postMessage yet) is still clickable — the click
+		// guarantees the save, so a flaky postMessage never traps the lawyer.
+		expect(canHandBack('ready', 'loading', false)).toBe(true);
+	});
+	it('is disabled before the editor is ready, mid-save, or while handing back', () => {
+		expect(canHandBack('loading', 'loading', false)).toBe(false);
+		expect(canHandBack('error', 'clean', false)).toBe(false);
+		expect(canHandBack('ready', 'saving', false)).toBe(false);
+		expect(canHandBack('ready', 'clean', true)).toBe(false);
+	});
+});
+
+describe('saveTickOutcome', () => {
+	it('lands the hand-back only once the save is confirmed', () => {
+		expect(saveTickOutcome(false, 'saved')).toBe('saved');
+		expect(saveTickOutcome(false, 'clean')).toBe('saved');
+	});
+	it('fails (never hands back unsaved) when a save comes back to dirty', () => {
+		expect(saveTickOutcome(true, 'dirty')).toBe('failed');
+	});
+	it('stays pending before a save is seen, or mid-save', () => {
+		expect(saveTickOutcome(false, 'dirty')).toBe('pending'); // not yet saved — keep waiting
+		expect(saveTickOutcome(true, 'saving')).toBe('pending');
+		expect(saveTickOutcome(false, 'loading')).toBe('pending');
+	});
+});
+
+describe('handBackInstruction', () => {
+	it('names the document and asks the agent to re-read + incorporate', () => {
+		const msg = handBackInstruction('Acme MSA (redlined).docx');
+		expect(msg).toContain('Acme MSA (redlined).docx');
+		expect(msg.toLowerCase()).toContain('re-read');
+		expect(msg.toLowerCase()).toContain('incorporate');
+	});
+	it('is non-empty for any filename', () => {
+		expect(handBackInstruction('x.docx').length).toBeGreaterThan(0);
 	});
 });
 

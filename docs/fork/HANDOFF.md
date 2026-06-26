@@ -3,8 +3,44 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-26): editor POLISH slice (4b) — SHIPPED on branch `fork/libreoffice-editor-slice4b`
-> (ADR-F047 Slice-4b addendum; frontend + compose only — NO backend/migration/dependency). NEXT = Slice 5.**
+> ▶▶ **PICKUP (2026-06-26): editor Slice 5 "Done — hand back to agent" — SHIPPED on branch
+> `fork/libreoffice-editor-slice5` (ADR-F047 Slice-5 addendum; NO migration / no new HTTP route / no new
+> dependency). ✅ THE IN-APP WORD-EDITOR MILESTONE IS COMPLETE. NEXT = maintainer's call.**
+> The lawyer clicks **Done — hand back** in the editor → the doc is saved → the editor closes and the
+> conversation composer is **primed + focused** with an editable instruction naming the doc; the lawyer sends
+> it (the existing `createRun({prompt, thread_id})` path) and the agent re-reads their edits.
+> - **Resume was already real** — the agent-run subsystem continues a thread via the langgraph checkpointer
+>   (`create_agent_run(thread_id=…)`); the CLAUDE.md "single-turn" blocker is the LEGACY CHAT endpoint, NOT
+>   agent runs. The frontend resume is the existing `ConversationPanel.submit()` path — no new run code.
+> - **"Zero new agent code" was wrong** (maintainer: *trusted supervisor*): C5a `extract_counterparty_position`
+>   frames markup as the UNTRUSTED other side — wrong for a trusted lawyer. New **generic, area-agnostic** tool
+>   `review_edited_document` (`app/agents/review_edited_document_tools.py`), granted to EVERY matter-bound run
+>   beside the matter-memory tools: reuses `read_state_of_play` in a TRUSTED frame + **filters out the agent's
+>   own pending redline** (author == `DEFAULT_AUTHOR`). Doctrine `MATTER_REVIEW_DOCTRINE` in the prompt (no
+>   migration). Matter-docx loaders factored `commercial_tools` → generic `tools.py` (DRY).
+> - **DURABLE TRAP — track-changes recording.** An Adeu redline has tracked CONTENT but NOT the
+>   `<w:trackChanges/>` recording flag → the editor opens with Record Changes OFF → the lawyer's edits are
+>   UNTRACKED (invisible to the re-read). Fixed in the BYTES: `redline_service.ensure_track_changes_recording`
+>   (lxml) injects the flag into the redline output's `settings.xml`, **schema-ordered** (CT_Settings is an
+>   ordered sequence) and handling an explicit `w:val="false"` (Word's "tracking off" → flip ON). Do NOT use a
+>   client `.uno:TrackChanges` postMessage — it's a TOGGLE (turns recording OFF if already on) + races the load.
+> - **DURABLE TRAP — hand-back button enablement.** Gate it on `phase==='ready'`, NOT on `saveState` leaving
+>   `'loading'` (Collabora's `Document_Loaded` postMessage is ~50/50 under automation → a saveState gate traps
+>   the user with a dead button + breaks Cypress). The CLICK guarantees the save (dirty → save-then-handback;
+>   pure `saveTickOutcome` decides saved/failed/pending). Live Cypress: inject the `Document_Loaded` postMessage
+>   to drive saveState deterministically.
+> - **Authorship is naive for now** (one agent author == "ours"; ANY other author → "the lawyer", incl. a
+>   counterparty's markup if present — bounded by the R6 grant + a per-author "flag it" cue, not eliminated); a
+>   proper "who's on our team" identity model is a flagged Backlog slice (maintainer).
+> - **Verify:** API suite **2775 / 0 failed** (+ Slice-5 tests), mypy + ruff clean; web svelte-check 0, Vitest
+>   **976**, prettier clean; live headed-Cypress hand-back (editor → close → primed composer), evidence
+>   `docs/fork/evidence/libreoffice-slice5/`. Adversarial review (4-dim × verify, 18 agents): **0 blockers**;
+>   4 should-fixes + cheap nits folded (recording val=false + schema order, trusted-frame author cue, clean_view
+>   label, EditorPhase reuse, `saveTickOutcome` test, this HANDOFF); deferred-on-record nits: lawyer-reply
+>   `parent_id` handling, `_render_redline` inline dup (divergent), `_render_supervised_edits` over-passing.
+>
+> ▶ **PREVIOUS (2026-06-26): editor POLISH slice (4b) — SHIPPED on branch `fork/libreoffice-editor-slice4b`
+> (ADR-F047 Slice-4b addendum; frontend + compose only — NO backend/migration/dependency).**
 > Fixed the 4 maintainer-reported Slice-4 UX defects, live-verified at 1920/1440/1024 (light+dark):
 > 1. *Editor too narrow* → `ConversationHost` editor card `flex-[2_1_0%]` vs conversation `flex-1` (2/3 : 1/3)
 >    **+ the load-bearing companion: `DocumentEditorPanel` `<section>` needs `w-full`** or it shrinks to ~iframe

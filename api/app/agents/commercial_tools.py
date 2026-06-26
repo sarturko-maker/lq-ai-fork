@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -46,11 +46,15 @@ from app.agents.redline_service import (
     RedlineApplyResult,
     RedlineService,
 )
-from app.agents.tools import MatterBinding, _matter_files_query
+from app.agents.tools import (
+    MatterBinding,
+    download_matter_docx,
+    fetch_matter_docx,
+    load_matter_docx_bytes,
+)
 from app.audit import audit_action
-from app.models.document import Document
 from app.models.file import File
-from app.models.project import MatterMemoryEntry, Project, ProjectFile
+from app.models.project import MatterMemoryEntry, Project
 from app.pipeline.readers._base import OOXML_DOCX_MIME, guard_ooxml, ooxml_subtype
 from app.schemas.commercial import (
     ApplyRedlineInput,
@@ -86,10 +90,6 @@ COMMERCIAL_TOOL_NAMES = frozenset(
         "reconcile_positions",
     }
 )
-
-# Defense cap on the original .docx we'll load into memory + redline. The upload
-# cap is larger; a deal contract is well under this.
-_MAX_DOCX_BYTES = 25 * 1024 * 1024
 
 # Bound the preview's rendered-redline view so a large/over-broad batch can't
 # blow the agent's context (it is a self-review aid, not the document of record).
@@ -361,7 +361,7 @@ async def _render_redline(
         return _rejection_text(exc)
 
     # 2. Fetch the source .docx under matter scope (404-conflated cross-user).
-    row = await _fetch_matter_docx(db, binding, proposal.document_name)
+    row = await fetch_matter_docx(db, binding, proposal.document_name)
     if row is None:
         return (
             f'No document named "{proposal.document_name}" in this matter. Use '
@@ -373,7 +373,7 @@ async def _render_redline(
             "apply_redline only redlines .docx documents."
         )
 
-    data = await _download_docx(row.storage_path)
+    data = await download_matter_docx(row.storage_path)
     if data is None:
         return (
             f'"{row.filename}" could not be read from storage. Try again shortly '
@@ -553,41 +553,11 @@ async def _apply_redline(
     )
 
 
-async def _load_matter_docx_bytes(
-    db: AsyncSession, binding: MatterBinding, document_name: str
-) -> tuple[Row[Any], bytes] | str:
-    """Fetch a matter ``.docx`` (owner+matter scoped, 404-conflated) and return its
-    safety-checked bytes, or a fix-and-retry STRING. Shared by the C5a negotiation
-    read/respond tools (the redline path inlines the same steps in ``_render_redline``)."""
-    row = await _fetch_matter_docx(db, binding, document_name.strip())
-    if row is None:
-        return (
-            f'No document named "{document_name}" in this matter. Use search_documents '
-            "(empty query) to list the matter's documents."
-        )
-    if row.mime_type != OOXML_DOCX_MIME:
-        return f'"{row.filename}" is not a Word .docx (it is {row.mime_type}).'
-    data = await _download_docx(row.storage_path)
-    if data is None:
-        return f'"{row.filename}" could not be read from storage. Try again shortly.'
-    if ooxml_subtype(data) != "docx":
-        return f'"{row.filename}" is not a valid .docx.'
-    try:
-        guard_ooxml(data)
-    except Exception:
-        logger.warning(
-            "counterparty doc failed OOXML safety checks",
-            extra={"event": "negotiation_source_unsafe_ooxml"},
-        )
-        return f'"{row.filename}" failed .docx safety checks and was not read.'
-    return row, data
-
-
 async def _extract_counterparty_position(
     db: AsyncSession, binding: MatterBinding, *, document_name: str
 ) -> str:
     """Read the counterparty's tracked changes + comments into the response checklist."""
-    loaded = await _load_matter_docx_bytes(db, binding, document_name)
+    loaded = await load_matter_docx_bytes(db, binding, document_name)
     if isinstance(loaded, str):
         return loaded
     row, data = loaded
@@ -702,7 +672,7 @@ async def _respond_to_counterparty(
         return _rejection_text(exc, tool="respond_to_counterparty")
 
     # 2. Load the counterparty doc under matter scope (ground truth).
-    loaded = await _load_matter_docx_bytes(db, binding, proposal.document_name)
+    loaded = await load_matter_docx_bytes(db, binding, proposal.document_name)
     if isinstance(loaded, str):
         return loaded
     row, data = loaded
@@ -999,60 +969,6 @@ def _response_filename(original: str) -> str:
     if dot and ext.lower() == "docx":
         return f"{stem} (response).{ext}"
     return f"{original} (response).docx"
-
-
-async def _fetch_matter_docx(
-    db: AsyncSession, binding: MatterBinding, document_name: str
-) -> Row[Any] | None:
-    """Resolve one matter document by filename (owner + matter scoped).
-
-    Mirrors ``read_document``'s resolution: prefer an ingested (readable) copy,
-    then the most recently added. Returns ``None`` when no such document exists
-    in this matter (cross-user is the same 404-conflated absence — ADR-F035).
-    """
-    wanted = document_name.strip()
-    stmt = (
-        _matter_files_query(
-            binding,
-            File.id.label("file_id"),
-            File.filename,
-            File.mime_type,
-            File.storage_path,
-            Document.id.label("document_id"),
-            Document.normalized_content,
-        )
-        .where(func.lower(File.filename) == wanted.lower())
-        .order_by(
-            Document.id.is_(None),
-            func.coalesce(ProjectFile.attached_at, File.created_at).desc(),
-        )
-    )
-    rows = (await db.execute(stmt)).all()
-    return rows[0] if rows else None
-
-
-async def _download_docx(storage_path: str) -> bytes | None:
-    """Buffer the original .docx bytes from object storage (size-capped)."""
-    chunks: list[bytes] = []
-    total = 0
-    try:
-        async with storage.stream_download(storage_path=storage_path) as stream:
-            async for chunk in stream:
-                total += len(chunk)
-                if total > _MAX_DOCX_BYTES:
-                    logger.warning(
-                        "apply_redline source exceeds cap",
-                        extra={"event": "redline_source_too_large", "bytes": total},
-                    )
-                    return None
-                chunks.append(chunk)
-    except Exception:
-        logger.warning(
-            "apply_redline source download failed",
-            extra={"event": "redline_source_download_failed"},
-        )
-        return None
-    return b"".join(chunks)
 
 
 def _extract_docx_text(data: bytes) -> str:

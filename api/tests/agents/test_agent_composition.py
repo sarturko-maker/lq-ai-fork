@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.composition import (
     MATTER_PROMPT,
+    MATTER_REVIEW_DOCTRINE,
     compose_and_execute_run,
     system_prompt_for,
 )
@@ -229,7 +230,10 @@ def test_system_prompt_assembly() -> None:
     prompt = system_prompt_for(binding)
     assert prompt.startswith(SYSTEM_PROMPT)
     assert 'the matter "Acme MSA"' in prompt
-    assert prompt.endswith(MATTER_PROMPT.format(name="Acme MSA"))
+    # Editor Slice 5 (ADR-F047): the hand-back doctrine is appended after the matter
+    # addendum for every matter-bound run.
+    assert prompt.endswith(MATTER_PROMPT.format(name="Acme MSA") + MATTER_REVIEW_DOCTRINE)
+    assert "review_edited_document" in prompt
 
 
 def test_system_prompt_appends_area_profile() -> None:
@@ -1365,6 +1369,50 @@ async def test_bound_run_grants_matter_read_tools(
     # The search result (the live fact body) flowed back to the model.
     all_seen = "\n".join(str(m.content) for turn in model.seen_messages for m in turn)
     assert "We act for the buyer." in all_seen
+
+
+async def test_bound_run_grants_review_edited_document(
+    comp_env: CompositionEnv,
+) -> None:
+    """Editor Slice 5 (ADR-F047): every matter-bound run — any area — also gets the
+    edited-document re-read tool review_edited_document (area-agnostic, in the same
+    unconditional block as the wiki/fact/consolidation/read grants). The scripted run
+    calls it; the run completes (a missing grant would deny the dispatch and fail the
+    run) and the tool is audited — proving the grant + the guarded path end-to-end. No
+    document is seeded, so the tool returns the honest 'no document' message; the grant
+    + dispatch is what this asserts (the read behaviour is covered in
+    test_review_edited_document)."""
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("review_edited_document", {"document_name": "contract.docx"}),
+            final_message("re-read the lawyer's edits"),
+        ]
+    )
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+    )
+
+    run = await _run_row(comp_env, run_id)
+    assert run.status == "completed", run.error
+
+    async with comp_env.factory() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "agent_run.tool_call",
+                        AuditLog.resource_id == str(run_id),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    audited = "\n".join(str(r.details) for r in rows)
+    assert "review_edited_document" in audited
 
 
 async def test_privacy_matter_labels_programme_memory_and_grants_tool(

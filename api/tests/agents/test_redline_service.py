@@ -12,9 +12,14 @@ import ast
 import io
 import pathlib
 import re
+import zipfile
 
 from app.agents.redline_render import reconstruct_redline_text
-from app.agents.redline_service import ProposedEdit, RedlineService
+from app.agents.redline_service import (
+    ProposedEdit,
+    RedlineService,
+    ensure_track_changes_recording,
+)
 
 CAP = (
     "The Vendor's aggregate liability arising out of or in connection with this "
@@ -44,6 +49,91 @@ def _strip_markers(redline: str) -> str:
     """Drop tracked-change spans, leaving only the unchanged (bare) text."""
     no_ins = re.sub(r"\[\+.*?\+\]", "", redline, flags=re.DOTALL)
     return re.sub(r"\[-.*?-\]", "", no_ins, flags=re.DOTALL)
+
+
+def _settings_xml(data: bytes) -> str:
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        return (
+            z.read("word/settings.xml").decode("utf-8")
+            if "word/settings.xml" in z.namelist()
+            else ""
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Track-changes recording — ADR-F047 Slice 5 (editor hand-back)
+# --------------------------------------------------------------------------- #
+
+
+def test_apply_output_opens_with_record_changes_on() -> None:
+    """A redline must open with "Record Changes" ON so the lawyer's edits in the editor
+    are captured as tracked changes (Adeu emits tracked content but not the flag)."""
+    from app.agents.negotiation_service import read_state_of_play
+
+    src = _build_docx([CAP])
+    out = RedlineService().apply(
+        src, [ProposedEdit(target_text="three (3)", new_text="twelve (12)")]
+    )
+    assert "w:trackChanges" in _settings_xml(out.docx_bytes)  # recording on
+    # the agent's tracked content is intact + re-readable (and authored by the agent)
+    state = read_state_of_play(out.docx_bytes)
+    assert len(state.changes) >= 1
+
+
+def test_ensure_track_changes_recording_is_idempotent() -> None:
+    src = _build_docx([CAP])
+    once = ensure_track_changes_recording(src)
+    assert "w:trackChanges" in _settings_xml(once)
+    twice = ensure_track_changes_recording(once)
+    assert twice == once  # already recording → byte-identical no-op
+
+
+def test_ensure_track_changes_recording_preserves_other_parts() -> None:
+    """Surgical: only settings.xml changes; document.xml stays byte-identical."""
+    src = _build_docx([CAP, "Second paragraph."])
+    patched = ensure_track_changes_recording(src)
+    with zipfile.ZipFile(io.BytesIO(src)) as a, zipfile.ZipFile(io.BytesIO(patched)) as b:
+        assert a.read("word/document.xml") == b.read("word/document.xml")
+    assert _docx_text(patched) == _docx_text(src)
+
+
+def _with_settings_track_changes_off(data: bytes) -> bytes:
+    """Inject Word's explicit "tracking OFF" flag (`<w:trackChanges w:val="false"/>`)."""
+    with zipfile.ZipFile(io.BytesIO(data)) as zin:
+        entries = [(n, zin.read(n)) for n in zin.namelist()]
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+        for n, d in entries:
+            if n == "word/settings.xml":
+                s = re.sub(
+                    r"(<w:settings\b[^>]*?>)",
+                    r'\1<w:trackChanges w:val="false"/>',
+                    d.decode(),
+                    count=1,
+                )
+                d = s.encode()
+            zout.writestr(n, d)
+    return out.getvalue()
+
+
+def test_ensure_track_changes_recording_forces_on_when_explicitly_off() -> None:
+    """A source the lawyer saved with Track Changes OFF carries `w:val="false"` — the
+    editor would open with recording off. ensure_track_changes_recording must flip it ON,
+    not be fooled by the substring into a no-op (the C-review should-fix)."""
+    src = _with_settings_track_changes_off(_build_docx([CAP]))
+    assert 'w:val="false"' in _settings_xml(src)  # precondition: explicitly OFF
+    on = _settings_xml(ensure_track_changes_recording(src))
+    assert "trackChanges" in on
+    assert 'w:val="false"' not in on and 'w:val="0"' not in on  # recording forced ON
+
+
+def test_ensure_track_changes_recording_is_schema_ordered_after_zoom() -> None:
+    """CT_Settings is an ordered sequence; the recording flag must be inserted AFTER the
+    early elements (python-docx's default settings.xml leads with <w:zoom>), not as the
+    first child (the C-review should-fix on schema order)."""
+    s = _settings_xml(ensure_track_changes_recording(_build_docx([CAP])))
+    assert "zoom" in s and "trackChanges" in s
+    assert s.index("zoom") < s.index("trackChanges")
 
 
 # --------------------------------------------------------------------------- #
