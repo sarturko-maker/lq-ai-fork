@@ -134,10 +134,11 @@ describe('sideLabel', () => {
 	it('maps each side to a friendly label', () => {
 		expect(sideLabel('ours')).toBe('Ours');
 		expect(sideLabel('counterparty')).toBe('Counterparty');
+		expect(sideLabel('other')).toBe('Third party'); // ADR-F048 Slice 2
 		expect(sideLabel('unknown')).toBe('Unknown');
 	});
 	it('passes an unrecognised side through unchanged', () => {
-		expect(sideLabel('other')).toBe('other');
+		expect(sideLabel('mystery')).toBe('mystery');
 	});
 	it('has a label for every known side', () => {
 		for (const s of PARTICIPANT_SIDES) expect(sideLabel(s).length).toBeGreaterThan(0);
@@ -145,13 +146,14 @@ describe('sideLabel', () => {
 });
 
 describe('sideToneClass', () => {
-	it('uses the brand accent for our side and amber for the counterparty', () => {
+	it('tones each known side distinctly: brand=ours, amber=counterparty, violet=third party', () => {
 		expect(sideToneClass('ours')).toContain('brand');
 		expect(sideToneClass('counterparty')).toContain('amber');
+		expect(sideToneClass('other')).toContain('violet'); // ADR-F048 Slice 2
 	});
-	it('falls back to a muted tone for unknown/other', () => {
+	it('falls back to a muted tone for unknown / unrecognised', () => {
 		expect(sideToneClass('unknown')).toContain('muted');
-		expect(sideToneClass('other')).toContain('muted');
+		expect(sideToneClass('mystery')).toContain('muted');
 	});
 });
 
@@ -182,6 +184,7 @@ describe('isParticipantSubmittable', () => {
 	it('needs a name and a valid side', () => {
 		expect(isParticipantSubmittable('Jane', 'ours')).toBe(true);
 		expect(isParticipantSubmittable('Jane', 'counterparty')).toBe(true);
+		expect(isParticipantSubmittable('Jane', 'other')).toBe(true); // ADR-F048 Slice 2
 		expect(isParticipantSubmittable('Jane', 'unknown')).toBe(true);
 	});
 	it('rejects a blank name or an invalid side', () => {

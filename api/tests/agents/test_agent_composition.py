@@ -583,6 +583,67 @@ async def test_empty_org_profile_degrades_to_no_client_block(
         await clear_org_profile(comp_env.factory)
 
 
+async def test_bound_run_seeds_operator_as_ours(comp_env: CompositionEnv) -> None:
+    """ADR-F048 Slice 2: composing a matter-bound run seeds the operator (the run owner)
+    as a confirmed 'ours' participant and injects them into the authorship-roster block."""
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model = ScriptedToolCallingModel(responses=[final_message("done")])
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+    )
+
+    async with comp_env.factory() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(MatterParticipant).where(
+                        MatterParticipant.project_id == comp_env.project_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1
+    p = rows[0]
+    assert p.display_name == "Agent Composition User"
+    assert p.side == "ours"
+    assert p.trust == "confirmed"  # structurally human-set (the session user), agent can't override
+    assert p.run_id is None
+    # The operator is injected into the run's authorship-roster prompt block.
+    prompt_text = _seen_system_text(model)
+    assert "BEGIN MATTER ROSTER" in prompt_text
+    assert "Agent Composition User — ours" in prompt_text
+
+
+async def test_seed_operator_is_idempotent_across_runs(comp_env: CompositionEnv) -> None:
+    """A second matter-bound run reuses the existing operator row — no duplicate (ADR-F048 S2)."""
+    for _ in range(2):
+        run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(
+                model=ScriptedToolCallingModel(responses=[final_message("done")])
+            ),
+            session_factory_provider=lambda: comp_env.factory,
+        )
+    async with comp_env.factory() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(MatterParticipant).where(
+                        MatterParticipant.project_id == comp_env.project_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1
+
+
 async def test_subagent_delegation_nests_steps_via_parent_step_id(
     comp_env: CompositionEnv,
 ) -> None:
@@ -1477,8 +1538,11 @@ async def test_bound_run_grants_matter_roster_tools(
     audited = "\n".join(str(r.details) for r in rows)
     assert "record_matter_participant" in audited
     assert "list_matter_roster" in audited
-    assert [p.display_name for p in recorded] == ["Jane Smith"]
-    assert recorded[0].trust == "inferred"  # agent write, not a confirmed pin
+    # The agent's recorded participant (inferred) sits alongside the auto-seeded operator
+    # (ADR-F048 Slice 2: a confirmed 'ours' row) — assert on the agent's own write.
+    agent_recorded = [p for p in recorded if p.trust == "inferred"]
+    assert [p.display_name for p in agent_recorded] == ["Jane Smith"]  # agent write, not a pin
+    assert any(p.trust == "confirmed" and p.side == "ours" for p in recorded)  # operator seeded
 
 
 def test_system_prompt_injects_roster_after_corrections() -> None:

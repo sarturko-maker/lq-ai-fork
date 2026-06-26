@@ -50,7 +50,12 @@ from app.agents.guard import GuardContext, guarded_dispatch
 from app.agents.redline_service import DEFAULT_AUTHOR
 from app.agents.tools import MatterBinding
 from app.models.project import MatterParticipant, Project
-from app.schemas.matter_memory import RecordParticipantInput, clean_alias_list
+from app.schemas.matter_memory import (
+    MATTER_PARTICIPANT_ALIAS_MAX_CHARS,
+    MATTER_PARTICIPANT_NAME_MAX_CHARS,
+    RecordParticipantInput,
+    clean_alias_list,
+)
 
 MATTER_ROSTER_TOOL_NAMES = frozenset({"record_matter_participant", "list_matter_roster"})
 
@@ -91,10 +96,10 @@ def classify_author(
     """Classify a tracked-change/comment author against the matter roster (ADR-F048).
 
     Returns one of ``'agent'`` (the agent's own pending redline — ``DEFAULT_AUTHOR``),
-    ``'ours'`` / ``'counterparty'`` / ``'unknown'`` (the matching participant's
-    ``side``), or ``'unknown'`` when no active participant matches. A participant the
-    agent recorded but could not place (``side='unknown'``) and an author absent from
-    the roster both resolve to ``'unknown'`` — which routes to "ask the user" downstream.
+    ``'ours'`` / ``'counterparty'`` / ``'other'`` / ``'unknown'`` (the matching
+    participant's ``side``), or ``'unknown'`` when no active participant matches. A
+    participant the agent recorded but could not place (``side='unknown'``) and an author
+    absent from the roster both resolve to ``'unknown'`` — which routes to "ask the user".
     Pure (no I/O); ``roster`` is the matter's active participants.
     """
     a = _normalize(author)
@@ -412,6 +417,80 @@ async def live_participants(db: AsyncSession, project_id: uuid.UUID) -> list[Mat
         .order_by(MatterParticipant.created_at.asc(), MatterParticipant.id.asc())
     )
     return list(rows.scalars().all())
+
+
+async def ensure_operator_participant(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    *,
+    user_id: uuid.UUID,
+    display_name: str | None,
+    email: str,
+) -> MatterParticipant | None:
+    """Seed the operator (the lawyer running the matter) as an ``'ours'`` participant.
+
+    Auto-write-then-correct (ADR-F042) Slice 2: a matter starts with an empty roster, so
+    the agent would otherwise have to ask who its own side is. We seed the run owner as
+    ``side='ours'`` / ``trust='confirmed'`` the first time we see the matter — the
+    identity is STRUCTURALLY human (the authenticated session user passed in by the
+    composition root, never model input), so it is a confirmed, human-owned row the
+    agent's auto-curation can never override (B2). ``classify_author`` then resolves the
+    lawyer's own edits as ``'ours'`` without a check-in.
+
+    **Idempotent — and it respects a human removal.** If any participant matching the
+    operator's name/email already exists — ACTIVE *or* soft-retired — nothing is inserted.
+    Probing retired rows too is the load-bearing part: a lawyer who deliberately retires
+    the auto-seeded operator OWNS that decision (ADR-F042 B2 — the human owns the tier), so
+    the next run must NOT resurrect it. Does NOT commit — the caller owns the transaction.
+    Returns the new row, or ``None`` when already present / not seedable. (Two brand-new
+    threads launched on the same brand-new matter could each seed once before either
+    commits — a benign, self-healing race: every subsequent run matches the existing row,
+    so growth is bounded to at most one duplicate ``'ours'`` row, which classifies
+    identically and the lawyer can retire.)
+    """
+    name = (display_name or "").strip() or (email or "").strip()
+    # Defense in depth: honour the same boundary caps the schema/CHECK enforce — skip
+    # (never truncate) a pathological name rather than crash the CHECK (reject-not-sanitize).
+    if not (1 <= len(name) <= MATTER_PARTICIPANT_NAME_MAX_CHARS):
+        return None
+    operator_keys = {_normalize(name), _normalize(email)}
+    operator_keys.discard("")
+    if not operator_keys:
+        return None
+    # Probe ALL operator rows (active OR retired), not just live_participants() — so a
+    # lawyer-retired operator is not silently re-seeded on the next run (B2).
+    existing = (
+        (
+            await db.execute(
+                select(MatterParticipant).where(MatterParticipant.project_id == project_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for p in existing:
+        if operator_keys & _match_set(p):
+            return None  # already on the roster (active or retired) — respect it
+    # Carry the email as an alias too (so the operator's own email on a document/email
+    # author string also resolves 'ours'), unless it duplicates the name or breaches the
+    # per-alias cap (then skip it — _aliases_excluding_name would otherwise raise).
+    email_alias = (email or "").strip()
+    extra = [email_alias] if 1 <= len(email_alias) <= MATTER_PARTICIPANT_ALIAS_MAX_CHARS else []
+    seeded = MatterParticipant(
+        project_id=project_id,
+        user_id=user_id,
+        display_name=name,
+        aliases=_aliases_excluding_name(name, extra),
+        organization=None,
+        role_label=None,
+        side="ours",
+        trust="confirmed",
+        source_citation=None,
+        run_id=None,
+    )
+    db.add(seeded)
+    await db.flush()
+    return seeded
 
 
 def format_roster_block(participants: Sequence[MatterParticipant]) -> str | None:

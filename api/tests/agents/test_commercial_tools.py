@@ -26,11 +26,12 @@ from app.agents.commercial_tools import (
     _extract_counterparty_position,
     _preview_redline,
     _reconcile_positions,
+    _render_state_of_play,
     _respond_to_counterparty,
     build_commercial_tools,
 )
 from app.agents.deal_changes import DealChangeLedger
-from app.agents.negotiation_service import read_state_of_play
+from app.agents.negotiation_service import StateOfPlay, TrackedChange, read_state_of_play
 from app.agents.redline_render import reconstruct_redline_text
 from app.agents.redline_service import (
     ProposedEdit,
@@ -42,7 +43,7 @@ from app.agents.tools import MatterBinding
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.file import File
-from app.models.project import MatterMemoryEntry, Project
+from app.models.project import MatterMemoryEntry, MatterParticipant, Project
 from app.models.user import User
 from app.pipeline.readers._base import OOXML_DOCX_MIME
 from app.security import hash_password
@@ -518,6 +519,67 @@ async def test_extract_counterparty_position_lists_changes_and_comments(
         )
         assert len(audit) == 1
         assert "losses" not in str(audit[0].details)
+
+
+def _np(name: str, side: str, *, aliases: list[str] | None = None) -> MatterParticipant:
+    """An in-memory roster row for the pure render tests (classify reads name/aliases/side)."""
+    return MatterParticipant(display_name=name, side=side, aliases=aliases or [], trust="inferred")
+
+
+def _tc(ref: str, author: str, *, deleted: str = "a", inserted: str = "b") -> TrackedChange:
+    return TrackedChange(
+        ref=ref,
+        kind="modify",
+        deleted_text=deleted,
+        inserted_text=inserted,
+        author=author,
+        context="",
+        adeu_ids=(),
+    )
+
+
+def _sop(changes: list[TrackedChange]) -> StateOfPlay:
+    return StateOfPlay(
+        changes=changes,
+        comments=[],
+        clean_view="CLEAN",
+        marked_view="MARKED",
+        clean_text_full="CLEAN",
+    )
+
+
+def test_render_state_of_play_groups_by_roster_side() -> None:
+    """ADR-F048 Slice 2: the negotiation render groups changes by side, keeping every ref.
+
+    Coverage parity is preserved — every change ref still appears in the "decide one
+    verdict per ref" list — while our side / a third party are grouped distinctly from
+    the counterparty so the agent doesn't negotiate against itself or mis-read a third party.
+    """
+    ours, third = "Our Associate", "Escrow Agent"
+    state = _sop(
+        [
+            _tc("C1", ours),  # ours
+            _tc("C2", "Mark Counsel"),  # not on roster → assumed counterparty
+            _tc("C3", third),  # known third party
+        ]
+    )
+    roster = [_np(ours, "ours"), _np(third, "other")]
+    out = _render_state_of_play("nda.docx", state, roster)
+    # Every ref is still required (the coverage gate is unchanged).
+    assert "[C1]" in out and "[C2]" in out and "[C3]" in out
+    assert "respond_to_counterparty" in out
+    # Grouped distinctly.
+    assert "Your side" in out
+    assert "third party" in out.lower()
+    assert "counterparty" in out.lower()
+
+
+def test_render_state_of_play_empty_roster_assumes_counterparty() -> None:
+    """Backward-compatible: with no placed authors, everyone is the other side (no groups)."""
+    out = _render_state_of_play("nda.docx", _sop([_tc("C1", "Anyone")]), [])
+    assert "[C1]" in out and "respond_to_counterparty" in out
+    assert "Your side" not in out  # no 'ours' subsection when nobody classifies ours
+    # The unplaced author is assumed counterparty on this document (C5a loop preserved).
 
 
 async def test_extract_counterparty_position_other_matter_not_found(

@@ -341,13 +341,14 @@ class MatterParticipantSide(StrEnum):
     """Which side a roster participant is on — the treatment driver (ADR-F048).
 
     The authoritative set, mirrored by the ORM CHECK
-    (``app.models.project._MATTER_PARTICIPANT_SIDES``) and the ``0076`` DDL. Start
-    here; extend additively (e.g. an ``'other'`` for a third party — a regulator or
-    escrow agent — is a one-line migration + member).
+    (``app.models.project._MATTER_PARTICIPANT_SIDES``) and the DDL. The set is
+    additive-extensible; ``'other'`` (the third-party side) was added in migration
+    ``0077`` (ADR-F048 Slice 2).
     """
 
     OURS = "ours"  # our team incl. our client → adopt their edits as authoritative
     COUNTERPARTY = "counterparty"  # the other side → a negotiation position, never silently adopted
+    OTHER = "other"  # a known third party (escrow agent, lender's counsel) → weigh distinctly
     UNKNOWN = "unknown"  # not yet identified → ask the user before trusting their edits
 
 

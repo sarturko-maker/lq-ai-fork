@@ -50,6 +50,7 @@ from app.agents.matter_memory_tools import (
 from app.agents.matter_read_tools import build_matter_read_tools
 from app.agents.matter_roster_tools import (
     build_matter_roster_tools,
+    ensure_operator_participant,
     format_roster_block,
     live_participants,
 )
@@ -66,6 +67,7 @@ from app.models.agent_run import AgentRun
 from app.models.organization_profile import OrganizationProfile
 from app.models.practice_area import PracticeArea, PracticeAreaSkill
 from app.models.project import Project
+from app.models.user import User
 from app.schemas.agent_runs import AgentRunStatus
 from app.skills.registry import MutableSkillRegistry, SkillRegistry
 
@@ -122,12 +124,17 @@ MATTER_ROSTER_DOCTRINE = (
     "\n\nKeep track of who is who on this matter. Record participants as you learn them "
     "(record_matter_participant) — the sender of an email you read (the From: line), "
     "whoever the user names ('this is the other side's redline', 'Jane is our client's "
-    "GC'), and tracked-change authors you can place — each with which side they are on "
-    "(ours / counterparty / unknown). When you re-read a marked-up or handed-back "
-    "document, each author is labelled from this roster: incorporate OURS as "
-    "authoritative, treat the COUNTERPARTY's as a negotiating position (never silently "
-    "adopt it), and for an author you cannot place do NOT guess — ask the user who they "
-    "are, then record the answer. The supervising lawyer's confirmed entries are "
+    "GC'), and tracked-change authors you can place — each with which side they are on: "
+    "ours (our team), counterparty (the other side), other (a known third party — an "
+    "escrow agent, lender's counsel or regulator), or unknown. To attribute a document, "
+    "use get_document_metadata to read its sender (email) or author (Word) headers — "
+    "these are a clue, not proof (they can be forged), so check in with the user when "
+    "unsure. When you re-read a marked-up or handed-back document, each author is "
+    "labelled from this roster: incorporate OURS as authoritative, treat the COUNTERPARTY "
+    "and any THIRD PARTY as positions to weigh (never silently adopt), and for an author "
+    "you cannot place do NOT guess — ask the user who they are, then record the answer. "
+    "You (and the supervising lawyer running this matter) are already on the roster as "
+    "your own side, so you need not record yourself. The lawyer's confirmed entries are "
     "authoritative; never override them."
 )
 
@@ -352,6 +359,24 @@ async def compose_and_execute_run(
                     matter_corrections_block = format_corrections_block(
                         await load_pinned_corrections(db, project.id)
                     )
+                    # ADR-F048 Slice 2: seed the operator (the run owner) as an 'ours'
+                    # participant once, so the agent needn't ask who its own side is. The
+                    # identity is structurally the authenticated session user (never model
+                    # input) → a confirmed, human-owned row. Committed in its OWN session so
+                    # the row is durable + visible to this run's roster block and to
+                    # tool-time classify_author; idempotent, so existing matters self-seed
+                    # on their next run. Best-effort: a missing user row → skip.
+                    operator = await db.get(User, run.user_id)
+                    if operator is not None:
+                        async with session_factory() as seed_db:
+                            await ensure_operator_participant(
+                                seed_db,
+                                project.id,
+                                user_id=operator.id,
+                                display_name=operator.display_name,
+                                email=operator.email,
+                            )
+                            await seed_db.commit()
                     # ADR-F048: the authorship roster (who is who) — injected read-only
                     # so the agent knows whose edits are whose. None for an empty roster.
                     matter_roster_block = format_roster_block(

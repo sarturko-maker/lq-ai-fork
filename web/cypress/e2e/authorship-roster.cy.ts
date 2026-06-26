@@ -37,6 +37,19 @@ const MEMORY = {
 			source_citation: 'From line of round-2.eml',
 			created_at: '2026-05-03T00:00:00Z',
 			updated_at: '2026-05-03T00:00:00Z'
+		},
+		{
+			// ADR-F048 Slice 2: a known third party — its own 'other' (Third party) side.
+			id: 'part-2',
+			display_name: 'Iron Mountain',
+			aliases: [],
+			organization: 'Iron Mountain Inc.',
+			role_label: 'Escrow agent',
+			side: 'other',
+			trust: 'confirmed',
+			source_citation: 'Matter brief',
+			created_at: '2026-05-04T00:00:00Z',
+			updated_at: '2026-05-04T00:00:00Z'
 		}
 	],
 	log: [],
@@ -146,6 +159,23 @@ describe(
 			cy.get('[data-testid="lq-memory-retire-confirm"]').click();
 			cy.wait('@retireParticipant');
 			cy.get('[role="dialog"]').should('not.exist');
+		});
+
+		it('renders and offers the third-party (other) side', () => {
+			cy.viewport(1440, 900);
+			login(ADMIN_EMAIL(), ADMIN_PASSWORD());
+			openMemory();
+
+			// The seeded third party renders with the "Third party" badge (ADR-F048 Slice 2).
+			cy.get('[data-testid="lq-memory-roster"]').should('contain.text', 'Iron Mountain');
+			cy.get('[data-testid="lq-memory-roster"]').should('contain.text', 'Third party');
+
+			// The add form's side <select> offers 'other' so the lawyer can classify a third party.
+			cy.get('[data-testid="lq-roster-add"]').click();
+			cy.get('[data-testid="lq-roster-side"]').find('option[value="other"]').should('exist');
+			cy.get('[data-testid="lq-roster-side"]').select('other');
+			cy.get('[data-testid="lq-roster-side"]').should('have.value', 'other');
+			cy.contains('button', 'Cancel').click();
 		});
 
 		it('capture — the Participants section + add form: light/dark', () => {

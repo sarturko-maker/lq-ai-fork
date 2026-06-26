@@ -104,3 +104,57 @@ resolution**, the C5a path + structured email tool deferred to Slice 2.
   (`extract_counterparty_position` / `respond_to_counterparty`); a structured `get_document_metadata`
   tool exposing `Document.structured_content` for robust email-sender attribution; an `'other'` side
   for third parties (regulator/escrow); auto-seeding the operator/WOPI user as `ours`.
+
+## Slice 2 addendum (2026-06-26) — richer signals + roster-aware negotiation
+
+Delivers the four Slice-1 deferrals. Decisions (AskUserQuestion, maintainer): a **distinct
+third-party bucket** for `'other'` in both renders; **lazy auto-seed** of the operator at run start;
+`get_document_metadata` exposes **email metadata + docx core-properties author**. Migration `0077`;
+no new HTTP route, no new dependency.
+
+- **`'other'` third-party side** (migration `0077`: drop+recreate the `side` CHECK to add `'other'`,
+  precedent `0070`). A known third party (escrow agent, lender's counsel, regulator) classifies as
+  its own side and renders in a **distinct THIRD-PARTY bucket** ("not your side, not the direct
+  counterparty; weigh and respond, do not silently adopt") in the hand-back and negotiation renders —
+  rather than being mis-bucketed as the counterparty or as unknown.
+
+- **`get_document_metadata` tool** (`tools.py`, in `MATTER_TOOL_NAMES`, granted to every matter-bound
+  run): for an **email** it returns the stored `Document.structured_content` headers (From/To/Cc/Date/
+  Subject — no re-parse, no ingestion change); for a **.docx** it reads the core-properties author /
+  last-modified-by live from the matter bytes (via the shared, safety-gated `load_matter_docx_bytes`).
+  Matter-scoped + 404-conflated; counts-only guard audit. These strings are **untrusted, forgeable
+  model input** — the tool docstring/return frame them as a clue to who a participant is (then
+  `record_matter_participant`), never authoritative identity. No new HTTP route.
+
+- **Roster-aware negotiation render (the C5a classification).** `extract_counterparty_position` now
+  loads the roster and `_render_state_of_play` groups each change/comment **by side** (OUR SIDE /
+  THIRD PARTY / COUNTERPARTY). Key divergence from the hand-back: the agent has deliberately opened
+  the *counterparty's* document, so an author it cannot place **defaults to the counterparty** here
+  (preserving the proven C5a respond-to-every-ref loop) — whereas the trusted hand-back treats an
+  unknown author as unexpected and **asks**. Classification is **additive labelling only**: every ref
+  still requires exactly one decision; the `evaluate_coverage` / `evaluate_anchoring` gates (which key
+  on refs, not authors) and the no-silent-action guarantee are unchanged. (Implementation note: the
+  editor and negotiation renders deliberately do **not** share a bucketer — the negotiation render
+  keeps full coverage parity and a counterparty-default, so it classifies inline via the shared,
+  already-public `classify_author` rather than the editor's `_classify_edits` which drops the agent's
+  own/resolved items.)
+
+- **Lazy auto-seed of the operator as `ours`** (`ensure_operator_participant`, called at run-start in
+  `composition.py` when a matter is bound). The run owner (the authenticated session user — never
+  model input) is seeded once as a **confirmed `'ours'`** row (`display_name = display_name or email`,
+  email as an alias), idempotent (matched on name/email), so the agent need not ask who its own side
+  is and the lawyer's own edits classify `ours` from the first run. Seeding **lazily at run start**
+  (vs eager at matter-create) covers existing matters too, with no data backfill. `trust='confirmed'`
+  means the agent's auto-curation can never override it (B2).
+
+### Slice-2 consequences
+- The untrusted-author-string limitation (above) is **unchanged** — `get_document_metadata` adds a
+  richer but still-forgeable signal; it informs candidacy, it does not authenticate. A trusted
+  authorship channel remains future work.
+- The operator auto-seed has a benign, self-healing race: two brand-new threads composing on the same
+  brand-new matter could each seed once before either commits → at most one duplicate `'ours'` row,
+  which classifies identically and the lawyer can retire; every later run matches the existing row.
+  Accepted over schema creep (a dedicated unique constraint would also block the lawyer adding people).
+- Still deferred (Slice 3, if pursued): WOPI-stamped trusted authorship; C5a-path **action**
+  classification beyond the render (e.g. auto-skipping coverage for our-own edits — explicitly NOT
+  done, to keep the no-silent-action gate intact).

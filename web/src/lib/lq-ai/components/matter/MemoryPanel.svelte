@@ -73,7 +73,7 @@
 	// --- Authorship roster (ADR-F048) ------------------------------------------------
 
 	/** The sides a participant can be on — mirrors the backend enum (MatterParticipantSide). */
-	export const PARTICIPANT_SIDES = ['ours', 'counterparty', 'unknown'] as const;
+	export const PARTICIPANT_SIDES = ['ours', 'counterparty', 'other', 'unknown'] as const;
 
 	/** Human label for a participant's `side` (the badge text). */
 	export function sideLabel(side: string): string {
@@ -82,6 +82,8 @@
 				return 'Ours';
 			case 'counterparty':
 				return 'Counterparty';
+			case 'other':
+				return 'Third party';
 			case 'unknown':
 				return 'Unknown';
 			default:
@@ -89,13 +91,15 @@
 		}
 	}
 
-	/** Tailwind classes for the side badge — brand for ours, amber for counterparty, muted else. */
+	/** Tailwind classes for the side badge — brand=ours, amber=counterparty, violet=third party, muted else. */
 	export function sideToneClass(side: string): string {
 		switch (side) {
 			case 'ours':
 				return 'border-brand/20 bg-brand/10 text-brand';
 			case 'counterparty':
 				return 'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400';
+			case 'other':
+				return 'border-violet-500/20 bg-violet-500/10 text-violet-600 dark:text-violet-400';
 			default:
 				return 'border-border bg-muted text-muted-foreground';
 		}

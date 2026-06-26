@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents.assessment_tools import ASSESSMENT_TOOL_NAMES
@@ -32,6 +33,7 @@ from app.agents.matter_roster_tools import (
     MATTER_ROSTER_TOOL_NAMES,
     _record_matter_participant,
     classify_author,
+    ensure_operator_participant,
     format_roster_block,
     live_participants,
 )
@@ -100,6 +102,13 @@ def test_classify_unknown_when_absent_or_unplaced() -> None:
     assert classify_author("Sam", roster) == "unknown"
     assert classify_author("Nobody Here", roster) == "unknown"
     assert classify_author("", roster) == "unknown"
+
+
+def test_classify_other_third_party_side() -> None:
+    """ADR-F048 Slice 2: a known third party classifies as 'other' (its own side)."""
+    roster = [_p("Escrow Agent", "other", aliases=["escrow@bank.example"])]
+    assert classify_author("Escrow Agent", roster) == "other"
+    assert classify_author("ESCROW@bank.example", roster) == "other"  # alias, case-insensitive
 
 
 # --------------------------------------------------------------------------- #
@@ -259,6 +268,25 @@ async def test_human_confirmed_is_never_overridden(
     assert "jane.smith@newaddr.com" in p.aliases  # but the new alias was merged in
 
 
+async def test_record_other_side(
+    commit_factory: async_sessionmaker[AsyncSession], matter: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """ADR-F048 Slice 2: the agent can record a third party under the new 'other' side."""
+    user_id, project_id = matter
+    out = await _record(
+        commit_factory,
+        _binding(user_id, project_id),
+        name="Escrow Agent",
+        side="other",
+        organization="Bank plc",
+    )
+    assert "Recorded Escrow Agent as other" in out
+    async with commit_factory() as db:
+        rows = await live_participants(db, project_id)
+    assert len(rows) == 1
+    assert rows[0].side == "other"
+
+
 async def test_record_rejects_invalid_side(
     commit_factory: async_sessionmaker[AsyncSession], matter: tuple[uuid.UUID, uuid.UUID]
 ) -> None:
@@ -343,3 +371,154 @@ def test_format_roster_block_renders_sides_and_aliases() -> None:
 
 def test_format_roster_block_empty_is_none() -> None:
     assert format_roster_block([]) is None
+
+
+# --------------------------------------------------------------------------- #
+# Operator auto-seed (ADR-F048 Slice 2)
+# --------------------------------------------------------------------------- #
+
+
+async def _seed(
+    factory: async_sessionmaker[AsyncSession],
+    project_id: uuid.UUID,
+    *,
+    user_id: uuid.UUID,
+    display_name: str | None,
+    email: str,
+) -> MatterParticipant | None:
+    async with factory() as db:
+        res = await ensure_operator_participant(
+            db, project_id, user_id=user_id, display_name=display_name, email=email
+        )
+        await db.commit()
+        return res
+
+
+async def test_ensure_operator_seeds_ours_confirmed(
+    commit_factory: async_sessionmaker[AsyncSession], matter: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """The operator is seeded as a confirmed 'ours' row; name + email both classify ours."""
+    user_id, project_id = matter
+    res = await _seed(
+        commit_factory,
+        project_id,
+        user_id=user_id,
+        display_name="Alex Lawyer",
+        email="alex@firm.example",
+    )
+    assert res is not None
+    async with commit_factory() as db:
+        rows = await live_participants(db, project_id)
+    assert len(rows) == 1
+    p = rows[0]
+    assert p.display_name == "Alex Lawyer"
+    assert p.side == "ours"
+    assert p.trust == "confirmed"  # structurally human-set (the authenticated session user)
+    assert p.run_id is None
+    assert "alex@firm.example" in p.aliases
+    # Both the operator's display name and their email resolve to our side.
+    assert classify_author("Alex Lawyer", rows) == "ours"
+    assert classify_author("alex@firm.example", rows) == "ours"
+
+
+async def test_ensure_operator_idempotent(
+    commit_factory: async_sessionmaker[AsyncSession], matter: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """A second seed (same operator) is a no-op — no duplicate row."""
+    user_id, project_id = matter
+    first = await _seed(
+        commit_factory, project_id, user_id=user_id, display_name="Alex", email="alex@firm.example"
+    )
+    second = await _seed(
+        commit_factory, project_id, user_id=user_id, display_name="Alex", email="alex@firm.example"
+    )
+    assert first is not None and second is None
+    async with commit_factory() as db:
+        rows = await live_participants(db, project_id)
+    assert len(rows) == 1
+
+
+async def test_ensure_operator_skips_when_already_on_roster(
+    commit_factory: async_sessionmaker[AsyncSession], matter: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """If the operator is already on the roster (matched by email), no seed is added."""
+    user_id, project_id = matter
+    # The agent (or lawyer) already recorded the operator under their email.
+    await _record(
+        commit_factory,
+        _binding(user_id, project_id),
+        name="Alex L.",
+        side="ours",
+        aliases=["alex@firm.example"],
+    )
+    res = await _seed(
+        commit_factory,
+        project_id,
+        user_id=user_id,
+        display_name="Alex Lawyer",
+        email="alex@firm.example",
+    )
+    assert res is None  # matched via the email alias → not seeded again
+    async with commit_factory() as db:
+        rows = await live_participants(db, project_id)
+    assert len(rows) == 1
+
+
+async def test_ensure_operator_does_not_resurrect_a_retired_operator(
+    commit_factory: async_sessionmaker[AsyncSession], matter: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """A lawyer-retired operator row is NOT re-seeded on the next run (ADR-F042 B2)."""
+    user_id, project_id = matter
+    first = await _seed(
+        commit_factory,
+        project_id,
+        user_id=user_id,
+        display_name="Alex Lawyer",
+        email="alex@firm.example",
+    )
+    assert first is not None
+    # The lawyer soft-retires the operator (as the retire endpoint does).
+    async with commit_factory() as db:
+        row = (
+            await db.execute(select(MatterParticipant).where(MatterParticipant.id == first.id))
+        ).scalar_one()
+        row.superseded_at = datetime.now(UTC)
+        await db.commit()
+    # A subsequent run must respect that removal — no resurrection.
+    again = await _seed(
+        commit_factory,
+        project_id,
+        user_id=user_id,
+        display_name="Alex Lawyer",
+        email="alex@firm.example",
+    )
+    assert again is None
+    async with commit_factory() as db:
+        active = await live_participants(db, project_id)
+        all_rows = (
+            (
+                await db.execute(
+                    select(MatterParticipant).where(MatterParticipant.project_id == project_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert active == []  # nothing active
+    assert len(all_rows) == 1  # the retired row stays retired, not resurrected
+
+
+async def test_ensure_operator_display_name_falls_back_to_email(
+    commit_factory: async_sessionmaker[AsyncSession], matter: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """No display name → the email is the display name (and not duplicated as an alias)."""
+    user_id, project_id = matter
+    res = await _seed(
+        commit_factory, project_id, user_id=user_id, display_name=None, email="solo@firm.example"
+    )
+    assert res is not None
+    async with commit_factory() as db:
+        rows = await live_participants(db, project_id)
+    assert rows[0].display_name == "solo@firm.example"
+    assert rows[0].aliases == []  # email == display name → no redundant alias
+    assert classify_author("solo@firm.example", rows) == "ours"
