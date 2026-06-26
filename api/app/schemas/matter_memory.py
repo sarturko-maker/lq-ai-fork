@@ -316,3 +316,121 @@ class MatterFactsAsOfInput(BaseModel):
         # value is required (non-None), so _utc_aware never returns None here; the
         # `or value` only narrows the optional return type for the type checker.
         return _utc_aware(value) or value
+
+
+# --- Authorship roster (ADR-F048): the who-is-who model + agent-tool input -----------
+#
+# A negotiation has many people redlining. The roster maps a person's identity (display
+# name + the author/email strings we MATCH against) to a ``side`` that drives how the
+# agent treats their edits. ``RecordParticipantInput`` is the agent's auto-write input
+# (code-validated, ADR-F018 shape — only A-class content args; ``trust``/``user``/
+# ``run`` are B-class, set by the tool). ``ParticipantRead`` is the shared read
+# projection both the roster endpoints and the composite GET return. The caps mirror
+# ``app.models.project`` (keep in sync).
+
+# Field caps — mirror app.models.project.MATTER_PARTICIPANT_* (and the 0076 DDL).
+MATTER_PARTICIPANT_NAME_MAX_CHARS = 200
+MATTER_PARTICIPANT_ROLE_MAX_CHARS = 200
+MATTER_PARTICIPANT_ORG_MAX_CHARS = 200
+MATTER_PARTICIPANT_ALIAS_MAX_CHARS = 200
+MATTER_PARTICIPANT_MAX_ALIASES = 30
+MATTER_PARTICIPANT_SOURCE_MAX_CHARS = 500
+
+
+class MatterParticipantSide(StrEnum):
+    """Which side a roster participant is on — the treatment driver (ADR-F048).
+
+    The authoritative set, mirrored by the ORM CHECK
+    (``app.models.project._MATTER_PARTICIPANT_SIDES``) and the ``0076`` DDL. Start
+    here; extend additively (e.g. an ``'other'`` for a third party — a regulator or
+    escrow agent — is a one-line migration + member).
+    """
+
+    OURS = "ours"  # our team incl. our client → adopt their edits as authoritative
+    COUNTERPARTY = "counterparty"  # the other side → a negotiation position, never silently adopted
+    UNKNOWN = "unknown"  # not yet identified → ask the user before trusting their edits
+
+
+def clean_alias_list(value: list[str] | None) -> list[str]:
+    """Normalise a proposed alias list — strip, drop blanks, case-insensitive dedupe.
+
+    The aliases are the match set (author strings / emails). Stored in display form
+    (stripped) and matched case-insensitively downstream, so we dedupe case-insensitively
+    here (keep first form seen). Reject (raise) an over-long alias or an over-count list
+    — never truncate (ADR-F018). ``None``/empty → ``[]`` (a participant may have no
+    alias yet; the display name still matches).
+    """
+    if not value:
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        item = (raw or "").strip()
+        if not item:
+            continue
+        if len(item) > MATTER_PARTICIPANT_ALIAS_MAX_CHARS:
+            raise ValueError(
+                f"an alias is too long ({len(item)} characters; max "
+                f"{MATTER_PARTICIPANT_ALIAS_MAX_CHARS})"
+            )
+        key = item.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(item)
+    if len(cleaned) > MATTER_PARTICIPANT_MAX_ALIASES:
+        raise ValueError(f"too many aliases ({len(cleaned)}; max {MATTER_PARTICIPANT_MAX_ALIASES})")
+    return cleaned
+
+
+class RecordParticipantInput(BaseModel):
+    """Validate one ``record_matter_participant`` proposal — the agent's roster auto-write.
+
+    Code-validated write (ADR-F018 shape): the model proposes who a person is, code
+    disposes against this schema BEFORE commit; a failure is rejected back with the
+    reason (reject, never truncate/sanitize). Only A-class content args appear here —
+    ``trust`` (always ``'inferred'`` for an agent write), ``user_id``, ``run_id`` and
+    ``project`` are B-class, set by the tool. The agent cannot mint a ``'confirmed'``
+    entry (that is the supervising lawyer's authenticated action; B2).
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    name: str = Field(min_length=1, max_length=MATTER_PARTICIPANT_NAME_MAX_CHARS)
+    side: MatterParticipantSide
+    role: str | None = Field(default=None, max_length=MATTER_PARTICIPANT_ROLE_MAX_CHARS)
+    organization: str | None = Field(default=None, max_length=MATTER_PARTICIPANT_ORG_MAX_CHARS)
+    aliases: list[str] | None = None
+    source: str | None = Field(default=None, max_length=MATTER_PARTICIPANT_SOURCE_MAX_CHARS)
+
+    @field_validator("role", "organization", "source")
+    @classmethod
+    def _blank_is_absent(cls, value: str | None) -> str | None:
+        # str_strip_whitespace already trimmed; a blank optional means "omitted".
+        return _absent_if_blank(value)
+
+    @field_validator("aliases")
+    @classmethod
+    def _clean_aliases(cls, value: list[str] | None) -> list[str]:
+        return clean_alias_list(value)
+
+
+class ParticipantRead(BaseModel):
+    """One active roster participant — the shared read projection (ADR-F048).
+
+    Returned by the roster write endpoints and embedded in the composite
+    ``GET /matters/{id}/memory`` so the cockpit panel loads the roster in one fetch.
+    ``trust`` tells the panel whether the agent inferred the entry or the lawyer
+    confirmed it; ``side`` drives the badge.
+    """
+
+    id: uuid.UUID
+    display_name: str
+    aliases: list[str]
+    organization: str | None
+    role_label: str | None
+    side: str
+    trust: str
+    source_citation: str | None
+    created_at: datetime
+    updated_at: datetime

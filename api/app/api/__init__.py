@@ -42,6 +42,7 @@ from app.api import (
     knowledge_bases,
     matter_files,
     matter_memory,
+    matter_roster,
     models,
     organization_profile,
     playbooks as playbooks_api,
@@ -119,6 +120,10 @@ api_router.include_router(organization_profile.router, dependencies=_active)
 # cross-user). The agent's matter-wiki auto-write has no endpoint (it is a guarded
 # agent tool); this surface exists solely for the authenticated human correction.
 api_router.include_router(matter_memory.router, dependencies=_active)
+# ADR-F048: the authorship-roster human-amend surface (add/edit/remove a who-is-who
+# participant). Owner-scoped (404 cross-user); the only writer of a confirmed entry —
+# the agent's record_matter_participant writes inferred rows only.
+api_router.include_router(matter_roster.router, dependencies=_active)
 api_router.include_router(matter_files.router, dependencies=_active)
 api_router.include_router(saved_prompts.router, dependencies=_active)
 # PRIV-3 (ADR-F019): the deployment-global ROPA register read API. Mounted under

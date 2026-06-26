@@ -28,6 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.agents.composition import (
     MATTER_PROMPT,
     MATTER_REVIEW_DOCTRINE,
+    MATTER_ROSTER_DOCTRINE,
+    MATTER_ROSTER_PROMPT,
     compose_and_execute_run,
     system_prompt_for,
 )
@@ -37,7 +39,7 @@ from app.clients.gateway import set_gateway_client
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.organization_profile import OrganizationProfile
-from app.models.project import MatterMemoryEntry, Project
+from app.models.project import MatterMemoryEntry, MatterParticipant, Project
 from app.models.user import User
 from app.security import hash_password
 from tests.agents.fakes import (
@@ -230,10 +232,13 @@ def test_system_prompt_assembly() -> None:
     prompt = system_prompt_for(binding)
     assert prompt.startswith(SYSTEM_PROMPT)
     assert 'the matter "Acme MSA"' in prompt
-    # Editor Slice 5 (ADR-F047): the hand-back doctrine is appended after the matter
-    # addendum for every matter-bound run.
-    assert prompt.endswith(MATTER_PROMPT.format(name="Acme MSA") + MATTER_REVIEW_DOCTRINE)
+    # Editor Slice 5 (ADR-F047) + roster (ADR-F048): the hand-back doctrine then the
+    # roster doctrine are appended after the matter addendum for every matter-bound run.
+    assert prompt.endswith(
+        MATTER_PROMPT.format(name="Acme MSA") + MATTER_REVIEW_DOCTRINE + MATTER_ROSTER_DOCTRINE
+    )
     assert "review_edited_document" in prompt
+    assert "record_matter_participant" in prompt  # roster doctrine present
 
 
 def test_system_prompt_appends_area_profile() -> None:
@@ -1413,6 +1418,91 @@ async def test_bound_run_grants_review_edited_document(
         )
     audited = "\n".join(str(r.details) for r in rows)
     assert "review_edited_document" in audited
+
+
+async def test_bound_run_grants_matter_roster_tools(
+    comp_env: CompositionEnv,
+) -> None:
+    """ADR-F048: every matter-bound run — any area — also gets the authorship-roster
+    tools record_matter_participant + list_matter_roster (area-agnostic, in the same
+    unconditional block as the wiki/fact/consolidation/read/review grants). The scripted
+    run records a participant then lists the roster; the run completes (a missing grant
+    would deny the dispatch and fail the run) and both tools are audited — proving the
+    grant + the guarded path end-to-end."""
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message(
+                "record_matter_participant",
+                {"name": "Jane Smith", "side": "ours", "role": "Lead counsel"},
+            ),
+            tool_call_message("list_matter_roster", {}),
+            final_message("noted who is who"),
+        ]
+    )
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: comp_env.factory,
+    )
+
+    run = await _run_row(comp_env, run_id)
+    assert run.status == "completed", run.error
+
+    async with comp_env.factory() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "agent_run.tool_call",
+                        AuditLog.resource_id == str(run_id),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # The participant was actually recorded (inferred row).
+        recorded = (
+            (
+                await db.execute(
+                    select(MatterParticipant).where(
+                        MatterParticipant.project_id == comp_env.project_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    audited = "\n".join(str(r.details) for r in rows)
+    assert "record_matter_participant" in audited
+    assert "list_matter_roster" in audited
+    assert [p.display_name for p in recorded] == ["Jane Smith"]
+    assert recorded[0].trust == "inferred"  # agent write, not a confirmed pin
+
+
+def test_system_prompt_injects_roster_after_corrections() -> None:
+    """ADR-F048: the authorship roster is a FENCED, read-only block after the lawyer
+    corrections and before the area profile. Absent/empty roster adds nothing."""
+    from app.agents.area_agent import AreaAgentSpec
+
+    binding = MatterBinding(
+        project_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        name="Acme MSA",
+        privileged=False,
+        minimum_inference_tier=None,
+    )
+    area = AreaAgentSpec(system_prompt_suffix="\n\nYou are the Commercial agent.")
+    roster = "- Jane Smith — ours (Lead counsel)"
+    prompt = system_prompt_for(binding, area, roster=roster)
+    assert "## Authorship roster" in prompt
+    assert "Jane Smith — ours" in prompt
+    # The area profile remains the final, governing word.
+    assert prompt.endswith("You are the Commercial agent.")
+    # Absent/blank roster degrades to nothing.
+    assert MATTER_ROSTER_PROMPT.split("{roster}")[0] not in system_prompt_for(binding, area)
+    assert system_prompt_for(binding, area, roster="   ") == system_prompt_for(binding, area)
 
 
 async def test_privacy_matter_labels_programme_memory_and_grants_tool(

@@ -522,12 +522,17 @@ decision (Backlog), triggered at real deployment; engine behaviour is identical,
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
-- **Authorship / "who's on our team" identity model (surfaced 2026-06-26, maintainer, in editor S5).**
-  The S5 `review_edited_document` filter equates "ours" with the single agent author `DEFAULT_AUTHOR`
-  ("LQ.AI Commercial counsel") — naive: it can't tell one operator-side lawyer from another, and treats
-  every non-agent author as "the supervising lawyer". A proper model (the operator's team / authorised
-  reviewers vs. the counterparty) would let the agent distinguish our-side edits, counterparty edits, and
-  a specific lawyer's edits across rounds. Its own slice + likely an ADR; supersedes the naive filter.
+- ~~**Authorship / "who's on our team" identity model (surfaced 2026-06-26, maintainer, in editor S5).**~~
+  ✅ **Slice 1 SHIPPED (2026-06-26, ADR-F048, migration `0076`):** a dedicated `matter_participants`
+  roster (identity + alias match-set → `side` ∈ ours/counterparty/unknown + role, `trust` inferred/confirmed)
+  the agent auto-populates (`record_matter_participant`/`list_matter_roster`, zero model calls) and the lawyer
+  amends (`POST/PATCH/retire` + a cockpit **Participants** section, human-confirmed wins). `review_edited_document`
+  now classifies each author via the roster (ours→incorporate, counterparty→negotiate, unknown→**ask** the user) —
+  superseding the naive `DEFAULT_AUTHOR` filter. **Slice 2 (deferred, on record):** the C5a negotiation-path
+  classification (`extract_counterparty_position`/`respond_to_counterparty`); a structured `get_document_metadata`
+  tool for robust email-sender attribution; an `'other'` side for third parties; auto-seeding the operator as `ours`.
+  **Known limitation (ADR-F048 §Consequences):** a docx author string is untrusted/forgeable — the roster reduces
+  over-trust but is not cryptographic identity (a trusted authorship channel is future work).
 - **Search past chat within a matter (ALL areas, not just Commercial) — surfaced 2026-06-22 (maintainer,
   during C3 design).** Retrieval over a matter's prior conversations so the agent (and the lawyer) can find
   "what did we say about the indemnity last week" without re-reading every thread. Distinct from the matter
