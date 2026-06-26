@@ -134,6 +134,10 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # C3-UM (fork) — matter-memory human retire gestures (ADR-F042 / F044 §4B).
     ("POST", "/api/v1/matters/{project_id}/memory/corrections/{entry_id}/retire"),
     ("POST", "/api/v1/matters/{project_id}/memory/facts/{entry_id}/retire"),
+    # ADR-F048 (fork) — authorship roster human-amend surface (add/edit/remove).
+    ("POST", "/api/v1/matters/{project_id}/roster"),
+    ("PATCH", "/api/v1/matters/{project_id}/roster/{entry_id}"),
+    ("POST", "/api/v1/matters/{project_id}/roster/{entry_id}/retire"),
     # C7a (fork) — matter-files read surface (redline-download, ADR-F046).
     ("GET", "/api/v1/matters/{project_id}/files"),
     # B5 + C3 — backend chats + messages with persistence; SSE streaming.

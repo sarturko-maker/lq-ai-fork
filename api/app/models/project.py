@@ -41,7 +41,7 @@ from sqlalchemy import (
     Text,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -376,4 +376,129 @@ class MatterMemoryEntry(Base):
         return (
             f"<MatterMemoryEntry id={self.id} project_id={self.project_id} "
             f"kind={self.kind!r} trust={self.trust!r}>"
+        )
+
+
+# --- Authorship roster (fork, ADR-F048): a matter's who-is-who -----------------------
+#
+# A negotiation has MANY people redlining, not just two counsels (our lead + our
+# associate + our client's GC, vs. their counsel + their client). The roster maps a
+# person's identity (display name + the author/email strings we MATCH against) to a
+# ``side``, so the agent can tell whose tracked changes are whose when it re-reads a
+# document. ``side`` drives treatment: ``'ours'`` (our team incl. our client) → adopt
+# as authoritative; ``'counterparty'`` → a negotiation position, never silently
+# adopted; ``'unknown'`` → ask the user. Additive-extensible ('other' for a third
+# party — a regulator/escrow agent — is a one-line migration + tuple later), mirroring
+# the ``_MATTER_FACT_TYPES`` convention. ``role_label`` is the free-text descriptor
+# ("Lead counsel", "Client GC") that rides along for context.
+_MATTER_PARTICIPANT_SIDES = ("ours", "counterparty", "unknown")
+# How a roster entry was set. ``'inferred'`` = the agent recorded it (auto-write,
+# ADR-F042 / B2); ``'confirmed'`` = the supervising lawyer set or edited it. The human
+# owns the tier: a ``'confirmed'`` entry is authoritative — the agent's auto-curation
+# must never overwrite its side/role (B2 carries over, enforced by the tool).
+_MATTER_PARTICIPANT_TRUST = ("inferred", "confirmed")
+# Identity-field caps (defense-in-depth; reject-not-truncate at the schema boundary).
+MATTER_PARTICIPANT_NAME_MAX_CHARS = 200
+MATTER_PARTICIPANT_ROLE_MAX_CHARS = 200
+MATTER_PARTICIPANT_ORG_MAX_CHARS = 200
+MATTER_PARTICIPANT_ALIAS_MAX_CHARS = 200
+MATTER_PARTICIPANT_MAX_ALIASES = 30
+MATTER_PARTICIPANT_SOURCE_MAX_CHARS = 500
+
+
+class MatterParticipant(Base):
+    """One person on a matter's authorship roster (ADR-F048).
+
+    Matter-scoped via ``project_id`` (CASCADE) — the write blast radius is the single
+    matter (ADR-F042). ``aliases`` is the JSONB match set: the tracked-change author
+    strings / emails this person writes under, matched Python-side (normalised
+    lower/trim) against a document's author strings (never a SQL string built from
+    untrusted input). ``side`` is the treatment driver (CHECK-bounded); ``trust``
+    distinguishes an agent-inferred row from a human-confirmed one (the latter wins).
+    A removed participant is SOFT-retired (``superseded_at`` set; the row is never
+    deleted — active = ``superseded_at IS NULL``), mirroring the correction retire.
+    """
+
+    __tablename__ = "matter_participants"
+    __table_args__ = (
+        CheckConstraint(
+            _in_set("side", _MATTER_PARTICIPANT_SIDES),
+            name="chk_matter_participants_side",
+        ),
+        CheckConstraint(
+            _in_set("trust", _MATTER_PARTICIPANT_TRUST),
+            name="chk_matter_participants_trust",
+        ),
+        CheckConstraint(
+            f"char_length(display_name) BETWEEN 1 AND {MATTER_PARTICIPANT_NAME_MAX_CHARS}",
+            name="chk_matter_participants_name_len",
+        ),
+        CheckConstraint(
+            "organization IS NULL OR "
+            f"char_length(organization) BETWEEN 1 AND {MATTER_PARTICIPANT_ORG_MAX_CHARS}",
+            name="chk_matter_participants_org_len",
+        ),
+        CheckConstraint(
+            "role_label IS NULL OR "
+            f"char_length(role_label) BETWEEN 1 AND {MATTER_PARTICIPANT_ROLE_MAX_CHARS}",
+            name="chk_matter_participants_role_len",
+        ),
+        CheckConstraint(
+            "source_citation IS NULL OR "
+            f"char_length(source_citation) BETWEEN 1 AND {MATTER_PARTICIPANT_SOURCE_MAX_CHARS}",
+            name="chk_matter_participants_source_len",
+        ),
+        Index(
+            "ix_matter_participants_project_created",
+            "project_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE", name="fk_matter_participants_project_id"),
+        nullable=False,
+    )
+    # The setter: the run's user for an agent-inferred row, the authenticated human for
+    # a confirmed one. CASCADE keeps a row from outliving its user on a D6 hard-delete.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE", name="fk_matter_participants_user_id"),
+        nullable=False,
+    )
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    # The match set (author strings + emails). Normalised + matched in code, not SQL.
+    aliases: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    organization: Mapped[str | None] = mapped_column(Text, nullable=True)
+    role_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    side: Mapped[str] = mapped_column(Text, nullable=False)
+    trust: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'inferred'"))
+    source_citation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Provenance: the run that recorded an inferred entry; NULL for a human-set one.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Soft-remove: a retired participant drops off the active roster but stays on record.
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<MatterParticipant id={self.id} project_id={self.project_id} "
+            f"side={self.side!r} trust={self.trust!r}>"
         )

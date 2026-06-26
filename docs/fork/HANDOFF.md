@@ -3,9 +3,51 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-26): editor Slice 5 "Done — hand back to agent" — SHIPPED on branch
+> ▶▶ **PICKUP (2026-06-26): AUTHORSHIP Slice 1 — matter who-is-who roster + hand-back author
+> resolution — SHIPPED on branch `fork/authorship-roster-slice1` (ADR-F048; migration `0076`; no new
+> dependency). NEXT = maintainer's call (authorship Slice 2, or back to the Commercial track / C6).**
+> A negotiation has many people redlining; the agent now knows who is who. Replaces the editor Slice-5
+> naive author filter (over-trust: every non-agent author treated as the lawyer).
+> - **Data** (`matter_participants`, mig `0076`): identity (display name + `aliases` JSONB match-set) →
+>   `side` ∈ {ours, counterparty, unknown} + `role_label`, `trust` ∈ {inferred, confirmed}. Matter-scoped
+>   (CASCADE); soft-retire via `superseded_at`; CHECK literals mirror `app.models.project` (keep in sync).
+> - **Agent** (`app/agents/matter_roster_tools.py`, ZERO model calls): `record_matter_participant`
+>   (auto-write `inferred`; **human-confirmed never overridden** — at most aliases widen) +
+>   `list_matter_roster` + the pure `classify_author(author, roster) → agent|ours|counterparty|unknown`
+>   (Python alias-match, normalised lower/trim — never SQL from the untrusted author string). Granted to
+>   EVERY matter-bound run (all areas), grant set disjoint. Roster injected read-only (`format_roster_block`
+>   → `MATTER_ROSTER_PROMPT`) + `MATTER_ROSTER_DOCTRINE` (record from emails/statements; on a re-read
+>   incorporate ours, treat counterparty as a position, **ASK** on unknown then record the answer).
+> - **The over-trust fix** (`review_edited_document_tools.py`): `_classify_edits` buckets each
+>   change/comment via the roster (agent's own `DEFAULT_AUTHOR` dropped); `_render_supervised_edits` renders
+>   OUR SIDE (incorporate) / COUNTERPARTY (negotiating position) / UNIDENTIFIED (ASK the user) distinctly.
+> - **Check-in needs NO new machinery** — there is no langgraph interrupt and no `ask_user` tool; the agent
+>   asks in its answer, the run ends, the user replies → existing thread-resume (ADR-F008). Doctrine, not a gate.
+> - **Email signal is already agent-visible** (`read_document()` returns the `From:` line) — no ingestion
+>   change for Slice 1; a structured `get_document_metadata` tool is deferred to Slice 2.
+> - **Human surface** (`app/api/matter_roster.py`): `POST /matters/{id}/roster` (create, `trust='confirmed'`,
+>   `user_id` from session), `PATCH /…/roster/{entry_id}` (partial edit, re-confirms), `POST /…/roster/{entry_id}/retire`
+>   (soft). Owner-scoped 404; counts/IDs+side-only audit (`matter_roster.*`, no name/role text). The active
+>   roster folds into the composite `GET /matters/{id}/memory` (`roster` field). Cockpit **Participants**
+>   section in `MemoryPanel.svelte` (add/edit/remove; side badge; confirmed marker).
+> - **DURABLE TRAP — author strings are untrusted/forgeable** (ADR-F048 §Consequences): a counterparty could
+>   set their docx author to our lawyer's name → classified `ours`. The roster *reduces* over-trust (unknown
+>   → ask) but is NOT cryptographic identity. Trusted authorship (WOPI-stamped) is future work.
+> - **DURABLE TRAP — meta-test path count.** New roster routes → `test_endpoints.IMPLEMENTED_ROUTES` (PATCH
+>   counts) + `test_openapi.EXPECTED_PATHS` + the `len(actual)` assertion (151 → 154; 3 path STRINGS:
+>   `/roster`, `/roster/{entry_id}`, `/roster/{entry_id}/retire`).
+> - **Verify:** migration `0076` upgrade→downgrade→upgrade round-trip on a throwaway pgvector container;
+>   new `test_matter_roster` (20) + `test_matter_roster_api` + rewritten `test_review_edited_document` +
+>   composition roster grant/inject tests; **full api suite 2800 passed / 34 skipped / 0 failed**, mypy +
+>   ruff clean. Web: svelte-check 0, vitest **987**, prettier clean. Live Cypress `authorship-roster.cy.ts`
+>   (add/edit/remove + light/dark) — run after rebuilding the `web` container.
+> - **Deferred → authorship Slice 2 (on record):** C5a negotiation-path classification
+>   (`extract_counterparty_position`/`respond_to_counterparty`); structured `get_document_metadata`; an
+>   `'other'` side for third parties; auto-seed the operator/WOPI user as `ours`.
+>
+> ▶ **PREVIOUS (2026-06-26): editor Slice 5 "Done — hand back to agent" — SHIPPED on branch
 > `fork/libreoffice-editor-slice5` (ADR-F047 Slice-5 addendum; NO migration / no new HTTP route / no new
-> dependency). ✅ THE IN-APP WORD-EDITOR MILESTONE IS COMPLETE. NEXT = maintainer's call.**
+> dependency). ✅ THE IN-APP WORD-EDITOR MILESTONE IS COMPLETE.**
 > The lawyer clicks **Done — hand back** in the editor → the doc is saved → the editor closes and the
 > conversation composer is **primed + focused** with an editable instruction naming the doc; the lawyer sends
 > it (the existing `createRun({prompt, thread_id})` path) and the agent re-reads their edits.

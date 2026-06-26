@@ -54,6 +54,20 @@ const SAMPLE_MEMORY: MatterMemoryRead = {
 			created_at: '2026-05-03T00:00:00Z'
 		}
 	],
+	roster: [
+		{
+			id: 'part-1',
+			display_name: 'Jane Smith',
+			aliases: ['jsmith@acme.com'],
+			organization: 'Acme LLP',
+			role_label: 'Lead counsel',
+			side: 'ours',
+			trust: 'confirmed',
+			source_citation: null,
+			created_at: '2026-05-03T00:00:00Z',
+			updated_at: '2026-05-03T00:00:00Z'
+		}
+	],
 	log: [
 		{
 			id: 'snap-1',

@@ -10,6 +10,8 @@ import type {
 	MatterCorrectionCreated,
 	MatterEntryRetired,
 	MatterMemoryRead,
+	MatterParticipantInput,
+	MatterParticipantRead,
 	WikiRevertResponse
 } from '../types';
 
@@ -71,6 +73,49 @@ export async function retireCorrection(
 export async function retireFact(projectId: string, entryId: string): Promise<MatterEntryRetired> {
 	return apiRequest<MatterEntryRetired>(
 		`/matters/${encodeURIComponent(projectId)}/memory/facts/${encodeURIComponent(entryId)}/retire`,
+		{ method: 'POST' }
+	);
+}
+
+/**
+ * POST /api/v1/matters/{id}/roster — add a who-is-who participant (ADR-F048). Always
+ * written `trust='confirmed'` with the author from the session (the lawyer owns it).
+ */
+export async function createParticipant(
+	projectId: string,
+	body: MatterParticipantInput
+): Promise<MatterParticipantRead> {
+	return apiRequest<MatterParticipantRead>(`/matters/${encodeURIComponent(projectId)}/roster`, {
+		method: 'POST',
+		body
+	});
+}
+
+/**
+ * PATCH /api/v1/matters/{id}/roster/{entryId} — edit a participant (ADR-F048). A partial
+ * edit; any edit (re)confirms the entry so the agent no longer overrides its side/role.
+ */
+export async function updateParticipant(
+	projectId: string,
+	entryId: string,
+	body: MatterParticipantInput
+): Promise<MatterParticipantRead> {
+	return apiRequest<MatterParticipantRead>(
+		`/matters/${encodeURIComponent(projectId)}/roster/${encodeURIComponent(entryId)}`,
+		{ method: 'PATCH', body }
+	);
+}
+
+/**
+ * POST /api/v1/matters/{id}/roster/{entryId}/retire — remove a participant from the
+ * active roster (ADR-F048). Soft (the row is kept, dropped off the active roster).
+ */
+export async function retireParticipant(
+	projectId: string,
+	entryId: string
+): Promise<MatterEntryRetired> {
+	return apiRequest<MatterEntryRetired>(
+		`/matters/${encodeURIComponent(projectId)}/roster/${encodeURIComponent(entryId)}/retire`,
 		{ method: 'POST' }
 	);
 }

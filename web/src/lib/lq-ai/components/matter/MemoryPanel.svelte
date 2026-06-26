@@ -69,6 +69,62 @@
 		const excerpt = oneLine.length > MAX ? oneLine.slice(0, MAX).trimEnd() + '…' : oneLine;
 		return `Re: "${excerpt}" → `;
 	}
+
+	// --- Authorship roster (ADR-F048) ------------------------------------------------
+
+	/** The sides a participant can be on — mirrors the backend enum (MatterParticipantSide). */
+	export const PARTICIPANT_SIDES = ['ours', 'counterparty', 'unknown'] as const;
+
+	/** Human label for a participant's `side` (the badge text). */
+	export function sideLabel(side: string): string {
+		switch (side) {
+			case 'ours':
+				return 'Ours';
+			case 'counterparty':
+				return 'Counterparty';
+			case 'unknown':
+				return 'Unknown';
+			default:
+				return side;
+		}
+	}
+
+	/** Tailwind classes for the side badge — brand for ours, amber for counterparty, muted else. */
+	export function sideToneClass(side: string): string {
+		switch (side) {
+			case 'ours':
+				return 'border-brand/20 bg-brand/10 text-brand';
+			case 'counterparty':
+				return 'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400';
+			default:
+				return 'border-border bg-muted text-muted-foreground';
+		}
+	}
+
+	/** Whether a roster entry is the lawyer's confirmed record (vs the agent's inference). */
+	export function participantTrustLabel(trust: string): string {
+		return trust === 'confirmed' ? 'Confirmed' : 'Inferred';
+	}
+
+	/** Split the aliases textarea (comma- or newline-separated) into a clean, deduped list. */
+	export function parseAliases(text: string): string[] {
+		const out: string[] = [];
+		const seen = new Set<string>();
+		for (const raw of text.split(/[\n,]/)) {
+			const item = raw.trim();
+			if (!item) continue;
+			const key = item.toLowerCase();
+			if (seen.has(key)) continue;
+			seen.add(key);
+			out.push(item);
+		}
+		return out;
+	}
+
+	/** A participant is submittable when it has a name and a valid side (after trim). */
+	export function isParticipantSubmittable(name: string, side: string): boolean {
+		return name.trim().length >= 1 && (PARTICIPANT_SIDES as readonly string[]).includes(side);
+	}
 </script>
 
 <script lang="ts">
@@ -106,10 +162,18 @@
 		revertWiki,
 		pinCorrection,
 		retireCorrection,
-		retireFact
+		retireFact,
+		createParticipant,
+		updateParticipant,
+		retireParticipant
 	} from '$lib/lq-ai/api/matterMemory';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
-	import type { MatterFactRead, MatterLogEntryRead, MatterMemoryRead } from '$lib/lq-ai/types';
+	import type {
+		MatterFactRead,
+		MatterLogEntryRead,
+		MatterMemoryRead,
+		MatterParticipantRead
+	} from '$lib/lq-ai/types';
 
 	let {
 		projectId,
@@ -140,18 +204,32 @@
 	let pinError = $state<string | null>(null);
 	let composerTextareaEl = $state<HTMLTextAreaElement | null>(null);
 
-	// C3-UM — retire confirm: soft-retire a pinned correction or close a fact's window.
-	type RetireTarget = { kind: 'correction' | 'fact'; id: string };
+	// C3-UM — retire confirm: soft-retire a pinned correction, a fact's window, or
+	// (ADR-F048) a roster participant.
+	type RetireTarget = { kind: 'correction' | 'fact' | 'participant'; id: string };
 	let retireOpen = $state(false);
 	let retireTarget = $state<RetireTarget | null>(null);
 	let retiring = $state(false);
 	let retireError = $state<string | null>(null);
+
+	// ADR-F048 — authorship-roster add/edit form (the lawyer owns the who-is-who).
+	let participantFormOpen = $state(false);
+	let editingParticipantId = $state<string | null>(null);
+	let pName = $state('');
+	let pSide = $state<string>('ours');
+	let pRole = $state('');
+	let pOrg = $state('');
+	let pAliasesText = $state('');
+	let savingParticipant = $state(false);
+	let participantError = $state<string | null>(null);
+	let pNameEl = $state<HTMLInputElement | null>(null);
 
 	const allEmpty = $derived(
 		memory !== null &&
 			memory.wiki.content_md.trim() === '' &&
 			memory.facts.length === 0 &&
 			memory.corrections.length === 0 &&
+			memory.roster.length === 0 &&
 			memory.log.length === 0
 	);
 
@@ -338,6 +416,8 @@
 		try {
 			if (target.kind === 'correction') {
 				await retireCorrection(projectId, target.id);
+			} else if (target.kind === 'participant') {
+				await retireParticipant(projectId, target.id);
 			} else {
 				await retireFact(projectId, target.id);
 			}
@@ -348,6 +428,73 @@
 			retireError = e instanceof LQAIApiError ? e.message : 'Could not retire — try again.';
 		} finally {
 			retiring = false;
+		}
+	}
+
+	// --- ADR-F048: the authorship-roster add / edit / remove gestures ----------------
+
+	function resetParticipantForm() {
+		editingParticipantId = null;
+		pName = '';
+		pSide = 'ours';
+		pRole = '';
+		pOrg = '';
+		pAliasesText = '';
+		participantError = null;
+	}
+
+	/** Open the add-participant form (blank) and focus the name field. */
+	function openAddParticipant() {
+		resetParticipantForm();
+		participantFormOpen = true;
+		void tick().then(() => pNameEl?.focus());
+	}
+
+	/** Open the form pre-filled to edit an existing participant. */
+	function openEditParticipant(p: MatterParticipantRead) {
+		editingParticipantId = p.id;
+		pName = p.display_name;
+		pSide = p.side;
+		pRole = p.role_label ?? '';
+		pOrg = p.organization ?? '';
+		pAliasesText = (p.aliases ?? []).join(', ');
+		participantError = null;
+		participantFormOpen = true;
+		void tick().then(() => pNameEl?.focus());
+	}
+
+	/** Cancel = discard the form draft. */
+	function closeParticipantForm() {
+		participantFormOpen = false;
+		resetParticipantForm();
+	}
+
+	async function submitParticipant() {
+		if (!isParticipantSubmittable(pName, pSide) || !canWrite(runActive)) return;
+		savingParticipant = true;
+		participantError = null;
+		const body = {
+			display_name: pName.trim(),
+			side: pSide,
+			role_label: pRole.trim() || null,
+			organization: pOrg.trim() || null,
+			aliases: parseAliases(pAliasesText),
+			source_citation: null
+		};
+		try {
+			if (editingParticipantId) {
+				await updateParticipant(projectId, editingParticipantId, body);
+			} else {
+				await createParticipant(projectId, body);
+			}
+			participantFormOpen = false;
+			resetParticipantForm();
+			await load(true); // refetch so the new/edited participant appears
+		} catch (e) {
+			participantError =
+				e instanceof LQAIApiError ? e.message : 'Could not save the participant — try again.';
+		} finally {
+			savingParticipant = false;
 		}
 	}
 
@@ -406,6 +553,95 @@
 					{pinning ? 'Pinning…' : 'Pin correction'}
 				</Button>
 			</div>
+		</div>
+	</div>
+{/snippet}
+
+{#snippet participantForm()}
+	<!-- ADR-F048: the lawyer adds/edits a who-is-who participant. A human write is
+	     stored trust='confirmed' (the agent can no longer override its side/role). -->
+	<div
+		class="mt-3 rounded-lg border border-border bg-card p-3 text-left"
+		data-testid="lq-roster-form"
+	>
+		<div class="grid gap-3 sm:grid-cols-2">
+			<label class="block text-xs font-medium text-muted-foreground">
+				Name
+				<input
+					bind:this={pNameEl}
+					bind:value={pName}
+					type="text"
+					maxlength="200"
+					placeholder="e.g. Jane Smith"
+					class="mt-1 w-full rounded-md border border-input bg-background p-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+					data-testid="lq-roster-name"
+				/>
+			</label>
+			<label class="block text-xs font-medium text-muted-foreground">
+				Side
+				<select
+					bind:value={pSide}
+					class="mt-1 w-full rounded-md border border-input bg-background p-2 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+					data-testid="lq-roster-side"
+				>
+					{#each PARTICIPANT_SIDES as s (s)}
+						<option value={s}>{sideLabel(s)}</option>
+					{/each}
+				</select>
+			</label>
+			<label class="block text-xs font-medium text-muted-foreground">
+				Role <span class="font-normal">(optional)</span>
+				<input
+					bind:value={pRole}
+					type="text"
+					maxlength="200"
+					placeholder="e.g. Lead counsel"
+					class="mt-1 w-full rounded-md border border-input bg-background p-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+					data-testid="lq-roster-role"
+				/>
+			</label>
+			<label class="block text-xs font-medium text-muted-foreground">
+				Organisation <span class="font-normal">(optional)</span>
+				<input
+					bind:value={pOrg}
+					type="text"
+					maxlength="200"
+					placeholder="e.g. Acme LLP"
+					class="mt-1 w-full rounded-md border border-input bg-background p-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+					data-testid="lq-roster-org"
+				/>
+			</label>
+		</div>
+		<label class="mt-3 block text-xs font-medium text-muted-foreground">
+			Also known as <span class="font-normal"
+				>(the names/emails they write under, comma-separated)</span
+			>
+			<textarea
+				bind:value={pAliasesText}
+				rows="2"
+				placeholder="e.g. J. Smith, jsmith@acme.com"
+				class="mt-1 w-full resize-y rounded-md border border-input bg-background p-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+				data-testid="lq-roster-aliases"
+			></textarea>
+		</label>
+		{#if participantError}
+			<p class="mt-1.5 text-sm text-destructive" data-testid="lq-roster-error">
+				{participantError}
+			</p>
+		{/if}
+		<div class="mt-2 flex items-center justify-end gap-2">
+			<Button type="button" variant="ghost" size="sm" onclick={closeParticipantForm}>Cancel</Button>
+			<Button
+				type="button"
+				size="sm"
+				disabled={!isParticipantSubmittable(pName, pSide) ||
+					!canWrite(runActive) ||
+					savingParticipant}
+				data-testid="lq-roster-submit"
+				onclick={submitParticipant}
+			>
+				{savingParticipant ? 'Saving…' : editingParticipantId ? 'Save' : 'Add participant'}
+			</Button>
 		</div>
 	</div>
 {/snippet}
@@ -490,6 +726,106 @@
 							</p>
 						{/if}
 					</div>
+				</section>
+
+				<Separator class="my-6" />
+
+				<!-- Authorship roster (ADR-F048): who is who on the matter -->
+				<section data-testid="lq-memory-roster">
+					<div class="flex items-center justify-between gap-3">
+						<SectionHeader size="section" title="Participants ({memory.roster.length})" />
+						{#if !(participantFormOpen && editingParticipantId === null)}
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								class="shrink-0"
+								disabled={!canWrite(runActive)}
+								title={canWrite(runActive)
+									? 'Add a participant'
+									: 'Paused while the agent is working'}
+								data-testid="lq-roster-add"
+								onclick={openAddParticipant}
+							>
+								+ Add participant
+							</Button>
+						{/if}
+					</div>
+					{#if participantFormOpen && editingParticipantId === null}
+						{@render participantForm()}
+					{/if}
+					{#if memory.roster.length === 0}
+						<p class="mt-2 text-sm text-muted-foreground">
+							No participants recorded yet. The agent adds who it learns (from emails, documents and
+							what you tell it); add or correct them here.
+						</p>
+					{:else}
+						<ul class="mt-2 space-y-3">
+							{#each memory.roster as p (p.id)}
+								<li class="rounded-lg border border-border bg-card p-3">
+									{#if participantFormOpen && editingParticipantId === p.id}
+										{@render participantForm()}
+									{:else}
+										<div class="flex items-start justify-between gap-2">
+											<div class="min-w-0">
+												<div class="flex flex-wrap items-center gap-2">
+													<span class="font-medium text-foreground">{p.display_name}</span>
+													<Badge variant="outline" class={sideToneClass(p.side)}>
+														{sideLabel(p.side)}
+													</Badge>
+													{#if p.trust === 'confirmed'}
+														<span class="text-label text-brand uppercase">
+															{participantTrustLabel(p.trust)}
+														</span>
+													{/if}
+												</div>
+												{#if p.role_label || p.organization}
+													<p class="mt-0.5 text-xs text-muted-foreground">
+														{[p.role_label, p.organization].filter(Boolean).join(' · ')}
+													</p>
+												{/if}
+												{#if p.aliases.length}
+													<p class="mt-0.5 text-xs text-muted-foreground">
+														writes as: {p.aliases.join(', ')}
+													</p>
+												{/if}
+											</div>
+											<div class="flex shrink-0 items-center gap-1">
+												<Button
+													type="button"
+													variant="ghost"
+													size="sm"
+													class="h-auto px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+													disabled={!canWrite(runActive)}
+													title={canWrite(runActive)
+														? 'Edit this participant'
+														: 'Paused while the agent is working'}
+													data-testid="lq-roster-edit"
+													onclick={() => openEditParticipant(p)}
+												>
+													Edit
+												</Button>
+												<Button
+													type="button"
+													variant="ghost"
+													size="sm"
+													class="h-auto px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+													disabled={!canWrite(runActive)}
+													title={canWrite(runActive)
+														? 'Remove this participant'
+														: 'Paused while the agent is working'}
+													data-testid="lq-roster-remove"
+													onclick={() => askRetire({ kind: 'participant', id: p.id })}
+												>
+													Remove
+												</Button>
+											</div>
+										</div>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					{/if}
 				</section>
 
 				<Separator class="my-6" />
@@ -730,12 +1066,21 @@
 	<Dialog.Content class="shadow-lg sm:max-w-md">
 		<Dialog.Header>
 			<Dialog.Title>
-				{retireTarget?.kind === 'fact' ? 'Retire this fact?' : 'Retire this correction?'}
+				{#if retireTarget?.kind === 'fact'}
+					Retire this fact?
+				{:else if retireTarget?.kind === 'participant'}
+					Remove this participant?
+				{:else}
+					Retire this correction?
+				{/if}
 			</Dialog.Title>
 			<Dialog.Description>
 				{#if retireTarget?.kind === 'fact'}
 					This closes the fact’s validity window so the agent stops treating it as current. Nothing
 					is deleted — it stays in the activity log, marked superseded.
+				{:else if retireTarget?.kind === 'participant'}
+					This removes the person from the matter’s roster, so the agent no longer matches their
+					edits to a side. Nothing is deleted; you can add them again later.
 				{:else}
 					This stops the correction from overriding what the agent believes. Nothing is deleted — it
 					stays in the activity log, marked superseded.
@@ -753,7 +1098,11 @@
 				data-testid="lq-memory-retire-confirm"
 				onclick={confirmRetire}
 			>
-				{retiring ? 'Retiring…' : 'Retire'}
+				{#if retireTarget?.kind === 'participant'}
+					{retiring ? 'Removing…' : 'Remove'}
+				{:else}
+					{retiring ? 'Retiring…' : 'Retire'}
+				{/if}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

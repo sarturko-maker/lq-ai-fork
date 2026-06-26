@@ -13,11 +13,17 @@ import {
 	canWrite,
 	CORRECTION_MAX_CHARS,
 	factCorrectionPrefill,
+	isParticipantSubmittable,
 	isPinSubmittable,
 	isRevertable,
 	logKindLabel,
 	logTailNote,
-	shortRunId
+	PARTICIPANT_SIDES,
+	parseAliases,
+	participantTrustLabel,
+	shortRunId,
+	sideLabel,
+	sideToneClass
 } from '../components/matter/MemoryPanel.svelte';
 
 describe('logKindLabel', () => {
@@ -119,5 +125,68 @@ describe('factCorrectionPrefill', () => {
 		expect(out.endsWith('… " → ') || out.endsWith('…" → ')).toBe(true);
 		// excerpt is bounded well under the full 200 chars
 		expect(out.length).toBeLessThan(100);
+	});
+});
+
+// --- Authorship roster (ADR-F048) ------------------------------------------------
+
+describe('sideLabel', () => {
+	it('maps each side to a friendly label', () => {
+		expect(sideLabel('ours')).toBe('Ours');
+		expect(sideLabel('counterparty')).toBe('Counterparty');
+		expect(sideLabel('unknown')).toBe('Unknown');
+	});
+	it('passes an unrecognised side through unchanged', () => {
+		expect(sideLabel('other')).toBe('other');
+	});
+	it('has a label for every known side', () => {
+		for (const s of PARTICIPANT_SIDES) expect(sideLabel(s).length).toBeGreaterThan(0);
+	});
+});
+
+describe('sideToneClass', () => {
+	it('uses the brand accent for our side and amber for the counterparty', () => {
+		expect(sideToneClass('ours')).toContain('brand');
+		expect(sideToneClass('counterparty')).toContain('amber');
+	});
+	it('falls back to a muted tone for unknown/other', () => {
+		expect(sideToneClass('unknown')).toContain('muted');
+		expect(sideToneClass('other')).toContain('muted');
+	});
+});
+
+describe('participantTrustLabel', () => {
+	it('distinguishes a confirmed entry from an inferred one', () => {
+		expect(participantTrustLabel('confirmed')).toBe('Confirmed');
+		expect(participantTrustLabel('inferred')).toBe('Inferred');
+	});
+});
+
+describe('parseAliases', () => {
+	it('splits on commas and newlines, trims, and drops blanks', () => {
+		expect(parseAliases('Jane Smith, jsmith@acme.com\n  J. Smith ')).toEqual([
+			'Jane Smith',
+			'jsmith@acme.com',
+			'J. Smith'
+		]);
+	});
+	it('dedupes case-insensitively (keeps the first form)', () => {
+		expect(parseAliases('Jane, JANE, jane')).toEqual(['Jane']);
+	});
+	it('is empty for a blank string', () => {
+		expect(parseAliases('   ,\n , ')).toEqual([]);
+	});
+});
+
+describe('isParticipantSubmittable', () => {
+	it('needs a name and a valid side', () => {
+		expect(isParticipantSubmittable('Jane', 'ours')).toBe(true);
+		expect(isParticipantSubmittable('Jane', 'counterparty')).toBe(true);
+		expect(isParticipantSubmittable('Jane', 'unknown')).toBe(true);
+	});
+	it('rejects a blank name or an invalid side', () => {
+		expect(isParticipantSubmittable('   ', 'ours')).toBe(false);
+		expect(isParticipantSubmittable('Jane', 'enemy')).toBe(false);
+		expect(isParticipantSubmittable('Jane', '')).toBe(false);
 	});
 });

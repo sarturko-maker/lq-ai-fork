@@ -1267,14 +1267,43 @@ export interface MatterLogEntryRead {
 	body_preview: string;
 }
 
-/** The full read-only projection of one matter's working memory (C3c-2 panel). */
+/**
+ * One active authorship-roster participant — who is who on the matter (ADR-F048).
+ * `side` drives the badge + how the agent treats their edits; `trust='confirmed'`
+ * marks a lawyer-set entry (authoritative over the agent's `inferred` ones).
+ */
+export interface MatterParticipantRead {
+	id: string;
+	display_name: string;
+	aliases: string[];
+	organization: string | null;
+	role_label: string | null;
+	side: string;
+	trust: string;
+	source_citation: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+/** The full read-only projection of one matter's working memory (C3c-2 panel + ADR-F048 roster). */
 export interface MatterMemoryRead {
 	project_id: string;
 	wiki: MatterWikiRead;
 	facts: MatterFactRead[];
 	corrections: MatterCorrectionRead[];
+	roster: MatterParticipantRead[];
 	log: MatterLogEntryRead[];
 	log_total: number;
+}
+
+/** The create/edit payload for an authorship-roster participant (ADR-F048). */
+export interface MatterParticipantInput {
+	display_name?: string;
+	side?: string;
+	role_label?: string | null;
+	organization?: string | null;
+	aliases?: string[];
+	source_citation?: string | null;
 }
 
 /** The outcome of a wiki revert: which version was restored + the new state. */

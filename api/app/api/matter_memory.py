@@ -56,11 +56,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.matter_fact_tools import live_corrections, live_facts, memory_log
 from app.agents.matter_memory_tools import snapshot_and_rewrite_wiki
 from app.api.dependencies import ActiveUser
+from app.api.matter_roster import roster_read
 from app.api.projects import _load_visible_project
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import Conflict, NotFound
 from app.models.project import MatterMemoryEntry
+from app.schemas.matter_memory import ParticipantRead
 
 router = APIRouter(prefix="/matters", tags=["matter-memory"])
 
@@ -210,12 +212,17 @@ class LogEntryRead(BaseModel):
 
 
 class MatterMemoryRead(BaseModel):
-    """The full read-only projection of one matter's working memory (C3c-2 panel)."""
+    """The full read-only projection of one matter's working memory (C3c-2 panel).
+
+    ``roster`` (ADR-F048) is the active authorship roster — who is who on the matter —
+    embedded here so the cockpit panel loads the whole memory tier in one fetch.
+    """
 
     project_id: uuid.UUID
     wiki: WikiRead
     facts: list[FactRead]
     corrections: list[CorrectionRead]
+    roster: list[ParticipantRead]
     log: list[LogEntryRead]
     log_total: int
 
@@ -272,6 +279,7 @@ async def read_matter_memory(
     facts = await live_facts(db, project.id)
     log_rows = await memory_log(db, project.id)
     corrections = await live_corrections(db, project.id)
+    roster = await roster_read(db, project.id)
 
     wiki_body = project.context_md or ""
     return MatterMemoryRead(
@@ -297,6 +305,7 @@ async def read_matter_memory(
             CorrectionRead(id=c.id, body_md=c.body_md, trust=c.trust, created_at=c.created_at)
             for c in corrections
         ],
+        roster=roster,
         # Most-recent slice of the append-only log (chronological), with the total so the
         # panel knows older entries exist. Slice the TAIL — memory_log is oldest-first.
         log=[_log_entry(e) for e in log_rows[-MEMORY_LOG_TAIL:]],

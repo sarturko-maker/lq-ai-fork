@@ -82,6 +82,10 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # C3-UM (fork) — matter-memory human retire gestures (ADR-F042 / F044 §4B).
         "/api/v1/matters/{project_id}/memory/corrections/{entry_id}/retire",
         "/api/v1/matters/{project_id}/memory/facts/{entry_id}/retire",
+        # ADR-F048 (fork) — authorship roster human-amend surface (add/edit/remove).
+        "/api/v1/matters/{project_id}/roster",
+        "/api/v1/matters/{project_id}/roster/{entry_id}",
+        "/api/v1/matters/{project_id}/roster/{entry_id}/retire",
         # C7a (fork) — matter-files read surface (redline-download, ADR-F046).
         "/api/v1/matters/{project_id}/files",
         # saved prompts
@@ -347,7 +351,9 @@ async def test_openapi_paths_match_sketch() -> None:
     # /api/v1/agents/threads/{thread_id}
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
-    assert len(actual) == 151  # +3: libreoffice-editor Slice 2 WOPI host + mint (ADR-F047)
+    assert len(actual) == 154  # +3: ADR-F048 authorship roster (POST /roster, PATCH
+    #   /roster/{entry_id}, POST /roster/{entry_id}/retire).
+    # +3 prior: libreoffice-editor Slice 2 WOPI host + mint (ADR-F047)
     #   — /wopi/files/{id} (CheckFileInfo GET + Lock POST share the path),
     #     /wopi/files/{id}/contents (GetFile), /files/{id}/editor-session (mint).
     # +1 prior: C7a matter-files read surface (redline-download, ADR-F046);
