@@ -7,6 +7,17 @@ then CLAUDE.md, then the ADRs/plans named below.
 > SHIPPED on branch `fork/authorship-roster-slice2` (ADR-F048 addendum; migration `0077`; NO new HTTP
 > route / no new dependency). NEXT = maintainer's call (Commercial C6 — needs ADRs F036/F038 first; or a
 > foundational milestone — F2 Memory / Authorization ADR-F021 Phase 1).**
+>
+> ⏩ **PICK UP EXACTLY HERE (merge is PENDING, not done): PR [#156](https://github.com/sarturko-maker/lq-ai-fork/pull/156)
+> is OPEN on branch `fork/authorship-roster-slice2`; `main` is still at Slice 1 (`7dc31f7`).** At last check CI =
+> Gateway ✅ + Web ✅, **API job still IN_PROGRESS** (the ~13-min pytest). When all 3 are SUCCESS, complete the
+> ADR-F005 merge: `gh pr merge 156 --repo sarturko-maker/lq-ai-fork --squash --delete-branch` → `git checkout main
+> && git pull` → `docker image prune -f` (dangling). If API CI FAILED, read the job log, fix, push, re-poll — the
+> full gate (review + live + suites) already passed locally so a CI fail is almost certainly env/flake or a
+> ruff/version-drift nit. **The dev stack already runs the Slice-2 code** (api+arq+web rebuilt at mig `0077`,
+> healthy) — no rebuild needed post-merge. After merging, this PICK-UP note is spent; the real NEXT is the
+> maintainer's-call line above.
+>
 > Delivers the four Slice-1 deferrals. Maintainer rulings: distinct THIRD-PARTY bucket for `'other'`; lazy
 > operator auto-seed; `get_document_metadata` exposes email + docx author.
 > - **`'other'` third-party side** (mig `0077` = drop+recreate the `side` CHECK, precedent `0070`; literals
