@@ -240,6 +240,17 @@ type ("Matter") usable for a real task (e.g. NDA review), with visible agent wor
 Outcome: agent context assembled from company/client → practice area → user → Matter; conversations
 compact, accumulate into Matter digests, and are searchable; agents propose, users curate.
 
+> **Architecture DECIDED (2026-06-27): [ADR-F049](../adr/F049-native-memory-substrate-and-eval-gated-retrieval.md)
+> — adopt the native langgraph Store + deepagents CompositeBackend/middleware substrate (we're off-substrate
+> today: checkpointer only); keep custom only the bi-temporal fact ledger + the documents hybrid retriever
+> (chunking/embedding-at-scale/fusion/rerank/citation-offsets); conversations on native `store.asearch` +
+> summarization-offload; one shared local embedder; PageIndex backlog. Built EVAL-FIRST + eval-gated.** Seven-
+> doc research arc: [`research/RETRIEVAL-MEMORY-INDEX.md`](research/RETRIEVAL-MEMORY-INDEX.md). Decomposition:
+> [`plans/RETRIEVAL-MEMORY-eval-first.md`](plans/RETRIEVAL-MEMORY-eval-first.md) (Phase E eval instrument →
+> N0 substrate → conversations → cost play → measured). The bullets below are the original F2 outcomes,
+> now realised through that plan (the CompositeBackend bullet ↔ N0; in-chat compaction ↔ N2; chat search
+> tools ↔ N3 native `store.asearch`; memory manager UI is later in the plan).
+
 - deepagents CompositeBackend: `/memories/{company,practice,user,matter}/` → StoreBackend namespaces
   keyed `(org_id, …)`; company + practice read-only to agents.
 - Client/counterparty profiles (new entity — distinct from `organization_profile`).
