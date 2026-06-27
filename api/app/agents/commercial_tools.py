@@ -25,7 +25,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app import storage
 from app.agents.deal_changes import DealChangeLedger
 from app.agents.guard import GuardContext, guarded_dispatch
+from app.agents.matter_roster_tools import classify_author, live_participants
 from app.agents.negotiation_service import Decision, apply_decisions, read_state_of_play
 from app.agents.redline_render import reconstruct_redline
 from app.agents.redline_service import (
@@ -54,7 +55,7 @@ from app.agents.tools import (
 )
 from app.audit import audit_action
 from app.models.file import File
-from app.models.project import MatterMemoryEntry, Project
+from app.models.project import MatterMemoryEntry, MatterParticipant, Project
 from app.pipeline.readers._base import OOXML_DOCX_MIME, guard_ooxml, ooxml_subtype
 from app.schemas.commercial import (
     ApplyRedlineInput,
@@ -569,6 +570,7 @@ async def _extract_counterparty_position(
         )
         return f'"{row.filename}" could not be read as a tracked-changes document.'
 
+    roster = await live_participants(db, binding.project_id)
     await audit_action(
         db,
         user_id=binding.user_id,
@@ -579,11 +581,81 @@ async def _extract_counterparty_position(
         practice_area_id=binding.practice_area_id,
         details={"changes": len(state.changes), "comments": len(state.open_comment_refs)},
     )
-    return _render_state_of_play(row.filename, state)
+    return _render_state_of_play(row.filename, state, roster)
 
 
-def _render_state_of_play(filename: str, state: Any) -> str:
-    """The model-facing checklist: every change ref + open comment ref to decide."""
+def _negotiation_side(author: str, roster: Sequence[MatterParticipant]) -> str:
+    """Classify a markup author into a negotiation-render group (ADR-F048 Slice 2).
+
+    The agent has deliberately opened the counterparty's marked-up document, so an author
+    it cannot place defaults to the OTHER SIDE here — this preserves the C5a
+    respond-to-every-ref loop (the editor hand-back, by contrast, treats an unknown author
+    as unexpected and asks). A known ``'ours'`` (incl. the agent's own pending redline) or
+    ``'other'`` (third party) author is grouped distinctly so the agent treats them
+    correctly rather than negotiating against its own side / mis-reading a third party.
+    """
+    side = classify_author(author, roster)
+    if side in ("ours", "agent"):
+        return "ours"
+    if side == "other":
+        return "other"
+    return "counterparty"  # 'counterparty' or 'unknown' → the other side on this document
+
+
+def _group_by_side(
+    items: Sequence[Any], roster: Sequence[MatterParticipant]
+) -> dict[str, list[Any]]:
+    """Group changes/comments by negotiation side in ONE pass (each item classified once)."""
+    buckets: dict[str, list[Any]] = {"ours": [], "other": [], "counterparty": []}
+    for item in items:
+        buckets[_negotiation_side(item.author, roster)].append(item)
+    return buckets
+
+
+def _change_entry(c: Any) -> list[str]:
+    """One tracked change rendered for the checklist (ref + what + optional context).
+
+    Intentionally mirrors ``review_edited_document_tools._describe_change`` with the
+    negotiation-render phrasing (the editor hand-back uses a past-tense "changed …" frame;
+    here it is the imperative-decision frame) — keep the two in step if either changes.
+    """
+    if c.kind == "modify":
+        what = f'change "{c.deleted_text}" → "{c.inserted_text}"'
+    elif c.kind == "insert":
+        what = f'insert "{c.inserted_text}"'
+    elif c.kind == "delete":
+        what = f'delete "{c.deleted_text}"'
+    else:
+        what = "formatting change"
+    out = [f"- [{c.ref}] {what}  (by {c.author})"]
+    if c.context:
+        out.append(f"    in: …{c.context}…")
+    return out
+
+
+def _comment_entry(cm: Any, state: Any) -> str:
+    """One open comment rendered for the checklist (with the anchored-change note)."""
+    anchor = state.comment_anchors.get(cm.ref)
+    note = (
+        f"  [anchored to change {anchor} — accepting or rejecting {anchor} removes "
+        f"this thread; to reply AND change it, counter {anchor} instead]"
+        if anchor
+        else ""
+    )
+    return f'- [{cm.ref}] {cm.author}: "{cm.text}"{note}'
+
+
+def _render_state_of_play(
+    filename: str, state: Any, roster: Sequence[MatterParticipant] = ()
+) -> str:
+    """The model-facing checklist: every change ref + open comment ref to decide.
+
+    Items are grouped by side from this matter's roster (ADR-F048 Slice 2) so the agent
+    treats its own side / a third party distinctly — but classification is additive
+    labelling only: every ref still requires exactly one decision (the coverage gate is
+    unchanged). Authors not on the roster default to the counterparty on this document
+    (see :func:`_negotiation_side`).
+    """
     open_comments = [cm for cm in state.comments if cm.parent_id is None and not cm.is_ours]
     if not state.changes and not open_comments:
         return (
@@ -596,33 +668,54 @@ def _render_state_of_play(filename: str, state: Any) -> str:
         "",
         "THEIR FINAL ASK (their changes accepted):",
         state.clean_view,
-        "",
-        "TRACKED CHANGES — decide one verdict per ref "
-        "(accept | reject | counter | leave_open | escalate):",
     ]
-    for c in state.changes:
-        if c.kind == "modify":
-            what = f'change "{c.deleted_text}" → "{c.inserted_text}"'
-        elif c.kind == "insert":
-            what = f'insert "{c.inserted_text}"'
-        elif c.kind == "delete":
-            what = f'delete "{c.deleted_text}"'
-        else:
-            what = "formatting change"
-        lines.append(f"- [{c.ref}] {what}  (by {c.author})")
-        if c.context:
-            lines.append(f"    in: …{c.context}…")
+
+    if state.changes:
+        lines += [
+            "",
+            "TRACKED CHANGES — decide exactly one verdict per ref "
+            "(accept | reject | counter | leave_open | escalate), grouped by side:",
+        ]
+        groups = _group_by_side(state.changes, roster)
+        if groups["ours"]:
+            lines += [
+                "",
+                "Your side (your team / your earlier redline) — accept to keep, reject to "
+                "drop, or counter to adjust:",
+            ]
+            for c in groups["ours"]:
+                lines += _change_entry(c)
+        if groups["other"]:
+            lines += [
+                "",
+                "A known third party (not the direct counterparty — e.g. an escrow agent "
+                "or lender's counsel) — weigh and decide each; do not silently adopt:",
+            ]
+            for c in groups["other"]:
+                lines += _change_entry(c)
+        if groups["counterparty"]:
+            lines += [
+                "",
+                "The counterparty (authors not on the roster are assumed to be the other "
+                "side on this document; if one is actually your side or a third party, "
+                "record them with record_matter_participant):",
+            ]
+            for c in groups["counterparty"]:
+                lines += _change_entry(c)
+
     if open_comments:
         lines += ["", "COMMENTS — decide one verdict per ref (reply | leave_open | escalate):"]
-        for cm in open_comments:
-            anchor = state.comment_anchors.get(cm.ref)
-            note = (
-                f"  [anchored to change {anchor} — accepting or rejecting {anchor} removes "
-                f"this thread; to reply AND change it, counter {anchor} instead]"
-                if anchor
-                else ""
-            )
-            lines.append(f'- [{cm.ref}] {cm.author}: "{cm.text}"{note}')
+        cgroups = _group_by_side(open_comments, roster)
+        if cgroups["ours"]:
+            lines += ["", "Your side:"]
+            lines += [_comment_entry(cm, state) for cm in cgroups["ours"]]
+        if cgroups["other"]:
+            lines += ["", "A known third party (weigh; do not silently adopt):"]
+            lines += [_comment_entry(cm, state) for cm in cgroups["other"]]
+        if cgroups["counterparty"]:
+            lines += ["", "The counterparty:"]
+            lines += [_comment_entry(cm, state) for cm in cgroups["counterparty"]]
+
     refs = [c.ref for c in state.changes] + [cm.ref for cm in open_comments]
     if any(cm.ref in state.comment_anchors for cm in open_comments):
         lines += [

@@ -122,16 +122,19 @@ class _ClassifiedEdits:
     """The handed-back edits/comments split by side (ADR-F048), the agent's own dropped.
 
     ``ours`` are the authoritative edits to incorporate; ``counterparty`` are a
-    negotiating position (never silently adopted); ``unknown`` are unidentified authors
-    the agent must ASK the user about. Comments are open thread roots only (replies +
-    resolved + the agent's own already excluded).
+    negotiating position (never silently adopted); ``other`` are a known third party
+    (escrow agent, lender's counsel) — weigh distinctly, never silently adopt;
+    ``unknown`` are unidentified authors the agent must ASK the user about. Comments are
+    open thread roots only (replies + resolved + the agent's own already excluded).
     """
 
     ours_changes: list[TrackedChange] = field(default_factory=list)
     counterparty_changes: list[TrackedChange] = field(default_factory=list)
+    other_changes: list[TrackedChange] = field(default_factory=list)
     unknown_changes: list[TrackedChange] = field(default_factory=list)
     ours_comments: list[CounterpartyComment] = field(default_factory=list)
     counterparty_comments: list[CounterpartyComment] = field(default_factory=list)
+    other_comments: list[CounterpartyComment] = field(default_factory=list)
     unknown_comments: list[CounterpartyComment] = field(default_factory=list)
 
     @property
@@ -139,9 +142,11 @@ class _ClassifiedEdits:
         return bool(
             self.ours_changes
             or self.counterparty_changes
+            or self.other_changes
             or self.unknown_changes
             or self.ours_comments
             or self.counterparty_comments
+            or self.other_comments
             or self.unknown_comments
         )
 
@@ -161,8 +166,9 @@ def _classify_edits(state: StateOfPlay, roster: list[Any]) -> _ClassifiedEdits:
     """Bucket each non-agent change/comment by side via the matter roster (ADR-F048).
 
     The agent's own pending redline (``classify_author`` → ``'agent'``) is dropped; the
-    rest land in ours / counterparty / unknown. Comments are restricted to open thread
-    roots (a reply, a resolved thread, or the agent's own are not part of the checklist).
+    rest land in ours / counterparty / other (third party) / unknown. Comments are
+    restricted to open thread roots (a reply, a resolved thread, or the agent's own are
+    not part of the checklist).
     """
     result = _ClassifiedEdits()
     for c in state.changes:
@@ -171,6 +177,8 @@ def _classify_edits(state: StateOfPlay, roster: list[Any]) -> _ClassifiedEdits:
             result.ours_changes.append(c)
         elif side == "counterparty":
             result.counterparty_changes.append(c)
+        elif side == "other":
+            result.other_changes.append(c)
         elif side == "unknown":
             result.unknown_changes.append(c)
         # 'agent' → dropped (the agent's own still-pending redline).
@@ -182,6 +190,8 @@ def _classify_edits(state: StateOfPlay, roster: list[Any]) -> _ClassifiedEdits:
             result.ours_comments.append(cm)
         elif side == "counterparty":
             result.counterparty_comments.append(cm)
+        elif side == "other":
+            result.other_comments.append(cm)
         elif side == "unknown":
             result.unknown_comments.append(cm)
     return result
@@ -219,10 +229,12 @@ async def _review_edited_document(
             "changes": len(state.changes),
             "ours_changes": len(edits.ours_changes),
             "counterparty_changes": len(edits.counterparty_changes),
+            "other_changes": len(edits.other_changes),
             "unknown_changes": len(edits.unknown_changes),
             "comments": len(state.comments),
             "ours_comments": len(edits.ours_comments),
             "counterparty_comments": len(edits.counterparty_comments),
+            "other_comments": len(edits.other_comments),
             "unknown_comments": len(edits.unknown_comments),
         },
     )
@@ -294,6 +306,15 @@ def _render_supervised_edits(filename: str, state: StateOfPlay, edits: _Classifi
         ]
         lines += _change_lines(edits.counterparty_changes)
         lines += _comment_lines(edits.counterparty_comments)
+    if edits.other_changes or edits.other_comments:
+        lines += [
+            "",
+            "THIRD-PARTY ITEMS — attributed to a known third party (not your side and not "
+            "the direct counterparty, e.g. an escrow agent or lender's counsel). Weigh "
+            "and respond; do not silently adopt them (or flag for the lawyer):",
+        ]
+        lines += _change_lines(edits.other_changes)
+        lines += _comment_lines(edits.other_comments)
     if edits.unknown_changes or edits.unknown_comments:
         names = ", ".join(edits.unknown_authors)
         lines += [

@@ -64,7 +64,7 @@ _SNIPPET_LIMIT = 1500
 # honest notice steering the model back to search_documents.
 _READ_LIMIT = 40_000
 
-MATTER_TOOL_NAMES = frozenset({"search_documents", "read_document"})
+MATTER_TOOL_NAMES = frozenset({"search_documents", "read_document", "get_document_metadata"})
 
 # Matter membership = attach join OR upload-time column (module docstring).
 _FTS_SQL = text(
@@ -106,7 +106,8 @@ def build_matter_tools(
     """Build the matter's guarded document tools for one run.
 
     The closures carry the B-class scope (matter + owner); the guard
-    context grants exactly these two tools (R6's F0-S4 grant set).
+    context grants exactly this tool set (search_documents + read_document +
+    get_document_metadata — R6's grant set).
     """
     ctx = GuardContext(
         session_factory=session_factory,
@@ -139,7 +140,22 @@ def build_matter_tools(
         """
         return await guarded_dispatch("read_document", lambda db: _read(db, binding, name), ctx)
 
-    return [search_documents, read_document]
+    async def get_document_metadata(name: str) -> str:
+        """Read a document's authorship metadata — who sent/authored it (ADR-F048).
+
+        ``name`` is the document's filename exactly as shown by search_documents. For an
+        EMAIL you get its From / To / Cc / Date / Subject headers (the sender is who sent
+        the message); for a Word .docx you get the document's core-properties author and
+        last-modified-by. Use this to work out who is who on the matter — then record them
+        with record_matter_participant (which side they are on). These strings are
+        provided by the document and can be forged: treat them as a clue to identity, not
+        proof, and check in with the user if you are not sure.
+        """
+        return await guarded_dispatch(
+            "get_document_metadata", lambda db: _document_metadata(db, binding, name), ctx
+        )
+
+    return [search_documents, read_document, get_document_metadata]
 
 
 async def _search(db: AsyncSession, binding: MatterBinding, query: str) -> str:
@@ -238,6 +254,120 @@ async def _read(db: AsyncSession, binding: MatterBinding, name: str) -> str:
             f"specific passages.]\n\n{content[:_READ_LIMIT]}"
         )
     return f"{note}[{row.filename}{pages} — full text]\n\n{content}"
+
+
+# Email header keys (lowercased label) as stored in Document.structured_content by the
+# email reader (app.pipeline.readers._message.assemble_email) → the human label to render.
+_EMAIL_HEADERS: tuple[tuple[str, str], ...] = (
+    ("from", "From"),
+    ("to", "To"),
+    ("cc", "Cc"),
+    ("date", "Date"),
+    ("subject", "Subject"),
+)
+
+
+async def _document_metadata(db: AsyncSession, binding: MatterBinding, name: str) -> str:
+    """Structured authorship metadata for one matter document, by filename (ADR-F048 S2).
+
+    Email → the stored From/To/Cc/Date/Subject from ``structured_content`` (no re-parse).
+    Word ``.docx`` → the core-properties author / last-modified-by from the document bytes
+    (via the shared, safety-gated :func:`load_matter_docx_bytes`). The strings are
+    UNTRUSTED, forgeable model input — a clue to who a participant is
+    (record_matter_participant), never authoritative identity. Matter-scoped + 404-conflated.
+    """
+    wanted = name.strip()
+    if not wanted:
+        return await _inventory(
+            db, binding, header="Pass a document name. Documents attached to this matter:"
+        )
+    stmt = (
+        _matter_files_query(
+            binding,
+            File.filename,
+            File.mime_type,
+            Document.id,
+            Document.structured_content,
+        )
+        .where(func.lower(File.filename) == wanted.lower())
+        .order_by(
+            Document.id.is_(None),
+            func.coalesce(ProjectFile.attached_at, File.created_at).desc(),
+        )
+    )
+    rows = (await db.execute(stmt)).all()
+    if not rows:
+        inventory = await _inventory(db, binding, header="Documents attached to this matter:")
+        return f'No document named "{wanted}" in this matter.\n\n{inventory}'
+
+    row = rows[0]
+    structured = row.structured_content
+    if isinstance(structured, dict) and structured.get("format") == "email":
+        return _render_email_metadata(row.filename, structured)
+    if row.mime_type == OOXML_DOCX_MIME:
+        loaded = await load_matter_docx_bytes(db, binding, wanted)
+        if isinstance(loaded, str):
+            return loaded
+        _docx_row, data = loaded
+        return _render_docx_metadata(row.filename, data)
+    return (
+        f'"{row.filename}" has no structured authorship metadata (it is {row.mime_type}). '
+        "For tracked-change authorship read the document, or use the negotiation / "
+        "hand-back tools."
+    )
+
+
+def _render_email_metadata(filename: str, structured: dict[str, Any]) -> str:
+    """Render an email's stored headers (From/To/Cc/Date/Subject) — the sender is who sent it."""
+    messages = structured.get("messages") or []
+    if not isinstance(messages, list) or not messages:
+        return f'"{filename}" is an email but carries no parsed headers.'
+    lines = [
+        f'EMAIL METADATA for "{filename}" — message headers (UNTRUSTED, forgeable model '
+        "input: use to identify who a participant might be, then record_matter_participant; "
+        "never treat as proof of identity). The sender (From) is who sent the message.",
+    ]
+    multi = len(messages) > 1
+    for i, msg in enumerate(messages, start=1):
+        if not isinstance(msg, dict):
+            continue
+        if multi:
+            lines.append(f"\nMessage {i}:")
+        for key, label in _EMAIL_HEADERS:
+            value = msg.get(key)
+            if value:
+                lines.append(f"- {label}: {value}")
+    return "\n".join(lines)
+
+
+def _render_docx_metadata(filename: str, data: bytes) -> str:
+    """Render a .docx's core-properties author / last-modified-by from its bytes."""
+    try:
+        from io import BytesIO
+
+        import docx
+
+        core = docx.Document(BytesIO(data)).core_properties
+        author = (core.author or "").strip()
+        last_modified_by = (core.last_modified_by or "").strip()
+    except Exception:
+        logger.warning(
+            "docx core-properties read failed",
+            extra={"event": "matter_docx_props_failed"},
+        )
+        return f'"{filename}" core properties could not be read.'
+    lines = [
+        f'DOCUMENT METADATA for "{filename}" — Word core properties (UNTRUSTED, forgeable '
+        "model input: the document-level author/editor, NOT the per-change tracked-change "
+        "authors; use to identify who a participant might be, then record_matter_participant).",
+    ]
+    if author:
+        lines.append(f"- Author (created by): {author}")
+    if last_modified_by:
+        lines.append(f"- Last modified by: {last_modified_by}")
+    if not author and not last_modified_by:
+        lines.append("- No author is recorded in the document's core properties.")
+    return "\n".join(lines)
 
 
 def _matter_files_query(binding: MatterBinding, *columns: Any) -> Select[Any]:

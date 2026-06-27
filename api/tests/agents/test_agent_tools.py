@@ -23,8 +23,10 @@ RESTRICT on owner, so children go first.
 from __future__ import annotations
 
 import inspect
+import io
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 import pytest
@@ -32,6 +34,7 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from app.agents import tools as agent_tools
 from app.agents.tools import MATTER_TOOL_NAMES, MatterBinding, build_matter_tools
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
@@ -39,6 +42,7 @@ from app.models.document import Document, DocumentChunk
 from app.models.file import File
 from app.models.project import Project, ProjectFile
 from app.models.user import User
+from app.pipeline.readers._base import OOXML_DOCX_MIME
 from app.security import hash_password
 
 pytestmark = pytest.mark.integration
@@ -61,6 +65,7 @@ class MatterEnv:
     project_id: uuid.UUID
     search: Callable[..., Awaitable[str]]
     read: Callable[..., Awaitable[str]]
+    get_meta: Callable[..., Awaitable[str]]
 
 
 @pytest_asyncio.fixture
@@ -229,7 +234,7 @@ async def matter_env(
             privileged=False,
             minimum_inference_tier=None,
         )
-        search, read = build_matter_tools(commit_factory, run_id=run.id, binding=binding)
+        search, read, get_meta = build_matter_tools(commit_factory, run_id=run.id, binding=binding)
         env = MatterEnv(
             factory=commit_factory,
             user_id=user.id,
@@ -237,6 +242,7 @@ async def matter_env(
             project_id=project.id,
             search=search,
             read=read,
+            get_meta=get_meta,
         )
 
     yield env
@@ -439,6 +445,118 @@ async def test_read_document_duplicates_prefer_newest_readable(
 
 
 # ---------------------------------------------------------------------------
+# get_document_metadata (ADR-F048 Slice 2) — authorship attribution
+# ---------------------------------------------------------------------------
+
+
+async def test_get_document_metadata_email_returns_headers(matter_env: MatterEnv) -> None:
+    """An email's stored structured_content headers (From/To/Date/Subject) are surfaced."""
+    async with matter_env.factory() as db:
+        f = File(
+            owner_id=matter_env.user_id,
+            project_id=matter_env.project_id,  # column membership
+            filename="deal.eml",
+            mime_type="message/rfc822",
+            size_bytes=10,
+            hash_sha256="b" * 64,
+            storage_path=f"meta-fixture/{uuid.uuid4()}",
+            ingestion_status="ready",
+        )
+        db.add(f)
+        await db.flush()
+        db.add(
+            Document(
+                file_id=f.id,
+                parser="eml",
+                page_count=1,
+                character_count=5,
+                normalized_content="From: ...",
+                structured_content={
+                    "format": "email",
+                    "message_count": 1,
+                    "messages": [
+                        {
+                            "ordinal": 1,
+                            "type": "message",
+                            "from": "Mark Counsel <mcounsel@beta.example>",
+                            "to": "us@firm.example",
+                            "date": "2026-06-26",
+                            "subject": "Revised NDA",
+                        }
+                    ],
+                },
+            )
+        )
+        await db.commit()
+        eid = f.id
+    try:
+        out = await matter_env.get_meta("deal.eml")
+        assert "EMAIL METADATA" in out
+        assert "From: Mark Counsel <mcounsel@beta.example>" in out
+        assert "Subject: Revised NDA" in out
+        assert "forgeable" in out.lower()  # untrusted-input framing
+    finally:
+        async with matter_env.factory() as db:
+            await db.execute(delete(File).where(File.id == eid))
+            await db.commit()
+
+
+async def test_get_document_metadata_docx_returns_core_author(
+    matter_env: MatterEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A .docx's core-properties author / last-modified-by are read from the bytes."""
+    from docx import Document as Docx
+
+    d = Docx()
+    d.add_paragraph("Body text.")
+    d.core_properties.author = "Jane Author"
+    d.core_properties.last_modified_by = "Mark Editor"
+    buf = io.BytesIO()
+    d.save(buf)
+    data = buf.getvalue()
+
+    @asynccontextmanager
+    async def fake_download(*, storage_path: str) -> AsyncIterator[AsyncIterator[bytes]]:
+        async def _gen() -> AsyncIterator[bytes]:
+            yield data
+
+        yield _gen()
+
+    monkeypatch.setattr(agent_tools.storage, "stream_download", fake_download)
+
+    async with matter_env.factory() as db:
+        f = File(
+            owner_id=matter_env.user_id,
+            project_id=matter_env.project_id,
+            filename="redline.docx",
+            mime_type=OOXML_DOCX_MIME,
+            size_bytes=len(data),
+            hash_sha256="c" * 64,
+            storage_path=f"meta-fixture/{uuid.uuid4()}",
+            ingestion_status="ready",
+        )
+        db.add(f)
+        await db.commit()
+        fid = f.id
+    try:
+        out = await matter_env.get_meta("redline.docx")
+        assert "DOCUMENT METADATA" in out
+        assert "Jane Author" in out
+        assert "Mark Editor" in out
+        assert "forgeable" in out.lower()
+    finally:
+        async with matter_env.factory() as db:
+            await db.execute(delete(File).where(File.id == fid))
+            await db.commit()
+
+
+async def test_get_document_metadata_unknown_name_lists_inventory(matter_env: MatterEnv) -> None:
+    out = await matter_env.get_meta("ghost.eml")
+    assert 'No document named "ghost.eml"' in out
+    assert "msa.pdf" in out  # the inventory orients the model
+
+
+# ---------------------------------------------------------------------------
 # The guard chokepoint around every dispatch
 # ---------------------------------------------------------------------------
 
@@ -448,9 +566,10 @@ async def test_each_dispatch_writes_one_audit_row_without_content(
 ) -> None:
     await matter_env.search("liability cap")
     await matter_env.read("msa.pdf")
+    await matter_env.get_meta("msa.pdf")  # a pdf → "no structured metadata", still one row
 
     rows = await _audit_rows(matter_env)
-    assert len(rows) == 2
+    assert len(rows) == 3
     assert {r.details["tool"] for r in rows} == MATTER_TOOL_NAMES
     for row in rows:
         assert row.action == "agent_run.tool_call"
@@ -468,12 +587,16 @@ async def test_tools_expose_model_facing_schema(matter_env: MatterEnv) -> None:
     pin the model-visible surface (A-class content args only, ADR-F004)."""
     assert matter_env.search.__name__ == "search_documents"
     assert matter_env.read.__name__ == "read_document"
+    assert matter_env.get_meta.__name__ == "get_document_metadata"
     assert matter_env.search.__doc__ and "empty query" in matter_env.search.__doc__
     assert matter_env.read.__doc__ and "filename" in matter_env.read.__doc__
+    assert matter_env.get_meta.__doc__ and "forged" in matter_env.get_meta.__doc__
     assert list(inspect.signature(matter_env.search).parameters) == ["query"]
     assert list(inspect.signature(matter_env.read).parameters) == ["name"]
+    assert list(inspect.signature(matter_env.get_meta).parameters) == ["name"]
     assert inspect.iscoroutinefunction(matter_env.search)
     assert inspect.iscoroutinefunction(matter_env.read)
+    assert inspect.iscoroutinefunction(matter_env.get_meta)
 
 
 async def test_halted_run_denies_dispatch(matter_env: MatterEnv) -> None:

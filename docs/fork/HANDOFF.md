@@ -3,9 +3,58 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-26): AUTHORSHIP Slice 1 — matter who-is-who roster + hand-back author
+> ▶▶ **PICKUP (2026-06-26): AUTHORSHIP Slice 2 — roster-aware negotiation + richer authorship signals —
+> SHIPPED on branch `fork/authorship-roster-slice2` (ADR-F048 addendum; migration `0077`; NO new HTTP
+> route / no new dependency). NEXT = maintainer's call (Commercial C6 — needs ADRs F036/F038 first; or a
+> foundational milestone — F2 Memory / Authorization ADR-F021 Phase 1).**
+>
+> ⏩ **PICK UP EXACTLY HERE (merge is PENDING, not done): PR [#156](https://github.com/sarturko-maker/lq-ai-fork/pull/156)
+> is OPEN on branch `fork/authorship-roster-slice2`; `main` is still at Slice 1 (`7dc31f7`).** At last check CI =
+> Gateway ✅ + Web ✅, **API job still IN_PROGRESS** (the ~13-min pytest). When all 3 are SUCCESS, complete the
+> ADR-F005 merge: `gh pr merge 156 --repo sarturko-maker/lq-ai-fork --squash --delete-branch` → `git checkout main
+> && git pull` → `docker image prune -f` (dangling). If API CI FAILED, read the job log, fix, push, re-poll — the
+> full gate (review + live + suites) already passed locally so a CI fail is almost certainly env/flake or a
+> ruff/version-drift nit. **The dev stack already runs the Slice-2 code** (api+arq+web rebuilt at mig `0077`,
+> healthy) — no rebuild needed post-merge. After merging, this PICK-UP note is spent; the real NEXT is the
+> maintainer's-call line above.
+>
+> Delivers the four Slice-1 deferrals. Maintainer rulings: distinct THIRD-PARTY bucket for `'other'`; lazy
+> operator auto-seed; `get_document_metadata` exposes email + docx author.
+> - **`'other'` third-party side** (mig `0077` = drop+recreate the `side` CHECK, precedent `0070`; literals
+>   in sync across `app.models.project._MATTER_PARTICIPANT_SIDES` / `schemas.matter_memory.MatterParticipantSide`
+>   / frontend `PARTICIPANT_SIDES`+`sideLabel`('Third party')+`sideToneClass`(violet)). A known third party
+>   (escrow agent, lender's counsel) renders in its OWN bucket — "weigh, don't silently adopt" — in both the
+>   editor hand-back and the negotiation render.
+> - **`get_document_metadata` tool** (`tools.py`, in `MATTER_TOOL_NAMES`, granted every matter-bound run):
+>   email → stored `Document.structured_content` headers (From/To/Cc/Date/Subject, no re-parse); docx →
+>   `core_properties` author/last-modified via the shared `load_matter_docx_bytes`. Matter-scoped, 404-conflated,
+>   counts-only guard audit. **No new HTTP route → no `test_endpoints`/`test_openapi` change.** UNTRUSTED/forgeable
+>   — informs candidacy, never authenticates.
+> - **Roster-aware C5a render** (`commercial_tools._render_state_of_play` + `_negotiation_side` + `_group_by_side`):
+>   groups marked-up changes/comments by side (OUR SIDE / THIRD PARTY / COUNTERPARTY). **KEY:** an unplaced author
+>   defaults to COUNTERPARTY here (the agent opened the counterparty's doc → preserves the C5a respond-to-every-ref
+>   loop) — UNLIKE the editor hand-back which ASKs on unknown. Classification is ADDITIVE LABELLING ONLY — every ref
+>   still requires one decision; `evaluate_coverage`/`evaluate_anchoring` + the no-silent-action guarantee UNCHANGED.
+> - **Lazy operator auto-seed** (`matter_roster_tools.ensure_operator_participant`, called in `composition.py` at
+>   run start when a matter is bound): seeds the run owner (the authenticated session user, NEVER model input) as
+>   `side='ours'`/`trust='confirmed'` (email as alias), so the agent needn't ask who its own side is. Committed in
+>   its OWN session so it's visible to the same run's roster block + tool-time `classify_author`. Idempotent over
+>   **active OR retired** rows — a lawyer-retired operator is NOT resurrected (ADR-F042 B2).
+> - **DURABLE TRAP — coverage parity.** The negotiation render must keep EVERY change/open-comment ref in the
+>   "decide one verdict per ref" list after grouping (the gate keys on refs, not authors). The editor and
+>   negotiation renders deliberately do NOT share a bucketer (different unknown-default + the editor drops the
+>   agent's own/resolved); they share only the public `classify_author`.
+> - **DURABLE TRAP — operator seed must COMMIT in its own session** (the long compose read-session doesn't commit);
+>   and probe idempotency over active+retired, else a human removal is undone.
+> - **Verify:** mig `0077` round-trip; full api suite **2818 passed / 35 skipped / 0 failed**; mypy + ruff clean.
+>   Web svelte-check 0, vitest **987**, prettier clean. Live: Cypress `authorship-roster.cy.ts` **3/3** (Third-party
+>   badge, light/dark) + DeepSeek scenario (operator seeded + third party 'other' recorded). Adversarial review
+>   (4-dim × verify, 14 agents): **0 blockers / 1 should-fix (fixed: retired-operator re-seed) / nits folded**.
+>   Evidence `docs/fork/evidence/authorship-slice2/`.
+>
+> ▶ **PREVIOUS (2026-06-26): AUTHORSHIP Slice 1 — matter who-is-who roster + hand-back author
 > resolution — SHIPPED on branch `fork/authorship-roster-slice1` (ADR-F048; migration `0076`; no new
-> dependency). NEXT = maintainer's call (authorship Slice 2, or back to the Commercial track / C6).**
+> dependency).**
 > A negotiation has many people redlining; the agent now knows who is who. Replaces the editor Slice-5
 > naive author filter (over-trust: every non-agent author treated as the lawyer).
 > - **Data** (`matter_participants`, mig `0076`): identity (display name + `aliases` JSONB match-set) →

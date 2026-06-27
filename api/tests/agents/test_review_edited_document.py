@@ -245,6 +245,26 @@ def test_render_flags_counterparty_as_negotiating_position() -> None:
     assert "OUR SIDE'S EDITS" not in out
 
 
+def test_render_flags_third_party_distinctly() -> None:
+    """ADR-F048 Slice 2: a known third party renders in its own THIRD-PARTY bucket."""
+    third = "Escrow Agent (Bank plc)"
+    roster = [_participant(third, "other")]
+    state = _state(
+        changes=[_change(third, ref="C1", deleted="Buyer", inserted="Escrow Agent")],
+        comments=[_comment(third, ref="Com:1", text="hold the deposit in escrow")],
+        clean="CLEAN",
+    )
+    edits = _classify_edits(state, roster)
+    assert [c.ref for c in edits.other_changes] == ["C1"]
+    assert [c.ref for c in edits.other_comments] == ["Com:1"]
+    out = _render_supervised_edits("contract.docx", state, edits)
+    assert "THIRD-PARTY ITEMS" in out
+    assert third in out and "Escrow Agent" in out
+    assert "hold the deposit in escrow" in out
+    assert "OUR SIDE'S EDITS" not in out
+    assert "UNIDENTIFIED AUTHORS" not in out  # placed as a third party, not flagged to ask
+
+
 def test_render_no_edits_is_graceful_but_shows_current() -> None:
     state = _state(
         changes=[_change(DEFAULT_AUTHOR, ref="C1")],  # only the agent's own change

@@ -159,6 +159,22 @@ async def test_create_rejects_invalid_side_422(
     assert resp.status_code == 422
 
 
+async def test_create_accepts_other_third_party_side(
+    client: AsyncClient, db_session: AsyncSession, db_user: User
+) -> None:
+    """ADR-F048 Slice 2: 'other' (a known third party) is a valid side on the human surface."""
+    project = await _make_project(db_session, db_user)
+    resp = await client.post(
+        _roster_url(project.id),
+        json={"display_name": "Escrow Agent", "side": "other", "organization": "Bank plc"},
+        headers=_h(db_user),
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["side"] == "other"
+    assert body["trust"] == "confirmed"
+
+
 async def test_update_partial_confirms_and_keeps_other_fields(
     client: AsyncClient, db_session: AsyncSession, db_user: User
 ) -> None:

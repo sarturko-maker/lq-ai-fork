@@ -528,11 +528,15 @@ decision (Backlog), triggered at real deployment; engine behaviour is identical,
   the agent auto-populates (`record_matter_participant`/`list_matter_roster`, zero model calls) and the lawyer
   amends (`POST/PATCH/retire` + a cockpit **Participants** section, human-confirmed wins). `review_edited_document`
   now classifies each author via the roster (ours→incorporate, counterparty→negotiate, unknown→**ask** the user) —
-  superseding the naive `DEFAULT_AUTHOR` filter. **Slice 2 (deferred, on record):** the C5a negotiation-path
-  classification (`extract_counterparty_position`/`respond_to_counterparty`); a structured `get_document_metadata`
-  tool for robust email-sender attribution; an `'other'` side for third parties; auto-seeding the operator as `ours`.
-  **Known limitation (ADR-F048 §Consequences):** a docx author string is untrusted/forgeable — the roster reduces
-  over-trust but is not cryptographic identity (a trusted authorship channel is future work).
+  superseding the naive `DEFAULT_AUTHOR` filter. ✅ **Slice 2 SHIPPED (2026-06-26, ADR-F048 addendum, migration
+  `0077`):** all four deferrals — roster-based author **grouping in the C5a negotiation render**
+  (`_render_state_of_play`, additive labelling only — coverage gate unchanged; unplaced authors default to the
+  counterparty on the counterparty's own doc); a structured **`get_document_metadata`** tool (email headers from
+  `structured_content` + docx core-properties author; no new HTTP route); an **`'other'` third-party side** (its
+  own "weigh, don't adopt" bucket); and **lazy auto-seed of the operator** as confirmed `'ours'` at run start
+  (idempotent over active+retired so a human removal isn't undone). **Known limitation (ADR-F048 §Consequences):**
+  author strings (now incl. email/docx metadata) are untrusted/forgeable — they inform candidacy but are not
+  cryptographic identity (a trusted, e.g. WOPI-stamped, authorship channel is future work).
 - **Search past chat within a matter (ALL areas, not just Commercial) — surfaced 2026-06-22 (maintainer,
   during C3 design).** Retrieval over a matter's prior conversations so the agent (and the lawyer) can find
   "what did we say about the indemnity last week" without re-reading every thread. Distinct from the matter

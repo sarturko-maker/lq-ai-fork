@@ -387,11 +387,12 @@ class MatterMemoryEntry(Base):
 # ``side``, so the agent can tell whose tracked changes are whose when it re-reads a
 # document. ``side`` drives treatment: ``'ours'`` (our team incl. our client) → adopt
 # as authoritative; ``'counterparty'`` → a negotiation position, never silently
-# adopted; ``'unknown'`` → ask the user. Additive-extensible ('other' for a third
-# party — a regulator/escrow agent — is a one-line migration + tuple later), mirroring
+# adopted; ``'other'`` (ADR-F048 Slice 2) → a known third party (escrow agent,
+# lender's counsel) — weigh distinctly, never silently adopt; ``'unknown'`` → ask the
+# user. Additive-extensible (the set grew from 3→4 in migration ``0077``), mirroring
 # the ``_MATTER_FACT_TYPES`` convention. ``role_label`` is the free-text descriptor
 # ("Lead counsel", "Client GC") that rides along for context.
-_MATTER_PARTICIPANT_SIDES = ("ours", "counterparty", "unknown")
+_MATTER_PARTICIPANT_SIDES = ("ours", "counterparty", "other", "unknown")
 # How a roster entry was set. ``'inferred'`` = the agent recorded it (auto-write,
 # ADR-F042 / B2); ``'confirmed'`` = the supervising lawyer set or edited it. The human
 # owns the tier: a ``'confirmed'`` entry is authoritative — the agent's auto-curation
