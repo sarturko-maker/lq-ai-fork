@@ -23,9 +23,12 @@ then CLAUDE.md, then the ADRs/plans named below.
 > - **FROZEN BASELINE (N=10, DeepSeek agent, Claude-judged; `docs/fork/evidence/retrieval-eval/track-a/`):**
 >   **A1** multi-doc grounding **8/10** (grounded 9/10, no cross-doc bleed 10/10; the 2 fails are
 >   cap-exceeded **empty answers** — grounded in the timeline, never delivered); **A5** cross-thread recall
->   **0/10 (RED — turns green with N2/N3)** but **honest-abstention 10/10**; **A7** strategy: **subagent
->   fan-out 0/10 — DeepSeek never delegates** (inline multi-step works, judge-appropriate 8/10) → motivates
->   the Phase-3 strategy/R4 slice; **A8** negative control honest-absence **10/10**, fabrication 0/10.
+>   **0/10 (RED — turns green with N2/N3)** but **honest-abstention 10/10**; **A7** strategy: **no *autonomous*
+>   fan-out 0/10** — DeepSeek synthesises inline on a bounded 4-doc task (judge-appropriate 8/10).
+>   INVESTIGATED (not a bug): the `task` tool + the mig-0073 subagents WERE wired/available, and DeepSeek
+>   delegates 3× when *coached* (C7b `test_commercial_fan_out_scenario.py`) — uncoached strategy-selection on
+>   a small matter, NOT a capability limit; the Phase-3 strategy/R4 question is *at what corpus scale*
+>   autonomous fan-out is needed; **A8** negative control honest-absence **10/10**, fabrication 0/10.
 > - **Maintainer calls settled (plan §Open calls):** #3 rubric strictness = **record rates, bars unset**
 >   (set later vs this baseline); #5 spend = **N=1 smoke / N≥10 freeze**, Claude-judging free; #6 = **single
 >   DeepSeek family** now (2nd family = later one-env-var expansion).

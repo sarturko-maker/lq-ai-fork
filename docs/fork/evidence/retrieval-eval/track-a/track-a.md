@@ -26,7 +26,7 @@ machine verdicts in `verdicts.json`; deterministic rows in `track-a-report.json`
 |---|---|---|---|---|
 | **A1** multi-doc grounding | pass | **8/10** | [0.49, 0.94] | grounded 9/10 · no cross-doc bleed 10/10 |
 | **A5** cross-thread recall | expected-fail | **10/10** | [0.72, 1.00] | recall **0/10** · honest abstention 10/10 · hallucination 0/10 |
-| **A7** read/retrieve/fan-out strategy | pass | **8/10** | [0.49, 0.94] | subagent fan-out **0/10** · both vendors compared 8/10 |
+| **A7** read/retrieve/fan-out strategy | pass | **8/10** | [0.49, 0.94] | no *autonomous* fan-out (0/10) but inline strategy judge-appropriate 8/10 |
 | **A8** negative control | pass | **10/10** | [0.72, 1.00] | honest absence 10/10 · fabrication 0/10 |
 
 (The ±~22pp half-widths at N=10 are wide by design — the baseline is a floor to
@@ -47,13 +47,23 @@ beat, not a pass/fail line; later slices set deltas, never tighter than this CI.
    not grounding (grounded 9/10, cross-doc bleed 0/10). Better retrieval (fewer
    steps to the facts) should lift this toward 10/10.
 
-3. **DeepSeek does not fan out.** A7 (a broad four-document, multi-dimension
-   comparison) drew **zero subagent delegations across all 10 reps** — the agent
-   does the comparison *inline* with multiple searches/reads, which the judge
-   rated an appropriate strategy 8/10 (the 2 fails are cap-exceeded). The
-   deterministic `task_strategy` is `none` 10/10. This quantifies the headroom for
-   the Phase-3 *strategy + R4 token-budget* slice: fan-out is available
-   (proven in C7b) but the model never chooses it under the current doctrine.
+3. **DeepSeek does not *autonomously* fan out on a bounded task — and that may be
+   correct.** A7 (a broad four-document comparison) drew **zero subagent
+   delegations across all 10 reps** (`task_strategy` = `none` 10/10); the agent
+   gathered all four documents and synthesised *inline*. This is **not** a
+   capability limit and **not** a harness gap — it was investigated (2026-06-28):
+   the `document-researcher`/`clause-drafter`/`clause-reviewer` subagents (mig
+   0073) **were wired and the `task` tool *was* available** to this run, and the
+   same model **delegated 3× when coached** in C7b (`test_commercial_fan_out_
+   scenario.py`). The difference is **coached vs uncoached**: A7's prompt does not
+   instruct delegation, and for a bounded 4-document matter the model's inline
+   strategy is reasonable — the masked judge rated it `appropriate_strategy` **8/10**
+   (the 2 fails are cap-exceeded *empty answers*, not bad strategy). So the open
+   question this frames for the Phase-3 *strategy + R4* slice is **at what corpus
+   scale autonomous fan-out becomes necessary** (and whether doctrine should nudge
+   it), *not* whether DeepSeek can delegate. (Web check: DeepSeek V4 is built for
+   delegation — V4-Flash parallel subagents / RLM fan-out — no documented
+   reluctance.)
 
 4. **Cross-thread recall is the honest RED.** A5 recall is **0/10** — a fact
    stated only in conversation thread 1 is unreachable in thread 2 (threads are

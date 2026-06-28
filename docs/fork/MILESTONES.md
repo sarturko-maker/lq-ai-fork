@@ -260,8 +260,10 @@ compact, accumulate into Matter digests, and are searchable; agents propose, use
 > (`track_a_lib.py`; orchestrator-Claude primary, `deepseek-pro` gateway fallback; judge sees only the
 > sanitised timeline + visible answer + rubric) + 4 scenarios + a free CI net + the live matrix
 > (`test_track_a_{lib,fixtures,unit,eval}.py`). **Frozen baseline (N=10, DeepSeek, Claude-judged,
-> `…/track-a/`): A1 grounding 8/10, A5 cross-thread recall 0/10 but honest-abstention 10/10, A7 subagent
-> fan-out 0/10 (never delegates), A8 honest-absence 10/10.** Phase-E exit reached. Next: **N0** (wire the
+> `…/track-a/`): A1 grounding 8/10, A5 cross-thread recall 0/10 but honest-abstention 10/10, A7 no
+> *autonomous* fan-out 0/10 (synthesises inline, judge-appropriate; subagents WERE wired & it delegates when
+> coached per C7b — a strategy-selection finding, not a capability limit), A8 honest-absence 10/10.**
+> Phase-E exit reached. Next: **N0** (wire the
 > native `AsyncPostgresStore` + `CompositeBackend`, accepts ADR-F049).
 
 - deepagents CompositeBackend: `/memories/{company,practice,user,matter}/` → StoreBackend namespaces

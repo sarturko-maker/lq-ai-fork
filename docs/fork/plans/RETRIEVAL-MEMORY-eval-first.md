@@ -56,7 +56,8 @@ set *after* the baseline, never tighter than the metric CI). Eval design detail:
   the C5a path (not rebuilt). CI net (`test_track_a_unit.py`, masking-leak assertion + verdict parsing +
   fake-gateway wiring + L1) runs free; the live matrix (`test_track_a_eval.py`) is provider-marked. **Frozen
   baseline (N=10, DeepSeek, Claude-judged): A1 grounding 8/10, A5 recall 0/10 but honest-abstention 10/10,
-  A7 subagent fan-out 0/10 (never delegates), A8 honest-absence 10/10** —
+  A7 no autonomous fan-out 0/10 (synthesises inline, judge-appropriate; subagents WERE wired & it delegates
+  when coached per C7b — a strategy-selection finding, not a capability limit), A8 honest-absence 10/10** —
   `docs/fork/evidence/retrieval-eval/track-a/`. *No ADR; no migration; no new dependency.*
 
 **Phase-E exit: ✅ REACHED (2026-06-28).** A frozen FTS-only Track-B baseline (E0) + a frozen Track-A

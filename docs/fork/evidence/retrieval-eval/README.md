@@ -96,14 +96,17 @@ packets; a gateway `deepseek-pro` fallback exists for automated runs. Full table
 |---|---|---|---|
 | **A1** multi-doc grounding | pass | 8/10 | grounded 9/10; 2 fails = cap-exceeded empty answers |
 | **A5** cross-thread recall | expected-fail | 10/10 | recall **0/10** (RED → N2/N3) but honest abstention 10/10 |
-| **A7** read/retrieve/fan-out strategy | pass | 8/10 | subagent fan-out **0/10** — never delegates |
+| **A7** read/retrieve/fan-out strategy | pass | 8/10 | no *autonomous* fan-out (0/10) — synthesises inline (judge-appropriate); delegates when coached (C7b) |
 | **A8** negative control | pass | 10/10 | honest absence 10/10, fabrication 0/10 |
 
 Findings that set later gates: anti-hallucination is already solid (A8 / A5
 abstention 10/10); grounding is faithful but capped by convergence (A1); DeepSeek
-**never fans out** to subagents (A7 → motivates the Phase-3 strategy/R4 slice);
-and cross-thread recall is the honest RED that the native conversation Store
-(N2/N3) must turn green.
+**does not *autonomously* fan out** on a bounded 4-doc task (A7 — it synthesises
+inline, which the judge rates appropriate; the `task` tool + subagents *were*
+wired and it delegates when coached per C7b — so the Phase-3 strategy/R4 question
+is *at what corpus scale* autonomous fan-out is needed, not whether it can); and
+cross-thread recall is the honest RED that the native conversation Store (N2/N3)
+must turn green.
 
 ### Reproduce
 
