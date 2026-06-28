@@ -65,13 +65,20 @@ agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be 
 
 ## Phase 0 — get on the native substrate
 
-- **N0 — wire the langgraph `Store` + `CompositeBackend` (ADR-F049 accepted here).** Instantiate
-  `AsyncPostgresStore` in the lifespan (mirror the checkpointer DI seam), pass `store=` + a
-  `CompositeBackend` with `/memories/{company,practice,user,matter}/` + `/conversation_history/` routes
-  to `create_deep_agent`. Add the namespace-distinctness assertion + the read-only `BackendProtocol`
-  wrapper for company/practice (permissions are tool-level + subagent perms *replace* parent's). Key
-  namespaces via `rt.context`. **No semantic index yet** (filter-only; degrades gracefully). *Migration-
-  light; ADR-F049 accepted with this slice. Gate: A5 substrate lights up; nothing green regresses.*
+- **N0 — wire the langgraph `Store` + `CompositeBackend` (ADR-F049 accepted here). ✅ SHIPPED
+  (2026-06-28).** `AsyncPostgresStore` instantiated in BOTH composition roots (api lifespan +
+  arq worker — runs execute in the worker), `store=` + a per-run `CompositeBackend`
+  (`/memories/{company,practice,user,matter}/` + `/conversation_history/`) passed to
+  `create_deep_agent`; the existing skills backend is the composite `default` (so `/skills` is
+  unaffected). `ReadOnlyStoreBackend` storage-level wrapper for company/practice (the backstop that
+  survives subagent permission-replacement). Namespaces keyed via `rt.context` (a new
+  `AgentRuntimeContext` + `context_schema=` — the load-bearing detail; no `org_id` exists, so the
+  owner segment is `run.user_id`). **No semantic index** (filter-only; `store.setup()` makes no
+  pgvector table). **No migration, no new dependency** (`AsyncPostgresStore` ships in the pinned
+  `langgraph-checkpoint-postgres`). **Honest gate (maintainer-ruled):** the substrate persists a note
+  across threads of a matter + isolates by matter + company/practice are read-only — proven by a
+  deterministic integration test (`test_memory_backend.py`); nothing green regresses; **A5 recall is a
+  tracked finding, expected ~0 until N3** (N0 ships the substrate, NOT the recall behaviour).
 - **N1 — move tier digests to `MemoryMiddleware`.** Replace the hand-assembled prompt blocks
   (`composition.py:305-391`) with `MemoryMiddleware(sources=[…])` per tier. *Gate: prompt-equivalence
   regression (the injected digests match the old prompt); all Track-A scenarios stay green.*

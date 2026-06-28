@@ -3,9 +3,62 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-28): RETRIEVAL & MEMORY E1 — the Track-A agentic baseline (masked-judge scenarios)
-> SHIPPED + MERGED (PR #161, `main` `a2eabaab`). Phase-E exit REACHED. NEXT SLICE = N0 (wire the native
-> `AsyncPostgresStore` + `CompositeBackend` into `compose_and_execute_run`, accepts ADR-F049).** E1 is the
+> ▶▶ **PICKUP (2026-06-28): RETRIEVAL & MEMORY N0 — the native langgraph `Store` + deepagents
+> `CompositeBackend` substrate — SHIPPED on branch `fork/n0-native-store-substrate` (ADR-F049 now
+> ACCEPTED). NO migration, NO new dependency. NEXT SLICE = N1 (move the tier digests to
+> `MemoryMiddleware`).** N0 gets the agent onto the framework's memory tier (replacing nothing yet — N1
+> does the prompt-block swap); the agent's builtin `write_file`/`read_file` now persist to a
+> matter-scoped, **thread-independent** Store.
+> - **What shipped:** `app/agents/store.py` — `AsyncPostgresStore` DI module mirroring
+>   `checkpointer.py` (own autocommit psycopg pool, `store.setup()` = library-managed tables NOT alembic,
+>   degrade-not-crash), inited+closed in BOTH composition roots (`main.py` lifespan AND `arq_setup.py`
+>   worker — runs execute in the WORKER). `app/agents/memory_backend.py` — `AgentRuntimeContext`
+>   (frozen dataclass keying the namespaces) + namespace callables + `ReadOnlyStoreBackend` (the
+>   storage-level read-only wrapper for company/practice) + `build_memory_backend` (per-run
+>   `CompositeBackend(default=skills backend, routes={/memories/{company,practice,user,matter}/ +
+>   /conversation_history/})`). Wiring threaded through `composition.py` (a `store_provider` seam
+>   mirroring `checkpointer_provider`; builds the backend + `AgentRuntimeContext` from the binding) →
+>   `runner.py` (`store=` + `context_schema=` into `agent_kwargs`; `context=` into `stream_kwargs`) →
+>   `factory.py` (unchanged — `**kwargs` forwards both).
+> - **Namespaces (no `org_id` exists — single-tenant):** company `("company",)` RO · practice
+>   `("practice", practice_area_id)` RO · user `("user", owner_id)` RW · matter `("matter", project_id)`
+>   RW · conversation `("conversation", thread_id)` RW (installed but UNWRITTEN until N2). Owner segment
+>   = `run.user_id`; a run only resolves its OWN owner-checked `project_id`, so no cross-user reach.
+>   **No semantic index** (filter-only; `setup()` makes no pgvector table).
+> - **THE GATE (maintainer-ruled HONEST gate — corrected from the over-promised "A5 lights up"):** the
+>   substrate is proven by a deterministic integration test (`tests/agents/test_memory_backend.py`:
+>   cross-thread persistence + cross-matter isolation + company/practice read-only + skills-resolve +
+>   an **e2e builtin `write_file`→Store through `create_deep_agent`**) + `test_agent_store.py` (Postgres
+>   `setup()` filter-only/idempotent on a throwaway DB). **A5's cross-thread *recall rate* is a tracked
+>   finding (ADR-F015), expected ~0 until N3** — N0 ships the substrate, not the recall behaviour (it
+>   structurally cannot rise until N2's offload + N3's search tool; the 3 docs were realigned).
+> - **Verify:** full api suite **2851 passed / 38 skipped / 0 failed**; `tests/agents` 607 (added the
+>   e2e guard); ruff (root) + mypy `app` clean. Adversarial
+>   review (4-dim: security/correctness/regression/simplification × verify): **0 blockers**; 1 should-fix
+>   folded (couple `runtime_context` to `store` so "rt.context populated" == "routes installed"), 1
+>   should-fix folded (the e2e store-ON regression guard), nits folded. **Live (api+arq rebuilt, DeepSeek;
+>   `docs/fork/evidence/n0-native-store/`):** api boot "agent memory store ready (filter-only)";
+>   `store`+`store_migrations` present (no `store_vectors`); a real run in the arq worker had the agent
+>   `write_file` `/memories/matter/n0_check.md` → landed in the Store under `("matter", project_id)` and
+>   read back — the full live path proven end-to-end.
+> - **NEXT = N1** (`plans/RETRIEVAL-MEMORY-eval-first.md`): replace the hand-assembled prompt blocks
+>   (`composition.py` ~305-391: client/wiki/corrections/roster) with `MemoryMiddleware(sources=[…])` per
+>   tier reading the Store. *Gate: prompt-equivalence regression (injected digests match the old prompt)
+>   + all Track-A scenarios stay green.* This is where the N0 `/memories/*` Store routes start being
+>   READ into the prompt — and where the **`/memories/matter/` Store vs the SQL matter wiki**
+>   (`project.context_md`, ADR-F042) convergence must be decided (N0 kept them deliberately separate).
+> - **Gotchas (carry into N1):** `context_schema` is MANDATORY or `rt.context` is empty and every
+>   namespace callable raises (the single load-bearing wiring detail); the Store pool MUST be
+>   `autocommit` (`setup()` runs `CREATE INDEX CONCURRENTLY`); namespace components must match
+>   `^[A-Za-z0-9\-_.@+:~]+$` (UUIDs fine); `StoreBackend.write` REFUSES overwrite → use `edit` for the
+>   auto-write-then-correct flow; deepagents **subagent permissions REPLACE the parent's** → company/
+>   practice read-only lives at the STORAGE layer (the wrapper), not a `FilesystemPermission` rule;
+>   subagents DO inherit the parent runtime context (same matter namespace) — verified; re-verify
+>   deepagents/langgraph signatures at the N1 boundary (minor churn); run pytest/ruff in `lq-ai-api-dev`
+>   with repo ROOT + `./skills` mounted on `--network lq-ai_default` + `DATABASE_URL`→postgres.
+>
+> ▶ **PREVIOUS: RETRIEVAL & MEMORY E1 — the Track-A agentic baseline (masked-judge scenarios)
+> SHIPPED + MERGED (PR #161, `main` `a2eabaab`). Phase-E exit REACHED.** E1 is the
 > subjective/agentic half of the eval-first instrument (E0 = the objective Track-B retrieval floor).
 > *(Follow-up shipping separately: a fan-out "when to delegate for document knowledge work" research note
 > → `docs/fork/research/` — input for the Phase-3 strategy/R4 slice, NOT a blocker for N0.)*

@@ -78,6 +78,7 @@ import logging
 from typing import Any, ClassVar
 
 from app.agents.checkpointer import close_agent_checkpointer, init_agent_checkpointer
+from app.agents.store import close_agent_store, init_agent_store
 from app.config import get_settings
 from app.db.session import dispose_engine
 from app.workers.agent_run_worker import (
@@ -186,6 +187,11 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     # crashes the worker — the api's posture, mirrored.
     await init_agent_checkpointer()
 
+    # F2 N0 (ADR-F049): the native memory Store behind the /memories backend.
+    # Runs EXECUTE here (not the api), so the store must be live in this
+    # process too — mirrors init_agent_checkpointer above. Degrade-not-crash.
+    await init_agent_store()
+
     # F025: the cross-process run-stream broker. Agent runs execute in THIS
     # process; this publishes their live parts (reasoning/tool frames + the
     # PRIV-9b changed-row highlight) onto Redis pub/sub so the api's SSE
@@ -220,7 +226,7 @@ async def on_startup(ctx: dict[str, Any]) -> None:
 
 
 async def on_shutdown(ctx: dict[str, Any]) -> None:
-    """Worker shutdown hook — close the checkpointer, dispose the engine.
+    """Worker shutdown hook — close the checkpointer + memory store, dispose the engine.
 
     Mirrors :mod:`app.workers.document_pipeline.on_shutdown`. Both
     closers are idempotent and best-effort; in-flight agent runs were
@@ -239,6 +245,10 @@ async def on_shutdown(ctx: dict[str, Any]) -> None:
         await close_agent_checkpointer()
     except Exception as exc:  # pragma: no cover - shutdown best-effort
         log.warning("arq-worker shutdown: checkpointer close failed: %s", exc)
+    try:
+        await close_agent_store()
+    except Exception as exc:  # pragma: no cover - shutdown best-effort
+        log.warning("arq-worker shutdown: memory store close failed: %s", exc)
     try:
         await dispose_engine()
     except Exception as exc:  # pragma: no cover - shutdown best-effort
