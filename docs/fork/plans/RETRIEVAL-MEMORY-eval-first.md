@@ -79,9 +79,22 @@ agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be 
   across threads of a matter + isolates by matter + company/practice are read-only — proven by a
   deterministic integration test (`test_memory_backend.py`); nothing green regresses; **A5 recall is a
   tracked finding, expected ~0 until N3** (N0 ships the substrate, NOT the recall behaviour).
-- **N1 — move tier digests to `MemoryMiddleware`.** Replace the hand-assembled prompt blocks
-  (`composition.py:305-391`) with `MemoryMiddleware(sources=[…])` per tier. *Gate: prompt-equivalence
-  regression (the injected digests match the old prompt); all Track-A scenarios stay green.*
+- **N1 — move the read-only DATA tier digests onto a middleware seam. ✅ SHIPPED (2026-06-28).** The
+  original framing ("use deepagents' `MemoryMiddleware` reading the Store") was **falsified by
+  exploration**: the matter wiki can't move to the Store without a separate cross-module ADR'd slice (it
+  would desync the cockpit C3-UM APIs, split the single-SQL wiki+fact-ledger+snapshot transaction, and
+  weaken the `guarded_tool_call` chokepoint + structural pin-immutability), and deepagents' stock
+  `MemoryMiddleware` injects generic `edit_file` self-learning guidance that conflicts with ADR-F042. So
+  N1 shipped a thin **fork** `TierMemoryMiddleware` (`app/agents/tier_middleware.py`) that appends the
+  four DATA tiers (House Brief, Matter File, Matter Corrections, Matter Roster) — rendered by the single
+  `render_memory_tiers` source — to the system message on every model call; `system_prompt_for` stays the
+  byte-identical equivalence oracle and **SQL stays the source of truth** (ADR-F042 unchanged). One
+  documented, benign delta: the tiers now render AFTER deepagents' `BASE_AGENT_PROMPT`. *Gate met:
+  prompt-equivalence (the four blocks render byte-identical and reach the model, proven by
+  `test_tier_middleware.py` + the composition e2e tests) + full api suite 2857 passed / 38 skipped / 0
+  failed + Track-A N=1 live smoke green.* The Store-vs-SQL **convergence** + the shared **Practice
+  Knowledge** learning tier are registered as the prize: [ADR-F050](../../adr/F050-practice-knowledge-shared-learning.md)
+  (proposed) + `plans/PRACTICE-KNOWLEDGE-prize.md`.
 
 ## Phase 1 — conversations on the native Store
 

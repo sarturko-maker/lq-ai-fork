@@ -64,6 +64,7 @@ from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
 from app.agents.skill_backend import SkillWiring, build_area_skill_wiring
 from app.agents.store import get_agent_store
 from app.agents.stream import RedisStreamBroker, RunStreamBroker
+from app.agents.tier_middleware import TierMemoryMiddleware
 from app.agents.tools import MatterBinding, build_matter_tools
 from app.db.session import get_session_factory
 from app.models.agent_run import AgentRun
@@ -218,6 +219,39 @@ MATTER_ROSTER_PROMPT = (
 )
 
 
+def render_memory_tiers(
+    *,
+    client_context: str | None = None,
+    matter_wiki: str | None = None,
+    corrections: str | None = None,
+    matter_memory_heading: str = "Matter memory",
+    roster: str | None = None,
+) -> str:
+    """Render the four read-only DATA memory tiers as one fenced block.
+
+    The single source of the tier fence constants, their deliberate order
+    (House Brief → Matter File → Matter Corrections → Matter Roster) and the
+    clean-degradation rule (an absent/empty/whitespace tier adds nothing).
+    Used BOTH by :func:`system_prompt_for` (the reference/equivalence oracle)
+    AND, in production, by ``TierMemoryMiddleware`` (F2 N1, ADR-F049) which
+    injects this text on the middleware seam instead of baking it into the
+    static system prompt. Each constant carries its own leading blank line, so
+    the returned text is byte-identical to the legacy inline assembly.
+    """
+    block = ""
+    if client_context and client_context.strip():
+        block += CLIENT_CONTEXT_PROMPT.format(context=client_context.strip())
+    if matter_wiki and matter_wiki.strip():
+        block += MATTER_MEMORY_PROMPT.format(
+            heading=matter_memory_heading, wiki=matter_wiki.strip()
+        )
+    if corrections and corrections.strip():
+        block += MATTER_CORRECTIONS_PROMPT.format(corrections=corrections.strip())
+    if roster and roster.strip():
+        block += MATTER_ROSTER_PROMPT.format(roster=roster.strip())
+    return block
+
+
 def system_prompt_for(
     binding: MatterBinding | None,
     area: AreaAgentSpec | None = None,
@@ -236,22 +270,31 @@ def system_prompt_for(
     block says WHO the agent acts for; the matter memory says what is known about THIS
     matter; the roster says who is who. Every layer degrades cleanly to silence — an
     absent/empty area, client, wiki, corrections or roster adds nothing.
+
+    F2 N1 (ADR-F049): in production the four DATA tiers no longer ride this string —
+    ``compose_and_execute_run`` passes only the run-invariant base (identity + matter
+    doctrine + area suffix) here and injects the tiers via ``TierMemoryMiddleware``
+    (which calls :func:`render_memory_tiers`, the same renderer). So the four tier
+    params below are **test/oracle-only** — production renders tiers separately. This
+    function stays a byte-identical oracle for the **tier-block rendering and the
+    inter-tier order**, NOT for the whole assembled string: in production the tiers
+    render AFTER the area suffix and deepagents' ``BASE_AGENT_PROMPT`` (the deliberate,
+    benign N1 ordering delta — the area method is no longer the literal *last* text the
+    model sees; the data tiers, incl. human-pinned corrections, sit closest to the
+    conversation).
     """
     prompt = SYSTEM_PROMPT
     if binding is not None:
         prompt += MATTER_PROMPT.format(name=binding.name)
         prompt += MATTER_REVIEW_DOCTRINE
         prompt += MATTER_ROSTER_DOCTRINE
-    if client_context and client_context.strip():
-        prompt += CLIENT_CONTEXT_PROMPT.format(context=client_context.strip())
-    if matter_wiki and matter_wiki.strip():
-        prompt += MATTER_MEMORY_PROMPT.format(
-            heading=matter_memory_heading, wiki=matter_wiki.strip()
-        )
-    if corrections and corrections.strip():
-        prompt += MATTER_CORRECTIONS_PROMPT.format(corrections=corrections.strip())
-    if roster and roster.strip():
-        prompt += MATTER_ROSTER_PROMPT.format(roster=roster.strip())
+    prompt += render_memory_tiers(
+        client_context=client_context,
+        matter_wiki=matter_wiki,
+        corrections=corrections,
+        matter_memory_heading=matter_memory_heading,
+        roster=roster,
+    )
     if area is not None:
         prompt += area.system_prompt_suffix
     return prompt
@@ -602,6 +645,22 @@ async def compose_and_execute_run(
             thread_id=thread_ns,
         )
 
+        # F2 N1 (ADR-F049): the four read-only DATA memory tiers (House Brief,
+        # Matter File, Matter Corrections, Matter Roster) ride the middleware
+        # seam now, not the static system prompt — the seam the future Practice
+        # Knowledge tier will plug into. SQL stays the source of truth (ADR-F042
+        # ownership unchanged) and the rendered blocks are byte-identical; only
+        # the run-invariant base (identity + matter doctrine + area) stays
+        # static. None when nothing renders (unbound/empty run) → unchanged graph.
+        tier_text = render_memory_tiers(
+            client_context=client_context_md,
+            matter_wiki=matter_wiki_md,
+            corrections=matter_corrections_block,
+            matter_memory_heading=matter_memory_heading,
+            roster=matter_roster_block,
+        )
+        tier_middleware = [TierMemoryMiddleware(tier_text=tier_text)] if tier_text else None
+
         http_client = build_gateway_http_client()
         try:
             model = model_builder(
@@ -616,18 +675,11 @@ async def compose_and_execute_run(
                 session_factory,
                 tools=tools,
                 model=model,
-                system_prompt=system_prompt_for(
-                    binding,
-                    area_spec,
-                    client_context_md,
-                    matter_wiki=matter_wiki_md,
-                    corrections=matter_corrections_block,
-                    matter_memory_heading=matter_memory_heading,
-                    roster=matter_roster_block,
-                ),
+                system_prompt=system_prompt_for(binding, area_spec),
                 subagents=wiring.subagents or None,
                 skills=wiring.main_sources,
                 backend=memory_backend,
+                middleware=tier_middleware,
                 checkpointer=checkpointer,
                 store=store,
                 runtime_context=runtime_context,

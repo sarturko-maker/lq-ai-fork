@@ -1217,7 +1217,9 @@ async def test_bound_run_injects_wiki_and_pinned_correction(
         session_factory_provider=lambda: comp_env.factory,
     )
 
-    joined = "\n".join(str(m.content) for m in model.seen_messages[0])
+    # F2 N1 (ADR-F049): the tiers now arrive via TierMemoryMiddleware as a
+    # content-block list — flatten with _seen_system_text (robust to repr-escaping).
+    joined = _seen_system_text(model)
     assert "## Matter memory (read-only)" in joined
     assert wiki in joined
     assert "The cap was AGREED at 12 months last round." in joined
@@ -1619,7 +1621,7 @@ async def test_privacy_matter_labels_programme_memory_and_grants_tool(
     assert run.status == "completed", run.error
 
     # Heading is area-labelled "Programme memory" (unit_label='Programme'), not "Matter".
-    joined = "\n".join(str(m.content) for m in model.seen_messages[0])
+    joined = _seen_system_text(model)  # F2 N1: tiers arrive via middleware content-blocks
     assert "## Programme memory (read-only)" in joined
     assert "## Matter memory (read-only)" not in joined
     assert "Programme seed: GDPR refresh for Acme." in joined
