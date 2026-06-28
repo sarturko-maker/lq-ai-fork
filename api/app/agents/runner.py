@@ -548,6 +548,7 @@ async def execute_agent_run(
     checkpointer: BaseCheckpointSaver | None = None,
     store: BaseStore | None = None,
     runtime_context: AgentRuntimeContext | None = None,
+    middleware: Sequence[Any] | None = None,
     thread_id: uuid.UUID | None = None,
     publisher: RunStreamPublisher | None = None,
     lease: RunLease | None = None,
@@ -622,6 +623,12 @@ async def execute_agent_run(
             agent_kwargs["store"] = store
         if runtime_context is not None:
             agent_kwargs["context_schema"] = AgentRuntimeContext
+        # F2 N1 (ADR-F049): per-run memory-tier injection rides the middleware
+        # seam (the fork TierMemoryMiddleware — NOT deepagents' self-learning
+        # MemoryMiddleware, whose edit_file guidance conflicts with ADR-F042).
+        # Rides **kwargs into create_deep_agent; omitted when nothing renders.
+        if middleware:
+            agent_kwargs["middleware"] = list(middleware)
         agent = build_deep_agent(
             model=model,
             tools=tools,

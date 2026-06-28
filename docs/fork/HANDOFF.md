@@ -3,11 +3,59 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-28): RETRIEVAL & MEMORY N0 — the native langgraph `Store` + deepagents
-> `CompositeBackend` substrate — SHIPPED on branch `fork/n0-native-store-substrate` (ADR-F049 now
-> ACCEPTED). NO migration, NO new dependency. NEXT SLICE = N1 (move the tier digests to
-> `MemoryMiddleware`).** N0 gets the agent onto the framework's memory tier (replacing nothing yet — N1
-> does the prompt-block swap); the agent's builtin `write_file`/`read_file` now persist to a
+> ▶▶ **PICKUP (2026-06-28): RETRIEVAL & MEMORY N1 — the read-only DATA memory tiers moved onto a fork
+> middleware seam (`TierMemoryMiddleware`) — SHIPPED on branch `fork/n1-tier-middleware` (ADR-F049). NO
+> migration, NO new dependency. NEXT SLICE = N2 (`SummarizationMiddleware` + `/conversation_history/`
+> offload → within-thread recall post-compaction).**
+> - **The N1 premise was FALSIFIED by exploration** (recorded so we don't relitigate): (a) the Matter
+>   File (wiki) can't move to the Store without a separate cross-module ADR'd slice — it would desync the
+>   cockpit C3-UM APIs, split the single-SQL wiki+fact-ledger+snapshot transaction, and weaken the
+>   `guarded_tool_call` chokepoint + structural pin-immutability; (b) deepagents' STOCK `MemoryMiddleware`
+>   injects generic `edit_file` self-learning guidance that conflicts with ADR-F042. So **SQL stays the
+>   source of truth** and N1 shipped a thin **fork** middleware, NOT the stock one.
+> - **What shipped:** `app/agents/tier_middleware.py` — `TierMemoryMiddleware(AgentMiddleware)` (overrides
+>   `wrap_model_call`/`awrap_model_call`; appends the rendered tier text via a local `_append_text_block`,
+>   no deepagents private-path dep). `composition.py` — new `render_memory_tiers` (the SINGLE source of the
+>   4 fence constants + order + degradation); `system_prompt_for` delegates to it (byte-identical, stays the
+>   equivalence oracle); `compose_and_execute_run` now passes `system_prompt_for(binding, area_spec)`
+>   (base = identity + matter doctrine + area suffix) + `middleware=[TierMemoryMiddleware(tier_text=…)]`
+>   (None when nothing renders). `runner.py` — `execute_agent_run` gained a `middleware` param → `agent_kwargs`
+>   (factory forwards via `**kwargs`; no factory change).
+> - **The tiers (CLAUDE.md § Memory tiers names):** House Brief, Matter File, Matter Corrections, Matter
+>   Roster — injected read-only, data-only-fenced, same relative order. **The ONE deliberate, documented,
+>   benign delta:** the tiers now render AFTER deepagents' `BASE_AGENT_PROMPT` + the area suffix (the area
+>   method is no longer the literal last text; data — incl. human pins — sits closest to the conversation).
+> - **THE GATE — met:** prompt-equivalence (the 4 blocks render byte-identical and reach the model — proven
+>   by `test_tier_middleware.py` incl. a real-assembly ordering lock + the `test_agent_composition.py` e2e
+>   `seen_messages` tests) + **full api suite 2857 passed / 38 skipped / 0 failed** + ruff (root) + mypy
+>   `app` (205 files) clean + **Track-A N=1 live smoke green** (4 scenarios terminal through the gateway with
+>   the middleware live; rates not re-frozen — N1 is not a baseline freeze, ADR-F015).
+> - **Adversarial review** (4-dim × verify, 15 agents): **0 blockers / 0 should-fixes**; 4 nits folded (a
+>   real-area-suffix ordering regression test + a tightened `system_prompt_for` docstring covering the
+>   oracle-scope + the area-suffix/ordering delta); 7 findings refuted (incl. a non-reproducing
+>   ruff-0.15.20 claim and benign content-block-shape/middleware-order observations).
+> - **THE PRIZE registered (not built):** the Store-vs-SQL **convergence** + the shared **Practice
+>   Knowledge** cross-matter learning tier → **ADR-F050** (proposed) + `plans/PRACTICE-KNOWLEDGE-prize.md`
+>   (the two-direction gate: anti-leakage/confidentiality + anti-poisoning; staging→de-id→guard→curator
+>   approval→provenance→revoke). Its own multi-slice, research-led, eval-gated milestone AFTER the N-ladder.
+>   Lighting up **Lawyer Preferences** (read-back of `autonomous_memory`) belongs to THAT track, not N1.
+> - **NEXT = N2** (`plans/RETRIEVAL-MEMORY-eval-first.md`): `SummarizationMiddleware` (profile already set,
+>   `factory.py:111`) + verbatim offload to the N0 Store `/conversation_history/` route → persistent
+>   within-thread recall post-compaction. *Gate: A6 within-chat recall post-compaction.* N1 does NOT unblock
+>   N2 (summarization operates on the message list, not the system prompt) — they're independent.
+> - **Gotchas (carry into N2):** middleware can only APPEND after the static base (so tiers land after
+>   `BASE_AGENT_PROMPT` — that's the N1 delta); a middleware-injected system message is a CONTENT-BLOCK LIST
+>   not a str → tests must flatten via `_seen_system_text`/`_flatten` (the gateway's OpenAI adapter
+>   concatenates blocks fine; the Anthropic adapter drops list-content but is unreachable — no `tools`
+>   forwarded, CLAUDE.md blocker #2); `system_prompt_for`'s 4 tier params are now test/oracle-only
+>   (production renders via `render_memory_tiers` + the middleware); re-verify deepagents/langchain
+>   middleware signatures at the N2 boundary; run pytest/ruff in `lq-ai-api-dev` with repo ROOT + `./skills`
+>   mounted on `--network lq-ai_default` + `DATABASE_URL`→postgres.
+>
+> ▶ **PREVIOUS (2026-06-28): RETRIEVAL & MEMORY N0 — the native langgraph `Store` + deepagents
+> `CompositeBackend` substrate — SHIPPED + MERGED (PR #163, ADR-F049 now
+> ACCEPTED). NO migration, NO new dependency.** N0 gets the agent onto the framework's memory tier
+> (the prompt-block swap was N1, above); the agent's builtin `write_file`/`read_file` now persist to a
 > matter-scoped, **thread-independent** Store.
 > - **What shipped:** `app/agents/store.py` — `AsyncPostgresStore` DI module mirroring
 >   `checkpointer.py` (own autocommit psycopg pool, `store.setup()` = library-managed tables NOT alembic,

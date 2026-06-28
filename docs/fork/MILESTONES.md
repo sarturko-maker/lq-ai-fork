@@ -277,6 +277,21 @@ compact, accumulate into Matter digests, and are searchable; agents propose, use
 > (maintainer-ruled):** substrate proven by deterministic test + nothing regresses; **A5 recall stays a
 > finding (~0) until N3** (N0 ships the substrate, not the recall behaviour). Next: **N1** (move the tier
 > digests to `MemoryMiddleware`, replacing the hand-assembled prompt blocks).
+>
+> **N1 ✅ SHIPPED (2026-06-28, ADR-F049):** the four read-only DATA memory tiers (House Brief, Matter
+> File, Matter Corrections, Matter Roster) moved off the static system prompt onto a fork
+> `TierMemoryMiddleware` (`app/agents/tier_middleware.py`); `render_memory_tiers` (composition.py) is the
+> single source of the fence constants/order/degradation and `system_prompt_for` stays the byte-identical
+> equivalence oracle. **The original premise was falsified** — the Matter File can't move to the Store
+> without a separate ADR'd slice (cockpit/transaction/guard/pin invariants), and deepagents' STOCK
+> `MemoryMiddleware` injects `edit_file` self-learning guidance that conflicts with ADR-F042 — so SQL
+> stays the source of truth and N1 used a thin **fork** middleware, not the stock one. One documented
+> benign delta: tiers now render after `BASE_AGENT_PROMPT` + the area suffix. **No migration, no new
+> dependency.** Gate met: full api suite **2857 passed / 38 skipped / 0 failed**, ruff + mypy clean,
+> Track-A N=1 live smoke green, adversarial review 0 blockers/0 should-fixes. The **convergence** + the
+> shared **Practice Knowledge** cross-matter learning tier are registered as the prize (**ADR-F050**
+> proposed + `plans/PRACTICE-KNOWLEDGE-prize.md`). Next: **N2** (`SummarizationMiddleware` +
+> `/conversation_history/` offload → within-chat recall post-compaction).
 
 - deepagents CompositeBackend: `/memories/{company,practice,user,matter}/` → StoreBackend namespaces
   keyed `(org_id, …)`; company + practice read-only to agents.

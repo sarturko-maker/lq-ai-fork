@@ -89,6 +89,30 @@ the orchestration; we keep the substrate (gateway, brakes, audit, citations, ski
 Implementation: one deepagents `CompositeBackend` — `/memories/{company,practice,user,matter}/` routed to
 StoreBackend namespaces keyed `(org_id, …)`; company and practice levels read-only to agents (curated).
 
+### Memory tiers (canonical names) — F2
+
+These are the agreed names for every memory tier. **Convention: when discussing memory with the
+maintainer, always refer to a tier by its canonical name followed by a one-sentence plain-language
+description** (e.g. *"Practice Knowledge — the firm's approved, anonymised house know-how shared across
+the practice group"*).
+
+| Name | Level | One-sentence description | Source of truth |
+|---|---|---|---|
+| **House Brief** | Firm | who the firm is and who it acts for; same for everyone, read-only to the agent. | `organization_profile` |
+| **Practice Playbook** | Practice area | the area's job description (doctrine, skills, helper roster, min model), human-curated, read-only to the agent. | `practice_areas` + bound skills |
+| **Practice Knowledge** ⭐ | Practice area | approved, anonymised house know-how built up across matters; agent proposes, human approves, shared with the practice group. | *future* — Store-backed + a safety harness (`docs/fork/plans/PRACTICE-KNOWLEDGE-prize.md`); NOT built |
+| **Lawyer Preferences** | User | one lawyer's private notes on how they like to work; never shared. | `autonomous_memory` (write-only today) |
+| **Matter File** | Matter | the running one-pager of a deal; agent keeps current, lawyer corrects/undoes. | `projects.context_md` (ADR-F042) |
+| **Matter Corrections** | Matter | lawyer-pinned authoritative facts; human-only writes; pins win. | `matter_memory_entries` (ADR-F042) |
+| **Matter Facts** | Matter | structured, time-stamped record of what's true and when; agent-maintained. | `matter_memory_entries` (ADR-F042/F043) |
+| **Matter Roster** | Matter | who's who + sides; agent infers, lawyer confirms. | `matter_participants` (ADR-F048) |
+| **Conversation Memory** | Conversation | what's been said in this chat + a running summary so long chats keep the thread. | checkpointer + Store `/conversation_history/` |
+
+The four read-only DATA tiers (House Brief, Matter File, Matter Corrections, Matter Roster) are injected
+into the system prompt by `TierMemoryMiddleware` (F2 N1, ADR-F049), not baked into the static prompt;
+SQL stays their source of truth. The Store/`MatterMemoryEntry` split is deliberate (N1 did NOT converge
+the Matter File onto the Store — that is its own future ADR'd slice).
+
 ## Rules of the game
 
 ### Decisions (ADRs)
