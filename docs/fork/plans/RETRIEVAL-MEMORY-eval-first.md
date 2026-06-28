@@ -98,12 +98,25 @@ gated.
   failure appears (A5 stale variant).*
 - **Documents MAP in the Store** (the L1 router; first doc's `fact_type="document"` → a
   `(matter,id,"map")` namespace). *Build only if large-corpus recall degrades without it.*
-- **Backlog — oversized-doc navigation / PageIndex.** Only on a *measured* single doc exceeding the
-  read cap where in-doc FTS fails: free chunk-derived section map first, PageIndex-via-gateway/local
-  (new `litellm` dep) only if insufficient. Own ADR if a dep is added.
+- **Slice P — PageIndex agentic-RAG EVAL SPIKE (find its fit through evals; not a skip).** PageIndex
+  is reasoning/agentic RAG (LLM navigates a doc's structure tree) — *complementary* to embeddings, not
+  a substitute. Run it as a **contained eval arm** (PageIndex OSS = MIT; LiteLLM pointed at our gateway
+  or a local model; **does NOT ship `litellm` into the product image**) measured on the same Track-B/
+  Track-A tasks, to test the hypotheses: (a) precise navigation **inside a single large, highly-
+  structured document** (long agreements where chunk-embedding fragments cross-references) — compare
+  recall/precision + cite-precision vs hybrid+rerank; (b) as a **selectable agentic-retrieval strategy**
+  for structure-heavy queries (Track-A A7 extension); (c) **explainability** (auditable navigation path
+  vs an opaque vector hit). Output: a measured map of *where PageIndex wins, at what cost* (tree-build
+  ~150–260 LLM calls/doc → likely cost-bounded to high-value docs). **Adoption is a separate post-eval
+  decision + its own ADR** if `litellm` (or a tree-index store) is added to the product. Sequenced
+  after E0/E1 (needs the harness) and after C (so the hybrid+rerank baseline exists to compare against);
+  can run independently of the substrate slices. A free chunk-derived section map remains the cheaper
+  first option to compare against for use case (a).
 
 **Dependency order:** E0 + E1 → N0 (ADR-F049) → N1, N2 → N3 | C → [Store semantic + docs dense] | A
-(independent) | D / strategy-R4 / recency / MAP gated on measured need.
+(independent) | D / strategy-R4 / recency / MAP gated on measured need. **Slice P (PageIndex eval
+spike)** after E0/E1 + C (needs the harness + a hybrid+rerank baseline to compare against); runs
+independently of the substrate slices.
 
 ---
 
@@ -117,7 +130,8 @@ baselines under `docs/fork/evidence/retrieval-eval/`.
 ## Non-goals
 - No parallel custom store/conversation-index/retriever (use native — ADR-F049 option 1 rejected).
 - No all-native retrieval (the Store is single-vector; documents keep the custom hybrid retriever).
-- No PageIndex / tree-RAG now (backlog, measured trigger).
+- No PageIndex *adoption* now (it IS evaluated — Slice P, a contained eval arm; it just isn't shipped
+  into the product image until the eval shows where it wins + a dependency ADR is accepted).
 - No a-priori eval thresholds (set X/Y after the B1 baseline, never tighter than CI).
 - No CI spend on live DeepSeek (provider-marked, manual/on-demand; retriever-only + scorer units in CI).
 

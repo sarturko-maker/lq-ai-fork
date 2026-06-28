@@ -49,9 +49,12 @@ The research arc established, with claims verified against our pinned packages a
    rerank + the Citation Engine byte-offset contract), already shipped for KnowledgeBases but **not
    wired to the matter agent path**.
 5. **Cost is a first-class axis.** At ~1000 docs the dominant cost is one-time indexing; the cheap
-   correct index is **local embeddings** (`torch` already in-image; the gateway has Tier-1 local
-   provider doors), with near-zero per-query cost — versus LLM-per-document tree-building
-   (PageIndex: ~150–260 calls/doc; **skip now, niche/later** for a measured oversized single doc).
+   correct index for broad cross-corpus recall is **local embeddings** (`torch` already in-image;
+   the gateway has Tier-1 local provider doors), with near-zero per-query cost. **PageIndex is a
+   *different thing* — reasoning/agentic RAG (the LLM navigates a document's structure tree), not an
+   embeddings substitute — and is complementary, not competing.** Its tree-build is LLM-heavy
+   (~150–260 calls/doc), so its fit is a **use-case + cost question to settle by eval**, not a
+   blanket skip (see consequences).
 6. **We cannot ship an agentic-retrieval vision we cannot measure**, and the orchestrator (Claude)
    **cannot eyeball 1000-doc recall**. CUAD (510 human-annotated contracts, 41 clause categories,
    SQuAD-2.0 with gold `answer_start` offsets, CC-BY-4.0) is the objective gold standard for the
@@ -146,10 +149,19 @@ ADR places them inside the native picture.
   documented **no-op** (`guard.py`), so nothing enforces a per-run *token* budget. Safe
   model-driven fan-out therefore needs a fan-out quota + wiring R4 into a real token budget — its
   own slice, called out here.
-- **PageIndex / tree-RAG is deferred** to a measured trigger (a single document exceeding the read
-  cap where in-doc FTS fails); a free chunk-derived section map is the first escalation, PageIndex
-  (MIT; routes via LiteLLM — a new egress-capable dep) only if that's insufficient. Never a
-  corpus-wide ×N index.
+- **PageIndex / agentic tree-RAG is a first-class EVAL CANDIDATE, not a skip.** It is complementary
+  to embeddings (reasoning over a document's structure vs vector similarity) and the two may compose.
+  We **evaluate it through the same tracks** to find *where* it earns its cost — hypotheses to test:
+  (a) precise navigation **inside a single large, highly-structured document** (long agreements,
+  where chunk-embedding fragments cross-references); (b) as a **selectable agentic-retrieval strategy**
+  the agent chooses for structure-heavy queries (ties to the strategy-selection research); (c)
+  **explainability/auditability** — the navigation path is a traceable reasoning chain, valuable for
+  legal defensibility. The trade is real (LLM-heavy tree-build ~150–260 calls/doc), so likely
+  cost-bounded to high-value documents — *the eval decides the boundary*. Evaluation is a **contained
+  spike** (PageIndex OSS is MIT; routes via LiteLLM, which can point at our gateway or a local model)
+  that does **not** ship `litellm` into the product image; **adoption is a separate post-eval decision
+  + its own ADR** if a dependency is added. Embeddings-hybrid remains the cross-corpus recall
+  workhorse; PageIndex is measured against/alongside it, never assumed in or out.
 - **Build is gated by measurement.** Every prior assumption (hybrid beats FTS, rerank helps, recency
   matters, within-chat retrieval is needed) becomes a measured delta; a slice that doesn't beat the
   baseline doesn't ship. CUAD gates the *mechanism* objectively; Claude-judged DeepSeek gates
