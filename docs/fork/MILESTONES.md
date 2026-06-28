@@ -250,6 +250,11 @@ compact, accumulate into Matter digests, and are searchable; agents propose, use
 > N0 substrate → conversations → cost play → measured). The bullets below are the original F2 outcomes,
 > now realised through that plan (the CompositeBackend bullet ↔ N0; in-chat compaction ↔ N2; chat search
 > tools ↔ N3 native `store.asearch`; memory manager UI is later in the plan).
+>
+> **E0 ✅ SHIPPED (2026-06-28):** the Track-B CUAD retrieval instrument + objective span scorer + the
+> frozen **FTS-only baseline** every later slice must beat (`docs/fork/evidence/retrieval-eval/`).
+> Floor: within-doc hit@8 0.39 / MAP 0.30; **cross-doc (matter-wide) hit@8 0.04 / MAP 0.02 — FTS
+> collapses at scale**. Next: **E1** (Track-A masked-judge scenarios + agent-mode) → N0.
 
 - deepagents CompositeBackend: `/memories/{company,practice,user,matter}/` → StoreBackend namespaces
   keyed `(org_id, …)`; company + practice read-only to agents.
