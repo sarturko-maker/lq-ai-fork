@@ -4,9 +4,11 @@ Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read thi
 then CLAUDE.md, then the ADRs/plans named below.
 
 > ▶▶ **PICKUP (2026-06-28): RETRIEVAL & MEMORY E1 — the Track-A agentic baseline (masked-judge scenarios)
-> SHIPPED (branch `fork/e1-track-a-masked-judge`). Phase-E exit REACHED. NEXT SLICE = N0 (wire the native
+> SHIPPED + MERGED (PR #161, `main` `a2eabaab`). Phase-E exit REACHED. NEXT SLICE = N0 (wire the native
 > `AsyncPostgresStore` + `CompositeBackend` into `compose_and_execute_run`, accepts ADR-F049).** E1 is the
 > subjective/agentic half of the eval-first instrument (E0 = the objective Track-B retrieval floor).
+> *(Follow-up shipping separately: a fan-out "when to delegate for document knowledge work" research note
+> → `docs/fork/research/` — input for the Phase-3 strategy/R4 slice, NOT a blocker for N0.)*
 > - **What shipped (all `tests/agents/scenarios/`):** `track_a_lib.py` — `build_judging_packet` (the
 >   **masked judging packet**: projects steps to the 5 audited `fetch_steps` fields + strips `<think>`;
 >   carries ONLY timeline + visible answer + rubric/expectations — never docs / agent prompt / `run_id`),
