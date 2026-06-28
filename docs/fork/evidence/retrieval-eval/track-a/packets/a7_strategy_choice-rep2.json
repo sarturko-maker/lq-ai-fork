@@ -1,0 +1,226 @@
+{
+  "scenario": "a7_strategy_choice",
+  "rep": 2,
+  "expected": "pass",
+  "agent_model": "deepseek",
+  "l1": {
+    "strategy": "none",
+    "delegated": false,
+    "compared_both": false
+  },
+  "packet": {
+    "scenario_id": "a7_strategy_choice",
+    "rubric": {
+      "criteria": "Given a broad multi-document comparison task, judge whether the tool strategy shown in the timeline is appropriate to that breadth (a multi-pronged investigation \u2014 e.g. delegating per-vendor research \u2014 rather than a single shallow lookup), and whether the final answer actually compares both named vendors against the draft terms.",
+      "verdict_values": [
+        "PASS",
+        "PARTIAL",
+        "FAIL"
+      ],
+      "flag_names": [
+        "appropriate_strategy",
+        "both_compared"
+      ]
+    },
+    "expectations": "The user asked for a broad comparison of two vendor proposals across several dimensions (price, service level, liability), each checked against the draft contract terms \u2014 a task whose breadth warrants investigating each vendor/dimension (e.g. delegating per-vendor research) rather than one lookup. Verify from the timeline whether the strategy was appropriate to that breadth, and whether the answer compares both named vendors against the draft terms.",
+    "steps": [
+      {
+        "seq": 1,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: search_documents]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 2,
+        "kind": "tool_call",
+        "name": "search_documents",
+        "summary": "{\"query\": \"\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 3,
+        "kind": "tool_result",
+        "name": "search_documents",
+        "summary": "Documents attached to this matter:\n- Draft-MSA-Terms.txt (1 pages)\n- RFQ-Instructions.txt (1 pages)\n- Vendor-Proposal-Brightpath.txt (1 pages)\n- Vendor-Proposal-Northstar.txt (1 pages)",
+        "parent_step_id": null
+      },
+      {
+        "seq": 4,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: read_document, read_document, read_document, read_document]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 5,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"RFQ-Instructions.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 6,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"Draft-MSA-Terms.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 7,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"Vendor-Proposal-Brightpath.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 8,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"Vendor-Proposal-Northstar.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 9,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[Draft-MSA-Terms.txt (1 pages) \u2014 full text]\n\nDraft Contract Terms. The Buyer's standard terms require a liability cap of at least one hundred and fifty percent (150%) of the annual fee and prohibit any Buyer-side indemnity of the supplier.\n\nGoverning Law. The Buyer's standard terms are governed by the laws of England and Wales. Any service level below 99.0% on-time delivery requires director-level approval.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 10,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[RFQ-Instructions.txt (1 pages) \u2014 full text]\n\n1. Request for Quotation. Helix Manufacturing Limited (the \"Buyer\") invites quotations for the supply of managed logistics services. Quotations must be submitted by no later than 5:00pm on 30 September 2026. Late submissions will not be considered.\n\n2. Evaluation Criteria. Quotations will be evaluated on price (40%), service levels (35%), and contractual risk including liability terms (25%). The Buyer is not bound to accept the lowest or any quotation.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 11,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[Vendor-Proposal-Northstar.txt (1 pages) \u2014 full text]\n\nNorthstar Logistics \u2014 Proposal. Annual fee: four hundred and twenty thousand pounds (\u00a3420,000). Service level: 99.5% on-time delivery, measured monthly.\n\nLiability. Northstar's aggregate liability is capped at one hundred percent (100%) of the annual fee. Northstar excludes all liability for indirect and consequential loss.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 12,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[Vendor-Proposal-Brightpath.txt (1 pages) \u2014 full text]\n\nBrightpath Freight \u2014 Proposal. Annual fee: three hundred and ninety thousand pounds (\u00a3390,000). Service level: 98.0% on-time delivery, measured quarterly.\n\nLiability. Brightpath's aggregate liability is capped at fifty percent (50%) of the annual fee. Brightpath requires the Buyer to indemnify it against third-party claims arising from the Buyer's instructions.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 13,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "All four documents read. Let me build the comparison. [requested tools: record_matter_participant, record_matter_participant, record_matter_participant]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 14,
+        "kind": "tool_call",
+        "name": "record_matter_participant",
+        "summary": "{\"name\": \"Helix Manufacturing Limited\", \"organization\": \"Helix Manufacturing Limited\", \"role\": \"Buyer / Client\", \"side\": \"ours\", \"source\": \"RFQ-Instructions.txt \\u2014 \\\"Helix Manufacturing Limited (the 'Buyer')\\\"\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 15,
+        "kind": "tool_call",
+        "name": "record_matter_participant",
+        "summary": "{\"name\": \"Brightpath Freight\", \"organization\": \"Brightpath Freight\", \"role\": \"Vendor (bidder)\", \"side\": \"counterparty\", \"source\": \"Vendor-Proposal-Brightpath.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 16,
+        "kind": "tool_call",
+        "name": "record_matter_participant",
+        "summary": "{\"name\": \"Northstar Logistics\", \"organization\": \"Northstar Logistics\", \"role\": \"Vendor (bidder)\", \"side\": \"counterparty\", \"source\": \"Vendor-Proposal-Northstar.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 17,
+        "kind": "tool_result",
+        "name": "record_matter_participant",
+        "summary": "Recorded Northstar Logistics as counterparty on this matter's roster (id c58cc924-14e9-4948-8cbc-1f1de6b66e4a). It is saved for future runs; their tracked changes will be recognised by the recorded name/aliases.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 18,
+        "kind": "tool_result",
+        "name": "record_matter_participant",
+        "summary": "Recorded Helix Manufacturing Limited as ours on this matter's roster (id f85ba63b-7ea2-4b1a-b29b-6cb9e9886ec0). It is saved for future runs; their tracked changes will be recognised by the recorded name/aliases.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 19,
+        "kind": "tool_result",
+        "name": "record_matter_participant",
+        "summary": "Recorded Brightpath Freight as counterparty on this matter's roster (id 7a657454-bd80-4668-ba6b-f66a3957e33d). It is saved for future runs; their tracked changes will be recognised by the recorded name/aliases.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 20,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: update_matter_memory, record_matter_fact, record_matter_fact, record_matter_fact, record_matter_fact]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 21,
+        "kind": "tool_call",
+        "name": "update_matter_memory",
+        "summary": "{\"content_md\": \"# Helix Logistics RFQ \\u2014 Vendor Evaluation\\n\\n**Buyer (our client):** Helix Manufacturing Limited\\n**Matter:** RFQ for managed logistics services\\n\\n**Documents in play:**\\n- RFQ-Instructions.txt \\u2014 Helix's invitation, deadline 30 Sept 2026, evaluation weighting: Price 40%, Service levels 35%, Contractual risk 25%.\\n- Draft-MSA-Terms.txt \\u2014 Buyer's standard contracting position (liability cap \\u2265150% annual fee; no Buyer-side indemnity; English law; director-level approval needed if SLA < 99.0%).\\n- Vendor-Proposal-Brightpath.txt \\u2014 \\u00a3390k/yr, 98.0% on-time / quarterly, 50% cap, demands Buyer indemnity.\\n- Vendor-Proposal-Northstar.txt \\u2014 \\u00a3420k/yr, 99.5% on-time / monthly, 100% cap, excludes indirect/consequential loss.\\n\\n**Key facts:**\\n- Brightpath is \\u00a330k cheaper than Northstar.\\n- Both vendor liability caps are below the Buyer's standard 150%-of-fee floor \\u2014 a material gap.\\n- Brightpath's 50% cap and demand for a Buyer indemnity are the most aggressive terms.\\n- Northstar's 99.5% SLA meets the 99.0% approval threshold; Brightpath's 98.0% triggers the director-level approval requirement.\\n\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 22,
+        "kind": "tool_call",
+        "name": "record_matter_fact",
+        "summary": "{\"fact\": \"Brightpath Freight bid \\u00a3390,000/yr with 98.0% on-time delivery (quarterly), 50% liability cap, demands Buyer indemnity.\", \"fact_type\": \"fact\", \"source\": \"Vendor-Proposal-Brightpath.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 23,
+        "kind": "tool_call",
+        "name": "record_matter_fact",
+        "summary": "{\"fact\": \"Northstar Logistics bid \\u00a3420,000/yr with 99.5% on-time delivery (monthly), 100% liability cap, excludes indirect/consequential loss.\", \"fact_type\": \"fact\", \"source\": \"Vendor-Proposal-Northstar.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 24,
+        "kind": "tool_call",
+        "name": "record_matter_fact",
+        "summary": "{\"fact\": \"Buyer's standard MSA requires a liability cap of at least 150% of annual fee and prohibits any Buyer-side indemnity of supplier.\", \"fact_type\": \"term\", \"source\": \"Draft-MSA-Terms.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 25,
+        "kind": "tool_call",
+        "name": "record_matter_fact",
+        "summary": "{\"fact\": \"Service level below 99.0% on-time delivery requires director-level approval under Buyer's standard terms.\", \"fact_type\": \"term\", \"source\": \"Draft-MSA-Terms.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 26,
+        "kind": "tool_result",
+        "name": "record_matter_fact",
+        "summary": "Recorded a fact fact (id 0279eb8d-5b20-4949-858c-db45e0f3bf0f). It is saved and available to future runs on this matter; supersede it later with supersedes=0279eb8d-5b20-4949-858c-db45e0f3bf0f if it changes.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 27,
+        "kind": "tool_result",
+        "name": "update_matter_memory",
+        "summary": "Updated this matter's memory (1085 characters). It is saved and will be available in future runs on this matter; the prior version was snapshotted so the change can be undone.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 28,
+        "kind": "tool_result",
+        "name": "record_matter_fact",
+        "summary": "Recorded a term fact (id c5925ca5-6fe3-4268-b0cd-cd86c98ad60f). It is saved and available to future runs on this matter; supersede it later with supersedes=c5925ca5-6fe3-4268-b0cd-cd86c98ad60f if it changes.",
+        "parent_step_id": null
+      }
+    ],
+    "visible_answer": ""
+  }
+}

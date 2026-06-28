@@ -210,6 +210,10 @@ class Receipt:
     error: str | None
     latency_s: float
     checks: ScenarioChecks
+    # The settled run's id — lets a caller re-read the masked step rows
+    # (evals.runner.fetch_steps) for Track-A judging (F2 E1). Not in to_dict()
+    # (a run id is not a report observation; the report carries counts/shapes).
+    run_id: uuid.UUID
     # UX-B-4 delegation observations (ADR-F017): how many `task` delegations the
     # lead agent issued, whether ANY step nested under a parent (subagent ran),
     # and a compact parent-seq → child-seqs ancestry summary.
@@ -359,6 +363,7 @@ async def run_scenario(
         error=run_row.error,
         latency_s=latency,
         checks=checks,
+        run_id=run_id,
         task_calls=task_calls,
         delegated=bool(ancestry),
         ancestry=ancestry,

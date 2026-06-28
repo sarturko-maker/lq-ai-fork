@@ -1,0 +1,226 @@
+{
+  "scenario": "a7_strategy_choice",
+  "rep": 3,
+  "expected": "pass",
+  "agent_model": "deepseek",
+  "l1": {
+    "strategy": "none",
+    "delegated": false,
+    "compared_both": true
+  },
+  "packet": {
+    "scenario_id": "a7_strategy_choice",
+    "rubric": {
+      "criteria": "Given a broad multi-document comparison task, judge whether the tool strategy shown in the timeline is appropriate to that breadth (a multi-pronged investigation \u2014 e.g. delegating per-vendor research \u2014 rather than a single shallow lookup), and whether the final answer actually compares both named vendors against the draft terms.",
+      "verdict_values": [
+        "PASS",
+        "PARTIAL",
+        "FAIL"
+      ],
+      "flag_names": [
+        "appropriate_strategy",
+        "both_compared"
+      ]
+    },
+    "expectations": "The user asked for a broad comparison of two vendor proposals across several dimensions (price, service level, liability), each checked against the draft contract terms \u2014 a task whose breadth warrants investigating each vendor/dimension (e.g. delegating per-vendor research) rather than one lookup. Verify from the timeline whether the strategy was appropriate to that breadth, and whether the answer compares both named vendors against the draft terms.",
+    "steps": [
+      {
+        "seq": 1,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: search_documents]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 2,
+        "kind": "tool_call",
+        "name": "search_documents",
+        "summary": "{\"query\": \"\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 3,
+        "kind": "tool_result",
+        "name": "search_documents",
+        "summary": "Documents attached to this matter:\n- Draft-MSA-Terms.txt (1 pages)\n- RFQ-Instructions.txt (1 pages)\n- Vendor-Proposal-Brightpath.txt (1 pages)\n- Vendor-Proposal-Northstar.txt (1 pages)",
+        "parent_step_id": null
+      },
+      {
+        "seq": 4,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: read_document, read_document, read_document, read_document]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 5,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"RFQ-Instructions.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 6,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"Draft-MSA-Terms.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 7,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"Vendor-Proposal-Brightpath.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 8,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"Vendor-Proposal-Northstar.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 9,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[RFQ-Instructions.txt (1 pages) \u2014 full text]\n\n1. Request for Quotation. Helix Manufacturing Limited (the \"Buyer\") invites quotations for the supply of managed logistics services. Quotations must be submitted by no later than 5:00pm on 30 September 2026. Late submissions will not be considered.\n\n2. Evaluation Criteria. Quotations will be evaluated on price (40%), service levels (35%), and contractual risk including liability terms (25%). The Buyer is not bound to accept the lowest or any quotation.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 10,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[Vendor-Proposal-Brightpath.txt (1 pages) \u2014 full text]\n\nBrightpath Freight \u2014 Proposal. Annual fee: three hundred and ninety thousand pounds (\u00a3390,000). Service level: 98.0% on-time delivery, measured quarterly.\n\nLiability. Brightpath's aggregate liability is capped at fifty percent (50%) of the annual fee. Brightpath requires the Buyer to indemnify it against third-party claims arising from the Buyer's instructions.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 11,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[Vendor-Proposal-Northstar.txt (1 pages) \u2014 full text]\n\nNorthstar Logistics \u2014 Proposal. Annual fee: four hundred and twenty thousand pounds (\u00a3420,000). Service level: 99.5% on-time delivery, measured monthly.\n\nLiability. Northstar's aggregate liability is capped at one hundred percent (100%) of the annual fee. Northstar excludes all liability for indirect and consequential loss.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 12,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[Draft-MSA-Terms.txt (1 pages) \u2014 full text]\n\nDraft Contract Terms. The Buyer's standard terms require a liability cap of at least one hundred and fifty percent (150%) of the annual fee and prohibit any Buyer-side indemnity of the supplier.\n\nGoverning Law. The Buyer's standard terms are governed by the laws of England and Wales. Any service level below 99.0% on-time delivery requires director-level approval.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 13,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "Let me also check who authored/sent these documents. [requested tools: get_document_metadata, get_document_metadata, get_document_metadata, get_document_metadata]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 14,
+        "kind": "tool_call",
+        "name": "get_document_metadata",
+        "summary": "{\"name\": \"RFQ-Instructions.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 15,
+        "kind": "tool_call",
+        "name": "get_document_metadata",
+        "summary": "{\"name\": \"Draft-MSA-Terms.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 16,
+        "kind": "tool_call",
+        "name": "get_document_metadata",
+        "summary": "{\"name\": \"Vendor-Proposal-Brightpath.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 17,
+        "kind": "tool_call",
+        "name": "get_document_metadata",
+        "summary": "{\"name\": \"Vendor-Proposal-Northstar.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 18,
+        "kind": "tool_result",
+        "name": "get_document_metadata",
+        "summary": "\"RFQ-Instructions.txt\" has no structured authorship metadata (it is text/plain). For tracked-change authorship read the document, or use the negotiation / hand-back tools.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 19,
+        "kind": "tool_result",
+        "name": "get_document_metadata",
+        "summary": "\"Vendor-Proposal-Brightpath.txt\" has no structured authorship metadata (it is text/plain). For tracked-change authorship read the document, or use the negotiation / hand-back tools.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 20,
+        "kind": "tool_result",
+        "name": "get_document_metadata",
+        "summary": "\"Draft-MSA-Terms.txt\" has no structured authorship metadata (it is text/plain). For tracked-change authorship read the document, or use the negotiation / hand-back tools.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 21,
+        "kind": "tool_result",
+        "name": "get_document_metadata",
+        "summary": "\"Vendor-Proposal-Northstar.txt\" has no structured authorship metadata (it is text/plain). For tracked-change authorship read the document, or use the negotiation / hand-back tools.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 22,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: search_matter_memory]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 23,
+        "kind": "tool_call",
+        "name": "search_matter_memory",
+        "summary": "{\"query\": \"Helix Logistics RFQ\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 24,
+        "kind": "tool_result",
+        "name": "search_matter_memory",
+        "summary": "No live matter memory matched 'Helix Logistics RFQ'. (Searched 0 live fact(s), 0 pinned correction(s), and the matter wiki.) To recall what was true at an earlier date, use matter_facts_as_of.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 25,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: update_matter_memory]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 26,
+        "kind": "tool_call",
+        "name": "update_matter_memory",
+        "summary": "{\"content_md\": \"# Helix Logistics RFQ \\u2014 Vendor Evaluation\\n\\n**Matter:** Helix Manufacturing Limited (\\\"Buyer\\\") \\u2014 procurement of managed logistics services.\\n\\n**Documents in play:** RFQ-Instructions.txt, Draft-MSA-Terms.txt (our standard terms), Vendor-Proposal-Brightpath.txt, Vendor-Proposal-Northstar.txt.\\n\\n**Our side:** Helix Manufacturing Limited (Buyer). We act as the Buyer's commercial counsel.\\n\\n**Vendors:** Brightpath Freight, Northstar Logistics.\\n\\n**Evaluation criteria (per RFQ):** Price (40%), Service levels (35%), Contractual risk incl. liability (25%).\\n\\n**Our standard position (Draft-MSA-Terms):**\\n- Liability cap: at least 150% of annual fee.\\n- No Buyer-side indemnity of the supplier.\\n- Governing law: England and Wales.\\n- Service level below 99.0% on-time delivery requires director-level approval.\\n\\n**Open:** Awaiting full comparison and recommendation.\\n\\n**Deadline:** Submissions close 30 September 2026.\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 27,
+        "kind": "tool_result",
+        "name": "update_matter_memory",
+        "summary": "Updated this matter's memory (906 characters). It is saved and will be available in future runs on this matter; the prior version was snapshotted so the change can be undone.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 28,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "Here is the full comparison and risk assessment.\n\n---\n\n## Helix Logistics RFQ \u2014 Side-by-Side Vendor Evaluation\n\n**Buyer:** Helix Manufacturing Limited | **Governing law (per Draft-MSA-Terms):** England and Wales | **Submission deadline:** 30 September 2026\n\n---\n\n### 1. Price (40% weighting)\n\n| Vendor | Annual Fee | Price Difference |\n|--------|-----------|-----------------|\n| **Brightpath Freight** | **\u00a3390,000** | Baseline (lower) |\n| **Northstar Logistics** | **\u00a3420,000** | +\u00a330,000 (+7.7%) |\n\n**Verdict:** Brightpath has a clear price advantage \u2014 \u00a330,000 cheaper than Northstar. However, the RFQ states the Buyer \"is not bound to accept the lowest or any quotation\" (RFQ-Instructions.txt, p1).\n\n---\n\n### 2. Service Level (35% weighting)\n\n| Vendor | On-Time Delivery | Measurement Period | Our Threshold | Gap Analysis |\n|--------|----------------|-------------------|---------------|-------------|\n| **Brightpath Freight** | **98.0%** | Quarterly | Our floor is 99.0% for standard sign-off (Draft-MSA-Terms) | **Below threshold** \u2014 98.0% < 99.0%, so director-level approval would be required per our own terms. |\n| **Northstar Logistics** | **99.5%** | Monthly | Same | **Exceeds threshold** \u2014 99.5% > 99.0%, no special approval needed. Also measured monthly (tighter granularity) vs quarterly. |\n\n**Key nuance on measurement cadence:** Brightpath measures quarterly, which can mask shortfalls \u2014 a bad month can be averaged over a quarter. Northstar measures monthly, giving earlier warning of underperformance.\n\n**Verdict:** Northstar is markedly stronger on service level \u2014 99.5% vs 98.0%, measured monthly rather than quarterly.\n\n---\n\n### 3. Liability & Contractual Risk (25% weighting) \u2014 Compared Against Our Draft-MSA-Terms\n\n| Term | Our Standard Position (Draft-MSA-Terms) | Brightpath Proposal | Northstar Proposal |\n|------|-----------------------------------------|-------------------|-------------------|\n| **Liability cap** | At least **150%** of annual fee | **50%** of annual fe\u2026",
+        "parent_step_id": null
+      }
+    ],
+    "visible_answer": "Here is the full comparison and risk assessment.\n\n---\n\n## Helix Logistics RFQ \u2014 Side-by-Side Vendor Evaluation\n\n**Buyer:** Helix Manufacturing Limited | **Governing law (per Draft-MSA-Terms):** England and Wales | **Submission deadline:** 30 September 2026\n\n---\n\n### 1. Price (40% weighting)\n\n| Vendor | Annual Fee | Price Difference |\n|--------|-----------|-----------------|\n| **Brightpath Freight** | **\u00a3390,000** | Baseline (lower) |\n| **Northstar Logistics** | **\u00a3420,000** | +\u00a330,000 (+7.7%) |\n\n**Verdict:** Brightpath has a clear price advantage \u2014 \u00a330,000 cheaper than Northstar. However, the RFQ states the Buyer \"is not bound to accept the lowest or any quotation\" (RFQ-Instructions.txt, p1).\n\n---\n\n### 2. Service Level (35% weighting)\n\n| Vendor | On-Time Delivery | Measurement Period | Our Threshold | Gap Analysis |\n|--------|----------------|-------------------|---------------|-------------|\n| **Brightpath Freight** | **98.0%** | Quarterly | Our floor is 99.0% for standard sign-off (Draft-MSA-Terms) | **Below threshold** \u2014 98.0% < 99.0%, so director-level approval would be required per our own terms. |\n| **Northstar Logistics** | **99.5%** | Monthly | Same | **Exceeds threshold** \u2014 99.5% > 99.0%, no special approval needed. Also measured monthly (tighter granularity) vs quarterly. |\n\n**Key nuance on measurement cadence:** Brightpath measures quarterly, which can mask shortfalls \u2014 a bad month can be averaged over a quarter. Northstar measures monthly, giving earlier warning of underperformance.\n\n**Verdict:** Northstar is markedly stronger on service level \u2014 99.5% vs 98.0%, measured monthly rather than quarterly.\n\n---\n\n### 3. Liability & Contractual Risk (25% weighting) \u2014 Compared Against Our Draft-MSA-Terms\n\n| Term | Our Standard Position (Draft-MSA-Terms) | Brightpath Proposal | Northstar Proposal |\n|------|-----------------------------------------|-------------------|-------------------|\n| **Liability cap** | At least **150%** of annual fee | **50%** of annual fee | **100%** of annual fee |\n| **Buyer indemnity of supplier** | **Not permitted** \u2014 \"prohibit any Buyer-side indemnity of the supplier\" | **Requires** Buyer to indemnify Brightpath against third-party claims from Buyer's instructions | **Not mentioned** (no indemnity request) |\n| **Exclusions** | Not specified in our draft | None stated | **Excludes all liability for indirect and consequential loss** |\n\n#### Brightpath Freight \u2014 Liability Risks\n\n1. **Liability cap at 50% \u2014 far below our floor of 150%.** At \u00a3390,000 annual fee, Brightpath proposes a cap of only **\u00a3195,000**. This is one-third of where we need it. For a logistics operation where the vendor handles physical goods, inventory, and delivery timeliness, 50% is low \u2014 it would leave Helix bearing most of the risk of Brightpath's failures.\n\n2. **Buyer indemnity of supplier \u2014 directly contrary to our standard terms.** Brightpath wants Helix to indemnify it against third-party claims \"arising from the Buyer's instructions\" (Vendor-Proposal-Brightpath.txt, p1). Our Draft-MSA-Terms expressly prohibit any Buyer-side indemnity. This would be a significant concession: it shifts liability back to Helix for claims by Brightpath's subcontractors, employees, or third parties, even where Brightpath's own execution was the cause and it merely followed a general instruction.\n\n#### Northstar Logistics \u2014 Liability Risks\n\n1. **Liability cap at 100% \u2014 below our 150% floor but closer.** At \u00a3420,000 annual fee, Northstar proposes a cap of **\u00a3420,000**. Better than Brightpath's \u00a3195,000, but still below our stated floor.\n\n2. **Full exclusion of indirect/consequential loss.** This is common in logistics contracts but worth noting: it means Helix could not recover lost profits, lost sales, production downtime, or reputational damage caused by Northstar's failures. This is a standard market position for logistics vendors \u2014 whether it is acceptable depends on whether Helix's primary exposure is direct loss of goods or indirect business interruption costs.\n\n---\n\n### 4. Governing Law\n\n| Vendor | Proposal States? |\n|--------|-----------------|\n| Brightpath | Not stated in their proposal. Check whether their standard T&Cs specify a different governing law \u2014 would need to reconcile with our England & Wales position. |\n| Northstar | Not stated in their proposal. Same need to reconcile. |\n\n---\n\n### 5. Overall Comparison Matrix\n\n| Criterion | Weight | Brightpath Freight | Northstar Logistics |\n|-----------|--------|-------------------|-------------------|\n| **Price** | 40% | \u2705 **\u00a3390,000** (best price) | \u26a0\ufe0f \u00a3420,000 (+7.7%) |\n| **Service Level** | 35% | \u274c 98.0% \u2014 below our threshold; quarterly measurement | \u2705 **99.5%** \u2014 exceeds threshold; monthly measurement |\n| **Contractual Risk** | 25% | \u274c\u274c Cap at 50% (far below floor) + demands Buyer indemnity (expressly prohibited) | \u26a0\ufe0f Cap at 100% (below floor but closer) + indirect loss exclusion (market standard) |\n| **Gov. Law** | \u2014 | Unknown \u2014 needs alignment to England & Wales | Unknown \u2014 needs alignment to England & Wales |\n\n---\n\n### 6. Key Risks & Flags\n\n1. **Neither vendor meets our 150% liability-cap floor.** This is the most important contractual gap. Northstar (100%) is closer than Brightpath (50%), but both would need negotiation. This needs escalation under our walk-away floor if it cannot be raised.\n\n2. **Brightpath's Buyer indemnity demand is a must-reject** per our standard terms (Draft-MSA-Terms). This is a hard line \u2014 it reverses the intended risk allocation. If Brightpath is otherwise preferred on price, this would need to be a firm \"no\" in contract negotiations.\n\n3. **Brightpath's 98.0% service level triggers our director-level approval requirement.** Even if Brightpath is selected commercially, this cannot be signed off at standard level \u2014 the business owner would need director approval per our own governance (Draft-MSA-Terms).\n\n4. **Measurement cadence matters operationally.** Quarterly measurement (Brightpath) lets underperformance persist for months before detection. Monthly measurement (Northstar) gives earlier intervention \u2014 but comes with a higher bar (99.5%).\n\n5. **Price alone could be misleading.** Brightpath is \u00a330,000 cheaper but carries significantly greater contractual risk and lower service levels. At the 25% contractual-risk weighting, a buyer-side indemnity and a 50% cap may present a greater total cost than the \u00a330,000 saving.\n\n6. **Governing law not addressed in either proposal.** Both vendors' T&Cs may specify a different governing law or jurisdiction. This must be checked and aligned to England and Wales before acceptance.\n\n---\n\n### 7. Recommendation\n\n**On balance, Northstar is the stronger proposition** despite the higher price. It offers a materially better service level (99.5% monthly vs 98.0% quarterly) and presents less contractual friction \u2014 no prohibited Buyer indemnity, and a liability cap (100%) that is at least in play for negotiation toward our 150% floor. Brightpath's combination of a 50% cap and a demand for a Buyer indemnity represents a significant contractual gap.\n\n**Items requiring human judgment:**\n\n- **Liability cap negotiation floor:** Is 150% a hard walk-away, or is there flexibility? If Northstar can be moved from 100% to 125\u2013150%, it becomes much more viable.\n- **Director-level approval on service level:** If Brightpath is pursued, the business owner must decide whether 98.0% is commercially acceptable with director sign-off.\n- **Indirect/consequential loss exclusion (Northstar):** Is Helix's primary exposure direct (loss of goods) or indirect (down-time, lost profits)? This determines whether this exclusion is acceptable or must be narrowed.\n- **Governing law:** Both vendors' governing law and jurisdiction preferences need to be obtained and aligned to England and Wales."
+  }
+}

@@ -1,0 +1,550 @@
+{
+  "agent_model": "deepseek",
+  "n": 10,
+  "judge_mode": "claude",
+  "judge_model": "claude-orchestrator",
+  "scenarios": [
+    {
+      "id": "a1_multidoc_grounding",
+      "expected": "pass",
+      "title": "A1 \u2014 multi-document grounding"
+    },
+    {
+      "id": "a5_cross_thread_recall",
+      "expected": "expected-fail",
+      "title": "A5 \u2014 cross-thread recall (expected-fail until N0/N3)"
+    },
+    {
+      "id": "a7_strategy_choice",
+      "expected": "pass",
+      "title": "A7 \u2014 read/retrieve/fan-out strategy choice"
+    },
+    {
+      "id": "a8_negative_control",
+      "expected": "pass",
+      "title": "A8 \u2014 negative control (anti-hallucination)"
+    }
+  ],
+  "results": [
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 1,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 4,
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 2,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 3,
+      "expected": "pass",
+      "status": "cap_exceeded",
+      "model_turns": 4,
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 4,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 5,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 6,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 7,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 4,
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 8,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 9,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 4,
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 10,
+      "expected": "pass",
+      "status": "cap_exceeded",
+      "model_turns": 4,
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 1,
+      "expected": "expected-fail",
+      "status": "completed",
+      "model_turns": 1,
+      "t1_memory_writes": [],
+      "fixture_valid": true,
+      "status_followup": "completed",
+      "l1": {
+        "recalled_detail": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 2,
+      "expected": "expected-fail",
+      "status": "completed",
+      "model_turns": 1,
+      "t1_memory_writes": [],
+      "fixture_valid": true,
+      "status_followup": "completed",
+      "l1": {
+        "recalled_detail": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 3,
+      "expected": "expected-fail",
+      "status": "completed",
+      "model_turns": 1,
+      "t1_memory_writes": [],
+      "fixture_valid": true,
+      "status_followup": "completed",
+      "l1": {
+        "recalled_detail": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 4,
+      "expected": "expected-fail",
+      "status": "completed",
+      "model_turns": 1,
+      "t1_memory_writes": [],
+      "fixture_valid": true,
+      "status_followup": "completed",
+      "l1": {
+        "recalled_detail": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 5,
+      "expected": "expected-fail",
+      "status": "completed",
+      "model_turns": 1,
+      "t1_memory_writes": [],
+      "fixture_valid": true,
+      "status_followup": "completed",
+      "l1": {
+        "recalled_detail": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 6,
+      "expected": "expected-fail",
+      "status": "completed",
+      "model_turns": 1,
+      "t1_memory_writes": [],
+      "fixture_valid": true,
+      "status_followup": "completed",
+      "l1": {
+        "recalled_detail": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 7,
+      "expected": "expected-fail",
+      "status": "completed",
+      "model_turns": 1,
+      "t1_memory_writes": [],
+      "fixture_valid": true,
+      "status_followup": "completed",
+      "l1": {
+        "recalled_detail": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 8,
+      "expected": "expected-fail",
+      "status": "completed",
+      "model_turns": 1,
+      "t1_memory_writes": [],
+      "fixture_valid": true,
+      "status_followup": "completed",
+      "l1": {
+        "recalled_detail": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 9,
+      "expected": "expected-fail",
+      "status": "completed",
+      "model_turns": 1,
+      "t1_memory_writes": [],
+      "fixture_valid": true,
+      "status_followup": "completed",
+      "l1": {
+        "recalled_detail": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 10,
+      "expected": "expected-fail",
+      "status": "completed",
+      "model_turns": 1,
+      "t1_memory_writes": [],
+      "fixture_valid": true,
+      "status_followup": "completed",
+      "l1": {
+        "recalled_detail": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 1,
+      "expected": "pass",
+      "status": "cap_exceeded",
+      "model_turns": 5,
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 2,
+      "expected": "pass",
+      "status": "cap_exceeded",
+      "model_turns": 4,
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": false
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 3,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 6,
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 4,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 6,
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 5,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 6,
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 6,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 4,
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 7,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 5,
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 8,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 4,
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 9,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 7,
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 10,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 4,
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 1,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 2,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 4,
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 3,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 4,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 5,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 4,
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 6,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 4,
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 7,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 8,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 9,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      },
+      "packet_written": true
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 10,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      },
+      "packet_written": true
+    }
+  ]
+}
