@@ -29,6 +29,7 @@ from collections.abc import Callable
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.store.base import BaseStore
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -54,12 +55,14 @@ from app.agents.matter_roster_tools import (
     format_roster_block,
     live_participants,
 )
+from app.agents.memory_backend import AgentRuntimeContext, build_memory_backend
 from app.agents.redline_service import RedlineService, build_redline_service
 from app.agents.review_edited_document_tools import build_review_edited_document_tools
 from app.agents.ropa_changes import RopaChangeLedger
 from app.agents.ropa_tools import PRIVACY_AREA_KEY, build_ropa_tools
 from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
 from app.agents.skill_backend import SkillWiring, build_area_skill_wiring
+from app.agents.store import get_agent_store
 from app.agents.stream import RedisStreamBroker, RunStreamBroker
 from app.agents.tools import MatterBinding, build_matter_tools
 from app.db.session import get_session_factory
@@ -281,6 +284,7 @@ async def compose_and_execute_run(
     model_builder: Callable[..., BaseChatModel] = build_gateway_chat_model,
     session_factory_provider: Callable[[], async_sessionmaker[AsyncSession]] = get_session_factory,
     checkpointer_provider: Callable[[], BaseCheckpointSaver | None] = get_agent_checkpointer,
+    store_provider: Callable[[], BaseStore | None] = get_agent_store,
     skill_registry_provider: Callable[[], SkillRegistry | None] = _skill_registry_from_app_state,
     redline_service_provider: Callable[[], RedlineService] = build_redline_service,
 ) -> None:
@@ -320,6 +324,9 @@ async def compose_and_execute_run(
                 return
             model_alias, purpose = run.model_alias, run.purpose
             thread_id = run.thread_id
+            # Captured as a scalar inside the session (the run row detaches when
+            # the block closes) — keys the user/owner memory namespace at N0.
+            run_user_id = run.user_id
             # C-CLIENT (ADR-F030): load the company/client tier once, for every
             # run. Read-only injection at the prompt seam (system_prompt_for
             # below); absent/empty profile → None → no client block.
@@ -556,6 +563,45 @@ async def compose_and_execute_run(
         else:
             wiring = SkillWiring(backend=None, main_sources=None, subagents=[])
 
+        # F2 N0 (ADR-F049): wire the native memory substrate. The skills backend
+        # becomes the CompositeBackend default (so /skills is unaffected); the
+        # /memories/* (+ /conversation_history/) routes are added for whichever
+        # ids are bound. Degrades to wiring.backend untouched when the Store is
+        # unavailable (init failure). No org_id exists (single-tenant), so the
+        # owner segment is run.user_id — and a run only ever resolves its OWN
+        # owner-checked project, so no run can name another user's namespace.
+        store = store_provider()
+        owner_ns = str(run_user_id)
+        project_ns = str(binding.project_id) if binding is not None else None
+        practice_ns = (
+            str(binding.practice_area_id)
+            if binding is not None and binding.practice_area_id is not None
+            else None
+        )
+        thread_ns = str(thread_id) if thread_id is not None else None
+        # Built ONLY when the Store is live, so "rt.context populated"
+        # (context_schema + context= in the runner) and "/memories routes
+        # installed" (build_memory_backend) are the SAME condition — a degraded
+        # Store leaves both off, never a half-wired context.
+        runtime_context = (
+            AgentRuntimeContext(
+                owner_id=owner_ns,
+                project_id=project_ns,
+                practice_area_id=practice_ns,
+                thread_id=thread_ns,
+            )
+            if store is not None
+            else None
+        )
+        memory_backend = build_memory_backend(
+            skills_backend=wiring.backend,
+            store=store,
+            owner_id=owner_ns,
+            project_id=project_ns,
+            practice_area_id=practice_ns,
+            thread_id=thread_ns,
+        )
+
         http_client = build_gateway_http_client()
         try:
             model = model_builder(
@@ -581,8 +627,10 @@ async def compose_and_execute_run(
                 ),
                 subagents=wiring.subagents or None,
                 skills=wiring.main_sources,
-                backend=wiring.backend,
+                backend=memory_backend,
                 checkpointer=checkpointer,
+                store=store,
+                runtime_context=runtime_context,
                 thread_id=thread_id,
                 publisher=publisher,
                 lease=lease,

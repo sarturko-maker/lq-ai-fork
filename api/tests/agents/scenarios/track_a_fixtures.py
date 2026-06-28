@@ -168,7 +168,7 @@ _A1 = TrackAScenario(
 _A5 = TrackAScenario(
     scenario=Scenario(
         id="a5_cross_thread_recall",
-        title="A5 — cross-thread recall (expected-fail until N0/N3)",
+        title="A5 — cross-thread recall (expected-fail until N3)",
         note=(
             "A NON-MATTER aside stated ONLY in conversation thread 1; thread 2 (a fresh "
             "thread in the same matter) asks for it. Cross-thread recall of matter facts "
@@ -176,8 +176,11 @@ _A5 = TrackAScenario(
             "verified live), so the genuine gap N2/N3's conversation store fixes is "
             "non-persisted conversational context — hence a deliberately non-matter "
             "detail the agent should NOT file. Threads are isolated today (blocker #3), "
-            "so recall fails; the good behaviour is honest abstention. Valid only if "
-            "thread 1 did not persist the detail to shared matter memory."
+            "so recall fails; the good behaviour is honest abstention. N0 lands the "
+            "/memories Store SUBSTRATE (a written note persists across threads) but does "
+            "NOT raise this recall rate — that needs N2's conversation offload + N3's "
+            "search tool; A5 recall is a tracked finding (ADR-F015) until N3. Valid only "
+            "if thread 1 did not persist the detail to shared matter memory."
         ),
         prompt=(
             "Quick note for context — no action needed and nothing to file: I'm working "

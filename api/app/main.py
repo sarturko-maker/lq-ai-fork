@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 from app import __version__
 from app.admin_bootstrap import ensure_first_run_admin
 from app.agents.checkpointer import close_agent_checkpointer, init_agent_checkpointer
+from app.agents.store import close_agent_store, init_agent_store
 from app.agents.stream import RedisStreamBridge, RunStreamBroker
 from app.api import api_router
 from app.cache import check_redis, close_redis, get_redis
@@ -102,6 +103,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # logs and leaves the saver unset; see app/agents/checkpointer.py.
     await init_agent_checkpointer()
 
+    # Native memory substrate (F2 N0, ADR-F049): the langgraph Store behind the
+    # /memories CompositeBackend. Same degrade-not-crash posture as the
+    # checkpointer — init failure leaves the store unset and the memory backend
+    # falls back to the non-persistent default; see app/agents/store.py.
+    await init_agent_store()
+
     # SSE v2 run-stream broker (F0-S7, ADR-F006): process-local pub/sub
     # between the runner and the stream endpoint. Composition root —
     # endpoints reach it through get_stream_broker (app/api/agent_runs).
@@ -125,6 +132,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         for closer_name, closer in (
             ("run-stream bridge", app.state.agent_stream_bridge.aclose),
             ("agent checkpointer", close_agent_checkpointer),
+            ("agent memory store", close_agent_store),
             ("gateway client", close_gateway_client),
             ("redis", close_redis),
             ("db engine", dispose_engine),

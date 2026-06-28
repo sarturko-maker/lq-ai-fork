@@ -41,12 +41,14 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.store.base import BaseStore
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import thread_config
 from app.agents.factory import build_deep_agent
 from app.agents.lease import RunLease, RunSettledElsewhere, heartbeat_run, settle_run
 from app.agents.live_changes import ChangeLedger
+from app.agents.memory_backend import AgentRuntimeContext
 from app.agents.stream import RunStreamPublisher, step_payload
 from app.models.agent_run import AgentRun, AgentRunStep
 from app.schemas.agent_runs import AgentRunStatus, AgentRunStepKind
@@ -272,6 +274,7 @@ async def _drive_agent(
     lease: RunLease | None = None,
     heartbeat_seconds: float | None = None,
     change_ledger: ChangeLedger | None = None,
+    runtime_context: AgentRuntimeContext | None = None,
 ) -> tuple[str | None, bool]:
     """Stream the agent, persisting one step row + COMMIT per event.
 
@@ -329,6 +332,11 @@ async def _drive_agent(
         # "no effect" warning).
         stream_kwargs["durability"] = "sync"
     stream_kwargs["config"] = config
+    # F2 N0 (ADR-F049): the runtime context that keys the /memories Store
+    # namespaces (rt.context). Paired with context_schema= on create_deep_agent
+    # — both or neither, or rt.context is empty and the namespace callables raise.
+    if runtime_context is not None:
+        stream_kwargs["context"] = runtime_context
     stream = agent.astream_events(
         {"messages": [{"role": "user", "content": prompt}]},
         **stream_kwargs,
@@ -538,6 +546,8 @@ async def execute_agent_run(
     backend: Any | None = None,
     wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS,
     checkpointer: BaseCheckpointSaver | None = None,
+    store: BaseStore | None = None,
+    runtime_context: AgentRuntimeContext | None = None,
     thread_id: uuid.UUID | None = None,
     publisher: RunStreamPublisher | None = None,
     lease: RunLease | None = None,
@@ -604,6 +614,14 @@ async def execute_agent_run(
             agent_kwargs["skills"] = list(skills)
         if backend is not None:
             agent_kwargs["backend"] = backend
+        # F2 N0 (ADR-F049): the native memory Store + its runtime context schema.
+        # context_schema is REQUIRED for rt.context to populate (the /memories
+        # namespace callables key off it); deepagents requires store= when the
+        # backend routes to the store. Both ride **kwargs into create_deep_agent.
+        if store is not None:
+            agent_kwargs["store"] = store
+        if runtime_context is not None:
+            agent_kwargs["context_schema"] = AgentRuntimeContext
         agent = build_deep_agent(
             model=model,
             tools=tools,
@@ -626,6 +644,7 @@ async def execute_agent_run(
             lease=lease,
             heartbeat_seconds=heartbeat_seconds,
             change_ledger=change_ledger,
+            runtime_context=runtime_context,
         )
     except RunSettledElsewhere:
         # Sweep or cancel won the row (ADR-F009): no terminal write of

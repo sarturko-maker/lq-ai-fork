@@ -1,6 +1,6 @@
 # F049 — Native memory substrate (langgraph Store + deepagents CompositeBackend) + custom retrieval layer, eval-gated
 
-- Status: proposed
+- Status: accepted (with F2 slice **N0**, 2026-06-28 — the native Store + CompositeBackend substrate)
 - Date: 2026-06-27
 - Deciders: maintainer (Arturs), agent
 - Milestone: **F2 — Memory: 4 levels + conversation memory** (ADR-F003). This ADR is the
