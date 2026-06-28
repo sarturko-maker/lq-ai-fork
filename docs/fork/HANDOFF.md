@@ -3,31 +3,39 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-27): RETRIEVAL & MEMORY — research arc COMPLETE → architecture decided (ADR-F049)
-> + eval-first plan. Docs-only (no code yet).** A seven-document research arc settled how the Deep Agent
-> discovers/selects/retrieves matter material (documents + conversations) at scale, cost-aware, **fitting
-> langgraph/deepagents not reinventing them**, and **how we test it**. Maintainer chose: adopt the native
-> substrate + a scoped custom retrieval layer, **eval-gated, eval-first**.
+> ▶▶ **PICKUP (2026-06-28): RETRIEVAL & MEMORY — research arc + ADR-F049 + eval-first plan MERGED (PR #158,
+> main `10e35e57`; docs-only, no code yet). NEXT SLICE = E0 (build the eval instrument).** A seven-document
+> research arc settled how the Deep Agent discovers/selects/retrieves matter material (documents +
+> conversations) at scale, cost-aware, **fitting langgraph/deepagents not reinventing them**, and **how we
+> test it**. Decision: adopt the native substrate + a scoped custom retrieval layer, **eval-gated, eval-first**.
 > - **Decision (ADR-F049, proposed):** wire the native langgraph **Store + deepagents CompositeBackend/
 >   MemoryMiddleware/SummarizationMiddleware** (we're off-substrate today — checkpointer only); keep custom
 >   ONLY the bi-temporal fact ledger (ADR-F042/43/44) + the documents hybrid retriever (ADR-0008, incl.
 >   chunking/embedding-at-scale/fusion/rerank/citation-offsets); conversations → native `store.asearch` +
->   summarization-offload (NOT a custom pipeline); one shared local embedder; PageIndex backlog.
+>   summarization-offload (NOT a custom pipeline); one shared local embedder.
+> - **PageIndex is an EVAL CANDIDATE, not a skip** (maintainer correction 2026-06-28): it's agentic/
+>   reasoning RAG (navigates a doc's structure tree), **complementary to embeddings, not a substitute**.
+>   **Slice P** = a contained eval spike to find where it wins (within-large-structured-doc navigation; a
+>   selectable retrieval strategy; explainability) at what cost — does NOT ship `litellm` into the image;
+>   adoption is a separate post-eval ADR. (See ADR-F049 consequences + plan Slice P.)
 > - **Plan (eval-first):** [`plans/RETRIEVAL-MEMORY-eval-first.md`](plans/RETRIEVAL-MEMORY-eval-first.md).
 >   Phase E (eval instrument) FIRST → Phase 0 substrate (N0 wires Store, accepts ADR-F049) → Phase 1
->   conversations → Phase 2 cost play (local embedder + wire hybrid) → Phase 3 measured.
+>   conversations → Phase 2 cost play (local embedder + wire hybrid) → Phase 3 measured (D rerank,
+>   strategy+R4-token-budget, recency, MAP, **Slice P PageIndex eval**).
 > - **Research arc + index:** [`research/RETRIEVAL-MEMORY-INDEX.md`](research/RETRIEVAL-MEMORY-INDEX.md)
 >   (7 docs; load-bearing claims verified against ground truth — incl. catching a Haiku-verifier false
 >   "refuted" on the native-store claim → ALWAYS verify load-bearing claims directly). Feeds milestone **F2**.
-> - **PICK UP EXACTLY HERE:** commit this docs-only set (PR), then **NEXT SLICE = E0** (Track-B CUAD harness
->   + objective scorer + **FTS-only baseline** at `docs/fork/evidence/retrieval-eval/baseline/`) — reuses
->   `seed_multi_doc_matter`/`run_scenario`/`api/evals/`; new code = `load_cuad` + span-overlap scorer. **First
->   settle the maintainer open calls in the plan** (CUAD subset size; thresholds set post-baseline; eval
->   spend ceiling; eval-in-CI = scorer-units+retriever-smoke only). Then E1 (Track-A masked judge), then N0.
+> - **PICK UP EXACTLY HERE → START E0** (Track-B CUAD harness + objective scorer + **FTS-only baseline** at
+>   `docs/fork/evidence/retrieval-eval/baseline/`) — reuses `seed_multi_doc_matter`/`run_scenario`/`api/evals/`;
+>   new code = `load_cuad` (download CUADv1.json CC-BY-4.0 → gitignored fixture) + a span-overlap scorer
+>   (recall@k/precision/AUPR/abstention vs gold `answer_start`). **First settle the maintainer open calls in
+>   the plan** (CUAD subset size; thresholds set post-baseline; eval spend ceiling; eval-in-CI =
+>   scorer-units+retriever-smoke only). Then E1 (Track-A masked judge generalising `craft_judge`), then N0.
 > - **Gotchas:** R4 cost cap is a **no-op** today (`guard.py`) — no per-run token budget (a Phase-3 slice);
 >   deepagents ships breaking changes on minors → re-verify Store/CompositeBackend/middleware signatures at
 >   each slice boundary; CUAD is CC-BY-4.0 → cite Atticus in NOTICES.md, dataset never ships in the image
->   (gitignored fixture); the qualified provider is **DeepSeek** (MiniMax out of quota).
+>   (gitignored fixture); the qualified provider is **DeepSeek** (MiniMax out of quota); run pytest/ruff in
+>   the dev image with the repo ROOT mounted (CI uses repo-root ruff.toml).
 >
 > ▶ **PREVIOUS (2026-06-26): AUTHORSHIP Slice 2 — roster-aware negotiation + richer authorship signals —
 > SHIPPED + MERGED (PR #156, main `c661c70`) (ADR-F048 addendum; migration `0077`; NO new HTTP
