@@ -3,45 +3,62 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-28): RETRIEVAL & MEMORY E0 — the CUAD retrieval-eval instrument + the FTS-only
-> baseline SHIPPED (branch `fork/e0-cuad-retrieval-eval`, PR #160). NEXT SLICE = E1 (Track-A masked-judge
-> scenarios + agent-mode), then N0 (wire the native Store, accepts ADR-F049).** First eval-first slice of
-> F2/ADR-F049: the measurement instrument + the measured floor every later slice must beat.
-> - **What shipped (Track-B, objective, $0):** `scripts/fetch_cuad.sh` (CUAD v1 CC-BY-4.0 → gitignored
->   fixture + NOTICES row) → `cuad_eval.load_cuad` (raw JSON; preserves `is_impossible`/multi-span;
->   deterministic 150-contract subset) → seed each contract via `seed_multi_doc_matter` (**verbatim context
->   through the PRODUCTION chunker** so gold `answer_start` shares chunk coords) → **retriever-only** FTS over
->   the production matter path (no gateway) → pure span-overlap scorer `retrieval_metrics.py`
->   (recall@k / hit@k / precision@k / MAP, gold-span-level). Two arms: within-doc + cross-doc. Frozen at
->   `docs/fork/evidence/retrieval-eval/` (+ README).
-> - **THE BASELINE (floor; ADR-F015 = recorded finding, not a gate):** within-doc hit@8 **0.39** /
->   recall@8 0.37 / MAP **0.30**; **cross-doc (matter-wide, 150 docs) hit@8 0.04 / MAP 0.02 — lexical FTS
->   collapses at scale.** Per-category: works only when the label is the in-text wording (Insurance 0.99,
->   Governing Law 0.91), **0.00** for semantically-named clauses (Anti-Assignment, Revenue/Profit Sharing,
->   Rofr/Rofo/Rofn, Uncapped Liability) — the headroom embeddings/rerank/PageIndex must earn.
-> - **CI vs on-demand:** pure scorer units (`test_retrieval_metrics`) + a synthetic retriever-only smoke
->   with a **drift-guard vs `tools.py:_FTS_SQL`** (`test_cuad_retrieval_smoke`) run in CI ($0, Postgres-only).
->   The full baseline (`test_cuad_retrieval_baseline`) is **corpus-gated** (skips without the fetched fixture)
->   → run on demand, evidence committed. Suite collects clean (2867); new tests 11 green + baseline 1 green.
-> - **Maintainer calls settled (plan §Open calls):** CUAD subset = **150 deterministic, all 41 categories**;
->   E0 **retriever-only** (agent-mode → E1); eval-in-CI = scorer-units + smoke. Thresholds X/Y set at Slice C
->   vs this baseline.
-> - **Decision context still live:** ADR-F049 (native Store + CompositeBackend substrate, eval-gated) + the
->   eval-first plan `plans/RETRIEVAL-MEMORY-eval-first.md`; PageIndex = eval candidate (Slice P), not a skip;
->   research arc `research/RETRIEVAL-MEMORY-INDEX.md` (merged PR #158/#159).
-> - **PICK UP EXACTLY HERE → START E1:** generalise `craft_judge` (`commercial_redline_lib.py:223`) into a
->   masked retrieval/agentic judge (f0-s9 masking); ship A1 (multi-doc grounding), A7 (read/retrieve/fan-out
->   choice), A8 (negative control); freeze the Track-A baseline (N≥10). Then **N0** wires `AsyncPostgresStore`
->   + a `CompositeBackend` into `compose_and_execute_run` (accepts ADR-F049). Reuse `retrieval_metrics.py` +
->   `cuad_eval.fts_retrieve` for any new retrieval gate.
-> - **Gotchas (E0-specific, carry forward):** the matter `_FTS_SQL` projects **NO char offsets** → the eval
->   uses a parallel query mirroring its ranking/scoping but adding offsets (drift-guarded — keep them in sync);
->   seed `normalized_content` = **verbatim** CUAD context (any re-parse shifts `answer_start`); the chunker's
->   200-char overlap → dedupe by gold-span, not chunk row; the dev container writes evidence as **root** →
->   chown back to host; CUAD CC-BY-4.0 (NOTICES) + gitignored, never shipped; JSON reports must have no
->   `NaN`/secrets; R4 cost cap still a **no-op** (`guard.py`); DeepSeek is the qualified provider; deepagents
->   minors break → re-verify Store/CompositeBackend signatures at the N0 boundary; run pytest/ruff in the dev
->   image with the repo ROOT mounted + `./skills` mounted.
+> ▶▶ **PICKUP (2026-06-28): RETRIEVAL & MEMORY E1 — the Track-A agentic baseline (masked-judge scenarios)
+> SHIPPED (branch `fork/e1-track-a-masked-judge`). Phase-E exit REACHED. NEXT SLICE = N0 (wire the native
+> `AsyncPostgresStore` + `CompositeBackend` into `compose_and_execute_run`, accepts ADR-F049).** E1 is the
+> subjective/agentic half of the eval-first instrument (E0 = the objective Track-B retrieval floor).
+> - **What shipped (all `tests/agents/scenarios/`):** `track_a_lib.py` — `build_judging_packet` (the
+>   **masked judging packet**: projects steps to the 5 audited `fetch_steps` fields + strips `<think>`;
+>   carries ONLY timeline + visible answer + rubric/expectations — never docs / agent prompt / `run_id`),
+>   `JudgeRubric`/`JudgeVerdict`, `parse_verdict` (evidence-quote-must-be-in-answer), and `masked_judge`
+>   (the gateway fallback judge, generalises `craft_judge`). `track_a_fixtures.py` — A1/A5/A7/A8
+>   `TrackAScenario`s. `test_track_a_unit.py` — **free CI net** (masking-leak assertion, verdict parsing,
+>   fake-gateway wiring, L1 via `score_all`). `test_track_a_eval.py` — provider-marked live matrix.
+>   `harness.Receipt` gained `run_id` (additive). **L1 reuses `evals.scoring.score_all`; masking reuses
+>   `evals.runner.fetch_steps` + `evals.scoring.visible_answer` — no new scorer/dependency.**
+> - **THE JUDGE (maintainer call):** the **orchestrator (Claude) is the primary judge** over the frozen
+>   masked packets (a fan-out Workflow, one independent judge per packet — "Claude-judged DeepSeek", $0 on
+>   the gateway); the gateway `deepseek-pro` `masked_judge` is the automated fallback. Masking is what makes
+>   Claude-as-judge fair (it never sees the docs/prompt, only what the agent surfaced).
+> - **FROZEN BASELINE (N=10, DeepSeek agent, Claude-judged; `docs/fork/evidence/retrieval-eval/track-a/`):**
+>   **A1** multi-doc grounding **8/10** (grounded 9/10, no cross-doc bleed 10/10; the 2 fails are
+>   cap-exceeded **empty answers** — grounded in the timeline, never delivered); **A5** cross-thread recall
+>   **0/10 (RED — turns green with N2/N3)** but **honest-abstention 10/10**; **A7** strategy: **no *autonomous*
+>   fan-out 0/10** — DeepSeek synthesises inline on a bounded 4-doc task (judge-appropriate 8/10).
+>   INVESTIGATED (not a bug): the `task` tool + the mig-0073 subagents WERE wired/available, and DeepSeek
+>   delegates 3× when *coached* (C7b `test_commercial_fan_out_scenario.py`) — uncoached strategy-selection on
+>   a small matter, NOT a capability limit; the Phase-3 strategy/R4 question is *at what corpus scale*
+>   autonomous fan-out is needed; **A8** negative control honest-absence **10/10**, fabrication 0/10.
+> - **Maintainer calls settled (plan §Open calls):** #3 rubric strictness = **record rates, bars unset**
+>   (set later vs this baseline); #5 spend = **N=1 smoke / N≥10 freeze**, Claude-judging free; #6 = **single
+>   DeepSeek family** now (2nd family = later one-env-var expansion).
+> - **PICK UP EXACTLY HERE → START N0:** instantiate `AsyncPostgresStore` in the lifespan (mirror the
+>   checkpointer DI seam), pass `store=` + a `CompositeBackend` with
+>   `/memories/{company,practice,user,matter}/` + `/conversation_history/` routes to `create_deep_agent`;
+>   read-only wrapper for company/practice; namespace-distinctness assertion; key via `rt.context`. **No
+>   semantic index yet** (filter-only). **Gate: A5 must light up** (cross-thread recall 0/10 → rises) with
+>   nothing else regressing — re-run the Track-A matrix and compare. ADR-F049 is *accepted* with N0.
+> - **Gotchas (carry forward):** the **agent's retrieved CHUNK set is still not observable** from steps
+>   (only doc filenames in `tool_result` summaries, bounded ~2000 chars) — chunk-level retrieval attribution
+>   (a `retrieved_chunks` column) is deferred to N0+ if doc-level proves too coarse; **A5 fixtures must use a
+>   NON-matter aside** (the agent auto-writes matter facts via `record_matter_fact` → cross-thread recall of
+>   *matter* facts already works via memory; the fixture asserts thread-1 fired no matter-memory write tool);
+>   the **`args` Workflow param arrives as a STRING** (`JSON.parse` it in the script); the dev container
+>   writes evidence as **root** → chown back; R4 cost cap still a **no-op**; deepagents minors break →
+>   re-verify Store/CompositeBackend signatures at the N0 boundary; run pytest/ruff in the dev image with the
+>   repo ROOT + `./skills` mounted.
+> - **Decision context still live:** ADR-F049 (native Store + CompositeBackend substrate, eval-gated, accepts
+>   at N0) + the eval-first plan `plans/RETRIEVAL-MEMORY-eval-first.md` (Phase-E exit reached); PageIndex =
+>   eval candidate (Slice P), not a skip; reuse `retrieval_metrics.py`/`cuad_eval.fts_retrieve` (Track B) +
+>   `track_a_lib`/`evals.scoring.score_all` (Track A) for any new gate.
+>
+> ▶ **PREVIOUS (2026-06-28): RETRIEVAL & MEMORY E0 — the CUAD Track-B retrieval-eval instrument + the
+> FTS-only baseline SHIPPED + MERGED (PR #160, `main` `d0b117c8`).** Frozen floor
+> (`docs/fork/evidence/retrieval-eval/`): within-doc hit@8 **0.39** / MAP 0.30; **cross-doc (150 docs) hit@8
+> 0.04 / MAP 0.02 — lexical FTS collapses at scale**, 0.00 for semantically-named clauses — the headroom
+> embeddings/rerank/PageIndex must earn. Reuse `retrieval_metrics.py` + `cuad_eval.fts_retrieve`; the matter
+> `_FTS_SQL` projects no offsets (the eval mirrors it, drift-guarded); seed `normalized_content` verbatim;
+> CUAD CC-BY-4.0/gitignored. (E1 above builds on this harness.)
 >
 > ▶ **PREVIOUS (2026-06-26): AUTHORSHIP Slice 2 — roster-aware negotiation + richer authorship signals —
 > SHIPPED + MERGED (PR #156, main `c661c70`) (ADR-F048 addendum; migration `0077`; NO new HTTP

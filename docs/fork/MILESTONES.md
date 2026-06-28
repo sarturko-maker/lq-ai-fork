@@ -254,7 +254,17 @@ compact, accumulate into Matter digests, and are searchable; agents propose, use
 > **E0 ✅ SHIPPED (2026-06-28):** the Track-B CUAD retrieval instrument + objective span scorer + the
 > frozen **FTS-only baseline** every later slice must beat (`docs/fork/evidence/retrieval-eval/`).
 > Floor: within-doc hit@8 0.39 / MAP 0.30; **cross-doc (matter-wide) hit@8 0.04 / MAP 0.02 — FTS
-> collapses at scale**. Next: **E1** (Track-A masked-judge scenarios + agent-mode) → N0.
+> collapses at scale**.
+>
+> **E1 ✅ SHIPPED (2026-06-28):** the Track-A **agentic** baseline — masked judging packet + judge
+> (`track_a_lib.py`; orchestrator-Claude primary, `deepseek-pro` gateway fallback; judge sees only the
+> sanitised timeline + visible answer + rubric) + 4 scenarios + a free CI net + the live matrix
+> (`test_track_a_{lib,fixtures,unit,eval}.py`). **Frozen baseline (N=10, DeepSeek, Claude-judged,
+> `…/track-a/`): A1 grounding 8/10, A5 cross-thread recall 0/10 but honest-abstention 10/10, A7 no
+> *autonomous* fan-out 0/10 (synthesises inline, judge-appropriate; subagents WERE wired & it delegates when
+> coached per C7b — a strategy-selection finding, not a capability limit), A8 honest-absence 10/10.**
+> Phase-E exit reached. Next: **N0** (wire the
+> native `AsyncPostgresStore` + `CompositeBackend`, accepts ADR-F049).
 
 - deepagents CompositeBackend: `/memories/{company,practice,user,matter}/` → StoreBackend namespaces
   keyed `(org_id, …)`; company + practice read-only to agents.

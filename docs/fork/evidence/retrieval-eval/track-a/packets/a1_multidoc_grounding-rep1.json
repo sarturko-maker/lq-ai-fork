@@ -1,0 +1,141 @@
+{
+  "scenario": "a1_multidoc_grounding",
+  "rep": 1,
+  "expected": "pass",
+  "agent_model": "deepseek",
+  "l1": {
+    "retrieval_fired": true,
+    "both_facts_present": true
+  },
+  "packet": {
+    "scenario_id": "a1_multidoc_grounding",
+    "rubric": {
+      "criteria": "The answer should report two figures drawn from two different source documents and attribute each to the correct document. Judge whether every figure in the answer is supported by a retrieval visible in the timeline, and whether attribution is correct (no figure assigned to the wrong document, no figure with no supporting retrieval).",
+      "verdict_values": [
+        "PASS",
+        "PARTIAL",
+        "FAIL"
+      ],
+      "flag_names": [
+        "grounded",
+        "no_cross_doc_bleed"
+      ]
+    },
+    "expectations": "The user asked for two facts from different documents in the matter: a specific vendor's (Northstar's) annual fee, and the minimum liability cap required by the draft contract terms. Verify: (a) each figure in the answer is supported by a retrieval visible in the timeline (a search or read of the relevant document), and (b) the answer attributes each figure to the correct source document \u2014 flag any figure attributed to the wrong document or with no supporting retrieval (possible fabrication).",
+    "steps": [
+      {
+        "seq": 1,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: search_documents]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 2,
+        "kind": "tool_call",
+        "name": "search_documents",
+        "summary": "{\"query\": \"\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 3,
+        "kind": "tool_result",
+        "name": "search_documents",
+        "summary": "Documents attached to this matter:\n- Draft-MSA-Terms.txt (1 pages)\n- RFQ-Instructions.txt (1 pages)\n- Vendor-Proposal-Brightpath.txt (1 pages)\n- Vendor-Proposal-Northstar.txt (1 pages)",
+        "parent_step_id": null
+      },
+      {
+        "seq": 4,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: read_document, read_document, read_document, read_document]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 5,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"Draft-MSA-Terms.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 6,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"RFQ-Instructions.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 7,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"Vendor-Proposal-Northstar.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 8,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"Vendor-Proposal-Brightpath.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 9,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[Draft-MSA-Terms.txt (1 pages) \u2014 full text]\n\nDraft Contract Terms. The Buyer's standard terms require a liability cap of at least one hundred and fifty percent (150%) of the annual fee and prohibit any Buyer-side indemnity of the supplier.\n\nGoverning Law. The Buyer's standard terms are governed by the laws of England and Wales. Any service level below 99.0% on-time delivery requires director-level approval.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 10,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[RFQ-Instructions.txt (1 pages) \u2014 full text]\n\n1. Request for Quotation. Helix Manufacturing Limited (the \"Buyer\") invites quotations for the supply of managed logistics services. Quotations must be submitted by no later than 5:00pm on 30 September 2026. Late submissions will not be considered.\n\n2. Evaluation Criteria. Quotations will be evaluated on price (40%), service levels (35%), and contractual risk including liability terms (25%). The Buyer is not bound to accept the lowest or any quotation.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 11,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[Vendor-Proposal-Brightpath.txt (1 pages) \u2014 full text]\n\nBrightpath Freight \u2014 Proposal. Annual fee: three hundred and ninety thousand pounds (\u00a3390,000). Service level: 98.0% on-time delivery, measured quarterly.\n\nLiability. Brightpath's aggregate liability is capped at fifty percent (50%) of the annual fee. Brightpath requires the Buyer to indemnify it against third-party claims arising from the Buyer's instructions.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 12,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[Vendor-Proposal-Northstar.txt (1 pages) \u2014 full text]\n\nNorthstar Logistics \u2014 Proposal. Annual fee: four hundred and twenty thousand pounds (\u00a3420,000). Service level: 99.5% on-time delivery, measured monthly.\n\nLiability. Northstar's aggregate liability is capped at one hundred percent (100%) of the annual fee. Northstar excludes all liability for indirect and consequential loss.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 13,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "Here are the figures, each with its source:\n\n| Figure | Value | Source |\n|---|---|---|\n| **Northstar's annual fee** | **\u00a3420,000** | Vendor-Proposal-Northstar.txt, page 1 \u2014 \"Annual fee: four hundred and twenty thousand pounds (\u00a3420,000)\" |\n| **Minimum liability cap our draft terms require** | **At least 150% of the annual fee** | Draft-MSA-Terms.txt, page 1 \u2014 \"the Buyer's standard terms require a liability cap of at least one hundred and fifty percent (150%) of the annual fee\" |\n\n**Applying the formula:** If Northstar is selected at its proposed fee of \u00a3420,000, our standard terms would require a liability cap of at least **\u00a3630,000** (150% \u00d7 \u00a3420,000). Northstar's proposal caps its liability at 100% of the annual fee (**\u00a3420,000**), which falls below that floor \u2014 so there is a gap to negotiate on liability if we proceed with them.\n\nLet me also capture what I've learned about the matter. [requested tools: update_matter_memory]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 14,
+        "kind": "tool_call",
+        "name": "update_matter_memory",
+        "summary": "{\"content_md\": \"# Helix Logistics RFQ \\u2014 vendor evaluation\\n\\n**Matter:** Helix Manufacturing Limited (\\\"Buyer\\\") is running an RFQ for managed logistics services.\\n\\n**Our side:** We act for the Buyer (Helix Manufacturing Limited).\\n\\n## Documents in play\\n\\n| Document | Key content |\\n|---|---|\\n| RFQ-Instructions.txt | RFQ rules; evaluation: price 40%, service levels 35%, contractual risk 25%. Deadline 30 Sep 2026. |\\n| Draft-MSA-Terms.txt | Buyer's standard terms: liability cap \\u2265150% of annual fee; no Buyer-side indemnity of supplier; governing law England & Wales; 99.0% on-time delivery floor requires director approval. |\\n| Vendor-Proposal-Northstar.txt | Annual fee \\u00a3420k; 99.5% on-time delivery monthly; liability cap at 100% of fee; excludes indirect/consequential loss. |\\n| Vendor-Proposal-Brightpath.txt | Annual fee \\u00a3390k; 98.0% on-time delivery quarterly; liability cap at 50% of fee; Buyer must indemnify Brightpath against third-party claims from Buyer's instructions. |\\n\\n## Key gaps vs. standard terms\\n\\n- **Northstar:** Liability cap at 100% of fee (standard requires \\u2265150%) \\u2014 gap of 50%.\\n- **Brightpath:** Liability cap at 50% of fee (standard requires \\u2265150%) \\u2014 gap of 100%; also requires a Buyer-side indemnity (standard prohibits).\\n- **Brightpath:** 98.0% service level below the 99.0% director-approval threshold.\\n\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 15,
+        "kind": "tool_result",
+        "name": "update_matter_memory",
+        "summary": "Updated this matter's memory (1310 characters). It is saved and will be available in future runs on this matter; the prior version was snapshotted so the change can be undone.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 16,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "### Summary\n\n- **Northstar's annual fee:** **\u00a3420,000** \u2014 *Vendor-Proposal-Northstar.txt*, page 1.\n- **Minimum liability cap our draft contract terms require:** **At least 150% of the annual fee** \u2014 *Draft-MSA-Terms.txt*, page 1.\n\nAt Northstar's proposed fee, that equates to a minimum cap of **\u00a3630,000**. Northstar offers only a 100%-of-fee cap (\u00a3420,000), which is 50% below our standard floor \u2014 a material gap to address if we move forward with them.",
+        "parent_step_id": null
+      }
+    ],
+    "visible_answer": "### Summary\n\n- **Northstar's annual fee:** **\u00a3420,000** \u2014 *Vendor-Proposal-Northstar.txt*, page 1.\n- **Minimum liability cap our draft contract terms require:** **At least 150% of the annual fee** \u2014 *Draft-MSA-Terms.txt*, page 1.\n\nAt Northstar's proposed fee, that equates to a minimum cap of **\u00a3630,000**. Northstar offers only a 100%-of-fee cap (\u00a3420,000), which is 50% below our standard floor \u2014 a material gap to address if we move forward with them."
+  }
+}

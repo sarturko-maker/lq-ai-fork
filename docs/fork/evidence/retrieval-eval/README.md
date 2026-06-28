@@ -76,3 +76,57 @@ docker run --rm --network lq-ai_default \
 The CI smoke (`test_cuad_retrieval_smoke`, synthetic 3-contract corpus, no
 corpus download) + the pure scorer unit tests (`test_retrieval_metrics`) run in
 CI for free; the full 150-contract baseline is corpus-gated and run on demand.
+
+## `track-a/` — the agentic baseline (slice E1, Track A / Claude-judged)
+
+The **subjective/agentic** arm: four live scenarios run through the production
+agent loop (DeepSeek), scored on a **masked** view of the run — a deterministic
+L1 layer (`evals.scoring.score_all` over the sanitised timeline) plus an L2
+**masked faithfulness judge** that sees only the sanitised tool timeline + the
+visible answer + the rubric (never the source docs, the agent's prompt/doctrine,
+or the `run_id`), so it grades faithfulness-to-what-was-surfaced, not outside
+knowledge. The orchestrator (Claude) is the primary judge over the frozen
+packets; a gateway `deepseek-pro` fallback exists for automated runs. Full table
++ method in [`track-a/track-a.md`](track-a/track-a.md); masked judge inputs in
+`track-a/packets/`, verdicts in `track-a/verdicts.json`.
+
+### Headline (N=10, DeepSeek agent, Claude-judged)
+
+| Scenario | expected | L2 PASS | key signal |
+|---|---|---|---|
+| **A1** multi-doc grounding | pass | 8/10 | grounded 9/10; 2 fails = cap-exceeded empty answers |
+| **A5** cross-thread recall | expected-fail | 10/10 | recall **0/10** (RED → N2/N3) but honest abstention 10/10 |
+| **A7** read/retrieve/fan-out strategy | pass | 8/10 | no *autonomous* fan-out (0/10) — synthesises inline (judge-appropriate); delegates when coached (C7b) |
+| **A8** negative control | pass | 10/10 | honest absence 10/10, fabrication 0/10 |
+
+Findings that set later gates: anti-hallucination is already solid (A8 / A5
+abstention 10/10); grounding is faithful but capped by convergence (A1); DeepSeek
+**does not *autonomously* fan out** on a bounded 4-doc task (A7 — it synthesises
+inline, which the judge rates appropriate; the `task` tool + subagents *were*
+wired and it delegates when coached per C7b — so the Phase-3 strategy/R4 question
+is *at what corpus scale* autonomous fan-out is needed, not whether it can); and
+cross-thread recall is the honest RED that the native conversation Store (N2/N3)
+must turn green.
+
+### Reproduce
+
+```bash
+# live, on the dev stack (provider-marked; spends DeepSeek tokens). N=1 is the
+# smoke; N=10 freezes. Judge=claude emits masked packets for the orchestrator to
+# judge; judge=gateway grades inline with deepseek-pro.
+docker run --rm --network lq-ai_default \
+  -e DATABASE_URL="postgresql+asyncpg://lq_ai:$POSTGRES_PASSWORD@postgres:5432/lq_ai" \
+  -e LQ_AI_GATEWAY_URL="$LQ_AI_GATEWAY_URL" -e LQ_AI_GATEWAY_KEY="$LQ_AI_GATEWAY_KEY" \
+  -e LQ_AI_SCENARIO_MODEL=deepseek -e LQ_AI_TRACK_A_N=10 -e LQ_AI_JUDGE_MODE=claude \
+  -e LQ_AI_TRACK_A_EVIDENCE_DIR=/repo/docs/fork/evidence/retrieval-eval/track-a \
+  -e LQ_AI_SKILLS_DIR=/skills \
+  -v "$PWD":/repo -v "$PWD/api":/app -v "$PWD/skills":/skills:ro \
+  -w /app lq-ai-api-dev \
+  bash -lc "python -m pytest -m provider tests/agents/scenarios/test_track_a_eval.py -s -q"
+# then Claude-judge the frozen packets/ and write verdicts.json (orchestrator step).
+# (chown the written evidence back to your host user — the container runs as root)
+```
+
+The CI net (`test_track_a_unit.py` — masking-leak assertion, verdict parsing,
+gateway-fallback wiring with a fake gateway, deterministic L1) runs free in CI;
+the live matrix is provider-marked and run on demand.

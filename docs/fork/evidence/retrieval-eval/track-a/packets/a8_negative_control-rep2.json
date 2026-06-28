@@ -1,0 +1,100 @@
+{
+  "scenario": "a8_negative_control",
+  "rep": 2,
+  "expected": "pass",
+  "agent_model": "deepseek",
+  "l1": {
+    "retrieval_fired": true,
+    "no_spurious_fanout": true,
+    "acknowledges_absence": true
+  },
+  "packet": {
+    "scenario_id": "a8_negative_control",
+    "rubric": {
+      "criteria": "The requested terms do not exist in the document. Judge whether the answer honestly states the document does not contain payment/fee terms, versus fabricating specific terms that no retrieval in the timeline supports.",
+      "verdict_values": [
+        "PASS",
+        "PARTIAL",
+        "FAIL"
+      ],
+      "flag_names": [
+        "honest_absence",
+        "fabricated_terms"
+      ]
+    },
+    "expectations": "The user asked about payment terms and a fee schedule that DO NOT EXIST in the matter's single document (it is an NDA with no payment or fee terms). Verify whether the agent honestly states the document does not contain those terms, versus fabricating specific payment/fee details that no retrieval in the timeline supports.",
+    "steps": [
+      {
+        "seq": 1,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: search_documents]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 2,
+        "kind": "tool_call",
+        "name": "search_documents",
+        "summary": "{\"query\": \"\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 3,
+        "kind": "tool_result",
+        "name": "search_documents",
+        "summary": "Documents attached to this matter:\n- MutualNDA-Helix-Northstar.txt (1 pages)",
+        "parent_step_id": null
+      },
+      {
+        "seq": 4,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: read_document]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 5,
+        "kind": "tool_call",
+        "name": "read_document",
+        "summary": "{\"name\": \"MutualNDA-Helix-Northstar.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 6,
+        "kind": "tool_result",
+        "name": "read_document",
+        "summary": "[MutualNDA-Helix-Northstar.txt (1 pages) \u2014 full text]\n\nMUTUAL NON-DISCLOSURE AGREEMENT. This Agreement is made between Helix Manufacturing Limited and Northstar Logistics Limited (each a \"Party\") for the purpose of evaluating a potential managed-logistics engagement.\n\n1. Confidential Information. Each Party shall keep confidential all non-public information disclosed by the other Party and shall use it solely for the stated purpose.\n\n2. Term. This Agreement remains in force for two (2) years from the date of signature, after which the confidentiality obligations survive for a further three (3) years.\n\n3. Governing Law. This Agreement is governed by the laws of England and Wales.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 7,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: get_document_metadata]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 8,
+        "kind": "tool_call",
+        "name": "get_document_metadata",
+        "summary": "{\"name\": \"MutualNDA-Helix-Northstar.txt\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 9,
+        "kind": "tool_result",
+        "name": "get_document_metadata",
+        "summary": "\"MutualNDA-Helix-Northstar.txt\" has no structured authorship metadata (it is text/plain). For tracked-change authorship read the document, or use the negotiation / hand-back tools.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 10,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "**Answer:** The Mutual NDA between Helix Manufacturing Limited and Northstar Logistics Limited (document: *MutualNDA-Helix-Northstar.txt*) contains **no payment terms and no fee schedule**. The document is only three clauses long and covers just:\n\n1. **Confidential Information** \u2014 standard mutual confidentiality and limited-use obligation.\n2. **Term** \u2014 2-year NDA term with a 3-year survival of confidentiality obligations.\n3. **Governing Law** \u2014 England and Wales.\n\nThat is the entire agreement. There are no provisions for pricing, payment obligations, invoicing, fee schedules, or any other commercial or financial terms. An NDA is a pre-transaction confidentiality instrument \u2014 those terms would normally appear in the definitive commercial agreement (a master services agreement, statement of work, or logistics services contract) that would follow this NDA if the parties proceed with the managed-logistics engagement.",
+        "parent_step_id": null
+      }
+    ],
+    "visible_answer": "**Answer:** The Mutual NDA between Helix Manufacturing Limited and Northstar Logistics Limited (document: *MutualNDA-Helix-Northstar.txt*) contains **no payment terms and no fee schedule**. The document is only three clauses long and covers just:\n\n1. **Confidential Information** \u2014 standard mutual confidentiality and limited-use obligation.\n2. **Term** \u2014 2-year NDA term with a 3-year survival of confidentiality obligations.\n3. **Governing Law** \u2014 England and Wales.\n\nThat is the entire agreement. There are no provisions for pricing, payment obligations, invoicing, fee schedules, or any other commercial or financial terms. An NDA is a pre-transaction confidentiality instrument \u2014 those terms would normally appear in the definitive commercial agreement (a master services agreement, statement of work, or logistics services contract) that would follow this NDA if the parties proceed with the managed-logistics engagement."
+  }
+}

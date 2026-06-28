@@ -45,15 +45,23 @@ set *after* the baseline, never tighter than the metric CI). Eval design detail:
   within-doc hit@8 0.39 / MAP 0.30; cross-doc hit@8 0.04 / MAP 0.02 — lexical FTS collapses at scale and
   is 0.00 for semantically-named clauses.** Agent-mode answer-quote scoring deferred to E1 (the agent's
   retrieved-chunk set is not observable from run steps). *No ADR; reused existing infra.*
-- **E1 — Track-A first scenario suite + masked judge + baseline.** Generalise `craft_judge`
-  (`commercial_redline_lib.py:223-277`) into a masked retrieval/agentic judge (f0-s9 masking: sanitised
-  tool timeline + answer + expectations only). Ship A1 (multi-doc grounding), A5 (cross-thread recall —
-  initially expected-fail until N0/N3), A7 (read/retrieve/fan-out strategy choice), A8 (negative
-  control); A2/A3 (long-negotiation) largely exist in `test_commercial_redline_eval.py` / the C5a path.
-  Freeze the Track-A baseline (N≥10). *No ADR.*
+- **E1 — Track-A first scenario suite + masked judge + baseline. ✅ SHIPPED (2026-06-28).** Generalised
+  `craft_judge` into a **masked judging packet** + judge (`tests/agents/scenarios/track_a_lib.py`): the
+  judge (the orchestrator Claude — primary — or a `deepseek-pro` gateway fallback) sees ONLY the sanitised
+  tool timeline (`evals.runner.fetch_steps`) + the visible answer (`evals.scoring.visible_answer`) + the
+  rubric/expectations — never the docs, the agent prompt/doctrine, or the `run_id`, so it grades
+  faithfulness-to-what-was-surfaced. Deterministic L1 reuses `evals.scoring.score_all`. Shipped A1 (multi-doc
+  grounding), A5 (cross-thread recall — frozen expected-fail until N2/N3), A7 (read/retrieve/fan-out
+  strategy), A8 (negative control); A2/A3 (long-negotiation) reused from `test_commercial_redline_eval.py` /
+  the C5a path (not rebuilt). CI net (`test_track_a_unit.py`, masking-leak assertion + verdict parsing +
+  fake-gateway wiring + L1) runs free; the live matrix (`test_track_a_eval.py`) is provider-marked. **Frozen
+  baseline (N=10, DeepSeek, Claude-judged): A1 grounding 8/10, A5 recall 0/10 but honest-abstention 10/10,
+  A7 no autonomous fan-out 0/10 (synthesises inline, judge-appropriate; subagents WERE wired & it delegates
+  when coached per C7b — a strategy-selection finding, not a capability limit), A8 honest-absence 10/10** —
+  `docs/fork/evidence/retrieval-eval/track-a/`. *No ADR; no migration; no new dependency.*
 
-**Phase-E exit:** a frozen FTS-only Track-B baseline + a green Track-A regression net. Now slices can be
-gated.
+**Phase-E exit: ✅ REACHED (2026-06-28).** A frozen FTS-only Track-B baseline (E0) + a frozen Track-A
+agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be gated on measured deltas.
 
 ## Phase 0 — get on the native substrate
 
@@ -147,13 +155,18 @@ baselines under `docs/fork/evidence/retrieval-eval/`.
    not observable from run steps; E0 stays deterministic/$0).
 2. **Track-B gate thresholds X (embeddings) / Y (rerank)** — set post-baseline, never tighter than CI.
    Baseline now exists (within-doc hit@8 0.39 / cross-doc hit@8 0.04); approve the delta policy at Slice C.
-3. **Track-A judge rubric strictness** — per-scenario pass bars (A3 coverage full/partial, A4 version
-   correct/wrong, A7 strategy ≥2/3). *(E1.)*
+3. **Track-A judge rubric strictness — ✅ SETTLED (2026-06-28, E1):** rates are recorded findings
+   (ADR-F015), **pass-bars unset** this slice; per-scenario bars get set at a later gating slice against
+   the frozen E1 baseline. Judge = the orchestrator (Claude) over masked packets — primary — with a
+   `deepseek-pro` gateway fallback for automated runs.
 4. **Eval-in-CI vs manual — ✅ SETTLED (2026-06-28):** scorer unit tests + a synthetic retriever-only
    smoke (+ the `_FTS_SQL` drift-guard) run in CI ($0, Postgres-only); the full corpus baseline is
    corpus-gated/on-demand; live agent-mode (E1) is provider-marked/CI-skipped.
-5. **DeepSeek eval spend budget** — a per-matrix ceiling; retriever-only as the day-to-day signal,
-   agent-mode reserved for slice gates / milestone runs. *(Relevant from E1.)*
-6. **Second model family for Track A?** (f0-s9 recommends ≥2.) Defer or include alongside DeepSeek? *(E1.)*
+5. **DeepSeek eval spend budget — ✅ SETTLED (2026-06-28, E1):** `LQ_AI_TRACK_A_N=1` smoke is the
+   day-to-day default; **N≥10 only for an explicit baseline freeze**, under a per-matrix cap. Retriever-only
+   (E0) stays the $0 day-to-day signal; Claude-judging is free (only the live *agent* runs spend tokens).
+6. **Second model family for Track A — ✅ SETTLED (2026-06-28, E1): single DeepSeek now.** The E1 baseline
+   is single-family; the agent model is already `LQ_AI_SCENARIO_MODEL`, so a 2nd family (e.g. Kimi K2.x,
+   OpenAI-compatible) is a one-env-var matrix expansion in a later run.
 7. **Embedding door / dim** — in-process local (Door A) vs gateway-local (Door B); 768 vs 384 vs keep
    1536. (Recommended: Door A, 768 — confirm at Slice C.)

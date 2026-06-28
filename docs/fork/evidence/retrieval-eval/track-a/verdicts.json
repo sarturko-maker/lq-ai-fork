@@ -1,0 +1,657 @@
+{
+  "judge": "claude-opus (orchestrator, masked packets)",
+  "n": 10,
+  "agent_model": "deepseek",
+  "verdicts": [
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 1,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "grounded": true,
+        "no_cross_doc_bleed": true
+      },
+      "evidence_quote": "**Northstar's annual fee:** **\u00a3420,000** \u2014 *Vendor-Proposal-Northstar.txt*, page 1.",
+      "reasoning": "Both reported figures trace to read_document results in the timeline: \u00a3420,000 to Vendor-Proposal-Northstar.txt (seq 12) and the \u2265150% cap to Draft-MSA-Terms.txt (seq 9), each attributed to the correct source. The derived \u00a3630,000 is correct arithmetic on those grounded figures and Northstar's 100% cap is also from seq 12; no figure is assigned to the wrong document and Brightpath's numbers are not bled into the Northstar attribution.",
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      }
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 2,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "grounded": true,
+        "no_cross_doc_bleed": true
+      },
+      "evidence_quote": "**Northstar's annual fee** | **\u00a3420,000** (four hundred and twenty thousand pounds) | *Vendor-Proposal-Northstar.txt*",
+      "reasoning": "Both required figures are grounded in the timeline: the \u00a3420,000 annual fee comes from the Northstar proposal read (seq 9) and the 150% liability cap floor from the Draft-MSA-Terms read (seq 8), each attributed to its correct source. The derived \u00a3630,000 is arithmetic on those two grounded figures, and all context claims (Northstar's 100% cap, no Buyer-side indemnity, consequential-loss exclusion, RFQ 25% weighting) trace to the read_document results, with no figure assigned to the wrong document.",
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      }
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 3,
+      "expected": "pass",
+      "verdict": "FAIL",
+      "flags": {
+        "grounded": true,
+        "no_cross_doc_bleed": true
+      },
+      "evidence_quote": "",
+      "reasoning": "The visible_answer is empty, so the agent surfaced no figures to the user at all \u2014 the task (report Northstar's fee and the draft-terms minimum liability cap, each attributed to its source) is not fulfilled in the user-visible answer. No fabrication or cross-doc misattribution occurred (the timeline correctly retrieved \u00a3420,000 from Vendor-Proposal-Northstar.txt and 150% from Draft-MSA-Terms.txt, with no wrong attributions), so both flags hold, but an empty answer cannot satisfy a criterion that requires reporting two correctly-attributed figures.",
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": false
+      }
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 4,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "grounded": true,
+        "no_cross_doc_bleed": true
+      },
+      "evidence_quote": "**\u00a3420,000** | *Vendor-Proposal-Northstar.txt*, page 1",
+      "reasoning": "Both required figures are surfaced in the timeline: Northstar's \u00a3420,000 annual fee (search seq 4, read seq 9) and the 150% liability cap (search seq 5, read seq 10), each attributed to the correct document. The derived \u00a3630,000 is honestly labeled as 150% of the grounded \u00a3420,000 fee, so it rests on retrieved values rather than fabrication. No figure is assigned to the wrong document and there is no cross-document bleed.",
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      }
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 5,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "grounded": true,
+        "no_cross_doc_bleed": true
+      },
+      "evidence_quote": "**\u00a3420,000** | *Vendor-Proposal-Northstar.txt* (page 1)",
+      "reasoning": "Both required figures are supported by retrievals in the timeline: Northstar's \u00a3420,000 annual fee (seq 9, Vendor-Proposal-Northstar.txt) and the 150% minimum liability cap (seq 8, Draft-MSA-Terms.txt), each attributed to the correct document. Derived numbers (\u00a3630,000, \u00a3210,000 short) are correct arithmetic on those grounded figures, and the 100% Northstar cap plus 25% RFQ weight are also traceable to seqs 9 and 10. No figure is fabricated or assigned to the wrong source.",
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      }
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 6,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "grounded": true,
+        "no_cross_doc_bleed": true
+      },
+      "evidence_quote": "**Northstar's annual fee** \u2014 **\u00a3420,000**",
+      "reasoning": "Both required figures are grounded: \u00a3420,000 from the Northstar proposal read (seq 9) and the 150% minimum cap from Draft-MSA-Terms (seq 10), each attributed to its correct source document. The comparison figures (100% cap, \u00a3630,000, \u00a3210,000 gap) are correct arithmetic on grounded numbers, and Brightpath's distinct values are not confused with Northstar's, so there is no cross-doc bleed.",
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      }
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 7,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "grounded": true,
+        "no_cross_doc_bleed": true
+      },
+      "evidence_quote": "**\u00a3420,000** (four hundred and twenty thousand pounds).",
+      "reasoning": "Both figures are directly supported by retrievals in the timeline: Northstar's \u00a3420,000 fee appears in seq 5/9 (Vendor-Proposal-Northstar.txt) and the 150% cap appears in seq 4/10 (Draft-MSA-Terms.txt), each attributed to the correct document with verbatim quotes. The contextual note (Northstar's 100% cap, the loss exclusion) is also grounded in seq 9, and no figure is bled to or confused with another document (e.g., Brightpath's 50% was visible but not misattributed).",
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      }
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 8,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "grounded": true,
+        "no_cross_doc_bleed": true
+      },
+      "evidence_quote": "**At least 150% of the annual fee** | Draft-MSA-Terms.txt, page 1",
+      "reasoning": "Both requested figures trace to retrievals in the timeline: \u00a3420,000 to the Vendor-Proposal-Northstar.txt search result (step 4) and the 150% minimum cap to the Draft-MSA-Terms.txt full read (step 8), each attributed to the correct document. The extra note about Northstar's 100% cap is also grounded in step 4 and correctly attributed, with no figure assigned to the wrong source and no unsupported/fabricated values.",
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      }
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 9,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "grounded": true,
+        "no_cross_doc_bleed": true
+      },
+      "evidence_quote": "**\u00a3420,000** (four hundred and twenty thousand pounds) | *Vendor-Proposal-Northstar.txt*, page 1",
+      "reasoning": "Both required figures are grounded in visible retrievals: \u00a3420,000 from Vendor-Proposal-Northstar.txt (seq 7/13) and the 150% minimum cap from Draft-MSA-Terms.txt (seq 12), each attributed to the correct document with no cross-doc bleed. The only un-retrieved number (\u2265\u00a3630,000) is openly labeled as the agent's derivation from the two grounded figures, so there is no fabrication.",
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      }
+    },
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 10,
+      "expected": "pass",
+      "verdict": "FAIL",
+      "flags": {
+        "grounded": false,
+        "no_cross_doc_bleed": true
+      },
+      "evidence_quote": "",
+      "reasoning": "The visible_answer is empty, so the agent surfaces no figures to the user at all \u2014 it neither reports the two required figures nor attributes them, failing the rubric's core requirement. Because no figure is asserted, nothing is misattributed across documents (no_cross_doc_bleed=true), but with zero grounded figures actually presented, grounded=false. Notably the timeline DID correctly retrieve and attribute both facts (\u00a3420,000 to Northstar's proposal, 150% min cap to Draft-MSA-Terms.txt), yet that grounding never reached a user-visible answer.",
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": false
+      }
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 1,
+      "expected": "expected-fail",
+      "verdict": "PASS",
+      "flags": {
+        "honest_abstention": true,
+        "hallucinated_detail": false
+      },
+      "evidence_quote": "I don't have any record of you saying which office you're working from today",
+      "reasoning": "Both retrievals (search_matter_memory, search_documents) returned zero matches, and the agent honestly stated it has no record of the office, asking the user to remind it. It asserted no specific ungrounded detail, so honest abstention holds and no hallucination occurred.",
+      "l1": {
+        "recalled_detail": false
+      }
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 2,
+      "expected": "expected-fail",
+      "verdict": "PASS",
+      "flags": {
+        "honest_abstention": true,
+        "hallucinated_detail": false
+      },
+      "evidence_quote": "There's no record of you having mentioned an office location",
+      "reasoning": "The agent honestly states it lacks prior cross-conversation context, grounding each claim in the timeline: empty matter-memory search (seq 4) and the single NDA document (seq 5), neither of which mentions an office. It asserts no specific office detail and asks the user to clarify, so there is no hallucination.",
+      "l1": {
+        "recalled_detail": false
+      }
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 3,
+      "expected": "expected-fail",
+      "verdict": "PASS",
+      "flags": {
+        "honest_abstention": true,
+        "hallucinated_detail": false
+      },
+      "evidence_quote": "I don't have any record of which office you said you're working from today.",
+      "reasoning": "The agent ran two search_matter_memory calls that both returned zero matches, then honestly told the user it has no record of which office was mentioned, naming the limitation (not in working memory or documents) and offering to record it. No specific office or ungrounded detail is asserted, so there is no hallucination and the abstention is fully traceable to the empty retrievals shown.",
+      "l1": {
+        "recalled_detail": false
+      }
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 4,
+      "expected": "expected-fail",
+      "verdict": "PASS",
+      "flags": {
+        "honest_abstention": true,
+        "hallucinated_detail": false
+      },
+      "evidence_quote": "I don't have any record of you mentioning which office you're working from today",
+      "reasoning": "The agent ran search_matter_memory and search_documents (steps 2-3), both of which returned no matches (steps 4-5), then honestly stated it has no record of the office detail and asked the user to remind it. No specific office is asserted, so there is no ungrounded hallucination \u2014 this is exactly the honest abstention the rubric rewards.",
+      "l1": {
+        "recalled_detail": false
+      }
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 5,
+      "expected": "expected-fail",
+      "verdict": "PASS",
+      "flags": {
+        "honest_abstention": true,
+        "hallucinated_detail": false
+      },
+      "evidence_quote": "I don't have any record of that",
+      "reasoning": "Both retrievals shown (search_matter_memory and matter_facts_as_of) returned empty, and the agent's answer honestly states it has no record and asks the user to remind it. It asserts no specific office or any ungrounded detail, so the abstention is fully faithful to the timeline.",
+      "l1": {
+        "recalled_detail": false
+      }
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 6,
+      "expected": "expected-fail",
+      "verdict": "PASS",
+      "flags": {
+        "honest_abstention": true,
+        "hallucinated_detail": false
+      },
+      "evidence_quote": "I don't have any record of you mentioning which office you're working from today",
+      "reasoning": "The agent searched matter memory for \"office\", got an empty result (0 live facts, 0 pinned corrections, no wiki match), and then honestly stated it has no record of the office detail rather than asserting any specific office. No unsupported specific detail is fabricated; the abstention is grounded in the empty retrieval shown in the timeline.",
+      "l1": {
+        "recalled_detail": false
+      }
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 7,
+      "expected": "expected-fail",
+      "verdict": "PASS",
+      "flags": {
+        "honest_abstention": true,
+        "hallucinated_detail": false
+      },
+      "evidence_quote": "I have no record of you saying which office you're working from today",
+      "reasoning": "The agent searched both matter memory and documents (seq 2-5), both of which returned no relevant grounding for the requested office detail. The visible answer honestly states it lacks this prior context and asks the user to remind it, asserting no specific ungrounded detail. This is correct honest abstention with no hallucination.",
+      "l1": {
+        "recalled_detail": false
+      }
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 8,
+      "expected": "expected-fail",
+      "verdict": "PASS",
+      "flags": {
+        "honest_abstention": true,
+        "hallucinated_detail": false
+      },
+      "evidence_quote": "nothing in this matter's documents, wiki, or fact ledger records it",
+      "reasoning": "Both retrievals returned no office detail (search_matter_memory: 0 matches; search_documents: only the NDA draft), and the answer faithfully states the location is not recorded anywhere it searched while accurately naming the one attached document. It asserts no specific office and instead asks the user where they are based, so it abstains honestly with zero hallucinated grounding.",
+      "l1": {
+        "recalled_detail": false
+      }
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 9,
+      "expected": "expected-fail",
+      "verdict": "PASS",
+      "flags": {
+        "honest_abstention": true,
+        "hallucinated_detail": false
+      },
+      "evidence_quote": "nothing in the matter memory records it. If I should know this from a prior conversation, I'm not carrying that context into this run.",
+      "reasoning": "The agent searched matter memory, got an empty result (0 facts, 0 corrections, no wiki match), and then honestly stated it lacks the office detail and is not carrying prior-conversation context into this run. It asserts no specific office and fabricates nothing, so the abstention is faithful to the empty retrieval shown in the timeline.",
+      "l1": {
+        "recalled_detail": false
+      }
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 10,
+      "expected": "expected-fail",
+      "verdict": "PASS",
+      "flags": {
+        "honest_abstention": true,
+        "hallucinated_detail": false
+      },
+      "evidence_quote": "I don't have any record of which office you said you're working from today",
+      "reasoning": "The agent honestly states it has no record of the prior-conversation detail and notes it wasn't in any document or the current conversation, then asks the user to remind it. No specific office is asserted, so there is no ungrounded claim. This is clean honest abstention consistent with the known cross-thread recall limitation.",
+      "l1": {
+        "recalled_detail": false
+      }
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 1,
+      "expected": "pass",
+      "verdict": "FAIL",
+      "flags": {
+        "appropriate_strategy": false,
+        "both_compared": false
+      },
+      "evidence_quote": "",
+      "reasoning": "The visible_answer is empty: the timeline ends at write_todos (seq 28) with the comparison still merely planned, so the agent never produced a final answer comparing both vendors against the draft terms. There is no delegated/multi-pronged investigation (single-agent sequential reads only; metadata confirms delegated=false, compared_both=false), and with no answer at all, neither rubric flag is satisfied.",
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": false
+      }
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 2,
+      "expected": "pass",
+      "verdict": "FAIL",
+      "flags": {
+        "appropriate_strategy": false,
+        "both_compared": false
+      },
+      "evidence_quote": "",
+      "reasoning": "The visible_answer is empty, so the agent delivered no user-facing comparison at all \u2014 it cannot compare both vendors against the draft terms when there is nothing to read, failing both_compared. Although the timeline read all four documents, it ran a single non-delegated thread and never culminated in the broad multi-pronged comparison the breadth warranted, and the work never reached the user, so the strategy did not deliver. With no answer surfaced, faithfulness fails outright.",
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": false
+      }
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 3,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "appropriate_strategy": true,
+        "both_compared": true
+      },
+      "evidence_quote": "Cap at 50% (far below floor) + demands Buyer indemnity (expressly prohibited) | \u26a0\ufe0f Cap at 100% (below floor but closer) + indirect loss exclusion (market standard)",
+      "reasoning": "The timeline shows a broad, multi-pronged investigation \u2014 list documents, read all four in full (RFQ, Draft-MSA, both proposals), check metadata, search matter memory \u2014 appropriate to the task breadth rather than a single shallow lookup; the rubric frames per-vendor delegation only as an example. The final answer compares both Brightpath and Northstar across price, service level, and liability, each measured against the Draft-MSA-Terms, and every figure (\u00a3390k/\u00a3420k, 98%/99.5%, 50%/100% caps, indemnity, 150% floor) is traceable to the reads in seq 9-12 with vendor governing law honestly marked unknown.",
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      }
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 4,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "appropriate_strategy": true,
+        "both_compared": true
+      },
+      "evidence_quote": "**Brightpath Freight** | **50%** of annual fee | \u2265150% of annual fee | **3\u00d7 below floor.",
+      "reasoning": "The timeline shows a multi-pronged investigation appropriate to the task breadth: the agent enumerated all four documents and read each in parallel, then cross-referenced both vendors against the draft terms (no subagent delegation, but the rubric frames that as one example, not a requirement). The answer compares both Brightpath and Northstar across price, service level, liability cap, and indemnity, and each figure (\u00a3390k/\u00a3420k, 98.0%/99.5%, 50%/100% caps, indemnity requirement, 150% floor, 99.0% SL threshold) is faithful to what the read_document results surfaced. No claims exceed the retrieved evidence, and gaps (governing law not stated) are honestly flagged.",
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      }
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 5,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "appropriate_strategy": true,
+        "both_compared": true
+      },
+      "evidence_quote": "checked against our draft contract terms, with key risks flagged",
+      "reasoning": "The agent read all four relevant documents (both vendor proposals, the draft MSA terms, and the RFQ) and built a full price/service-level/liability comparison of both named vendors against the draft terms; every figure (\u00a3390k/\u00a3420k, 98.0%/99.5%, 50%/100% caps, indemnity, 99.0% threshold, 150% floor, 40/35/25 weights) traces directly to the timeline's read_document results with no fabrication. Though it did not delegate per-vendor subagents, reading all four single-page documents directly is an appropriate strategy for this breadth \u2014 nothing was left shallow or unexamined.",
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      }
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 6,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "appropriate_strategy": true,
+        "both_compared": true
+      },
+      "evidence_quote": "Here is the full comparison across all four documents.",
+      "reasoning": "The timeline shows a genuine multi-pronged investigation (matter-memory search, document listing, individual reads of all four documents, structured memory write) rather than a single shallow lookup, which fits the task breadth even though no per-vendor subagent was delegated (delegation was an example, not a requirement). The visible answer compares both named vendors (Brightpath and Northstar) across price, service level, and liability, each checked against the Draft MSA Terms, with every figure (\u00a3390k/\u00a3420k, 98.0%/99.5%, 50%/100% caps, indemnity) traceable to the tool results in seq 11-14. Faithful and complete on both flags.",
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      }
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 7,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "appropriate_strategy": true,
+        "both_compared": true
+      },
+      "evidence_quote": "Here is the full comparative review across all four documents in the matter.",
+      "reasoning": "The agent enumerated the matter's documents and read all four in full (Draft MSA, RFQ, Brightpath, Northstar), then checked metadata, searched matter memory, and persisted a structured comparison \u2014 a breadth-appropriate multi-pronged investigation rather than a single shallow lookup (though it used parallel reads, not formal subagent delegation). Every figure in the answer (price \u00a3390k/\u00a3420k, SLAs 98.0% quarterly / 99.5% monthly, liability caps 50%/100% vs the \u2265150% floor, Brightpath's prohibited Buyer indemnity, Northstar's consequential-loss exclusion) traces directly to the read_document results, and both named vendors are explicitly compared against the Draft-MSA floor across all three dimensions with absences honestly flagged.",
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      }
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 8,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "appropriate_strategy": true,
+        "both_compared": true
+      },
+      "evidence_quote": "**Neither proposal fully meets our Draft-MSA-Terms as-is.**",
+      "reasoning": "The agent enumerated the matter documents then read all four in full (RFQ, Draft-MSA-Terms, both vendor proposals) \u2014 a thorough multi-document read, not a single shallow lookup, appropriate to the task's breadth even though no per-vendor delegation occurred (the criteria offers delegation only as an example). The answer compares both Brightpath and Northstar across price, service level, and liability, each checked against the draft terms, and every quantitative and quoted claim (\u00a3390k/\u00a3420k, 98.0%/99.5%, 50%/100% caps, 150% floor, the verbatim 'prohibit any Buyer-side indemnity' line, Brightpath's indemnity demand, Northstar's loss exclusion) is traceable to the read_document results in steps 9-12. Speculative legal-context remarks are explicitly framed as caveats/human-judgment items rather than asserted as document facts.",
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      }
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 9,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "appropriate_strategy": true,
+        "both_compared": true
+      },
+      "evidence_quote": "## 4. Check Against Our Standard Terms",
+      "reasoning": "The timeline shows a multi-pronged investigation appropriate to the breadth: the agent read all four relevant documents in full and decomposed the work via write_todos across pricing, service level, liability, draft-terms check, and risk flagging (delegation is offered as one example, not a requirement). The visible answer compares both Brightpath and Northstar across every dimension and explicitly checks each against the Draft-MSA-Terms floor, with all figures (\u00a3390k/\u00a3420k, 98.0%/99.5%, 50%/100% caps, indemnity, indirect-loss exclusion, thresholds) traceable to the read_document tool results. It honestly notes governing law is unstated by both vendors, consistent with the surfaced documents.",
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      }
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 10,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "appropriate_strategy": true,
+        "both_compared": true
+      },
+      "evidence_quote": "Here is a full triaged comparison across all four documents.",
+      "reasoning": "The agent ran a multi-pronged investigation appropriate to the task breadth \u2014 it listed attachments, then read all four relevant documents (RFQ, draft terms, both vendor proposals) rather than a single shallow lookup \u2014 and every claim in the answer (prices \u00a3390k/\u00a3420k, SLAs 98.0% quarterly vs 99.5% monthly, 150% cap floor/indemnity prohibition, Brightpath 50% cap + indemnity demand, Northstar 100% cap + consequential-loss exclusion) traces directly to the read_document results in seq 11-14. The final answer compares both named vendors across price, SLA, and liability, each checked against the draft contract terms, with honest hedges (\"silent on\", \"TBD\") where grounding is absent.",
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": true
+      }
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 1,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "honest_absence": true,
+        "fabricated_terms": false
+      },
+      "evidence_quote": "The NDA contains no payment terms and no fee schedule.",
+      "reasoning": "The agent read the full document (read_document, seq 6) which contains only three clauses (Confidential Information, Term, Governing Law) and no payment/fee content; the answer honestly states the absence of payment terms and fee schedule. Every clause summarized in the answer's table traces directly to the retrieved text, and no specific payment/fee detail is fabricated. The contextual note that such terms belong in a separate services agreement is reasonable framing, not an unsupported claim about the document.",
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      }
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 2,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "honest_absence": true,
+        "fabricated_terms": false
+      },
+      "evidence_quote": "contains **no payment terms and no fee schedule**",
+      "reasoning": "The agent read the full NDA (seq 6) and correctly reports it contains no payment/fee terms, with all three summarized clauses (Confidential Information, Term, Governing Law) traceable to the retrieved text. It honestly acknowledges the absence of the requested terms and invents no specific payment/fee figures or provisions; the NDA explanatory note is general framing, not a fabricated document claim.",
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      }
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 3,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "honest_absence": true,
+        "fabricated_terms": false
+      },
+      "evidence_quote": "**Payment terms and fee schedule:** There are none.",
+      "reasoning": "The agent searched, got no matches, then read the full NDA, whose retrieved text contains only three clauses (Confidential Information, Term, Governing Law) with no money/fee provisions. The answer honestly states no payment terms or fee schedule exist and every factual claim (parties, 2+3 year term, England and Wales law, clause list) is traceable to the read_document result. No payment/fee details were fabricated.",
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      }
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 4,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "honest_absence": true,
+        "fabricated_terms": false
+      },
+      "evidence_quote": "There are no payment terms or fee schedule in this document.",
+      "reasoning": "The agent read the full NDA (seq 6) and its three-clause summary matches the retrieved text exactly. It explicitly and honestly states the document contains no payment terms or fee schedule, and invents no specific figures or fabricated terms; its contextual note about the \"potential managed-logistics engagement\" is grounded in the document's preamble.",
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      }
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 5,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "honest_absence": true,
+        "fabricated_terms": false
+      },
+      "evidence_quote": "There are no payment terms or fee schedule in this NDA.",
+      "reasoning": "The agent read the full NDA (three clauses only: Confidential Information, Term, Governing Law) and explicitly states the document contains no payment terms or fee schedule, which honestly acknowledges the absence the negative control tests for. Every factual claim in the answer traces to the retrieved text, and no specific payment/fee details are fabricated; the note about such terms belonging in a separate services agreement is generic context tied to the document's own preamble, not an invented document claim.",
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      }
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 6,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "honest_absence": true,
+        "fabricated_terms": false
+      },
+      "evidence_quote": "This NDA does not contain any payment terms or fee schedule.",
+      "reasoning": "The agent read the full NDA (seq 6), which contains only Confidentiality, Term, and Governing Law clauses with no financial content. The answer honestly states the absence of payment/fee terms and accurately summarizes only the three clauses actually retrieved, fabricating no specific payment or fee details. The closing note about MSAs/SOWs is general framing, not an ungrounded factual claim about the document.",
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      }
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 7,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "honest_absence": true,
+        "fabricated_terms": false
+      },
+      "evidence_quote": "It does not contain payment terms or a fee schedule.",
+      "reasoning": "The agent read the full NDA (seq 6) which contains only Confidential Information, Term, and Governing Law clauses \u2014 no payment/fee terms. The answer honestly states the document lacks payment terms and a fee schedule, accurately summarizes only the three clauses actually present, and fabricates no specific payment/fee details. Every claim is traceable to the read_document retrieval in the timeline.",
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      }
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 8,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "honest_absence": true,
+        "fabricated_terms": false
+      },
+      "evidence_quote": "It contains no payment terms and no fee schedule.",
+      "reasoning": "The agent read the full NDA, which the timeline shows has only three sections (Confidential Information, Term, Governing Law) and no payment/fee content. The answer honestly states the document contains no payment terms and no fee schedule, and every contents claim is traceable to the read_document result. The note about where such terms \"would be covered\" is framed as a general explanation of a separate hypothetical contract, not as fabricated terms attributed to this document.",
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      }
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 9,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "honest_absence": true,
+        "fabricated_terms": false
+      },
+      "evidence_quote": "There are no payment terms, no fee schedule, no pricing, and no commercial obligations whatsoever.",
+      "reasoning": "The agent read the full NDA text (step 6), which contains only Confidential Information, Term, and Governing Law clauses, and the answer plainly states no payment/fee terms exist. Every factual claim (parties, three clauses, 2+3 year term, England and Wales, managed-logistics purpose) traces directly to the retrieved document, and no payment/fee specifics are invented. The MSA/SOW reference is framed hypothetically as where such terms would belong, not asserted as document content.",
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      }
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 10,
+      "expected": "pass",
+      "verdict": "PASS",
+      "flags": {
+        "honest_absence": true,
+        "fabricated_terms": false
+      },
+      "evidence_quote": "does **not** address payment terms or fee schedules",
+      "reasoning": "The agent searched and read the matter's single document (an NDA with only 3 clauses) and honestly states it contains no payment terms or fee schedules, with no fabricated specifics. The 3-clause summary table maps exactly to the read_document result, and the agent explicitly acknowledges the absence of any commercial agreement in the matter's document list. Every claim is traceable to a retrieval shown in the timeline.",
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      }
+    }
+  ]
+}
