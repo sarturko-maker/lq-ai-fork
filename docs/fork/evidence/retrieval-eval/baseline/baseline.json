@@ -1,0 +1,261 @@
+{
+  "manifest": {
+    "dataset": "CUAD v1 (CC-BY-4.0, theatticusproject)",
+    "generated_at": "2026-06-28T10:27:54+00:00",
+    "git_sha": "31aca7b7",
+    "selection": "deterministic (contracts sorted by id, first N)",
+    "slice": "E0",
+    "subset_loaded": 150,
+    "subset_requested": 150
+  },
+  "results": {
+    "absent_control": {
+      "absent_questions": 4066,
+      "note": "Fraction of absent-clause questions for which within-doc FTS still returned >=1 chunk. The FTS retriever cannot abstain; true abstention is an agent-mode/QA property measured in E1.",
+      "within_doc_spurious_retrieval_rate": 0.07993113625184456
+    },
+    "corpus": {
+      "absent_questions": 4066,
+      "categories": 41,
+      "chunks": 4911,
+      "chunks_per_contract": 32.7,
+      "contracts": 150,
+      "gold_span_drift": 0,
+      "present_questions": 2084
+    },
+    "cross_doc": {
+      "hit_rate_at_k": {
+        "1": 0.008637236084452975,
+        "10": 0.05230326295585413,
+        "20": 0.08445297504798464,
+        "3": 0.022552783109404992,
+        "5": 0.030710172744721688,
+        "8": 0.044145873320537425
+      },
+      "mean_average_precision": 0.018335489950179133,
+      "precision_at_k": {
+        "1": 0.008637236084452975,
+        "10": 0.007717530390275111,
+        "20": 0.007292725151480939,
+        "3": 0.008797184900831733,
+        "5": 0.008053422904670506,
+        "8": 0.007885476647472809
+      },
+      "recall_at_k": {
+        "1": 0.006657298235993053,
+        "10": 0.04416863652897596,
+        "20": 0.07198177828165706,
+        "3": 0.018229332710593443,
+        "5": 0.02585489253145077,
+        "8": 0.0381705559147725
+      }
+    },
+    "params": {
+      "k_values": [
+        1,
+        3,
+        5,
+        8,
+        10,
+        20
+      ],
+      "overlap_chars": 200,
+      "query": "clause category name",
+      "retriever": "matter FTS (websearch_to_tsquery 'english' + ts_rank_cd), embeddings NULL",
+      "target_chars": 2000
+    },
+    "per_category_within_doc": {
+      "Affiliate License-Licensee": {
+        "count": 20,
+        "recall_at_8": 0.0
+      },
+      "Affiliate License-Licensor": {
+        "count": 11,
+        "recall_at_8": 0.0
+      },
+      "Agreement Date": {
+        "count": 145,
+        "recall_at_8": 0.6241379310344828
+      },
+      "Anti-Assignment": {
+        "count": 112,
+        "recall_at_8": 0.0
+      },
+      "Audit Rights": {
+        "count": 66,
+        "recall_at_8": 0.4410951621477937
+      },
+      "Cap On Liability": {
+        "count": 82,
+        "recall_at_8": 0.0156794425087108
+      },
+      "Change Of Control": {
+        "count": 37,
+        "recall_at_8": 0.5954954954954955
+      },
+      "Competitive Restriction Exception": {
+        "count": 29,
+        "recall_at_8": 0.08620689655172414
+      },
+      "Covenant Not To Sue": {
+        "count": 31,
+        "recall_at_8": 0.05376344086021505
+      },
+      "Document Name": {
+        "count": 150,
+        "recall_at_8": 0.03333333333333333
+      },
+      "Effective Date": {
+        "count": 130,
+        "recall_at_8": 0.6987179487179487
+      },
+      "Exclusivity": {
+        "count": 57,
+        "recall_at_8": 0.8489557226399332
+      },
+      "Expiration Date": {
+        "count": 127,
+        "recall_at_8": 0.31496062992125984
+      },
+      "Governing Law": {
+        "count": 134,
+        "recall_at_8": 0.914179104477612
+      },
+      "Insurance": {
+        "count": 53,
+        "recall_at_8": 0.9876715265866208
+      },
+      "Ip Ownership Assignment": {
+        "count": 34,
+        "recall_at_8": 0.09411764705882353
+      },
+      "Irrevocable Or Perpetual License": {
+        "count": 25,
+        "recall_at_8": 0.872
+      },
+      "Joint Ip Ownership": {
+        "count": 15,
+        "recall_at_8": 0.08
+      },
+      "License Grant": {
+        "count": 81,
+        "recall_at_8": 0.7688975290827142
+      },
+      "Liquidated Damages": {
+        "count": 21,
+        "recall_at_8": 0.38095238095238093
+      },
+      "Minimum Commitment": {
+        "count": 54,
+        "recall_at_8": 0.12081128747795414
+      },
+      "Most Favored Nation": {
+        "count": 8,
+        "recall_at_8": 0.08333333333333333
+      },
+      "No-Solicit Of Customers": {
+        "count": 9,
+        "recall_at_8": 0.0
+      },
+      "No-Solicit Of Employees": {
+        "count": 17,
+        "recall_at_8": 0.0
+      },
+      "Non-Compete": {
+        "count": 40,
+        "recall_at_8": 0.05
+      },
+      "Non-Disparagement": {
+        "count": 9,
+        "recall_at_8": 0.1111111111111111
+      },
+      "Non-Transferable License": {
+        "count": 47,
+        "recall_at_8": 0.46796690307328603
+      },
+      "Notice Period To Terminate Renewal": {
+        "count": 36,
+        "recall_at_8": 0.4166666666666667
+      },
+      "Parties": {
+        "count": 150,
+        "recall_at_8": 0.37571428571428567
+      },
+      "Post-Termination Services": {
+        "count": 59,
+        "recall_at_8": 0.0
+      },
+      "Price Restrictions": {
+        "count": 4,
+        "recall_at_8": 0.0
+      },
+      "Renewal Term": {
+        "count": 51,
+        "recall_at_8": 0.6862745098039216
+      },
+      "Revenue/Profit Sharing": {
+        "count": 49,
+        "recall_at_8": 0.0
+      },
+      "Rofr/Rofo/Rofn": {
+        "count": 18,
+        "recall_at_8": 0.0
+      },
+      "Source Code Escrow": {
+        "count": 6,
+        "recall_at_8": 0.6190476190476191
+      },
+      "Termination For Convenience": {
+        "count": 62,
+        "recall_at_8": 0.18548387096774194
+      },
+      "Third Party Beneficiary": {
+        "count": 10,
+        "recall_at_8": 0.8
+      },
+      "Uncapped Liability": {
+        "count": 38,
+        "recall_at_8": 0.0
+      },
+      "Unlimited/All-You-Can-Eat-License": {
+        "count": 8,
+        "recall_at_8": 0.0
+      },
+      "Volume Restriction": {
+        "count": 25,
+        "recall_at_8": 0.0
+      },
+      "Warranty Duration": {
+        "count": 24,
+        "recall_at_8": 0.08333333333333333
+      }
+    },
+    "within_doc": {
+      "hit_rate_at_k": {
+        "1": 0.2744721689059501,
+        "10": 0.40163147792706333,
+        "20": 0.42226487523992323,
+        "3": 0.34021113243761997,
+        "5": 0.3704414587332054,
+        "8": 0.39107485604606523
+      },
+      "mean_average_precision": 0.2964496737846744,
+      "precision_at_k": {
+        "1": 0.2744721689059501,
+        "10": 0.21886767662919296,
+        "20": 0.21884222619475885,
+        "3": 0.22952655150351886,
+        "5": 0.22237683941138836,
+        "8": 0.21919957042317886
+      },
+      "recall_at_k": {
+        "1": 0.23416023748506828,
+        "10": 0.37959883003763695,
+        "20": 0.40229767896009433,
+        "3": 0.31193279941259533,
+        "5": 0.3442663615357827,
+        "8": 0.367756931133598
+      }
+    }
+  }
+}

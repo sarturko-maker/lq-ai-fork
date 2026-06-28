@@ -204,6 +204,12 @@ docs/LaunchPositioning_TwoAxesOfTrust.md
 # These are working notes by definition — never published.
 .planning/
 
+# ---------- Eval corpora (fetched, never committed) ----------
+# CUAD retrieval-eval corpus (CC-BY-4.0; fetched by scripts/fetch_cuad.sh).
+# Multi-MB third-party dataset — used only by the Track-B eval (ADR-F049),
+# never shipped. See NOTICES.md § Eval / test datasets.
+api/tests/fixtures/cuad/
+
 # ---------- Temporary / scratch ----------
 tmp/
 temp/

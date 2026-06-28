@@ -90,3 +90,16 @@ To update a row (e.g., if a upstream source moves or a licence changes):
 | Image | Used by | License | Posture |
 |---|---|---|---|
 | `collabora/code` (Collabora Online Development Edition; **LibreOffice** core on LibreOfficeKit) | The `collabora` compose service — the in-app Word editor engine (ADR-F047; libreoffice-editor Slice 1) | **MPL-2.0** (Collabora Online / COOL source); LibreOffice core **dual MPL-2.0 / LGPLv3+**; COOL `browser/` **BSD**; bundled fonts **OFL-1.1**; dictionaries **MPL-1.1** | **Weak / file-level copyleft only — NO AGPL, no network copyleft** (strictly lighter than the grandfathered PyMuPDF AGPL-3.0 row above). Run as a **separate, unmodified, server-side-only container** (WOPI host will live in `api`, iframe in `web`; the editor data plane makes **no** LLM/gateway call — the ADR-F010 egress invariant is untouched), pinned **by digest**. The MPL-2.0 *source* carries **no** production restriction. The dev/integration stack runs the **prebuilt official CODE binary**, whose *executable* form additionally carries a proprietary Collabora EULA + Collabora trademark/CSS and a "not recommended for production" framing (a support/warranty stance, **not** a license prohibition; the historical 10-document / 20-connection cap is **removed** in current CODE). We hide Collabora chrome via our own UI + CSS config (officially permitted for self-hosted installs) and do **not** redistribute the binary. The clean unbranded / supported **production** posture is a **deferred decision** — self-build from MPL-2.0 source **or** a Collabora subscription — to be made at productionisation (`docs/fork/MILESTONES.md`). **NOT AGPL.** |
+
+---
+
+## Eval / test datasets (license posture)
+
+> Third-party datasets used **only** by the test/eval harness — never shipped in
+> a runtime image, never in the product. Fetched on demand into a **gitignored**
+> fixture dir (the corpus is not committed). CC-BY-4.0 carries an attribution
+> obligation, recorded here.
+
+| Dataset | Used by | License | Attribution / posture |
+|---|---|---|---|
+| **CUAD v1** (Contract Understanding Atticus Dataset) | `api/tests/agents/scenarios/cuad_eval.py` — the Track-B objective retrieval baseline (ADR-F049 / E0). Fetched by `scripts/fetch_cuad.sh` into `api/tests/fixtures/cuad/` (**gitignored**). | **CC-BY-4.0** | **Attribution required** (CC-BY-4.0): "CUAD (Contract Understanding Atticus Dataset) © The Atticus Project, licensed CC-BY-4.0 — https://www.atticusprojectai.org/cuad" (paper: Hendrycks et al., *CUAD: An Expert-Annotated NLP Dataset for Legal Contract Review*, NeurIPS 2021). Eval-only: the corpus is downloaded into a gitignored fixture dir, used to score retrieval offline (no gateway, no LLM), and **never** committed, shipped in an image, or redistributed. No copyleft. |

@@ -32,14 +32,19 @@ set *after* the baseline, never tighter than the metric CI). Eval design detail:
 
 ## Phase E — the eval instrument (build FIRST; no architecture change)
 
-- **E0 — Track-B CUAD harness + objective scorer + FTS-only baseline.** `load_cuad` (download
-  `CUADv1.json`, CC-BY-4.0, into a gitignored fixture dir; pick the agreed subset) → seed each contract
-  as a matter document via `seed_multi_doc_matter` → run clause questions (retriever-only mode = no LLM
-  cost; agent mode on a small subset) → score retrieved/quoted spans vs gold `answer_start`
-  (recall@k/precision/AUPR/abstention-on-absent). Reuses `api/tests/agents/scenarios/harness.py` +
-  `api/evals/` (`runner`/`scoring`/`report`). **Output: the FTS-only baseline frozen at
-  `docs/fork/evidence/retrieval-eval/baseline/`.** Scorer unit tests + a tiny retriever-only smoke run
-  in CI ($0); live agent-mode is provider-marked/CI-skipped. *No ADR; reuses existing infra.*
+- **E0 — Track-B CUAD harness + objective scorer + FTS-only baseline. ✅ SHIPPED (2026-06-28).**
+  `load_cuad` (raw `CUADv1.json`, CC-BY-4.0, gitignored fixture via `scripts/fetch_cuad.sh`; deterministic
+  150-contract subset) → seed each contract as a matter document via `seed_multi_doc_matter` (verbatim
+  context through the **production chunker**, so gold `answer_start` shares the chunk coordinate system) →
+  run clause questions **retriever-only** (no LLM, $0) over the production matter FTS path → score retrieved
+  chunk spans vs gold spans (recall@k / hit@k / precision@k / MAP + an absent-clause spurious-retrieval
+  control). Two arms: **within-doc** (right contract known) and **cross-doc** (matter-wide at scale).
+  Pure metrics in `tests/agents/scenarios/retrieval_metrics.py` (CI-unit-tested); rig in `cuad_eval.py`;
+  CI smoke (synthetic, no corpus) + drift-guard vs `tools.py:_FTS_SQL`; corpus-gated full baseline frozen
+  at `docs/fork/evidence/retrieval-eval/baseline/`. **Result (the floor every later slice must beat):
+  within-doc hit@8 0.39 / MAP 0.30; cross-doc hit@8 0.04 / MAP 0.02 — lexical FTS collapses at scale and
+  is 0.00 for semantically-named clauses.** Agent-mode answer-quote scoring deferred to E1 (the agent's
+  retrieved-chunk set is not observable from run steps). *No ADR; reused existing infra.*
 - **E1 — Track-A first scenario suite + masked judge + baseline.** Generalise `craft_judge`
   (`commercial_redline_lib.py:223-277`) into a masked retrieval/agentic judge (f0-s9 masking: sanitised
   tool timeline + answer + expectations only). Ship A1 (multi-doc grounding), A5 (cross-thread recall —
@@ -135,18 +140,20 @@ baselines under `docs/fork/evidence/retrieval-eval/`.
 - No a-priori eval thresholds (set X/Y after the B1 baseline, never tighter than CI).
 - No CI spend on live DeepSeek (provider-marked, manual/on-demand; retriever-only + scorer units in CI).
 
-## Open maintainer calls (settle before/with E0)
-1. **CUAD subset size** — retriever-only large subset (proposed 100–200 contracts, all 41 categories) +
-   agent-mode small subset (proposed 10–25 contracts × ~10 high-value categories: cap, indemnity, IP,
-   governing law, termination, exclusivity, change-of-control…). Confirm numbers + shortlist.
+## Open maintainer calls
+1. **CUAD subset size — ✅ SETTLED (2026-06-28): 150 contracts, deterministic (sorted by id), all 41
+   categories**, retriever-only for the frozen baseline (the runner is parameterised so any N can be
+   re-run). The agent-mode small subset moves to **E1** with the Track-A scenarios (agent-mode recall is
+   not observable from run steps; E0 stays deterministic/$0).
 2. **Track-B gate thresholds X (embeddings) / Y (rerank)** — set post-baseline, never tighter than CI.
-   Approve the policy.
+   Baseline now exists (within-doc hit@8 0.39 / cross-doc hit@8 0.04); approve the delta policy at Slice C.
 3. **Track-A judge rubric strictness** — per-scenario pass bars (A3 coverage full/partial, A4 version
-   correct/wrong, A7 strategy ≥2/3).
-4. **Eval-in-CI vs manual** — live tracks manual/on-demand (provider-marked); scorer units + a tiny
-   retriever-only smoke in CI. Confirm.
+   correct/wrong, A7 strategy ≥2/3). *(E1.)*
+4. **Eval-in-CI vs manual — ✅ SETTLED (2026-06-28):** scorer unit tests + a synthetic retriever-only
+   smoke (+ the `_FTS_SQL` drift-guard) run in CI ($0, Postgres-only); the full corpus baseline is
+   corpus-gated/on-demand; live agent-mode (E1) is provider-marked/CI-skipped.
 5. **DeepSeek eval spend budget** — a per-matrix ceiling; retriever-only as the day-to-day signal,
-   agent-mode reserved for slice gates / milestone runs.
-6. **Second model family for Track A?** (f0-s9 recommends ≥2.) Defer or include alongside DeepSeek?
+   agent-mode reserved for slice gates / milestone runs. *(Relevant from E1.)*
+6. **Second model family for Track A?** (f0-s9 recommends ≥2.) Defer or include alongside DeepSeek? *(E1.)*
 7. **Embedding door / dim** — in-process local (Door A) vs gateway-local (Door B); 768 vs 384 vs keep
    1536. (Recommended: Door A, 768 — confirm at Slice C.)
