@@ -289,6 +289,29 @@ class MatterMemorySearchInput(BaseModel):
     query: str = Field(min_length=1, max_length=MATTER_SEARCH_QUERY_MAX_CHARS)
 
 
+# F2 N3 (ADR-F049): a conversation-recall query is a short keyword string
+# (reject-not-truncate), matched Python-side over the matter's offloaded transcripts —
+# never a SQL string built from the query. The optional thread_id narrows to one prior
+# thread (within-chat / programmatic use); omitted → whole-matter cross-thread recall.
+MATTER_CONVERSATION_QUERY_MAX_CHARS = 500
+
+
+class MatterConversationSearchInput(BaseModel):
+    """Validate one ``search_matter_conversations`` query (a short keyword string).
+
+    ``str_strip_whitespace`` trims first, so a whitespace-only query collapses to ""
+    and fails ``min_length=1`` (rejected, never an empty search). ``thread_id`` is an
+    optional within-chat narrowing filter — Pydantic coerces the model's string to a
+    UUID, and a malformed value is rejected back to the model (reject-and-retry, never a
+    crash). The query is matched Python-side over loaded transcripts — it never builds SQL.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    query: str = Field(min_length=1, max_length=MATTER_CONVERSATION_QUERY_MAX_CHARS)
+    thread_id: uuid.UUID | None = None
+
+
 class MatterFactsAsOfInput(BaseModel):
     """Validate one ``matter_facts_as_of`` date (the "what did we believe at T" query).
 

@@ -127,12 +127,31 @@ async def _run_once(
             )
             row["t1_memory_writes"] = wrote
             row["fixture_valid"] = not wrote
+            # N3: thread 2 recalls thread 1's aside cross-thread via
+            # search_matter_conversations, which reads thread 1's offloaded transcript
+            # from the shared Store. The N2 offload only fires on compaction
+            # (content-dependent), so record whether it fired live, then seed the
+            # namespace deterministically when it did not (seed + best-effort live,
+            # maintainer ruling). thread 2's run gets the SAME store_provider so its
+            # conversation tool is wired and reads the shared Store.
+            if store is not None and ts.seed_thread_one_transcript is not None:
+                t1_ns = ("conversation", str(receipt.thread_id))
+                offloaded = list(store.search(t1_ns))
+                row["conversation_offloaded_t1"] = bool(offloaded)
+                if not offloaded:
+                    store.put(
+                        t1_ns,
+                        f"/{receipt.thread_id}.md",
+                        {"content": ts.seed_thread_one_transcript},
+                    )
+                    row["conversation_seeded_t1"] = True
             receipt = await run_scenario(
                 _followup_scenario(ts),
                 seeded,
                 skill_registry=registry,
                 model_alias=_MODEL,
                 max_steps=ts.max_steps,
+                store_provider=store_provider,
             )
             row["status_followup"] = receipt.status
 

@@ -217,6 +217,9 @@ class Receipt:
     # (evals.runner.fetch_steps) for Track-A judging (F2 E1). Not in to_dict()
     # (a run id is not a report observation; the report carries counts/shapes).
     run_id: uuid.UUID
+    # N3: the run's thread id (== the Store ("conversation", str(thread_id)) namespace
+    # component) — lets the A5 gate seed/read this thread's transcript. Not in to_dict().
+    thread_id: uuid.UUID
     # UX-B-4 delegation observations (ADR-F017): how many `task` delegations the
     # lead agent issued, whether ANY step nested under a parent (subagent ran),
     # and a compact parent-seq → child-seqs ancestry summary.
@@ -314,6 +317,9 @@ async def run_scenario(
         db.add(run)
         await db.commit()
         run_id = run.id
+        # N3: the thread's id (== the Store conversation namespace component,
+        # str(thread_id)) — lets a caller seed/read this run's transcript namespace.
+        thread_id_val = thread.id
 
     compose_kwargs: dict[str, Any] = {
         "run_id": run_id,
@@ -390,6 +396,7 @@ async def run_scenario(
         latency_s=latency,
         checks=checks,
         run_id=run_id,
+        thread_id=thread_id_val,
         task_calls=task_calls,
         delegated=bool(ancestry),
         ancestry=ancestry,
