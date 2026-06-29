@@ -23,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.tools import MatterBinding
+from tests.agents.embedding_fakes import KeywordRerankProvider
 from tests.agents.scenarios.cuad_eval import (
     CuadContract,
     CuadQuestion,
@@ -157,6 +158,24 @@ async def test_cuad_baseline_smoke(commit_factory: async_sessionmaker[AsyncSessi
         "Cap On Liability",
         "Termination For Convenience",
     }
+
+
+async def test_cuad_rerank_arm_smoke(commit_factory: async_sessionmaker[AsyncSession]) -> None:
+    """The Slice-D rerank arm runs end-to-end (FTS candidates → fake cross-encoder
+    reorder → truncate) and records the reranker in ``params``. Reordering the
+    synthetic corpus preserves the perfect hit rate (no relevant clause is displaced)
+    — proving the arm wiring deterministically in CI ($0, no model)."""
+    results = await run_cuad_retrieval_baseline(
+        commit_factory,
+        _synthetic_contracts(),
+        run_cross_doc=True,
+        reranker=KeywordRerankProvider(),
+        rerank_candidates=8,
+    )
+    assert results["params"]["reranker"] == "fake:keyword-rerank"
+    assert results["params"]["rerank_candidates"] == 8
+    assert results["within_doc"]["hit_rate_at_k"]["8"] == 1.0
+    assert results["cross_doc"]["hit_rate_at_k"]["8"] == 1.0
 
 
 async def test_matter_retriever_fts_only_matches_frozen_reference(

@@ -5,7 +5,7 @@
   **N3** (2026-06-29, cross-thread conversation-recall tool), **Slice A** (2026-06-29, matter document
   tool wired to one hybrid retriever), **Slice C2** (2026-06-29, Store `IndexConfig` semantic recall),
   **Slice C1** (2026-06-29, local embedder + matter-document hybrid
-  retrieval — see the addenda at the end)
+  retrieval), **Slice D** (2026-06-30, local cross-encoder rerank, default ON — see the addenda at the end)
 - Date: 2026-06-27
 - Deciders: maintainer (Arturs), agent
 - Milestone: **F2 — Memory: 4 levels + conversation memory** (ADR-F003). This ADR is the
@@ -369,3 +369,46 @@ filter-only no-op), `test_agent_store` (indexed `setup()` builds `store_vectors`
 no-index posture preserved), and the new semantic cases in `test_matter_conversation_tools` (paraphrase
 surfaces, filter-only misses the same paraphrase, honest absence preserved). **No migration, no dep, no
 gateway change.** The N-ladder semantic objective (A5 paraphrase recall) is now met end to end.
+
+## Addendum — Slice D (2026-06-30): the local cross-encoder reranker over the candidate set
+
+C1 lit up *recall* (hybrid fusion: within-doc recall@5 0.31→0.63). But the bi-encoder embeds query and
+passage **independently** — it cannot model query↔passage term interactions, so the top-k order is imprecise.
+Slice D adds a **cross-encoder reranker**: it scores each *(query, passage)* pair **jointly** (full
+cross-attention) and reorders a *wider* candidate set down to the top-k the agent reads — the textbook
+retrieve-wide-then-rerank precision stage.
+
+**Second inference locus (same carve-out as C1).** The reranker is a local in-process fastembed
+`TextCrossEncoder` (Door A) — it holds no key and egresses nothing, so it extends the §Consequences "two
+inference loci" trade already accepted for the embedder; it is local scoring, not external generation
+(ADR-F010). It **reuses fastembed — no new dependency**, **no migration** (pure compute over already-retrieved
+hits), **no gateway change**. There is no gateway `/rerank` endpoint, so Door B is deferred; `build_rerank_provider`
+leaves the seam. Default model `Xenova/ms-marco-MiniLM-L-6-v2` (~5 MB, fast); `BAAI/bge-reranker-base` is the
+configurable quality alternative.
+
+**The wiring (a thin wrapper; the retriever is untouched).** `app/knowledge/retrieval.py:matter_search_reranked`
+fetches `rerank_candidates` (default 30) via the **unchanged** `matter_hybrid_search`, scores each candidate's
+`content`, stable-sorts by the cross-encoder score (tiebreak file_name, char_offset_start), truncates to top-k.
+`reranker=None` ⇒ it delegates straight to `matter_hybrid_search` at top_k — **byte-identical** to the no-rerank
+path, so the frozen E0/Slice-A FTS baseline and the `_REFERENCE_FTS` drift guard are unaffected. A reranker
+error or a score-count mismatch degrades to the hybrid order (retrieval never hard-fails on the reranker —
+mirrors the embedder fallback). `tools.py:_search` routes through the wrapper gated on `rerank_enabled`;
+production `search_documents` and the Track-B eval both go through it (Slice A's "agent mode == retriever").
+
+**Default ON — the Track-B B3 gate (ADR-F015 finding, N=30, evidence `docs/fork/evidence/retrieval-eval-slice-d/`).**
+The dev box (6.3 GB) OOMs loading the bge embedder **and** the cross-encoder while batch-evaluating, so
+**hybrid+rerank at scale is a deferred finding** (a bigger box — the C1 full-150 precedent); the
+memory-feasible **FTS+rerank** arm is a conservative lower bound (the hybrid pool has ~2× the recall, so the
+reranker has *more* to surface there). Real `Xenova/ms-marco-MiniLM-L-6-v2` over the production path vs the
+frozen FTS floor: **zero recall harm** anywhere; within-doc **p@1 +15.5%**, **MAP +11%** (precision@5 *flat* —
+a single-clause-gold artifact: one relevant chunk caps p@5 at 0.2, so a rank-3→rank-1 promotion moves p@1/MAP
+not p@5); cross-doc (the at-scale case) **precision@5 +20%, recall@5 +36%, hit@8 +32%, MAP +21%**. A
+realistic-load memory probe (both models + 12 searches, not the eval batch) peaks **~1.06 GB** — production
+agent runs holding both models are safe; the OOM was eval-batch volume only. Maintainer ruling: **ship default
+ON** — the theory (SOTA precision fix), the measured lower-bound lift with zero harm, the memory safety, and the
+minor latency justify it; the only residual (the *marginal* lift on the hybrid pool specifically) is a
+bounded marginal-improvement question, deferred to a bigger-box batch eval. Deterministic CI (hermetic fake
+reranker, no model download): `test_rerank_provider`, `test_matter_search_reranked` (passthrough byte-identical /
+wide-fetch promotion / ≤1 no-op / error + score-mismatch fallback / matter-scope isolation), the rerank arm in
+`test_cuad_retrieval_smoke`, and the `tools.py` rerank path + fallback. **No migration, no dep, no gateway
+change.**

@@ -28,11 +28,14 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from app.knowledge.rerank_provider import RerankProvider
 
 log = logging.getLogger(__name__)
 
@@ -563,6 +566,92 @@ async def matter_hybrid_search(
     # stable tiebreak so the result is deterministic across runs.
     hits.sort(key=lambda h: (-h.score, h.file_name, h.char_offset_start))
     return hits
+
+
+async def matter_search_reranked(
+    db: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    query: str,
+    query_embedding: list[float] | None,
+    top_k: int,
+    alpha: float,
+    document_id: uuid.UUID | None = None,
+    reranker: RerankProvider | None,
+    rerank_candidates: int,
+) -> list[MatterSearchHit]:
+    """Cross-encoder rerank over the matter hybrid candidate set (ADR-F049 Slice D).
+
+    Fetches a WIDER hybrid candidate set (``rerank_candidates``) from
+    :func:`matter_hybrid_search`, scores each candidate's ``content`` against the
+    query with a cross-encoder, and reorders down to ``top_k``. A cross-encoder
+    judges *(query, passage)* jointly — the precision complement to the bi-encoder
+    fusion (which scores the two independently, then compares).
+
+    ``reranker is None`` → delegates straight to :func:`matter_hybrid_search` at
+    ``top_k`` (**byte-identical** to the no-rerank path, so the frozen E0/Slice-A
+    baselines hold), and ``rerank_candidates`` is ignored. With a reranker,
+    ``rerank_candidates`` should exceed ``top_k`` to widen the pool the cross-encoder
+    reorders; the pool size is ``max(rerank_candidates, top_k)``, so a value ≤ ``top_k``
+    degrades gracefully to reranking the top-``top_k`` (no widening, never an error). A
+    reranker error (or a score-count mismatch) degrades to the hybrid order — retrieval
+    never hard-fails on the reranker (mirrors the embedder fallback in
+    ``tools.py:_embed_query``). Production ``search_documents`` AND the Track-B eval both
+    route through here, so "agent mode == retriever" (Slice A).
+    """
+    if reranker is None:
+        return await matter_hybrid_search(
+            db,
+            project_id=project_id,
+            user_id=user_id,
+            query=query,
+            query_embedding=query_embedding,
+            top_k=top_k,
+            alpha=alpha,
+            document_id=document_id,
+        )
+
+    candidates = await matter_hybrid_search(
+        db,
+        project_id=project_id,
+        user_id=user_id,
+        query=query,
+        query_embedding=query_embedding,
+        top_k=max(rerank_candidates, top_k),
+        alpha=alpha,
+        document_id=document_id,
+    )
+    if len(candidates) <= 1:
+        return candidates[:top_k]
+
+    try:
+        scores = await reranker.score(query, [c.content for c in candidates])
+    except Exception as exc:  # degrade, never hard-fail on the reranker (embedder posture)
+        log.warning(
+            "matter rerank failed; hybrid-order fallback",
+            extra={"event": "matter_rerank_failed", "error": str(exc)},
+        )
+        return candidates[:top_k]
+
+    if len(scores) != len(candidates):
+        log.warning(
+            "matter rerank score count mismatch; hybrid-order fallback",
+            extra={
+                "event": "matter_rerank_score_mismatch",
+                "scores": len(scores),
+                "candidates": len(candidates),
+            },
+        )
+        return candidates[:top_k]
+
+    ranked = sorted(
+        zip(candidates, scores, strict=True),
+        key=lambda cs: (-cs[1], cs[0].file_name, cs[0].char_offset_start),
+    )[:top_k]
+    # The hit's ``score`` becomes the cross-encoder relevance score (an ordering
+    # only, not calibrated across queries — same contract as the fused/FTS score).
+    return [replace(hit, score=score) for hit, score in ranked]
 
 
 def _hit_from_full_row(row: Any) -> MatterSearchHit:

@@ -19,7 +19,7 @@ from collections.abc import Sequence
 
 import pytest
 
-from app.knowledge import embedding_provider as ep
+from app.knowledge import embedding_provider as ep, rerank_provider as rp
 
 
 class _FakeEmbeddingProvider:
@@ -46,3 +46,26 @@ def _hermetic_embedding_provider() -> object:
         yield
     finally:
         ep.set_embedding_provider(None)
+
+
+class _IdentityRerankProvider:
+    """Model-free reranker that PRESERVES the input (hybrid) order — descending scores
+    aligned with input. Insurance so a test that flips ``rerank_enabled`` without
+    injecting its own fake never loads the real cross-encoder (rerank is OFF by
+    default, so production tests don't reach the global). Tests that assert reordering
+    pass an explicit ``KeywordRerankProvider`` (``tests.agents.embedding_fakes``)."""
+
+    name = "fake:identity-rerank"
+
+    async def score(self, query: str, passages: Sequence[str]) -> list[float]:
+        return [float(len(passages) - i) for i in range(len(passages))]
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_rerank_provider() -> object:
+    """Default every agents test to the identity reranker; reset after (Slice D)."""
+    rp.set_rerank_provider(_IdentityRerankProvider())
+    try:
+        yield
+    finally:
+        rp.set_rerank_provider(None)

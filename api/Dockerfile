@@ -24,6 +24,12 @@ RUN pip install --no-cache-dir --no-deps "adeu==1.12.1"
 ENV EMBEDDING_CACHE_DIR=/opt/fastembed-cache
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-base-en-v1.5', cache_dir='/opt/fastembed-cache')"
 
+# F2 Slice D (ADR-F049): bundle the cross-encoder reranker's ONNX model at BUILD too
+# (same boot-latency/outage rationale; reuses fastembed — no new dependency). The
+# runtime provider reads RERANK_CACHE_DIR (app.config.Settings.rerank_cache_dir).
+ENV RERANK_CACHE_DIR=/opt/fastembed-cache
+RUN python -c "from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder('Xenova/ms-marco-MiniLM-L-6-v2', cache_dir='/opt/fastembed-cache')"
+
 # Copy application code, migration files, and the entrypoint script
 COPY app/ ./app/
 COPY alembic.ini ./alembic.ini

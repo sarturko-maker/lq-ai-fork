@@ -212,6 +212,9 @@ dependencies = [
     # (config `embedding_provider=gateway`) so the single-egress posture is a
     # one-env-var switch. Default model BAAI/bge-base-en-v1.5 (768-dim, MIT) —
     # ~210 MB, vendored at build (see api/Dockerfile). Pinned tight (pre-1.0).
+    # F2 Slice D (ADR-F049) REUSES this dep for the cross-encoder reranker
+    # (fastembed.rerank.cross_encoder.TextCrossEncoder, Xenova/ms-marco-MiniLM-L-6-v2,
+    # ~5 MB, vendored at build) — NO new SBOM family (same onnxruntime/tokenizers).
     "fastembed>=0.8,<0.9",
 ]
 

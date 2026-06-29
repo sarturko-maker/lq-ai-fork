@@ -52,7 +52,8 @@ from app.agents.tools import MatterBinding
 
 if TYPE_CHECKING:
     from app.knowledge.embedding_provider import EmbeddingProvider
-from app.knowledge.retrieval import matter_hybrid_search
+    from app.knowledge.rerank_provider import RerankProvider
+from app.knowledge.retrieval import matter_search_reranked
 from app.models.document import Document
 from app.models.file import File
 from app.pipeline.chunker import (
@@ -276,18 +277,25 @@ async def fts_retrieve(
     document_id: uuid.UUID | None = None,
     query_embedding: list[float] | None = None,
     alpha: float = 1.0,
+    reranker: RerankProvider | None = None,
+    rerank_candidates: int = 30,
 ) -> list[RetrievedChunk]:
     """Run the production matter retriever; top-``k`` chunks.
 
-    Routes through :func:`app.knowledge.retrieval.matter_hybrid_search` — the exact
+    Routes through :func:`app.knowledge.retrieval.matter_search_reranked` — the exact
     path the agent's ``search_documents`` tool runs — so the eval scores what the
-    agent actually retrieves. Default (``query_embedding=None``, ``alpha=1.0``) is
-    the FTS-only floor (the E0 baseline). Slice C1 passes a real ``query_embedding``
-    + a tuned ``alpha`` (<1) to measure the hybrid delta against that floor.
-    ``document_id`` scopes to one document (within-doc arm); ``None`` searches the
-    whole matter (cross-doc arm).
+    agent actually retrieves (``reranker=None`` ⇒ the plain hybrid path, byte-identical
+    to ``matter_hybrid_search``). Default (``query_embedding=None``, ``alpha=1.0``,
+    ``reranker=None``) is the FTS-only floor (the E0 baseline). Slice C1 passes a real
+    ``query_embedding`` + a tuned ``alpha`` (<1) for the hybrid delta; Slice D passes a
+    ``reranker`` for the rerank delta on top. ``document_id`` scopes to one document
+    (within-doc arm); ``None`` searches the whole matter.
+
+    ``rerank_candidates`` is IGNORED when ``reranker is None`` (the wrapper delegates
+    straight to ``matter_hybrid_search`` at top-``k``); it only matters with a reranker,
+    where it must exceed ``k`` to widen the candidate pool (default 30 > the eval's k's).
     """
-    hits = await matter_hybrid_search(
+    hits = await matter_search_reranked(
         db,
         project_id=binding.project_id,
         user_id=binding.user_id,
@@ -296,6 +304,8 @@ async def fts_retrieve(
         top_k=k,
         alpha=alpha,
         document_id=document_id,
+        reranker=reranker,
+        rerank_candidates=rerank_candidates,
     )
     return [
         RetrievedChunk(
@@ -396,13 +406,17 @@ async def run_cuad_retrieval_baseline(
     gold_span_drift: int = 0,
     query_embedder: EmbeddingProvider | None = None,
     alpha: float = 0.5,
+    reranker: RerankProvider | None = None,
+    rerank_candidates: int = 30,
 ) -> dict[str, Any]:
     """Seed the contracts into one matter, run retrieval, score, clean up.
 
     Default (``query_embedder=None``) is the FTS-only floor (the E0 baseline). Pass
     a ``query_embedder`` to run the **hybrid** arm (Slice C1): the seeded chunks are
     backfilled into ``embedding_local`` and each query is embedded + fused at
-    ``alpha`` — so the result is directly comparable to the frozen FTS baseline.
+    ``alpha`` — so the result is directly comparable to the frozen FTS baseline. Pass
+    a ``reranker`` (Slice D) to reorder the wider hybrid candidate set with a
+    cross-encoder before truncation — the rerank delta on top of hybrid.
 
     Returns a JSON-serialisable results dict (observations only: counts +
     scores + public CUAD category/contract ids — no clause text, no secrets).
@@ -488,6 +502,8 @@ async def run_cuad_retrieval_baseline(
                         document_id=doc_id,
                         query_embedding=q_emb,
                         alpha=alpha,
+                        reranker=reranker,
+                        rerank_candidates=rerank_candidates,
                     )
                     cross = (
                         await fts_retrieve(
@@ -497,6 +513,8 @@ async def run_cuad_retrieval_baseline(
                             k=max_k,
                             query_embedding=q_emb,
                             alpha=alpha,
+                            reranker=reranker,
+                            rerank_candidates=rerank_candidates,
                         )
                         if run_cross_doc
                         else []
@@ -561,13 +579,22 @@ async def run_cuad_retrieval_baseline(
             "overlap_chars": overlap_chars,
             "query": "clause category name",
             "retriever": (
-                f"matter hybrid (FTS websearch_to_tsquery + pgvector cosine, "
-                f"alpha={alpha}, embedder={query_embedder.name})"
-                if hybrid
-                else "matter FTS (websearch_to_tsquery 'english' + ts_rank_cd), embeddings NULL"
+                (
+                    f"matter hybrid (FTS websearch_to_tsquery + pgvector cosine, "
+                    f"alpha={alpha}, embedder={query_embedder.name})"
+                    if hybrid
+                    else "matter FTS (websearch_to_tsquery 'english' + ts_rank_cd), embeddings NULL"
+                )
+                + (
+                    f" + cross-encoder rerank ({reranker.name}, candidates={rerank_candidates})"
+                    if reranker is not None
+                    else ""
+                )
             ),
             "alpha": alpha if hybrid else None,
             "embedder": query_embedder.name if hybrid else None,
+            "reranker": reranker.name if reranker is not None else None,
+            "rerank_candidates": rerank_candidates if reranker is not None else None,
         },
         "within_doc": _arm_block("within_doc"),
         "cross_doc": _arm_block("cross_doc") if run_cross_doc else None,

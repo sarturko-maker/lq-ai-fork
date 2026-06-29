@@ -3,10 +3,49 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-29): RETRIEVAL & MEMORY Phase-2 SLICE C2 — langgraph Store `IndexConfig` for
-> conversation/memory SEMANTIC recall — on branch `fork/f2-slice-c2-store-index` (ADR-F049 Slice C2
-> addendum). NO migration, NO dep, NO gateway change. Reuses the Slice-C1 provider. NEXT = Slice D (local
-> cross-encoder rerank) / PageIndex — Phase-3, gated on measured need; own slice + go-ahead.**
+> ▶▶ **PICKUP (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE D — local cross-encoder rerank —
+> on branch `fork/f2-slice-d-rerank` (ADR-F049 Slice D addendum), DEFAULT ON. NO migration, NO dep, NO
+> gateway change. Reuses fastembed. NEXT = Phase-3 remainder (Strategy+R4 / recency / Documents-MAP /
+> PageIndex Slice P) — all gated on measured need; own slice + maintainer go-ahead.**
+> - **What it does:** C1 lit up recall (hybrid fusion); the bi-encoder embeds query/passage independently so
+>   the top-k order is imprecise. Slice D adds a cross-encoder reranker that scores (query, passage) JOINTLY
+>   and reorders a WIDER candidate set down to top-k — the textbook retrieve-wide-then-rerank precision stage.
+> - **The wiring (a thin wrapper; the retriever is UNTOUCHED):** `app/knowledge/retrieval.py:matter_search_reranked`
+>   fetches `rerank_candidates` (30) via the unchanged `matter_hybrid_search`, scores each `content`, stable-sorts
+>   by cross-encoder score (tiebreak file_name, char_offset_start), truncates to top-k. `reranker=None` ⇒
+>   delegates straight to `matter_hybrid_search` at top_k = BYTE-IDENTICAL (frozen E0/Slice-A baselines +
+>   `_REFERENCE_FTS` drift guard hold). Error / score-count mismatch ⇒ hybrid-order fallback (never hard-fails,
+>   mirrors the embedder). `tools.py:_search` routes through it gated on `rerank_enabled`; production
+>   `search_documents` + Track-B eval both go through it (Slice A "agent mode == retriever").
+> - **Provider (mirrors C1):** `app/knowledge/rerank_provider.py` — `RerankProvider` Protocol +
+>   `LocalRerankProvider` (lazy fastembed `TextCrossEncoder`, `asyncio.to_thread`) + `build_/get_/set_rerank_provider`.
+>   Door A only (no gateway `/rerank` endpoint; seam left for Door B). Default model
+>   `Xenova/ms-marco-MiniLM-L-6-v2` (~5 MB, bundled at build in both Dockerfiles via `RERANK_CACHE_DIR`). Config:
+>   `rerank_enabled` (DEFAULT TRUE), `rerank_model`, `rerank_cache_dir`, `rerank_candidates`.
+> - **THE GATE — met, default ON (ADR-F015 finding, N=30, `docs/fork/evidence/retrieval-eval-slice-d/`):**
+>   real MiniLM-L-6 over the production path vs the frozen FTS floor — ZERO recall harm; within-doc p@1 +15.5%,
+>   MAP +11% (precision@5 *flat* = single-clause-gold artifact: 1 gold chunk caps p@5 at 0.2, so rank-3→1 moves
+>   p@1/MAP not p@5); cross-doc precision@5 +20%, recall@5 +36%, hit@8 +32%, MAP +21%. Maintainer ruling:
+>   **default ON** (SOTA precision fix + measured lower-bound lift, zero harm, ~1 GB memory peak in real runs,
+>   minor latency). Deterministic CI (hermetic fake reranker): `test_rerank_provider`, `test_matter_search_reranked`
+>   (passthrough byte-identical / wide-fetch promotion / ≤1 no-op / error+mismatch fallback / scope isolation),
+>   rerank arm in `test_cuad_retrieval_smoke`, tool rerank-path+fallback in `test_agent_tools`. **Full
+>   `tests/agents/` 671 passed / 38 skipped / 0 failed** (with default ON); ruff + mypy (208) clean.
+> - **TRAPS (carry forward):** (1) **dev box (6.3 GB) OOMs loading the bge embedder + cross-encoder while
+>   batch-evaluating** (876-chunk backfill + ~23k inferences grow the ONNX arena) → hybrid+rerank AT SCALE is a
+>   DEFERRED finding for a ≥16 GB box; the measured FTS+rerank arm is a conservative lower bound. Run any
+>   two-model eval ALONE; a REAL agent run holding both models peaks ~1 GB (safe — the OOM is eval-batch-only).
+>   (2) keep `matter_hybrid_search` wrapper-only (byte-identical guard); (3) `rerank_enabled=True` default →
+>   the autouse `_hermetic_rerank_provider` (conftest, identity fake) keeps the suite model-free; the matter
+>   rerank path is tests/agents-only so non-agents/CI never load the model; (4) `OMP_NUM_THREADS` + run evals
+>   alone; chown root-written evidence; the nested `-v docs:/app/docs` mount lands evidence in repo-root docs.
+> - **NEXT (deferred, own slice + go-ahead):** batch-measure hybrid+rerank + `bge-reranker-base` vs MiniLM on a
+>   bigger box; tune `rerank_candidates`/model. Then the rest of Phase-3 (Strategy+R4, recency, Documents-MAP,
+>   PageIndex Slice P) — each gated on measured need.
+>
+> ▶ **PREVIOUS (2026-06-29): RETRIEVAL & MEMORY Phase-2 SLICE C2 — langgraph Store `IndexConfig` for
+> conversation/memory SEMANTIC recall — MERGED PR #169 (`fdc096a8`) (ADR-F049 Slice C2
+> addendum). NO migration, NO dep, NO gateway change. Reuses the Slice-C1 provider.**
 > - **What it does:** N0 built the `AsyncPostgresStore` filter-only, so `store.asearch(query=…)` was a no-op
 >   and N3's `search_matter_conversations` scanned transcripts lexically. C2 wires the C1 `EmbeddingProvider`
 >   as the Store's `IndexConfig.embed` so `asearch(query=)` ranks by cosine → cross-thread PARAPHRASE recall a

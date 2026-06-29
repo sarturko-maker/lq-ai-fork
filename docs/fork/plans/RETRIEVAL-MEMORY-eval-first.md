@@ -170,7 +170,16 @@ agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be 
 ## Phase 3 — later / only if measured
 
 - **Slice D — local cross-encoder rerank** over the fused set (documents). *Gate: Track-B B3 — ship
-  only if precision@5 lifts ≥ Y pp without hurting recall@5.*
+  only if precision@5 lifts ≥ Y pp without hurting recall@5.* ✅ **SHIPPED 2026-06-30 (ADR-F049 Slice D
+  addendum, default ON).** A local fastembed `TextCrossEncoder` (Door A, `Xenova/ms-marco-MiniLM-L-6-v2`)
+  reorders the wider candidate set via `matter_search_reranked` (the retriever is untouched → frozen
+  baselines hold); no migration/dep/gateway change. Gate (ADR-F015 finding, N=30, evidence
+  `evidence/retrieval-eval-slice-d/`): the dev box OOMs loading the embedder + cross-encoder together, so
+  **hybrid+rerank at scale is deferred to a bigger box** (C1 full-150 precedent); the measured
+  **FTS+rerank** lower bound lifts within-doc p@1 +15.5% / MAP +11% and cross-doc precision@5 +20% /
+  recall@5 +36% / hit@8 +32%, **zero recall harm** (precision@5-within-doc *flat* — a single-clause-gold
+  metric artifact). ~1 GB memory peak in real runs (safe). **NEXT (deferred):** batch-measure
+  hybrid+rerank + `bge-reranker-base` on a ≥16 GB box.
 - **Strategy + safety — fan-out quota + wire R4 into a real per-run token budget.** R4 is a no-op today
   (`guard.py`); safe model-driven fan-out needs a token-budget brake + a fan-out quota + a pre-flight
   `estimate_read_cost` helper (over `character_count`) + budget visibility. *Likely its own ADR. Gate:
