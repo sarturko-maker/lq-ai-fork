@@ -1,6 +1,8 @@
 # F049 — Native memory substrate (langgraph Store + deepagents CompositeBackend) + custom retrieval layer, eval-gated
 
-- Status: accepted (with F2 slice **N0**, 2026-06-28 — the native Store + CompositeBackend substrate)
+- Status: accepted (with F2 slice **N0**, 2026-06-28 — the native Store + CompositeBackend substrate);
+  addenda: **N1** (2026-06-28, read-only tier middleware), **N2** (2026-06-29, conversation offload — see
+  the addendum at the end)
 - Date: 2026-06-27
 - Deciders: maintainer (Arturs), agent
 - Milestone: **F2 — Memory: 4 levels + conversation memory** (ADR-F003). This ADR is the
@@ -171,3 +173,31 @@ ADR places them inside the native picture.
   boundary (deepagents minor churn); CUAD is commercial-contract-skewed (weaker proxy for Privacy/
   Disputes — area quality stays a Track-A judged concern); the custom eval scorer is designed, not
   yet written; all thresholds are post-baseline placeholders.
+
+## Addendum — N2 (2026-06-29): conversation-history offload was already wired by N0
+
+The planned N2 ("`SummarizationMiddleware` with a `StoreBackend` offload route") was found, on
+exploration, to be **already structurally wired by N0** — recorded here so it is not relitigated.
+`create_deep_agent` *always* installs a default `SummarizationMiddleware(model, backend)` (deepagents
+`graph.py`); N0 passes it our per-run `CompositeBackend`, whose `/conversation_history/` route maps the
+middleware's offload path `/conversation_history/{thread_id}.md` (computed from the composite's
+`artifacts_root='/'`) verbatim into the Store under namespace `("conversation", thread_id)`. So evicted
+history persists and is recalled via the path the summary message embeds (builtin `read_file`) — **with no
+production code**. N2 therefore shipped as **verify + test + eval**: a deterministic offload drift-guard
+(`tests/agents/test_summarization_offload.py`) + the A6 within-chat-recall Track-A scenario (a finding per
+ADR-F015, not a gate). Compaction fires at ~0.85·`max_input_tokens` (200k in production), so it is exercised
+only by lowering the window in the eval harness — a test seam, never a production knob.
+
+**Maintainer rulings (2026-06-29):** (a) plain-chat transcripts persist too (the conversation route installs
+whenever a `thread_id` is bound — always; thread-scoped, no cross-user reach — KEPT, not matter-gated);
+(b) the A6 gate exercises the full offload → `read_file` recall path (an injected `InMemoryStore`).
+
+**Known degraded-mode limitation (accepted, not fixed):** the offload *file name* derives from
+`configurable.thread_id`, which the runner sets only when a checkpointer is present (`runner.py`), while the
+Store *namespace* derives from `rt.context.thread_id` (always `str(run.thread_id)`). If the Store is live but
+the checkpointer is `None` *and* a single bounded run crosses the ~170k-token trigger, the offload mis-keys
+under a generated `session_<hex>` file name (right namespace, wrong key). It is doubly moot — degraded-
+checkpointer runs already refuse follow-ups (so cross-run recall is moot) and within-run recall still works
+(the same `session_<hex>` is used for the write and the embedded recall path) — so it is documented here
+rather than guarded. The Store-vs-SQL convergence and shared Practice Knowledge tier remain the future prize
+(ADR-F050).

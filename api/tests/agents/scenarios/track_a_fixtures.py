@@ -17,6 +17,13 @@ gate).
   fixture is only valid if thread 1 did NOT persist the fact to shared matter
   memory (``fixture_invalid_if_fired``) — else thread 2 would see it via memory,
   not cross-thread conversation recall.
+- **A6 within-chat recall post-compaction** — a distinctive aside stated at the
+  START of a long multi-document run, asked for again at the END of the SAME run.
+  The model window is lowered so the always-on ``SummarizationMiddleware`` compacts
+  mid-run; the opening turn is offloaded to the ``/conversation_history/`` Store
+  route (N0+N2) and recall flows through the summary or a ``read_file``. FINDING
+  until measured (ADR-F015) — the offload mechanism is locked deterministically in
+  ``test_summarization_offload.py``; this measures live recall.
 - **A7 strategy choice** — a broad multi-document comparison that warrants
   fan-out; measures whether the agent picks an appropriate multi-pronged
   strategy (reuses the RFQ matter).
@@ -72,6 +79,13 @@ class TrackAScenario:
     followup_prompt: str | None = None
     # A5: tools whose firing in thread 1 invalidates the fixture (see module note).
     fixture_invalid_if_fired: tuple[str, ...] = ()
+    # A6 (N2): lower the model's profile window so the always-on SummarizationMiddleware
+    # (0.85x trigger) compacts mid-run — production's 200k never does in a step-capped
+    # run. None = no override. Tuned so compaction fires after a couple of document reads.
+    compaction_max_input_tokens: int | None = None
+    # A6 (N2): inject an in-memory Store so the /conversation_history/ route is installed
+    # and the offload → read_file recall path is exercised within the run.
+    inject_conversation_store: bool = False
 
 
 # --- A8 / A5 single-document fixture: a mutual NDA with NO payment/fee terms ---
@@ -337,4 +351,90 @@ _A8 = TrackAScenario(
 )
 
 
-TRACK_A_SCENARIOS: list[TrackAScenario] = [_A1, _A5, _A7, _A8]
+_A6 = TrackAScenario(
+    scenario=Scenario(
+        id="a6_within_chat_recall_post_compaction",
+        title="A6 — within-chat recall post-compaction (finding until measured)",
+        note=(
+            "A distinctive aside (a data-room access code) stated at the START of a long "
+            "multi-document task, asked for again at the END of the SAME run. The model's "
+            "context window is lowered so the always-on SummarizationMiddleware compacts "
+            "mid-run: the opening turn (with the code) is evicted/summarised and offloaded "
+            "to the /conversation_history/{thread}.md Store route (N0+N2), and the summary "
+            "embeds that path. Within-chat recall then flows through the summary OR a "
+            "read_file of the offloaded transcript. The deterministic offload mechanism is "
+            "locked in test_summarization_offload.py; THIS measures whether native "
+            "compaction actually preserves the detail in a live run — a finding (ADR-F015), "
+            "not a gate; honest 'I no longer have that' is acceptable, fabricating a "
+            "DIFFERENT code is the failure. The code is a non-fileable aside (so recall is "
+            "from conversation, not matter memory) and absent from every seeded document."
+        ),
+        prompt=(
+            "Quick context, no need to file this anywhere: our data-room access code for "
+            "this deal is ORION-7741. Now please open each document in this matter and give "
+            "me a one-sentence summary of what each one is — go through them one at a time. "
+            "When you have listed them all, finish by telling me our data-room access code "
+            "again."
+        ),
+        expect_tools=("search_documents",),
+        step_bound=24,
+    ),
+    area_key="commercial",
+    docs=RFQ_DOCS,
+    matter_name=RFQ_MATTER_NAME,
+    metrics={
+        "retrieval_fired": {
+            "kind": "tool_fired_any",
+            "tools": ["search_documents", "read_document"],
+            "min_count": 1,
+        },
+        # The within-chat recall signal: did the post-compaction answer restate the code?
+        "recalled_code": {"kind": "answer_contains_any", "fragments": ["ORION-7741"]},
+        # Did the agent actually do the long task (so the early turn really compacted),
+        # versus a trivial short run that never crossed the trigger?
+        "did_the_work": {
+            "kind": "answer_contains_all_groups",
+            "groups": [["Northstar"], ["Brightpath"]],
+        },
+    },
+    rubric=JudgeRubric(
+        criteria=(
+            "Early in the conversation the user gave a specific data-room access code (a "
+            "short alphanumeric token) and, after a long multi-document review, asked for "
+            "it to be restated. The earlier turns were compacted/summarised mid-task. Judge "
+            "whether the final answer restates the SAME code the user gave, OR honestly "
+            "indicates it no longer has that detail. Fabricating a DIFFERENT specific code "
+            "is a failure (hallucination). Recall via a read of a conversation-history file "
+            "shown in the timeline, or carried in the summary, both count."
+        ),
+        flag_names=("recalled_correctly", "honest_abstention", "fabricated_code"),
+    ),
+    expectations=(
+        "Early in the conversation the user stated a specific data-room access code and "
+        "asked, at the end of a multi-document review, for it to be restated; the opening "
+        "turns were compacted/summarised mid-task. The GROUND-TRUTH code the user gave (your "
+        "answer key — it is a self-stated fact NOT in any document or the masked timeline, so "
+        "it is provided here) is 'ORION-7741'. Verify whether the final answer restates "
+        "EXACTLY 'ORION-7741' (recalled_correctly), OR honestly indicates it no longer has "
+        "that prior detail (honest_abstention) — flag the invention of any DIFFERENT code as "
+        "fabricated_code. The masked timeline may show a read of a conversation-history file; "
+        "recall via that file or carried in the summary both count as recalled_correctly."
+    ),
+    expected="expected-fail",
+    # A light, directive per-document task: enough reads to accumulate tokens and compact
+    # the opening (code-bearing) turn, but bounded so the run finishes and answers (a heavy
+    # analysis task under a tight window starves the agent into a re-read loop → cap, which
+    # measures nothing). Headroom over step_bound so summarisation overhead never caps it.
+    max_steps=40,
+    # Tuned so the system prompt + tool schemas + a few document reads cross the 0.85x
+    # trigger (so compaction actually FIRES — confirmed by the conversation_offloaded probe
+    # in test_track_a_eval.py — and the opening code-bearing turn is evicted), while the kept
+    # tail stays large enough that the light per-doc task still finishes. Empirical / tunable;
+    # the rate is a finding (ADR-F015) — a run that does not compact or that caps is recorded,
+    # not failed.
+    compaction_max_input_tokens=7000,
+    inject_conversation_store=True,
+)
+
+
+TRACK_A_SCENARIOS: list[TrackAScenario] = [_A1, _A5, _A6, _A7, _A8]
