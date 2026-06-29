@@ -3,11 +3,57 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-29): RETRIEVAL & MEMORY N3 — cross-thread conversation recall
-> (`search_matter_conversations`) — SHIPPED on branch `fork/n3-search-matter-conversations` (ADR-F049 N3
-> addendum). NO migration, NO new dependency, NO gateway change. The N-LADDER (N0→N3) IS COMPLETE.
-> NEXT = Phase-2 "cost play" (Slice C local embedder + Slice A doc-tool hybrid_search) — do NOT start
-> without the maintainer's go-ahead.**
+> ▶▶ **PICKUP (2026-06-29): RETRIEVAL & MEMORY Phase-2 "cost play" SLICE A — matter document tool wired to
+> ONE hybrid retriever — SHIPPED on branch `fork/f2-slice-a-matter-hybrid-search` (ADR-F049 Slice A
+> addendum). NO migration, NO new dependency, NO gateway change. NEXT = Slice C (local embedder) — maintainer
+> ruling: keep BOTH Door A (in-process) + Door B (gateway-side) available, a configurable/injected provider,
+> NOT a one-way destructive dim ALTER; needs its own plan + go-ahead.**
+> - **What it does:** collapses THREE copies of the matter FTS query into one retriever
+>   `app/knowledge/retrieval.py:matter_hybrid_search`. The production `search_documents` tool AND the Track-B
+>   eval `fts_retrieve` both route through it → *"agent mode matches retriever-only"* is structural. With no
+>   embedder wired (`query_embedding=None`) it takes the **FTS-only fast path** = byte-identical to the frozen
+>   E0 baseline; the **fusion branch** (FTS + pgvector candidates, min-max fused, hydrated) is present +
+>   unit-tested with synthetic 1536-dim vectors but **DORMANT** until Slice C passes a real embedding + alpha.
+> - **What shipped:** `app/knowledge/retrieval.py` (NEW `matter_hybrid_search` + `MatterSearchHit` +
+>   `_MATTER_FROM_WHERE` single-source scope + 3 matter SQL templates; reuses the KB `_min_max_normalize`/
+>   `_hydrate_chunks`/`_format_vector` — KB `hybrid_search` UNTOUCHED); `app/agents/tools.py` (`_search`
+>   routes through it; `_FTS_SQL` DELETED; unused `text` import dropped);
+>   `tests/agents/scenarios/cuad_eval.py` (`fts_retrieve` routes through it; `_EVAL_FTS_TEMPLATE` DELETED);
+>   `test_cuad_retrieval_smoke.py` (drift guard repurposed to a frozen `_REFERENCE_FTS` oracle);
+>   `test_matter_hybrid_search.py` (NEW — fusion branch, scope isolation, document_id filter).
+> - **Load-bearing scope divergence (do NOT converge onto the KB scope):** matter scope = `project_files` ∪
+>   `files.project_id`, owner re-asserted, `deleted_at IS NULL`, **NO `ingestion_status='ready'` filter** (a
+>   matter chunk is searchable as soon as it exists; the KB path filters, the matter path never did), and
+>   **`websearch_to_tsquery`** not the KB side's `plainto_tsquery`. `_MATTER_FROM_WHERE` is the single source
+>   of that security boundary (test_agent_tools already guards the no-ingestion-filter behaviour — the
+>   searched file is seeded `ingestion_status='processing'` yet must return).
+> - **THE GATE — met:** full api suite **2906 passed / 9 failed / 3 skipped** locally — ALL 9 failures are
+>   NON-Slice-A and pass/skip in CI: 7 are `pytest.mark.provider`+`skipif(no LQ_AI_GATEWAY_KEY)` live/eval
+>   scenario tests (they SKIP in CI; ran locally only because `--env-file ./.env` carries the key, then
+>   failed against the local gateway), and 2 `test_ropa_tools` tests that PASS **61/61 in isolation** but were
+>   contaminated in the full run by `test_default_area_scenarios.py` (a provider-marked live fixture seeding
+>   "Customer Analytics" that ALSO skips in CI). CI (no key) is the authoritative gate — green like N3's
+>   2877. (Pre-existing local-run-only isolation flake; out of Slice A scope, NOT introduced here.) ruff
+>   (root, CI cmd `ruff … api scripts`) +
+>   mypy `app` (206 files) clean; targeted **25/25** (`test_matter_hybrid_search` 3 + `test_cuad_retrieval_smoke`
+>   2 + `test_agent_tools` 20 — the tool contract unchanged through the new path). **Track-B re-freeze
+>   (ADR-F015 finding, `docs/fork/evidence/retrieval-eval-slice-a/LIVE-VERIFICATION.md`):** the full
+>   150-contract CUAD baseline re-run THROUGH THE NEW PATH is **BYTE-IDENTICAL to the frozen E0 baseline** —
+>   every metric to full float precision (within-doc hit@8 0.39107 / MAP 0.29645 / recall@5 0.34427; cross-doc
+>   hit@8 0.04415 / MAP 0.01834), and the entire within/cross/absent/per-category blocks compare equal. Slice A
+>   changes the call path, not the numbers (the run's duplicate baseline.json/md were not committed).
+> - **Gotchas (carry forward):** keep the FTS-only fast path byte-identical (the frozen `_REFERENCE_FTS` +
+>   the CUAD re-freeze are the guards — don't "optimise" the fast path through the fusion/hydrate flow, which
+>   loses the `filename ASC, chunk_index ASC` tiebreak); `matter_hybrid_search` takes raw
+>   `project_id`/`user_id` (NOT a `MatterBinding`) to avoid a `retrieval.py → app.agents` import cycle; the
+>   CUAD corpus IS present at `api/tests/fixtures/cuad/CUADv1.json` (39 MB, gitignored) — set `LQ_AI_CUAD_DIR`
+>   + a SEPARATE `LQ_AI_RETRIEVAL_EVIDENCE_DIR` so the re-freeze never clobbers the frozen E0 baseline; run
+>   pytest/ruff in `lq-ai-api-dev` (api→`/app`, `skills→/skills:ro` NOT `/app/skills`, `--network
+>   lq-ai_default`, `DATABASE_URL`→postgres via `--env-file ./.env`).
+>
+> ▶ **PREVIOUS (2026-06-29): RETRIEVAL & MEMORY N3 — cross-thread conversation recall
+> (`search_matter_conversations`) — SHIPPED (MERGED PR #166, squash `32cbdd34`); ADR-F049 N3 addendum. NO
+> migration/dep/gateway change. The N-LADDER N0→N3 IS COMPLETE.**
 > - **What it does:** a thin, area-agnostic, matter-scoped READ tool granted to every matter-bound run
 >   whose Store is live. N2 made each thread's transcript persist to the Store (`("conversation",
 >   str(thread_id))`); N3 adds the agent's READER so a run in thread 2 can recall what was said in thread 1

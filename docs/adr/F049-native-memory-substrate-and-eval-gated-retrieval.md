@@ -2,7 +2,8 @@
 
 - Status: accepted (with F2 slice **N0**, 2026-06-28 — the native Store + CompositeBackend substrate);
   addenda: **N1** (2026-06-28, read-only tier middleware), **N2** (2026-06-29, conversation offload),
-  **N3** (2026-06-29, cross-thread conversation-recall tool — see the addenda at the end)
+  **N3** (2026-06-29, cross-thread conversation-recall tool), **Slice A** (2026-06-29, matter document
+  tool wired to one hybrid retriever — see the addenda at the end)
 - Date: 2026-06-27
 - Deciders: maintainer (Arturs), agent
 - Milestone: **F2 — Memory: 4 levels + conversation memory** (ADR-F003). This ADR is the
@@ -243,3 +244,35 @@ Store is live (a degraded Store has no transcripts to search); the doctrine is i
 matter-bound runs, so in that rare edge the agent gets a graceful R6 "not granted" if it tries — never a
 crash. *Gate (ADR-F015 finding, not a frozen bar):* A5 cross-thread recall via the tool + a cross-matter /
 cross-owner / foreign-thread_id isolation check (deterministic in `test_matter_conversation_tools.py`).
+
+## Addendum — Slice A (2026-06-29): the matter document tool wired to one hybrid retriever
+
+The first **Phase-2 ("cost play")** slice. The agent's matter document tool (`search_documents`) ran a
+pure-FTS query (`tools.py:_FTS_SQL`); a production hybrid retriever (`knowledge/retrieval.py:hybrid_search`,
+FTS + pgvector, ADR-0008) existed but was **KB-scoped and unreachable from the matter path**, and the
+Track-B CUAD eval ran a *third* copy of the matter FTS query (`cuad_eval.py:_EVAL_FTS_TEMPLATE`) kept in
+sync by a drift guard. Slice A collapses this to **one matter retriever**:
+`knowledge/retrieval.py:matter_hybrid_search` — same fusion machinery as the KB `hybrid_search`, a matter
+scope (the `project_files` attach-join ∪ the upload-time `files.project_id`, owner re-asserted,
+`deleted_at IS NULL`), and `websearch_to_tsquery` FTS. Both the production tool **and** the eval's
+`fts_retrieve` now route through it, so *"agent mode matches retriever-only"* is **structural**, not a
+hand-kept drift guard.
+
+**Maintainer rulings (2026-06-29):** (a) sequence = **Slice A first, alone** (a zero-behaviour-change
+wiring refactor gated on matching the frozen E0 baseline), with Slice C (the local embedder) as the next
+PR; (b) the Slice C embedder must keep **both** Door A (in-process) **and** Door B (gateway-side) paths
+available — a configurable/injected embedding provider, *not* a one-way destructive commitment (recorded
+here for the Slice C plan; Slice A is deliberately embedder-agnostic).
+
+**No-op by construction.** No embedder is wired yet, so `search_documents` passes `query_embedding=None`
+and `matter_hybrid_search` takes its **FTS-only fast path** — one ordered query
+(`rank DESC, filename ASC, chunk_index ASC`) returned verbatim, **byte-identical** to the pre-Slice-A
+behaviour and the frozen Track-B baseline. The hybrid fusion branch (FTS + pgvector candidates, min-max
+fused, hydrated) is present and unit-tested with synthetic vectors but **dormant** until Slice C passes a
+real query embedding + a tuned `alpha`. The matter scope **deliberately diverges** from the KB scope and
+must not converge: no `ingestion_status='ready'` filter (a matter chunk is searchable as soon as it
+exists), and `websearch_to_tsquery` not `plainto_tsquery`. **No migration, no new dependency, no gateway
+change.** *Gate (ADR-F015 finding):* the full CUAD Track-B baseline re-run through the new path equals the
+frozen E0 numbers (within-doc hit@8 0.391 / cross-doc 0.044); deterministic drift guard
+(`test_cuad_retrieval_smoke`) + fusion/scope/document_id tests (`test_matter_hybrid_search`); the
+`search_documents` tool contract + audit-body-free check (`test_agent_tools`) unchanged.

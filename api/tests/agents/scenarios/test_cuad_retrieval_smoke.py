@@ -1,20 +1,28 @@
-"""CI smoke for the CUAD retrieval-eval rig (ADR-F049, E0).
+"""CI smoke for the CUAD retrieval-eval rig (ADR-F049, E0 / Slice A).
 
 Synthetic 3-contract corpus — no CUAD download, no gateway, $0. Exercises the
-whole Track-B path (build fixture → seed → FTS retrieve → score) end-to-end on a
+whole Track-B path (build fixture → seed → retrieve → score) end-to-end on a
 real Postgres (the GENERATED ``content_tsv`` makes seeded chunks searchable on
-commit, no ingest worker), and **drift-guards** the offset-projecting eval query
-against the production ``app/agents/tools.py:_FTS_SQL``. Runs in CI; the full
-150-contract baseline run is corpus-gated (``test_cuad_retrieval_baseline``).
+commit, no ingest worker), and **locks** the production matter retriever's
+FTS-only ranking against a frozen reference query.
+
+Since Slice A (ADR-F049) the eval and the agent's ``search_documents`` tool BOTH
+route through ``app.knowledge.retrieval.matter_hybrid_search``, so there is no
+longer a parallel eval query to drift. The guard instead pins
+``matter_hybrid_search`` (FTS-only) against ``_REFERENCE_FTS`` below — the exact
+pre-Slice-A matter query — so any change to the matter scope / FTS operator /
+tiebreak fails loudly here. Runs in CI; the full 150-contract baseline run is
+corpus-gated (``test_cuad_retrieval_baseline``).
 """
 
 from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.tools import _FTS_SQL, MatterBinding
+from app.agents.tools import MatterBinding
 from tests.agents.scenarios.cuad_eval import (
     CuadContract,
     CuadQuestion,
@@ -24,6 +32,26 @@ from tests.agents.scenarios.cuad_eval import (
     run_cuad_retrieval_baseline,
 )
 from tests.agents.scenarios.harness import seed_multi_doc_matter
+
+# The frozen oracle: the exact matter FTS query as it stood BEFORE Slice A
+# centralised it into ``matter_hybrid_search`` (websearch_to_tsquery('english'),
+# ts_rank_cd, matter-membership + owner + not-deleted, ORDER BY rank DESC,
+# filename ASC, chunk_index ASC, NO ingestion_status filter). If the production
+# retriever's ranking/scope drifts from this, the drift guard below fails.
+_REFERENCE_FTS = text(
+    "SELECT f.filename, "
+    "ts_rank_cd(dc.content_tsv, websearch_to_tsquery('english', :q)) AS rank "
+    "FROM document_chunks dc "
+    "JOIN documents d ON d.id = dc.document_id "
+    "JOIN files f ON f.id = d.file_id "
+    "LEFT JOIN project_files pf ON pf.file_id = f.id AND pf.project_id = :pid "
+    "WHERE (pf.project_id IS NOT NULL OR f.project_id = :pid) "
+    "AND f.owner_id = :uid "
+    "AND f.deleted_at IS NULL "
+    "AND dc.content_tsv @@ websearch_to_tsquery('english', :q) "
+    "ORDER BY rank DESC, f.filename ASC, dc.chunk_index ASC "
+    "LIMIT :lim"
+)
 
 _ALPHA = (
     "ALPHA DISTRIBUTION AGREEMENT\n\n"
@@ -131,11 +159,13 @@ async def test_cuad_baseline_smoke(commit_factory: async_sessionmaker[AsyncSessi
     }
 
 
-async def test_eval_query_matches_production_fts(
+async def test_matter_retriever_fts_only_matches_frozen_reference(
     commit_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """Drift guard: the offset-projecting eval query must rank/scope identically
-    to the production matter retriever (``_FTS_SQL``)."""
+    """Drift guard: the production matter retriever (``matter_hybrid_search`` in
+    FTS-only mode, the path the agent + the eval both run) must rank/scope
+    identically to the frozen ``_REFERENCE_FTS``. Guards against an accidental
+    change to the matter scope, the FTS operator, or the tiebreak (Slice A)."""
     contracts = _synthetic_contracts()
     fixtures = [cuad_contract_to_fixture(c, index=i) for i, c in enumerate(contracts)]
     seeded = await seed_multi_doc_matter(
@@ -155,9 +185,9 @@ async def test_eval_query_matches_production_fts(
             assert len(await matter_document_ids(db, binding)) == 3
 
             for query in ("Governing Law", "Cap On Liability", "Termination For Convenience"):
-                prod_rows = (
+                ref_rows = (
                     await db.execute(
-                        _FTS_SQL,
+                        _REFERENCE_FTS,
                         {
                             "q": query,
                             "pid": str(binding.project_id),
@@ -166,15 +196,15 @@ async def test_eval_query_matches_production_fts(
                         },
                     )
                 ).all()
-                prod = [(r.filename, round(float(r.rank), 6)) for r in prod_rows]
+                reference = [(r.filename, round(float(r.rank), 6)) for r in ref_rows]
 
-                eval_rows = await fts_retrieve(db, binding, query, k=8)
-                got = [(c.filename, round(c.rank, 6)) for c in eval_rows]
+                got_rows = await fts_retrieve(db, binding, query, k=8)
+                got = [(c.filename, round(c.rank, 6)) for c in got_rows]
 
-                assert got == prod, f"eval query drifted from _FTS_SQL for {query!r}"
-                assert prod, f"expected a production FTS match for {query!r}"
-                # Offsets are recoverable (the whole point of the parallel query).
-                assert all(isinstance(c.document_id, uuid.UUID) for c in eval_rows)
-                assert all(c.char_offset_end > c.char_offset_start for c in eval_rows)
+                assert got == reference, f"matter retriever drifted from reference for {query!r}"
+                assert reference, f"expected a reference FTS match for {query!r}"
+                # Offsets are recoverable (the whole point of the projecting query).
+                assert all(isinstance(c.document_id, uuid.UUID) for c in got_rows)
+                assert all(c.char_offset_end > c.char_offset_start for c in got_rows)
     finally:
         await seeded.cleanup()

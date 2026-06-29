@@ -24,10 +24,15 @@ Why this design (the seam map, ADR-F049):
   and *cross-doc* (retrieval over the whole matter — the at-scale setting that
   motivates F2: can the right clause surface from the right document among many?).
 
-The matter FTS query (``app/agents/tools.py:_FTS_SQL``) projects no character
-offsets, so this module runs a parallel query that mirrors its ranking and
-scoping exactly but also selects ``char_offset_start/_end`` + ``document_id``.
-``test_cuad_retrieval_smoke`` drift-guards the two against each other.
+Retrieval routes through the production matter retriever
+``app.knowledge.retrieval.matter_hybrid_search`` (ADR-F049, Slice A) — the
+*same* function the agent's ``search_documents`` tool runs — in its FTS-only
+mode (``query_embedding=None``). ``MatterSearchHit`` already carries the chunk
+char offsets + ``document_id`` needed to score retrieved spans against CUAD
+gold, so there is no longer a parallel eval query to keep in sync. When Slice C
+wires an embedder, this harness passes a real query embedding to the same call
+to measure the hybrid delta. ``test_cuad_retrieval_smoke`` locks the FTS-only
+ranking against a frozen reference query.
 """
 
 from __future__ import annotations
@@ -40,10 +45,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.tools import MatterBinding
+from app.knowledge.retrieval import matter_hybrid_search
 from app.models.document import Document
 from app.models.file import File
 from app.pipeline.chunker import (
@@ -254,31 +260,8 @@ def cuad_contract_to_fixture(
 
 
 # ---------------------------------------------------------------------------
-# Offset-projecting FTS retriever (mirrors app/agents/tools.py:_FTS_SQL)
+# Offset-projecting retriever (the production matter retriever, in FTS-only mode)
 # ---------------------------------------------------------------------------
-
-# Identical ranking + scoping to the production matter retriever
-# (``tools.py:_FTS_SQL``: websearch_to_tsquery('english'), ts_rank_cd,
-# matter-membership + owner + not-deleted, ORDER BY rank DESC, filename,
-# chunk_index) — but ALSO projects the chunk's char offsets + document_id so
-# retrieved spans can be scored against CUAD gold. ``test_cuad_retrieval_smoke``
-# asserts this returns the same top-k as ``_FTS_SQL`` (drift guard).
-_EVAL_FTS_TEMPLATE = (
-    "SELECT f.filename, dc.document_id, dc.char_offset_start, dc.char_offset_end, "
-    "dc.content, "
-    "ts_rank_cd(dc.content_tsv, websearch_to_tsquery('english', :q)) AS rank "
-    "FROM document_chunks dc "
-    "JOIN documents d ON d.id = dc.document_id "
-    "JOIN files f ON f.id = d.file_id "
-    "LEFT JOIN project_files pf ON pf.file_id = f.id AND pf.project_id = :pid "
-    "WHERE (pf.project_id IS NOT NULL OR f.project_id = :pid) "
-    "AND f.owner_id = :uid "
-    "AND f.deleted_at IS NULL "
-    "AND dc.content_tsv @@ websearch_to_tsquery('english', :q) "
-    "{doc_filter}"
-    "ORDER BY rank DESC, f.filename ASC, dc.chunk_index ASC "
-    "LIMIT :lim"
-)
 
 
 async def fts_retrieve(
@@ -289,33 +272,35 @@ async def fts_retrieve(
     k: int,
     document_id: uuid.UUID | None = None,
 ) -> list[RetrievedChunk]:
-    """Run the offset-projecting matter FTS retriever; top-``k`` chunks.
+    """Run the production matter retriever (FTS-only mode); top-``k`` chunks.
 
-    ``document_id`` scopes retrieval to one document (the within-doc arm); ``None``
-    searches the whole matter (the cross-doc arm).
+    Routes through :func:`app.knowledge.retrieval.matter_hybrid_search` with
+    ``query_embedding=None`` — the exact path the agent's ``search_documents``
+    tool runs today — so the eval scores what the agent actually retrieves.
+    ``document_id`` scopes to one document (the within-doc arm); ``None``
+    searches the whole matter (the cross-doc arm). ``MatterSearchHit.score`` is
+    the raw ``ts_rank_cd`` here (FTS-only). When Slice C lands an embedder, pass
+    its query vector + a tuned ``alpha`` to measure the hybrid delta.
     """
-    doc_filter = "AND dc.document_id = :doc_id " if document_id is not None else ""
-    sql = text(_EVAL_FTS_TEMPLATE.format(doc_filter=doc_filter))
-    params: dict[str, Any] = {
-        "q": query,
-        "pid": str(binding.project_id),
-        "uid": str(binding.user_id),
-        "lim": k,
-    }
-    if document_id is not None:
-        params["doc_id"] = str(document_id)
-    rows = (await db.execute(sql, params)).all()
+    hits = await matter_hybrid_search(
+        db,
+        project_id=binding.project_id,
+        user_id=binding.user_id,
+        query=query,
+        query_embedding=None,
+        top_k=k,
+        alpha=1.0,
+        document_id=document_id,
+    )
     return [
         RetrievedChunk(
-            filename=r.filename,
-            document_id=r.document_id
-            if isinstance(r.document_id, uuid.UUID)
-            else uuid.UUID(str(r.document_id)),
-            char_offset_start=r.char_offset_start,
-            char_offset_end=r.char_offset_end,
-            rank=float(r.rank),
+            filename=hit.file_name,
+            document_id=hit.document_id,
+            char_offset_start=hit.char_offset_start,
+            char_offset_end=hit.char_offset_end,
+            rank=hit.score,
         )
-        for r in rows
+        for hit in hits
     ]
 
 
