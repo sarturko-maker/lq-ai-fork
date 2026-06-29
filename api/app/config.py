@@ -135,6 +135,39 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ----- Embeddings (matter/agent retrieval — ADR-F049 Slice C1) -----
+    # Two doors behind one configurable provider (app.knowledge.embedding_provider):
+    # 'local' = in-process fastembed/ONNX ($0, no gateway, dev-friendly DEFAULT);
+    # 'gateway' = the Inference Gateway's /v1/embeddings (single-egress option).
+    # Both emit `embedding_dim`-length vectors that fit document_chunks.embedding_local.
+    # (Unprefixed env names per the database_url / jwt_secret precedent.)
+    embedding_provider: Literal["local", "gateway"] = Field(
+        default="local",
+        description=(
+            "Matter-document embedding door: 'local' (in-process fastembed, default, "
+            "$0) or 'gateway' (Inference Gateway /v1/embeddings)."
+        ),
+    )
+    embedding_model: str = Field(
+        default="BAAI/bge-base-en-v1.5",
+        description="fastembed model id for the local (Door A) embedder. 768-dim, MIT.",
+    )
+    embedding_dim: int = Field(
+        default=768,
+        description=(
+            "Embedding dimensionality. Must match document_chunks.embedding_local "
+            "vector(N) (mig 0078) and, for the gateway door, the requested OpenAI "
+            "`dimensions` reduction. Coupled to embedding_model."
+        ),
+    )
+    embedding_cache_dir: str | None = Field(
+        default=None,
+        description=(
+            "fastembed model cache dir for the local door. None = fastembed default "
+            "(warmed into the image at build so first use does not download)."
+        ),
+    )
+
     # ----- Inference Gateway -----
     lq_ai_gateway_url: str = Field(
         default="http://localhost:8001",

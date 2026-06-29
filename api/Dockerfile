@@ -17,6 +17,13 @@ RUN pip install --no-cache-dir .
 # use Adeu's FastMCP server (a second egress); its real SDK deps are in pyproject.
 RUN pip install --no-cache-dir --no-deps "adeu==1.12.1"
 
+# F2 Slice C1 (ADR-F049): bundle the local embedder's ONNX model at BUILD so the
+# first matter search never triggers a Hugging Face download at runtime (ADR-0008
+# boot-latency / outage rule). The runtime provider reads the same path via
+# EMBEDDING_CACHE_DIR (app.config.Settings.embedding_cache_dir).
+ENV EMBEDDING_CACHE_DIR=/opt/fastembed-cache
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-base-en-v1.5', cache_dir='/opt/fastembed-cache')"
+
 # Copy application code, migration files, and the entrypoint script
 COPY app/ ./app/
 COPY alembic.ini ./alembic.ini

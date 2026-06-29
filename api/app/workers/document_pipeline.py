@@ -85,17 +85,23 @@ async def ingest_file_job(ctx: dict[str, Any], file_id_str: str) -> dict[str, An
     if result.status == "ready":
         redis = ctx.get("redis")
         if redis is not None:
-            try:
-                await redis.enqueue_job("embed_chunks_for_file_job", file_id_str)
-            except Exception as exc:
-                log.warning(
-                    "worker: failed to enqueue embed job after ingest",
-                    extra={
-                        "event": "worker_embed_enqueue_failed",
-                        "file_id": file_id_str,
-                        "error": str(exc),
-                    },
-                )
+            # Two embed columns, two jobs (both idempotent, both best-effort):
+            #   embed_chunks_for_file_job        → embedding (1536, gateway) — KB path
+            #   embed_local_chunks_for_file_job  → embedding_local (768, local provider)
+            #                                      — matter/agent path (ADR-F049 Slice C1)
+            for job_name in ("embed_chunks_for_file_job", "embed_local_chunks_for_file_job"):
+                try:
+                    await redis.enqueue_job(job_name, file_id_str)
+                except Exception as exc:
+                    log.warning(
+                        "worker: failed to enqueue embed job after ingest",
+                        extra={
+                            "event": "worker_embed_enqueue_failed",
+                            "file_id": file_id_str,
+                            "job": job_name,
+                            "error": str(exc),
+                        },
+                    )
 
     return {
         "file_id": str(result.file_id),
@@ -131,6 +137,38 @@ async def embed_chunks_for_file_job(
         from app.knowledge.embed import embed_chunks_for_file
 
         result = await embed_chunks_for_file(session, file_id)
+
+    return {
+        "file_id": str(result.file_id),
+        "chunks_embedded": result.chunks_embedded,
+        "error": result.error,
+    }
+
+
+async def embed_local_chunks_for_file_job(
+    ctx: dict[str, Any],
+    file_id_str: str,
+) -> dict[str, Any]:
+    """Worker job: backfill ``embedding_local`` for a file (ADR-F049 Slice C1).
+
+    The matter/agent retrieval path's 768-dim column, via the configured
+    :class:`~app.knowledge.embedding_provider.EmbeddingProvider` (local door by
+    default — in-process, $0). Idempotent (``embed_local_chunks_for_file`` filters
+    ``embedding_local IS NULL``); a failed batch leaves the rest NULL so the matter
+    retriever degrades to FTS for them.
+    """
+
+    file_id = uuid.UUID(file_id_str)
+    log.info(
+        "worker: local embed job start",
+        extra={"event": "worker_embed_local_start", "file_id": file_id_str},
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        from app.knowledge.embed import embed_local_chunks_for_file
+
+        result = await embed_local_chunks_for_file(session, file_id)
 
     return {
         "file_id": str(result.file_id),
@@ -246,6 +284,7 @@ class WorkerSettings:
     functions: ClassVar[list[Any]] = [
         ingest_file_job,
         embed_chunks_for_file_job,
+        embed_local_chunks_for_file_job,
         export_user_data_job,
     ]
     on_startup = on_startup

@@ -43,12 +43,15 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.tools import MatterBinding
+
+if TYPE_CHECKING:
+    from app.knowledge.embedding_provider import EmbeddingProvider
 from app.knowledge.retrieval import matter_hybrid_search
 from app.models.document import Document
 from app.models.file import File
@@ -271,25 +274,27 @@ async def fts_retrieve(
     *,
     k: int,
     document_id: uuid.UUID | None = None,
+    query_embedding: list[float] | None = None,
+    alpha: float = 1.0,
 ) -> list[RetrievedChunk]:
-    """Run the production matter retriever (FTS-only mode); top-``k`` chunks.
+    """Run the production matter retriever; top-``k`` chunks.
 
-    Routes through :func:`app.knowledge.retrieval.matter_hybrid_search` with
-    ``query_embedding=None`` — the exact path the agent's ``search_documents``
-    tool runs today — so the eval scores what the agent actually retrieves.
-    ``document_id`` scopes to one document (the within-doc arm); ``None``
-    searches the whole matter (the cross-doc arm). ``MatterSearchHit.score`` is
-    the raw ``ts_rank_cd`` here (FTS-only). When Slice C lands an embedder, pass
-    its query vector + a tuned ``alpha`` to measure the hybrid delta.
+    Routes through :func:`app.knowledge.retrieval.matter_hybrid_search` — the exact
+    path the agent's ``search_documents`` tool runs — so the eval scores what the
+    agent actually retrieves. Default (``query_embedding=None``, ``alpha=1.0``) is
+    the FTS-only floor (the E0 baseline). Slice C1 passes a real ``query_embedding``
+    + a tuned ``alpha`` (<1) to measure the hybrid delta against that floor.
+    ``document_id`` scopes to one document (within-doc arm); ``None`` searches the
+    whole matter (cross-doc arm).
     """
     hits = await matter_hybrid_search(
         db,
         project_id=binding.project_id,
         user_id=binding.user_id,
         query=query,
-        query_embedding=None,
+        query_embedding=query_embedding,
         top_k=k,
-        alpha=1.0,
+        alpha=alpha,
         document_id=document_id,
     )
     return [
@@ -302,6 +307,41 @@ async def fts_retrieve(
         )
         for hit in hits
     ]
+
+
+async def backfill_matter_local_embeddings(
+    factory: async_sessionmaker[AsyncSession], binding: MatterBinding, provider: EmbeddingProvider
+) -> int:
+    """Embed every chunk of the matter's files into ``embedding_local`` (Slice C1).
+
+    Reuses the production backfill :func:`app.knowledge.embed.embed_local_chunks_for_file`,
+    one file per **short-lived session** — exactly how the ingest worker job runs it
+    (``async with factory() as session``). The per-file session is deliberate: a
+    single session held across the whole corpus (150 files / ~5k embeds, minutes of
+    wall-clock) gets dropped by the server mid-run. Returns the count embedded.
+    """
+    from app.knowledge.embed import embed_local_chunks_for_file
+
+    async with factory() as db:
+        file_ids = list(
+            (
+                await db.execute(
+                    select(File.id).where(
+                        File.project_id == binding.project_id,
+                        File.owner_id == binding.user_id,
+                        File.deleted_at.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    embedded = 0
+    for fid in file_ids:
+        async with factory() as db:
+            result = await embed_local_chunks_for_file(db, fid, provider=provider)
+            embedded += result.chunks_embedded
+    return embedded
 
 
 async def matter_document_ids(db: AsyncSession, binding: MatterBinding) -> dict[str, uuid.UUID]:
@@ -354,8 +394,15 @@ async def run_cuad_retrieval_baseline(
     overlap_chars: int = DEFAULT_OVERLAP_CHARS,
     matter_name: str = "CUAD retrieval-eval corpus",
     gold_span_drift: int = 0,
+    query_embedder: EmbeddingProvider | None = None,
+    alpha: float = 0.5,
 ) -> dict[str, Any]:
-    """Seed the contracts into one matter, run FTS retrieval, score, clean up.
+    """Seed the contracts into one matter, run retrieval, score, clean up.
+
+    Default (``query_embedder=None``) is the FTS-only floor (the E0 baseline). Pass
+    a ``query_embedder`` to run the **hybrid** arm (Slice C1): the seeded chunks are
+    backfilled into ``embedding_local`` and each query is embedded + fused at
+    ``alpha`` — so the result is directly comparable to the frozen FTS baseline.
 
     Returns a JSON-serialisable results dict (observations only: counts +
     scores + public CUAD category/contract ids — no clause text, no secrets).
@@ -402,21 +449,55 @@ async def run_cuad_retrieval_baseline(
         present_hit[arm] = {k: [] for k in k_values}
         present_precision[arm] = {k: [] for k in k_values}
 
+    hybrid = query_embedder is not None
     try:
+        if hybrid:
+            # Fill the local vector column (own short-lived sessions per file) BEFORE
+            # the retrieval session opens, so the hybrid arm has vectors to fuse.
+            assert query_embedder is not None
+            await backfill_matter_local_embeddings(factory, binding, query_embedder)
+
         async with factory() as db:
             fn_to_docid = await matter_document_ids(db, binding)
             contract_docid = {
                 cid: fn_to_docid[fn] for cid, fn in contract_filename.items() if fn in fn_to_docid
             }
 
+            # Cache one query embedding per distinct clause category (queries repeat
+            # across contracts) so the embedder runs ~41 times, not once per question.
+            query_emb_cache: dict[str, list[float] | None] = {}
+
+            async def _q_emb(category: str) -> list[float] | None:
+                if not hybrid:
+                    return None
+                if category not in query_emb_cache:
+                    assert query_embedder is not None
+                    vecs = await query_embedder.embed([category], is_query=True)
+                    query_emb_cache[category] = vecs[0] if vecs else None
+                return query_emb_cache[category]
+
             for contract in contracts:
                 doc_id = contract_docid[contract.contract_id]
                 for q in contract.questions:
+                    q_emb = await _q_emb(q.category)
                     within = await fts_retrieve(
-                        db, binding, q.category, k=max_k, document_id=doc_id
+                        db,
+                        binding,
+                        q.category,
+                        k=max_k,
+                        document_id=doc_id,
+                        query_embedding=q_emb,
+                        alpha=alpha,
                     )
                     cross = (
-                        await fts_retrieve(db, binding, q.category, k=max_k)
+                        await fts_retrieve(
+                            db,
+                            binding,
+                            q.category,
+                            k=max_k,
+                            query_embedding=q_emb,
+                            alpha=alpha,
+                        )
                         if run_cross_doc
                         else []
                     )
@@ -479,7 +560,14 @@ async def run_cuad_retrieval_baseline(
             "target_chars": target_chars,
             "overlap_chars": overlap_chars,
             "query": "clause category name",
-            "retriever": "matter FTS (websearch_to_tsquery 'english' + ts_rank_cd), embeddings NULL",
+            "retriever": (
+                f"matter hybrid (FTS websearch_to_tsquery + pgvector cosine, "
+                f"alpha={alpha}, embedder={query_embedder.name})"
+                if hybrid
+                else "matter FTS (websearch_to_tsquery 'english' + ts_rank_cd), embeddings NULL"
+            ),
+            "alpha": alpha if hybrid else None,
+            "embedder": query_embedder.name if hybrid else None,
         },
         "within_doc": _arm_block("within_doc"),
         "cross_doc": _arm_block("cross_doc") if run_cross_doc else None,

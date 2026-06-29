@@ -568,6 +568,7 @@ class GatewayClient:
         model: str,
         input_: str | list[str],
         request_id: str | None = None,
+        dimensions: int | None = None,
     ) -> dict[str, Any]:
         """POST to the gateway's ``/v1/embeddings``.
 
@@ -581,6 +582,11 @@ class GatewayClient:
         """
 
         body: dict[str, Any] = {"model": model, "input": input_}
+        # OpenAI text-embedding-3-* honour a `dimensions` reduction (forwarded by the
+        # gateway's OpenAI adapter); lets the gateway door (B) match the local door's
+        # 768-dim column. Omitted → the model's native dim (ADR-F049 Slice C1).
+        if dimensions is not None:
+            body["dimensions"] = dimensions
         headers = self._build_headers(request_id=request_id)
 
         try:

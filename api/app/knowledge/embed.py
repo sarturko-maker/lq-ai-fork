@@ -40,7 +40,7 @@ from app.errors import GatewayInvalidResponse
 from app.models.document import DocumentChunk
 
 if TYPE_CHECKING:
-    pass
+    from app.knowledge.embedding_provider import EmbeddingProvider
 
 log = logging.getLogger(__name__)
 
@@ -189,21 +189,28 @@ async def request_embedding_vectors(
     model: str = DEFAULT_EMBEDDING_MODEL,
     gateway: GatewayClient | None = None,
     request_id: str | None = None,
+    dimensions: int | None = None,
 ) -> list[list[float]]:
     """Return embedding vectors for a batch of texts, one per input.
 
     The gateway accepts either a single string or a list. We always
     submit lists for batches so the wire shape matches the OpenAI
-    convention.
+    convention. ``dimensions`` (ADR-F049 Slice C1) requests a reduced
+    output dim from the gateway door (OpenAI ``text-embedding-3-*``);
+    omitted → native dim.
     """
 
     if not texts:
         return []
     client = gateway if gateway is not None else get_gateway_client()
+    # Only forward `dimensions` when set (Door B), so existing callers + gateway
+    # doubles whose embeddings() predates the param keep working unchanged.
+    extra = {"dimensions": dimensions} if dimensions is not None else {}
     payload = await client.embeddings(
         model=model,
         input_=list(texts),
         request_id=request_id,
+        **extra,
     )
     data = payload.get("data") or []
     if not isinstance(data, list) or len(data) != len(texts):
@@ -388,6 +395,85 @@ async def embed_chunks_for_file(
         chunks_embedded=embedded_count,
         chunks_skipped=0,
     )
+
+
+async def embed_local_chunks_for_file(
+    db: AsyncSession,
+    file_id: uuid.UUID,
+    *,
+    provider: EmbeddingProvider | None = None,
+) -> EmbedFileResult:
+    """Backfill ``document_chunks.embedding_local`` for ``file_id`` (ADR-F049 Slice C1).
+
+    The matter/agent retrieval path's own vector column (``vector(768)``, mig 0078),
+    filled by the configured :class:`EmbeddingProvider` — the in-process local
+    embedder (Door A) by default. Mirrors :func:`embed_chunks_for_file` but targets
+    ``embedding_local`` (passages) instead of the gateway's 1536 ``embedding`` column,
+    and does NOT touch ``tokens`` (that count tracks the OpenAI/cl100k path).
+
+    Idempotent (filters ``embedding_local IS NULL``). A failed batch logs + stops;
+    chunks already written stay, the rest stay NULL → the matter retriever degrades
+    to FTS for them (graceful). No document-level status flip — the local column is a
+    separate concern from the KB/gateway column's ingest status.
+    """
+    # Local imports avoid an import cycle: embedding_provider imports this module
+    # (request_embedding_vectors), so it can't be imported at embed.py module scope.
+    from app.knowledge.embedding_provider import get_embedding_provider
+    from app.models.document import Document
+
+    emb = provider if provider is not None else get_embedding_provider()
+
+    stmt = (
+        select(DocumentChunk)
+        .join(Document, DocumentChunk.document_id == Document.id)
+        .where(Document.file_id == file_id)
+        .where(text("document_chunks.embedding_local IS NULL"))
+        .order_by(DocumentChunk.chunk_index)
+    )
+    chunks_needing_embed = list((await db.execute(stmt)).scalars().all())
+    if not chunks_needing_embed:
+        return EmbedFileResult(file_id=file_id, chunks_embedded=0, chunks_skipped=0)
+
+    embedded_count = 0
+    for batch in _batched(chunks_needing_embed):
+        texts = [chunk.content for chunk in batch]
+        try:
+            vectors = await emb.embed(texts, is_query=False)
+        except Exception as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+            log.warning(
+                "embed_local_chunks_for_file: batch failed",
+                extra={
+                    "event": "embed_local_batch_failed",
+                    "file_id": str(file_id),
+                    "batch_size": len(batch),
+                    "error": reason,
+                },
+            )
+            return EmbedFileResult(
+                file_id=file_id, chunks_embedded=embedded_count, chunks_skipped=0, error=reason
+            )
+
+        for chunk, vector in zip(batch, vectors, strict=True):
+            await db.execute(
+                text(
+                    "UPDATE document_chunks "
+                    "SET embedding_local = CAST(:vec AS vector) WHERE id = :chunk_id"
+                ),
+                {"vec": _format_vector(vector), "chunk_id": str(chunk.id)},
+            )
+            embedded_count += 1
+        await db.commit()
+
+    log.info(
+        "embed_local_chunks_for_file: done",
+        extra={
+            "event": "embed_local_done",
+            "file_id": str(file_id),
+            "embedded": embedded_count,
+        },
+    )
+    return EmbedFileResult(file_id=file_id, chunks_embedded=embedded_count, chunks_skipped=0)
 
 
 async def _mark_document_embed_failure(

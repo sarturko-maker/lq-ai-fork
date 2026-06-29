@@ -431,16 +431,18 @@ _MATTER_FTS_CAND = (
 )
 
 # Candidate-only vector query (hybrid path): id + cosine similarity, overshot.
-# ``embedding IS NOT NULL`` excludes un-embedded chunks — so with no embedder
-# wired yet (every vector NULL) this returns nothing and the fusion degrades to
-# FTS even if a caller passes an embedding.
+# Targets ``embedding_local`` — the matter/agent path's OWN 768-dim column (mig
+# 0078, ADR-F049 Slice C1), filled by the local embedder (Door A by default). This
+# is deliberately NOT the KB/chat ``embedding`` (1536) column the KB ``hybrid_search``
+# uses — the two doors live in separate columns. ``embedding_local IS NOT NULL``
+# excludes un-embedded chunks, so an un-backfilled matter degrades to FTS.
 _MATTER_VEC_CAND = (
     "SELECT dc.id AS chunk_id, "
-    "1.0 - (dc.embedding <=> CAST(:q_emb AS vector)) AS vec_score "
+    "1.0 - (dc.embedding_local <=> CAST(:q_emb AS vector)) AS vec_score "
     + _MATTER_FROM_WHERE
-    + "AND dc.embedding IS NOT NULL "
+    + "AND dc.embedding_local IS NOT NULL "
     "{doc_filter}"
-    "ORDER BY dc.embedding <=> CAST(:q_emb AS vector) "
+    "ORDER BY dc.embedding_local <=> CAST(:q_emb AS vector) "
     "LIMIT :lim"
 )
 
