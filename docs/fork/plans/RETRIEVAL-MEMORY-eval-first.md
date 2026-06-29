@@ -132,15 +132,25 @@ agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be 
 
 ## Phase 2 — the cost play (shared local embedder; documents)
 
-- **Slice C — local embedding callable (ADR-F049 addendum; new SBOM line).** In-process FastEmbed/ONNX
+- **Slice A — wire matter document tools to one hybrid retriever. ✅ SHIPPED (2026-06-29).** Added
+  `matter_hybrid_search` (`knowledge/retrieval.py`): the KB `hybrid_search` fusion machinery on a **matter**
+  scope (`project_files` ∪ `files.project_id`, owner re-asserted, not-deleted; NO `ingestion_status` filter;
+  `websearch_to_tsquery`). The production `search_documents` tool **and** the Track-B eval `fts_retrieve` now
+  route through it — *"agent mode matches retriever-only"* is structural, and the three duplicated matter-FTS
+  queries collapse to one (`tools.py:_FTS_SQL` + `cuad_eval.py:_EVAL_FTS_TEMPLATE` deleted). No embedder yet
+  ⇒ `query_embedding=None` ⇒ the **FTS-only fast path**, byte-identical to the frozen E0 baseline; the
+  fusion branch is present + unit-tested (synthetic vectors) but dormant until C. **No migration, no new
+  dependency, no gateway change.** *Gate (ADR-F015 finding): full CUAD Track-B re-run == frozen baseline
+  (within-doc hit@8 0.391 / cross-doc 0.044); drift guard + fusion/scope/doc-id tests + unchanged tool
+  contract.* *(ADR-F049 Slice A addendum.)*
+- **Slice C — local embedding callable (ADR-F049 addendum; new SBOM line). NEXT.** In-process FastEmbed/ONNX
   embedder (ADR-F010 Door A; `torch` already in-image, add `onnxruntime`+`fastembed`+a model file) for
-  the documents pgvector column **and** as the Store's `IndexConfig.embed` — one model, one door,
-  $0/token. ALTER the chunk `vector` column to the model's native dim (768 recommended; the path is
-  anticipated at `embed.py:57-59`). *Gate: Track-B B2 — ship only if CUAD recall@5 beats FTS-only by
-  ≥ X pp; conversation semantic recall improves.*
-- **Slice A — wire matter document tools to the existing `hybrid_search`.** Point `_search`
-  (`tools.py`) at a matter-scoped `hybrid_search` (`knowledge/retrieval.py`); degrades to FTS until
-  vectors exist (safe to ship before C). *Gate: Track-B B1→B2 agent mode matches retriever-only.*
+  the documents pgvector column **and** as the Store's `IndexConfig.embed`. **Maintainer ruling (2026-06-29):
+  keep BOTH Door A (in-process) AND Door B (gateway-side) available — a configurable/injected embedding
+  provider, NOT a one-way destructive dim ALTER.** Anticipated dim path at `embed.py:57-59`. The seam is
+  ready: `matter_hybrid_search` already accepts `query_embedding` + `alpha`, so C adds the embedder + flips
+  the call. *Gate: Track-B B2 — ship only if CUAD recall@5 beats FTS-only by ≥ X pp (X pre-registered after
+  this re-freeze); conversation semantic recall improves.*
 
 ## Phase 3 — later / only if measured
 

@@ -42,13 +42,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.selectable import Select
 
 from app import storage
 from app.agents.guard import GuardContext, guarded_dispatch
+from app.knowledge.retrieval import matter_hybrid_search
 from app.models.document import Document
 from app.models.file import File
 from app.models.project import ProjectFile
@@ -65,22 +66,6 @@ _SNIPPET_LIMIT = 1500
 _READ_LIMIT = 40_000
 
 MATTER_TOOL_NAMES = frozenset({"search_documents", "read_document", "get_document_metadata"})
-
-# Matter membership = attach join OR upload-time column (module docstring).
-_FTS_SQL = text(
-    "SELECT f.filename, dc.content, dc.page_start, dc.page_end, "
-    "ts_rank_cd(dc.content_tsv, websearch_to_tsquery('english', :q)) AS rank "
-    "FROM document_chunks dc "
-    "JOIN documents d ON d.id = dc.document_id "
-    "JOIN files f ON f.id = d.file_id "
-    "LEFT JOIN project_files pf ON pf.file_id = f.id AND pf.project_id = :pid "
-    "WHERE (pf.project_id IS NOT NULL OR f.project_id = :pid) "
-    "AND f.owner_id = :uid "
-    "AND f.deleted_at IS NULL "
-    "AND dc.content_tsv @@ websearch_to_tsquery('english', :q) "
-    "ORDER BY rank DESC, f.filename ASC, dc.chunk_index ASC "
-    "LIMIT :lim"
-)
 
 
 @dataclass(frozen=True)
@@ -159,23 +144,28 @@ def build_matter_tools(
 
 
 async def _search(db: AsyncSession, binding: MatterBinding, query: str) -> str:
-    """FTS over the matter's chunks; empty query → document inventory."""
+    """Retrieve over the matter's chunks; empty query → document inventory.
+
+    Routes through :func:`app.knowledge.retrieval.matter_hybrid_search` — the
+    one matter retriever the Track-B eval also runs (ADR-F049, Slice A). With no
+    embedder wired (``query_embedding=None``) it takes the FTS-only fast path:
+    byte-identical to the pre-Slice-A behaviour. Slice C lights up the vector
+    side by passing a real query embedding here.
+    """
     if not query.strip():
         return await _inventory(db, binding, header="Documents attached to this matter:")
 
-    rows = (
-        await db.execute(
-            _FTS_SQL,
-            {
-                "q": query,
-                "pid": str(binding.project_id),
-                "uid": str(binding.user_id),
-                "lim": _SEARCH_LIMIT,
-            },
-        )
-    ).all()
+    hits = await matter_hybrid_search(
+        db,
+        project_id=binding.project_id,
+        user_id=binding.user_id,
+        query=query,
+        query_embedding=None,
+        top_k=_SEARCH_LIMIT,
+        alpha=1.0,
+    )
 
-    if not rows:
+    if not hits:
         inventory = await _inventory(
             db, binding, header="Documents attached to this matter (none matched):"
         )
@@ -185,13 +175,13 @@ async def _search(db: AsyncSession, binding: MatterBinding, query: str) -> str:
         )
 
     blocks: list[str] = []
-    for row in rows:
-        pages = _page_range(row.page_start, row.page_end)
-        snippet = row.content
+    for hit in hits:
+        pages = _page_range(hit.page_start, hit.page_end)
+        snippet = hit.content
         if len(snippet) > _SNIPPET_LIMIT:
             snippet = snippet[: _SNIPPET_LIMIT - 1] + "…"
-        blocks.append(f"[{row.filename}{pages}]\n{snippet}")
-    return f"Top {len(rows)} matching passage(s) from this matter's documents:\n\n" + "\n\n".join(
+        blocks.append(f"[{hit.file_name}{pages}]\n{snippet}")
+    return f"Top {len(hits)} matching passage(s) from this matter's documents:\n\n" + "\n\n".join(
         blocks
     )
 

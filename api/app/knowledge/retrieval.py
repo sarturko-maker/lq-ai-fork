@@ -14,6 +14,14 @@ The candidate set is filtered to chunks whose owning file is attached
 to the KB AND whose ``ingestion_status='ready'`` AND whose file isn't
 soft-deleted. Per-user isolation is enforced upstream by the handler
 (the KB owner is the only caller; the handler verified ownership).
+
+This module also hosts the **matter-scoped** sibling
+:func:`matter_hybrid_search` (F2 Slice A, ADR-F049) — same fusion
+machinery, a different (matter, not KB) scope, and ``websearch_to_tsquery``
+on the FTS side. The agent's ``search_documents`` tool and the Track-B
+retrieval eval both route through it, so there is exactly one matter
+retriever (see its scope note — the KB and matter scopes diverge on
+purpose and must not converge).
 """
 
 from __future__ import annotations
@@ -354,3 +362,218 @@ def _format_vector(vector: list[float]) -> str:
     """Format a float list as pgvector's textual ``[v1,v2,...]`` form."""
 
     return "[" + ",".join(repr(float(v)) for v in vector) + "]"
+
+
+def _as_uuid(value: Any) -> uuid.UUID:
+    """Coerce a DB-returned id (already a ``uuid.UUID`` under psycopg, or a str)."""
+
+    return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+
+
+# ---------------------------------------------------------------------------
+# Matter-scoped hybrid retrieval (F2 Slice A, ADR-F049)
+# ---------------------------------------------------------------------------
+#
+# The agent's matter document tool (``app/agents/tools.py:search_documents``)
+# and the Track-B retrieval eval (``tests/.../cuad_eval.py:fts_retrieve``) BOTH
+# route through :func:`matter_hybrid_search` — one retriever, so "agent mode
+# matches retriever-only" is structural rather than a drift guard between two
+# hand-kept copies.
+#
+# The matter scope diverges from the KB scope above ON PURPOSE and must NOT
+# converge onto it:
+#   * membership = the ``project_files`` attach join OR the upload-time
+#     ``files.project_id`` column (either one makes a file the matter's);
+#   * owner re-asserted (``files.owner_id == :uid``) + ``deleted_at IS NULL``;
+#   * NO ``ingestion_status = 'ready'`` filter — a matter chunk is searchable
+#     as soon as it exists; the matter path never gated on ingestion state (the
+#     KB path does). Adding that filter here is a behaviour change — don't.
+#   * FTS uses ``websearch_to_tsquery`` (quotes / OR / leading ``-`` honoured),
+#     NOT the KB side's ``plainto_tsquery``.
+# ``_MATTER_FROM_WHERE`` is the single source of that security boundary; the
+# three matter queries below all build on it (parameterised, never f-string
+# interpolated except the fixed ``:doc_id`` toggle).
+
+_MATTER_FROM_WHERE = (
+    "FROM document_chunks dc "
+    "JOIN documents d ON d.id = dc.document_id "
+    "JOIN files f ON f.id = d.file_id "
+    "LEFT JOIN project_files pf ON pf.file_id = f.id AND pf.project_id = :pid "
+    "WHERE (pf.project_id IS NOT NULL OR f.project_id = :pid) "
+    "AND f.owner_id = :uid "
+    "AND f.deleted_at IS NULL "
+)
+
+# Full-field FTS query (the FTS-only fast path): everything both callers render
+# + the exact pre-Slice-A ranking/tiebreak (rank DESC, filename ASC, chunk_index
+# ASC). ``{doc_filter}`` is either "" or the fixed within-document narrowing.
+_MATTER_FTS_FULL = (
+    "SELECT dc.id AS chunk_id, dc.document_id, f.filename AS file_name, dc.content, "
+    "dc.page_start, dc.page_end, dc.char_offset_start, dc.char_offset_end, "
+    "ts_rank_cd(dc.content_tsv, websearch_to_tsquery('english', :q)) AS score "
+    + _MATTER_FROM_WHERE
+    + "AND dc.content_tsv @@ websearch_to_tsquery('english', :q) "
+    "{doc_filter}"
+    "ORDER BY score DESC, f.filename ASC, dc.chunk_index ASC "
+    "LIMIT :lim"
+)
+
+# Candidate-only FTS query (hybrid path): id + raw rank, overshot, no final
+# tiebreak (fusion re-orders). Same scope + operator as the full query.
+_MATTER_FTS_CAND = (
+    "SELECT dc.id AS chunk_id, "
+    "ts_rank_cd(dc.content_tsv, websearch_to_tsquery('english', :q)) AS score "
+    + _MATTER_FROM_WHERE
+    + "AND dc.content_tsv @@ websearch_to_tsquery('english', :q) "
+    "{doc_filter}"
+    "ORDER BY score DESC "
+    "LIMIT :lim"
+)
+
+# Candidate-only vector query (hybrid path): id + cosine similarity, overshot.
+# ``embedding IS NOT NULL`` excludes un-embedded chunks — so with no embedder
+# wired yet (every vector NULL) this returns nothing and the fusion degrades to
+# FTS even if a caller passes an embedding.
+_MATTER_VEC_CAND = (
+    "SELECT dc.id AS chunk_id, "
+    "1.0 - (dc.embedding <=> CAST(:q_emb AS vector)) AS vec_score "
+    + _MATTER_FROM_WHERE
+    + "AND dc.embedding IS NOT NULL "
+    "{doc_filter}"
+    "ORDER BY dc.embedding <=> CAST(:q_emb AS vector) "
+    "LIMIT :lim"
+)
+
+
+@dataclass(slots=True)
+class MatterSearchHit:
+    """One ranked chunk from a matter document search.
+
+    Carries everything both callers need: the production ``search_documents``
+    tool renders ``file_name`` + page range + ``content``; the Track-B eval
+    scores ``char_offset_start/_end`` against CUAD gold spans. ``score`` is the
+    raw ``ts_rank_cd`` in FTS-only mode and the fused hybrid score in hybrid
+    mode — interpretable only as an ordering, not across queries.
+    """
+
+    chunk_id: uuid.UUID
+    document_id: uuid.UUID
+    file_name: str
+    content: str
+    page_start: int | None
+    page_end: int | None
+    char_offset_start: int
+    char_offset_end: int
+    score: float
+
+
+async def matter_hybrid_search(
+    db: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    query: str,
+    query_embedding: list[float] | None,
+    top_k: int,
+    alpha: float,
+    document_id: uuid.UUID | None = None,
+) -> list[MatterSearchHit]:
+    """Hybrid (FTS + pgvector) retrieval over ONE matter's chunks.
+
+    Mirrors :func:`hybrid_search` but scoped to a matter (see the scope note
+    above) with ``websearch_to_tsquery`` FTS. ``project_id`` / ``user_id`` are
+    the B-class matter+owner scope (the caller unpacks them from its binding —
+    this module stays free of the agents layer). ``document_id`` narrows to one
+    document (the eval's within-doc arm); ``None`` searches the whole matter.
+
+    ``query_embedding is None`` (or ``alpha >= 1``) takes the **FTS-only fast
+    path** — one ordered query returned verbatim, byte-identical to the
+    pre-Slice-A matter retriever and the frozen Track-B baseline. This is the
+    path production runs today: no embedder is wired yet, so ``search_documents``
+    always passes ``query_embedding=None``. When Slice C lands an embedder, the
+    caller passes a real vector + a tuned ``alpha`` and the hybrid branch lights
+    up with no change here.
+    """
+    alpha = max(0.0, min(1.0, alpha))
+    doc_filter = "AND dc.document_id = :doc_id " if document_id is not None else ""
+    scope: dict[str, Any] = {"pid": str(project_id), "uid": str(user_id)}
+    if document_id is not None:
+        scope["doc_id"] = str(document_id)
+
+    # --- FTS-only fast path (today's production behaviour; keep it exact) ----
+    if query_embedding is None or alpha >= 1.0:
+        sql = text(_MATTER_FTS_FULL.format(doc_filter=doc_filter))
+        rows = (await db.execute(sql, {**scope, "q": query, "lim": top_k})).all()
+        return [_hit_from_full_row(r) for r in rows]
+
+    # --- Hybrid path (dormant until Slice C wires an embedder) --------------
+    candidate_limit = top_k * CANDIDATE_OVERSHOOT
+
+    fts_rows: list[tuple[uuid.UUID, float]] = []
+    if alpha > 0.0:
+        res = await db.execute(
+            text(_MATTER_FTS_CAND.format(doc_filter=doc_filter)),
+            {**scope, "q": query, "lim": candidate_limit},
+        )
+        fts_rows = [(_as_uuid(m["chunk_id"]), float(m["score"])) for m in res.mappings().all()]
+
+    res = await db.execute(
+        text(_MATTER_VEC_CAND.format(doc_filter=doc_filter)),
+        {**scope, "q_emb": _format_vector(query_embedding), "lim": candidate_limit},
+    )
+    vector_rows = [(_as_uuid(m["chunk_id"]), float(m["vec_score"])) for m in res.mappings().all()]
+
+    if not fts_rows and not vector_rows:
+        return []
+
+    fts_norm = _min_max_normalize(dict(fts_rows))
+    vector_norm = _min_max_normalize(dict(vector_rows))
+    candidate_ids = set(fts_norm) | set(vector_norm)
+    fused = sorted(
+        (
+            (cid, (1.0 - alpha) * vector_norm.get(cid, 0.0) + alpha * fts_norm.get(cid, 0.0))
+            for cid in candidate_ids
+        ),
+        key=lambda pair: pair[1],
+        reverse=True,
+    )[:top_k]
+    if not fused:
+        return []
+
+    score_map = dict(fused)
+    hydrated = await _hydrate_chunks(db, [cid for cid, _ in fused])
+    hits = [
+        MatterSearchHit(
+            chunk_id=row["chunk_id"],
+            document_id=row["document_id"],
+            file_name=row["file_name"],
+            content=row["content"],
+            page_start=row["page_start"],
+            page_end=row["page_end"],
+            char_offset_start=row["char_offset_start"],
+            char_offset_end=row["char_offset_end"],
+            score=score_map[row["chunk_id"]],
+        )
+        for row in hydrated
+        if row["chunk_id"] in score_map
+    ]
+    # _hydrate_chunks doesn't preserve order; re-sort by fused score with a
+    # stable tiebreak so the result is deterministic across runs.
+    hits.sort(key=lambda h: (-h.score, h.file_name, h.char_offset_start))
+    return hits
+
+
+def _hit_from_full_row(row: Any) -> MatterSearchHit:
+    """Map one ``_MATTER_FTS_FULL`` row to a :class:`MatterSearchHit`."""
+
+    return MatterSearchHit(
+        chunk_id=_as_uuid(row.chunk_id),
+        document_id=_as_uuid(row.document_id),
+        file_name=str(row.file_name),
+        content=str(row.content),
+        page_start=int(row.page_start) if row.page_start is not None else None,
+        page_end=int(row.page_end) if row.page_end is not None else None,
+        char_offset_start=int(row.char_offset_start),
+        char_offset_end=int(row.char_offset_end),
+        score=float(row.score),
+    )
