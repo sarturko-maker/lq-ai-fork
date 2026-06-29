@@ -3,7 +3,8 @@
 - Status: accepted (with F2 slice **N0**, 2026-06-28 — the native Store + CompositeBackend substrate);
   addenda: **N1** (2026-06-28, read-only tier middleware), **N2** (2026-06-29, conversation offload),
   **N3** (2026-06-29, cross-thread conversation-recall tool), **Slice A** (2026-06-29, matter document
-  tool wired to one hybrid retriever — see the addenda at the end)
+  tool wired to one hybrid retriever), **Slice C1** (2026-06-29, local embedder + matter-document hybrid
+  retrieval — see the addenda at the end)
 - Date: 2026-06-27
 - Deciders: maintainer (Arturs), agent
 - Milestone: **F2 — Memory: 4 levels + conversation memory** (ADR-F003). This ADR is the
@@ -276,3 +277,40 @@ change.** *Gate (ADR-F015 finding):* the full CUAD Track-B baseline re-run throu
 frozen E0 numbers (within-doc hit@8 0.391 / cross-doc 0.044); deterministic drift guard
 (`test_cuad_retrieval_smoke`) + fusion/scope/document_id tests (`test_matter_hybrid_search`); the
 `search_documents` tool contract + audit-body-free check (`test_agent_tools`) unchanged.
+
+## Addendum — Slice C1 (2026-06-29): the local embedder + matter-document hybrid retrieval
+
+The first **Phase-2 "cost play"** slice lights up the vector side of `matter_hybrid_search` (the dormant
+branch Slice A built). A configurable, injected **`EmbeddingProvider`** (`app/knowledge/embedding_provider.py`)
+keeps **both doors** the maintainer required:
+
+- **Door A — `LocalEmbeddingProvider`** (the default): in-process `fastembed`/ONNX, `BAAI/bge-base-en-v1.5`
+  (768-dim, MIT), bundled into the image at build (no runtime download). $0/token, no provider key, and the
+  dev stack gets semantic retrieval with no live gateway embedding model. This is a **second inference
+  locus** — permitted for *embeddings* (not external-provider generation, which ADR-F010 governs); keeping
+  Door B available preserves the single-egress posture as a one-env-var switch. bge's query/passage
+  asymmetry is applied in-provider (the query instruction prefix; `fastembed`'s `query_embed` is a no-op for
+  the bundled ONNX build).
+- **Door B — `GatewayEmbeddingProvider`**: the existing `/v1/embeddings` egress, now threading a
+  `dimensions` reduction so an OpenAI `text-embedding-3-*` emits the same 768 dim → fits the same column.
+
+Selection is `Settings.embedding_provider` (`local` | `gateway`, default `local`).
+
+**No destructive ALTER (maintainer ruling).** Migration 0078 **adds** `document_chunks.embedding_local
+vector(768)` + an ivfflat index; the live `embedding vector(1536)` column + the KB/chat `hybrid_search`
+path are **untouched** (the two doors live in separate columns). The matter retriever's vector branch reads
+`embedding_local`; the ingest worker backfills it via a new `embed_local_chunks_for_file` job (per-file
+short-lived sessions); `tools.py:_search` embeds the query (local door) and fuses at `alpha` with an
+FTS-only fallback when the embedder is unavailable or a matter is un-backfilled. **No gateway change beyond
+the additive `dimensions` passthrough; one new SBOM family (`fastembed` → onnxruntime/tokenizers/numpy).**
+
+*Gate (ADR-F015 finding — Track-B, apples-to-apples on the same N=30 CUAD subset, local door, alpha=0.5):*
+hybrid vs the FTS floor — **within-doc recall@5 0.314 → 0.629 (+100%)**, hit@8 0.356 → 0.812; **cross-doc
+recall@5 0.077 → 0.100 (+29%)**, hit@8 +27%. **Pre-registered X (ship threshold, set post-calibration):
+within-doc recall@5 must beat the same-corpus FTS floor by ≥ +0.05 — observed +0.31, 6× the bar.** N=30 (not
+the frozen 150) because the local embedder + eval query-volume crashed a Postgres backend on this
+memory-constrained dev box at N≥60; N=30 alone is stable and its FTS floor tracks the frozen @150. Evidence +
+the full table: `docs/fork/evidence/retrieval-eval-slice-c/`. Deterministic: `test_embedding_provider` (Door
+A real model + Door B `dimensions`), `test_matter_hybrid_search` fusion over `embedding_local`, the FTS drift
+guard, migration on a throwaway pgvector container. **C2 (the langgraph Store `IndexConfig` for
+conversation/memory semantic recall) reuses this same provider — a separate slice.**

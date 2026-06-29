@@ -575,6 +575,12 @@ decision (Backlog), triggered at real deployment; engine behaviour is identical,
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+- **Full N=150 hybrid CUAD calibration on a non-memory-constrained host (surfaced 2026-06-29, F2 Slice C1).**
+  Slice C1 calibrated the local-embedder hybrid at N=30 (apples-to-apples vs FTS@30; within-doc recall@5
+  0.314→0.629, +100%) because the local embedder + the eval's query-volume crash a Postgres backend on this
+  memory-constrained dev box at N≥60. Re-run the full 150-contract hybrid vs the frozen FTS@150 floor on a
+  bigger host before production rollout — empirical confirmation only; no code gap (ADR-F015 finding).
+
 - ~~**Authorship / "who's on our team" identity model (surfaced 2026-06-26, maintainer, in editor S5).**~~
   ✅ **Slice 1 SHIPPED (2026-06-26, ADR-F048, migration `0076`):** a dedicated `matter_participants`
   roster (identity + alias match-set → `side` ∈ ours/counterparty/unknown + role, `trust` inferred/confirmed)

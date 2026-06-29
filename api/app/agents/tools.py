@@ -3,11 +3,12 @@
 A run bound to a Matter (``agent_runs.project_id``, migration 0049)
 gets two tools over the matter's ingested documents:
 
-* :func:`search_documents` — lexical FTS (``websearch_to_tsquery`` over
-  ``document_chunks.content_tsv``, the proven pattern from the tabular
-  executor) across every file attached to the matter. Works with no
-  embedding provider — the dev stack has none (vector search is a
-  Backlog item).
+* :func:`search_documents` — hybrid retrieval over every file attached to
+  the matter (ADR-F049 Slice C1): FTS (``websearch_to_tsquery`` over
+  ``document_chunks.content_tsv``) fused with pgvector cosine over the
+  local-embedder column (``embedding_local``). The query is embedded via the
+  configured provider (local in-process door by default); if the embedder is
+  unavailable or the matter has no vectors yet it degrades to FTS-only.
 * :func:`read_document` — the full ``documents.normalized_content``
   (the canonical PyMuPDF text stream) for one file, by filename,
   bounded to ``_READ_LIMIT`` chars with an honest truncation notice.
@@ -49,6 +50,7 @@ from sqlalchemy.sql.selectable import Select
 
 from app import storage
 from app.agents.guard import GuardContext, guarded_dispatch
+from app.knowledge.embedding_provider import get_embedding_provider
 from app.knowledge.retrieval import matter_hybrid_search
 from app.models.document import Document
 from app.models.file import File
@@ -60,6 +62,10 @@ logger = logging.getLogger(__name__)
 # Top-k passages per search; chunks are paragraph-sized so 8 keeps the
 # tool result well inside the model's working context.
 _SEARCH_LIMIT = 8
+# Hybrid fusion weight for matter document search (ADR-F049 Slice C1):
+# score = (1-alpha)*vector + alpha*fts. Tuned on Track-B; <1 to engage the vector
+# side. When the query can't be embedded we fall back to alpha=1.0 (FTS-only).
+_HYBRID_ALPHA = 0.5
 _SNIPPET_LIMIT = 1500
 # read_document cap (~10k tokens) — long documents truncate with an
 # honest notice steering the model back to search_documents.
@@ -143,26 +149,46 @@ def build_matter_tools(
     return [search_documents, read_document, get_document_metadata]
 
 
+async def _embed_query(query: str) -> list[float] | None:
+    """Embed a search query via the configured provider; ``None`` on failure.
+
+    ADR-F049 Slice C1: the local door (in-process) is the default; ``is_query=True``
+    so an asymmetric model adds its retrieval prefix. Any provider error degrades
+    to FTS-only (mirrors the chat RAG path) — retrieval must never hard-fail on the
+    embedder.
+    """
+    try:
+        vectors = await get_embedding_provider().embed([query], is_query=True)
+    except Exception as exc:
+        logger.warning(
+            "matter search: query-embedding failed; FTS-only fallback",
+            extra={"event": "matter_search_embed_failed", "error": str(exc)},
+        )
+        return None
+    return vectors[0] if vectors else None
+
+
 async def _search(db: AsyncSession, binding: MatterBinding, query: str) -> str:
     """Retrieve over the matter's chunks; empty query → document inventory.
 
-    Routes through :func:`app.knowledge.retrieval.matter_hybrid_search` — the
-    one matter retriever the Track-B eval also runs (ADR-F049, Slice A). With no
-    embedder wired (``query_embedding=None``) it takes the FTS-only fast path:
-    byte-identical to the pre-Slice-A behaviour. Slice C lights up the vector
-    side by passing a real query embedding here.
+    Routes through :func:`app.knowledge.retrieval.matter_hybrid_search` — the one
+    matter retriever the Track-B eval also runs (ADR-F049 Slice A). Slice C1 embeds
+    the query (local door by default) and fuses FTS + vectors (``embedding_local``);
+    if the embedder is unavailable or the matter has no vectors yet, the fusion
+    degrades to the FTS-only fast path (``alpha=1.0``).
     """
     if not query.strip():
         return await _inventory(db, binding, header="Documents attached to this matter:")
 
+    query_embedding = await _embed_query(query)
     hits = await matter_hybrid_search(
         db,
         project_id=binding.project_id,
         user_id=binding.user_id,
         query=query,
-        query_embedding=None,
+        query_embedding=query_embedding,
         top_k=_SEARCH_LIMIT,
-        alpha=1.0,
+        alpha=_HYBRID_ALPHA if query_embedding is not None else 1.0,
     )
 
     if not hits:

@@ -202,6 +202,17 @@ dependencies = [
     # structlog: MIT/Apache-2.0, Adeu's logger. (lxml, python-docx, rapidfuzz,
     # pydantic — Adeu's other SDK deps — are already declared above.)
     "structlog>=24.0.0",
+    # F2 Slice C1 (ADR-F049) — fastembed: in-process ONNX text embeddings for the
+    # matter/agent retrieval path's LOCAL door (Door A, default). $0/token, no
+    # provider key, no gateway round-trip; the dev stack gets semantic retrieval
+    # with no live gateway embedding model. Apache-2.0. NEW SBOM family: it pulls
+    # onnxruntime (MIT, the inference runtime), tokenizers (Apache-2.0), numpy
+    # (BSD) + huggingface-hub (Apache-2.0, model fetch — done at BUILD, bundled into
+    # the image; no runtime download). The gateway door (B) stays available
+    # (config `embedding_provider=gateway`) so the single-egress posture is a
+    # one-env-var switch. Default model BAAI/bge-base-en-v1.5 (768-dim, MIT) —
+    # ~210 MB, vendored at build (see api/Dockerfile). Pinned tight (pre-1.0).
+    "fastembed>=0.8,<0.9",
 ]
 
 [project.optional-dependencies]
@@ -284,6 +295,12 @@ ignore_missing_imports = true
 # but the override here covers the standard case.
 [[tool.mypy.overrides]]
 module = ["tiktoken", "tiktoken.*"]
+ignore_missing_imports = true
+
+# F2 Slice C1 — fastembed (the local embedder, Door A) ships no type stubs;
+# imported lazily inside app.knowledge.embedding_provider.LocalEmbeddingProvider.
+[[tool.mypy.overrides]]
+module = ["fastembed", "fastembed.*"]
 ignore_missing_imports = true
 
 # D5 — pyotp has no type stubs (small module, BSD-2-clause; the project

@@ -1,0 +1,257 @@
+{
+  "manifest": {
+    "alpha": 0.5,
+    "dataset": "CUAD v1 (CC-BY-4.0, theatticusproject)",
+    "embedder": "local:BAAI/bge-base-en-v1.5",
+    "generated_at": "2026-06-29T16:16:33+00:00",
+    "git_sha": "a5efce37",
+    "selection": "deterministic (contracts sorted by id, first N)",
+    "slice": "C1",
+    "subset_loaded": 30,
+    "subset_requested": 30
+  },
+  "results": {
+    "absent_control": {
+      "absent_questions": 842,
+      "note": "Fraction of absent-clause questions for which within-doc FTS still returned >=1 chunk. The FTS retriever cannot abstain; true abstention is an agent-mode/QA property measured in E1.",
+      "within_doc_spurious_retrieval_rate": 1.0
+    },
+    "corpus": {
+      "absent_questions": 842,
+      "categories": 39,
+      "chunks": 876,
+      "chunks_per_contract": 29.2,
+      "contracts": 30,
+      "gold_span_drift": 0,
+      "present_questions": 388
+    },
+    "cross_doc": {
+      "hit_rate_at_k": {
+        "1": 0.041237113402061855,
+        "10": 0.16237113402061856,
+        "20": 0.25257731958762886,
+        "3": 0.08247422680412371,
+        "5": 0.1134020618556701,
+        "8": 0.14432989690721648
+      },
+      "mean_average_precision": 0.06890525262797619,
+      "precision_at_k": {
+        "1": 0.041237113402061855,
+        "10": 0.021649484536082474,
+        "20": 0.016623711340206185,
+        "3": 0.03350515463917526,
+        "5": 0.027835051546391754,
+        "8": 0.02384020618556701
+      },
+      "recall_at_k": {
+        "1": 0.029100188185239732,
+        "10": 0.14314248895434462,
+        "20": 0.22168016691212566,
+        "3": 0.07326542300769105,
+        "5": 0.1000143184421535,
+        "8": 0.12453055964653903
+      }
+    },
+    "params": {
+      "alpha": 0.5,
+      "embedder": "local:BAAI/bge-base-en-v1.5",
+      "k_values": [
+        1,
+        3,
+        5,
+        8,
+        10,
+        20
+      ],
+      "overlap_chars": 200,
+      "query": "clause category name",
+      "retriever": "matter hybrid (FTS websearch_to_tsquery + pgvector cosine, alpha=0.5, embedder=local:BAAI/bge-base-en-v1.5)",
+      "target_chars": 2000
+    },
+    "per_category_within_doc": {
+      "Affiliate License-Licensee": {
+        "count": 2,
+        "recall_at_8": 1.0
+      },
+      "Affiliate License-Licensor": {
+        "count": 1,
+        "recall_at_8": 1.0
+      },
+      "Agreement Date": {
+        "count": 29,
+        "recall_at_8": 0.7586206896551724
+      },
+      "Anti-Assignment": {
+        "count": 19,
+        "recall_at_8": 0.9122807017543859
+      },
+      "Audit Rights": {
+        "count": 13,
+        "recall_at_8": 0.7307692307692307
+      },
+      "Cap On Liability": {
+        "count": 14,
+        "recall_at_8": 0.7845804988662132
+      },
+      "Change Of Control": {
+        "count": 3,
+        "recall_at_8": 1.0
+      },
+      "Competitive Restriction Exception": {
+        "count": 5,
+        "recall_at_8": 0.4
+      },
+      "Covenant Not To Sue": {
+        "count": 7,
+        "recall_at_8": 0.32142857142857145
+      },
+      "Document Name": {
+        "count": 30,
+        "recall_at_8": 0.5666666666666667
+      },
+      "Effective Date": {
+        "count": 25,
+        "recall_at_8": 0.86
+      },
+      "Exclusivity": {
+        "count": 12,
+        "recall_at_8": 0.9444444444444445
+      },
+      "Expiration Date": {
+        "count": 23,
+        "recall_at_8": 0.8260869565217391
+      },
+      "Governing Law": {
+        "count": 27,
+        "recall_at_8": 0.8703703703703703
+      },
+      "Insurance": {
+        "count": 11,
+        "recall_at_8": 0.9545454545454546
+      },
+      "Ip Ownership Assignment": {
+        "count": 6,
+        "recall_at_8": 0.8333333333333334
+      },
+      "Irrevocable Or Perpetual License": {
+        "count": 3,
+        "recall_at_8": 1.0
+      },
+      "Joint Ip Ownership": {
+        "count": 2,
+        "recall_at_8": 0.8
+      },
+      "License Grant": {
+        "count": 15,
+        "recall_at_8": 0.9777777777777777
+      },
+      "Liquidated Damages": {
+        "count": 3,
+        "recall_at_8": 0.6666666666666666
+      },
+      "Minimum Commitment": {
+        "count": 13,
+        "recall_at_8": 0.6435897435897436
+      },
+      "Most Favored Nation": {
+        "count": 3,
+        "recall_at_8": 0.5555555555555555
+      },
+      "No-Solicit Of Customers": {
+        "count": 2,
+        "recall_at_8": 1.0
+      },
+      "No-Solicit Of Employees": {
+        "count": 3,
+        "recall_at_8": 1.0
+      },
+      "Non-Compete": {
+        "count": 8,
+        "recall_at_8": 1.0
+      },
+      "Non-Disparagement": {
+        "count": 2,
+        "recall_at_8": 0.25
+      },
+      "Non-Transferable License": {
+        "count": 7,
+        "recall_at_8": 1.0
+      },
+      "Notice Period To Terminate Renewal": {
+        "count": 6,
+        "recall_at_8": 1.0
+      },
+      "Parties": {
+        "count": 30,
+        "recall_at_8": 0.43333333333333335
+      },
+      "Post-Termination Services": {
+        "count": 15,
+        "recall_at_8": 0.8444444444444444
+      },
+      "Renewal Term": {
+        "count": 7,
+        "recall_at_8": 1.0
+      },
+      "Revenue/Profit Sharing": {
+        "count": 10,
+        "recall_at_8": 0.8
+      },
+      "Rofr/Rofo/Rofn": {
+        "count": 4,
+        "recall_at_8": 0.25
+      },
+      "Termination For Convenience": {
+        "count": 11,
+        "recall_at_8": 0.9090909090909091
+      },
+      "Third Party Beneficiary": {
+        "count": 1,
+        "recall_at_8": 0.0
+      },
+      "Uncapped Liability": {
+        "count": 4,
+        "recall_at_8": 1.0
+      },
+      "Unlimited/All-You-Can-Eat-License": {
+        "count": 1,
+        "recall_at_8": 0.5
+      },
+      "Volume Restriction": {
+        "count": 7,
+        "recall_at_8": 0.42857142857142855
+      },
+      "Warranty Duration": {
+        "count": 4,
+        "recall_at_8": 0.9166666666666666
+      }
+    },
+    "within_doc": {
+      "hit_rate_at_k": {
+        "1": 0.38402061855670105,
+        "10": 0.845360824742268,
+        "20": 0.9201030927835051,
+        "3": 0.5798969072164949,
+        "5": 0.6701030927835051,
+        "8": 0.8118556701030928
+      },
+      "mean_average_precision": 0.489200385528154,
+      "precision_at_k": {
+        "1": 0.38402061855670105,
+        "10": 0.12250654557355589,
+        "20": 0.08896098139020485,
+        "3": 0.23797250859106528,
+        "5": 0.1747422680412371,
+        "8": 0.13968151693667158
+      },
+      "recall_at_k": {
+        "1": 0.31841863033873347,
+        "10": 0.8069608083783342,
+        "20": 0.9050482736049746,
+        "3": 0.5272203812796596,
+        "5": 0.6286532482408771,
+        "8": 0.7694178530518737
+      }
+    }
+  }
+}

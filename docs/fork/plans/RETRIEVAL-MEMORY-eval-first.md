@@ -143,14 +143,21 @@ agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be 
   dependency, no gateway change.** *Gate (ADR-F015 finding): full CUAD Track-B re-run == frozen baseline
   (within-doc hit@8 0.391 / cross-doc 0.044); drift guard + fusion/scope/doc-id tests + unchanged tool
   contract.* *(ADR-F049 Slice A addendum.)*
-- **Slice C — local embedding callable (ADR-F049 addendum; new SBOM line). NEXT.** In-process FastEmbed/ONNX
-  embedder (ADR-F010 Door A; `torch` already in-image, add `onnxruntime`+`fastembed`+a model file) for
-  the documents pgvector column **and** as the Store's `IndexConfig.embed`. **Maintainer ruling (2026-06-29):
-  keep BOTH Door A (in-process) AND Door B (gateway-side) available — a configurable/injected embedding
-  provider, NOT a one-way destructive dim ALTER.** Anticipated dim path at `embed.py:57-59`. The seam is
-  ready: `matter_hybrid_search` already accepts `query_embedding` + `alpha`, so C adds the embedder + flips
-  the call. *Gate: Track-B B2 — ship only if CUAD recall@5 beats FTS-only by ≥ X pp (X pre-registered after
-  this re-freeze); conversation semantic recall improves.*
+- **Slice C1 — local embedder + matter-document hybrid retrieval. ✅ SHIPPED (2026-06-29).** A configurable,
+  injected `EmbeddingProvider` (`app/knowledge/embedding_provider.py`): **Door A** in-process
+  `fastembed`/`BAAI/bge-base-en-v1.5` (768-dim, MIT, bundled at build, default) + **Door B** gateway
+  `/v1/embeddings` (now threads a `dimensions` reduction to match). Migration 0078 **adds**
+  `document_chunks.embedding_local vector(768)` + ivfflat (the 1536 column + KB path untouched — no
+  destructive ALTER, maintainer ruling). Backfill (`embed_local_chunks_for_file` + worker job) + the matter
+  retriever's vector branch + `tools.py:_search` embedding the query (FTS-only fallback). New SBOM:
+  `fastembed`. *Gate (ADR-F015 finding — Track-B apples-to-apples, N=30 subset, local door, alpha=0.5):*
+  **within-doc recall@5 0.314 → 0.629 (+100%)**; cross-doc recall@5 0.077 → 0.100 (+29%). **X = within-doc
+  recall@5 ≥ +0.05 over the same-corpus FTS floor (observed +0.31).** N=30 (not 150) — the local embedder +
+  eval volume crashes a backend on the memory-constrained dev box at N≥60; full-150 hybrid deferred to a
+  bigger env. *(ADR-F049 Slice C1 addendum; `docs/fork/evidence/retrieval-eval-slice-c/`.)*
+- **Slice C2 — langgraph Store `IndexConfig` (conversation/memory semantic recall). NEXT.** Wire the SAME
+  provider as the Store's `IndexConfig.embed` so `store.asearch(query=…)` ranks semantically (it is a no-op
+  filter-only today). Own slice + go-ahead. *Gate: A5-style conversation semantic recall improves.*
 
 ## Phase 3 — later / only if measured
 

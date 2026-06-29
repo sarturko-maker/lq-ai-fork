@@ -3,11 +3,45 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-29): RETRIEVAL & MEMORY Phase-2 "cost play" SLICE A — matter document tool wired to
-> ONE hybrid retriever — SHIPPED on branch `fork/f2-slice-a-matter-hybrid-search` (ADR-F049 Slice A
-> addendum). NO migration, NO new dependency, NO gateway change. NEXT = Slice C (local embedder) — maintainer
-> ruling: keep BOTH Door A (in-process) + Door B (gateway-side) available, a configurable/injected provider,
-> NOT a one-way destructive dim ALTER; needs its own plan + go-ahead.**
+> ▶▶ **PICKUP (2026-06-29): RETRIEVAL & MEMORY Phase-2 SLICE C1 — local embedder + matter-document hybrid
+> retrieval — on branch `fork/f2-slice-c1-local-embedder` (ADR-F049 Slice C1 addendum). Migration 0078
+> (ADDITIVE, non-destructive), ONE new SBOM dep (`fastembed`), gateway change = additive `dimensions`
+> passthrough only. NEXT = Slice C2 (langgraph Store `IndexConfig` for conversation/memory semantic recall,
+> reuses the same provider) — own slice + go-ahead.**
+> - **What it does:** lights up the vector side of `matter_hybrid_search` (the dormant branch Slice A built).
+>   A configurable, injected `EmbeddingProvider` (`app/knowledge/embedding_provider.py`): **Door A**
+>   `LocalEmbeddingProvider` (in-process `fastembed`/`BAAI/bge-base-en-v1.5`, 768-dim MIT, DEFAULT, $0,
+>   bundled in the image) + **Door B** `GatewayEmbeddingProvider` (gateway `/v1/embeddings` with a
+>   `dimensions=768` reduction to match). `Settings.embedding_provider` selects (default `local`);
+>   `get_embedding_provider()` process-global mirrors `get_gateway_client()`.
+> - **Both doors, no destructive ALTER (maintainer rulings):** mig 0078 ADDS `document_chunks.embedding_local
+>   vector(768)` + an ivfflat index; the live `embedding vector(1536)` column + the KB/chat `hybrid_search`
+>   path are UNTOUCHED (two doors → two columns). `matter_hybrid_search` vector branch reads `embedding_local`
+>   (KB keeps `embedding`). Backfill = `embed_local_chunks_for_file` + `embed_local_chunks_for_file_job`
+>   (enqueued on ingest, per-file short-lived sessions). `tools.py:_search` embeds the query (Door A,
+>   `is_query=True`) and fuses at `_HYBRID_ALPHA=0.5`; FTS-only fallback on embedder error / un-backfilled
+>   matter (graceful).
+> - **bge query/passage asymmetry (load-bearing):** the bge query instruction is prepended IN-PROVIDER —
+>   `fastembed.query_embed` is a NO-OP prefix for the bundled ONNX build (verified: query==passage without
+>   it). `test_embedding_provider` asserts query≠passage.
+> - **THE GATE — met:** deterministic **32/32** (`test_embedding_provider` 7 + `test_matter_hybrid_search` 3
+>   fusion-over-`embedding_local` + `test_cuad_retrieval_smoke` 2 + `test_agent_tools` 20); ruff + mypy (207)
+>   clean; full api suite count → PR. **Track-B finding (ADR-F015, apples-to-apples N=30 subset, local door,
+>   alpha=0.5, `docs/fork/evidence/retrieval-eval-slice-c/`): within-doc recall@5 0.314 → 0.629 (+100%),
+>   hit@8 0.356 → 0.812; cross-doc recall@5 0.077 → 0.100 (+29%). X (ship threshold) = within-doc recall@5 ≥
+>   +0.05 over same-corpus FTS; observed +0.31.**
+> - **TRAPS (carry forward):** (1) the local embedder + the eval's query-volume CRASH a Postgres backend on
+>   this memory-constrained dev box at N≥60 (→ recovery; `CannotConnectNow`) — run hybrid evals ALONE (never
+>   concurrent with the full suite) and at a gentler N; the full-150 hybrid is deferred to a bigger env. (2)
+>   The eval backfill MUST use per-file short-lived sessions (one long session over 150 files gets dropped).
+>   (3) Dev-image rebuild was REQUIRED (fastembed + bundled model at `/opt/fastembed-cache`,
+>   `EMBEDDING_CACHE_DIR`); `docker image prune -f` after. (4) fastembed resolves bge-base to qdrant's
+>   ONNX-quantized repo, 768-dim. (5) `embedding_local` is NULL until the local job runs → matter search
+>   degrades to FTS until backfilled (live verification must populate first).
+>
+> ▶ **PREVIOUS (2026-06-29): RETRIEVAL & MEMORY Phase-2 SLICE A — matter document tool wired to ONE hybrid
+> retriever — SHIPPED (MERGED PR #167, squash `a5efce37`); ADR-F049 Slice A addendum. NO migration/dep/gateway
+> change.**
 > - **What it does:** collapses THREE copies of the matter FTS query into one retriever
 >   `app/knowledge/retrieval.py:matter_hybrid_search`. The production `search_documents` tool AND the Track-B
 >   eval `fts_retrieve` both route through it → *"agent mode matches retriever-only"* is structural. With no

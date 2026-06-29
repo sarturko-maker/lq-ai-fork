@@ -31,7 +31,7 @@ from app.models.file import File
 from tests.agents.scenarios.harness import SeededMatter, seed_multi_doc_matter
 from tests.agents.scenarios.scenarios import DocChunk, FixtureDocument
 
-_EMB_DIM = 1536  # the current chunk vector column dim (mig 0005); Slice C ALTERs it.
+_EMB_DIM = 768  # document_chunks.embedding_local dim (mig 0078, bge-base) — the matter path.
 
 
 def _unit_vector(hot_index: int) -> list[float]:
@@ -97,8 +97,10 @@ async def _chunk_ids_by_index(
 
 
 async def _set_embedding(db: AsyncSession, chunk_id: uuid.UUID, vec: list[float]) -> None:
+    # The matter retriever reads embedding_local (768, mig 0078) — the local door's
+    # column — NOT the KB/chat embedding(1536) column.
     await db.execute(
-        text("UPDATE document_chunks SET embedding = CAST(:v AS vector) WHERE id = :id"),
+        text("UPDATE document_chunks SET embedding_local = CAST(:v AS vector) WHERE id = :id"),
         {"v": _pgvector_text(vec), "id": str(chunk_id)},
     )
 

@@ -30,6 +30,12 @@ RUN pip install --no-cache-dir ".[dev]"
 # C4 (ADR-F031): Adeu --no-deps (see api/Dockerfile — avoids the fastmcp/starlette conflict).
 RUN pip install --no-cache-dir --no-deps "adeu==1.12.1"
 
+# F2 Slice C1 (ADR-F049): bundle the local embedder's ONNX model at BUILD (see
+# api/Dockerfile) so tests + dev runs use the in-process embedder with no runtime
+# download. Same EMBEDDING_CACHE_DIR the runtime provider reads.
+ENV EMBEDDING_CACHE_DIR=/opt/fastembed-cache
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-base-en-v1.5', cache_dir='/opt/fastembed-cache')"
+
 # Copy application code and migration files
 COPY app/ ./app/
 COPY alembic.ini ./alembic.ini
