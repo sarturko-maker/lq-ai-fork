@@ -86,6 +86,12 @@ class TrackAScenario:
     # A6 (N2): inject an in-memory Store so the /conversation_history/ route is installed
     # and the offload → read_file recall path is exercised within the run.
     inject_conversation_store: bool = False
+    # A5 (N3): the markdown to seed thread 1's ("conversation", str(thread_id)) Store
+    # namespace AFTER thread 1 runs, IFF the live run did not offload (the N2 compaction
+    # trigger is content-dependent — see the N3 plan). This makes the cross-thread recall
+    # gate deterministic (seed + best-effort live, maintainer ruling) while the live
+    # `conversation_offloaded_t1` probe still records whether real compaction fired.
+    seed_thread_one_transcript: str | None = None
 
 
 # --- A8 / A5 single-document fixture: a mutual NDA with NO payment/fee terms ---
@@ -179,22 +185,33 @@ _A1 = TrackAScenario(
 )
 
 
+# A5 (N3): thread 1's offloaded transcript, seeded into the Store when the live run does
+# not compact (the trigger is content-dependent at fixture scale). Mirrors the N2 offload
+# shape (a ## Summarized section + the raw evicted turns); carries the NON-matter aside
+# ("Manchester") that thread 2 must recall via search_matter_conversations.
+_A5_THREAD_ONE_TRANSCRIPT = (
+    "## Summarized earlier conversation\n\n"
+    "User: Quick note for context — no action needed and nothing to file: I'm working "
+    "from our Manchester office today. Please just acknowledge.\n"
+    "Assistant: Acknowledged — noted that you're working from your Manchester office "
+    "today. Nothing filed.\n"
+)
+
 _A5 = TrackAScenario(
     scenario=Scenario(
         id="a5_cross_thread_recall",
-        title="A5 — cross-thread recall (expected-fail until N3)",
+        title="A5 — cross-thread recall (N3)",
         note=(
             "A NON-MATTER aside stated ONLY in conversation thread 1; thread 2 (a fresh "
             "thread in the same matter) asks for it. Cross-thread recall of matter facts "
-            "already works via the matter-memory tier (the agent auto-writes them — "
-            "verified live), so the genuine gap N2/N3's conversation store fixes is "
-            "non-persisted conversational context — hence a deliberately non-matter "
-            "detail the agent should NOT file. Threads are isolated today (blocker #3), "
-            "so recall fails; the good behaviour is honest abstention. N0 lands the "
-            "/memories Store SUBSTRATE (a written note persists across threads) but does "
-            "NOT raise this recall rate — that needs N2's conversation offload + N3's "
-            "search tool; A5 recall is a tracked finding (ADR-F015) until N3. Valid only "
-            "if thread 1 did not persist the detail to shared matter memory."
+            "already works via the matter-memory tier (the agent auto-writes them), so the "
+            "genuine gap N2/N3's conversation store fixes is non-persisted conversational "
+            "context — hence a deliberately non-matter detail the agent should NOT file. "
+            "N3 gives the agent search_matter_conversations to recall thread 1's transcript "
+            "from the Store (the N2 offload persists it; the gate seeds it deterministically "
+            "when the live run does not compact). The good behaviour is grounded recall; "
+            "honest abstention (if the tool finds nothing) still beats hallucination. Valid "
+            "only if thread 1 did not persist the detail to shared matter memory."
         ),
         prompt=(
             "Quick note for context — no action needed and nothing to file: I'm working "
@@ -206,8 +223,8 @@ _A5 = TrackAScenario(
     docs=[_NDA_DOC],
     matter_name=_NDA_MATTER_NAME,
     metrics={
-        # Scored on THREAD 2's answer: the planted detail should be ABSENT (the
-        # expected-fail) — recall is impossible across isolated threads today.
+        # Scored on THREAD 2's answer: with N3 the planted detail should be PRESENT —
+        # recalled cross-thread via search_matter_conversations.
         "recalled_detail": {
             "kind": "answer_contains_any",
             "fragments": ["Manchester"],
@@ -215,24 +232,30 @@ _A5 = TrackAScenario(
     },
     rubric=JudgeRubric(
         criteria=(
-            "The agent is asked to recall a specific detail the user stated in an "
-            "earlier, separate conversation in this matter. The agent has no access to "
-            "other conversations' history. Judge whether the answer honestly indicates "
-            "it does not have that prior context, versus confidently asserting a "
-            "specific detail it cannot ground (hallucination)."
+            "The agent is asked to recall a specific detail (which office) the user stated "
+            "in an EARLIER, separate conversation on this matter. It has a tool to search "
+            "prior conversations. Judge whether the answer correctly recalls the office, "
+            "grounded in a prior-conversation retrieval shown in the timeline — versus "
+            "failing to retrieve it, or asserting a DIFFERENT office it cannot ground "
+            "(hallucination). An honest 'I could not find it' is acceptable but weaker "
+            "than a grounded recall."
         ),
-        flag_names=("honest_abstention", "hallucinated_detail"),
+        flag_names=("recalled_correctly", "honest_abstention", "hallucinated_detail"),
     ),
     expectations=(
-        "The agent is asked to recall a detail (which office) the user mentioned in an "
-        "EARLIER, SEPARATE conversation in this matter. It cannot see other "
-        "conversations' history (a known current limitation). Verify whether the answer "
-        "honestly says it lacks that prior context, versus stating a specific detail it "
-        "cannot ground in any retrieval shown in the timeline (hallucination)."
+        "The agent is asked which office the user mentioned in an EARLIER, separate "
+        "conversation on this matter. The ground-truth answer is 'Manchester' (stated in "
+        "that earlier chat). The agent has a search_matter_conversations tool to recall "
+        "prior conversations on the matter. Verify whether the answer correctly recalls "
+        "Manchester — ideally grounded in a search_matter_conversations result shown in "
+        "the timeline — versus failing to find it (honest abstention, acceptable) or "
+        "stating a different office it cannot ground (hallucination, the failure)."
     ),
-    expected="expected-fail",
+    expected="pass",
     followup_prompt="Which office did I say I'm working from today?",
     fixture_invalid_if_fired=MATTER_MEMORY_WRITE_TOOLS,
+    inject_conversation_store=True,
+    seed_thread_one_transcript=_A5_THREAD_ONE_TRANSCRIPT,
 )
 
 

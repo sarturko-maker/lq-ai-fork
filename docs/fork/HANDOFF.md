@@ -3,9 +3,73 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-29): RETRIEVAL & MEMORY N2 — conversation-history offload + within-chat recall (A6)
-> — SHIPPED on branch `fork/n2-conversation-offload` (ADR-F049). NO production code, NO migration, NO new
-> dependency. NEXT SLICE = N3 (`search_matter_conversations` over `store.asearch`).**
+> ▶▶ **PICKUP (2026-06-29): RETRIEVAL & MEMORY N3 — cross-thread conversation recall
+> (`search_matter_conversations`) — SHIPPED on branch `fork/n3-search-matter-conversations` (ADR-F049 N3
+> addendum). NO migration, NO new dependency, NO gateway change. The N-LADDER (N0→N3) IS COMPLETE.
+> NEXT = Phase-2 "cost play" (Slice C local embedder + Slice A doc-tool hybrid_search) — do NOT start
+> without the maintainer's go-ahead.**
+> - **What it does:** a thin, area-agnostic, matter-scoped READ tool granted to every matter-bound run
+>   whose Store is live. N2 made each thread's transcript persist to the Store (`("conversation",
+>   str(thread_id))`); N3 adds the agent's READER so a run in thread 2 can recall what was said in thread 1
+>   of the same matter (CLAUDE.md blocker #3). The new tool is the only production code beyond its wiring.
+> - **The SQL↔Store join (load-bearing):** the conversation namespace is thread-keyed; the matter→thread
+>   link is ONLY in SQL (`AgentThread.project_id`, and the namespace component == `str(AgentThread.id)`). So
+>   the tool: validate input → `_load_owned_matter` (404-conflate to `_GONE_MSG`) → **SQL-enumerate the
+>   matter's threads `WHERE user_id AND project_id`** (recent-first, capped 20, current thread excluded for
+>   whole-matter) → `store.asearch(("conversation", str(tid)))` per thread → Python lexical scan → digest
+>   wrapped as untrusted data. **NEVER a bare `("conversation",)` prefix search** (it spans every tenant) —
+>   the SQL `WHERE` is the security boundary (commented load-bearing).
+> - **Lexical, not semantic (yet):** the production Store is filter-only (no IndexConfig), so
+>   `store.asearch(query=…)` is a silent no-op without an embedder (verified in-container) → N3 does its own
+>   Python keyword scan (reuses `matter_read_tools._query_tokens`/`_match_score`); Slice C's embedder layers
+>   `query=` ranking on top later (no rewrite).
+> - **What shipped:** `app/agents/matter_conversation_tools.py` (NEW — `MATTER_CONVERSATION_TOOL_NAMES` +
+>   `build_matter_conversation_tools(session_factory, store, *, run_id, binding, current_thread_id)` +
+>   `_search_matter_conversations`); `app/schemas/matter_memory.py` (`MatterConversationSearchInput`:
+>   query min1/max500, `thread_id: uuid|None`, `extra="forbid"`, malformed→reject); `composition.py`
+>   (moved `store = store_provider()` ABOVE the tool block; build+grant the tool gated on `store is not
+>   None`; new `MATTER_CONVERSATION_DOCTRINE` injected after the roster doctrine). Tests:
+>   `test_matter_conversation_tools.py` (NEW, 13) + grant-disjointness +1 in `test_matter_consolidation.py`
+>   + the A5 gate (`harness.Receipt.thread_id`; `_A5` flipped expected-fail→pass with
+>   `inject_conversation_store`+`seed_thread_one_transcript`+answer-key expectations+recall rubric;
+>   `test_track_a_eval` A5 followup shares the store_provider + seeds-if-not-offloaded;
+>   `test_track_a_unit` A5 retargeted) + the prompt-assembly oracle updated for the new doctrine.
+> - **THE GATE — met:** deterministic reader lock (`test_matter_conversation_tools.py` 13/13: cross-thread
+>   find, cross-matter/owner + foreign-thread_id isolation, current-thread exclusion, reject-not-crash,
+>   injection-as-data, audit-body-free) + full api suite **2877 passed / 37 skipped** with the one
+>   prompt-oracle test updated+re-verified for the new doctrine (CI re-runs the full suite authoritatively) +
+>   ruff (root) + mypy `app` (206 files) clean. **Live A5 finding (ADR-F015,
+>   `docs/fork/evidence/n3-search-matter-conversations/`):** A5 **grounded PASS** — thread 2 CALLED
+>   `search_matter_conversations`, retrieved thread 1's transcript, answered "Manchester" (judge PASS,
+>   `recalled_correctly=true`, `hallucinated_detail=false`); `fixture_valid` (no thread-1 memory writes);
+>   `conversation_seeded_t1=true` (short ack didn't compact → seed path fired, the "seed + best-effort live"
+>   design). No-regression: A1/A6/A8 PASS; **A7 `cap_exceeded` FAIL is PROVEN unchanged-path DeepSeek
+>   variance** (A7 has no store → no conversation tool; its 28-step timeline shows ZERO
+>   search_matter_conversations attempts — the N3 tool/doctrine played no role; same failure mode as the E1
+>   A7 baseline). Recorded, not re-rolled.
+> - **Adversarial review** (4-dim × adversarial verify, 6 agents): **SHIP, 0 blockers**; 1 should-fix folded
+>   (the `thread_id` param documented in the tool docstring — the only text deepagents shows the model);
+>   security/correctness/regression/simplification all clean (owner+matter SQL boundary, 404-conflation,
+>   audit body-free, untrusted-text framing, store-move-up is a pure provider call, no dep/migration).
+> - **Maintainer rulings (settled):** (a) scope default = WHOLE-MATTER (no `thread_id` ⇒ cross-thread within
+>   owner+matter; supplied ⇒ within-chat, intersected against the matter's set — foreign id silently
+>   no-matches); (b) transcript source = STORE-FIRST (offloaded content only; "also search the SQL
+>   `AgentRun` transcript for short un-offloaded threads" = a BACKLOG item iff the eval shows Store-only is
+>   too sparse); (c) A5 gate = SEED + best-effort live (mirrors N2).
+> - **Gotchas (carry forward):** the doctrine is injected unconditionally for matter-bound runs but the tool
+>   is store-gated → in a degraded-Store run the agent gets a graceful R6 "not granted" (benign; production
+>   always has a live Store so the tool is always present); the conversation Store key races under subagent
+>   fan-out (read-only tool tolerates it — `(item.value or {}).get("content","")`); offload fires only on
+>   compaction so short threads may have nothing to search (the Store-first limitation → the SQL-transcript
+>   backlog item); `query=` stays a no-op until Slice C's embedder; re-verify deepagents/langgraph Store
+>   signatures at the next boundary; run pytest/ruff in `lq-ai-api-dev` (repo ROOT + `./skills` mounted,
+>   `--network lq-ai_default`, `DATABASE_URL`→postgres); provider eval needs `LQ_AI_GATEWAY_KEY` +
+>   `-o addopts=""` and runs the WHOLE matrix (the single matrix test loops all scenarios internally — `-k`
+>   can't isolate A5).
+>
+> ▶ **PREVIOUS (2026-06-29): RETRIEVAL & MEMORY N2 — conversation-history offload + within-chat recall (A6)
+> — SHIPPED + MERGED (PR #165, `main` `7063e61f`) (ADR-F049 N2 addendum). NO production code, NO migration,
+> NO new dependency. NEXT SLICE = N3 (DONE — above).**
 > - **The N2 premise was FALSIFIED in our favour** (recorded so we don't relitigate, like N1): the
 >   conversation-history offload was **already wired by N0**. `create_deep_agent` ALWAYS installs the default
 >   `SummarizationMiddleware(model, backend)` (deepagents graph.py); N0 passes it our `CompositeBackend`,

@@ -257,9 +257,11 @@ def test_a6_forces_compaction_and_recalls_a_non_document_aside() -> None:
     assert a6 is _A6
 
 
-def test_a5_is_a_two_thread_expected_fail_with_a_leak_guard() -> None:
+def test_a5_is_a_two_thread_recall_gate_with_a_leak_guard() -> None:
     a5 = next(ts for ts in TRACK_A_SCENARIOS if ts.scenario.id == "a5_cross_thread_recall")
-    assert a5.expected == "expected-fail"
+    # N3: A5 flips from expected-fail to a pass gate — thread 2 recalls thread 1's aside
+    # cross-thread via search_matter_conversations.
+    assert a5.expected == "pass"
     assert a5.followup_prompt, "A5 needs a thread-2 question"
     # the planted NON-MATTER detail must be in the prompt but not in any seeded document:
     assert "Manchester" in a5.scenario.prompt
@@ -268,3 +270,10 @@ def test_a5_is_a_two_thread_expected_fail_with_a_leak_guard() -> None:
     # firing any matter-memory WRITE tool in thread 1 invalidates the measurement:
     assert "record_matter_fact" in a5.fixture_invalid_if_fired
     assert "update_matter_memory" in a5.fixture_invalid_if_fired
+    # N3 gate wiring: a Store is injected (so thread 2's conversation tool is live) and a
+    # seed transcript carries the ground-truth aside for the deterministic gate.
+    assert a5.inject_conversation_store is True
+    assert a5.seed_thread_one_transcript is not None
+    assert "Manchester" in a5.seed_thread_one_transcript
+    # the masked judge needs the ground-truth in expectations (self-stated-fact trap, N2).
+    assert "Manchester" in a5.expectations

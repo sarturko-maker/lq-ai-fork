@@ -1,0 +1,111 @@
+{
+  "agent_model": "deepseek",
+  "n": 1,
+  "judge_mode": "gateway",
+  "judge_model": "deepseek-pro",
+  "scenarios": [
+    {
+      "id": "a1_multidoc_grounding",
+      "expected": "pass",
+      "title": "A1 \u2014 multi-document grounding"
+    },
+    {
+      "id": "a5_cross_thread_recall",
+      "expected": "pass",
+      "title": "A5 \u2014 cross-thread recall (N3)"
+    },
+    {
+      "id": "a6_within_chat_recall_post_compaction",
+      "expected": "expected-fail",
+      "title": "A6 \u2014 within-chat recall post-compaction (finding until measured)"
+    },
+    {
+      "id": "a7_strategy_choice",
+      "expected": "pass",
+      "title": "A7 \u2014 read/retrieve/fan-out strategy choice"
+    },
+    {
+      "id": "a8_negative_control",
+      "expected": "pass",
+      "title": "A8 \u2014 negative control (anti-hallucination)"
+    }
+  ],
+  "results": [
+    {
+      "scenario": "a1_multidoc_grounding",
+      "rep": 1,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "both_facts_present": true
+      },
+      "verdict": "PASS",
+      "packet_written": true
+    },
+    {
+      "scenario": "a5_cross_thread_recall",
+      "rep": 1,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 1,
+      "t1_memory_writes": [],
+      "fixture_valid": true,
+      "conversation_offloaded_t1": false,
+      "conversation_seeded_t1": true,
+      "status_followup": "completed",
+      "l1": {
+        "recalled_detail": true
+      },
+      "conversation_offloaded": true,
+      "conversation_offload_bytes": 278,
+      "verdict": "PASS",
+      "packet_written": true
+    },
+    {
+      "scenario": "a6_within_chat_recall_post_compaction",
+      "rep": 1,
+      "expected": "expected-fail",
+      "status": "completed",
+      "model_turns": 4,
+      "l1": {
+        "retrieval_fired": true,
+        "recalled_code": false,
+        "did_the_work": true
+      },
+      "conversation_offloaded": true,
+      "conversation_offload_bytes": 690,
+      "verdict": "PASS",
+      "packet_written": true
+    },
+    {
+      "scenario": "a7_strategy_choice",
+      "rep": 1,
+      "expected": "pass",
+      "status": "cap_exceeded",
+      "model_turns": 5,
+      "l1": {
+        "strategy": "none",
+        "delegated": false,
+        "compared_both": false
+      },
+      "verdict": "FAIL",
+      "packet_written": true
+    },
+    {
+      "scenario": "a8_negative_control",
+      "rep": 1,
+      "expected": "pass",
+      "status": "completed",
+      "model_turns": 3,
+      "l1": {
+        "retrieval_fired": true,
+        "no_spurious_fanout": true,
+        "acknowledges_absence": true
+      },
+      "verdict": "PASS",
+      "packet_written": true
+    }
+  ]
+}

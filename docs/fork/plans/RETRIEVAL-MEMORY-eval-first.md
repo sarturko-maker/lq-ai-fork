@@ -116,10 +116,19 @@ agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be 
   plain-chat transcripts persist too (route is thread-keyed, not matter-gated); the degraded-key edge
   (checkpointer-`None` + single run over the trigger) is accepted + documented (ADR-F049 N2 addendum). Full
   api suite 2864/38/0; ruff + mypy clean; no migration, no new dependency. *Gate met.*
-- **N3 — thin `search_matter_conversations` over `store.asearch`.** Matter-scoped (404-conflated),
-  optional `thread_id` filter for within-chat. No chunk/embed/index pipeline. Filter/lexical-first;
-  gains semantic recall when the embedder (Slice C) lands. *Gate: A5 recall via the tool; cross-matter
-  404 security check.*
+- **N3 — thin `search_matter_conversations` over the Store. ✅ SHIPPED (2026-06-29).** Matter-scoped
+  (404-conflated), optional `thread_id` filter for within-chat. No chunk/embed/index pipeline.
+  **The SQL↔Store join:** the conversation namespace is thread-keyed (`("conversation", str(thread_id))`),
+  so the tool SQL-enumerates the matter's threads (`AgentThread WHERE user_id AND project_id`, the security
+  boundary — never a bare `("conversation",)` prefix search, which would span every tenant) then reads each
+  thread's namespace. Filter/lexical-first (own Python keyword scan — `query=` is a no-op without an
+  embedder, verified in-container; semantic recall layers on when Slice C lands). Read-only through
+  `guarded_dispatch`; audit counts/IDs only; retrieved transcripts framed as untrusted data; tool granted
+  only when the Store is live. Maintainer rulings: whole-matter default scope; Store-first (SQL-transcript
+  fallback = backlog iff too sparse); A5 gate = seed + best-effort live. **Deterministic gate:**
+  `test_matter_conversation_tools.py` (cross-thread find, cross-matter/owner + foreign-thread_id isolation,
+  current-thread exclusion, reject-not-crash, injection-as-data, audit-no-body). A5 flips expected-fail →
+  pass. No migration, no new dependency. *(ADR-F049 N3 addendum.)*
 
 ## Phase 2 — the cost play (shared local embedder; documents)
 
