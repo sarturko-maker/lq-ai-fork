@@ -25,7 +25,10 @@ from app.knowledge import embedding_provider as ep
 class _FakeEmbeddingProvider:
     """Model-free, deterministic. Matter chunks carry no ``embedding_local`` in these
     tests, so the vector side is empty and retrieval falls back to FTS — the fake's
-    vector value is irrelevant to the assertions, only that no model loads."""
+    vector value is irrelevant to the assertions, only that no model loads. For tests
+    that need REAL cosine geometry (Slice C2 paraphrase ranking), use
+    ``tests.agents.embedding_fakes.ConceptEmbeddingProvider`` instead (passed explicitly,
+    not via this autouse seam)."""
 
     name = "fake:test"
     dim = 768
