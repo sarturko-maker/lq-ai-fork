@@ -16,7 +16,7 @@ import pytest
 from evals.scoring import score_all
 
 from tests.agents.scenarios import track_a_lib
-from tests.agents.scenarios.track_a_fixtures import _A1, _A7, _A8, TRACK_A_SCENARIOS
+from tests.agents.scenarios.track_a_fixtures import _A1, _A6, _A7, _A8, TRACK_A_SCENARIOS
 from tests.agents.scenarios.track_a_lib import (
     _STEP_KEYS,
     JudgeRubric,
@@ -233,6 +233,28 @@ def test_track_a_scenarios_are_well_formed() -> None:
             assert spec["kind"] in _KNOWN_METRIC_KINDS, (ts.scenario.id, name, spec["kind"])
         # every metric spec scores without raising on a trivial (empty) timeline:
         score_all(ts.metrics, [], "")
+
+
+def test_a6_forces_compaction_and_recalls_a_non_document_aside() -> None:
+    a6 = next(
+        ts for ts in TRACK_A_SCENARIOS if ts.scenario.id == "a6_within_chat_recall_post_compaction"
+    )
+    # A finding (ADR-F015), not a tuned gate — recall through a lossy summary is what
+    # N2 measures; honest abstention is acceptable.
+    assert a6.expected == "expected-fail"
+    # The N2 knobs: a lowered window forces compaction; a Store makes the offload
+    # route live so read_file recall is exercised.
+    assert a6.compaction_max_input_tokens is not None and a6.compaction_max_input_tokens > 0
+    assert a6.inject_conversation_store is True
+    # The recall token is a NON-fileable aside in the prompt, ABSENT from every seeded
+    # document — so recall is genuinely from conversation history, not the documents.
+    assert "ORION-7741" in a6.scenario.prompt
+    doc_text = " ".join(c.content for d in a6.docs for c in d.chunks)
+    assert "ORION-7741" not in doc_text
+    # The within-chat recall signal is scored at L1.
+    assert a6.metrics["recalled_code"]["fragments"] == ["ORION-7741"]
+    # _A6 is the same object that ships in the matrix.
+    assert a6 is _A6
 
 
 def test_a5_is_a_two_thread_expected_fail_with_a_leak_guard() -> None:

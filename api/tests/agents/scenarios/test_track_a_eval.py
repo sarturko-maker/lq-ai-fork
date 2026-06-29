@@ -29,6 +29,7 @@ import pytest
 import pytest_asyncio
 from evals.runner import fetch_steps
 from evals.scoring import score_all
+from langgraph.store.memory import InMemoryStore
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.skills import SkillRegistry, load_registry
@@ -95,9 +96,20 @@ async def _run_once(
         factory, area_key=ts.area_key, docs=ts.docs, matter_name=ts.matter_name
     )
     row: dict[str, object] = {"scenario": ts.scenario.id, "rep": rep, "expected": ts.expected}
+    # A6 (N2): inject a per-run in-memory Store so the /conversation_history/ route is
+    # installed and the offload → read_file recall path is live; lower the model window
+    # so the always-on summariser compacts mid-run. Both default off for other scenarios.
+    store: InMemoryStore | None = InMemoryStore() if ts.inject_conversation_store else None
+    store_provider = (lambda: store) if store is not None else None
     try:
         receipt = await run_scenario(
-            ts.scenario, seeded, skill_registry=registry, model_alias=_MODEL, max_steps=ts.max_steps
+            ts.scenario,
+            seeded,
+            skill_registry=registry,
+            model_alias=_MODEL,
+            max_steps=ts.max_steps,
+            compaction_max_input_tokens=ts.compaction_max_input_tokens,
+            store_provider=store_provider,
         )
         row["status"] = receipt.status
         row["model_turns"] = receipt.model_turns
@@ -127,6 +139,18 @@ async def _run_once(
         steps = await fetch_steps(engine, receipt.run_id)
         l1 = score_all(ts.metrics, steps, receipt.final_answer)
         row["l1"] = l1
+
+        # A6 (N2): observed proof that compaction actually fired during the run — the
+        # default SummarizationMiddleware offloads evicted history to the injected Store
+        # under ("conversation", thread_id). A non-empty conversation namespace means the
+        # run compacted; an empty one means it never crossed the trigger (so any recall was
+        # in-context, NOT post-compaction). A finding, not a gate (ADR-F015).
+        if store is not None:
+            convo = list(store.search(("conversation",)))
+            row["conversation_offloaded"] = bool(convo)
+            row["conversation_offload_bytes"] = sum(
+                len((item.value or {}).get("content", "")) for item in convo
+            )
         packet = build_judging_packet(
             scenario_id=ts.scenario.id,
             rubric=ts.rubric,

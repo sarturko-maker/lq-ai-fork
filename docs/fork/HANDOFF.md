@@ -3,10 +3,62 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-28): RETRIEVAL & MEMORY N1 — the read-only DATA memory tiers moved onto a fork
-> middleware seam (`TierMemoryMiddleware`) — SHIPPED on branch `fork/n1-tier-middleware` (ADR-F049). NO
-> migration, NO new dependency. NEXT SLICE = N2 (`SummarizationMiddleware` + `/conversation_history/`
-> offload → within-thread recall post-compaction).**
+> ▶▶ **PICKUP (2026-06-29): RETRIEVAL & MEMORY N2 — conversation-history offload + within-chat recall (A6)
+> — SHIPPED on branch `fork/n2-conversation-offload` (ADR-F049). NO production code, NO migration, NO new
+> dependency. NEXT SLICE = N3 (`search_matter_conversations` over `store.asearch`).**
+> - **The N2 premise was FALSIFIED in our favour** (recorded so we don't relitigate, like N1): the
+>   conversation-history offload was **already wired by N0**. `create_deep_agent` ALWAYS installs the default
+>   `SummarizationMiddleware(model, backend)` (deepagents graph.py); N0 passes it our `CompositeBackend`,
+>   whose `/conversation_history/` route maps the offload path `/conversation_history/{thread_id}.md` (from
+>   `artifacts_root='/'`) verbatim into the Store ns `("conversation", thread_id)`; recall is the path the
+>   summary embeds (builtin `read_file`). N0's "installed but unwritten until N2" was satisfied the moment N0
+>   shipped — the writer was always the default middleware. So **N2 = verify + test + eval, ZERO production
+>   code.**
+> - **What shipped (test-only):** `tests/agents/test_summarization_offload.py` (NEW, 5 tests) — the
+>   deterministic offload drift-guard: builds the REAL deepagents `SummarizationMiddleware` (via
+>   `create_summarization_middleware`, exactly as `create_deep_agent` does) over our `build_memory_backend`
+>   composite + an `InMemoryStore`, driven through a langgraph runtime; asserts routing
+>   (`artifacts_root=='/'` → prefix `/conversation_history` → `CONVERSATION_ROUTE`, a writable StoreBackend),
+>   offload → ns `("conversation",thread_id)` key `/{thread_id}.md`, append-on-2nd (single key), thread
+>   isolation, read-back. `tests/agents/scenarios/harness.py` — `run_scenario` gained `compaction_max_input_tokens`
+>   (→ `model_builder=partial(build_gateway_chat_model, max_input_tokens=…)`) + `store_provider`, both
+>   existing `compose_and_execute_run` params (no production change). `track_a_fixtures.py` — the **`_A6`**
+>   scenario (forces compaction over the RFQ matter, recalls a non-fileable aside `ORION-7741`).
+>   `test_track_a_eval.py` — A6 wiring + a post-run **`conversation_offloaded`** probe (searches the injected
+>   Store → observed proof compaction fired). `test_track_a_unit.py` — A6 well-formedness.
+> - **THE GATE — met:** deterministic offload lock (`test_summarization_offload.py` 5/5) + full api suite
+>   **2864 passed / 38 skipped / 0 failed** + ruff (root) + mypy `app` (205 files) clean. **Live A6 finding
+>   (ADR-F015, not a baseline freeze; `docs/fork/evidence/n2-conversation-offload/`):** at
+>   `compaction_max_input_tokens=7000` A6 forced a REAL compaction (`conversation_offloaded=True`, 378 B —
+>   opening turn evicted to the Store) and the agent **correctly recalled `ORION-7741`** (L1
+>   `recalled_code=True`, verdict PASS) — carried by the LLM summary, `read_file` NOT needed. So native
+>   compaction suffices for within-chat recall when the summary preserves the detail; the offload-file read +
+>   N3's search tool are the backstop for dropped details / cross-thread. No-regression smoke (N=1): A5/A7/A8
+>   verdict PASS as baseline; A1 a transient empty-answer run failure on its UNCHANGED path (E1 baseline
+>   8/10 — noise, recorded not re-rolled).
+> - **Maintainer rulings (settled):** (1) degraded-key edge (Store live + checkpointer `None` + a single run
+>   crossing ~170k → offload file-name falls back to `session_<hex>` while the ns key is `str(run.thread_id)`)
+>   = **ACCEPT + DOCUMENT** (doubly moot: degraded runs refuse follow-ups, within-run recall still works) →
+>   ADR-F049 **N2 addendum**, no guard; (2) plain-chat transcripts **persist** too (the conversation route
+>   is thread-keyed, installs whenever a thread is bound — not matter-gated); (3) A6 exercises the **full**
+>   offload→`read_file` path via an injected `InMemoryStore`.
+> - **NEXT = N3** (`plans/RETRIEVAL-MEMORY-eval-first.md`): a thin `search_matter_conversations` over
+>   `store.asearch` (matter-scoped, 404-conflated, optional `thread_id` filter). *Gate: A5 recall via the
+>   tool + a cross-matter 404 security check.* This lifts A5 (cross-thread recall, still ~0) and is the
+>   robust backstop when a summary drops a detail.
+> - **Gotchas (carry into N3):** the masked judge can't grade a SELF-STATED fact (it strips the user prompt)
+>   → A6 puts the ground-truth code in `expectations` as an answer key (fine; docs/prompt/run-id masking
+>   preserved); the compaction trigger is content-/model-dependent — at small fixture-doc scale the
+>   conversation sits near the boundary (windows 12000/9000 completed but did NOT compact — in-context only;
+>   7000 was where it fired) → the robust path is N3's explicit search, not trigger-tuning; **subagent
+>   fan-out writes the SAME `/conversation_history/{thread}.md` key via adownload→aedit → a read-modify-write
+>   race** (note for N3's reader); offload is best-effort (write failure → `file_path=None`, nothing to
+>   recall); re-verify deepagents/langgraph signatures in-container (the oracle); run pytest/ruff in
+>   `lq-ai-api-dev` with repo ROOT + `./skills` mounted on `--network lq-ai_default` + `DATABASE_URL`→postgres.
+>
+> ▶ **PREVIOUS (2026-06-28): RETRIEVAL & MEMORY N1 — the read-only DATA memory tiers moved onto a fork
+> middleware seam (`TierMemoryMiddleware`) — SHIPPED + MERGED (PR #164, ADR-F049). NO
+> migration, NO new dependency. NEXT SLICE = N2 (DONE — above).**
 > - **The N1 premise was FALSIFIED by exploration** (recorded so we don't relitigate): (a) the Matter
 >   File (wiki) can't move to the Store without a separate cross-module ADR'd slice — it would desync the
 >   cockpit C3-UM APIs, split the single-SQL wiki+fact-ledger+snapshot transaction, and weaken the

@@ -12,6 +12,7 @@ gateway URL/key all flow from settings exactly as in production.
 
 from __future__ import annotations
 
+import functools
 import os
 import time
 import uuid
@@ -19,10 +20,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from langgraph.store.base import BaseStore
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.composition import compose_and_execute_run
+from app.agents.factory import build_gateway_chat_model
 from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
 from app.models.audit import AuditLog
 from app.models.document import Document, DocumentChunk
@@ -261,6 +264,8 @@ async def run_scenario(
     skill_registry: SkillRegistry | None = None,
     max_steps: int = _MAX_STEPS,
     model_alias: str | None = None,
+    compaction_max_input_tokens: int | None = None,
+    store_provider: Callable[[], BaseStore | None] | None = None,
 ) -> Receipt:
     """Drive one scenario through the production loop; read back receipts.
 
@@ -279,6 +284,15 @@ async def run_scenario(
     so the harness must be able to point at a candidate provider when
     qualifying it (ADR-F015). Resolution: explicit arg → ``LQ_AI_SCENARIO_MODEL``
     env → ``"smart"`` (the operator-configured, currently-qualified default).
+
+    F2 N2 (ADR-F049): ``compaction_max_input_tokens`` lowers the model's profile
+    window so deepagents' always-on ``SummarizationMiddleware`` (0.85x trigger)
+    compacts mid-run after a couple of tool roundtrips — the only way to OBSERVE
+    compaction in a bounded run (production sends 200k). ``store_provider`` injects
+    a Store so the ``/conversation_history/`` route is installed and the offload →
+    ``read_file`` recall path is exercised (the A6 within-chat-recall gate). Both
+    reuse the existing ``compose_and_execute_run`` seams — no production change;
+    ``None`` (default) preserves today's 200k / no-Store behaviour.
     """
     resolved_alias = model_alias or os.environ.get("LQ_AI_SCENARIO_MODEL", "smart")
     factory = seeded.factory
@@ -301,18 +315,30 @@ async def run_scenario(
         await db.commit()
         run_id = run.id
 
-    started = time.monotonic()
-    await compose_and_execute_run(
-        run_id=run_id,
-        session_factory_provider=lambda: factory,
+    compose_kwargs: dict[str, Any] = {
+        "run_id": run_id,
+        "session_factory_provider": lambda: factory,
         # Single-turn, fresh thread per scenario — no checkpoint needed,
         # and this keeps the harness off any Postgres checkpointer that
         # would point at the dev DB rather than the test DB.
-        checkpointer_provider=lambda: None,
+        "checkpointer_provider": lambda: None,
         # UX-B-3: inject the loaded registry (or None → skills off, the
         # production default in a registry-less process).
-        skill_registry_provider=lambda: skill_registry,
-    )
+        "skill_registry_provider": lambda: skill_registry,
+    }
+    if compaction_max_input_tokens is not None:
+        # N2: a smaller window -> the default summariser's 0.85x trigger fires
+        # mid-run (production's 200k never does in a step-capped run).
+        compose_kwargs["model_builder"] = functools.partial(
+            build_gateway_chat_model, max_input_tokens=compaction_max_input_tokens
+        )
+    if store_provider is not None:
+        # N2: install the /conversation_history/ (+ /memories) Store routes so the
+        # offload persists and is recallable via read_file within the run.
+        compose_kwargs["store_provider"] = store_provider
+
+    started = time.monotonic()
+    await compose_and_execute_run(**compose_kwargs)
     latency = time.monotonic() - started
 
     async with factory() as db:

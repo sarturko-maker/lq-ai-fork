@@ -98,10 +98,24 @@ agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be 
 
 ## Phase 1 — conversations on the native Store
 
-- **N2 — `SummarizationMiddleware` with a `StoreBackend` offload route.** Native compaction (profile
-  already set, `factory.py:111`) + verbatim offload to `/conversation_history/`. Gives persistent,
-  retrievable within-thread transcripts with no custom code. *Gate: A6 (within-chat recall post-
-  compaction). Also measures whether within-chat retrieval needs anything beyond native.*
+- **N2 — `SummarizationMiddleware` with a `StoreBackend` offload route. ✅ SHIPPED (2026-06-29).** The
+  premise was **falsified in our favour**: the offload was **already wired by N0** — `create_deep_agent`
+  always installs the default `SummarizationMiddleware(model, backend)` over our `CompositeBackend`, whose
+  `/conversation_history/` route maps the offload path `/conversation_history/{thread_id}.md` (from
+  `artifacts_root='/'`) verbatim into the Store ns `("conversation", thread_id)`; recall is the path the
+  summary embeds (builtin `read_file`). So N2 shipped as **verify + test + eval, no production code**: a
+  deterministic offload drift-guard (`tests/agents/test_summarization_offload.py`: routing/artifacts_root,
+  Store landing, append-on-2nd, thread isolation, read-back) + the **A6** within-chat-recall scenario (a
+  per-scenario `compaction_max_input_tokens` + injected Store harness seam — both existing
+  `compose_and_execute_run` params, no production change). **Live finding (ADR-F015, not a freeze;
+  `docs/fork/evidence/n2-conversation-offload/`):** A6 forced a real compaction (`conversation_offloaded=
+  True`, the opening turn evicted to the Store) and the agent **correctly recalled** the planted aside via
+  the LLM summary (verdict PASS, `recalled_code=True`; `read_file` not needed). So native compaction
+  suffices for within-chat recall when the summary preserves the detail; the explicit offload-file read and
+  N3's `search_matter_conversations` are the backstop for dropped details / cross-thread. Maintainer rulings:
+  plain-chat transcripts persist too (route is thread-keyed, not matter-gated); the degraded-key edge
+  (checkpointer-`None` + single run over the trigger) is accepted + documented (ADR-F049 N2 addendum). Full
+  api suite 2864/38/0; ruff + mypy clean; no migration, no new dependency. *Gate met.*
 - **N3 — thin `search_matter_conversations` over `store.asearch`.** Matter-scoped (404-conflated),
   optional `thread_id` filter for within-chat. No chunk/embed/index pipeline. Filter/lexical-first;
   gains semantic recall when the embedder (Slice C) lands. *Gate: A5 recall via the tool; cross-matter
