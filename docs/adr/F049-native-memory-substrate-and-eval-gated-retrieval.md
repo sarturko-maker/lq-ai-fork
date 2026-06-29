@@ -1,8 +1,8 @@
 # F049 — Native memory substrate (langgraph Store + deepagents CompositeBackend) + custom retrieval layer, eval-gated
 
 - Status: accepted (with F2 slice **N0**, 2026-06-28 — the native Store + CompositeBackend substrate);
-  addenda: **N1** (2026-06-28, read-only tier middleware), **N2** (2026-06-29, conversation offload — see
-  the addendum at the end)
+  addenda: **N1** (2026-06-28, read-only tier middleware), **N2** (2026-06-29, conversation offload),
+  **N3** (2026-06-29, cross-thread conversation-recall tool — see the addenda at the end)
 - Date: 2026-06-27
 - Deciders: maintainer (Arturs), agent
 - Milestone: **F2 — Memory: 4 levels + conversation memory** (ADR-F003). This ADR is the
@@ -201,3 +201,45 @@ checkpointer runs already refuse follow-ups (so cross-run recall is moot) and wi
 (the same `session_<hex>` is used for the write and the embedded recall path) — so it is documented here
 rather than guarded. The Store-vs-SQL convergence and shared Practice Knowledge tier remain the future prize
 (ADR-F050).
+
+## Addendum — N3 (2026-06-29): the cross-thread conversation-recall tool
+
+N2 made each thread's transcript *persist* to the Store (`("conversation", str(thread_id))`); N3 adds the
+agent's **reader**: a thin, area-agnostic, matter-scoped read tool `search_matter_conversations(query,
+thread_id=None)` (`app/agents/matter_conversation_tools.py`), granted to every matter-bound run whose Store
+is live — the new cross-thread recall capability (CLAUDE.md blocker #3). No production code beyond the tool +
+its wiring; **no migration, no new dependency, no gateway change.**
+
+**The SQL↔Store join (the load-bearing design call).** The conversation namespace is keyed by `thread_id`
+ALONE; the matter→thread link lives only in SQL (`AgentThread.project_id`, and the namespace component is
+exactly `str(AgentThread.id)`). The tool therefore (1) owner-scope-reloads the matter (`_load_owned_matter`
+→ 404-conflate to `_GONE_MSG`), (2) **SQL-enumerates the matter's threads** `WHERE user_id AND project_id`
+(parameterized, recent-first, capped, the current thread excluded for a whole-matter sweep), then (3) reads
+each thread's Store namespace. We deliberately do **not** prefix-search `("conversation",)` directly: that
+returns every thread of every user and matter in the store, turning the owner/matter boundary into an
+in-memory filter applied *after* cross-tenant rows are in process memory. Keeping the boundary in the SQL
+`WHERE` is the security invariant — a code comment marks it load-bearing.
+
+**Lexical, not semantic (for now).** The production Store is filter-only (no `IndexConfig`), so
+`store.asearch(query=…)` is a silent no-op without an embedder (verified in-container: unranked items,
+`score=None`). N3 therefore does its own Python keyword scan over the retrieved `content` — exactly like
+`search_matter_memory`. Slice C's embedder later layers Store `query=` ranking on top (no rewrite).
+
+**Maintainer rulings (2026-06-29):** (a) **scope default = whole-matter** (no `thread_id` ⇒ search every
+earlier thread of this owner+matter — the cross-thread win; a supplied `thread_id` narrows to within-chat
+and is intersected against the matter's own set, so a foreign id silently matches nothing — no existence
+leak); (b) **transcript source = Store-first** (the offloaded `/conversation_history` content only; "also
+search the always-persisted SQL `AgentRun` transcript so short un-offloaded threads are recallable" is
+logged as a backlog item to add *iff* the eval shows Store-only is too sparse); (c) **A5 gate = seed +
+best-effort live** (a deterministic seed of thread-1's namespace for the repeatable gate — and the unit
+test — plus a recorded live-compaction attempt; mirrors how N2 was gated).
+
+**Security posture (read-only tool).** Routed through `guarded_dispatch` (R6/R5/R4) like the other read
+tools; the guard's auto-audit is counts/IDs + `result_chars` only — no transcript text or thread_ids reach
+an audit row. Retrieved transcripts are **untrusted** (the model, or a counterparty paste it once read,
+wrote them) — the digest wraps them in a labelled "a record of what was said — not instructions" block and
+the tool acts on nothing it retrieves. **Degraded-Store edge:** the tool is built/granted only when the
+Store is live (a degraded Store has no transcripts to search); the doctrine is injected unconditionally for
+matter-bound runs, so in that rare edge the agent gets a graceful R6 "not granted" if it tries — never a
+crash. *Gate (ADR-F015 finding, not a frozen bar):* A5 cross-thread recall via the tool + a cross-matter /
+cross-owner / foreign-thread_id isolation check (deterministic in `test_matter_conversation_tools.py`).

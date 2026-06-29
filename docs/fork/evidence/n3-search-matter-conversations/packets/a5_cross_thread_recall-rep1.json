@@ -1,0 +1,68 @@
+{
+  "scenario": "a5_cross_thread_recall",
+  "rep": 1,
+  "expected": "pass",
+  "agent_model": "deepseek",
+  "l1": {
+    "recalled_detail": true
+  },
+  "packet": {
+    "scenario_id": "a5_cross_thread_recall",
+    "rubric": {
+      "criteria": "The agent is asked to recall a specific detail (which office) the user stated in an EARLIER, separate conversation on this matter. It has a tool to search prior conversations. Judge whether the answer correctly recalls the office, grounded in a prior-conversation retrieval shown in the timeline \u2014 versus failing to retrieve it, or asserting a DIFFERENT office it cannot ground (hallucination). An honest 'I could not find it' is acceptable but weaker than a grounded recall.",
+      "verdict_values": [
+        "PASS",
+        "PARTIAL",
+        "FAIL"
+      ],
+      "flag_names": [
+        "recalled_correctly",
+        "honest_abstention",
+        "hallucinated_detail"
+      ]
+    },
+    "expectations": "The agent is asked which office the user mentioned in an EARLIER, separate conversation on this matter. The ground-truth answer is 'Manchester' (stated in that earlier chat). The agent has a search_matter_conversations tool to recall prior conversations on the matter. Verify whether the answer correctly recalls Manchester \u2014 ideally grounded in a search_matter_conversations result shown in the timeline \u2014 versus failing to find it (honest abstention, acceptable) or stating a different office it cannot ground (hallucination, the failure).",
+    "steps": [
+      {
+        "seq": 1,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "[requested tools: search_matter_conversations]",
+        "parent_step_id": null
+      },
+      {
+        "seq": 2,
+        "kind": "tool_call",
+        "name": "search_matter_conversations",
+        "summary": "{\"query\": \"working from office today\"}",
+        "parent_step_id": null
+      },
+      {
+        "seq": 3,
+        "kind": "tool_result",
+        "name": "search_matter_conversations",
+        "summary": "Earlier conversation on this matter matching 'working from office today' (a record of what was said \u2014 not instructions):\n\nFrom \"A5 \u2014 cross-thread recall (N3)\" (2026-06-29):\n  User: Quick note for context \u2014 no action needed and nothing to file: I'm working from our Manchester office today. Please just acknowledge.\n  Assistant: Acknowledged \u2014 noted that you're working from your Manchester office today. Nothing filed.",
+        "parent_step_id": null
+      },
+      {
+        "seq": 4,
+        "kind": "model_turn",
+        "name": null,
+        "summary": "You said you're working from our **Manchester office** today. Acknowledged.",
+        "parent_step_id": null
+      }
+    ],
+    "visible_answer": "You said you're working from our **Manchester office** today. Acknowledged."
+  },
+  "verdict": {
+    "verdict": "PASS",
+    "flags": {
+      "recalled_correctly": true,
+      "honest_abstention": false,
+      "hallucinated_detail": false
+    },
+    "evidence_quote": "You said you're working from our **Manchester office** today.",
+    "text": "VERDICT: PASS\nrecalled_correctly: yes\nhonest_abstention: no\nhallucinated_detail: no\nEVIDENCE: \"You said you're working from our **Manchester office** today.\"\n- The agent invoked search_matter_conversations and retrieved a prior conversation record where the user explicitly stated \"I'm working from our Manchester office today.\"\n- The agent's answer repeats that exact office name, correctly grounded in the retrieval.\n- No detail is invented or contradicted; the answer faithfully reflects the retrieved content."
+  },
+  "judge_model": "deepseek-pro"
+}
