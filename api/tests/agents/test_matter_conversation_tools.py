@@ -40,14 +40,28 @@ from app.agents.matter_fact_tools import MATTER_FACT_TOOL_NAMES
 from app.agents.matter_memory_tools import MATTER_MEMORY_TOOL_NAMES
 from app.agents.matter_read_tools import MATTER_READ_TOOL_NAMES
 from app.agents.ropa_tools import ROPA_TOOL_NAMES
+from app.agents.store import build_store_index_config
 from app.agents.tools import MatterBinding
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.project import Project
 from app.models.user import User
 from app.security import hash_password
+from tests.agents.embedding_fakes import ConceptEmbeddingProvider
 
 pytestmark = pytest.mark.integration
+
+# A transcript whose only locatable detail ("Manchester office") shares NO word with the
+# paraphrase query below — so a lexical scan misses it and ONLY the semantic index surfaces
+# it (the Slice-C2 win). Concept embedder maps both to the "location" dimension.
+_PARAPHRASE_QUERY = "northern premises"
+
+
+def _indexed_store() -> InMemoryStore:
+    """An InMemoryStore wired with the SAME index config production uses (Slice C2),
+    over a deterministic concept embedder — so ``asearch(query=)`` ranks by cosine."""
+    return InMemoryStore(index=build_store_index_config(ConceptEmbeddingProvider()))
+
 
 # A realistic offloaded transcript (the N2 offload writes a ## Summarized section + the
 # raw evicted turns; the planted aside is a NON-matter detail the agent would not file).
@@ -476,3 +490,212 @@ async def test_guard_audit_carries_no_body(
     assert "search_matter_conversations" in details
     assert "success" in details
     assert marker not in details  # …but never reaches the audit row
+
+
+# --------------------------------------------------------------------------- #
+# Semantic recall (Slice C2) — the Store IndexConfig lights up paraphrase recall
+# --------------------------------------------------------------------------- #
+
+
+async def test_semantic_recall_surfaces_a_paraphrase(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """The C2 win: an indexed Store surfaces an earlier thread whose detail the query
+    PARAPHRASES — no shared word, so the lexical scan alone would miss it."""
+    user_id, project_id = matter
+    t1 = await _add_thread(commit_factory, user_id, project_id, title="round 1")
+    t2 = await _add_thread(commit_factory, user_id, project_id, title="round 2")
+    store = _indexed_store()
+    # aput (async) so the index embeds on write, exactly as the N2 offload does.
+    await store.aput(("conversation", str(t1)), f"/{t1}.md", {"content": _T1_TRANSCRIPT})
+    async with commit_factory() as db:
+        out = await _search_matter_conversations(
+            db,
+            _binding(user_id, project_id),
+            store,
+            current_thread_id=t2,
+            query=_PARAPHRASE_QUERY,  # "northern premises" — no word overlap with the transcript
+            thread_id=None,
+        )
+    assert "Manchester" in out  # surfaced semantically…
+    assert "round 1" in out  # …and the earlier thread is identified
+    assert "not instructions" in out  # …inside the untrusted-data label
+
+
+async def test_paraphrase_misses_on_a_filter_only_store(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """Proof the win is the index, not the query: the SAME paraphrase on a non-indexed
+    Store finds nothing (no shared word → lexical scan misses; no vectors → no semantic)."""
+    user_id, project_id = matter
+    t1 = await _add_thread(commit_factory, user_id, project_id, title="round 1")
+    t2 = await _add_thread(commit_factory, user_id, project_id, title="round 2")
+    store = InMemoryStore()  # filter-only (no index) — N3 / degraded behaviour
+    _seed_conversation(store, t1, _T1_TRANSCRIPT)
+    async with commit_factory() as db:
+        out = await _search_matter_conversations(
+            db,
+            _binding(user_id, project_id),
+            store,
+            current_thread_id=t2,
+            query=_PARAPHRASE_QUERY,
+            thread_id=None,
+        )
+    assert "No earlier conversation on this matter matched" in out
+
+
+async def test_semantic_preserves_honest_absence(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """An OFF-topic query (a different concept, orthogonal vector) stays below the semantic
+    threshold → honest no-match, even with the index on (semantic doesn't invent matches)."""
+    user_id, project_id = matter
+    t1 = await _add_thread(commit_factory, user_id, project_id, title="round 1")
+    t2 = await _add_thread(commit_factory, user_id, project_id, title="round 2")
+    store = _indexed_store()
+    await store.aput(("conversation", str(t1)), f"/{t1}.md", {"content": _T1_TRANSCRIPT})
+    async with commit_factory() as db:
+        out = await _search_matter_conversations(
+            db,
+            _binding(user_id, project_id),
+            store,
+            current_thread_id=t2,
+            query="payment rate cap",  # the "fee" concept — orthogonal to the location detail
+            thread_id=None,
+        )
+    assert "No earlier conversation on this matter matched" in out
+    assert "Manchester" not in out
+
+
+async def test_semantic_threshold_boundary_is_applied(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """Pin _SEM_THRESHOLD (0.6) deterministically. The concept fake unit-normalises one-hot
+    concept vectors, so a query touching N concepts scores cosine 1/sqrt(N) against a
+    single-concept transcript: a 2-concept query → 0.707 (>= 0.6, surfaces), a 3-concept query
+    → 0.577 (< 0.6, does NOT surface). Both queries share NO word with the transcript, so the
+    cutoff is purely semantic — constraining the threshold to (0.577, 0.707]."""
+    user_id, project_id = matter
+    t1 = await _add_thread(commit_factory, user_id, project_id, title="round 1")
+    cur = await _add_thread(commit_factory, user_id, project_id, title="current")
+    store = _indexed_store()
+    await store.aput(
+        ("conversation", str(t1)), f"/{t1}.md", {"content": _T1_TRANSCRIPT}
+    )  # location only
+
+    async def _search(query: str) -> str:
+        async with commit_factory() as db:
+            return await _search_matter_conversations(
+                db,
+                _binding(user_id, project_id),
+                store,
+                current_thread_id=cur,
+                query=query,
+                thread_id=None,
+            )
+
+    # cosine 0.707 ≥ 0.6 → surfaces (no lexical overlap with the transcript).
+    assert "Manchester" in await _search("northern fee")
+    # cosine 0.577 < 0.6 → stays below the floor → honest no-match.
+    out_below = await _search("northern fee deadline")
+    assert "Manchester" not in out_below
+    assert "No earlier conversation on this matter matched" in out_below
+
+
+async def test_cross_matter_isolation_on_indexed_path(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+    other_matter: tuple[uuid.UUID, uuid.UUID],
+) -> None:
+    """The SQL enumeration boundary holds on the NEW indexed/semantic path too: a query that
+    SEMANTICALLY matches matter B's transcript still cannot surface it for matter A, because
+    the boundary is upstream of asearch — only this matter's SQL-enumerated threads are scored."""
+    user_id, project_id = matter
+    other_user, other_project = other_matter
+    mine = await _add_thread(commit_factory, user_id, project_id, title="mine")
+    theirs = await _add_thread(commit_factory, other_user, other_project, title="theirs")
+    store = _indexed_store()
+    # Mine is the "timeline" concept; theirs is the "location" concept that the paraphrase hits.
+    await store.aput(
+        ("conversation", str(mine)), f"/{mine}.md", {"content": "our deadline is in March"}
+    )
+    await store.aput(("conversation", str(theirs)), f"/{theirs}.md", {"content": _T1_TRANSCRIPT})
+    async with commit_factory() as db:
+        out = await _search_matter_conversations(
+            db,
+            _binding(user_id, project_id),
+            store,
+            current_thread_id=None,
+            query=_PARAPHRASE_QUERY,  # "northern premises" — semantically matches THEIRS, not mine
+            thread_id=None,
+        )
+    assert "Manchester" not in out  # matter B's semantically-matching transcript never surfaces
+    assert "No earlier conversation on this matter matched" in out
+
+
+async def test_pre_index_transcript_still_surfaces_on_indexed_pg_store(
+    commit_factory: async_sessionmaker[AsyncSession],
+    matter: tuple[uuid.UUID, uuid.UUID],
+    test_db_url: str,
+) -> None:
+    """Slice C2 blocker regression (end-to-end): a transcript offloaded BEFORE the index existed
+    (no store_vectors row) must STILL surface via the lexical scan once the indexed store is live.
+    _read_thread_transcript reads content query-LESS for exactly this reason. Uses a REAL pg store
+    — InMemoryStore's scoreless fallback would mask the indexed query's INNER-JOIN drop."""
+    from psycopg.rows import dict_row
+    from psycopg_pool import AsyncConnectionPool
+
+    from app.agents.checkpointer import _psycopg_dsn
+
+    user_id, project_id = matter
+    t1 = await _add_thread(commit_factory, user_id, project_id, title="round 1")
+    current = await _add_thread(commit_factory, user_id, project_id, title="current")
+
+    def _pg_pool() -> AsyncConnectionPool:
+        return AsyncConnectionPool(
+            _psycopg_dsn(test_db_url),
+            open=False,
+            min_size=1,
+            max_size=2,
+            kwargs={"autocommit": True, "row_factory": dict_row, "prepare_threshold": 0},
+        )
+
+    from langgraph.store.postgres.aio import AsyncPostgresStore
+
+    # 1) Write t1's transcript with NO index (pre-C2 posture → no store_vectors row).
+    pool = _pg_pool()
+    await pool.open()
+    try:
+        plain = AsyncPostgresStore(pool)  # type: ignore[arg-type]
+        await plain.setup()
+        await plain.aput(("conversation", str(t1)), f"/{t1}.md", {"content": _T1_TRANSCRIPT})
+    finally:
+        await pool.close()
+
+    # 2) Reopen the SAME DB WITH the index and search via the tool: the lexical "office" match
+    #    must still surface t1, even though its row has no vector (indexed query= would drop it).
+    pool2 = _pg_pool()
+    await pool2.open()
+    try:
+        indexed = AsyncPostgresStore(
+            pool2,  # type: ignore[arg-type]
+            index=build_store_index_config(ConceptEmbeddingProvider()),
+        )
+        await indexed.setup()
+        async with commit_factory() as db:
+            out = await _search_matter_conversations(
+                db,
+                _binding(user_id, project_id),
+                indexed,
+                current_thread_id=current,
+                query="office",  # a LEXICAL keyword in the pre-index transcript
+                thread_id=None,
+            )
+        assert "Manchester" in out  # the pre-index transcript still surfaces (lexical recall)
+        assert "round 1" in out
+    finally:
+        await pool2.close()

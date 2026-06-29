@@ -581,6 +581,13 @@ decision (Backlog), triggered at real deployment; engine behaviour is identical,
   memory-constrained dev box at N≥60. Re-run the full 150-contract hybrid vs the frozen FTS@150 floor on a
   bigger host before production rollout — empirical confirmation only; no code gap (ADR-F015 finding).
 
+- **Per-turn (sub-thread) conversation semantic granularity (surfaced 2026-06-29, F2 Slice C2).** C2 indexes
+  the Store at thread/summary granularity — the N2 offload writes one summary key per thread, so semantic
+  `asearch` ranks whole threads. A long thread that mentions a detail in passing dilutes that detail in the
+  whole-summary embedding. Finer granularity (chunk the offloaded transcript into multiple Store keys, e.g.
+  per-turn or per-section) would sharpen needle-in-haystack recall. Touches the N2 offload writer; own slice,
+  gated on a measured recall gap (ADR-F015). No code gap today — thread-granular recall is proven live.
+
 - ~~**Authorship / "who's on our team" identity model (surfaced 2026-06-26, maintainer, in editor S5).**~~
   ✅ **Slice 1 SHIPPED (2026-06-26, ADR-F048, migration `0076`):** a dedicated `matter_participants`
   roster (identity + alias match-set → `side` ∈ ours/counterparty/unknown + role, `trust` inferred/confirmed)

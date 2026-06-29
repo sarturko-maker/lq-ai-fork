@@ -3,7 +3,8 @@
 - Status: accepted (with F2 slice **N0**, 2026-06-28 — the native Store + CompositeBackend substrate);
   addenda: **N1** (2026-06-28, read-only tier middleware), **N2** (2026-06-29, conversation offload),
   **N3** (2026-06-29, cross-thread conversation-recall tool), **Slice A** (2026-06-29, matter document
-  tool wired to one hybrid retriever), **Slice C1** (2026-06-29, local embedder + matter-document hybrid
+  tool wired to one hybrid retriever), **Slice C2** (2026-06-29, Store `IndexConfig` semantic recall),
+  **Slice C1** (2026-06-29, local embedder + matter-document hybrid
   retrieval — see the addenda at the end)
 - Date: 2026-06-27
 - Deciders: maintainer (Arturs), agent
@@ -314,3 +315,57 @@ the full table: `docs/fork/evidence/retrieval-eval-slice-c/`. Deterministic: `te
 A real model + Door B `dimensions`), `test_matter_hybrid_search` fusion over `embedding_local`, the FTS drift
 guard, migration on a throwaway pgvector container. **C2 (the langgraph Store `IndexConfig` for
 conversation/memory semantic recall) reuses this same provider — a separate slice.**
+
+## Addendum — Slice C2 (2026-06-29): the Store `IndexConfig` for conversation/memory semantic recall
+
+C1 lit up semantic search over matter **documents**; C2 lights it up over the **Store** —
+conversation transcripts and the `/memories/*` tiers. N0 built the `AsyncPostgresStore` filter-only (no
+`IndexConfig`), so `store.asearch(query=…)` was a silent no-op; N3's `search_matter_conversations` therefore
+scanned transcripts lexically. C2 wires the Slice-C1 `EmbeddingProvider` as the Store's `IndexConfig.embed`
+so `asearch(query=…)` ranks by cosine — the paraphrase recall a keyword scan misses.
+
+**Single wiring point.** `app/agents/store.py:build_store_index_config(provider)` returns
+`{dims, embed, fields:["content"]}`; `init_agent_store()` passes it to `AsyncPostgresStore(pool, index=…)`.
+Both composition roots (api lifespan + arq worker) already route through `init_agent_store`, so this is ONE
+edit. `setup()` then builds the pgvector `store_vectors`/`vector_migrations` tables **non-destructively**
+(N0 left them absent; verified on a throwaway pgvector container — the library owns its own schema, ADR-F008,
+so no alembic migration). The same helper builds the index for the `InMemoryStore` tests, so they exercise
+production's shape.
+
+**Symmetric embedding.** `embed` is a plain async `AEmbeddingsFunc` over the provider; `langgraph` wraps it
+(`ensure_embeddings` → `EmbeddingsLambda`) so `aembed_query` and `aembed_documents` BOTH route to the same
+function — embedding is symmetric regardless of which method a store calls (the `AsyncPostgresStore` embeds
+the query via `aembed_documents`, the `InMemoryStore` via `aembed_query`; both land in the same closure;
+verified in-container). bge's query-instruction asymmetry (applied in the C1 *document* path) is intentionally
+not applied to the Store. `fields=["content"]` embeds only the transcript/summary text deepagents'
+`StoreBackend` writes (`{"content": …}`), not timestamps/encoding. Indexing is store-WIDE (every
+`/memories/*` + conversation write embeds on `put`) — deliberate; the local door is $0 and the model loads
+lazily on first embed, so startup stays cheap and a degraded provider never crashes a run.
+
+**The tool — two reads (a review-caught blocker).** A first cut passed `query=` to the single transcript
+read. That silently regressed N3 recall: an *indexed* `AsyncPostgresStore` runs the query branch as
+`store JOIN store_vectors` (an **INNER JOIN**), so any row written **before** the index existed (every
+conversation transcript from the N0-N3 era, which has no `store_vectors` row and is not re-embedded until its
+key is next `put`) is dropped from the result — `content=''` → the thread is skipped before the lexical scan
+even runs, so an exact keyword match on pre-C2 history vanishes. (`InMemoryStore` masks this with a
+`scoreless` fallback the pg store does not share.) The fix splits `_read_thread_transcript` into two reads of
+the same namespace: a **query-less** read for the transcript `content` (returns every row, no vector join —
+exactly the N3 read), and a separate best-effort **`query=`** read whose `SearchItem.score` drives semantic
+ranking (`None` on a filter-only / degraded store, or for an un-embedded pre-index row → lexical fallback,
+byte-identical to N3). The two layers compose: a thread surfaces when it matches the keyword scan **or**
+clears `_SEM_THRESHOLD` (0.6); a semantic-only hit shows leading summary lines as context. Recall is
+**thread/summary-granular** (the N2 offload writes one summary key per thread) — finer per-turn granularity is
+a future slice (MILESTONES backlog). A pgvector regression test pins it: a row written index-OFF then
+searched index-ON is dropped by `query=` but recovered by the query-less read, and surfaces end-to-end
+through the tool's lexical scan.
+
+*Gate (ADR-F015 finding — live, real `bge-base` on a throwaway pgvector, the production index path):*
+genuine paraphrase queries sharing **no salient keyword** with their target summary rank it above threshold
+and above the off-topic thread, while an unrelated query stays below threshold on both — paraphrase hits
+**0.62–0.68**, off-topic/related-but-wrong **0.43–0.46**, so `_SEM_THRESHOLD = 0.6` sits in the gap with a
+precision margin. Evidence: `docs/fork/evidence/retrieval-eval-slice-c2/`. Deterministic (hermetic concept
+embedder, no model download): `test_store_index_config` (config shape + `InMemoryStore` cosine ranking +
+filter-only no-op), `test_agent_store` (indexed `setup()` builds `store_vectors` + ranks on real pgvector;
+no-index posture preserved), and the new semantic cases in `test_matter_conversation_tools` (paraphrase
+surfaces, filter-only misses the same paraphrase, honest absence preserved). **No migration, no dep, no
+gateway change.** The N-ladder semantic objective (A5 paraphrase recall) is now met end to end.

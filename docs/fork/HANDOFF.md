@@ -3,41 +3,60 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-29): RETRIEVAL & MEMORY Phase-2 SLICE C1 — local embedder + matter-document hybrid
-> retrieval — on branch `fork/f2-slice-c1-local-embedder` (ADR-F049 Slice C1 addendum). Migration 0078
-> (ADDITIVE, non-destructive), ONE new SBOM dep (`fastembed`), gateway change = additive `dimensions`
-> passthrough only. NEXT = Slice C2 (langgraph Store `IndexConfig` for conversation/memory semantic recall,
-> reuses the same provider) — own slice + go-ahead.**
-> - **What it does:** lights up the vector side of `matter_hybrid_search` (the dormant branch Slice A built).
->   A configurable, injected `EmbeddingProvider` (`app/knowledge/embedding_provider.py`): **Door A**
->   `LocalEmbeddingProvider` (in-process `fastembed`/`BAAI/bge-base-en-v1.5`, 768-dim MIT, DEFAULT, $0,
->   bundled in the image) + **Door B** `GatewayEmbeddingProvider` (gateway `/v1/embeddings` with a
->   `dimensions=768` reduction to match). `Settings.embedding_provider` selects (default `local`);
->   `get_embedding_provider()` process-global mirrors `get_gateway_client()`.
-> - **Both doors, no destructive ALTER (maintainer rulings):** mig 0078 ADDS `document_chunks.embedding_local
->   vector(768)` + an ivfflat index; the live `embedding vector(1536)` column + the KB/chat `hybrid_search`
->   path are UNTOUCHED (two doors → two columns). `matter_hybrid_search` vector branch reads `embedding_local`
->   (KB keeps `embedding`). Backfill = `embed_local_chunks_for_file` + `embed_local_chunks_for_file_job`
->   (enqueued on ingest, per-file short-lived sessions). `tools.py:_search` embeds the query (Door A,
->   `is_query=True`) and fuses at `_HYBRID_ALPHA=0.5`; FTS-only fallback on embedder error / un-backfilled
->   matter (graceful).
-> - **bge query/passage asymmetry (load-bearing):** the bge query instruction is prepended IN-PROVIDER —
->   `fastembed.query_embed` is a NO-OP prefix for the bundled ONNX build (verified: query==passage without
->   it). `test_embedding_provider` asserts query≠passage.
-> - **THE GATE — met:** deterministic **32/32** (`test_embedding_provider` 7 + `test_matter_hybrid_search` 3
->   fusion-over-`embedding_local` + `test_cuad_retrieval_smoke` 2 + `test_agent_tools` 20); ruff + mypy (207)
->   clean; full api suite count → PR. **Track-B finding (ADR-F015, apples-to-apples N=30 subset, local door,
->   alpha=0.5, `docs/fork/evidence/retrieval-eval-slice-c/`): within-doc recall@5 0.314 → 0.629 (+100%),
->   hit@8 0.356 → 0.812; cross-doc recall@5 0.077 → 0.100 (+29%). X (ship threshold) = within-doc recall@5 ≥
->   +0.05 over same-corpus FTS; observed +0.31.**
-> - **TRAPS (carry forward):** (1) the local embedder + the eval's query-volume CRASH a Postgres backend on
->   this memory-constrained dev box at N≥60 (→ recovery; `CannotConnectNow`) — run hybrid evals ALONE (never
->   concurrent with the full suite) and at a gentler N; the full-150 hybrid is deferred to a bigger env. (2)
->   The eval backfill MUST use per-file short-lived sessions (one long session over 150 files gets dropped).
->   (3) Dev-image rebuild was REQUIRED (fastembed + bundled model at `/opt/fastembed-cache`,
->   `EMBEDDING_CACHE_DIR`); `docker image prune -f` after. (4) fastembed resolves bge-base to qdrant's
->   ONNX-quantized repo, 768-dim. (5) `embedding_local` is NULL until the local job runs → matter search
->   degrades to FTS until backfilled (live verification must populate first).
+> ▶▶ **PICKUP (2026-06-29): RETRIEVAL & MEMORY Phase-2 SLICE C2 — langgraph Store `IndexConfig` for
+> conversation/memory SEMANTIC recall — on branch `fork/f2-slice-c2-store-index` (ADR-F049 Slice C2
+> addendum). NO migration, NO dep, NO gateway change. Reuses the Slice-C1 provider. NEXT = Slice D (local
+> cross-encoder rerank) / PageIndex — Phase-3, gated on measured need; own slice + go-ahead.**
+> - **What it does:** N0 built the `AsyncPostgresStore` filter-only, so `store.asearch(query=…)` was a no-op
+>   and N3's `search_matter_conversations` scanned transcripts lexically. C2 wires the C1 `EmbeddingProvider`
+>   as the Store's `IndexConfig.embed` so `asearch(query=)` ranks by cosine → cross-thread PARAPHRASE recall a
+>   keyword scan misses. The A5 semantic objective is now met end to end.
+> - **The wiring (ONE point):** `app/agents/store.py:build_store_index_config(provider)` →
+>   `{dims, embed, fields:["content"]}`; `init_agent_store()` passes it to `AsyncPostgresStore(pool, index=…)`.
+>   BOTH composition roots route through `init_agent_store`, so one edit covers api + arq. `setup()` builds the
+>   pgvector `store_vectors`/`vector_migrations` tables NON-destructively (N0 left them absent; library owns its
+>   own schema, ADR-F008 — no alembic). The SAME helper builds the `InMemoryStore` index in tests.
+> - **Symmetric embedding:** `embed` is a plain async `AEmbeddingsFunc`; langgraph wraps it
+>   (`ensure_embeddings`→`EmbeddingsLambda`) so `aembed_query` AND `aembed_documents` route to the SAME closure
+>   → symmetric regardless of which a store calls (pg store uses `aembed_documents`, InMemoryStore uses
+>   `aembed_query`; verified). bge's query-instruction asymmetry (C1 document path) is intentionally NOT applied
+>   to the Store. Indexing is store-WIDE (every `/memories/*` + conversation `put` embeds; local door $0, model
+>   loads lazily → cheap startup).
+> - **The tool — TWO reads (review-caught blocker, FIXED):** an indexed `AsyncPostgresStore` runs `query=` as
+>   `store JOIN store_vectors` (INNER JOIN), so a row written BEFORE the index existed (every pre-C2 transcript,
+>   no `store_vectors` row) is DROPPED → first cut silently regressed N3 recall (thread skipped before the
+>   lexical scan). FIX: `_read_thread_transcript` does a query-LESS read for `content` (returns every row,
+>   exactly N3) + a SEPARATE best-effort `query=` read for the semantic `score` (None for un-embedded/pre-index
+>   rows → lexical fallback). Surfaces a thread on lexical match OR `score ≥ _SEM_THRESHOLD` (0.6); a
+>   semantic-only hit shows leading summary lines. Recall is thread/summary-granular — per-turn = Backlog.
+> - **THE GATE — met:** deterministic (hermetic concept embedder, NO model download): `test_store_index_config`
+>   (4), `test_agent_store` (3: indexed `setup()` builds `store_vectors` + ranks on real pgvector; no-index
+>   posture preserved; **pre-index INNER-JOIN regression guard**), `test_matter_conversation_tools` (+6:
+>   paraphrase surfaces / filter-only misses same paraphrase / honest absence / **threshold-boundary 0.577<0.6≤0.707**
+>   / indexed cross-matter isolation / **end-to-end pre-index pg row still surfaces lexically**). Targeted run
+>   **26 passed**; full `tests/agents/` **651 passed/37 skipped/0 failed** locally → CI authoritative, count → PR.
+>   ruff + mypy (207) clean. **Live gate (ADR-F015, REAL bge on throwaway pgvector, production index path):
+>   paraphrase hits 0.62–0.68 vs off-topic/related-wrong 0.43–0.46 → surfaces the right thread, preserves
+>   honest absence; the 0.6 threshold sits in the gap with a precision margin. `docs/fork/evidence/retrieval-eval-slice-c2/`.**
+> - **TRAPS (carry forward):** (1) **indexed pg `asearch(query=)` INNER-JOINs `store_vectors`** → rows without a
+>   vector (pre-index, or any row written index-OFF) are DROPPED — read CONTENT query-less, score separately;
+>   pre-C2 conversation history gets semantic ranking only after it's next offloaded (re-embed on `put`); a
+>   `store_vectors` backfill is the optional upgrade (not needed — lexical recall is preserved). (2) the REAL
+>   local embedder + heavy PG load crash the dev-box Postgres — run any live embedder check ALONE; C2's CI tests
+>   use the hermetic FAKE provider so the suite is safe. (3) `query=` on a filter-only store is a silent no-op
+>   (score None) — that None-check is the back-compat seam, don't remove it. (4) NO dev-stack rebuild was needed
+>   for C2's gate (throwaway pgvector + the C1-bundled model at `/opt/fastembed-cache`); a real deploy DOES need
+>   api+arq rebuilt so `setup()` creates `store_vectors` on the live store DB (non-destructive).
+>
+> ▶ **PREVIOUS (2026-06-29): RETRIEVAL & MEMORY Phase-2 SLICE C1 — local embedder + matter-document hybrid
+> retrieval — MERGED PR #168 (squash `8c424795`); ADR-F049 Slice C1 addendum. Migration 0078 (ADDITIVE), ONE
+> new SBOM dep (`fastembed`), gateway change = additive `dimensions` passthrough only.** Configurable injected
+> `EmbeddingProvider` (Door A in-process `fastembed`/`bge-base-en-v1.5` 768-dim default $0 + Door B gateway
+> `dimensions=768`); `matter_hybrid_search` vector branch reads the additive `document_chunks.embedding_local`
+> (KB `embedding vector(1536)` untouched); `tools.py:_search` embeds the query + fuses at alpha 0.5 with FTS
+> fallback. Gate (Track-B N=30, local, alpha=0.5): within-doc recall@5 0.314→0.629 (+100%). Traps: local
+> embedder + eval volume crash dev-box PG at N≥60 (full-150 → Backlog); per-file backfill sessions; dev-image
+> rebuild bundles the model at `/opt/fastembed-cache`. Detail: `f2-slice-c1-local-embedder-shipped` memory.
 >
 > ▶ **PREVIOUS (2026-06-29): RETRIEVAL & MEMORY Phase-2 SLICE A — matter document tool wired to ONE hybrid
 > retriever — SHIPPED (MERGED PR #167, squash `a5efce37`); ADR-F049 Slice A addendum. NO migration/dep/gateway

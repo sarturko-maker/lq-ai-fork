@@ -155,9 +155,17 @@ agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be 
   recall@5 ≥ +0.05 over the same-corpus FTS floor (observed +0.31).** N=30 (not 150) — the local embedder +
   eval volume crashes a backend on the memory-constrained dev box at N≥60; full-150 hybrid deferred to a
   bigger env. *(ADR-F049 Slice C1 addendum; `docs/fork/evidence/retrieval-eval-slice-c/`.)*
-- **Slice C2 — langgraph Store `IndexConfig` (conversation/memory semantic recall). NEXT.** Wire the SAME
-  provider as the Store's `IndexConfig.embed` so `store.asearch(query=…)` ranks semantically (it is a no-op
-  filter-only today). Own slice + go-ahead. *Gate: A5-style conversation semantic recall improves.*
+- **Slice C2 — langgraph Store `IndexConfig` (conversation/memory semantic recall). ✅ SHIPPED (2026-06-29).**
+  Wired the SAME C1 provider as the Store's `IndexConfig.embed` via one helper
+  (`app/agents/store.py:build_store_index_config`) passed to `AsyncPostgresStore(pool, index=…)` in
+  `init_agent_store` (both composition roots route through it). `setup()` builds the pgvector `store_vectors`
+  table non-destructively (no migration/dep/gateway change). `search_matter_conversations` now passes `query=`
+  to `asearch` and layers semantic ranking (threshold 0.6) over the lexical scan; filter-only/degraded →
+  `score=None` → byte-identical to N3 (back-compat). Embedding is symmetric (the pg store embeds the query via
+  `aembed_documents`, verified in-container); recall is thread/summary-granular (per-turn → backlog). *Gate
+  (ADR-F015, live real bge on throwaway pgvector): paraphrase hits 0.62–0.68 vs off-topic 0.43–0.46 — surfaces
+  the right thread, preserves honest absence. `docs/fork/evidence/retrieval-eval-slice-c2/`; ADR-F049 Slice C2
+  addendum.* The A5 paraphrase-recall objective is now met end to end.
 
 ## Phase 3 — later / only if measured
 
