@@ -3,46 +3,51 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-30): ▶ TABULAR REVIEW T1 SHIPPED — NEXT = T2 (chat preview + Expand).**
-> Branch `fork/f2-tabular-t1` (ADR-F055, **migration 0082**). The agentic "grids" tool is live: a Commercial
-> run builds a cross-document grid via `start_tabular_review` → `record_tabular_row` → `finalize_tabular_review`.
-> Full plan + all 11 slices: `docs/fork/plans/TABULAR-REVIEW-agentic.md`. Maintainer design calls (confirmed):
-> crossover = the budget `fan_out_quota`; reuse `tabular_executions` + a `mode` flag; in-place mutation
-> (ADR-F042); a `finalize` completeness gate; citations as `chunk_ids`; user-facing noun **"grid"** +
-> dedicated **"Grids"** cockpit tab; LQ-Grid harvest mapped to slices. Dev stack healthy on
-> `http://localhost:3000` (NOT 127.0.0.1 — CORS); model `smart → deepseek-v4-flash`.
+> ▶▶ **PICKUP (2026-07-01): ▶ TABULAR REVIEW T2 SHIPPED — NEXT = T3 (discoverability skill, eval-gated).**
+> Branch `fork/f2-tabular-t2-grid-preview` (PR pending; ADR-F055, **no migration — frontend-only**). A
+> finalized grid now surfaces as a **durable preview card** in the cockpit conversation with an **Expand**
+> overlay; T1 was headless. Full plan + all 11 slices: `docs/fork/plans/TABULAR-REVIEW-agentic.md`. Dev stack
+> healthy on `http://localhost:3000` (NOT 127.0.0.1 — CORS); model `smart → deepseek-v4-flash`.
 >
-> - **T1 — WHAT SHIPPED (no new UI):** migration 0082 (additive: `tabular_executions.mode` linear|agentic +
->   `project_id` + `created_by_run_id` + `fill_mode` + a partial index); NEW `app/agents/tabular_tool.py`
->   (`build_tabular_tools`: start/record/finalize through `guarded_dispatch`, own grant set
->   `TABULAR_TOOL_NAMES` disjoint from all others, matter+owner scoped, **`SELECT … FOR UPDATE`** serializes
->   parallel fan-out row writes on the `results` JSONB, incremental commit per row); `CellResult` +
->   `source_quote`/`notes` (LQ-Grid); NEW `schemas/tabular_agent.py` (tool inputs); `TABULAR_GROUP` capability
->   (`capabilities.py` → Commercial, gated by the ADR-F054 toggle); composition wiring (envelope resolved
->   BEFORE the area branches so the tool + the FanOutQuotaMiddleware share it; the Commercial tabular branch;
->   `TABULAR_FILL_DOCTRINE` gated on `tabular_enabled`); the frozen linear worker refuses `mode='agentic'`.
-> - **GATE — met:** ruff(root)+format+**mypy(218)** clean; **23 new** tests (`test_tabular_tool.py`) + **119
->   regression** (capabilities / composition / commercial / frozen tabular endpoints / openapi) green in
->   `lq-ai-api-dev`; migration 0082 **up→down→up on a throwaway pgvector**; dev stack rebuilt (api+arq+ingest,
->   0082 live on the dev DB). **LIVE-VERIFIED (ADR-F015):** DeepSeek built a 3×2 grid end-to-end
->   (search→read×3→start→record×3→finalize; status `completed`; correct values + verbatim `source_quote`s) —
->   `docs/fork/evidence/tabular-review/T1-live-grid.md` + `tests/agents/scenarios/test_tabular_grid_live.py`
->   (provider-marked). Adversarial security pass clean (owner+matter 404-conflation, parameterized SQL via the
->   shared `_matter_files_query` boundary, audit counts/IDs-only, zero gateway egress in the tool, confined grant).
-> - **NEXT = T2:** a `data-tabular` SSE frame (`stream.py` + `ui-message-stream.ts` + a new case at
->   `ConversationPanel.svelte:632`) + a chat small-table preview (column pills) + Expand → the reused
->   `TabularGrid` (`/tabular/[id]`). Then T3 (discoverability skill, eval-gated) · T4 (retrieval-fill +
->   crossover eval) · T5 (live cell fill) · T6 (stage takeover + cell drawer) · T7 (Grids tab listing) ·
->   T8 (bash loop). Enrichment T9 (source highlight → Collabora) / T10 (rich grid affordances); T11 optional.
-> - **TRAPS (carry forward):** (1) adding a tool GROUP breaks exact-match capability tests — `test_capabilities.py`
->   Commercial tool keys are now `[redlining, tabular]` (updated). (2) the tabular tools take FILENAMES (the
->   agent works in filenames); they resolve to `documents.id` via `_matter_files_query` (the shared scope
->   boundary — never re-derive it). (3) `FOR UPDATE` the grid before ANY `results`-JSONB read-modify-write
->   (parallel fan-out subagents would otherwise lose rows). (4) `tabular_executions` had NO `project_id` —
->   0082 adds it (matter scope + the Grids listing). (5) the frozen linear worker takes an explicit id (no
->   pending-scan) so agentic rows are never enqueued; the `mode='agentic'` refusal is defense-in-depth.
->   (6) **dev gateway key (`LQ_AI_GATEWAY_KEY`) was surfaced in a terminal env dump this session → rotate it
->   in the gitignored `.env`** (a local internal api↔gateway key, not a provider key).
+> - **T2 — WHAT SHIPPED (web only):** **refined from the plan's `data-tabular` frame to settled-step
+>   derivation** (ADR-F055 **T2 addendum**, maintainer-confirmed): the SSE replay path
+>   (`agent_runs.py:_stream_run_events`) re-emits ONLY settled `data-step` rows, so a custom `data-*` frame is
+>   live-only and would VANISH on reload — wrong for a durable artifact. So the preview anchors on the
+>   **settled `finalize_tabular_review` step** already in the timeline (grid id parsed from its short
+>   `{"grid_id":"…"}` tool-call input) and fetches the body from the existing owner-scoped
+>   `GET /tabular/executions/{id}` — **no `stream.py` / `ui-message-stream` change.** NEW
+>   `web/.../agents/tabular-preview.ts` (`tabularGridIdsForTurn` + `summarizeGridForPreview` +
+>   `buildDocumentNameById`) + NEW `TabularPreview.svelte` (compact M×N + column pills + status + Expand,
+>   rendered after the answer in `ConversationPanel.svelte`); **Expand** = an in-conversation overlay mounting
+>   the REUSED `TabularGrid` + `TabularCitationModal`. `/tabular/[id]` refactored to share
+>   `buildDocumentNameById` (dedup).
+> - **GATE — met:** `npm run check` 0 errors (5 pre-existing warnings, unrelated) + **1030** frontend tests
+>   green (**16 new** in `tabular-preview.test.ts`); eslint clean on touched files. **LIVE-VERIFIED:** a
+>   deterministic Cypress spec (`f2-tabular-t2-grid-preview.cy.ts`) drives the real component in a real
+>   browser (intercepted thread+grid, no LLM) — **1 passing, 4 screenshots** (card + light/dark + the expanded
+>   full grid). Evidence: `docs/fork/evidence/tabular-review/T2-grid-preview.md` + `T2-cypress/*.png`.
+>   Security/simplification pass clean (owner-scoped read via the existing endpoint; untrusted cell text is
+>   data-only — clamped + textContent, never markup/instructions; unparseable step summary skipped not fatal;
+>   removed a duplicated `documentNameById` builder).
+> - **NEXT = T3:** a Commercial `tabular-review` **SKILL.md** (proactive offer when multi-doc + tabular ask;
+>   map NL → `start_tabular_review` with inferred columns; column templates) bound via `practice_area_skills`,
+>   **eval-gated** (masked judge, C8/C9 style: offers when apt AND stays quiet when not). Then T4 (retrieval-
+>   fill + crossover eval) · T5 (live cell fill, the transient `data-tabular-cell` frame — animation, the
+>   RIGHT use of a live-only frame) · T6 (stage takeover + cell drawer — also fixes the cosmetic below) ·
+>   T7 (Grids tab) · T8 (bash loop). Enrichment T9/T10; T11 optional.
+> - **TRAPS / carry-forward:** (1) **durable in-chat artifacts MUST derive from settled `data-step` rows, NOT
+>   custom `data-*` frames** — the replay path only re-emits `data-step`; a `data-*` frame is live-only
+>   animation (correct for T5 cell-fill, wrong for a persisted preview). (2) the web suite has **no
+>   `@testing-library/svelte`** — put logic in a `.ts` helper + unit-test it; verify the component live
+>   (Cypress). (3) **rebuild the `web` container** before any UI screenshot (it serves a prebuilt bundle) +
+>   `docker image prune -f` after. (4) **prettier is NOT CI-gated for web** and existing files aren't all
+>   prettier-clean — match surrounding tab style, don't `prettier --write` whole existing files (huge noise
+>   diff). (5) the Edit tool's tab/whitespace matching is flaky on `.svelte` — anchor on a single unique line
+>   or use a python rewrite. (6) **cosmetic (→ T6):** the cockpit composer floats over the bottom of the
+>   conversation, so a tall trailing grid card sits partly behind it until scrolled (header/status/pills clear;
+>   Expand unaffected) — pre-existing trait of any tall trailing content. (7) **dev gateway key
+>   (`LQ_AI_GATEWAY_KEY`) surfaced in a terminal dump on 2026-06-30 → still needs rotating** in the gitignored
+>   `.env` (local internal api↔gateway key, not a provider key).
 >
 > ▷ **CLOSED side-quest (2026-06-30): K2-Think model eval — PARKED, do NOT resume unless asked.** A "test a
 > model quickly" detour for one specific client. Conclusion: native deepagents + K2 is **not viable**

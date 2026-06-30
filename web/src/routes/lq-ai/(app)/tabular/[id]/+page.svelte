@@ -11,6 +11,7 @@
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import TabularGrid from '$lib/lq-ai/components/TabularGrid.svelte';
 	import TabularCitationModal from '$lib/lq-ai/components/TabularCitationModal.svelte';
+	import { buildDocumentNameById } from '$lib/lq-ai/agents/tabular-preview';
 	import type {
 		TabularCellResult,
 		TabularExecution
@@ -44,27 +45,9 @@
 	$: fraction = execution
 		? progressFraction(execution.status, execution.results, docCount, colCount)
 		: 0;
-	// Map document_id -> document_name. Primary source: the parallel
-	// `document_names` array on the execution (populated at every
-	// response build by joining documents → files.filename) so the
-	// grid renders human-readable headers from the moment the
-	// execution is created, before any row is written. Falls back to
-	// row.document_name (worker-written) for older executions that
-	// pre-date the document_names field.
-	$: documentNameById = (() => {
-		const m: Record<string, string> = {};
-		if (execution?.document_ids && execution?.document_names) {
-			const ids = execution.document_ids;
-			const names = execution.document_names;
-			for (let i = 0; i < ids.length; i++) {
-				if (names[i]) m[ids[i]] = names[i];
-			}
-		}
-		for (const row of execution?.results?.rows ?? []) {
-			if (!m[row.document_id]) m[row.document_id] = row.document_name;
-		}
-		return m;
-	})();
+	// Map document_id -> document_name (joined `document_names` first, row
+	// name as fallback) — shared with the in-chat grid preview (T2).
+	$: documentNameById = execution ? buildDocumentNameById(execution) : {};
 
 	async function loadOnce(): Promise<void> {
 		if (!executionId) return;

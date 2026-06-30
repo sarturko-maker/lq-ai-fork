@@ -65,6 +65,8 @@
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import { renderModelMarkdown } from '$lib/lq-ai/sanitize-markdown';
 	import StepRow from './StepRow.svelte';
+	import TabularPreview from './TabularPreview.svelte';
+	import { tabularGridIdsForTurn } from '$lib/lq-ai/agents/tabular-preview';
 	import { agentsApi, filesApi, matterFilesApi } from '$lib/lq-ai/api';
 	import { isRedlineOutput } from '$lib/lq-ai/api/editor';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
@@ -1001,6 +1003,7 @@
 			{@const turnAnswer = splitThink(turn.run.final_answer)}
 			{@const turnHtml = answerHtmlFor(turn.run)}
 			{@const turnCost = formatRunCostUSD(turn.run.cost_usd)}
+			{@const turnGridIds = tabularGridIdsForTurn(turn.steps)}
 			<section class="ag-run" data-testid="lq-ai-agents-run">
 				<header class="ag-run__head">
 					<p class="lq-text-body ag-run__prompt">{turn.run.prompt}</p>
@@ -1145,6 +1148,17 @@
 					<p class="lq-text-body-sm ag-error">
 						Run failed: {turn.run.error ?? 'unknown error'}
 					</p>
+				{/if}
+
+				<!-- F2 Tabular T2 (ADR-F055): one durable grid-preview card per grid this
+				     turn finalized. Derived from the SETTLED finalize_tabular_review step
+				     (re-renders identically on reload, ADR-F004); each fetches its own body. -->
+				{#if turnGridIds.length > 0}
+					<div class="ag-grids" data-testid="lq-ai-agents-grids">
+						{#each turnGridIds as gridId (gridId)}
+							<TabularPreview {gridId} />
+						{/each}
+					</div>
 				{/if}
 
 				<!-- F2 Slice O-2 (ADR-F053): a rough rolling-average cost estimate for the

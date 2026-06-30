@@ -355,7 +355,10 @@ planning (framework mismatch: LQ-Grid is React, our web is Svelte). Its own plan
   Integration decided: **rebuild-from-reference in Svelte** (LQ-Grid patterns harvested, no code copied).
   User-facing noun **"grid"** + a dedicated **"Grids"** cockpit tab. **T1 SHIPPED** (the agentic grids tool
   — `start`/`record`/`finalize` through `guarded_dispatch`, migration 0082, live-verified end-to-end on
-  DeepSeek). NEXT = **T2** (data-tabular SSE frame + chat preview + Expand → the reused `TabularGrid`).
+  DeepSeek). **T2 SHIPPED** (in-chat **grid preview card + Expand** overlay; **frontend-only** — refined from
+  the planned `data-tabular` frame to **settled-step derivation** since the SSE replay re-emits only
+  `data-step`, ADR-F055 T2 addendum; Cypress-screenshot-verified). NEXT = **T3** (discoverability SKILL.md —
+  proactive offer + NL→`start_tabular_review`, eval-gated).
 
 **Deferred — resume after this milestone (paused 2026-06-30, honest record):**
 - **F2 Slice P — PageIndex** (gateway-bound retrieval, eval-first; `plans/PAGEINDEX-SLICE-P.md`, ADR-F052
