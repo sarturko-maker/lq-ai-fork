@@ -243,6 +243,112 @@ async def test_max_steps_cap_marks_cap_exceeded(
     assert [s.seq for s in steps] == [1, 2, 3, 4]
 
 
+# --- F2 Slice F (ADR-F051): the per-run token-budget brake (R4 realised) -------------
+
+
+async def test_token_budget_halts_run_before_max_steps(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A run whose cumulative model tokens cross run_token_budget is halted as
+    cap_exceeded with a DISTINCT error — before the (much higher) step cap, and
+    even though the model would loop forever."""
+    run_id = await make_run(max_steps=50)
+    model = ScriptedToolCallingModel(
+        responses=[tool_call_message("read_clause", {"topic": "liability"})],
+        loop_last=True,
+        usage_per_turn=100,  # each model turn reports 100 tokens
+    )
+
+    # Budget 250 → trips on the 3rd model turn (cumulative 300), well before max_steps=50.
+    await execute_agent_run(
+        run_id, commit_factory, tools=[read_clause], model=model, token_budget=250
+    )
+
+    run, steps = await _load_run_and_steps(commit_factory, run_id)
+    assert run.status == "cap_exceeded"
+    assert run.error == "token_budget_exceeded"  # told apart from the step cap (error NULL)
+    assert run.final_answer is None
+    assert run.finished_at is not None
+    assert len(steps) < 50  # halted early on the token budget, not the step cap
+
+
+async def test_token_budget_zero_disables_the_brake(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """token_budget <= 0 disables the brake: a normal run completes even though it
+    reported usage well above any small ceiling."""
+    run_id = await make_run()
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("read_clause", {"topic": "liability"}),
+            final_message("The cap is the fees paid in the twelve months before the claim."),
+        ],
+        usage_per_turn=10_000,
+    )
+
+    await execute_agent_run(
+        run_id, commit_factory, tools=[read_clause], model=model, token_budget=0
+    )
+
+    run, _ = await _load_run_and_steps(commit_factory, run_id)
+    assert run.status == "completed"
+    assert run.error is None
+    assert run.final_answer is not None and "twelve" in run.final_answer
+
+
+async def test_run_under_token_budget_completes_normally(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Usage accumulation does not disturb a normal run that stays under budget."""
+    run_id = await make_run()
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("read_clause", {"topic": "liability"}),
+            final_message("The cap is the fees paid in the twelve months before the claim."),
+        ],
+        usage_per_turn=100,
+    )
+
+    await execute_agent_run(
+        run_id, commit_factory, tools=[read_clause], model=model, token_budget=1_000_000
+    )
+
+    run, _ = await _load_run_and_steps(commit_factory, run_id)
+    assert run.status == "completed"
+    assert run.error is None
+    assert run.final_answer is not None and "twelve" in run.final_answer
+
+
+async def test_token_budget_never_halts_mid_final_answer(
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+    commit_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The brake mirrors max_steps: a turn that PRODUCES the final answer is never
+    cut off, even if it pushes cumulative tokens over the budget."""
+    run_id = await make_run()
+    model = ScriptedToolCallingModel(
+        responses=[
+            tool_call_message("read_clause", {"topic": "liability"}),
+            final_message("The cap is the fees paid in the twelve months before the claim."),
+        ],
+        usage_per_turn=100,
+    )
+
+    # 150 → after the tool turn (100) we are under; the final turn (→200) crosses it but
+    # is_final, so the run completes with its deliverable rather than being capped.
+    await execute_agent_run(
+        run_id, commit_factory, tools=[read_clause], model=model, token_budget=150
+    )
+
+    run, _ = await _load_run_and_steps(commit_factory, run_id)
+    assert run.status == "completed"
+    assert run.error is None
+    assert run.final_answer is not None and "twelve" in run.final_answer
+
+
 async def test_finishing_exactly_at_cap_is_completed_not_capped(
     make_run: Callable[..., Awaitable[uuid.UUID]],
     commit_factory: async_sessionmaker[AsyncSession],

@@ -53,9 +53,25 @@ class ScriptedToolCallingModel(BaseChatModel):
 
     responses: list[AIMessage]
     loop_last: bool = False
+    # F2 Slice F (ADR-F051): total tokens this model reports PER turn, so a runner
+    # token-budget test is deterministic. 0 = report no usage (the default; usage_metadata
+    # stays absent, exactly like a provider that does not return usage). When > 0, each
+    # turn emits a trailing usage chunk (mirroring ChatOpenAI's final include_usage chunk),
+    # so the merged on_chat_model_end message carries usage_metadata.total_tokens.
+    usage_per_turn: int = 0
 
     _idx: int = PrivateAttr(default=0)
     _seen: list[list[BaseMessage]] = PrivateAttr(default_factory=list)
+
+    def _usage_md(self) -> dict[str, int] | None:
+        if self.usage_per_turn <= 0:
+            return None
+        out = self.usage_per_turn // 2
+        return {
+            "input_tokens": self.usage_per_turn - out,
+            "output_tokens": out,
+            "total_tokens": self.usage_per_turn,
+        }
 
     @property
     def seen_messages(self) -> list[list[BaseMessage]]:
@@ -92,7 +108,11 @@ class ScriptedToolCallingModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         self._seen.append(list(messages))
-        return ChatResult(generations=[ChatGeneration(message=self._next_message())])
+        message = self._next_message()
+        usage = self._usage_md()
+        if usage is not None:
+            message = message.model_copy(update={"usage_metadata": usage})
+        return ChatResult(generations=[ChatGeneration(message=message)])
 
     def _stream(
         self,
@@ -112,6 +132,7 @@ class ScriptedToolCallingModel(BaseChatModel):
         """
         self._seen.append(list(messages))
         message = self._next_message()
+        usage = self._usage_md()
         if message.tool_calls:
             yield ChatGenerationChunk(
                 message=AIMessageChunk(
@@ -128,12 +149,18 @@ class ScriptedToolCallingModel(BaseChatModel):
                     ],
                 )
             )
+            if usage is not None:
+                yield ChatGenerationChunk(message=AIMessageChunk(content="", usage_metadata=usage))
             return
         text = message.content if isinstance(message.content, str) else ""
         mid = max(1, len(text) // 2)
         yield ChatGenerationChunk(message=AIMessageChunk(content=text[:mid]))
         if text[mid:]:
             yield ChatGenerationChunk(message=AIMessageChunk(content=text[mid:]))
+        # F2 Slice F: trailing usage chunk (mirrors ChatOpenAI's final include_usage
+        # chunk) so the merged on_chat_model_end message carries usage_metadata.
+        if usage is not None:
+            yield ChatGenerationChunk(message=AIMessageChunk(content="", usage_metadata=usage))
 
 
 class ExplodingModel(BaseChatModel):

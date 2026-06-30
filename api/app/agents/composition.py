@@ -760,6 +760,8 @@ async def compose_and_execute_run(
                 subagents=wiring.subagents or None,
                 skills=wiring.main_sources,
                 backend=memory_backend,
+                # F2 Slice F (ADR-F051): the per-run token-budget brake (R4 realised).
+                token_budget=get_settings().run_token_budget,
                 middleware=run_middleware or None,
                 checkpointer=checkpointer,
                 store=store,

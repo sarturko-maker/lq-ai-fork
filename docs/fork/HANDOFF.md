@@ -3,10 +3,51 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE E — cost-aware fan-out + a fan-out quota
-> brake (strategy + safety) — on branch `fork/f2-slice-e-fanout-strategy` (ADR-F049 Slice E addendum).
-> NO migration, NO dep, NO gateway change. NEXT = the deferred Phase-3 remainder (S5 = R4 token budget;
-> recency; Documents-MAP; PageIndex Slice P) — all gated on measured need; own slice + maintainer go-ahead.**
+> ▶▶ **PICKUP (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE F — R4 realised: a per-run TOKEN-BUDGET
+> brake — on branch `fork/f2-slice-f-token-budget` (ADR-F051, NEW). NO migration, NO dep, NO behavioural
+> gateway change. NEXT = the remaining Phase-3 (recency; Documents-MAP; PageIndex Slice P) — all gated on
+> measured need; + the deferred token-total PERSISTENCE follow-up (a migration); own slice + go-ahead.**
+> - **What it does:** closes the R4 gap Slice E deferred. R4 (the per-action cost cap) was a documented
+>   no-op; nothing enforced a per-run token/dollar budget (only step/time caps fired). Slice F makes the
+>   runner halt a run once its cumulative model tokens cross a ceiling — the hard cost stop that bounds a
+>   runaway loop / over-eager fan-out (the ADR-F015 vector).
+> - **Enabler (load-bearing):** `factory.build_gateway_chat_model` now sets `stream_usage=True`. The gateway
+>   ALREADY forces `stream_options.include_usage=true` upstream + forwards the final usage chunk in its SSE;
+>   the api-side ChatOpenAI just never ASKED. With the flag, langchain populates `usage_metadata` on the
+>   merged `on_chat_model_end` message (verified in-container: usage on a streamed chunk surfaces summed on
+>   the merged event — true for nested subagent turns too).
+> - **Accumulate + brake:** `runner._drive_agent` sums `usage_metadata.total_tokens` per model turn
+>   (helper `_usage_total`, returns 0 when usage absent → fail-open) and halts mirroring `max_steps`:
+>   `if token_budget > 0 and cumulative_tokens >= token_budget and not is_final → token_cap_hit; break`. The
+>   not-mid-final-answer guard means a deliverable turn is never cut off. Settles `cap_exceeded` with a
+>   DISTINCT `error="token_budget_exceeded"` (the step cap leaves error NULL). `execute_agent_run` gains a
+>   `token_budget` param; `composition` passes `get_settings().run_token_budget`.
+> - **Config:** `Settings.run_token_budget` default **2,000,000** — a CONSERVATIVE, UNCALIBRATED runaway
+>   backstop (~10× the 200k window; ≤0 disables). Not a tuned cap — calibration needs per-run token telemetry
+>   (the deferred persistence follow-up).
+> - **guard.py R4:** the tool-dispatch R4 STAYS an honest no-op (tools are free local reads; zero marginal
+>   inference cost) — the docstring + inline comment now point to the runner brake. The cost is the MODEL
+>   calls, so the brake lives in the runner loop, NOT at the guard.
+> - **In-memory, NO migration.** The brake needs only the live running total. Persisting a per-run
+>   `total_tokens` (+ deriving `cost_usd`, still NULL) is a DEFERRED observability/calibration follow-up
+>   (needs a migration → api+arq+ingest rebuild). Recorded, not built.
+> - **THE GATE — met (ADR-F015; the runaway-token-budget halt is the hard CI gate).** Deterministic, $0,
+>   zero-LLM: `test_agent_runner.py` — a looping model reporting fixed tokens/turn halts as
+>   `cap_exceeded`+`token_budget_exceeded` BEFORE max_steps; `budget<=0` disables; a normal under-budget run
+>   completes unaffected; a final-answer turn is never cut off mid-deliverable. The fake
+>   `ScriptedToolCallingModel` gained `usage_per_turn` (emits a trailing usage chunk like ChatOpenAI's
+>   include_usage chunk). Full `tests/agents/` 688 passed / 38 skipped / 0 failed; ruff + format + mypy (209) clean. Live finding:
+>   `docs/fork/evidence/retrieval-eval-slice-f/`.
+> - **TRAPS (carry forward):** (1) usage only surfaces if `stream_usage=True` AND the model streams (the
+>   runner uses astream_events) AND the provider returns usage — a provider that omits usage → fail-open
+>   (brake silent, still bounded by max_steps). (2) usage must be on a streamed CHUNK to surface on the
+>   merged on_chat_model_end (the fake emits a trailing usage chunk; ChatOpenAI's include_usage does the
+>   same). (3) the default budget is UNCALIBRATED — a backstop, tunable. (4) nested subagent turns count
+>   toward the run budget (intended — fan-out is the runaway vector); the budget is whole-run, not per-subagent.
+>   (5) `_drive_agent` now returns a 3-tuple `(final_answer, cap_hit, token_cap_hit)`.
+>
+> ▶ **PREVIOUS (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE E — cost-aware fan-out + a fan-out quota
+> brake — MERGED PR #171 (`ae973717`) (ADR-F049 Slice E addendum). NO migration, NO dep, NO gateway change.**
 > - **What it does:** Slices A–D made the matter retriever good; Slice E makes the agent COST-AWARE about
 >   how it consumes documents and puts a REAL enforced ceiling on subagent fan-out. Implements S1–S4 of the
 >   strategy research (`research/retrieval-strategy-selection-fanout-vs-read-vs-retrieve.md` §8); S5 (R4 as a

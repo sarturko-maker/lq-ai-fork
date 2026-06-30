@@ -188,11 +188,18 @@ agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be 
   the middleware's `wrap_tool_call` is its chokepoint, denying past the ceiling with a model-visible refusal —
   never a crash). No migration/dep/gateway change. Gate (ADR-F015): the deterministic runaway-fan-out cost
   test (`test_fan_out_middleware.py`, incl. a real-graph integration proof) is the hard CI gate; the live RFQ
-  subagent scenario is the A7 strategy finding; full `tests/agents/` 683/38/0. **S5 — wire R4 into a real
-  per-run TOKEN budget — is explicitly DEFERRED (its own slice + ADR):** R4 (`guard.py`) is still a no-op, so
-  cost-safety is NOT yet claimed; the plumbing is half-present (`inference_routing_log` tokens_in/out;
-  `agent_runs.cost_usd` NULL, mig 0048; runner captures no usage). *Gate when built: a runaway-fan-out token
-  budget halt.*
+  subagent scenario is the A7 strategy finding; full `tests/agents/` 683/38/0.
+- **Strategy + safety, part 2 — R4 as a real per-run TOKEN budget.** ✅ **SHIPPED 2026-06-30 (Slice F,
+  ADR-F051)** — the deferred hard cost stop. The api-side model now sets `stream_usage=True` (the gateway
+  already forwards the usage chunk), so the runner sums each model turn's `usage_metadata.total_tokens` (lead
+  + subagents) and halts the run (`cap_exceeded`, `error=token_budget_exceeded`) once the cumulative total
+  crosses `Settings.run_token_budget` — mirroring `max_steps`, never mid-final-answer. R4-at-the-tool stays an
+  honest no-op (tools are free local reads; the cost is the model calls, so the brake lives in the runner
+  loop). No migration/dep/behavioural-gateway change; in-memory enforcement. Default 2,000,000 is an
+  uncalibrated runaway backstop (≤0 disables). Gate (ADR-F015): the deterministic runaway-token-budget halt
+  test (`test_agent_runner.py`) + budget-disable + under-budget + never-mid-final-answer; full `tests/agents/`
+  688/38/0. **DEFERRED follow-up:** persist a per-run `total_tokens` (a migration) for observability +
+  calibration of the default; `agent_runs.cost_usd` stays NULL until then.
 - **Recency weighting** on conversation results — thin post-filter. *Build only if a measured stale-turn
   failure appears (A5 stale variant).*
 - **Documents MAP in the Store** (the L1 router; first doc's `fact_type="document"` → a

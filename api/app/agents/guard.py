@@ -16,10 +16,13 @@ brakes, one audit row:
   boundary cadence — ADR-F009). Deny is still model-visible-error
   advisory per dispatch; the HARD stop is the runner's heartbeat
   detecting the settled row (RunSettledElsewhere) or arq Job.abort.
-* **R4 (cost)** — honest no-op: the matter document tools are local
-  Postgres reads with zero marginal inference cost. Per-run budgets
-  aggregating gateway routing-log costs are F1 (``cost_usd`` NULL
-  until then, migration 0048).
+* **R4 (cost)** — still an honest no-op *at the tool dispatch*: the
+  matter tools are local Postgres reads with zero marginal inference
+  cost, so there is nothing to cap here. The real per-run cost is the
+  gateway MODEL calls, so the token budget that R4 always pointed at
+  now lives where that cost is incurred — the runner loop, beside
+  ``max_steps`` (F2 Slice F, ADR-F051: sum each turn's
+  ``usage_metadata.total_tokens``, halt at ``run_token_budget``).
 
 Audit: one ``agent_run.tool_call`` row per dispatch via
 :func:`app.audit.audit_action` — tool name, outcome, result size.
@@ -125,8 +128,9 @@ async def guarded_dispatch(
             raise AgentRunHalted(f"run is '{run_status}' — tool dispatch denied")
         await db.commit()
 
-        # R4: no-op — local DB reads, zero marginal inference cost.
-        # Per-run budgets land with F1 (ADR-F002).
+        # R4: no-op HERE — local DB reads, zero marginal inference cost.
+        # The per-run TOKEN budget (the real cost is the gateway model calls)
+        # is enforced in the runner loop beside max_steps (ADR-F051).
 
         try:
             result = await op(db)
