@@ -36,6 +36,7 @@ import logging
 import uuid
 from collections.abc import Callable, Collection, Sequence
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -45,6 +46,7 @@ from langgraph.store.base import BaseStore
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.checkpointer import thread_config
+from app.agents.cost import estimate_agent_run_cost_usd
 from app.agents.factory import build_deep_agent
 from app.agents.lease import RunLease, RunSettledElsewhere, heartbeat_run, settle_run
 from app.agents.live_changes import ChangeLedger
@@ -485,6 +487,7 @@ async def _finalize(
     final_answer: str | None = None,
     error: str | None = None,
     total_tokens: int | None = None,
+    cost_usd: Decimal | None = None,
     lease: RunLease | None = None,
 ) -> bool:
     """Write the terminal state — F1-S1: one fenced conditional UPDATE.
@@ -505,6 +508,7 @@ async def _finalize(
         final_answer=final_answer,
         error=error,
         total_tokens=total_tokens,
+        cost_usd=cost_usd,
         lease_token=lease.token if lease is not None else None,
     )
 
@@ -742,6 +746,23 @@ async def execute_agent_run(
     # F2 Slice F (ADR-F051): the token-budget cap records a distinct error so it can be
     # told apart from the step cap (which leaves error NULL, its existing behaviour).
     cap_error = "token_budget_exceeded" if token_cap_hit else None
+    # F2 Slice O-2 (ADR-F053 addendum): turn the run's token total into a rough USD
+    # estimate (rolling-average agent_loop rate x total_tokens) for the run row + UI.
+    # Gated on a positive token total: capped runs spent tokens so they get priced too,
+    # while a 0-token run (no usage reported) and the timeout/error paths above settle
+    # cost_usd NULL — unpriceable, and we avoid opening a session just to skip it.
+    # Cost estimation runs in its OWN session (a failed rate query can never poison the
+    # settlement transaction) and must never block settlement, so it degrades to NULL.
+    cost_usd: Decimal | None = None
+    if total_tokens:
+        try:
+            async with db_session_factory() as cost_db:
+                cost_usd = await estimate_agent_run_cost_usd(cost_db, total_tokens=total_tokens)
+        except Exception:
+            logger.warning(
+                "agent run cost estimate failed (non-fatal); settling with cost_usd NULL",
+                extra={"event": "agent_run_cost_estimate_failed", "run_id": str(run_id)},
+            )
     settled = await _finalize(
         db_session_factory,
         run_id,
@@ -755,6 +776,7 @@ async def execute_agent_run(
         # spend is queryable (observability + calibrating run_token_budget). Only the
         # normal-return path has the total; timeout/error paths persist NULL (best-effort).
         total_tokens=total_tokens,
+        cost_usd=cost_usd,
         lease=lease,
     )
     if publisher is not None and settled:

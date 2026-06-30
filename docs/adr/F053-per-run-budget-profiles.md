@@ -90,3 +90,51 @@ Chosen: **option 3.**
   profile rejected, ceiling raised to 600); `test_agent_run_timeout_layering` (arq timeout > largest profile
   wall clock). Migration 0080 up→down→up verified on a throwaway pgvector; full api + web suites green.
 - **No new dependency.** Additive migration only; the gateway is untouched.
+
+## Slice O-2 addendum — `cost_usd` populated (accepted 2026-06-30)
+
+Slice O deferred showing *estimated spend*; O-2 lands it. Mapping the cost surfaces changed two
+assumptions the parent slice made, both in our favour:
+
+- **No migration, no new column.** `agent_runs.cost_usd` (`NUMERIC(10,4)`, nullable) already
+  exists and is already exposed on `AgentRunRead` + the TS `AgentRun`. O-2 only writes and
+  renders it.
+- **Real calibration data already flows.** Every deep-agent gateway call is tagged
+  `purpose='agent_loop'` (`app.agents.factory`) and the gateway records a real per-call
+  `cost_estimate` (from its `cost_tracking.rates` map) on the routing-log row — so a rolling
+  average over `agent_loop` traffic has live data, not just a cold-start default.
+
+Decisions (within F053's accepted umbrella; recorded here, no new ADR):
+
+1. **Blended per-token rate, not a per-call average.** `app.citation.cost` averages *per-call*
+   cost (a judge call is fixed-shape). A run is many calls of varying size and the only
+   run-level quantity persisted is `total_tokens` (Slice G), so the estimator
+   (`app.agents.cost`) computes `SUM(cost_estimate) / SUM(tokens_in+tokens_out)` over the last
+   100 priced `agent_loop` rows (<=30 days) and multiplies by `total_tokens`. Summing-then-
+   dividing weights the rate by call size.
+2. **An estimate, not exact per-run cost.** The routing log has no run/agent-run id, so a run's
+   own rows can't be summed — exact attribution stays a deferred cross-service slice
+   (routing-log `run_id`). The UI labels it "Est. cost ~ ..." with a "not an exact bill" tooltip.
+3. **Fallback rate when uncalibrated.** Fewer than 5 priced `agent_loop` rows ->
+   `DEFAULT_AGENT_PER_TOKEN_USD` (~$3/Mtok), a documented placeholder that self-calibrates. (On
+   the dev box, whose gateway prices no local model, the fallback is what shows — honest, and
+   labelled approximate.)
+4. **No cache.** Unlike the judge estimator (fires several times per chat message), this runs
+   once per run at settlement — a process-global cache would buy nothing, so it is omitted (no
+   module singleton).
+5. **Own session, best-effort.** The runner computes the cost in a SEPARATE short-lived session
+   before `_finalize` (a failed rate query can never poison the settlement transaction) and only
+   when `total_tokens` is truthy; any failure degrades to `cost_usd` NULL. Timeout/error paths
+   settle unpriced (no token total). `settle_run` gained a `cost_usd` param it persists in the
+   one terminal UPDATE.
+6. **UI = post-run actual only.** The estimate renders on the settled run card, not as a pre-run
+   per-profile number: multiplying a per-token rate by a profile's *ceiling* (8M/16M tokens)
+   would show a scary backstop figure, not expected spend — misleading. A "typical run ~ $X"
+   hint near the dropdown (rate x the average run's tokens) is a possible honest follow-up.
+
+Gate: `test_agent_cost.py` (blended math, size-weighting, fallback <5, purpose/null/stale
+filters, total_tokens None/0, db=None, defensive DB-error fallback); `test_agent_lease.py`
+(cost_usd persisted + NULL by default); `test_agent_runner.py` (normal path priced, timeout
+path unpriced); `ConversationPanel-helpers.test.ts` (`formatRunCostUSD`). No migration; gateway
+untouched; no new dependency. `cost_usd` exact per-run attribution (routing-log `run_id`)
+remains the deferred follow-up.

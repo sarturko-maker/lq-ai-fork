@@ -3,7 +3,40 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-30): DEV-STACK STABILITY + STREAMING-RENDER FIX — branch `fork/dev-stack-streaming-fix`.
+> ▶▶ **PICKUP (2026-06-30): F2 SLICE O-2 — per-run COST ESTIMATE (`agent_runs.cost_usd`) + a UI receipt —
+> branch `fork/o2-cost-estimate` (ADR-F053 Slice O-2 addendum). The actioned upstream-reuse finding; finishes
+> the cost-envelope story Slice O started. NO migration, NO new dep, gateway untouched.**
+> - **Two assumptions flipped (both favourable):** (a) `agent_runs.cost_usd` (`NUMERIC(10,4)`, nullable)
+>   ALREADY exists + is exposed on `AgentRunRead` + TS `AgentRun` → **no migration, no new column**; (b) every
+>   deep-agent call is tagged `purpose='agent_loop'` and the gateway records a real per-call `cost_estimate`
+>   on the routing-log row → a rolling average over `agent_loop` has **live data**, not cold-start-only.
+> - **NEW `api/app/agents/cost.py`** — `estimate_agent_run_cost_usd(db, *, total_tokens)`: a **blended
+>   per-token** rate `SUM(cost_estimate)/SUM(tokens_in+tokens_out)` over the last 100 priced `agent_loop` rows
+>   (≤30 days) × `total_tokens`. Blended (not upstream's per-CALL average) because a run is many calls of
+>   varying size and we only persist `total_tokens` (Slice G). Fallback `DEFAULT_AGENT_PER_TOKEN_USD` (~$3/Mtok)
+>   when <5 priced rows. **No cache** (runs once per settlement, not per-message like the judge estimator → no
+>   module singleton). An ESTIMATE — routing log has no run id (exact attribution = deferred `run_id` slice).
+> - **Seam:** `runner.execute_agent_run` computes the cost in a **SEPARATE** short-lived session before
+>   `_finalize` (a failed rate query can't poison the settle txn), **gated on truthy `total_tokens`**, best-
+>   effort (failure → NULL). `_finalize` + `lease.settle_run` gained a `cost_usd` param persisted in the one
+>   terminal UPDATE. Timeout/error paths settle unpriced (NULL).
+> - **UI (post-run actual only):** `ConversationPanel.svelte` renders "Est. cost ~ $X" on the settled run card
+>   (`formatRunCostUSD` in `<script module>`, reuses `formatCostUSD`; tooltip "not an exact bill"). Deliberately
+>   NOT a pre-run per-profile number — ceiling × rate (8M/16M tok) would show a scary backstop, not expected
+>   spend. (A "typical run ~ $X" dropdown hint = possible honest follow-up.)
+> - **GATE — met:** targeted api **41 passed** (`test_agent_cost` blended/size-weighted/fallback/filters/
+>   None-0/db-None/DB-error; `test_agent_lease` cost_usd persisted + NULL default; `test_agent_runner` normal
+>   priced / timeout unpriced); ruff(root) + format + **mypy(211)** clean; web `npm run check` 0 errors +
+>   `ConversationPanel-helpers` 14 passed (full `test:frontend` <RESULT — see PR>). CI on the PR is
+>   authoritative. **TRAP** (caught): a no-usage run has `total_tokens=0` (a number, not None) — `if
+>   total_tokens is not None:` opened a session that ATE the fault-injection ordinal in `test_finalize_*`
+>   (one passed vacuously); gate on **truthy** `total_tokens` (a 0-token run is unpriceable anyway).
+> - **NEXT (queue):** **Slice P — PageIndex** (gateway-bound retrieval; strongly favoured — this box can't run
+>   local ONNX during runs; ADR-F052 to draft; `plans/PAGEINDEX-SLICE-P.md`; eval-first). Lower-priority
+>   follow-ups: cost_usd **exact** attribution (routing-log `run_id`, cross-service); a "typical run ~ $X"
+>   pre-run hint. Still-open housekeeping: the unpushed `fork/c3-update-memory-ux` branch (2 local commits).
+>
+> ▶ **PREVIOUS (2026-06-30): DEV-STACK STABILITY + STREAMING-RENDER FIX — MERGED PR #175 (`b30240ed`).
 > Two separable fixes surfaced while live-testing Slice O on the 6.3 GB dev box; NOT part of the Slice O feature.**
 > - **(1) Agent runs OOM the box** loading the in-process ONNX retrieval stack (local bge embedder +
 >   cross-encoder rerank) in the **arq-worker** during `search_documents` → memory 2.6→5.3 GB → OOM →

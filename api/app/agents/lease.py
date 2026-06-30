@@ -29,6 +29,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import CursorResult, text
@@ -142,6 +143,7 @@ async def settle_run(
     final_answer: str | None = None,
     error: str | None = None,
     total_tokens: int | None = None,
+    cost_usd: Decimal | None = None,
     lease_token: uuid.UUID | None = None,
 ) -> bool:
     """The one terminal write. ``True`` when THIS call settled the run.
@@ -163,6 +165,10 @@ async def settle_run(
         # F2 Slice G (ADR-F051 follow-up): the run's cumulative model tokens, NULL when
         # not reported / settled off the normal path. The single terminal write owns it.
         "total_tokens": total_tokens,
+        # F2 Slice O-2 (ADR-F053 addendum): a rough USD estimate for the run
+        # (blended agent_loop rate x total_tokens — app.agents.cost). NULL on the
+        # timeout/error paths (no token total) and whenever it can't be priced.
+        "cost_usd": cost_usd,
     }
     fence_sql = ""
     if lease_token is not None:
@@ -175,7 +181,8 @@ async def settle_run(
                     text(
                         "UPDATE agent_runs SET status = :status, "
                         "final_answer = :final_answer, error = :error, "
-                        "total_tokens = :total_tokens, finished_at = now() "
+                        "total_tokens = :total_tokens, cost_usd = :cost_usd, "
+                        "finished_at = now() "
                         "WHERE id = :run_id AND status = :running" + fence_sql
                     ),
                     params,
