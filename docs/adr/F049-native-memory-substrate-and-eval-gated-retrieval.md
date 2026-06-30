@@ -5,7 +5,9 @@
   **N3** (2026-06-29, cross-thread conversation-recall tool), **Slice A** (2026-06-29, matter document
   tool wired to one hybrid retriever), **Slice C2** (2026-06-29, Store `IndexConfig` semantic recall),
   **Slice C1** (2026-06-29, local embedder + matter-document hybrid
-  retrieval), **Slice D** (2026-06-30, local cross-encoder rerank, default ON — see the addenda at the end)
+  retrieval), **Slice D** (2026-06-30, local cross-encoder rerank, default ON),
+  **Slice E** (2026-06-30, cost-aware fan-out: read-cost estimate + a fan-out quota brake — see the
+  addenda at the end)
 - Date: 2026-06-27
 - Deciders: maintainer (Arturs), agent
 - Milestone: **F2 — Memory: 4 levels + conversation memory** (ADR-F003). This ADR is the
@@ -412,3 +414,78 @@ reranker, no model download): `test_rerank_provider`, `test_matter_search_rerank
 wide-fetch promotion / ≤1 no-op / error + score-mismatch fallback / matter-scope isolation), the rerank arm in
 `test_cuad_retrieval_smoke`, and the `tools.py` rerank path + fallback. **No migration, no dep, no gateway
 change.**
+
+## Addendum — Slice E (2026-06-30): cost-aware fan-out — a read-cost estimate + a fan-out quota brake
+
+The **Phase-3 "Strategy + safety"** line. Slices A–D made the matter retriever good; this slice makes the
+agent *cost-aware* about how it consumes documents, and puts a **real enforced ceiling** on subagent
+fan-out. It implements four of the five sub-slices the strategy research decomposed
+(`research/retrieval-strategy-selection-fanout-vs-read-vs-retrieve.md` §8, `fanout-for-document-work-vs-code.md`):
+S1 (per-doc read-cost in the inventory), S2 (`estimate_read_cost` tool), S3 (the retrieval-strategy
+doctrine), S4 (the fan-out quota). **S5 — wiring R4 into a live per-run token budget — is explicitly
+deferred (see "the honest R4 gap" below).** No migration, no new dependency, no gateway change.
+
+**S1 + S2 — the agent can estimate read cost.** `tools.py:_inventory` now renders `~k tokens to read` per
+document from the stored `character_count` (capped at the `read_document` limit, ÷ ~4 chars/token) — the
+cheapest, highest-leverage self-awareness signal (the agent sees the cost of reading each candidate before
+it reads). A new guarded read-only tool `estimate_read_cost(filenames)` (added to `MATTER_TOOL_NAMES`,
+through the same `guarded_dispatch` chokepoint + the `_matter_files_query` matter+owner scope) returns the
+candidate set's estimated read tokens (`Σ min(character_count, read_limit) / 4`), the turn-start remaining
+budget, and which consumption mode fits (read-in-full when it fits ≤ ½ the budget; fan out only when it
+would not fit and the work is independent; else passages). Empty list ⇒ the whole matter.
+*(Postgres-LEAST trap: `LEAST(NULL, n) == n`, so an un-ingested file's NULL `character_count` would
+phantom-count as the cap — `coalesce(character_count, 0)` first.)*
+
+**The budget is an honest ESTIMATE, not live accounting.** `remaining_budget_tokens` = the compaction floor
+(0.85·`max_input_tokens`) minus a coarse standing-overhead reserve (base prompt + injected tiers +
+reasoning/output headroom), computed at tool-build time. It is a turn-START order-of-magnitude figure to
+*choose a consumption mode* — there is no live per-turn token counter (that is the deferred R4 work). The
+tool says so in its output ("a turn-start estimate, not a live count").
+
+**S3 — the strategy doctrine (taste).** `RETRIEVAL_STRATEGY_DOCTRINE`, injected for every matter-bound run
+(after the conversation-recall doctrine), teaches the three consumption modes, the cost rule keyed on
+`estimate_read_cost`, cheap-first-escalate-on-thin, and the fan-out anti-patterns (don't fan out a set that
+fits; don't fan out a dependent/cross-referential question — one mind reconciles the synthesis). Prose, an
+ADR-F041 craft layer — the **model chooses** the mode (the substrate has no pre-consumption deterministic
+hook, ADR-F034; a forced router would need the deferred O-series). `system_prompt_for` stays the
+byte-identical assembly oracle.
+
+**S4 — the fan-out quota (safety).** Subagent fan-out is the deepagents builtin `task` tool, which is added
+to the agent's `ToolNode` by deepagents' `SubAgentMiddleware` and therefore **bypasses the
+`guarded_dispatch` chokepoint** (that only wraps our matter tools). Nothing bounded fan-out breadth before
+this slice — `max_steps`/`recursion_limit`/wall-clock are *step* caps, and one wide fan-out turn can blow the
+token budget long before the step count (the ADR-F015 over-exploration finding). A new fork middleware
+`app/agents/fan_out_middleware.py:FanOutQuotaMiddleware` is the missing chokepoint: langchain's agent factory
+builds the `ToolNode` with a `wrap_tool_call`/`awrap_tool_call` chain composed from **every** middleware that
+overrides the hook (`langchain.agents.factory`), and `task` is a normal registered tool — so our
+`(a)wrap_tool_call` sees every `task` dispatch *before* it executes. Past the configurable per-run ceiling
+(`Settings.fan_out_quota`, default 8; ≤0 disables) it returns a model-visible refusal `ToolMessage` **without
+calling the handler** — no subagent spawns, the run is **not** killed, and the agent adapts (consolidate /
+read directly). Check-and-increment carries no `await` between read and write, so the cap is exact even when
+the `ToolNode` gathers a multi-`task` turn. Constructed per run in `composition.py` (alongside
+`TierMemoryMiddleware`), added only when subagents are configured. This is a SAFETY ceiling, not a taste
+limit — doctrine (S3) governs *when* to fan out; the quota only bounds the blast radius if the model
+misjudges. **Known limit:** nested fan-out (a subagent calling `task`) runs under the subagent's own
+graph/middleware, so the quota bounds the *lead's* breadth (the primary runaway vector), not a subagent's.
+
+**The honest R4 gap (S5 deferred — do NOT claim cost-safety from this slice).** R4 (the per-action cost cap,
+`guard.py`) is still a documented **no-op**; there is no per-run *token/dollar* budget enforcement anywhere.
+The plumbing for it is half-present (the gateway writes `inference_routing_log` rows with `tokens_in/out`;
+`agent_runs.cost_usd` exists, NULL, mig 0048) but the runner captures no usage and nothing aggregates it.
+So Slice E makes runaway fan-out *unlikely and bounded* (estimate + doctrine + the quota ceiling) but **not
+impossible** — a hard token stop needs S5 (routing-log aggregation + a halt-at-ceiling), its own slice + ADR.
+Stated plainly so "the agent is cost-safe" is not over-claimed.
+
+**Maintainer ruling carried in:** quota default = a configurable global safety ceiling (per-area tuning is a
+follow-up, research open Q6); strategy = model-self-select with a cost tool (not a deterministic router).
+
+*Gate (ADR-F015 — the runaway-fan-out cost test is the hard, CI-enforced gate; A7 strategy is a finding).*
+Deterministic, $0, zero-LLM: `test_fan_out_middleware.py` (the quota allows N then denies the (N+1)th with a
+refusal — handler never runs; non-`task` tools pass through and never count; `quota<=0` disables; sync path
+matches async; **an integration test on a REAL deepagents graph with a subagent proves the builtin `task` is
+routed through our `awrap_tool_call`** — the load-bearing assumption); `test_agent_tools.py` (read-cost in
+the inventory; `estimate_read_cost` SUM/cap math, whole-matter vs named, matter+owner scope isolation,
+read-in-full vs fan-out suggestions, audit body-free; the grant set + model-facing schema include the new
+tool); the `system_prompt_for` oracle updated for the new doctrine. **A7-large** (an over-window corpus where
+inline should miss documents and fan-out should win) extends the Track-A instrument as a finding, not a
+CI bar.

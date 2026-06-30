@@ -207,6 +207,26 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ----- Fan-out safety quota (strategy + safety — ADR-F049 Slice E) -----
+    # A per-run CEILING on subagent (`task`) dispatches, enforced by a fork
+    # middleware (app.agents.fan_out_middleware) over the deepagents builtin `task`
+    # tool (which bypasses the guarded_dispatch chokepoint). This is a SAFETY brake
+    # (the antidote to the ADR-F015 over-exploration), NOT a taste limit — the
+    # retrieval-strategy doctrine teaches WHEN to fan out; this bounds the blast
+    # radius if the model misjudges. Over the ceiling, the run is not killed: the
+    # `task` call is denied with a model-visible refusal so the agent can adapt
+    # (consolidate findings / read remaining documents directly). NOTE: this is the
+    # step/breadth brake; a real per-run TOKEN budget (R4, guard.py) is still a
+    # no-op and is a separate deferred slice (do not claim cost-safety from this).
+    fan_out_quota: int = Field(
+        default=8,
+        description=(
+            "Maximum subagent (`task`) dispatches per run before fan-out is denied "
+            "with a model-visible refusal. A configurable safety ceiling (ADR-F049 "
+            "Slice E), not a taste limit. <= 0 disables the brake."
+        ),
+    )
+
     # ----- Inference Gateway -----
     lq_ai_gateway_url: str = Field(
         default="http://localhost:8001",

@@ -312,6 +312,32 @@ class MatterConversationSearchInput(BaseModel):
     thread_id: uuid.UUID | None = None
 
 
+# F2 Phase-3 Slice E (ADR-F049): the pre-flight read-cost estimate takes a candidate
+# filename list (or none ⇒ the whole matter). Bounds keep an over-eager model from
+# passing a runaway list; names are matched parameterized (never built into SQL).
+ESTIMATE_READ_COST_MAX_FILES = 200
+ESTIMATE_READ_COST_FILENAME_MAX_CHARS = 512
+
+
+class EstimateReadCostInput(BaseModel):
+    """Validate one ``estimate_read_cost`` request (a list of candidate filenames).
+
+    An empty / omitted list means "estimate the whole matter". Each filename is a
+    short string matched case-insensitively against the matter's files; the list is
+    bounded so a malformed or runaway request is rejected back to the model rather
+    than scanned. Filenames never build SQL — they are parameterized equality matches.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    filenames: list[Annotated[str, Field(max_length=ESTIMATE_READ_COST_FILENAME_MAX_CHARS)]] = (
+        Field(
+            default_factory=list,
+            max_length=ESTIMATE_READ_COST_MAX_FILES,
+        )
+    )
+
+
 class MatterFactsAsOfInput(BaseModel):
     """Validate one ``matter_facts_as_of`` date (the "what did we believe at T" query).
 

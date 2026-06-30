@@ -43,12 +43,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.selectable import Select
 
 from app import storage
+from app.agents.factory import DEFAULT_MAX_INPUT_TOKENS
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.config import get_settings
 from app.knowledge.embedding_provider import get_embedding_provider
@@ -58,6 +60,7 @@ from app.models.document import Document
 from app.models.file import File
 from app.models.project import ProjectFile
 from app.pipeline.readers._base import OOXML_DOCX_MIME, guard_ooxml, ooxml_subtype
+from app.schemas.matter_memory import EstimateReadCostInput
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +76,33 @@ _SNIPPET_LIMIT = 1500
 # honest notice steering the model back to search_documents.
 _READ_LIMIT = 40_000
 
-MATTER_TOOL_NAMES = frozenset({"search_documents", "read_document", "get_document_metadata"})
+# F2 Phase-3 Slice E (ADR-F049): pre-flight read-cost estimate.
+# A tokenizer-agnostic ~4-chars/token estimate; legal text tokenises slightly denser,
+# so this slightly UNDERSTATES — good enough to choose a consumption mode, not a
+# billing-grade number (the honest limit recorded in the strategy research).
+_CHARS_PER_TOKEN = 4
+# Compaction trims context at ~0.85 x the window (factory.DEFAULT_MAX_INPUT_TOKENS);
+# that floor is the budget a turn's reads compete inside.
+_COMPACTION_FRACTION = 0.85
+# A coarse standing-overhead reserve (base prompt + injected memory tiers + headroom
+# for reasoning and output) subtracted from the floor to give a turn-START remaining
+# budget. This is an ESTIMATE: live per-turn token accounting is the deferred R4 slice
+# (guard.py R4 is still a no-op), so the tool never claims a live count.
+_BUDGET_RESERVE_TOKENS = 40_000
+
+
+def _read_tokens(character_count: int | None) -> int:
+    """Estimated tokens to read one document in full (capped at the read limit).
+
+    ``read_document`` truncates at ``_READ_LIMIT`` chars, so a document cannot cost
+    more than ``_READ_LIMIT / _CHARS_PER_TOKEN`` tokens to read however large it is.
+    """
+    return min(character_count or 0, _READ_LIMIT) // _CHARS_PER_TOKEN
+
+
+MATTER_TOOL_NAMES = frozenset(
+    {"search_documents", "read_document", "get_document_metadata", "estimate_read_cost"}
+)
 
 
 @dataclass(frozen=True)
@@ -95,12 +124,17 @@ def build_matter_tools(
     *,
     run_id: uuid.UUID,
     binding: MatterBinding,
+    max_input_tokens: int = DEFAULT_MAX_INPUT_TOKENS,
 ) -> list[Callable[..., Any]]:
     """Build the matter's guarded document tools for one run.
 
     The closures carry the B-class scope (matter + owner); the guard
     context grants exactly this tool set (search_documents + read_document +
-    get_document_metadata — R6's grant set).
+    get_document_metadata + estimate_read_cost — R6's grant set).
+
+    ``max_input_tokens`` is the run's context window (default the production
+    window) — it sets the turn-start remaining-budget estimate the
+    ``estimate_read_cost`` tool reports (F2 Slice E, ADR-F049).
     """
     ctx = GuardContext(
         session_factory=session_factory,
@@ -110,6 +144,10 @@ def build_matter_tools(
         granted=MATTER_TOOL_NAMES,
         practice_area_id=binding.practice_area_id,
     )
+    # Turn-start remaining budget = compaction floor minus a coarse standing reserve.
+    # An estimate for choosing a consumption mode, NOT live accounting (deferred R4).
+    budget_floor = int(max_input_tokens * _COMPACTION_FRACTION)
+    remaining_budget = max(0, budget_floor - _BUDGET_RESERVE_TOKENS)
 
     async def search_documents(query: str) -> str:
         """Search this matter's documents for passages matching a query.
@@ -148,7 +186,24 @@ def build_matter_tools(
             "get_document_metadata", lambda db: _document_metadata(db, binding, name), ctx
         )
 
-    return [search_documents, read_document, get_document_metadata]
+    async def estimate_read_cost(filenames: list[str] | None = None) -> str:
+        """Estimate the token cost of reading documents BEFORE you read or delegate.
+
+        Pass the candidate filenames exactly as shown by search_documents, or omit
+        them / pass an empty list to estimate the whole matter. Returns how many
+        documents matched, the estimated tokens to read them in full, your remaining
+        budget for this turn (an estimate), and which consumption mode fits. Use it to
+        choose: read a set in full when it fits well within the remaining budget; fan
+        out a subagent per document only when it would NOT fit and the work splits into
+        independent reads; otherwise retrieve passages with search_documents.
+        """
+        return await guarded_dispatch(
+            "estimate_read_cost",
+            lambda db: _estimate_read_cost(db, binding, filenames, remaining_budget),
+            ctx,
+        )
+
+    return [search_documents, read_document, get_document_metadata, estimate_read_cost]
 
 
 async def _embed_query(query: str) -> list[float] | None:
@@ -277,6 +332,89 @@ async def _read(db: AsyncSession, binding: MatterBinding, name: str) -> str:
             f"specific passages.]\n\n{content[:_READ_LIMIT]}"
         )
     return f"{note}[{row.filename}{pages} — full text]\n\n{content}"
+
+
+def _rejection_text(exc: ValidationError, tool: str) -> str:
+    """Turn a Pydantic failure into a fix-and-retry message (no body echo)."""
+    problems = []
+    for err in exc.errors():
+        loc = ".".join(str(p) for p in err["loc"]) or "(input)"
+        problems.append(f"- {loc}: {err['msg']}")
+    return f"{tool} was rejected — nothing was read. Fix the following and retry:\n" + "\n".join(
+        problems
+    )
+
+
+async def _estimate_read_cost(
+    db: AsyncSession,
+    binding: MatterBinding,
+    filenames: list[str] | None,
+    remaining_budget: int,
+) -> str:
+    """Estimate the tokens to read a candidate set in full, vs the remaining budget.
+
+    Reject-not-crash: a malformed / over-long list is rejected back to the model. Names
+    are matched parameterized over the matter scope (the security boundary in
+    :func:`_matter_files_query`) — never built into SQL. An empty list ⇒ the whole
+    matter. The estimate is ``Σ min(character_count, _READ_LIMIT) / _CHARS_PER_TOKEN``;
+    the budget and modes follow the strategy research (read-in-full when it fits ≤ ½ of
+    the remaining budget; fan out only when it would not fit and the work is independent).
+    """
+    try:
+        proposal = EstimateReadCostInput(filenames=filenames or [])
+    except ValidationError as exc:
+        return _rejection_text(exc, "estimate_read_cost")
+
+    wanted = [n.strip() for n in proposal.filenames if n.strip()]
+    # Count READABLE documents (distinct Document.id) — an un-ingested matter file has
+    # no Document row, so it is not a candidate to read and adds nothing to the cost.
+    # NOTE: Postgres LEAST() SKIPS NULL args (LEAST(NULL, 40000) == 40000), so an
+    # un-ingested file's NULL character_count would phantom-count as the read cap —
+    # coalesce(..., 0) first so a NULL contributes 0, not _READ_LIMIT.
+    stmt = _matter_files_query(
+        binding,
+        func.count(func.distinct(Document.id)),
+        func.coalesce(
+            func.sum(func.least(func.coalesce(Document.character_count, 0), _READ_LIMIT)), 0
+        ),
+    )
+    if wanted:
+        stmt = stmt.where(func.lower(File.filename).in_([w.lower() for w in wanted]))
+    row = (await db.execute(stmt)).one()
+    n_docs = int(row[0] or 0)
+    est_tokens = int(row[1] or 0) // _CHARS_PER_TOKEN
+
+    if n_docs == 0:
+        if wanted:
+            return (
+                "None of those filenames matched documents in this matter. Check the "
+                "names with search_documents (an empty query lists them)."
+            )
+        return "This matter has no documents to read."
+
+    half = remaining_budget // 2
+    if est_tokens <= half:
+        mode = (
+            "This fits comfortably — read them in full with read_document and reason "
+            "over the whole text."
+        )
+    elif est_tokens <= remaining_budget:
+        mode = (
+            "This is large for one context — read only the few most relevant in full, "
+            "or retrieve passages with search_documents."
+        )
+    else:
+        mode = (
+            "This is too large to read whole. If the work splits into independent "
+            "per-document reads, fan out a subagent per document; otherwise retrieve "
+            "passages with search_documents and read only the very top few in full."
+        )
+    scope = f"{n_docs} document(s)" if wanted else f"the whole matter ({n_docs} document(s))"
+    return (
+        f"Estimated cost to read {scope} in full: ~{est_tokens:,} tokens. "
+        f"Remaining budget this turn: ~{remaining_budget:,} tokens (a turn-start "
+        f"estimate, not a live count). {mode}"
+    )
 
 
 # Email header keys (lowercased label) as stored in Document.structured_content by the
@@ -520,9 +658,20 @@ async def load_matter_docx_bytes(
 
 
 async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -> str:
-    """One line per attached file — name, pages, ingest readiness."""
+    """One line per attached file — name, pages, read-cost estimate, ingest readiness.
+
+    F2 Slice E (ADR-F049): the per-document ``~k tokens to read`` estimate (from the
+    stored ``character_count``, capped at the read limit) is the cheapest, highest-
+    leverage self-awareness signal — the agent sees the cost of reading each candidate
+    BEFORE it reads, which is the precondition for choosing a consumption mode.
+    """
     stmt = _matter_files_query(
-        binding, File.filename, File.ingestion_status, Document.id, Document.page_count
+        binding,
+        File.filename,
+        File.ingestion_status,
+        Document.id,
+        Document.page_count,
+        Document.character_count,
     ).order_by(File.filename)
     rows = (await db.execute(stmt)).all()
     if not rows:
@@ -532,10 +681,14 @@ async def _inventory(db: AsyncSession, binding: MatterBinding, *, header: str) -
     for row in rows:
         if row.id is None:
             lines.append(f"- {row.filename} (not ingested yet — status: {row.ingestion_status})")
-        elif row.page_count:
-            lines.append(f"- {row.filename} ({row.page_count} pages)")
-        else:
-            lines.append(f"- {row.filename}")
+            continue
+        bits: list[str] = []
+        if row.page_count:
+            bits.append(f"{row.page_count} pages")
+        if row.character_count:
+            bits.append(f"~{_read_tokens(row.character_count):,} tokens to read")
+        suffix = f" ({'; '.join(bits)})" if bits else ""
+        lines.append(f"- {row.filename}{suffix}")
     return f"{header}\n" + "\n".join(lines)
 
 
