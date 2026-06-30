@@ -334,11 +334,16 @@ and **Playbooks-as-deliverables**.
   `playbook_positions` DATA (the firm's preferred positions) — NOT the frozen legacy executor.
 - Primitive builtins (read/write/edit/bash/task) are NEVER shown — only legal capabilities.
 
-**Phase 1 (NEXT slice) — the capability-toggle panel.** A right-side panel (co-visible split when wide,
-tab fallback when narrow — the ROPA-register precedent), listing the area's Playbooks/Skills/Tools with
-per-matter on/off toggles that genuinely gate what the agent gets (skills via the skill-wiring filter,
-tools via the guard grant set, playbooks via a new read-only consumption path). MCP shown disabled.
-Plan + ADR (≈F054) land at: `docs/fork/plans/CAPABILITY-PANEL-slice.md`. Built + verified per ADR-F005.
+**Phase 1 — the capability-toggle panel. ✅ SHIPPED + MERGED PR #177 (`29d9d027`), 2026-06-30
+(ADR-F054, migration 0081; maintainer-confirmed live).** A cockpit "Capabilities" tab listing the area's
+Playbooks/Skills/Tools (+ disabled MCP placeholder) with per-matter on/off toggles that genuinely gate what
+the agent gets: skills via the skill-wiring filter, tool GROUPS via the guard grant set (R6 fail-closes),
+playbooks via a new read-only "Practice Playbook" tier on `TierMemoryMiddleware`. ONE pure
+`app/agents/capabilities.py` inventory is the single source of truth (API + composition); two-layer scope
+(area curates / lawyer toggles per matter); no-toggle default path byte-identical to pre-slice. Plan/ADR:
+`docs/fork/plans/CAPABILITY-PANEL-slice.md`, `docs/adr/F054-per-matter-capability-toggles.md`. (Shipped as
+a TAB; the co-visible resizable split is a noted follow-up. Endpoint is PATCH not PUT — the api CORS
+allow-list has no PUT.)
 
 **Phase 2 — Tabular review as an in-matter tool (Commercial + Corporate) + LQ-Grid.** Reuse the upstream
 tabular SUBSTRATE (ColumnSpec, per-cell extraction, Citation-Engine ensemble, JSONB grid) — NOT the

@@ -3,11 +3,16 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-30): CAPABILITY PANEL (Phase 1) — BUILT + LIVE-VERIFIED on branch
-> `fork/capability-panel` (ADR-F054, migration 0081). PR open; HOLDING merge for maintainer UI sign-off
-> (they are testing on localhost). The first slice of the new "Capability panel + in-matter Tabular review"
-> milestone — the prerequisite before Phase 2 (tabular as an in-matter agent TOOL in Commercial + Corporate,
-> grid UX augmented by the maintainer's React repo LQ-Grid, REFERENCE-ONLY).**
+> ▶▶ **PICKUP (2026-06-30): ⏭️ PIVOT PENDING — the maintainer is about to redirect to TEST SOMETHING
+> QUICKLY (target TBD; ask them, then write a proper pickup here). The capability-panel work below is a
+> CLEAN, MERGED checkpoint — nothing is in flight, the tree is on `main`, the dev stack is up on
+> `http://localhost:3000` (NOT 127.0.0.1 — CORS allows only `http://localhost:3000`). Pick the pivot up
+> first; resume the capability-panel milestone's Phase 2 (tabular) after.**
+>
+> ▶ **PREVIOUS (2026-06-30): CAPABILITY PANEL (Phase 1) — ✅ SHIPPED + MERGED PR #177 (`29d9d027`)
+> (ADR-F054, migration 0081). Maintainer-confirmed working in the browser. Phase 1 of the "Capability panel
+> + in-matter Tabular review" milestone — the prerequisite before Phase 2 (tabular as an in-matter agent TOOL
+> in Commercial + Corporate, grid UX informed by the maintainer's React repo LQ-Grid, REFERENCE-ONLY).**
 > - **WHAT SHIPPED:** a per-matter capability panel. The AREA curates the AVAILABLE set; the LAWYER toggles
 >   a subset on/off **PER MATTER** (persisted; survives the matter's conversations; "system proposes, user
 >   owns"). Sections: **Playbooks / Skills / Tools** (real now) + a disabled **MCP** placeholder. Primitives
@@ -44,10 +49,17 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   a == default row) accepted as harmless/intentional. **LIVE-VERIFIED** on the dev stack: attach playbook
 >   (204) → GET shows all 4 sections (real commercial skills, bound playbook, redlining, MCP-disabled) →
 >   toggle redlining off (persists across a fresh GET) → wrong-area tool 422.
-> - **DEV STACK:** api+arq+ingest rebuilt (mig 0081 live, tables confirmed) + **web rebuilt** (the panel is
->   live on `http://127.0.0.1:3000`; a demo playbook "NDA — Mutual" is bound to Commercial for testing —
->   unbind via the admin DELETE). NOTE: the dev DB has the FIRST-cut 0081 (redundant index + auto-named FKs);
->   harmless — the SHIPPED migration (clean) applies on a fresh deploy; no host-side downgrade was run.
+> - **POST-MERGE GATE:** CI green on #177 (API + Gateway + Web); **full api suite 3003 passed / 5 skipped**.
+>   **LIVE BUG fixed during testing — toggle endpoint PUT → PATCH:** the api CORS `allow_methods` is
+>   GET/POST/PATCH/DELETE/OPTIONS (NO PUT — the codebase has zero PUT endpoints), so the browser's PUT
+>   preflight was blocked → "Failed to fetch" → toggles silently reverted. Switched to PATCH (convention +
+>   semantically a sparse update); the web client method is `updateMatterCapabilities` (PATCH). **TRAP for
+>   any future mutating endpoint: use POST/PATCH/DELETE, never PUT, or the browser CORS preflight fails.**
+> - **DEV STACK:** api+arq+ingest+web rebuilt (mig 0081 live, tables confirmed); panel live + maintainer-
+>   confirmed on `http://localhost:3000` (use localhost, NOT 127.0.0.1 — CORS allow-list is localhost:3000
+>   only). A demo playbook "NDA — Mutual" is bound to Commercial for testing (unbind via the admin DELETE).
+>   NOTE: the dev DB carries the FIRST-cut 0081 (redundant index + auto-named FKs) — harmless; the SHIPPED
+>   (clean) migration applies on a fresh deploy; no host-side downgrade was run.
 > - **TRAPS (carry forward):** (1) a new route MUST be added to BOTH `test_endpoints.py` IMPLEMENTED_ROUTES
 >   (skip the 501-scaffold) AND `test_openapi.py` EXPECTED_PATHS **+ the `len(actual) == N` count** (3 path
 >   templates here → +3). (2) `build_area_inventory` calls `record.summary()` on every area-bound run → any
