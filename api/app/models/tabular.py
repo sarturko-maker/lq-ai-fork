@@ -96,6 +96,36 @@ class TabularExecution(Base):
         nullable=True,
     )
     skill_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ADR-F055 (F2 Tabular T1): 'linear' = the frozen ARQ executor (M3-C2); 'agentic' =
+    # the deepagents "grids" tool. DEFAULT 'linear' keeps every existing + POST /execute
+    # row unchanged; the frozen worker refuses 'agentic' rows (defense in depth — it is
+    # only ever enqueued for linear ids). CHECK-constrained at the storage layer (mig 0082).
+    mode: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'linear'"))
+    # The matter an agentic grid belongs to (ADR-F035 matter scope; the Grids-tab listing
+    # keys off it). NULL for linear rows (upstream scopes them by user + document_ids).
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "projects.id",
+            ondelete="SET NULL",
+            name="fk_tabular_executions_project_id",
+        ),
+        nullable=True,
+    )
+    # The agent run that produced an agentic grid (provenance, ADR-F046; mirrors
+    # files.created_by_run_id). NULL for linear executions.
+    created_by_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "agent_runs.id",
+            ondelete="SET NULL",
+            name="fk_tabular_executions_created_by_run_id",
+        ),
+        nullable=True,
+    )
+    # Which engine filled an agentic grid (ADR-F055 crossover): 'fanout' (one subagent per
+    # doc) | 'retrieval' (batched-row retrieval). NULL for linear rows. CHECK-constrained.
+    fill_mode: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
         Text,
         nullable=False,

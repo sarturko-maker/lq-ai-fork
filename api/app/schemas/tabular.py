@@ -161,6 +161,17 @@ class CellResult(BaseModel):
     column isn't ensemble-verified or verification didn't confirm the
     value (a verification miss never fails the cell)."""
 
+    source_quote: str | None = None
+    """A short verbatim quote from the source document that grounds the
+    value (ADR-F055 agentic grids; LQ-Grid-derived). Display-only — the
+    agentic fill path records it so the lawyer can see the grounding
+    in-cell even when no chunk citation is attached. ``None`` for the
+    frozen linear executor's cells."""
+
+    notes: str | None = None
+    """Optional commentary on an ambiguous extraction (ADR-F055; LQ-Grid
+    -derived). ``None`` for the frozen linear executor's cells."""
+
 
 class TabularRow(BaseModel):
     """One row in the tabular grid — all cells for a single document.

@@ -3,11 +3,57 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-30): ⏭️ PIVOT PENDING — the maintainer is about to redirect to TEST SOMETHING
-> QUICKLY (target TBD; ask them, then write a proper pickup here). The capability-panel work below is a
-> CLEAN, MERGED checkpoint — nothing is in flight, the tree is on `main`, the dev stack is up on
-> `http://localhost:3000` (NOT 127.0.0.1 — CORS allows only `http://localhost:3000`). Pick the pivot up
-> first; resume the capability-panel milestone's Phase 2 (tabular) after.**
+> ▶▶ **PICKUP (2026-06-30): ▶ TABULAR REVIEW T1 SHIPPED — NEXT = T2 (chat preview + Expand).**
+> Branch `fork/f2-tabular-t1` (ADR-F055, **migration 0082**). The agentic "grids" tool is live: a Commercial
+> run builds a cross-document grid via `start_tabular_review` → `record_tabular_row` → `finalize_tabular_review`.
+> Full plan + all 11 slices: `docs/fork/plans/TABULAR-REVIEW-agentic.md`. Maintainer design calls (confirmed):
+> crossover = the budget `fan_out_quota`; reuse `tabular_executions` + a `mode` flag; in-place mutation
+> (ADR-F042); a `finalize` completeness gate; citations as `chunk_ids`; user-facing noun **"grid"** +
+> dedicated **"Grids"** cockpit tab; LQ-Grid harvest mapped to slices. Dev stack healthy on
+> `http://localhost:3000` (NOT 127.0.0.1 — CORS); model `smart → deepseek-v4-flash`.
+>
+> - **T1 — WHAT SHIPPED (no new UI):** migration 0082 (additive: `tabular_executions.mode` linear|agentic +
+>   `project_id` + `created_by_run_id` + `fill_mode` + a partial index); NEW `app/agents/tabular_tool.py`
+>   (`build_tabular_tools`: start/record/finalize through `guarded_dispatch`, own grant set
+>   `TABULAR_TOOL_NAMES` disjoint from all others, matter+owner scoped, **`SELECT … FOR UPDATE`** serializes
+>   parallel fan-out row writes on the `results` JSONB, incremental commit per row); `CellResult` +
+>   `source_quote`/`notes` (LQ-Grid); NEW `schemas/tabular_agent.py` (tool inputs); `TABULAR_GROUP` capability
+>   (`capabilities.py` → Commercial, gated by the ADR-F054 toggle); composition wiring (envelope resolved
+>   BEFORE the area branches so the tool + the FanOutQuotaMiddleware share it; the Commercial tabular branch;
+>   `TABULAR_FILL_DOCTRINE` gated on `tabular_enabled`); the frozen linear worker refuses `mode='agentic'`.
+> - **GATE — met:** ruff(root)+format+**mypy(218)** clean; **23 new** tests (`test_tabular_tool.py`) + **119
+>   regression** (capabilities / composition / commercial / frozen tabular endpoints / openapi) green in
+>   `lq-ai-api-dev`; migration 0082 **up→down→up on a throwaway pgvector**; dev stack rebuilt (api+arq+ingest,
+>   0082 live on the dev DB). **LIVE-VERIFIED (ADR-F015):** DeepSeek built a 3×2 grid end-to-end
+>   (search→read×3→start→record×3→finalize; status `completed`; correct values + verbatim `source_quote`s) —
+>   `docs/fork/evidence/tabular-review/T1-live-grid.md` + `tests/agents/scenarios/test_tabular_grid_live.py`
+>   (provider-marked). Adversarial security pass clean (owner+matter 404-conflation, parameterized SQL via the
+>   shared `_matter_files_query` boundary, audit counts/IDs-only, zero gateway egress in the tool, confined grant).
+> - **NEXT = T2:** a `data-tabular` SSE frame (`stream.py` + `ui-message-stream.ts` + a new case at
+>   `ConversationPanel.svelte:632`) + a chat small-table preview (column pills) + Expand → the reused
+>   `TabularGrid` (`/tabular/[id]`). Then T3 (discoverability skill, eval-gated) · T4 (retrieval-fill +
+>   crossover eval) · T5 (live cell fill) · T6 (stage takeover + cell drawer) · T7 (Grids tab listing) ·
+>   T8 (bash loop). Enrichment T9 (source highlight → Collabora) / T10 (rich grid affordances); T11 optional.
+> - **TRAPS (carry forward):** (1) adding a tool GROUP breaks exact-match capability tests — `test_capabilities.py`
+>   Commercial tool keys are now `[redlining, tabular]` (updated). (2) the tabular tools take FILENAMES (the
+>   agent works in filenames); they resolve to `documents.id` via `_matter_files_query` (the shared scope
+>   boundary — never re-derive it). (3) `FOR UPDATE` the grid before ANY `results`-JSONB read-modify-write
+>   (parallel fan-out subagents would otherwise lose rows). (4) `tabular_executions` had NO `project_id` —
+>   0082 adds it (matter scope + the Grids listing). (5) the frozen linear worker takes an explicit id (no
+>   pending-scan) so agentic rows are never enqueued; the `mode='agentic'` refusal is defense-in-depth.
+>   (6) **dev gateway key (`LQ_AI_GATEWAY_KEY`) was surfaced in a terminal env dump this session → rotate it
+>   in the gitignored `.env`** (a local internal api↔gateway key, not a provider key).
+>
+> ▷ **CLOSED side-quest (2026-06-30): K2-Think model eval — PARKED, do NOT resume unless asked.** A "test a
+> model quickly" detour for one specific client. Conclusion: native deepagents + K2 is **not viable**
+> (streaming multi-turn tool-calls emit malformed JSON → upstream "Invalid JSON payload for chat completion
+> request" → run aborts; the gateway repairs args only on the NON-streaming path); the **planner-executor**
+> workaround (K2 emits JSON content, code applies) works mechanically (NDA redline: parse 8/8, surgicality
+> 5/5) but legal quality is supervised-first-pass only (0/8 send-ready; residuals clause + downstream-conflict
+> reconciliation are the weak spots). **The dev stack was FULLY REVERTED to DeepSeek — git tree CLEAN, all K2
+> tweaks removed (gateway provider/alias, factory reasoning_effort, web buildRunPayload force, docker-compose
+> env), live gateway config k2think-free.** Only inert leftovers: the gitignored `.env` `K2THINK_API_KEY`
+> and `scratchpad/k2_*` scripts. Full detail: memory [[k2-think-tooluse-test]].
 >
 > ▶ **PREVIOUS (2026-06-30): CAPABILITY PANEL (Phase 1) — ✅ SHIPPED + MERGED PR #177 (`29d9d027`)
 > (ADR-F054, migration 0081). Maintainer-confirmed working in the browser. Phase 1 of the "Capability panel
