@@ -3,8 +3,31 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-30): F2 SLICE O — per-run BUDGET PROFILES + ≥4× default ceilings + a UI knob —
-> on branch `fork/f2-slice-o-cost-envelope` (ADR-F053, **migration 0080**). The maintainer ask: raise the
+> ▶▶ **PICKUP (2026-06-30): DEV-STACK STABILITY + STREAMING-RENDER FIX — branch `fork/dev-stack-streaming-fix`.
+> Two separable fixes surfaced while live-testing Slice O on the 6.3 GB dev box; NOT part of the Slice O feature.**
+> - **(1) Agent runs OOM the box** loading the in-process ONNX retrieval stack (local bge embedder +
+>   cross-encoder rerank) in the **arq-worker** during `search_documents` → memory 2.6→5.3 GB → OOM →
+>   **Postgres broken-pipe crash loop** → API 500 → browser "Failed to fetch / lost contact". Fix:
+>   `docker-compose.yml` adds `EMBEDDING_PROVIDER`/`RERANK_ENABLED` env passthroughs to api + arq-worker
+>   (defaults preserve prod: local + rerank-on); the **dev box** sets `EMBEDDING_PROVIDER=gateway` +
+>   `RERANK_ENABLED=false` in gitignored `.env` → runs embed via the gateway + skip the cross-encoder → no
+>   in-process ONNX → **memory flat ~1.6 GB through a full run** (proven). The gateway exposes an `embedding`
+>   model, so hybrid retrieval still works (FTS + gateway-vector). Generalises the CLAUDE.md trap: not just
+>   *evals* — **agent runs** can't hold the local ONNX stack on a ~6 GB box.
+> - **(2) Browser tab froze mid-run** (before completion): `ConversationPanel.svelte` had
+>   `$: liveReasoningHtml = renderModelMarkdown(liveReasoning)` — re-parsing (marked+DOMPurify) the WHOLE
+>   growing reasoning buffer on EVERY `reasoning-delta`. With a reasoning model (deepseek-v4-flash) streaming
+>   100k+ tokens that's **O(n²)** main-thread work → freeze. Fix: render on a `requestAnimationFrame` throttle
+>   over a bounded **tail** (`LIVE_REASONING_TAIL=8000`); one `autoScroll` per frame; clear on settle; removed
+>   the reactive statement. Live-verified by the maintainer (page stays responsive; settled markdown renders).
+> - **GATE:** `npm run check` 0 errors; web bundle rebuilt + live-verified; backend stable (no OOM, memory
+>   flat). CI on the PR is authoritative. No migration, no new dep.
+> - **NEXT (queue):** **Slice O-2** (cost_usd estimate in the budget UI — the actioned upstream-reuse
+>   finding) OR **Slice P — PageIndex** (gateway-bound retrieval; now strongly favoured since this box can't
+>   run local ONNX during runs; ADR-F052 to draft; `plans/PAGEINDEX-SLICE-P.md`). Maintainer to pick.
+>
+> ▶ **PREVIOUS (2026-06-30): F2 SLICE O — per-run BUDGET PROFILES + ≥4× default ceilings + a UI knob —
+> MERGED PR #174 (`38318028`) (ADR-F053, **migration 0080**). The maintainer ask: raise the
 > default brakes ≥4× so the agent works freely + an EASY way to dial DOWN in the UI. Companion/prereq to
 > the PageIndex slice (`plans/PAGEINDEX-SLICE-P.md`). NO new dep; gateway untouched.**
 > - **What:** `BudgetProfile` (economy/balanced/generous) → a four-brake `BudgetEnvelope` (token_budget,
