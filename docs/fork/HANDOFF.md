@@ -3,7 +3,48 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE G — persist per-run token usage —
+> ▶▶ **PICKUP (2026-06-30): F2 SLICE O — per-run BUDGET PROFILES + ≥4× default ceilings + a UI knob —
+> on branch `fork/f2-slice-o-cost-envelope` (ADR-F053, **migration 0080**). The maintainer ask: raise the
+> default brakes ≥4× so the agent works freely + an EASY way to dial DOWN in the UI. Companion/prereq to
+> the PageIndex slice (`plans/PAGEINDEX-SLICE-P.md`). NO new dep; gateway untouched.**
+> - **What:** `BudgetProfile` (economy/balanced/generous) → a four-brake `BudgetEnvelope` (token_budget,
+>   fan_out_quota, max_steps, wall_clock). **economy** `(2M,8,100,900s)` = the conservative pre-Slice-O tier
+>   (dial-down); **balanced (default)** `(8M,32,400,3600s)` = exactly 4× economy, read from `Settings` so
+>   env can shift the default; **generous** `(16M,48,600,5400s)`. `app/agents/budget.py:resolve_envelope`
+>   is the single source of truth (NULL/unknown legacy → balanced).
+> - **Flow (load-bearing):** the arq worker is enqueued with ONLY the run id + reads `agent_runs` columns →
+>   the profile MUST be persisted. **Migration 0080** adds `agent_runs.budget_profile` (nullable TEXT,
+>   additive). The endpoint resolves the envelope, materializes `max_steps` on the row (runner reads it; an
+>   explicit request `max_steps` overrides — ceiling raised 100→**600**), stores the profile. Composition
+>   re-resolves the other three from the stored profile (was a direct `get_settings()` read) → passes
+>   `token_budget` + `wall_clock_seconds` + `FanOutQuotaMiddleware(quota=…)`. arq `AGENT_RUN_JOB_TIMEOUT`
+>   1020→**5520s** (must exceed the generous 5400s wall clock; guarded by `test_agent_run_timeout_layering`,
+>   now asserting against `MAX_PROFILE_WALL_CLOCK_SECONDS`).
+> - **UI:** composer `ConversationPanel.svelte` gains a Budget `<select>` (Economy/Balanced/Generous, default
+>   balanced) via a pure exported `buildRunPayload` helper; `api/agents.ts` `AgentRunCreate.budget_profile`
+>   + `AgentRun` echo. **One dropdown, three named tiers** (not 4 raw integer fields).
+> - **GATE — met:** `test_budget.py` (profile→envelope map + the **≥4× requirement** + legacy/NULL→balanced
+>   + string==enum); `test_agent_runs_api.py` (profile persisted + resolves max_steps; explicit override;
+>   invalid profile→422; ceiling now 601→422); timeout-layering strengthened. Migration **0080 up→down→up on
+>   a THROWAWAY pgvector** verified (`budget_profile | text | YES`). Affected modules **116 passed**; full api
+>   suite <RESULT — see PR>; ruff(root) + format + mypy(210) clean. Web `npm run check` clean + `test:frontend`
+>   **997 passed**.
+> - **TRAPS:** (1) **ruff config = repo-root `ruff.toml`** — run ruff from the REPO ROOT (mount whole repo),
+>   NOT api/=/app (api-local config flags 344 unrelated files; root config → only your files). dev-image ruff
+>   is 0.15.20, same as CI's `pip install -e .[dev]`. (2) the arq timeout MUST exceed the LARGEST profile wall
+>   clock — raise both together (the test guards it). (3) `max_steps` is materialized on the row; the other
+>   three brakes are re-resolved from the profile at composition — don't expect them on the row. (4) deploy
+>   needs api+arq+ingest rebuilt (migration 0080). (5) economy/generous are FIXED; only balanced is
+>   env-tunable (via the 4 `Settings.run_*` defaults).
+> - **NEXT — Slice O-2 (the actioned upstream-reuse finding):** populate `agent_runs.cost_usd` at
+>   `settle_run` by mirroring upstream's rolling-average-from-`inference_routing_log` estimator
+>   (`citation/cost.py:estimate_judge_call_cost_usd` is NOT directly reusable — per-call +
+>   `purpose='judge_paraphrase'`; write a new `agent_loop` per-TOKEN estimator) × the persisted
+>   `total_tokens`; surface "~$ est." in the budget UI. Exact attribution still needs routing-log `run_id`
+>   (separate cross-service slice). THEN the PageIndex slice (`plans/PAGEINDEX-SLICE-P.md`, ADR-F052 to draft)
+>   — gateway-bound, runs on THIS box; eval-first.
+>
+> ▶ **PREVIOUS (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE G — persist per-run token usage —
 > on branch `fork/f2-slice-g-token-persistence` (ADR-F051 Slice G addendum, **migration 0079**). The
 > Slice-F observability deferral, discharged. NO new dep, NO behavioural change beyond the additive column.**
 > - **What:** migration 0079 adds `agent_runs.total_tokens` (nullable INTEGER, additive/non-destructive;

@@ -219,11 +219,13 @@ class Settings(BaseSettings):
     # step/breadth brake; the complementary per-run TOKEN budget (R4 realised) now
     # lives in `run_token_budget` / the runner loop (ADR-F051, below).
     fan_out_quota: int = Field(
-        default=8,
+        default=32,
         description=(
             "Maximum subagent (`task`) dispatches per run before fan-out is denied "
             "with a model-visible refusal. A configurable safety ceiling (ADR-F049 "
-            "Slice E), not a taste limit. <= 0 disables the brake."
+            "Slice E), not a taste limit. This is the BALANCED (default) tier of the "
+            "budget profiles (ADR-F053); economy/generous scale it in app.agents.budget. "
+            "<= 0 disables the brake."
         ),
     )
 
@@ -240,11 +242,37 @@ class Settings(BaseSettings):
     # calibration awaits per-run token telemetry (a deferred observability follow-up).
     # <= 0 disables the brake.
     run_token_budget: int = Field(
-        default=2_000_000,
+        default=8_000_000,
         description=(
             "Maximum cumulative model tokens (input+output, lead + subagents) per agent "
             "run before it is halted as cap_exceeded (ADR-F051). A conservative runaway "
-            "backstop, not a tight cap. <= 0 disables the brake."
+            "backstop, not a tight cap. The BALANCED (default) tier of the budget "
+            "profiles (ADR-F053); economy/generous scale it in app.agents.budget. "
+            "<= 0 disables the brake."
+        ),
+    )
+
+    # ----- Per-run step + wall-clock tiers (balanced default — ADR-F053) -----
+    # The other two halves of the BALANCED budget envelope (with the token budget +
+    # fan-out quota above). The economy/generous tiers scale these in
+    # app.agents.budget; the per-run `budget_profile` (default balanced) selects the
+    # tier. Both are env-tunable so an operator can shift the default tier without a
+    # code change.
+    run_max_steps: int = Field(
+        default=400,
+        ge=1,
+        description=(
+            "Default settled-step ceiling per agent run (balanced tier, ADR-F053). The "
+            "request may override per-run via AgentRunCreate.max_steps (advanced)."
+        ),
+    )
+    run_wall_clock_seconds: float = Field(
+        default=3600.0,
+        gt=0,
+        description=(
+            "Default in-run wall-clock timeout in seconds (balanced tier, ADR-F053). "
+            "The arq job timeout (AGENT_RUN_JOB_TIMEOUT_SECONDS) MUST exceed the largest "
+            "profile's wall clock so the runner's clean cap fires before arq hard-cancels."
         ),
     )
 

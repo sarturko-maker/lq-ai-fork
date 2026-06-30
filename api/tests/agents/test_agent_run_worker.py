@@ -353,7 +353,9 @@ async def test_sweep_fires_abort_for_stale_claimed_runs_only(
     await _age_row(commit_factory, stale_id, set_sql="heartbeat_at = now() - interval '10 minutes'")
     unclaimed_id = await make_run()
     await _age_row(
-        commit_factory, unclaimed_id, set_sql="started_at = now() - interval '30 minutes'"
+        commit_factory,
+        unclaimed_id,
+        set_sql="started_at = now() - interval '30 minutes'",
     )
     aborted: list[uuid.UUID] = []
 
@@ -434,14 +436,19 @@ def test_agent_run_timeout_layering() -> None:
     Ordering: a run that exhausts its time should settle as a CLEAN cap
     (the runner's asyncio.timeout -> failed/timeout with steps preserved),
     not as the arq job-timeout CancelledError that surfaces the uglier
-    "run interrupted". So DEFAULT_WALL_CLOCK_SECONDS < the arq per-job
-    timeout, with slack for composition/finalize. Inverting these (e.g. a
-    future budget bump that raises the wall clock past the arq timeout)
-    would silently turn graceful caps into interruptions — this guards it.
+    "run interrupted". So the LARGEST budget profile's wall clock (Slice O,
+    ADR-F053) < the arq per-job timeout, with slack for composition/finalize.
+    Inverting these (e.g. a future budget bump that raises a profile's wall
+    clock past the arq timeout) would silently turn graceful caps into
+    interruptions — this guards it.
     """
+    from app.agents.budget import MAX_PROFILE_WALL_CLOCK_SECONDS
     from app.agents.runner import DEFAULT_WALL_CLOCK_SECONDS
     from app.workers.agent_run_worker import AGENT_RUN_JOB_TIMEOUT_SECONDS
 
-    assert DEFAULT_WALL_CLOCK_SECONDS < AGENT_RUN_JOB_TIMEOUT_SECONDS
+    # The base default is the floor (economy tier); the generous tier is the
+    # ceiling the arq timeout must clear.
+    assert DEFAULT_WALL_CLOCK_SECONDS <= MAX_PROFILE_WALL_CLOCK_SECONDS
+    assert MAX_PROFILE_WALL_CLOCK_SECONDS < AGENT_RUN_JOB_TIMEOUT_SECONDS
     # Slack must be enough to settle the run row after the clean cap fires.
-    assert AGENT_RUN_JOB_TIMEOUT_SECONDS - DEFAULT_WALL_CLOCK_SECONDS >= 60
+    assert AGENT_RUN_JOB_TIMEOUT_SECONDS - MAX_PROFILE_WALL_CLOCK_SECONDS >= 60

@@ -67,6 +67,7 @@ from sqlalchemy import CursorResult, func, select, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agents.budget import resolve_envelope
 from app.agents.checkpointer import get_agent_checkpointer, has_checkpoint
 from app.agents.stream import (
     CHANNEL_CLOSED,
@@ -396,6 +397,12 @@ async def create_agent_run(
         db.add(thread)
         await db.flush()  # assigns thread.id for the run row below
 
+    # Slice O (ADR-F053): resolve the cost/effort envelope. ``max_steps`` is
+    # materialized on the row (the runner reads it directly); the other three
+    # brakes are re-resolved from ``budget_profile`` at composition. An explicit
+    # request ``max_steps`` overrides the profile's step ceiling (advanced).
+    envelope = resolve_envelope(body.budget_profile, get_settings())
+    resolved_max_steps = body.max_steps if body.max_steps is not None else envelope.max_steps
     run = AgentRun(
         user_id=user.id,
         thread_id=thread.id,
@@ -405,7 +412,8 @@ async def create_agent_run(
         status=AgentRunStatus.running.value,
         prompt=body.prompt,
         model_alias=body.model_alias,
-        max_steps=body.max_steps,
+        max_steps=resolved_max_steps,
+        budget_profile=body.budget_profile.value,
     )
     db.add(run)
     thread.last_run_at = datetime.now(UTC)
@@ -602,7 +610,10 @@ async def _stream_run_events(
         except Exception:
             logger.warning(
                 "run-stream bridge attach failed; serving DB-tail",
-                extra={"event": "agent_stream_bridge_attach_failed", "run_id": str(run_id)},
+                extra={
+                    "event": "agent_stream_bridge_attach_failed",
+                    "run_id": str(run_id),
+                },
             )
     try:
         max_seq = 0

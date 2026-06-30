@@ -35,6 +35,8 @@ export interface AgentRun {
 	error: string | null;
 	/** Decimal on the wire; NULL until the F1 R4 cost brake fills it. */
 	cost_usd: string | number | null;
+	/** Cost profile used for this run; echoed from the create request. */
+	budget_profile?: string | null;
 }
 
 export interface AgentRunStep {
@@ -88,6 +90,8 @@ export interface AgentRunCreate {
 	 * follow-up.
 	 */
 	thread_id?: string | null;
+	/** Cost profile for the run — controls model tier ceiling and token budget. */
+	budget_profile?: 'economy' | 'balanced' | 'generous';
 }
 
 export interface AgentThread {

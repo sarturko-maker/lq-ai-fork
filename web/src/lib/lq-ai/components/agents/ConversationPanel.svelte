@@ -1,3 +1,25 @@
+<script module lang="ts">
+	/**
+	 * Pure, testable helper for building the `createRun` payload. Exported so
+	 * unit tests can exercise the branching logic without a DOM (same pattern
+	 * as DocumentEditorPanel.svelte + DocumentsPanel.svelte).
+	 */
+	import type { AgentRunCreate } from '$lib/lq-ai/api/agents';
+
+	export function buildRunPayload(args: {
+		prompt: string;
+		budgetProfile: 'economy' | 'balanced' | 'generous';
+		detail?: { thread: { id: string } } | null;
+		selectedMatterId?: string | null;
+	}): AgentRunCreate {
+		const { prompt, budgetProfile, detail, selectedMatterId } = args;
+		if (detail) {
+			return { prompt, budget_profile: budgetProfile, thread_id: detail.thread.id };
+		}
+		return { prompt, budget_profile: budgetProfile, project_id: selectedMatterId ?? null };
+	}
+</script>
+
 <script lang="ts">
 	/**
 	 * The agents conversation surface — extracted from the agents route in
@@ -114,6 +136,8 @@
 
 	let submitting = false;
 	let submitError: string | null = null;
+	// Budget profile for the next run — controls model tier ceiling / token spend.
+	let budgetProfile: 'economy' | 'balanced' | 'generous' = 'balanced';
 	// PRIV-9a run-lock: the Stop control's in-flight + error state.
 	let cancelling = false;
 	let cancelError: string | null = null;
@@ -390,9 +414,7 @@
 		try {
 			const isNewThread = !detail;
 			const created = await agentsApi.createRun(
-				detail
-					? { prompt: text, thread_id: detail.thread.id }
-					: { prompt: text, project_id: selectedMatterId }
+				buildRunPayload({ prompt: text, budgetProfile, detail, selectedMatterId })
 			);
 			// PRIV-9a: createRun returns the run already 'running' — seed it so the
 			// Stop button is targetable before the first poll lands (no locked-but-
@@ -1219,6 +1241,22 @@
 			</ul>
 		{/if}
 
+		<div class="ag-budget">
+			<label class="lq-text-label" for="ag-budget">Budget</label>
+			<div class="ag-matter__row">
+				<select
+					id="ag-budget"
+					data-testid="lq-ai-agents-budget-select"
+					bind:value={budgetProfile}
+				>
+					<option value="economy">Economy</option>
+					<option value="balanced">Balanced</option>
+					<option value="generous">Generous</option>
+				</select>
+			</div>
+			<p class="lq-text-caption ag-note">Balanced — recommended</p>
+		</div>
+
 		<div class="ag-composer__actions">
 			<input
 				bind:this={fileInput}
@@ -1442,7 +1480,8 @@
 		outline-offset: 1px;
 	}
 
-	.ag-matter {
+	.ag-matter,
+	.ag-budget {
 		display: flex;
 		flex-direction: column;
 		gap: var(--lq-space-1);

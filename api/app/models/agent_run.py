@@ -166,6 +166,11 @@ class AgentRun(Base):
     # settled off the normal path (timeout/error). ``cost_usd`` stays NULL (dollars
     # need the gateway's per-call cost, a separate concern).
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # F2 Slice O (ADR-F053, migration 0080): the cost/effort envelope the run was
+    # created with (economy/balanced/generous). Resolved to the four-brake ceiling
+    # at composition (app.agents.budget.resolve_envelope). NULL for legacy rows →
+    # treated as balanced.
+    budget_profile: Mapped[str | None] = mapped_column(Text, nullable=True)
     # F1-S1 lease/liveness (ADR-F009, migration 0052). ``lease_token`` is
     # the fencing value: a new uuid per worker claim, carried in the WHERE
     # clause of the worker's terminal writes and the runner's throttled
