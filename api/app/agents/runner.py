@@ -132,6 +132,23 @@ def _message_from_chat_model_output(output: Any) -> Any:
     return output
 
 
+def _usage_total(event: dict[str, Any]) -> int:
+    """Total tokens (input+output) an ``on_chat_model_end`` event reports, or 0.
+
+    F2 Slice F (ADR-F051): langchain populates ``usage_metadata`` on the merged
+    message when the model is built with ``stream_usage=True`` (the gateway already
+    forwards the usage chunk). Returns 0 when usage is absent (degraded provider, a
+    fake without usage) so the budget brake never fires on missing data.
+    """
+    message = _message_from_chat_model_output((event.get("data") or {}).get("output"))
+    usage = getattr(message, "usage_metadata", None)
+    if isinstance(usage, dict):
+        total = usage.get("total_tokens")
+        if isinstance(total, int):
+            return total
+    return 0
+
+
 def _step_from_event(
     event: dict[str, Any],
 ) -> tuple[AgentRunStepKind, str | None, str, bool] | None:
@@ -269,19 +286,26 @@ async def _drive_agent(
     max_steps: int,
     session_factory: async_sessionmaker[AsyncSession],
     wall_clock_seconds: float,
+    token_budget: int = 0,
     thread_id: uuid.UUID | None = None,
     publisher: RunStreamPublisher | None = None,
     lease: RunLease | None = None,
     heartbeat_seconds: float | None = None,
     change_ledger: ChangeLedger | None = None,
     runtime_context: AgentRuntimeContext | None = None,
-) -> tuple[str | None, bool]:
+) -> tuple[str | None, bool, bool]:
     """Stream the agent, persisting one step row + COMMIT per event.
 
     The commit-per-step is the load-bearing transaction pattern: the
     run's progress is readable mid-flight (ADR-F002 live activity), and
     a crash loses at most the in-flight step. Returns
-    ``(final_answer, cap_hit)``.
+    ``(final_answer, cap_hit, token_cap_hit)``.
+
+    ``token_budget`` (F2 Slice F, ADR-F051) is the per-run cumulative
+    model-token ceiling (R4 realised): each model turn's
+    ``usage_metadata.total_tokens`` (lead + subagents) is summed, and the
+    run halts (``token_cap_hit``) once the total crosses it — the same
+    shape as ``max_steps``. ``<= 0`` disables the brake.
 
     With ``thread_id`` set (F0-S5) the invocation addresses that
     conversation's checkpoint lineage: the new user message is APPENDED
@@ -307,6 +331,8 @@ async def _drive_agent(
     seq = 0
     final_answer: str | None = None
     cap_hit = False
+    token_cap_hit = False
+    cumulative_tokens = 0
     interval = heartbeat_seconds if heartbeat_seconds is not None else _default_heartbeat_seconds()
     last_beat = asyncio.get_running_loop().time()
     # Settled tool_call row id per dispatched tool's langchain run id.
@@ -426,12 +452,20 @@ async def _drive_agent(
                         (event.get("data") or {}).get("output")
                     )
                     final_answer = _text_of(getattr(message, "content", "")).strip() or None
+                # F2 Slice F (ADR-F051): accumulate this model turn's tokens (lead AND
+                # subagent turns report here) and halt on the per-run budget — the same
+                # not-mid-final-answer shape as the step cap.
+                if etype == "on_chat_model_end":
+                    cumulative_tokens += _usage_total(event)
                 if seq >= max_steps and not is_final:
                     cap_hit = True
                     break
+                if token_budget > 0 and cumulative_tokens >= token_budget and not is_final:
+                    token_cap_hit = True
+                    break
     finally:
         await stream.aclose()
-    return final_answer, cap_hit
+    return final_answer, cap_hit, token_cap_hit
 
 
 def _default_heartbeat_seconds() -> float:
@@ -545,6 +579,7 @@ async def execute_agent_run(
     skills: Sequence[str] | None = None,
     backend: Any | None = None,
     wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS,
+    token_budget: int = 0,
     checkpointer: BaseCheckpointSaver | None = None,
     store: BaseStore | None = None,
     runtime_context: AgentRuntimeContext | None = None,
@@ -639,13 +674,14 @@ async def execute_agent_run(
             # F1-S1 thread repair: a prior run settled non-cooperatively
             # may have left dangling tool_calls in the transcript.
             await repair_dangling_tool_calls(agent, thread_id)
-        final_answer, cap_hit = await _drive_agent(
+        final_answer, cap_hit, token_cap_hit = await _drive_agent(
             agent,
             run_id=run_id,
             prompt=prompt,
             max_steps=max_steps,
             session_factory=db_session_factory,
             wall_clock_seconds=wall_clock_seconds,
+            token_budget=token_budget,
             thread_id=thread_id if checkpointer is not None else None,
             publisher=publisher,
             lease=lease,
@@ -697,7 +733,11 @@ async def execute_agent_run(
             publisher.close()
         return
 
-    status = AgentRunStatus.cap_exceeded if cap_hit else AgentRunStatus.completed
+    capped = cap_hit or token_cap_hit
+    status = AgentRunStatus.cap_exceeded if capped else AgentRunStatus.completed
+    # F2 Slice F (ADR-F051): the token-budget cap records a distinct error so it can be
+    # told apart from the step cap (which leaves error NULL, its existing behaviour).
+    cap_error = "token_budget_exceeded" if token_cap_hit else None
     settled = await _finalize(
         db_session_factory,
         run_id,
@@ -705,13 +745,15 @@ async def execute_agent_run(
         # A capped run has no deliverable: any captured answer text is
         # incidental (e.g., a subagent's closing turn), not the run's
         # final answer — leave it NULL (F4).
-        final_answer=None if cap_hit else final_answer,
+        final_answer=None if capped else final_answer,
+        error=cap_error,
         lease=lease,
     )
     if publisher is not None and settled:
         publisher.run_finished(
             status=status.value,
-            final_answer=None if cap_hit else final_answer,
+            final_answer=None if capped else final_answer,
+            error=cap_error,
         )
     elif publisher is not None:
         publisher.close()

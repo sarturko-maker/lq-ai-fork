@@ -216,14 +216,35 @@ class Settings(BaseSettings):
     # radius if the model misjudges. Over the ceiling, the run is not killed: the
     # `task` call is denied with a model-visible refusal so the agent can adapt
     # (consolidate findings / read remaining documents directly). NOTE: this is the
-    # step/breadth brake; a real per-run TOKEN budget (R4, guard.py) is still a
-    # no-op and is a separate deferred slice (do not claim cost-safety from this).
+    # step/breadth brake; the complementary per-run TOKEN budget (R4 realised) now
+    # lives in `run_token_budget` / the runner loop (ADR-F051, below).
     fan_out_quota: int = Field(
         default=8,
         description=(
             "Maximum subagent (`task`) dispatches per run before fan-out is denied "
             "with a model-visible refusal. A configurable safety ceiling (ADR-F049 "
             "Slice E), not a taste limit. <= 0 disables the brake."
+        ),
+    )
+
+    # ----- Per-run token budget (R4 realised — ADR-F051) -----
+    # The HARD cost stop the Slice-E estimate/quota deferred to: the runner sums each
+    # model turn's usage_metadata.total_tokens (lead + subagents) and halts the run
+    # (cap_exceeded, error=token_budget_exceeded) once the cumulative total crosses this
+    # ceiling. This is the token brake the guarded-tool R4 slot always pointed at
+    # (tool dispatches themselves stay free local reads — R4-at-the-tool is still a
+    # no-op by design); the cost lives in the gateway model calls, so the brake lives in
+    # the runner loop beside max_steps. The default is a CONSERVATIVE, uncalibrated
+    # runaway backstop (~10x the 200k window) — generous enough not to clip a legitimate
+    # multi-turn / bounded-fan-out run, low enough to bound a pathological loop; precise
+    # calibration awaits per-run token telemetry (a deferred observability follow-up).
+    # <= 0 disables the brake.
+    run_token_budget: int = Field(
+        default=2_000_000,
+        description=(
+            "Maximum cumulative model tokens (input+output, lead + subagents) per agent "
+            "run before it is halted as cap_exceeded (ADR-F051). A conservative runaway "
+            "backstop, not a tight cap. <= 0 disables the brake."
         ),
     )
 

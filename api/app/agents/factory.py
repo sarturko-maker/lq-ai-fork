@@ -106,6 +106,12 @@ def build_gateway_chat_model(
         # breaks OpenAI-compatible endpoints ("No generations found in
         # stream", deepagents#3190) — pin Chat Completions explicitly.
         use_responses_api=False,
+        # F2 Slice F (ADR-F051): request + parse streaming token usage so the
+        # runner can accumulate a per-run total and enforce the token budget.
+        # The gateway already forces `stream_options.include_usage=True` upstream
+        # and forwards the final usage chunk; this makes langchain ASK for it and
+        # populate `usage_metadata` on the merged on_chat_model_end message.
+        stream_usage=True,
         # F0-S9: without max_input_tokens deepagents never computes a
         # window-relative compaction trigger (see DEFAULT_MAX_INPUT_TOKENS).
         profile=({"max_input_tokens": max_input_tokens} if max_input_tokens is not None else None),
