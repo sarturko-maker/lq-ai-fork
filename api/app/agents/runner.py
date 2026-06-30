@@ -293,13 +293,15 @@ async def _drive_agent(
     heartbeat_seconds: float | None = None,
     change_ledger: ChangeLedger | None = None,
     runtime_context: AgentRuntimeContext | None = None,
-) -> tuple[str | None, bool, bool]:
+) -> tuple[str | None, bool, bool, int]:
     """Stream the agent, persisting one step row + COMMIT per event.
 
     The commit-per-step is the load-bearing transaction pattern: the
     run's progress is readable mid-flight (ADR-F002 live activity), and
     a crash loses at most the in-flight step. Returns
-    ``(final_answer, cap_hit, token_cap_hit)``.
+    ``(final_answer, cap_hit, token_cap_hit, cumulative_tokens)`` — the
+    last is the run's summed model-token usage (F2 Slice G), persisted at
+    settlement for observability + budget calibration.
 
     ``token_budget`` (F2 Slice F, ADR-F051) is the per-run cumulative
     model-token ceiling (R4 realised): each model turn's
@@ -465,7 +467,7 @@ async def _drive_agent(
                     break
     finally:
         await stream.aclose()
-    return final_answer, cap_hit, token_cap_hit
+    return final_answer, cap_hit, token_cap_hit, cumulative_tokens
 
 
 def _default_heartbeat_seconds() -> float:
@@ -482,6 +484,7 @@ async def _finalize(
     status: AgentRunStatus,
     final_answer: str | None = None,
     error: str | None = None,
+    total_tokens: int | None = None,
     lease: RunLease | None = None,
 ) -> bool:
     """Write the terminal state — F1-S1: one fenced conditional UPDATE.
@@ -501,6 +504,7 @@ async def _finalize(
         status=status,
         final_answer=final_answer,
         error=error,
+        total_tokens=total_tokens,
         lease_token=lease.token if lease is not None else None,
     )
 
@@ -674,7 +678,7 @@ async def execute_agent_run(
             # F1-S1 thread repair: a prior run settled non-cooperatively
             # may have left dangling tool_calls in the transcript.
             await repair_dangling_tool_calls(agent, thread_id)
-        final_answer, cap_hit, token_cap_hit = await _drive_agent(
+        final_answer, cap_hit, token_cap_hit, total_tokens = await _drive_agent(
             agent,
             run_id=run_id,
             prompt=prompt,
@@ -747,6 +751,10 @@ async def execute_agent_run(
         # final answer — leave it NULL (F4).
         final_answer=None if capped else final_answer,
         error=cap_error,
+        # F2 Slice G (ADR-F051 follow-up): persist the run's summed model tokens so its
+        # spend is queryable (observability + calibrating run_token_budget). Only the
+        # normal-return path has the total; timeout/error paths persist NULL (best-effort).
+        total_tokens=total_tokens,
         lease=lease,
     )
     if publisher is not None and settled:
