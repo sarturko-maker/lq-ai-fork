@@ -330,9 +330,11 @@ class EstimateReadCostInput(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    filenames: list[str] = Field(
-        default_factory=list,
-        max_length=ESTIMATE_READ_COST_MAX_FILES,
+    filenames: list[Annotated[str, Field(max_length=ESTIMATE_READ_COST_FILENAME_MAX_CHARS)]] = (
+        Field(
+            default_factory=list,
+            max_length=ESTIMATE_READ_COST_MAX_FILES,
+        )
     )
 
 

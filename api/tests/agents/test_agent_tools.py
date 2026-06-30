@@ -803,3 +803,12 @@ async def test_estimate_read_cost_suggests_fan_out_when_over_budget(
     out = await estimate_tiny(["msa.pdf"])
     assert "too large to read whole" in out
     assert "fan out" in out.lower()
+
+
+async def test_estimate_read_cost_rejects_an_over_long_filename(matter_env: MatterEnv) -> None:
+    """Untrusted model tool args: a single over-long filename is rejected at the boundary
+    (reject-not-crash, the per-filename cap), never scanned — and the rejection echoes no
+    raw value (keeps the bound on what an over-eager model can push into one turn)."""
+    out = await matter_env.estimate(["A" * 1000])
+    assert "rejected" in out.lower() and "estimate_read_cost" in out
+    assert "AAAA" not in out  # no echo of the over-long value
