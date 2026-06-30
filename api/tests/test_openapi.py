@@ -88,6 +88,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/matters/{project_id}/roster/{entry_id}/retire",
         # C7a (fork) — matter-files read surface (redline-download, ADR-F046).
         "/api/v1/matters/{project_id}/files",
+        # ADR-F054 (fork) — per-matter capability panel (toggles).
+        "/api/v1/matters/{project_id}/capabilities",
         # saved prompts
         "/api/v1/saved-prompts",
         "/api/v1/saved-prompts/{prompt_id}",
@@ -226,6 +228,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/practice-areas/{key}",
         "/api/v1/practice-areas/{key}/skills",
         "/api/v1/practice-areas/{key}/skills/{skill_name}",
+        # ADR-F054 (fork) — admin playbook attach/detach (capability availability)
+        "/api/v1/practice-areas/{key}/playbooks",
+        "/api/v1/practice-areas/{key}/playbooks/{playbook_id}",
         # PRIV-3 (fork) — ROPA register read API (ADR-F019)
         "/api/v1/ropa/processing-activities",
         "/api/v1/ropa/processing-activities/{activity_id}",
@@ -351,7 +356,10 @@ async def test_openapi_paths_match_sketch() -> None:
     # /api/v1/agents/threads/{thread_id}
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
-    assert len(actual) == 154  # +3: ADR-F048 authorship roster (POST /roster, PATCH
+    assert len(actual) == 157  # +3: ADR-F054 capability panel (GET/PUT
+    #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
+    #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
+    # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH
     #   /roster/{entry_id}, POST /roster/{entry_id}/retire).
     # +3 prior: libreoffice-editor Slice 2 WOPI host + mint (ADR-F047)
     #   — /wopi/files/{id} (CheckFileInfo GET + Lock POST share the path),

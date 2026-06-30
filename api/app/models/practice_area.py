@@ -129,3 +129,45 @@ class PracticeAreaSkill(Base):
 
     def __repr__(self) -> str:
         return f"<PracticeAreaSkill area_id={self.practice_area_id} skill_name={self.skill_name!r}>"
+
+
+class PracticeAreaPlaybook(Base):
+    """Many-to-many join: practice area ↔ playbook (availability binding) — ADR-F054.
+
+    Mirrors :class:`PracticeAreaSkill`, but ``playbook_id`` IS a real FK (playbooks
+    are SQL rows, unlike filesystem-canonical skills). A playbook bound here is
+    AVAILABLE to matters under the area; the lawyer toggles it on/off per matter via
+    ``matter_capability_toggles``. The legacy playbook EXECUTOR is frozen (CLAUDE.md)
+    — the deep agent reuses only the playbook DATA (the firm's preferred positions),
+    injected read-only as the "Practice Playbook" memory tier. Hard-deleting a
+    playbook CASCADE-drops its bindings (and a soft-delete hides it from the
+    inventory), so no dead toggle rows accumulate.
+    """
+
+    __tablename__ = "practice_area_playbooks"
+    __table_args__ = (
+        PrimaryKeyConstraint("practice_area_id", "playbook_id", name="pk_practice_area_playbooks"),
+    )
+
+    practice_area_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "practice_areas.id", ondelete="CASCADE", name="fk_practice_area_playbooks_area_id"
+        ),
+        nullable=False,
+    )
+    playbook_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "playbooks.id", ondelete="CASCADE", name="fk_practice_area_playbooks_playbook_id"
+        ),
+        nullable=False,
+    )
+    attached_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<PracticeAreaPlaybook area_id={self.practice_area_id} playbook_id={self.playbook_id}>"
+        )

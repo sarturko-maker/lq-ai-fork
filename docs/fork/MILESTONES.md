@@ -212,7 +212,8 @@ type ("Matter") usable for a real task (e.g. NDA review), with visible agent wor
   (existing LQ.AI skills bound to the area), **Playbooks** (existing LQ.AI playbooks), **Tools**
   (real legal capabilities: tabular review, Word redlining as they hook up); utility/workspace
   tools (file search, workspace ops) collapsed behind an expandable section. Dim → lit semantics
-  carry over per section.
+  carry over per section. **(→ pulled forward + made concrete with two-layer per-matter toggles in
+  the "Capability panel + in-matter Tabular review" milestone, 2026-06-30.)**
 - Deep Agent per area via `create_deep_agent`: area system prompt, area-scoped skills, subagent
   fan-out; every tool dispatch through `guarded_tool_call` (R4/R5/R6 + audit preserved).
 - **Glass-cockpit UX v1**: one message box (no model/skill pickers); capability rail — area's skills,
@@ -313,6 +314,47 @@ compact, accumulate into Matter digests, and are searchable; agents propose, use
   must not surface in Matter B; practice-area memory must not leak across areas; per-level
   read/write policy exercised end-to-end against the live stack.
 
+## Capability panel + in-matter Tabular review (ACTIVE — pulled forward 2026-06-30)
+
+Outcome: in the cockpit, the lawyer SEES and CONTROLS what the practice-area Deep Agent has available —
+a right-hand **capability panel** with **Playbooks / Skills / Tools** (and an MCP placeholder) — then
+**Tabular review** lands as an in-matter agent **tool** in Commercial + Corporate, the grid UX augmented
+by the maintainer's **[LQ-Grid](https://github.com/sarturko-maker/LQ-Grid)**. This pulls forward two
+already-planned items and makes them concrete: F1's **RIGHT panel restructure** (Skills/Playbooks/Tools
+sections, never built) and F3's **"playbooks + tabular review callable as agent tools … they become
+unit-of-work panels"**; it also actions the Backlog **"Tabular review inside a matter"** roadmap decision
+and **Playbooks-as-deliverables**.
+
+**Decided design (maintainer, 2026-06-30):**
+- **Two-layer scope** — the practice AREA curates the AVAILABLE capability set (admin/curated); the
+  LAWYER toggles a subset on/off, **persisted per matter** (survives across that matter's conversations).
+  "System proposes, user owns" applied to capabilities.
+- **Playbooks, Skills, Tools are real now**; **MCP is a visible-but-disabled placeholder** to be wired
+  into the (approval-gated) **MCP milestone** later. Playbooks reuse the EXISTING `playbooks`/
+  `playbook_positions` DATA (the firm's preferred positions) — NOT the frozen legacy executor.
+- Primitive builtins (read/write/edit/bash/task) are NEVER shown — only legal capabilities.
+
+**Phase 1 (NEXT slice) — the capability-toggle panel.** A right-side panel (co-visible split when wide,
+tab fallback when narrow — the ROPA-register precedent), listing the area's Playbooks/Skills/Tools with
+per-matter on/off toggles that genuinely gate what the agent gets (skills via the skill-wiring filter,
+tools via the guard grant set, playbooks via a new read-only consumption path). MCP shown disabled.
+Plan + ADR (≈F054) land at: `docs/fork/plans/CAPABILITY-PANEL-slice.md`. Built + verified per ADR-F005.
+
+**Phase 2 — Tabular review as an in-matter tool (Commercial + Corporate) + LQ-Grid.** Reuse the upstream
+tabular SUBSTRATE (ColumnSpec, per-cell extraction, Citation-Engine ensemble, JSONB grid) — NOT the
+frozen linear executor — exposed as a guarded agent tool the lawyer toggles on in the panel. Augment the
+grid UX with **LQ-Grid** (React: source highlighting, document grouping, dual extraction); the
+integration approach (port to Svelte / web-component wrap / rebuild-from-reference) is decided at Phase-2
+planning (framework mismatch: LQ-Grid is React, our web is Svelte). Its own plan + ADR when it starts.
+
+**Deferred — resume after this milestone (paused 2026-06-30, honest record):**
+- **F2 Slice P — PageIndex** (gateway-bound retrieval, eval-first; `plans/PAGEINDEX-SLICE-P.md`, ADR-F052
+  to draft) — was the queued NEXT; paused.
+- **Full hybrid+rerank @ scale calibration** (N=150 CUAD; needs a ≥16 GB box) — stays parked.
+- **`cost_usd` exact per-run attribution** (routing-log `run_id`, cross-service) + a "typical run ≈ $X"
+  pre-run hint (the O-2 follow-ups) — paused.
+- **Per-turn conversation semantic granularity** (F2 Slice C2 follow-up, eval-gated) — stays parked.
+
 ## F3 — Practice-area IA re-centre
 
 Outcome: the IA is practice areas → units of work; tool tabs become in-context capabilities.
@@ -330,6 +372,8 @@ Outcome: the IA is practice areas → units of work; tool tabs become in-context
   2026-06-11): the per-position match/deviate review UX and the tabular grid + per-cell citation
   modal are the legal decision surfaces lawyers actually use; wiring only executors while the
   tabs retire degrades deliverables to chat text. They become unit-of-work panels.
+  **(→ tabular pulled forward as Phase 2 of the "Capability panel + in-matter Tabular review"
+  milestone, 2026-06-30; the capability panel itself is Phase 1.)**
 - MCP servers per practice area via `langchain-mcp-adapters` (scoped tool sets, not global).
 - One search box across chats, documents, memory — matter-scoped by default, privilege-scoped always.
 - Long tasks keep running when the laptop closes: background continuation + notification + finished
@@ -833,7 +877,9 @@ decision (Backlog), triggered at real deployment; engine behaviour is identical,
     high-value lawyer artifact we don't surface. Pairs with the artifact surface above.
   - **Tabular review inside a matter** (documents-as-rows × AI-extracted-fields-as-columns) — the
     capability is valuable even though we retired upstream's flat global Tabular tab; reframe as an
-    in-matter agent capability, not a top-level tool. Needs a roadmap decision.
+    in-matter agent capability, not a top-level tool. ~~Needs a roadmap decision.~~ **→ DECIDED
+    2026-06-30: Phase 2 of the "Capability panel + in-matter Tabular review" milestone (Commercial +
+    Corporate, as a guarded agent tool, grid UX augmented by LQ-Grid).**
   - **Per-user/per-area MCP connectors + OAuth handshake** — concrete reference for our stated MCP
     direction (aligns with upstream ADR 0014/0015 gateway tool-egress + the agentic-modules milestone).
   - **Document versioning + soft-delete**, **GDPR data export/erasure** (fits the Privacy area), and

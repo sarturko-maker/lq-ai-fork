@@ -503,3 +503,74 @@ class MatterParticipant(Base):
             f"<MatterParticipant id={self.id} project_id={self.project_id} "
             f"side={self.side!r} trust={self.trust!r}>"
         )
+
+
+class MatterCapabilityToggle(Base):
+    """Per-matter capability on/off override — ADR-F054 (capability panel).
+
+    Two-layer scope: the practice AREA curates which capabilities are AVAILABLE
+    (skills via ``practice_area_skills``; playbooks via ``practice_area_playbooks``;
+    tools via a per-area CODE group map in ``app.agents.capabilities``); the LAWYER
+    toggles a subset on/off here, persisted per matter (survives the matter's
+    conversations). "System proposes, user owns."
+
+    **Sparse override.** A row exists ONLY where the lawyer diverged from the
+    capability's ``default_enabled`` (every available capability defaults ON except
+    the MCP placeholder). Absence of a row = the default — so a matter the lawyer
+    never touches stays byte-identical to today, and a newly-available area
+    capability is auto-on with no backfill. ``enabled`` is stored (not "presence =
+    off") so a lawyer can explicitly re-enable after a future default flip, and the
+    direction is recorded in ``set_by``. A stale row for a removed/renamed
+    capability is ignored at resolve time (the inventory is the source of truth).
+
+    ``capability_key`` is TEXT (not a polymorphic FK), mirroring
+    ``practice_area_skills.skill_name``: skills are filesystem-canonical, tool-group
+    keys are code-canonical, and the playbook key is ``playbook_id::text`` —
+    validated to resolve against the matter's AVAILABLE set at the PUT boundary so
+    no dead rows accumulate.
+    """
+
+    __tablename__ = "matter_capability_toggles"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "project_id",
+            "capability_kind",
+            "capability_key",
+            name="pk_matter_capability_toggles",
+        ),
+        CheckConstraint(
+            "capability_kind IN ('skill', 'tool', 'playbook')",
+            name="chk_matter_capability_toggles_kind",
+        ),
+        CheckConstraint(
+            "char_length(capability_key) BETWEEN 1 AND 200",
+            name="chk_matter_capability_toggles_key_len",
+        ),
+    )
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "projects.id", ondelete="CASCADE", name="fk_matter_capability_toggles_project_id"
+        ),
+        nullable=False,
+    )
+    capability_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    capability_key: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    # Human provenance — who last set this toggle. SET NULL on user delete keeps
+    # the override (it is the matter's state, not the individual's).
+    set_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_matter_capability_toggles_set_by"),
+        nullable=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<MatterCapabilityToggle project_id={self.project_id} "
+            f"kind={self.capability_kind!r} key={self.capability_key!r} enabled={self.enabled}>"
+        )

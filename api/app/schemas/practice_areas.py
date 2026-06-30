@@ -69,3 +69,15 @@ class SkillAttachRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     skill_name: str = Field(min_length=1, max_length=200)
+
+
+class PlaybookAttachRequest(BaseModel):
+    """Attach a playbook (by id) to an area's available set — ADR-F054.
+
+    Mirrors :class:`SkillAttachRequest` but ``playbook_id`` is a real id (playbooks
+    are SQL rows). The handler validates the playbook exists and is not soft-deleted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    playbook_id: uuid.UUID

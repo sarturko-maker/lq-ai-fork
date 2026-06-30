@@ -17,6 +17,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -41,7 +42,14 @@ from app.clients.gateway import set_gateway_client
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.organization_profile import OrganizationProfile
-from app.models.project import MatterMemoryEntry, MatterParticipant, Project
+from app.models.playbook import Playbook, PlaybookPosition
+from app.models.practice_area import PracticeAreaPlaybook
+from app.models.project import (
+    MatterCapabilityToggle,
+    MatterMemoryEntry,
+    MatterParticipant,
+    Project,
+)
 from app.models.user import User
 from app.security import hash_password
 from tests.agents.fakes import (
@@ -101,6 +109,21 @@ class _ConsolidationGatewayStub:
 class _SkillRec:
     raw_yaml: str
     body: str
+
+    def summary(self) -> Any:
+        """Mirror SkillRecord.summary() enough for build_area_inventory (ADR-F054).
+
+        The capability inventory reads ``.title``/``.description`` off the summary;
+        parse them from the minimal raw_yaml so the fake matches the real record's
+        contract (the inventory is computed for every area-bound run now)."""
+        title: str | None = None
+        description: str | None = None
+        for line in self.raw_yaml.splitlines():
+            if line.startswith("name:"):
+                title = line.split(":", 1)[1].strip() or None
+            elif line.startswith("description:"):
+                description = line.split(":", 1)[1].strip() or None
+        return SimpleNamespace(title=title, description=description)
 
 
 @dataclass
@@ -1681,3 +1704,197 @@ async def test_composition_failure_finalizes_run_as_failed(
     assert run.error is not None and "model construction exploded" in run.error
     assert "Traceback" not in run.error
     assert run.finished_at is not None
+
+
+# --- ADR-F054: per-matter capability toggles wired into composition ----------
+async def _area_id(env: CompositionEnv, key: str) -> uuid.UUID:
+    from app.models.practice_area import PracticeArea
+
+    async with env.factory() as db:
+        return (
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == key))
+        ).scalar_one()
+
+
+async def _file_matter_under(env: CompositionEnv, area_id: uuid.UUID) -> None:
+    async with env.factory() as db:
+        await db.execute(
+            Project.__table__.update()
+            .where(Project.id == env.project_id)
+            .values(practice_area_id=area_id)
+        )
+        await db.commit()
+
+
+async def _bind_playbook(env: CompositionEnv, area_id: uuid.UUID, *, standard: str) -> uuid.UUID:
+    """Create a playbook with one position and bind it to the area. Returns the id.
+
+    Deleting the playbook later CASCADE-drops the binding (FK ON DELETE CASCADE), so
+    test cleanup is a single delete — keeps the shared Commercial area uncontaminated.
+    """
+    async with env.factory() as db:
+        pb = Playbook(name="Capability Test Book", contract_type="NDA", description="")
+        db.add(pb)
+        await db.flush()
+        db.add(
+            PlaybookPosition(
+                playbook_id=pb.id,
+                issue="Liability cap",
+                standard_language=standard,
+                severity_if_missing="high",
+                position_order=0,
+            )
+        )
+        db.add(PracticeAreaPlaybook(practice_area_id=area_id, playbook_id=pb.id))
+        await db.commit()
+        return pb.id
+
+
+async def _delete_playbook(env: CompositionEnv, playbook_id: uuid.UUID) -> None:
+    async with env.factory() as db:
+        await db.execute(delete(Playbook).where(Playbook.id == playbook_id))
+        await db.commit()
+
+
+async def _add_toggle(env: CompositionEnv, kind: str, key: str, *, enabled: bool) -> None:
+    async with env.factory() as db:
+        db.add(
+            MatterCapabilityToggle(
+                project_id=env.project_id,
+                capability_kind=kind,
+                capability_key=key,
+                enabled=enabled,
+                set_by=env.user_id,
+            )
+        )
+        await db.commit()
+
+
+async def _audit_tools(env: CompositionEnv, run_id: uuid.UUID) -> list[str]:
+    async with env.factory() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.resource_type == "agent_run",
+                        AuditLog.resource_id == str(run_id),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return [r.details["tool"] for r in rows if "tool" in (r.details or {})]
+
+
+async def test_enabled_playbook_reaches_system_prompt(comp_env: CompositionEnv) -> None:
+    """ADR-F054: a playbook bound to the matter's area and ON (the default) is injected
+    as the read-only Practice Playbook tier — its preferred positions reach the prompt."""
+    area_id = await _area_id(comp_env, "commercial")
+    await _file_matter_under(comp_env, area_id)
+    token = "PLAYBOOKTOKEN-cap-at-fees-paid"
+    pb_id = await _bind_playbook(comp_env, area_id, standard=token)
+    try:
+        run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+        model = ScriptedToolCallingModel(responses=[final_message("done")])
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(model=model),
+            session_factory_provider=lambda: comp_env.factory,
+            skill_registry_provider=lambda: None,
+        )
+        text = _seen_system_text(model)
+        assert "PRACTICE PLAYBOOK" in text  # the fence rendered
+        assert token in text  # the preferred position reached the model
+    finally:
+        await _delete_playbook(comp_env, pb_id)
+
+
+async def test_disabled_playbook_absent_from_system_prompt(comp_env: CompositionEnv) -> None:
+    """ADR-F054: a playbook toggled OFF for the matter is not injected — its positions
+    never reach the prompt (the tier degrades to silence)."""
+    area_id = await _area_id(comp_env, "commercial")
+    await _file_matter_under(comp_env, area_id)
+    token = "PLAYBOOKTOKEN-should-be-absent"
+    pb_id = await _bind_playbook(comp_env, area_id, standard=token)
+    try:
+        await _add_toggle(comp_env, "playbook", str(pb_id), enabled=False)
+        run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+        model = ScriptedToolCallingModel(responses=[final_message("done")])
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(model=model),
+            session_factory_provider=lambda: comp_env.factory,
+            skill_registry_provider=lambda: None,
+        )
+        text = _seen_system_text(model)
+        assert token not in text
+        assert "PRACTICE PLAYBOOK" not in text  # no other playbook is bound → no tier
+    finally:
+        await _delete_playbook(comp_env, pb_id)
+
+
+async def test_disabled_skill_absent_from_system_prompt(comp_env: CompositionEnv) -> None:
+    """ADR-F054: a skill toggled OFF is not wired — its SkillsMiddleware description
+    (the exposure signal) disappears from the prompt; ON (default) it is present."""
+    area_id = await _area_id(comp_env, "commercial")
+    await _file_matter_under(comp_env, area_id)
+    desc = "NDAUNIQUEDESC-exposure-signal."
+    registry = _FakeSkillRegistry(
+        {"nda-review": _SkillRec(f"name: nda-review\ndescription: {desc}", "# NDA")}
+    )
+
+    # Default (no toggle): nda-review is bound (migration 0056) + known → exposed.
+    run_a = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model_a = ScriptedToolCallingModel(responses=[final_message("done")])
+    await compose_and_execute_run(
+        run_id=run_a,
+        model_builder=CapturingBuilder(model=model_a),
+        session_factory_provider=lambda: comp_env.factory,
+        skill_registry_provider=lambda: registry,
+    )
+    assert desc in _seen_system_text(model_a)
+
+    # Toggle nda-review OFF → no longer wired → description gone.
+    await _add_toggle(comp_env, "skill", "nda-review", enabled=False)
+    run_b = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model_b = ScriptedToolCallingModel(responses=[final_message("done")])
+    await compose_and_execute_run(
+        run_id=run_b,
+        model_builder=CapturingBuilder(model=model_b),
+        session_factory_provider=lambda: comp_env.factory,
+        skill_registry_provider=lambda: registry,
+    )
+    assert desc not in _seen_system_text(model_b)
+
+
+async def test_disabled_tool_group_is_not_granted(comp_env: CompositionEnv) -> None:
+    """ADR-F054: a tool group toggled OFF is not built, so its tools never run — the
+    guarded-dispatch audit row that proves a grant is ABSENT. Default (ON) grants it."""
+    privacy_id = await _area_id(comp_env, "privacy")
+    await _file_matter_under(comp_env, privacy_id)
+
+    # Default: ROPA group ON → list_processing_activities dispatches (audit row).
+    run_a = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model_a = ScriptedToolCallingModel(
+        responses=[tool_call_message("list_processing_activities", {}), final_message("done")]
+    )
+    await compose_and_execute_run(
+        run_id=run_a,
+        model_builder=CapturingBuilder(model=model_a),
+        session_factory_provider=lambda: comp_env.factory,
+    )
+    assert "list_processing_activities" in await _audit_tools(comp_env, run_a)
+
+    # Toggle the ROPA group OFF → the tool is not built/granted → no dispatch audit row.
+    await _add_toggle(comp_env, "tool", "ropa", enabled=False)
+    run_b = await comp_env.make_run(project_id_value=comp_env.project_id)
+    model_b = ScriptedToolCallingModel(
+        responses=[tool_call_message("list_processing_activities", {}), final_message("done")]
+    )
+    await compose_and_execute_run(
+        run_id=run_b,
+        model_builder=CapturingBuilder(model=model_b),
+        session_factory_provider=lambda: comp_env.factory,
+    )
+    assert "list_processing_activities" not in await _audit_tools(comp_env, run_b)

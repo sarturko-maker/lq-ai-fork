@@ -40,6 +40,7 @@ from app.api import (
     integrations_teams,
     internal,
     knowledge_bases,
+    matter_capabilities,
     matter_files,
     matter_memory,
     matter_roster,
@@ -124,6 +125,10 @@ api_router.include_router(matter_memory.router, dependencies=_active)
 # participant). Owner-scoped (404 cross-user); the only writer of a confirmed entry —
 # the agent's record_matter_participant writes inferred rows only.
 api_router.include_router(matter_roster.router, dependencies=_active)
+# ADR-F054: the cockpit capability panel — per-matter on/off toggles over the area's
+# available skills/tools/playbooks (MCP placeholder). Owner-scoped (404 cross-user);
+# composition reads the same toggles so the panel shows what the agent gets.
+api_router.include_router(matter_capabilities.router, dependencies=_active)
 api_router.include_router(matter_files.router, dependencies=_active)
 api_router.include_router(saved_prompts.router, dependencies=_active)
 # PRIV-3 (ADR-F019): the deployment-global ROPA register read API. Mounted under
