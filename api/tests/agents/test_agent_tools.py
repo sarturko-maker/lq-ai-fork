@@ -68,6 +68,7 @@ class MatterEnv:
     search: Callable[..., Awaitable[str]]
     read: Callable[..., Awaitable[str]]
     get_meta: Callable[..., Awaitable[str]]
+    estimate: Callable[..., Awaitable[str]]
 
 
 @pytest_asyncio.fixture
@@ -236,7 +237,9 @@ async def matter_env(
             privileged=False,
             minimum_inference_tier=None,
         )
-        search, read, get_meta = build_matter_tools(commit_factory, run_id=run.id, binding=binding)
+        search, read, get_meta, estimate = build_matter_tools(
+            commit_factory, run_id=run.id, binding=binding
+        )
         env = MatterEnv(
             factory=commit_factory,
             user_id=user.id,
@@ -245,6 +248,7 @@ async def matter_env(
             search=search,
             read=read,
             get_meta=get_meta,
+            estimate=estimate,
         )
 
     yield env
@@ -312,6 +316,11 @@ async def test_search_empty_query_lists_the_inventory(matter_env: MatterEnv) -> 
     assert "pending.pdf" in result and "not ingested yet" in result
     assert "uploaded.pdf" in result  # column-only membership counts
     assert "foreign.pdf" not in result
+    # F2 Slice E: each ingested doc carries a read-cost estimate (~k tokens to read);
+    # the not-ingested file has no Document, so no estimate (just the status notice).
+    assert "tokens to read" in result
+    pending_line = next(line for line in result.splitlines() if "pending.pdf" in line)
+    assert "tokens to read" not in pending_line
 
 
 async def test_search_no_hits_is_honest_and_orients_the_model(
@@ -601,9 +610,10 @@ async def test_each_dispatch_writes_one_audit_row_without_content(
     await matter_env.search("liability cap")
     await matter_env.read("msa.pdf")
     await matter_env.get_meta("msa.pdf")  # a pdf → "no structured metadata", still one row
+    await matter_env.estimate(["msa.pdf"])  # F2 Slice E: read-cost estimate, one row
 
     rows = await _audit_rows(matter_env)
-    assert len(rows) == 3
+    assert len(rows) == 4
     assert {r.details["tool"] for r in rows} == MATTER_TOOL_NAMES
     for row in rows:
         assert row.action == "agent_run.tool_call"
@@ -622,15 +632,19 @@ async def test_tools_expose_model_facing_schema(matter_env: MatterEnv) -> None:
     assert matter_env.search.__name__ == "search_documents"
     assert matter_env.read.__name__ == "read_document"
     assert matter_env.get_meta.__name__ == "get_document_metadata"
+    assert matter_env.estimate.__name__ == "estimate_read_cost"
     assert matter_env.search.__doc__ and "empty query" in matter_env.search.__doc__
     assert matter_env.read.__doc__ and "filename" in matter_env.read.__doc__
     assert matter_env.get_meta.__doc__ and "forged" in matter_env.get_meta.__doc__
+    assert matter_env.estimate.__doc__ and "estimate" in matter_env.estimate.__doc__.lower()
     assert list(inspect.signature(matter_env.search).parameters) == ["query"]
     assert list(inspect.signature(matter_env.read).parameters) == ["name"]
     assert list(inspect.signature(matter_env.get_meta).parameters) == ["name"]
+    assert list(inspect.signature(matter_env.estimate).parameters) == ["filenames"]
     assert inspect.iscoroutinefunction(matter_env.search)
     assert inspect.iscoroutinefunction(matter_env.read)
     assert inspect.iscoroutinefunction(matter_env.get_meta)
+    assert inspect.iscoroutinefunction(matter_env.estimate)
 
 
 async def test_halted_run_denies_dispatch(matter_env: MatterEnv) -> None:
@@ -711,3 +725,81 @@ async def test_real_loop_dispatches_guarded_search_over_matter_documents(
     assert len(rows) == 1
     assert rows[0].details["tool"] == "search_documents"
     assert rows[0].details["outcome"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# estimate_read_cost (F2 Slice E, ADR-F049): the pre-flight read-cost estimate
+# ---------------------------------------------------------------------------
+
+
+def test_read_tokens_estimate_and_cap() -> None:
+    """Pure helper: ~chars/4, None→0, capped at the read limit (a truncated big
+    doc cannot cost more than _READ_LIMIT/4 tokens to read)."""
+    from app.agents.tools import _READ_LIMIT, _read_tokens
+
+    assert _read_tokens(None) == 0
+    assert _read_tokens(0) == 0
+    assert _read_tokens(400) == 100
+    assert _read_tokens(10**9) == _READ_LIMIT // 4  # capped at the read limit
+
+
+async def test_estimate_read_cost_sums_named_documents(matter_env: MatterEnv) -> None:
+    out = await matter_env.estimate(["msa.pdf", "notes.pdf"])
+    expected = (len(_MSA_TEXT) + len(_NOTES_TEXT)) // 4
+    assert "2 document(s)" in out
+    assert f"~{expected:,} tokens" in out
+
+
+async def test_estimate_read_cost_whole_matter_excludes_pending_and_decoys(
+    matter_env: MatterEnv,
+) -> None:
+    """An empty list estimates the whole matter: the three READABLE matter docs
+    (msa + notes + uploaded), never the pending file (no Document → not counted,
+    zero cost), and never the other matter's or the foreign owner's documents."""
+    out = await matter_env.estimate([])
+    expected = (len(_MSA_TEXT) + len(_NOTES_TEXT) + len(_UPLOADED_TEXT)) // 4
+    assert "the whole matter (3 document(s))" in out
+    assert f"~{expected:,} tokens" in out
+
+
+async def test_estimate_read_cost_unknown_name_is_honest(matter_env: MatterEnv) -> None:
+    out = await matter_env.estimate(["does-not-exist.pdf"])
+    assert "None of those filenames matched" in out
+
+
+async def test_estimate_read_cost_excludes_other_matters_and_foreign_owner(
+    matter_env: MatterEnv,
+) -> None:
+    """The matter+owner scope is the security boundary: a document in another matter
+    of the same owner, or a foreign-owned file maliciously joined in, is invisible —
+    estimate reports no match (404-conflated absence), never its cost."""
+    assert "None of those filenames matched" in await matter_env.estimate(["secret.pdf"])
+    assert "None of those filenames matched" in await matter_env.estimate(["foreign.pdf"])
+
+
+async def test_estimate_read_cost_suggests_read_in_full_when_it_fits(
+    matter_env: MatterEnv,
+) -> None:
+    out = await matter_env.estimate(["msa.pdf"])
+    assert "read them in full" in out
+    assert "estimate, not a live count" in out  # honest budget framing
+
+
+async def test_estimate_read_cost_suggests_fan_out_when_over_budget(
+    matter_env: MatterEnv,
+) -> None:
+    """A tiny context window makes even one small document exceed the remaining
+    budget → the tool steers toward fan-out / passages, not read-in-full."""
+    binding = MatterBinding(
+        project_id=matter_env.project_id,
+        user_id=matter_env.user_id,
+        name="Acme MSA",
+        privileged=False,
+        minimum_inference_tier=None,
+    )
+    *_, estimate_tiny = build_matter_tools(
+        matter_env.factory, run_id=matter_env.run_id, binding=binding, max_input_tokens=10_000
+    )
+    out = await estimate_tiny(["msa.pdf"])
+    assert "too large to read whole" in out
+    assert "fan out" in out.lower()

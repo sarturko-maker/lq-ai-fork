@@ -180,10 +180,19 @@ agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be 
   recall@5 +36% / hit@8 +32%, **zero recall harm** (precision@5-within-doc *flat* — a single-clause-gold
   metric artifact). ~1 GB memory peak in real runs (safe). **NEXT (deferred):** batch-measure
   hybrid+rerank + `bge-reranker-base` on a ≥16 GB box.
-- **Strategy + safety — fan-out quota + wire R4 into a real per-run token budget.** R4 is a no-op today
-  (`guard.py`); safe model-driven fan-out needs a token-budget brake + a fan-out quota + a pre-flight
-  `estimate_read_cost` helper (over `character_count`) + budget visibility. *Likely its own ADR. Gate:
-  A7 strategy choice; a runaway-fan-out cost test.*
+- **Strategy + safety — cost-aware fan-out + a fan-out quota brake.** ✅ **SHIPPED 2026-06-30 (Slice E,
+  ADR-F049 Slice E addendum)** — the S1–S4 cost-aware half. S1 per-doc `~k tokens to read` in the inventory
+  + S2 `estimate_read_cost` guarded tool (over `character_count`, with a turn-start remaining-budget estimate)
+  + S3 the `retrieval-strategy` doctrine (three modes, cost rule, cheap-first, fan-out anti-patterns) + S4 a
+  `FanOutQuotaMiddleware` capping `task` dispatches per run (the builtin `task` bypasses `guarded_dispatch`;
+  the middleware's `wrap_tool_call` is its chokepoint, denying past the ceiling with a model-visible refusal —
+  never a crash). No migration/dep/gateway change. Gate (ADR-F015): the deterministic runaway-fan-out cost
+  test (`test_fan_out_middleware.py`, incl. a real-graph integration proof) is the hard CI gate; the live RFQ
+  subagent scenario is the A7 strategy finding; full `tests/agents/` 683/38/0. **S5 — wire R4 into a real
+  per-run TOKEN budget — is explicitly DEFERRED (its own slice + ADR):** R4 (`guard.py`) is still a no-op, so
+  cost-safety is NOT yet claimed; the plumbing is half-present (`inference_routing_log` tokens_in/out;
+  `agent_runs.cost_usd` NULL, mig 0048; runner captures no usage). *Gate when built: a runaway-fan-out token
+  budget halt.*
 - **Recency weighting** on conversation results — thin post-filter. *Build only if a measured stale-turn
   failure appears (A5 stale variant).*
 - **Documents MAP in the Store** (the L1 router; first doc's `fact_type="document"` → a

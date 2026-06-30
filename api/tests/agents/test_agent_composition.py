@@ -31,6 +31,7 @@ from app.agents.composition import (
     MATTER_REVIEW_DOCTRINE,
     MATTER_ROSTER_DOCTRINE,
     MATTER_ROSTER_PROMPT,
+    RETRIEVAL_STRATEGY_DOCTRINE,
     compose_and_execute_run,
     system_prompt_for,
 )
@@ -233,18 +234,21 @@ def test_system_prompt_assembly() -> None:
     prompt = system_prompt_for(binding)
     assert prompt.startswith(SYSTEM_PROMPT)
     assert 'the matter "Acme MSA"' in prompt
-    # Editor Slice 5 (ADR-F047) + roster (ADR-F048) + conversation recall (ADR-F049 N3):
-    # the hand-back, roster, then conversation-recall doctrines are appended after the
-    # matter addendum for every matter-bound run, in that order.
+    # Editor Slice 5 (ADR-F047) + roster (ADR-F048) + conversation recall (ADR-F049 N3) +
+    # retrieval-strategy (ADR-F049 Slice E): the hand-back, roster, conversation-recall,
+    # then retrieval-strategy doctrines are appended after the matter addendum for every
+    # matter-bound run, in that order.
     assert prompt.endswith(
         MATTER_PROMPT.format(name="Acme MSA")
         + MATTER_REVIEW_DOCTRINE
         + MATTER_ROSTER_DOCTRINE
         + MATTER_CONVERSATION_DOCTRINE
+        + RETRIEVAL_STRATEGY_DOCTRINE
     )
     assert "review_edited_document" in prompt
     assert "record_matter_participant" in prompt  # roster doctrine present
     assert "search_matter_conversations" in prompt  # conversation-recall doctrine present
+    assert "estimate_read_cost" in prompt  # retrieval-strategy doctrine present
 
 
 def test_system_prompt_appends_area_profile() -> None:

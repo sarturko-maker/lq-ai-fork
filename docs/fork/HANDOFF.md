@@ -3,10 +3,62 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE D — local cross-encoder rerank —
-> on branch `fork/f2-slice-d-rerank` (ADR-F049 Slice D addendum), DEFAULT ON. NO migration, NO dep, NO
-> gateway change. Reuses fastembed. NEXT = Phase-3 remainder (Strategy+R4 / recency / Documents-MAP /
-> PageIndex Slice P) — all gated on measured need; own slice + maintainer go-ahead.**
+> ▶▶ **PICKUP (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE E — cost-aware fan-out + a fan-out quota
+> brake (strategy + safety) — on branch `fork/f2-slice-e-fanout-strategy` (ADR-F049 Slice E addendum).
+> NO migration, NO dep, NO gateway change. NEXT = the deferred Phase-3 remainder (S5 = R4 token budget;
+> recency; Documents-MAP; PageIndex Slice P) — all gated on measured need; own slice + maintainer go-ahead.**
+> - **What it does:** Slices A–D made the matter retriever good; Slice E makes the agent COST-AWARE about
+>   how it consumes documents and puts a REAL enforced ceiling on subagent fan-out. Implements S1–S4 of the
+>   strategy research (`research/retrieval-strategy-selection-fanout-vs-read-vs-retrieve.md` §8); S5 (R4 as a
+>   live per-run token budget) is explicitly DEFERRED.
+> - **S1+S2 — estimate read cost:** `tools.py:_inventory` renders `~k tokens to read` per document from the
+>   stored `character_count` (capped at the read limit ÷ ~4). New guarded read-only tool
+>   `estimate_read_cost(filenames)` (in `MATTER_TOOL_NAMES`, same `guarded_dispatch` + `_matter_files_query`
+>   matter+owner scope) returns the set's est read tokens (`Σ min(char_count, read_limit)/4`), the turn-start
+>   remaining budget, and the fitting mode (read-in-full ≤ ½ budget / fan-out if independent & won't fit /
+>   else passages). Empty list ⇒ whole matter. **Budget is an ESTIMATE** (compaction floor − a coarse
+>   standing reserve), NOT live accounting — the tool says so. *(Postgres `LEAST(NULL,n)==n` trap →
+>   `coalesce(char_count,0)` first, else an un-ingested file phantom-counts as the cap.)*
+> - **S3 — doctrine (taste):** `RETRIEVAL_STRATEGY_DOCTRINE` injected for matter-bound runs (after the
+>   conversation doctrine): three modes + the cost rule keyed on `estimate_read_cost` + cheap-first-escalate
+>   + fan-out anti-patterns (don't fan out a set that fits or a dependent question — one mind reconciles).
+>   Prose (ADR-F041); `system_prompt_for` stays the byte-identical oracle.
+> - **S4 — fan-out quota (safety):** the deepagents builtin `task` tool BYPASSES `guarded_dispatch` (it's a
+>   `SubAgentMiddleware.tools` entry). NEW `app/agents/fan_out_middleware.py:FanOutQuotaMiddleware`
+>   (`AgentMiddleware`, overrides `(a)wrap_tool_call`) is its chokepoint: langchain's factory builds the
+>   `ToolNode` with a `wrap_tool_call` chain from EVERY middleware overriding the hook (`langchain.agents.
+>   factory:1005`), and `task` is a normal registered tool → our hook sees every `task` BEFORE it runs. Past
+>   the per-run ceiling (`Settings.fan_out_quota`, default 8; ≤0 disables) it returns a model-visible refusal
+>   `ToolMessage` WITHOUT calling the handler — no subagent spawns, run NOT killed, agent adapts. Check+increment
+>   has no `await` between → exact cap even on a gathered multi-`task` turn. Built per-run in `composition.py`
+>   (beside `TierMemoryMiddleware`), only when subagents are configured. SAFETY ceiling, NOT a taste limit.
+> - **The honest R4 gap (S5 deferred):** R4 (`guard.py`) is still a no-op; no per-run TOKEN budget exists.
+>   Slice E makes runaway fan-out unlikely+bounded (estimate + doctrine + quota) but NOT impossible — the hard
+>   token stop needs S5 (routing-log aggregation + halt-at-ceiling: `inference_routing_log` has tokens_in/out,
+>   `agent_runs.cost_usd` NULL mig 0048, runner captures no usage → ~100-200 LOC). Do NOT claim cost-safety.
+> - **THE GATE — met (ADR-F015; the runaway-fan-out cost test is the hard CI gate, A7 strategy is a finding).**
+>   Deterministic, $0: `test_fan_out_middleware.py` (allows N then denies (N+1) with a refusal, handler never
+>   runs; non-task passes through & never counts; quota≤0 disables; sync==async; + an INTEGRATION test on a
+>   REAL deepagents graph with a subagent proving the builtin `task` IS routed through our `awrap_tool_call`);
+>   `test_agent_tools.py` (read-cost render; `estimate_read_cost` SUM/cap math, whole-matter vs named,
+>   matter+owner scope isolation, read-in-full vs fan-out suggestions, audit body-free; grant set + schema +1);
+>   `system_prompt_for` oracle updated. **Full `tests/agents/` 683 passed / 38 skipped / 0 failed**; ruff +
+>   format + mypy (209) clean. **Live finding (best-effort, dev stack DeepSeek): the RFQ multi-doc subagent
+>   scenario PASSED (43.96s) — the doctrine + estimate tool + quota are live and benign end-to-end.** Evidence
+>   `docs/fork/evidence/retrieval-eval-slice-e/`.
+> - **TRAPS (carry forward):** (1) `LEAST(NULL,n)==n` in Postgres → coalesce first (the bug a test caught).
+>   (2) `wrap_tool_call` DOES fire for the builtin `task` — proven at factory.py:1005 + the integration test;
+>   fallback if ever falsified = runner-side halt on observed `task` starts. (3) the budget is a turn-start
+>   ESTIMATE, not live accounting (S5). (4) nested fan-out (a subagent calling `task`) runs under the
+>   subagent's own middleware → the quota bounds the LEAD's breadth (the primary runaway vector), a known limit.
+>   (5) `build_matter_tools` now returns 4 tools — the only unpacking site is `test_agent_tools.py`.
+> - **A7-large** (over-window corpus where inline must fail / fan-out must win) is DESIGNED (research §6) but
+>   DEFERRED as its own eval finding: DeepSeek's known no-autonomous-fan-out (E1 A7 0/10) means a live A7-large
+>   mostly re-confirms that, and the over-window fixture build is its own slice. The live subagent RFQ scenario
+>   is the strategy live finding here.
+>
+> ▶ **PREVIOUS (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE D — local cross-encoder rerank — MERGED
+> PR #170 (`3694adf0`) (ADR-F049 Slice D addendum), DEFAULT ON. NO migration, NO dep, NO gateway change.
 > - **What it does:** C1 lit up recall (hybrid fusion); the bi-encoder embeds query/passage independently so
 >   the top-k order is imprecise. Slice D adds a cross-encoder reranker that scores (query, passage) JOINTLY
 >   and reorders a WIDER candidate set down to top-k — the textbook retrieve-wide-then-rerank precision stage.
