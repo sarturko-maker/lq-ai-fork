@@ -76,6 +76,16 @@ describe('agents API client', () => {
 		expect(JSON.parse(init.body as string)).toEqual({ prompt: 'p', project_id: 'proj-1' });
 	});
 
+	it('createRun forwards budget_profile in the JSON body', async () => {
+		fetchMock.mockResolvedValueOnce(
+			jsonResponseLike(202, { id: 'r5', status: 'running', budget_profile: 'economy' })
+		);
+		const run = await createRun({ prompt: 'p', budget_profile: 'economy' });
+		expect(run.budget_profile).toBe('economy');
+		const [, init] = firstCall(fetchMock);
+		expect(JSON.parse(init.body as string)).toEqual({ prompt: 'p', budget_profile: 'economy' });
+	});
+
 	it('getRun GETs /agents/runs/{id} with the id URL-encoded', async () => {
 		fetchMock.mockResolvedValueOnce(
 			jsonResponseLike(200, { run: { id: 'a/b', status: 'completed' }, steps: [] })

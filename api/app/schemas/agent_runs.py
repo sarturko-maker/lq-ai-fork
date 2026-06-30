@@ -47,6 +47,21 @@ class AgentRunStepKind(StrEnum):
     tool_result = "tool_result"
 
 
+class BudgetProfile(StrEnum):
+    """Cost/effort envelope for an agent run (ADR-F053).
+
+    Selects a tier of the four per-run brakes (token budget, fan-out quota,
+    max steps, wall clock). ``balanced`` is the default (~4x the old caps);
+    ``economy`` dials down to the conservative tier; ``generous`` raises it for
+    deep work. The string values are persisted on ``agent_runs.budget_profile``
+    and resolved to a concrete envelope in :mod:`app.agents.budget`.
+    """
+
+    economy = "economy"
+    balanced = "balanced"
+    generous = "generous"
+
+
 class AgentRunCreate(BaseModel):
     """Request body for ``POST /agents/runs``.
 
@@ -65,14 +80,16 @@ class AgentRunCreate(BaseModel):
 
     prompt: str = Field(min_length=1, max_length=32_768)
     model_alias: str = Field(default="smart", min_length=1, max_length=64)
-    # Cockpit default budget (ADR-F026): a single ROPA edit is ~10-20 settled steps
-    # (read register -> locate -> propose/link/retire -> re-read, with a
-    # model turn between each), and a multi-change ask stacks several. The
-    # old default of 20 capped real privacy work mid-run. 100 is both the
-    # default and the hard ceiling here; the R4 cost cap (not this) is the
-    # money guard, and the run's wall clock (runner.DEFAULT_WALL_CLOCK_SECONDS)
-    # bounds time. Raising the ceiling above 100 is a deliberate follow-up.
-    max_steps: int = Field(default=100, ge=1, le=100)
+    # F2 Slice O (ADR-F053): the run's cost/effort envelope. Resolves
+    # server-side to (token_budget, fan_out_quota, max_steps, wall_clock).
+    # balanced (default) is the ~4x tier; economy dials down; generous raises.
+    budget_profile: BudgetProfile = Field(default=BudgetProfile.balanced)
+    # Per-run step ceiling. Normally driven by ``budget_profile`` (ADR-F053):
+    # leave this None and the resolved profile's max_steps applies (economy 100 /
+    # balanced 400 / generous 600). Set it to override the profile for one run
+    # (advanced); the hard ceiling is 600 (the generous tier). The token budget
+    # (ADR-F051) is the money guard and the wall clock bounds time.
+    max_steps: int | None = Field(default=None, ge=1, le=600)
     # F0-S4: optional Matter binding — the run's agent gets the matter's
     # document tools and the gateway envelope carries the matter's
     # privilege/tier floor. Validated against ownership at the endpoint
@@ -105,6 +122,9 @@ class AgentRunRead(BaseModel):
     # F2 Slice G (ADR-F051 follow-up): the run's cumulative model tokens, NULL until
     # settlement / when usage was not reported. (cost_usd — dollars — stays NULL.)
     total_tokens: int | None = None
+    # F2 Slice O (ADR-F053): the cost/effort envelope the run was created with.
+    # NULL for legacy rows created before the column existed (treated as balanced).
+    budget_profile: BudgetProfile | None = None
 
 
 class AgentRunStepRead(BaseModel):

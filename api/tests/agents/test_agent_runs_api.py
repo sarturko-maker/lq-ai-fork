@@ -198,7 +198,9 @@ async def test_create_run_returns_202_with_running_row(
     assert body["status"] == "running"
     assert body["prompt"] == "What is the liability cap?"
     assert body["model_alias"] == "smart"
-    assert body["max_steps"] == 100
+    # Slice O (ADR-F053): no budget_profile → balanced default → max_steps 400.
+    assert body["max_steps"] == 400
+    assert body["budget_profile"] == "balanced"
     assert body["purpose"] == "agent_loop"
     assert body["final_answer"] is None
     assert body["finished_at"] is None
@@ -235,13 +237,62 @@ async def test_create_run_honours_model_alias_and_max_steps(
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
+    ("profile", "expected_max_steps"),
+    [("economy", 100), ("balanced", 400), ("generous", 600)],
+)
+async def test_create_run_resolves_budget_profile(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+    profile: str,
+    expected_max_steps: int,
+) -> None:
+    """Slice O (ADR-F053): budget_profile is persisted and resolves max_steps."""
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "Check the cap.", "budget_profile": profile},
+        )
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["budget_profile"] == profile
+    assert body["max_steps"] == expected_max_steps
+    row = (
+        await db_session.execute(select(AgentRun).where(AgentRun.id == uuid.UUID(body["id"])))
+    ).scalar_one()
+    assert row.budget_profile == profile
+    assert row.max_steps == expected_max_steps
+
+
+@pytest.mark.integration
+async def test_create_run_explicit_max_steps_overrides_profile(
+    client: AsyncClient,
+    user_a: User,
+) -> None:
+    """An explicit max_steps overrides the profile's step ceiling (advanced)."""
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "x", "budget_profile": "economy", "max_steps": 250},
+        )
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["budget_profile"] == "economy"
+    assert body["max_steps"] == 250
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
     "payload",
     [
         {},  # prompt required
         {"prompt": ""},  # min_length=1
         {"prompt": "x", "max_steps": 0},  # ge=1
-        {"prompt": "x", "max_steps": 101},  # le=100
+        {"prompt": "x", "max_steps": 601},  # le=600 (Slice O raised the ceiling)
         {"prompt": "x", "model_alias": ""},  # min_length=1
+        {"prompt": "x", "budget_profile": "lavish"},  # not a BudgetProfile
     ],
 )
 async def test_create_run_rejects_invalid_bodies(

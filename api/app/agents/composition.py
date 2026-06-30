@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.area_agent import AreaAgentSpec, combine_tier_floors, render_area_agent
 from app.agents.assessment_tools import build_assessment_tools
+from app.agents.budget import resolve_envelope
 from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.commercial_tools import COMMERCIAL_AREA_KEY, build_commercial_tools
 from app.agents.deal_changes import DealChangeLedger
@@ -422,6 +423,9 @@ async def compose_and_execute_run(
             # Captured as a scalar inside the session (the run row detaches when
             # the block closes) — keys the user/owner memory namespace at N0.
             run_user_id = run.user_id
+            # Slice O (ADR-F053): the run's cost/effort profile, resolved below to
+            # the four-brake envelope (captured as a scalar before the row detaches).
+            run_budget_profile = run.budget_profile
             # C-CLIENT (ADR-F030): load the company/client tier once, for every
             # run. Read-only injection at the prompt seam (system_prompt_for
             # below); absent/empty profile → None → no client block.
@@ -738,9 +742,13 @@ async def compose_and_execute_run(
         run_middleware: list[AgentMiddleware] = []
         if tier_text:
             run_middleware.append(TierMemoryMiddleware(tier_text=tier_text))
-        _fan_out_quota = get_settings().fan_out_quota
-        if wiring.subagents and _fan_out_quota > 0:
-            run_middleware.append(FanOutQuotaMiddleware(quota=_fan_out_quota))
+        # Slice O (ADR-F053): resolve the run's budget profile to the four-brake
+        # envelope. The fan-out quota + token budget + wall clock are sized from
+        # here now (was a direct get_settings() read); max_steps was materialized
+        # on the row at creation. A legacy/NULL profile resolves to balanced.
+        envelope = resolve_envelope(run_budget_profile, get_settings())
+        if wiring.subagents and envelope.fan_out_quota > 0:
+            run_middleware.append(FanOutQuotaMiddleware(quota=envelope.fan_out_quota))
 
         http_client = build_gateway_http_client()
         try:
@@ -760,8 +768,10 @@ async def compose_and_execute_run(
                 subagents=wiring.subagents or None,
                 skills=wiring.main_sources,
                 backend=memory_backend,
-                # F2 Slice F (ADR-F051): the per-run token-budget brake (R4 realised).
-                token_budget=get_settings().run_token_budget,
+                # F2 Slice F (ADR-F051): the per-run token-budget brake (R4 realised),
+                # now sized by the run's budget profile (Slice O, ADR-F053).
+                token_budget=envelope.token_budget,
+                wall_clock_seconds=envelope.wall_clock_seconds,
                 middleware=run_middleware or None,
                 checkpointer=checkpointer,
                 store=store,
