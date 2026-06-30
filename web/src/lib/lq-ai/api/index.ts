@@ -29,5 +29,6 @@ export * as autonomousApi from './autonomous';
 export * as agentsApi from './agents';
 export * as practiceAreasApi from './practiceAreas';
 export * as matterMemoryApi from './matterMemory';
+export * as matterCapabilitiesApi from './matterCapabilities';
 export * as matterFilesApi from './matterFiles';
 export * as editorApi from './editor';

@@ -29,6 +29,7 @@
 	import RopaRegister from '$lib/lq-ai/components/ropa/RopaRegister.svelte';
 	import MemoryPanel from '$lib/lq-ai/components/matter/MemoryPanel.svelte';
 	import DocumentsPanel from '$lib/lq-ai/components/matter/DocumentsPanel.svelte';
+	import CapabilitiesPanel from '$lib/lq-ai/components/matter/CapabilitiesPanel.svelte';
 	import DocumentEditorPanel, {
 		handBackInstruction
 	} from '$lib/lq-ai/components/matter/DocumentEditorPanel.svelte';
@@ -140,7 +141,9 @@
 	// C3c-2: every matter also gets a "Memory" tab onto its working-memory tier
 	// (area-agnostic — ADR-F042/F044). C7a adds a "Documents" tab onto the matter's
 	// files (incl. downloadable redline outputs — ADR-F046). 'register' stays Privacy-only.
-	let matterTab = $state<'conversation' | 'register' | 'memory' | 'documents'>('conversation');
+	let matterTab = $state<'conversation' | 'register' | 'memory' | 'documents' | 'capabilities'>(
+		'conversation'
+	);
 
 	// PRIV-9a: when a Privacy matter has the width, show chat + the ROPA
 	// register side by side (resizable) instead of the one-at-a-time toggle, so
@@ -164,14 +167,19 @@
 		...(matter
 			? [
 					{ id: 'memory' as const, label: 'Memory' },
-					{ id: 'documents' as const, label: 'Documents' }
+					{ id: 'documents' as const, label: 'Documents' },
+					// ADR-F054: the capability panel — toggle the area's skills/tools/playbooks
+					// (+ MCP placeholder) for this matter. Full-width panel like Memory/Documents.
+					{ id: 'capabilities' as const, label: 'Capabilities' }
 				]
 			: [])
 	]);
 
-	// Both Memory and Documents are full-width read panels: the conversation region
-	// stays mounted but hidden behind either (the no-remount invariant — C3c-2).
-	const matterPanelOpen = $derived(matterTab === 'memory' || matterTab === 'documents');
+	// Memory, Documents and Capabilities are full-width panels: the conversation region
+	// stays mounted but hidden behind any of them (the no-remount invariant — C3c-2).
+	const matterPanelOpen = $derived(
+		matterTab === 'memory' || matterTab === 'documents' || matterTab === 'capabilities'
+	);
 
 	// If the active tab leaves the strip (e.g. a Privacy matter widens past the
 	// split budget, retiring the 'register' tab), fall back to the conversation so
@@ -626,6 +634,18 @@
 								reloadKey={registerReloadKey}
 								{nowMs}
 								onOpenEditor={openEditor}
+							/>
+						</div>
+					{/if}
+					{#if matterTab === 'capabilities' && matter}
+						<!-- Capabilities tab (ADR-F054): full-width panel to toggle the area's
+					     skills/tools/playbooks (+ MCP placeholder) for this matter. The run
+					     composition reads the same toggles. Run-locked (paused while working). -->
+						<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
+							<CapabilitiesPanel
+								projectId={matter.project_id}
+								{runActive}
+								reloadKey={registerReloadKey}
 							/>
 						</div>
 					{/if}

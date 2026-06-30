@@ -1369,3 +1369,41 @@ export interface EditorSession {
 	access_token_ttl: number;
 	wopi_src: string;
 }
+
+// --- Capability panel (ADR-F054) ---------------------------------------------
+
+/** Capability kinds the lawyer can toggle (+ the disabled 'mcp' placeholder). */
+export type CapabilityKind = 'skill' | 'tool' | 'playbook' | 'mcp';
+
+/** One capability the panel shows — availability + resolved on/off state. */
+export interface CapabilityEntry {
+	capability_kind: CapabilityKind;
+	capability_key: string;
+	label: string;
+	description: string | null;
+	available: boolean;
+	enabled: boolean;
+	default_enabled: boolean;
+	toggleable: boolean;
+}
+
+/** A kind-grouped section (Playbooks / Skills / Tools / MCP), in panel order. */
+export interface CapabilitySection {
+	kind: CapabilityKind;
+	label: string;
+	entries: CapabilityEntry[];
+}
+
+/** The matter's full capability inventory — `GET/PUT /matters/{id}/capabilities`. */
+export interface CapabilityInventory {
+	practice_area_key: string | null;
+	unit_label: string;
+	sections: CapabilitySection[];
+}
+
+/** One on/off toggle in a `PUT /matters/{id}/capabilities` body. */
+export interface CapabilityToggleInput {
+	kind: 'skill' | 'tool' | 'playbook';
+	key: string;
+	enabled: boolean;
+}

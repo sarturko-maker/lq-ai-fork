@@ -28,8 +28,10 @@ from app.api.dependencies import ActiveUser, AdminUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import Conflict, NotFound, ValidationError
-from app.models.practice_area import PracticeArea, PracticeAreaSkill
+from app.models.playbook import Playbook
+from app.models.practice_area import PracticeArea, PracticeAreaPlaybook, PracticeAreaSkill
 from app.schemas.practice_areas import (
+    PlaybookAttachRequest,
     PracticeAreaConfigUpdate,
     PracticeAreaListResponse,
     PracticeAreaRead,
@@ -264,6 +266,102 @@ async def detach_practice_area_skill(
         practice_area_id=area.id,
         request=request,
         details={"skill_name": skill_name},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{key}/playbooks",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Attach a playbook to a practice area (admin).",
+    response_class=Response,
+)
+async def attach_practice_area_playbook(
+    key: str,
+    payload: PlaybookAttachRequest,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> Response:
+    """POST /api/v1/practice-areas/{key}/playbooks — ADR-F054 (capability panel).
+
+    Body ``{playbook_id}``; the playbook must exist and not be soft-deleted. The
+    binding makes the playbook AVAILABLE to matters under the area (the lawyer toggles
+    it on/off per matter). Re-attaching returns 409.
+    """
+    area = await _load_area_or_404(db, key)
+    playbook = (
+        await db.execute(
+            select(Playbook).where(
+                Playbook.id == payload.playbook_id,
+                Playbook.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if playbook is None:
+        raise NotFound(
+            f"Playbook {payload.playbook_id} is not available.",
+            details={"playbook_id": str(payload.playbook_id)},
+        )
+    area_id = area.id
+    db.add(PracticeAreaPlaybook(practice_area_id=area_id, playbook_id=payload.playbook_id))
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise Conflict(
+            "Playbook is already attached to this practice area.",
+            details={"key": key, "playbook_id": str(payload.playbook_id)},
+        ) from exc
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="practice_area.playbook_attach",
+        resource_type="practice_area",
+        resource_id=key,
+        practice_area_id=area_id,
+        request=request,
+        details={"playbook_id": str(payload.playbook_id)},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/{key}/playbooks/{playbook_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Detach a playbook from a practice area (admin).",
+    response_class=Response,
+)
+async def detach_practice_area_playbook(
+    key: str,
+    playbook_id: uuid.UUID,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> Response:
+    """DELETE /api/v1/practice-areas/{key}/playbooks/{playbook_id} — ADR-F054.
+
+    Idempotent: detaching a not-attached playbook is a no-op 204 (the desired end
+    state holds); an unknown area is a 404.
+    """
+    area = await _load_area_or_404(db, key)
+    await db.execute(
+        delete(PracticeAreaPlaybook).where(
+            PracticeAreaPlaybook.practice_area_id == area.id,
+            PracticeAreaPlaybook.playbook_id == playbook_id,
+        )
+    )
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="practice_area.playbook_detach",
+        resource_type="practice_area",
+        resource_id=key,
+        practice_area_id=area.id,
+        request=request,
+        details={"playbook_id": str(playbook_id)},
     )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

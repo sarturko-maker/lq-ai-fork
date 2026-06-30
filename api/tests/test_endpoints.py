@@ -363,6 +363,12 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("PATCH", "/api/v1/practice-areas/{key}"),
     ("POST", "/api/v1/practice-areas/{key}/skills"),
     ("DELETE", "/api/v1/practice-areas/{key}/skills/{skill_name}"),
+    # ADR-F054 (fork) — capability panel. Dedicated coverage in
+    # tests/test_practice_area_playbooks_api.py + tests/test_matter_capabilities_api.py.
+    ("POST", "/api/v1/practice-areas/{key}/playbooks"),
+    ("DELETE", "/api/v1/practice-areas/{key}/playbooks/{playbook_id}"),
+    ("GET", "/api/v1/matters/{project_id}/capabilities"),
+    ("PATCH", "/api/v1/matters/{project_id}/capabilities"),
     # PRIV-3 (fork) — ROPA register read API (ADR-F019). Dedicated coverage in
     # tests/test_ropa_read.py.
     ("GET", "/api/v1/ropa/processing-activities"),

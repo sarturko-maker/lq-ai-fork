@@ -3,8 +3,65 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-30): F2 SLICE O-2 — per-run COST ESTIMATE (`agent_runs.cost_usd`) + a UI receipt —
-> branch `fork/o2-cost-estimate` (ADR-F053 Slice O-2 addendum). The actioned upstream-reuse finding; finishes
+> ▶▶ **PICKUP (2026-06-30): CAPABILITY PANEL (Phase 1) — BUILT + LIVE-VERIFIED on branch
+> `fork/capability-panel` (ADR-F054, migration 0081). PR open; HOLDING merge for maintainer UI sign-off
+> (they are testing on localhost). The first slice of the new "Capability panel + in-matter Tabular review"
+> milestone — the prerequisite before Phase 2 (tabular as an in-matter agent TOOL in Commercial + Corporate,
+> grid UX augmented by the maintainer's React repo LQ-Grid, REFERENCE-ONLY).**
+> - **WHAT SHIPPED:** a per-matter capability panel. The AREA curates the AVAILABLE set; the LAWYER toggles
+>   a subset on/off **PER MATTER** (persisted; survives the matter's conversations; "system proposes, user
+>   owns"). Sections: **Playbooks / Skills / Tools** (real now) + a disabled **MCP** placeholder. Primitives
+>   (read/write/edit/bash/task) + always-on matter substrate tools are NEVER shown. All 6 design calls were
+>   confirmed on the recommended defaults (see ADR-F054).
+> - **ARCHITECTURE:** ONE pure `app/agents/capabilities.py` inventory `(kind,key,label,available,
+>   default_enabled,toggleable)` + `enabled_keys`/`is_toggleable`/`enabled_map`, consumed by BOTH the read
+>   API AND `compose_and_execute_run` (single source of truth → the panel shows what the agent gets).
+>   Migration **0081** (additive, named FKs, no redundant index): `practice_area_playbooks` (area↔playbook
+>   availability, mirrors `practice_area_skills`) + `matter_capability_toggles` (SPARSE per-matter on/off;
+>   absent row = `default_enabled`). **NO `practice_area_tools` table** — tools are code-canonical
+>   (`*_TOOL_NAMES`); availability is a per-area CODE group map (`AREA_TOOL_GROUPS`). New `GET/PATCH
+>   /matters/{id}/capabilities` (404-not-403, owner-scoped via `_load_visible_project`) + admin
+>   `POST/DELETE /practice-areas/{key}/playbooks`.
+> - **OFF → genuinely removed at 3 EXISTING seams:** skills filtered before `build_area_skill_wiring`; tool
+>   GROUPS not built (so absent from `GuardContext.granted`, R6 fail-closes; change_ledger created iff its
+>   group enabled); playbooks injected as a NEW read-only **"Practice Playbook" tier** on
+>   `TierMemoryMiddleware` (ADR-F049, `playbook_context.render_practice_playbook`, length-capped, data-only
+>   fence — REUSES the playbook DATA, the legacy executor stays frozen). The Practice Playbook tier renders
+>   at the practice-area level (after House Brief, before the matter tiers).
+> - **UI:** a "Capabilities" **tab** (full-width panel like Memory/Documents; conversation stays MOUNTED →
+>   live SSE survives) — `web/.../components/matter/CapabilitiesPanel.svelte` (accessible role=switch toggles,
+>   optimistic + revert, run-locked while a run is active), `api/matterCapabilities.ts`, wired in
+>   `ConversationHost.svelte`. (Co-visible resizable split = a noted follow-up; the tab is the shipped form.)
+> - **THE HARD GUARD (met):** the area-key tool branch became a per-group gate; the **no-toggle (default)
+>   path is byte-identical** to pre-slice (all skills wired in order, all area tool groups built with their
+>   ledgers, no playbook tier when nothing bound) — proven by the composition tests + the adversarial review.
+> - **GATE:** ruff (CI cmd, repo root) + format + **mypy 215** clean; migration 0081 **up→down→up on a
+>   throwaway pgvector** (named FKs, PK-only index); **full api suite green** (last full run 3002 passed/1
+>   fixed = the test_openapi/test_endpoints route-contract entries — REMEMBER to add new routes there);
+>   web `npm run check` **0 errors** + **1014 passed** (96 files). **Adversarial review: 0 blockers / 0
+>   should-fixes / 5 nits** — 3 actioned (dropped redundant index, dropped dead `ToolGroupSpec.tool_names` +
+>   tautological test, named the migration FKs); nits 4–5 (resolve-inventory duplication; sparse-row writes
+>   a == default row) accepted as harmless/intentional. **LIVE-VERIFIED** on the dev stack: attach playbook
+>   (204) → GET shows all 4 sections (real commercial skills, bound playbook, redlining, MCP-disabled) →
+>   toggle redlining off (persists across a fresh GET) → wrong-area tool 422.
+> - **DEV STACK:** api+arq+ingest rebuilt (mig 0081 live, tables confirmed) + **web rebuilt** (the panel is
+>   live on `http://127.0.0.1:3000`; a demo playbook "NDA — Mutual" is bound to Commercial for testing —
+>   unbind via the admin DELETE). NOTE: the dev DB has the FIRST-cut 0081 (redundant index + auto-named FKs);
+>   harmless — the SHIPPED migration (clean) applies on a fresh deploy; no host-side downgrade was run.
+> - **TRAPS (carry forward):** (1) a new route MUST be added to BOTH `test_endpoints.py` IMPLEMENTED_ROUTES
+>   (skip the 501-scaffold) AND `test_openapi.py` EXPECTED_PATHS **+ the `len(actual) == N` count** (3 path
+>   templates here → +3). (2) `build_area_inventory` calls `record.summary()` on every area-bound run → any
+>   test fake registry needs a `.summary()` returning `.title`/`.description` (fixed the `_SkillRec` fake in
+>   `test_agent_composition.py`). (3) the ASGI endpoint test has NO skill registry installed → the skills
+>   SECTION is empty there (graceful None); skills coverage is the pure + composition tests; the LIVE server
+>   DOES have the registry (skills show). (4) commit ruff from the REPO ROOT (`ruff check api scripts`).
+> - **NEXT after merge:** Phase 2 — Tabular review as an in-matter agent tool (Commercial + Corporate),
+>   grid UX learning from LQ-Grid (React, REFERENCE-ONLY — its own plan + ADR). Deferred (resume after this
+>   milestone): Slice P/PageIndex; N=150 hybrid+rerank calibration; cost_usd exact attribution + pre-run
+>   hint; per-turn conversation granularity.
+>
+> ▶ **PREVIOUS (2026-06-30): F2 SLICE O-2 — per-run COST ESTIMATE (`agent_runs.cost_usd`) + a UI receipt —
+> MERGED PR #176 (`c9df336b`) (ADR-F053 Slice O-2 addendum). The actioned upstream-reuse finding; finishes
 > the cost-envelope story Slice O started. NO migration, NO new dep, gateway untouched.**
 > - **Two assumptions flipped (both favourable):** (a) `agent_runs.cost_usd` (`NUMERIC(10,4)`, nullable)
 >   ALREADY exists + is exposed on `AgentRunRead` + TS `AgentRun` → **no migration, no new column**; (b) every
@@ -828,7 +885,7 @@ then CLAUDE.md, then the ADRs/plans named below.
 > refuted**, all folded. **The live dev stack is at mig 0075 with api+arq rebuilt on the merged code.**
 >
 > **Slice 3 what shipped (the WOPI write half; api only — no web/nginx change).** `POST /wopi/files/{id}/contents`
-> (`X-WOPI-Override: PUT`); session now **editable** (`UserCanWrite=true`/`SupportsUpdate=true`/`ReadOnly=false`).
+> (`X-WOPI-Override: PATCH`); session now **editable** (`UserCanWrite=true`/`SupportsUpdate=true`/`ReadOnly=false`).
 > **Version model = snapshot-then-mutate (maintainer's call), as TWO durable commits:** on the FIRST human save of
 > an agent redline (`created_by_run_id` set) the agent's bytes are `copy_object`'d to a NEW immutable `File` row
 > (`(agent draft)`, provenance kept → C7a Documents tab, key==id per ADR-0005) and the live row is flipped to
