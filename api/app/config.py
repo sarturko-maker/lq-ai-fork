@@ -216,8 +216,8 @@ class Settings(BaseSettings):
     # radius if the model misjudges. Over the ceiling, the run is not killed: the
     # `task` call is denied with a model-visible refusal so the agent can adapt
     # (consolidate findings / read remaining documents directly). NOTE: this is the
-    # step/breadth brake; a real per-run TOKEN budget (R4, guard.py) is still a
-    # no-op and is a separate deferred slice (do not claim cost-safety from this).
+    # step/breadth brake; the complementary per-run TOKEN budget (R4 realised) now
+    # lives in `run_token_budget` / the runner loop (ADR-F051, below).
     fan_out_quota: int = Field(
         default=8,
         description=(
