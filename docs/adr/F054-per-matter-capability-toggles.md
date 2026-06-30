@@ -80,9 +80,9 @@ Adopt **option 3**.
   admin attach/detach endpoint now, the curation UI later.
 - The "Practice Playbook" tier from the canonical memory-tiers table (CLAUDE.md) goes partly live,
   read-only — its source of truth stays the `playbooks`/`playbook_positions` SQL.
-- Stale toggle rows are tolerated (resolve-time drift drop, the established `area_agent` posture); the PUT
+- Stale toggle rows are tolerated (resolve-time drift drop, the established `area_agent` posture); the PATCH
   boundary rejects writing a key absent from the matter's available set.
-- **Gate.** Deterministic: pure inventory tests; GET/PUT (defaults all-on, override reflected, unfiled →
+- **Gate.** Deterministic: pure inventory tests; GET/PATCH (defaults all-on, override reflected, unfiled →
   empty, cross-user/archived/sandbox → 404, 422 on unknown/non-toggleable/oversized, audit body-free);
   composition (disabled skill/tool/playbook genuinely absent; **no-toggle path byte-identical**); migration
   `0081` up→down→up on a throwaway pgvector; admin attach/detach; `render_practice_playbook` formatting/cap.

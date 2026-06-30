@@ -368,7 +368,7 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/practice-areas/{key}/playbooks"),
     ("DELETE", "/api/v1/practice-areas/{key}/playbooks/{playbook_id}"),
     ("GET", "/api/v1/matters/{project_id}/capabilities"),
-    ("PUT", "/api/v1/matters/{project_id}/capabilities"),
+    ("PATCH", "/api/v1/matters/{project_id}/capabilities"),
     # PRIV-3 (fork) — ROPA register read API (ADR-F019). Dedicated coverage in
     # tests/test_ropa_read.py.
     ("GET", "/api/v1/ropa/processing-activities"),

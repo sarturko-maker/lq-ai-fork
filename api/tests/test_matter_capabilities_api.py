@@ -157,7 +157,7 @@ async def test_put_disables_tool_then_get_reflects(
     area_id = await _commercial_area_id(db_session)
     matter = await _make_matter(db_session, user, area_id=area_id)
 
-    resp = await client.put(
+    resp = await client.patch(
         _url(matter.id),
         headers=_bearer(user),
         json={"toggles": [{"kind": "tool", "key": "redlining", "enabled": False}]},
@@ -189,14 +189,14 @@ async def test_put_upsert_is_idempotent(
     matter = await _make_matter(db_session, user, area_id=area_id)
     body = {"toggles": [{"kind": "tool", "key": "redlining", "enabled": False}]}
 
-    await client.put(_url(matter.id), headers=_bearer(user), json=body)
+    await client.patch(_url(matter.id), headers=_bearer(user), json=body)
     # Flip it back on, then off again — still exactly one row.
-    await client.put(
+    await client.patch(
         _url(matter.id),
         headers=_bearer(user),
         json={"toggles": [{"kind": "tool", "key": "redlining", "enabled": True}]},
     )
-    await client.put(_url(matter.id), headers=_bearer(user), json=body)
+    await client.patch(_url(matter.id), headers=_bearer(user), json=body)
 
     rows = (
         (
@@ -215,7 +215,7 @@ async def test_put_rejects_unknown_capability(
 ) -> None:
     area_id = await _commercial_area_id(db_session)
     matter = await _make_matter(db_session, user, area_id=area_id)
-    resp = await client.put(
+    resp = await client.patch(
         _url(matter.id),
         headers=_bearer(user),
         json={"toggles": [{"kind": "skill", "key": "does-not-exist", "enabled": False}]},
@@ -229,7 +229,7 @@ async def test_put_rejects_wrong_area_tool(
     # ROPA is a Privacy group; it is not toggleable on a Commercial matter.
     area_id = await _commercial_area_id(db_session)
     matter = await _make_matter(db_session, user, area_id=area_id)
-    resp = await client.put(
+    resp = await client.patch(
         _url(matter.id),
         headers=_bearer(user),
         json={"toggles": [{"kind": "tool", "key": "ropa", "enabled": False}]},
@@ -243,7 +243,7 @@ async def test_put_rejects_mcp_toggle(
     area_id = await _commercial_area_id(db_session)
     matter = await _make_matter(db_session, user, area_id=area_id)
     # 'mcp' is not an accepted kind (Literal) → 422 at the schema boundary.
-    resp = await client.put(
+    resp = await client.patch(
         _url(matter.id),
         headers=_bearer(user),
         json={"toggles": [{"kind": "mcp", "key": "mcp", "enabled": True}]},
@@ -260,7 +260,7 @@ async def test_put_rejects_unbound_playbook(
     other = Playbook(name="Unbound", contract_type="MSA", description="")
     db_session.add(other)
     await db_session.flush()
-    resp = await client.put(
+    resp = await client.patch(
         _url(matter.id),
         headers=_bearer(user),
         json={"toggles": [{"kind": "playbook", "key": str(other.id), "enabled": False}]},
@@ -273,7 +273,7 @@ async def test_put_cross_user_matter_is_404(
 ) -> None:
     area_id = await _commercial_area_id(db_session)
     matter = await _make_matter(db_session, user, area_id=area_id)
-    resp = await client.put(
+    resp = await client.patch(
         _url(matter.id),
         headers=_bearer(other_user),
         json={"toggles": [{"kind": "tool", "key": "redlining", "enabled": False}]},
@@ -286,7 +286,7 @@ async def test_put_writes_one_audit_row_with_no_content(
 ) -> None:
     area_id = await _commercial_area_id(db_session)
     matter = await _make_matter(db_session, user, area_id=area_id)
-    await client.put(
+    await client.patch(
         _url(matter.id),
         headers=_bearer(user),
         json={"toggles": [{"kind": "tool", "key": "redlining", "enabled": False}]},
@@ -316,7 +316,7 @@ async def test_put_isolated_per_matter(
     area_id = await _commercial_area_id(db_session)
     matter_a = await _make_matter(db_session, user, area_id=area_id)
     matter_b = await _make_matter(db_session, user, area_id=area_id)
-    await client.put(
+    await client.patch(
         _url(matter_a.id),
         headers=_bearer(user),
         json={"toggles": [{"kind": "tool", "key": "redlining", "enabled": False}]},

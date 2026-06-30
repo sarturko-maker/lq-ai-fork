@@ -174,7 +174,7 @@ class CapabilityInventory:
     def is_toggleable(self, kind: str, key: str) -> bool:
         """True iff (kind, key) is an available, toggleable capability of this area.
 
-        The PUT boundary uses this to reject a toggle for an unknown / non-toggleable
+        The PATCH boundary uses this to reject a toggle for an unknown / non-toggleable
         (MCP) / stale key — so a forged or drifted id can never be stored.
         """
         return any(

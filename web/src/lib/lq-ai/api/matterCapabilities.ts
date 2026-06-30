@@ -18,16 +18,17 @@ export async function getMatterCapabilities(projectId: string): Promise<Capabili
 }
 
 /**
- * PUT /api/v1/matters/{id}/capabilities — set per-matter capability toggles.
+ * PATCH /api/v1/matters/{id}/capabilities — set per-matter capability toggles.
  * Sends only the changed toggles (sparse); the server rejects (422) any toggle for
  * an unknown / non-toggleable / unbound capability. Returns the resolved inventory.
+ * (PATCH, not PUT — the codebase convention; the api CORS allow-list has no PUT.)
  */
-export async function putMatterCapabilities(
+export async function updateMatterCapabilities(
 	projectId: string,
 	toggles: CapabilityToggleInput[]
 ): Promise<CapabilityInventory> {
 	return apiRequest<CapabilityInventory>(
 		`/matters/${encodeURIComponent(projectId)}/capabilities`,
-		{ method: 'PUT', body: { toggles } }
+		{ method: 'PATCH', body: { toggles } }
 	);
 }

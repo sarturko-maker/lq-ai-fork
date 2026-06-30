@@ -167,7 +167,7 @@
 		setSaving(id, true);
 		saveError = null;
 		try {
-			inventory = await matterCapabilitiesApi.putMatterCapabilities(
+			inventory = await matterCapabilitiesApi.updateMatterCapabilities(
 				projectId,
 				togglePayload(entry, next)
 			);

@@ -19,7 +19,7 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   Migration **0081** (additive, named FKs, no redundant index): `practice_area_playbooks` (area↔playbook
 >   availability, mirrors `practice_area_skills`) + `matter_capability_toggles` (SPARSE per-matter on/off;
 >   absent row = `default_enabled`). **NO `practice_area_tools` table** — tools are code-canonical
->   (`*_TOOL_NAMES`); availability is a per-area CODE group map (`AREA_TOOL_GROUPS`). New `GET/PUT
+>   (`*_TOOL_NAMES`); availability is a per-area CODE group map (`AREA_TOOL_GROUPS`). New `GET/PATCH
 >   /matters/{id}/capabilities` (404-not-403, owner-scoped via `_load_visible_project`) + admin
 >   `POST/DELETE /practice-areas/{key}/playbooks`.
 > - **OFF → genuinely removed at 3 EXISTING seams:** skills filtered before `build_area_skill_wiring`; tool
@@ -885,7 +885,7 @@ then CLAUDE.md, then the ADRs/plans named below.
 > refuted**, all folded. **The live dev stack is at mig 0075 with api+arq rebuilt on the merged code.**
 >
 > **Slice 3 what shipped (the WOPI write half; api only — no web/nginx change).** `POST /wopi/files/{id}/contents`
-> (`X-WOPI-Override: PUT`); session now **editable** (`UserCanWrite=true`/`SupportsUpdate=true`/`ReadOnly=false`).
+> (`X-WOPI-Override: PATCH`); session now **editable** (`UserCanWrite=true`/`SupportsUpdate=true`/`ReadOnly=false`).
 > **Version model = snapshot-then-mutate (maintainer's call), as TWO durable commits:** on the FIRST human save of
 > an agent redline (`created_by_run_id` set) the agent's bytes are `copy_object`'d to a NEW immutable `File` row
 > (`(agent draft)`, provenance kept → C7a Documents tab, key==id per ADR-0005) and the live row is flipped to

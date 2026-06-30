@@ -127,7 +127,7 @@ Design notes:
   records both directions in `set_by`.
 - **`capability_key` is TEXT, not a polymorphic FK** — mirrors `practice_area_skills.skill_name`: skills
   are filesystem-canonical, tool-group keys are code-canonical; the playbook key is `playbook_id::text`,
-  validated to resolve at the PUT boundary (so no dead rows accumulate) and CASCADE-cleaned via the
+  validated to resolve at the PATCH boundary (so no dead rows accumulate) and CASCADE-cleaned via the
   availability binding when a playbook is hard-deleted.
 - **`default_enabled` is computed in code, not stored:** every available capability defaults ON except
   MCP (placeholder, always off). This keeps any matter the lawyer never touches byte-identical to today.
@@ -164,7 +164,7 @@ returns the row or raises 404). Cross-user / archived / sandbox → **404, never
                        available, enabled, default_enabled, toggleable }] } ] }
      ```
      MCP section: `available:false, toggleable:false, "coming soon"`.
-2. **`PUT /api/v1/matters/{project_id}/capabilities`** → echoes the resolved inventory
+2. **`PATCH /api/v1/matters/{project_id}/capabilities`** → echoes the resolved inventory
    - Body `CapabilityOverridesUpdate` (Pydantic, validated at the boundary — reject, don't sanitize):
      `toggles: [{ kind: Literal['skill','tool','playbook'], key: str, enabled: bool }]`, length/count
      capped. Reject (422) any `(kind,key)` NOT in the matter's AVAILABLE set, and any non-toggleable
@@ -262,7 +262,7 @@ the Memory/Documents tabs). New component
   real matter (keys off `matter.project_id`, already hoisted to the host — not Privacy-only).
 - **State:** fetch `GET /matters/{projectId}/capabilities` on mount / `reloadKey`; render the four
   grouped sections (Playbooks, Skills, Tools, MCP) of labelled toggles (shadcn `Switch`). Non-toggleable
-  / MCP entries render locked/greyed with a "coming soon" caption. On toggle, `PUT` the change (optimistic
+  / MCP entries render locked/greyed with a "coming soon" caption. On toggle, `PATCH` the change (optimistic
   update, revert on error, debounced). Because state is server-persisted per matter, it survives
   conversation remounts automatically — NO composer-local state, NO `buildRunPayload` change. Disable
   toggles while a run is active (`runActive`) and state in the UI + ADR that toggles apply to the NEXT run
@@ -273,7 +273,7 @@ the Memory/Documents tabs). New component
 - New API client methods in `web/src/lib/lq-ai/api/` (`getMatterCapabilities`, `putMatterCapabilities`)
   with TS types mirroring the schemas.
 - **Testing idiom:** pure helpers (section grouping, default-on overlay, optimistic-toggle reducer,
-  PUT-body diff) exported from `<script module>` + vitest (NO `@testing-library/svelte`). Rebuild the
+  PATCH-body diff) exported from `<script module>` + vitest (NO `@testing-library/svelte`). Rebuild the
   prebuilt `web` container before any UI debugging.
 
 ## Tests
@@ -285,7 +285,7 @@ API (`cd api && pytest`, containerized, counts quoted in the PR):
   `default_enabled` then overlays toggles; drift (registry-unknown skill, deleted playbook) dropped.
 - `GET`: defaults all-on; reflects a written override; unfiled matter → empty; cross-user / archived /
   sandbox → **404**; MCP section disabled.
-- `PUT`: persists; rejects unknown `(kind,key)` (422), non-toggleable/MCP (422), oversized key (422),
+- `PATCH`: persists; rejects unknown `(kind,key)` (422), non-toggleable/MCP (422), oversized key (422),
   unknown kind (422); upsert idempotent; cross-matter → 404; one audit row (kinds/keys only, no content);
   `set_by` recorded; matter isolation (a second matter unaffected).
 - **Composition (load-bearing):** real `compose_and_execute_run` with the test DB + scripted model + the
@@ -299,7 +299,7 @@ API (`cd api && pytest`, containerized, counts quoted in the PR):
   data-only fence.
 
 Web (`cd web && npm run check && npm run test:frontend`): vitest on the exported pure helpers (grouping,
-default-on overlay, optimistic reducer, PUT-body diff, MCP/non-toggleable flags).
+default-on overlay, optimistic reducer, PATCH-body diff, MCP/non-toggleable flags).
 
 ## Verification / DoD (ADR-F005 gate)
 
@@ -331,13 +331,13 @@ default-on overlay, optimistic reducer, PUT-body diff, MCP/non-toggleable flags)
 - **Prompt injection via playbook prose:** rendered as a DATA-only fence, never instructions (matter-wiki
   posture).
 - **Stale toggle rows:** `capability_key` is soft for skills/tools; resolve-time intersection with the
-  inventory drops unknowns, and the PUT boundary rejects writing a key absent from the available set.
+  inventory drops unknowns, and the PATCH boundary rejects writing a key absent from the available set.
 - **Mid-run toggle:** `granted` is frozen at composition; UI disables toggles while `runActive`; the ADR
   states toggles apply to the next run.
 
 ## Recommended order
 
-inventory module (`capabilities.py`, pure) + tests → migration `0081` + ORM models → GET/PUT API +
+inventory module (`capabilities.py`, pure) + tests → migration `0081` + ORM models → GET/PATCH API +
 schemas + authz/404 + admin playbook attach/detach → composition wiring (skills filter → tool-group loop
 → regression guard) → playbook consumption (`playbook_context.py` + tier wiring + oracle update) → web
 panel + client + helper tests → throwaway-pgvector migration test → rebuild api+arq+ingest → live

@@ -178,7 +178,7 @@ async def get_matter_capabilities(
     return _to_response(inventory, toggles, practice_area_key=area_key, unit_label=unit_label)
 
 
-@router.put("/{project_id}/capabilities", response_model=CapabilityInventoryResponse)
+@router.patch("/{project_id}/capabilities", response_model=CapabilityInventoryResponse)
 async def update_matter_capabilities(
     project_id: uuid.UUID,
     payload: CapabilityOverridesUpdate,

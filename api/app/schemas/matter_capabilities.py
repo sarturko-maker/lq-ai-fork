@@ -1,6 +1,6 @@
 """Pydantic schemas for the capability panel — per-matter capability toggles (ADR-F054).
 
-Wire shapes for ``GET``/``PUT /matters/{project_id}/capabilities``: the read groups the
+Wire shapes for ``GET``/``PATCH /matters/{project_id}/capabilities``: the read groups the
 area's available capabilities (Playbooks / Skills / Tools / MCP placeholder) with each
 one's resolved ``enabled`` state; the write is the lawyer's sparse set of on/off toggles.
 """
@@ -34,7 +34,7 @@ class CapabilitySectionRead(BaseModel):
 
 
 class CapabilityInventoryResponse(BaseModel):
-    """The matter's full capability inventory (GET response / PUT echo)."""
+    """The matter's full capability inventory (GET response / PATCH echo)."""
 
     practice_area_key: str | None
     unit_label: str
@@ -52,7 +52,7 @@ class CapabilityToggleInput(BaseModel):
 
 
 class CapabilityOverridesUpdate(BaseModel):
-    """The PUT body — a bounded set of toggles. Validated at the boundary; the handler
+    """The PATCH body — a bounded set of toggles. Validated at the boundary; the handler
     additionally rejects any (kind, key) not in the matter's AVAILABLE set (422)."""
 
     model_config = ConfigDict(extra="forbid")
