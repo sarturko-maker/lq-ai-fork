@@ -42,6 +42,7 @@ from app.agents.capabilities import (
     ASSESSMENT_GROUP,
     REDLINING_GROUP,
     ROPA_GROUP,
+    TABULAR_GROUP,
     build_area_inventory,
 )
 from app.agents.checkpointer import get_agent_checkpointer
@@ -76,6 +77,7 @@ from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
 from app.agents.skill_backend import SkillWiring, build_area_skill_wiring
 from app.agents.store import get_agent_store
 from app.agents.stream import RedisStreamBroker, RunStreamBroker
+from app.agents.tabular_tool import build_tabular_tools
 from app.agents.tier_middleware import TierMemoryMiddleware
 from app.agents.tools import MatterBinding, build_matter_tools
 from app.config import get_settings
@@ -200,6 +202,28 @@ RETRIEVAL_STRATEGY_DOCTRINE = (
     "dependent, cross-referential question (e.g. tracing one defined term across the deal): "
     "one mind must reconcile the synthesis. There is a per-run limit on how many subagents "
     "you may dispatch; spend it deliberately on independent breadth, not routine lookups."
+)
+
+# ADR-F055 (F2 Tabular T1): the agentic "grids" doctrine — appended ONLY for a Commercial
+# matter with the Grids capability enabled (tabular_enabled). Teaches the start→fan-out→
+# finalize flow + the fan-out crossover. The retrieval-fill path above the quota is T4; the
+# T1 doctrine degrades a too-large set to read-and-record rather than promising a tool that
+# does not exist yet. This is the TASTE layer (prose craft, ADR-F041); a dedicated
+# proactive-suggestion skill is T3.
+TABULAR_FILL_DOCTRINE = (
+    "\n\nWhen the lawyer asks you to compare, extract, or summarise a field across SEVERAL "
+    "of this matter's documents (a due-diligence sweep, 'what is the X in each', a key-terms "
+    "table), build a GRID rather than answering in prose. Call start_tabular_review with the "
+    "columns (each a name + the question to ask of every document) and, optionally, the "
+    "documents to cover (default: the whole matter). It returns a grid_id and a recommended "
+    "fill strategy. When the document count is at or below the fan-out limit it reports, FAN "
+    "OUT one subagent per document with the task tool: each subagent reads ITS document and "
+    "calls record_tabular_row(grid_id, its filename, the cells for every column) — value, a "
+    "short verbatim source_quote, the confidence, and notes for anything ambiguous; use "
+    "confidence='failed' when the document does not answer a column (never leave a cell out "
+    "silently). When every document's row is recorded, call finalize_tabular_review(grid_id) "
+    "— it refuses until every cell has been attempted, then saves the grid. The grid is the "
+    "work product; keep it current as the lawyer asks for changes."
 )
 
 # C-CLIENT (ADR-F030): the operator's Organization Profile is the company /
@@ -347,6 +371,7 @@ def system_prompt_for(
     matter_memory_heading: str = "Matter memory",
     roster: str | None = None,
     practice_playbook: str | None = None,
+    tabular_enabled: bool = False,
 ) -> str:
     """The run's full system prompt — base + matter + client + matter memory + area.
 
@@ -377,6 +402,8 @@ def system_prompt_for(
         prompt += MATTER_ROSTER_DOCTRINE
         prompt += MATTER_CONVERSATION_DOCTRINE
         prompt += RETRIEVAL_STRATEGY_DOCTRINE
+        if tabular_enabled:
+            prompt += TABULAR_FILL_DOCTRINE
     prompt += render_memory_tiers(
         client_context=client_context,
         practice_playbook=practice_playbook,
@@ -729,6 +756,12 @@ async def compose_and_execute_run(
         # GuardContext.granted (R6 then denies them — defense in depth). The change
         # ledger is created iff its producing group is enabled. All groups enabled
         # (the default) ⇒ byte-identical to the pre-slice grants.
+        #
+        # Slice O (ADR-F053): resolve the run's budget profile to the four-brake envelope
+        # HERE (before the area branches) so the agentic-tabular tool can size its
+        # fan-out↔retrieval crossover off the same envelope the FanOutQuotaMiddleware uses
+        # below. Pure (resolve_envelope reads no I/O); a legacy/NULL profile → balanced.
+        envelope = resolve_envelope(run_budget_profile, get_settings())
         change_ledger: ChangeLedger | None = None
         if binding is not None and area_key == PRIVACY_AREA_KEY:
             if ROPA_GROUP.key in enabled_tool_groups:
@@ -766,6 +799,18 @@ async def compose_and_execute_run(
                     binding=binding,
                     redline_service=redline_service_provider(),
                     change_ledger=change_ledger,
+                )
+            # ADR-F055 (F2 Tabular T1): a Commercial matter also gets the agentic "grids"
+            # tool — cross-document tabular review the agent builds by fanning out a
+            # subagent per document (≤ the fan-out quota; retrieval-fill above it is T4).
+            # Independent toggle (TABULAR_GROUP); own grant set (confinement). No change
+            # ledger yet (live cell-fill is T5). fan_out_quota sizes the crossover.
+            if TABULAR_GROUP.key in enabled_tool_groups:
+                tools = tools + build_tabular_tools(
+                    session_factory,
+                    run_id=run_id,
+                    binding=binding,
+                    fan_out_quota=envelope.fan_out_quota,
                 )
 
         # F1-S3: the gateway tier floor is the strongest (lowest) of the
@@ -859,14 +904,19 @@ async def compose_and_execute_run(
         run_middleware: list[AgentMiddleware] = []
         if tier_text:
             run_middleware.append(TierMemoryMiddleware(tier_text=tier_text))
-        # Slice O (ADR-F053): resolve the run's budget profile to the four-brake
-        # envelope. The fan-out quota + token budget + wall clock are sized from
-        # here now (was a direct get_settings() read); max_steps was materialized
-        # on the row at creation. A legacy/NULL profile resolves to balanced.
-        envelope = resolve_envelope(run_budget_profile, get_settings())
+        # Slice O (ADR-F053): the four-brake ``envelope`` is resolved above (before the
+        # area branches) so the agentic-tabular tool and this fan-out quota share it. The
+        # token budget + wall clock ride the same envelope; max_steps was materialized on
+        # the row at creation.
         if wiring.subagents and envelope.fan_out_quota > 0:
             run_middleware.append(FanOutQuotaMiddleware(quota=envelope.fan_out_quota))
 
+        # ADR-F055: the agentic-tabular doctrine rides the prompt only when the Grids
+        # capability is actually wired (Commercial area + group enabled) — same condition
+        # as the tool grant above, so the prompt never advertises a tool the run lacks.
+        tabular_enabled = (
+            area_key == COMMERCIAL_AREA_KEY and TABULAR_GROUP.key in enabled_tool_groups
+        )
         http_client = build_gateway_http_client()
         try:
             model = model_builder(
@@ -881,7 +931,9 @@ async def compose_and_execute_run(
                 session_factory,
                 tools=tools,
                 model=model,
-                system_prompt=system_prompt_for(binding, area_spec),
+                system_prompt=system_prompt_for(
+                    binding, area_spec, tabular_enabled=tabular_enabled
+                ),
                 subagents=wiring.subagents or None,
                 skills=wiring.main_sources,
                 backend=memory_backend,

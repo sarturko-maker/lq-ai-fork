@@ -82,7 +82,6 @@ async def tabular_execution_job(ctx: dict[str, Any], execution_id_str: str) -> d
     )
 
     factory = get_session_factory()
-    gateway = _gateway_from_ctx(ctx)
 
     async with factory() as session:
         execution = await session.get(TabularExecution, execution_id)
@@ -96,6 +95,22 @@ async def tabular_execution_job(ctx: dict[str, Any], execution_id_str: str) -> d
             )
             return {"execution_id": execution_id_str, "status": "missing"}
 
+        # ADR-F055: this frozen executor runs ONLY linear executions. Agentic "grids" are
+        # built in-run by the deepagents tool (app.agents.tabular_tool) and are never
+        # enqueued here; refuse one defensively so a mis-enqueued agentic id can never be
+        # clobbered by the linear graph (which would overwrite its results + status).
+        # Checked BEFORE resolving a gateway — a refused row needs no inference client.
+        if execution.mode == "agentic":
+            logger.warning(
+                "tabular_worker: refusing agentic execution (linear executor only)",
+                extra={
+                    "event": "tabular_worker_agentic_refused",
+                    "execution_id": execution_id_str,
+                },
+            )
+            return {"execution_id": execution_id_str, "status": "skipped_agentic"}
+
+        gateway = _gateway_from_ctx(ctx)
         try:
             await run_tabular_execution(
                 session,

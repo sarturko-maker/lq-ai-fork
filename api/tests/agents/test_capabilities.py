@@ -75,8 +75,8 @@ def test_commercial_inventory_lists_skills_tools_playbooks_and_mcp() -> None:
     assert [s.kind for s in inv.sections()] == ["playbook", "skill", "tool", "mcp"]
     assert [e.key for e in sections["playbook"].entries] == [str(pb.id)]
     assert {e.key for e in sections["skill"].entries} == {"nda-review", "msa-review-saas"}
-    # Commercial offers exactly the redlining tool group.
-    assert [e.key for e in sections["tool"].entries] == ["redlining"]
+    # Commercial offers the redlining + tabular (Grids) tool groups (ADR-F055).
+    assert [e.key for e in sections["tool"].entries] == ["redlining", "tabular"]
     # MCP is the disabled placeholder.
     (mcp,) = sections["mcp"].entries
     assert mcp.available is False and mcp.toggleable is False
@@ -142,7 +142,7 @@ def test_enabled_keys_all_on_by_default() -> None:
         area_playbooks=[pb],
     )
     assert inv.enabled_keys("skill", []) == ["nda-review"]
-    assert inv.enabled_keys("tool", []) == ["redlining"]
+    assert inv.enabled_keys("tool", []) == ["redlining", "tabular"]
     assert inv.enabled_keys("playbook", []) == [str(pb.id)]
 
 
@@ -213,7 +213,7 @@ def test_enabled_map_covers_every_entry() -> None:
 
 def test_area_tool_groups_map_to_the_expected_keys() -> None:
     # Composition gates on these group keys; pin the area→groups map.
-    assert [g.key for g in cap.AREA_TOOL_GROUPS["commercial"]] == ["redlining"]
+    assert [g.key for g in cap.AREA_TOOL_GROUPS["commercial"]] == ["redlining", "tabular"]
     assert [g.key for g in cap.AREA_TOOL_GROUPS["privacy"]] == ["ropa", "assessment"]
 
 

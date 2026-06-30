@@ -60,14 +60,23 @@ class ToolGroupSpec:
     description: str
 
 
-# The toggleable tool groups, by area key. Tabular review (next milestone) slots in
-# as one more entry under COMMERCIAL_AREA_KEY with no schema change.
+# The toggleable tool groups, by area key. New groups slot in as one more entry under
+# their area key with no schema change (tool availability is a code map, not a table).
 REDLINING_GROUP = ToolGroupSpec(
     key="redlining",
     label="Redlining",
     description=(
         "Propose and apply tracked-changes redlines on the matter's contracts, and "
         "run negotiation rounds against the counterparty's markup."
+    ),
+)
+# ADR-F055 (F2 Tabular T1): the agentic "grids" tool group — cross-document tabular review.
+TABULAR_GROUP = ToolGroupSpec(
+    key="tabular",
+    label="Grids",
+    description=(
+        "Build and maintain cross-document review grids (a column per question, a row per "
+        "document) over the matter's contracts, and update them conversationally."
     ),
 )
 ROPA_GROUP = ToolGroupSpec(
@@ -89,7 +98,7 @@ ASSESSMENT_GROUP = ToolGroupSpec(
 
 AREA_TOOL_GROUPS: dict[str, tuple[ToolGroupSpec, ...]] = {
     PRIVACY_AREA_KEY: (ROPA_GROUP, ASSESSMENT_GROUP),
-    COMMERCIAL_AREA_KEY: (REDLINING_GROUP,),
+    COMMERCIAL_AREA_KEY: (REDLINING_GROUP, TABULAR_GROUP),
 }
 
 
