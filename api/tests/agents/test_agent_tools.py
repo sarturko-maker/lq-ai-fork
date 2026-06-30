@@ -28,6 +28,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -36,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.agents import tools as agent_tools
 from app.agents.tools import MATTER_TOOL_NAMES, MatterBinding, build_matter_tools
+from app.knowledge import rerank_provider as rp
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.document import Document, DocumentChunk
@@ -326,6 +328,38 @@ async def test_search_finds_upload_time_membership(matter_env: MatterEnv) -> Non
     result = await matter_env.search("escrow source code deposit")
     assert "uploaded.pdf" in result
     assert "Iron Mountain" in result
+
+
+async def test_search_rerank_enabled_routes_through_the_reranker(
+    matter_env: MatterEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With ``rerank_enabled`` the tool routes through the cross-encoder path; the
+    autouse identity reranker preserves order, so the expected passage still surfaces
+    (Slice D wiring, end-to-end through the guarded tool)."""
+    monkeypatch.setattr(
+        agent_tools,
+        "get_settings",
+        lambda: SimpleNamespace(rerank_enabled=True, rerank_candidates=30),
+    )
+    result = await matter_env.search("liability cap")
+    assert "msa.pdf" in result and "aggregate liability" in result
+
+
+async def test_search_rerank_error_degrades_to_hybrid(
+    matter_env: MatterEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reranker failure never breaks the tool — it falls back to the hybrid order
+    (the never-hard-fail posture, mirroring the embedder fallback)."""
+    monkeypatch.setattr(
+        agent_tools,
+        "get_settings",
+        lambda: SimpleNamespace(rerank_enabled=True, rerank_candidates=30),
+    )
+    from tests.agents.embedding_fakes import KeywordRerankProvider
+
+    rp.set_rerank_provider(KeywordRerankProvider(fail=True))
+    result = await matter_env.search("liability cap")
+    assert "msa.pdf" in result and "aggregate liability" in result
 
 
 # ---------------------------------------------------------------------------

@@ -50,8 +50,10 @@ from sqlalchemy.sql.selectable import Select
 
 from app import storage
 from app.agents.guard import GuardContext, guarded_dispatch
+from app.config import get_settings
 from app.knowledge.embedding_provider import get_embedding_provider
-from app.knowledge.retrieval import matter_hybrid_search
+from app.knowledge.rerank_provider import get_rerank_provider
+from app.knowledge.retrieval import matter_search_reranked
 from app.models.document import Document
 from app.models.file import File
 from app.models.project import ProjectFile
@@ -171,17 +173,20 @@ async def _embed_query(query: str) -> list[float] | None:
 async def _search(db: AsyncSession, binding: MatterBinding, query: str) -> str:
     """Retrieve over the matter's chunks; empty query → document inventory.
 
-    Routes through :func:`app.knowledge.retrieval.matter_hybrid_search` — the one
+    Routes through :func:`app.knowledge.retrieval.matter_search_reranked` — the one
     matter retriever the Track-B eval also runs (ADR-F049 Slice A). Slice C1 embeds
     the query (local door by default) and fuses FTS + vectors (``embedding_local``);
     if the embedder is unavailable or the matter has no vectors yet, the fusion
-    degrades to the FTS-only fast path (``alpha=1.0``).
+    degrades to the FTS-only fast path (``alpha=1.0``). Slice D: when
+    ``rerank_enabled`` a local cross-encoder reorders the wider candidate set
+    (``reranker=None`` ⇒ byte-identical to the plain hybrid path).
     """
     if not query.strip():
         return await _inventory(db, binding, header="Documents attached to this matter:")
 
+    settings = get_settings()
     query_embedding = await _embed_query(query)
-    hits = await matter_hybrid_search(
+    hits = await matter_search_reranked(
         db,
         project_id=binding.project_id,
         user_id=binding.user_id,
@@ -189,6 +194,8 @@ async def _search(db: AsyncSession, binding: MatterBinding, query: str) -> str:
         query_embedding=query_embedding,
         top_k=_SEARCH_LIMIT,
         alpha=_HYBRID_ALPHA if query_embedding is not None else 1.0,
+        reranker=get_rerank_provider() if settings.rerank_enabled else None,
+        rerank_candidates=settings.rerank_candidates,
     )
 
     if not hits:

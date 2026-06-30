@@ -168,6 +168,45 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ----- Cross-encoder rerank (matter/agent retrieval — ADR-F049 Slice D) -----
+    # A local fastembed TextCrossEncoder reorders the hybrid candidate set by scoring
+    # (query, passage) pairs jointly (precision complement to the bi-encoder fusion).
+    # Door A only today (no gateway /rerank endpoint); reuses fastembed (no new dep).
+    # DEFAULT ON per the Track-B B3 gate (ADR-F015 finding, N=30): rerank lifts top-rank
+    # (within-doc p@1 +15.5%, MAP +11%) and the at-scale cross-doc case (+20-36%) with
+    # zero recall harm, ~1 GB memory peak in real runs. (The dev box can't batch-eval the
+    # embedder + cross-encoder together, so hybrid+rerank-at-scale is a deferred finding;
+    # the measured FTS+rerank arm is a conservative lower bound on the hybrid pool.)
+    rerank_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable cross-encoder rerank of matter document search results. Default ON "
+            "per the Track-B B3 gate (ADR-F049 Slice D)."
+        ),
+    )
+    rerank_model: str = Field(
+        default="Xenova/ms-marco-MiniLM-L-6-v2",
+        description=(
+            "fastembed TextCrossEncoder model id for the local reranker. MS-MARCO "
+            "MiniLM (~5 MB) by default; BAAI/bge-reranker-base is the quality alt."
+        ),
+    )
+    rerank_cache_dir: str | None = Field(
+        default=None,
+        description=(
+            "fastembed cache dir for the reranker model. None = fastembed default "
+            "(warmed into the image at build via RERANK_CACHE_DIR so first use does "
+            "not download)."
+        ),
+    )
+    rerank_candidates: int = Field(
+        default=30,
+        description=(
+            "How many hybrid candidates to fetch and rerank before truncating to the "
+            "tool's top-k. Wider = more for the cross-encoder to reorder, more CPU."
+        ),
+    )
+
     # ----- Inference Gateway -----
     lq_ai_gateway_url: str = Field(
         default="http://localhost:8001",
