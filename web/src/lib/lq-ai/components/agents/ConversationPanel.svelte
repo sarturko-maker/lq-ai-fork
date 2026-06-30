@@ -477,6 +477,32 @@
 	/** Live thinking-ribbon text — animation only, cleared as rows settle. */
 	let liveReasoning = '';
 	let liveReasoningBlock: string | null = null;
+	// Live reasoning is rendered to HTML on a requestAnimationFrame throttle over a
+	// bounded TAIL of the buffer — NOT a `$:` over the whole string. A reasoning model
+	// (e.g. deepseek-v4-flash) streams 100k+ tokens at hundreds of deltas/sec; re-running
+	// marked+DOMPurify over the full buffer per delta is O(n²) and freezes the tab before
+	// the run finishes. The ribbon is ephemeral (the settled StepRow renders the final
+	// reasoning), so rendering only the visible tail is sufficient and bounded.
+	let liveReasoningHtml = '';
+	let _reasoningRafPending = false;
+	const LIVE_REASONING_TAIL = 8000;
+	function scheduleLiveReasoningRender() {
+		if (_reasoningRafPending) return;
+		_reasoningRafPending = true;
+		requestAnimationFrame(() => {
+			_reasoningRafPending = false;
+			if (!liveReasoning) {
+				liveReasoningHtml = '';
+				return;
+			}
+			const tail =
+				liveReasoning.length > LIVE_REASONING_TAIL
+					? liveReasoning.slice(-LIVE_REASONING_TAIL)
+					: liveReasoning;
+			liveReasoningHtml = renderModelMarkdown(tail);
+			void autoScroll();
+		});
+	}
 	let answerBuffers: Record<string, string> = {};
 
 	/**
@@ -529,6 +555,7 @@
 		streamRunId = null;
 		liveReasoning = '';
 		liveReasoningBlock = null;
+		liveReasoningHtml = '';
 		answerBuffers = {};
 	}
 
@@ -596,7 +623,7 @@
 				if (liveReasoningBlock !== blockId && liveReasoning) liveReasoning += '\n\n';
 				liveReasoningBlock = blockId;
 				liveReasoning += delta;
-				void autoScroll();
+				scheduleLiveReasoningRender();
 				return;
 			}
 			case 'data-step': {
@@ -608,6 +635,7 @@
 					// hands over to the timeline (settled rows decide).
 					liveReasoning = '';
 					liveReasoningBlock = null;
+					liveReasoningHtml = '';
 				}
 				void autoScroll();
 				return;
@@ -632,6 +660,7 @@
 				detail = applyRunPart(detail, runId, payload);
 				liveReasoning = '';
 				liveReasoningBlock = null;
+				liveReasoningHtml = '';
 				return;
 			}
 			case 'data-ropa-change': {
@@ -882,7 +911,9 @@
 	// workspace option is gone; create-in-place covers the zero-matter case.
 	$: needsMatter = !detail && !selectedMatterId;
 	// Live reasoning rendered as markdown, sanitized like any model output.
-	$: liveReasoningHtml = liveReasoning ? renderModelMarkdown(liveReasoning) : '';
+	// liveReasoningHtml is updated by scheduleLiveReasoningRender() (rAF-throttled,
+	// tail-bounded) — NOT a `$:` over the full buffer, which was O(n²) and froze the tab
+	// during long reasoning-model streams.
 	// PRIV-9a run-lock + co-visible-register signal: the agent is actively
 	// working (createRun in flight or the newest run still running, not stale)
 	// → the composer shows only Stop, and `runActive` drives the host's register

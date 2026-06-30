@@ -182,6 +182,10 @@ services:
       # Inference Gateway
       LQ_AI_GATEWAY_URL: ${LQ_AI_GATEWAY_URL:-http://gateway:8001}
       LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
+      # Retrieval providers (ADR-F049 C1/D) — see arq-worker for the rationale.
+      # Dev-box override (.env) avoids loading in-process ONNX models.
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+      RERANK_ENABLED: ${RERANK_ENABLED:-true}
       # JWT (auth — per ADR 0002 the backend owns auth)
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_ACCESS_TOKEN_TTL_SECONDS: ${JWT_ACCESS_TOKEN_TTL_SECONDS:-900}
@@ -331,6 +335,14 @@ services:
       LQ_AI_GATEWAY_URL: ${LQ_AI_GATEWAY_URL:-http://gateway:8001}
       LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Retrieval providers (ADR-F049 C1/D). The agent run executes HERE, so the
+      # in-process ONNX models (local embedder + cross-encoder rerank) load in
+      # THIS worker during search_documents. On a memory-constrained box (≈6 GB)
+      # that OOMs the run → Postgres broken-pipe crash loop. Override via .env to
+      # gateway embeddings + rerank off so runs stay lightweight. Defaults below
+      # preserve production behaviour (local embedder + rerank on).
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+      RERANK_ENABLED: ${RERANK_ENABLED:-true}
       # Skills loader — the worker's on_startup installs the skill
       # registry via the shared bootstrap (app/skills/bootstrap.py) so
       # skill_ref autonomous sessions resolve on this process. Mounted
