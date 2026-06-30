@@ -1,6 +1,7 @@
 # F051 — Per-run token-budget brake (R4 realised)
 
-- Status: accepted (with F2 Phase-3 Slice F, 2026-06-30)
+- Status: accepted (with F2 Phase-3 Slice F, 2026-06-30); addendum: **Slice G** (2026-06-30, persist
+  the per-run token total — migration 0079 — see the addendum at the end)
 - Date: 2026-06-30
 - Deciders: maintainer (Arturs), agent
 - Milestone: **F2 — Memory / retrieval** (the "Strategy + safety" line of
@@ -112,3 +113,20 @@ guard (R4-at-the-tool stays an honest no-op; its docstring now points here).
   run under budget completes unaffected; a final-answer turn is never cut off mid-deliverable.
   The fake `ScriptedToolCallingModel` emits a trailing usage chunk (mirroring ChatOpenAI's
   final include-usage chunk), verified in-container to surface on the merged event.
+
+## Addendum — Slice G (2026-06-30): persist the per-run token total
+
+The "Token totals are not persisted yet" deferral above is now discharged. Migration **0079**
+adds `agent_runs.total_tokens` (nullable `INTEGER`; additive, non-destructive — `cost_usd` stays
+NULL since dollars need the gateway's per-call cost). `_drive_agent` now returns the cumulative
+total as a 4th tuple element; `execute_agent_run` threads it through `_finalize` → the fenced
+`settle_run` terminal write (one new SET column) on the **normal** path (completed / cap_exceeded).
+Timeout/generic-exception paths persist NULL (best-effort — they bypass the normal return). The
+total is exposed read-only on `AgentRunRead.total_tokens`. This makes a settled run's actual spend
+queryable — the observability that also enables **calibrating** the (still uncalibrated) default
+`run_token_budget`. **No new dependency, no behavioural change** beyond the additive column +
+persistence. *Gate (ADR-F015): deterministic — `test_agent_runner.py` asserts the persisted total
+on a completed run (200), a budget-disabled run (20,000), and a capped run (300 — the total that
+tripped the brake); migration up→down→up round-trip verified on a throwaway pgvector; full
+`tests/agents/` green.* Deriving `cost_usd` (dollars) from the total remains future work (it needs
+per-model rates the runner does not see).

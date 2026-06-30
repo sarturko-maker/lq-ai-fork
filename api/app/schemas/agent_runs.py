@@ -102,6 +102,9 @@ class AgentRunRead(BaseModel):
     finished_at: datetime | None = None
     error: str | None = None
     cost_usd: Decimal | None = None
+    # F2 Slice G (ADR-F051 follow-up): the run's cumulative model tokens, NULL until
+    # settlement / when usage was not reported. (cost_usd — dollars — stays NULL.)
+    total_tokens: int | None = None
 
 
 class AgentRunStepRead(BaseModel):

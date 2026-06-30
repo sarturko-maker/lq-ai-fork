@@ -271,6 +271,8 @@ async def test_token_budget_halts_run_before_max_steps(
     assert run.final_answer is None
     assert run.finished_at is not None
     assert len(steps) < 50  # halted early on the token budget, not the step cap
+    # Slice G: the cumulative total that tripped the budget is persisted (3 turns x 100).
+    assert run.total_tokens == 300
 
 
 async def test_token_budget_zero_disables_the_brake(
@@ -296,6 +298,8 @@ async def test_token_budget_zero_disables_the_brake(
     assert run.status == "completed"
     assert run.error is None
     assert run.final_answer is not None and "twelve" in run.final_answer
+    # Slice G: token usage is persisted even when the budget brake is disabled.
+    assert run.total_tokens == 20_000
 
 
 async def test_run_under_token_budget_completes_normally(
@@ -320,6 +324,8 @@ async def test_run_under_token_budget_completes_normally(
     assert run.status == "completed"
     assert run.error is None
     assert run.final_answer is not None and "twelve" in run.final_answer
+    # Slice G: a completed run persists its summed model tokens (2 turns x 100).
+    assert run.total_tokens == 200
 
 
 async def test_token_budget_never_halts_mid_final_answer(

@@ -198,8 +198,7 @@ agentic baseline & CI regression net (E1). Architecture slices (N0+) can now be 
   loop). No migration/dep/behavioural-gateway change; in-memory enforcement. Default 2,000,000 is an
   uncalibrated runaway backstop (≤0 disables). Gate (ADR-F015): the deterministic runaway-token-budget halt
   test (`test_agent_runner.py`) + budget-disable + under-budget + never-mid-final-answer; full `tests/agents/`
-  688/38/0. **DEFERRED follow-up:** persist a per-run `total_tokens` (a migration) for observability +
-  calibration of the default; `agent_runs.cost_usd` stays NULL until then.
+  688/38/0. **Token-total persistence: ✅ SHIPPED 2026-06-30 (Slice G, ADR-F051 Slice G addendum, migration 0079)** — `agent_runs.total_tokens` persists the runner's cumulative total at settlement (exposed on `AgentRunRead`), making per-run spend queryable for observability + calibrating the default. `cost_usd` (dollars) stays NULL (needs per-model rates).
 - **Recency weighting** on conversation results — thin post-filter. *Build only if a measured stale-turn
   failure appears (A5 stale variant).*
 - **Documents MAP in the Store** (the L1 router; first doc's `fact_type="document"` → a

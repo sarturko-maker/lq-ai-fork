@@ -3,8 +3,29 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE F — R4 realised: a per-run TOKEN-BUDGET
-> brake — on branch `fork/f2-slice-f-token-budget` (ADR-F051, NEW). NO migration, NO dep, NO behavioural
+> ▶▶ **PICKUP (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE G — persist per-run token usage —
+> on branch `fork/f2-slice-g-token-persistence` (ADR-F051 Slice G addendum, **migration 0079**). The
+> Slice-F observability deferral, discharged. NO new dep, NO behavioural change beyond the additive column.**
+> - **What:** migration 0079 adds `agent_runs.total_tokens` (nullable INTEGER, additive/non-destructive;
+>   `cost_usd` stays NULL — dollars need per-model rates the runner doesn't see). `_drive_agent` returns the
+>   cumulative total as a 4th tuple element; `execute_agent_run` threads it via `_finalize` → the fenced
+>   `settle_run` terminal write (one new SET column) on the NORMAL path (completed/cap_exceeded). Timeout/
+>   error paths persist NULL (best-effort — they bypass the normal return). Exposed read-only on
+>   `AgentRunRead.total_tokens`. Makes per-run spend queryable → enables calibrating `run_token_budget`.
+> - **GATE — met:** `test_agent_runner.py` asserts the persisted total (completed=200, budget-disabled=20000,
+>   capped=300 — the total that tripped the brake). **Migration round-trip up→down→up on a THROWAWAY pgvector
+>   container** (CLAUDE.md: NEVER host-side alembic on the dev DB; mount `skills:/skills:ro` — mig 0032 needs
+>   it; use the container IP, default bridge has no name DNS). Full `tests/agents/` 688 passed / 38 skipped / 0 failed; ruff+format+mypy
+>   (209) clean. conftest runs `alembic upgrade head` on a fresh DB so 0079 is exercised by the whole suite.
+> - **TRAPS:** (1) `cost_usd` (dollars) stays NULL — out of scope (rates). (2) timeout/error runs persist NULL
+>   total_tokens (best-effort). (3) deploy needs the migration applied → rebuild api+arq+ingest (NOT done
+>   autonomously). (4) `_drive_agent` now a 4-tuple; `settle_run`/`_finalize` gained a `total_tokens` param.
+> - **NEXT:** Phase-3 remainder (recency / Documents-MAP — eval-gated on unmet measured triggers; PageIndex
+>   Slice P / batch hybrid+rerank — need a ≥16 GB box) all await a trigger/box/go-ahead. Deriving `cost_usd`
+>   from the token total (per-model rates) is the natural follow-up.
+>
+> ▶ **PREVIOUS (2026-06-30): RETRIEVAL & MEMORY Phase-3 SLICE F — R4 realised: a per-run TOKEN-BUDGET
+> brake — MERGED PR #172 (`67ee1bb4`) (ADR-F051). NO migration, NO dep, NO behavioural
 > gateway change. NEXT = the remaining Phase-3 (recency; Documents-MAP; PageIndex Slice P) — all gated on
 > measured need; + the deferred token-total PERSISTENCE follow-up (a migration); own slice + go-ahead.**
 > - **What it does:** closes the R4 gap Slice E deferred. R4 (the per-action cost cap) was a documented

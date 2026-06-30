@@ -141,6 +141,7 @@ async def settle_run(
     status: AgentRunStatus,
     final_answer: str | None = None,
     error: str | None = None,
+    total_tokens: int | None = None,
     lease_token: uuid.UUID | None = None,
 ) -> bool:
     """The one terminal write. ``True`` when THIS call settled the run.
@@ -159,6 +160,9 @@ async def settle_run(
         "status": status.value,
         "final_answer": final_answer,
         "error": error,
+        # F2 Slice G (ADR-F051 follow-up): the run's cumulative model tokens, NULL when
+        # not reported / settled off the normal path. The single terminal write owns it.
+        "total_tokens": total_tokens,
     }
     fence_sql = ""
     if lease_token is not None:
@@ -171,7 +175,7 @@ async def settle_run(
                     text(
                         "UPDATE agent_runs SET status = :status, "
                         "final_answer = :final_answer, error = :error, "
-                        "finished_at = now() "
+                        "total_tokens = :total_tokens, finished_at = now() "
                         "WHERE id = :run_id AND status = :running" + fence_sql
                     ),
                     params,

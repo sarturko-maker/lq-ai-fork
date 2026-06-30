@@ -159,6 +159,13 @@ class AgentRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    # F2 Slice G (ADR-F051 follow-up, migration 0079): cumulative model tokens
+    # (input+output, lead + subagents) the run spent — the value the runner's R4
+    # token-budget brake accumulates, persisted at settlement for observability +
+    # calibrating ``run_token_budget``. NULL for a run that never reported usage or
+    # settled off the normal path (timeout/error). ``cost_usd`` stays NULL (dollars
+    # need the gateway's per-call cost, a separate concern).
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # F1-S1 lease/liveness (ADR-F009, migration 0052). ``lease_token`` is
     # the fencing value: a new uuid per worker claim, carried in the WHERE
     # clause of the worker's terminal writes and the runner's throttled
