@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from decimal import Decimal
 
 import pytest
 import pytest_asyncio
@@ -167,6 +168,43 @@ async def test_terminal_status_is_monotonic(
     row = await _run_row(commit_factory, run_id)
     assert row.status == AgentRunStatus.cancelled.value
     assert row.final_answer is None
+
+
+async def test_settle_persists_total_tokens_and_cost_usd(
+    commit_factory: async_sessionmaker[AsyncSession],
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+) -> None:
+    """F2 Slice G + O-2: the one terminal write owns total_tokens AND the
+    rough USD estimate; both land on the row at settlement."""
+    run_id = await make_run()
+    assert await claim_run(commit_factory, run_id, claimed_by="w1") is not None
+    settled = await settle_run(
+        commit_factory,
+        run_id,
+        status=AgentRunStatus.completed,
+        final_answer="done",
+        total_tokens=123_456,
+        cost_usd=Decimal("0.3704"),
+    )
+    assert settled
+    row = await _run_row(commit_factory, run_id)
+    assert row.status == AgentRunStatus.completed.value
+    assert row.total_tokens == 123_456
+    assert row.cost_usd == Decimal("0.3704")
+
+
+async def test_settle_leaves_cost_usd_null_by_default(
+    commit_factory: async_sessionmaker[AsyncSession],
+    make_run: Callable[..., Awaitable[uuid.UUID]],
+) -> None:
+    """The error/timeout paths settle without a cost — cost_usd stays NULL
+    (no token total to price), exactly like total_tokens."""
+    run_id = await make_run()
+    assert await claim_run(commit_factory, run_id, claimed_by="w1") is not None
+    assert await settle_run(commit_factory, run_id, status=AgentRunStatus.failed, error="timeout")
+    row = await _run_row(commit_factory, run_id)
+    assert row.cost_usd is None
+    assert row.total_tokens is None
 
 
 async def test_fenced_settle_rejects_a_stale_token(

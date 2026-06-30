@@ -5,7 +5,7 @@
  * purely computational.
  */
 import { describe, expect, it } from 'vitest';
-import { buildRunPayload } from '../components/agents/ConversationPanel.svelte';
+import { buildRunPayload, formatRunCostUSD } from '../components/agents/ConversationPanel.svelte';
 
 const ALL_PROFILES = ['economy', 'balanced', 'generous'] as const;
 
@@ -91,5 +91,32 @@ describe('buildRunPayload — null detail coerced to no-detail path', () => {
 		});
 		expect(payload.project_id).toBe('proj-3');
 		expect('thread_id' in payload).toBe(false);
+	});
+});
+
+describe('formatRunCostUSD — post-run cost estimate label (F2 Slice O-2)', () => {
+	it('hides the caption (null) when cost_usd is null or undefined', () => {
+		expect(formatRunCostUSD(null)).toBeNull();
+		expect(formatRunCostUSD(undefined)).toBeNull();
+	});
+
+	it('formats a Decimal string from the wire as USD', () => {
+		// cost_usd arrives as a Decimal string (NUMERIC on the server).
+		expect(formatRunCostUSD('0.3704')).toBe('$0.37');
+		expect(formatRunCostUSD('2.0000')).toBe('$2.00');
+	});
+
+	it('formats a numeric value as USD', () => {
+		expect(formatRunCostUSD(0.6)).toBe('$0.60');
+	});
+
+	it('shows the sub-cent band for tiny estimates (honest, not $0.00)', () => {
+		// A cheap local-model run prices below a cent — reuse formatCostUSD's band.
+		expect(formatRunCostUSD('0.0006')).toBe('< $0.01');
+	});
+
+	it('hides the caption for non-finite or negative values (defensive)', () => {
+		expect(formatRunCostUSD('not-a-number')).toBeNull();
+		expect(formatRunCostUSD(-1)).toBeNull();
 	});
 });

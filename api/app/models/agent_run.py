@@ -108,8 +108,9 @@ class AgentRun(Base):
     ADR-F002): ``max_steps`` bounds the number of persisted steps;
     exceeding it terminates the run at ``cap_exceeded``. The runner
     additionally enforces a wall-clock timeout (status ``failed``,
-    ``error='timeout'``). ``cost_usd`` is NULL until the F1 cost-cap
-    work aggregates gateway routing-log costs per run.
+    ``error='timeout'``). ``cost_usd`` is a rough rolling-average estimate
+    (F2 Slice O-2, ADR-F053; NULL on the timeout/error paths and before
+    settlement) — see ``total_tokens`` / ``cost_usd`` below.
 
     ``purpose`` is the routing-log tag the run's gateway calls carry
     (``lq_ai_purpose``, default ``'agent_loop'``) so agent traffic is
@@ -163,9 +164,15 @@ class AgentRun(Base):
     # (input+output, lead + subagents) the run spent — the value the runner's R4
     # token-budget brake accumulates, persisted at settlement for observability +
     # calibrating ``run_token_budget``. NULL for a run that never reported usage or
-    # settled off the normal path (timeout/error). ``cost_usd`` stays NULL (dollars
-    # need the gateway's per-call cost, a separate concern).
+    # settled off the normal path (timeout/error).
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # F2 Slice O-2 (ADR-F053 addendum): a rough USD estimate of the run's spend —
+    # a blended rolling-average ``agent_loop`` per-token rate from the inference
+    # routing log x ``total_tokens`` (app.agents.cost). Reuses the existing
+    # ``cost_usd`` column (no migration). An ESTIMATE, not exact per-run cost: the
+    # routing log has no run id (exact attribution is a deferred slice). NULL when
+    # ``total_tokens`` is NULL (timeout/error) or before settlement; the UI labels
+    # the figure as approximate.
     # F2 Slice O (ADR-F053, migration 0080): the cost/effort envelope the run was
     # created with (economy/balanced/generous). Resolved to the four-brake ceiling
     # at composition (app.agents.budget.resolve_envelope). NULL for legacy rows →

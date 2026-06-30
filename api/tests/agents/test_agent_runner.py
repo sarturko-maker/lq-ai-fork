@@ -21,6 +21,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -326,6 +327,10 @@ async def test_run_under_token_budget_completes_normally(
     assert run.final_answer is not None and "twelve" in run.final_answer
     # Slice G: a completed run persists its summed model tokens (2 turns x 100).
     assert run.total_tokens == 200
+    # Slice O-2: the same terminal write prices the run from total_tokens (no
+    # agent_loop routing rows seeded → the fallback rate applies, but the seam
+    # populated a positive cost_usd — the exact-rate math lives in test_agent_cost).
+    assert run.cost_usd is not None and run.cost_usd > Decimal("0")
 
 
 async def test_token_budget_never_halts_mid_final_answer(
@@ -411,6 +416,9 @@ async def test_wall_clock_timeout_fails_run_and_keeps_steps(
     assert run.status == "failed"
     assert run.error == "timeout"
     assert run.finished_at is not None
+    # Slice O-2: the timeout path settles with no token total, so the run is
+    # left unpriced — cost_usd stays NULL (only the normal/cap path prices).
+    assert run.cost_usd is None
     # At least the first model turn committed before the brake; committed
     # steps survive the failure.
     assert len(steps) >= 1

@@ -118,9 +118,12 @@ class AgentRunRead(BaseModel):
     started_at: datetime
     finished_at: datetime | None = None
     error: str | None = None
+    # F2 Slice O-2 (ADR-F053 addendum): a rough rolling-average USD estimate of the
+    # run's spend (blended agent_loop per-token rate x total_tokens). An ESTIMATE,
+    # surfaced as approximate in the UI; NULL on timeout/error or before settlement.
     cost_usd: Decimal | None = None
     # F2 Slice G (ADR-F051 follow-up): the run's cumulative model tokens, NULL until
-    # settlement / when usage was not reported. (cost_usd — dollars — stays NULL.)
+    # settlement / when usage was not reported.
     total_tokens: int | None = None
     # F2 Slice O (ADR-F053): the cost/effort envelope the run was created with.
     # NULL for legacy rows created before the column existed (treated as balanced).

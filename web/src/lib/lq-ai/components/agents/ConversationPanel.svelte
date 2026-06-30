@@ -5,6 +5,7 @@
 	 * as DocumentEditorPanel.svelte + DocumentsPanel.svelte).
 	 */
 	import type { AgentRunCreate } from '$lib/lq-ai/api/agents';
+	import { formatCostUSD } from '$lib/lq-ai/playbookCost';
 
 	export function buildRunPayload(args: {
 		prompt: string;
@@ -17,6 +18,20 @@
 			return { prompt, budget_profile: budgetProfile, thread_id: detail.thread.id };
 		}
 		return { prompt, budget_profile: budgetProfile, project_id: selectedMatterId ?? null };
+	}
+
+	/**
+	 * Format a settled run's estimated USD spend, or null when there is nothing
+	 * to show. `cost_usd` arrives as a Decimal string (or number) on the wire; it
+	 * is a rolling-average ESTIMATE (F2 Slice O-2, ADR-F053) — the UI labels it
+	 * approximate. Reuses `formatCostUSD` for $-formatting consistency. Returns
+	 * null for missing / non-finite / negative values so the caption is hidden.
+	 */
+	export function formatRunCostUSD(value: string | number | null | undefined): string | null {
+		if (value == null) return null;
+		const n = typeof value === 'number' ? value : Number(value);
+		if (!Number.isFinite(n) || n < 0) return null;
+		return formatCostUSD(n);
 	}
 </script>
 
@@ -985,6 +1000,7 @@
 			{@const turnSteps = visibleSteps(turn.steps, turn.run)}
 			{@const turnAnswer = splitThink(turn.run.final_answer)}
 			{@const turnHtml = answerHtmlFor(turn.run)}
+			{@const turnCost = formatRunCostUSD(turn.run.cost_usd)}
 			<section class="ag-run" data-testid="lq-ai-agents-run">
 				<header class="ag-run__head">
 					<p class="lq-text-body ag-run__prompt">{turn.run.prompt}</p>
@@ -1128,6 +1144,19 @@
 				{:else if turn.run.status === 'failed'}
 					<p class="lq-text-body-sm ag-error">
 						Run failed: {turn.run.error ?? 'unknown error'}
+					</p>
+				{/if}
+
+				<!-- F2 Slice O-2 (ADR-F053): a rough rolling-average cost estimate for the
+				     settled run (NULL/hidden on timeout/error or before settlement). Labelled
+				     approximate — it is not an exact bill (the routing log has no per-run id). -->
+				{#if turnCost}
+					<p
+						class="lq-text-caption ag-cost"
+						data-testid="lq-ai-agents-cost"
+						title="Rough estimate from recent per-token cost — not an exact bill."
+					>
+						Est. cost ≈ {turnCost}
 					</p>
 				{/if}
 
@@ -1900,6 +1929,11 @@
 	}
 
 	/* C7a — produced work product (e.g. a redline output) download, inline under the run. */
+	.ag-cost {
+		margin-top: var(--lq-space-2);
+		color: var(--color-muted-foreground);
+	}
+
 	.ag-produced {
 		margin-top: var(--lq-space-3);
 		display: flex;
