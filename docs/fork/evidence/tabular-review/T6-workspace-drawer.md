@@ -71,6 +71,17 @@ the override POST; deterministic, no DB state). The spec passes; 3 viewport scre
 edge is clipped in the viewport capture; all content is present. The cockpit stage-takeover — `TabularWorkspace`
 in the `DocumentEditorPanel` fly-in — gives the grid + drawer the full rail-collapsed width.)
 
+## Adversarial review (fresh-context, then verified)
+
+A fresh-context adversarial review (2 reviewers over the diff → verify each finding) surfaced **one confirmed
+should-fix**, since fixed: `TabularCellDrawer`'s draft-reset guard keyed on the display `documentName` rather
+than the unique `documentId`. In a grid holding two documents with the **same filename**, switching between
+their same-column cells produced an identical key, so a stale override draft was **not** reset — and Save could
+write the override onto the wrong document (an ADR-F042 human-write corrupted). Fix: thread `documentId` into
+the drawer and key the reset on `documentId + columnName` (both `TabularWorkspace` and `/tabular/[id]` pass it).
+Everything else (the override endpoint authz / `overridden_by`-from-session / audit-no-leak / `_upsert_row`
+human-wins, and the SSE-safe stage-takeover) verified clean.
+
 ## Notes / follow-ups
 
 - `/tabular/[id]` keeps its export/cancel/banner chrome and inlines the same `TabularGrid` + `TabularCellDrawer`

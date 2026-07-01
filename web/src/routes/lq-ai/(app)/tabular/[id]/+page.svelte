@@ -309,6 +309,7 @@
 					<div class="lq-tabres__drawer">
 						<TabularCellDrawer
 							cell={selectedCell}
+							documentId={selected.documentId}
 							documentName={selected.documentName}
 							columnName={selected.columnName}
 							{saving}

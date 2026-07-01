@@ -246,6 +246,7 @@
 				<div class="lq-tabws__drawer">
 					<TabularCellDrawer
 						cell={selectedCell}
+						documentId={selected.documentId}
 						documentName={selected.documentName}
 						columnName={selected.columnName}
 						{saving}
