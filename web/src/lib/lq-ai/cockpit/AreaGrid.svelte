@@ -16,6 +16,7 @@
 	 */
 	import { fade } from 'svelte/transition';
 	import BriefcaseIcon from '@lucide/svelte/icons/briefcase';
+	import CpuIcon from '@lucide/svelte/icons/cpu';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import GavelIcon from '@lucide/svelte/icons/gavel';
 	import ScaleIcon from '@lucide/svelte/icons/scale';
@@ -60,7 +61,8 @@
 		disputes: GavelIcon,
 		'm-and-a': BriefcaseIcon,
 		privacy: ShieldIcon,
-		employment: UsersIcon
+		employment: UsersIcon,
+		'ai-compliance': CpuIcon
 	};
 	function areaIcon(key: string): typeof FolderIcon {
 		return AREA_ICON[key] ?? FolderIcon;
