@@ -204,3 +204,43 @@ value` (centralised in one read-side helper + the web `CellResult`); a consumer 
 the stale agent value. Neutral: verified/flagged sign-off, a completion meter, semantic colour, the party
 column/filter, and deliverables remain later phases (P2–P5); source **highlighting** in the opened document
 stays T9 (T6 v1 opens the source file, unhighlighted).
+
+## T4 addendum (2026-07-01) — the bounded row-evidence primitive + the fill-mode crossover
+
+The decision outcome's fan-out engine (T1) filled a grid by having each subagent **read a whole document**
+and record its row, and `start_tabular_review` degraded a >quota set to prose advice ("read the most
+relevant, retrieve the rest") because "the retrieval-fill path above the quota is T4". A live incident
+(2026-07-01) exposed a sharper problem than the >quota case: with retrieval degraded (a keyless gateway
+embedder → silent FTS-only on long contracts), the agent **re-searched the same cell forever** — 235
+`search_documents`, 0 `record_tabular_row`, to the step cap. The root retrieval fault is fixed elsewhere
+(embeddings aligned to local; ADR-F056), but the tabular tool had **no structural defence**: nothing bounded
+searches-per-cell.
+
+**Decision (maintainer-chosen, Option B of the T4 plan).** Add ONE guarded tool, `gather_row_evidence(grid_id,
+document)`, that runs **exactly one** `matter_search_reranked` per column (scoped to that document) and returns
+the grounded passages + chunk ids — **no LLM inside the tool** (retrieval only). The agent still extracts and
+`record_tabular_row`s (its own model turn). This keeps the model-driven ethos (a tool the agent *chooses*,
+like the native redline engine of ADR-F045 — NOT a Python pipeline that fills JSON slots, which is exactly
+what the fork removed) while making thrash **structurally impossible**: the agent gets everything to fill a row
+in one call, so re-searching is pointless and the cap lives in code, not the prompt. Considered + rejected:
+doctrine-only (soft — the bug is a model ignoring "you already searched this"); a server-side fill engine that
+also extracts (a mini linear executor — against the fork thesis).
+
+**Details.** `gather_row_evidence` reuses the SAME embed+hybrid+rerank wiring as `search_documents` via a new
+shared `tools.matter_reranked_hits` (`search_documents` refactored onto it, no behaviour change);
+`matter_search_reranked` and the frozen E0/Slice-A/-D FTS baselines are untouched. The doctrine routes
+gather→record and forbids cell re-search (record `confidence='failed'` when the passages don't answer;
+escalate to `read_document` only when clearly thin). Finalize records `fill_mode='retrieval'` above the
+fan-out quota else `'fanout'` — a recommendation-based signal (per-row fill provenance is a later refinement);
+**no migration** (mig 0082's CHECK already permits `'retrieval'`). Grid load for evidence is read-only (no
+`FOR UPDATE` — it never writes `results`), a scope-sharing helper single-sources the matter+owner+agentic
+boundary so the two loaders can't drift.
+
+**Consequences.** Positive: a grid can no longer thrash regardless of retrieval quality; the >quota crossover
+is a real path, not prose; `gather_row_evidence` is also T5's natural cell-fill seam. Audit carries
+counts/ids only (`tabular.row_evidence_gathered`), matter+owner scope is re-asserted (cross-tenant →
+404-absence), the grant set stays confined. Neutral/deferred: the **eval gate** (retrieval-fill vs
+read-in-full **cell quality** on CUAD, to tune the crossover default) is OOM-sensitive (real embedder) and
+runs alone on a throwaway pgvector — until it lands the crossover stays at its current sensible default
+(fan-out ≤ quota, retrieval > quota), so nothing regresses. Per-column top-k is fixed (`_EVIDENCE_TOP_K`);
+the eval will size it.
