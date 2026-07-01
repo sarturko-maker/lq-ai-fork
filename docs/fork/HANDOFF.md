@@ -21,8 +21,14 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   rendered after the answer in `ConversationPanel.svelte`); **Expand** = an in-conversation overlay mounting
 >   the REUSED `TabularGrid` + `TabularCitationModal`. `/tabular/[id]` refactored to share
 >   `buildDocumentNameById` (dedup).
-> - **GATE — met:** `npm run check` 0 errors (5 pre-existing warnings, unrelated) + **1030** frontend tests
->   green (**16 new** in `tabular-preview.test.ts`); eslint clean on touched files. **LIVE-VERIFIED:** a
+> - **REVIEW FIXES (fresh-context adversarial pass, applied before merge):** (a) the card now **polls until
+>   terminal** (bounded) — the finalize `data-step` streams at tool-START before the row flips to `completed`,
+>   so a mount-time fetch could race the commit and show "Building…" until reload (`isTerminalGridStatus` +
+>   a capped `setTimeout` loop, cleared on destroy); (b) a **404 hides the card** (a fabricated grid id →
+>   render nothing, not a spurious error card); (c) Escape closes the overlay only when no citation modal is
+>   open (the modal owns its own Escape). Review cleared XSS/authz/the `documentNameById` refactor.
+> - **GATE — met:** `npm run check` 0 errors (5 pre-existing warnings, unrelated) + **1032** frontend tests
+>   green (**18 new** in `tabular-preview.test.ts`); eslint clean on touched files. **LIVE-VERIFIED:** a
 >   deterministic Cypress spec (`f2-tabular-t2-grid-preview.cy.ts`) drives the real component in a real
 >   browser (intercepted thread+grid, no LLM) — **1 passing, 4 screenshots** (card + light/dark + the expanded
 >   full grid). Evidence: `docs/fork/evidence/tabular-review/T2-grid-preview.md` + `T2-cypress/*.png`.

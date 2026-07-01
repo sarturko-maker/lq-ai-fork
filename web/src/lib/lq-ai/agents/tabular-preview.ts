@@ -13,10 +13,26 @@
  * existing `GET /tabular/executions/{id}` endpoint.
  */
 import type { AgentRunStep } from '$lib/lq-ai/api/agents';
-import type { TabularCellResult, TabularExecution, TabularResults } from '$lib/lq-ai/types';
+import type {
+	TabularCellResult,
+	TabularExecution,
+	TabularExecutionStatus,
+	TabularResults
+} from '$lib/lq-ai/types';
 
 /** Tool name whose settled call anchors a grid preview (one per finalized grid). */
 export const FINALIZE_TOOL_NAME = 'finalize_tabular_review';
+
+/**
+ * A grid whose status is terminal needs no refetch. Non-terminal is possible on
+ * the LIVE path: the finalize tool-call step streams at tool-START (before the
+ * finalize body flips the row to `completed`), so a card that mounts and fetches
+ * can briefly race the commit and read `running`. The card polls until terminal
+ * so that transient state self-corrects without a reload.
+ */
+export function isTerminalGridStatus(status: TabularExecutionStatus): boolean {
+	return status === 'completed' || status === 'failed' || status === 'cancelled';
+}
 
 /** Compact-preview caps — the mini-table shows at most this many rows / columns. */
 export const PREVIEW_MAX_ROWS = 4;

@@ -14,7 +14,7 @@
 	 * "panels slide back" stage-takeover motion is a later slice (T6); here
 	 * Expand is a self-contained overlay that keeps the chat in context.
 	 */
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import TableIcon from '@lucide/svelte/icons/table';
 	import Maximize2Icon from '@lucide/svelte/icons/maximize-2';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -31,6 +31,7 @@
 	} from '$lib/lq-ai/types';
 	import {
 		buildDocumentNameById,
+		isTerminalGridStatus,
 		summarizeGridForPreview
 	} from '$lib/lq-ai/agents/tabular-preview';
 
@@ -39,7 +40,20 @@
 	let execution: TabularExecution | null = null;
 	let loading = true;
 	let loadError: string | null = null;
+	// A 404 means the grid does not exist for this user (e.g. the model finalized a
+	// fabricated id) — render nothing rather than a spurious error card.
+	let notFound = false;
 	let expanded = false;
+
+	// The finalize step streams at tool-START, before the finalize body flips the
+	// row to `completed` — so a mount-time fetch can race the commit and read a
+	// non-terminal status. Poll (bounded) until terminal so that self-corrects
+	// without a reload; on reload the grid is already terminal so this never fires.
+	const POLL_INTERVAL_MS = 1500;
+	const MAX_POLLS = 10;
+	let pollTimer: ReturnType<typeof setTimeout> | null = null;
+	let polls = 0;
+	let destroyed = false;
 
 	interface OpenCellState {
 		documentName: string;
@@ -52,17 +66,45 @@
 	$: documentNameById = execution ? buildDocumentNameById(execution) : {};
 
 	onMount(load);
+	onDestroy(() => {
+		destroyed = true;
+		clearPoll();
+	});
+
+	function clearPoll(): void {
+		if (pollTimer !== null) {
+			clearTimeout(pollTimer);
+			pollTimer = null;
+		}
+	}
 
 	async function load(): Promise<void> {
 		loading = true;
 		loadError = null;
+		clearPoll();
 		try {
 			execution = await getTabularExecution(gridId);
+			if (destroyed) return;
+			if (!isTerminalGridStatus(execution.status) && polls < MAX_POLLS) {
+				polls += 1;
+				pollTimer = setTimeout(() => void load(), POLL_INTERVAL_MS);
+			}
 		} catch (e) {
-			loadError = e instanceof LQAIApiError ? e.message : 'Could not load this grid.';
+			if (e instanceof LQAIApiError && e.status === 404) {
+				notFound = true;
+			} else {
+				loadError = e instanceof LQAIApiError ? e.message : 'Could not load this grid.';
+			}
 		} finally {
 			loading = false;
 		}
+	}
+
+	// Manual retry (error card) — reset the poll budget so a recovered backend
+	// can still be polled to terminal.
+	function retry(): void {
+		polls = 0;
+		void load();
 	}
 
 	const STATUS_LABEL: Record<TabularExecutionStatus, string> = {
@@ -86,7 +128,9 @@
 		openCell = null;
 	}
 	function handleOverlayKey(e: KeyboardEvent): void {
-		if (e.key === 'Escape') closeOverlay();
+		// Only close the overlay when it is open and no citation modal is up — the
+		// modal owns Escape while it is open (it has its own handler).
+		if (e.key === 'Escape' && expanded && !openCell) closeOverlay();
 	}
 
 	function handleCellOpen(
@@ -110,6 +154,7 @@
      must live at the component root, never inside a block. -->
 <svelte:window on:keydown={handleOverlayKey} />
 
+{#if !notFound}
 <div class="ag-grid-card" data-testid="lq-ai-tabular-preview" data-grid-id={gridId}>
 	{#if loading}
 		<p class="lq-text-caption ag-grid-card__loading" data-testid="lq-ai-tabular-preview-loading">
@@ -119,7 +164,7 @@
 	{:else if loadError}
 		<p class="lq-text-body-sm ag-grid-card__error" data-testid="lq-ai-tabular-preview-error">
 			{loadError}
-			<button type="button" class="ag-grid-card__retry" on:click={load}>Retry</button>
+			<button type="button" class="ag-grid-card__retry" on:click={retry}>Retry</button>
 		</p>
 	{:else if execution && preview}
 		<header class="ag-grid-card__head">
@@ -205,6 +250,7 @@
 		</footer>
 	{/if}
 </div>
+{/if}
 
 {#if expanded && execution}
 	<!-- Inline overlay (T2): the full reused grid in context. Backdrop click /

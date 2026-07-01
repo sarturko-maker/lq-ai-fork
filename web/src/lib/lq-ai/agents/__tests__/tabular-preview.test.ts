@@ -3,6 +3,7 @@ import type { AgentRunStep } from '$lib/lq-ai/api/agents';
 import type { TabularExecution, TabularCellResult } from '$lib/lq-ai/types';
 import {
 	buildDocumentNameById,
+	isTerminalGridStatus,
 	summarizeGridForPreview,
 	tabularGridIdsForTurn,
 	PREVIEW_VALUE_MAX
@@ -126,6 +127,18 @@ describe('tabularGridIdsForTurn', () => {
 
 	it('returns an empty list for a turn with no tabular steps', () => {
 		expect(tabularGridIdsForTurn([step({ kind: 'model_turn' })])).toEqual([]);
+	});
+});
+
+describe('isTerminalGridStatus', () => {
+	it('treats completed / failed / cancelled as terminal', () => {
+		expect(isTerminalGridStatus('completed')).toBe(true);
+		expect(isTerminalGridStatus('failed')).toBe(true);
+		expect(isTerminalGridStatus('cancelled')).toBe(true);
+	});
+	it('treats pending / running as non-terminal (poll continues)', () => {
+		expect(isTerminalGridStatus('pending')).toBe(false);
+		expect(isTerminalGridStatus('running')).toBe(false);
 	});
 });
 
