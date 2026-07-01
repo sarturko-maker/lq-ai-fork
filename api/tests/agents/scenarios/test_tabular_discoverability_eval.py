@@ -24,14 +24,24 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.tabular import TabularExecution
+from app.skills import load_registry
 from tests.agents.scenarios.harness import run_scenario, seed_multi_doc_matter
 from tests.agents.scenarios.scenarios import Scenario, build_document
+
+# The real skill registry — WITHOUT this the harness threads a None registry, every
+# bound skill is dropped as drift, and the eval would measure only the always-on
+# doctrine (the [[eval-attribution-confirm-capability]] trap). Load /skills so the
+# bound tabular-review skill is actually injected (as the sibling craft evals do).
+_SKILLS_DIR = Path(
+    os.environ.get("LQ_AI_SKILLS_DIR", str(Path(__file__).resolve().parents[4] / "skills"))
+)
 
 pytestmark = [
     pytest.mark.provider,
@@ -119,6 +129,10 @@ _CASES = [
 async def test_tabular_discoverability_eval(
     commit_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    registry = load_registry(_SKILLS_DIR)
+    assert registry.get("tabular-review") is not None, (
+        "tabular-review skill missing from the registry — the eval would not inject it"
+    )
     findings: list[dict[str, object]] = []
     for scenario, docs, should_offer in _CASES:
         seeded = await seed_multi_doc_matter(
@@ -128,7 +142,9 @@ async def test_tabular_discoverability_eval(
             matter_name=f"T3 discoverability — {scenario.id}",
         )
         try:
-            receipt = await run_scenario(scenario, seeded, max_steps=scenario.step_bound)
+            receipt = await run_scenario(
+                scenario, seeded, skill_registry=registry, max_steps=scenario.step_bound
+            )
             async with commit_factory() as db:
                 grid = (
                     await db.execute(
@@ -138,13 +154,23 @@ async def test_tabular_discoverability_eval(
                         )
                     )
                 ).scalar_one_or_none()
-            offered = "start_tabular_review" in receipt.tools_called
+            built = "start_tabular_review" in receipt.tools_called
+            # Discoverability is served by BUILDING a grid OR PROPOSING one in prose
+            # ("I can build a grid comparing…") — for a vague "best way to see this?"
+            # ask an offer is a legitimate answer. The skill teaches the noun "grid",
+            # so its presence in the settled answer is the prose-offer signal; a
+            # single-doc lookup answers the field and never mentions a grid.
+            answer = (receipt.final_answer or "").lower()
+            proposed = "grid" in answer
+            surfaced = built or proposed
             findings.append(
                 {
                     "scenario": scenario.id,
-                    "should_offer_grid": should_offer,
-                    "offered_grid": offered,
-                    "correct": offered == should_offer,
+                    "should_surface_grid": should_offer,
+                    "built_grid": built,
+                    "proposed_grid": proposed,
+                    "surfaced_grid": surfaced,
+                    "correct": surfaced == should_offer,
                     "status": receipt.status,
                     "model_turns": receipt.model_turns,
                     "tools_called": receipt.tools_called,

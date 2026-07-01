@@ -149,10 +149,11 @@ grid→deliverables (Word letters/reports). License: reference-only, no code cop
   multi-doc compare/extract intent (**build it**, don't answer across-many-docs in prose); map NL →
   `start_tabular_review` columns; column templates (key terms / NDA / M&A DD / SaaS / DPA); restraint on a
   single-doc lookup.
-- **Eval finding (masked, live DeepSeek, ADR-F015):** 2/3 → **3/3** after strengthening the proactive-offer
-  directive (the vague "best way to see this across them?" ask now builds a grid; explicit table maps
-  columns; single-doc stays quiet). `test_tabular_discoverability_eval.py`; evidence
-  `docs/fork/evidence/tabular-review/T3-discoverability.md`.
+- **Eval finding (masked, live DeepSeek, ADR-F015):** **3/3 across 2 reps** with the skill genuinely injected
+  (vague ask builds a grid; explicit table maps columns; single-doc stays quiet). The eval was corrected
+  after fresh-context review caught the injection-attribution trap (it initially omitted `skill_registry=` →
+  measured only the doctrine); it now loads `/skills` + passes the registry + credits a prose offer.
+  `test_tabular_discoverability_eval.py`; evidence `docs/fork/evidence/tabular-review/T3-discoverability.md`.
 
 ### T4 (core) — Retrieval-fill engine + the crossover switch
 - Batched-row subagents: ≤quota subagents, each owns a row slice, fills each cell via

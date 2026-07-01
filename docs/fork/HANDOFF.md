@@ -22,9 +22,14 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   (`test_skill_loader`+`test_practice_areas`) + **67** (`test_capabilities`+`test_matter_capabilities_api`+
 >   `test_agent_composition`) deterministic tests green in `lq-ai-api-dev`; **migration 0083 up→down→up on a
 >   throwaway pgvector**. mypy unaffected (zero `app/` changes). **LIVE (ADR-F015 finding, masked, DeepSeek):**
->   discoverability **2/3 → 3/3** after one tuning pass (the vague "best way to see this across them?" ask now
->   BUILDS a grid; explicit table maps Term/Governing-law columns; single-doc stays quiet) — that the skill
->   edit changed behaviour also confirms it IS injected. `test_tabular_discoverability_eval.py` +
+>   discoverability **3/3 across 2 reps** with the skill genuinely injected (apt-vague builds a grid, explicit
+>   table maps Term/Governing-law columns, single-doc stays quiet). **The eval was CORRECTED after the
+>   fresh-context review** caught the [[eval-attribution-confirm-capability]] trap: the first version omitted
+>   `skill_registry=` on `run_scenario`, so the harness dropped every bound skill as drift and measured only
+>   the doctrine — the fix loads `load_registry(/skills)` + passes it (as every sibling eval does) + asserts
+>   the skill is present; the metric now credits a prose OFFER as well as a build. Also fixed review finding #2:
+>   harness `cleanup()` now deletes `TabularExecution` rows (project FK SET NULL was orphaning grids). Prod
+>   injection was never affected (registry loads from app.state). `test_tabular_discoverability_eval.py` +
 >   `docs/fork/evidence/tabular-review/T3-discoverability.md`.
 > - **NEXT = T7** (Grids cockpit tab — matter-scoped listing of agentic grids: title/created/doc-count/
 >   fill_mode, open/rename/soft-delete; owner-only read route, cross-matter 404; frontend + read API — LOW

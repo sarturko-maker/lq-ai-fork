@@ -32,6 +32,7 @@ from app.models.document import Document, DocumentChunk
 from app.models.file import File
 from app.models.practice_area import PracticeArea
 from app.models.project import Project
+from app.models.tabular import TabularExecution
 from app.models.user import User
 from app.schemas.agent_runs import AgentRunStepKind
 from app.security import hash_password
@@ -175,6 +176,11 @@ async def seed_multi_doc_matter(
             await db.execute(delete(AgentRun).where(AgentRun.user_id == user_id))
             await db.execute(delete(AgentThread).where(AgentThread.user_id == user_id))
             await db.execute(delete(File).where(File.owner_id == user_id))
+            # Agentic grids (F2 Tabular): project_id is ON DELETE SET NULL, so the
+            # Project delete would orphan them — remove them first.
+            await db.execute(
+                delete(TabularExecution).where(TabularExecution.project_id == project_id)
+            )
             await db.execute(delete(Project).where(Project.owner_id == user_id))
             await db.execute(delete(User).where(User.id == user_id))
             await db.commit()
