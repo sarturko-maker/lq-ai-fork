@@ -185,11 +185,18 @@ grid→deliverables (Word letters/reports). License: reference-only, no code cop
   `grids-panel-helpers.ts`. Live: `f2-tabular-t7-grids-tab.cy.ts` (list + empty, light/dark). Evidence
   `docs/fork/evidence/tabular-review/T7-grids-tab.md`.
 
-### T8 (core) — Conversational grid-ops (the "bash" loop)
-- `update_tabular_cells(grid_id, targets, instruction)`, `combine_documents(grid_id, document_ids)`
-  (**later-doc precedence**), re-pull — **in-place** matter-tier mutation + audit + re-emit `data-tabular`.
-  Verify "re-pull the Term column for docs 3 and 7" updates exactly those cells; lawyer correct/undo
-  honored (ADR-F042).
+### T8 (core) — Conversational grid-ops (the "bash" loop) ✅ SHIPPED 2026-07-01 (combine → T8b)
+- `update_tabular_cells(grid_id, document, cells)` — edits a **completed** grid in place (distinct from
+  `record_tabular_row`, running-only); shares one `_apply_cells` core with record; audited
+  (`tabular.cells_updated`); matter-tier auto-write-then-correct (ADR-F042). Doctrine teaches the edit loop.
+  +7 deterministic tests (30 total) + guarded end-to-end now includes update. **Live (ADR-F015):** the agent
+  selects `update_tabular_cells` and corrects a seeded-wrong cell ("One (1) year" → "Two (2) years",
+  `cell_changed`). Evidence `docs/fork/evidence/tabular-review/T8-grid-ops.md`.
+- **`combine_documents` DEFERRED → T8b:** merging B's row into A's breaks cell-citation integrity (a cell's
+  `cited_chunk_ids` resolve against the ROW's `document_id`; merged-in B cells would cite A). Needs a per-cell
+  document_id (data-model decision) — its own slice, not a citation bug shipped under time pressure.
+- *(No `data-tabular` re-emit — the T2 preview derives from the settled finalize step; an edit surfaces via
+  the Grids tab / `/tabular/[id]` re-fetch. Live in-chat re-render on edit is T5's transient frame.)*
 
 ### T9 (enrichment) — Source highlighting (cell → original document)
 - Cell drawer "View Source" → open the matter document in the embedded **Collabora/WOPI viewer**
@@ -205,7 +212,13 @@ grid→deliverables (Word letters/reports). License: reference-only, no code cop
 - Per-cell estimate keyed by a dedicated `purpose` (fanout-read vs retrieval-cell differ), surfaced before a
   wide run; reuses the O-2 blended estimator; labeled an estimate.
 
-**Backlog (noted, not built):** counterparty profiles (Matter Roster `matter_participants` synergy);
+**T8b (split from T8):** `combine_documents(grid_id, documents, into)` with later-doc precedence — needs a
+per-cell `document_id` first so a merged-in cell's `cited_chunk_ids` resolve against the right document (a
+data-model change), then the row-merge + drop the merged docs from `document_ids`.
+
+**Backlog (noted, not built):** an agent-facing grid-listing tool (so the agent can edit a grid across
+conversations, not just within the one that built it); counterparty profiles (Matter Roster
+`matter_participants` synergy);
 grid→deliverables (Word letters/reports/disclosure schedules); grid virtualization (>100 rows).
 
 ## Critical files

@@ -362,7 +362,10 @@ planning (framework mismatch: LQ-Grid is React, our web is Svelte). Its own plan
   multi-doc compare intent, maps NL→columns, stays quiet on single-doc; live masked eval **3/3** across 2
   reps with the skill injected, ADR-F015). **T7 SHIPPED** (cockpit **"Grids" tab** — owner-scoped listing
   of the matter's agentic grids with derived titles + fill-mode, open/soft-delete; new read route, no
-  migration; Cypress-verified). NEXT = **T5/T6** (live fill + stage takeover) then T4/T8, then
+  migration; Cypress-verified). **T8 SHIPPED** (conversational grid-ops: `update_tabular_cells` edits a
+  finalized grid in place — the "bash" loop; live-verified the agent selects it + corrects a cell;
+  `combine_documents` → T8b, citation-integrity data-model). NEXT = **T5/T6** (live fill + stage takeover)
+  then T4 (retrieval-fill), then
   T5/T6 (live fill + stage takeover) and T4/T8 (retrieval-fill + bash loop; sequenced low-risk-first).
 
 **Deferred — resume after this milestone (paused 2026-06-30, honest record):**

@@ -3,51 +3,47 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-07-01): ▶ TABULAR REVIEW T7 SHIPPED — NEXT = T5 (live cell fill) then T6/T4/T8.**
-> Branch `fork/f2-tabular-t7-grids-tab` (PR pending; ADR-F055, **no migration**). The cockpit now has a
-> **"Grids" tab** listing a matter's agentic grids. Full plan + all 11 slices:
-> `docs/fork/plans/TABULAR-REVIEW-agentic.md`. Dev stack healthy on `http://localhost:3000` (NOT 127.0.0.1 —
-> CORS); model `smart → deepseek-v4-flash`; DeepSeek has quota.
+> ▶▶ **PICKUP (2026-07-01): ▶ TABULAR REVIEW T8 SHIPPED — NEXT = T5 (live cell fill) then T6/T4.**
+> Branch `fork/f2-tabular-t8-grid-ops` (PR pending; ADR-F055, **no migration**). The Commercial agent can
+> now EDIT a finalized grid in place ("bash" loop). Full plan: `docs/fork/plans/TABULAR-REVIEW-agentic.md`.
+> Dev stack healthy on `http://localhost:3000`; model `smart → deepseek-v4-flash`; DeepSeek has quota.
 >
-> - **DONE (all merged to main):** T1 (grids tool, mig 0082) · T2 (in-chat preview + Expand, #180 `91660db9`)
->   · T3 (discoverability skill, #181 `9e7b4f26`, mig 0083) · **T7 (this branch).**
-> - **T7 — WHAT SHIPPED:** cockpit **"Grids" tab** (sibling to Documents — derived artifacts vs source
->   files). NEW `GET /tabular/matters/{project_id}/grids` (owner-scoped via `_load_visible_project`,
->   cross-matter → 404; `mode='agentic'` + non-deleted only). `TabularExecutionSummary` +
->   `column_names`/`fill_mode` (default-safe; grids have NO stored title → the tab derives one from column
->   names). Web `GridsPanel.svelte` (modeled on `DocumentsPanel`) + `grids-panel-helpers.ts` (unit-tested:
->   title/subtitle/fill-mode/status) + a `grids` tab in `ConversationHost.svelte`. Open → the reused
->   `/tabular/[id]`; **soft-delete reuses** the owner-scoped `DELETE /tabular/executions/{id}`. **Rename
->   deferred** (would need a title column). **No migration.**
-> - **GATE — met:** `npm run check` 0 errors + **1039** frontend tests (7 new) + eslint clean; `ruff` +
->   `mypy`(217) clean + **8** tabular-endpoint tests (2 new, owner-scope + agentic/deleted/other-matter
->   exclusion + 404s). **LIVE:** `f2-tabular-t7-grids-tab.cy.ts` — 2 passing, 3 screenshots (populated
->   list light/dark + empty state). Evidence `docs/fork/evidence/tabular-review/T7-grids-tab.md`.
-> - **NEXT = T5** (live cell fill): a TRANSIENT `data-tabular-cell` frame (the RIGHT use of a live-only
->   frame — animation, ADR-F004) modeled on `data-deal-change`; a `TabularChangeLedger`
->   (`LiveChange`/`ChangeLedger`); grid + T2 preview fill row-by-row; settled grid stays truth. **Ledger
->   coexistence:** ONE run-scoped Commercial ledger passed to BOTH `build_commercial_tools` and
->   `build_tabular_tools`. Then **T6** (stage takeover + cell drawer; also fixes the composer-overlap
->   cosmetic) · **T4** (retrieval-fill + crossover eval — HIGH risk: dev-box OOM, FTS-only, ship honest) ·
->   **T8** (bash loop: `update_tabular_cells`/`combine_documents`).
-> - **KEY TRAPS / carry-forward:** (1) **durable in-chat artifacts derive from settled `data-step` rows, NOT
->   custom `data-*` frames** (replay re-emits only `data-step`; a `data-*` frame is live-only — correct for
->   T5 cell-fill, wrong for a persisted artifact). (2) **eval attribution** ([[eval-attribution-confirm-
->   capability]]): a craft eval MUST pass `skill_registry=load_registry(LQ_AI_SKILLS_DIR)` to `run_scenario`
->   or the skill is dropped as drift and you measure only the doctrine (caught in T3 review). (3) web suite
->   has **no `@testing-library/svelte`** → logic in a `.ts` helper + unit-test; verify components live
->   (Cypress, mirror `c5b3`/T2/T7 specs: intercept the endpoint, click the tab, screenshot). (4) **rebuild
->   the `web` container** before any UI screenshot + `docker image prune -f` after. (5) **prettier NOT
->   CI-gated for web**; match tab style, don't `--write` whole existing files. Svelte 5: a `$props()` value
->   read in a plain `let` warns → use `untrack(() => prop)`; an unused `_` in `{#each}` fails eslint → key
->   on a real item. (6) **dev-container test recipe:** `lq-ai-api-dev` image, `--network lq-ai_default`,
->   mount `api/app`+`api/tests`+`api/alembic`+`skills:/skills:ro`, `DATABASE_URL` from the api container
->   (host `postgres`), `LQ_AI_SKILLS_DIR=/skills`; pass `LQ_AI_GATEWAY_KEY`+`LQ_AI_GATEWAY_URL` ONLY for
->   provider evals. Migration round-trip = throwaway pgvector on the default bridge, reach by IP. ruff/mypy
->   in the dev image, ruff from the REPO ROOT. (7) **cosmetic (→ T6):** the cockpit composer floats over a
->   tall trailing grid card until scrolled. (8) **dev gateway key (`LQ_AI_GATEWAY_KEY`) surfaced in a
->   terminal dump 2026-06-30 → still needs rotating** in the gitignored `.env` (local api↔gateway key).
->
+> - **DONE tonight (all merged to main):** T2 (in-chat preview + Expand, #180 `91660db9`) · T3 (discoverability
+>   skill, #181 `9e7b4f26`, mig 0083) · T7 (Grids tab, #182 `fab000f6`) · **T8 (this branch).** (T1 grids
+>   tool `e9fdb2d0` was pre-session.) **All 3 explicit maintainer priorities (grid tool / discoverability /
+>   artifacts-tab) + the in-chat preview + editing are shipped.**
+> - **T8 — WHAT SHIPPED:** NEW `update_tabular_cells(grid_id, document, cells)` in `tabular_tool.py` — edits a
+>   **completed** grid in place (distinct from `record_tabular_row`, running-only); shares ONE `_apply_cells`
+>   core with record (resolve→verify-in-grid→validate-columns→upsert→audit); audited `tabular.cells_updated`;
+>   added to `TABULAR_TOOL_NAMES` (grant) + `build_tabular_tools` returns 4 tools; `TABULAR_FILL_DOCTRINE`
+>   teaches the edit loop (ADR-F042 the lawyer owns/undoes). **`combine_documents` DEFERRED → T8b** (merging
+>   B's row into A breaks cell-citation integrity: a cell's `cited_chunk_ids` resolve against the ROW's
+>   `document_id`; needs a per-cell document_id — data-model decision, not a shipped bug).
+> - **GATE — met:** `ruff`+`mypy`(217) clean; **30** `test_tabular_tool.py` (+7; guarded end-to-end now
+>   start→record→finalize→UPDATE) + **54** capability/composition tests green. **LIVE (ADR-F015, DeepSeek):**
+>   the agent SELECTS `update_tabular_cells` + corrects a seeded-wrong cell ("One (1) year"→"Two (2) years",
+>   `cell_changed=true`) — `test_tabular_update_eval.py` + `docs/fork/evidence/tabular-review/T8-grid-ops.md`.
+> - **NEXT = T5** (live cell fill): a TRANSIENT `data-tabular-cell` frame (animation, ADR-F004 — the RIGHT use
+>   of a live-only frame) modeled on `data-deal-change`; a `TabularChangeLedger` (`LiveChange`/`ChangeLedger`);
+>   grid + T2 preview fill row-by-row. **Ledger coexistence:** ONE run-scoped Commercial ledger passed to BOTH
+>   `build_commercial_tools` and `build_tabular_tools`. Then **T6** (stage takeover + cell drawer; also fixes
+>   the composer-overlap cosmetic — the T2 preview mini-table sits behind the composer at rest) · **T4**
+>   (retrieval-fill + crossover eval — HIGH risk: dev-box OOM, FTS-only, ship honest) · **T8b** (combine).
+> - **KEY TRAPS (each cost CI cycles this session):** (1) **a new `/api/v1` endpoint MUST be added to the
+>   governance guards:** `test_endpoints.py` `IMPLEMENTED_ROUTES` + `test_openapi.py` `EXPECTED_PATHS` + the
+>   `len(actual)==N` count. (2) **ruff drift:** the dev image's ruff lags CI; run `ruff format` **WRITE** with
+>   a fresh `pip install 'ruff>=0.6'` (`python:3.12-slim`) on changed py before pushing, not `--check` on the
+>   dev image. (3) **eval attribution** ([[eval-attribution-confirm-capability]]): pass
+>   `skill_registry=load_registry(LQ_AI_SKILLS_DIR)` to `run_scenario` or the skill is dropped as drift. (4)
+>   adding a tool to `TABULAR_TOOL_NAMES`/`build_tabular_tools` breaks the exact-set + unpack assertions in
+>   `test_tabular_tool.py` (update them). (5) **durable in-chat artifacts derive from settled `data-step`, NOT
+>   custom `data-*` frames** (live-only; correct for T5 cell-fill). (6) web: no `@testing-library/svelte` →
+>   `.ts` helper + unit-test, verify live (Cypress); rebuild `web` before screenshots; Svelte-5
+>   `untrack(()=>prop)` + key `{#each}` on a real item. (7) **dev-container recipe:** `lq-ai-api-dev`,
+>   `--network lq-ai_default`, mount `api/app`+`api/tests`+`api/alembic`+`skills:/skills:ro`, `DATABASE_URL`
+>   from the api container, `LQ_AI_SKILLS_DIR=/skills`; add `LQ_AI_GATEWAY_KEY`+`LQ_AI_GATEWAY_URL` ONLY for
+>   provider evals; migration round-trip = throwaway pgvector by IP. (8) **dev `LQ_AI_GATEWAY_KEY` surfaced in
+>   a terminal dump 2026-06-30 → still needs rotating** in the gitignored `.env`.
 > ▷ **CLOSED side-quest (2026-06-30): K2-Think model eval — PARKED, do NOT resume unless asked.** A "test a
 > model quickly" detour for one specific client. Conclusion: native deepagents + K2 is **not viable**
 > (streaming multi-turn tool-calls emit malformed JSON → upstream "Invalid JSON payload for chat completion
