@@ -266,6 +266,14 @@
 	.lq-tabws {
 		display: flex;
 		flex-direction: column;
+		/* This IS the direct child of the cockpit fly-in's flex ROW, so it must
+		   fill the pane width — without flex:1 + min-width:0 it sizes to its
+		   content (the max-content grid), overflowing the fly-in's overflow-hidden
+		   pane: the grid then can't scroll (overflow is clipped, not scrollable)
+		   and the docked drawer opens off-screen to the right. */
+		flex: 1;
+		min-width: 0;
+		width: 100%;
 		height: 100%;
 		min-height: 0;
 		background: var(--lq-surface);

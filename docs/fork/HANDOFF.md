@@ -3,10 +3,55 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-07-02): ▶ TABULAR REVIEW T6 — grid review WORKSPACE + human cell-override — DONE on branch
-> `fork/f2-tabular-t6-workspace-drawer` (PR pending).** ADR-F055 **T6 addendum**; **NO migration** (the override
-> rides the `results` JSONB). Dev stack healthy `http://localhost:3000`; model `smart → deepseek-v4-flash`. Full
-> plan: `docs/fork/plans/TABULAR-REVIEW-agentic.md` "### T6 (core)".
+> ▶▶ **PICKUP (2026-07-02): ▶ TABULAR REVIEW T6 — grid review WORKSPACE + human cell-override — MERGED PR #184
+> (`de393216`).** ADR-F055 **T6 addendum**; **NO migration** (the override rides the `results` JSONB). Dev stack
+> fully rebuilt + healthy `http://localhost:3000` (web + api + arq + ingest); model `smart → deepseek-v4-flash`.
+> Full plan: `docs/fork/plans/TABULAR-REVIEW-agentic.md` "### T6 (core)"; evidence
+> `docs/fork/evidence/tabular-review/T6-workspace-drawer.md`.
+>
+> - **OPEN follow-up — PR #185 `fork/f2-tabular-t6-sticky-col-fix` (2 fixes; merge when CI green):**
+>   **(1) THE IMPORTANT ONE — cockpit stage was non-interactive.** Navigating to a grid THROUGH Commercial
+>   (Expand → the `TabularWorkspace` fly-in): a cell click showed **no drawer** and the cells **wouldn't scroll
+>   horizontally** — though the standalone `/tabular/[id]` path worked. Cause: `.lq-tabws` (the workspace root) is
+>   the direct child of the fly-in's flex ROW but only set `height:100%` — no `flex`/`width` — so it sized to its
+>   max-content grid and overflowed the fly-in's `overflow:hidden` pane (grid unscrollable + drawer off-screen
+>   right). `/tabular/[id]` is a normal `max-width` block so it was fine — which is why the original T6 Cypress
+>   test (that path) MISSED it. Fix: `.lq-tabws { flex:1; min-width:0; width:100% }`. Guard: NEW
+>   `f2-tabular-t6-cockpit-stage.cy.ts` drives the REAL cockpit Expand→workspace path (6-col grid) and asserts
+>   h-scroll + a cell click shows the drawer within the viewport — **passes live** (evidence
+>   `T6-cypress/f2-tabular-t6-cockpit-stage.png`). LESSON: TabularWorkspace is ONLY used in the cockpit fly-in;
+>   the standalone page inlines its own grid+drawer — so ALWAYS test the cockpit path, not just `/tabular/[id]`.
+>   **(2)** grid first column (doc name) read too large + a long name overflowed its 14rem column (overlaid the
+>   body on scroll): `font-size:0.8125rem` + ellipsis + `title` tooltip; Wrap-on = plain wrap (NOT
+>   `-webkit-line-clamp`, which needs `display:-webkit-box` and breaks the `<th>` table-cell). svelte-check 0
+>   errors; web rebuilt + live. **First action next session: confirm CI green → squash-merge #185.**
+> - **🔬 QUEUED RESEARCH (post-compaction, maintainer-requested) — is `max_steps` the right brake, or should the
+>   token cap govern?** Long contracts (the customer/CUAD sample) make the Commercial deepagent hit the **400-step
+>   limit** (`run_max_steps`, the *balanced* `BudgetEnvelope` in `api/app/agents/budget.py`; economy=100 /
+>   balanced=400 / generous=600, each paired with `token_budget` 2M/8M/16M + `fan_out_quota` + wall-clock — the
+>   R4 token brake is ADR-F051, profiles ADR-F053). **Question:** is hitting the step ceiling a *real* token-cost
+>   problem, or is step-count an arbitrary iteration cap that should defer to the **token cap** (which may be far
+>   more generous)? **Initial framing to test, not conclude:** `max_steps` and `token_budget` are independent
+>   brakes (whichever fires first). For the observed **thrash** ([[tabular-fanout-live-behavior]]: ~35k-tok docs →
+>   150+ searches, 0 `record_tabular_row`), `max_steps` is a *cheap* catch — remove it and the 8M token cap lets
+>   the loop burn far more before stopping. But for **legitimate** large grids (many docs × columns, every step
+>   productive), 400 may *wrongly truncate* a valid, still-cheap run. So the likely answer isn't "steps don't
+>   matter" but "steps are a cheap loop-backstop that's mis-sized for real work": options to weigh — scale
+>   `max_steps` with work size (doc_count × columns, or `fan_out_quota`); raise it and lean on token + wall-clock
+>   caps; and/or fix the thrash root cause (T4 retrieval-fill + doctrine so it stops re-searching). Also research
+>   how **deepagents/langgraph** intend step/recursion limits vs token control (langgraph `recursion_limit`). This
+>   is ADR-worthy (touches ADR-F051/F053). **Do NOT implement — research + recommend first.** Memory:
+>   [[max-steps-vs-token-cap-research]].
+> - **⏳ MAINTAINER WANTS TO VERIFY LIVE (do this next):** the FULL agentic loop — the Commercial agent *builds*
+>   a grid → it appears **inline in chat** as a `TabularPreview` card with an **Expand** button → Expand opens the
+>   **stage-takeover** workspace (conversation slides back, docked cell drawer). A ready matter exists:
+>   **"Tabular Test"** (Commercial, owner `admin@lq.ai`, project `03f556b9-0885-4e08-b419-d6f71beb7a5a`) with a
+>   completed 5×5 grid `a0beca15-58eb-4492-bb1e-0db085ac4068` (direct: `/lq-ai/tabular/<id>`). To exercise the
+>   agent-build path, ask the Commercial agent to "compare/tabulate these contracts" over a few matter docs (small
+>   docs + a "fan out one subagent per contract" nudge = clean completion; see [[tabular-fanout-live-behavior]]),
+>   then Expand the preview. Grid-list rows also open the stage via the **Grids** tab (onOpenGrid). NOTE the design
+>   phrase "expanding into a new **tab**": T6 shipped Expand → an in-cockpit **stage-takeover** (fly-in, SSE-safe),
+>   NOT a browser tab — confirm that matches intent, or file a tweak.
 >
 > - **WHAT SHIPPED — the grid is a review WORKSPACE, not a stacked modal.** Killed the `ag-grid-overlay` (z-60)
 >   and the `TabularCitationModal` (z-100, **DELETED**). Expand (in-chat preview) / a Grids-tab row now open the

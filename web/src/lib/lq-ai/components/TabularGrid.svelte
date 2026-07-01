@@ -103,7 +103,9 @@
 					<th
 						scope="row"
 						class="lq-tabgrid__sticky-col"
+						class:lq-tabgrid__sticky-col--wrap={wrap}
 						data-testid="lq-tabgrid-row-label"
+						title={name}
 					>
 						{name}
 					</th>
@@ -173,10 +175,28 @@
 		z-index: 1;
 		background: var(--lq-surface);
 		font-weight: 600;
+		/* Match the cell density (was inheriting the ~1rem table default, which
+		   read too large). */
+		font-size: 0.8125rem;
 		padding: 0.625rem 0.75rem;
 		width: 14rem;
 		min-width: 14rem;
 		max-width: 14rem;
+		/* Keep a long document name INSIDE its fixed column — otherwise it spills
+		   over the next column and, on horizontal scroll, overlays the body. The
+		   full name is available via the `title` tooltip. */
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		vertical-align: top;
+	}
+	/* Wrap toggle on: let the name wrap within the column instead of ellipsising.
+	   (Plain wrap — no line-clamp — so the <th> keeps its table-cell display and
+	   the sticky column layout stays intact; document names are short.) */
+	.lq-tabgrid__sticky-col--wrap {
+		white-space: normal;
+		text-overflow: clip;
+		word-break: break-word;
 	}
 	.lq-tabgrid__corner {
 		z-index: 3;
