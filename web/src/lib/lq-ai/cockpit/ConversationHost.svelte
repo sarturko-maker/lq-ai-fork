@@ -29,6 +29,7 @@
 	import RopaRegister from '$lib/lq-ai/components/ropa/RopaRegister.svelte';
 	import MemoryPanel from '$lib/lq-ai/components/matter/MemoryPanel.svelte';
 	import DocumentsPanel from '$lib/lq-ai/components/matter/DocumentsPanel.svelte';
+	import GridsPanel from '$lib/lq-ai/components/matter/GridsPanel.svelte';
 	import CapabilitiesPanel from '$lib/lq-ai/components/matter/CapabilitiesPanel.svelte';
 	import DocumentEditorPanel, {
 		handBackInstruction
@@ -141,7 +142,9 @@
 	// C3c-2: every matter also gets a "Memory" tab onto its working-memory tier
 	// (area-agnostic — ADR-F042/F044). C7a adds a "Documents" tab onto the matter's
 	// files (incl. downloadable redline outputs — ADR-F046). 'register' stays Privacy-only.
-	let matterTab = $state<'conversation' | 'register' | 'memory' | 'documents' | 'capabilities'>(
+	let matterTab = $state<
+		'conversation' | 'register' | 'memory' | 'documents' | 'grids' | 'capabilities'
+	>(
 		'conversation'
 	);
 
@@ -168,6 +171,9 @@
 			? [
 					{ id: 'memory' as const, label: 'Memory' },
 					{ id: 'documents' as const, label: 'Documents' },
+					// F2 Tabular T7 (ADR-F055): the matter's agentic grids — derived
+					// artifacts, sibling to Documents (source files). Full-width panel.
+					{ id: 'grids' as const, label: 'Grids' },
 					// ADR-F054: the capability panel — toggle the area's skills/tools/playbooks
 					// (+ MCP placeholder) for this matter. Full-width panel like Memory/Documents.
 					{ id: 'capabilities' as const, label: 'Capabilities' }
@@ -178,7 +184,10 @@
 	// Memory, Documents and Capabilities are full-width panels: the conversation region
 	// stays mounted but hidden behind any of them (the no-remount invariant — C3c-2).
 	const matterPanelOpen = $derived(
-		matterTab === 'memory' || matterTab === 'documents' || matterTab === 'capabilities'
+		matterTab === 'memory' ||
+			matterTab === 'documents' ||
+			matterTab === 'grids' ||
+			matterTab === 'capabilities'
 	);
 
 	// If the active tab leaves the strip (e.g. a Privacy matter widens past the
@@ -635,6 +644,14 @@
 								{nowMs}
 								onOpenEditor={openEditor}
 							/>
+						</div>
+					{/if}
+					{#if matterTab === 'grids' && matter}
+						<!-- Grids tab (F2 Tabular T7, ADR-F055): full-width read panel listing the
+					     matter's agentic grids; each row opens the reused grid at /tabular/[id]
+					     and can be soft-deleted. reloadKey pulls once when a run settles. -->
+						<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
+							<GridsPanel projectId={matter.project_id} reloadKey={registerReloadKey} {nowMs} />
 						</div>
 					{/if}
 					{#if matterTab === 'capabilities' && matter}

@@ -1163,6 +1163,9 @@ export interface TabularExecutionSummary {
 	status: TabularExecutionStatus;
 	document_count: number;
 	column_count: number;
+	// F2 Tabular T7: agentic-grid listing fields (empty/null for a linear execution).
+	column_names?: string[];
+	fill_mode?: string | null;
 	cost_estimate_usd: string | null;
 	cost_actual_usd: string | null;
 	created_at: string;

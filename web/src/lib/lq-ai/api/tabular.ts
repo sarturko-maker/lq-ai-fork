@@ -56,6 +56,20 @@ export async function listTabularExecutions(): Promise<TabularExecutionSummary[]
 }
 
 /**
+ * GET /api/v1/tabular/matters/{projectId}/grids — the matter's agentic
+ * grids for the cockpit Grids tab (F2 Tabular T7). Owner-scoped through
+ * the matter (cross-user / unknown → 404); recent-first; linear + deleted
+ * rows excluded server-side.
+ */
+export async function listMatterGrids(
+	projectId: string
+): Promise<TabularExecutionSummary[]> {
+	return apiRequest<TabularExecutionSummary[]>(
+		`/tabular/matters/${encodeURIComponent(projectId)}/grids`
+	);
+}
+
+/**
  * GET /api/v1/tabular/executions/{id} — full execution row including
  * the (potentially large) `results` payload once status is terminal.
  */

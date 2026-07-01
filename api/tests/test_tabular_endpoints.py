@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -31,6 +32,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.document import Document, DocumentChunk
 from app.models.file import File as FileModel
+from app.models.project import Project
 from app.models.tabular import TabularExecution
 from app.models.user import User
 from app.security import create_access_token, hash_password
@@ -408,3 +410,89 @@ async def test_preview_cost_ensemble_premium_applied(
     # 3 docs * 1 ensemble column = 3 ensemble cells.
     assert payload["ensemble_cells_count"] == 3
     assert float(payload["ensemble_premium_usd"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# F2 Tabular T7 — the matter-scoped Grids listing (GET /tabular/matters/{id}/grids)
+# ---------------------------------------------------------------------------
+
+
+async def _make_project(db: AsyncSession, owner: User, name: str = "Matter") -> Project:
+    project = Project(owner_id=owner.id, name=name, slug=f"m-{uuid.uuid4().hex[:8]}")
+    db.add(project)
+    await db.flush()
+    return project
+
+
+async def _insert_grid(
+    db: AsyncSession,
+    *,
+    owner: User,
+    project_id: uuid.UUID | None,
+    mode: str = "agentic",
+    deleted: bool = False,
+    fill_mode: str | None = "fanout",
+) -> TabularExecution:
+    grid = TabularExecution(
+        user_id=owner.id,
+        skill_name=None,
+        status="completed",
+        mode=mode,
+        project_id=project_id,
+        fill_mode=fill_mode if mode == "agentic" else None,
+        document_ids=[uuid.uuid4()],
+        columns=[{"name": "Term", "query": "?"}, {"name": "Governing law", "query": "?"}],
+        results={"rows": []},
+        deleted_at=datetime.now(UTC) if deleted else None,
+    )
+    db.add(grid)
+    await db.flush()
+    return grid
+
+
+@pytest.mark.integration
+async def test_list_matter_grids_scoped_to_matter_owner_and_agentic(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    user = await _make_user(db_session)
+    project = await _make_project(db_session, user)
+    other_project = await _make_project(db_session, user)
+
+    live = await _insert_grid(db_session, owner=user, project_id=project.id)
+    await _insert_grid(db_session, owner=user, project_id=project.id, deleted=True)  # excluded
+    await _insert_grid(db_session, owner=user, project_id=project.id, mode="linear")  # excluded
+    await _insert_grid(db_session, owner=user, project_id=other_project.id)  # other matter
+    await db_session.flush()
+
+    resp = await client.get(
+        f"/api/v1/tabular/matters/{project.id}/grids", headers=_bearer(user)
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert [g["id"] for g in data] == [str(live.id)]
+    assert data[0]["column_names"] == ["Term", "Governing law"]
+    assert data[0]["fill_mode"] == "fanout"
+    assert data[0]["document_count"] == 1
+
+
+@pytest.mark.integration
+async def test_list_matter_grids_cross_user_and_unknown_are_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    user = await _make_user(db_session)
+    stranger = await _make_user(db_session)
+    project = await _make_project(db_session, user)
+    await _insert_grid(db_session, owner=user, project_id=project.id)
+    await db_session.flush()
+
+    # Cross-user access collapses into 404 (no existence leak).
+    resp = await client.get(
+        f"/api/v1/tabular/matters/{project.id}/grids", headers=_bearer(stranger)
+    )
+    assert resp.status_code == 404
+
+    # Unknown matter → 404.
+    resp = await client.get(
+        f"/api/v1/tabular/matters/{uuid.uuid4()}/grids", headers=_bearer(user)
+    )
+    assert resp.status_code == 404

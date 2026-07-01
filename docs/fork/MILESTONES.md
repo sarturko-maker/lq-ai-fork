@@ -359,8 +359,10 @@ planning (framework mismatch: LQ-Grid is React, our web is Svelte). Its own plan
   the planned `data-tabular` frame to **settled-step derivation** since the SSE replay re-emits only
   `data-step`, ADR-F055 T2 addendum; Cypress-screenshot-verified). **T3 SHIPPED** (discoverability
   `tabular-review` SKILL.md bound to Commercial via mig 0083; agent proactively **builds** a grid on a
-  multi-doc compare intent, maps NL→columns, stays quiet on single-doc; live masked eval 2/3→**3/3** after
-  one tuning pass, ADR-F015). NEXT = **T7** (Grids cockpit tab — matter-scoped artifact listing), then
+  multi-doc compare intent, maps NL→columns, stays quiet on single-doc; live masked eval **3/3** across 2
+  reps with the skill injected, ADR-F015). **T7 SHIPPED** (cockpit **"Grids" tab** — owner-scoped listing
+  of the matter's agentic grids with derived titles + fill-mode, open/soft-delete; new read route, no
+  migration; Cypress-verified). NEXT = **T5/T6** (live fill + stage takeover) then T4/T8, then
   T5/T6 (live fill + stage takeover) and T4/T8 (retrieval-fill + bash loop; sequenced low-risk-first).
 
 **Deferred — resume after this milestone (paused 2026-06-30, honest record):**
