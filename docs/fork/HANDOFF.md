@@ -9,13 +9,22 @@ then CLAUDE.md, then the ADRs/plans named below.
 > Full plan: `docs/fork/plans/TABULAR-REVIEW-agentic.md` "### T6 (core)"; evidence
 > `docs/fork/evidence/tabular-review/T6-workspace-drawer.md`.
 >
-> - **OPEN follow-up — PR #185 `fork/f2-tabular-t6-sticky-col-fix` (merge when CI green):** maintainer saw on the
->   live stack that the grid's first column (document name) read **too large** and, on horizontal scroll,
->   **overlaid the body**. Cause: the sticky row-label `<th>` inherited the ~1rem table default (vs 0.875rem
->   cells) with no overflow handling, so a long name spilled its fixed 14rem column. Fix (`TabularGrid.svelte`):
->   `font-size:0.8125rem` + ellipsis-truncate with a `title` tooltip; Wrap-on wraps within the column (plain
->   wrap, NOT `-webkit-line-clamp` — that needs `display:-webkit-box` which breaks the `<th>` table-cell/sticky
->   layout). svelte-check 0 errors; web rebuilt. **First action next session: confirm CI green → squash-merge #185.**
+> - **OPEN follow-up — PR #185 `fork/f2-tabular-t6-sticky-col-fix` (2 fixes; merge when CI green):**
+>   **(1) THE IMPORTANT ONE — cockpit stage was non-interactive.** Navigating to a grid THROUGH Commercial
+>   (Expand → the `TabularWorkspace` fly-in): a cell click showed **no drawer** and the cells **wouldn't scroll
+>   horizontally** — though the standalone `/tabular/[id]` path worked. Cause: `.lq-tabws` (the workspace root) is
+>   the direct child of the fly-in's flex ROW but only set `height:100%` — no `flex`/`width` — so it sized to its
+>   max-content grid and overflowed the fly-in's `overflow:hidden` pane (grid unscrollable + drawer off-screen
+>   right). `/tabular/[id]` is a normal `max-width` block so it was fine — which is why the original T6 Cypress
+>   test (that path) MISSED it. Fix: `.lq-tabws { flex:1; min-width:0; width:100% }`. Guard: NEW
+>   `f2-tabular-t6-cockpit-stage.cy.ts` drives the REAL cockpit Expand→workspace path (6-col grid) and asserts
+>   h-scroll + a cell click shows the drawer within the viewport — **passes live** (evidence
+>   `T6-cypress/f2-tabular-t6-cockpit-stage.png`). LESSON: TabularWorkspace is ONLY used in the cockpit fly-in;
+>   the standalone page inlines its own grid+drawer — so ALWAYS test the cockpit path, not just `/tabular/[id]`.
+>   **(2)** grid first column (doc name) read too large + a long name overflowed its 14rem column (overlaid the
+>   body on scroll): `font-size:0.8125rem` + ellipsis + `title` tooltip; Wrap-on = plain wrap (NOT
+>   `-webkit-line-clamp`, which needs `display:-webkit-box` and breaks the `<th>` table-cell). svelte-check 0
+>   errors; web rebuilt + live. **First action next session: confirm CI green → squash-merge #185.**
 > - **⏳ MAINTAINER WANTS TO VERIFY LIVE (do this next):** the FULL agentic loop — the Commercial agent *builds*
 >   a grid → it appears **inline in chat** as a `TabularPreview` card with an **Expand** button → Expand opens the
 >   **stage-takeover** workspace (conversation slides back, docked cell drawer). A ready matter exists:
