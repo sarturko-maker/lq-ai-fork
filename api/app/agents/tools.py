@@ -55,7 +55,7 @@ from app.agents.guard import GuardContext, guarded_dispatch
 from app.config import get_settings
 from app.knowledge.embedding_provider import get_embedding_provider
 from app.knowledge.rerank_provider import get_rerank_provider
-from app.knowledge.retrieval import matter_search_reranked
+from app.knowledge.retrieval import MatterSearchHit, matter_search_reranked
 from app.models.document import Document
 from app.models.file import File
 from app.models.project import ProjectFile
@@ -225,10 +225,44 @@ async def _embed_query(query: str) -> list[float] | None:
     return vectors[0] if vectors else None
 
 
+async def matter_reranked_hits(
+    db: AsyncSession,
+    binding: MatterBinding,
+    query: str,
+    *,
+    top_k: int,
+    document_id: uuid.UUID | None = None,
+) -> list[MatterSearchHit]:
+    """Embed the query + retrieve the matter's top hits (optionally one document).
+
+    The single embed + hybrid + rerank wiring shared by ``search_documents``
+    (``_search``, whole-matter) and the agentic tabular ``gather_row_evidence``
+    (``document_id`` scoped). Embeds via the configured provider; degrades to the
+    FTS-only fast path (``alpha=1.0``) when the embedder is unavailable or the matter
+    has no vectors; reorders with the local cross-encoder only when
+    ``settings.rerank_enabled`` (``reranker=None`` ⇒ byte-identical to plain hybrid).
+    ``matter_search_reranked`` itself is untouched — the frozen retrieval baselines hold.
+    """
+    settings = get_settings()
+    query_embedding = await _embed_query(query)
+    return await matter_search_reranked(
+        db,
+        project_id=binding.project_id,
+        user_id=binding.user_id,
+        query=query,
+        query_embedding=query_embedding,
+        top_k=top_k,
+        alpha=_HYBRID_ALPHA if query_embedding is not None else 1.0,
+        reranker=get_rerank_provider() if settings.rerank_enabled else None,
+        rerank_candidates=settings.rerank_candidates,
+        document_id=document_id,
+    )
+
+
 async def _search(db: AsyncSession, binding: MatterBinding, query: str) -> str:
     """Retrieve over the matter's chunks; empty query → document inventory.
 
-    Routes through :func:`app.knowledge.retrieval.matter_search_reranked` — the one
+    Routes through :func:`matter_reranked_hits` → ``matter_search_reranked`` — the one
     matter retriever the Track-B eval also runs (ADR-F049 Slice A). Slice C1 embeds
     the query (local door by default) and fuses FTS + vectors (``embedding_local``);
     if the embedder is unavailable or the matter has no vectors yet, the fusion
@@ -239,19 +273,7 @@ async def _search(db: AsyncSession, binding: MatterBinding, query: str) -> str:
     if not query.strip():
         return await _inventory(db, binding, header="Documents attached to this matter:")
 
-    settings = get_settings()
-    query_embedding = await _embed_query(query)
-    hits = await matter_search_reranked(
-        db,
-        project_id=binding.project_id,
-        user_id=binding.user_id,
-        query=query,
-        query_embedding=query_embedding,
-        top_k=_SEARCH_LIMIT,
-        alpha=_HYBRID_ALPHA if query_embedding is not None else 1.0,
-        reranker=get_rerank_provider() if settings.rerank_enabled else None,
-        rerank_candidates=settings.rerank_candidates,
-    )
+    hits = await matter_reranked_hits(db, binding, query, top_k=_SEARCH_LIMIT)
 
     if not hits:
         inventory = await _inventory(

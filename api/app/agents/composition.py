@@ -204,30 +204,37 @@ RETRIEVAL_STRATEGY_DOCTRINE = (
     "you may dispatch; spend it deliberately on independent breadth, not routine lookups."
 )
 
-# ADR-F055 (F2 Tabular T1): the agentic "grids" doctrine — appended ONLY for a Commercial
-# matter with the Grids capability enabled (tabular_enabled). Teaches the start→fan-out→
-# finalize flow + the fan-out crossover. The retrieval-fill path above the quota is T4; the
-# T1 doctrine degrades a too-large set to read-and-record rather than promising a tool that
-# does not exist yet. This is the TASTE layer (prose craft, ADR-F041); a dedicated
-# proactive-suggestion skill is T3.
+# ADR-F055 (F2 Tabular T1 + T4): the agentic "grids" doctrine — appended ONLY for a
+# Commercial matter with the Grids capability enabled (tabular_enabled). Teaches the
+# start→gather-evidence→record→finalize flow + the fan-out↔retrieval crossover. T4 adds the
+# bounded gather_row_evidence primitive (ONE search per column, no loop) so filling a row
+# can never thrash, and the real retrieval-fill path above the quota. This is the TASTE
+# layer (prose craft, ADR-F041); a dedicated proactive-suggestion skill is T3.
 TABULAR_FILL_DOCTRINE = (
     "\n\nWhen the lawyer asks you to compare, extract, or summarise a field across SEVERAL "
     "of this matter's documents (a due-diligence sweep, 'what is the X in each', a key-terms "
     "table), build a GRID rather than answering in prose. Call start_tabular_review with the "
     "columns (each a name + the question to ask of every document) and, optionally, the "
     "documents to cover (default: the whole matter). It returns a grid_id and a recommended "
-    "fill strategy. When the document count is at or below the fan-out limit it reports, FAN "
-    "OUT one subagent per document with the task tool: each subagent reads ITS document and "
-    "calls record_tabular_row(grid_id, its filename, the cells for every column) — value, a "
-    "short verbatim source_quote, the confidence, and notes for anything ambiguous; use "
-    "confidence='failed' when the document does not answer a column (never leave a cell out "
-    "silently). When every document's row is recorded, call finalize_tabular_review(grid_id) "
-    "— it refuses until every cell has been attempted, then saves the grid. The grid is the "
-    "work product; keep it current as the lawyer asks for changes. To CHANGE a finalized "
-    'grid ("re-pull the Term for Acme", "fix that governing-law cell"), re-read the '
-    "document(s) and call update_tabular_cells(grid_id, filename, the corrected cells) — it "
-    "edits the saved grid in place; only the columns you name change, and the lawyer owns "
-    "the result and can undo it."
+    "fill strategy. To fill a document's row, call gather_row_evidence(grid_id, its filename) "
+    "ONCE — it runs one retrieval per column (scoped to that document) and returns the "
+    "grounded passages with their chunk ids; extract each column's value from those passages "
+    "and call record_tabular_row(grid_id, its filename, the cells for every column) — value, "
+    "a short verbatim source_quote, the confidence, notes for anything ambiguous, and the "
+    "cited_chunk_ids. Do NOT keep searching a cell: if a column's passages do not answer it, "
+    "record confidence='failed' (never leave a cell out silently). When the document count is "
+    "at or below the fan-out limit it reports, FAN OUT one subagent per document (each does "
+    "gather_row_evidence then record_tabular_row for its document); above the limit, fan out "
+    "subagents that each own a SLICE of the documents and loop the same two calls per "
+    "document. (For a genuinely dense document a full read_document can extract more than the "
+    "passages — escalate to it only when the evidence is clearly thin, not by re-searching.) "
+    "When every document's row is recorded, call finalize_tabular_review(grid_id) — it "
+    "refuses until every cell has been attempted, then saves the grid. The grid is the work "
+    "product; keep it current as the lawyer asks for changes. To CHANGE a finalized grid "
+    '("re-pull the Term for Acme", "fix that governing-law cell"), gather evidence (or read '
+    "the document) and call update_tabular_cells(grid_id, filename, the corrected cells) — it "
+    "edits the saved grid in place; only the columns you name change, and the lawyer owns the "
+    "result and can undo it."
 )
 
 # C-CLIENT (ADR-F030): the operator's Organization Profile is the company /

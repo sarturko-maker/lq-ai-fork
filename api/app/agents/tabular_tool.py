@@ -41,7 +41,9 @@ from app.agents.guard import GuardContext, guarded_dispatch
 
 # The shared matter-membership query is the security boundary (membership union + owner
 # re-assertion + not-deleted) — reuse it, never re-derive the scope (drift = a leak).
-from app.agents.tools import MatterBinding, _matter_files_query
+# ``matter_reranked_hits`` is the SAME embed+hybrid+rerank wiring search_documents uses,
+# so gather_row_evidence can't drift from the retriever (or the frozen eval baselines).
+from app.agents.tools import MatterBinding, _matter_files_query, matter_reranked_hits
 from app.audit import audit_action
 from app.models.document import Document
 from app.models.file import File
@@ -51,6 +53,7 @@ from app.schemas.tabular import CELL_OVERRIDE_KEYS
 from app.schemas.tabular_agent import (
     AgenticCellInput,
     FinalizeTabularReviewInput,
+    GatherRowEvidenceInput,
     RecordTabularRowInput,
     StartTabularReviewInput,
 )
@@ -60,11 +63,18 @@ logger = logging.getLogger(__name__)
 TABULAR_TOOL_NAMES = frozenset(
     {
         "start_tabular_review",
+        "gather_row_evidence",
         "record_tabular_row",
         "finalize_tabular_review",
         "update_tabular_cells",
     }
 )
+
+# T4 (ADR-F055): the bounded row-evidence retrieval primitive. ONE reranked search per
+# column (no loop, no LLM inside) so filling a row can never thrash — the cap lives in
+# code, not the prompt. Sized so a wide grid's evidence stays within a subagent's context.
+_EVIDENCE_TOP_K = 4  # passages returned per column
+_EVIDENCE_SNIPPET_CHARS = 600  # per-passage truncation
 
 
 def build_tabular_tools(
@@ -123,6 +133,30 @@ def build_tabular_tools(
             ctx,
         )
 
+    async def gather_row_evidence(grid_id: str, document: str) -> str:
+        """Gather the passages needed to fill ONE document's row — in a single call.
+
+        The cheap, no-thrash way to fill a grid: instead of searching per cell, call this
+        ONCE for a document and it runs one retrieval per column (scoped to that document)
+        and returns the top matching passages, each tagged with its chunk id. Then extract
+        each column's value from its passages and call record_tabular_row with the value, a
+        short verbatim source_quote, the confidence, and the cited_chunk_ids.
+
+        - ``grid_id``: the id from start_tabular_review.
+        - ``document``: the document's filename, exactly as shown by search_documents.
+
+        Do NOT search a cell again after this — if a column's passages do not answer it,
+        record that cell with confidence='failed'. (For a very long document a full
+        read_document may extract more than these passages; this is the cheap default.)
+        """
+        return await guarded_dispatch(
+            "gather_row_evidence",
+            lambda db: _gather_row_evidence(
+                db, binding, grid_id=grid_id, document=document, run_id=run_id
+            ),
+            ctx,
+        )
+
     async def record_tabular_row(
         grid_id: str, document: str, cells: dict[str, dict[str, Any]]
     ) -> str:
@@ -159,7 +193,9 @@ def build_tabular_tools(
         """
         return await guarded_dispatch(
             "finalize_tabular_review",
-            lambda db: _finalize_tabular_review(db, binding, grid_id=grid_id, run_id=run_id),
+            lambda db: _finalize_tabular_review(
+                db, binding, grid_id=grid_id, run_id=run_id, fan_out_quota=fan_out_quota
+            ),
             ctx,
         )
 
@@ -191,6 +227,7 @@ def build_tabular_tools(
 
     return [
         start_tabular_review,
+        gather_row_evidence,
         record_tabular_row,
         finalize_tabular_review,
         update_tabular_cells,
@@ -260,14 +297,15 @@ async def _start_tabular_review(
     fits_fanout = fan_out_quota <= 0 or n_docs <= fan_out_quota
     if fits_fanout:
         strategy = (
-            "fan out one subagent per document with the task tool — each reads its document "
-            "and calls record_tabular_row with the cells for every column"
+            "fan out one subagent per document with the task tool — each calls "
+            "gather_row_evidence(grid_id, its filename) ONCE, extracts the columns from the "
+            "returned passages, and calls record_tabular_row for every column"
         )
     else:
         strategy = (
             f"there are more documents ({n_docs}) than your subagent limit ({fan_out_quota}); "
-            "read the most relevant documents and record their rows, retrieving passages with "
-            "search_documents for the rest — fill every row"
+            "fan out subagents that each own a SLICE of the documents — for each of its "
+            "documents a subagent calls gather_row_evidence then record_tabular_row"
         )
     note = f" (skipped {len(unresolved)} unmatched: {', '.join(unresolved)})" if unresolved else ""
     return (
@@ -276,6 +314,91 @@ async def _start_tabular_review(
         f"Recommended fill: {strategy}.\n"
         f'When every document\'s row is recorded, call finalize_tabular_review("{grid_id}").'
     )
+
+
+async def _gather_row_evidence(
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    grid_id: str,
+    document: str,
+    run_id: uuid.UUID,
+) -> str:
+    """Validate → load grid (read-only) → resolve doc → ONE reranked search per column.
+
+    The bounded, no-LLM retrieval primitive (ADR-F055 T4): exactly one
+    ``matter_reranked_hits`` per column, scoped to this document, so filling a row can
+    never loop. The agent extracts + records; this only surfaces grounded passages.
+    """
+    try:
+        proposal = GatherRowEvidenceInput(grid_id=grid_id, document=document)  # type: ignore[arg-type]
+    except ValidationError as exc:
+        return _rejection_text(exc, "gather_row_evidence")
+
+    execution = await _load_grid(db, binding, proposal.grid_id)
+    if execution is None:
+        return _no_grid_text(proposal.grid_id)
+
+    resolved = await _resolve_one_document(db, binding, proposal.document)
+    if resolved is None:
+        return (
+            f'No ingested document named "{proposal.document}" in this matter. Use '
+            "search_documents (empty query) to list the matter's documents."
+        )
+    document_id, document_name = resolved
+    if document_id not in set(execution.document_ids):
+        names = await _names_for_documents(db, binding, list(execution.document_ids))
+        covered = ", ".join(sorted(names.values())) or "(none)"
+        return (
+            f'"{document_name}" is not one of this grid\'s documents. The grid covers: {covered}.'
+        )
+
+    specs = _column_specs(execution)
+    blocks: list[str] = []
+    total_passages = 0
+    for name, query in specs:
+        # ONE search per column — the structural no-thrash guarantee (T4).
+        hits = await matter_reranked_hits(
+            db, binding, query, top_k=_EVIDENCE_TOP_K, document_id=document_id
+        )
+        if not hits:
+            blocks.append(
+                f"## {name}\n(no matching passages — record confidence='failed' if the "
+                "document does not answer this column)"
+            )
+            continue
+        lines: list[str] = []
+        for hit in hits:
+            snippet = hit.content.strip()
+            if len(snippet) > _EVIDENCE_SNIPPET_CHARS:
+                snippet = snippet[: _EVIDENCE_SNIPPET_CHARS - 1] + "…"
+            lines.append(f"[chunk {hit.chunk_id}] {snippet}")
+            total_passages += 1
+        blocks.append(f"## {name}\n" + "\n".join(lines))
+
+    await audit_action(
+        db,
+        user_id=binding.user_id,
+        action="tabular.row_evidence_gathered",
+        resource_type="tabular_execution",
+        resource_id=str(execution.id),
+        project_id=binding.project_id,
+        practice_area_id=binding.practice_area_id,
+        details={
+            "document_id": str(document_id),
+            "columns": len(specs),
+            "passages": total_passages,
+        },
+    )
+
+    header = (
+        f'Evidence for "{document_name}" in grid {execution.id} — one search per column '
+        f"({len(specs)} column(s), {total_passages} passage(s)). Extract each column's value "
+        "from its passages and call record_tabular_row(value, a short verbatim source_quote, "
+        "confidence, cited_chunk_ids). Do NOT search these cells again — record "
+        "confidence='failed' for any column its passages do not answer."
+    )
+    return header + "\n\n" + "\n\n".join(blocks)
 
 
 async def _record_tabular_row(
@@ -440,6 +563,7 @@ async def _finalize_tabular_review(
     *,
     grid_id: str,
     run_id: uuid.UUID,
+    fan_out_quota: int,
 ) -> str:
     """Validate → lock the grid → completeness gate → mark completed (or reject the gaps)."""
     try:
@@ -480,7 +604,12 @@ async def _finalize_tabular_review(
 
     execution.status = "completed"
     execution.completed_at = datetime.now(UTC)
-    execution.fill_mode = "fanout"  # T1 implements the fan-out engine; T4 adds retrieval.
+    # Crossover (ADR-F055 T4): above the subagent quota the recommended path is
+    # retrieval-fill (batched-row subagents using gather_row_evidence); at/below it is
+    # fan-out-read. Record which the run was routed toward (a recommendation-based signal;
+    # per-row fill provenance is a later refinement). fan_out_quota<=0 disables fan-out.
+    n_docs = len(execution.document_ids)
+    execution.fill_mode = "retrieval" if 0 < fan_out_quota < n_docs else "fanout"
     await db.flush()
 
     filled, total = _coverage_counts(execution)
@@ -510,6 +639,33 @@ async def _finalize_tabular_review(
 # --- helpers --------------------------------------------------------------------------
 
 
+def _grid_scope_stmt(binding: MatterBinding, grid_id: uuid.UUID) -> Any:
+    """The matter+owner+agentic+not-deleted scope shared by both grid loaders.
+
+    Single source of the security boundary (cross-user / cross-matter → None, 404-conflated;
+    ``mode='agentic'`` so a tool can never touch a frozen linear execution row).
+    """
+    return select(TabularExecution).where(
+        TabularExecution.id == grid_id,
+        TabularExecution.user_id == binding.user_id,
+        TabularExecution.project_id == binding.project_id,
+        TabularExecution.mode == "agentic",
+        TabularExecution.deleted_at.is_(None),
+    )
+
+
+async def _load_grid(
+    db: AsyncSession, binding: MatterBinding, grid_id: uuid.UUID
+) -> TabularExecution | None:
+    """Load an AGENTIC grid for this matter + owner, read-only (no lock).
+
+    For the read-only ``gather_row_evidence`` path — it never writes ``results``, so it must
+    not take the ``FOR UPDATE`` lock that would needlessly serialize concurrent fan-out
+    evidence gathers.
+    """
+    return (await db.execute(_grid_scope_stmt(binding, grid_id))).scalar_one_or_none()
+
+
 async def _load_grid_for_update(
     db: AsyncSession, binding: MatterBinding, grid_id: uuid.UUID
 ) -> TabularExecution | None:
@@ -518,18 +674,9 @@ async def _load_grid_for_update(
     Matter + owner re-asserted (cross-user / cross-matter → None, 404-conflated). ``mode``
     pinned to 'agentic' so a tool can never touch a frozen linear execution row.
     """
-    stmt = (
-        select(TabularExecution)
-        .where(
-            TabularExecution.id == grid_id,
-            TabularExecution.user_id == binding.user_id,
-            TabularExecution.project_id == binding.project_id,
-            TabularExecution.mode == "agentic",
-            TabularExecution.deleted_at.is_(None),
-        )
-        .with_for_update()
-    )
-    return (await db.execute(stmt)).scalar_one_or_none()
+    return (
+        await db.execute(_grid_scope_stmt(binding, grid_id).with_for_update())
+    ).scalar_one_or_none()
 
 
 async def _resolve_documents(
@@ -652,6 +799,22 @@ def _column_names(execution: TabularExecution) -> list[str]:
         for c in (execution.columns or [])
         if isinstance(c, dict) and isinstance(c.get("name"), str)
     ]
+
+
+def _column_specs(execution: TabularExecution) -> list[tuple[str, str]]:
+    """(column name, retrieval query) pairs for evidence gathering.
+
+    The query is the column's ``query`` (the question asked of every document); fall back to
+    the column name when a stored column somehow lacks one (defensive — the input schema
+    requires it).
+    """
+    specs: list[tuple[str, str]] = []
+    for c in execution.columns or []:
+        if isinstance(c, dict) and isinstance(c.get("name"), str):
+            name = c["name"]
+            query = c["query"] if isinstance(c.get("query"), str) and c["query"].strip() else name
+            specs.append((name, query))
+    return specs
 
 
 def _rows_by_doc(results: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
