@@ -24,6 +24,7 @@ factory), so they seed via a commit-capable factory and tear down by
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ from app.agents.compliance_tools import COMPLIANCE_TOOL_NAMES, build_compliance_
 from app.agents.tools import MatterBinding
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
+from app.models.classification import RiskClassification
 from app.models.compliance import AiSystem
 from app.models.practice_area import PracticeArea
 from app.models.project import Project
@@ -69,6 +71,7 @@ class ComplianceEnv:
     propose: Callable[..., Awaitable[str]]
     retire: Callable[..., Awaitable[str]]
     list_systems: Callable[..., Awaitable[str]]
+    classify: Callable[..., Awaitable[str]]
     built_tool_names: frozenset[str]
     ledger: AiSystemChangeLedger
 
@@ -145,6 +148,7 @@ async def compliance_env(
             propose=by_name["propose_ai_system"],
             retire=by_name["retire_ai_system"],
             list_systems=by_name["list_ai_systems"],
+            classify=by_name["classify_ai_system"],
             built_tool_names=frozenset(t.__name__ for t in tools),
             ledger=ledger,
         )
@@ -153,6 +157,10 @@ async def compliance_env(
 
     async with commit_factory() as db:
         await db.execute(delete(AuditLog).where(AuditLog.user_id == env.user_id))
+        # Classifications FK ai_systems (RESTRICT) — delete them before the register rows.
+        await db.execute(
+            delete(RiskClassification).where(RiskClassification.source_project_id == env.project_id)
+        )
         await db.execute(delete(AiSystem).where(AiSystem.source_project_id == env.project_id))
         await db.execute(delete(AgentRun).where(AgentRun.user_id == env.user_id))
         await db.execute(delete(AgentThread).where(AgentThread.user_id == env.user_id))
@@ -303,3 +311,120 @@ async def test_db_check_refuses_inconsistent_row(compliance_env: ComplianceEnv) 
                 )
             )
             await db.commit()
+
+
+# --- AIC-2: the classify_ai_system tool + verdict persistence (presence gate) ----
+
+
+async def _classifications(env: ComplianceEnv) -> list[RiskClassification]:
+    async with env.factory() as db:
+        rows = (
+            await db.execute(
+                select(RiskClassification)
+                .where(RiskClassification.source_project_id == env.project_id)
+                .order_by(RiskClassification.created_at.asc())
+            )
+        ).scalars()
+        return list(rows)
+
+
+async def _first_system_id(env: ComplianceEnv) -> str:
+    await env.propose(**_VALID)
+    return str((await _systems(env))[0].id)
+
+
+async def test_classify_persists_sealed_high_risk_verdict(compliance_env: ComplianceEnv) -> None:
+    sid = await _first_system_id(compliance_env)
+    result = await compliance_env.classify(sid, annex_iii_area="employment")
+    assert "HIGH" in result
+    assert "engine's determination" in result
+
+    rows = await _classifications(compliance_env)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.tier == "high"
+    assert row.route == "annex_iii"
+    assert row.superseded_at is None
+    assert row.verdict_hash
+    assert row.ruleset_version.startswith("2024-1689+omnibus-2026-06-30")
+    # Provenance + durable scoping key stamped from the binding, never the model.
+    assert row.source_project_id == compliance_env.project_id
+    assert row.practice_area_id == compliance_env.practice_area_id
+    # The engine's input snapshot is stored; the tier is not one of its keys.
+    assert "tier" not in row.facts
+    assert row.facts["annex_iii_area"] == "employment"
+
+
+async def test_reclassify_same_facts_is_idempotent(compliance_env: ComplianceEnv) -> None:
+    sid = await _first_system_id(compliance_env)
+    await compliance_env.classify(sid, annex_iii_area="employment")
+    again = await compliance_env.classify(sid, annex_iii_area="employment")
+    assert "unchanged" in again.lower()
+    # Still exactly one row (no duplicate, no supersede).
+    rows = await _classifications(compliance_env)
+    assert len(rows) == 1
+    assert rows[0].superseded_at is None
+
+
+async def test_reclassify_changed_facts_supersedes(compliance_env: ComplianceEnv) -> None:
+    sid = await _first_system_id(compliance_env)
+    await compliance_env.classify(sid, annex_iii_area="employment")  # high
+    # A valid Art 6(3) derogation drops it below high-risk → a different verdict.
+    await compliance_env.classify(
+        sid, annex_iii_area="employment", art6_3_derogation_condition="narrow_procedural_task"
+    )
+    rows = await _classifications(compliance_env)
+    assert len(rows) == 2
+    current = [r for r in rows if r.superseded_at is None]
+    superseded = [r for r in rows if r.superseded_at is not None]
+    assert len(current) == 1 and len(superseded) == 1
+    assert current[0].tier == "minimal"
+    assert current[0].draft_basis is True
+    assert superseded[0].tier == "high"
+
+
+async def test_classify_unknown_system_refused(compliance_env: ComplianceEnv) -> None:
+    result = await compliance_env.classify(str(uuid.uuid4()), annex_iii_area="employment")
+    assert "refused" in result.lower()
+    assert await _classifications(compliance_env) == []
+
+
+async def test_classify_rejects_incoherent_facts(compliance_env: ComplianceEnv) -> None:
+    sid = await _first_system_id(compliance_env)
+    # third-party conformity assessment without an Annex I component is incoherent.
+    result = await compliance_env.classify(sid, requires_third_party_conformity_assessment=True)
+    assert "rejected" in result.lower()
+    assert await _classifications(compliance_env) == []
+
+
+async def test_classify_tool_has_no_tier_parameter(compliance_env: ComplianceEnv) -> None:
+    # The presence gate at the tool boundary: there is no way to pass a verdict in.
+    params = set(inspect.signature(compliance_env.classify).parameters)
+    assert "tier" not in params
+    assert "risk_tier" not in params
+    assert "route" not in params
+
+
+async def test_classify_ledger_records_classify_verb(compliance_env: ComplianceEnv) -> None:
+    sid = await _first_system_id(compliance_env)
+    compliance_env.ledger.drain()  # discard the create from _first_system_id
+    await compliance_env.classify(sid, annex_iii_area="employment")
+    changes = compliance_env.ledger.drain()
+    assert len(changes) == 1
+    assert changes[0].kind == "ai_system"
+    assert changes[0].verb == "classify"
+    assert changes[0].id == sid
+
+
+async def test_classify_audit_row_carries_ids_not_facts(compliance_env: ComplianceEnv) -> None:
+    sid = await _first_system_id(compliance_env)
+    await compliance_env.classify(sid, annex_iii_area="employment")
+    rows = await _audit_rows(compliance_env)
+    classify_rows = [r for r in rows if r.details.get("tool") == "classify_ai_system"]
+    assert len(classify_rows) == 1
+    audit = classify_rows[0]
+    assert audit.details["outcome"] == "success"
+    # The register name and intended purpose never reach the audit row.
+    serialized = str(audit.details)
+    assert "Applicant ranking model" not in serialized
+    assert "Score and rank" not in serialized

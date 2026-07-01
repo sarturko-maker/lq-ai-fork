@@ -28,15 +28,36 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   AIC-4b (flags carried, coherence-checked). Gate green: **74 passed** (compliance schema/tools/read +
 >   capabilities + practice-area seed) on a throwaway DB migrated through 0085; ruff + mypy + svelte-check
 >   (0 err) clean. Plan `docs/fork/plans/AIC-1-ai-systems-register.md`; ADR-F057 Implementation-notes addendum.
+> - **AIC-2 SHIPPED — the deterministic verdict engine (the module's IP).** Branch
+>   **`fork/aic-2-verdict-engine`** stacked on the AIC-1 branch (rebase onto main after #188/#189). Migration
+>   **0086** (`risk_classifications`: sealed verdicts, one CURRENT per system via a partial-unique index,
+>   born-flip-ready + deployment-global like the register). `app/aiact/classify.py` = a **pure total function**
+>   `classify(facts) → Verdict{tier,route,article_refs,predicate_trace,ruleset_version,verdict_hash,draft_basis}`
+>   (no LLM/IO/key/clock); law is versioned data in `app/aiact/ruleset.py` (`RULESET_VERSION`
+>   `2024-1689+omnibus-2026-06-30.v1` + "not legal advice" disclaimer). **Presence gate is STRUCTURAL:** the only
+>   tier path is `classify_ai_system` (in `COMPLIANCE_TOOL_NAMES`), whose `ClassificationFactsInput` is
+>   `extra="forbid"` with **no tier/route field** (tested). Waterfall: Art 5 (incl. Omnibus NCII/CSAM) → Annex I
+>   3p-CA → Annex III (Art 6(3) derogation = conservative `draft_basis`; profiling never derogates) → Art 50 →
+>   minimal. Recompute-on-fact-change = supersede (idempotent on `verdict_hash`). Read: `GET …/classification`
+>   full verdict + a current-verdict badge joined onto the register list; web `ComplianceRegister.svelte` gains a
+>   **Risk tier badge** column, live-washed via the existing `data-compliance-change` (verb `classify`).
+>   **Legal grounding web-researched 2026-07-01** (Omnibus changed *dates* — AIC-6, not this engine — + one Art 5
+>   branch; the classification TEST is unchanged from Reg 2024/1689). **Counsel-review of ruleset v1 is still
+>   OPEN** (ADR-F057 open #8) — verdicts carry the disclaimer until validated. Gate green: **75 passed**
+>   (engine golden table + schema presence-gate + tools + read) on a throwaway DB thru 0086; ruff + mypy +
+>   svelte-check (0 err) clean; broad `tests/agents/` regression re-run. **Live 3-service rebuild DEFERRED
+>   (OOM-aware), as with AIC-1.** Plan `docs/fork/plans/AIC-2-verdict-engine.md`; ADR-F057 AIC-2 addendum.
 > - **PLAN + ADR:** `docs/fork/plans/AI-COMPLIANCE-module.md` + **ADR-F057** (deterministic verdict engine +
 >   presence gate; rides F018/F019/F020/F021). Reference = the maintainer's PRIVATE `sarturko-maker/EU_AI_Act`
 >   repo — REFERENCE-ONLY, clean-room. Memory: [[ai-compliance-module-pivot]].
 > - **DECISIONS (2026-07-01):** GPAI Chapter V DEFERRED (carry flags); register DEPLOYMENT-GLOBAL; start now.
 >   **⚠️ Digital Omnibus ADOPTED 2026-06-30** (post-cutoff) → web-research + counsel-review the law at
 >   AIC-2/AIC-6 (the `regulatory_calendar` is a versioned data table for exactly this).
-> - **NEXT: AIC-2** — the deterministic verdict engine (`app/aiact/classify.py`): consume the AIC-1 facts →
->   tier/role/obligations verdict with `verdict_hash` + `ruleset_version`, gated so the model cannot
->   self-certify a tier. Web-research + counsel-review the ADOPTED Omnibus BEFORE encoding the rules.
+> - **NEXT: AIC-3** — org role (provider/deployer, Art 25 flip triggers) + the tier×role → ObligationItem
+>   checklist per system. Role does NOT change the tier (AIC-2 proved that) — it selects the obligation set.
+>   Rule content (Chapter III / Art 26 / Art 50 obligations) must be web-researched + counsel-reviewed against
+>   the ADOPTED Omnibus, same as AIC-2. Consider pulling forward a verdict detail-drawer (route + refs + trace)
+>   now that `GET …/classification` serves it.
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 >
 > ▶▶ **PICKUP (2026-07-02): ▶ TABULAR REVIEW T6 — grid review WORKSPACE + human cell-override — MERGED PR #184

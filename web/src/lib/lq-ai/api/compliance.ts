@@ -16,6 +16,35 @@ import { apiRequest } from './client';
 export type LifecycleStatus = 'in_development' | 'in_service' | 'decommissioned';
 export type DevelopmentOrigin = 'in_house' | 'third_party' | 'hybrid';
 
+// AIC-2: the EU AI Act risk pyramid — the deterministic engine's verdict, never a
+// stored register field (ADR-F057 presence gate).
+export type RiskTier = 'prohibited' | 'high' | 'limited' | 'minimal';
+
+// The current-verdict badge attached to each register row (mirrors
+// app/schemas/classification.py ClassificationSummary).
+export interface ClassificationSummary {
+	tier: RiskTier;
+	route: string;
+	ruleset_version: string;
+	draft_basis: boolean;
+	verdict_hash: string;
+	created_at: string;
+}
+
+// The full sealed verdict (mirrors VerdictRead) — tier + route + refs + reasoning trace.
+export interface VerdictRead {
+	id: string;
+	ai_system_id: string;
+	tier: RiskTier;
+	route: string;
+	article_refs: string[];
+	predicate_trace: Array<{ predicate: string; value: string; effect: string }>;
+	ruleset_version: string;
+	verdict_hash: string;
+	draft_basis: boolean;
+	created_at: string;
+}
+
 export interface AiSystemRead {
 	id: string;
 	name: string;
@@ -29,6 +58,8 @@ export interface AiSystemRead {
 	updated_at: string;
 	// Soft-retire: null = live (default reads hide retired rows).
 	retired_at: string | null;
+	// AIC-2: the current risk verdict, or null until the engine has classified it.
+	classification: ClassificationSummary | null;
 }
 
 export function listAiSystems(): Promise<AiSystemRead[]> {
@@ -37,4 +68,10 @@ export function listAiSystems(): Promise<AiSystemRead[]> {
 
 export function getAiSystem(id: string): Promise<AiSystemRead> {
 	return apiRequest<AiSystemRead>(`/compliance/ai-systems/${encodeURIComponent(id)}`);
+}
+
+export function getAiSystemClassification(id: string): Promise<VerdictRead> {
+	return apiRequest<VerdictRead>(
+		`/compliance/ai-systems/${encodeURIComponent(id)}/classification`
+	);
 }

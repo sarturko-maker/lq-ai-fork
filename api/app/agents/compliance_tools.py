@@ -46,7 +46,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.ai_system_changes import AiSystemChangeLedger
 from app.agents.guard import GuardContext, guarded_dispatch
 from app.agents.tools import MatterBinding
+from app.aiact import ruleset
+from app.aiact.classify import classify, facts_hash
+from app.models.classification import RiskClassification
 from app.models.compliance import AiSystem
+from app.schemas.classification import ClassificationFactsInput
 from app.schemas.compliance import AiSystemInput
 
 # The stable key of the AI Compliance practice area (migration 0084). The composition
@@ -59,6 +63,7 @@ COMPLIANCE_TOOL_NAMES = frozenset(
         "propose_ai_system",
         "list_ai_systems",
         "retire_ai_system",
+        "classify_ai_system",
     }
 )
 
@@ -168,7 +173,81 @@ def build_compliance_tools(
         """List the AI systems in the company register (with IDs)."""
         return await guarded_dispatch("list_ai_systems", lambda db: _list_ai_systems(db), ctx)
 
-    return [propose_ai_system, list_ai_systems, retire_ai_system]
+    async def classify_ai_system(
+        ai_system_id: str,
+        art5_trigger: str = "none",
+        annex_i_safety_component: bool = False,
+        requires_third_party_conformity_assessment: bool = False,
+        annex_iii_area: str = "none",
+        profiling_of_natural_persons: bool = False,
+        art6_3_derogation_condition: str = "none",
+        interacts_with_natural_persons: bool = False,
+        generates_synthetic_content: bool = False,
+        emotion_recognition: bool = False,
+        biometric_categorisation: bool = False,
+    ) -> str:
+        """Classify one AI system under the EU AI Act by supplying the FACTS about it.
+
+        You do NOT decide the risk tier — the deterministic classification engine does,
+        from these facts. You supply what is true about the system; the engine returns
+        the tier (prohibited / high / limited / minimal), the route, the article
+        references, and a full reasoning trace. There is no way to assert a tier here;
+        supplying an unsettled or incoherent fact combination is rejected with reasons.
+
+        Pass ``ai_system_id`` from list_ai_systems. Facts (all optional, default to the
+        "no" case — set only what applies):
+
+        - ``art5_trigger``: a prohibited practice under Article 5, else "none". One of:
+          subliminal_manipulation, exploits_vulnerabilities, social_scoring,
+          predictive_policing_profiling, untargeted_facial_scraping,
+          emotion_recognition_workplace_education, biometric_categorisation_sensitive,
+          realtime_rbi_public_le, ncii_csam_generation.
+        - ``annex_i_safety_component``: true if the system is a safety component of, or
+          is itself, a product covered by EU harmonisation law (Annex I).
+        - ``requires_third_party_conformity_assessment``: true if that Annex I product
+          must undergo third-party conformity assessment (only valid with the above).
+        - ``annex_iii_area``: the high-risk use-case area under Annex III, else "none".
+          One of: biometrics, critical_infrastructure, education, employment,
+          essential_services_credit_insurance, law_enforcement, migration_border,
+          justice_democracy.
+        - ``profiling_of_natural_persons``: true if the Annex III system profiles
+          natural persons (this always stays high-risk — no derogation).
+        - ``art6_3_derogation_condition``: an Article 6(3) derogation ground if the
+          Annex III system does not pose significant risk, else "none". One of:
+          narrow_procedural_task, improves_prior_human_activity,
+          detects_deviations_no_replace, preparatory_task. (Only valid with an Annex III
+          area; the verdict is flagged draft-basis when a derogation is applied.)
+        - ``interacts_with_natural_persons`` / ``generates_synthetic_content`` /
+          ``emotion_recognition`` / ``biometric_categorisation``: Article 50 transparency
+          triggers.
+
+        Re-classifying with the same facts is a no-op; changed facts supersede the prior
+        verdict (the history is kept).
+        """
+        return await guarded_dispatch(
+            "classify_ai_system",
+            lambda db: _classify_ai_system(
+                db,
+                binding,
+                ai_system_id=ai_system_id,
+                art5_trigger=art5_trigger,
+                annex_i_safety_component=annex_i_safety_component,
+                requires_third_party_conformity_assessment=(
+                    requires_third_party_conformity_assessment
+                ),
+                annex_iii_area=annex_iii_area,
+                profiling_of_natural_persons=profiling_of_natural_persons,
+                art6_3_derogation_condition=art6_3_derogation_condition,
+                interacts_with_natural_persons=interacts_with_natural_persons,
+                generates_synthetic_content=generates_synthetic_content,
+                emotion_recognition=emotion_recognition,
+                biometric_categorisation=biometric_categorisation,
+                ledger=change_ledger,
+            ),
+            ctx,
+        )
+
+    return [propose_ai_system, list_ai_systems, retire_ai_system, classify_ai_system]
 
 
 async def _propose_ai_system(
@@ -312,6 +391,120 @@ async def _list_ai_systems(db: AsyncSession) -> str:
         f"Company AI-systems register — {len(rows)} {noun}:\n\n"
         + "\n".join(blocks)
         + _hidden_footer(retired)
+    )
+
+
+async def _classify_ai_system(
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    ai_system_id: str,
+    art5_trigger: str,
+    annex_i_safety_component: bool,
+    requires_third_party_conformity_assessment: bool,
+    annex_iii_area: str,
+    profiling_of_natural_persons: bool,
+    art6_3_derogation_condition: str,
+    interacts_with_natural_persons: bool,
+    generates_synthetic_content: bool,
+    emotion_recognition: bool,
+    biometric_categorisation: bool,
+    ledger: AiSystemChangeLedger | None = None,
+) -> str:
+    """Validate facts, run the engine, persist the sealed verdict (or return refusal).
+
+    The engine (not this function, not the model) authors the tier. The verdict is
+    idempotent on ``verdict_hash``: identical facts + rule set is a no-op; a changed
+    verdict supersedes the prior current row (recompute-on-fact-change, ADR-F057).
+    """
+    try:
+        eid = uuid.UUID(ai_system_id)
+    except ValueError:
+        return (
+            "Classification refused — the id must be one shown by list_ai_systems. "
+            "Nothing was recorded."
+        )
+    try:
+        facts = ClassificationFactsInput(
+            art5_trigger=art5_trigger,  # type: ignore[arg-type]  # str → enum coercion
+            annex_i_safety_component=annex_i_safety_component,
+            requires_third_party_conformity_assessment=requires_third_party_conformity_assessment,
+            annex_iii_area=annex_iii_area,  # type: ignore[arg-type]
+            profiling_of_natural_persons=profiling_of_natural_persons,
+            art6_3_derogation_condition=art6_3_derogation_condition,  # type: ignore[arg-type]
+            interacts_with_natural_persons=interacts_with_natural_persons,
+            generates_synthetic_content=generates_synthetic_content,
+            emotion_recognition=emotion_recognition,
+            biometric_categorisation=biometric_categorisation,
+        )
+    except ValidationError as exc:
+        return _rejection_text(exc, "classify_ai_system")
+
+    system = await db.get(AiSystem, eid)
+    if system is None:
+        return (
+            f"Classification refused — no AI system with id {ai_system_id}. Nothing was recorded."
+        )
+    if binding.practice_area_id is None:
+        # Can't happen (composition gate), mirrored from _propose_ai_system; also
+        # narrows the type for the NON-NULL scoping key below.
+        return (
+            "Classification refused — this matter is not bound to a practice area. "
+            "Nothing was recorded."
+        )
+
+    verdict = classify(facts, is_gpai=system.is_gpai)
+
+    current = (
+        await db.execute(
+            select(RiskClassification).where(
+                RiskClassification.ai_system_id == eid,
+                RiskClassification.superseded_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if current is not None and current.verdict_hash == verdict.verdict_hash:
+        # Same facts + same rule set — the sealed verdict is unchanged. No write.
+        return (
+            f'AI system "{system.name}" is already classified {verdict.tier.value} '
+            f"(unchanged — same facts, ruleset {verdict.ruleset_version}). Nothing was recorded."
+        )
+    if current is not None:
+        # Recompute-on-fact-change: retire the prior current verdict, keep the history.
+        current.superseded_at = datetime.now(UTC)
+
+    row = RiskClassification(
+        ai_system_id=eid,
+        practice_area_id=binding.practice_area_id,
+        source_project_id=binding.project_id,
+        facts=facts.model_dump(mode="json"),
+        facts_hash=facts_hash(facts),
+        tier=verdict.tier.value,
+        route=verdict.route.value,
+        article_refs=list(verdict.article_refs),
+        predicate_trace=verdict.trace_as_dicts(),
+        ruleset_version=verdict.ruleset_version,
+        verdict_hash=verdict.verdict_hash,
+        draft_basis=verdict.draft_basis,
+    )
+    db.add(row)
+    await db.flush()
+    if ledger is not None:
+        # Wash the register row (the badge keys on the ai_system id, not the verdict id).
+        ledger.record(_KIND_AI_SYSTEM, eid, "classify")
+
+    refs = ", ".join(verdict.article_refs) if verdict.article_refs else "none"
+    draft = (
+        " This verdict applies an Art 6(3) derogation and is flagged draft-basis "
+        "(unsettled predicate)."
+        if verdict.draft_basis
+        else ""
+    )
+    return (
+        f'Classified AI system "{system.name}" as {verdict.tier.value.upper()} '
+        f"(route: {verdict.route.value}; refs: {refs}; ruleset {verdict.ruleset_version}). "
+        f"The tier is the engine's determination over the facts you supplied, not an "
+        f"assertion.{draft} {ruleset.DISCLAIMER}"
     )
 
 

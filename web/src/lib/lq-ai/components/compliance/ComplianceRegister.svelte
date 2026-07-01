@@ -8,9 +8,10 @@
 	 * design language. Read-only: the AI Compliance Deep Agent writes the register
 	 * (guarded, code-validated tools); the user reads and owns it.
 	 *
-	 * There is deliberately NO risk-tier column: the tier is a legal determination
-	 * owned by the deterministic engine (ADR-F057 presence gate), not something the
-	 * register stores — it lands in a later slice as its own artifact.
+	 * The register itself stores NO risk tier (ADR-F057 presence gate) — the tier is a
+	 * legal determination owned by the deterministic engine (AIC-2). The "Risk" badge
+	 * shown here is the engine's separate sealed verdict, attached by the read API;
+	 * "Unclassified" until the engine has run.
 	 *
 	 * The live-update machinery (generation-guarded poll + settle reconcile + the
 	 * changed-row wash) mirrors RopaRegister.svelte: the poll is the source of truth;
@@ -30,7 +31,7 @@
 	} from '$lib/components/ui/table/index.js';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
-	import { listAiSystems, type AiSystemRead } from '$lib/lq-ai/api/compliance';
+	import { listAiSystems, type AiSystemRead, type RiskTier } from '$lib/lq-ai/api/compliance';
 	import { POLL_INTERVAL_MS } from '$lib/lq-ai/agents/helpers';
 	import { MOTION, motionMs } from '$lib/lq-ai/cockpit/helpers';
 
@@ -66,6 +67,16 @@
 	function originLabel(v: string): string {
 		return ORIGIN_LABELS[v] ?? v;
 	}
+
+	// AIC-2: the engine's tier → a badge. Scarce colour (F013): only prohibited is red,
+	// only high risk gets the accent; limited/minimal stay muted.
+	type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline';
+	const TIER_BADGE: Record<RiskTier, { label: string; variant: BadgeVariant }> = {
+		prohibited: { label: 'Prohibited', variant: 'destructive' },
+		high: { label: 'High risk', variant: 'default' },
+		limited: { label: 'Limited', variant: 'secondary' },
+		minimal: { label: 'Minimal', variant: 'outline' }
+	};
 
 	// --- Live-update machinery (mirrors RopaRegister.svelte verbatim) ----------
 	// Out-of-order guard: a slow fetch must not clobber a fresher one (the live poll
@@ -175,6 +186,7 @@
 						<TableRow>
 							<TableHead>Name</TableHead>
 							<TableHead>Intended purpose</TableHead>
+							<TableHead>Risk</TableHead>
 							<TableHead>Lifecycle</TableHead>
 							<TableHead>Origin</TableHead>
 							<TableHead>GPAI</TableHead>
@@ -189,6 +201,25 @@
 								<TableCell class="font-medium text-foreground">{s.name}</TableCell>
 								<TableCell class="max-w-md text-muted-foreground">
 									<span class="line-clamp-2">{s.intended_purpose}</span>
+								</TableCell>
+								<TableCell>
+									{#if s.classification}
+										<span
+											class="inline-flex items-center gap-1"
+											title={`${s.classification.route} · ${s.classification.ruleset_version}`}
+										>
+											<Badge variant={TIER_BADGE[s.classification.tier].variant}>
+												{TIER_BADGE[s.classification.tier].label}
+											</Badge>
+											{#if s.classification.draft_basis}
+												<span class="text-xs text-muted-foreground">· draft</span>
+											{/if}
+										</span>
+									{:else}
+										<span class="text-sm text-muted-foreground" title="Not yet classified">
+											Unclassified
+										</span>
+									{/if}
 								</TableCell>
 								<TableCell>
 									<Badge variant="secondary">{lifecycleLabel(s.lifecycle_status)}</Badge>
