@@ -28,14 +28,17 @@ from tests.agents.test_agent_runs_api import _bearer, _make_user, _override_get_
 pytestmark = pytest.mark.integration
 
 _EXPECTED_SEED = [
-    # (key, name, unit_label, configured) in position order. Identity/unit are
-    # migration 0053; ``configured`` reflects the profile seeds — Commercial in
-    # 0054, the other four in 0055 (UX-B-2), so all five now read configured.
+    # (key, name, unit_label, configured) in position order. Identity/unit for the
+    # first five are migration 0053; ``configured`` reflects the profile seeds —
+    # Commercial in 0054, the next four in 0055 (UX-B-2). AI Compliance (position 6)
+    # is introduced already-configured by 0084 (AIC-0, ADR-F057) — the EU AI Act
+    # module home. So all six read configured.
     ("commercial", "Commercial", "Matter", True),
     ("disputes", "Disputes", "Matter", True),
     ("m-and-a", "M&A", "Deal", True),
     ("privacy", "Privacy", "Programme", True),
     ("employment", "Employment", "Matter", True),
+    ("ai-compliance", "AI Compliance", "Programme", True),
 ]
 
 
@@ -113,14 +116,15 @@ async def test_list_practice_areas_position_order(client: AsyncClient, user: Use
     commercial = areas[0]
     assert commercial["configured"] is True
     assert commercial["unit_label"] == "Matter"
-    # All five standard areas carry a seeded profile (Commercial 0054, the rest
-    # 0055), so all derive configured=True.
+    # All six areas carry a seeded profile (Commercial 0054, the next four 0055,
+    # AI Compliance 0084), so all derive configured=True.
     assert {a["key"] for a in areas if a["configured"]} == {
         "commercial",
         "disputes",
         "m-and-a",
         "privacy",
         "employment",
+        "ai-compliance",
     }
 
 
@@ -243,6 +247,69 @@ async def test_default_area_profiles_seed_is_idempotent(db_session: AsyncSession
         assert area.profile_md == "operator-edited disputes profile"
     finally:
         sys.modules.pop("migration_0055", None)
+
+
+# --- AIC-0 AI Compliance area (migration 0084, ADR-F057) ---------------------
+
+
+async def test_ai_compliance_area_present_and_configured(client: AsyncClient, user: User) -> None:
+    """0084 (AIC-0) introduces AI Compliance already-configured: it renders a
+    composer, carries the EU-AI-Act doctrine (incl. the ADR-F057 presence-gate
+    discipline that a risk classification is a legal determination the model does
+    not assert), seeds no area tier floor and no subagents.
+    """
+    resp = await client.get("/api/v1/practice-areas", headers=_bearer(user))
+    assert resp.status_code == 200
+    areas = {a["key"]: a for a in resp.json()["practice_areas"]}
+    area = areas["ai-compliance"]
+    assert area["name"] == "AI Compliance"
+    assert area["unit_label"] == "Programme"
+    assert area["configured"] is True
+    profile = area["profile_md"]
+    assert profile and profile.strip()
+    # The module's defining discipline (ADR-F057): the tier is a legal determination
+    # owned by the engine, not asserted by the model.
+    assert "legal determination" in profile.lower()
+    # Same UX-B-1 calibration as the other areas (ground/cite + clarify-before-guess).
+    assert "cite" in profile.lower()
+    assert "clarifying question" in profile.lower()
+    # No area floor (only tier 4 is qualified) and no live subagents yet.
+    assert area["default_tier_floor"] is None
+    assert area["agent_config"] == {}
+
+
+async def test_ai_compliance_area_seed_is_idempotent(db_session: AsyncSession) -> None:
+    """Re-running the 0084 seed never duplicates the row or clobbers an edit."""
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0084", versions / "0084_seed_ai_compliance_area.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["migration_0084"] = module
+    try:
+        spec.loader.exec_module(module)
+        area = (
+            await db_session.execute(
+                select(PracticeArea).where(PracticeArea.key == "ai-compliance")
+            )
+        ).scalar_one()
+        area.profile_md = "operator-edited ai-compliance profile"
+        await db_session.flush()
+        before = (
+            await db_session.execute(select(func.count()).select_from(PracticeArea))
+        ).scalar_one()
+        conn = await db_session.connection()
+        await conn.run_sync(lambda sync_conn: module._seed_ai_compliance_area(sync_conn))
+        after = (
+            await db_session.execute(select(func.count()).select_from(PracticeArea))
+        ).scalar_one()
+        await db_session.refresh(area)
+        # Key exists ⇒ insert skipped: no duplicate, edit preserved.
+        assert after == before
+        assert area.profile_md == "operator-edited ai-compliance profile"
+    finally:
+        sys.modules.pop("migration_0084", None)
 
 
 # --- UX-B-3 default-area skill bindings (migration 0056) ---------------------
