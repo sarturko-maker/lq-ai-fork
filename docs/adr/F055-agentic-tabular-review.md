@@ -236,8 +236,21 @@ fan-out quota else `'fanout'` — a recommendation-based signal (per-row fill pr
 `FOR UPDATE` — it never writes `results`), a scope-sharing helper single-sources the matter+owner+agentic
 boundary so the two loaders can't drift.
 
-**Consequences.** Positive: a grid can no longer thrash regardless of retrieval quality; the >quota crossover
-is a real path, not prose; `gather_row_evidence` is also T5's natural cell-fill seam. Audit carries
+**Live-verification correction — the `grid_filler` subagent.** A first live run showed the tool alone was
+NECESSARY BUT NOT SUFFICIENT: deepagents fan-out subagents **inherit the lead's full toolset**, so after
+calling `gather_row_evidence` they fell back to `search_documents` and re-searched every cell (0 rows
+recorded, 100-step cap) — the thrash moved one level down. The fix removes the *means* to loop: a dedicated
+**`grid_filler` subagent** with a RESTRICTED toolset `{gather_row_evidence, record_tabular_row,
+read_document}` — no `search_documents` — built in the composition body with the real guarded callables (a
+deepagents `SubAgent` `tools` subset) and wired only when the Grids capability is on; the lead doctrine fans
+out `grid_filler` per document. Re-verified live (2-doc grid, economy): **completed** in 76 steps (was
+cap_exceeded), grid finalized 2×3, and **subagent `search_documents` count = 0** (the structural guarantee) vs
+`gather_row_evidence`=2, `record_tabular_row`=3. `FanOutQuotaMiddleware` now keys off the combined subagent
+list so the quota applies even when the area declares no subagents of its own.
+
+**Consequences.** Positive: a grid can no longer thrash regardless of retrieval quality — the fill subagent
+*physically cannot* re-search; the >quota crossover is a real path, not prose; `gather_row_evidence` is also
+T5's natural cell-fill seam. Audit carries
 counts/ids only (`tabular.row_evidence_gathered`), matter+owner scope is re-asserted (cross-tenant →
 404-absence), the grant set stays confined. Neutral/deferred: the **eval gate** (retrieval-fill vs
 read-in-full **cell quality** on CUAD, to tune the crossover default) is OOM-sensitive (real embedder) and
