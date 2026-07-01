@@ -25,6 +25,23 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   body on scroll): `font-size:0.8125rem` + ellipsis + `title` tooltip; Wrap-on = plain wrap (NOT
 >   `-webkit-line-clamp`, which needs `display:-webkit-box` and breaks the `<th>` table-cell). svelte-check 0
 >   errors; web rebuilt + live. **First action next session: confirm CI green → squash-merge #185.**
+> - **🔬 QUEUED RESEARCH (post-compaction, maintainer-requested) — is `max_steps` the right brake, or should the
+>   token cap govern?** Long contracts (the customer/CUAD sample) make the Commercial deepagent hit the **400-step
+>   limit** (`run_max_steps`, the *balanced* `BudgetEnvelope` in `api/app/agents/budget.py`; economy=100 /
+>   balanced=400 / generous=600, each paired with `token_budget` 2M/8M/16M + `fan_out_quota` + wall-clock — the
+>   R4 token brake is ADR-F051, profiles ADR-F053). **Question:** is hitting the step ceiling a *real* token-cost
+>   problem, or is step-count an arbitrary iteration cap that should defer to the **token cap** (which may be far
+>   more generous)? **Initial framing to test, not conclude:** `max_steps` and `token_budget` are independent
+>   brakes (whichever fires first). For the observed **thrash** ([[tabular-fanout-live-behavior]]: ~35k-tok docs →
+>   150+ searches, 0 `record_tabular_row`), `max_steps` is a *cheap* catch — remove it and the 8M token cap lets
+>   the loop burn far more before stopping. But for **legitimate** large grids (many docs × columns, every step
+>   productive), 400 may *wrongly truncate* a valid, still-cheap run. So the likely answer isn't "steps don't
+>   matter" but "steps are a cheap loop-backstop that's mis-sized for real work": options to weigh — scale
+>   `max_steps` with work size (doc_count × columns, or `fan_out_quota`); raise it and lean on token + wall-clock
+>   caps; and/or fix the thrash root cause (T4 retrieval-fill + doctrine so it stops re-searching). Also research
+>   how **deepagents/langgraph** intend step/recursion limits vs token control (langgraph `recursion_limit`). This
+>   is ADR-worthy (touches ADR-F051/F053). **Do NOT implement — research + recommend first.** Memory:
+>   [[max-steps-vs-token-cap-research]].
 > - **⏳ MAINTAINER WANTS TO VERIFY LIVE (do this next):** the FULL agentic loop — the Commercial agent *builds*
 >   a grid → it appears **inline in chat** as a `TabularPreview` card with an **Expand** button → Expand opens the
 >   **stage-takeover** workspace (conversation slides back, docked cell drawer). A ready matter exists:
