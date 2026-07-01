@@ -239,6 +239,9 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/v1/tabular/executions/{execution_id}"),
     ("DELETE", "/api/v1/tabular/executions/{execution_id}"),
     ("POST", "/api/v1/tabular/executions/{execution_id}/cancel"),
+    # F2 Tabular T6 (ADR-F055 T6 / ADR-F042) — lawyer cell override (human-write).
+    ("POST", "/api/v1/tabular/executions/{execution_id}/cells/override"),
+    ("DELETE", "/api/v1/tabular/executions/{execution_id}/cells/override"),
     # M3-C4a — XLSX/CSV export.
     ("GET", "/api/v1/tabular/executions/{execution_id}/export"),
     # M3-B1 — Word add-in admin manifest generation

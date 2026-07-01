@@ -47,6 +47,7 @@ from app.models.document import Document
 from app.models.file import File
 from app.models.project import ProjectFile
 from app.models.tabular import TabularExecution
+from app.schemas.tabular import CELL_OVERRIDE_KEYS
 from app.schemas.tabular_agent import (
     AgenticCellInput,
     FinalizeTabularReviewInput,
@@ -626,6 +627,17 @@ def _upsert_row(
     for row in rows:
         if row.get("document_id") == document_id:
             merged = dict(row.get("cells", {}))
+            # Human override wins (ADR-F055 T6): the agent may refresh a cell's
+            # value/citations, but it must never drop or overwrite a lawyer's
+            # override. Carry any override_* keys from the existing cell onto
+            # the incoming one before merge (setdefault — the agent path never
+            # sets them itself).
+            for name, new_cell in cells.items():
+                prev = merged.get(name)
+                if isinstance(prev, dict) and isinstance(new_cell, dict):
+                    for key in CELL_OVERRIDE_KEYS:
+                        if key in prev:
+                            new_cell.setdefault(key, prev[key])
             merged.update(cells)
             row["cells"] = merged
             row["document_name"] = document_name

@@ -6,16 +6,17 @@
 	import {
 		getTabularExecution,
 		cancelTabularExecution,
-		exportTabularExecution
+		exportTabularExecution,
+		overrideTabularCell,
+		clearTabularCellOverride
 	} from '$lib/lq-ai/api/tabular';
+	import { openFileInNewTab } from '$lib/lq-ai/api/files';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
 	import TabularGrid from '$lib/lq-ai/components/TabularGrid.svelte';
-	import TabularCitationModal from '$lib/lq-ai/components/TabularCitationModal.svelte';
+	import TabularCellDrawer from '$lib/lq-ai/components/TabularCellDrawer.svelte';
 	import { buildDocumentNameById } from '$lib/lq-ai/agents/tabular-preview';
-	import type {
-		TabularCellResult,
-		TabularExecution
-	} from '$lib/lq-ai/types';
+	import { findCellInExecution } from '$lib/lq-ai/agents/tabular-workspace-helpers';
+	import type { TabularExecution } from '$lib/lq-ai/types';
 
 	import {
 		isTerminalStatus,
@@ -31,13 +32,15 @@
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	let cancelling = false;
 
-	// Citation modal state.
-	interface OpenCellState {
+	// Selected cell → docked drawer (T6, replaces the stacked citation modal).
+	interface Selected {
+		documentId: string;
 		documentName: string;
 		columnName: string;
-		cell: TabularCellResult;
 	}
-	let openCell: OpenCellState | null = null;
+	let selected: Selected | null = null;
+	let saving = false;
+	let actionError: string | null = null;
 
 	$: executionId = $page.params.id;
 	$: docCount = execution?.document_ids.length ?? 0;
@@ -48,6 +51,11 @@
 	// Map document_id -> document_name (joined `document_names` first, row
 	// name as fallback) — shared with the in-chat grid preview (T2).
 	$: documentNameById = execution ? buildDocumentNameById(execution) : {};
+	// Re-derive the selected cell from the live execution so the drawer shows
+	// fresh data after an override refetch (never a stale captured object).
+	$: selectedCell = selected
+		? findCellInExecution(execution, selected.documentId, selected.columnName)
+		: undefined;
 
 	async function loadOnce(): Promise<void> {
 		if (!executionId) return;
@@ -92,15 +100,61 @@
 		documentId: string;
 		documentName: string;
 		columnName: string;
-		cell: TabularCellResult | undefined;
+		cell: import('$lib/lq-ai/types').TabularCellResult | undefined;
 	}>): void {
-		const { documentName, columnName, cell } = event.detail;
+		const { documentId, documentName, columnName, cell } = event.detail;
 		if (!cell) return;
-		openCell = { documentName, columnName, cell };
+		actionError = null;
+		selected = { documentId, documentName, columnName };
 	}
 
-	function closeCellModal(): void {
-		openCell = null;
+	function closeDrawer(): void {
+		selected = null;
+		actionError = null;
+	}
+
+	async function saveOverride(value: string, note: string | null): Promise<void> {
+		if (!selected || !executionId) return;
+		saving = true;
+		actionError = null;
+		try {
+			execution = await overrideTabularCell(executionId, {
+				document_id: selected.documentId,
+				column_name: selected.columnName,
+				override_value: value,
+				override_note: note
+			});
+		} catch (err) {
+			actionError = err instanceof LQAIApiError ? err.message : 'Could not save the override.';
+		} finally {
+			saving = false;
+		}
+	}
+
+	async function clearOverride(): Promise<void> {
+		if (!selected || !executionId) return;
+		saving = true;
+		actionError = null;
+		try {
+			execution = await clearTabularCellOverride(
+				executionId,
+				selected.documentId,
+				selected.columnName
+			);
+		} catch (err) {
+			actionError = err instanceof LQAIApiError ? err.message : 'Could not clear the override.';
+		} finally {
+			saving = false;
+		}
+	}
+
+	async function openSource(fileId: string): Promise<void> {
+		actionError = null;
+		try {
+			await openFileInNewTab(fileId);
+		} catch (err) {
+			actionError = err instanceof LQAIApiError ? err.message : 'Could not open the source document.';
+		}
 	}
 
 	// M3-C4a — XLSX / CSV export.
@@ -241,25 +295,35 @@
 		</div>
 
 		{#if execution.columns.length > 0 && execution.document_ids.length > 0}
-			<TabularGrid
-				results={execution.results}
-				columns={execution.columns}
-				documentIds={execution.document_ids}
-				{documentNameById}
-				on:open={handleCellOpen}
-			/>
+			<div class="lq-tabres__stage">
+				<div class="lq-tabres__grid">
+					<TabularGrid
+						results={execution.results}
+						columns={execution.columns}
+						documentIds={execution.document_ids}
+						{documentNameById}
+						on:open={handleCellOpen}
+					/>
+				</div>
+				{#if selected && selectedCell}
+					<div class="lq-tabres__drawer">
+						<TabularCellDrawer
+							cell={selectedCell}
+							documentName={selected.documentName}
+							columnName={selected.columnName}
+							{saving}
+							{actionError}
+							onClose={closeDrawer}
+							onSaveOverride={saveOverride}
+							onClearOverride={clearOverride}
+							onOpenSource={openSource}
+						/>
+					</div>
+				{/if}
+			</div>
 		{:else}
 			<div class="lq-tabres__state">No grid to render (empty execution).</div>
 		{/if}
-	{/if}
-
-	{#if openCell}
-		<TabularCitationModal
-			documentName={openCell.documentName}
-			columnName={openCell.columnName}
-			cell={openCell.cell}
-			on:close={closeCellModal}
-		/>
 	{/if}
 </section>
 
@@ -389,6 +453,24 @@
 		white-space: pre-wrap;
 		max-height: 6rem;
 		overflow: auto;
+	}
+	.lq-tabres__stage {
+		display: flex;
+		gap: 1rem;
+		align-items: stretch;
+		min-height: 0;
+	}
+	.lq-tabres__grid {
+		flex: 1;
+		min-width: 0;
+	}
+	.lq-tabres__drawer {
+		flex-shrink: 0;
+		width: 24rem;
+		max-width: 42%;
+		border: 1px solid var(--lq-border);
+		border-radius: 0.5rem;
+		overflow: hidden;
 	}
 	.lq-tabres__state {
 		padding: 1.5rem;

@@ -37,6 +37,7 @@ from app.agents.tabular_tool import (
     _record_tabular_row,
     _start_tabular_review,
     _update_tabular_cells,
+    _upsert_row,
     build_tabular_tools,
 )
 from app.agents.tools import MATTER_TOOL_NAMES, MatterBinding
@@ -764,3 +765,70 @@ async def test_update_audits_as_cells_updated(matter: SimpleNamespace) -> None:
             .all()
         )
     assert "tabular.cells_updated" in actions
+
+
+# ---------------------------------------------------------------------------
+# T6 (ADR-F055 T6 / ADR-F042) — a lawyer override survives an agent rewrite.
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_row_preserves_human_override_across_agent_rewrite() -> None:
+    """The agent may refresh a cell's value/citations, but ``_upsert_row`` must
+    carry any override_* keys forward so a re-pull never clobbers the lawyer's
+    correction (the structural "human wins" guarantee)."""
+
+    doc_id = str(uuid.uuid4())
+    # Existing cell carries an agent value + a human override.
+    existing = {
+        "rows": [
+            {
+                "document_id": doc_id,
+                "document_name": "MSA.docx",
+                "cells": {
+                    "Term": {
+                        "value": "One (1) year",
+                        "confidence": "high",
+                        "cited_chunk_ids": [],
+                        "source_quote": "one (1) year",
+                        "notes": None,
+                        "override_value": "Two (2) years",
+                        "override_note": "Amendment 1",
+                        "overridden_by": str(uuid.uuid4()),
+                        "overridden_at": "2026-07-01T00:00:00+00:00",
+                    }
+                },
+            }
+        ]
+    }
+    # The agent re-records the same cell with a fresh (different) value — the
+    # exact 5-key payload the agent write path produces (no override_* keys).
+    fresh = {
+        "Term": {
+            "value": "Eighteen (18) months",
+            "confidence": "medium",
+            "cited_chunk_ids": [str(uuid.uuid4())],
+            "source_quote": "eighteen (18) months",
+            "notes": "re-pulled",
+        }
+    }
+
+    result = _upsert_row(existing, document_id=doc_id, document_name="MSA.docx", cells=fresh)
+
+    cell = result["rows"][0]["cells"]["Term"]
+    # The agent's underlying value is refreshed …
+    assert cell["value"] == "Eighteen (18) months"
+    assert cell["confidence"] == "medium"
+    # … but the human override is untouched and still shadows it.
+    assert cell["override_value"] == "Two (2) years"
+    assert cell["override_note"] == "Amendment 1"
+    assert cell["overridden_by"]
+    assert cell["overridden_at"] == "2026-07-01T00:00:00+00:00"
+
+
+def test_upsert_row_new_row_has_no_override_keys() -> None:
+    """Appending a brand-new row carries no override_* keys (nothing to preserve)."""
+    doc_id = str(uuid.uuid4())
+    fresh = {"Term": {"value": "x", "confidence": "high", "cited_chunk_ids": []}}
+    result = _upsert_row(None, document_id=doc_id, document_name="A.docx", cells=fresh)
+    cell = result["rows"][0]["cells"]["Term"]
+    assert "override_value" not in cell

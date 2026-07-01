@@ -1075,6 +1075,13 @@ export interface TabularCitation {
 	document_id: string;
 	chunk_id?: string | null;
 	confidence: TabularCellConfidence;
+	// Navigation fields resolved at read time by `GET .../executions/{id}` so
+	// the drawer can open the cited source document (T6 M5). `source_file_id`
+	// is `files.id` (what the doc panel / `/files/{id}/content` key off).
+	source_file_id?: string | null;
+	source_page?: number | null;
+	source_text?: string | null;
+	verification_method?: string | null;
 }
 
 /**
@@ -1093,6 +1100,19 @@ export interface TabularCellResult {
 	tier_used?: number | null;
 	cost_usd?: string | null;
 	error?: string | null;
+	verification_method?: string | null;
+	/** A short verbatim quote from the source grounding the value (ADR-F055). */
+	source_quote?: string | null;
+	/** Optional commentary on an ambiguous extraction (ADR-F055). */
+	notes?: string | null;
+	// --- Lawyer override (ADR-F055 T6 / ADR-F042 auto-write-then-correct) ---
+	// The human correction. The EFFECTIVE display value is
+	// `override_value ?? value`; the agent's `value` + citations stay visible
+	// underneath. Set only by `POST .../cells/override` (never an agent tool).
+	override_value?: string | null;
+	override_note?: string | null;
+	overridden_by?: string | null;
+	overridden_at?: string | null;
 }
 
 /**

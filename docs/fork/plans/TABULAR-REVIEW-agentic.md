@@ -170,10 +170,117 @@ grid→deliverables (Word letters/reports). License: reference-only, no code cop
 - **Ledger coexistence:** one run-scoped Commercial ledger passed to both `build_commercial_tools` and
   `build_tabular_tools` (drains any `LiveChange` agnostically) — not two ledgers in one slot.
 
-### T6 (core) — Cockpit stage-takeover + cell side-drawer
-- Expand → panels slide back, grid takes the stage; responsive collapse (Memory/Documents motion is the
-  precedent). **Cell click → side drawer** (CellDetail; LQ-Grid pattern — keeps grid context) showing
-  value + confidence + `source_quote` + `notes` + citations. No new ADR.
+### T6 (core) — Grid review WORKSPACE: stage-takeover + one docked cell drawer + human override — DESIGN LOCKED 2026-07-02
+
+**Reframe (maintainer):** the grid is a review WORKSPACE, not an artifact you pop open. Today **Expand**
+opens a fixed `ag-grid-overlay` (z-60) and a **cell click stacks a SECOND modal** (`TabularCitationModal`,
+z-100) — "overlay on overlay". T6 replaces both with an in-page stage + ONE docked drawer, and adds the
+load-bearing correction seam. Designed off the maintainer's React reference **LQ-Grid**
+(`github.com/sarturko-maker/LQ-Grid`, REFERENCE-ONLY, MIT, rebuilt in Svelte, **no code copied**) + an
+approved interactive mockup. This is the first slice of the phased grid-workspace direction
+(T6 → P2 verified/flagged + completion meter → P3 output-types + semantic colour → P4 party column/filter →
+P5 deliverables); **eval-free** (pure UX + a human-write endpoint — no model behaviour change).
+
+**The 4 LOCKED decisions (AskUserQuestion, 2026-07-02):**
+1. **Cell sign-off** = editable **override + note in T6** (persisted via an ADR-F042 **human-write
+   endpoint**, NOT an agent tool); verified/flagged sign-off is Phase 2.
+2. **Deliverables** = grid **triages → hands flagged rows to the skill/editor (Collabora) flow**; the grid
+   does NOT own document generation.
+3. **Lens** = **document-per-row**; counterparty as a **column + filter** (Matter Roster, ADR-F048) — Phase 4,
+   not T6.
+4. **Source view (v1)** = drawer shows the **verbatim quote + opens the source document**; true in-editor
+   (Collabora/WOPI offset) clause highlight is T9.
+
+**Must-haves (else it is just a prettier modal):**
+- **(M1) In-page stage-takeover** — conversation slides back, **stays MOUNTED** (SSE survives); mirror the
+  `DocumentEditorPanel` fly-in (`ConversationHost.svelte:672-685`), NOT a tab-swap or a Resizable pane.
+- **(M2) ONE docked right drawer** replaces `TabularCitationModal`; **DELETE** it + the `ag-grid-overlay`
+  overlay (`TabularPreview.svelte:255-316` + CSS 456-477). Also fixes the composer-overlap cosmetic (T2
+  addendum) — the drawer docks in-stage, the sticky composer stays scoped to the narrowed conversation column.
+- **(M3)** drawer shows value · confidence · verbatim `source_quote` · `notes` · citations · `tier_used`/cost.
+- **(M4) editable override + note → the human-write endpoint** (the load-bearing add); the human value
+  **structurally wins** — the agent's fill/`update_tabular_cells` (T8) path can never clobber it.
+- **(M5) citation → opens the source document** (new tab via `GET /files/{source_file_id}/content`; not yet
+  highlighted — highlight is T9).
+- **Naming:** NO standing "Grid" tab — tabs stay Conversation·Grids·Documents; an open grid is a **named
+  workspace** with a `‹ Grids / <derived title>` breadcrumb (title from column names — grids have none).
+- **Cell-squish fix:** real **fixed column widths + horizontal scroll + a Wrap toggle** (line-clamp), NOT
+  `width:100%`.
+
+**Backend — one new endpoint, schema fields, structural human-wins (NO migration; override rides `results` JSONB):**
+- NEW **`POST /api/v1/tabular/executions/{execution_id}/cells/override`** (set) + **`DELETE
+  …/cells/override?document_id=&column_name=`** (clear/undo — the ADR-F044 human-authenticated-revert
+  posture). One new distinct path (POST+DELETE share it). **Owner-scoped** (`user_id` from the session;
+  cross-user → 404; **`mode=='agentic'` gate → 404 on a linear row** so it can never mutate the frozen
+  executor, ADR-F001). Take **`.with_for_update()`** before the `results` read-modify-write (concurrent
+  fan-out writers), **reassign** `execution.results` (JSONB dirty-tracking — never mutate in place), set
+  `overridden_by=user.id`, `overridden_at=now(UTC)`. **Audit `tabular.cell_overridden` with IDs/counts only**
+  (never the value/note). Return `_to_response` + `_enrich_cell_citations` (one round-trip, like GET). Body
+  (POST): `{document_id, column_name, override_value(min_length 1), override_note?}` with
+  `ConfigDict(str_strip_whitespace=True, extra='forbid')`. **Mirrors `create_matter_correction`**
+  (`matter_memory.py`, ADR-F042 §B2 — human action, never an agent tool; build the response before
+  `db.commit()`).
+- `CellResult` (`schemas/tabular.py:128`): add `override_value / override_note / overridden_by /
+  overridden_at` (all default `None`, so existing + agent-written cells validate unchanged — Pydantic drops
+  keys not declared on the model). The **effective display value = `override_value ?? value`**; the agent's
+  `value` stays visible underneath (LQ-Grid "overridden" badge).
+- **Human-wins is STRUCTURAL, not claimed:** `tabular_tool.py:_upsert_row`/`_apply_cells` must **preserve any
+  `override_*` keys** when the agent (record/update) rewrites a cell — the agent may refresh
+  value/citations/source_quote underneath, the human override still shadows. **Explicit test.**
+- **Governance guards (a new endpoint touches 3 files):** `test_endpoints.py` `IMPLEMENTED_ROUTES` +=
+  `('POST'|'DELETE', '/api/v1/tabular/executions/{execution_id}/cells/override')` (both tuples);
+  `test_openapi.py` `EXPECTED_PATHS` += the one new path string **and** bump `len==158 → 159`. `execution_id`
+  is already in `_PARAM_VALUES` (no new param).
+
+**Frontend — 2 new components, delete 1 modal, DRY both consumers (no @testing-library/svelte → logic in `.ts`):**
+- NEW **`TabularWorkspace.svelte`** — the grid WORKSPACE shell, reused by BOTH the cockpit stage-takeover
+  **and** the full-page `/tabular/[id]` route: self-fetches by `gridId` (reuse `TabularPreview`'s
+  **poll-until-terminal** `POLL_INTERVAL_MS=1500`/`MAX_POLLS=10` + 404→render-nothing), reuses
+  `buildDocumentNameById`, renders `TabularGrid` (**unchanged**) `on:open` beside a docked
+  `TabularCellDrawer` that **PUSHES** the grid (LQ-Grid `App.tsx` layout: grid `flex-1 min-w-0
+  overflow-auto`, drawer `shrink-0` width, `transition-[width]`; drawer width 0 when no cell — no z-index).
+  Owns selected-cell + Wrap toggle + the `‹ Grids / <title>` breadcrumb (`gridTitle` from
+  `grids-panel-helpers`). `onClose?` (docked) / absent (full-page). Override save → POST + refetch; clear →
+  DELETE + refetch.
+- NEW **`TabularCellDrawer.svelte`** — replaces `TabularCitationModal`: value/confidence/tier/cost + verbatim
+  `source_quote` (amber blockquote, LQ-Grid) + `notes` + citations + **Open source document ↗**
+  (`/files/{source_file_id}/content`, new tab) + the **Override + note** form (LQ-Grid `CellActionBar`
+  shape, **override-only** for T6). Prose via `renderModelMarkdown` (DOMPurify); ids/filenames as text.
+  Docked, tokenized (app.css `bg-card`/`border-border`/`bg-brand` #0070f3 — **not** legacy sage), no black
+  scrim.
+- `types.ts`: extend `TabularCellResult` (`+source_quote, notes, override_value, override_note,
+  overridden_by, overridden_at`) and `TabularCitation` (`+source_file_id, source_page, source_text`) — these
+  are **already on the wire**, currently dropped by the lossy TS subset.
+- `TabularCell.svelte`: render `override_value ?? value` + a subtle "edited" mark in-grid.
+- **DELETE `TabularCitationModal.svelte`** (both consumers move to the drawer).
+- `/tabular/[id]/+page.svelte`: render `<TabularWorkspace gridId={id} />` full-page (DRY — removes the page's
+  own grid+modal wiring; stays the shareable standalone view).
+
+**Wiring — the stage-takeover (`ConversationHost.svelte`, the fly-in precedent verbatim):**
+- Add `gridOpen`/`gridId` state parallel to `editorOpen`/`editorFileId` (129-131); `openGrid(id)` (close the
+  editor first, `matterTab='conversation'` so the conversation sits beside) / `closeGrid()`
+  (`matterTab='grids'` so `‹ Grids` lands on the list). A fly-in sibling `{#if gridOpen && gridId}` cloning
+  the editor block (672-685: `transition:fly {x:28}`, `flex-[2_1_0%]`, `<TabularWorkspace {gridId}
+  onClose={closeGrid} />`). Extend the conversation-card shrink/hidden ternaries (405-410) + `showList`
+  (135-136) + `canSplitRegister` (157-159) to `(editorOpen || gridOpen)`. Drive
+  `cockpit.editorOpen = editorOpen || gridOpen` (rail collapse via `+layout.svelte:79-90`) with the same
+  unmount-reset. **Do NOT add `gridOpen` to `panelKey` (108-110)** — that would remount `ConversationPanel`
+  and drop the live SSE.
+- `GridsPanel.svelte`: add `onOpenGrid?: (id) => void`; replace `goto('/lq-ai/tabular/'+grid.id)` (86-88)
+  with `onOpenGrid?.(grid.id)` (keep `goto` as fallback). Wire `onOpenGrid={openGrid}` at the GridsPanel
+  mount (654).
+- `TabularPreview.svelte`: **Expand** no longer self-hosts the overlay — `dispatch('expand', {gridId})`;
+  DELETE the overlay + stacked-modal blocks + their CSS. `ConversationPanel.svelte` forwards `on:expand` →
+  `dispatch('expandGrid')` → ConversationHost `openGrid` (two-hop bubble, mirrors the existing `on:settled`).
+
+**Tests / DoD (ADR-F005 gate):** backend override set/clear/404(cross-user, linear-mode)/422(blank, extra
+key)/**human-wins-across-a-subsequent-agent-write**/audit-carries-no-value + the two guard files;
+`_apply_cells` preserve-override unit test; frontend `.ts` helpers (effective value, override badge, drawer
+view-model, `cost_usd` string parse) + Cypress (workspace open: grid + docked drawer + Wrap + breadcrumb;
+cell→drawer; override→badge; light/dark) — **rebuild `web` before screenshots**; `npm run check` +
+`test:frontend`; `ruff` (repo root) + `mypy app`; **live DeepSeek** override round-trip. **ADR-F055 T6
+addendum** (the human-write endpoint + structural human-wins; the layout reuses the fly-in — no new ADR for
+the UI, per this ADR's decision-7 note). **No migration.** Branch `fork/f2-tabular-t6-workspace-drawer`.
 
 ### T7 (core) — The "Grids" tab (matter-scoped listing) ✅ SHIPPED 2026-07-01
 - NEW cockpit tab **"Grids"** (sibling to Documents): lists the matter's `mode='agentic'`, non-deleted
@@ -261,3 +368,6 @@ grid→deliverables (Word letters/reports/disclosure schedules); grid virtualiza
 
 ## Recommended order
 T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 (core), then T9 / T10 (enrichment), T11 (optional).
+**Actual sequence (2026-07):** T1 · T2 · T3 · T7 · T8 shipped; **T6 next** (pulled forward after T8 — the
+maintainer prioritised the grid-workspace UX over T4/T5). T4 (retrieval-fill) + T5 (live cell fill) remain
+queued after T6; T8b + T9/T10/T11 after that.

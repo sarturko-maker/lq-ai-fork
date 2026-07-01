@@ -17,6 +17,11 @@ Surface (per [PRD §3.14](docs/PRD.md#314-tabular--multi-document-review-m3)):
 * ``POST   /api/v1/tabular/executions/{id}/cancel`` — set status to
   ``cancelled``; the worker honours this on the next cell-iteration
   boundary check.
+* ``POST   /api/v1/tabular/executions/{id}/cells/override`` — the lawyer
+  sets a manual override on one agentic-grid cell (ADR-F055 T6 / ADR-F042
+  auto-write-then-correct; human action, never an agent tool).
+* ``DELETE /api/v1/tabular/executions/{id}/cells/override`` — clear that
+  override (revert to the agent value).
 
 Authorization
 -------------
@@ -68,6 +73,8 @@ from app.db.session import get_db
 from app.models.document import Document, DocumentChunk
 from app.models.tabular import TabularExecution
 from app.schemas.tabular import (
+    CELL_OVERRIDE_KEYS,
+    CellOverrideRequest,
     Citation,
     ColumnSpec,
     TabularExecutionCreate,
@@ -515,6 +522,200 @@ async def cancel_tabular_execution(
     await db.commit()
     await db.refresh(row)
     return await _to_response(db, row)
+
+
+# ---------------------------------------------------------------------------
+# Cell override — the lawyer's manual correction (ADR-F055 T6 / ADR-F042)
+# ---------------------------------------------------------------------------
+#
+# "System proposes, user owns" for the matter-tier grid: the agent fills cells
+# (``record_tabular_row`` / ``update_tabular_cells``, guarded tools), and the
+# lawyer corrects them here. This is a HUMAN-write endpoint, never an agent
+# tool — mirrors ``matter_memory.create_matter_correction`` (ADR-F042 §B2).
+# The override rides the ``results`` JSONB (no migration); the agent write path
+# (``tabular_tool._upsert_row``) preserves the override_* keys so a re-pull can
+# never clobber it (the structural "human wins" guarantee).
+
+
+async def _load_owned_agentic_execution_locked(
+    db: AsyncSession,
+    *,
+    execution_id: uuid.UUID,
+    user: ActiveUser,
+) -> TabularExecution:
+    """Load + row-lock one agentic grid the caller OWNS, for a results write.
+
+    Strict owner scope (``user_id == caller.id`` — no admin bypass: an override
+    carries the lawyer's provenance). Pinned to ``mode == 'agentic'`` so it can
+    never mutate a frozen linear-executor row (ADR-F001). ``FOR UPDATE`` guards
+    the results read-modify-write against concurrent fan-out writers.
+    404 collapses missing / cross-user / linear / soft-deleted (no leak).
+    """
+
+    stmt = (
+        select(TabularExecution)
+        .where(
+            TabularExecution.id == execution_id,
+            TabularExecution.user_id == user.id,
+            TabularExecution.mode == "agentic",
+            TabularExecution.deleted_at.is_(None),
+        )
+        .with_for_update()
+    )
+    row = (await db.execute(stmt)).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="execution not found")
+    return row
+
+
+def _set_cell_override(
+    results: dict | None,
+    *,
+    document_id: str,
+    column_name: str,
+    override_value: str,
+    override_note: str | None,
+    overridden_by: str,
+    overridden_at: str,
+) -> dict | None:
+    """Return a NEW results dict with the override merged onto one cell.
+
+    ``None`` if the (document_id, column_name) cell does not exist (→ 404: you
+    can only correct a cell the agent attempted; a finalized grid attempted
+    every cell). Reassign-don't-mutate → SQLAlchemy flags the JSONB dirty."""
+
+    rows = [dict(r) for r in (results or {}).get("rows", []) if isinstance(r, dict)]
+    for row in rows:
+        if row.get("document_id") == document_id:
+            cells = dict(row.get("cells", {}))
+            cell = cells.get(column_name)
+            if not isinstance(cell, dict):
+                return None
+            new_cell = dict(cell)
+            new_cell["override_value"] = override_value
+            new_cell["override_note"] = override_note
+            new_cell["overridden_by"] = overridden_by
+            new_cell["overridden_at"] = overridden_at
+            cells[column_name] = new_cell
+            row["cells"] = cells
+            return {"rows": rows}
+    return None
+
+
+def _clear_cell_override(
+    results: dict | None,
+    *,
+    document_id: str,
+    column_name: str,
+) -> dict | None:
+    """Return a NEW results dict with the override_* keys stripped from one cell
+    (revert to the agent value). ``None`` if the cell does not exist (→ 404).
+    Idempotent — clearing an un-overridden cell is a harmless no-op."""
+
+    rows = [dict(r) for r in (results or {}).get("rows", []) if isinstance(r, dict)]
+    for row in rows:
+        if row.get("document_id") == document_id:
+            cells = dict(row.get("cells", {}))
+            cell = cells.get(column_name)
+            if not isinstance(cell, dict):
+                return None
+            cells[column_name] = {k: v for k, v in cell.items() if k not in CELL_OVERRIDE_KEYS}
+            row["cells"] = cells
+            return {"rows": rows}
+    return None
+
+
+@router.post(
+    "/tabular/executions/{execution_id}/cells/override",
+    response_model=TabularExecutionResponse,
+    summary="Set a lawyer's manual override on one grid cell.",
+)
+async def override_tabular_cell(
+    execution_id: uuid.UUID,
+    payload: CellOverrideRequest,
+    user: ActiveUser,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TabularExecutionResponse:
+    """Set a human override on one cell (ADR-F055 T6 / ADR-F042).
+
+    The override shadows the agent's value in display; the agent's value +
+    citations stay recorded underneath and the agent write path can never
+    clobber the override. Owner-scoped agentic grids only (cross-user /
+    linear → 404). Returns the full enriched grid (like GET)."""
+
+    row = await _load_owned_agentic_execution_locked(db, execution_id=execution_id, user=user)
+    updated = _set_cell_override(
+        row.results,
+        document_id=str(payload.document_id),
+        column_name=payload.column_name,
+        override_value=payload.override_value,
+        override_note=payload.override_note,
+        overridden_by=str(user.id),
+        overridden_at=datetime.now(UTC).isoformat(),
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="cell not found")
+    row.results = updated
+    # Audit carries IDs/counts only — never the override value or note.
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="tabular.cell_overridden",
+        resource_type="tabular_execution",
+        resource_id=str(execution_id),
+        project_id=row.project_id,
+        request=request,
+        details={"document_id": str(payload.document_id), "column": payload.column_name},
+    )
+    await db.commit()
+    await db.refresh(row)
+    response = await _to_response(db, row)
+    await _enrich_cell_citations(db, response)
+    return response
+
+
+@router.delete(
+    "/tabular/executions/{execution_id}/cells/override",
+    response_model=TabularExecutionResponse,
+    summary="Clear a lawyer's override on one grid cell (revert to the agent value).",
+)
+async def clear_tabular_cell_override(
+    execution_id: uuid.UUID,
+    user: ActiveUser,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    document_id: Annotated[uuid.UUID, Query()],
+    column_name: Annotated[str, Query(min_length=1, max_length=200)],
+) -> TabularExecutionResponse:
+    """Clear a cell override (revert to the agent value). Idempotent; the
+    (document_id, column_name) cell must exist (else 404). Returns the full
+    enriched grid (like GET)."""
+
+    row = await _load_owned_agentic_execution_locked(db, execution_id=execution_id, user=user)
+    updated = _clear_cell_override(
+        row.results,
+        document_id=str(document_id),
+        column_name=column_name,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="cell not found")
+    row.results = updated
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="tabular.cell_override_cleared",
+        resource_type="tabular_execution",
+        resource_id=str(execution_id),
+        project_id=row.project_id,
+        request=request,
+        details={"document_id": str(document_id), "column": column_name},
+    )
+    await db.commit()
+    await db.refresh(row)
+    response = await _to_response(db, row)
+    await _enrich_cell_citations(db, response)
+    return response
 
 
 # ---------------------------------------------------------------------------

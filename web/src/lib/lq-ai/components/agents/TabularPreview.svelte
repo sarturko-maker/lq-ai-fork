@@ -1,41 +1,37 @@
 <script lang="ts">
 	/**
-	 * F2 Tabular T2 — in-chat grid preview + Expand overlay (ADR-F055).
+	 * F2 Tabular T2 — in-chat grid preview + Expand (ADR-F055).
 	 *
 	 * A durable artifact card the conversation shows for each grid a run
 	 * finalized: a compact M×N preview (column pills + a clamped mini-table)
-	 * with an Expand button that opens the FULL, reused `TabularGrid` in an
-	 * in-conversation overlay (cell click → the existing `TabularCitationModal`).
+	 * with an Expand button. T6 (ADR-F055): Expand no longer self-hosts an
+	 * overlay — it dispatches `expand` so the cockpit opens the grid as a
+	 * stage-takeover (the docked `TabularWorkspace`, conversation stays mounted).
 	 *
 	 * It re-derives identically live and on reload because the parent anchors
 	 * it on the settled `finalize_tabular_review` step (ADR-F004); the grid
 	 * body comes from `GET /tabular/executions/{id}` (owner-scoped — the
-	 * caller is the run's user; cross-user/missing → 404). The cockpit
-	 * "panels slide back" stage-takeover motion is a later slice (T6); here
-	 * Expand is a self-contained overlay that keeps the chat in context.
+	 * caller is the run's user; cross-user/missing → 404).
 	 */
-	import { onDestroy, onMount } from 'svelte';
+	import { createEventDispatcher, onDestroy, onMount } from 'svelte';
 	import TableIcon from '@lucide/svelte/icons/table';
 	import Maximize2Icon from '@lucide/svelte/icons/maximize-2';
-	import XIcon from '@lucide/svelte/icons/x';
 	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 
 	import { getTabularExecution } from '$lib/lq-ai/api/tabular';
 	import { LQAIApiError } from '$lib/lq-ai/api/client';
-	import TabularGrid from '$lib/lq-ai/components/TabularGrid.svelte';
-	import TabularCitationModal from '$lib/lq-ai/components/TabularCitationModal.svelte';
-	import type {
-		TabularCellResult,
-		TabularExecution,
-		TabularExecutionStatus
-	} from '$lib/lq-ai/types';
+	import type { TabularExecution, TabularExecutionStatus } from '$lib/lq-ai/types';
 	import {
-		buildDocumentNameById,
 		isTerminalGridStatus,
 		summarizeGridForPreview
 	} from '$lib/lq-ai/agents/tabular-preview';
 
 	export let gridId: string;
+
+	// T6: Expand no longer self-hosts an overlay — it asks the cockpit to open the
+	// grid as a stage-takeover (the docked TabularWorkspace). ConversationPanel
+	// forwards this to ConversationHost.openGrid. The conversation stays mounted.
+	const dispatch = createEventDispatcher<{ expand: { gridId: string } }>();
 
 	let execution: TabularExecution | null = null;
 	let loading = true;
@@ -43,7 +39,6 @@
 	// A 404 means the grid does not exist for this user (e.g. the model finalized a
 	// fabricated id) — render nothing rather than a spurious error card.
 	let notFound = false;
-	let expanded = false;
 
 	// The finalize step streams at tool-START, before the finalize body flips the
 	// row to `completed` — so a mount-time fetch can race the commit and read a
@@ -55,15 +50,7 @@
 	let polls = 0;
 	let destroyed = false;
 
-	interface OpenCellState {
-		documentName: string;
-		columnName: string;
-		cell: TabularCellResult;
-	}
-	let openCell: OpenCellState | null = null;
-
 	$: preview = execution ? summarizeGridForPreview(execution) : null;
-	$: documentNameById = execution ? buildDocumentNameById(execution) : {};
 
 	onMount(load);
 	onDestroy(() => {
@@ -120,39 +107,10 @@
 		return 'busy';
 	}
 
-	function openOverlay(): void {
-		expanded = true;
-	}
-	function closeOverlay(): void {
-		expanded = false;
-		openCell = null;
-	}
-	function handleOverlayKey(e: KeyboardEvent): void {
-		// Only close the overlay when it is open and no citation modal is up — the
-		// modal owns Escape while it is open (it has its own handler).
-		if (e.key === 'Escape' && expanded && !openCell) closeOverlay();
-	}
-
-	function handleCellOpen(
-		event: CustomEvent<{
-			documentId: string;
-			documentName: string;
-			columnName: string;
-			cell: TabularCellResult | undefined;
-		}>
-	): void {
-		const { documentName, columnName, cell } = event.detail;
-		if (!cell) return;
-		openCell = { documentName, columnName, cell };
-	}
-	function closeCellModal(): void {
-		openCell = null;
+	function expand(): void {
+		dispatch('expand', { gridId });
 	}
 </script>
-
-<!-- Esc closes the overlay; the handler no-ops unless one is open. Meta tags
-     must live at the component root, never inside a block. -->
-<svelte:window on:keydown={handleOverlayKey} />
 
 {#if !notFound}
 <div class="ag-grid-card" data-testid="lq-ai-tabular-preview" data-grid-id={gridId}>
@@ -242,7 +200,7 @@
 				type="button"
 				class="ag-grid-card__expand"
 				data-testid="lq-ai-tabular-preview-expand"
-				on:click={openOverlay}
+				on:click={expand}
 			>
 				<Maximize2Icon class="size-3.5" aria-hidden="true" />
 				Expand
@@ -250,69 +208,6 @@
 		</footer>
 	{/if}
 </div>
-{/if}
-
-{#if expanded && execution}
-	<!-- Inline overlay (T2): the full reused grid in context. Backdrop click /
-	     Esc closes; the panel stops propagation so clicks inside don't. -->
-	<div
-		class="ag-grid-overlay__backdrop"
-		data-testid="lq-ai-tabular-preview-overlay"
-		on:click={closeOverlay}
-		on:keydown
-		role="presentation"
-	>
-		<div
-			class="ag-grid-overlay"
-			role="dialog"
-			aria-modal="true"
-			aria-label="Grid"
-			tabindex="-1"
-			on:click|stopPropagation
-			on:keydown|stopPropagation
-		>
-			<header class="ag-grid-overlay__head">
-				<span class="ag-grid-card__title">
-					<TableIcon class="size-4" aria-hidden="true" />
-					<span class="lq-text-label">Grid</span>
-					<span class="lq-text-caption ag-grid-card__counts">
-						{execution.document_ids.length} × {execution.columns.length}
-					</span>
-				</span>
-				<button
-					type="button"
-					class="ag-grid-overlay__close"
-					data-testid="lq-ai-tabular-preview-close"
-					aria-label="Close grid"
-					on:click={closeOverlay}
-				>
-					<XIcon class="size-4" aria-hidden="true" />
-				</button>
-			</header>
-			<div class="ag-grid-overlay__body">
-				{#if execution.columns.length > 0 && execution.document_ids.length > 0}
-					<TabularGrid
-						results={execution.results}
-						columns={execution.columns}
-						documentIds={execution.document_ids}
-						{documentNameById}
-						on:open={handleCellOpen}
-					/>
-				{:else}
-					<p class="lq-text-body-sm">This grid has no rows to render.</p>
-				{/if}
-			</div>
-		</div>
-	</div>
-
-	{#if openCell}
-		<TabularCitationModal
-			documentName={openCell.documentName}
-			columnName={openCell.columnName}
-			cell={openCell.cell}
-			on:close={closeCellModal}
-		/>
-	{/if}
 {/if}
 
 <style>
@@ -452,54 +347,6 @@
 	}
 	.ag-grid-card__expand:hover {
 		background: color-mix(in srgb, currentColor 12%, transparent);
-	}
-	.ag-grid-overlay__backdrop {
-		position: fixed;
-		inset: 0;
-		z-index: 60;
-		background: color-mix(in srgb, #0b0b0f 55%, transparent);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: 1.5rem;
-	}
-	.ag-grid-overlay {
-		display: flex;
-		flex-direction: column;
-		width: min(72rem, 100%);
-		max-height: 90vh;
-		background: var(--lq-surface-0, #fff);
-		color: inherit;
-		border-radius: var(--lq-radius-lg, 0.75rem);
-		border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-		box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.4);
-		overflow: hidden;
-	}
-	.ag-grid-overlay__head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.75rem;
-		padding: 0.75rem 1rem;
-		border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent);
-	}
-	.ag-grid-overlay__close {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		padding: 0.3rem;
-		border-radius: var(--lq-radius-sm, 0.4rem);
-		border: none;
-		background: none;
-		cursor: pointer;
-		color: inherit;
-	}
-	.ag-grid-overlay__close:hover {
-		background: color-mix(in srgb, currentColor 10%, transparent);
-	}
-	.ag-grid-overlay__body {
-		overflow: auto;
-		padding: 0.75rem 1rem 1rem;
 	}
 	:global(.ag-grid-card__spin) {
 		animation: ag-grid-spin 1s linear infinite;

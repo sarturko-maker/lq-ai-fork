@@ -149,6 +149,9 @@
 		/** ADR-F047 (Slice 4): the agent FRESHLY produced a redline .docx — the host
 		 * slides the in-app editor in so the lawyer can review/edit it right away. */
 		redlineready: { fileId: string; filename: string };
+		/** F2 Tabular T6 (ADR-F055): the lawyer clicked Expand on an in-chat grid
+		 * preview — the host opens it as a stage-takeover (docked TabularWorkspace). */
+		expandgrid: { gridId: string };
 	}>();
 
 	let submitting = false;
@@ -1156,7 +1159,10 @@
 				{#if turnGridIds.length > 0}
 					<div class="ag-grids" data-testid="lq-ai-agents-grids">
 						{#each turnGridIds as gridId (gridId)}
-							<TabularPreview {gridId} />
+							<TabularPreview
+								{gridId}
+								on:expand={(e) => dispatch('expandgrid', { gridId: e.detail.gridId })}
+							/>
 						{/each}
 					</div>
 				{/if}

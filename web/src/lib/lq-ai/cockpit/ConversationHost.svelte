@@ -30,6 +30,7 @@
 	import MemoryPanel from '$lib/lq-ai/components/matter/MemoryPanel.svelte';
 	import DocumentsPanel from '$lib/lq-ai/components/matter/DocumentsPanel.svelte';
 	import GridsPanel from '$lib/lq-ai/components/matter/GridsPanel.svelte';
+	import TabularWorkspace from '$lib/lq-ai/components/TabularWorkspace.svelte';
 	import CapabilitiesPanel from '$lib/lq-ai/components/matter/CapabilitiesPanel.svelte';
 	import DocumentEditorPanel, {
 		handBackInstruction
@@ -130,9 +131,17 @@
 	let editorFileId = $state<string | null>(null);
 	let editorFilename = $state('');
 
+	// F2 Tabular T6 (ADR-F055): a grid is a review WORKSPACE, not a modal. Opening
+	// one (Grids tab row / in-chat preview Expand) flies the full grid + docked
+	// cell drawer in on the RIGHT — the SAME stage-takeover as the editor, so the
+	// conversation stays MOUNTED (live SSE survives) and the shell rail collapses.
+	// Mutually exclusive with the editor (one stage at a time).
+	let gridOpen = $state(false);
+	let gridId = $state<string | null>(null);
+
 	// The thread list yields to the editor (focus on edit + the live chat); the
 	// conversation column stays mounted and takes the freed width.
-	const showList = $derived((!isStacked || !stackedShowPanel) && !editorOpen);
+	const showList = $derived((!isStacked || !stackedShowPanel) && !editorOpen && !gridOpen);
 	const showPanel = $derived(!isStacked || stackedShowPanel);
 
 	// PRIV-3 (ADR-F019): a Privacy matter surfaces the company's read-only ROPA
@@ -155,7 +164,7 @@
 	// thread list (w-72 = 288px) is subtracted from the host width.
 	const SPLIT_MIN_PANEL = 880;
 	const canSplitRegister = $derived(
-		isPrivacyMatter && !isStacked && !editorOpen && hostWidth - 288 >= SPLIT_MIN_PANEL
+		isPrivacyMatter && !isStacked && !editorOpen && !gridOpen && hostWidth - 288 >= SPLIT_MIN_PANEL
 	);
 
 	// The tab strip for a real matter. 'conversation' always; 'register' only for
@@ -313,6 +322,9 @@
 	}
 
 	function openEditor(fileId: string, filename: string) {
+		// One stage at a time — close a grid workspace if it's up.
+		gridOpen = false;
+		gridId = null;
 		editorFileId = fileId;
 		editorFilename = filename;
 		editorOpen = true;
@@ -326,6 +338,26 @@
 	function closeEditor() {
 		editorOpen = false;
 		editorFileId = null;
+	}
+
+	// F2 Tabular T6: open a grid as a stage-takeover (from the Grids tab or the
+	// in-chat preview's Expand). Mirrors openEditor — conversation beside the grid,
+	// not the Grids list; the editor yields (one stage at a time).
+	function openGrid(id: string) {
+		editorOpen = false;
+		editorFileId = null;
+		gridId = id;
+		gridOpen = true;
+		matterTab = 'conversation';
+		if (isStacked) stackedShowPanel = true;
+	}
+
+	// Closing returns to the Grids list so the breadcrumb "‹ Grids" is literal
+	// regardless of where the grid was opened from.
+	function closeGrid() {
+		gridOpen = false;
+		gridId = null;
+		if (matter) matterTab = 'grids';
 	}
 
 	// ADR-F047 Slice 5 "Done — hand back": the editor has confirmed the save. Return
@@ -356,7 +388,8 @@
 	// rail while editing, and restore it (reset to false) when this host unmounts
 	// (per-matter remount) or the editor closes.
 	$effect(() => {
-		cockpit.editorOpen = editorOpen;
+		// The grid stage-takeover collapses the shell rail just like the editor.
+		cockpit.editorOpen = editorOpen || gridOpen;
 		return () => {
 			cockpit.editorOpen = false;
 		};
@@ -381,6 +414,7 @@
 					on:threadcreated={handleThreadCreated}
 					on:ropachange={handleRopaChange}
 					on:redlineready={handleRedlineReady}
+					on:expandgrid={(e) => openGrid(e.detail.gridId)}
 				/>
 			</div>
 		</PageShell>
@@ -403,10 +437,11 @@
 	     live SSE survives) and the editor takes the whole pane. -->
 	<div class="flex h-full min-h-0 gap-2 sm:gap-3">
 		<div
-			class="flex h-full min-h-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-[flex-grow] duration-200 ease-out {editorOpen
+			class="flex h-full min-h-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-[flex-grow] duration-200 ease-out {editorOpen ||
+			gridOpen
 				? 'min-w-0 flex-1 basis-0'
 				: 'w-full'}"
-			class:hidden={editorOpen && isStacked}
+			class:hidden={(editorOpen || gridOpen) && isStacked}
 		>
 			{#if showList}
 				<aside
@@ -651,7 +686,12 @@
 					     matter's agentic grids; each row opens the reused grid at /tabular/[id]
 					     and can be soft-deleted. reloadKey pulls once when a run settles. -->
 						<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
-							<GridsPanel projectId={matter.project_id} reloadKey={registerReloadKey} {nowMs} />
+							<GridsPanel
+								projectId={matter.project_id}
+								reloadKey={registerReloadKey}
+								{nowMs}
+								onOpenGrid={openGrid}
+							/>
 						</div>
 					{/if}
 					{#if matterTab === 'capabilities' && matter}
@@ -681,6 +721,18 @@
 					onClose={closeEditor}
 					onHandBack={handBackFromEditor}
 				/>
+			</div>
+		{/if}
+		{#if gridOpen && gridId}
+			<!-- F2 Tabular T6 (ADR-F055): the grid workspace flies in as a sibling of
+			     the conversation card — same stage-takeover as the editor, so the
+			     conversation stays mounted (live SSE survives). -->
+			<div
+				class="flex h-full min-h-0 min-w-0 flex-[2_1_0%] overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+				transition:fly={{ x: 28, duration: motionMs(MOTION.base), opacity: 0.5, easing: cubicOut }}
+				data-testid="lq-cockpit-grid"
+			>
+				<TabularWorkspace {gridId} onClose={closeGrid} />
 			</div>
 		{/if}
 	</div>
