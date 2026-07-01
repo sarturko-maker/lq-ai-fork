@@ -389,6 +389,10 @@ async def list_tabular_executions(
     return [_to_summary(row) for row in rows]
 
 
+# A matter accrues few grids; cap the listing defensively so the response stays bounded.
+_MATTER_GRIDS_LIMIT = 200
+
+
 @router.get(
     "/tabular/matters/{project_id}/grids",
     response_model=list[TabularExecutionSummary],
@@ -415,6 +419,7 @@ async def list_matter_grids(
             TabularExecution.deleted_at.is_(None),
         )
         .order_by(TabularExecution.created_at.desc())
+        .limit(_MATTER_GRIDS_LIMIT)
     )
     rows = (await db.execute(stmt)).scalars().all()
     return [_to_summary(row) for row in rows]

@@ -93,6 +93,9 @@
 		try {
 			await deleteTabularExecution(grid.id);
 			if (destroyed) return;
+			// Supersede any in-flight (settle-triggered) load whose snapshot predates
+			// this DELETE — otherwise it could re-insert the just-deleted row.
+			loadGeneration++;
 			grids = (grids ?? []).filter((g) => g.id !== grid.id);
 		} catch (e) {
 			if (destroyed) return;
