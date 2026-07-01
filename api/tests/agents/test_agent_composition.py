@@ -846,6 +846,61 @@ async def test_multi_subagent_fan_out_nests_every_delegate(
         )
 
 
+async def test_commercial_tabular_matter_wires_restricted_grid_filler_subagent(
+    comp_env: CompositionEnv,
+) -> None:
+    """ADR-F055 T4: a Commercial+Grids matter wires a ``grid_filler`` subagent whose toolset
+    is RESTRICTED to {gather_row_evidence, record_tabular_row, read_document} — and pointedly
+    does NOT include ``search_documents`` — so a fan-out fill subagent physically cannot
+    re-search (the live-verified no-thrash guarantee). Captures the subagents passed to
+    ``execute_agent_run`` at composition."""
+    from app.agents import composition as comp_mod
+    from app.models.practice_area import PracticeArea
+
+    async with comp_env.factory() as db:
+        area_id = (
+            await db.execute(select(PracticeArea.id).where(PracticeArea.key == "commercial"))
+        ).scalar_one()
+        await db.execute(
+            Project.__table__.update()
+            .where(Project.id == comp_env.project_id)
+            .values(practice_area_id=area_id)
+        )
+        await db.commit()
+
+    run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+
+    captured: dict[str, object] = {}
+    real_execute = comp_mod.execute_agent_run
+
+    async def _capturing_execute(*args: object, **kwargs: object) -> None:
+        captured["subagents"] = kwargs.get("subagents")
+        await real_execute(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(comp_mod, "execute_agent_run", _capturing_execute)
+    try:
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(
+                model=ScriptedToolCallingModel(responses=[final_message("Nothing to do.")])
+            ),
+            session_factory_provider=lambda: comp_env.factory,
+            skill_registry_provider=lambda: None,
+        )
+    finally:
+        monkeypatch.undo()
+
+    subagents = captured["subagents"] or []
+    grid_fillers = [s for s in subagents if s.get("name") == "grid_filler"]  # type: ignore[union-attr]
+    assert len(grid_fillers) == 1, (
+        f"expected one grid_filler; got {[s.get('name') for s in subagents]}"  # type: ignore[union-attr]
+    )
+    tool_names = {getattr(t, "__name__", "") for t in grid_fillers[0]["tools"]}
+    assert tool_names == {"gather_row_evidence", "record_tabular_row", "read_document"}
+    assert "search_documents" not in tool_names  # the structural no-thrash guarantee
+
+
 async def test_privacy_matter_grants_ropa_tools_and_validated_write_commits(
     comp_env: CompositionEnv,
 ) -> None:
