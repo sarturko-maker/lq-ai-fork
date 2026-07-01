@@ -492,3 +492,258 @@ async def test_list_matter_grids_cross_user_and_unknown_are_404(
     # Unknown matter → 404.
     resp = await client.get(f"/api/v1/tabular/matters/{uuid.uuid4()}/grids", headers=_bearer(user))
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# F2 Tabular T6 (ADR-F055 T6 / ADR-F042) — lawyer cell override (human-write)
+# ---------------------------------------------------------------------------
+
+
+async def _insert_agentic_grid_with_cell(
+    db: AsyncSession,
+    *,
+    owner: User,
+    project_id: uuid.UUID | None,
+    column: str = "Term",
+    cell: dict[str, Any] | None = None,
+    mode: str = "agentic",
+) -> tuple[TabularExecution, uuid.UUID]:
+    """Seed a completed grid carrying one real (document_id, column) cell."""
+
+    document_id = uuid.uuid4()
+    cell = cell or {
+        "value": "One (1) year",
+        "confidence": "high",
+        "cited_chunk_ids": [],
+        "source_quote": "The term of this Agreement is one (1) year.",
+        "notes": None,
+    }
+    grid = TabularExecution(
+        user_id=owner.id,
+        skill_name=None,
+        status="completed",
+        mode=mode,
+        project_id=project_id,
+        fill_mode="fanout" if mode == "agentic" else None,
+        document_ids=[document_id],
+        columns=[{"name": column, "query": "?"}],
+        results={
+            "rows": [
+                {
+                    "document_id": str(document_id),
+                    "document_name": "MSA.docx",
+                    "cells": {column: cell},
+                }
+            ]
+        },
+    )
+    db.add(grid)
+    await db.flush()
+    return grid, document_id
+
+
+@pytest.mark.integration
+async def test_override_cell_sets_override_and_keeps_agent_value(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    user = await _make_user(db_session)
+    project = await _make_project(db_session, user)
+    grid, doc_id = await _insert_agentic_grid_with_cell(
+        db_session, owner=user, project_id=project.id
+    )
+
+    resp = await client.post(
+        f"/api/v1/tabular/executions/{grid.id}/cells/override",
+        headers=_bearer(user),
+        json={
+            "document_id": str(doc_id),
+            "column_name": "Term",
+            "override_value": "Two (2) years",
+            "override_note": "Per Amendment No. 1",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    cell = resp.json()["results"]["rows"][0]["cells"]["Term"]
+    assert cell["override_value"] == "Two (2) years"
+    assert cell["override_note"] == "Per Amendment No. 1"
+    assert cell["overridden_by"] == str(user.id)
+    assert cell["overridden_at"]  # timestamp set
+    # The agent's value + grounding stay visible underneath the override.
+    assert cell["value"] == "One (1) year"
+    assert cell["source_quote"].startswith("The term of this Agreement")
+
+
+@pytest.mark.integration
+async def test_override_cell_audit_carries_no_value_or_note(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    from sqlalchemy import select as _select
+
+    from app.models.audit import AuditLog
+
+    user = await _make_user(db_session)
+    project = await _make_project(db_session, user)
+    grid, doc_id = await _insert_agentic_grid_with_cell(
+        db_session, owner=user, project_id=project.id
+    )
+    resp = await client.post(
+        f"/api/v1/tabular/executions/{grid.id}/cells/override",
+        headers=_bearer(user),
+        json={
+            "document_id": str(doc_id),
+            "column_name": "Term",
+            "override_value": "SECRET-VALUE-42",
+            "override_note": "SECRET-NOTE-99",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    rows = (
+        (
+            await db_session.execute(
+                _select(AuditLog).where(AuditLog.action == "tabular.cell_overridden")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    details = rows[0].details or {}
+    assert details.get("document_id") == str(doc_id)
+    assert details.get("column") == "Term"
+    # The audit contract: IDs/counts only — never the override value or note.
+    assert "SECRET-VALUE-42" not in str(details)
+    assert "SECRET-NOTE-99" not in str(details)
+
+
+@pytest.mark.integration
+async def test_override_cell_cross_user_is_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    user = await _make_user(db_session)
+    stranger = await _make_user(db_session)
+    project = await _make_project(db_session, user)
+    grid, doc_id = await _insert_agentic_grid_with_cell(
+        db_session, owner=user, project_id=project.id
+    )
+    resp = await client.post(
+        f"/api/v1/tabular/executions/{grid.id}/cells/override",
+        headers=_bearer(stranger),
+        json={"document_id": str(doc_id), "column_name": "Term", "override_value": "x"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_override_cell_linear_grid_is_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The override endpoint must never mutate a frozen linear-executor row."""
+    user = await _make_user(db_session)
+    project = await _make_project(db_session, user)
+    grid, doc_id = await _insert_agentic_grid_with_cell(
+        db_session, owner=user, project_id=project.id, mode="linear"
+    )
+    resp = await client.post(
+        f"/api/v1/tabular/executions/{grid.id}/cells/override",
+        headers=_bearer(user),
+        json={"document_id": str(doc_id), "column_name": "Term", "override_value": "x"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_override_missing_cell_is_404(client: AsyncClient, db_session: AsyncSession) -> None:
+    user = await _make_user(db_session)
+    project = await _make_project(db_session, user)
+    grid, doc_id = await _insert_agentic_grid_with_cell(
+        db_session, owner=user, project_id=project.id
+    )
+    # Unknown column → 404.
+    resp = await client.post(
+        f"/api/v1/tabular/executions/{grid.id}/cells/override",
+        headers=_bearer(user),
+        json={"document_id": str(doc_id), "column_name": "Nope", "override_value": "x"},
+    )
+    assert resp.status_code == 404
+    # Unknown document → 404.
+    resp = await client.post(
+        f"/api/v1/tabular/executions/{grid.id}/cells/override",
+        headers=_bearer(user),
+        json={"document_id": str(uuid.uuid4()), "column_name": "Term", "override_value": "x"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_override_blank_value_and_extra_key_are_422(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    user = await _make_user(db_session)
+    project = await _make_project(db_session, user)
+    grid, doc_id = await _insert_agentic_grid_with_cell(
+        db_session, owner=user, project_id=project.id
+    )
+    # Whitespace-only value strips to "" → min_length fails → 422 at the boundary.
+    resp = await client.post(
+        f"/api/v1/tabular/executions/{grid.id}/cells/override",
+        headers=_bearer(user),
+        json={"document_id": str(doc_id), "column_name": "Term", "override_value": "   "},
+    )
+    assert resp.status_code == 422
+    # Unknown key rejected (extra='forbid').
+    resp = await client.post(
+        f"/api/v1/tabular/executions/{grid.id}/cells/override",
+        headers=_bearer(user),
+        json={
+            "document_id": str(doc_id),
+            "column_name": "Term",
+            "override_value": "x",
+            "bogus": 1,
+        },
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.integration
+async def test_clear_cell_override_reverts_to_agent_value(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    user = await _make_user(db_session)
+    project = await _make_project(db_session, user)
+    grid, doc_id = await _insert_agentic_grid_with_cell(
+        db_session, owner=user, project_id=project.id
+    )
+    # Set, then clear.
+    await client.post(
+        f"/api/v1/tabular/executions/{grid.id}/cells/override",
+        headers=_bearer(user),
+        json={"document_id": str(doc_id), "column_name": "Term", "override_value": "Two (2) years"},
+    )
+    resp = await client.delete(
+        f"/api/v1/tabular/executions/{grid.id}/cells/override",
+        headers=_bearer(user),
+        params={"document_id": str(doc_id), "column_name": "Term"},
+    )
+    assert resp.status_code == 200, resp.text
+    cell = resp.json()["results"]["rows"][0]["cells"]["Term"]
+    assert cell["override_value"] is None
+    assert cell["overridden_by"] is None
+    assert cell["value"] == "One (1) year"
+
+
+@pytest.mark.integration
+async def test_clear_cell_override_missing_cell_is_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    user = await _make_user(db_session)
+    project = await _make_project(db_session, user)
+    grid, _doc_id = await _insert_agentic_grid_with_cell(
+        db_session, owner=user, project_id=project.id
+    )
+    resp = await client.delete(
+        f"/api/v1/tabular/executions/{grid.id}/cells/override",
+        headers=_bearer(user),
+        params={"document_id": str(uuid.uuid4()), "column_name": "Term"},
+    )
+    assert resp.status_code == 404

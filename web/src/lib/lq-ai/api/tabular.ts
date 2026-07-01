@@ -104,6 +104,38 @@ export async function cancelTabularExecution(
 }
 
 /**
+ * POST /api/v1/tabular/executions/{id}/cells/override — the lawyer sets a
+ * manual override on one agentic-grid cell (ADR-F055 T6 / ADR-F042; human
+ * action, never an agent tool). Returns the full enriched grid. Cross-user /
+ * linear-mode / unknown-cell → 404.
+ */
+export async function overrideTabularCell(
+	executionId: string,
+	body: { document_id: string; column_name: string; override_value: string; override_note?: string | null }
+): Promise<TabularExecution> {
+	return apiRequest<TabularExecution>(
+		`/tabular/executions/${encodeURIComponent(executionId)}/cells/override`,
+		{ method: 'POST', body: body as unknown as Record<string, unknown> }
+	);
+}
+
+/**
+ * DELETE /api/v1/tabular/executions/{id}/cells/override — clear a cell
+ * override (revert to the agent value). Returns the full enriched grid.
+ */
+export async function clearTabularCellOverride(
+	executionId: string,
+	documentId: string,
+	columnName: string
+): Promise<TabularExecution> {
+	const qs = `document_id=${encodeURIComponent(documentId)}&column_name=${encodeURIComponent(columnName)}`;
+	return apiRequest<TabularExecution>(
+		`/tabular/executions/${encodeURIComponent(executionId)}/cells/override?${qs}`,
+		{ method: 'DELETE' }
+	);
+}
+
+/**
  * GET /api/v1/tabular/executions/{id}/export?format=xlsx|csv — M3-C4a.
  *
  * Returns the grid as a Blob plus the server-suggested filename (from

@@ -171,6 +171,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/tabular/matters/{project_id}/grids",
         "/api/v1/tabular/executions/{execution_id}",
         "/api/v1/tabular/executions/{execution_id}/cancel",
+        # F2 Tabular T6 (ADR-F055 T6 / ADR-F042) — lawyer cell override
+        # (POST set + DELETE clear share this one path).
+        "/api/v1/tabular/executions/{execution_id}/cells/override",
         # M3-C4a — XLSX/CSV export.
         "/api/v1/tabular/executions/{execution_id}/export",
         # M3-D1 — slack-bridge persistence surface (bearer-token, no user)
@@ -358,7 +361,9 @@ async def test_openapi_paths_match_sketch() -> None:
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
     # +1: F2 Tabular T7 (ADR-F055) — GET /tabular/matters/{project_id}/grids.
-    assert len(actual) == 158  # +3: ADR-F054 capability panel (GET/PUT
+    # +1: F2 Tabular T6 (ADR-F055 T6 / ADR-F042) — /tabular/executions/{id}/cells/override
+    #   (POST set + DELETE clear share one path → +1 path, +0 count beyond it).
+    assert len(actual) == 159  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

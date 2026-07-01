@@ -172,6 +172,59 @@ class CellResult(BaseModel):
     """Optional commentary on an ambiguous extraction (ADR-F055; LQ-Grid
     -derived). ``None`` for the frozen linear executor's cells."""
 
+    # --- Lawyer override (ADR-F055 T6 / ADR-F042 auto-write-then-correct) ---
+    # A human-authored correction of the cell. Persisted in the ``results``
+    # JSONB alongside the agent's value (no migration), surfaced here so it
+    # serializes. The *effective* display value is ``override_value ?? value``
+    # — the agent's ``value`` + ``citations`` stay visible underneath. Set
+    # ONLY by the human-write endpoint (``POST .../cells/override``), never by
+    # an agent tool; the agent write path preserves these keys (human wins).
+    override_value: str | None = None
+    """The lawyer's corrected value. ``None`` when the cell is un-overridden."""
+
+    override_note: str | None = None
+    """Optional lawyer note explaining the override. ``None`` when absent."""
+
+    overridden_by: uuid.UUID | None = None
+    """The authenticated user who set the override (from the session, never
+    agent input). ``None`` when un-overridden."""
+
+    overridden_at: datetime | None = None
+    """When the override was set (UTC). ``None`` when un-overridden."""
+
+
+# The cell-dict keys that carry a lawyer override. Kept in one place so the
+# human-write endpoint (``api.tabular``) and the agent write path
+# (``agents.tabular_tool._upsert_row``, which must PRESERVE them so a re-pull
+# never clobbers the lawyer's correction — ADR-F055 T6 "human wins") stay in
+# sync.
+CELL_OVERRIDE_KEYS: tuple[str, ...] = (
+    "override_value",
+    "override_note",
+    "overridden_by",
+    "overridden_at",
+)
+
+# Bounds for the human-write override endpoint (rejected at the boundary).
+CELL_OVERRIDE_VALUE_MAX_CHARS = 4_000
+CELL_OVERRIDE_NOTE_MAX_CHARS = 2_000
+
+
+class CellOverrideRequest(BaseModel):
+    """A lawyer's manual correction of one grid cell (ADR-F055 T6 / ADR-F042).
+
+    Human-write only — never an agent tool. The override shadows the agent's
+    value in display; the agent's value + citations stay recorded underneath.
+    Whitespace-stripped + bounded at the boundary (reject, don't sanitize);
+    unknown keys are rejected (``extra='forbid'``)."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    document_id: uuid.UUID
+    column_name: str = Field(min_length=1, max_length=200)
+    override_value: str = Field(min_length=1, max_length=CELL_OVERRIDE_VALUE_MAX_CHARS)
+    override_note: str | None = Field(default=None, max_length=CELL_OVERRIDE_NOTE_MAX_CHARS)
+
 
 class TabularRow(BaseModel):
     """One row in the tabular grid — all cells for a single document.

@@ -3,8 +3,61 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-07-01): ▶ TABULAR REVIEW T8 SHIPPED — NEXT = T5 (live cell fill) then T6/T4.**
-> Branch `fork/f2-tabular-t8-grid-ops` (PR pending; ADR-F055, **no migration**). The Commercial agent can
+> ▶▶ **PICKUP (2026-07-02): ▶ TABULAR REVIEW T6 — grid review WORKSPACE + human cell-override — DONE on branch
+> `fork/f2-tabular-t6-workspace-drawer` (PR pending).** ADR-F055 **T6 addendum**; **NO migration** (the override
+> rides the `results` JSONB). Dev stack healthy `http://localhost:3000`; model `smart → deepseek-v4-flash`. Full
+> plan: `docs/fork/plans/TABULAR-REVIEW-agentic.md` "### T6 (core)".
+>
+> - **WHAT SHIPPED — the grid is a review WORKSPACE, not a stacked modal.** Killed the `ag-grid-overlay` (z-60)
+>   and the `TabularCitationModal` (z-100, **DELETED**). Expand (in-chat preview) / a Grids-tab row now open the
+>   grid as a **cockpit stage-takeover** — the `DocumentEditorPanel` fly-in reused verbatim, so the conversation
+>   stays MOUNTED and **live SSE survives** — hosting NEW `TabularWorkspace` = the full `TabularGrid` beside ONE
+>   docked `TabularCellDrawer` that **PUSHES** the grid (no modal, no backdrop). Drawer shows value · confidence
+>   · tier · cost · verbatim `source_quote` · notes · citations · **Open source document** (new tab via
+>   `GET /files/{source_file_id}/content`) · the **override + note** form.
+> - **The load-bearing add = a human cell-override (ADR-F042 human-write, NOT an agent tool).** NEW `POST` +
+>   `DELETE /api/v1/tabular/executions/{id}/cells/override` — owner-scoped (`user_id` from the SESSION),
+>   `mode=='agentic'`-gated (→ 404 on a linear/cross-user row, never touches the frozen executor),
+>   `.with_for_update()` before the JSONB read-modify-write, audit **IDs/counts only**. Mirrors
+>   `create_matter_correction`. The override rides the cell dict in `results` JSONB (+4 `CellResult` fields, all
+>   default `None`). **"Human wins" is STRUCTURAL:** `tabular_tool._upsert_row` **preserves** the `override_*`
+>   keys, so `record_tabular_row`/`update_tabular_cells` can refresh the agent value underneath but can never
+>   clobber the lawyer's override. Effective display value everywhere = `override_value ?? value`.
+> - **Also fixed:** cell-squish (real **fixed 16rem column widths + horizontal scroll + a Wrap line-clamp
+>   toggle**, not `width:100%`); the composer-overlap cosmetic (the drawer docks in-stage — no fixed overlay).
+>   `‹ Grids / <derived title>` breadcrumb; NO standing "Grid" tab.
+> - **Files.** NEW `web/.../components/{TabularWorkspace,TabularCellDrawer}.svelte` +
+>   `agents/tabular-workspace-helpers.ts` (+ `__tests__/*.test.ts`). Wiring: `ConversationHost.svelte`
+>   (`gridOpen`/`gridId` + `openGrid`/`closeGrid` + fly-in sibling + `cockpit.editorOpen = editorOpen||gridOpen`
+>   rail-collapse), `GridsPanel.svelte` (`onOpenGrid`), `TabularPreview.svelte` (Expand → `dispatch('expand')`,
+>   overlay+modal deleted), `ConversationPanel.svelte` (forwards `expandgrid`), `/tabular/[id]/+page.svelte`
+>   (inlines grid+drawer, KEEPS its export/cancel/banner chrome). `TabularGrid`/`TabularCell` gained `wrap`
+>   (+`fill`) + render `override_value ?? value` + an "edited" mark. `types.ts` extended (the TS
+>   `TabularCellResult` was a LOSSY subset — `source_quote`/`notes` were already on the wire). Backend:
+>   `api/app/api/tabular.py`, `schemas/tabular.py`, `agents/tabular_tool.py`. **DELETED** `TabularCitationModal`.
+> - **GATE — met.** api **48** (tabular endpoints+tool: set/clear/404×3/422×2/human-wins-across-agent-write/
+>   audit-no-value) + **4** guards (endpoints IMPLEMENTED_ROUTES + openapi EXPECTED_PATHS + `len==158→159`) +
+>   **mypy** 217 + **ruff** clean. web **1051** vitest (+12 new helper) + **svelte-check 0 errors** (1485→1484
+>   files, modal gone). Cypress T2/m3-c specs updated to the workspace/drawer test-ids (mock-based; not
+>   CI-gated). Evidence: `docs/fork/evidence/tabular-review/T6-workspace-drawer.md`.
+> - **KEY TRAPS.** (1) the override is a HUMAN endpoint — never a `guarded_dispatch` tool; `overridden_by` from
+>   the session, and `_upsert_row` MUST preserve override keys (else the agent silently reverts a correction).
+>   (2) a new `/api/v1` path ⇒ BOTH guard files + the `len==159` count. (3) new UI = app.css semantic tokens
+>   (`bg-brand` #0070f3 / `var(--brand)`), NOT legacy sage; the existing grid stays on `--lq-*`. (4) do NOT add
+>   `gridOpen` to `panelKey` (would remount `ConversationPanel` → drop the live SSE). (5) run the CI-parity
+>   `ruff` in a fresh `python:3.12-slim` on changed py; rebuild `web` before Cypress/screenshots. (6) forward
+>   DATABASE_URL to the dev-container tests BY NAME (`-e DATABASE_URL` + a `DATABASE_URL="$(docker inspect …)"`
+>   prefix) — never put the secret literally on the command line.
+> - **NEXT = T5** (live cell fill — a transient `data-tabular-cell` frame) · then **T4** (retrieval-fill +
+>   crossover eval, OOM-aware) · **T8b** (combine_documents). **T6 later phases:** P2 verified/flagged +
+>   completion meter (migration) · P3 column output-types + semantic colour · P4 party column/filter · P5
+>   deliverables (skill → `.docx` → Documents → Collabora). Grid-workspace design + LQ-Grid reference: memory
+>   [[t6-grid-workspace-redesign]]. **Untracked side-investigation** (NOT in this PR): `sample-documents/` demo
+>   packs + `api/tests/agents/scenarios/test_*_live.py` — keep or delete; live findings in
+>   [[tabular-fanout-live-behavior]].
+
+> ▶ **PREVIOUS (2026-07-01): TABULAR REVIEW T8 — MERGED PR #183 (`444c6c62`); ADR-F055, no migration.**
+> Branch `fork/f2-tabular-t8-grid-ops` (merged). The Commercial agent can
 > now EDIT a finalized grid in place ("bash" loop). Full plan: `docs/fork/plans/TABULAR-REVIEW-agentic.md`.
 > Dev stack healthy on `http://localhost:3000`; model `smart → deepseek-v4-flash`; DeepSeek has quota.
 >

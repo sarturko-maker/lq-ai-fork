@@ -150,3 +150,57 @@ animation (ADR-F004), the right use of a live-only frame.
 Cosmetic deferred to T6: the cockpit composer floats over the bottom of the conversation, so a tall trailing
 grid card sits partly behind it until scrolled (header/status/pills stay clear; Expand unaffected) — a
 pre-existing trait of any tall trailing content, addressed by the T6 stage rework.
+
+## T6 addendum (2026-07-02) — grid review WORKSPACE + a human-write cell-override endpoint
+
+Decision 7 called the grid "a first-class matter artifact" and the closing paragraph noted "the cockpit
+stage-takeover, the cell side-drawer, and the richer grid affordances … are design-system slices needing no
+separate ADR." A maintainer-driven design phase (LQ-Grid reference review + an approved mockup + four locked
+`AskUserQuestion` decisions) **reframed** the target: the grid is a review **WORKSPACE**, not an artifact you
+pop open in a modal. The UI parts stay design-system slices (no ADR). But T6 adds **one thing this ADR did
+not anticipate** and that touches the audit/authz contract, so it is recorded here rather than left implicit.
+
+**What decision 4 said, and where T6 lands it.** Decision 4 made the grid matter-tier
+**auto-write-then-correct (ADR-F042)** — "the conversational loop mutates the same grid in place … the
+lawyer corrects/undoes/pins." Until now the only cell writer was the **agent** (`record_tabular_row` /
+`update_tabular_cells`, T8), each under `guarded_dispatch`. ADR-F042 §B2 is explicit that the *human*
+correction is an **authenticated HTTP action, never an agent tool** (pinning mirrors
+`matter_memory` corrections). T6 realises that human half.
+
+**Decision (refines decision 4; maintainer-confirmed 2026-07-02):**
+
+1. **A new human-write endpoint** `POST /api/v1/tabular/executions/{execution_id}/cells/override` (set) and
+   `DELETE …/cells/override?document_id=&column_name=` (clear/undo — the ADR-F044 human-authenticated-revert
+   posture). It is a **human action, not a `guarded_dispatch` tool.** Owner-scoped from the **session**
+   `user.id` (cross-user → 404, no existence leak), gated to **`mode=='agentic'`** (404 on a linear row — it
+   can never touch the frozen executor, ADR-F001), row-locked (`.with_for_update()`) before the `results`
+   read-modify-write, audited **`tabular.cell_overridden` with IDs/counts only** (never the value/note,
+   ADR-F005 / 0013 D6). It mirrors `create_matter_correction` field-for-field (`str_strip_whitespace`,
+   `extra='forbid'`, response built before `db.commit()`).
+
+2. **The override rides the `results` JSONB — no migration, no new columns.** Four keys are added to a cell
+   dict (`override_value`, `override_note`, `overridden_by`, `overridden_at`) and surfaced by adding the same
+   four fields to `CellResult` (defaults `None`; existing + agent-written cells validate unchanged). This
+   inherits decision 3's "schema-level in `results` JSONB (no new columns)" posture. The **effective display
+   value is `override_value ?? value`**; the agent's `value` and citations stay visible underneath.
+
+3. **"The human value wins" is STRUCTURAL, not conventional.** Two guarantees: (a) `overridden_by` comes
+   from the authenticated session, never from agent/model input (which is forgeable via prompt/document
+   injection); (b) the agent write path (`_upsert_row`/`_apply_cells`) **preserves any `override_*` keys**
+   when it rewrites a cell — the agent may refresh the underlying value/citations, but it can neither drop
+   nor overwrite the lawyer's override. This is the tabular analogue of `trust='human-pinned'` winning in
+   `matter_memory`, and it is covered by an explicit test (override survives a subsequent
+   `update_tabular_cells`).
+
+4. **The stage-takeover + docked drawer are design-system slices (no ADR):** the workspace reuses the
+   `DocumentEditorPanel` fly-in (the conversation stays a mounted flex child → live SSE survives), and one
+   docked `TabularCellDrawer` replaces the stacked `TabularCitationModal` + `ag-grid-overlay`.
+
+**Consequences.** Positive: the lawyer can correct a cell and the correction is durable, attributable, and
+un-clobberable by the agent — closing decision 4's human half without a migration and without weakening the
+`guarded_dispatch`-only rule for agent writes. Negative/risk: the override lives in JSONB alongside the
+agent's value, so any future consumer of `results` must read the effective value via `override_value ??
+value` (centralised in one read-side helper + the web `CellResult`); a consumer that ignores it would show
+the stale agent value. Neutral: verified/flagged sign-off, a completion meter, semantic colour, the party
+column/filter, and deliverables remain later phases (P2–P5); source **highlighting** in the opened document
+stays T9 (T6 v1 opens the source file, unhighlighted).

@@ -1,0 +1,486 @@
+<script lang="ts">
+	/**
+	 * F2 Tabular T6 — the docked cell drawer (ADR-F055 T6).
+	 *
+	 * Replaces the stacked `TabularCitationModal`: a side panel that DOCKS next
+	 * to the grid inside `TabularWorkspace` (it pushes the grid, never overlays
+	 * — no z-index, no backdrop). Shows the effective value + confidence + tier
+	 * + cost, the verbatim grounding quote + notes, the citation list with an
+	 * "Open source document" action (M5), and the lawyer OVERRIDE form (M4).
+	 *
+	 * The override is the ADR-F042 human half: the lawyer's value shadows the
+	 * agent's in display everywhere (`effectiveCellValue`), while the agent's
+	 * value + citations stay visible here. All model/user text renders ESCAPED
+	 * (`{text}`), never `{@html}` — cell content is untrusted (prompt injection).
+	 */
+	import FileSearchIcon from '@lucide/svelte/icons/file-search';
+	import XIcon from '@lucide/svelte/icons/x';
+	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
+
+	import type { TabularCellResult } from '$lib/lq-ai/types';
+	import { effectiveCellValue, formatCostUsd, isOverridden } from '$lib/lq-ai/agents/tabular-workspace-helpers';
+
+	export let cell: TabularCellResult;
+	/** The row's UNIQUE document id — the true cell coordinate. Distinct from
+	 * `documentName` (a display label that can collide between two same-named
+	 * documents in one grid); the draft-reset guard MUST key on this, else a
+	 * stale override could be saved onto the wrong document (ADR-F042 path). */
+	export let documentId: string;
+	export let documentName: string;
+	export let columnName: string;
+	export let saving = false;
+	export let actionError: string | null = null;
+	// Callback props (forward-compatible; the workspace owns the API + state).
+	export let onClose: (() => void) | undefined = undefined;
+	export let onSaveOverride: ((value: string, note: string | null) => void) | undefined = undefined;
+	export let onClearOverride: (() => void) | undefined = undefined;
+	export let onOpenSource: ((fileId: string) => void) | undefined = undefined;
+
+	let draftValue = '';
+	let draftNote = '';
+	let lastKey = '';
+
+	// Reset the draft only when a DIFFERENT cell is selected (keyed on the cell
+	// coordinates) — not when the same cell refetches after a save.
+	$: {
+		const key = `${documentId} ${columnName}`;
+		if (key !== lastKey) {
+			lastKey = key;
+			draftValue = cell.override_value ?? cell.value ?? '';
+			draftNote = cell.override_note ?? '';
+		}
+	}
+
+	$: overridden = isOverridden(cell);
+	$: effective = effectiveCellValue(cell);
+	$: costLabel = formatCostUsd(cell.cost_usd);
+	// One "open source" target per cell — the first citation that resolved a file.
+	$: sourceFileId = cell.citations.find((c) => c.source_file_id)?.source_file_id ?? null;
+	$: trimmed = draftValue.trim();
+	$: unchanged = trimmed === (cell.override_value ?? '').trim();
+	$: canSave = trimmed.length > 0 && !unchanged && !saving;
+
+	function save(): void {
+		if (!canSave) return;
+		onSaveOverride?.(draftValue.trim(), draftNote.trim() ? draftNote.trim() : null);
+	}
+</script>
+
+<aside class="lq-tabdrawer" data-testid="lq-tabular-cell-drawer" aria-label="Cell detail">
+	<header class="lq-tabdrawer__head">
+		<div class="lq-tabdrawer__coords">
+			<div class="lq-tabdrawer__col">{columnName}</div>
+			<div class="lq-tabdrawer__doc">{documentName}</div>
+		</div>
+		<button
+			type="button"
+			class="lq-tabdrawer__close"
+			data-testid="lq-tabular-cell-drawer-close"
+			on:click={() => onClose?.()}
+			aria-label="Close cell detail"
+		>
+			<XIcon size={16} />
+		</button>
+	</header>
+
+	<div class="lq-tabdrawer__body">
+		<!-- Value -->
+		<section>
+			<div class="lq-tabdrawer__value-row">
+				{#if cell.confidence === 'failed' && !overridden}
+					<span class="lq-tabdrawer__failed" data-testid="lq-tabular-cell-drawer-failed"
+						>Not found</span
+					>
+				{:else}
+					<span class="lq-tabdrawer__value" data-testid="lq-tabular-cell-drawer-value">{effective ?? '—'}</span>
+				{/if}
+				<span class="lq-tabdrawer__chip" data-confidence={cell.confidence}>{cell.confidence}</span>
+			</div>
+			{#if overridden}
+				<div class="lq-tabdrawer__overridden" data-testid="lq-tabular-cell-drawer-overridden">
+					<span class="lq-tabdrawer__badge">Overridden by lawyer</span>
+					{#if cell.value != null}
+						<span class="lq-tabdrawer__was">Agent value: {cell.value}</span>
+					{/if}
+				</div>
+			{/if}
+			<div class="lq-tabdrawer__meta">
+				{#if cell.tier_used != null}<span>Tier {cell.tier_used}</span>{/if}
+				{#if costLabel}<span>{costLabel}</span>{/if}
+				{#if cell.verification_method}<span>{cell.verification_method}</span>{/if}
+			</div>
+			{#if cell.error}
+				<pre class="lq-tabdrawer__error">{cell.error}</pre>
+			{/if}
+		</section>
+
+		<!-- Verbatim grounding quote -->
+		{#if cell.source_quote}
+			<section>
+				<h4 class="lq-tabdrawer__h">Source quote</h4>
+				<blockquote class="lq-tabdrawer__quote" data-testid="lq-tabular-cell-drawer-quote"
+					>{cell.source_quote}</blockquote
+				>
+			</section>
+		{/if}
+
+		<!-- Notes -->
+		{#if cell.notes}
+			<section>
+				<h4 class="lq-tabdrawer__h">Notes</h4>
+				<p class="lq-tabdrawer__notes">{cell.notes}</p>
+			</section>
+		{/if}
+
+		<!-- Citations -->
+		<section>
+			<div class="lq-tabdrawer__cite-head">
+				<h4 class="lq-tabdrawer__h">Citations</h4>
+				{#if sourceFileId}
+					<button
+						type="button"
+						class="lq-tabdrawer__source"
+						data-testid="lq-tabular-cell-drawer-open-source"
+						on:click={() => onOpenSource?.(sourceFileId)}
+					>
+						<FileSearchIcon size={13} /> Open source document
+					</button>
+				{/if}
+			</div>
+			{#if cell.citations.length === 0}
+				<p class="lq-tabdrawer__empty">No citations attached to this cell.</p>
+			{:else}
+				<ul class="lq-tabdrawer__cites">
+					{#each cell.citations as cite (cite.citation_id)}
+						<li class="lq-tabdrawer__cite">
+							<span class="lq-tabdrawer__chip" data-confidence={cite.confidence}>{cite.confidence}</span>
+							<span class="lq-tabdrawer__cite-meta">
+								{#if cite.source_page != null}Page {cite.source_page}{:else}<code>{cite.citation_id.slice(0, 8)}</code>{/if}
+							</span>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
+
+		<!-- Lawyer override (ADR-F042 human-write) -->
+		<section class="lq-tabdrawer__override">
+			<h4 class="lq-tabdrawer__h">Your override</h4>
+			<input
+				type="text"
+				class="lq-tabdrawer__input"
+				data-testid="lq-tabular-cell-drawer-override-value"
+				placeholder="Corrected value"
+				bind:value={draftValue}
+			/>
+			<textarea
+				class="lq-tabdrawer__textarea"
+				data-testid="lq-tabular-cell-drawer-override-note"
+				placeholder="Note (optional) — why you changed it"
+				rows="2"
+				bind:value={draftNote}
+			></textarea>
+			{#if actionError}
+				<p class="lq-tabdrawer__action-error" role="alert">{actionError}</p>
+			{/if}
+			<div class="lq-tabdrawer__actions">
+				<button
+					type="button"
+					class="lq-tabdrawer__save"
+					data-testid="lq-tabular-cell-drawer-save"
+					disabled={!canSave}
+					on:click={save}
+				>
+					{#if saving}<LoaderCircleIcon size={13} class="lq-spin" />{/if}
+					Save override
+				</button>
+				{#if overridden}
+					<button
+						type="button"
+						class="lq-tabdrawer__clear"
+						data-testid="lq-tabular-cell-drawer-clear"
+						disabled={saving}
+						on:click={() => onClearOverride?.()}
+					>
+						Clear
+					</button>
+				{/if}
+			</div>
+		</section>
+	</div>
+</aside>
+
+<style>
+	.lq-tabdrawer {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		min-height: 0;
+		background: var(--lq-surface);
+		border-left: 1px solid var(--lq-border);
+	}
+	.lq-tabdrawer__head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.5rem;
+		padding: 0.875rem 1rem;
+		border-bottom: 1px solid var(--lq-border);
+	}
+	.lq-tabdrawer__col {
+		font-weight: 600;
+		font-size: 0.9375rem;
+	}
+	.lq-tabdrawer__doc {
+		font-size: 0.8125rem;
+		color: var(--lq-text-secondary);
+		margin-top: 0.125rem;
+		word-break: break-word;
+	}
+	.lq-tabdrawer__close {
+		flex-shrink: 0;
+		background: none;
+		border: none;
+		color: var(--lq-text-secondary);
+		cursor: pointer;
+		padding: 0.25rem;
+		border-radius: 0.375rem;
+		line-height: 0;
+	}
+	.lq-tabdrawer__close:hover {
+		background: var(--lq-inset);
+	}
+	.lq-tabdrawer__body {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+		padding: 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 1.125rem;
+	}
+	.lq-tabdrawer__value-row {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+	.lq-tabdrawer__value {
+		font-size: 1rem;
+		font-weight: 500;
+		line-height: 1.4;
+		word-break: break-word;
+	}
+	.lq-tabdrawer__failed {
+		font-style: italic;
+		color: var(--lq-text-secondary);
+	}
+	.lq-tabdrawer__overridden {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+	}
+	.lq-tabdrawer__badge {
+		display: inline-block;
+		padding: 0.0625rem 0.4375rem;
+		border-radius: 999px;
+		font-size: 0.6875rem;
+		font-weight: 600;
+		background: color-mix(in srgb, var(--brand, #0070f3) 14%, transparent);
+		color: var(--brand, #0070f3);
+	}
+	.lq-tabdrawer__was {
+		font-size: 0.75rem;
+		color: var(--lq-text-secondary);
+		text-decoration: line-through;
+	}
+	.lq-tabdrawer__meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin-top: 0.5rem;
+		font-size: 0.75rem;
+		color: var(--lq-text-secondary);
+	}
+	.lq-tabdrawer__error {
+		margin: 0.5rem 0 0;
+		padding: 0.5rem 0.625rem;
+		background: var(--lq-inset);
+		border-radius: 0.375rem;
+		font-size: 0.75rem;
+		white-space: pre-wrap;
+		max-height: 7rem;
+		overflow: auto;
+	}
+	.lq-tabdrawer__h {
+		margin: 0 0 0.375rem;
+		font-size: 0.6875rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--lq-text-secondary);
+	}
+	.lq-tabdrawer__quote {
+		margin: 0;
+		padding: 0.625rem 0.75rem;
+		background: var(--lq-warning-soft, #fef3c7);
+		border-left: 3px solid var(--lq-warning, #d97706);
+		border-radius: 0 0.375rem 0.375rem 0;
+		font-size: 0.8125rem;
+		font-style: italic;
+		line-height: 1.5;
+		color: var(--lq-text);
+		word-break: break-word;
+	}
+	.lq-tabdrawer__notes {
+		margin: 0;
+		font-size: 0.8125rem;
+		line-height: 1.5;
+		color: var(--lq-text);
+	}
+	.lq-tabdrawer__cite-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+	.lq-tabdrawer__source {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3125rem;
+		padding: 0.25rem 0.5rem;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--brand, #0070f3);
+		background: color-mix(in srgb, var(--brand, #0070f3) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--brand, #0070f3) 30%, transparent);
+		border-radius: 0.375rem;
+		cursor: pointer;
+	}
+	.lq-tabdrawer__source:hover {
+		background: color-mix(in srgb, var(--brand, #0070f3) 18%, transparent);
+	}
+	.lq-tabdrawer__empty {
+		margin: 0;
+		font-size: 0.8125rem;
+		color: var(--lq-text-secondary);
+	}
+	.lq-tabdrawer__cites {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+	}
+	.lq-tabdrawer__cite {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.375rem 0.5rem;
+		border: 1px solid var(--lq-border);
+		border-radius: 0.375rem;
+		background: var(--lq-inset);
+		font-size: 0.75rem;
+	}
+	.lq-tabdrawer__cite-meta code {
+		font-family: 'Menlo', 'Monaco', monospace;
+	}
+	.lq-tabdrawer__chip {
+		flex-shrink: 0;
+		display: inline-block;
+		padding: 0.0625rem 0.375rem;
+		border-radius: 999px;
+		font-size: 0.6875rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.02em;
+	}
+	.lq-tabdrawer__chip[data-confidence='high'] {
+		background: var(--lq-success-soft, #dcfce7);
+		color: var(--lq-success, #166534);
+	}
+	.lq-tabdrawer__chip[data-confidence='medium'] {
+		background: var(--lq-inset, #e5e7eb);
+		color: var(--lq-text, #1f2937);
+	}
+	.lq-tabdrawer__chip[data-confidence='low'],
+	.lq-tabdrawer__chip[data-confidence='failed'] {
+		background: var(--lq-warning-soft, #fef3c7);
+		color: var(--lq-warning, #92400e);
+	}
+	.lq-tabdrawer__override {
+		border-top: 1px solid var(--lq-border);
+		padding-top: 1rem;
+	}
+	.lq-tabdrawer__input,
+	.lq-tabdrawer__textarea {
+		width: 100%;
+		box-sizing: border-box;
+		padding: 0.4375rem 0.5rem;
+		font-size: 0.8125rem;
+		font-family: inherit;
+		color: var(--lq-text);
+		background: var(--lq-canvas, #fff);
+		border: 1px solid var(--lq-border);
+		border-radius: 0.375rem;
+		margin-bottom: 0.5rem;
+	}
+	.lq-tabdrawer__textarea {
+		resize: vertical;
+	}
+	.lq-tabdrawer__input:focus,
+	.lq-tabdrawer__textarea:focus {
+		outline: 2px solid var(--brand, #0070f3);
+		outline-offset: -1px;
+	}
+	.lq-tabdrawer__action-error {
+		margin: 0 0 0.5rem;
+		font-size: 0.75rem;
+		color: var(--lq-danger, #b91c1c);
+	}
+	.lq-tabdrawer__actions {
+		display: flex;
+		gap: 0.5rem;
+	}
+	.lq-tabdrawer__save {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		padding: 0.4375rem 0.75rem;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: #fff;
+		background: var(--brand, #0070f3);
+		border: none;
+		border-radius: 0.375rem;
+		cursor: pointer;
+	}
+	.lq-tabdrawer__save:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.lq-tabdrawer__clear {
+		padding: 0.4375rem 0.75rem;
+		font-size: 0.8125rem;
+		color: var(--lq-text-secondary);
+		background: none;
+		border: 1px solid var(--lq-border);
+		border-radius: 0.375rem;
+		cursor: pointer;
+	}
+	.lq-tabdrawer__clear:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	:global(.lq-tabdrawer .lq-spin) {
+		animation: lq-tabdrawer-spin 0.8s linear infinite;
+	}
+	@keyframes lq-tabdrawer-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+</style>

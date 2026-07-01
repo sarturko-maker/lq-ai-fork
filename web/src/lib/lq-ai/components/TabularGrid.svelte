@@ -39,6 +39,17 @@
 	 */
 	export let documentIds: string[];
 	export let documentNameById: Record<string, string>;
+	/**
+	 * T6: when true, cell values wrap (line-clamped) instead of a single
+	 * ellipsised line — the grid-workspace "Wrap" toggle. Columns keep their
+	 * fixed width either way, so the grid never squishes.
+	 */
+	export let wrap = false;
+	/**
+	 * T6: fill the available height (grid workspace stage) instead of the
+	 * default capped scroll box (in-chat preview / small embeds).
+	 */
+	export let fill = false;
 
 	const dispatch = createEventDispatcher<{ open: CellOpenEvent }>();
 
@@ -67,7 +78,7 @@
 	}
 </script>
 
-<div class="lq-tabgrid__scroll" data-testid="lq-tabgrid">
+<div class="lq-tabgrid__scroll" class:lq-tabgrid__scroll--fill={fill} data-testid="lq-tabgrid">
 	<table class="lq-tabgrid">
 		<thead>
 			<tr>
@@ -101,6 +112,7 @@
 						<td class="lq-tabgrid__cell">
 							<TabularCell
 								{cell}
+								{wrap}
 								documentName={name}
 								columnName={col.name}
 								on:open={(e) => handleCellOpen(e, docId, cell)}
@@ -121,10 +133,18 @@
 		border-radius: 0.5rem;
 		background: var(--lq-surface);
 	}
+	/* Grid-workspace stage (T6): fill the available height instead of capping. */
+	.lq-tabgrid__scroll--fill {
+		max-height: none;
+		height: 100%;
+	}
 	.lq-tabgrid {
+		/* Fixed column widths + horizontal scroll (T6 squish fix): the table
+		   sizes to the sum of its columns rather than stretching to 100%, so a
+		   few columns stay their natural width and many columns scroll. */
 		border-collapse: separate;
 		border-spacing: 0;
-		min-width: 100%;
+		width: max-content;
 	}
 	.lq-tabgrid th,
 	.lq-tabgrid td {
@@ -154,14 +174,20 @@
 		background: var(--lq-surface);
 		font-weight: 600;
 		padding: 0.625rem 0.75rem;
-		min-width: 12rem;
+		width: 14rem;
+		min-width: 14rem;
+		max-width: 14rem;
 	}
 	.lq-tabgrid__corner {
 		z-index: 3;
 		background: var(--lq-inset);
 	}
+	/* Fixed data-column width — the source of the "no squish" behaviour. */
+	.lq-tabgrid__sticky-row,
 	.lq-tabgrid__cell {
-		min-width: 14rem;
+		width: 16rem;
+		min-width: 16rem;
+		max-width: 16rem;
 	}
 	.lq-tabgrid tbody tr:nth-child(even) .lq-tabgrid__sticky-col {
 		background: var(--lq-inset);

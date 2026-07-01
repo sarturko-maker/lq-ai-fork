@@ -326,15 +326,16 @@ describe('M3-C3 — Tabular Review happy path', () => {
 		cy.get('[data-testid="lq-tabcell-failed"]').should('have.length', 1);
 		cy.get('[data-testid="lq-tabcell-failed"]').should('contain', 'not found');
 
-		// 12. Click a populated cell → citation modal opens.
+		// 12. Click a populated cell → the docked cell drawer opens (T6, ADR-F055 —
+		// replaces the old stacked citation modal).
 		cy.get('[data-testid="lq-tabcell"][data-state!="empty"][data-state!="failed"]')
 			.first()
 			.click();
-		cy.get('[data-testid="lq-tabcm"]').should('be.visible');
-		cy.get('[data-testid="lq-tabcm-citations"]').should('be.visible');
+		cy.get('[data-testid="lq-tabular-cell-drawer"]').should('be.visible');
+		cy.get('[data-testid="lq-tabular-cell-drawer-value"]').should('be.visible');
 
-		// 13. Close the modal (× button).
-		cy.get('[data-testid="lq-tabcm-close"]').click();
-		cy.get('[data-testid="lq-tabcm"]').should('not.exist');
+		// 13. Close the drawer (× button).
+		cy.get('[data-testid="lq-tabular-cell-drawer-close"]').click();
+		cy.get('[data-testid="lq-tabular-cell-drawer"]').should('not.exist');
 	});
 });

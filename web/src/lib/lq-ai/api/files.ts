@@ -102,3 +102,30 @@ export async function downloadFile(fileId: string, filename?: string): Promise<v
 		URL.revokeObjectURL(url);
 	}
 }
+
+/**
+ * GET /api/v1/files/{id}/content — fetch the bytes with auth (refresh-on-401)
+ * and open them in a new browser tab (viewable types render inline; others
+ * download). Used by the tabular cell drawer's "Open source document" action
+ * (F2 Tabular T6, ADR-F055 T6 M5). Browser-only; no-ops under SSR/tests.
+ * Falls back to a download when a popup is blocked so the click is never lost.
+ */
+export async function openFileInNewTab(fileId: string): Promise<void> {
+	const res = await apiBlobRequest(`/files/${encodeURIComponent(fileId)}/content`);
+	const blob = await res.blob();
+	if (typeof window === 'undefined' || typeof document === 'undefined') {
+		return;
+	}
+	const url = URL.createObjectURL(blob);
+	const win = window.open(url, '_blank', 'noopener,noreferrer');
+	if (!win) {
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = '';
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+	}
+	// Defer revoke so the opened tab has time to load the blob.
+	setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}

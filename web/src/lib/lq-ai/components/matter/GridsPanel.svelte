@@ -28,11 +28,18 @@
 	let {
 		projectId,
 		reloadKey = 0,
-		nowMs
+		nowMs,
+		onOpenGrid
 	}: {
 		projectId: string;
 		reloadKey?: number;
 		nowMs: number;
+		/**
+		 * F2 Tabular T6: open a grid as an in-cockpit stage-takeover (keeps the
+		 * conversation mounted → live SSE survives). When absent (e.g. a future
+		 * standalone mount) the row falls back to navigating to `/tabular/[id]`.
+		 */
+		onOpenGrid?: (gridId: string) => void;
 	} = $props();
 
 	let grids = $state<TabularExecutionSummary[] | null>(null);
@@ -84,6 +91,10 @@
 	});
 
 	function open(grid: TabularExecutionSummary) {
+		if (onOpenGrid) {
+			onOpenGrid(grid.id);
+			return;
+		}
 		void goto(`/lq-ai/tabular/${grid.id}`);
 	}
 

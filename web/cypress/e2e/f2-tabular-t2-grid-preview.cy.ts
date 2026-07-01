@@ -201,18 +201,19 @@ describe('F2 Tabular T2 — in-chat grid preview', { retries: { runMode: 1, open
 			cy.screenshot(`f2-tabular-t2-preview-${theme}`, { capture: 'viewport' });
 		}
 
-		// EXPAND: opens the reused full TabularGrid in an in-conversation overlay.
+		// EXPAND (T6, ADR-F055): opens the grid as a cockpit stage-takeover — the
+		// docked TabularWorkspace flies in, the conversation stays mounted.
 		pinTheme('light');
 		cy.get('[data-testid="lq-ai-tabular-preview-expand"]').first().click();
-		cy.get('[data-testid="lq-ai-tabular-preview-overlay"]', { timeout: 15000 }).should('be.visible');
+		cy.get('[data-testid="lq-tabular-workspace"]', { timeout: 15000 }).should('be.visible');
 		cy.get('[data-testid="lq-tabgrid"]').should('be.visible');
 		cy.get('[data-testid="lq-tabgrid"]').should('contain', 'Singapore');
 		// eslint-disable-next-line cypress/no-unnecessary-waiting -- paint settle before capture
 		cy.wait(300);
 		cy.screenshot('f2-tabular-t2-expanded', { capture: 'viewport' });
 
-		// Close returns to the conversation.
-		cy.get('[data-testid="lq-ai-tabular-preview-close"]').click();
-		cy.get('[data-testid="lq-ai-tabular-preview-overlay"]').should('not.exist');
+		// The "‹ Grids" breadcrumb closes the stage and returns to the cockpit.
+		cy.get('[data-testid="lq-tabular-workspace-back"]').click();
+		cy.get('[data-testid="lq-tabular-workspace"]').should('not.exist');
 	});
 });

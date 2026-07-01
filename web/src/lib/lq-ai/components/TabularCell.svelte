@@ -11,6 +11,7 @@
 	import { createEventDispatcher } from 'svelte';
 
 	import type { TabularCellConfidence, TabularCellResult } from '$lib/lq-ai/types';
+	import { effectiveCellValue, isOverridden } from '$lib/lq-ai/agents/tabular-workspace-helpers';
 
 	type CellRenderState = 'empty' | 'failed' | 'high' | 'medium' | 'low';
 
@@ -40,11 +41,17 @@
 	 */
 	export let documentName: string = '';
 	export let columnName: string = '';
+	/** T6: wrap (line-clamp) the value instead of a single ellipsised line. */
+	export let wrap = false;
 
 	const dispatch = createEventDispatcher<{ open: { documentName: string; columnName: string } }>();
 
 	$: state = cellRenderState(cell) as CellRenderState;
 	$: clickable = state !== 'empty';
+	// The effective display value: a lawyer override shadows the agent value
+	// (ADR-F042 "human wins"); the drawer still shows the agent value underneath.
+	$: shownValue = effectiveCellValue(cell) ?? '';
+	$: overridden = isOverridden(cell);
 
 	function handleClick(): void {
 		if (!clickable) return;
@@ -65,33 +72,44 @@
      analyzer flags the dynamic tabindex without seeing the role guard. -->
 <div
 	class="lq-tabcell"
+	class:lq-tabcell--wrap={wrap}
 	data-state={state}
 	data-testid="lq-tabcell"
 	data-document-name={documentName}
 	data-column-name={columnName}
+	data-overridden={overridden ? 'true' : undefined}
 	role={clickable ? 'button' : undefined}
 	tabindex={clickable ? 0 : undefined}
 	on:click={handleClick}
 	on:keydown={handleKey}
 >
-	{#if state === 'empty'}
+	{#if state === 'empty' && !overridden}
 		<span class="lq-tabcell__placeholder" aria-label="not yet computed">…</span>
-	{:else if state === 'failed'}
+	{:else if state === 'failed' && !overridden}
 		<span class="lq-tabcell__failed" data-testid="lq-tabcell-failed">not found</span>
 	{:else}
-		<span class="lq-tabcell__value" data-testid="lq-tabcell-value">{cell?.value ?? ''}</span>
+		<span class="lq-tabcell__value" class:lq-tabcell__value--wrap={wrap} data-testid="lq-tabcell-value"
+			>{shownValue}</span
+		>
 	{/if}
 
-	{#if cell && state !== 'empty'}
-		<span
-			class="lq-tabcell__chip"
-			data-confidence={cell.confidence}
-			data-testid="lq-tabcell-chip"
-			aria-label={`Confidence: ${confidenceChipLabel(cell.confidence)}`}
-		>
-			{confidenceChipLabel(cell.confidence)}
-		</span>
-	{/if}
+	<span class="lq-tabcell__marks">
+		{#if overridden}
+			<span class="lq-tabcell__edited" data-testid="lq-tabcell-edited" title="Overridden by lawyer"
+				>edited</span
+			>
+		{/if}
+		{#if cell && state !== 'empty'}
+			<span
+				class="lq-tabcell__chip"
+				data-confidence={cell.confidence}
+				data-testid="lq-tabcell-chip"
+				aria-label={`Confidence: ${confidenceChipLabel(cell.confidence)}`}
+			>
+				{confidenceChipLabel(cell.confidence)}
+			</span>
+		{/if}
+	</span>
 </div>
 
 <style>
@@ -118,14 +136,45 @@
 		outline: 2px solid var(--lq-accent, #4f46e5);
 		outline-offset: -2px;
 	}
+	.lq-tabcell--wrap {
+		align-items: flex-start;
+	}
 	.lq-tabcell__placeholder {
 		color: var(--lq-text-secondary);
 	}
 	.lq-tabcell__value {
 		flex: 1;
+		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+	.lq-tabcell__value--wrap {
+		white-space: normal;
+		text-overflow: clip;
+		display: -webkit-box;
+		-webkit-line-clamp: 6;
+		line-clamp: 6;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+		word-break: break-word;
+	}
+	.lq-tabcell__marks {
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+	}
+	.lq-tabcell__edited {
+		display: inline-block;
+		padding: 0.0625rem 0.375rem;
+		border-radius: 999px;
+		font-size: 0.625rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.02em;
+		background: color-mix(in srgb, var(--brand, #0070f3) 14%, transparent);
+		color: var(--brand, #0070f3);
 	}
 	.lq-tabcell__failed {
 		flex: 1;
