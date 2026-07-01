@@ -464,9 +464,7 @@ async def test_list_matter_grids_scoped_to_matter_owner_and_agentic(
     await _insert_grid(db_session, owner=user, project_id=other_project.id)  # other matter
     await db_session.flush()
 
-    resp = await client.get(
-        f"/api/v1/tabular/matters/{project.id}/grids", headers=_bearer(user)
-    )
+    resp = await client.get(f"/api/v1/tabular/matters/{project.id}/grids", headers=_bearer(user))
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert [g["id"] for g in data] == [str(live.id)]
@@ -492,7 +490,5 @@ async def test_list_matter_grids_cross_user_and_unknown_are_404(
     assert resp.status_code == 404
 
     # Unknown matter → 404.
-    resp = await client.get(
-        f"/api/v1/tabular/matters/{uuid.uuid4()}/grids", headers=_bearer(user)
-    )
+    resp = await client.get(f"/api/v1/tabular/matters/{uuid.uuid4()}/grids", headers=_bearer(user))
     assert resp.status_code == 404
