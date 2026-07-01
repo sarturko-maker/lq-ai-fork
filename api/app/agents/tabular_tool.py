@@ -57,7 +57,12 @@ from app.schemas.tabular_agent import (
 logger = logging.getLogger(__name__)
 
 TABULAR_TOOL_NAMES = frozenset(
-    {"start_tabular_review", "record_tabular_row", "finalize_tabular_review"}
+    {
+        "start_tabular_review",
+        "record_tabular_row",
+        "finalize_tabular_review",
+        "update_tabular_cells",
+    }
 )
 
 
@@ -157,7 +162,38 @@ def build_tabular_tools(
             ctx,
         )
 
-    return [start_tabular_review, record_tabular_row, finalize_tabular_review]
+    async def update_tabular_cells(
+        grid_id: str, document: str, cells: dict[str, dict[str, Any]]
+    ) -> str:
+        """Edit cells of a FINALIZED grid in place — the conversational grid-ops loop.
+
+        Use this to act on a lawyer's request to change an existing grid: "re-pull the Term
+        for Acme", "fix that governing-law cell", "update the cap for the SOW". Re-read the
+        document(s) first, then call this with the corrected cells.
+
+        - ``grid_id``: the grid to edit (a completed grid; while a grid is still being built
+          use record_tabular_row instead).
+        - ``document``: the filename whose row you are editing, exactly as in the grid.
+        - ``cells``: a map of column name → cell (same shape as record_tabular_row) — only
+          the columns you name are changed; the rest of the row is untouched.
+
+        The grid updates in place and stays the lawyer's work product — they can correct or
+        undo any change (ADR-F042).
+        """
+        return await guarded_dispatch(
+            "update_tabular_cells",
+            lambda db: _update_tabular_cells(
+                db, binding, grid_id=grid_id, document=document, cells=cells, run_id=run_id
+            ),
+            ctx,
+        )
+
+    return [
+        start_tabular_review,
+        record_tabular_row,
+        finalize_tabular_review,
+        update_tabular_cells,
+    ]
 
 
 # --- impls ----------------------------------------------------------------------------
@@ -268,10 +304,46 @@ async def _record_tabular_row(
             f"{execution.status!r}). Start a new grid if you need to."
         )
 
-    resolved = await _resolve_one_document(db, binding, proposal.document)
+    applied = await _apply_cells(
+        db,
+        binding,
+        execution,
+        document=proposal.document,
+        cells=proposal.cells,
+        action="tabular.row_recorded",
+    )
+    if isinstance(applied, str):
+        return applied
+    document_name, n_cells = applied
+
+    filled, total = _coverage_counts(execution)
+    return (
+        f'Recorded {n_cells} cell(s) for "{document_name}" in grid {execution.id}. '
+        f"{filled}/{total} cell(s) filled across the grid. When every row is recorded, call "
+        f"finalize_tabular_review."
+    )
+
+
+async def _apply_cells(
+    db: AsyncSession,
+    binding: MatterBinding,
+    execution: TabularExecution,
+    *,
+    document: str,
+    cells: dict[str, AgenticCellInput],
+    action: str,
+) -> tuple[str, int] | str:
+    """Resolve doc → verify it is in the grid → validate columns → upsert (merge) → audit.
+
+    Shared by ``_record_tabular_row`` (initial fill) and ``_update_tabular_cells`` (edit a
+    finalized grid) — the caller owns the status gate and the confirmation message. Returns
+    ``(document_name, n_cells)`` on success, or an error string the caller relays verbatim.
+    The grid must already be locked FOR UPDATE by the caller (results JSONB read-modify-write).
+    """
+    resolved = await _resolve_one_document(db, binding, document)
     if resolved is None:
         return (
-            f'No ingested document named "{proposal.document}" in this matter. Use '
+            f'No ingested document named "{document}" in this matter. Use '
             "search_documents (empty query) to list the matter's documents."
         )
     document_id, document_name = resolved
@@ -283,14 +355,14 @@ async def _record_tabular_row(
         )
 
     column_names = _column_names(execution)
-    unknown = [name for name in proposal.cells if name not in column_names]
+    unknown = [name for name in cells if name not in column_names]
     if unknown:
         return (
             f"Unknown column(s) {', '.join(unknown)} — this grid's columns are: "
             f"{', '.join(column_names)}. Use the exact column names."
         )
 
-    new_cells = {name: _cell_payload(cell) for name, cell in proposal.cells.items()}
+    new_cells = {name: _cell_payload(cell) for name, cell in cells.items()}
     execution.results = _upsert_row(
         execution.results,
         document_id=str(document_id),
@@ -302,19 +374,62 @@ async def _record_tabular_row(
     await audit_action(
         db,
         user_id=binding.user_id,
-        action="tabular.row_recorded",
+        action=action,
         resource_type="tabular_execution",
         resource_id=str(execution.id),
         project_id=binding.project_id,
         practice_area_id=binding.practice_area_id,
         details={"document_id": str(document_id), "cells": len(new_cells)},
     )
+    return document_name, len(new_cells)
 
-    filled, total = _coverage_counts(execution)
+
+async def _update_tabular_cells(
+    db: AsyncSession,
+    binding: MatterBinding,
+    *,
+    grid_id: str,
+    document: str,
+    cells: dict[str, dict[str, Any]],
+    run_id: uuid.UUID,
+) -> str:
+    """Edit cells of a COMPLETED grid in place (the conversational 'bash' loop, ADR-F055).
+
+    Distinct from record_tabular_row, which only fills a grid still being built: this
+    re-pulls or corrects cells of a finalized grid (a lawyer asking "re-pull the Term for
+    Acme", "fix that governing-law cell"). Matter-tier auto-write-then-correct (ADR-F042):
+    the agent writes, the lawyer owns/undoes.
+    """
+    try:
+        proposal = RecordTabularRowInput(grid_id=grid_id, document=document, cells=cells)  # type: ignore[arg-type]
+    except ValidationError as exc:
+        return _rejection_text(exc, "update_tabular_cells")
+
+    execution = await _load_grid_for_update(db, binding, proposal.grid_id)
+    if execution is None:
+        return _no_grid_text(proposal.grid_id)
+    if execution.status != "completed":
+        return (
+            f"Grid {proposal.grid_id} is not a finalized grid to edit (status="
+            f"{execution.status!r}). Use record_tabular_row while it is still being built, "
+            "then finalize_tabular_review."
+        )
+
+    applied = await _apply_cells(
+        db,
+        binding,
+        execution,
+        document=proposal.document,
+        cells=proposal.cells,
+        action="tabular.cells_updated",
+    )
+    if isinstance(applied, str):
+        return applied
+    document_name, n_cells = applied
+
     return (
-        f'Recorded {len(new_cells)} cell(s) for "{document_name}" in grid {execution.id}. '
-        f"{filled}/{total} cell(s) filled across the grid. When every row is recorded, call "
-        f"finalize_tabular_review."
+        f'Updated {n_cells} cell(s) for "{document_name}" in grid {execution.id}. The grid is '
+        "the lawyer's work product — they can correct or undo any change."
     )
 
 

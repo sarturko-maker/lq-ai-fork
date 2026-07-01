@@ -36,6 +36,7 @@ from app.agents.tabular_tool import (
     _finalize_tabular_review,
     _record_tabular_row,
     _start_tabular_review,
+    _update_tabular_cells,
     build_tabular_tools,
 )
 from app.agents.tools import MATTER_TOOL_NAMES, MatterBinding
@@ -289,11 +290,13 @@ def test_build_returns_three_named_tools() -> None:
         "start_tabular_review",
         "record_tabular_row",
         "finalize_tabular_review",
+        "update_tabular_cells",
     ]
     assert sorted(TABULAR_TOOL_NAMES) == [
         "finalize_tabular_review",
         "record_tabular_row",
         "start_tabular_review",
+        "update_tabular_cells",
     ]
 
 
@@ -597,7 +600,7 @@ async def test_audit_receipts_carry_counts_not_content(matter: SimpleNamespace) 
 
 async def test_guarded_closures_end_to_end(matter: SimpleNamespace) -> None:
     """start → record → finalize through guarded_dispatch on a live running run."""
-    start, record, finalize = build_tabular_tools(
+    start, record, finalize, update = build_tabular_tools(
         matter.factory,
         run_id=matter.run_id,
         binding=_binding(matter.user_id, matter.project_id),
@@ -611,6 +614,11 @@ async def test_guarded_closures_end_to_end(matter: SimpleNamespace) -> None:
     await record(str(grid_id), "nda2.pdf", _cells())
     done = await finalize(str(grid_id))
     assert "Finalized grid" in done
+    # T8: edit a cell of the now-completed grid through the guarded closure.
+    edited = await update(
+        str(grid_id), "nda1.pdf", {"Term": {"value": "9 years", "confidence": "high"}}
+    )
+    assert "Updated 1 cell(s)" in edited
     # The guard wrote one agent_run.tool_call row per dispatch.
     async with matter.factory() as db:
         calls = (
@@ -624,7 +632,7 @@ async def test_guarded_closures_end_to_end(matter: SimpleNamespace) -> None:
                 )
             )
         ).scalar_one()
-    assert calls >= 4  # start + 2 records + finalize
+    assert calls >= 5  # start + 2 records + finalize + update
 
 
 async def test_linear_worker_refuses_agentic_row(
@@ -656,3 +664,103 @@ async def test_linear_worker_refuses_agentic_row(
     async with matter.factory() as db:
         g = await db.get(TabularExecution, grid_id)
         assert g is not None and g.status == "running"  # untouched
+
+
+# --------------------------------------------------------------------------- #
+# update_tabular_cells (T8 — the conversational grid-ops "bash" loop)
+# --------------------------------------------------------------------------- #
+
+
+async def _completed_grid(m: SimpleNamespace) -> TabularExecution:
+    """start → record both docs → finalize → a completed grid to edit."""
+    _, grid = await _start(m)
+    await _record(m, grid.id, "nda1.pdf", _cells())
+    await _record(m, grid.id, "nda2.pdf", _cells())
+    msg = await _finalize(m, grid.id)
+    assert "Finalized" in msg
+    return grid
+
+
+async def _update(
+    m: SimpleNamespace, grid_id: uuid.UUID, document: str, cells: dict[str, dict[str, object]]
+) -> str:
+    async with m.factory() as db:
+        msg = await _update_tabular_cells(
+            db,
+            _binding(m.user_id, m.project_id),
+            grid_id=str(grid_id),
+            document=document,
+            cells=cells,
+            run_id=m.run_id,
+        )
+        await db.commit()
+    return msg
+
+
+async def test_update_edits_a_completed_grid_cell_in_place(matter: SimpleNamespace) -> None:
+    grid = await _completed_grid(matter)
+    msg = await _update(
+        matter, grid.id, "nda1.pdf", {"Term": {"value": "3 years", "confidence": "high"}}
+    )
+    assert "Updated 1 cell(s)" in msg
+    async with matter.factory() as db:
+        fresh = await _only_grid(db, matter.project_id)
+    rows = fresh.results["rows"]
+    row = next(r for r in rows if r["document_name"] == "nda1.pdf")
+    assert row["cells"]["Term"]["value"] == "3 years"  # changed
+    assert "Law" in row["cells"]  # unnamed column untouched
+    assert fresh.status == "completed"  # still finalized
+    assert len(rows) == 2  # no row added/dropped
+
+
+async def test_update_rejects_a_running_grid(matter: SimpleNamespace) -> None:
+    _, grid = await _start(matter)  # running, never finalized
+    msg = await _update(matter, grid.id, "nda1.pdf", {"Term": {"value": "x", "confidence": "high"}})
+    assert "not a finalized grid" in msg
+
+
+async def test_update_rejects_unknown_column(matter: SimpleNamespace) -> None:
+    grid = await _completed_grid(matter)
+    msg = await _update(
+        matter, grid.id, "nda1.pdf", {"Bogus": {"value": "x", "confidence": "high"}}
+    )
+    assert "Unknown column" in msg
+
+
+async def test_update_rejects_document_not_in_matter(matter: SimpleNamespace) -> None:
+    grid = await _completed_grid(matter)
+    msg = await _update(matter, grid.id, "ghost.pdf", _cells())
+    assert "No ingested document" in msg
+
+
+async def test_update_unknown_grid(matter: SimpleNamespace) -> None:
+    msg = await _update(matter, uuid.uuid4(), "nda1.pdf", _cells())
+    assert "No grid" in msg
+
+
+async def test_update_cross_matter_isolation(matter: SimpleNamespace) -> None:
+    """A completed grid under matter A is invisible to a binding for matter B (404-conflated)."""
+    grid = await _completed_grid(matter)
+    async with matter.factory() as db:
+        msg = await _update_tabular_cells(
+            db,
+            _binding(matter.user_id, matter.other_project_id),  # different matter
+            grid_id=str(grid.id),
+            document="nda1.pdf",
+            cells=_cells(),
+            run_id=matter.run_id,
+        )
+        await db.commit()
+    assert "No grid" in msg
+
+
+async def test_update_audits_as_cells_updated(matter: SimpleNamespace) -> None:
+    grid = await _completed_grid(matter)
+    await _update(matter, grid.id, "nda1.pdf", {"Term": {"value": "z", "confidence": "high"}})
+    async with matter.factory() as db:
+        actions = (
+            (await db.execute(select(AuditLog.action).where(AuditLog.resource_id == str(grid.id))))
+            .scalars()
+            .all()
+        )
+    assert "tabular.cells_updated" in actions

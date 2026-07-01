@@ -223,7 +223,11 @@ TABULAR_FILL_DOCTRINE = (
     "confidence='failed' when the document does not answer a column (never leave a cell out "
     "silently). When every document's row is recorded, call finalize_tabular_review(grid_id) "
     "— it refuses until every cell has been attempted, then saves the grid. The grid is the "
-    "work product; keep it current as the lawyer asks for changes."
+    "work product; keep it current as the lawyer asks for changes. To CHANGE a finalized "
+    'grid ("re-pull the Term for Acme", "fix that governing-law cell"), re-read the '
+    "document(s) and call update_tabular_cells(grid_id, filename, the corrected cells) — it "
+    "edits the saved grid in place; only the columns you name change, and the lawyer owns "
+    "the result and can undo it."
 )
 
 # C-CLIENT (ADR-F030): the operator's Organization Profile is the company /
