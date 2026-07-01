@@ -69,9 +69,17 @@ class FinalizeTabularReviewInput(BaseModel):
     grid_id: uuid.UUID
 
 
+class GatherRowEvidenceInput(BaseModel):
+    """Args for ``gather_row_evidence`` — the bounded row-evidence retrieval (T4)."""
+
+    grid_id: uuid.UUID
+    document: str = Field(min_length=1, max_length=_DOC_NAME_MAX)
+
+
 __all__ = [
     "AgenticCellInput",
     "FinalizeTabularReviewInput",
+    "GatherRowEvidenceInput",
     "RecordTabularRowInput",
     "StartTabularReviewInput",
 ]

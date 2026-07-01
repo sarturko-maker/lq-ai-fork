@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable
+from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -204,30 +205,65 @@ RETRIEVAL_STRATEGY_DOCTRINE = (
     "you may dispatch; spend it deliberately on independent breadth, not routine lookups."
 )
 
-# ADR-F055 (F2 Tabular T1): the agentic "grids" doctrine — appended ONLY for a Commercial
-# matter with the Grids capability enabled (tabular_enabled). Teaches the start→fan-out→
-# finalize flow + the fan-out crossover. The retrieval-fill path above the quota is T4; the
-# T1 doctrine degrades a too-large set to read-and-record rather than promising a tool that
-# does not exist yet. This is the TASTE layer (prose craft, ADR-F041); a dedicated
-# proactive-suggestion skill is T3.
+# ADR-F055 (F2 Tabular T1 + T4): the agentic "grids" doctrine — appended ONLY for a
+# Commercial matter with the Grids capability enabled (tabular_enabled). Teaches the
+# start→gather-evidence→record→finalize flow + the fan-out↔retrieval crossover. T4 adds the
+# bounded gather_row_evidence primitive (ONE search per column, no loop) so filling a row
+# can never thrash, and the real retrieval-fill path above the quota. This is the TASTE
+# layer (prose craft, ADR-F041); a dedicated proactive-suggestion skill is T3.
 TABULAR_FILL_DOCTRINE = (
     "\n\nWhen the lawyer asks you to compare, extract, or summarise a field across SEVERAL "
     "of this matter's documents (a due-diligence sweep, 'what is the X in each', a key-terms "
     "table), build a GRID rather than answering in prose. Call start_tabular_review with the "
     "columns (each a name + the question to ask of every document) and, optionally, the "
     "documents to cover (default: the whole matter). It returns a grid_id and a recommended "
-    "fill strategy. When the document count is at or below the fan-out limit it reports, FAN "
-    "OUT one subagent per document with the task tool: each subagent reads ITS document and "
-    "calls record_tabular_row(grid_id, its filename, the cells for every column) — value, a "
-    "short verbatim source_quote, the confidence, and notes for anything ambiguous; use "
-    "confidence='failed' when the document does not answer a column (never leave a cell out "
-    "silently). When every document's row is recorded, call finalize_tabular_review(grid_id) "
-    "— it refuses until every cell has been attempted, then saves the grid. The grid is the "
-    "work product; keep it current as the lawyer asks for changes. To CHANGE a finalized "
-    'grid ("re-pull the Term for Acme", "fix that governing-law cell"), re-read the '
-    "document(s) and call update_tabular_cells(grid_id, filename, the corrected cells) — it "
-    "edits the saved grid in place; only the columns you name change, and the lawyer owns "
-    "the result and can undo it."
+    "fill strategy. To fill a document's row, call gather_row_evidence(grid_id, its filename) "
+    "ONCE — it runs one retrieval per column (scoped to that document) and returns the "
+    "grounded passages with their chunk ids; extract each column's value from those passages "
+    "and call record_tabular_row(grid_id, its filename, the cells for every column) — value, "
+    "a short verbatim source_quote, the confidence, notes for anything ambiguous, and the "
+    "cited_chunk_ids. Do NOT keep searching a cell: if a column's passages do not answer it, "
+    "record confidence='failed' (never leave a cell out silently). "
+    "To fill the rows, FAN OUT one grid_filler subagent per document with the task tool — tell "
+    "each the grid_id and its document's filename; the grid_filler gathers that document's "
+    "evidence and records its row. When there are more documents than your subagent limit, give "
+    "each grid_filler a SLICE of the documents. Do NOT fill rows by looping search_documents "
+    "yourself — delegate to grid_filler. (For a genuinely dense document a full read_document "
+    "can extract more than the "
+    "passages — escalate to it only when the evidence is clearly thin, not by re-searching.) "
+    "When every document's row is recorded, call finalize_tabular_review(grid_id) — it "
+    "refuses until every cell has been attempted, then saves the grid. The grid is the work "
+    "product; keep it current as the lawyer asks for changes. To CHANGE a finalized grid "
+    '("re-pull the Term for Acme", "fix that governing-law cell"), gather evidence (or read '
+    "the document) and call update_tabular_cells(grid_id, filename, the corrected cells) — it "
+    "edits the saved grid in place; only the columns you name change, and the lawyer owns the "
+    "result and can undo it."
+)
+
+# ADR-F055 T4 (2026-07-01): the grid-fill subagent. Live verification of the T4 primitive
+# found fan-out subagents INHERIT the lead's full toolset — so after gather_row_evidence they
+# fell back to search_documents and re-searched every cell (0 rows recorded, step cap hit):
+# the thrash just moved one level down. The structural fix removes the MEANS to loop —
+# grid_filler is a subagent with a RESTRICTED toolset {gather_row_evidence, record_tabular_row,
+# read_document} (NO search_documents), so it physically cannot re-search. Wired in the
+# composition body with the real guarded callables ONLY when the Grids capability is on.
+GRID_FILLER_DESCRIPTION = (
+    "Fills ONE document's row in a tabular review grid. Delegate one per document (or give it a "
+    "slice of documents). Tell it the grid_id and the exact document filename(s)."
+)
+GRID_FILLER_PROMPT = (
+    "You fill rows of a cross-document review grid. You are given a grid_id and one or more "
+    "document filenames. For EACH document: (1) call gather_row_evidence(grid_id, filename) "
+    "ONCE — it runs one retrieval per column (scoped to that document) and returns the grounded "
+    "passages with their chunk ids; (2) from those passages extract each column's value and "
+    "call record_tabular_row(grid_id, filename, cells) with a cell for EVERY column: value, a "
+    "short verbatim source_quote, a confidence ('high'|'medium'|'low'|'failed'), optional notes, "
+    "and the cited_chunk_ids of the passages you used. You have NO search tool — fill each cell "
+    "from the gathered passages; if a column's passages genuinely do not answer it, record that "
+    "cell with confidence='failed' (never leave a column out). Only if a document's passages are "
+    "clearly too thin to answer most columns may you call read_document(filename) ONCE and "
+    "extract from the full text. Record every document's row, then report which documents you "
+    "recorded. Do not call finalize — the lead does that."
 )
 
 # C-CLIENT (ADR-F030): the operator's Organization Profile is the company /
@@ -912,15 +948,43 @@ async def compose_and_execute_run(
         # area branches) so the agentic-tabular tool and this fan-out quota share it. The
         # token budget + wall clock ride the same envelope; max_steps was materialized on
         # the row at creation.
-        if wiring.subagents and envelope.fan_out_quota > 0:
-            run_middleware.append(FanOutQuotaMiddleware(quota=envelope.fan_out_quota))
-
         # ADR-F055: the agentic-tabular doctrine rides the prompt only when the Grids
         # capability is actually wired (Commercial area + group enabled) — same condition
         # as the tool grant above, so the prompt never advertises a tool the run lacks.
         tabular_enabled = (
             area_key == COMMERCIAL_AREA_KEY and TABULAR_GROUP.key in enabled_tool_groups
         )
+
+        # ADR-F055 T4: the grid_filler subagent — a RESTRICTED-toolset fan-out unit
+        # {gather_row_evidence, record_tabular_row, read_document} with NO search_documents, so
+        # a fill subagent physically cannot re-search (the live-verified thrash fix). Built here
+        # with the REAL guarded callables picked out of the assembled tool list by name, and
+        # appended to the area's declarative subagents. Its restricted `tools` is a deepagents
+        # SubAgent subset (inherit-on-absent otherwise). Only when the Grids capability is on and
+        # all three callables are present.
+        subagents_list: list[dict[str, Any]] = list(wiring.subagents or [])
+        if tabular_enabled:
+            by_name = {getattr(t, "__name__", ""): t for t in tools}
+            fill_tools = [
+                by_name[n]
+                for n in ("gather_row_evidence", "record_tabular_row", "read_document")
+                if n in by_name
+            ]
+            if len(fill_tools) == 3:
+                subagents_list.append(
+                    {
+                        "name": "grid_filler",
+                        "description": GRID_FILLER_DESCRIPTION,
+                        "system_prompt": GRID_FILLER_PROMPT,
+                        "tools": fill_tools,
+                    }
+                )
+
+        # F2 Slice E fan-out quota (ADR-F049): the run's chokepoint over the builtin `task`
+        # tool (which bypasses guarded_dispatch). Added when ANY subagent is configured
+        # (declarative area subagents OR the grid_filler) and the ceiling is enabled (>0).
+        if subagents_list and envelope.fan_out_quota > 0:
+            run_middleware.append(FanOutQuotaMiddleware(quota=envelope.fan_out_quota))
         http_client = build_gateway_http_client()
         try:
             model = model_builder(
@@ -938,7 +1002,7 @@ async def compose_and_execute_run(
                 system_prompt=system_prompt_for(
                     binding, area_spec, tabular_enabled=tabular_enabled
                 ),
-                subagents=wiring.subagents or None,
+                subagents=subagents_list or None,
                 skills=wiring.main_sources,
                 backend=memory_backend,
                 # F2 Slice F (ADR-F051): the per-run token-budget brake (R4 realised),

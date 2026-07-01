@@ -34,6 +34,7 @@ from app.agents.matter_read_tools import MATTER_READ_TOOL_NAMES
 from app.agents.tabular_tool import (
     TABULAR_TOOL_NAMES,
     _finalize_tabular_review,
+    _gather_row_evidence,
     _record_tabular_row,
     _start_tabular_review,
     _update_tabular_cells,
@@ -41,6 +42,7 @@ from app.agents.tabular_tool import (
     build_tabular_tools,
 )
 from app.agents.tools import MATTER_TOOL_NAMES, MatterBinding
+from app.knowledge.retrieval import MatterSearchHit
 from app.models.agent_run import AgentRun, AgentThread
 from app.models.audit import AuditLog
 from app.models.document import Document, DocumentChunk
@@ -280,7 +282,7 @@ async def _start(
 # --------------------------------------------------------------------------- #
 
 
-def test_build_returns_three_named_tools() -> None:
+def test_build_returns_named_tools() -> None:
     tools = build_tabular_tools(
         async_sessionmaker(),
         run_id=uuid.uuid4(),
@@ -289,12 +291,14 @@ def test_build_returns_three_named_tools() -> None:
     )
     assert [t.__name__ for t in tools] == [
         "start_tabular_review",
+        "gather_row_evidence",
         "record_tabular_row",
         "finalize_tabular_review",
         "update_tabular_cells",
     ]
     assert sorted(TABULAR_TOOL_NAMES) == [
         "finalize_tabular_review",
+        "gather_row_evidence",
         "record_tabular_row",
         "start_tabular_review",
         "update_tabular_cells",
@@ -454,14 +458,155 @@ async def test_record_cross_matter_isolation(matter: SimpleNamespace) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# gather_row_evidence (T4 — the bounded, no-thrash retrieval primitive)
+# --------------------------------------------------------------------------- #
+
+
+def _hit(content: str, doc_id: uuid.UUID, chunk_id: uuid.UUID | None = None) -> MatterSearchHit:
+    return MatterSearchHit(
+        chunk_id=chunk_id or uuid.uuid4(),
+        document_id=doc_id,
+        file_name="nda1.pdf",
+        content=content,
+        page_start=1,
+        page_end=1,
+        char_offset_start=0,
+        char_offset_end=len(content),
+        score=1.0,
+    )
+
+
+async def _gather(m: SimpleNamespace, grid_id: uuid.UUID, document: str) -> str:
+    async with m.factory() as db:
+        msg = await _gather_row_evidence(
+            db,
+            _binding(m.user_id, m.project_id),
+            grid_id=str(grid_id),
+            document=document,
+            run_id=m.run_id,
+        )
+        await db.commit()
+    return msg
+
+
+async def test_gather_one_search_per_column_scoped_to_the_doc(
+    matter: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The no-thrash guarantee: EXACTLY one retrieval per column, scoped to the document."""
+    _, grid = await _start(matter)  # columns Term + Law
+    calls: list[tuple[str, int, uuid.UUID | None]] = []
+
+    async def fake_hits(
+        db: object,
+        binding: object,
+        query: str,
+        *,
+        top_k: int,
+        document_id: uuid.UUID | None = None,
+    ) -> list[MatterSearchHit]:
+        calls.append((query, top_k, document_id))
+        return [_hit(f"passage answering: {query}", matter.nda1_doc)]
+
+    monkeypatch.setattr("app.agents.tabular_tool.matter_reranked_hits", fake_hits)
+
+    msg = await _gather(matter, grid.id, "nda1.pdf")
+
+    assert len(calls) == 2  # one search per column — never a loop
+    assert [c[0] for c in calls] == ["What is the term?", "What is the governing law?"]
+    assert all(c[2] == matter.nda1_doc for c in calls)  # scoped to THIS document
+    assert "## Term" in msg and "## Law" in msg
+    assert "[chunk " in msg  # passages carry chunk ids for cited_chunk_ids
+    assert "Do NOT search these cells again" in msg
+
+
+async def test_gather_marks_failed_when_no_passages(
+    matter: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, grid = await _start(matter)
+
+    async def empty_hits(*_a: object, **_k: object) -> list[MatterSearchHit]:
+        return []
+
+    monkeypatch.setattr("app.agents.tabular_tool.matter_reranked_hits", empty_hits)
+    msg = await _gather(matter, grid.id, "nda1.pdf")
+    assert "no matching passages" in msg
+    assert "confidence='failed'" in msg
+
+
+async def test_gather_rejects_document_not_in_grid(matter: SimpleNamespace) -> None:
+    _, grid = await _start(matter, documents=["nda1.pdf"])
+    msg = await _gather(matter, grid.id, "nda2.pdf")
+    assert "not one of this grid's documents" in msg
+
+
+async def test_gather_rejects_document_not_in_matter(matter: SimpleNamespace) -> None:
+    _, grid = await _start(matter)
+    msg = await _gather(matter, grid.id, "ghost.pdf")
+    assert "No ingested document" in msg
+
+
+async def test_gather_unknown_grid(matter: SimpleNamespace) -> None:
+    msg = await _gather(matter, uuid.uuid4(), "nda1.pdf")
+    assert "No grid" in msg
+
+
+async def test_gather_cross_matter_isolation(matter: SimpleNamespace) -> None:
+    """A grid under matter A is invisible to a binding for matter B (404-conflated)."""
+    _, grid = await _start(matter)
+    async with matter.factory() as db:
+        msg = await _gather_row_evidence(
+            db,
+            _binding(matter.user_id, matter.other_project_id),  # different matter
+            grid_id=str(grid.id),
+            document="nda1.pdf",
+            run_id=matter.run_id,
+        )
+        await db.commit()
+    assert "No grid" in msg
+
+
+async def test_gather_audits_counts_not_content(
+    matter: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, grid = await _start(matter)
+
+    async def fake_hits(*_a: object, **_k: object) -> list[MatterSearchHit]:
+        return [_hit("secret passage text", matter.nda1_doc)]
+
+    monkeypatch.setattr("app.agents.tabular_tool.matter_reranked_hits", fake_hits)
+    await _gather(matter, grid.id, "nda1.pdf")
+    async with matter.factory() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(AuditLog).where(
+                        AuditLog.resource_type == "tabular_execution",
+                        AuditLog.resource_id == str(grid.id),
+                        AuditLog.action == "tabular.row_evidence_gathered",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1
+    assert rows[0].details.get("columns") == 2
+    assert "secret passage text" not in str(rows[0].details)
+
+
+# --------------------------------------------------------------------------- #
 # finalize
 # --------------------------------------------------------------------------- #
 
 
-async def _finalize(m: SimpleNamespace, grid_id: uuid.UUID) -> str:
+async def _finalize(m: SimpleNamespace, grid_id: uuid.UUID, *, fan_out_quota: int = 8) -> str:
     async with m.factory() as db:
         msg = await _finalize_tabular_review(
-            db, _binding(m.user_id, m.project_id), grid_id=str(grid_id), run_id=m.run_id
+            db,
+            _binding(m.user_id, m.project_id),
+            grid_id=str(grid_id),
+            run_id=m.run_id,
+            fan_out_quota=fan_out_quota,
         )
         await db.commit()
     return msg
@@ -505,6 +650,18 @@ async def test_finalize_succeeds_when_all_attempted(matter: SimpleNamespace) -> 
     assert g.status == "completed"
     assert g.completed_at is not None
     assert g.fill_mode == "fanout"
+
+
+async def test_finalize_records_retrieval_fill_mode_above_quota(matter: SimpleNamespace) -> None:
+    """Above the fan-out quota the crossover routes to retrieval-fill → fill_mode='retrieval'."""
+    _, grid = await _start(matter, fan_out_quota=1)  # 2 docs > quota 1
+    await _record(matter, grid.id, "nda1.pdf", _cells())
+    await _record(matter, grid.id, "nda2.pdf", _cells())
+    msg = await _finalize(matter, grid.id, fan_out_quota=1)
+    assert "Finalized grid" in msg
+    async with matter.factory() as db:
+        g = await _only_grid(db, matter.project_id)
+    assert g.fill_mode == "retrieval"
 
 
 async def test_finalize_idempotent_when_already_complete(matter: SimpleNamespace) -> None:
@@ -601,7 +758,7 @@ async def test_audit_receipts_carry_counts_not_content(matter: SimpleNamespace) 
 
 async def test_guarded_closures_end_to_end(matter: SimpleNamespace) -> None:
     """start → record → finalize through guarded_dispatch on a live running run."""
-    start, record, finalize, update = build_tabular_tools(
+    start, gather, record, finalize, update = build_tabular_tools(
         matter.factory,
         run_id=matter.run_id,
         binding=_binding(matter.user_id, matter.project_id),
@@ -611,6 +768,9 @@ async def test_guarded_closures_end_to_end(matter: SimpleNamespace) -> None:
     assert "Started grid" in out
     async with matter.factory() as db:
         grid_id = (await _only_grid(db, matter.project_id)).id
+    # gather_row_evidence through the guarded closure (no thrash: one call per doc).
+    evidence = await gather(str(grid_id), "nda1.pdf")
+    assert "Evidence for" in evidence
     await record(str(grid_id), "nda1.pdf", _cells())
     await record(str(grid_id), "nda2.pdf", _cells())
     done = await finalize(str(grid_id))
