@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.main import app
+from app.models.classification import RiskClassification
 from app.models.compliance import AiSystem
 from app.models.practice_area import PracticeArea
 from app.models.user import User
@@ -75,14 +76,48 @@ async def _area_id(db_session: AsyncSession) -> uuid.UUID:
 
 
 async def _clean(db_session: AsyncSession) -> None:
+    # Classifications FK ai_systems (RESTRICT) — clear them first.
+    await db_session.execute(delete(RiskClassification))
     await db_session.execute(delete(AiSystem))
     await db_session.flush()
 
 
-async def _seed(db_session: AsyncSession, **overrides: object) -> AiSystem:
+async def _seed_verdict(
+    db_session: AsyncSession,
+    system: AiSystem,
+    *,
+    tier: str = "high",
+    route: str = "annex_iii",
+    superseded_at: datetime | None = None,
+    verdict_hash: str = "hash-current",
+) -> RiskClassification:
+    row = RiskClassification(
+        ai_system_id=system.id,
+        practice_area_id=system.practice_area_id,
+        facts={"annex_iii_area": "employment"},
+        facts_hash="facts-hash",
+        tier=tier,
+        route=route,
+        article_refs=["Art 6(2)", "Annex III(4)"],
+        predicate_trace=[
+            {"predicate": "annex_iii_area", "value": "employment", "effect": "high-risk"}
+        ],
+        ruleset_version="2024-1689+omnibus-2026-06-30.v1",
+        verdict_hash=verdict_hash,
+        draft_basis=False,
+        superseded_at=superseded_at,
+    )
+    db_session.add(row)
+    await db_session.flush()
+    return row
+
+
+async def _seed(
+    db_session: AsyncSession, *, name: str = "Applicant ranking model", **overrides: object
+) -> AiSystem:
     row = AiSystem(
         practice_area_id=await _area_id(db_session),
-        name="Applicant ranking model",
+        name=name,
         intended_purpose="Score and rank job applicants for recruiter review.",
         lifecycle_status="in_service",
         development_origin="third_party",
@@ -145,3 +180,78 @@ async def test_retired_hidden_by_default_shown_with_flag(
 async def test_no_bearer_is_401(client: AsyncClient, db_session: AsyncSession) -> None:
     resp = await client.get("/api/v1/compliance/ai-systems")
     assert resp.status_code == 401
+
+
+# --- AIC-2: the risk-verdict badge + classification detail endpoint --------------
+
+
+async def test_list_badge_present_and_absent(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    await _clean(db_session)
+    classified = await _seed(db_session, name="Classified system")
+    await _seed_verdict(db_session, classified, tier="high")
+    await _seed(db_session, name="Unclassified system")
+
+    resp = await client.get("/api/v1/compliance/ai-systems", headers=_bearer(user))
+    body = {row["name"]: row for row in resp.json()}
+    assert body["Classified system"]["classification"]["tier"] == "high"
+    assert body["Classified system"]["classification"]["route"] == "annex_iii"
+    # The badge summary carries no facts / internal keys.
+    assert "facts" not in body["Classified system"]["classification"]
+    assert body["Unclassified system"]["classification"] is None
+
+
+async def test_classification_endpoint_returns_full_verdict(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    await _clean(db_session)
+    system = await _seed(db_session)
+    await _seed_verdict(db_session, system, tier="high")
+
+    resp = await client.get(
+        f"/api/v1/compliance/ai-systems/{system.id}/classification", headers=_bearer(user)
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["tier"] == "high"
+    assert body["route"] == "annex_iii"
+    assert body["article_refs"] == ["Art 6(2)", "Annex III(4)"]
+    assert body["predicate_trace"][0]["predicate"] == "annex_iii_area"
+    # The read surface never leaks the facts snapshot or the internal scoping keys.
+    assert "facts" not in body
+    assert "facts_hash" not in body
+    assert "practice_area_id" not in body
+    assert "source_project_id" not in body
+
+
+async def test_classification_404_when_unclassified(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    await _clean(db_session)
+    system = await _seed(db_session)
+    resp = await client.get(
+        f"/api/v1/compliance/ai-systems/{system.id}/classification", headers=_bearer(user)
+    )
+    assert resp.status_code == 404
+
+
+async def test_classification_returns_current_not_superseded(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    await _clean(db_session)
+    system = await _seed(db_session)
+    await _seed_verdict(
+        db_session,
+        system,
+        tier="high",
+        superseded_at=datetime.now(UTC),
+        verdict_hash="hash-old",
+    )
+    await _seed_verdict(db_session, system, tier="minimal", verdict_hash="hash-new")
+
+    resp = await client.get(
+        f"/api/v1/compliance/ai-systems/{system.id}/classification", headers=_bearer(user)
+    )
+    assert resp.status_code == 200
+    assert resp.json()["tier"] == "minimal"

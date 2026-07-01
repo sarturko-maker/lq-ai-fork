@@ -24,6 +24,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.schemas.classification import ClassificationSummary
+
 
 class LifecycleStatus(StrEnum):
     """Operational stage of an AI system in the organisation.
@@ -123,3 +125,7 @@ class AiSystemRead(BaseModel):
     # Soft-retire: NULL = live. Reads exclude retired rows by default; under
     # ?include_retired=true this carries the retirement timestamp.
     retired_at: datetime | None = None
+    # The current risk verdict badge (AIC-2), attached by the read router from the
+    # system's current classification; NULL until the engine has classified it. The
+    # register stores no tier itself — this is the engine's separate sealed artifact.
+    classification: ClassificationSummary | None = None

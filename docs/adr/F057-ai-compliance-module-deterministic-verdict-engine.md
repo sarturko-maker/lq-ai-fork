@@ -130,3 +130,49 @@ calls made under this ADR, recorded here so the reasoning survives:
 - **Live-wash included** (not deferred): a run-scoped `AiSystemChangeLedger` + a transient
   `data-compliance-change` SSE frame drive the cockpit's changed-row highlight; `runner.py` and
   `live_changes.py` stay area-agnostic (the LiveChange/ChangeLedger Protocols already generalise).
+
+## Implementation notes — AIC-2 (2026-07-01): the deterministic verdict engine
+
+The module's genuine IP landed (plan `docs/fork/plans/AIC-2-verdict-engine.md`). Concrete calls made under
+this ADR:
+
+- **The engine is a pure total function.** `app/aiact/classify.py:classify(facts)` has no LLM call, no I/O,
+  no key, no clock, no randomness — a deterministic function of `(facts, RULESET_VERSION)`. This is *why* the
+  legal determination is reproducible and auditable independent of model quality, and why the seal
+  (`verdict_hash`) is stable. Legal content is isolated in `app/aiact/ruleset.py` as versioned data
+  (`RULESET_VERSION` + a "not legal advice" `DISCLAIMER` + article-ref maps) so a legal update is a data +
+  version bump, never an engine rewrite (the "law is versioned data, not code" commitment).
+- **The presence gate is enforced at the facts schema, structurally.** The only path to a tier is
+  `classify_ai_system(ai_system_id, <facts>)`; its `ClassificationFactsInput` is `extra="forbid"` with **no
+  tier/route/risk field**, so a smuggled verdict is a hard validation error (tested by parametrised
+  `tier`/`risk_tier`/`route`/`verdict` rejections and a signature test asserting the tool has no such
+  parameter). The model authors facts; the engine authors the tier — provably.
+- **Route ⇔ tier is 1:1; a derogation is a modifier, not a route.** The five `ClassificationRoute` values each
+  map to exactly one terminal tier. An Art 6(3) derogation does not get its own route: it is recorded in
+  `predicate_trace` + the Art 6(3) `article_refs` + the `draft_basis` flag, and the residual (limited/minimal)
+  tier keeps its own terminal route. This is a deliberate refinement of the plan's six-route sketch — it keeps
+  every route an honest explanation of its tier.
+- **Conservative derogation posture (maintainer-decided).** A claimed Art 6(3) ground is honoured but the
+  verdict is flagged `draft_basis=true` (Art 6(3) is the least-settled predicate); profiling of natural
+  persons **never** derogates (Art 6(3) final subparagraph), tested explicitly.
+- **Facts snapshot on the verdict, not the register (maintainer-decided).** The richer classification facts
+  live as a JSONB snapshot on the `risk_classifications` row, keeping `ai_systems` thin and the presence gate
+  crisp (the register can never hold a tier). `verdict_hash` = unsigned SHA-256 over normalised facts +
+  `RULESET_VERSION` + tier + route + sorted refs (ADR-F057 unsigned-digest-v1).
+- **Recompute-on-fact-change via supersede.** A verdict is never mutated in place. Re-classifying with an
+  identical `verdict_hash` is an idempotent no-op; a changed verdict sets the prior row's `superseded_at` and
+  inserts a fresh one. A **partial unique index** (`WHERE superseded_at IS NULL`) enforces at most one current
+  verdict per system; superseded rows are the audit history.
+- **Legal grounding + counsel-review gate.** The rule set was web-researched (2026-07-01) against the adopted
+  Digital Omnibus (Council green light 29 June 2026): the classification *test* is unchanged from Reg
+  2024/1689; the Omnibus deferred *dates* (AIC-6's calendar, not this engine) and added one Art 5 prohibition
+  (NCII/CSAM), which the engine encodes. Every verdict carries `RULESET_VERSION` + the disclaimer; a verdict is
+  authoritative only after counsel validates the rule set (open item #8 — still open).
+- **Dates are out of scope here.** AIC-2 cites *articles*, not deadlines; the phased Art 113/Omnibus dates
+  (Annex III 2 Dec 2027, Annex I 2 Aug 2028, Art 50 marking 2 Dec 2026, FRIA 2 Dec 2027) belong to AIC-6.
+- **Role stays out of the engine.** Provider/deployer does not change the tier (it changes *obligations*,
+  AIC-3), so it is deliberately absent from the engine's inputs.
+- **UI depth = tier badge only** (maintainer-decided): the register gains a coloured risk badge
+  (prohibited/high/limited/minimal/unclassified + a `draft` marker), washed live via the existing
+  `data-compliance-change` path (verb `classify`). The full `GET …/classification` verdict (route + refs +
+  trace) is served for a future detail drawer (deferred).

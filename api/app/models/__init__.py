@@ -22,6 +22,7 @@ from app.models.autonomous import (
     PrecedentEntry,
 )
 from app.models.chat import Chat, Message
+from app.models.classification import RiskClassification
 from app.models.compliance import AiSystem
 from app.models.document import Document, DocumentChunk
 from app.models.editor_lock import EditorLock
@@ -80,6 +81,7 @@ __all__ = [
     "ProjectKnowledgeBase",
     "ProjectSkill",
     "Risk",
+    "RiskClassification",
     "SavedPrompt",
     "SlackWorkspace",
     "System",
