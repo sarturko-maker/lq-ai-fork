@@ -27,6 +27,7 @@
 	import type { Project } from '$lib/lq-ai/types';
 	import ConversationPanel from '$lib/lq-ai/components/agents/ConversationPanel.svelte';
 	import RopaRegister from '$lib/lq-ai/components/ropa/RopaRegister.svelte';
+	import ComplianceRegister from '$lib/lq-ai/components/compliance/ComplianceRegister.svelte';
 	import MemoryPanel from '$lib/lq-ai/components/matter/MemoryPanel.svelte';
 	import DocumentsPanel from '$lib/lq-ai/components/matter/DocumentsPanel.svelte';
 	import GridsPanel from '$lib/lq-ai/components/matter/GridsPanel.svelte';
@@ -145,36 +146,44 @@
 	const showPanel = $derived(!isStacked || stackedShowPanel);
 
 	// PRIV-3 (ADR-F019): a Privacy matter surfaces the company's read-only ROPA
-	// register alongside the conversation via one calm toggle. Other areas never
-	// see it; reversible = this derived + the {#if} branch in the panel column.
+	// register alongside the conversation via one calm toggle. AI Compliance does the
+	// same with its AI-systems register (below); areas with no register see neither.
 	const isPrivacyMatter = $derived(matter?.practice_area_key === 'privacy');
+	// AIC-1 (ADR-F057): an AI Compliance matter surfaces the deployment-global
+	// AI-systems register the same way a Privacy matter surfaces the ROPA register.
+	// `isRegisterMatter` generalises the split-view gating over both; the render
+	// slots pick the concrete component. Other areas see neither register.
+	const isComplianceMatter = $derived(matter?.practice_area_key === 'ai-compliance');
+	const isRegisterMatter = $derived(isPrivacyMatter || isComplianceMatter);
+	const registerTabLabel = $derived(isComplianceMatter ? 'AI systems' : 'ROPA register');
 	// C3c-2: every matter also gets a "Memory" tab onto its working-memory tier
 	// (area-agnostic — ADR-F042/F044). C7a adds a "Documents" tab onto the matter's
-	// files (incl. downloadable redline outputs — ADR-F046). 'register' stays Privacy-only.
+	// files (incl. downloadable redline outputs — ADR-F046). 'register' is only for a
+	// register-bearing area (Privacy ROPA / AI Compliance AI-systems).
 	let matterTab = $state<
 		'conversation' | 'register' | 'memory' | 'documents' | 'grids' | 'capabilities'
 	>(
 		'conversation'
 	);
 
-	// PRIV-9a: when a Privacy matter has the width, show chat + the ROPA
-	// register side by side (resizable) instead of the one-at-a-time toggle, so
-	// the user watches the register change as the agent works. Below the budget
+	// PRIV-9a: when a register matter (Privacy / AI Compliance) has the width, show
+	// chat + the register side by side (resizable) instead of the one-at-a-time
+	// toggle, so the user watches the register change as the agent works. Below the budget
 	// (register ~400px + chat ~480px) we fall back to the toggle. The outer
 	// thread list (w-72 = 288px) is subtracted from the host width.
 	const SPLIT_MIN_PANEL = 880;
 	const canSplitRegister = $derived(
-		isPrivacyMatter && !isStacked && !editorOpen && !gridOpen && hostWidth - 288 >= SPLIT_MIN_PANEL
+		isRegisterMatter && !isStacked && !editorOpen && !gridOpen && hostWidth - 288 >= SPLIT_MIN_PANEL
 	);
 
 	// The tab strip for a real matter. 'conversation' always; 'register' only for
-	// a narrow Privacy matter (when wide it's co-visible in the split, not a tab);
+	// a narrow register matter (when wide it's co-visible in the split, not a tab);
 	// 'memory' for every matter (C3c-2). The unfiled bucket (matter === null) gets
 	// no strip — its resume-only flow stays single-pane.
 	const matterTabs = $derived([
 		{ id: 'conversation' as const, label: 'Conversation' },
-		...(isPrivacyMatter && !canSplitRegister
-			? [{ id: 'register' as const, label: 'ROPA register' }]
+		...(isRegisterMatter && !canSplitRegister
+			? [{ id: 'register' as const, label: registerTabLabel }]
 			: []),
 		...(matter
 			? [
@@ -413,6 +422,7 @@
 					on:newmatter={() => (createOpen = true)}
 					on:threadcreated={handleThreadCreated}
 					on:ropachange={handleRopaChange}
+					on:compliancechange={handleRopaChange}
 					on:redlineready={handleRedlineReady}
 					on:expandgrid={(e) => openGrid(e.detail.gridId)}
 				/>
@@ -607,18 +617,26 @@
 										<div
 											class="h-full min-h-0 overflow-y-auto scroll-smooth overscroll-contain border-l border-border"
 										>
-											<RopaRegister
-												{runActive}
-												reloadKey={registerReloadKey}
-												changedIds={recentlyChangedIds}
-											/>
+											{#if isComplianceMatter}
+												<ComplianceRegister
+													{runActive}
+													reloadKey={registerReloadKey}
+													changedIds={recentlyChangedIds}
+												/>
+											{:else}
+												<RopaRegister
+													{runActive}
+													reloadKey={registerReloadKey}
+													changedIds={recentlyChangedIds}
+												/>
+											{/if}
 										</div>
 									</Resizable.Pane>
 								</Resizable.PaneGroup>
 							</div>
 						{:else}
 							<div class="min-h-0 flex-1 overflow-y-auto scroll-smooth overscroll-contain">
-								{#if isPrivacyMatter}
+								{#if isRegisterMatter}
 									<!-- Narrow fallback: chat and register are one-at-a-time, but the
 							     conversation stays MOUNTED (hidden while the register shows) so its
 							     run-state keeps flowing — the register still live-updates as the
@@ -628,11 +646,19 @@
 										{@render conversationPane()}
 									</div>
 									{#if matterTab === 'register'}
-										<RopaRegister
-											{runActive}
-											reloadKey={registerReloadKey}
-											changedIds={recentlyChangedIds}
-										/>
+										{#if isComplianceMatter}
+											<ComplianceRegister
+												{runActive}
+												reloadKey={registerReloadKey}
+												changedIds={recentlyChangedIds}
+											/>
+										{:else}
+											<RopaRegister
+												{runActive}
+												reloadKey={registerReloadKey}
+												changedIds={recentlyChangedIds}
+											/>
+										{/if}
 									{/if}
 								{:else if matter || threadId}
 									{@render conversationPane()}

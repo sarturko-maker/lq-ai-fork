@@ -92,6 +92,37 @@ export function parseRopaChangePayload(data: unknown): RopaChangePayload | null 
 }
 
 /**
+ * The `data-compliance-change` part payload (AIC-1, ADR-F057/F024) — one AI-systems
+ * register row the agent just changed. The AI Compliance twin of the ROPA change
+ * payload: same shape (`{kind, id, verb}`), same contract (highlight only; the
+ * settled re-read decides — ADR-F004). `id` is the only load-bearing field.
+ */
+export interface AiSystemChangePayload {
+	/** Register entity the row lives in: ai_system (AIC-1). */
+	kind: string;
+	/** The entity id — matched against the register's `{#each}` row ids. */
+	id: string;
+	/** create | retire — carried for honesty; v1 wash is verb-agnostic. */
+	verb: string;
+}
+
+/**
+ * Validate a `data-compliance-change` part's payload. Only `id` is load-bearing; a
+ * malformed frame is dropped (null) and simply doesn't highlight — the poller still
+ * carries the true register. Mirrors {@link parseRopaChangePayload}.
+ */
+export function parseAiSystemChangePayload(data: unknown): AiSystemChangePayload | null {
+	if (typeof data !== 'object' || data === null) return null;
+	const d = data as Record<string, unknown>;
+	if (typeof d.id !== 'string' || d.id === '') return null;
+	return {
+		kind: typeof d.kind === 'string' ? d.kind : '',
+		id: d.id,
+		verb: typeof d.verb === 'string' ? d.verb : ''
+	};
+}
+
+/**
  * The closed negotiation verdict taxonomy — mirrors
  * `commercial_tools._RESPOND_VERDICTS`. A change is
  * accept|reject|counter|leave_open|escalate; a comment is reply|leave_open|escalate.

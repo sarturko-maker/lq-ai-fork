@@ -9,24 +9,34 @@ then CLAUDE.md, then the ADRs/plans named below.
 > as prior work (full categorized backlog: `docs/fork/PLANNED-WORK.md` — a dated snapshot that survives
 > compaction; `MILESTONES.md` stays source of truth).
 >
-> - **AIC-0 SHIPPED on `fork/aic-0-ai-compliance-area-shell` (PR pending):** a sixth **configured** practice
->   area — **AI Compliance** — via migration **0084** (seeds the `ai-compliance` row + an EU-AI-Act doctrine
->   that bakes in the ADR-F057 presence-gate: the agent gathers facts, a risk tier is a legal determination it
->   does NOT assert). Thin vertical — matter files under it + agent answers with inherited memory tiers +
->   document search; NO domain tools yet (those are AIC-1/AIC-2). Gate green: 29/29 `test_practice_areas` in
->   the dev container (0084 applies to head on a throwaway DB), ruff + svelte-check clean, mypy unaffected. The
->   composition tool-branch was deliberately deferred to AIC-1 (no dead no-op branch).
-> - **PLAN (DRAFT, maintainer-edit): `docs/fork/plans/AI-COMPLIANCE-module.md`** + **ADR-F057** (drafted;
->   F022/F052/F056 were taken) — an EU AI Act (Reg 2024/1689) register + a **deterministic classification
->   engine that OWNS the verdict of record** (role/tier/obligations/refs/deadlines; server-side presence gate;
->   signed re-derivable provenance). Rides F018/F019/F020/F021. Reference = the maintainer's PRIVATE
->   `sarturko-maker/EU_AI_Act` repo — REFERENCE-ONLY, clean-room (copy no code/branding; never fetch).
+> - **AIC-0 — PR #188 (`fork/aic-0-ai-compliance-area-shell`):** migration **0084** seeds the configured
+>   `ai-compliance` area + an EU-AI-Act doctrine baking in the ADR-F057 presence-gate. Live rebuild deferred by
+>   the maintainer (commit + PR only).
+> - **AIC-1 SHIPPED — the `ai_systems` register (first entity end-to-end, the PRIV-3 analogue).** Branch
+>   **`fork/aic-1-ai-systems-register`** stacked on the AIC-0 branch (**PR #189**, base = #188; rebase onto main
+>   once #188 merges). Migration **0085** (`ai_systems`: deployment-global, provenance `source_project_id`
+>   + durable NON-NULL `practice_area_id`). A **FACTS-ONLY** register — no tier/role column, no tool writes one
+>   (the presence gate is *structural*; `AiSystemInput` is `extra="forbid"` so a smuggled `risk_tier` is
+>   rejected). Files: `models/`+`schemas/compliance.py`, `agents/compliance_tools.py`
+>   (`COMPLIANCE_AREA_KEY="ai-compliance"`, `build_compliance_tools` → `propose_ai_system`/`retire_ai_system`/
+>   `list_ai_systems` via `guarded_dispatch`), `agents/ai_system_changes.py`, `api/compliance.py` read router,
+>   `capabilities.AI_SYSTEMS_GROUP`, composition elif branch, `stream.ai_system_changed`; web
+>   `ComplianceRegister.svelte` + `api/compliance.ts` + live `data-compliance-change` wash + `ConversationHost`
+>   `isComplianceMatter`/`isRegisterMatter` (privacy path byte-identical). **`practice_area_id` is present
+>   (born flip-ready) but the `visible_filter()`/`can()` seam is DEFERRED** — ships shared-read like ROPA
+>   (ADR-F019); the flip is migration-free later. `self_declared_role`/authoritative role → AIC-3; GPAI logic →
+>   AIC-4b (flags carried, coherence-checked). Gate green: **74 passed** (compliance schema/tools/read +
+>   capabilities + practice-area seed) on a throwaway DB migrated through 0085; ruff + mypy + svelte-check
+>   (0 err) clean. Plan `docs/fork/plans/AIC-1-ai-systems-register.md`; ADR-F057 Implementation-notes addendum.
+> - **PLAN + ADR:** `docs/fork/plans/AI-COMPLIANCE-module.md` + **ADR-F057** (deterministic verdict engine +
+>   presence gate; rides F018/F019/F020/F021). Reference = the maintainer's PRIVATE `sarturko-maker/EU_AI_Act`
+>   repo — REFERENCE-ONLY, clean-room. Memory: [[ai-compliance-module-pivot]].
 > - **DECISIONS (2026-07-01):** GPAI Chapter V DEFERRED (carry flags); register DEPLOYMENT-GLOBAL; start now.
 >   **⚠️ Digital Omnibus ADOPTED 2026-06-30** (post-cutoff) → web-research + counsel-review the law at
->   AIC-2/AIC-6 (the calendar is a versioned data table for exactly this). Memory: [[ai-compliance-module-pivot]].
-> - **NEXT: AIC-1** — the AI-system register (first entity end-to-end, the PRIV-3 analogue): `ai_systems` table
->   (deployment-global) + `models/`+`schemas/compliance.py` + `build_compliance_tools`/`propose_ai_system` +
->   the composition branch + a read-only `/compliance` register UI. Then AIC-2 = the verdict engine.
+>   AIC-2/AIC-6 (the `regulatory_calendar` is a versioned data table for exactly this).
+> - **NEXT: AIC-2** — the deterministic verdict engine (`app/aiact/classify.py`): consume the AIC-1 facts →
+>   tier/role/obligations verdict with `verdict_hash` + `ruleset_version`, gated so the model cannot
+>   self-certify a tier. Web-research + counsel-review the ADOPTED Omnibus BEFORE encoding the rules.
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 >
 > ▶▶ **PICKUP (2026-07-02): ▶ TABULAR REVIEW T6 — grid review WORKSPACE + human cell-override — MERGED PR #184

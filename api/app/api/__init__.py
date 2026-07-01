@@ -32,6 +32,7 @@ from app.api import (
     bootstrap,
     chat_receipts,
     chats,
+    compliance,
     enhance_prompt,
     files,
     inference,
@@ -139,6 +140,11 @@ api_router.include_router(ropa.router, dependencies=_active)
 # (PIA/DPIA/LIA/TIA + risks). Same shared-read posture and `/ropa` prefix as the
 # ROPA reads; tagged separately for OpenAPI grouping.
 api_router.include_router(assessments.router, dependencies=_active)
+# AIC-1 (ADR-F057/F019): the deployment-global AI-systems register read API. Same
+# shared-read posture as `/ropa` (active firm user; no per-user scoping — a 404
+# means a missing record id, not an existence-hiding refusal). The AI Compliance
+# Deep Agent is the sole writer through the guarded tools.
+api_router.include_router(compliance.router, dependencies=_active)
 api_router.include_router(user_skills.router, dependencies=_active)
 api_router.include_router(teams.user_router, dependencies=_active)
 api_router.include_router(teams.admin_router, dependencies=_active)
