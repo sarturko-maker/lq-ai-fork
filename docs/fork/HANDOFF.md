@@ -3,27 +3,43 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-07-01): ▶ TABULAR REVIEW T4 — `gather_row_evidence`, the bounded no-thrash retrieval-fill
-> primitive — CORE SHIPPED on `fork/f2-tabular-t4-retrieval-fill` (PR pending).** ADR-F055 **T4 addendum**;
-> **NO migration** (mig 0082's CHECK already permits `fill_mode='retrieval'`). Maintainer chose **Option B** (a
-> bounded row-evidence TOOL: ONE reranked search per column, no LLM inside → thrash structurally impossible; the
-> agent still extracts + records). Reuses a NEW shared `tools.matter_reranked_hits` (search_documents refactored
-> onto it, no behaviour change; `matter_search_reranked`/FTS baselines untouched). Doctrine rewritten (gather →
-> record, never re-search a cell). Finalize sets `fill_mode` by the fan-out↔retrieval crossover. **Gate PASSED:**
-> 40 `test_tabular_tool` (+8) + 64 agent-tools/composition; ruff (repo-root config, **line-length 100**) + mypy
-> (217) clean. api + arq-worker REBUILT — tool live in the running stack. Memory
-> [[f2-tabular-t4-retrieval-fill]]; plan `docs/fork/plans/TABULAR-T4-retrieval-fill.md`.
-> - **REMAINING on this branch:** (1) **eval gate (OOM-aware, deferred)** — a CUAD arm comparing retrieval-fill
->   vs read-in-full cell quality to tune the crossover default + size `_EVIDENCE_TOP_K` (real embedder → run
->   ALONE on a throwaway pgvector); until then the crossover stays at its current default (fanout ≤ quota,
->   retrieval > quota) so nothing regresses. (2) **live behavioural verify** — agent BUILDS a grid on matter
->   `20ce20fb`; step trace shows `gather_row_evidence` + `record_tabular_row` per doc, NO `search_documents` loop
->   (contrast the 235-search thrash). (3) PR + ADR-F005 gate.
-> - **ALSO OPEN — PR #186 `fork/f2-embedding-oom-hardening`:** dev-box OOM containment (worker `mem_limit`
->   ingest 3g/arq 2.5g + `FAN_OUT_QUOTA` forwarded to arq — it was being ignored) + **ADR-F056** (proposed:
->   per-matter embedding provider local vs OpenAI/Voyage) + §Resource-aware execution. The 2026-07-01 retrieval
->   incident fix (embeddings aligned to `local`, matter `20ce20fb` re-embedded 245/245) rides here as docs (the
->   fix itself was `.env`-only). Merge after review; F056 build sequenced AFTER T4.
+> ▶▶ **PICKUP (2026-07-01): ▶ TABULAR REVIEW T4 — no-thrash retrieval-fill — SHIPPED + LIVE-VERIFIED on
+> `fork/f2-tabular-t4-retrieval-fill` → PR #187 (OPEN; Web+Gateway CI green, API CI running at handoff).**
+> ADR-F055 **T4 addendum**; **NO migration** (mig 0082's CHECK already permits `fill_mode='retrieval'`). Two
+> parts, both live-verified on matter `20ce20fb`:
+> 1. **`gather_row_evidence`** (maintainer chose Option B) — a bounded row-evidence TOOL: ONE reranked search
+>    per column, no LLM inside; the agent still extracts + records. Reuses a NEW shared
+>    `tools.matter_reranked_hits` (search_documents refactored onto it, no behaviour change;
+>    `matter_search_reranked`/FTS baselines untouched). Finalize sets `fill_mode` by the fan-out↔retrieval
+>    crossover.
+> 2. **`grid_filler` subagent** (the live-found + fixed gap) — the tool alone was NOT enough: deepagents
+>    fan-out subagents INHERIT the lead's full toolset, so they fell back to `search_documents` and thrashed one
+>    level down (run `c46ad30a`: cap_exceeded, 0 rows). Fix = a dedicated `grid_filler` subagent with a
+>    RESTRICTED toolset `{gather_row_evidence, record_tabular_row, read_document}` (NO search_documents) so a
+>    fill subagent PHYSICALLY cannot re-search. Built in the composition BODY with the real guarded callables
+>    (deepagents `SubAgent` `tools` subset); gated on `tabular_enabled` (Commercial + Grids) — **the restriction
+>    applies ONLY to the tabular grid_filler; lead + all other subagents keep full tools.** Lead doctrine fans
+>    out grid_filler per doc. **Re-verified live (run `1d7ea0ea`, 2-doc grid, economy): COMPLETED in 76 steps
+>    (was cap_exceeded), grid finalized 2×3, subagent `search_documents` = 0.**
+> - **Gate PASSED:** 40 `test_tabular_tool` (+8) + **35** `test_agent_composition` (+1 grid_filler wiring) + 64
+>   agent-tools/composition; ruff (repo-root config, **line-length 100**) + mypy (217) clean. api + arq-worker
+>   REBUILT — live in the running stack. Memory [[f2-tabular-t4-retrieval-fill]]; plan
+>   `docs/fork/plans/TABULAR-T4-retrieval-fill.md`.
+> - **REMAINING before/around merge:** (a) **merge decision** — squash-merge #187 once API CI green (maintainer
+>   asked to confirm first); (b) **eval gate (OOM-aware, deferred)** — a CUAD arm comparing retrieval-fill vs
+>   read-in-full cell quality to tune the crossover default + `_EVIDENCE_TOP_K` (real embedder → run ALONE on a
+>   throwaway pgvector); crossover stays at its current default until then (nothing regresses). (c) NEXT tabular
+>   slice = **T5** (live cell fill — uses `gather_row_evidence` as its seam).
+> - **⚠️ OOM caveat:** an economy grid run (fan_out_quota=8, ignores `.env FAN_OUT_QUOTA` — only *balanced*
+>   reads it) still briefly tipped PG into recovery even with PR #186 mem_limits (sum arq 2.5g + ingest 3g +
+>   baseline > 6.3g host ⇒ a global OOM can still pick PG). Keep live grid runs SMALL (2 docs) or lower arq's
+>   mem_limit / give PG a floor. Relief: `docker restart lq-ai-arq-worker-1`.
+> - **ALSO OPEN — PR #186 `fork/f2-embedding-oom-hardening` (CI fully GREEN):** dev-box OOM containment (worker
+>   `mem_limit` ingest 3g/arq 2.5g + `FAN_OUT_QUOTA` forwarded to arq — it was being ignored) + **ADR-F056**
+>   (proposed: per-matter embedding provider local vs OpenAI/Voyage; 2 open decisions — dim-pin, privileged
+>   posture) + §Resource-aware execution. The 2026-07-01 retrieval incident fix (embeddings aligned to `local`,
+>   matter `20ce20fb` re-embedded 245/245) rides here as docs (the fix itself was `.env`-only). Merge after
+>   review; **F056 build sequenced AFTER T4.**
 >
 > ▶▶ **PICKUP (2026-07-02): ▶ TABULAR REVIEW T6 — grid review WORKSPACE + human cell-override — MERGED PR #184
 > (`de393216`).** ADR-F055 **T6 addendum**; **NO migration** (the override rides the `results` JSONB). Dev stack
