@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.agents.commercial_tools import COMMERCIAL_AREA_KEY
+from app.agents.compliance_tools import COMPLIANCE_AREA_KEY
 from app.agents.ropa_tools import PRIVACY_AREA_KEY
 from app.models.playbook import Playbook
 from app.skills.registry import SkillRegistry
@@ -95,10 +96,20 @@ ASSESSMENT_GROUP = ToolGroupSpec(
         "the ROPA register."
     ),
 )
+# AIC-1 (ADR-F057): the AI Compliance area's ai_systems register group.
+AI_SYSTEMS_GROUP = ToolGroupSpec(
+    key="ai_systems",
+    label="AI systems register",
+    description=(
+        "Maintain the company register of AI systems under the EU AI Act — record and "
+        "retire systems, capturing the facts the classification engine uses."
+    ),
+)
 
 AREA_TOOL_GROUPS: dict[str, tuple[ToolGroupSpec, ...]] = {
     PRIVACY_AREA_KEY: (ROPA_GROUP, ASSESSMENT_GROUP),
     COMMERCIAL_AREA_KEY: (REDLINING_GROUP, TABULAR_GROUP),
+    COMPLIANCE_AREA_KEY: (AI_SYSTEMS_GROUP,),
 }
 
 

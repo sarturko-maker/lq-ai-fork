@@ -98,6 +98,7 @@
 		applyStepPart,
 		dealVerdictLabel,
 		dealVerdictTone,
+		parseAiSystemChangePayload,
 		parseDealChangePayload,
 		parseRopaChangePayload,
 		parseRunPayload,
@@ -146,6 +147,9 @@
 		/** PRIV-9b (ADR-F024): one ROPA register row the agent just changed — the
 		 * host lifts the id into a recently-changed set that washes the matching row. */
 		ropachange: { kind: string; id: string; verb: string };
+		/** AIC-1 (ADR-F057/F024): one AI-systems register row the agent just changed —
+		 * the AI Compliance twin of `ropachange`; the host washes the matching row. */
+		compliancechange: { kind: string; id: string; verb: string };
 		/** ADR-F047 (Slice 4): the agent FRESHLY produced a redline .docx — the host
 		 * slides the in-app editor in so the lawyer can review/edit it right away. */
 		redlineready: { fileId: string; filename: string };
@@ -690,6 +694,15 @@
 				// the true rows (ADR-F004), so a dropped frame loses a flash, not data.
 				const payload = parseRopaChangePayload(part.data);
 				if (payload) dispatch('ropachange', payload);
+				return;
+			}
+			case 'data-compliance-change': {
+				// AIC-1 (ADR-F057/F024): an AI-systems register row just changed. Relay
+				// the id up to the host, which washes the matching row in the co-visible
+				// register. Animation only — the register's poll/reconcile carries the
+				// true rows (ADR-F004), so a dropped frame loses a flash, not data.
+				const payload = parseAiSystemChangePayload(part.data);
+				if (payload) dispatch('compliancechange', payload);
 				return;
 			}
 			case 'data-deal-change': {

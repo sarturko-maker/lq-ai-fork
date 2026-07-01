@@ -90,6 +90,15 @@ def test_privacy_inventory_offers_ropa_and_assessment_groups() -> None:
     assert [e.key for e in tools.entries] == ["ropa", "assessment"]
 
 
+def test_compliance_inventory_offers_ai_systems_group() -> None:
+    # AIC-1 (ADR-F057): the AI Compliance area offers exactly the ai_systems group.
+    inv = build_area_inventory(
+        area_key="ai-compliance", bound_skill_names=[], registry=_registry(), area_playbooks=[]
+    )
+    tools = {s.kind: s for s in inv.sections()}["tool"]
+    assert [e.key for e in tools.entries] == ["ai_systems"]
+
+
 def test_unknown_area_contributes_no_tool_groups() -> None:
     inv = build_area_inventory(
         area_key="employment", bound_skill_names=[], registry=_registry(), area_playbooks=[]

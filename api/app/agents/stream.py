@@ -404,6 +404,24 @@ class RunStreamPublisher:
             }
         )
 
+    def ai_system_changed(self, *, kind: str, entity_id: str, verb: str) -> None:
+        """Announce one AI-systems register row the agent just changed — AIC-1 (ADR-F057).
+
+        The AI Compliance twin of :meth:`ropa_changed`: a TRANSIENT
+        ``data-compliance-change`` part carrying ``{kind, id, verb}``. Drives the
+        cockpit's live changed-row highlight on the AI-systems register: the client
+        lifts the id into a recently-changed set and washes the matching row.
+        Transient ⇒ not tracked as an open block, so a late subscriber simply misses
+        it — animation only; the settled re-read remains the truth (ADR-F004). Ids
+        are audit-safe (the audit contract allows counts/types/**IDs**)."""
+        self._publish(
+            {
+                "type": "data-compliance-change",
+                "transient": True,
+                "data": {"kind": kind, "id": entity_id, "verb": verb},
+            }
+        )
+
     def deal_changed(self, *, ref: str, verdict: str) -> None:
         """Announce one counterparty item the agent just decided — C5b-3 (ADR-F032).
 

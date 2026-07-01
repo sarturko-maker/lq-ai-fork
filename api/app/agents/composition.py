@@ -35,10 +35,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
+from app.agents.ai_system_changes import AiSystemChangeLedger
 from app.agents.area_agent import AreaAgentSpec, combine_tier_floors, render_area_agent
 from app.agents.assessment_tools import build_assessment_tools
 from app.agents.budget import resolve_envelope
 from app.agents.capabilities import (
+    AI_SYSTEMS_GROUP,
     ASSESSMENT_GROUP,
     REDLINING_GROUP,
     ROPA_GROUP,
@@ -47,6 +49,7 @@ from app.agents.capabilities import (
 )
 from app.agents.checkpointer import get_agent_checkpointer
 from app.agents.commercial_tools import COMMERCIAL_AREA_KEY, build_commercial_tools
+from app.agents.compliance_tools import COMPLIANCE_AREA_KEY, build_compliance_tools
 from app.agents.deal_changes import DealChangeLedger
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.fan_out_middleware import FanOutQuotaMiddleware
@@ -815,6 +818,22 @@ async def compose_and_execute_run(
                     run_id=run_id,
                     binding=binding,
                     fan_out_quota=envelope.fan_out_quota,
+                )
+        elif binding is not None and area_key == COMPLIANCE_AREA_KEY:
+            # AIC-1 (ADR-F057): a matter filed under the AI Compliance area gets the
+            # ai_systems register tools (the PRIV-3 analogue). Area-keyed grant with
+            # its own grant set (COMPLIANCE_TOOL_NAMES) — confinement, no cross-area
+            # grant. The register is deployment-global (ADR-F019); the matter only
+            # governs whether the tools exist + whether the run may write. The change
+            # ledger drives the cockpit's live changed-row highlight (ADR-F024), the
+            # Compliance analogue of ROPA's wash.
+            if AI_SYSTEMS_GROUP.key in enabled_tool_groups:
+                change_ledger = AiSystemChangeLedger()
+                tools = tools + build_compliance_tools(
+                    session_factory,
+                    run_id=run_id,
+                    binding=binding,
+                    change_ledger=change_ledger,
                 )
 
         # F1-S3: the gateway tier floor is the strongest (lowest) of the

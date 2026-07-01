@@ -22,6 +22,7 @@ from app.models.autonomous import (
     PrecedentEntry,
 )
 from app.models.chat import Chat, Message
+from app.models.compliance import AiSystem
 from app.models.document import Document, DocumentChunk
 from app.models.editor_lock import EditorLock
 from app.models.enhance_prompt import EnhancePromptInteraction
@@ -47,6 +48,7 @@ from app.models.work_product import WorkProductAttribution
 __all__ = [
     "AgentRun",
     "AgentRunStep",
+    "AiSystem",
     "Assessment",
     "AuditLog",
     "AutonomousMemory",

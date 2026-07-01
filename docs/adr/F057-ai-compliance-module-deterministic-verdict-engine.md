@@ -101,3 +101,32 @@ where classification correctness matters (ADR-F041).
   (AIC-9, full F020 security envelope); web-research + counsel review of the adopted Digital Omnibus as AIC-2
   input; if verdict signing is later required, route the digest through the gateway; the "LQ.AI Oscar Edition"
   rebrand keeps its own ADR.
+
+## Implementation notes — AIC-1 (2026-07-01): the `ai_systems` register
+
+The first entity landed (the PRIV-3 analogue; plan `docs/fork/plans/AIC-1-ai-systems-register.md`). Concrete
+calls made under this ADR, recorded here so the reasoning survives:
+
+- **Presence gate is structural, not just prompted.** `ai_systems` has NO risk-tier/role column and there is
+  NO tool that writes one. The write schema `AiSystemInput` is `extra="forbid"`, so a `risk_tier` the model
+  tries to smuggle in is a hard validation error (tested). The register stores only facts —
+  `intended_purpose`, `lifecycle_status`, `development_origin` (build-vs-buy raw fact that *informs* the role),
+  and the GPAI carry-flags. The tier/role verdict is AIC-2's separate artifact.
+- **Born flip-ready, but the policy seam is deferred.** Every row carries a durable **NON-NULL
+  `practice_area_id`** (FK `RESTRICT`) — the one deliberate divergence from the ROPA exemplar (which predates
+  ADR-F021 and has no such column). But AIC-1 does **not** build the `visible_filter()`/`can()` seam: the
+  `/compliance` router ships **shared-read, behaviour-identical to `/ropa`** (ADR-F019). The column's only job
+  today is to make the future flip to area-membership enforcement a pure read-path change **with no
+  migration**. This honours the "authz-ready by construction" commitment without over-building the seam in the
+  first entity slice.
+- **`self_declared_role` and the authoritative role deferred to AIC-3.** AIC-1 stores only `development_origin`
+  so the presence gate stays unambiguous (no role-ish column that reads like a verdict); the authoritative
+  role + Art 25 flip triggers are AIC-3.
+- **GPAI stays pure carry-flags.** `is_gpai` / `gpai_systemic` with a coherence invariant
+  (`gpai_systemic ⇒ is_gpai`) enforced in both the Pydantic model and a DB CHECK; zero obligation logic wired
+  (that is AIC-4b).
+- **Area key.** `COMPLIANCE_AREA_KEY = "ai-compliance"` — must byte-match the AIC-0 seed
+  (`practice_areas.key`, migration 0084) or the composition branch never fires.
+- **Live-wash included** (not deferred): a run-scoped `AiSystemChangeLedger` + a transient
+  `data-compliance-change` SSE frame drive the cockpit's changed-row highlight; `runner.py` and
+  `live_changes.py` stay area-agnostic (the LiveChange/ChangeLedger Protocols already generalise).
