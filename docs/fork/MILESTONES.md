@@ -357,8 +357,11 @@ planning (framework mismatch: LQ-Grid is React, our web is Svelte). Its own plan
   — `start`/`record`/`finalize` through `guarded_dispatch`, migration 0082, live-verified end-to-end on
   DeepSeek). **T2 SHIPPED** (in-chat **grid preview card + Expand** overlay; **frontend-only** — refined from
   the planned `data-tabular` frame to **settled-step derivation** since the SSE replay re-emits only
-  `data-step`, ADR-F055 T2 addendum; Cypress-screenshot-verified). NEXT = **T3** (discoverability SKILL.md —
-  proactive offer + NL→`start_tabular_review`, eval-gated).
+  `data-step`, ADR-F055 T2 addendum; Cypress-screenshot-verified). **T3 SHIPPED** (discoverability
+  `tabular-review` SKILL.md bound to Commercial via mig 0083; agent proactively **builds** a grid on a
+  multi-doc compare intent, maps NL→columns, stays quiet on single-doc; live masked eval 2/3→**3/3** after
+  one tuning pass, ADR-F015). NEXT = **T7** (Grids cockpit tab — matter-scoped artifact listing), then
+  T5/T6 (live fill + stage takeover) and T4/T8 (retrieval-fill + bash loop; sequenced low-risk-first).
 
 **Deferred — resume after this milestone (paused 2026-06-30, honest record):**
 - **F2 Slice P — PageIndex** (gateway-bound retrieval, eval-first; `plans/PAGEINDEX-SLICE-P.md`, ADR-F052
