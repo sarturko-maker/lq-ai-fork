@@ -235,6 +235,7 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/tabular/preview-cost"),
     ("POST", "/api/v1/tabular/execute"),
     ("GET", "/api/v1/tabular/executions"),
+    ("GET", "/api/v1/tabular/matters/{project_id}/grids"),  # F2 Tabular T7
     ("GET", "/api/v1/tabular/executions/{execution_id}"),
     ("DELETE", "/api/v1/tabular/executions/{execution_id}"),
     ("POST", "/api/v1/tabular/executions/{execution_id}/cancel"),

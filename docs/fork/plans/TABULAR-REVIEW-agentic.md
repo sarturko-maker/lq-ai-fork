@@ -175,11 +175,15 @@ grid→deliverables (Word letters/reports). License: reference-only, no code cop
   precedent). **Cell click → side drawer** (CellDetail; LQ-Grid pattern — keeps grid context) showing
   value + confidence + `source_quote` + `notes` + citations. No new ADR.
 
-### T7 (core) — The "Grids" tab (matter-scoped listing)
-- New cockpit tab **"Grids"** (sibling to Documents): list the matter's grids (`mode='agentic'`,
-  non-deleted) with title/created/doc-count/`fill_mode`; open → the grid view; rename; soft-delete. New
-  read route (`GET /matters/{id}/grids` or reuse the tabular list scoped to agentic + matter). Web
-  `GridsTab.svelte`. Authz: matter-owner only (cross-matter → 404).
+### T7 (core) — The "Grids" tab (matter-scoped listing) ✅ SHIPPED 2026-07-01
+- NEW cockpit tab **"Grids"** (sibling to Documents): lists the matter's `mode='agentic'`, non-deleted
+  grids with a **derived title** (column names — grids have no stored title), doc/column counts, `fill_mode`,
+  status, age; **open** → the reused `/tabular/[id]`; **soft-delete** (reuses the owner-scoped DELETE).
+  Rename deferred (would need a title column) — noted. NEW `GET /tabular/matters/{project_id}/grids`
+  (owner-scoped via `_load_visible_project`, cross-matter → 404); `TabularExecutionSummary` +
+  `column_names`/`fill_mode` (default-safe). **No migration.** Web `GridsPanel.svelte` +
+  `grids-panel-helpers.ts`. Live: `f2-tabular-t7-grids-tab.cy.ts` (list + empty, light/dark). Evidence
+  `docs/fork/evidence/tabular-review/T7-grids-tab.md`.
 
 ### T8 (core) — Conversational grid-ops (the "bash" loop)
 - `update_tabular_cells(grid_id, targets, instruction)`, `combine_documents(grid_id, document_ids)`

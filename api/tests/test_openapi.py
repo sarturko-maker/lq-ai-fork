@@ -168,6 +168,7 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/tabular/preview-cost",
         "/api/v1/tabular/execute",
         "/api/v1/tabular/executions",
+        "/api/v1/tabular/matters/{project_id}/grids",
         "/api/v1/tabular/executions/{execution_id}",
         "/api/v1/tabular/executions/{execution_id}/cancel",
         # M3-C4a — XLSX/CSV export.
@@ -356,7 +357,8 @@ async def test_openapi_paths_match_sketch() -> None:
     # /api/v1/agents/threads/{thread_id}
     # F0-S7 (fork) adds one new path (ADR-F006 SSE v2):
     # /api/v1/agents/runs/{run_id}/stream
-    assert len(actual) == 157  # +3: ADR-F054 capability panel (GET/PUT
+    # +1: F2 Tabular T7 (ADR-F055) — GET /tabular/matters/{project_id}/grids.
+    assert len(actual) == 158  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

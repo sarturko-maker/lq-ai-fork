@@ -61,6 +61,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import ActiveUser
+from app.api.projects import _load_visible_project
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
@@ -384,6 +385,42 @@ async def list_tabular_executions(
             or_(TabularExecution.user_id == user.id, TabularExecution.user_id.is_(None))
         )
     stmt = stmt.order_by(TabularExecution.created_at.desc()).limit(limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [_to_summary(row) for row in rows]
+
+
+# A matter accrues few grids; cap the listing defensively so the response stays bounded.
+_MATTER_GRIDS_LIMIT = 200
+
+
+@router.get(
+    "/tabular/matters/{project_id}/grids",
+    response_model=list[TabularExecutionSummary],
+    summary="List a matter's agentic grids (F2 Tabular T7).",
+)
+async def list_matter_grids(
+    project_id: uuid.UUID,
+    user: ActiveUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[TabularExecutionSummary]:
+    """The matter's agentic grids for the cockpit Grids tab (ADR-F055), recent-first.
+
+    Owner-scoped through the matter (``_load_visible_project`` 404s on miss /
+    cross-user / archived — no existence leak). Only ``mode='agentic'`` rows
+    (the frozen linear executor's rows never surface here) and soft-deleted rows
+    are excluded.
+    """
+    project = await _load_visible_project(db, project_id, user.id)
+    stmt = (
+        select(TabularExecution)
+        .where(
+            TabularExecution.project_id == project.id,
+            TabularExecution.mode == "agentic",
+            TabularExecution.deleted_at.is_(None),
+        )
+        .order_by(TabularExecution.created_at.desc())
+        .limit(_MATTER_GRIDS_LIMIT)
+    )
     rows = (await db.execute(stmt)).scalars().all()
     return [_to_summary(row) for row in rows]
 
@@ -848,6 +885,10 @@ def _to_summary(row: TabularExecution) -> TabularExecutionSummary:
             "status": row.status,
             "document_count": len(row.document_ids),
             "column_count": len(row.columns),
+            "column_names": [
+                str(c["name"]) for c in row.columns if isinstance(c, dict) and c.get("name")
+            ],
+            "fill_mode": row.fill_mode,
             "cost_estimate_usd": row.cost_estimate_usd,
             "cost_actual_usd": row.cost_actual_usd,
             "created_at": row.created_at,

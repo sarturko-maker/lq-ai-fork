@@ -363,6 +363,11 @@ class TabularExecutionSummary(BaseModel):
     status: TabularExecutionStatus
     document_count: int
     column_count: int
+    # F2 Tabular T7: agentic-grid listing fields (default-safe for linear rows).
+    # ``column_names`` gives the Grids tab a human title without fetching results;
+    # ``fill_mode`` (fanout|retrieval) is null for a linear execution.
+    column_names: list[str] = Field(default_factory=list)
+    fill_mode: str | None = None
     cost_estimate_usd: Decimal | None = None
     cost_actual_usd: Decimal | None = None
     created_at: datetime
