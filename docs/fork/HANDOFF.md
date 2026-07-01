@@ -3,10 +3,29 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
-> ▶▶ **PICKUP (2026-07-02): ▶ TABULAR REVIEW T6 — grid review WORKSPACE + human cell-override — DONE on branch
-> `fork/f2-tabular-t6-workspace-drawer` (PR pending).** ADR-F055 **T6 addendum**; **NO migration** (the override
-> rides the `results` JSONB). Dev stack healthy `http://localhost:3000`; model `smart → deepseek-v4-flash`. Full
-> plan: `docs/fork/plans/TABULAR-REVIEW-agentic.md` "### T6 (core)".
+> ▶▶ **PICKUP (2026-07-02): ▶ TABULAR REVIEW T6 — grid review WORKSPACE + human cell-override — MERGED PR #184
+> (`de393216`).** ADR-F055 **T6 addendum**; **NO migration** (the override rides the `results` JSONB). Dev stack
+> fully rebuilt + healthy `http://localhost:3000` (web + api + arq + ingest); model `smart → deepseek-v4-flash`.
+> Full plan: `docs/fork/plans/TABULAR-REVIEW-agentic.md` "### T6 (core)"; evidence
+> `docs/fork/evidence/tabular-review/T6-workspace-drawer.md`.
+>
+> - **OPEN follow-up — PR #185 `fork/f2-tabular-t6-sticky-col-fix` (merge when CI green):** maintainer saw on the
+>   live stack that the grid's first column (document name) read **too large** and, on horizontal scroll,
+>   **overlaid the body**. Cause: the sticky row-label `<th>` inherited the ~1rem table default (vs 0.875rem
+>   cells) with no overflow handling, so a long name spilled its fixed 14rem column. Fix (`TabularGrid.svelte`):
+>   `font-size:0.8125rem` + ellipsis-truncate with a `title` tooltip; Wrap-on wraps within the column (plain
+>   wrap, NOT `-webkit-line-clamp` — that needs `display:-webkit-box` which breaks the `<th>` table-cell/sticky
+>   layout). svelte-check 0 errors; web rebuilt. **First action next session: confirm CI green → squash-merge #185.**
+> - **⏳ MAINTAINER WANTS TO VERIFY LIVE (do this next):** the FULL agentic loop — the Commercial agent *builds*
+>   a grid → it appears **inline in chat** as a `TabularPreview` card with an **Expand** button → Expand opens the
+>   **stage-takeover** workspace (conversation slides back, docked cell drawer). A ready matter exists:
+>   **"Tabular Test"** (Commercial, owner `admin@lq.ai`, project `03f556b9-0885-4e08-b419-d6f71beb7a5a`) with a
+>   completed 5×5 grid `a0beca15-58eb-4492-bb1e-0db085ac4068` (direct: `/lq-ai/tabular/<id>`). To exercise the
+>   agent-build path, ask the Commercial agent to "compare/tabulate these contracts" over a few matter docs (small
+>   docs + a "fan out one subagent per contract" nudge = clean completion; see [[tabular-fanout-live-behavior]]),
+>   then Expand the preview. Grid-list rows also open the stage via the **Grids** tab (onOpenGrid). NOTE the design
+>   phrase "expanding into a new **tab**": T6 shipped Expand → an in-cockpit **stage-takeover** (fly-in, SSE-safe),
+>   NOT a browser tab — confirm that matches intent, or file a tweak.
 >
 > - **WHAT SHIPPED — the grid is a review WORKSPACE, not a stacked modal.** Killed the `ag-grid-overlay` (z-60)
 >   and the `TabularCitationModal` (z-100, **DELETED**). Expand (in-chat preview) / a Grids-tab row now open the
