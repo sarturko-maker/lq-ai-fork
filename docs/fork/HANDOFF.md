@@ -3,6 +3,26 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
+> ▶▶ **PICKUP (2026-07-01): ▶ EMBEDDING PROVIDER — tabular-thrash root cause FOUND + FIXED; ADR-F056 plan drafted.**
+> The "tabular review hits 600 steps and kills the box" symptom is **semantic search being OFF**, not chunking or
+> model quality. On matter `20ce20fb` the agent ran **235 `search_documents`, 0 `record_tabular_row`** → 600-step
+> cap → context bloat/DB+gateway hammer → box overload. Three compounding causes on the `embedding_local` path:
+> (1) **ingest embedded with `local`, the query with `gateway`** (compose wires `EMBEDDING_PROVIDER` to api+arq but
+> NOT ingest) = two vector spaces in one column, no provenance to tell them apart; (2) the dev gateway `embedding`
+> alias → `openai-prod/text-embedding-3-small` has **no OpenAI key** → `/v1/embeddings` **503** → `_embed_query`
+> silently degrades to **FTS-only** (keyword search collapses on long contracts); (3) **half-built index** (78/245
+> chunks embedded — local embedder OOM'd mid-ingest, silent).
+> **FIX APPLIED + VERIFIED LIVE:** `.env EMBEDDING_PROVIDER=gateway→local` (RERANK stays false — box OOMs both ONNX
+> models; embedder-alone OK), recreated api+arq+ingest, re-embedded matter `20ce20fb` via
+> `embed_local_chunks_for_file` → **245/245**, `matter_hybrid_search` (alpha 0.5) returns relevant clauses across
+> all 5 docs. **Retest tabular review on `20ce20fb` now — search should hit first-try, not thrash.**
+> **BIGGER TO-DO (maintainer direction) = ADR-F056 (proposed) + plan `docs/fork/plans/EMBEDDING-PROVIDER-choice.md`:**
+> per-matter selectable embedding provider (local vs OpenAI-via-gateway now, Voyage later) with a single
+> ingest↔query resolver, per-chunk provenance, re-embed-on-change, and coverage health. **Confirmed scope:**
+> per-matter (firm default inherited); **build AFTER tabular T4**; local+gateway v1. Memory:
+> [[embedding-provider-mismatch-and-choice]]. ⚠️ **ROTATE dev Postgres password + DEEPSEEK_API_KEY** (leaked to
+> this session's transcript during diagnosis; both gitignored, not in git).
+>
 > ▶▶ **PICKUP (2026-07-02): ▶ TABULAR REVIEW T6 — grid review WORKSPACE + human cell-override — MERGED PR #184
 > (`de393216`).** ADR-F055 **T6 addendum**; **NO migration** (the override rides the `results` JSONB). Dev stack
 > fully rebuilt + healthy `http://localhost:3000` (web + api + arq + ingest); model `smart → deepseek-v4-flash`.

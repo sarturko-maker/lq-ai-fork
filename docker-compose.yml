@@ -227,6 +227,15 @@ services:
       context: ./api
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Dev-box OOM containment (ADR-F056 §Resource-aware execution). This worker
+    # loads Docling + EasyOCR + the local embedder (~2.5 GiB) during ingest. On a
+    # ~6 GB box an unbounded spike made the kernel OOM-killer kill a Postgres
+    # backend → whole-app crash-recovery. mem_limit caps THIS cgroup so a runaway
+    # ingest self-OOMs (job fails + restarts) instead of taking down the DB.
+    # Sized for the single-runaway case (the observed one): 3g while arq idles
+    # keeps the host under its ceiling. Pair with LQ_AI_INGEST_WORKER_CONCURRENCY=1.
+    mem_limit: 3g
+    mem_reservation: 512m
     depends_on:
       postgres:
         condition: service_healthy
@@ -304,6 +313,14 @@ services:
       context: ./api
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Dev-box OOM containment (ADR-F056 §Resource-aware execution). Agent runs
+    # execute HERE and load the local embedder + hold N fanned-out subagents'
+    # context. mem_limit caps THIS cgroup so a heavy run self-OOMs (run fails +
+    # worker restarts) rather than the kernel killing Postgres. Sized for the
+    # single-runaway case: 2.5g while ingest idles stays under the host ceiling.
+    # Pair with a lowered FAN_OUT_QUOTA to cut the peak subagent fan-out.
+    mem_limit: 2500m
+    mem_reservation: 512m
     depends_on:
       postgres:
         condition: service_healthy
@@ -343,6 +360,11 @@ services:
       # preserve production behaviour (local embedder + rerank on).
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
       RERANK_ENABLED: ${RERANK_ENABLED:-true}
+      # Per-run subagent fan-out ceiling (balanced tier; ADR-F049 Slice E /
+      # ADR-F053). Agent runs execute in THIS worker, so the cap must be set
+      # here. Dev-box OOM containment lowers it via .env; production default 32
+      # (api/app/agents/budget.py) if unset. See mem_limit above / ADR-F056.
+      FAN_OUT_QUOTA: ${FAN_OUT_QUOTA:-32}
       # Skills loader — the worker's on_startup installs the skill
       # registry via the shared bootstrap (app/skills/bootstrap.py) so
       # skill_ref autonomous sessions resolve on this process. Mounted

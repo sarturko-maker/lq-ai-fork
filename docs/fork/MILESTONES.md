@@ -640,6 +640,12 @@ decision (Backlog), triggered at real deployment; engine behaviour is identical,
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
 
+- **Per-matter selectable embedding provider (ADR-F056, plan `EMBEDDING-PROVIDER-choice.md`; surfaced
+  2026-07-01).** Local (private/$0/sensitive) vs inference (gateway→OpenAI now, Voyage `voyage-law-2` later),
+  per-matter with a firm default; single ingest↔query resolver + per-chunk provenance + re-embed-on-change +
+  coverage health. Fixes the silent drift/degrade/half-index class that caused the tabular thrash. **Confirmed:
+  build AFTER tabular T4.** Immediate incident already fixed (aligned dev stack to `local`, re-embedded).
+
 - **Full N=150 hybrid CUAD calibration on a non-memory-constrained host (surfaced 2026-06-29, F2 Slice C1).**
   Slice C1 calibrated the local-embedder hybrid at N=30 (apples-to-apples vs FTS@30; within-doc recall@5
   0.314→0.629, +100%) because the local embedder + the eval's query-volume crash a Postgres backend on this
