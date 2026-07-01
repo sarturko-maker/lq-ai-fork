@@ -143,12 +143,17 @@ grid→deliverables (Word letters/reports). License: reference-only, no code cop
   refactored to share `buildDocumentNameById`. 16 helper tests + a deterministic Cypress screenshot spec.
   Evidence: `docs/fork/evidence/tabular-review/T2-grid-preview.md`.
 
-### T3 (core) — Discoverability skill: proactive offer + NL intent
-- New `tabular-review` **SKILL.md** bound to Commercial (`practice_area_skills`), gated by its skill toggle:
-  *when* to offer (multi-doc + tabular ask) with column pills; *how* to map NL → `start_tabular_review`
-  with inferred columns; built-in **column templates** (M&A DD / key terms / GDPR).
-- **Eval-gated** (masked judge, C8/C9 style): does it offer when appropriate (and stay quiet when not), and
-  map NL correctly? Freeze the finding under `docs/fork/evidence/tabular-review/`.
+### T3 (core) — Discoverability skill: proactive offer + NL intent ✅ SHIPPED 2026-07-01
+- NEW `skills/tabular-review/SKILL.md` bound to Commercial (**migration 0083**, 0056/0072 idempotent
+  pattern), auto-appears as a toggleable capability (default-on, ADR-F054): *reach for a grid* on a
+  multi-doc compare/extract intent (**build it**, don't answer across-many-docs in prose); map NL →
+  `start_tabular_review` columns; column templates (key terms / NDA / M&A DD / SaaS / DPA); restraint on a
+  single-doc lookup.
+- **Eval finding (masked, live DeepSeek, ADR-F015):** **3/3 across 2 reps** with the skill genuinely injected
+  (vague ask builds a grid; explicit table maps columns; single-doc stays quiet). The eval was corrected
+  after fresh-context review caught the injection-attribution trap (it initially omitted `skill_registry=` →
+  measured only the doctrine); it now loads `/skills` + passes the registry + credits a prose offer.
+  `test_tabular_discoverability_eval.py`; evidence `docs/fork/evidence/tabular-review/T3-discoverability.md`.
 
 ### T4 (core) — Retrieval-fill engine + the crossover switch
 - Batched-row subagents: ≤quota subagents, each owns a row slice, fills each cell via

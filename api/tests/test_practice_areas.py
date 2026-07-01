@@ -151,6 +151,8 @@ async def test_seed_commercial_config_present_and_derived_configured(
     # UX-B-3 (0056): Commercial now carries its default skill bindings.
     assert "contract-qa" in commercial["bound_skills"]
     assert "nda-review" in commercial["bound_skills"]
+    # F2 Tabular T3 (0083): Commercial carries the tabular-review discoverability skill.
+    assert "tabular-review" in commercial["bound_skills"]
     # C7b (0073): Commercial carries the drafter/reviewer fan-out roster (the 0057
     # document-researcher extended with clause-drafter + clause-reviewer).
     subagents = commercial["agent_config"].get("subagents", [])
