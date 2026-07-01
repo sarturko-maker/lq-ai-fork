@@ -130,11 +130,18 @@ grid→deliverables (Word letters/reports). License: reference-only, no code cop
 - **Verify:** a Commercial run over ≤8 docs persists an agentic grid (JSONB == `TabularResults`);
   renders at `/tabular/[id]`. Draft **ADR-F055**.
 
-### T2 (core) — `data-tabular` frame + chat preview (column pills) + Expand → grid
-- `RunStreamPublisher.tabular_ready(grid_id, preview)` → `{"type":"data-tabular",…}` on `finalize`;
-  consume in `ui-message-stream.ts`; new `case 'data-tabular':` at `ConversationPanel.svelte:632` mounting
-  **`TabularPreview.svelte`** (compact M×N + **column pills** + Expand). Expand opens the reused
-  `TabularGrid` (`getTabularExecution`). Screenshot verify.
+### T2 (core) — chat preview (column pills) + Expand → grid ✅ SHIPPED 2026-07-01
+- **Refined from a `data-tabular` frame to settled-step derivation** (ADR-F055 T2 addendum,
+  maintainer-confirmed): the SSE replay path re-emits only `data-step` rows, so a custom `data-*` frame is
+  live-only and would vanish on reload — wrong for a durable artifact. Instead the preview anchors on the
+  **settled `finalize_tabular_review` step** (grid id parsed from its short tool-call input); **T2 is
+  frontend-only** (no `stream.py`/`ui-message-stream` change).
+- NEW `agents/tabular-preview.ts` (`tabularGridIdsForTurn` + `summarizeGridForPreview` +
+  `buildDocumentNameById`) → NEW **`TabularPreview.svelte`** (compact M×N + **column pills** + status +
+  Expand) rendered after the answer in `ConversationPanel.svelte`. Expand opens the reused `TabularGrid` +
+  `TabularCitationModal` in an in-conversation overlay (cockpit stage-takeover motion = T6). `/tabular/[id]`
+  refactored to share `buildDocumentNameById`. 16 helper tests + a deterministic Cypress screenshot spec.
+  Evidence: `docs/fork/evidence/tabular-review/T2-grid-preview.md`.
 
 ### T3 (core) — Discoverability skill: proactive offer + NL intent
 - New `tabular-review` **SKILL.md** bound to Commercial (`practice_area_skills`), gated by its skill toggle:

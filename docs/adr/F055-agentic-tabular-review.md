@@ -124,3 +124,29 @@ two.
 
 **Neutral.** Grid virtualization, counterparty sidebar, per-cell tier UI, and source-document highlighting
 are LQ-Grid-inspired backlog, out of scope here.
+
+## T2 addendum (2026-07-01) — the preview derives from the settled step, not a new frame
+
+The Decision-outcome paragraph anticipated the grid surfacing "via a new `data-tabular` stream frame".
+Implementing T2 surfaced a constraint that makes that frame the wrong primary mechanism: the SSE replay
+path (`api/app/api/agent_runs.py:_stream_run_events`) re-emits only settled `data-step` rows — every custom
+`data-*` frame (`data-plan`, `data-deal-change`) is **live-only and never survives a reload**. A grid is a
+**durable artifact**, so its in-chat preview must re-derive on reload; a live-only frame could not be its
+source, and adding one purely for live latency would be a redundant second path (the finalize `data-step`
+already arrives live).
+
+**Decision (refines decision 7's surfacing clause; maintainer-confirmed 2026-07-01):** the preview anchors
+on the **settled `finalize_tabular_review` step** already in the run timeline — the parent derives the grid
+id from that tool call's short `{"grid_id": "<uuid>"}` input (well under the ~2000-char step-summary cap;
+unparseable → skipped, never fatal) and renders one `TabularPreview` card per finalized grid, fetching the
+body from the existing owner-scoped `GET /tabular/executions/{id}`. **No new stream frame; T2 is
+frontend-only** (`web/.../agents/tabular-preview.ts` + `TabularPreview.svelte` + a `ConversationPanel`
+render block; the `/tabular/[id]` page is refactored to share `buildDocumentNameById`). The card renders
+identically live and on reload (ADR-F004). **Expand** opens the FULL reused `TabularGrid` +
+`TabularCitationModal` in an in-conversation overlay (the cockpit "panels slide back" stage-takeover motion
+stays T6). The **transient `data-tabular-cell`** frame for live cell fill (T5) is unaffected — it is genuine
+animation (ADR-F004), the right use of a live-only frame.
+
+Cosmetic deferred to T6: the cockpit composer floats over the bottom of the conversation, so a tall trailing
+grid card sits partly behind it until scrolled (header/status/pills stay clear; Expand unaffected) — a
+pre-existing trait of any tall trailing content, addressed by the T6 stage rework.
