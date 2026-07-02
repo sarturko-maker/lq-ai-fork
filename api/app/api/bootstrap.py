@@ -29,13 +29,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.user import User
+from app.security.rate_limit import RateLimiter, get_rate_limiter
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -73,9 +74,13 @@ class BootstrapStatus(BaseModel):
     summary="Report whether the first-run bootstrap admin password is still active.",
 )
 async def get_bootstrap_status(
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
 ) -> BootstrapStatus:
     """Unauthenticated probe used by the login UI to render fresh-install hints."""
+    # ADR-F059 — per-IP cap: this endpoint leaks default_password_active.
+    await limiter.enforce_bootstrap_status(request)
     result = await db.execute(
         select(User.id)
         .where(

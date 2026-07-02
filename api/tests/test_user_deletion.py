@@ -78,7 +78,7 @@ async def test_delete_schedules_deletion_and_revokes_sessions(
     now = datetime.now(tz=UTC)
     sess = UserSession(
         user_id=seed_user.id,
-        refresh_token_hash="x" * 60,
+        refresh_token_hmac="x" * 60,
         expires_at=now,
         absolute_expires_at=now + timedelta(hours=8),
         last_active_at=now,

@@ -163,6 +163,17 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LQ_AI_DEV_MODE: "false"
+      # ADR-F059 D4 — trusted-proxy handling. uvicorn runs with --proxy-headers
+      # ON by default (uvicorn 0.32+) and reads FORWARDED_ALLOW_IPS natively, so
+      # with it set uvicorn rewrites request.client to the real client IP that
+      # Caddy (SAAS-3) forwards in X-Forwarded-For — the source of truth for the
+      # per-IP rate-limit buckets, audit rows, and session IP metadata. This
+      # compose network publishes ZERO host ports (see header), so the ONLY
+      # peers that can reach api:8000 are stack services; trusting them is
+      # acceptable until SAAS-3 pins Caddy's fixed container IP here. We never
+      # parse X-Forwarded-For in app code (ADR-F059 D4). Dev compose leaves this
+      # unset → uvicorn's default 127.0.0.1 → byte-identical dev behaviour.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
       # Same-origin reverse proxy (Caddy, SAAS-3) fronts web + api under one
       # origin — leave unset (CORS disabled; no cross-origin browser calls).
       LQ_AI_CORS_ORIGINS: ${LQ_AI_CORS_ORIGINS:-}

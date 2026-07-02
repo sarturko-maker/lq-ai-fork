@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from collections.abc import Awaitable, Callable
 
@@ -111,6 +112,55 @@ def _metrics_endpoint() -> Response:
     return Response(content=body, media_type=CONTENT_TYPE_LATEST)
 
 
+# --- Access-log secret scrub (SAAS-2, ADR-F059 §6-item-4) --------------------
+
+# The WOPI editor-session token rides as an `access_token` query param (WOPI
+# protocol design), and uvicorn's default access log records the full request
+# line INCLUDING the query string — so the token would land in container logs
+# in EVERY environment. This filter redacts the value defensively; the Caddy
+# edge (deploy/caddy) scrubs it a second time at the public boundary.
+_ACCESS_TOKEN_RE = re.compile(r"(access_token=)[^&\s\"']+")
+
+
+def _scrub_access_token(value: object) -> object:
+    if isinstance(value, str) and "access_token=" in value:
+        return _ACCESS_TOKEN_RE.sub(r"\1REDACTED", value)
+    return value
+
+
+class AccessTokenLogScrubFilter(logging.Filter):
+    """Redact ``access_token=<value>`` from uvicorn access-log records.
+
+    uvicorn access records carry the request line as ``record.args``
+    (``(client_addr, method, full_path, http_version, status_code)``) with the
+    query string in ``full_path``; we rewrite the args in place. If the record
+    shape differs (already-formatted message, dict args), we fall back to
+    scrubbing ``record.msg``. A malformed record never raises — logging must not
+    be broken by the scrubber, so the filter always returns ``True``.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            args = record.args
+            if isinstance(args, tuple) and args:
+                scrubbed = tuple(_scrub_access_token(a) for a in args)
+                if scrubbed != args:
+                    record.args = scrubbed
+            if isinstance(record.msg, str) and "access_token=" in record.msg:
+                record.msg = _ACCESS_TOKEN_RE.sub(r"\1REDACTED", record.msg)
+        except Exception:  # scrubbing must never break logging
+            pass
+        return True
+
+
+def _install_access_log_scrub() -> None:
+    """Attach the access-token scrubber to the ``uvicorn.access`` logger (idempotent)."""
+    access_logger = logging.getLogger("uvicorn.access")
+    if any(isinstance(f, AccessTokenLogScrubFilter) for f in access_logger.filters):
+        return
+    access_logger.addFilter(AccessTokenLogScrubFilter())
+
+
 # --- OpenTelemetry bootstrap --------------------------------------------------
 
 
@@ -202,5 +252,7 @@ def install_observability(
         methods=["GET"],
         include_in_schema=False,
     )
+    # ADR-F059 — scrub the WOPI access_token out of uvicorn's access log.
+    _install_access_log_scrub()
     _maybe_init_otel(service_name=service_name, service_version=service_version)
     _instrument_fastapi(app)

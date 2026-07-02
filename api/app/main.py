@@ -32,9 +32,10 @@ from app.agents.stream import RedisStreamBridge, RunStreamBroker
 from app.api import api_router
 from app.cache import check_redis, close_redis, get_redis
 from app.clients.gateway import close_gateway_client, get_gateway_client
-from app.config import get_settings
+from app.config import assert_boot_secrets_configured, get_settings
 from app.db.session import check_db, dispose_engine, get_session_factory
 from app.errors import LQAIError
+from app.security.rate_limit import RateLimiter, RedisRateLimitBackend
 from app.skills import install_sighup_reload, install_skill_registry, resolve_skill_dirs
 from app.storage import check_storage, ensure_bucket
 
@@ -54,6 +55,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level.upper())
     log.info("Starting %s v%s", SERVICE_NAME, __version__)
+
+    # ADR-F059 — a misconfigured signing SECRET is fatal (unlike a missing
+    # runtime dependency, which the lifespan below deliberately degrades on):
+    # refuse to boot a non-dev process on the shipped default JWT_SECRET.
+    assert_boot_secrets_configured(settings)
 
     try:
         await ensure_bucket()
@@ -122,6 +128,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # TCP connect happens on first command) — if Redis is down the endpoint's
     # attach fails soft and the stream serves the DB-tail.
     app.state.agent_stream_bridge = RedisStreamBridge(get_redis(), broker)
+
+    # ADR-F059 — auth-surface rate limiter on the shared redis client. Wired
+    # once here (composition root); routes reach it via get_rate_limiter, which
+    # reads app.state. A Redis fault fails OPEN inside the limiter (never 500s
+    # an auth endpoint), so building it lazily-connecting is safe.
+    app.state.rate_limiter = RateLimiter(RedisRateLimitBackend(get_redis()), settings)
 
     try:
         yield

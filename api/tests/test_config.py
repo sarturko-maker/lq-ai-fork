@@ -11,7 +11,11 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import Settings, get_settings
+from app.config import Settings, assert_boot_secrets_configured, get_settings
+
+
+def _settings(**overrides: object) -> Settings:
+    return Settings(_env_file=None, **overrides)  # type: ignore[call-arg]
 
 
 @pytest.mark.unit
@@ -86,6 +90,42 @@ def test_overrides_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.jwt_refresh_token_ttl_seconds == 240
     assert s.log_level == "debug"
     assert s.lq_ai_dev_mode is True
+
+
+# ---------------------------------------------------------------------------
+# assert_boot_secrets_configured (SAAS-2, ADR-F059 §6-item-9)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_boot_refuses_non_dev_default_secret() -> None:
+    """Non-dev + shipped default JWT secret → refuse to boot (RuntimeError)."""
+    s = _settings(lq_ai_dev_mode=False, jwt_secret="dev-jwt-secret-change-me")
+    with pytest.raises(RuntimeError) as exc:
+        assert_boot_secrets_configured(s)
+    # The message names the setting but NEVER echoes the value.
+    assert "JWT_SECRET" in str(exc.value)
+    assert "dev-jwt-secret-change-me" not in str(exc.value)
+
+
+@pytest.mark.unit
+def test_boot_refuses_non_dev_empty_secret() -> None:
+    s = _settings(lq_ai_dev_mode=False, jwt_secret="")
+    with pytest.raises(RuntimeError):
+        assert_boot_secrets_configured(s)
+
+
+@pytest.mark.unit
+def test_boot_allows_dev_mode_on_default_secret() -> None:
+    """Dev mode is a no-op even on the obvious default — the local harness runs."""
+    s = _settings(lq_ai_dev_mode=True, jwt_secret="dev-jwt-secret-change-me")
+    assert assert_boot_secrets_configured(s) is None
+
+
+@pytest.mark.unit
+def test_boot_allows_non_dev_real_secret() -> None:
+    s = _settings(lq_ai_dev_mode=False, jwt_secret="a-real-strong-secret-value")
+    assert assert_boot_secrets_configured(s) is None
 
 
 @pytest.mark.unit

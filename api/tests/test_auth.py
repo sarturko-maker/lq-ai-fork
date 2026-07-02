@@ -199,7 +199,7 @@ async def test_login_creates_session_row(
     assert s.revoked_at is None
     assert s.expires_at > datetime.now(tz=UTC)
     # The plaintext refresh token from the response is NOT what's stored.
-    assert s.refresh_token_hash != resp.json()["refresh_token"]
+    assert s.refresh_token_hmac != resp.json()["refresh_token"]
 
 
 @pytest.mark.integration
@@ -221,7 +221,7 @@ async def test_login_caps_active_sessions_per_user(
     for i in range(_MAX_ACTIVE_SESSIONS_PER_USER + 2):
         s = UserSession(
             user_id=seed_user.id,
-            refresh_token_hash=f"seeded-hash-{i}",
+            refresh_token_hmac=f"seeded-hash-{i}",
             expires_at=now + timedelta(seconds=settings.jwt_refresh_token_ttl_seconds),
             absolute_expires_at=now + timedelta(seconds=settings.session_absolute_timeout_seconds),
             created_at=now - timedelta(minutes=(100 - i)),
@@ -592,3 +592,229 @@ async def test_full_round_trip(client: AsyncClient, seed_user: User) -> None:
         json={"refresh_token": rotated["refresh_token"]},
     )
     assert fail2_resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting — brute-force brakes (SAAS-2, ADR-F059)
+# ---------------------------------------------------------------------------
+
+
+class _Clock:
+    """Driven clock for the fake rate-limit backend (no sleeps)."""
+
+    def __init__(self, t: float = 1000.0) -> None:
+        self.t = t
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += seconds
+
+
+class _FakeRLBackend:
+    """In-memory fixed-window backend injected through the limiter's seam."""
+
+    def __init__(self, clock: _Clock) -> None:
+        self._clock = clock
+        self.store: dict[str, tuple[int, float]] = {}
+
+    async def incr_with_expiry(self, key: str, window_seconds: int) -> tuple[int, int]:
+        now = self._clock()
+        count, expiry = self.store.get(key, (0, 0.0))
+        if now >= expiry:
+            count = 0
+            expiry = now + window_seconds
+        count += 1
+        self.store[key] = (count, expiry)
+        return count, max(0, round(expiry - now))
+
+
+@pytest_asyncio.fixture
+async def rl_clock() -> _Clock:
+    return _Clock()
+
+
+@pytest_asyncio.fixture
+async def rate_limited_client(
+    db_session: AsyncSession, rl_clock: _Clock
+) -> AsyncIterator[AsyncClient]:
+    """Client whose auth endpoints run a REAL limiter over a fake backend.
+
+    Injected through ``get_rate_limiter`` — the same seam the lifespan uses.
+    """
+    from app.security.rate_limit import RateLimiter, get_rate_limiter
+
+    limiter = RateLimiter(_FakeRLBackend(rl_clock), get_settings())
+    app.dependency_overrides[get_db] = _override_get_db(db_session)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+    app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_rate_limiter, None)
+
+
+async def _attempt_login(client: AsyncClient, email: str, password: str) -> int:
+    resp = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    return resp.status_code
+
+
+@pytest.mark.integration
+async def test_login_brute_force_per_account_returns_429(
+    rate_limited_client: AsyncClient, seed_user: User
+) -> None:
+    """Wrong-password guesses on one account trip the per-account bucket (5/window)."""
+    s = get_settings()
+    for _ in range(s.rate_limit_login_account_per_window):
+        assert await _attempt_login(rate_limited_client, seed_user.email, "wrong") == 401
+    # The next attempt is throttled BEFORE the credential check.
+    resp = await rate_limited_client.post(
+        "/api/v1/auth/login",
+        json={"email": seed_user.email, "password": "wrong"},
+    )
+    assert resp.status_code == 429
+    assert "retry-after" in {k.lower() for k in resp.headers}
+
+
+@pytest.mark.integration
+async def test_login_brute_force_per_ip_returns_429(rate_limited_client: AsyncClient) -> None:
+    """Distinct emails from one IP trip the per-IP bucket (10/window) with no account trip."""
+    s = get_settings()
+    for i in range(s.rate_limit_login_ip_per_window):
+        # A fresh nonexistent email each time → account bucket never accumulates.
+        assert await _attempt_login(rate_limited_client, f"nobody-{i}@example.com", "x") == 401
+    resp = await rate_limited_client.post(
+        "/api/v1/auth/login",
+        json={"email": "nobody-final@example.com", "password": "x"},
+    )
+    assert resp.status_code == 429
+
+
+@pytest.mark.integration
+async def test_login_429_shape_identical_for_nonexistent_account(
+    rate_limited_client: AsyncClient,
+) -> None:
+    """A throttled nonexistent account gets the same 429 shape — no existence leak."""
+    s = get_settings()
+    email = "ghost@example.com"
+    for _ in range(s.rate_limit_login_account_per_window):
+        assert await _attempt_login(rate_limited_client, email, "x") == 401
+    resp = await rate_limited_client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "x"}
+    )
+    assert resp.status_code == 429
+    assert resp.headers.get("retry-after") is not None
+    # Uniform message — reveals nothing about whether the account exists.
+    assert resp.json()["detail"] == "Too many requests. Please slow down and try again shortly."
+
+
+@pytest.mark.integration
+async def test_login_window_expiry_restores_service(
+    rate_limited_client: AsyncClient, rl_clock: _Clock, seed_user: User
+) -> None:
+    """After the window rolls over, a legitimate login succeeds again."""
+    s = get_settings()
+    for _ in range(s.rate_limit_login_account_per_window):
+        await _attempt_login(rate_limited_client, seed_user.email, "wrong")
+    blocked = await rate_limited_client.post(
+        "/api/v1/auth/login",
+        json={"email": seed_user.email, "password": "wrong"},
+    )
+    assert blocked.status_code == 429
+
+    rl_clock.advance(s.rate_limit_window_seconds + 1)
+
+    ok = await rate_limited_client.post(
+        "/api/v1/auth/login",
+        json={"email": seed_user.email, "password": "correct-horse-battery-staple"},
+    )
+    assert ok.status_code == 200
+
+
+@pytest.mark.integration
+async def test_successful_logins_within_limit_unaffected(
+    rate_limited_client: AsyncClient, seed_user: User
+) -> None:
+    """Logins under the limit are never throttled."""
+    for _ in range(3):
+        resp = await rate_limited_client.post(
+            "/api/v1/auth/login",
+            json={"email": seed_user.email, "password": "correct-horse-battery-staple"},
+        )
+        assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# /auth/refresh — HMAC index kills the O(n) bcrypt scan (SAAS-2, ADR-F059)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_refresh_scan_and_matcher_are_gone() -> None:
+    """The bcrypt-scan machinery no longer exists (structural regression guard)."""
+    import app.api.auth as auth_module
+    import app.security as security_module
+
+    assert not hasattr(auth_module, "_match_candidate")
+    assert not hasattr(security_module, "refresh_token_matches")
+    assert not hasattr(security_module, "hash_refresh_token")
+    assert hasattr(security_module, "hmac_refresh_token")
+
+
+@pytest.mark.integration
+async def test_refresh_garbage_token_does_zero_bcrypt(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    seed_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A garbage refresh with 50 seeded sessions is a cheap indexed miss — no bcrypt."""
+    import bcrypt
+
+    now = datetime.now(tz=UTC)
+    settings = get_settings()
+    for i in range(50):
+        db_session.add(
+            UserSession(
+                user_id=seed_user.id,
+                refresh_token_hmac=f"seed-hmac-{i}",
+                expires_at=now + timedelta(seconds=settings.jwt_refresh_token_ttl_seconds),
+                absolute_expires_at=now
+                + timedelta(seconds=settings.session_absolute_timeout_seconds),
+                last_active_at=now,
+            )
+        )
+    await db_session.flush()
+
+    calls = {"n": 0}
+    real_checkpw = bcrypt.checkpw
+
+    def _counting_checkpw(*args: object, **kwargs: object) -> bool:
+        calls["n"] += 1
+        return real_checkpw(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(bcrypt, "checkpw", _counting_checkpw)
+
+    resp = await client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": "never-issued-token"},
+    )
+    assert resp.status_code == 401
+    assert calls["n"] == 0  # the refresh path bcrypt-compares nothing now
+
+
+@pytest.mark.integration
+async def test_refresh_rotated_pair_is_usable(client: AsyncClient, seed_user: User) -> None:
+    """login → refresh → the rotated refresh token itself refreshes again."""
+    tokens = await _login(client, seed_user)
+    first = await client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+    )
+    assert first.status_code == 200, first.text
+    rotated = first.json()["refresh_token"]
+    assert rotated != tokens["refresh_token"]
+
+    second = await client.post("/api/v1/auth/refresh", json={"refresh_token": rotated})
+    assert second.status_code == 200, second.text
+    assert second.json()["refresh_token"] != rotated

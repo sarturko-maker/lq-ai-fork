@@ -427,13 +427,16 @@ class Settings(BaseSettings):
             "collabora service aliasgroup1 allow-list."
         ),
     )
-    # Editor-session (WOPI access) token TTL. WOPI sessions are long-lived
-    # (a lawyer reading/annotating a redline), so the default is generous; it
-    # still bounds the exposure window of a leaked token. Surfaced to the
-    # client as `access_token_ttl` (epoch ms) at mint time.
+    # Editor-session (WOPI access) token TTL. The token rides as a URL query
+    # param (WOPI protocol design), so a shorter life bounds the exposure of a
+    # leaked/log-captured token; editor sessions re-mint cheaply. Lowered
+    # 10h -> 1h for internet exposure (SAAS-2, ADR-F059 §6-item-4). The 30-min
+    # WOPI lock (schemas/wopi.LOCK_TTL_SECONDS) is independent and shorter, so
+    # locks renew within a token's life. Surfaced to the client as
+    # `access_token_ttl` (epoch ms) at mint time.
     wopi_token_ttl_seconds: int = Field(
-        default=36000,
-        description="Editor-session (WOPI) token TTL in seconds. Default: 10 hours.",
+        default=3600,
+        description="Editor-session (WOPI) token TTL in seconds. Default: 1 hour.",
     )
     # The browser origin Collabora may postMessage to (CheckFileInfo
     # PostMessageOrigin). Consumed by the Slice-4 reskin; harmless to advertise
@@ -614,6 +617,77 @@ class Settings(BaseSettings):
             "For local Compose dev set to http://localhost:3000."
         ),
     )
+
+    # ----- Auth rate limiting (SAAS-2, ADR-F059 §6-item-1) -----
+    # Per-IP + per-account fixed-window counters on the auth surface, enforced
+    # on the EXISTING Redis client (no new dependency). Each bucket count is
+    # env-tunable; the window is shared. Redis-unavailable => FAIL OPEN (a Redis
+    # outage must never lock legitimate users out of authentication). The
+    # defaults are "per minute" (window 60s).
+    rate_limit_window_seconds: int = Field(
+        default=60,
+        description="Fixed-window length (seconds) for all auth rate-limit buckets.",
+    )
+    rate_limit_login_ip_per_window: int = Field(
+        default=10,
+        description="Max /auth/login attempts per window per source IP.",
+    )
+    rate_limit_login_account_per_window: int = Field(
+        default=5,
+        description="Max /auth/login attempts per window per submitted account (email).",
+    )
+    rate_limit_refresh_ip_per_window: int = Field(
+        default=60,
+        description="Max /auth/refresh attempts per window per source IP.",
+    )
+    rate_limit_mfa_verify_ip_per_window: int = Field(
+        default=10,
+        description="Max /auth/mfa/verify attempts per window per source IP (TOTP brute-force).",
+    )
+    rate_limit_mfa_verify_account_per_window: int = Field(
+        default=5,
+        description="Max /auth/mfa/verify attempts per window per account (from the mfa_token).",
+    )
+    rate_limit_change_password_account_per_window: int = Field(
+        default=5,
+        description="Max /auth/change-password attempts per window per authenticated account.",
+    )
+    rate_limit_mfa_manage_account_per_window: int = Field(
+        default=10,
+        description="Max /auth/mfa/{setup,enable,disable} attempts per window per account.",
+    )
+    rate_limit_bootstrap_status_ip_per_window: int = Field(
+        default=30,
+        description="Max /admin/bootstrap-status probes per window per source IP.",
+    )
+
+
+# ADR-F059 — the intentionally-obvious dev default (see security/jwt.py); a
+# non-dev process refuses to boot on it so a real deployment can never silently
+# sign tokens with a public, well-known secret. Empty is included because an
+# unset signing secret is equally catastrophic.
+_INSECURE_JWT_SECRETS = frozenset({"dev-jwt-secret-change-me", ""})
+
+
+def assert_boot_secrets_configured(settings: Settings) -> None:
+    """Refuse to boot a non-dev process configured with an insecure JWT secret.
+
+    Pure and unit-testable: raises :class:`RuntimeError` naming the offending
+    setting (never echoing its value) when ``lq_ai_dev_mode`` is False and
+    ``jwt_secret`` is the shipped default or empty. In dev mode
+    (``LQ_AI_DEV_MODE=true``) the check is a no-op so the local harness runs on
+    the obvious default. Called at the TOP of the api lifespan (:mod:`app.main`):
+    unlike a missing runtime dependency — which the lifespan deliberately
+    degrades on, not crashes — a misconfigured signing SECRET is fatal.
+    """
+    if settings.lq_ai_dev_mode:
+        return
+    if settings.jwt_secret in _INSECURE_JWT_SECRETS:
+        raise RuntimeError(
+            "JWT_SECRET is unset or still the shipped development default; set a "
+            "strong JWT_SECRET (or LQ_AI_DEV_MODE=true for local development) "
+            "before starting outside dev. Refusing to boot."
+        )
 
 
 @lru_cache(maxsize=1)

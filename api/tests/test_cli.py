@@ -261,7 +261,7 @@ async def test_reset_admin_password_revokes_active_sessions(cli_db_url: str) -> 
             s.add(
                 UserSession(
                     user_id=user.id,
-                    refresh_token_hash="dummy-hash",
+                    refresh_token_hmac="dummy-hash",
                     expires_at=now + timedelta(days=7),
                     absolute_expires_at=now + timedelta(hours=8),
                     last_active_at=now,
