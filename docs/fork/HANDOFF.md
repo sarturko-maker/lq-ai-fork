@@ -28,17 +28,29 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   commercial-pack checklist (MSA/SLA/AUP/DPA/IR/billing — lawyer-maintainer owns; ALL are
 >   first-paying-tenant blockers, not staging blockers); AI-Act self-assessment (expected verdict
 >   LIMITED/art50_transparency — seal the `verdict_hash` once PR #190 merges); SAAS-HOSTING.md committed.
-> - **NEXT = SAAS-1 — pipeline to a deployable artifact** (first implementation slice under the working
->   model; full spec MILESTONES § SAAS + SAAS-HOSTING §5): (1) `.github/workflows/release.yml` registry
->   namespace `legalquants` → `sarturko-maker`; (2) NEW push-to-main image builds (path-filtered matrix,
->   `:sha` + `:main` tags, `type=gha` cache); (3) NEW `docker-compose.prod.yml` (`image:` refs, NO host
->   ports, full per-service `mem_limit`s); (4) `api/Dockerfile` `COPY skills/ /skills` (kills the
->   migration-0032 fresh-DB trap; TRAP: `skills/` is OUTSIDE the `./api` build context — switch the api
->   image to repo-root context + root `.dockerignore`, atomically across Dockerfile/compose/workflows);
->   (5) ✓ ABSORBED — PR #186 (worker mem_limits + FAN_OUT_QUOTA forward) merged separately, reviewed
->   SHIP; (6) Dependabot + scheduled Trivy; (7) rewrite `SECURITY.md` for the fork (it still
->   routes vulns to security@legalquants.com — upstream!). Delegate to Sonnet; lead verifies (workflow
->   dry-run, `docker compose -f docker-compose.prod.yml config`, image build, fresh-context review).
+> - **SAAS-1 ✓ SHIPPED (branch `fork/saas-1-deploy-pipeline`) — pipeline to a deployable artifact.**
+>   First slice run under the delegation working model (Sonnet implemented in a worktree; lead
+>   verified + reviewed). Landed: `release.yml` GHCR namespace → `sarturko-maker`; NEW `images.yml`
+>   (push-to-main `:sha-<12>`+`:main` builds, gha cache, all 3 services unconditionally — deliberate
+>   simplicity); NEW `docker-compose.prod.yml` (Mode-2 per-tenant stack: image refs only, ZERO host
+>   ports, mem_limits on all 8 services ≈12.7 GB, `${VAR:?}` secrets, NO MinIO — external S3 required);
+>   api image bakes `skills/` via REPO-ROOT build context (+ root `.dockerignore`, atomic across
+>   Dockerfile/dev-compose/workflows; `Dockerfile.dev` untouched); PR #186 absorbed by merging it;
+>   Dependabot (deepagents ignored ENTIRELY — exact 0.x pin, a major-only ignore doesn't silence it);
+>   weekly Trivy (SARIF needs `limit-severities-for-sarif: true` or the severity filter is IGNORED);
+>   fork `SECURITY.md` (GitHub Security Advisories only; Private Vulnerability Reporting toggle
+>   ENABLED on the repo 2026-07-02). Review catches worth remembering: `skills/community` is a
+>   SUBMODULE → CI build checkouts need `submodules: true` or images silently ship it empty;
+>   ingest-worker now forwards `EMBEDDING_PROVIDER` in BOTH composes (fault (1) of the ADR-F056
+>   incident). NOTE: `deploy/helm/lq-ai/` EXISTS (SAAS-0 recon claimed it didn't) — unmaintained;
+>   deprecate-or-adopt is an open maintainer decision.
+> - **NEXT = SAAS-2 — internet-exposure hardening pack** (spec MILESTONES § SAAS + SAAS-HOSTING §6;
+>   auth/crypto surfaces → consider Opus for implementation per the working model): rate limits
+>   (per-IP + per-account, Redis) on all auth endpoints; `/auth/refresh` HMAC token index (kills the
+>   O(n) bcrypt-scan CPU-DoS deferred since PR #47); edge-deny `/api/v1/internal/*`; WOPI hygiene
+>   (log-scrub query tokens, shorter TTL, proof-key eval); non-dev boot assertion on `jwt_secret`;
+>   security headers at the proxy; trusted-proxy IPs; `/metrics` off the public origin. Tests:
+>   brute-force, refresh-flood, internal-deny.
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
 >   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 interleaves after SAAS-3**; untracked side files
