@@ -21,7 +21,7 @@ on:
   workflow_dispatch: {}
 
 concurrency:
-  group: images-${{ github.workflow }}-${{ github.ref }}
+  group: images-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -55,6 +55,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # skills/community is a git SUBMODULE (pinned gitlink) — without this
+          # the build context has an empty skills/community/ and the baked
+          # image silently ships without the community skill corpus while dev
+          # (bind mount over an initialized checkout) has it.
+          submodules: true
 
       - name: Resolve image tag
         id: tag

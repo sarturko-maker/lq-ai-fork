@@ -41,11 +41,17 @@ jobs:
             file: ./api/Dockerfile
           - service: gateway
             context: ./gateway
+            file: ./gateway/Dockerfile
           - service: web
             context: ./web
+            file: ./web/Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # skills/community is a git SUBMODULE — see images.yml's matching
+          # comment; without this the api image ships an empty community corpus.
+          submodules: true
 
       - name: Resolve image tag
         id: tag

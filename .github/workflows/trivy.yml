@@ -45,6 +45,9 @@ jobs:
           format: sarif
           output: trivy-image-${{ matrix.service }}.sarif
           severity: CRITICAL,HIGH
+          # Without this, `severity:` is IGNORED for SARIF output and the
+          # Security tab gets flooded with every severity level.
+          limit-severities-for-sarif: true
           exit-code: "0" # visibility only — see header
 
       - name: Upload SARIF
@@ -71,6 +74,9 @@ jobs:
           format: sarif
           output: trivy-fs.sarif
           severity: CRITICAL,HIGH
+          # Same as the image scans: required for the severity filter to
+          # apply to SARIF output.
+          limit-severities-for-sarif: true
           exit-code: "0" # visibility only — see header
 
       - name: Upload SARIF

@@ -213,6 +213,12 @@ services:
       LQ_AI_CHUNK_OVERLAP_CHARS: ${LQ_AI_CHUNK_OVERLAP_CHARS:-200}
       LQ_AI_GATEWAY_URL: ${LQ_AI_GATEWAY_URL:-http://gateway:8001}
       LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
+      # MUST match api + arq-worker: ingest embeds chunks with this provider
+      # and queries embed with it too — a mismatch puts two vector spaces in
+      # one column and silently degrades retrieval to FTS-only (the exact
+      # 2026-07-01 dev incident behind ADR-F056). One shared var, three
+      # services, until F056's single resolver lands.
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     # Persist Docling/EasyOCR model caches across restarts (same names as dev —
     # docs/adr/0006-document-pipeline-architecture.md).

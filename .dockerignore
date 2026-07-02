@@ -18,12 +18,13 @@
 .github/
 
 # ----- Not needed by the api image build -----
+# (gateway/web/bridges build from their own contexts with their own
+# .dockerignore files — none of their sources belong in THIS context.)
 gateway/
-web/node_modules/
-web/.svelte-kit/
-web/build/
-web/dist/
-word-addin/node_modules/
+web/
+word-addin/
+slack-bridge/
+teams-bridge/
 docs/
 sample-documents/
 deploy/
@@ -68,6 +69,10 @@ env/
 **/*.env
 **/*.env.*
 !**/*.env.example
+# Live gateway config can carry provider routing details; only the .example
+# seed is tracked, but exclude the real thing defensively.
+gateway.yaml
+.envrc
 
 # ----- Misc -----
 *.log

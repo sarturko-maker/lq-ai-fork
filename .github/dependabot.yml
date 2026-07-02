@@ -26,8 +26,12 @@ updates:
       # RUN (`pip install --no-deps adeu==1.12.1`), not a pyproject.toml
       # dependency, so this entry is a forward-guard (no-op today; keep it
       # in case adeu moves into pyproject.toml's deps).
+      # deepagents is an EXACT 0.x pin (==0.6.8): to Dependabot every release
+      # is out-of-range and 0.x bumps count as semver-minor, so a major-only
+      # ignore would still let weekly bump PRs through. Ignore ALL updates —
+      # the deepagents version is an architectural decision (CLAUDE.md),
+      # bumped deliberately, never by bot.
       - dependency-name: "deepagents"
-        update-types: ["version-update:semver-major"]
       - dependency-name: "adeu"
         update-types: ["version-update:semver-major"]
       - dependency-name: "langgraph"
