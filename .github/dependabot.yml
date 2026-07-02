@@ -1,0 +1,108 @@
+# SAAS-1 (ADR-F058): baseline dependency-update hygiene for a public repo whose
+# fleet tracks `main` closely (images.yml rebuilds + redeploys frequently).
+# Weekly cadence, grouped minor+patch per ecosystem (fewer, easier-to-review
+# PRs), open-pull-requests-limit caps the noise. Majors stay manual review —
+# ungrouped, one PR each — EXCEPT the three api pins this project deliberately
+# tracks exact/tight (deepagents, adeu, langgraph — see api/pyproject.toml),
+# where even the major-bump PR is suppressed: those upgrades are planned,
+# tested migrations (CLAUDE.md "Known blockers"), never a Dependabot drive-by.
+version: 2
+
+updates:
+  # ----- Python: api -----
+  - package-ecosystem: "pip"
+    directory: "/api"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Pinned exact / tight per api/pyproject.toml (langgraph 1.x substrate,
+      # deepagents==0.6.8 exact); adeu is currently pinned via a Dockerfile
+      # RUN (`pip install --no-deps adeu==1.12.1`), not a pyproject.toml
+      # dependency, so this entry is a forward-guard (no-op today; keep it
+      # in case adeu moves into pyproject.toml's deps).
+      # deepagents is an EXACT 0.x pin (==0.6.8): to Dependabot every release
+      # is out-of-range and 0.x bumps count as semver-minor, so a major-only
+      # ignore would still let weekly bump PRs through. Ignore ALL updates —
+      # the deepagents version is an architectural decision (CLAUDE.md),
+      # bumped deliberately, never by bot.
+      - dependency-name: "deepagents"
+      - dependency-name: "adeu"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "langgraph"
+        update-types: ["version-update:semver-major"]
+
+  # ----- Python: gateway -----
+  - package-ecosystem: "pip"
+    directory: "/gateway"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ----- JS: web -----
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ----- GitHub Actions workflows -----
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ----- Docker base images -----
+  - package-ecosystem: "docker"
+    directory: "/api"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "docker"
+    directory: "/gateway"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "docker"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"

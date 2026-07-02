@@ -652,11 +652,14 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   own `app/aiact` engine). Product name DECIDED at acceptance: **"LQ.AI Oscar Edition"**
   (upstream's name is a group the maintainer belongs to — public DNS unblocked). Still open:
   PyMuPDF, Collabora posture, EU model menu, pricing.
-- **SAAS-1 — pipeline to a deployable artifact.** Fix `release.yml` registry namespace
-  (`legalquants` → fork); push-to-main `:sha`+`:main` image builds (path-filtered, gha cache);
-  prod compose file (`image:` refs, no host ports, full per-service mem_limits); `COPY skills/`
-  into the api image (kills the 0032 fresh-DB trap); merge the OOM mem_limits branch; Trivy
-  (scheduled) + Dependabot; fork `SECURITY.md` + private-advisory discipline.
+- **SAAS-1 ✓ done — pipeline to a deployable artifact.** `release.yml` namespace → fork;
+  NEW `images.yml` push-to-main `:sha-<12>`+`:main` builds (gha cache; all 3 services build
+  unconditionally — deliberate simplicity over path filtering); NEW `docker-compose.prod.yml`
+  (image refs, zero host ports, mem_limits everywhere, required-var secrets, no MinIO);
+  `skills/` baked into the api image via repo-root build context + root `.dockerignore`
+  (CI checkouts need `submodules: true` — skills/community is a gitlink); OOM mem_limits
+  branch merged as PR #186; Dependabot + weekly Trivy (SARIF severity-limited); fork
+  `SECURITY.md` + repo Private Vulnerability Reporting enabled.
 - **SAAS-2 — internet-exposure hardening pack.** Rate limits (per-IP+per-account, Redis) on all
   auth endpoints; `/auth/refresh` HMAC index (kills the bcrypt-scan DoS); edge-deny
   `/api/v1/internal/*`; WOPI hygiene (log-scrub query tokens, shorter TTL, proof-key eval);

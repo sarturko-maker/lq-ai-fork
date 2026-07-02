@@ -155,9 +155,15 @@ services:
       retries: 10
 
   api:
+    # SAAS-1: build context is the repo ROOT (not ./api) so api/Dockerfile can
+    # `COPY skills/ /skills/` — skills/ lives outside api/, and the prod image
+    # (docker-compose.prod.yml, images.yml, release.yml) has no separate repo
+    # checkout to bind-mount it from. Dev keeps the ./skills bind mount below
+    # for live editing; the mount shadows the baked-in copy (fine — dev wants
+    # host-fresh skills, not the build-time snapshot).
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:
@@ -223,9 +229,10 @@ services:
     # from Redis and writes parsed documents + chunks to Postgres.
     # See `docs/adr/0006-document-pipeline-architecture.md` for the
     # mechanism rationale.
+    # SAAS-1: repo-root build context — see the `api` service's comment above.
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     restart: unless-stopped
     # Dev-box OOM containment (ADR-F056 §Resource-aware execution). This worker
     # loads Docling + EasyOCR + the local embedder (~2.5 GiB) during ingest. On a
@@ -277,6 +284,11 @@ services:
       # (`hybrid_alpha < 1.0`).
       LQ_AI_GATEWAY_URL: ${LQ_AI_GATEWAY_URL:-http://gateway:8001}
       LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
+      # MUST match api + arq-worker — the missing forward here was fault (1)
+      # of the 2026-07-01 embedding-mismatch incident (ADR-F056): ingest
+      # embedded `local` while queries embedded `gateway`, two vector spaces
+      # in one column. One shared var, three services, until F056's resolver.
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     # Persist Docling's Hugging Face model cache and EasyOCR's detection
     # model cache across container restarts so the operator only pays
@@ -309,9 +321,10 @@ services:
     # Phase 1 registers only a noop task; Phase 5 of M3-A6 adds the
     # easy-playbook generation function. See
     # `api/app/workers/arq_setup.py` for the WorkerSettings.
+    # SAAS-1: repo-root build context — see the `api` service's comment above.
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     restart: unless-stopped
     # Dev-box OOM containment (ADR-F056 §Resource-aware execution). Agent runs
     # execute HERE and load the local embedder + hold N fanned-out subagents'
