@@ -88,7 +88,7 @@ jobs:
 
       - name: Generate SLSA build provenance
         if: ${{ github.event_name == 'push' || !inputs.dry_run }}
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/lq-ai-${{ matrix.service }}
           subject-digest: ${{ steps.build.outputs.digest }}
