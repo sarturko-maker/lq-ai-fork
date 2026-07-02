@@ -33,15 +33,19 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   namespace `legalquants` → `sarturko-maker`; (2) NEW push-to-main image builds (path-filtered matrix,
 >   `:sha` + `:main` tags, `type=gha` cache); (3) NEW `docker-compose.prod.yml` (`image:` refs, NO host
 >   ports, full per-service `mem_limit`s); (4) `api/Dockerfile` `COPY skills/ /skills` (kills the
->   migration-0032 fresh-DB trap); (5) absorb branch `fork/f2-embedding-oom-hardening` (worker
->   mem_limits); (6) Dependabot + scheduled Trivy; (7) rewrite `SECURITY.md` for the fork (it still
+>   migration-0032 fresh-DB trap; TRAP: `skills/` is OUTSIDE the `./api` build context — switch the api
+>   image to repo-root context + root `.dockerignore`, atomically across Dockerfile/compose/workflows);
+>   (5) ✓ ABSORBED — PR #186 (worker mem_limits + FAN_OUT_QUOTA forward) merged separately, reviewed
+>   SHIP; (6) Dependabot + scheduled Trivy; (7) rewrite `SECURITY.md` for the fork (it still
 >   routes vulns to security@legalquants.com — upstream!). Delegate to Sonnet; lead verifies (workflow
 >   dry-run, `docker compose -f docker-compose.prod.yml config`, image build, fresh-context review).
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
 >   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 interleaves after SAAS-3**; untracked side files
 >   (`sample-documents/`, `api/tests/agents/scenarios/test_*_live.py`, `.vite/`) belong to NO PR — leave
->   or clean deliberately; dev `.env` `LQ_AI_GATEWAY_KEY` still needs rotating (2026-06-30 terminal dump).
+>   or clean deliberately; dev `.env` `LQ_AI_GATEWAY_KEY` still needs rotating (2026-06-30 terminal dump)
+>   — PLUS dev Postgres password + `DEEPSEEK_API_KEY` (2026-07-01 diagnosis transcript; values gitignored,
+>   never in git — rotation is a maintainer/dev-box action).
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 > ▶▶ **PICKUP (2026-07-02): ▶ TABULAR REVIEW T6 — grid review WORKSPACE + human cell-override — MERGED PR #184
@@ -141,6 +145,28 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   [[t6-grid-workspace-redesign]]. **Untracked side-investigation** (NOT in this PR): `sample-documents/` demo
 >   packs + `api/tests/agents/scenarios/test_*_live.py` — keep or delete; live findings in
 >   [[tabular-fanout-live-behavior]].
+
+> ▶ **PREVIOUS (2026-07-01): EMBEDDING PROVIDER — tabular-thrash root cause FOUND + FIXED; ADR-F056 plan drafted
+> (merged via PR #186).**
+> The "tabular review hits 600 steps and kills the box" symptom is **semantic search being OFF**, not chunking or
+> model quality. On matter `20ce20fb` the agent ran **235 `search_documents`, 0 `record_tabular_row`** → 600-step
+> cap → context bloat/DB+gateway hammer → box overload. Three compounding causes on the `embedding_local` path:
+> (1) **ingest embedded with `local`, the query with `gateway`** (compose wires `EMBEDDING_PROVIDER` to api+arq but
+> NOT ingest) = two vector spaces in one column, no provenance to tell them apart; (2) the dev gateway `embedding`
+> alias → `openai-prod/text-embedding-3-small` has **no OpenAI key** → `/v1/embeddings` **503** → `_embed_query`
+> silently degrades to **FTS-only** (keyword search collapses on long contracts); (3) **half-built index** (78/245
+> chunks embedded — local embedder OOM'd mid-ingest, silent).
+> **FIX APPLIED + VERIFIED LIVE:** `.env EMBEDDING_PROVIDER=gateway→local` (RERANK stays false — box OOMs both ONNX
+> models; embedder-alone OK), recreated api+arq+ingest, re-embedded matter `20ce20fb` via
+> `embed_local_chunks_for_file` → **245/245**, `matter_hybrid_search` (alpha 0.5) returns relevant clauses across
+> all 5 docs. **Retest tabular review on `20ce20fb` now — search should hit first-try, not thrash.**
+> **BIGGER TO-DO (maintainer direction) = ADR-F056 (proposed) + plan `docs/fork/plans/EMBEDDING-PROVIDER-choice.md`:**
+> per-matter selectable embedding provider (local vs OpenAI-via-gateway now, Voyage later) with a single
+> ingest↔query resolver, per-chunk provenance, re-embed-on-change, and coverage health. **Confirmed scope:**
+> per-matter (firm default inherited); **build AFTER tabular T4**; local+gateway v1. Memory:
+> [[embedding-provider-mismatch-and-choice]]. NOTE: `FAN_OUT_QUOTA` binds the **balanced** budget profile only
+> (economy=8/generous=48 hardcoded in `budget.py`) — the worker `mem_limit` is the only containment for a
+> generous run.
 
 > ▶ **PREVIOUS (2026-07-01): TABULAR REVIEW T8 — MERGED PR #183 (`444c6c62`); ADR-F055, no migration.**
 > Branch `fork/f2-tabular-t8-grid-ops` (merged). The Commercial agent can
