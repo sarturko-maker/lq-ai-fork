@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from fastapi import HTTPException, Request, status
+from redis.exceptions import RedisError
 
 from app.config import Settings
 
@@ -142,8 +143,17 @@ class RateLimiter:
         key = self._key(scope, identifier)
         try:
             count, ttl = await self._backend.incr_with_expiry(key, rule.window_seconds)
-        except Exception as exc:  # fail-open on ANY backend fault
+        except RedisError as exc:
+            # Expected fail-open path: a Redis outage must never lock legitimate
+            # users out of auth (ADR-F059). Quiet WARNING — this is operational.
             log.warning("rate-limit backend unavailable (scope=%s); failing open: %s", scope, exc)
+            return RateLimitResult(allowed=True, retry_after=0)
+        except Exception:
+            # A NON-Redis exception is a bug (e.g. a backend refactor typo), not
+            # an outage. Still fail open — the brake must never 500 an auth
+            # endpoint — but log LOUDLY so a silently-disabled security control
+            # is caught, not swallowed like a routine Redis blip.
+            log.exception("rate-limit check errored unexpectedly (scope=%s); failing open", scope)
             return RateLimitResult(allowed=True, retry_after=0)
         if count > rule.limit:
             retry_after = ttl if ttl > 0 else rule.window_seconds

@@ -62,43 +62,75 @@ are separate keys; a request passes both where both apply; the account key is a 
 tag so no email/user-id lands in Redis or logs; the 429 shape is uniform regardless of account
 existence. **Fail-open** because Redis is in-stack and an outage must not lock legitimate users out
 of authentication — availability beats the brake here; a Redis exception never 500s an auth
-endpoint. Wired once in the lifespan onto `app.state`, reached via a `get_rate_limiter` dependency
-(DI; tests inject a fake backend through the same seam).
+endpoint (a *non*-Redis exception still fails open but is logged at `exception` level, so a bug that
+disables the brake is loud, not swallowed). Wired once in the lifespan onto `app.state`, reached via
+a `get_rate_limiter` dependency (DI; tests inject a fake backend through the same seam).
 
-### D4 — Deny internal + /metrics at the edge (uniform 404), not in-app
+**Accepted trade-off — account-lockout DoS.** The per-account login bucket keys on the *submitted*
+email (so the 429 leaks no account-existence signal). A consequence: anyone who knows a victim's
+email can spend that account's bucket (default 5/window) and 429 the victim's own logins while the
+attacker sustains the trickle. This is the standard tension between anti-enumeration and
+anti-lockout; we accept it for v1 because (i) the per-IP bucket already bounds a single attacker,
+(ii) the limit is env-tunable (`RATE_LIMIT_LOGIN_ACCOUNT_PER_WINDOW` — raise it if lockouts bite),
+and (iii) MFA and the audit trail cover the credential-stuffing case the account bucket targets. A
+"count only failed logins against the account bucket" refinement (so a correct password is never
+locked out) is a candidate follow-up.
+
+### D4 — Deny internal + WOPI + /metrics at the edge (uniform 404), not in-app
 
 Options: (a) app-level IP allowlist / new auth on the internal router; (b) `respond 404` at Caddy
-for `/api/v1/internal/*` and `/metrics`.
+for `/api/v1/internal/*`, `/api/v1/wopi/*` and `/metrics`.
 
-**Chosen: (b).** The gateway reaches api over the compose network, never through the public edge, so
-a one-line edge deny costs nothing and keeps the app router unchanged. Uniform **404** (never 403)
-matches the app's own "no existence leak" authz rule. Trusted-proxy handling uses uvicorn's native
-`--proxy-headers` (on by default in 0.32+) + `FORWARDED_ALLOW_IPS` (read natively) — no
-`X-Forwarded-For` parsing in app code; the closed prod-compose network (zero host ports) makes
-trusting compose peers acceptable until SAAS-3 pins Caddy's IP.
+**Chosen: (b).** Both the gateway (`/api/v1/internal/*`) AND the in-stack Collabora server
+(`/api/v1/wopi/*`) reach api over the compose network, never through the public edge —
+`collabora_wopi_host = http://api:8000` (matching the Collabora `aliasgroup1`), and the browser only
+mints a token via `POST /files/{id}/editor-session` then talks to Collabora at `web:8080 /cool`. So a
+one-line edge deny of each costs nothing and keeps the app router unchanged. Denying `/api/v1/wopi/*`
+removes the *external* replay vector for a stolen editor-session token entirely (see D5). Uniform
+**404** (never 403) matches the app's own "no existence leak" authz rule; named `path` matchers deny
+both the bare prefix and the wildcard. Trusted-proxy handling uses uvicorn's native `--proxy-headers`
+(on by default in 0.32+) + `FORWARDED_ALLOW_IPS` (read natively) — no `X-Forwarded-For` parsing in
+app code; the closed prod-compose network (zero host ports) makes trusting compose peers acceptable
+until SAAS-3 pins Caddy's IP.
 
-### D5 — WOPI token: shorten TTL + scrub logs at both edges; proof-key deferred
+### D5 — WOPI token: edge-deny + scrub logs (NOT a TTL cut); proof-key deferred
 
-Options: (a) implement WOPI proof-key (`X-WOPI-Proof`) validation now; (b) shorten the TTL
-(10h→1h), scrub `access_token` from both the Caddy and uvicorn access logs, and defer proof-key.
+Options: (a) implement WOPI proof-key (`X-WOPI-Proof`) validation now; (b) shorten the token TTL
+(10h→1h); (c) edge-deny the WOPI surface (D4) + scrub `access_token` from both the Caddy and uvicorn
+access logs, keeping the 10h TTL.
 
-**Chosen: (b).** The token is already single-file-scoped and same-origin; the larger exposure was
-the 10h life + log capture, both now closed. A boot assertion additionally refuses to start a
-non-dev process on the default `jwt_secret` (a misconfigured signing secret is fatal — unlike a
-missing runtime dependency, which the lifespan degrades on). Proof-key is deferred (finding below).
+**Chosen: (c).** The SAAS-2 recon proposed shortening the TTL, but the web editor has **no token-
+renewal path** — the token is form-POSTed into the Collabora iframe once per `load()`
+(`DocumentEditorPanel`), so a 1h TTL would silently 401 a long legal-editing session mid-work (saves
+fail; the 30-min WOPI lock lapses and a second editor could grab the file). The token's actual
+exposure is closed more completely and without that regression: (1) the browser side form-POSTs the
+token, so it never enters a URL/history; (2) the uvicorn access-log scrub + Caddy log redaction close
+the log-capture vector (the token *does* ride as a query param on the internal Collabora→api calls);
+and (3) the D4 edge-deny means the WOPI endpoints aren't reachable from the public internet at all,
+so a stolen token can't be replayed externally regardless of TTL. TTL stays 10h; a configurable short
+TTL *with* client renewal is a follow-up (editor slice). A boot assertion additionally refuses to
+start a non-dev process on the default `jwt_secret` (a misconfigured signing secret is fatal — unlike
+a missing runtime dependency, which the lifespan degrades on). Proof-key is deferred (finding below).
 
 ## Consequences
 
 - One-time forced re-login on deploy (0084 clears `user_sessions`). Rotating `jwt_secret` now also
   invalidates all refresh verifiers (same blast radius as rotating the signing key) — acceptable.
 - `/auth/refresh` is O(1); the per-user session cap (PR #47) stays as hygiene, not as the DoS fix.
-- New env-tunable `Settings.rate_limit_*` fields (documented defaults); a Redis outage silently
-  disables the brake (logged) rather than failing auth.
+- New `Settings.rate_limit_*` fields (documented defaults). They are env-tunable, but the api service
+  uses an explicit env allowlist (no `env_file`), so they are only overridable in a deployment once
+  *forwarded* — `docker-compose.prod.yml` therefore forwards all nine as `${VAR:-default}`. A Redis
+  outage silently disables the brake (logged) rather than failing auth.
+- WOPI stays at a 10h TTL (D5); the exposure is closed by the D4 edge-deny + the log scrubs, not by a
+  TTL cut (the editor has no token-renewal path). A short-TTL-with-renewal is a follow-up.
 - The production edge lives in `deploy/caddy/Caddyfile` (validated with `caddy validate`); the caddy
   *service* + TLS + CSP-enforcement are SAAS-3. The report-only CSP must be promoted there.
-- Dev stack unaffected: the dev compose already requires `JWT_SECRET` via `${JWT_SECRET:?}`, so the
-  boot assertion is inert there; `FORWARDED_ALLOW_IPS` unset in dev → uvicorn's 127.0.0.1 default →
-  byte-identical `request.client` behaviour.
+- Dev stack: the boot assertion is inert (the dev compose sets `LQ_AI_DEV_MODE=true`, and also
+  requires `JWT_SECRET` via `${JWT_SECRET:?}`); `FORWARDED_ALLOW_IPS` unset in dev → uvicorn's
+  127.0.0.1 default → byte-identical `request.client`. The rate limiter IS wired in dev, but the dev
+  compose sets generous login limits (1000/window) so repeated Cypress logins from one account/IP
+  don't flake local e2e; unit tests inject their own limiter + fake backend, so they still assert
+  enforcement.
 
 ### Deferred: WOPI proof-key (`X-WOPI-Proof`) validation — finding
 
@@ -108,8 +140,9 @@ the client's public proof key(s) from Collabora's discovery XML (`/hosting/disco
 reconstructing the expected proof string, (3) RSA-verifying against BOTH the current and old keys to
 survive key rotation, and (4) a timestamp-freshness check to bar replay. Rough effort: ~150–250 LOC
 plus a periodic discovery-key refresh and rotation handling; RSA verify is available via the already
-present `cryptography`, but the discovery fetch/parse is new surface. Deferred because the token is
-already scoped + short-lived + same-origin and the log-capture exposure is closed; proof-key is
-defense-in-depth against a stolen-token replay from an untrusted network position — lower priority
-than the shipped items, and its own slice with SAAS-3 (also: lock the Collabora container's outbound
-network to the WOPI host).
+present `cryptography`, but the discovery fetch/parse is new surface. Deferred because the WOPI
+surface is now edge-denied (D4 — unreachable from the public internet), the token is single-file-
+scoped + same-origin + never in a URL/history (browser form-POST), and the log-capture exposure is
+closed; proof-key is defense-in-depth against a stolen-token replay from *inside* the stack network —
+lower priority than the shipped items, and its own slice with SAAS-3 (also: lock the Collabora
+container's outbound network to the WOPI host).

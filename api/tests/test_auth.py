@@ -655,6 +655,48 @@ async def rate_limited_client(
     app.dependency_overrides.pop(get_rate_limiter, None)
 
 
+def _route_depends_on_rate_limiter(path: str, method: str) -> bool:
+    """True iff the APIRoute for (path, method) has get_rate_limiter in its
+    dependency tree — a structural drift guard so a dropped ``limiter:
+    RateLimiterDep`` on any rate-limited endpoint fails loudly (ADR-F059 N3)."""
+    from fastapi.routing import APIRoute
+
+    from app.security.rate_limit import get_rate_limiter
+
+    def _tree_has(dependant: object) -> bool:
+        if getattr(dependant, "call", None) is get_rate_limiter:
+            return True
+        return any(_tree_has(sub) for sub in getattr(dependant, "dependencies", []))
+
+    for route in app.routes:
+        if isinstance(route, APIRoute) and route.path == path and method in route.methods:
+            return _tree_has(route.dependant)
+    raise AssertionError(f"route not found: {method} {path}")
+
+
+@pytest.mark.parametrize(
+    ("path", "method"),
+    [
+        ("/api/v1/auth/login", "POST"),
+        ("/api/v1/auth/refresh", "POST"),
+        ("/api/v1/auth/mfa/verify", "POST"),
+        ("/api/v1/auth/change-password", "POST"),
+        ("/api/v1/auth/mfa/setup", "POST"),
+        ("/api/v1/auth/mfa/enable", "POST"),
+        ("/api/v1/auth/mfa/disable", "POST"),
+        ("/api/v1/admin/bootstrap-status", "GET"),
+    ],
+)
+def test_rate_limiter_wired_on_every_exposed_auth_endpoint(path: str, method: str) -> None:
+    """Every internet-facing auth endpoint must carry the rate-limit dependency.
+
+    A behavioural 429 test covers login + refresh; this catches a silently
+    dropped ``Depends(get_rate_limiter)`` on the authenticated/MFA endpoints
+    (hard to exercise end-to-end) so the brake can't regress unnoticed.
+    """
+    assert _route_depends_on_rate_limiter(path, method), f"no rate limiter on {method} {path}"
+
+
 async def _attempt_login(client: AsyncClient, email: str, password: str) -> int:
     resp = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
     return resp.status_code

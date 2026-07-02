@@ -1,4 +1,4 @@
-"""Drift guard for the production edge Caddyfile (SAAS-2, ADR-F059 D3).
+"""Drift guard for the production edge Caddyfile (SAAS-2, ADR-F059 D4).
 
 Asserts the security-gate stanzas are present in deploy/caddy/Caddyfile. This is
 a DRIFT GUARD, not a syntax check (that is `caddy validate`, run in CI/manually):
@@ -23,12 +23,17 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.unit
-def test_caddyfile_denies_internal_and_metrics() -> None:
+def test_caddyfile_denies_internal_wopi_and_metrics() -> None:
     text = _CADDYFILE.read_text(encoding="utf-8")
-    assert "handle /api/v1/internal/*" in text
-    assert "handle /metrics" in text
-    # Both denies are uniform 404s (never 403 — no existence leak).
-    assert text.count("respond 404") >= 2
+    # Named `path` matchers deny both the bare prefix and the wildcard.
+    assert "@internal path /api/v1/internal /api/v1/internal/*" in text
+    assert "@wopi path /api/v1/wopi /api/v1/wopi/*" in text
+    assert "@metrics path /metrics /metrics/*" in text
+    assert "handle @internal" in text
+    assert "handle @wopi" in text
+    assert "handle @metrics" in text
+    # All three denies are uniform 404s (never 403 — no existence leak).
+    assert text.count("respond 404") >= 3
 
 
 @pytest.mark.unit

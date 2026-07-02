@@ -427,16 +427,21 @@ class Settings(BaseSettings):
             "collabora service aliasgroup1 allow-list."
         ),
     )
-    # Editor-session (WOPI access) token TTL. The token rides as a URL query
-    # param (WOPI protocol design), so a shorter life bounds the exposure of a
-    # leaked/log-captured token; editor sessions re-mint cheaply. Lowered
-    # 10h -> 1h for internet exposure (SAAS-2, ADR-F059 §6-item-4). The 30-min
-    # WOPI lock (schemas/wopi.LOCK_TTL_SECONDS) is independent and shorter, so
-    # locks renew within a token's life. Surfaced to the client as
-    # `access_token_ttl` (epoch ms) at mint time.
+    # Editor-session (WOPI access) token TTL. Kept at 10h deliberately (SAAS-2,
+    # ADR-F059 §6-item-4): shortening it was considered for internet exposure but
+    # DECLINED because the web editor has no token-renewal path (the token is
+    # form-POSTed into the Collabora iframe once per load — DocumentEditorPanel),
+    # so a short TTL would silently 401 a long legal editing session mid-work
+    # (saves fail, the 30-min WOPI lock lapses). The token's actual exposure is
+    # closed instead by: the api access-log scrub (observability.py) + the Caddy
+    # edge redaction, the Caddy edge-DENY of /api/v1/wopi/* (Collabora reaches
+    # the WOPI host over the compose-internal api:8000, never the public edge),
+    # and the browser-side form-POST (the token never enters a URL/history). A
+    # configurable short TTL with client renewal is a follow-up (editor slice).
+    # Surfaced to the client as `access_token_ttl` (epoch ms) at mint time.
     wopi_token_ttl_seconds: int = Field(
-        default=3600,
-        description="Editor-session (WOPI) token TTL in seconds. Default: 1 hour.",
+        default=36000,
+        description="Editor-session (WOPI) token TTL in seconds. Default: 10 hours.",
     )
     # The browser origin Collabora may postMessage to (CheckFileInfo
     # PostMessageOrigin). Consumed by the Slice-4 reskin; harmless to advertise
@@ -557,7 +562,12 @@ class Settings(BaseSettings):
     log_level: LogLevel = Field(default="info", description="Log level for the api/ service.")
     lq_ai_dev_mode: bool = Field(
         default=False,
-        description="When true, relax some safety checks for local development.",
+        description=(
+            "When true, gates the non-dev boot secret assertion "
+            "(assert_boot_secrets_configured) so the local harness runs on the "
+            "shipped default JWT_SECRET. This is the ONLY behaviour it gates — "
+            "do not hang unrelated relaxations on it without an ADR."
+        ),
     )
 
     # ----- SMTP / email transport (M4-C1) -----

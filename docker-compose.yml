@@ -205,6 +205,13 @@ services:
       # local stack. lq_ai_dev_mode gates ONLY that assertion (nothing else
       # reads it); prod hardcodes "false" (docker-compose.prod.yml).
       LQ_AI_DEV_MODE: ${LQ_AI_DEV_MODE:-true}
+      # ADR-F059 §6-item-1 — the auth rate limiter is wired in ALL environments,
+      # but the dev stack (loopback-only) needs no brute-force brake and Cypress
+      # e2e logs in repeatedly as one account from one IP. Generous dev login
+      # limits keep the limiter code path live without flaking local e2e; prod
+      # uses the secure code defaults (docker-compose.prod.yml). Override as needed.
+      RATE_LIMIT_LOGIN_IP_PER_WINDOW: ${RATE_LIMIT_LOGIN_IP_PER_WINDOW:-1000}
+      RATE_LIMIT_LOGIN_ACCOUNT_PER_WINDOW: ${RATE_LIMIT_LOGIN_ACCOUNT_PER_WINDOW:-1000}
       # CORS — empty disables. Production behind a same-origin reverse
       # proxy: leave unset. Local Compose dev: http://localhost:3000.
       LQ_AI_CORS_ORIGINS: ${LQ_AI_CORS_ORIGINS:-}

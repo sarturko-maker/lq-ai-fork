@@ -44,13 +44,42 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   ingest-worker now forwards `EMBEDDING_PROVIDER` in BOTH composes (fault (1) of the ADR-F056
 >   incident). NOTE: `deploy/helm/lq-ai/` EXISTS (SAAS-0 recon claimed it didn't) — unmaintained;
 >   deprecate-or-adopt is an open maintainer decision.
-> - **NEXT = SAAS-2 — internet-exposure hardening pack** (spec MILESTONES § SAAS + SAAS-HOSTING §6;
->   auth/crypto surfaces → consider Opus for implementation per the working model): rate limits
->   (per-IP + per-account, Redis) on all auth endpoints; `/auth/refresh` HMAC token index (kills the
->   O(n) bcrypt-scan CPU-DoS deferred since PR #47); edge-deny `/api/v1/internal/*`; WOPI hygiene
->   (log-scrub query tokens, shorter TTL, proof-key eval); non-dev boot assertion on `jwt_secret`;
->   security headers at the proxy; trusted-proxy IPs; `/metrics` off the public origin. Tests:
->   brute-force, refresh-flood, internal-deny.
+> - **SAAS-2 ✓ SHIPPED (branch `fork/saas-2-hardening`, PR #212) — internet-exposure hardening pack.**
+>   Implemented by Opus in a worktree; lead verified + reviewed (deep security pass — auth/crypto path).
+>   ADR-F059 (proposed). Landed: (1) Redis rate limiting (per-IP + per-account, hand-rolled atomic Lua
+>   fixed-window on the EXISTING redis client — NO new dep) on login/refresh/mfa-verify/change-password/
+>   mfa-manage + the unauth `/admin/bootstrap-status` probe; 429 + Retry-After, uniform shape (no
+>   existence leak), FAIL-OPEN on Redis fault (RedisError = quiet; other exc = `log.exception`, still
+>   open); DI via `app.state` + `get_rate_limiter`. (2) `/auth/refresh` HMAC index — migration **0084**
+>   (chains off 0083; DELETEs sessions, drops bcrypt `refresh_token_hash`, adds `refresh_token_hmac`
+>   VARCHAR(64) NOT NULL UNIQUE); verifier = HMAC-SHA256 with a domain-separated key derived from
+>   `jwt_secret`; single indexed `.with_for_update()` lookup preserves the double-spend theft signal;
+>   kills the O(n) global bcrypt scan (deferred since PR #47). (3) `deploy/caddy/Caddyfile` (+README,
+>   `caddy validate`-clean) — uniform-404 edge-deny of `/api/v1/internal/*`, **`/api/v1/wopi/*`** (review
+>   catch S1 — Collabora reaches WOPI over the compose-internal `api:8000`, never the edge), `/metrics`
+>   (all via named `path` matchers = bare-prefix + wildcard); HSTS/nosniff/Referrer/Permissions headers +
+>   frame-ancestors 'self' (Collabora iframe preserved) + report-only CSP; access-log `access_token`
+>   redaction; SSE `flush_interval -1`. (4) trusted-proxy: `FORWARDED_ALLOW_IPS` in prod compose only
+>   (uvicorn ≥0.32 proxy-headers on by default, reads env natively — no entrypoint change). (5) boot
+>   assertion `assert_boot_secrets_configured` (refuse non-dev boot on default/empty `jwt_secret`); dev
+>   compose sets `LQ_AI_DEV_MODE=true`. (6) WOPI: uvicorn access-log scrub filter + Caddy redaction;
+>   **TTL stayed 10h** (review catch S3 — the editor has NO token-renewal path, so 1h would 401 long
+>   sessions; edge-deny + scrub are the complete fix); proof-key DEFERRED (ADR finding). Rate-limit
+>   knobs forwarded in prod compose (`${VAR:-default}`) so they're operator-tunable (S4); generous dev
+>   login limits so Cypress e2e doesn't flake. Review verdict SHIP-AFTER-FIXES → all S1–S7 + nits
+>   applied (WOPI edge-deny, account-lockout DoS recorded in ADR D3, TTL reverted, tunability fixed,
+>   narrowed fail-open except, db-schema.md updated, wiring drift-guard test for every auth endpoint).
+>   **TRAPS:** Caddy `handle` takes ONE matcher — multi-path needs a named `@name path a b` matcher;
+>   the account-login bucket keys on the submitted email = a known-victim lockout DoS (accepted v1,
+>   `RATE_LIMIT_LOGIN_ACCOUNT_PER_WINDOW` is the lever); test_migrations `partial_indexes_exist` had to
+>   drop the bcrypt index; 0084 will re-parent when the AIC stack rebases.
+> - **NEXT = SAAS-3 — first hosted environment (staging).** Hetzner node + the caddy SERVICE joined to
+>   the prod-compose network (the Caddyfile is ready) + wildcard DNS-01 cert (CT-log hygiene) +
+>   SPF/DKIM/DMARC; encrypted `pg_dump` + object-storage backups w/ dead-man alerting; public status
+>   page; staging auto-deploy from main. **Proof = a real agent run end-to-end on the staging URL + a
+>   passed restore drill.** At SAAS-3: pin Caddy's fixed container IP into `FORWARDED_ALLOW_IPS` (drop
+>   the `*`), promote the report-only CSP to enforced, rotate the gateway key, lock Collabora's outbound
+>   network to the WOPI host. AIC-3+ can interleave after this.
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
 >   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 interleaves after SAAS-3**; untracked side files
