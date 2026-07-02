@@ -63,6 +63,24 @@ this way. Four gaps no current ADR answers — slices must not make them harder:
    per client, which the current single-org model already fits. Do not "fix" the architecture
    toward SaaS multi-tenancy; that would trade the model we want for one we don't.
 
+## Addendum — hosted SaaS as a delivery mode (maintainer direction, 2026-07-02; ADR-F058)
+
+The product gains a **hosted offering** as its market-awareness channel: companies register an
+organisation, set up admins, then users. This does NOT retire anything above — it is delivered as
+**one automated stack per tenant** (ADR-F058 Mode 2), so invariant #4's deployment unit survives
+verbatim in every mode:
+
+- **Mode 1 — self-host from GitHub** (single tenant): retained, explicitly. Hosted conveniences
+  stay optional/pluggable so this path never rots.
+- **Mode 2 — operator-hosted dedicated stacks**: the SAAS milestone; operationally the self-serve
+  cousin of forward deployment (we deploy the same per-client unit onto our own EU nodes).
+- **Mode 3 — shared multi-tenancy**: recorded, trigger-gated (self-serve/BYOK motion, tenant
+  count, ops burden — full trigger set in ADR-F058). Only building Mode 3 would supersede
+  invariant #4 — via its own ADR, not silently.
+
+Invariant #4's warning stands: do not bake org_id/multi-tenancy assumptions into slices ahead of
+Mode 3's trigger. The SAAS trunk builds lifecycle + hardening around the single-tenant core.
+
 ## What already lines up (for orientation, not celebration)
 
 Practice areas as identity (ADR-F002, F1) · 4-level memory + memory manager (F2) · durable
