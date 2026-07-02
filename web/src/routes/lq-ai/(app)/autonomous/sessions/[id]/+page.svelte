@@ -116,7 +116,7 @@
 </script>
 
 <svelte:head>
-	<title>Session receipt · LQ.AI</title>
+	<title>Session receipt · LQ.AI Oscar Edition</title>
 </svelte:head>
 
 <div class="receipt-page">

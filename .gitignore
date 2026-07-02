@@ -270,3 +270,4 @@ LAUNCH-POST.md
 
 # PRIV-7: transient third-party test notices (never commit verbatim)
 api/tests/agents/scenarios/_local/
+.vite/

@@ -115,7 +115,7 @@
 </script>
 
 <svelte:head>
-	<title>Audit log — LQ.AI admin</title>
+	<title>Audit log — LQ.AI Oscar Edition admin</title>
 </svelte:head>
 
 <div class="p-4 max-w-7xl mx-auto" data-testid="lq-ai-admin-audit-log">

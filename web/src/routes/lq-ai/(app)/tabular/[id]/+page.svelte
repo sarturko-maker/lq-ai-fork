@@ -189,7 +189,7 @@
 </script>
 
 <svelte:head>
-	<title>Tabular result · LQ.AI</title>
+	<title>Tabular result · LQ.AI Oscar Edition</title>
 </svelte:head>
 
 <section class="lq-tabres">

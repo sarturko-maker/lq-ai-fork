@@ -63,7 +63,7 @@
 </script>
 
 <svelte:head>
-	<title>Tabular Review · LQ.AI</title>
+	<title>Tabular Review · LQ.AI Oscar Edition</title>
 </svelte:head>
 
 <PageShell size="wide" pad="compact">

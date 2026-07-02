@@ -679,6 +679,14 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   (placeholders-only, guard test + `!.env.prod.example` gitignore negation); `deploy/status/`
   (Uptime Kuma, separate stack); `deploy/dns/` (A/AAAA/CAA + SPF/DKIM/DMARC templates);
   `docs/fork/runbooks/staging-bringup.md`. All verifiable with no live box.
+- **SAAS-rebrand ✓ done — "LQ.AI Oscar Edition" execution.** The name accepted in ADR-F058 applied
+  to the 12 user-facing product-name surfaces (shell `<title>`, CockpitHeader wordmark lockup,
+  DualBrandingFooter, 8 per-page titles, README H1 + fork-identity note), scoped by a 4-lens
+  branding audit; surgical display-strings-only (identifiers/wire contracts/provenance untouched;
+  NOTICES.md untouched by design). Deferred on record: Word add-in display-name + manifest
+  tokenisation; README body rewrite; DevForkCallout repo-URL repoint (maintainer call). Plan:
+  `plans/SAAS-REBRAND-oscar-edition.md`; decision record: ADR-F058 rebrand-execution addendum.
+  Recommended before the SAAS-3b public proof — done ahead of it.
 - **SAAS-3b — bring-up (maintainer-gated).** Provision domain / Hetzner node / DNS token /
   object-storage bucket + the `staging` Environment secrets → run `deploy.sh` for real → **Proof:**
   a real agent run end-to-end on the staging URL + a passed restore drill; then the SAAS-2 handoff

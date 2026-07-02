@@ -1,6 +1,8 @@
-# LQ.AI
+# LQ.AI Oscar Edition
 
 > **Open-source AI for legal teams. Bring your own keys, run it where you want, own your data.**
+>
+> _"Oscar Edition" — an independently-maintained fork of [LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai), adding model-driven **Deep Agents** and agentic practice-area **modules**. Fork charter & divergence policy: [ADR-F001](docs/adr/F001-fork-charter.md) · [UPSTREAM.md](UPSTREAM.md)._
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![PRD](https://img.shields.io/badge/PRD-v0.2-green.svg)](docs/PRD.md)

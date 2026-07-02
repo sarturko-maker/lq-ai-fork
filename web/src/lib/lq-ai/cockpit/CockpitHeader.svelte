@@ -83,7 +83,13 @@
 			</Button>
 		{/if}
 		<a href="/lq-ai" class="text-base font-semibold tracking-tight text-foreground no-underline">
+			<!-- Real space before the suffix so the anchor's accessible name /
+			     copied text reads "LQ.AI Oscar Edition", not "LQ.AIOscar Edition";
+			     ml-1 tunes the visual gap on top of the collapsed space. -->
 			<span class="text-primary">LQ</span>.AI
+			<span class="ml-1 text-xs font-medium tracking-normal text-muted-foreground"
+				>Oscar Edition</span
+			>
 		</a>
 	</div>
 	<div class="flex items-center gap-1">
