@@ -645,12 +645,13 @@ while self-hosting from GitHub keeps working. Plan of record: `docs/fork/plans/S
 modes; stack-per-tenant now; shared-schema Mode 3 recorded + trigger-gated). Working model:
 lead model drafts/orchestrates/verifies; smaller models implement.
 
-- **SAAS-0 ✓ done — charter + governance pack (doc-only).** ADR-F058 (proposed); NORTH-STAR
-  addendum (invariant #4 survives — three delivery modes); this milestone entry;
+- **SAAS-0 ✓ done — charter + governance pack (doc-only).** ADR-F058 **accepted 2026-07-02**;
+  NORTH-STAR addendum (invariant #4 survives — three delivery modes); this milestone entry;
   `plans/SAAS-COMMERCIAL-PACK.md` (MSA/ToS/SLA/AUP/DPA/IR/billing checklist for the
   lawyer-maintainer); `plans/SAAS-AIACT-SELF-ASSESSMENT.md` (the product classified through its
-  own `app/aiact` engine). Open decisions tabled: product name (blocks public DNS), PyMuPDF,
-  Collabora posture, EU model menu, pricing.
+  own `app/aiact` engine). Product name DECIDED at acceptance: **"LQ.AI Oscar Edition"**
+  (upstream's name is a group the maintainer belongs to — public DNS unblocked). Still open:
+  PyMuPDF, Collabora posture, EU model menu, pricing.
 - **SAAS-1 — pipeline to a deployable artifact.** Fix `release.yml` registry namespace
   (`legalquants` → fork); push-to-main `:sha`+`:main` image builds (path-filtered, gha cache);
   prod compose file (`image:` refs, no host ports, full per-service mem_limits); `COPY skills/`
@@ -839,7 +840,8 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   `DBAPIError`/`IntegrityError` would carry the failing SQL + bound params. PRIV-6a closed the only reachable
   path (the find-or-create savepoint); hardening the shared chokepoint to map `DBAPIError` → a constraint-
   name-only, value-free message (keeping the raw text in server logs) is belt-and-braces across all tools.
-- Project rename before public release (ADR-F001 obligation).
+- ~~Project rename before public release (ADR-F001 obligation)~~ — DECIDED 2026-07-02 at
+  ADR-F058 acceptance: "LQ.AI Oscar Edition" (upstream's name is a group the maintainer belongs to).
 - Embedding provider strategy (KB + chat vector search currently lack one; MiniMax coding-plan key is
   chat-only — needs a dedicated embedding model, possibly local/Tier-1 for privileged matters).
 - `<think>` block handling in MessageBubble for reasoning models (MiniMax-M3 emits them inline).

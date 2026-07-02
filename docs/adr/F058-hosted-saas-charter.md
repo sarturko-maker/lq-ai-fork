@@ -1,6 +1,6 @@
 # F058 — Hosted SaaS charter: three delivery modes, stack-per-tenant hosting first
 
-- Status: proposed
+- Status: accepted (maintainer, 2026-07-02)
 - Date: 2026-07-02
 - Deciders: maintainer (Arturs)
 - Informed by: `docs/fork/plans/SAAS-HOSTING.md` (the reviewed recommendation this ADR ratifies);
@@ -87,11 +87,11 @@ day-one mitigations below keep the merge option open cheaply.
   recording the three delivery modes; invariant #4's deployment unit survives in all of them.
   Forward deployment (bespoke per-client implementations) remains a live business shape; Mode 2
   is operationally its self-serve cousin (we forward-deploy onto our own nodes).
-- **Rename obligation activates.** ADR-F001 requires renaming before public release;
-  customer-facing hosting is a public release. The memory-noted "LQ.AI Oscar Edition" retains
-  upstream's "LQ.AI" mark, which sits poorly with F001's "respect upstream's identity" — the
-  product name is an **open maintainer decision** that must close before public marketing
-  (blocker for SAAS-3's public DNS, not for staging).
+- **Product name DECIDED (maintainer, 2026-07-02 at acceptance): "LQ.AI Oscar Edition".**
+  ADR-F001's rename obligation is satisfied without dropping the "LQ.AI" mark: the upstream name
+  belongs to a group the maintainer is a member of, so retaining it does not appropriate a
+  third party's identity — the "Oscar Edition" suffix still distinguishes the fork from
+  upstream's own releases. This unblocks SAAS-3's public DNS.
 - **Open decisions carried** (SAAS-HOSTING.md §10): PyMuPDF (Artifex licence vs pypdfium2 swap),
   Collabora posture, EU model menu, pricing/selling entity. Each closes in its named slice.
 - **Obligations before the first paying tenant** (tracked in `plans/SAAS-COMMERCIAL-PACK.md`):

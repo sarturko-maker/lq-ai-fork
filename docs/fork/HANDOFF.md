@@ -21,7 +21,9 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   models** (Sonnet 5 default; Opus 4.8 for complex work — migrations, auth/crypto, RLS). Compaction
 >   expected roughly per slice — this banner + memory must always carry the goal and the NEXT slice.
 > - **SAAS-0 ✓ SHIPPED (branch `fork/saas-0-hosted-saas-charter`, base main — doc-only):** ADR-F058
->   (proposed → maintainer accepts); NORTH-STAR **addendum** (invariant #4 SURVIVES — hosted = per-tenant
+>   **ACCEPTED (maintainer, 2026-07-02)** + product name DECIDED at acceptance: **"LQ.AI Oscar
+>   Edition"** (upstream's name is a group the maintainer belongs to — F001 tension dissolved,
+>   SAAS-3 public DNS unblocked); NORTH-STAR **addendum** (invariant #4 SURVIVES — hosted = per-tenant
 >   stacks; do NOT bake org_id into slices ahead of the Mode-3 trigger); MILESTONES § SAAS;
 >   commercial-pack checklist (MSA/SLA/AUP/DPA/IR/billing — lawyer-maintainer owns; ALL are
 >   first-paying-tenant blockers, not staging blockers); AI-Act self-assessment (expected verdict
@@ -37,8 +39,7 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   dry-run, `docker compose -f docker-compose.prod.yml config`, image build, fresh-context review).
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
->   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 interleaves after SAAS-3**; product NAME
->   (ADR-F001 rename obligation) blocks SAAS-3's public DNS, not staging; untracked side files
+>   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 interleaves after SAAS-3**; untracked side files
 >   (`sample-documents/`, `api/tests/agents/scenarios/test_*_live.py`, `.vite/`) belong to NO PR — leave
 >   or clean deliberately; dev `.env` `LQ_AI_GATEWAY_KEY` still needs rotating (2026-06-30 terminal dump).
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════

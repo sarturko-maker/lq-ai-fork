@@ -1,8 +1,8 @@
 # SaaS hosting review — from single-tenant dev box to a hosted product
 
-**Status: PLAN OF RECORD for the SAAS milestone (to be ratified by ADR-F058, proposed
-2026-07-02) — §10 rows 1/2/9 are maintainer-decided; the remaining decisions close in their
-named slices.**
+**Status: PLAN OF RECORD for the SAAS milestone — ratified by ADR-F058 (accepted 2026-07-02).
+§10 rows 1/2/9/10 are maintainer-decided; the remaining decisions close in their named
+slices.**
 Recon 2026-07-02: 5 codebase audits (file:line evidence) + 4 web-research sweeps (current prices),
 then an adversarial verification pass (fact-check / completeness / attack-the-recommendation)
 whose surviving findings are folded in below. Decisions marked **[MAINTAINER]** are yours;
@@ -429,8 +429,10 @@ tenant** — this list is the self-assessment, not the certificate.
    record; verify against the pinned image and fix whichever is stale. ADR-F047 deferred the
    production posture: **[MAINTAINER]** Decision 6: CODE-per-tenant now, Collabora subscription
    when revenue justifies, self-build never (CVE burden).
-5. **Rename before public release** — ADR-F001 obligation; "LQ.AI Oscar Edition" is memory-noted
-   but un-ADR'd. Customer-facing hosting = public release: fold into ADR-F058.
+5. **Rename before public release** — ADR-F001 obligation; **DECIDED at F058 acceptance
+   (2026-07-02): "LQ.AI Oscar Edition"** — the upstream name belongs to a group the maintainer
+   is a member of, so retaining the "LQ.AI" mark appropriates no third-party identity; the
+   suffix distinguishes the fork. Unblocks SAAS-3 public DNS.
 6. Housekeeping: NOTICES rows for MinIO + the Xenova ms-marco ONNX model; per-skill license
    audit before shipping community skills to tenants.
 
@@ -484,6 +486,7 @@ Module development (AIC-3…) can interleave after SAAS-3.
 | 7 | Panel vs plain SSH deploys | Plain SSH/GHA now; Dokploy-API prototype checkpoint at ~5 tenants |
 | 8 | Hosting provider | Hetzner (CX43 nodes, ~€36–45 base, ~€10–19/tenant) |
 | 9 | Delivery-mode interpretation (§0) | **DECIDED 2026-07-02**: three modes — self-host stays supported; hosted conveniences must remain optional/pluggable |
+| 10 | Product name (F001 rename obligation) | **DECIDED 2026-07-02 (at F058 acceptance)**: "LQ.AI Oscar Edition" — upstream's name is a group the maintainer belongs to; unblocks SAAS-3 public DNS |
 
 ## Evidence
 
