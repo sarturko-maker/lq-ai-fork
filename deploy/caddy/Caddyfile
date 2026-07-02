@@ -9,8 +9,11 @@
 # Each stanza below closes a numbered item of the SAAS-HOSTING.md §6 security
 # gate (ADR-F059). Do NOT edit deploy/caddy-tailscale/ (the dev/Tailscale edge).
 #
-# Validate:  docker run --rm -v "$PWD/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
-#              caddy:2 caddy validate --config /etc/caddy/Caddyfile
+# Validate (needs the CUSTOM image — the tls DNS block below requires the
+# caddy-dns/hetzner module that stock caddy:2 does not ship; the Dockerfile also
+# runs this at build time):
+#   docker build -t lq-ai-caddy deploy/caddy
+#   docker run --rm lq-ai-caddy caddy validate --config /etc/caddy/Caddyfile
 {
 	# ACME account email (expiry notices). Env placeholder with an obvious
 	# placeholder default; the operator sets LQ_AI_ACME_EMAIL to a real address.
@@ -21,6 +24,19 @@
 # (Caddy then provisions TLS automatically). The `localhost` default lets this
 # file `caddy validate` with no DNS/cert dependency.
 {$LQ_AI_PUBLIC_HOST:localhost} {
+	# --- TLS: wildcard cert via DNS-01 (Hetzner DNS plugin) — SAAS-3, ADR-F060 D2 ---
+	# Stock caddy:2 has NO DNS modules; this file only validates/runs inside the
+	# custom xcaddy image (deploy/caddy/Dockerfile) that compiles caddy-dns/hetzner
+	# in. DNS-01 (not per-host HTTP-01) so a wildcard cert never names a tenant in
+	# the Certificate Transparency logs (which would publish the customer list), and
+	# so staging exercises the exact prod issuance path. The token is a RUNTIME env
+	# value (never committed) — `caddy validate` needs only the module present, not a
+	# real token. Set LQ_AI_PUBLIC_HOST to a single host (staging) or a wildcard
+	# (`*.tenant.example.com`, prod); the ACME account email is the global `email`.
+	tls {
+		dns hetzner {env.HETZNER_DNS_API_TOKEN}
+	}
+
 	# --- (d) §6-4: access logs MUST NOT retain the WOPI access_token ---
 	# Caddy's default access log records `request>uri`, which includes the query
 	# string — and the WOPI editor-session token rides as an `access_token` query

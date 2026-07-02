@@ -89,6 +89,14 @@ services:
     environment:
       # Auth — backend <-> gateway shared secret (X-LQ-AI-Gateway-Key).
       LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
+      # Fernet master key that decrypts `api_key_encrypted:` provider keys stored
+      # in this tenant's gateway.yaml (gateway/app/secrets.py, ADR 0011) — the
+      # SAAS-HOSTING §5.5 / ADR-F060 D6 posture of keeping provider keys encrypted
+      # at rest rather than as plaintext env. OPTIONAL: unset falls back to the
+      # plaintext provider-key env vars below; the gateway reads it lazily (only
+      # when it actually decrypts a key), so an unset value never blocks boot.
+      # gen-secrets.sh mints one; the operator pastes it into the node's .env.prod.
+      LQ_AI_GATEWAY_MASTER_KEY: ${LQ_AI_GATEWAY_MASTER_KEY:-}
       LQ_AI_API_URL: ${LQ_AI_API_URL:-http://api:8000}
       LQ_AI_SKILL_CACHE_TTL_SECONDS: ${LQ_AI_SKILL_CACHE_TTL_SECONDS:-60}
       # B4 — inference_routing_log writer (audit trail of every routed request).
@@ -328,6 +336,56 @@ services:
       timeout: 5s
       retries: 10
 
+  caddy:
+    # Public edge — the ONLY service that publishes host ports (ADR-F060 D3).
+    # Custom xcaddy image (deploy/caddy/Dockerfile) with the caddy-dns/hetzner
+    # DNS-01 module + the Caddyfile BAKED IN; published to GHCR by images.yml and
+    # pinned by LQ_AI_IMAGE_TAG like every other image, so the edge rolls
+    # forward/back atomically with api/web/gateway. Joins this stack's network and
+    # reverse-proxies api:8000 / web:8080 by name (the compose publishes no other
+    # host ports — see the file header). Provisions the tenant's TLS cert via
+    # wildcard DNS-01 (ADR-F060 D2: no per-host cert in the CT logs).
+    image: ghcr.io/sarturko-maker/lq-ai-caddy:${LQ_AI_IMAGE_TAG:?set LQ_AI_IMAGE_TAG to a published sha-<sha> tag from images.yml — never :main}
+    restart: unless-stopped
+    # Static reverse proxy; no in-process models — a small, fixed footprint.
+    mem_limit: 256m
+    mem_reservation: 64m
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3 (QUIC)
+    depends_on:
+      # Only accept public traffic once the upstreams it proxies are healthy.
+      # Caddy talks to api + web directly; web's nginx proxies Collabora, so a
+      # Collabora outage must NOT keep the edge (and the rest of the app) down.
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    environment:
+      # The tenant hostname Caddy serves + provisions the wildcard cert for. A
+      # single host for staging; a wildcard (`*.tenant.example.com`) for prod.
+      LQ_AI_PUBLIC_HOST: ${LQ_AI_PUBLIC_HOST:?set to this tenant's public host, e.g. acme.lq-ai.example.com (staging) or *.acme.lq-ai.example.com (prod)}
+      # ACME account email for Let's Encrypt cert-expiry notices.
+      LQ_AI_ACME_EMAIL: ${LQ_AI_ACME_EMAIL:?set to an ops email for ACME/Let's Encrypt expiry notices}
+      # Hetzner DNS API token for the ACME DNS-01 challenge (ADR-F060 D2). Scoped
+      # to this tenant's DNS zone; never committed — lives in the root-owned
+      # .env.prod on the node (SAAS-3b bring-up), same as every other secret.
+      HETZNER_DNS_API_TOKEN: ${HETZNER_DNS_API_TOKEN:?set to a Hetzner DNS API token scoped to the tenant's zone (ACME DNS-01 challenge)}
+    volumes:
+      # Cert store + Caddy state MUST persist across restarts — otherwise every
+      # redeploy re-issues certs (Let's Encrypt rate limits bite) and drops OCSP
+      # staples. Named volumes, same lifecycle as pgdata/redisdata.
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      # Caddy exposes no app health route; probe the local admin API (:2019,
+      # localhost-only) to prove the process is up and serving its config.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
   collabora:
     # In-app Word editor engine — Collabora Online / CODE over WOPI (ADR-F047).
     # Same PREBUILT image, pinned BY DIGEST, as dev (Spike-0-validated Collabora
@@ -382,3 +440,6 @@ volumes:
   gateway-config:
   ingest-hf-cache:
   ingest-easyocr-cache:
+  # Caddy cert store (/data) + autosave config (/config) — SAAS-3, ADR-F060 D3.
+  caddy-data:
+  caddy-config:

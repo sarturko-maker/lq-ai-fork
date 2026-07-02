@@ -110,6 +110,9 @@ out/
 .env.*
 # ...but the committed templates (root + deploy/*) stay tracked.
 !.env.example
+# The hosted-deploy template — PLACEHOLDERS ONLY, enforced by the guard test
+# api/tests/test_env_prod_example.py (SAAS-3, ADR-F060 D6).
+!.env.prod.example
 
 # Operator's actual gateway.yaml (the .example version is committed)
 gateway.yaml
