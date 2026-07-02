@@ -47,7 +47,7 @@ jobs:
             file: ./web/Dockerfile
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # skills/community is a git SUBMODULE — see images.yml's matching
           # comment; without this the api image ships an empty community corpus.
@@ -108,7 +108,7 @@ jobs:
       packages: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve image tag
         id: tag
@@ -168,7 +168,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve image tag
         id: tag
