@@ -360,10 +360,13 @@ services:
       # preserve production behaviour (local embedder + rerank on).
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
       RERANK_ENABLED: ${RERANK_ENABLED:-true}
-      # Per-run subagent fan-out ceiling (balanced tier; ADR-F049 Slice E /
-      # ADR-F053). Agent runs execute in THIS worker, so the cap must be set
-      # here. Dev-box OOM containment lowers it via .env; production default 32
-      # (api/app/agents/budget.py) if unset. See mem_limit above / ADR-F056.
+      # Per-run subagent fan-out ceiling (ADR-F049 Slice E / ADR-F053). Agent
+      # runs execute in THIS worker, so the cap must be set here. Dev-box OOM
+      # containment lowers it via .env; default 32 (Settings.fan_out_quota,
+      # api/app/config.py) if unset. NOTE: this governs the BALANCED budget
+      # profile only — economy (8) and generous (48) are hardcoded in
+      # api/app/agents/budget.py, so a generous run ignores this env var and
+      # the mem_limit above is the only containment. See ADR-F056.
       FAN_OUT_QUOTA: ${FAN_OUT_QUOTA:-32}
       # Skills loader — the worker's on_startup installs the skill
       # registry via the shared bootstrap (app/skills/bootstrap.py) so

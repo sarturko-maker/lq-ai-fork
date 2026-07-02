@@ -101,7 +101,10 @@ resource-aware companion in three layers:
   `docker-compose.yml` worker `mem_limit` (ingest 3g / arq 2.5g) + `mem_reservation` so a runaway worker
   self-OOMs in its own cgroup instead of killing Postgres; `.env` `LQ_AI_INGEST_WORKER_CONCURRENCY=1` and
   `FAN_OUT_QUOTA=4` (forwarded to arq-worker in compose) to cut peak concurrency. Verified: limits effective,
-  `settings.fan_out_quota==4`. Reversible; no app code.
+  `settings.fan_out_quota==4`. Reversible; no app code. CAVEAT: `FAN_OUT_QUOTA` binds only the **balanced**
+  budget profile — economy (8) and generous (48) are hardcoded in `api/app/agents/budget.py`, so a run
+  launched on "generous" fans out to 48 regardless; on a constrained box the `mem_limit` cgroup is then the
+  only containment.
 - **Layer 2 — self-sizing at boot (build with this slice):** a small startup helper that reads the container's
   **cgroup memory limit** (`/sys/fs/cgroup/memory.max`, cgroup v2; fall back to v1 / host with a logged
   warning) + core count and derives safe defaults for fan-out + ingest concurrency + whether to load ONNX
