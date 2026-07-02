@@ -1,0 +1,83 @@
+name: Images
+
+# Push-to-main image builds — the fleet-deploy artifacts for the SAAS hosted
+# stacks (ADR-F058 Mode 2). Distinct from release.yml: that workflow is the
+# tag-triggered, SLSA/SBOM/cosign-SIGNED public release path; this one is the
+# fast, UNSIGNED `:main`-tracking build. `docker-compose.prod.yml` never
+# deploys `:main` itself (a moving pointer) — the deploy script pins
+# LQ_AI_IMAGE_TAG to a specific `:sha-<sha>` this workflow publishes.
+#
+# SIMPLICITY CHOICE (SAAS-1): all three services (api, gateway, web) build on
+# EVERY push to main, unconditionally — no path-filtered per-service
+# triggering. At this fleet size (3 services), with buildx `type=gha` caching
+# making an unchanged service's rebuild cheap, the extra moving part a
+# change-detection step would add (e.g. dorny/paths-filter, another
+# third-party action to pin/trust) isn't worth it yet. Revisit if build
+# minutes become a real cost or the matrix grows.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: sarturko-maker
+
+jobs:
+  build-and-push:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # api's build context is the REPO ROOT so api/Dockerfile can `COPY
+          # skills/ /skills/` (skills/ lives outside api/) — see release.yml's
+          # matching matrix entry / docker-compose.yml's api service comment.
+          - service: api
+            context: .
+            file: ./api/Dockerfile
+          - service: gateway
+            context: ./gateway
+            file: ./gateway/Dockerfile
+          - service: web
+            context: ./web
+            file: ./web/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: echo "sha=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/lq-ai-${{ matrix.service }}:${{ steps.tag.outputs.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/lq-ai-${{ matrix.service }}:main
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}

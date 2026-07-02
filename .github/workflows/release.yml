@@ -19,7 +19,9 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_OWNER: legalquants
+  # SAAS-1 (ADR-F058): fork publishes to its own GHCR namespace — the fork has
+  # no push access to upstream's `legalquants` org.
+  IMAGE_OWNER: sarturko-maker
 
 jobs:
   build-and-push:
@@ -29,8 +31,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # SAAS-1: api's build context is the REPO ROOT, not ./api — the image
+          # now bakes skills/ (COPY skills/ /skills/ in api/Dockerfile), which
+          # lives outside api/ and is unreachable from an ./api-scoped context.
+          # gateway/web are unaffected (their Dockerfiles live at their context
+          # root, same as before).
           - service: api
-            context: ./api
+            context: .
+            file: ./api/Dockerfile
           - service: gateway
             context: ./gateway
           - service: web
@@ -64,6 +72,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           push: ${{ github.event_name == 'push' || !inputs.dry_run }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/lq-ai-${{ matrix.service }}:${{ steps.tag.outputs.tag }}

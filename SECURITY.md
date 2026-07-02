@@ -1,14 +1,19 @@
 # Security Policy
 
+This is the security policy for **LQ.AI Oscar Edition**
+([sarturko-maker/lq-ai-fork](https://github.com/sarturko-maker/lq-ai-fork)), a hard fork of
+[LegalQuants/lq-ai](https://github.com/LegalQuants/lq-ai) (see `docs/adr/F001-fork-charter.md`).
+This policy covers the fork only — it does not speak for upstream, and upstream's advisories are
+not a substitute for reporting against this repo (see Scope below).
+
 ## Reporting a vulnerability
 
 **Do not file security vulnerabilities as public GitHub issues.** Public reports give attackers a head start; coordinated disclosure protects users while we develop a fix.
 
 To report a vulnerability:
 
-- **Email:** security@legalquants.com
-- **GPG key:** A GPG key for encrypted reports will be published before v1 release. Until then, please prefer GitHub Security Advisories (which encrypt in transit and at rest within GitHub's infrastructure).
-- **GitHub Security Advisory:** Alternatively, you can report privately through GitHub's [Security Advisories](https://github.com/legalquants/lq-ai/security/advisories/new) feature.
+- **GitHub Security Advisory:** report privately through this repo's [Security Advisories](https://github.com/sarturko-maker/lq-ai-fork/security/advisories/new) feature (encrypted in transit and at rest within GitHub's infrastructure). This is currently the **only** reporting channel.
+- **Email:** not yet available. A dedicated security-contact email (with a published GPG key) will be stood up before the first hosted tenant goes live (SAAS milestone, ADR-F058); this policy will be updated when it exists. Until then, use the GitHub Security Advisory link above.
 
 Please include:
 
@@ -32,7 +37,9 @@ For vulnerabilities being actively exploited in the wild, we accelerate; please 
 
 ## Coordinated disclosure
 
-LQ.AI follows coordinated disclosure: we ask reporters to give us reasonable time to develop and ship a fix before public disclosure. We will work with you to set a disclosure date that balances user safety with researcher interests.
+The project follows coordinated disclosure: we ask reporters to give us reasonable time to develop and ship a fix before public disclosure. We will work with you to set a disclosure date that balances user safety with researcher interests.
+
+Because this is a public repository whose `main` branch is deployed continuously (SAAS-1's push-to-main image pipeline), a merged fix is effectively a public disclosure the moment it lands: `main` is also the attacker's changelog. Where practical, we patch, deploy the hosted fleet, and push the fix in the same window rather than merging a fix days ahead of deploying it.
 
 After a fix ships, we publish:
 
@@ -44,19 +51,20 @@ After a fix ships, we publish:
 
 **In scope** for security disclosures:
 
-- The LQ.AI codebase: `api/`, `gateway/`, `web/`, `scripts/`.
-- Official deployment artifacts: `docker-compose.yml`, Helm charts, container images we publish.
+- The LQ.AI Oscar Edition codebase: `api/`, `gateway/`, `web/`, `scripts/`.
+- Official deployment artifacts: `docker-compose.yml` (self-host), `docker-compose.prod.yml` (hosted, ADR-F058 Mode 2), and the container images we publish (`ghcr.io/sarturko-maker/lq-ai-{api,gateway,web}`).
 - Cryptographic implementations and key handling.
 - Authentication, authorization, session management, and audit logging.
 - The Inference Gateway's Tier Derivation, Anonymization Layer, and provider-routing logic.
 - Documentation that could mislead operators about security posture.
+- Vulnerabilities affecting the operator-hosted SaaS deployments of this project (ADR-F058 Mode 2) follow this same channel — see the note below.
 
 **Out of scope** (please report elsewhere):
 
 - Vulnerabilities in third-party LLM providers (Anthropic, OpenAI, Vertex, etc.) — report directly to the provider.
-- Vulnerabilities in dependencies — report upstream; we'll respond to advisories that affect us.
-- Operator-specific deployment configurations or operator-modified forks.
-- Social engineering attacks on LegalQuants employees or community members.
+- Vulnerabilities in dependencies — report upstream; we'll respond to advisories that affect us (also tracked via `.github/dependabot.yml`).
+- **Operator-modified deployments**: configurations, forks, or code changes made by a self-hosting operator that diverge from this repo's shipped defaults are the operator's responsibility, not ours.
+- Social engineering attacks against maintainers or community members.
 - Theoretical attacks without a demonstrable exploit path against the project's threat model.
 
 ## What we will not do
@@ -74,17 +82,17 @@ This safe-harbor commitment does not authorize:
 - Activities that compromise the privacy or safety of users beyond what is necessary to demonstrate the vulnerability.
 - Activities that disrupt or degrade the availability of services or other users' deployments.
 - Accessing data beyond what is needed to demonstrate the vulnerability.
-- Public disclosure before the coordinated disclosure timeline agreed upon with the maintainers.
-- Targeting LegalQuants infrastructure or employee accounts (this policy covers the open-source project; LegalQuants commercial services have separate disclosure terms).
+- Public disclosure before the coordinated disclosure timeline agreed upon with the maintainer.
+- Targeting infrastructure or accounts belonging to a specific operator-hosted tenant of this project (a customer's dedicated stack); this policy covers the open-source project and the maintainer's own hosted infrastructure — a tenant's operator may have separate disclosure terms.
 
 ## Past advisories
 
 Past security advisories and reporter acknowledgments are listed at:
-[GitHub Security Advisories page — URL becomes active when first advisory is published].
+[GitHub Security Advisories page — URL becomes active when first advisory is published](https://github.com/sarturko-maker/lq-ai-fork/security/advisories).
 
 ## Questions about this policy
 
-For questions about this policy (rather than vulnerability reports), GitHub Discussions in the `Help` category is appropriate. For sensitive policy questions, email security@legalquants.com.
+For questions about this policy (rather than vulnerability reports), GitHub Discussions in the `Help` category is appropriate. For sensitive policy questions, use the GitHub Security Advisory channel above until a dedicated email exists.
 
 ---
 

@@ -1,0 +1,351 @@
+# LQ.AI — production docker-compose (SAAS-1, ADR-F058 Mode 2)
+#
+# Per-tenant hosted stack: one instance of this file per customer, deployed by the
+# private control-plane repo (SAAS-7A) onto a dedicated Hetzner node. See
+# docs/fork/plans/SAAS-HOSTING.md §3 (Option A) + §5 (update pipeline) and
+# docs/adr/F058-hosted-saas-charter.md.
+#
+# Differences from docker-compose.yml (the dev harness), all deliberate:
+#   - `image:` refs pulled from GHCR, never `build:` — the prod host has no repo
+#     checkout. LQ_AI_IMAGE_TAG is set by the deploy script to a `:sha-<sha>` tag
+#     published by .github/workflows/images.yml; deploying `:main` (a moving
+#     pointer) is NOT allowed — it breaks the "deploy = one pinned SHA" contract
+#     that rollback (redeploy previous SHA) depends on.
+#   - NO minio — hosted stacks use external S3-compatible object storage (Hetzner
+#     Object Storage). S3_* is required with no MinIO-shaped fallback.
+#   - NO host ports on ANY service. The reverse proxy (Caddy, SAAS-3) joins this
+#     compose stack's docker network and talks to services by their in-network
+#     name (api:8000, web:8080, etc.) — it is the only public listener. Until
+#     SAAS-3 lands, this file is not internet-facing by construction.
+#   - mem_limit + mem_reservation on every service, sized to fit comfortably
+#     under a 16 GB Hetzner CX43 node (~12.7 GB of limits total).
+#   - No default passwords / no dev bind-mount conveniences: every secret uses
+#     required-var (`${VAR:?...}`) syntax so `docker compose config` fails loudly
+#     on a missing value instead of silently booting with a well-known default.
+#   - Skills are baked into the api image (`COPY skills/ /skills/`, api/Dockerfile)
+#     — no `./skills` bind mount (there is no repo checkout to mount from).
+#
+# Operators/deploy scripts should set an explicit per-tenant Compose project name
+# (`docker compose -p <tenant-slug> -f docker-compose.prod.yml ...` or
+# COMPOSE_PROJECT_NAME) so stacks packed on the same node (once §3A's packing
+# preconditions hold) don't collide on the default project-derived network name.
+
+services:
+  # ============================================================
+  # Storage
+  # ============================================================
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    # Baseline OLTP + pgvector workload for one tenant; well under the 16 GB node
+    # ceiling with headroom for the workers' spikes (ADR-F056 §Resource-aware
+    # execution — same containment rationale as the dev-box mem_limits).
+    mem_limit: 2g
+    mem_reservation: 1g
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lq_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-lq_ai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-lq_ai} -d $${POSTGRES_DB:-lq_ai}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    # Sessions, arq queues, rate-limit token buckets (SAAS-2) — small working set.
+    mem_limit: 512m
+    mem_reservation: 256m
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ============================================================
+  # Application services
+  # ============================================================
+
+  gateway:
+    image: ghcr.io/sarturko-maker/lq-ai-gateway:${LQ_AI_IMAGE_TAG:?set LQ_AI_IMAGE_TAG to a published sha-<sha> tag from images.yml — never :main}
+    restart: unless-stopped
+    # Stateless request router; no in-process models. Small footprint.
+    mem_limit: 512m
+    mem_reservation: 256m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Auth — backend <-> gateway shared secret (X-LQ-AI-Gateway-Key).
+      LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
+      LQ_AI_API_URL: ${LQ_AI_API_URL:-http://api:8000}
+      LQ_AI_SKILL_CACHE_TTL_SECONDS: ${LQ_AI_SKILL_CACHE_TTL_SECONDS:-60}
+      # B4 — inference_routing_log writer (audit trail of every routed request).
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-lq_ai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lq_ai}}
+      # Provider keys — any may be unset; this tenant's gateway.yaml picks which
+      # to use. Tenant-tier EU routing / PRC-provider fencing lands in SAAS-6.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-eu-central-1}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_RESOURCE: ${AZURE_OPENAI_RESOURCE:-}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # Observability (opt-in; unset disables).
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LQ_AI_DEV_MODE: "false"
+    # D0.5 — gateway.yaml is mutable at runtime via the admin alias-CRUD surface
+    # (ADR 0010). Unlike dev, there is no repo checkout on the prod host to seed
+    # from: GATEWAY_CONFIG_FILE must point at this tenant's provisioned seed file
+    # (control-plane repo template, applied by the provision script — see
+    # SAAS-HOSTING.md §5 item 5). The named volume then holds the live, writable
+    # copy across restarts exactly as in dev.
+    volumes:
+      - ${GATEWAY_CONFIG_FILE:?set to this tenant's provisioned gateway.yaml seed path (control-plane repo template)}:/usr/share/lq-ai/gateway.yaml.example:ro
+      - gateway-config:/etc/lq-ai
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health', timeout=2).status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    image: ghcr.io/sarturko-maker/lq-ai-api:${LQ_AI_IMAGE_TAG:?set LQ_AI_IMAGE_TAG to a published sha-<sha> tag from images.yml — never :main}
+    restart: unless-stopped
+    mem_limit: 2g
+    mem_reservation: 1g
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-lq_ai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lq_ai}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # Object storage — hosted stacks use external S3-compatible storage
+      # (Hetzner Object Storage recommended, SAAS-HOSTING.md §5); there is no
+      # MinIO fallback in prod, so all four are required.
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:?set to your S3-compatible endpoint (e.g. Hetzner Object Storage) — prod has no MinIO fallback}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+      S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required (per-tenant bucket — ADR-F058 day-one rule 1 — key objects tenants/<stack-or-org-id>/<file_id>)}
+      S3_REGION: ${S3_REGION:?S3_REGION is required (provider-specific code, e.g. Hetzner "fsn1"/"nbg1"/"hel1" — not necessarily an AWS region)}
+      LQ_AI_GATEWAY_URL: ${LQ_AI_GATEWAY_URL:-http://gateway:8001}
+      LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
+      # Retrieval providers (ADR-F049 C1/D). local = bundled ONNX models, $0,
+      # no extra egress; the production-shaped default (see arq-worker below,
+      # where agent runs actually execute).
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+      RERANK_ENABLED: ${RERANK_ENABLED:-true}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ACCESS_TOKEN_TTL_SECONDS: ${JWT_ACCESS_TOKEN_TTL_SECONDS:-900}
+      JWT_REFRESH_TOKEN_TTL_SECONDS: ${JWT_REFRESH_TOKEN_TTL_SECONDS:-604800}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LQ_AI_DEV_MODE: "false"
+      # Same-origin reverse proxy (Caddy, SAAS-3) fronts web + api under one
+      # origin — leave unset (CORS disabled; no cross-origin browser calls).
+      LQ_AI_CORS_ORIGINS: ${LQ_AI_CORS_ORIGINS:-}
+      # Skills are baked into the image at /skills (api/Dockerfile `COPY skills/
+      # /skills/`) — no bind mount needed or possible (no repo checkout here).
+      LQ_AI_SKILLS_DIR: ${LQ_AI_SKILLS_DIR:-/skills}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ingest-worker:
+    # C5 document pipeline worker. Same image as `api` (see api/Dockerfile) —
+    # both COPY skills/ /skills/ at build, though this worker doesn't need them.
+    image: ghcr.io/sarturko-maker/lq-ai-api:${LQ_AI_IMAGE_TAG:?set LQ_AI_IMAGE_TAG to a published sha-<sha> tag from images.yml — never :main}
+    restart: unless-stopped
+    # Loads Docling + EasyOCR + the local embedder during ingest (~2.5 GiB
+    # peak). mem_limit caps THIS cgroup so a runaway ingest self-OOMs (job
+    # fails + worker restarts) instead of the kernel killing Postgres —
+    # ADR-F056 §Resource-aware execution (same containment as the dev-box
+    # mem_limits; sized up here for headroom on a full 16 GB node).
+    mem_limit: 3g
+    mem_reservation: 1536m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # DE-326: the api is the single schema migrator; wait for it to be
+      # healthy (entrypoint runs `alembic upgrade head` first) so this worker
+      # never races the migration. Paired with LQ_AI_SKIP_MIGRATIONS=1 below.
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-lq_ai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lq_ai}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      LQ_AI_SKIP_MIGRATIONS: "1"
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:?set to your S3-compatible endpoint (e.g. Hetzner Object Storage) — prod has no MinIO fallback}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+      S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required (per-tenant bucket — ADR-F058 day-one rule 1 — key objects tenants/<stack-or-org-id>/<file_id>)}
+      S3_REGION: ${S3_REGION:?S3_REGION is required (provider-specific code, e.g. Hetzner "fsn1"/"nbg1"/"hel1" — not necessarily an AWS region)}
+      LQ_AI_INGEST_WORKER_CONCURRENCY: ${LQ_AI_INGEST_WORKER_CONCURRENCY:-2}
+      LQ_AI_DOCLING_TIMEOUT_SECONDS: ${LQ_AI_DOCLING_TIMEOUT_SECONDS:-300}
+      LQ_AI_DOCLING_ENABLED: ${LQ_AI_DOCLING_ENABLED:-true}
+      LQ_AI_CHUNK_TARGET_CHARS: ${LQ_AI_CHUNK_TARGET_CHARS:-2000}
+      LQ_AI_CHUNK_OVERLAP_CHARS: ${LQ_AI_CHUNK_OVERLAP_CHARS:-200}
+      LQ_AI_GATEWAY_URL: ${LQ_AI_GATEWAY_URL:-http://gateway:8001}
+      LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    # Persist Docling/EasyOCR model caches across restarts (same names as dev —
+    # docs/adr/0006-document-pipeline-architecture.md).
+    volumes:
+      - ingest-hf-cache:/root/.cache/huggingface
+      - ingest-easyocr-cache:/root/.EasyOCR
+    command: ["arq", "app.workers.document_pipeline.WorkerSettings"]
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import os; from redis import Redis; r = Redis.from_url(os.environ['REDIS_URL']); r.ping()"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  arq-worker:
+    # M3-A6 worker. Sister to `ingest-worker`; same image, dedicated `arq:m3a6`
+    # queue. Agent runs (deepagents) execute HERE.
+    image: ghcr.io/sarturko-maker/lq-ai-api:${LQ_AI_IMAGE_TAG:?set LQ_AI_IMAGE_TAG to a published sha-<sha> tag from images.yml — never :main}
+    restart: unless-stopped
+    # Agent runs execute here and load the local embedder + hold N fanned-out
+    # subagents' context. mem_limit caps THIS cgroup so a heavy run self-OOMs
+    # (run fails + worker restarts) rather than the kernel killing Postgres —
+    # ADR-F056 §Resource-aware execution; pair with FAN_OUT_QUOTA below.
+    mem_limit: 2500m
+    mem_reservation: 1250m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-lq_ai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lq_ai}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      LQ_AI_SKIP_MIGRATIONS: "1"
+      LQ_AI_GATEWAY_URL: ${LQ_AI_GATEWAY_URL:-http://gateway:8001}
+      LQ_AI_GATEWAY_KEY: ${LQ_AI_GATEWAY_KEY:?LQ_AI_GATEWAY_KEY is required}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Retrieval providers (ADR-F049 C1/D) — agent runs load these in-process.
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+      RERANK_ENABLED: ${RERANK_ENABLED:-true}
+      # Per-run subagent fan-out ceiling (balanced tier; ADR-F049 Slice E /
+      # ADR-F053). Agent runs execute in THIS worker, so the cap must be set
+      # here. 32 is the app default (api/app/agents/budget.py) when unset;
+      # written explicitly so the prod value is visible in this file.
+      FAN_OUT_QUOTA: ${FAN_OUT_QUOTA:-32}
+      # Skills baked into the image at /skills — no bind mount here either.
+      LQ_AI_SKILLS_DIR: ${LQ_AI_SKILLS_DIR:-/skills}
+      # Storage-backed tools (Commercial apply_redline source-doc fetch +
+      # redlined output upload; user-export bundles) execute in this worker.
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:?set to your S3-compatible endpoint (e.g. Hetzner Object Storage) — prod has no MinIO fallback}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+      S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required (per-tenant bucket — ADR-F058 day-one rule 1 — key objects tenants/<stack-or-org-id>/<file_id>)}
+      S3_REGION: ${S3_REGION:?S3_REGION is required (provider-specific code, e.g. Hetzner "fsn1"/"nbg1"/"hel1" — not necessarily an AWS region)}
+    command: ["arq", "app.workers.arq_setup.WorkerSettings"]
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import os; from redis import Redis; r = Redis.from_url(os.environ['REDIS_URL']); r.ping()"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  web:
+    # LQ.AI web shell — static SvelteKit SPA served by nginx (F0-S6, ADR-F006).
+    # PUBLIC_LQ_AI_API_BASE_URL is baked in at image-build time; the images.yml
+    # build leaves it at its default (relative `/api/v1`), which is exactly
+    # right for prod's same-origin reverse-proxy topology — nothing to set here.
+    image: ghcr.io/sarturko-maker/lq-ai-web:${LQ_AI_IMAGE_TAG:?set LQ_AI_IMAGE_TAG to a published sha-<sha> tag from images.yml — never :main}
+    restart: unless-stopped
+    mem_limit: 256m
+    mem_reservation: 128m
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  collabora:
+    # In-app Word editor engine — Collabora Online / CODE over WOPI (ADR-F047).
+    # Same PREBUILT image, pinned BY DIGEST, as dev (Spike-0-validated Collabora
+    # Office 26.04.1.4 — docs/fork/evidence/libreoffice-spike0/).
+    image: collabora/code@sha256:75859dc9f9084d1877ce36cf96ec86600f495bade33289c9cbc27e0a0ee23b81  # collabora/code 26.04.1.4
+    restart: unless-stopped
+    mem_limit: 2g
+    mem_reservation: 1g
+    # MKNOD is all coolwsd's chroot sandbox needs; deliberately not `privileged`
+    # / SYS_ADMIN (same posture as dev).
+    cap_add:
+      - MKNOD
+    environment:
+      # WOPI host allow-list — internal address, unchanged from dev.
+      aliasgroup1: http://api:8000
+      # Public origin this stack is served under. Both server_name (bare
+      # host[:port]) and net.frame_ancestors (full https origin, extra_params
+      # below) are DERIVED from this single var — dev's separate
+      # COLLABORA_SERVER_NAME / COLLABORA_FRAME_ANCESTORS defaults don't apply
+      # in prod (no localhost). Caddy (SAAS-3) terminates TLS in front of this.
+      server_name: ${LQ_AI_PUBLIC_ORIGIN:?set to this tenant's public host[:port], e.g. acme.lq-ai.example.com — no scheme}
+      dictionaries: en_GB en_US
+      DONT_GEN_SSL_CERT: "true"
+      # No default admin credentials in prod (dev defaults to admin/admin — the
+      # console still isn't reachable, no host port, not proxied, but a shared
+      # public value across every tenant stack is an avoidable weak spot).
+      username: ${COLLABORA_ADMIN_USER:?COLLABORA_ADMIN_USER is required}
+      password: ${COLLABORA_ADMIN_PASSWORD:?COLLABORA_ADMIN_PASSWORD is required}
+      # ssl.termination defaults to true (prod is always behind Caddy's TLS
+      # termination) — the inverse of dev's plain-http default. home_mode.enable
+      # trade-off documented in .env.example / dev compose; unchanged in prod.
+      extra_params: "--o:ssl.enable=false --o:ssl.termination=${COLLABORA_SSL_TERMINATION:-true} --o:net.frame_ancestors=https://${LQ_AI_PUBLIC_ORIGIN:?set to this tenant's public host[:port]} --o:home_mode.enable=${COLLABORA_HOME_MODE:-true} --o:allow_update_popup=false"
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/9980 && printf "GET /hosting/discovery HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && head -n1 <&3 | grep -q 200'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+# ============================================================
+# Persistent volumes — same names as docker-compose.yml minus miniodata
+# (no minio service) and ollamadata (no local-inference profile in prod).
+# ============================================================
+
+volumes:
+  pgdata:
+  redisdata:
+  gateway-config:
+  ingest-hf-cache:
+  ingest-easyocr-cache:

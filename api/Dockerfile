@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install runtime deps from pyproject.toml (no dev extras in the image)
-COPY pyproject.toml README.md ./
+COPY api/pyproject.toml api/README.md ./
 RUN pip install --no-cache-dir .
 # C4 (ADR-F031): Adeu installed --no-deps — its hard fastmcp[apps] dep would pull
 # starlette 0.48 / mcp / pydantic 2.13 and break our pinned FastAPI stack. We never
@@ -31,11 +31,20 @@ ENV RERANK_CACHE_DIR=/opt/fastembed-cache
 RUN python -c "from fastembed.rerank.cross_encoder import TextCrossEncoder; TextCrossEncoder('Xenova/ms-marco-MiniLM-L-6-v2', cache_dir='/opt/fastembed-cache')"
 
 # Copy application code, migration files, and the entrypoint script
-COPY app/ ./app/
-COPY alembic.ini ./alembic.ini
-COPY alembic/ ./alembic/
-COPY entrypoint.sh /usr/local/bin/lq-ai-entrypoint
+COPY api/app/ ./app/
+COPY api/alembic.ini ./alembic.ini
+COPY api/alembic/ ./alembic/
+COPY api/entrypoint.sh /usr/local/bin/lq-ai-entrypoint
 RUN chmod +x /usr/local/bin/lq-ai-entrypoint
+
+# SAAS-1 (ADR-F058 Mode 2): build context is now the REPO ROOT (see
+# docker-compose.yml / images.yml / release.yml `context: .` + `file:
+# ./api/Dockerfile`) specifically so this line can reach skills/ — it lives
+# outside api/ and a prod host has no separate repo checkout to bind-mount it
+# from. Baking it in kills the migration-0032 fresh-DB trap (it reads
+# /skills/playbooks/nda/playbook.yaml) for good, not just in dev where the
+# ./skills:/skills:ro bind mount (docker-compose.yml) happened to cover it.
+COPY skills/ /skills/
 
 EXPOSE 8000
 

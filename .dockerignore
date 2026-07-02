@@ -1,0 +1,73 @@
+# =============================================================================
+# Root .dockerignore — SAAS-1 (ADR-F058): the api/ingest-worker/arq-worker
+# build context is now the REPO ROOT (api/Dockerfile needs `COPY skills/
+# /skills/`, which lives outside api/). gateway/ and web/ keep their own
+# per-directory .dockerignore (unaffected — those builds still use ./gateway
+# and ./web as context).
+#
+# This file is LOAD-BEARING for build performance, not just hygiene: with a
+# root context, an unrelated change anywhere in the tree (docs, evidence
+# packs, node_modules) would otherwise bust Docker's context hash and force a
+# resend of gigabytes to the daemon on every build. Keep it lean; api/Dockerfile
+# only ever COPYs api/{pyproject.toml,README.md,app/,alembic.ini,alembic/,
+# entrypoint.sh} and skills/ — everything else here is noise for that build.
+# =============================================================================
+
+# ----- VCS -----
+.git/
+.github/
+
+# ----- Not needed by the api image build -----
+gateway/
+web/node_modules/
+web/.svelte-kit/
+web/build/
+web/dist/
+word-addin/node_modules/
+docs/
+sample-documents/
+deploy/
+tests/
+api/tests/
+scripts/
+.vite/
+.claude/
+
+# ----- macOS Finder duplicate files (see api/.dockerignore for the "why") -----
+**/* [0-9].*
+**/* [0-9][0-9].*
+**/.DS_Store
+**/._*
+
+# ----- Python build / test caches -----
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.coverage
+**/htmlcov/
+.venv/
+venv/
+env/
+
+# ----- Node -----
+**/node_modules/
+
+# ----- Editor / OS detritus -----
+**/*.swp
+**/*.swo
+**/.idea/
+**/.vscode/
+
+# ----- Secrets — never sent to the build daemon -----
+.env
+.env.*
+!.env.example
+**/*.env
+**/*.env.*
+!**/*.env.example
+
+# ----- Misc -----
+*.log
