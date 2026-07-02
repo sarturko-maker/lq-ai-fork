@@ -24,8 +24,7 @@ from app.security.jwt import (
     decode_access_token,
     decode_mfa_token,
     decode_wopi_token,
-    hash_refresh_token,
-    refresh_token_matches,
+    hmac_refresh_token,
 )
 from app.security.passwords import hash_password, verify_password
 
@@ -41,7 +40,6 @@ __all__ = [
     "decode_mfa_token",
     "decode_wopi_token",
     "hash_password",
-    "hash_refresh_token",
-    "refresh_token_matches",
+    "hmac_refresh_token",
     "verify_password",
 ]

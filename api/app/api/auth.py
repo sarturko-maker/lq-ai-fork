@@ -31,7 +31,7 @@ we don't reveal whether an email exists in the system.
 
 from __future__ import annotations
 
-import asyncio
+import hmac
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
@@ -54,9 +54,10 @@ from app.security import (
     create_refresh_token,
     decode_mfa_token,
     hash_password,
-    refresh_token_matches,
+    hmac_refresh_token,
     verify_password,
 )
+from app.security.rate_limit import RateLimiter, get_rate_limiter
 from app.security.totp import (
     consume_recovery_code,
     generate_recovery_codes,
@@ -66,6 +67,9 @@ from app.security.totp import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# ADR-F059 — per-IP + per-account Redis rate limiting on the auth surface.
+RateLimiterDep = Annotated[RateLimiter, Depends(get_rate_limiter)]
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +276,7 @@ async def _create_session(
     the user's first password entry, not from the most recent rotation.
     """
     settings = get_settings()
-    plaintext, hashed = create_refresh_token()
+    plaintext, token_hmac = create_refresh_token()
     user_agent, ip_address = _client_metadata(request)
 
     now = _utcnow()
@@ -282,7 +286,7 @@ async def _create_session(
 
     session = UserSession(
         user_id=user.id,
-        refresh_token_hash=hashed,
+        refresh_token_hmac=token_hmac,
         user_agent=user_agent,
         ip_address=ip_address,
         expires_at=now + timedelta(seconds=settings.jwt_refresh_token_ttl_seconds),
@@ -292,19 +296,11 @@ async def _create_session(
     db.add(session)
     await db.flush()
 
-    # Keep the per-user active-session set bounded. /auth/refresh has to
-    # bcrypt-compare the presented token against EVERY active session (per-row
-    # salt → no index lookup), so an unbounded set turns refresh into a
-    # multi-second, event-loop-occupying scan — 359 accumulated dev sessions
-    # (all one user) measured at ~79s, long enough that the web layout's
-    # session check never resolved and the cockpit rendered a permanent blank.
-    # Revoking this user's least-recently-active sessions beyond the cap caps
-    # per-user accumulation (and self-heals existing pile-ups on the next
-    # login). NOTE: it does NOT bound the GLOBAL scan cost — refresh can't
-    # attribute the presented token to a user before matching, so its scan
-    # spans all users' active sessions (~N_users x cap). The deterministic-HMAC
-    # index noted in refresh() is the real fix that removes the scan (and its
-    # bad-token-spam DoS surface) entirely.
+    # Keep the per-user active-session set bounded. The /auth/refresh CPU-DoS
+    # (a bcrypt-compare of the presented token against EVERY active session) is
+    # now removed — refresh looks the session up by a unique HMAC index
+    # (ADR-F059) — but capping stale-login accumulation stays good hygiene
+    # (bounded session table, self-heals existing pile-ups on the next login).
     await _revoke_sessions_over_cap(db, user.id, now=now)
 
     return plaintext, session
@@ -404,8 +400,14 @@ async def login(
     payload: LoginRequest,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    limiter: RateLimiterDep,
 ) -> Response:
     """POST /api/v1/auth/login — see backend-openapi.yaml."""
+    # ADR-F059 — brute-force brake BEFORE any DB/bcrypt work. Per-IP and
+    # per-submitted-account (applied whether or not the account exists → the
+    # 429 leaks no existence signal, same as the generic 401 below).
+    await limiter.enforce_login(request, payload.email)
+
     # Look up the user. Email column is CITEXT so case is irrelevant.
     # `deleted_at IS NOT NULL` users are treated as non-existent.
     result = await db.execute(
@@ -501,68 +503,47 @@ async def refresh(
     payload: RefreshRequest,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    limiter: RateLimiterDep,
 ) -> TokenResponse:
     """POST /api/v1/auth/refresh — rotate the refresh token, mint a new access token."""
     settings = get_settings()
     now = _utcnow()
 
-    # Find the active session whose stored hash matches the presented token.
-    # We can't index-lookup by hash (bcrypt salt is per-row), so we scan
-    # active sessions and bcrypt-compare each. In v1 the active-session
-    # count per user is tiny (a few devices); if this becomes hot, switch
-    # to a deterministic HMAC index column. Tracked as DE candidate.
-    result = await db.execute(
-        select(UserSession.id, UserSession.refresh_token_hash).where(
-            UserSession.revoked_at.is_(None),
-            UserSession.expires_at > now,
-        )
-    )
-    candidates = result.tuples().all()
-    # (The request's read transaction — and its pooled connection — stays
-    # open across the scan, as it always has; releasing it mid-request
-    # would fight the session-per-request design. The HMAC index column
-    # is the real fix for the scan's duration.)
+    # ADR-F059 — per-IP flood brake (still worthwhile even though the O(n)
+    # bcrypt scan below is gone: bounds bad-token spam).
+    await limiter.enforce_refresh(request)
 
-    def _match_candidate() -> UUID | None:
-        for session_id, token_hash in candidates:
-            if refresh_token_matches(payload.refresh_token, token_hash):
-                return session_id
-        return None
-
-    # The scan is CPU-bound (one bcrypt compare per candidate, ~10²ms
-    # each): with accumulated sessions it reaches tens of seconds, and
-    # run inline it FREEZES the event loop — every concurrent request,
-    # including logins, stalls behind one refresh (found live in F1-S2
-    # verification with 186 dev sessions). Off-thread keeps the loop
-    # responsive; the deterministic index column above stays the real
-    # fix for the scan itself.
-    matched_id = await asyncio.to_thread(_match_candidate)
-
-    matched: UserSession | None = None
-    if matched_id is not None:
-        # Re-acquire under lock and RE-CHECK liveness: the scan is a long
-        # await point — a concurrent presentation of the SAME token can
-        # have rotated the session meanwhile. Without this re-check the
-        # loser would blindly overwrite the revocation below (refresh
-        # double-spend: two live sessions from one token, and the theft
-        # signal rotation exists to provide — the loser's 401 — is lost).
-        matched = (
-            await db.execute(
-                select(UserSession)
-                .where(
-                    UserSession.id == matched_id,
-                    UserSession.revoked_at.is_(None),
-                    UserSession.expires_at > now,
-                )
-                .with_for_update()
+    # ADR-F059 — single indexed lookup by the deterministic HMAC verifier (no
+    # more scan + bcrypt-compare of every active session). `.with_for_update()`
+    # in this one query both selects and locks the row: a concurrent
+    # presentation of the SAME token blocks on the lock, then re-evaluates the
+    # `revoked_at IS NULL` predicate after the winner commits its revocation
+    # (Postgres READ COMMITTED EvalPlanQual) and so returns None → the loser
+    # 401s, preserving the refresh-double-spend theft signal.
+    token_hmac = hmac_refresh_token(payload.refresh_token)
+    matched = (
+        await db.execute(
+            select(UserSession)
+            .where(
+                UserSession.refresh_token_hmac == token_hmac,
+                UserSession.revoked_at.is_(None),
+                UserSession.expires_at > now,
             )
-        ).scalar_one_or_none()
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+    # Belt-and-braces hygiene: re-check the fetched verifier with a constant-time
+    # compare (the SQL equality already matched; this guards against any future
+    # collation/normalisation surprise on the indexed column).
+    if matched is not None and not hmac.compare_digest(matched.refresh_token_hmac, token_hmac):
+        matched = None
 
     if matched is None:
         # No user context (the presented token didn't match any active
         # session); the audit row records the *attempt* with no user id.
         # Counts/types/IDs only — never the token.
-        reason = "no_matching_session" if matched_id is None else "concurrent_rotation"
+        reason = "no_matching_session"
         await audit_action(
             db,
             user_id=None,
@@ -730,6 +711,7 @@ async def change_password(
     user: CurrentUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    limiter: RateLimiterDep,
 ) -> Response:
     """POST /api/v1/auth/change-password.
 
@@ -753,6 +735,9 @@ async def change_password(
     UI can render a usable message.
     """
     settings = get_settings()
+
+    # ADR-F059 — per-account brake on password-change guessing/abuse.
+    await limiter.enforce_change_password(request, str(user.id))
 
     if not verify_password(payload.current_password, user.hashed_password):
         await audit_action(
@@ -849,6 +834,7 @@ async def mfa_setup(
     user: CurrentUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    limiter: RateLimiterDep,
 ) -> MfaSetupResponse:
     """POST /api/v1/auth/mfa/setup — issue a fresh TOTP secret + recovery codes.
 
@@ -857,6 +843,7 @@ async def mfa_setup(
     after MFA is already enabled is a 409 ``mfa_already_enabled``;
     the user must call ``/mfa/disable`` first.
     """
+    await limiter.enforce_mfa_manage(request, str(user.id), action="setup")  # ADR-F059
     if user.mfa_enabled:
         raise Conflict(message="MFA already enabled", code="mfa_already_enabled")
 
@@ -897,6 +884,7 @@ async def mfa_enable(
     user: CurrentUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    limiter: RateLimiterDep,
 ) -> Response:
     """POST /api/v1/auth/mfa/enable — flip ``mfa_enabled`` after first verify.
 
@@ -904,6 +892,7 @@ async def mfa_enable(
     ``totp_secret`` is on the user row). On success the user's next
     login will receive the 423 challenge.
     """
+    await limiter.enforce_mfa_manage(request, str(user.id), action="enable")  # ADR-F059
     if user.mfa_enabled:
         raise Conflict(message="MFA already enabled", code="mfa_already_enabled")
 
@@ -966,6 +955,7 @@ async def mfa_verify(
     payload: MfaVerifyRequest,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    limiter: RateLimiterDep,
 ) -> Response:
     """POST /api/v1/auth/mfa/verify — redeem an mfa_token + code → LoginResponse.
 
@@ -978,6 +968,11 @@ async def mfa_verify(
     attacker cannot probe which leg failed.
     """
     claims = decode_mfa_token(payload.mfa_token)
+    # ADR-F059 — the 6-digit TOTP is brute-forceable; cap tries per-IP and (when
+    # the challenge token is decodable) per-account BEFORE the TOTP comparison.
+    await limiter.enforce_mfa_verify(
+        request, account_id=(str(claims.user_id) if claims is not None else None)
+    )
     if claims is None:
         await audit_action(
             db,
@@ -1073,6 +1068,7 @@ async def mfa_disable(
     user: CurrentUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
+    limiter: RateLimiterDep,
 ) -> Response:
     """POST /api/v1/auth/mfa/disable — require password + MFA code together.
 
@@ -1083,6 +1079,7 @@ async def mfa_disable(
     Wrong-password and wrong-code branches both return generic 401 so
     callers can't tell which leg failed.
     """
+    await limiter.enforce_mfa_manage(request, str(user.id), action="disable")  # ADR-F059
     if not user.mfa_enabled:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

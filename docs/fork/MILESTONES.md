@@ -660,11 +660,15 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   (CI checkouts need `submodules: true` — skills/community is a gitlink); OOM mem_limits
   branch merged as PR #186; Dependabot + weekly Trivy (SARIF severity-limited); fork
   `SECURITY.md` + repo Private Vulnerability Reporting enabled.
-- **SAAS-2 — internet-exposure hardening pack.** Rate limits (per-IP+per-account, Redis) on all
-  auth endpoints; `/auth/refresh` HMAC index (kills the bcrypt-scan DoS); edge-deny
-  `/api/v1/internal/*`; WOPI hygiene (log-scrub query tokens, shorter TTL, proof-key eval);
-  non-dev boot assertion on `jwt_secret`; security headers at the proxy; trusted-proxy IPs;
-  `/metrics` off the public origin. Tests: brute-force, refresh-flood, internal-deny.
+- **SAAS-2 ✓ done — internet-exposure hardening pack** (PR #212, ADR-F059). Redis rate limits
+  (per-IP+per-account, hand-rolled atomic Lua, no new dep, fail-open) on all auth endpoints +
+  `/admin/bootstrap-status`; `/auth/refresh` HMAC index (migration 0084 — kills the O(n) global
+  bcrypt-scan DoS); `deploy/caddy/Caddyfile` edge-deny of `/api/v1/internal/*` + `/api/v1/wopi/*`
+  + `/metrics` (uniform 404) + security headers + access-token log scrub; trusted-proxy
+  `FORWARDED_ALLOW_IPS` (prod); non-dev boot assertion on `jwt_secret`. WOPI TTL kept at 10h
+  (no client renewal path — edge-deny + log-scrub are the fix); proof-key deferred. Tests:
+  brute-force (per-IP + per-account), refresh-flood (zero-bcrypt), limiter-wiring drift guard,
+  Caddyfile drift guard, boot assertion, log scrub.
 - **SAAS-3 — first hosted environment (staging).** Hetzner node + Caddy + wildcard DNS-01 cert
   (CT-log hygiene) + SPF/DKIM/DMARC; encrypted `pg_dump` + object-storage backups with dead-man
   alerting; public status page; staging auto-deploy from main. Proof: a real agent run end-to-end

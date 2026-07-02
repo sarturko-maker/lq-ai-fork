@@ -8,9 +8,10 @@ Token model (per ADR 0002 / PRD §5.1):
   by the refresh flow.
 
 - **Refresh token** — long-lived (~7 days) opaque random string. The plaintext
-  is returned to the client on login and refresh; the bcrypt hash is stored
-  in `user_sessions.refresh_token_hash` so a database leak does not let an
-  attacker re-authenticate. Rotated on each use.
+  is returned to the client on login and refresh; a deterministic HMAC-SHA256
+  verifier is stored in `user_sessions.refresh_token_hmac` (unique-indexed) so a
+  database leak does not let an attacker re-authenticate, while the refresh
+  lookup stays a single indexed query (ADR-F059). Rotated on each use.
 
 - **MFA challenge token** — JWT with type=mfa, ~5 min TTL. Issued by
   `/auth/login` when the user has `mfa_enabled=true` and 423-ed back; D5
@@ -28,12 +29,13 @@ trips review.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-import bcrypt
 import jwt
 
 from app.config import get_settings
@@ -272,48 +274,65 @@ def decode_wopi_token(token: str) -> WopiTokenClaims | None:
 
 
 # ---------------------------------------------------------------------------
-# Refresh tokens
+# Refresh tokens  (ADR-F059 — deterministic HMAC index, replaces the bcrypt scan)
 #
-# Per PRD §5.1 / ADR 0002, refresh tokens are opaque random strings — not
-# JWTs. The plaintext goes to the client; we store only the bcrypt hash in
-# user_sessions. We use bcrypt (not SHA-256) for the same reason we use
-# bcrypt for passwords: an attacker who exfiltrates the user_sessions
-# table should not be able to brute-force the (long, random) refresh token
-# offline meaningfully faster than they could online — and bcrypt's slow
-# verification gates that.
+# Per PRD §5.1 / ADR 0002, refresh tokens are opaque random strings — not JWTs.
+# The plaintext goes to the client; we store only a verifier in user_sessions.
 #
-# The token is 32 bytes of cryptographic randomness, urlsafe-base64-encoded
-# (~43 chars). 32 bytes is well over the 128-bit entropy threshold needed
-# to make brute-force pointless even without bcrypt.
+# We store a deterministic HMAC-SHA256, NOT a per-row bcrypt hash. Rationale
+# (ADR-F059): the token is 32 bytes of CSPRNG output (~256 bits), so it is
+# NOT brute-forceable offline — bcrypt's per-row salt bought nothing here except
+# a CPU-DoS: /auth/refresh cannot attribute a presented token to a user before
+# matching, so a bcrypt-per-row verifier forced a scan over EVERY active session
+# (unindexable by a salted hash) with one bcrypt compare each — tens of seconds
+# under accumulated sessions, and a bad-token flood amplifier. A deterministic
+# HMAC over a high-entropy secret is a sufficient at-rest verifier and turns the
+# lookup into ONE indexed equality query. bcrypt remains for PASSWORDS (low
+# entropy — where its slowness is the point).
+#
+# The index key is DERIVED from jwt_secret (no new secret to provision) with a
+# domain-separation constant so it is distinct from the JWT signing use of the
+# same secret:
+#   index_key = HMAC-SHA256(jwt_secret, "lq-ai-refresh-token-index-v1")
+#   token_hmac = HMAC-SHA256(index_key, token)
+# Rotating jwt_secret invalidates all stored verifiers (every session must
+# re-login) — acceptable and the same blast radius as rotating the signing key.
 # ---------------------------------------------------------------------------
 
 _REFRESH_TOKEN_BYTES = 32
+
+# Domain-separation label: keeps the derived refresh-index key distinct from any
+# other HMAC use of jwt_secret. Bump the version suffix to force a re-key.
+_REFRESH_INDEX_DOMAIN = b"lq-ai-refresh-token-index-v1"
 
 
 def create_refresh_token() -> tuple[str, str]:
     """Mint a fresh refresh token.
 
-    Returns `(plaintext, bcrypt_hash)`. The plaintext goes to the client
-    (transported over TLS); the hash goes into `user_sessions.refresh_token_hash`.
-    The plaintext is never logged or persisted by the backend.
+    Returns ``(plaintext, token_hmac)``. The plaintext goes to the client
+    (transported over TLS); the ``token_hmac`` hex digest goes into
+    ``user_sessions.refresh_token_hmac`` (unique-indexed). The plaintext is
+    never logged or persisted by the backend.
     """
     plaintext = secrets.token_urlsafe(_REFRESH_TOKEN_BYTES)
-    return plaintext, hash_refresh_token(plaintext)
+    return plaintext, hmac_refresh_token(plaintext)
 
 
-def hash_refresh_token(plaintext: str) -> str:
-    """Bcrypt-hash a refresh token plaintext for at-rest storage."""
+def _refresh_index_key() -> bytes:
+    """Derive the refresh-token index key from ``jwt_secret`` (domain-separated)."""
     settings = get_settings()
-    salt = bcrypt.gensalt(rounds=settings.bcrypt_rounds)
-    hashed = bcrypt.hashpw(plaintext.encode("utf-8"), salt)
-    return hashed.decode("utf-8")
+    return hmac.new(
+        settings.jwt_secret.encode("utf-8"),
+        _REFRESH_INDEX_DOMAIN,
+        hashlib.sha256,
+    ).digest()
 
 
-def refresh_token_matches(plaintext: str, hashed: str) -> bool:
-    """Constant-time check that a refresh-token plaintext matches a stored hash."""
-    if not plaintext or not hashed:
-        return False
-    try:
-        return bcrypt.checkpw(plaintext.encode("utf-8"), hashed.encode("utf-8"))
-    except ValueError:
-        return False
+def hmac_refresh_token(plaintext: str) -> str:
+    """Deterministic HMAC-SHA256 verifier for a refresh-token plaintext.
+
+    Same input + same ``jwt_secret`` always yields the same hex digest, so the
+    refresh handler can look a session up by an indexed equality on this column
+    instead of scanning + bcrypt-comparing every active session.
+    """
+    return hmac.new(_refresh_index_key(), plaintext.encode("utf-8"), hashlib.sha256).hexdigest()

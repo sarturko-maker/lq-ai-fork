@@ -160,9 +160,36 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_ACCESS_TOKEN_TTL_SECONDS: ${JWT_ACCESS_TOKEN_TTL_SECONDS:-900}
       JWT_REFRESH_TOKEN_TTL_SECONDS: ${JWT_REFRESH_TOKEN_TTL_SECONDS:-604800}
+      # ADR-F059 §6-item-1 — auth rate-limit knobs, forwarded so an operator can
+      # tighten them under attack or loosen a false-positive WITHOUT editing this
+      # file (the defaults here ARE the secure code defaults). The api service
+      # uses an explicit env allowlist (no env_file), so a knob is only override-
+      # able once forwarded — hence these lines. NOTE (ADR-F059 D3): the per-
+      # account login bucket keys on the SUBMITTED email, so a known-victim
+      # lockout DoS is possible; RATE_LIMIT_LOGIN_ACCOUNT_PER_WINDOW is the lever.
+      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
+      RATE_LIMIT_LOGIN_IP_PER_WINDOW: ${RATE_LIMIT_LOGIN_IP_PER_WINDOW:-10}
+      RATE_LIMIT_LOGIN_ACCOUNT_PER_WINDOW: ${RATE_LIMIT_LOGIN_ACCOUNT_PER_WINDOW:-5}
+      RATE_LIMIT_REFRESH_IP_PER_WINDOW: ${RATE_LIMIT_REFRESH_IP_PER_WINDOW:-60}
+      RATE_LIMIT_MFA_VERIFY_IP_PER_WINDOW: ${RATE_LIMIT_MFA_VERIFY_IP_PER_WINDOW:-10}
+      RATE_LIMIT_MFA_VERIFY_ACCOUNT_PER_WINDOW: ${RATE_LIMIT_MFA_VERIFY_ACCOUNT_PER_WINDOW:-5}
+      RATE_LIMIT_CHANGE_PASSWORD_ACCOUNT_PER_WINDOW: ${RATE_LIMIT_CHANGE_PASSWORD_ACCOUNT_PER_WINDOW:-5}
+      RATE_LIMIT_MFA_MANAGE_ACCOUNT_PER_WINDOW: ${RATE_LIMIT_MFA_MANAGE_ACCOUNT_PER_WINDOW:-10}
+      RATE_LIMIT_BOOTSTRAP_STATUS_IP_PER_WINDOW: ${RATE_LIMIT_BOOTSTRAP_STATUS_IP_PER_WINDOW:-30}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LQ_AI_DEV_MODE: "false"
+      # ADR-F059 D4 — trusted-proxy handling. uvicorn runs with --proxy-headers
+      # ON by default (uvicorn 0.32+) and reads FORWARDED_ALLOW_IPS natively, so
+      # with it set uvicorn rewrites request.client to the real client IP that
+      # Caddy (SAAS-3) forwards in X-Forwarded-For — the source of truth for the
+      # per-IP rate-limit buckets, audit rows, and session IP metadata. This
+      # compose network publishes ZERO host ports (see header), so the ONLY
+      # peers that can reach api:8000 are stack services; trusting them is
+      # acceptable until SAAS-3 pins Caddy's fixed container IP here. We never
+      # parse X-Forwarded-For in app code (ADR-F059 D4). Dev compose leaves this
+      # unset → uvicorn's default 127.0.0.1 → byte-identical dev behaviour.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
       # Same-origin reverse proxy (Caddy, SAAS-3) fronts web + api under one
       # origin — leave unset (CORS disabled; no cross-origin browser calls).
       LQ_AI_CORS_ORIGINS: ${LQ_AI_CORS_ORIGINS:-}

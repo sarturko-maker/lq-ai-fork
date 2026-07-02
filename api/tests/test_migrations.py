@@ -100,7 +100,9 @@ async def test_partial_indexes_exist(db_session: AsyncSession) -> None:
     expected_partials = {
         "idx_users_email_active",
         "idx_users_deletion_scheduled",
-        "idx_user_sessions_token_hash",
+        # idx_user_sessions_token_hash (bcrypt partial index) was dropped in
+        # migration 0084 (ADR-F059) — refresh now uses a full UNIQUE index on
+        # refresh_token_hmac (ix_user_sessions_refresh_token_hmac), not partial.
         "idx_audit_log_privileged",
         "idx_audit_log_tier",
         "idx_inference_log_user",

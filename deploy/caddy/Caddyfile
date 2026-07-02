@@ -1,0 +1,113 @@
+# LQ.AI Oscar Edition — production edge (Mode-2 per-tenant stack).
+#
+# The ONLY public listener for a hosted tenant stack (docker-compose.prod.yml,
+# which publishes ZERO host ports). Caddy joins that compose network and talks
+# to services by name: api:8000 and web:8080. SAAS-3 adds the caddy service to
+# the prod compose and provisions TLS (wildcard DNS-01); this file is the edge
+# config that ships with it.
+#
+# Each stanza below closes a numbered item of the SAAS-HOSTING.md §6 security
+# gate (ADR-F059). Do NOT edit deploy/caddy-tailscale/ (the dev/Tailscale edge).
+#
+# Validate:  docker run --rm -v "$PWD/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+#              caddy:2 caddy validate --config /etc/caddy/Caddyfile
+{
+	# ACME account email (expiry notices). Env placeholder with an obvious
+	# placeholder default; the operator sets LQ_AI_ACME_EMAIL to a real address.
+	email {$LQ_AI_ACME_EMAIL:ops@example.com}
+}
+
+# Site address: the operator sets LQ_AI_PUBLIC_HOST to the tenant's hostname
+# (Caddy then provisions TLS automatically). The `localhost` default lets this
+# file `caddy validate` with no DNS/cert dependency.
+{$LQ_AI_PUBLIC_HOST:localhost} {
+	# --- (d) §6-4: access logs MUST NOT retain the WOPI access_token ---
+	# Caddy's default access log records `request>uri`, which includes the query
+	# string — and the WOPI editor-session token rides as an `access_token` query
+	# param. The `query` log filter replaces that param's value before the line
+	# is written. (The api scrubs its own uvicorn access log too — belt-and-braces.)
+	log {
+		output stdout
+		format filter {
+			wrap console
+			request>uri query {
+				replace access_token REDACTED
+			}
+		}
+	}
+
+	# --- (c) §6-6: security headers (cover api + web uniformly at the edge) ---
+	header {
+		# HSTS — 1 year, include subdomains; NO preload yet (preload is a
+		# hard-to-reverse commitment — revisit in SAAS-3 once stable).
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Minimal deny-list of powerful features the app does not use.
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		# frame-ancestors 'self': Collabora embeds the editor SAME-origin in an
+		# iframe, so self-framing MUST keep working (web/nginx.conf already sets
+		# the same framing CSP for the /browser|/hosting|/cool routes — kept consistent).
+		Content-Security-Policy "frame-ancestors 'self'"
+		# Starter CSP in REPORT-ONLY mode: observe violations WITHOUT breaking the
+		# app. Enforcement (promoting this to Content-Security-Policy) is SAAS-3
+		# tuning once the violation report is clean.
+		Content-Security-Policy-Report-Only "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
+		# Don't advertise the server software.
+		-Server
+	}
+
+	# Request-body ceiling — uploads up to 100 MB (SAAS-HOSTING.md §5).
+	request_body {
+		max_size 100MB
+	}
+
+	# --- (a) §6-3: edge-deny the service-to-service internal API ---
+	# /api/v1/internal/* is gateway<->backend only (single shared secret); the
+	# gateway reaches api over the compose network, never through this edge.
+	# Uniform 404 (never 403) — no existence leak, matching the app's authz rule.
+	# More specific than /api/v1/* below, so Caddy's handle-specificity ordering
+	# evaluates this first. The named `path` matcher denies both the bare prefix
+	# and the wildcard so a probe to `/api/v1/internal` (no slash) can't fall through.
+	@internal path /api/v1/internal /api/v1/internal/*
+	handle @internal {
+		respond 404
+	}
+
+	# --- (a) §6-3/§6-4: edge-deny the WOPI protocol surface ---
+	# /api/v1/wopi/* is called ONLY by the in-stack Collabora server, which reaches
+	# the WOPI host over the compose-internal address (collabora_wopi_host =
+	# http://api:8000, matching the collabora aliasgroup1) — never through this
+	# public edge. The browser mints a token via POST /api/v1/files/{id}/editor-
+	# session and talks to Collabora at web:8080 /cool; it never calls /wopi
+	# directly. Denying it here removes the external replay vector for a stolen
+	# editor-session token (the threat the deferred WOPI proof-key would defend).
+	@wopi path /api/v1/wopi /api/v1/wopi/*
+	handle @wopi {
+		respond 404
+	}
+
+	# --- (b) §6-8: keep /metrics off the public origin ---
+	# The api registers an unauthenticated Prometheus /metrics; deny it at the
+	# edge. (The gateway's /metrics is never routed here at all.)
+	@metrics path /metrics /metrics/*
+	handle @metrics {
+		respond 404
+	}
+
+	# --- (f) routing (SAAS-HOSTING.md §5) — API → api:8000 (after the denies) ---
+	handle /api/v1/* {
+		reverse_proxy api:8000 {
+			# (e) SSE: agent + chat streams must flush immediately, not buffer.
+			# Caddy streams by default; -1 disables response buffering explicitly.
+			flush_interval -1
+		}
+	}
+
+	# --- (f) everything else → web:8080 ---
+	# The web nginx serves the SPA bundle AND proxies Collabora (/browser,
+	# /hosting, /cool). WebSocket upgrades (/cool) pass through automatically.
+	handle {
+		reverse_proxy web:8080
+	}
+}

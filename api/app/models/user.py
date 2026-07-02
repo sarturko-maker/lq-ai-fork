@@ -105,9 +105,11 @@ class User(Base):
 class UserSession(Base):
     """Refresh token session. Access tokens are stateless JWTs (not stored).
 
-    `refresh_token_hash` stores the bcrypt hash of the refresh token. The
-    token itself is returned to the client at login/refresh time and never
-    persisted in the clear.
+    `refresh_token_hmac` stores a deterministic HMAC-SHA256 verifier of the
+    refresh token (ADR-F059), unique-indexed so /auth/refresh looks a session
+    up by one indexed equality instead of a bcrypt scan. The token itself is
+    returned to the client at login/refresh time and never persisted in the
+    clear.
     """
 
     __tablename__ = "user_sessions"
@@ -122,7 +124,9 @@ class UserSession(Base):
         ForeignKey("users.id", ondelete="CASCADE", name="fk_user_sessions_user_id"),
         nullable=False,
     )
-    refresh_token_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # ADR-F059 — deterministic HMAC-SHA256 hex digest (64 chars); the unique
+    # index that makes the refresh lookup O(1) is created in migration 0084.
+    refresh_token_hmac: Mapped[str] = mapped_column(String(64), nullable=False)
     user_agent: Mapped[str | None] = mapped_column(String, nullable=True)
     ip_address: Mapped[str | None] = mapped_column(INET, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

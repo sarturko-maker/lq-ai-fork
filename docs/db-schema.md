@@ -76,13 +76,14 @@ Authenticated endpoints (other than `GET /users/me`, `POST /auth/logout`, and `P
 
 ### `user_sessions`
 
-Refresh tokens, hashed; access tokens are stateless JWTs.
+Refresh tokens are stored as a deterministic HMAC-SHA256 verifier (ADR-F059, migration 0084) so
+`/auth/refresh` is a single indexed lookup; access tokens are stateless JWTs.
 
 ```sql
 CREATE TABLE user_sessions (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
     user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    refresh_token_hash  TEXT NOT NULL,
+    refresh_token_hmac  VARCHAR(64) NOT NULL,  -- HMAC-SHA256 hex (ADR-F059); replaced bcrypt refresh_token_hash
     user_agent          TEXT,
     ip_address          INET,
     expires_at          TIMESTAMPTZ NOT NULL,
@@ -91,7 +92,9 @@ CREATE TABLE user_sessions (
 );
 
 CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
-CREATE INDEX idx_user_sessions_token_hash ON user_sessions(refresh_token_hash) WHERE revoked_at IS NULL;
+-- Full UNIQUE index (not partial): the HMAC verifier is globally unique and the refresh
+-- lookup keys on it directly (ADR-F059, replaced the bcrypt partial idx_user_sessions_token_hash).
+CREATE UNIQUE INDEX ix_user_sessions_refresh_token_hmac ON user_sessions(refresh_token_hmac);
 CREATE INDEX idx_user_sessions_expires ON user_sessions(expires_at);
 ```
 
