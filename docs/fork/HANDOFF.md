@@ -3,6 +3,46 @@
 Overwritten at the end of every slice (CLAUDE.md § Session handoff). **Read this first in every session**,
 then CLAUDE.md, then the ADRs/plans named below.
 
+> ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+> ▶▶▶ **PIVOT (2026-07-02): SAAS — HOSTED PRODUCT. Maintainer-directed; the CURRENT direction.**
+> Make the fork hostable: companies register an org (tenant) → admin → users, on operator-hosted,
+> EU-resident, **dedicated stacks (one per tenant)** — while **self-hosting from GitHub stays supported**
+> (three delivery modes; the hosted offering is the market-awareness channel). Governing docs (read in
+> this order): **`docs/fork/plans/SAAS-HOSTING.md`** (plan of record: recon findings with file:line
+> evidence, the A/B architecture decision, hosting = Hetzner ~€36–45/mo base, the update pipeline, the
+> §6 security gate, §10 decision table) → **ADR-F058** (charter: 3 delivery modes; Mode-3 shared-schema
+> RECORDED + trigger-gated (full trigger set in F058); A→B shape = COEXIST; day-one rules:
+> S3 `tenants/<id>/` keys, fleet skew ≤ N-1, per-tenant monthly spend ceiling, PRC-model fencing,
+> platform-vs-org admin split) → `MILESTONES.md § SAAS` (ladder SAAS-0…8A) →
+> `plans/SAAS-COMMERCIAL-PACK.md` + `plans/SAAS-AIACT-SELF-ASSESSMENT.md`. Memory: [[saas-hosting-pivot]].
+>
+> - **WORKING MODEL (maintainer, 2026-07-02):** the lead model (Fable 5) DRAFTS small slices,
+>   ORCHESTRATES, and runs ALL verification/tests/review; **implementation is delegated to smaller
+>   models** (Sonnet 5 default; Opus 4.8 for complex work — migrations, auth/crypto, RLS). Compaction
+>   expected roughly per slice — this banner + memory must always carry the goal and the NEXT slice.
+> - **SAAS-0 ✓ SHIPPED (branch `fork/saas-0-hosted-saas-charter`, base main — doc-only):** ADR-F058
+>   (proposed → maintainer accepts); NORTH-STAR **addendum** (invariant #4 SURVIVES — hosted = per-tenant
+>   stacks; do NOT bake org_id into slices ahead of the Mode-3 trigger); MILESTONES § SAAS;
+>   commercial-pack checklist (MSA/SLA/AUP/DPA/IR/billing — lawyer-maintainer owns; ALL are
+>   first-paying-tenant blockers, not staging blockers); AI-Act self-assessment (expected verdict
+>   LIMITED/art50_transparency — seal the `verdict_hash` once PR #190 merges); SAAS-HOSTING.md committed.
+> - **NEXT = SAAS-1 — pipeline to a deployable artifact** (first implementation slice under the working
+>   model; full spec MILESTONES § SAAS + SAAS-HOSTING §5): (1) `.github/workflows/release.yml` registry
+>   namespace `legalquants` → `sarturko-maker`; (2) NEW push-to-main image builds (path-filtered matrix,
+>   `:sha` + `:main` tags, `type=gha` cache); (3) NEW `docker-compose.prod.yml` (`image:` refs, NO host
+>   ports, full per-service `mem_limit`s); (4) `api/Dockerfile` `COPY skills/ /skills` (kills the
+>   migration-0032 fresh-DB trap); (5) absorb branch `fork/f2-embedding-oom-hardening` (worker
+>   mem_limits); (6) Dependabot + scheduled Trivy; (7) rewrite `SECURITY.md` for the fork (it still
+>   routes vulns to security@legalquants.com — upstream!). Delegate to Sonnet; lead verifies (workflow
+>   dry-run, `docker compose -f docker-compose.prod.yml config`, image build, fresh-context review).
+> - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
+>   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
+>   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 interleaves after SAAS-3**; product NAME
+>   (ADR-F001 rename obligation) blocks SAAS-3's public DNS, not staging; untracked side files
+>   (`sample-documents/`, `api/tests/agents/scenarios/test_*_live.py`, `.vite/`) belong to NO PR — leave
+>   or clean deliberately; dev `.env` `LQ_AI_GATEWAY_KEY` still needs rotating (2026-06-30 terminal dump).
+> ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+
 > ▶▶ **PICKUP (2026-07-02): ▶ TABULAR REVIEW T6 — grid review WORKSPACE + human cell-override — MERGED PR #184
 > (`de393216`).** ADR-F055 **T6 addendum**; **NO migration** (the override rides the `results` JSONB). Dev stack
 > fully rebuilt + healthy `http://localhost:3000` (web + api + arq + ingest); model `smart → deepseek-v4-flash`.

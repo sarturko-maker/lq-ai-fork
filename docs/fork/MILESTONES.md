@@ -636,6 +636,52 @@ decision (Backlog), triggered at real deployment; engine behaviour is identical,
   evidence `docs/fork/evidence/libreoffice-slice5/`. **→ The editor milestone is COMPLETE** (the production
   licence posture remains the deferred Backlog decision below).
 
+## SAAS — hosted product (ACTIVE — maintainer pivot 2026-07-02; ADR-F058)
+
+Outcome: companies can be onboarded onto operator-hosted, EU-resident, dedicated LQ.AI stacks
+(org → admin → users), updated continuously from `main`, hard against the public internet —
+while self-hosting from GitHub keeps working. Plan of record: `docs/fork/plans/SAAS-HOSTING.md`
+(recon + verified findings + the A/B architecture decision); charter: ADR-F058 (three delivery
+modes; stack-per-tenant now; shared-schema Mode 3 recorded + trigger-gated). Working model:
+lead model drafts/orchestrates/verifies; smaller models implement.
+
+- **SAAS-0 ✓ done — charter + governance pack (doc-only).** ADR-F058 (proposed); NORTH-STAR
+  addendum (invariant #4 survives — three delivery modes); this milestone entry;
+  `plans/SAAS-COMMERCIAL-PACK.md` (MSA/ToS/SLA/AUP/DPA/IR/billing checklist for the
+  lawyer-maintainer); `plans/SAAS-AIACT-SELF-ASSESSMENT.md` (the product classified through its
+  own `app/aiact` engine). Open decisions tabled: product name (blocks public DNS), PyMuPDF,
+  Collabora posture, EU model menu, pricing.
+- **SAAS-1 — pipeline to a deployable artifact.** Fix `release.yml` registry namespace
+  (`legalquants` → fork); push-to-main `:sha`+`:main` image builds (path-filtered, gha cache);
+  prod compose file (`image:` refs, no host ports, full per-service mem_limits); `COPY skills/`
+  into the api image (kills the 0032 fresh-DB trap); merge the OOM mem_limits branch; Trivy
+  (scheduled) + Dependabot; fork `SECURITY.md` + private-advisory discipline.
+- **SAAS-2 — internet-exposure hardening pack.** Rate limits (per-IP+per-account, Redis) on all
+  auth endpoints; `/auth/refresh` HMAC index (kills the bcrypt-scan DoS); edge-deny
+  `/api/v1/internal/*`; WOPI hygiene (log-scrub query tokens, shorter TTL, proof-key eval);
+  non-dev boot assertion on `jwt_secret`; security headers at the proxy; trusted-proxy IPs;
+  `/metrics` off the public origin. Tests: brute-force, refresh-flood, internal-deny.
+- **SAAS-3 — first hosted environment (staging).** Hetzner node + Caddy + wildcard DNS-01 cert
+  (CT-log hygiene) + SPF/DKIM/DMARC; encrypted `pg_dump` + object-storage backups with dead-man
+  alerting; public status page; staging auto-deploy from main. Proof: a real agent run end-to-end
+  on the staging URL + a passed restore drill. (AIC-3+ module work can interleave after this.)
+- **SAAS-4 — user lifecycle + admin split.** Invitations/verification/reset/SMTP; forced first
+  password change; WorkOS-style users/orgs/memberships modeling; platform-admin vs org-admin
+  (customer admin never reaches gateway-key endpoints); anti-enumeration + rate limits inherited.
+- **SAAS-5 — cookie auth.** HttpOnly+Secure+SameSite session cookies + CSRF; retires
+  localStorage tokens.
+- **SAAS-6 — EU routing + spend governance.** Tenant-tier provider fencing (MiniMax/DeepSeek out);
+  EU default menu (decision closes here); per-tenant monthly LLM spend ceiling at the gateway
+  (+80 % alert); legacy-chat-stream heartbeat; licensing actions (redis pin, MinIO→object storage
+  for hosted, NOTICES rows, in-product source link).
+- **SAAS-7A — control plane v1 (private repo).** `tenants.yaml` inventory; provision script
+  (stack + DNS + secrets + per-tenant bucket/keys + seeded admin); deploy fan-out with the N-1
+  skew gate. Proof: `provision acme` → working tenant at `acme.<domain>` <30 min on a fresh node.
+- **SAAS-8A — tenant ops.** Per-tenant encrypted backup/restore drill; destroy-tenant
+  (data-destruction clause); per-tenant usage/cost report feeding invoices; onboarding runbook
+  (org-profile intake → first witnessed run — the empty-House-Brief degradation makes this
+  non-optional).
+
 ## Backlog
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
