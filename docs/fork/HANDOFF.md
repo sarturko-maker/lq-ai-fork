@@ -73,18 +73,42 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   the account-login bucket keys on the submitted email = a known-victim lockout DoS (accepted v1,
 >   `RATE_LIMIT_LOGIN_ACCOUNT_PER_WINDOW` is the lever); test_migrations `partial_indexes_exist` had to
 >   drop the bcrypt index; 0084 will re-parent when the AIC stack rebases.
-> - **NEXT = SAAS-3 — first hosted environment (staging).** Hetzner node + the caddy SERVICE joined to
->   the prod-compose network (the Caddyfile is ready) + wildcard DNS-01 cert (CT-log hygiene) +
->   SPF/DKIM/DMARC; encrypted `pg_dump` + object-storage backups w/ dead-man alerting; public status
->   page; staging auto-deploy from main. **Proof = a real agent run end-to-end on the staging URL + a
->   passed restore drill.** At SAAS-3: pin Caddy's fixed container IP into `FORWARDED_ALLOW_IPS` (drop
->   the `*`), promote the report-only CSP to enforced, rotate the gateway key, lock Collabora's outbound
->   network to the WOPI host. AIC-3+ can interleave after this.
+> - **SAAS-3a ✓ SHIPPED (branch `fork/saas-3a-staging-ready`, off main) — the staging-ready substrate.**
+>   Authored by the lead (Opus — complex security-sensitive infra per the working model); independent
+>   fresh-context adversarial security review. **ADR-F060 (proposed).** Landed: **custom Caddy image**
+>   (`deploy/caddy/Dockerfile`, xcaddy `caddy:2.11.4` + `caddy-dns/hetzner@v1.0.0`, Caddyfile BAKED in —
+>   prod host has no checkout) published by `images.yml` (one matrix entry) + the **`caddy` SERVICE** in
+>   `docker-compose.prod.yml` (the ONLY host-ports block: 80/443 tcp+443/udp, joins the stack net,
+>   persisted `caddy-data`/`caddy-config`, admin-API healthcheck); Caddyfile gains a wildcard **DNS-01**
+>   `tls { dns hetzner {env…} }` block (DNS-01 even for staging = prod dress-rehearsal + CT-log hygiene;
+>   validates only in the custom image). `scripts/deploy.sh` (pull → dedicated `-e LQ_AI_SKIP_MIGRATIONS=1
+>   … alembic upgrade head` → `up -d --wait` → retrying public smoke; rejects any tag not `sha-<hex>`),
+>   `deploy-staging.yml` (`workflow_run` after Images + `workflow_dispatch`, `environment: staging`, raw
+>   pinned-host-key SSH, no third-party actions). `scripts/backup.sh` (`pg_dump -Fc` IN-container | `age -r`
+>   asymmetric → dockerized aws-cli → `tenants/<id>/backups/`, PGDMP-magic guard, dead-man on success only)
+>   + `scripts/restore-drill.sh` (latest → decrypt with the operator identity → throwaway pgvector →
+>   assert `alembic_version`+`users`) — **verified END-TO-END vs MinIO+pgvector with real age/pg_dump/
+>   pg_restore**. `scripts/gen-secrets.sh` (stdout only; hex secrets + a valid Fernet master key).
+>   `.env.prod.example` (placeholders only; NEW guard test `api/tests/test_env_prod_example.py` +
+>   `!.env.prod.example` gitignore negation — it was caught by the `.env.*` catch-all). `deploy/status/`
+>   (Uptime Kuma, SEPARATE stack), `deploy/dns/` (A/AAAA/CAA + SPF/DKIM/DMARC), the SAAS-3b runbook. Also
+>   forwarded optional `LQ_AI_GATEWAY_MASTER_KEY` in the gateway service (closes the Fernet-encrypted-
+>   provider-keys gap). **VERIFIED (all local, no box):** caddy image builds + `caddy validate` clean;
+>   `compose config` valid (prod + status); `shellcheck` clean (one annotated SC2016); `actionlint` clean
+>   (one annotated SC2029); guard test 3/3; the backup↔restore round-trip. **TRAPS:** stock `caddy:2`
+>   can't validate the DNS block (custom image only); `.env.prod.example` needs the gitignore negation;
+>   the aws-cli pin `amazon/aws-cli:2.17.0` exists (verified). Merge under the ADR-F005 gate.
+> - **NEXT = SAAS-3b — bring-up (maintainer-gated).** Provision domain / Hetzner node / DNS token /
+>   object-storage bucket + the `staging` Environment secrets → run `deploy.sh` → **Proof = a real agent
+>   run end-to-end on the staging URL + a passed restore drill.** Then the SAAS-2 handoff hardening: pin
+>   Caddy's fixed container IP into `FORWARDED_ALLOW_IPS` (drop the `*`), promote the report-only CSP,
+>   rotate the gateway key, lock Collabora's outbound to the WOPI host. Runbook: `docs/fork/runbooks/
+>   staging-bringup.md`. AIC-3+ can interleave after this.
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
 >   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 interleaves after SAAS-3**; untracked side files
->   (`sample-documents/`, `api/tests/agents/scenarios/test_*_live.py`, `.vite/`) belong to NO PR — leave
->   or clean deliberately; dev `.env` `LQ_AI_GATEWAY_KEY` still needs rotating (2026-06-30 terminal dump)
+>   (`sample-documents/`, `api/tests/agents/scenarios/test_*_live.py`, `.vite/`, `api/rl_smoke.py` — a
+>   SAAS-2 live-smoke leftover) belong to NO PR — leave or clean deliberately; dev `.env` `LQ_AI_GATEWAY_KEY` still needs rotating (2026-06-30 terminal dump)
 >   — PLUS dev Postgres password + `DEEPSEEK_API_KEY` (2026-07-01 diagnosis transcript; values gitignored,
 >   never in git — rotation is a maintainer/dev-box action).
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════

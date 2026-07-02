@@ -1,0 +1,28 @@
+# Public status page for the hosted stacks — SAAS-3, ADR-F060.
+#
+# A SEPARATE, tiny stack on its OWN host — deliberately NOT a service inside any
+# tenant's docker-compose.prod.yml: a tenant (or its node) going down must not
+# take down the page that reports the outage. Uptime Kuma polls each tenant's
+# public URL (and the backup dead-man switches) from OUTSIDE and serves the
+# status page at status.<domain>.
+#
+# Run:  docker compose -f deploy/status/docker-compose.status.yml up -d
+# Front it with its own Caddy/TLS for status.<domain> (see deploy/status/README).
+
+services:
+  uptime-kuma:
+    # Pin by digest at bring-up (see the runbook); the major tag is the safe
+    # floor for `docker compose config` in CI (config never pulls).
+    image: louislam/uptime-kuma:1
+    restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 128m
+    volumes:
+      - kuma-data:/app/data
+    # Bind to loopback only — the status host's own reverse proxy terminates TLS
+    # for status.<domain> and forwards to this. Never publish 3001 to 0.0.0.0.
+    ports:
+      - "127.0.0.1:3001:3001"
+
+volumes:
+  kuma-data:

@@ -52,6 +52,13 @@ jobs:
           - service: web
             context: ./web
             file: ./web/Dockerfile
+          # The public edge (SAAS-3, ADR-F060 D3) — a custom xcaddy image with the
+          # caddy-dns/hetzner DNS-01 module and the Caddyfile baked in (the prod
+          # host has no checkout to bind-mount from). Context is deploy/caddy so
+          # the Dockerfile's `COPY Caddyfile` resolves.
+          - service: caddy
+            context: ./deploy/caddy
+            file: ./deploy/caddy/Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v4

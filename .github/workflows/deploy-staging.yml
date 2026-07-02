@@ -1,0 +1,106 @@
+name: Deploy staging
+
+# SSH-push deploy to the staging tenant stack (SAAS-3, ADR-F060 D1). Fires after
+# the Images workflow publishes the per-SHA images for a push to main, so the tag
+# we deploy always exists in GHCR; also runnable on demand (workflow_dispatch)
+# with an explicit SHA for a redeploy / rollback (roll-forward-only: rollback =
+# dispatch the previous SHA).
+#
+# The `staging` Environment holds the deploy secrets AND (optionally) a required-
+# reviewer gate. No third-party actions — raw ssh/scp with a pinned host key,
+# matching images.yml's "don't add a third-party action to pin/trust" stance.
+
+on:
+  workflow_run:
+    workflows: [Images]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit SHA to deploy (defaults to this ref's HEAD)
+        required: false
+        type: string
+
+concurrency:
+  # One deploy at a time; never cancel a deploy mid-flight.
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to staging
+    runs-on: ubuntu-latest
+    # Only after a SUCCESSFUL image build on main, or an explicit manual dispatch.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    environment: staging
+    steps:
+      - name: Resolve deploy SHA + tag
+        id: tag
+        env:
+          EVENT: ${{ github.event_name }}
+          WR_SHA: ${{ github.event.workflow_run.head_sha }}
+          IN_SHA: ${{ github.event.inputs.sha }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ] && [ -n "$IN_SHA" ]; then
+            SHA="$IN_SHA"
+          else
+            SHA="$WR_SHA"
+          fi
+          SHA="${SHA:-$GITHUB_SHA}"
+          # Validate BEFORE the value reaches scp/ssh below. deploy.sh re-checks on
+          # the node, but that is too late to stop a crafted workflow_dispatch `sha`
+          # input from injecting a command into the remote shell string.
+          if ! printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{7,40}$'; then
+            echo "refusing to deploy a non-hex commit SHA: '$SHA'" >&2
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${SHA:0:12}" >> "$GITHUB_OUTPUT"
+          echo "Deploying $SHA (tag sha-${SHA:0:12})"
+
+      - name: Checkout the deployed SHA
+        uses: actions/checkout@v4
+        with:
+          # Sync the compose file + deploy script that MATCH the image SHA.
+          ref: ${{ steps.tag.outputs.sha }}
+
+      - name: Deploy over SSH
+        env:
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+          STACK_DIR: ${{ secrets.STAGING_STACK_DIR }}
+          PROJECT: ${{ secrets.STAGING_COMPOSE_PROJECT }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          : "${SSH_KEY:?STAGING_SSH_KEY is not set}"
+          : "${SSH_HOST:?STAGING_SSH_HOST is not set}"
+          : "${SSH_USER:?STAGING_SSH_USER is not set}"
+          : "${KNOWN_HOSTS:?STAGING_SSH_KNOWN_HOSTS is not set (host key must be pinned)}"
+          STACK_DIR="${STACK_DIR:-/opt/lq-ai}"
+          PROJECT="${PROJECT:-lq-ai}"
+
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Pin the host key (no StrictHostKeyChecking=no) — set STAGING_SSH_KNOWN_HOSTS.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          SSHOPTS="-i $HOME/.ssh/id_deploy -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+          # shellcheck disable=SC2086  # $SSHOPTS is a deliberate multi-flag word-split
+          scp $SSHOPTS docker-compose.prod.yml scripts/deploy.sh "$SSH_USER@$SSH_HOST:$STACK_DIR/"
+          # SC2086: $SSHOPTS word-split is intended. SC2029: TAG/STACK_DIR/PROJECT
+          # SHOULD expand client-side here (the runner holds them; the node runs the
+          # resulting literals) — that is the point, not a bug.
+          # shellcheck disable=SC2086,SC2029
+          ssh $SSHOPTS "$SSH_USER@$SSH_HOST" \
+            "LQ_AI_IMAGE_TAG='$TAG' LQ_AI_STACK_DIR='$STACK_DIR' COMPOSE_PROJECT_NAME='$PROJECT' bash '$STACK_DIR/deploy.sh'"

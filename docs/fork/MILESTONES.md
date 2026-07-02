@@ -669,10 +669,22 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   (no client renewal path — edge-deny + log-scrub are the fix); proof-key deferred. Tests:
   brute-force (per-IP + per-account), refresh-flood (zero-bcrypt), limiter-wiring drift guard,
   Caddyfile drift guard, boot assertion, log scrub.
-- **SAAS-3 — first hosted environment (staging).** Hetzner node + Caddy + wildcard DNS-01 cert
-  (CT-log hygiene) + SPF/DKIM/DMARC; encrypted `pg_dump` + object-storage backups with dead-man
-  alerting; public status page; staging auto-deploy from main. Proof: a real agent run end-to-end
-  on the staging URL + a passed restore drill. (AIC-3+ module work can interleave after this.)
+- **SAAS-3a ✓ done — staging-ready substrate** (ADR-F060). Custom Caddy image (xcaddy +
+  `caddy-dns/hetzner`, Caddyfile baked in, published by `images.yml`) + the `caddy` SERVICE in the
+  prod compose (the only host-ports block, wildcard DNS-01, persisted cert volumes); `deploy.sh`
+  (pull → dedicated migrate → up --wait → smoke, SHA-pinned) + `deploy-staging.yml` (SSH-push,
+  `environment: staging`, fires after Images); encrypted backups (`backup.sh`: `pg_dump -Fc | age`
+  asymmetric → object storage + dead-man) + `restore-drill.sh` (throwaway restore + row-count
+  assert) — verified end-to-end vs MinIO + pgvector; `gen-secrets.sh`; `.env.prod.example`
+  (placeholders-only, guard test + `!.env.prod.example` gitignore negation); `deploy/status/`
+  (Uptime Kuma, separate stack); `deploy/dns/` (A/AAAA/CAA + SPF/DKIM/DMARC templates);
+  `docs/fork/runbooks/staging-bringup.md`. All verifiable with no live box.
+- **SAAS-3b — bring-up (maintainer-gated).** Provision domain / Hetzner node / DNS token /
+  object-storage bucket + the `staging` Environment secrets → run `deploy.sh` for real → **Proof:**
+  a real agent run end-to-end on the staging URL + a passed restore drill; then the SAAS-2 handoff
+  hardening (pin `FORWARDED_ALLOW_IPS` to Caddy's IP, promote the report-only CSP, rotate the gateway
+  key, lock Collabora egress). Thin PR: the runbook checkboxes ticked with evidence. (AIC-3+ module
+  work interleaves after SAAS-3.)
 - **SAAS-4 — user lifecycle + admin split.** Invitations/verification/reset/SMTP; forced first
   password change; WorkOS-style users/orgs/memberships modeling; platform-admin vs org-admin
   (customer admin never reaches gateway-key endpoints); anti-enumeration + rate limits inherited.
