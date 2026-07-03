@@ -8,7 +8,7 @@ backend whether the deployment is still in fresh-install state.
 This module exposes:
 
 * ``GET /api/v1/admin/bootstrap-status`` — unauthenticated; returns
-  ``{"default_password_active": bool, "logs_hint": str}``.
+  ``{"default_password_active": bool, "logs_hint": str, "hosted": bool}``.
 
 The endpoint is intentionally unauthenticated — it is consulted by the
 login screen *before* the operator has credentials. The signal it
@@ -23,6 +23,13 @@ in :mod:`app.admin_bootstrap`: an admin user with
 rotated. Once they hit ``POST /api/v1/auth/change-password`` the flag
 flips to False and ``default_password_active`` returns False — the
 login UI hides the hint automatically.
+
+SETUP-3b (ADR-F061 addendum D8) adds ``hosted``: True when this
+deployment has a platform operator configured (``FIRST_RUN_OPERATOR_EMAIL``
+set) — i.e. a hosted tenant stack rather than a self-host install. The
+login UI uses it to swap the docker-log-grep hint for a welcome-email /
+self-serve-reset hint (the log-grep instruction is meaningless to a
+tenant's own admin, who has no shell on the node).
 """
 
 from __future__ import annotations
@@ -34,6 +41,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db.session import get_db
 from app.models.user import User
 from app.security.rate_limit import RateLimiter, get_rate_limiter
@@ -66,6 +74,14 @@ class BootstrapStatus(BaseModel):
             "password from the API container's logs."
         )
     )
+    hosted: bool = Field(
+        description=(
+            "True when this deployment has a platform operator configured "
+            "(SETUP-3b, ADR-F061 addendum D8) — i.e. a hosted tenant stack rather "
+            "than a self-host install. The login UI uses this to swap the "
+            "docker-log-grep hint for a welcome-email / self-serve-reset hint."
+        )
+    )
 
 
 @router.get(
@@ -94,4 +110,7 @@ async def get_bootstrap_status(
     return BootstrapStatus(
         default_password_active=default_password_active,
         logs_hint=_LOGS_HINT,
+        # ADR-F061 addendum D8 — derived, not stored: a platform operator email
+        # configured for this deployment IS the hosted-tenant signal.
+        hosted=get_settings().first_run_operator_email is not None,
     )
