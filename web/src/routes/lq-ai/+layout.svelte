@@ -27,7 +27,14 @@
 	let booted = false;
 
 	function isAuthExempt(pathname: string): boolean {
-		return pathname === '/lq-ai/login' || pathname === '/lq-ai/change-password';
+		// SETUP-3b: accept-invite + reset-password are token pages reached from
+		// emailed links by users who have no session yet (exact-match literals).
+		return (
+			pathname === '/lq-ai/login' ||
+			pathname === '/lq-ai/change-password' ||
+			pathname === '/lq-ai/accept-invite' ||
+			pathname === '/lq-ai/reset-password'
+		);
 	}
 
 	$: pathname = $page.url.pathname;

@@ -30,13 +30,15 @@
 	let listError: string | null = null;
 
 	async function bootstrap() {
-		// Route guard. Non-admin users see a flash error and are routed back.
+		// Route guard. SETUP-3b fence (ADR-F061 D4): alias CRUD + GET /admin/config
+		// are operator-only server-side — org-admins are routed back (their sub-nav
+		// link is hidden too; the server 403s regardless).
 		if (!$auth.user) {
 			goto('/lq-ai/login');
 			return;
 		}
-		if (!$auth.user.is_admin) {
-			console.warn('non-admin attempted /lq-ai/admin/models; redirecting');
+		if ($auth.user.role !== 'operator') {
+			console.warn('non-operator attempted /lq-ai/admin/models; redirecting');
 			goto('/lq-ai');
 			return;
 		}
