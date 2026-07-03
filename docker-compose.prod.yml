@@ -338,8 +338,8 @@ services:
 
   caddy:
     # Public edge — the ONLY service that publishes host ports (ADR-F060 D3).
-    # Custom xcaddy image (deploy/caddy/Dockerfile) with the caddy-dns/hetzner
-    # DNS-01 module + the Caddyfile BAKED IN; published to GHCR by images.yml and
+    # Custom xcaddy image (deploy/caddy/Dockerfile) with the compiled-in DNS-01
+    # provider set (hetzner, ionos) + the Caddyfile BAKED IN; published to GHCR by images.yml and
     # pinned by LQ_AI_IMAGE_TAG like every other image, so the edge rolls
     # forward/back atomically with api/web/gateway. Joins this stack's network and
     # reverse-proxies api:8000 / web:8080 by name (the compose publishes no other
@@ -368,10 +368,13 @@ services:
       LQ_AI_PUBLIC_HOST: ${LQ_AI_PUBLIC_HOST:?set to this tenant's public host, e.g. acme.lq-ai.example.com (staging) or *.acme.lq-ai.example.com (prod)}
       # ACME account email for Let's Encrypt cert-expiry notices.
       LQ_AI_ACME_EMAIL: ${LQ_AI_ACME_EMAIL:?set to an ops email for ACME/Let's Encrypt expiry notices}
-      # Hetzner DNS API token for the ACME DNS-01 challenge (ADR-F060 D2). Scoped
-      # to this tenant's DNS zone; never committed — lives in the root-owned
-      # .env.prod on the node (SAAS-3b bring-up), same as every other secret.
-      HETZNER_DNS_API_TOKEN: ${HETZNER_DNS_API_TOKEN:?set to a Hetzner DNS API token scoped to the tenant's zone (ACME DNS-01 challenge)}
+      # DNS provider + API token for the ACME DNS-01 challenge (ADR-F060 D2;
+      # multi-provider SETUP-1). The provider must be compiled into the
+      # lq-ai-caddy image (hetzner | ionos) — selected at Caddyfile parse time.
+      # The token is scoped to this tenant's DNS zone; never committed — lives in
+      # the root-owned .env.prod on the node, same as every other secret.
+      LQ_AI_DNS_PROVIDER: ${LQ_AI_DNS_PROVIDER:-hetzner}
+      LQ_AI_DNS_API_TOKEN: ${LQ_AI_DNS_API_TOKEN:?set to the DNS provider API token scoped to the tenant's zone (ACME DNS-01 challenge)}
     volumes:
       # Cert store + Caddy state MUST persist across restarts — otherwise every
       # redeploy re-issues certs (Let's Encrypt rate limits bite) and drops OCSP

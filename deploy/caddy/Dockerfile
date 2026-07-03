@@ -3,8 +3,11 @@
 # WHY a custom image: stock caddy:2 ships with NO DNS provider modules, so it
 # cannot answer an ACME DNS-01 challenge — and we issue the tenant's TLS cert via
 # wildcard DNS-01 (ADR-F060 D2: a per-host HTTP-01 cert would name every tenant in
-# the public Certificate Transparency logs). xcaddy compiles caddy-dns/hetzner in
-# (Hetzner is the host, so the DNS is same-vendor).
+# the public Certificate Transparency logs). xcaddy compiles in a curated
+# MULTI-PROVIDER set (SETUP-1, ADR-F060 amendment): the coupling is to where the
+# tenant's DNS ZONE is hosted, not to the VPS vendor, so one fleet image carries
+# every provider we support and the Caddyfile selects one per deployment via the
+# parse-time {$LQ_AI_DNS_PROVIDER} placeholder.
 #
 # WHY the Caddyfile is BAKED IN (ADR-F060 D3): the prod host has no repo checkout
 # to bind-mount from, and the edge config is code, not per-tenant runtime state.
@@ -19,10 +22,14 @@
 #   docker run --rm lq-ai-caddy caddy validate --config /etc/caddy/Caddyfile
 
 # Pin the builder to the same Caddy minor the runtime image resolves to, and pin
-# the DNS provider to a released tag — reproducible builds, no floating deps.
+# every DNS provider to a released tag — reproducible builds, no floating deps.
+# Adding a provider is one `--with` line (tag-pinned; caddy-dns/cloudflare is
+# deliberately absent — it publishes no release tags; pin a commit SHA if a
+# tenant ever needs it).
 FROM caddy:2.11.4-builder AS build
 RUN xcaddy build \
-    --with github.com/caddy-dns/hetzner@v1.0.0
+    --with github.com/caddy-dns/hetzner@v1.0.0 \
+    --with github.com/caddy-dns/ionos@v1.2.0
 
 FROM caddy:2.11.4
 COPY --from=build /usr/bin/caddy /usr/bin/caddy

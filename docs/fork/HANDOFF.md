@@ -112,15 +112,36 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   tokenisation (own M365-validation pass); README body rewrite; DevForkCallout repo-URL repoint
 >   (maintainer call). **TRAP:** "Oscar" in `ropa/*` comments = a COMPETITOR product, not us — never
 >   rename those.
-> - **NEXT = SAAS-3b — bring-up (maintainer-gated).** Provision domain / Hetzner node / DNS token /
->   object-storage bucket + the `staging` Environment secrets → run `deploy.sh` → **Proof = a real agent
->   run end-to-end on the staging URL + a passed restore drill.** Then the SAAS-2 handoff hardening: pin
->   Caddy's fixed container IP into `FORWARDED_ALLOW_IPS` (drop the `*`), promote the report-only CSP,
->   rotate the gateway key, lock Collabora's outbound to the WOPI host. Runbook: `docs/fork/runbooks/
->   staging-bringup.md`. AIC-3+ can interleave after this.
+> - **REDIRECT (maintainer, 2026-07-03): bring-up box = an IONOS VPS (not Hetzner); weekend task.**
+>   Before then, build the SETUP ladder from **`docs/fork/plans/SAAS-SETUP-onboarding-architecture.md`**
+>   (DRAFT for maintainer edit; grounded in a 5-lens recon): 3-actor model (operator outside the app /
+>   org-admin / member; fence = new `operator` role — provider-keys/aliases/gateway-config/tier-policy
+>   become operator-only, per the route table in the plan §1); config hierarchy deployment→area→matter
+>   (Level 2 = ADR-F054, ALREADY SHIPPED; Level 0 `deployment_capability_toggles` = new; keystone =
+>   tool-group REGISTRY replacing composition.py's per-area elif chain — supersedes F054 D1, decision
+>   row #9 needs maintainer sign-off); operator CLI wizard (manifest → .env + gateway seed + DNS
+>   instructions + deploy; two compose gaps to fix: FIRST_RUN_ADMIN_EMAIL + SMTP not forwarded);
+>   SAAS-4 absorbed as SETUP-3 (invites/reset/verification + fence). Slices: SETUP-1 multi-DNS edge ✓
+>   / SETUP-2 wizard (both weekend-critical) / SETUP-3a/b lifecycle+UI / SETUP-4a/b registry+areas UI /
+>   SETUP-5 reconcile. AIC-3 PARKED (task #456).
+> - **SETUP-1 ✓ (branch `fork/setup-1-multi-dns-edge`) — multi-DNS edge (Option A, ADR-F060
+>   amendment):** the caddy image now compiles `caddy-dns/hetzner@v1.0.0` + `caddy-dns/ionos@v1.2.0`;
+>   the Caddyfile selects per deployment via PARSE-time `dns {$LQ_AI_DNS_PROVIDER:hetzner}
+>   {env.LQ_AI_DNS_API_TOKEN}` (unknown module fails validate/startup loudly — proven by a negative
+>   test); env generalised `HETZNER_DNS_API_TOKEN`→`LQ_AI_DNS_API_TOKEN` (+`LQ_AI_DNS_PROVIDER`,
+>   default hetzner) across compose/.env.prod.example/READMEs; runbook de-Hetzner'd (IONOS VPS/DNS/S3
+>   paths). caddy-dns/cloudflare DELIBERATELY absent (no release tags — pin a commit if ever needed).
+>   TRAP: `{$VAR}` parse-time substitution CAN pick the dns module; `{env.VAR}` runtime CANNOT.
+> - **NEXT = SETUP-2 — operator wizard v1 (weekend-critical; spec = plan §3).** Then SAAS-3b bring-up
+>   (maintainer, weekend, IONOS): provision domain/node/DNS token/bucket + `staging` Environment
+>   secrets → run the wizard/`deploy.sh` → **Proof = a real agent run on the staging URL + a passed
+>   restore drill.** Then the SAAS-2 handoff hardening (pin `FORWARDED_ALLOW_IPS` to Caddy's IP,
+>   promote CSP, rotate gateway key, lock Collabora egress). Runbook: `docs/fork/runbooks/
+>   staging-bringup.md`.
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
->   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 interleaves after SAAS-3**; untracked side files
+>   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 PARKED (task #456; resumes after the
+>   SETUP ladder)**; untracked side files
 >   (`sample-documents/`, `api/tests/agents/scenarios/test_*_live.py`) belong to NO PR — leave or clean
 >   deliberately (rebrand slice already cleaned two: `.vite/` now gitignored, empty `api/rl_smoke.py`
 >   deleted; the dev web container now serves a main+rebrand bundle — rebuild from the AIC branch if the

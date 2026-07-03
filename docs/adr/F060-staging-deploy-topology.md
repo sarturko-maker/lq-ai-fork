@@ -138,3 +138,23 @@ tree. A guard test greps the committed `.env.prod.example` for any real-looking 
 - **Reusable for prod:** `deploy.sh`/`backup.sh`/`restore-drill.sh` are host-generic; the prod
   promote path (tag `v*` + required-approval + a pre-migrate encrypted dump, SAAS-HOSTING §5.4) reuses
   them unchanged — a later slice adds only the approval gate and the tenant-inventory loop.
+
+## Amendment (2026-07-03): multi-DNS-provider edge image (SETUP-1)
+
+Maintainer redirect: the bring-up box is an **IONOS VPS**, not Hetzner — which exposed that D2/D3
+had silently coupled the edge image to *Hetzner DNS*. The coupling is really to **where the tenant's
+DNS zone is hosted** (the DNS-01 challenge writes TXT records via that host's API), never to the VPS
+vendor. Decision (maintainer, "Option A", 2026-07-03):
+
+- The one fleet image compiles in a **curated multi-provider set** — `caddy-dns/hetzner@v1.0.0` +
+  `caddy-dns/ionos@v1.2.0` (both tag-pinned; `caddy-dns/cloudflare` deliberately absent — it
+  publishes no release tags; pin a commit SHA if a tenant ever needs it).
+- The Caddyfile selects the provider per deployment via the **parse-time** placeholder
+  `dns {$LQ_AI_DNS_PROVIDER:hetzner} {env.LQ_AI_DNS_API_TOKEN}` — an unknown/missing module fails
+  `caddy validate`/startup loudly. Env generalised: `HETZNER_DNS_API_TOKEN` → `LQ_AI_DNS_API_TOKEN`
+  (+ `LQ_AI_DNS_PROVIDER`, default `hetzner`).
+- Verification extends the D2 proof: the image `caddy validate`s under **every** supported provider
+  value plus a negative case (an uncompiled provider must fail).
+- Recorded for fleet scale (not built): **CNAME delegation** (`_acme-challenge.<tenant-domain>` →
+  a challenge zone we control at one provider) removes the per-tenant DNS-host coupling entirely
+  when tenants bring their own domains.

@@ -692,8 +692,17 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   a real agent run end-to-end on the staging URL + a passed restore drill; then the SAAS-2 handoff
   hardening (pin `FORWARDED_ALLOW_IPS` to Caddy's IP, promote the report-only CSP, rotate the gateway
   key, lock Collabora egress). Thin PR: the runbook checkboxes ticked with evidence. (AIC-3+ module
-  work interleaves after SAAS-3.)
-- **SAAS-4 — user lifecycle + admin split.** Invitations/verification/reset/SMTP; forced first
+  work is PARKED behind the SETUP ladder — maintainer redirect 2026-07-03.)
+- **SETUP ladder (maintainer redirect 2026-07-03; plan of record
+  `plans/SAAS-SETUP-onboarding-architecture.md`, DRAFT for maintainer edit).** Bring-up box = an
+  IONOS VPS; 3-actor model + deployment→area→matter config hierarchy + operator wizard +
+  admin-configurable practice areas. **SETUP-1 ✓ done** — multi-DNS edge (Option A, ADR-F060
+  amendment): hetzner+ionos compiled in, parse-time `{$LQ_AI_DNS_PROVIDER}` selection,
+  `LQ_AI_DNS_API_TOKEN` generalisation, runbook de-Hetzner'd. SETUP-2 wizard (weekend-critical) →
+  SETUP-3a/b user lifecycle + operator fence (absorbs SAAS-4) → SETUP-4a/b capability registry +
+  areas admin UI → SETUP-5 reconcile (F054 flip + D1 supersession).
+- **SAAS-4 — user lifecycle + admin split — ABSORBED into SETUP-3a/b** (see the SETUP ladder above).
+  Original scope: invitations/verification/reset/SMTP; forced first
   password change; WorkOS-style users/orgs/memberships modeling; platform-admin vs org-admin
   (customer admin never reaches gateway-key endpoints); anti-enumeration + rate limits inherited.
 - **SAAS-5 — cookie auth.** HttpOnly+Secure+SameSite session cookies + CSRF; retires

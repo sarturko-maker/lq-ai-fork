@@ -17,9 +17,11 @@ a thin PR: the checklist ticked with evidence.
 
 ## 0. Decisions (confirmed defaults, ADR-F060)
 
-- **Host:** Hetzner, Falkenstein/Nuremberg (EU-resident). Node: CX43 (16 GB) full
-  stack — or CX33 (8 GB) running the reduced profile (§ Reduced profile below).
-- **DNS:** Hetzner DNS (the zone must live here so the DNS-01 token can write TXT).
+- **Host:** any EU-resident VPS vendor (maintainer's box: **IONOS**; Hetzner CX43
+  was the costed reference). 16 GB full stack — or 8 GB running the reduced
+  profile (§ Reduced profile below). The VPS vendor is independent of DNS/S3.
+- **DNS:** a supported DNS-01 provider hosts the zone — `hetzner` or `ionos`
+  (multi-provider SETUP-1; select via `LQ_AI_DNS_PROVIDER`).
 - **TLS:** wildcard DNS-01 via the custom Caddy image (already built by `images.yml`).
 - **Backups:** `pg_dump -Fc | age` (asymmetric) → object storage; restore drills
   into a throwaway container.
@@ -27,13 +29,16 @@ a thin PR: the checklist ticked with evidence.
 
 ## 1. Provision infra (the credit-card steps)
 
-1. **Domain** — register / delegate the zone to Hetzner DNS.
-2. **Node** — Hetzner CX43 (FSN/NBG), Ubuntu LTS. Firewall: allow **80/443 only**
-   (plus SSH from your admin IP / via WireGuard-Tailscale). SSH **key-only**
-   (`PasswordAuthentication no`).
-3. **DNS API token** — Hetzner DNS token scoped to this zone → this is
-   `HETZNER_DNS_API_TOKEN`.
-4. **Object storage** — a Hetzner Object Storage bucket for this tenant. Enable
+1. **Domain** — host the zone at a supported DNS provider (`hetzner` | `ionos`);
+   set `LQ_AI_DNS_PROVIDER` accordingly.
+2. **Node** — an EU VPS with 16 GB (e.g. IONOS VPS; 8 GB → reduced profile),
+   Ubuntu LTS. Firewall: allow **80/443 only** (plus SSH from your admin IP /
+   via WireGuard-Tailscale). SSH **key-only** (`PasswordAuthentication no`).
+3. **DNS API token** — a token for that DNS provider scoped to this zone → this
+   is `LQ_AI_DNS_API_TOKEN` (IONOS: the `publicprefix.secret` concatenation from
+   the developer console).
+4. **Object storage** — any S3-compatible bucket for this tenant (IONOS S3 /
+   Hetzner Object Storage — the scripts use the generic aws-cli). Enable
    **versioning** (customer files are covered by versioning, not the DB dump —
    ADR-F060 D4) and a **lifecycle rule** for backup retention (7 daily / 4 weekly
    under `tenants/<id>/backups/`). Create access/secret keys → `S3_*`.
