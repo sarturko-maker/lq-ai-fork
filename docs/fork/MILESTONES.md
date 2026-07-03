@@ -710,9 +710,20 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   new `operator` role + `OperatorUser` dep fencing the gateway-key surfaces (aliases/provider-keys/
   config/PATCH tier-policy/override-tier-floor) — org-admin keeps the rest; **escalation guard: no
   path mints an operator except bootstrap** (`FIRST_RUN_OPERATOR_EMAIL`). Mail transport generalised
-  to `app/email.py` (notify_email delegates, never-raise preserved). NEXT: SETUP-3b (Users UI +
-  onboarding flow + wizard invite-handover) → SETUP-4a/b capability registry + areas admin UI →
-  SETUP-5 reconcile (F054 flip + D1 supersession).
+  to `app/email.py` (notify_email delegates, never-raise preserved).
+  **SETUP-3b ✓ done** — Users admin UI + onboarding pages + wizard handover (ADR-F061 addendum;
+  plan `plans/SETUP-3b-users-admin-ui-onboarding.md`): `/lq-ai/admin/users` (generation-B; role
+  change + disable/enable + invites with SMTP-off `accept_url` handover; operator rows visible/
+  badged/locked, D6); unauth `/lq-ai/accept-invite` + `/lq-ai/reset-password` (dual-state) +
+  login "Forgot your password?" + hosted-aware bootstrap hint (`bootstrap-status.hosted`, D8);
+  emailed links carry the real `/lq-ai/*` paths (D1); fence gating in the web UI (`/admin/models`
+  operator-only, `DevRoleManagementCard` deleted — audit in `evidence/setup-3b/fence-audit.md`);
+  wizard: SMTP-on handover = POST `/auth/password-reset-request` (never scrapes/prints the
+  password; SMTP-off keeps the labelled log-scrape fallback) + optional `OPERATOR_EMAIL` →
+  `FIRST_RUN_OPERATOR_EMAIL` (D7). NEXT: SETUP-4a/b capability registry + areas admin UI →
+  SETUP-5 reconcile (F054 flip + D1 supersession) → SETUP-3c (first-login onboarding checklist:
+  House Brief → invite users → review area defaults — UX polish split out of 3b, can ride after
+  the 4x/5 ladder).
 - **SAAS-4 — user lifecycle + admin split — ABSORBED into SETUP-3a/b** (see the SETUP ladder above).
   Original scope: invitations/verification/reset/SMTP; forced first
   password change; WorkOS-style users/orgs/memberships modeling; platform-admin vs org-admin

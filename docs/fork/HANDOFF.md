@@ -189,16 +189,39 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   real dev postgres creds (NOT a made-up dbname) or every DB test errors on connect; it never touches
 >   the AIC-chain dev DB. Migration-number trap holds: 0085 is main's next free; AIC #188-190 renumber
 >   on THEIR rebase.
-> - **NEXT = SETUP-3b — Users admin UI (invite/disable/role) + first-login onboarding flow + switch the
->   wizard's handover to an emailed invite (operator never sees the customer password).** Then SETUP-4a/b
->   (tool-group registry refactor + `practice_area_tool_groups` + areas/capabilities admin UI), SETUP-5
->   (reconcile F054). SAAS-3b bring-up (maintainer, weekend, IONOS): provision domain/node/DNS token/
->   bucket → run `setup-tenant.sh` → **Proof = a real agent run on the staging URL + a passed restore
->   drill.** Then the SAAS-2 handoff hardening (pin `FORWARDED_ALLOW_IPS` to Caddy's IP, promote CSP,
->   rotate gateway key, lock Collabora egress). Runbook: `docs/fork/runbooks/staging-bringup.md`.
->   SETUP-3b open Qs from the 3a review (recorded, decide in 3b): whether `operator` should be allowed
->   to create tenant data (currently NOT in `_MUTATING_ROLES`), and whether `GET /admin/users?role=`
->   should surface operator rows.
+> - **SETUP-3b ✓ — Users admin UI + onboarding pages + wizard email handover. ADR-F061 ADDENDUM
+>   (D1/D6/D7/D8 + Q1 deferral), NO migration, NO new route/dep.** Sonnet-line implemented in a
+>   worktree; plan `docs/fork/plans/SETUP-3b-users-admin-ui-onboarding.md`. Landed: (A) emailed
+>   links now carry the REAL paths `/lq-ai/accept-invite|reset-password` (D1) +
+>   `bootstrap-status.hosted` (D8, derived from `first_run_operator_email`). (B/C)
+>   `/lq-ai/admin/users` — generation-B (ModalShell/Table/Badge/Alert/FormControl, semantic
+>   tokens): role select w/ last-admin handling, disable/enable w/ inline confirm, self+operator
+>   rows LOCKED + "Platform operator" badge (D6 — visible, badged, locked; filter offers
+>   all/admin/member/viewer only), invites create-modal/resend/revoke, SMTP-off `accept_url`
+>   copy-to-clipboard handover panel (never logged). (D) unauth `/lq-ai/accept-invite` +
+>   dual-state `/lq-ai/reset-password` (uniform "if an account exists" copy — anti-enum preserved
+>   in UI), both in `isAuthExempt()`; login gains "Forgot your password?" + hosted-aware hint
+>   swap. (E) fence audit `docs/fork/evidence/setup-3b/fence-audit.md`: `/admin/models` page-guard
+>   `role==='operator'` + sub-nav link hidden; `DevRoleManagementCard` DELETED (D5 — function
+>   moved to Users page); provider-keys/tier-policy have NO web consumers (nothing to gate);
+>   FLAGGED (not changed): RefusalMessageBubble's override button hits the now-fenced
+>   override-tier-floor as org-admin → 403 surfaces in-modal (decide hide-vs-reclassify later).
+>   (F) wizard: SMTP-on handover = curl POST `/auth/password-reset-request` for ADMIN_EMAIL w/
+>   deploy.sh-style retries, NEVER scrapes/prints the password; SMTP-off keeps the labelled
+>   log-scrape fallback; optional `OPERATOR_EMAIL` → `FIRST_RUN_OPERATOR_EMAIL` (written/omitted;
+>   email+charset fences); handover tests run the REAL deploy path against docker/curl PATH shims.
+>   **TRAP:** wizard/env-example tests resolve `_REPO_ROOT = parents[2]` — the containerized run
+>   needs `-v scripts:/scripts -v deploy:/deploy -v docker-compose.prod.yml:/docker-compose.prod.yml
+>   -v .env.prod.example:/.env.prod.example` (ro) or 16 tests fail on a missing repo root.
+> - **NEXT = SETUP-4a — tool-group registry refactor (+ SETUP-4b `practice_area_tool_groups` +
+>   areas/capabilities admin UI), then SETUP-5 reconcile (F054 flip + D1 supersession; also takes
+>   the Q1 viewer/operator tenant-data RBAC decision).** SETUP-3c (first-login onboarding
+>   checklist: House Brief → invite users → review area defaults) split out of 3b as UX polish —
+>   can ride after the ladder. SAAS-3b bring-up (maintainer, weekend, IONOS): provision
+>   domain/node/DNS token/bucket → run `setup-tenant.sh` → **Proof = a real agent run on the
+>   staging URL + a passed restore drill.** Then the SAAS-2 handoff hardening (pin
+>   `FORWARDED_ALLOW_IPS` to Caddy's IP, promote CSP, rotate gateway key, lock Collabora egress).
+>   Runbook: `docs/fork/runbooks/staging-bringup.md`.
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
 >   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 PARKED (task #456; resumes after the

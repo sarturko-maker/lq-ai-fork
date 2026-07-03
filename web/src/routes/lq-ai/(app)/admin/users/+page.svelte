@@ -487,9 +487,13 @@
 			<Alert intent="error">{inviteActionError}</Alert>
 		{/if}
 
-		{#if resendResult?.accept_url}
+		{#if resendResult}
 			<div class="space-y-1">
-				{@render acceptUrlPanel(resendResult)}
+				{#if resendResult.accept_url}
+					{@render acceptUrlPanel(resendResult)}
+				{:else}
+					<Alert intent="info">Invitation email re-sent to {resendResult.email}.</Alert>
+				{/if}
 				<Button type="button" variant="ghost" size="sm" onclick={() => (resendResult = null)}>
 					Dismiss
 				</Button>

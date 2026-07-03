@@ -57,7 +57,10 @@ export interface User {
 	email: string;
 	is_admin: boolean;
 	must_change_password: boolean;
-	role?: 'admin' | 'member' | 'viewer';
+	// 'operator' (SETUP-3a platform role) rides along for tab gating: the
+	// operator is a superset of the org-admin (is_admin=true), so the
+	// role==='admin' || is_admin checks below already admit it.
+	role?: 'admin' | 'member' | 'viewer' | 'operator';
 }
 
 export const TABS: readonly TabDef[] = [

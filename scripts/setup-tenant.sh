@@ -96,6 +96,9 @@ root-sourced env file)
   S3_REGION              provider region code (e.g. fsn1, de)
   S3_BUCKET              default: lq-ai-<slug>
   ADMIN_EMAIL            the CUSTOMER admin (becomes FIRST_RUN_ADMIN_EMAIL)
+  OPERATOR_EMAIL         optional PLATFORM operator account (becomes
+                         FIRST_RUN_OPERATOR_EMAIL, ADR-F061; blank/omitted =
+                         no operator account — self-host semantics)
   SMTP_HOST/SMTP_PORT/SMTP_FROM/SMTP_USERNAME   optional auth-mail transport
   IMAGE_TAG             ^sha-[0-9a-f]{7,}$  (published image, never :main)
   NODE_PROFILE          full | reduced   (16 GB vs 8 GB node)
@@ -147,7 +150,7 @@ fi
 # Input state (populated from the manifest or interactive prompts)
 # ---------------------------------------------------------------------------
 TENANT_SLUG="" PUBLIC_HOST="" PUBLIC_ORIGIN="" DNS_PROVIDER="" ACME_EMAIL=""
-S3_ENDPOINT_URL="" S3_REGION="" S3_BUCKET="" ADMIN_EMAIL=""
+S3_ENDPOINT_URL="" S3_REGION="" S3_BUCKET="" ADMIN_EMAIL="" OPERATOR_EMAIL=""
 SMTP_HOST="" SMTP_PORT="" SMTP_FROM="" SMTP_USERNAME=""
 IMAGE_TAG="" NODE_PROFILE="full" MODEL_PROVIDER="anthropic"
 AGE_RECIPIENT="" BACKUP_DEADMAN_URL="" RESTORE_DEADMAN_URL=""
@@ -183,6 +186,7 @@ load_manifest() {
 			S3_REGION) S3_REGION="$val" ;;
 			S3_BUCKET) S3_BUCKET="$val" ;;
 			ADMIN_EMAIL) ADMIN_EMAIL="$val" ;;
+			OPERATOR_EMAIL) OPERATOR_EMAIL="$val" ;;
 			SMTP_HOST) SMTP_HOST="$val" ;;
 			SMTP_PORT) SMTP_PORT="$val" ;;
 			SMTP_FROM) SMTP_FROM="$val" ;;
@@ -227,6 +231,7 @@ interactive_collect() {
 	ask S3_REGION "S3 region code" "fsn1"
 	ask S3_BUCKET "S3 bucket" "lq-ai-${TENANT_SLUG}"
 	ask ADMIN_EMAIL "Customer admin email (FIRST_RUN_ADMIN_EMAIL)"
+	ask OPERATOR_EMAIL "Platform operator email (FIRST_RUN_OPERATOR_EMAIL; blank = no operator account)" ""
 	ask SMTP_HOST "SMTP host (blank = no auth mail)" ""
 	if [ -n "$SMTP_HOST" ]; then
 		ask SMTP_PORT "SMTP port" "$DEFAULT_SMTP_PORT"
@@ -264,6 +269,7 @@ S3_ENDPOINT_URL=$S3_ENDPOINT_URL
 S3_REGION=$S3_REGION
 S3_BUCKET=$S3_BUCKET
 ADMIN_EMAIL=$ADMIN_EMAIL
+OPERATOR_EMAIL=$OPERATOR_EMAIL
 SMTP_HOST=$SMTP_HOST
 SMTP_PORT=$SMTP_PORT
 SMTP_FROM=$SMTP_FROM
@@ -304,8 +310,8 @@ check_value() {  # check_value VARNAME  (empty = optional key, allowed)
 		|| die "$key value contains characters outside the safe set [A-Za-z0-9@:/._%+*?=-] — refusing (values land in a root-sourced env file)"
 }
 for k in TENANT_SLUG PUBLIC_HOST PUBLIC_ORIGIN DNS_PROVIDER ACME_EMAIL \
-	S3_ENDPOINT_URL S3_REGION S3_BUCKET ADMIN_EMAIL SMTP_HOST SMTP_PORT \
-	SMTP_FROM SMTP_USERNAME IMAGE_TAG NODE_PROFILE MODEL_PROVIDER \
+	S3_ENDPOINT_URL S3_REGION S3_BUCKET ADMIN_EMAIL OPERATOR_EMAIL SMTP_HOST \
+	SMTP_PORT SMTP_FROM SMTP_USERNAME IMAGE_TAG NODE_PROFILE MODEL_PROVIDER \
 	AGE_RECIPIENT BACKUP_DEADMAN_URL RESTORE_DEADMAN_URL; do
 	check_value "$k"
 done
@@ -347,6 +353,10 @@ printf '%s' "$ACME_EMAIL" | grep -Eq "$EMAIL_RE" \
 [ -n "$ADMIN_EMAIL" ] || die "ADMIN_EMAIL is required (the customer admin)"
 printf '%s' "$ADMIN_EMAIL" | grep -Eq "$EMAIL_RE" \
 	|| die "ADMIN_EMAIL '$ADMIN_EMAIL' is not a plausible email address"
+# OPERATOR_EMAIL is optional (SETUP-3b, ADR-F061): empty ⇒ no operator account
+# is minted (self-host semantics); when set it must be a plausible email.
+[ -z "$OPERATOR_EMAIL" ] || printf '%s' "$OPERATOR_EMAIL" | grep -Eq "$EMAIL_RE" \
+	|| die "OPERATOR_EMAIL '$OPERATOR_EMAIL' is not a plausible email address"
 
 [ -n "$S3_ENDPOINT_URL" ] || die "S3_ENDPOINT_URL is required"
 printf '%s' "$S3_ENDPOINT_URL" | grep -Eq "$URL_RE" \
@@ -480,6 +490,14 @@ if [ "$NODE_PROFILE" = "reduced" ]; then
 	INGEST_CONCURRENCY_LINE="LQ_AI_INGEST_WORKER_CONCURRENCY=1"
 fi
 
+# FIRST_RUN_OPERATOR_EMAIL mints the PLATFORM operator account at first boot
+# (SETUP-3a/3b, ADR-F061 D3). Written ONLY when provided; omitted entirely
+# otherwise so a stack without an operator keeps self-host semantics.
+OPERATOR_EMAIL_LINE=""
+if [ -n "$OPERATOR_EMAIL" ]; then
+	OPERATOR_EMAIL_LINE="FIRST_RUN_OPERATOR_EMAIL=$OPERATOR_EMAIL"
+fi
+
 # --force overwrite: recreate rather than truncate-in-place, so an existing
 # file's OLD (possibly looser) mode never applies while the new secrets are
 # being written — the file is born 0600 under umask 077 (SETUP-2 review).
@@ -527,7 +545,10 @@ RERANK_ENABLED=true
 # --- Auth + notification email (FIRST_RUN_ADMIN_EMAIL + SMTP; SETUP-2 gap fix)-
 # FIRST_RUN_ADMIN_EMAIL seeds the customer admin at first boot (config.py has no
 # env_prefix — the var is the bare field name). SMTP is optional (smtp_host-gated).
+# FIRST_RUN_OPERATOR_EMAIL (optional, SETUP-3b/ADR-F061) mints the platform
+# operator; the line is omitted when no operator email was provided.
 FIRST_RUN_ADMIN_EMAIL=$ADMIN_EMAIL
+$OPERATOR_EMAIL_LINE
 SMTP_HOST=$SMTP_HOST
 SMTP_PORT=$SMTP_PORT
 SMTP_USERNAME=$SMTP_USERNAME
@@ -664,9 +685,12 @@ if [ "$CREATE_BUCKET" = "1" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Deploy + admin handover (v1: surface the bootstrap password from the api log
-# ONCE — SETUP-3 switches this to an emailed invite so the operator never sees
-# the customer password).
+# Deploy + admin handover (SETUP-3b, ADR-F061 addendum D7).
+#   SMTP configured → fire POST /auth/password-reset-request for ADMIN_EMAIL:
+#     the customer admin sets their own password via the emailed link; the
+#     bootstrap password is NEVER scraped or printed on this branch.
+#   SMTP unset → fallback: surface the one-time bootstrap password from the
+#     api log (the only handover channel without a mail transport).
 # ---------------------------------------------------------------------------
 if [ "$DO_DEPLOY" = "0" ]; then
 	info "--no-deploy: artifacts rendered in $OUT_DIR. Run deploy.sh when ready."
@@ -678,25 +702,58 @@ info "deploying $IMAGE_TAG via deploy.sh…"
 LQ_AI_IMAGE_TAG="$IMAGE_TAG" LQ_AI_STACK_DIR="$OUT_DIR" COMPOSE_PROJECT_NAME="$TENANT_SLUG" \
 	bash "$SCRIPT_DIR/deploy.sh" "$IMAGE_TAG"
 
-# Scrape the api container log for the one-time bootstrap password line
-# (api/app/main.py logs "First-run admin password …: <pw>" exactly once on the
-# creation event). If the admin already existed, there is no new password.
 dc() { docker compose -p "$TENANT_SLUG" -f "$OUT_DIR/docker-compose.prod.yml" --env-file "$ENV_FILE" "$@"; }
-ADMIN_PW_LINE="$(dc logs api 2>&1 | grep -F 'First-run admin password' | tail -1 || true)"
-ADMIN_PW="${ADMIN_PW_LINE##*: }"
 
 echo
 echo "============================================================"
-echo "  TENANT HANDOVER — $TENANT_SLUG   (record now; do not store)"
+echo "  TENANT HANDOVER — $TENANT_SLUG"
 echo "============================================================"
 echo "  URL:          https://$PUBLIC_HOST"
 echo "  Admin email:  $ADMIN_EMAIL"
-if [ -n "$ADMIN_PW_LINE" ] && [ -n "$ADMIN_PW" ]; then
-	echo "  Admin password (first login only, MUST be changed at first login):"
-	echo "      $ADMIN_PW"
+if [ -n "$SMTP_HOST" ]; then
+	# Email-first handover (D7): retry against the public origin like
+	# deploy.sh's smoke — the first-ever deploy can lag cert issuance/DNS.
+	# PUBLIC_ORIGIN is validated concrete (never a wildcard). The endpoint
+	# returns a uniform 202 and emails a single-use reset link (1 h TTL).
+	RESET_REQUEST_URL="https://$PUBLIC_ORIGIN/api/v1/auth/password-reset-request"
+	handover_sent=0
+	for attempt in $(seq 1 12); do
+		if curl -fsS --max-time 10 -o /dev/null -X POST \
+			-H 'Content-Type: application/json' \
+			--data "{\"email\":\"$ADMIN_EMAIL\"}" "$RESET_REQUEST_URL"; then
+			handover_sent=1
+			break
+		fi
+		echo "setup-tenant: handover request attempt $attempt failed; retrying in 5s…" >&2
+		sleep 5
+	done
+	if [ "$handover_sent" = "1" ]; then
+		echo "  Handover email sent to $ADMIN_EMAIL — they set their own password"
+		echo "  via the emailed link (single-use, expires in 1 hour). Recovery is"
+		echo "  self-serve ('Forgot your password?' on the sign-in page). No"
+		echo "  credential was printed or stored during this handover."
+	else
+		warn "could not reach $RESET_REQUEST_URL after retries — no handover email sent"
+		echo "  Ask the admin to use 'Forgot your password?' at"
+		echo "      https://$PUBLIC_HOST/lq-ai/reset-password"
+		echo "  once the stack is reachable (same effect, self-serve)."
+	fi
 else
-	echo "  Admin password: not found in the api log — an admin already existed"
-	echo "      (idempotent boot). Reset via the reset-admin-password CLI if needed."
+	# SMTP-OFF FALLBACK: no mail transport, so the only handover channel is the
+	# one-time bootstrap password from the api log (api/app/main.py logs
+	# "First-run admin password …: <pw>" exactly once on the creation event).
+	# If the admin already existed, there is no new password to print.
+	ADMIN_PW_LINE="$(dc logs api 2>&1 | grep -F 'First-run admin password' | tail -1 || true)"
+	ADMIN_PW="${ADMIN_PW_LINE##*: }"
+	echo "  (SMTP is not configured — falling back to the log-scraped bootstrap"
+	echo "   password. Record it now; do not store.)"
+	if [ -n "$ADMIN_PW_LINE" ] && [ -n "$ADMIN_PW" ]; then
+		echo "  Admin password (first login only, MUST be changed at first login):"
+		echo "      $ADMIN_PW"
+	else
+		echo "  Admin password: not found in the api log — an admin already existed"
+		echo "      (idempotent boot). Reset via the reset-admin-password CLI if needed."
+	fi
 fi
 echo "------------------------------------------------------------"
 echo "  NEXT STEPS (pre-exposure hardening checklist — runbook §Pre-exposure):"
