@@ -107,3 +107,34 @@ day-one mitigations below keep the merge option open cheaply.
   slices and orchestrates; implementation is delegated to smaller models (Sonnet-class; Opus-
   class for complex changes); the lead runs verification/tests/review. Compaction expected per
   slice — HANDOFF.md carries the goal and next slice.
+
+## Addendum (2026-07-02): Rebrand execution — the SAAS-rebrand slice
+
+The name decision above ("LQ.AI Oscar Edition") was executed in the `fork/saas-rebrand-oscar-edition`
+slice (task #455). No new ADR: this addendum records *how* the accepted decision was applied and,
+more importantly, the boundary the rename must never cross.
+
+- **Surgical, display-strings-only.** The rebrand touches only user-facing PRODUCT-NAME surfaces,
+  never identifiers. A four-lens branding audit (recorded in the PR) produced a CHANGE list of 12
+  surfaces — the SvelteKit shell `<title>`, the app-wide `CockpitHeader` wordmark, the
+  `DualBrandingFooter`, eight per-page `<title>` suffixes, and the README front door — plus a
+  fork-identity note under the README H1.
+- **The "LQ.AI" mark is retained** (the new name contains it), so a bare `LQ.AI` is not
+  automatically wrong. Running-prose mentions, action phrases ("Sign in to LQ.AI"), and `/learn`
+  developer-education headings keep the short mark; only naming *surfaces* take the full name.
+- **KEEP boundary (a global find/replace would break the app).** These are NOT renamed: the
+  `lq-ai/` code namespace + `$lib/lq-ai` imports; `--lq-*`/`.lq-*` CSS tokens; the
+  `LQ_AI_*`/`PUBLIC_LQ_AI_*` env-var namespace (pydantic binds by field name); `lq-ai-*`
+  package/image/`data-testid` identifiers (~1,300 testids are asserted 1:1 in Cypress);
+  cross-service wire-contract headers (`X-LQ-AI-Gateway-Key`, `X-LQ-AI-Routed-*`); infra literals
+  (`lq_ai` role/db, `lq-ai-files` bucket); and — extend-never-edit — all upstream/provenance
+  references (`LegalQuants/lq-ai`, open-webui, NOTICES.md, LICENSE). `LegalQuants` is the
+  provider/org name, not the product, and stays. NOTICES.md is therefore untouched by the rename
+  (its entries are provenance; the slice adds no new NOTICES entry).
+- **Deferred (documented follow-up):** the Microsoft Word add-in default display name
+  (`word_addin.py DEFAULT_DISPLAY_NAME`) + tokenising two hardcoded manifest strings across both
+  manifest copies. The add-in is non-live scaffold and admin-overridable; the manifest change is a
+  correctness fix that warrants its own M365-validation pass, separate from a display-string rename.
+- **DevForkCallout repo URL** (currently upstream `LegalQuants/lq-ai`) is left as-is pending a
+  maintainer call: its linked PRD §10 / ADR-0009 are upstream documents, so repointing it to the
+  fork would break those specific links.

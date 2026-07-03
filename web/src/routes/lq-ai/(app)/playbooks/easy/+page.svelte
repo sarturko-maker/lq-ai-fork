@@ -309,7 +309,7 @@
 </script>
 
 <svelte:head>
-	<title>Generate playbook · LQ.AI</title>
+	<title>Generate playbook · LQ.AI Oscar Edition</title>
 </svelte:head>
 
 <section class="lq-easy-wizard" data-testid="lq-easy-wizard">

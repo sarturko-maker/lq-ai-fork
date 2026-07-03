@@ -42,7 +42,7 @@
 </script>
 
 <svelte:head>
-	<title>Playbooks · LQ.AI</title>
+	<title>Playbooks · LQ.AI Oscar Edition</title>
 </svelte:head>
 
 <PageShell size="wide" pad="compact">

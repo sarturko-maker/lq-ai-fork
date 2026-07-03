@@ -267,7 +267,7 @@
 </script>
 
 <svelte:head>
-	<title>New Tabular Review · LQ.AI</title>
+	<title>New Tabular Review · LQ.AI Oscar Edition</title>
 </svelte:head>
 
 <section class="lq-tabwiz">

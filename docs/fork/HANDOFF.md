@@ -98,6 +98,20 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   (one annotated SC2029); guard test 3/3; the backup↔restore round-trip. **TRAPS:** stock `caddy:2`
 >   can't validate the DNS block (custom image only); `.env.prod.example` needs the gitignore negation;
 >   the aws-cli pin `amazon/aws-cli:2.17.0` exists (verified). Merge under the ADR-F005 gate.
+> - **SAAS-rebrand ✓ SHIPPED (branch `fork/saas-rebrand-oscar-edition`) — "LQ.AI Oscar Edition"
+>   executed.** The ADR-F058-accepted name applied to the 12 user-facing product-name surfaces
+>   (shell `<title>` in `app.html`, CockpitHeader wordmark two-weight lockup, DualBrandingFooter,
+>   8 per-page `<title>` suffixes, README H1 + a fork-identity note), scoped by a 4-lens branding
+>   audit. **Surgical display-strings-only** — the KEEP boundary (recorded in the ADR-F058
+>   rebrand-execution addendum + `plans/SAAS-REBRAND-oscar-edition.md`) protects the `lq-ai/` code
+>   namespace, `--lq-*` CSS tokens, `LQ_AI_*` env vars, `lq-ai-*` package/image/testid identifiers
+>   (~1,300 Cypress-asserted), `X-LQ-AI-*` wire headers, infra literals, and ALL provenance
+>   (NOTICES.md untouched by design — its entries are extend-never-edit; `LegalQuants` = org name,
+>   stays). DECIDE calls on record: running-prose/`Sign in to LQ.AI`/`/learn`/FastAPI-docs-titles/
+>   TOTP-issuer all KEEP the short mark. **Deferred:** Word add-in display-name + manifest
+>   tokenisation (own M365-validation pass); README body rewrite; DevForkCallout repo-URL repoint
+>   (maintainer call). **TRAP:** "Oscar" in `ropa/*` comments = a COMPETITOR product, not us — never
+>   rename those.
 > - **NEXT = SAAS-3b — bring-up (maintainer-gated).** Provision domain / Hetzner node / DNS token /
 >   object-storage bucket + the `staging` Environment secrets → run `deploy.sh` → **Proof = a real agent
 >   run end-to-end on the staging URL + a passed restore drill.** Then the SAAS-2 handoff hardening: pin
@@ -107,8 +121,10 @@ then CLAUDE.md, then the ADRs/plans named below.
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
 >   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 interleaves after SAAS-3**; untracked side files
->   (`sample-documents/`, `api/tests/agents/scenarios/test_*_live.py`, `.vite/`, `api/rl_smoke.py` — a
->   SAAS-2 live-smoke leftover) belong to NO PR — leave or clean deliberately; dev `.env` `LQ_AI_GATEWAY_KEY` still needs rotating (2026-06-30 terminal dump)
+>   (`sample-documents/`, `api/tests/agents/scenarios/test_*_live.py`) belong to NO PR — leave or clean
+>   deliberately (rebrand slice already cleaned two: `.vite/` now gitignored, empty `api/rl_smoke.py`
+>   deleted; the dev web container now serves a main+rebrand bundle — rebuild from the AIC branch if the
+>   Compliance UI needs demoing before AIC merges); dev `.env` `LQ_AI_GATEWAY_KEY` still needs rotating (2026-06-30 terminal dump)
 >   — PLUS dev Postgres password + `DEEPSEEK_API_KEY` (2026-07-01 diagnosis transcript; values gitignored,
 >   never in git — rotation is a maintainer/dev-box action).
 > ═══════════════════════════════════════════════════════════════════════════════════════════════════════

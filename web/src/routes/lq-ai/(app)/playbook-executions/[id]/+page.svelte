@@ -80,7 +80,7 @@
 </script>
 
 <svelte:head>
-	<title>Playbook execution · LQ.AI</title>
+	<title>Playbook execution · LQ.AI Oscar Edition</title>
 </svelte:head>
 
 <section class="lq-pbx-page">

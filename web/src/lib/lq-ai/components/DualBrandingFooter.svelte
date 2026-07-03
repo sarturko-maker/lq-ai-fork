@@ -15,7 +15,7 @@
 	data-testid="lq-ai-dual-branding-footer"
 >
 	<span>
-		<strong>LQ.AI</strong> — Open-Source Legal AI
+		<strong>LQ.AI Oscar Edition</strong> — Open-Source Legal AI
 	</span>
 	<span>Apache-2.0</span>
 </footer>
