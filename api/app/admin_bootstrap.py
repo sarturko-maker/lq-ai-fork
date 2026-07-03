@@ -14,9 +14,10 @@ password, only the winner does. This avoids advisory locks and keeps the
 startup path simple.
 
 The default admin email is `admin@lq.ai`. Operators can override it via
-`LQ_AI_FIRST_RUN_ADMIN_EMAIL` (see config.py); the email never changes
-after first-run, only the password is rotated through the change-password
-endpoint or the `reset-admin-password` CLI.
+`FIRST_RUN_ADMIN_EMAIL` (config.py's Settings has no ``env_prefix``, so the
+env var is the bare field name — NOT ``LQ_AI_``-prefixed); the email never
+changes after first-run, only the password is rotated through the
+change-password endpoint or the `reset-admin-password` CLI.
 
 Idempotency: subsequent restarts find an existing admin and skip silently
 (no log line, no new password generated). The bootstrap is a no-op after

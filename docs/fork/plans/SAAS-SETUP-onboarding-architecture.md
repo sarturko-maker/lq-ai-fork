@@ -1,6 +1,10 @@
 # SAAS-SETUP — Setup & Onboarding Architecture
 
-**Status:** DRAFT for maintainer edit (2026-07-03). Grounded in a 5-lens code recon (auth/users ·
+**Status:** ACCEPTED — the maintainer ratified the recommendations verbatim ("proceed as you
+suggest", 2026-07-03): every §7 decision row's recommendation is the decision of record (row 9 =
+ADR-F054 D1 superseded — tool-group availability becomes data, group names as rows, grants stay
+code; row 5 = `operator` in-app role). Row 1 (DNS-zone location) stays the operator's per-tenant
+choice — both providers are compiled in (SETUP-1). Grounded in a 5-lens code recon (auth/users ·
 practice-area substrate · capability registries · deploy/wizard substrate · admin fence); every claim
 below is anchored, not assumed.
 **Directive (maintainer, 2026-07-03):** bring-up happens on an **IONOS VPS** at the weekend; before

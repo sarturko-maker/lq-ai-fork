@@ -62,10 +62,16 @@ echo "backup: encrypting (age -r, asymmetric)…"
 age -r "$LQ_AI_BACKUP_AGE_RECIPIENT" -o "$tmp/db.dump.age" "$tmp/db.dump"
 
 echo "backup: uploading s3://$S3_BUCKET/$key …"
+# Secret VALUES must never ride in docker's argv — argv is world-readable via
+# /proc/*/cmdline (SETUP-2 review). Env-prefix the credentials and pass `-e NAME`
+# with no value: docker then reads them from its own environment.
+AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" \
+AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" \
+AWS_DEFAULT_REGION="$S3_REGION" \
 docker run --rm -i \
-	-e AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY" \
-	-e AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY" \
-	-e AWS_DEFAULT_REGION="$S3_REGION" \
+	-e AWS_ACCESS_KEY_ID \
+	-e AWS_SECRET_ACCESS_KEY \
+	-e AWS_DEFAULT_REGION \
 	"$AWSCLI_IMAGE" \
 	s3 cp - "s3://$S3_BUCKET/$key" --endpoint-url "$S3_ENDPOINT_URL" \
 	<"$tmp/db.dump.age"

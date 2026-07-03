@@ -698,9 +698,13 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   IONOS VPS; 3-actor model + deployment→area→matter config hierarchy + operator wizard +
   admin-configurable practice areas. **SETUP-1 ✓ done** — multi-DNS edge (Option A, ADR-F060
   amendment): hetzner+ionos compiled in, parse-time `{$LQ_AI_DNS_PROVIDER}` selection,
-  `LQ_AI_DNS_API_TOKEN` generalisation, runbook de-Hetzner'd. SETUP-2 wizard (weekend-critical) →
-  SETUP-3a/b user lifecycle + operator fence (absorbs SAAS-4) → SETUP-4a/b capability registry +
-  areas admin UI → SETUP-5 reconcile (F054 flip + D1 supersession).
+  `LQ_AI_DNS_API_TOKEN` generalisation, runbook de-Hetzner'd. **SETUP-2 ✓ done** — operator
+  tenant-setup wizard `scripts/setup-tenant.sh` (manifest/interactive; renders .env.prod 0600 +
+  verbatim Anthropic-only gateway.yaml seed + dns-records + backup cron; secrets env/prompt-only,
+  NEVER in the manifest or argv; charset fence — values land in a root-sourced env file; optional
+  bucket create + deploy + admin handover) + FIRST_RUN_ADMIN_EMAIL/SMTP forwarded in prod compose.
+  NEXT: SETUP-3a/b user lifecycle + operator fence (absorbs SAAS-4) → SETUP-4a/b capability
+  registry + areas admin UI → SETUP-5 reconcile (F054 flip + D1 supersession).
 - **SAAS-4 — user lifecycle + admin split — ABSORBED into SETUP-3a/b** (see the SETUP ladder above).
   Original scope: invitations/verification/reset/SMTP; forced first
   password change; WorkOS-style users/orgs/memberships modeling; platform-admin vs org-admin

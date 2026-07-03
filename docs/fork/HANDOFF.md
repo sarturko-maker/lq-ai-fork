@@ -132,12 +132,41 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   default hetzner) across compose/.env.prod.example/READMEs; runbook de-Hetzner'd (IONOS VPS/DNS/S3
 >   paths). caddy-dns/cloudflare DELIBERATELY absent (no release tags — pin a commit if ever needed).
 >   TRAP: `{$VAR}` parse-time substitution CAN pick the dns module; `{env.VAR}` runtime CANNOT.
-> - **NEXT = SETUP-2 — operator wizard v1 (weekend-critical; spec = plan §3).** Then SAAS-3b bring-up
->   (maintainer, weekend, IONOS): provision domain/node/DNS token/bucket + `staging` Environment
->   secrets → run the wizard/`deploy.sh` → **Proof = a real agent run on the staging URL + a passed
->   restore drill.** Then the SAAS-2 handoff hardening (pin `FORWARDED_ALLOW_IPS` to Caddy's IP,
->   promote CSP, rotate gateway key, lock Collabora egress). Runbook: `docs/fork/runbooks/
->   staging-bringup.md`.
+> - **PLAN RATIFIED (maintainer "proceed as you suggest", 2026-07-03):** every §7 recommendation is
+>   the decision of record — notably row 9 (ADR-F054 D1 SUPERSEDED: tool-group availability becomes
+>   DATA) and row 5 (`operator` in-app role). Plan status flipped to ACCEPTED.
+> - **SETUP-2 ✓ (branch `fork/setup-2-tenant-wizard`) — the operator tenant-setup wizard.**
+>   Implemented by Opus in a worktree (working model); lead verified + security-reviewed.
+>   `scripts/setup-tenant.sh` (interactive or `--manifest` flat KEY=VALUE; SECRETS FORBIDDEN in the
+>   manifest — the script refuses; secrets come from env or silent prompts): renders `.env.prod`
+>   (0600, no-overwrite without `--force`) + `deploy/gateway/tenant-gateway.yaml.example`-based seed
+>   (Anthropic-only, `api_key_env` indirection — NO key material in yaml; **tier 4** = honest cloud
+>   tier, 3 for ZDR; no PRC tokens) + `dns-records.txt` + backup cron + optional `--create-bucket`
+>   (dockerized aws-cli, versioning + ~GFS lifecycle) + `deploy.sh` + a ONE-TIME admin-password
+>   handover (log-scrape of `First-run admin password`). Fixed the two prod-compose gaps:
+>   `FIRST_RUN_ADMIN_EMAIL` (api) + `SMTP_*` (api AND arq-worker — that's where autonomous mail
+>   sends) now forwarded, optional `${VAR:-}`; `.env.prod.example` extended; `admin_bootstrap.py`
+>   env-name doc bug fixed (`FIRST_RUN_ADMIN_EMAIL`, config.py has no env_prefix). Two-round review
+>   (round 2 security-focused) found + FIXED: (S1) S3 secrets out of docker argv (`-e VAR` names only,
+>   values env-prefixed — argv is world-readable via /proc/*/cmdline) in `--create-bucket` AND the
+>   same pre-existing pattern in `scripts/backup.sh`; (S2) generic conservative charset fence +
+>   anchored per-field formats on ALL manifest values (the backup cron root-executes `.env.prod` via
+>   `set -a; . file` — unvalidated values = latent root RCE; ADMIN_EMAIL is customer-originated) +
+>   refusal tests; (N3) slug regex no edge hyphens; (N4) `rm -f` before `--force` overwrite (mode
+>   window); (N5) wildcard PUBLIC_HOST requires explicit PUBLIC_ORIGIN; (N6) secret fence +=
+>   `*APPLICATION_CREDENTIALS`; (N7) `awscli()` dedup + 0600 tests for gateway.yaml/manifest.
+>   Boxless gate: pytest **25 passed** (22 wizard + 3 guard) in the dev image; shellcheck CLEAN;
+>   `bash -n` OK; ruff clean. NOT live-verified: the deploy+handover path + `--create-bucket`
+>   (needs the box — weekend). Session traps: Edit tool needs a fresh Read after branch switches;
+>   `gh pr checks` exits 8 while checks are pending; bare `vitest` is watch-mode (use
+>   `CI=1 npx vitest run`); commit strays NEVER (`sample-documents/`,
+>   `api/tests/agents/scenarios/test_*_live.py`).
+> - **NEXT = SETUP-3a — user lifecycle + operator fence (plan §4 + §1; decisions ratified).** Then
+>   SETUP-3b (Users UI + onboarding flow + wizard invite-handover), SETUP-4a/b (capability registry +
+>   areas admin UI). SAAS-3b bring-up (maintainer, weekend, IONOS): provision domain/node/DNS token/
+>   bucket → run `setup-tenant.sh` → **Proof = a real agent run on the staging URL + a passed restore
+>   drill.** Then the SAAS-2 handoff hardening (pin `FORWARDED_ALLOW_IPS` to Caddy's IP, promote CSP,
+>   rotate gateway key, lock Collabora egress). Runbook: `docs/fork/runbooks/staging-bringup.md`.
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
 >   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 PARKED (task #456; resumes after the
