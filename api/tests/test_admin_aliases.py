@@ -41,11 +41,15 @@ def _override_get_db(db_session: AsyncSession):
 
 @pytest_asyncio.fixture
 async def admin_user(db_session: AsyncSession) -> User:
+    # SETUP-3a (ADR-F061 D4): the alias / provider-key / config proxies are
+    # operator-fenced. The authorised caller is now an OPERATOR (role=operator,
+    # is_admin=True). A plain org-admin's 403 is covered in test_operator_fence.
     user = User(
-        email=f"admin-{uuid.uuid4().hex[:8]}@example.com",
-        display_name="Admin",
+        email=f"operator-{uuid.uuid4().hex[:8]}@example.com",
+        display_name="Operator",
         hashed_password=hash_password("correct-horse-battery-staple"),
         is_admin=True,
+        role="operator",
         mfa_enabled=False,
         must_change_password=False,
     )

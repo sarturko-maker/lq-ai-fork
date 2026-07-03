@@ -210,13 +210,30 @@ services:
       FIRST_RUN_ADMIN_EMAIL: ${FIRST_RUN_ADMIN_EMAIL:-}
       # SETUP-2 auth/notification mail (SMTP; optional — smtp_host-gated). Forwarded
       # so a hosted stack CAN send mail (SAAS-SETUP §0 gap); the api reads these for
-      # future invite/reset flows, and the arq-worker (below) sends autonomous mail.
+      # the invite/reset flows (SETUP-3a), and the arq-worker (below) sends autonomous mail.
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      # SETUP-3a (ADR-F061) — the operator (platform) account. Unset ⇒ no operator
+      # is bootstrapped (self-host with no separate operator). Bare env name (no
+      # env_prefix), same as FIRST_RUN_ADMIN_EMAIL above.
+      FIRST_RUN_OPERATOR_EMAIL: ${FIRST_RUN_OPERATOR_EMAIL:-}
+      # SETUP-3a (ADR-F061 D6) — browser-facing base URL for emailed invite/reset
+      # links, derived from the tenant's public origin. Unset ⇒ path-only fallback
+      # links + the invite-create response hands the accept URL back for out-of-band
+      # delivery. (Scheme prefixed here; LQ_AI_PUBLIC_ORIGIN carries no scheme.)
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://${LQ_AI_PUBLIC_ORIGIN}}
+      # SETUP-3a (ADR-F061 D7) — lifecycle token TTLs + rate limits (optional; the
+      # defaults ARE the secure code defaults — forwarded so an operator can tune
+      # without editing this file, matching the SAAS-2 auth knob convention above).
+      INVITE_TOKEN_TTL_SECONDS: ${INVITE_TOKEN_TTL_SECONDS:-604800}
+      PASSWORD_RESET_TOKEN_TTL_SECONDS: ${PASSWORD_RESET_TOKEN_TTL_SECONDS:-3600}
+      RATE_LIMIT_PASSWORD_RESET_REQUEST_IP_PER_WINDOW: ${RATE_LIMIT_PASSWORD_RESET_REQUEST_IP_PER_WINDOW:-10}
+      RATE_LIMIT_PASSWORD_RESET_REQUEST_EMAIL_PER_WINDOW: ${RATE_LIMIT_PASSWORD_RESET_REQUEST_EMAIL_PER_WINDOW:-5}
+      RATE_LIMIT_TOKEN_REDEEM_IP_PER_WINDOW: ${RATE_LIMIT_TOKEN_REDEEM_IP_PER_WINDOW:-10}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"]
       interval: 5s

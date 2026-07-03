@@ -7,9 +7,10 @@ an ``audit_log`` row carrying the override reason, and returns the new
 ``kind='ai'`` :class:`Message` plus the routing-log id the gateway
 wrote.
 
-M1 binds this surface to the ``is_admin`` role (per the RBAC
-simplification in Wave D.1 §7.4 / spec discussion). A per-user
-``override_tier_floor`` capability is queued for v1.1+.
+SETUP-3a (ADR-F061 D4) reclassifies this surface from ``AdminUser`` to
+``OperatorUser`` — lifting the tier floor is a gateway-routing (platform)
+concern, so only the operator may. A per-user ``override_tier_floor``
+capability is queued for v1.1+.
 
 The new module exists rather than living in :mod:`app.api.inference`
 to keep the override surface independently auditable: a security
@@ -30,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.chats import run_inference_override
-from app.api.dependencies import AdminUser
+from app.api.dependencies import OperatorUser
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db
@@ -97,11 +98,15 @@ class OverrideResponse(BaseModel):
 async def override_tier_floor(
     payload: OverrideRequest,
     request: Request,
-    admin: AdminUser,
+    operator: OperatorUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> OverrideResponse:
-    """Admin override of a tier-floor refusal."""
+    """Operator override of a tier-floor refusal (ADR-F061 D4).
+
+    Re-running a refused inference with the tier floor lifted rewrites the
+    routing constraint the gateway enforces — a platform concern, so this is
+    operator-fenced rather than org-admin."""
 
     refusal = await db.get(Message, payload.message_id)
     if refusal is None or refusal.kind != "refusal":
@@ -140,7 +145,7 @@ async def override_tier_floor(
         db=db,
         gateway=gateway,
         chat=chat,
-        user=admin,
+        user=operator,
         user_msg=user_msg,
         refusal_msg=refusal,
         override_reason=payload.reason,
@@ -149,7 +154,7 @@ async def override_tier_floor(
 
     await audit_action(
         db,
-        user_id=admin.id,
+        user_id=operator.id,
         action="inference.tier_floor_overridden",
         resource_type="message",
         resource_id=str(refusal.id),

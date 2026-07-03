@@ -40,6 +40,7 @@ from app.models.tabular import TabularExecution
 from app.models.team import Team, TeamMember
 from app.models.teams_tenant import TeamsTenant
 from app.models.user import User, UserSession
+from app.models.user_auth_token import UserAuthToken
 from app.models.user_export import UserExportJob
 from app.models.user_skill import UserSkill
 from app.models.work_product import WorkProductAttribution
@@ -86,6 +87,7 @@ __all__ = [
     "TeamMember",
     "TeamsTenant",
     "User",
+    "UserAuthToken",
     "UserExportJob",
     "UserSession",
     "UserSkill",

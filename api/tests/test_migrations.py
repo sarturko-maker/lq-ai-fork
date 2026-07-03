@@ -884,3 +884,106 @@ async def test_message_citations_partial_default_false(
         )
     ).one()
     assert row[0] is False
+
+
+# ---------------------------------------------------------------------------
+# SETUP-3a — user_auth_tokens + users.disabled_at/email_verified_at + operator
+# role (migration 0085, ADR-F061)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_user_auth_tokens_table_exists(db_session: AsyncSession) -> None:
+    """The 0085 user_auth_tokens table + its unique HMAC index exist."""
+    cols = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'user_auth_tokens'"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    expected = {
+        "id",
+        "purpose",
+        "email",
+        "user_id",
+        "role",
+        "token_hmac",
+        "created_by",
+        "created_at",
+        "expires_at",
+        "consumed_at",
+        "revoked_at",
+    }
+    assert expected.issubset(set(cols)), f"missing columns: {expected - set(cols)}"
+
+    idx = (
+        await db_session.execute(
+            text(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' "
+                "AND indexname = 'ix_user_auth_tokens_token_hmac'"
+            )
+        )
+    ).scalar_one_or_none()
+    assert idx == "ix_user_auth_tokens_token_hmac"
+
+
+@pytest.mark.integration
+async def test_user_auth_tokens_purpose_check(db_session: AsyncSession) -> None:
+    """purpose is constrained to invite|password_reset."""
+    with pytest.raises(Exception):
+        await db_session.execute(
+            text(
+                "INSERT INTO user_auth_tokens (purpose, email, role, token_hmac, expires_at) "
+                "VALUES ('bogus', 'x@example.com', 'member', 'h', now())"
+            )
+        )
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_users_disable_and_verify_columns_exist(db_session: AsyncSession) -> None:
+    """users.disabled_at + users.email_verified_at were added by 0085."""
+    cols = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'users' "
+                    "AND column_name IN ('disabled_at', 'email_verified_at')"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert set(cols) == {"disabled_at", "email_verified_at"}
+
+
+@pytest.mark.integration
+async def test_users_role_check_admits_operator(db_session: AsyncSession) -> None:
+    """The 0085-widened role CHECK admits 'operator' and still rejects garbage."""
+    ok = User(
+        email=f"operator-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="h",
+        role="operator",
+        is_admin=True,
+    )
+    db_session.add(ok)
+    await db_session.flush()  # must NOT raise
+
+    bad = User(
+        email=f"bad-{uuid.uuid4().hex[:8]}@example.com",
+        hashed_password="h",
+        role="wizard",
+    )
+    db_session.add(bad)
+    with pytest.raises(Exception):
+        await db_session.flush()
+    await db_session.rollback()

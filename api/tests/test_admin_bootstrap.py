@@ -26,7 +26,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.admin_bootstrap import ensure_first_run_admin, generate_password
+from app.admin_bootstrap import (
+    ensure_first_run_admin,
+    ensure_first_run_operator,
+    generate_password,
+)
 from app.config import get_settings
 from app.db.session import get_db
 from app.main import app
@@ -203,6 +207,73 @@ async def test_ensure_first_run_admin_skips_when_email_already_taken_by_non_admi
     # The conflict path returns None; a non-admin still occupies the email
     # slot. Operators are expected to recover manually if this happens.
     assert pw is None
+
+
+# ---------------------------------------------------------------------------
+# ensure_first_run_operator — SETUP-3a (ADR-F061 D3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_ensure_first_run_operator_noop_when_unset(db_session: AsyncSession) -> None:
+    """With FIRST_RUN_OPERATOR_EMAIL unset (default None) → clean no-op."""
+    settings = get_settings()
+    assert settings.first_run_operator_email is None  # shipped default
+    pw = await ensure_first_run_operator(db_session)
+    assert pw is None
+    operators = (
+        (await db_session.execute(select(User).where(User.role == "operator"))).scalars().all()
+    )
+    assert operators == []
+
+
+@pytest.mark.integration
+async def test_ensure_first_run_operator_creates_when_configured(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Configured email → operator row with role=operator, is_admin=True, must_change."""
+    settings = get_settings()
+    email = f"operator-{uuid.uuid4().hex[:8]}@example.com"
+    monkeypatch.setattr(settings, "first_run_operator_email", email)
+
+    pw = await ensure_first_run_operator(db_session)
+    assert pw is not None
+    assert len(pw) == 24
+
+    op = (await db_session.execute(select(User).where(User.email == email))).scalar_one()
+    assert op.role == "operator"
+    assert op.is_admin is True  # operator is a superset of org-admin
+    assert op.must_change_password is True
+    from app.security import verify_password
+
+    assert verify_password(pw, op.hashed_password) is True
+
+
+@pytest.mark.integration
+async def test_ensure_first_run_operator_idempotent(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An existing operator → returns None and inserts no second operator."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "first_run_operator_email", "op-2@example.com")
+    db_session.add(
+        User(
+            email="existing-operator@example.com",
+            hashed_password=hash_password("xyz"),
+            is_admin=True,
+            role="operator",
+            mfa_enabled=False,
+            must_change_password=False,
+        )
+    )
+    await db_session.flush()
+
+    pw = await ensure_first_run_operator(db_session)
+    assert pw is None
+    operators = (
+        (await db_session.execute(select(User).where(User.role == "operator"))).scalars().all()
+    )
+    assert len(operators) == 1
 
 
 # ---------------------------------------------------------------------------

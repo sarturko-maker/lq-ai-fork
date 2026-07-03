@@ -46,11 +46,14 @@ def _override_get_db(db_session: AsyncSession):
 
 @pytest_asyncio.fixture
 async def admin_user(db_session: AsyncSession) -> User:
+    # SETUP-3a (ADR-F061 D4): the provider-key proxy is operator-fenced, so the
+    # authorised caller is an OPERATOR (role=operator, is_admin=True).
     user = User(
-        email=f"admin-{uuid.uuid4().hex[:8]}@example.com",
-        display_name="Admin",
+        email=f"operator-{uuid.uuid4().hex[:8]}@example.com",
+        display_name="Operator",
         hashed_password=hash_password("correct-horse-battery-staple"),
         is_admin=True,
+        role="operator",
         mfa_enabled=False,
         must_change_password=False,
     )

@@ -36,7 +36,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select, update
@@ -44,9 +44,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser
 from app.audit import audit_action
+from app.auth_tokens import (
+    INVITE,
+    PASSWORD_RESET,
+    consume_token,
+    issue_password_reset,
+    revoke_active_password_resets_for_user,
+)
 from app.config import get_settings
 from app.db.session import get_db
 from app.errors import Conflict
+from app.lifecycle_email import build_reset_url, send_password_reset_email
 from app.models.user import User, UserSession
 from app.security import (
     create_access_token,
@@ -452,6 +460,26 @@ async def login(
             detail="Invalid credentials",
         )
 
+    # SETUP-3a (ADR-F061 D5) — a disabled account cannot log in. The check runs
+    # AFTER password verification and returns the BYTE-IDENTICAL 401 as a wrong
+    # password, so an attacker cannot distinguish "disabled" from "wrong
+    # password" (or even confirm the password is right on a disabled account).
+    if user.disabled_at is not None:
+        await audit_action(
+            db,
+            user_id=user.id,
+            action="user.login_failed",
+            resource_type="user",
+            resource_id=str(user.id),
+            request=request,
+            details={"email": payload.email, "reason": "account_disabled"},
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+
     # MFA branch: issue a short-lived challenge token; the client redeems
     # it at /auth/mfa/verify (D5). No session is created here — the user
     # has not yet completed authentication.
@@ -605,12 +633,15 @@ async def refresh(
             detail="Session has been idle too long; please log in again",
         )
 
-    # Look up the owning user; if missing or soft-deleted, refuse.
+    # Look up the owning user; if missing, soft-deleted, or disabled, refuse.
+    # SETUP-3a (ADR-F061 D5) — disable revokes sessions, but a session minted in
+    # the instant before disable must not be refreshable, so re-check here too.
     user_result = await db.execute(
         select(User).where(User.id == matched.user_id, User.deleted_at.is_(None))
     )
     user = user_result.scalar_one_or_none()
-    if user is None:
+    if user is None or user.disabled_at is not None:
+        matched.revoked_at = now
         await audit_action(
             db,
             user_id=matched.user_id,
@@ -618,7 +649,7 @@ async def refresh(
             resource_type="user_session",
             resource_id=str(matched.id),
             request=request,
-            details={"reason": "user_deleted"},
+            details={"reason": "user_disabled" if user is not None else "user_deleted"},
         )
         await db.commit()
         raise HTTPException(
@@ -1139,4 +1170,272 @@ async def mfa_disable(
         request=request,
     )
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# SETUP-3a (ADR-F061) — unauthenticated user-lifecycle endpoints.
+#
+# accept-invite      redeems a single-use invite token → creates the user.
+# password-reset-request  anti-enumeration: uniform 202 regardless of existence.
+# password-reset     redeems a single-use reset token → sets password, revokes
+#                    all sessions.
+#
+# Invalid/expired/consumed/revoked tokens collapse to ONE uniform 400 (no
+# distinguishing signal). Redeem endpoints are rate-limited per-IP; the reset
+# request is rate-limited per-IP AND per-submitted-email (ADR-F061 D7).
+# ---------------------------------------------------------------------------
+
+
+class AcceptInviteRequest(BaseModel):
+    """`POST /auth/accept-invite` body."""
+
+    token: str = Field(min_length=1, max_length=512)
+    password: str = Field(min_length=1, max_length=1024)
+    display_name: str | None = Field(default=None, max_length=200)
+
+
+class AcceptInviteResponse(BaseModel):
+    """`POST /auth/accept-invite` response — the created account (no tokens)."""
+
+    user_id: str
+    email: str
+    role: str
+
+
+class PasswordResetRequestRequest(BaseModel):
+    """`POST /auth/password-reset-request` body."""
+
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    """`POST /auth/password-reset` body."""
+
+    token: str = Field(min_length=1, max_length=512)
+    new_password: str = Field(min_length=1, max_length=1024)
+
+
+def _invalid_token() -> HTTPException:
+    """The single uniform 400 for any bad lifecycle token (ADR-F061 D7)."""
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="This link is invalid or has expired.",
+    )
+
+
+@router.post(
+    "/accept-invite",
+    response_model=AcceptInviteResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Accept an invite: create the account and set a password",
+    responses={
+        201: {"model": AcceptInviteResponse},
+        400: {"description": "Invalid/expired token or password fails policy"},
+        409: {"description": "A user with this email already exists"},
+    },
+)
+async def accept_invite(
+    payload: AcceptInviteRequest,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limiter: RateLimiterDep,
+) -> AcceptInviteResponse:
+    """POST /api/v1/auth/accept-invite — unauthenticated.
+
+    Redeems the single-use invite token, creates the user at the invited role
+    with ``email_verified_at`` stamped (accepting the invite IS verification),
+    and does NOT force a password change (the user just set their password).
+    """
+    await limiter.enforce_token_redeem(request)
+    settings = get_settings()
+    now = _utcnow()
+
+    token = await consume_token(db, purpose=INVITE, plaintext=payload.token, now=now)
+    if token is None:
+        raise _invalid_token()
+
+    if len(payload.password) < settings.password_min_length:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Password must be at least {settings.password_min_length} characters.",
+        )
+
+    email = token.email or ""
+    role = token.role or "member"
+
+    # Guard a race where the email became a user after the invite was minted.
+    existing = (
+        await db.execute(
+            select(User.id).where(User.email == email, User.deleted_at.is_(None)).limit(1)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise Conflict(message="A user with this email already exists.")
+
+    user = User(
+        email=email,
+        display_name=payload.display_name,
+        hashed_password=hash_password(payload.password),
+        is_admin=(role == "admin"),
+        role=role,
+        mfa_enabled=False,
+        must_change_password=False,
+        email_verified_at=now,
+    )
+    db.add(user)
+    await db.flush()
+
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.invite_accepted",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
+        details={"role": role, "invite_id": str(token.id)},
+    )
+    await db.commit()
+
+    return AcceptInviteResponse(user_id=str(user.id), email=user.email, role=user.role)
+
+
+@router.post(
+    "/password-reset-request",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Request a password-reset link (uniform 202, no existence leak)",
+)
+async def password_reset_request(
+    payload: PasswordResetRequestRequest,
+    request: Request,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limiter: RateLimiterDep,
+) -> JSONResponse:
+    """POST /api/v1/auth/password-reset-request — unauthenticated.
+
+    ALWAYS returns 202 ``{"status": "ok"}`` regardless of whether the email
+    maps to an active account (anti-enumeration). When it does, a single-use
+    reset token is minted and emailed best-effort.
+
+    The email send runs as a BACKGROUND task, after the response is sent —
+    awaiting the (thread-pooled, network-bound) SMTP send inline would make the
+    exists-branch measurably slower than the not-exists branch, a latency
+    oracle that defeats the uniform 202 (security review fix 1). The token
+    INSERT is committed before the handler returns, so the scheduled send only
+    ever emails a durable token; the send stays best-effort (never raises).
+    """
+    await limiter.enforce_password_reset_request(request, str(payload.email))
+    settings = get_settings()
+    now = _utcnow()
+
+    email = str(payload.email)
+    user = (
+        await db.execute(
+            select(User).where(
+                User.email == email,
+                User.deleted_at.is_(None),
+                User.disabled_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+
+    reset_url: str | None = None
+    if user is not None:
+        plaintext, _token = await issue_password_reset(
+            db,
+            user_id=user.id,
+            ttl_seconds=settings.password_reset_token_ttl_seconds,
+            now=now,
+        )
+        reset_url = build_reset_url(plaintext)
+
+    # Audit the attempt — counts/IDs only, NO email echo (ADR-F061 D8). user_id
+    # is None when no account matched (the row still records that a request
+    # occurred, without leaking which address).
+    await audit_action(
+        db,
+        user_id=user.id if user is not None else None,
+        action="user.password_reset_requested",
+        resource_type="user",
+        resource_id=str(user.id) if user is not None else None,
+        request=request,
+    )
+    await db.commit()
+
+    if user is not None and reset_url is not None:
+        # Scheduled AFTER the commit above; Starlette runs it after the
+        # response body is sent, so both branches return in comparable time.
+        background.add_task(send_password_reset_email, to_addr=user.email, reset_url=reset_url)
+
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED, content={"status": "ok"}, background=background
+    )
+
+
+@router.post(
+    "/password-reset",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Complete a password reset with a single-use token",
+    responses={
+        204: {"description": "Password reset; all sessions revoked"},
+        400: {"description": "Invalid/expired token or password fails policy"},
+    },
+)
+async def password_reset(
+    payload: PasswordResetConfirmRequest,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limiter: RateLimiterDep,
+) -> Response:
+    """POST /api/v1/auth/password-reset — unauthenticated.
+
+    Redeems the single-use reset token, sets the new password, clears any
+    forced-change flag, and revokes ALL of the user's sessions.
+    """
+    await limiter.enforce_token_redeem(request)
+    settings = get_settings()
+    now = _utcnow()
+
+    token = await consume_token(db, purpose=PASSWORD_RESET, plaintext=payload.token, now=now)
+    if token is None:
+        raise _invalid_token()
+
+    if len(payload.new_password) < settings.password_min_length:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Password must be at least {settings.password_min_length} characters.",
+        )
+
+    user = await db.get(User, token.user_id) if token.user_id is not None else None
+    # Security review fix 4 — re-check disabled_at here too: the request side
+    # refuses to mint a token for a disabled account, but an account disabled
+    # AFTER the token was emailed must not be able to complete a reset. Same
+    # uniform 400 as any other bad token.
+    if user is None or user.deleted_at is not None or user.disabled_at is not None:
+        raise _invalid_token()
+
+    user.hashed_password = hash_password(payload.new_password)
+    # The user just set their own password; clear any forced-change flag.
+    user.must_change_password = False
+
+    # Security review fix 2 — belt-and-braces: no sibling reset token survives
+    # a completed reset (issue-time already enforces at-most-one-live).
+    await revoke_active_password_resets_for_user(db, user_id=user.id, now=now)
+
+    await db.execute(
+        update(UserSession)
+        .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    await audit_action(
+        db,
+        user_id=user.id,
+        action="user.password_reset_completed",
+        resource_type="user",
+        resource_id=str(user.id),
+        request=request,
+    )
+    await db.commit()
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
