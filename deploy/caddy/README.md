@@ -27,11 +27,12 @@ uses a different path prefix and no TLS). **Do not edit that one for hosting.**
 - **(f)** Routing (SAAS-HOSTING.md §5): `/api/v1/*` → `api:8000` (after the
   denies); everything else → `web:8080` (whose nginx also proxies Collabora at
   `/browser`, `/hosting`, `/cool`, WebSocket upgrades included).
-- **(g)** TLS via **wildcard DNS-01** (Hetzner DNS plugin) — SAAS-3, ADR-F060 D2.
+- **(g)** TLS via **wildcard DNS-01** — SAAS-3, ADR-F060 D2; multi-provider SETUP-1.
   A per-host HTTP-01 cert would name every tenant in the public Certificate
   Transparency logs (the customer list); a wildcard cert never does. Stock
-  `caddy:2` has no DNS modules, so the `tls { dns hetzner … }` block only runs in
-  the custom image (`Dockerfile`, `caddy-dns/hetzner`).
+  `caddy:2` has no DNS modules, so the `tls { dns {$LQ_AI_DNS_PROVIDER} … }`
+  block only runs in the custom image (`Dockerfile`; compiled-in set: hetzner,
+  ionos — selected per deployment via `LQ_AI_DNS_PROVIDER`).
 
 ## Configuration
 
@@ -42,15 +43,17 @@ the node, never committed):
 |---|---|---|
 | `LQ_AI_PUBLIC_HOST` | `localhost` | The tenant hostname Caddy serves + provisions TLS for (a single host for staging; a wildcard `*.tenant.example.com` for prod). |
 | `LQ_AI_ACME_EMAIL` | `ops@example.com` | ACME account email for cert-expiry notices. |
-| `HETZNER_DNS_API_TOKEN` | — (required at run) | Hetzner DNS API token for the ACME DNS-01 challenge, scoped to the tenant's zone. A runtime env value only — `caddy validate` does not need it. |
+| `LQ_AI_DNS_PROVIDER` | `hetzner` | Which compiled-in DNS module answers the ACME DNS-01 challenge (`hetzner` \| `ionos`). Parse-time selection — an unknown value fails `caddy validate`/startup loudly. |
+| `LQ_AI_DNS_API_TOKEN` | — (required at run) | API token for the selected DNS provider, scoped to the tenant's zone. A runtime env value only — `caddy validate` does not need it. |
 
 The `localhost` default exists only so the file validates with no DNS/cert
 dependency; a real deployment always sets `LQ_AI_PUBLIC_HOST`.
 
 ## Validate
 
-The Caddyfile now carries a `tls { dns hetzner … }` block, so it validates **only
-in the custom image** (stock `caddy:2` lacks the DNS module). Build the image
+The Caddyfile carries a `tls { dns {$LQ_AI_DNS_PROVIDER} … }` block, so it
+validates **only in the custom image** (stock `caddy:2` lacks the DNS modules;
+the placeholder resolves at parse time — default `hetzner`). Build the image
 (context is `deploy/caddy` so `COPY Caddyfile` resolves) and validate the baked
 config — no token needed:
 

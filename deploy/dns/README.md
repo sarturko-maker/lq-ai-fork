@@ -1,9 +1,11 @@
 # deploy/dns — DNS + email records for a hosted tenant
 
-Record templates for bringing a tenant online (SAAS-3, ADR-F060). The zone must
-be hosted at **Hetzner DNS** so the ACME **DNS-01** challenge token
-(`HETZNER_DNS_API_TOKEN`) can create the `_acme-challenge` TXT records Caddy asks
-for. Replace `example.com`, `staging`, the IPs, and the DKIM selector/key.
+Record templates for bringing a tenant online (SAAS-3, ADR-F060; multi-provider
+SETUP-1). The zone must be hosted at a **supported DNS provider** — `hetzner` or
+`ionos` (compiled into the lq-ai-caddy image; select via `LQ_AI_DNS_PROVIDER`) —
+so the ACME **DNS-01** challenge token (`LQ_AI_DNS_API_TOKEN`) can create the
+`_acme-challenge` TXT records Caddy asks for. The DNS host is independent of the
+VPS vendor. Replace `example.com`, `staging`, the IPs, and the DKIM selector/key.
 
 ## A/AAAA — the app + status page
 
