@@ -94,6 +94,17 @@ class User(Base):
     )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # SETUP-3a (ADR-F061) — admin disable/re-enable is a timestamp (D5), not a
+    # boolean. Non-null ⇒ the account is disabled: login stays uniform-401,
+    # live access tokens die in get_current_user, refresh 401s. Cleared by the
+    # admin enable endpoint.
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # SETUP-3a (ADR-F061) — stamped when the user accepts an invite (accepting
+    # the invite IS email verification). Reserved for a future standalone
+    # verification flow; currently informational.
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     deletion_scheduled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

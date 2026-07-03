@@ -395,6 +395,51 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ----- First-run operator (SETUP-3a, ADR-F061 D3) -----
+    # The platform operator's in-app account. Unlike the admin (which always
+    # bootstraps at a default email), the operator is minted ONLY when this is
+    # set — no default, so a self-host deployment that has no separate operator
+    # simply never gets one. Bootstrap is idempotent (skips if an operator
+    # already exists) and mints role='operator', is_admin=true (so the operator
+    # also passes org-admin surfaces), must_change_password=true. Operator
+    # accounts are the ONLY holders of the gateway-proxy surfaces (aliases,
+    # provider-keys, gateway config, tier-policy PATCH) and can never be minted
+    # through the org-admin role endpoint (escalation guard, ADR-F061 D3).
+    first_run_operator_email: str | None = Field(
+        default=None,
+        description=(
+            "Email for the auto-created first-run operator (platform) account. "
+            "Unset ⇒ no operator is bootstrapped. Ignored once an operator exists."
+        ),
+    )
+
+    # ----- Public base URL for emailed links (SETUP-3a, ADR-F061 D6) -----
+    # The browser-facing origin used to build invite / password-reset links
+    # (e.g. https://acme.lq-ai.example.com). Distinct from collabora_wopi_host
+    # (in-network) and from CORS origins. Unset ⇒ links fall back to path-only
+    # strings and the invite-create response returns the accept URL so an admin
+    # can hand it over out-of-band. (Bare env name per the database_url /
+    # jwt_secret precedent — no env_prefix.)
+    public_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Browser-facing base URL for emailed invite/reset links (e.g. "
+            "https://tenant.example.com). Unset ⇒ path-only fallback links."
+        ),
+    )
+
+    # ----- Lifecycle token TTLs (SETUP-3a, ADR-F061 D7) -----
+    invite_token_ttl_seconds: int = Field(
+        default=604800,  # 7 days
+        gt=0,
+        description="Invite-token TTL in seconds. Default: 7 days (ADR-F061 D7).",
+    )
+    password_reset_token_ttl_seconds: int = Field(
+        default=3600,  # 1 hour
+        gt=0,
+        description="Password-reset-token TTL in seconds. Default: 1 hour (ADR-F061 D7).",
+    )
+
     # Minimum length for user-set passwords (the change-password endpoint
     # rejects shorter inputs). 12 is a reasonable floor for an admin tool;
     # individual operators may raise but should not lower it.
@@ -669,6 +714,28 @@ class Settings(BaseSettings):
     rate_limit_bootstrap_status_ip_per_window: int = Field(
         default=30,
         description="Max /admin/bootstrap-status probes per window per source IP.",
+    )
+    # SETUP-3a (ADR-F061 D7) — unauthenticated lifecycle surfaces. The reset
+    # request is doubly bucketed (per-IP AND per-submitted-email) so neither a
+    # source-IP flood nor a single-victim spam gets through; both buckets are
+    # incremented on every attempt whether or not the account exists (so the
+    # 429 leaks no existence signal, matching the uniform 202). The redeem
+    # bucket is shared by accept-invite + reset-confirm (per-IP only — the
+    # token IS the identifier and must not be hashed into a key/log).
+    rate_limit_password_reset_request_ip_per_window: int = Field(
+        default=10,
+        description="Max /auth/password-reset-request attempts per window per source IP.",
+    )
+    rate_limit_password_reset_request_email_per_window: int = Field(
+        default=5,
+        description="Max /auth/password-reset-request attempts per window per submitted email.",
+    )
+    rate_limit_token_redeem_ip_per_window: int = Field(
+        default=10,
+        description=(
+            "Max /auth/accept-invite + /auth/password-reset redemptions per window "
+            "per source IP (shared bucket)."
+        ),
     )
 
 

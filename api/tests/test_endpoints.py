@@ -117,6 +117,10 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/auth/mfa/enable"),
     ("POST", "/api/v1/auth/mfa/verify"),
     ("POST", "/api/v1/auth/mfa/disable"),
+    # SETUP-3a (ADR-F061) — unauthenticated user-lifecycle endpoints
+    ("POST", "/api/v1/auth/accept-invite"),
+    ("POST", "/api/v1/auth/password-reset-request"),
+    ("POST", "/api/v1/auth/password-reset"),
     # D6 — GDPR Article 17 + 20 surface
     ("POST", "/api/v1/users/me/export"),
     ("GET", "/api/v1/users/me/export/{job_id}"),
@@ -308,6 +312,13 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("PATCH", "/api/v1/admin/users/{user_id}/role"),
     # Wave B v2 — admin user list for DevRoleManagementCard (PRD §5.2)
     ("GET", "/api/v1/admin/users"),
+    # SETUP-3a (ADR-F061) — invite lifecycle + admin disable/enable
+    ("POST", "/api/v1/admin/users/invites"),
+    ("GET", "/api/v1/admin/users/invites"),
+    ("POST", "/api/v1/admin/users/invites/{invite_id}/resend"),
+    ("DELETE", "/api/v1/admin/users/invites/{invite_id}"),
+    ("POST", "/api/v1/admin/users/{user_id}/disable"),
+    ("POST", "/api/v1/admin/users/{user_id}/enable"),
     # Wave D.2 — sandbox ensure, skills autocomplete, user-skill versions, KB files
     ("POST", "/api/v1/projects/sandbox/ensure"),
     ("GET", "/api/v1/skills/autocomplete"),

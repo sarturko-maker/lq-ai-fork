@@ -57,6 +57,24 @@ async def admin_user(db_session: AsyncSession) -> User:
 
 
 @pytest_asyncio.fixture
+async def operator_user(db_session: AsyncSession) -> User:
+    # SETUP-3a (ADR-F061 D4): WRITING the tier policy (PATCH) is operator-fenced;
+    # reading it (GET) stays org-admin. The operator carries is_admin=True.
+    user = User(
+        email=f"waveb-operator-{uuid.uuid4().hex[:8]}@example.com",
+        display_name="Operator",
+        hashed_password=hash_password("correct-horse-battery-staple"),
+        is_admin=True,
+        role="operator",
+        mfa_enabled=False,
+        must_change_password=False,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    return user
+
+
+@pytest_asyncio.fixture
 async def caller(db_session: AsyncSession) -> User:
     user = User(
         email=f"waveb-{uuid.uuid4().hex[:8]}@example.com",
@@ -207,7 +225,7 @@ async def test_admin_tier_policy_requires_admin(db_session: AsyncSession, caller
 
 @pytest.mark.integration
 async def test_admin_tier_policy_patch_writes_audit(
-    db_session: AsyncSession, admin_user: User
+    db_session: AsyncSession, operator_user: User
 ) -> None:
     gateway = AsyncMock(spec=GatewayClient)
     gateway.get_tier_config.return_value = {
@@ -231,7 +249,7 @@ async def test_admin_tier_policy_patch_writes_audit(
         async with _client_with(db_session=db_session, gateway_mock=gateway) as client:
             resp = await client.patch(
                 "/api/v1/admin/tier-policy",
-                headers=_bearer(admin_user),
+                headers=_bearer(operator_user),
                 json={
                     "allowed_tiers_global": [1, 2, 3],
                     "default_minimum_tier": 3,
@@ -254,7 +272,7 @@ async def test_admin_tier_policy_patch_writes_audit(
 
 @pytest.mark.integration
 async def test_admin_tier_policy_patch_noop_skips_audit(
-    db_session: AsyncSession, admin_user: User
+    db_session: AsyncSession, operator_user: User
 ) -> None:
     """Empty PATCH body returns the current state without an audit row."""
 
@@ -272,7 +290,7 @@ async def test_admin_tier_policy_patch_noop_skips_audit(
         async with _client_with(db_session=db_session, gateway_mock=gateway) as client:
             resp = await client.patch(
                 "/api/v1/admin/tier-policy",
-                headers=_bearer(admin_user),
+                headers=_bearer(operator_user),
                 json={},
             )
     finally:

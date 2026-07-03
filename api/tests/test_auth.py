@@ -685,6 +685,10 @@ def _route_depends_on_rate_limiter(path: str, method: str) -> bool:
         ("/api/v1/auth/mfa/enable", "POST"),
         ("/api/v1/auth/mfa/disable", "POST"),
         ("/api/v1/admin/bootstrap-status", "GET"),
+        # SETUP-3a (ADR-F061 D7) — the unauthenticated lifecycle surfaces.
+        ("/api/v1/auth/accept-invite", "POST"),
+        ("/api/v1/auth/password-reset-request", "POST"),
+        ("/api/v1/auth/password-reset", "POST"),
     ],
 )
 def test_rate_limiter_wired_on_every_exposed_auth_endpoint(path: str, method: str) -> None:

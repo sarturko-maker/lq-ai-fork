@@ -124,6 +124,16 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/admin/users/{user_id}/role",
         # Wave B v2 — admin user list for DevRoleManagementCard
         "/api/v1/admin/users",
+        # SETUP-3a (ADR-F061) — invite lifecycle + admin disable/enable
+        "/api/v1/admin/users/invites",
+        "/api/v1/admin/users/invites/{invite_id}/resend",
+        "/api/v1/admin/users/invites/{invite_id}",
+        "/api/v1/admin/users/{user_id}/disable",
+        "/api/v1/admin/users/{user_id}/enable",
+        # SETUP-3a (ADR-F061) — unauthenticated lifecycle endpoints
+        "/api/v1/auth/accept-invite",
+        "/api/v1/auth/password-reset-request",
+        "/api/v1/auth/password-reset",
         # admin
         "/api/v1/admin/audit-log",
         "/api/v1/admin/tier-policy",
@@ -363,7 +373,10 @@ async def test_openapi_paths_match_sketch() -> None:
     # +1: F2 Tabular T7 (ADR-F055) — GET /tabular/matters/{project_id}/grids.
     # +1: F2 Tabular T6 (ADR-F055 T6 / ADR-F042) — /tabular/executions/{id}/cells/override
     #   (POST set + DELETE clear share one path → +1 path, +0 count beyond it).
-    assert len(actual) == 159  # +3: ADR-F054 capability panel (GET/PUT
+    # +8: SETUP-3a (ADR-F061) — invite lifecycle (create/list share one path;
+    #   resend; revoke; = 3) + disable + enable (2) + accept-invite +
+    #   password-reset-request + password-reset (3) = 8 new paths.
+    assert len(actual) == 167  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

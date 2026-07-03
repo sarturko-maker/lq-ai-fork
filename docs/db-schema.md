@@ -31,7 +31,7 @@ CREATE TABLE users (
     display_name          TEXT,
     hashed_password       TEXT NOT NULL,
     is_admin              BOOLEAN NOT NULL DEFAULT FALSE,
-    role                  TEXT NOT NULL DEFAULT 'member',       -- PRD §5.2 RBAC; CHECK (role IN ('admin','member','viewer'))
+    role                  TEXT NOT NULL DEFAULT 'member',       -- PRD §5.2 RBAC + operator fence; CHECK (role IN ('admin','member','viewer','operator')) [0085]
     mfa_enabled           BOOLEAN NOT NULL DEFAULT FALSE,
     must_change_password  BOOLEAN NOT NULL DEFAULT FALSE,  -- B2: first-run admin + reset-admin
     totp_secret           TEXT,
@@ -49,7 +49,10 @@ CREATE TABLE users (
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_login_at         TIMESTAMPTZ,
     deleted_at            TIMESTAMPTZ,
-    deletion_scheduled_at TIMESTAMPTZ
+    deletion_scheduled_at TIMESTAMPTZ,
+    -- SETUP-3a (migration 0085, ADR-F061)
+    disabled_at           TIMESTAMPTZ,        -- non-null ⇒ admin-disabled; login/refresh/get_current_user 401
+    email_verified_at     TIMESTAMPTZ         -- stamped when the user accepts an invite (accept IS verification)
 );
 
 CREATE INDEX idx_users_email_active ON users(email) WHERE deleted_at IS NULL;
@@ -60,7 +63,9 @@ CREATE INDEX idx_users_deletion_scheduled ON users(deletion_scheduled_at) WHERE 
 
 | Column | Migration | Notes |
 |---|---|---|
-| `role` | 0017 | Three-role RBAC per PRD §5.2 (`admin`, `member`, `viewer`). Kept in sync with `is_admin` (role=`admin` iff `is_admin=true`). |
+| `role` | 0017 / 0085 | Four-role vocabulary (`admin`, `member`, `viewer`, `operator`). Kept in sync with `is_admin` (`is_admin=true` for `admin` AND `operator`). `operator` is bootstrap-only (ADR-F061 D3) — the role endpoint 422s on it and refuses operator targets. |
+| `disabled_at` | 0085 | Admin disable/re-enable (ADR-F061 D5). Non-null ⇒ login stays uniform-401, live access tokens die in `get_current_user`, refresh 401s. Cleared by the enable endpoint. |
+| `email_verified_at` | 0085 | Stamped when a user accepts an invite (accepting IS verification). Reserved for a future standalone verification flow. |
 | `reasoning_visibility` | 0015 | Enhance Prompt reasoning display mode (§3.2). Default `disclosure` = collapsed behind toggle. |
 | `featured_tools` | 0019 | Dashboard tool surfacing: `prominent` (cards) vs. `inline` (toolbar only). |
 | `workspace_layout` | 0019 | Matter workspace pane count for Wave C: `three_pane`, `two_pane`, `one_pane`. |
@@ -96,6 +101,40 @@ CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
 -- lookup keys on it directly (ADR-F059, replaced the bcrypt partial idx_user_sessions_token_hash).
 CREATE UNIQUE INDEX ix_user_sessions_refresh_token_hmac ON user_sessions(refresh_token_hmac);
 CREATE INDEX idx_user_sessions_expires ON user_sessions(expires_at);
+```
+
+### `user_auth_tokens`
+
+SETUP-3a (migration 0085, ADR-F061). ONE table backs both single-use lifecycle flows: an admin
+**invite** (target `email` + `role`) and a **password reset** (target `user_id`). Only the
+domain-separated HMAC-SHA256 verifier is stored — the opaque `secrets.token_urlsafe(32)` plaintext
+ships in the email link (and, mail-off, the invite-create response) and is never persisted in the
+clear (ADR-F059 pattern). Single-use is an atomic `consumed_at` write under `SELECT … FOR UPDATE`;
+`revoked_at` supports resend/revoke.
+
+```sql
+CREATE TABLE user_auth_tokens (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    purpose      TEXT NOT NULL,                       -- CHECK (purpose IN ('invite','password_reset'))
+    email        CITEXT,                              -- invite target (NULL for password_reset)
+    user_id      UUID REFERENCES users(id) ON DELETE CASCADE,   -- reset target (NULL for invite)
+    role         TEXT,                                -- invited role; CHECK (role IS NULL OR role IN ('admin','member','viewer'))
+    token_hmac   VARCHAR(64) NOT NULL,                -- domain-separated HMAC-SHA256 hex (never the plaintext)
+    created_by   UUID REFERENCES users(id) ON DELETE SET NULL,  -- issuing admin (provenance)
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ NOT NULL,                -- invite 7d / reset 1h TTL (ADR-F061 D7)
+    consumed_at  TIMESTAMPTZ,                         -- atomic single-use marker
+    revoked_at   TIMESTAMPTZ,                         -- resend/revoke
+    -- shape: an invite carries email+role; a reset carries user_id
+    CONSTRAINT chk_user_auth_tokens_shape CHECK (
+        (purpose = 'invite' AND email IS NOT NULL AND role IS NOT NULL)
+        OR (purpose = 'password_reset' AND user_id IS NOT NULL)
+    )
+);
+
+CREATE UNIQUE INDEX ix_user_auth_tokens_token_hmac ON user_auth_tokens(token_hmac);
+CREATE INDEX ix_user_auth_tokens_email ON user_auth_tokens(email);
+CREATE INDEX ix_user_auth_tokens_user_id ON user_auth_tokens(user_id);
 ```
 
 ### `user_export_jobs`

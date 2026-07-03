@@ -703,8 +703,16 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   verbatim Anthropic-only gateway.yaml seed + dns-records + backup cron; secrets env/prompt-only,
   NEVER in the manifest or argv; charset fence — values land in a root-sourced env file; optional
   bucket create + deploy + admin handover) + FIRST_RUN_ADMIN_EMAIL/SMTP forwarded in prod compose.
-  NEXT: SETUP-3a/b user lifecycle + operator fence (absorbs SAAS-4) → SETUP-4a/b capability
-  registry + areas admin UI → SETUP-5 reconcile (F054 flip + D1 supersession).
+  **SETUP-3a ✓ done** — user-lifecycle backend + operator fence (ADR-F061, mig 0085): one
+  `user_auth_tokens` table (invite 7d + password_reset 1h, single-use, HMAC-at-rest per ADR-F059);
+  admin invite/resend/revoke + accept-invite + password-reset (uniform-202 anti-enum, background
+  SMTP send) + admin disable/enable (`users.disabled_at` enforced at login/get_current_user/refresh);
+  new `operator` role + `OperatorUser` dep fencing the gateway-key surfaces (aliases/provider-keys/
+  config/PATCH tier-policy/override-tier-floor) — org-admin keeps the rest; **escalation guard: no
+  path mints an operator except bootstrap** (`FIRST_RUN_OPERATOR_EMAIL`). Mail transport generalised
+  to `app/email.py` (notify_email delegates, never-raise preserved). NEXT: SETUP-3b (Users UI +
+  onboarding flow + wizard invite-handover) → SETUP-4a/b capability registry + areas admin UI →
+  SETUP-5 reconcile (F054 flip + D1 supersession).
 - **SAAS-4 — user lifecycle + admin split — ABSORBED into SETUP-3a/b** (see the SETUP ladder above).
   Original scope: invitations/verification/reset/SMTP; forced first
   password change; WorkOS-style users/orgs/memberships modeling; platform-admin vs org-admin

@@ -275,6 +275,47 @@ class RateLimiter:
             ]
         )
 
+    async def enforce_password_reset_request(self, request: Request, email: str) -> None:
+        """SETUP-3a (ADR-F061 D7) — per-IP + per-submitted-email on reset-request.
+
+        Both buckets are checked whether or not the account exists, so a 429
+        leaks no existence signal (the endpoint's uniform 202 does the same).
+        """
+        s = self._settings
+        window = self._window()
+        await self._enforce(
+            [
+                (
+                    "password_reset_request:ip",
+                    _client_ip(request),
+                    RateLimitRule(s.rate_limit_password_reset_request_ip_per_window, window),
+                ),
+                (
+                    "password_reset_request:email",
+                    email.strip().lower(),
+                    RateLimitRule(s.rate_limit_password_reset_request_email_per_window, window),
+                ),
+            ]
+        )
+
+    async def enforce_token_redeem(self, request: Request) -> None:
+        """SETUP-3a (ADR-F061 D7) — per-IP brake shared by accept-invite +
+        password-reset redemption.
+
+        Per-IP only: the token itself is the identifier and must never be
+        hashed into a Redis key or a log line.
+        """
+        s = self._settings
+        await self._enforce(
+            [
+                (
+                    "token_redeem:ip",
+                    _client_ip(request),
+                    RateLimitRule(s.rate_limit_token_redeem_ip_per_window, self._window()),
+                ),
+            ]
+        )
+
 
 def get_rate_limiter(request: Request) -> RateLimiter:
     """FastAPI dependency: the process-wide limiter wired in the lifespan.

@@ -66,7 +66,10 @@ async def get_current_user(
 
     result = await db.execute(select(User).where(User.id == claims.user_id))
     user = result.scalar_one_or_none()
-    if user is None or user.deleted_at is not None:
+    # SETUP-3a (ADR-F061 D5) — a disabled account's live access tokens die on
+    # the next request: disable stamps ``disabled_at`` and revokes sessions, but
+    # an already-issued (stateless) access token is only killed by this check.
+    if user is None or user.deleted_at is not None or user.disabled_at is not None:
         raise _unauthorized()
 
     return user
@@ -156,6 +159,38 @@ AdminUser = Annotated[User, Depends(get_admin_user)]
 """Type alias for endpoints that require ``is_admin = true``. Stacks on
 top of :data:`ActiveUser` (so it inherits the bearer-token + must-change-
 password gate) and adds the admin check."""
+
+
+async def get_operator_user(user: ActiveUser) -> User:
+    """`ActiveUser` plus the ``role == 'operator'`` gate — SETUP-3a (ADR-F061 D4).
+
+    The OPERATOR fence. The platform operator owns the gateway-proxy surfaces
+    (model aliases, provider keys, gateway config, tier-policy writes,
+    tier-floor override) — concerns that reach the gateway's key-holding
+    egress, not a tenant's data. These are reclassified off :data:`AdminUser`
+    onto this dependency so an org-admin (a customer) cannot touch them.
+
+    Mirrors :func:`get_admin_user`: an authenticated NON-operator gets 403
+    ``forbidden`` (they *are* authenticated, just not authorized here — a 403,
+    not a 404; the fence is not an existence secret). The operator role is
+    bootstrap-only and carries ``is_admin=true``, so an operator ALSO passes
+    every :data:`AdminUser` surface (org-admin ⊂ operator).
+    """
+
+    if getattr(user, "role", "member") != "operator":
+        from app.errors import Forbidden
+
+        raise Forbidden(
+            message="Operator (platform) privileges required for this endpoint.",
+        )
+    return user
+
+
+OperatorUser = Annotated[User, Depends(get_operator_user)]
+"""Type alias for the operator fence (ADR-F061 D4). Stacks on
+:data:`ActiveUser` and requires ``role == 'operator'``. Applied to the
+gateway-proxy admin surfaces so only the platform operator — never a tenant's
+org-admin — can reach them."""
 
 
 async def get_autonomous_enabled_user(user: ActiveUser) -> User:

@@ -161,12 +161,44 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   `gh pr checks` exits 8 while checks are pending; bare `vitest` is watch-mode (use
 >   `CI=1 npx vitest run`); commit strays NEVER (`sample-documents/`,
 >   `api/tests/agents/scenarios/test_*_live.py`).
-> - **NEXT = SETUP-3a — user lifecycle + operator fence (plan §4 + §1; decisions ratified).** Then
->   SETUP-3b (Users UI + onboarding flow + wizard invite-handover), SETUP-4a/b (capability registry +
->   areas admin UI). SAAS-3b bring-up (maintainer, weekend, IONOS): provision domain/node/DNS token/
+> - **SETUP-3a ✓ (branch `fork/setup-3a-user-lifecycle`, off main) — user-lifecycle backend + operator
+>   fence. ADR-F061 (proposed), migration 0085.** Opus implemented in a worktree (working model); lead
+>   verified + ran an INDEPENDENT deep security review (auth path) + an isolated live smoke. Plan:
+>   `docs/fork/plans/SETUP-3a-user-lifecycle-operator-fence.md`. Landed: ONE `user_auth_tokens` table
+>   (`purpose` invite 7d | password_reset 1h; single-use, opaque `token_urlsafe(32)`, ONLY a
+>   domain-separated HMAC-SHA256 at rest per ADR-F059; atomic consume under `FOR UPDATE`). Admin
+>   invite CRUD + resend/revoke (one live invite per email) + `POST /auth/accept-invite` (creates the
+>   user at the invite's role, `email_verified_at`); `POST /auth/password-reset-request` (uniform 202
+>   anti-enum, **SMTP send scheduled via `BackgroundTasks` after the response** so exists/not-exists
+>   return in equal time — the login handler's timing-equalisation lesson) + `/auth/password-reset`
+>   (revokes ALL sessions + sibling reset tokens); admin `disable`/`enable` (`users.disabled_at`
+>   enforced at login = byte-identical 401, `get_current_user`, refresh). **THE FENCE:** new `operator`
+>   role + `OperatorUser` dep (403) on aliases×5/provider-keys×4/GET config/PATCH tier-policy/
+>   override-tier-floor; GET tier-policy stays org-admin (transparency). **ESCALATION GUARD (D3, the
+>   review's #1 target — INTACT):** `operator` is NOT in `update_user_role`'s `_ROLE_ENUM` (422),
+>   invites can't carry it (CHECK + 422), every role/disable path refuses an operator target (403), the
+>   JWT carries no role (fence reads the fresh DB row), operator is minted ONLY by bootstrap
+>   (`FIRST_RUN_OPERATOR_EMAIL`). Mail transport generalised to `app/email.py` (notify_email delegates,
+>   never-raise preserved). Gate: full api suite **3191 passed/42 skip**; lead re-ran the 5 touched
+>   files **111 passed**; ruff+mypy clean; mig 0085 up/down/up on throwaway pgvector; isolated live
+>   smoke 17/19 (the 2 "fails" = harness expected 200 for change-password which correctly 204s) —
+>   evidence `docs/fork/evidence/setup-3a/live-smoke.md`. Security review = SHIP-AFTER-FIXES → 4 fixes
+>   applied (reset timing oracle → background send; reset-token multiplicity → revoke prior+sibling;
+>   scheme-only base-url → path fallback; confirm-path disabled_at re-check). **TRAP:** the api test
+>   conftest CREATEs its own `lq_ai_test_<hex>` from `{base}/postgres` — point `DATABASE_URL` at the
+>   real dev postgres creds (NOT a made-up dbname) or every DB test errors on connect; it never touches
+>   the AIC-chain dev DB. Migration-number trap holds: 0085 is main's next free; AIC #188-190 renumber
+>   on THEIR rebase.
+> - **NEXT = SETUP-3b — Users admin UI (invite/disable/role) + first-login onboarding flow + switch the
+>   wizard's handover to an emailed invite (operator never sees the customer password).** Then SETUP-4a/b
+>   (tool-group registry refactor + `practice_area_tool_groups` + areas/capabilities admin UI), SETUP-5
+>   (reconcile F054). SAAS-3b bring-up (maintainer, weekend, IONOS): provision domain/node/DNS token/
 >   bucket → run `setup-tenant.sh` → **Proof = a real agent run on the staging URL + a passed restore
 >   drill.** Then the SAAS-2 handoff hardening (pin `FORWARDED_ALLOW_IPS` to Caddy's IP, promote CSP,
 >   rotate gateway key, lock Collabora egress). Runbook: `docs/fork/runbooks/staging-bringup.md`.
+>   SETUP-3b open Qs from the 3a review (recorded, decide in 3b): whether `operator` should be allowed
+>   to create tenant data (currently NOT in `_MUTATING_ROLES`), and whether `GET /admin/users?role=`
+>   should surface operator rows.
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
 >   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 PARKED (task #456; resumes after the

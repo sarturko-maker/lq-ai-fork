@@ -289,7 +289,7 @@ async def test_notify_email_sent_when_configured(
                 {"to": msg["To"], "subject": msg["Subject"], "from": msg["From"]}  # type: ignore[index]
             )
 
-    monkeypatch.setattr("app.autonomous.notify_email.smtplib.SMTP", _FakeSMTP)
+    monkeypatch.setattr("app.email.smtplib.SMTP", _FakeSMTP)
 
     sess = await _make_session(db_session, user=user_a, phase=str(Phase.delivery))
     await guarded_tool_call(
@@ -320,7 +320,7 @@ async def test_notify_email_failure_does_not_break_handler(
         def __init__(self, *args: object, **kwargs: object) -> None:
             raise OSError("connection refused")
 
-    monkeypatch.setattr("app.autonomous.notify_email.smtplib.SMTP", _BoomSMTP)
+    monkeypatch.setattr("app.email.smtplib.SMTP", _BoomSMTP)
 
     sess = await _make_session(db_session, user=user_a, phase=str(Phase.delivery))
     result = await guarded_tool_call(
@@ -367,7 +367,7 @@ async def test_send_notification_email_smtp_timeout_degrades_to_noop(
             # socket.timeout is an alias of the builtin TimeoutError.
             raise TimeoutError("timed out")
 
-    monkeypatch.setattr("app.autonomous.notify_email.smtplib.SMTP", _HangSMTP)
+    monkeypatch.setattr("app.email.smtplib.SMTP", _HangSMTP)
 
     sent = await send_notification_email(to_addr="x@example.com", subject="hi", body="body")
     assert sent is False
@@ -413,7 +413,7 @@ async def test_notify_handles_missing_user_email_through_handler(
         def send_message(self, msg: object) -> None:  # pragma: no cover - never sent
             sent_messages.append({"to": msg["To"]})  # type: ignore[index]
 
-    monkeypatch.setattr("app.autonomous.notify_email.smtplib.SMTP", _FakeSMTP)
+    monkeypatch.setattr("app.email.smtplib.SMTP", _FakeSMTP)
 
     sess = await _make_session(db_session, user=user_a, phase=str(Phase.delivery))
 
@@ -475,7 +475,7 @@ async def test_send_notification_email_newline_title_cannot_inject_header(
         def send_message(self, msg: object) -> None:  # pragma: no cover
             pass
 
-    monkeypatch.setattr("app.autonomous.notify_email.smtplib.SMTP", _FakeSMTP)
+    monkeypatch.setattr("app.email.smtplib.SMTP", _FakeSMTP)
 
     sent = await send_notification_email(
         to_addr="x@example.com",

@@ -71,12 +71,15 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
 
 @pytest_asyncio.fixture
 async def admin_user(db_session: AsyncSession) -> User:
+    # SETUP-3a (ADR-F061 D4): the tier-floor override is operator-fenced (lifting
+    # the floor is a gateway-routing concern), so the authorised caller is an
+    # OPERATOR (role=operator, is_admin=True).
     user = User(
-        email=f"admin-override-{uuid.uuid4().hex[:8]}@example.com",
-        display_name="Override Admin",
+        email=f"operator-override-{uuid.uuid4().hex[:8]}@example.com",
+        display_name="Override Operator",
         hashed_password=hash_password("correct-horse-battery-staple"),
         is_admin=True,
-        role="admin",
+        role="operator",
         mfa_enabled=False,
         must_change_password=False,
     )

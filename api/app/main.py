@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import __version__
-from app.admin_bootstrap import ensure_first_run_admin
+from app.admin_bootstrap import ensure_first_run_admin, ensure_first_run_operator
 from app.agents.checkpointer import close_agent_checkpointer, init_agent_checkpointer
 from app.agents.store import close_agent_store, init_agent_store
 from app.agents.stream import RedisStreamBridge, RunStreamBroker
@@ -103,6 +103,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
     except Exception as exc:
         log.warning("first-run admin bootstrap failed: %s (continuing)", exc)
+
+    # First-run operator bootstrap (SETUP-3a, ADR-F061). No-op unless
+    # FIRST_RUN_OPERATOR_EMAIL is configured; same degrade-not-crash posture as
+    # the admin bootstrap above.
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            generated_op = await ensure_first_run_operator(session)
+        if generated_op is not None:
+            log.warning(
+                "First-run operator password (record it now and rotate on first login): %s",
+                generated_op,
+            )
+    except Exception as exc:
+        log.warning("first-run operator bootstrap failed: %s (continuing)", exc)
 
     # Durable agent state (F0-S5, ADR-F008). Init failure is degraded
     # service (no multi-turn persistence), never a crash — the function

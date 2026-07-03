@@ -139,3 +139,72 @@ async def ensure_first_run_admin(db: AsyncSession) -> str | None:
     await db.commit()
     log.info("First-run admin bootstrap: created admin user %s.", admin_email)
     return plaintext
+
+
+async def ensure_first_run_operator(db: AsyncSession) -> str | None:
+    """Create the first-run operator (platform) account if configured — SETUP-3a.
+
+    The operator owns the gateway-proxy surfaces (model aliases, provider keys,
+    gateway config, tier-policy writes, tier-floor override) behind the
+    ``OperatorUser`` fence (ADR-F061 D3/D4). Unlike the admin bootstrap — which
+    always mints ``admin@lq.ai`` — the operator is created ONLY when
+    ``FIRST_RUN_OPERATOR_EMAIL`` is set, so a self-host deployment with no
+    separate operator simply never gets one.
+
+    Returns the generated plaintext password if a new operator was created, or
+    ``None`` when the feature is unconfigured OR an operator already exists (the
+    caller logs the returned password at WARNING, exactly once, like the admin
+    bootstrap). Idempotent + race-safe via ``ON CONFLICT DO NOTHING`` on email.
+
+    The account is minted with ``role='operator'`` AND ``is_admin=True`` — the
+    operator is a superset of the org-admin, so it also passes every
+    ``AdminUser`` surface. ``must_change_password=True`` forces a first-login
+    rotation. This is the ONLY path that mints an operator; the org-admin role
+    endpoint can never promote to operator (ADR-F061 D3 escalation guard).
+    """
+    settings = get_settings()
+    operator_email = settings.first_run_operator_email
+    if not operator_email:
+        # No operator configured for this deployment — clean no-op.
+        return None
+
+    # Fast path: an operator already exists (idempotent on restart).
+    existing = await db.execute(
+        select(User.id).where(User.role == "operator", User.deleted_at.is_(None)).limit(1)
+    )
+    if existing.scalar_one_or_none() is not None:
+        log.info("First-run operator bootstrap: operator already exists; skipping.")
+        return None
+
+    plaintext = generate_password()
+    hashed = hash_password(plaintext)
+
+    stmt = (
+        pg_insert(User)
+        .values(
+            email=operator_email,
+            display_name="LQ.AI Operator",
+            hashed_password=hashed,
+            is_admin=True,
+            role="operator",
+            mfa_enabled=False,
+            must_change_password=True,
+        )
+        .on_conflict_do_nothing(index_elements=["email"])
+        .returning(User.id)
+    )
+    result = await db.execute(stmt)
+    inserted_id = result.scalar_one_or_none()
+
+    if inserted_id is None:
+        # Lost the race, or a non-operator user already owns this email.
+        log.info(
+            "First-run operator bootstrap: %s already exists (lost race or pre-seeded); skipping.",
+            operator_email,
+        )
+        await db.rollback()
+        return None
+
+    await db.commit()
+    log.info("First-run operator bootstrap: created operator user %s.", operator_email)
+    return plaintext

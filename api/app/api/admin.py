@@ -33,22 +33,26 @@ envelope through the global exception handler in :mod:`app.main`.
 from __future__ import annotations
 
 import uuid as _uuid_mod
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-from sqlalchemy import ColumnElement, Select, Text, and_, func, select
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import ColumnElement, Select, Text, and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import AdminUser
+from app.api.dependencies import AdminUser, OperatorUser
+from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
+from app.config import get_settings
 from app.db.session import get_db
+from app.errors import Conflict, Forbidden, NotFound
 from app.models.audit import AuditLog
 from app.models.document import Document as DocumentORM
 from app.models.file import File as FileORM
-from app.models.user import User as UserORM
+from app.models.user import User as UserORM, UserSession as UserSessionORM
+from app.models.user_auth_token import UserAuthToken
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -291,19 +295,21 @@ async def get_tier_policy(
 async def update_tier_policy(
     request: Request,
     body: TierPolicyPatchRequest,
-    admin: AdminUser,
+    operator: OperatorUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> TierPolicyResponse:
     """PATCH /api/v1/admin/tier-policy — partial-update the tier policy.
+
+    ADR-F061 D4 — WRITING the tier policy rewrites gateway.yaml, an operator
+    (platform) concern, so this is operator-fenced. Reading it (GET, above)
+    stays :data:`AdminUser` for org-admin transparency.
 
     Proxies through to the gateway's PATCH /admin/v1/tier-config (which
     atomically rewrites ``gateway.yaml`` and reloads the live snapshot).
     Writes a ``tier_policy.updated`` audit row with before/after values
     so a privacy auditor can reconstruct the policy history.
     """
-
-    from app.audit import audit_action
 
     before_payload = await gateway.get_tier_config(request_id=request.headers.get("x-request-id"))
     before = _project_tier_policy(before_payload)
@@ -321,7 +327,7 @@ async def update_tier_policy(
     if after.model_dump() != before.model_dump():
         await audit_action(
             db,
-            user_id=admin.id,
+            user_id=operator.id,
             action="tier_policy.updated",
             resource_type="tier_policy",
             resource_id="singleton",
@@ -495,9 +501,11 @@ class AliasUpdateRequest(BaseModel):
     fallback: list[_FallbackEntry] | None = None
 
 
+# ADR-F061 D4 — the alias-CRUD surface proxies the gateway's key-holding
+# egress, so it is fenced to the OPERATOR (platform), not the org-admin.
 @router.get("/aliases")
 async def list_aliases(
-    _admin: AdminUser,
+    _operator: OperatorUser,
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> dict[str, Any]:
     """List configured aliases via the gateway's admin surface."""
@@ -508,7 +516,7 @@ async def list_aliases(
 @router.get("/aliases/{name}")
 async def get_alias(
     name: str,
-    _admin: AdminUser,
+    _operator: OperatorUser,
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> dict[str, Any]:
     """Return a single alias. 404 propagates from the gateway."""
@@ -519,7 +527,7 @@ async def get_alias(
 @router.post("/aliases", status_code=status.HTTP_201_CREATED)
 async def create_alias(
     body: AliasCreateRequest,
-    _admin: AdminUser,
+    _operator: OperatorUser,
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> dict[str, Any]:
     """Create a new alias. 409 propagates from the gateway."""
@@ -532,7 +540,7 @@ async def create_alias(
 async def update_alias(
     name: str,
     body: AliasUpdateRequest,
-    _admin: AdminUser,
+    _operator: OperatorUser,
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> dict[str, Any]:
     """Update an existing alias. 404 propagates from the gateway."""
@@ -544,7 +552,7 @@ async def update_alias(
 @router.delete("/aliases/{name}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_alias(
     name: str,
-    _admin: AdminUser,
+    _operator: OperatorUser,
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> JSONResponse:
     """Remove an alias. 404 propagates from the gateway."""
@@ -555,10 +563,12 @@ async def remove_alias(
 
 @router.get("/config")
 async def get_admin_config(
-    _admin: AdminUser,
+    _operator: OperatorUser,
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> dict[str, Any]:
-    """Return the gateway's sanitized current config (D0.5)."""
+    """Return the gateway's sanitized current config (D0.5).
+
+    ADR-F061 D4 — operator-fenced (gateway-proxy surface)."""
 
     return await gateway.get_admin_config()
 
@@ -594,9 +604,11 @@ class ProviderKeyRotateRequest(BaseModel):
     api_key: str = Field(min_length=1)
 
 
+# ADR-F061 D4 — provider-key (BYOK) proxy is a gateway-key-holding surface;
+# operator-fenced (org-admin BYOK deferred — SAAS-SETUP §7 row 8).
 @router.get("/provider-keys")
 async def list_provider_keys(
-    _admin: AdminUser,
+    _operator: OperatorUser,
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> dict[str, Any]:
     """List provider-key status via the gateway. No secret is returned."""
@@ -607,7 +619,7 @@ async def list_provider_keys(
 @router.post("/provider-keys")
 async def set_provider_key(
     body: ProviderKeySetRequest,
-    _admin: AdminUser,
+    _operator: OperatorUser,
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> dict[str, Any]:
     """Set/replace a provider's runtime key. 400 / 404 propagate from the gateway."""
@@ -619,7 +631,7 @@ async def set_provider_key(
 async def rotate_provider_key(
     provider: str,
     body: ProviderKeyRotateRequest,
-    _admin: AdminUser,
+    _operator: OperatorUser,
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> dict[str, Any]:
     """Rotate a provider's runtime key. 400 / 404 propagate from the gateway."""
@@ -634,7 +646,7 @@ async def rotate_provider_key(
 )
 async def revoke_provider_key(
     provider: str,
-    _admin: AdminUser,
+    _operator: OperatorUser,
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
 ) -> Response:
     """Revoke a provider's runtime key. 404 / 409 propagate from the gateway.
@@ -668,6 +680,8 @@ class AdminUserRow(BaseModel):
     created_at: datetime
     last_login_at: datetime | None
     deletion_scheduled_at: datetime | None
+    # SETUP-3a (ADR-F061) — non-null ⇒ account disabled by an admin.
+    disabled_at: datetime | None = None
 
 
 class AdminUserListResponse(BaseModel):
@@ -738,6 +752,7 @@ async def list_users(
                 created_at=r.created_at,
                 last_login_at=r.last_login_at,
                 deletion_scheduled_at=r.deletion_scheduled_at,
+                disabled_at=r.disabled_at,
             )
             for r in rows
         ],
@@ -783,9 +798,8 @@ async def update_user_role(
     so the operator can promote someone else first.
     """
 
-    from app.audit import audit_action
-    from app.errors import Forbidden, NotFound
-
+    # ADR-F061 D3 — 'operator' is NOT in _ROLE_ENUM, so requesting it here 422s
+    # (no promotion path to operator through the org-admin endpoint).
     if body.role not in _ROLE_ENUM:
         raise HTTPException(
             status_code=422,
@@ -800,6 +814,11 @@ async def update_user_role(
     target = await db.get(UserORM, target_uuid)
     if target is None or target.deleted_at is not None:
         raise NotFound(message="user not found")
+
+    # ADR-F061 D3 — an operator account is untouchable from the org-admin
+    # surface: an admin cannot demote/reclassify the platform operator.
+    if target.role == "operator":
+        raise Forbidden(message="Operator accounts cannot be modified from this endpoint.")
 
     before_role = target.role
     if before_role == body.role:
@@ -855,6 +874,424 @@ async def update_user_role(
         email=target.email,
         role=target.role,
         is_admin=target.is_admin,
+    )
+
+
+# ---------------------------------------------------------------------------
+# SETUP-3a (ADR-F061) — user invite lifecycle + admin disable/enable
+#
+# All endpoints are AdminUser-gated (org-admin). The escalation guard (D3)
+# refuses any 'operator' target and never mints one: invite role is bounded to
+# _ROLE_ENUM (admin|member|viewer), so 'operator' 422s. Tokens are single-use,
+# TTL-bounded, HMAC-only at rest (app.auth_tokens); the plaintext appears only
+# in the email link and (mail-off fallback) the invite-create response — never
+# in an audit row.
+# ---------------------------------------------------------------------------
+
+
+def _utcnow() -> datetime:
+    return datetime.now(tz=UTC)
+
+
+def _invite_status(token: UserAuthToken, now: datetime) -> str:
+    """Derive a display status for an invite token."""
+    if token.consumed_at is not None:
+        return "accepted"
+    if token.revoked_at is not None:
+        return "revoked"
+    if token.expires_at <= now:
+        return "expired"
+    return "pending"
+
+
+class InviteCreateRequest(BaseModel):
+    """``POST /admin/users/invites`` body."""
+
+    email: EmailStr
+    role: str = "member"  # 'admin' | 'member' | 'viewer' — NEVER 'operator'
+
+
+class InviteResponse(BaseModel):
+    """Invite-create / resend response.
+
+    ``accept_url`` is present ONLY when ``email_sent`` is False (SMTP off) so
+    the admin can hand the link over out-of-band (ADR-F061 D6). The URL/token
+    is never persisted in an audit row.
+    """
+
+    id: str
+    email: str
+    role: str
+    created_at: datetime
+    expires_at: datetime
+    email_sent: bool
+    accept_url: str | None = None
+
+
+class InviteRow(BaseModel):
+    """One row in the invite list (no token material)."""
+
+    id: str
+    email: str
+    role: str
+    status: str  # 'pending' | 'accepted' | 'revoked' | 'expired'
+    created_at: datetime
+    expires_at: datetime
+    consumed_at: datetime | None
+    revoked_at: datetime | None
+
+
+class InviteListResponse(BaseModel):
+    """``GET /admin/users/invites`` response."""
+
+    invites: list[InviteRow]
+
+
+async def _build_and_send_invite(
+    db: AsyncSession,
+    *,
+    email: str,
+    role: str,
+    admin: UserORM,
+    request: Request,
+    action: str,
+    now: datetime,
+) -> InviteResponse:
+    """Issue an invite for ``email``/``role``, send the mail, audit, and return.
+
+    Shared by create + resend. Never puts the token/URL in the audit row.
+    """
+    settings = get_settings()
+    from app.auth_tokens import issue_invite
+    from app.lifecycle_email import build_accept_url, send_invite_email
+
+    plaintext, token = await issue_invite(
+        db,
+        email=email,
+        role=role,
+        created_by=admin.id,
+        ttl_seconds=settings.invite_token_ttl_seconds,
+        now=now,
+    )
+    accept_url = build_accept_url(plaintext)
+    email_sent = await send_invite_email(to_addr=email, accept_url=accept_url)
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action=action,
+        resource_type="user_auth_token",
+        resource_id=str(token.id),
+        request=request,
+        # Counts/types/IDs only — the target email + role, never the token/URL.
+        details={"target_email": email, "role": role, "email_sent": email_sent},
+    )
+    await db.commit()
+
+    return InviteResponse(
+        id=str(token.id),
+        email=email,
+        role=role,
+        created_at=token.created_at,
+        expires_at=token.expires_at,
+        email_sent=email_sent,
+        # Hand the link back for out-of-band delivery only when mail is off.
+        accept_url=None if email_sent else accept_url,
+    )
+
+
+@router.post("/users/invites", response_model=InviteResponse, status_code=status.HTTP_201_CREATED)
+async def create_invite(
+    body: InviteCreateRequest,
+    request: Request,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> InviteResponse:
+    """POST /api/v1/admin/users/invites — invite a new user (ADR-F061 D8).
+
+    409 if an active (non-deleted) user already owns the email OR a pending
+    invite exists. 422 for an out-of-range role (including 'operator').
+    """
+    from app.auth_tokens import find_active_invite_for_email
+
+    email = str(body.email)
+    if body.role not in _ROLE_ENUM:
+        raise HTTPException(
+            status_code=422,
+            detail=f"role must be one of {sorted(_ROLE_ENUM)}",
+        )
+
+    now = _utcnow()
+
+    existing_user = (
+        await db.execute(
+            select(UserORM.id).where(UserORM.email == email, UserORM.deleted_at.is_(None)).limit(1)
+        )
+    ).scalar_one_or_none()
+    if existing_user is not None:
+        raise Conflict(message="A user with this email already exists.")
+
+    pending = await find_active_invite_for_email(db, email=email, now=now)
+    if pending is not None:
+        raise Conflict(
+            message="A pending invite for this email already exists. Resend or revoke it first.",
+        )
+
+    return await _build_and_send_invite(
+        db,
+        email=email,
+        role=body.role,
+        admin=admin,
+        request=request,
+        action="user.invited",
+        now=now,
+    )
+
+
+@router.get("/users/invites", response_model=InviteListResponse)
+async def list_invites(
+    _admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> InviteListResponse:
+    """GET /api/v1/admin/users/invites — list invites (newest first)."""
+    now = _utcnow()
+    rows = (
+        (
+            await db.execute(
+                select(UserAuthToken)
+                .where(UserAuthToken.purpose == "invite")
+                .order_by(UserAuthToken.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return InviteListResponse(
+        invites=[
+            InviteRow(
+                id=str(t.id),
+                email=t.email or "",
+                role=t.role or "",
+                status=_invite_status(t, now),
+                created_at=t.created_at,
+                expires_at=t.expires_at,
+                consumed_at=t.consumed_at,
+                revoked_at=t.revoked_at,
+            )
+            for t in rows
+        ]
+    )
+
+
+async def _load_invite(db: AsyncSession, invite_id: str) -> UserAuthToken:
+    """Load an invite token by id, or 404. Non-invite ids are 404 too."""
+    try:
+        token_uuid = _uuid_mod.UUID(invite_id)
+    except (TypeError, ValueError):
+        raise NotFound(message="invite not found") from None
+    token = await db.get(UserAuthToken, token_uuid)
+    if token is None or token.purpose != "invite":
+        raise NotFound(message="invite not found")
+    return token
+
+
+@router.post("/users/invites/{invite_id}/resend", response_model=InviteResponse)
+async def resend_invite(
+    invite_id: str,
+    request: Request,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> InviteResponse:
+    """POST /api/v1/admin/users/invites/{id}/resend — revoke + reissue (D8).
+
+    409 if the invite was already accepted (there is nothing to resend). The
+    prior active invite for the email is revoked and a fresh token issued.
+    """
+    from app.auth_tokens import revoke_active_invites_for_email
+
+    token = await _load_invite(db, invite_id)
+    if token.consumed_at is not None:
+        raise Conflict(message="This invite has already been accepted.")
+
+    email = token.email or ""
+    role = token.role or "member"
+    if role not in _ROLE_ENUM:  # defensive — stored role should always be valid
+        role = "member"
+
+    now = _utcnow()
+    # Revoke every active invite for the email (includes this one) before mint.
+    await revoke_active_invites_for_email(db, email=email, now=now)
+
+    return await _build_and_send_invite(
+        db,
+        email=email,
+        role=role,
+        admin=admin,
+        request=request,
+        action="user.invite_resent",
+        now=now,
+    )
+
+
+@router.delete("/users/invites/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_invite(
+    invite_id: str,
+    request: Request,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """DELETE /api/v1/admin/users/invites/{id} — revoke a pending invite."""
+    token = await _load_invite(db, invite_id)
+    now = _utcnow()
+    if token.revoked_at is None and token.consumed_at is None:
+        token.revoked_at = now
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="user.invite_revoked",
+        resource_type="user_auth_token",
+        resource_id=str(token.id),
+        request=request,
+        details={"target_email": token.email},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class UserDisableResponse(BaseModel):
+    """``POST /admin/users/{id}/disable|enable`` response."""
+
+    user_id: str
+    email: str
+    disabled: bool
+    disabled_at: datetime | None
+
+
+async def _load_target_user(db: AsyncSession, user_id: str) -> UserORM:
+    """Load a non-deleted user by id, or 404."""
+    try:
+        target_uuid = _uuid_mod.UUID(user_id)
+    except (TypeError, ValueError):
+        raise NotFound(message="user not found") from None
+    target = await db.get(UserORM, target_uuid)
+    if target is None or target.deleted_at is not None:
+        raise NotFound(message="user not found")
+    return target
+
+
+@router.post("/users/{user_id}/disable", response_model=UserDisableResponse)
+async def disable_user(
+    user_id: str,
+    request: Request,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserDisableResponse:
+    """POST /api/v1/admin/users/{id}/disable — disable an account (ADR-F061 D5).
+
+    Stamps ``disabled_at`` and revokes all the user's sessions immediately;
+    live access tokens die on their next request (get_current_user check).
+    Guards: an operator target is refused (D3); self-disable is refused; the
+    last active admin cannot be disabled (lockout protection).
+    """
+    target = await _load_target_user(db, user_id)
+
+    if target.role == "operator":
+        raise Forbidden(message="Operator accounts cannot be disabled from this endpoint.")
+    if target.id == admin.id:
+        raise Forbidden(message="You cannot disable your own account.")
+
+    # Last-admin lockout guard — count OTHER active, enabled admins.
+    if target.role == "admin" and target.disabled_at is None:
+        remaining_admins = (
+            await db.execute(
+                select(func.count())
+                .select_from(UserORM)
+                .where(
+                    UserORM.role == "admin",
+                    UserORM.id != target.id,
+                    UserORM.deleted_at.is_(None),
+                    UserORM.disabled_at.is_(None),
+                )
+            )
+        ).scalar_one()
+        if int(remaining_admins or 0) == 0:
+            raise Forbidden(
+                message=(
+                    "Cannot disable the last active admin. Promote or enable another "
+                    "admin first, then retry."
+                ),
+            )
+
+    now = _utcnow()
+    already_disabled = target.disabled_at is not None
+    if not already_disabled:
+        target.disabled_at = now
+
+    # Revoke all active sessions so refresh cannot resurrect access.
+    await db.execute(
+        update(UserSessionORM)
+        .where(UserSessionORM.user_id == target.id, UserSessionORM.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+
+    if not already_disabled:
+        await audit_action(
+            db,
+            user_id=admin.id,
+            action="user.disabled",
+            resource_type="user",
+            resource_id=str(target.id),
+            request=request,
+            details={"target_user_email": target.email},
+        )
+    await db.commit()
+    await db.refresh(target)
+
+    return UserDisableResponse(
+        user_id=str(target.id),
+        email=target.email,
+        disabled=target.disabled_at is not None,
+        disabled_at=target.disabled_at,
+    )
+
+
+@router.post("/users/{user_id}/enable", response_model=UserDisableResponse)
+async def enable_user(
+    user_id: str,
+    request: Request,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserDisableResponse:
+    """POST /api/v1/admin/users/{id}/enable — re-enable a disabled account.
+
+    Clears ``disabled_at``. The user must still log in afresh (their sessions
+    were revoked at disable time). Operator targets are refused (D3), though an
+    operator is never disabled in the first place.
+    """
+    target = await _load_target_user(db, user_id)
+    if target.role == "operator":
+        raise Forbidden(message="Operator accounts are not managed from this endpoint.")
+
+    was_disabled = target.disabled_at is not None
+    if was_disabled:
+        target.disabled_at = None
+        await audit_action(
+            db,
+            user_id=admin.id,
+            action="user.enabled",
+            resource_type="user",
+            resource_id=str(target.id),
+            request=request,
+            details={"target_user_email": target.email},
+        )
+        await db.commit()
+        await db.refresh(target)
+
+    return UserDisableResponse(
+        user_id=str(target.id),
+        email=target.email,
+        disabled=target.disabled_at is not None,
+        disabled_at=target.disabled_at,
     )
 
 
