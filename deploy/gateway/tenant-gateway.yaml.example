@@ -1,0 +1,116 @@
+# ============================================================
+# LQ.AI Oscar Edition — per-tenant Inference Gateway SEED
+# ============================================================
+# The MINIMAL, single-provider gateway.yaml a hosted tenant stack boots
+# with (SAAS-SETUP §3 item 5, ADR-F060 D6). The repo-root
+# `gateway.yaml.example` is the DEV kitchen-sink reference (every provider,
+# every alias, anonymization, ensemble, cost tables); a tenant seed ships
+# the smallest config that boots a sane, non-PRC default.
+#
+# HOW THIS SEED IS APPLIED (the SAAS-3a "only-if-absent" trap):
+#   1. scripts/setup-tenant.sh renders this into <out-dir>/gateway.yaml on
+#      the node (chmod 600).
+#   2. docker-compose.prod.yml mounts that file read-only at
+#      /usr/share/lq-ai/gateway.yaml.example (GATEWAY_CONFIG_FILE).
+#   3. gateway/entrypoint.sh copies it into the `gateway-config` VOLUME
+#      **only when the live copy is absent** — i.e. on FIRST boot. After
+#      that the LIVE, writable copy lives in the volume; re-rendering the
+#      seed does NOT change a running stack.
+# Post-boot edits: provider keys + model aliases hot-swap via the admin
+# API (/api/v1/admin/provider-keys, /admin/aliases); tiers / tier_policy /
+# rate_limits are a volume-edit + `docker compose restart gateway`.
+#
+# PROVIDER KEYS ARE NEVER INLINE HERE. `api_key_env:` names the ENV VAR;
+# the key value lives only in the root-owned .env.prod on the node, which
+# compose forwards to the gateway service (ADR 0011 / ADR-F060 D6). This
+# is why setup-tenant.sh can render this file with zero secret material.
+#
+# PRC FENCE (ADR-F058, SAAS-6): a tenant seed carries NO PRC-hosted provider —
+# the non-PRC default is deliberate. Adding an EU/US provider is an explicit
+# operator action post-boot, never a silent default.
+# ============================================================
+
+server:
+  host: 0.0.0.0
+  port: 8001
+  log_level: info  # debug | info | warn | error
+
+# Backend <-> gateway shared secret (X-LQ-AI-Gateway-Key). The same key is
+# used in reverse for the gateway's skill-fetch from the backend.
+gateway_auth:
+  enabled: true
+  api_key_env: LQ_AI_GATEWAY_KEY
+
+# ============================================================
+# PROVIDERS — exactly one for a fresh tenant: Anthropic.
+# ============================================================
+# The key is supplied via ANTHROPIC_API_KEY (compose forwards it to the
+# gateway from .env.prod). `tier: 4` is the DOCUMENTED value for a standard
+# commercial Anthropic API account (see the repo-root example's tier note);
+# an enterprise zero-data-retention agreement is `tier: 3` — set it to match
+# the ACTUAL provider relationship (the routing-log stamps this tier on every
+# request, so an inaccurate value is a false privacy claim).
+providers:
+  - name: anthropic-prod
+    type: anthropic
+    base_url: https://api.anthropic.com
+    api_key_env: ANTHROPIC_API_KEY
+    tier: 4  # standard commercial Anthropic API (3 if operator has an enterprise ZDR agreement)
+    models:
+      - claude-opus-4-7
+      - claude-sonnet-4-6
+      - claude-haiku-4-5
+
+# ============================================================
+# MODEL ALIASES — friendly names the skills + chat UI reference.
+# ============================================================
+# All three resolve to the single Anthropic provider above; the operator can
+# repoint any alias without touching skill code. No fallback list — a fresh
+# tenant has one provider, so a miss surfaces as a clean 503 rather than
+# silently degrading to an unconfigured path.
+model_aliases:
+  smart:
+    primary:
+      provider: anthropic-prod
+      model: claude-opus-4-7
+    fallback: []
+
+  fast:
+    primary:
+      provider: anthropic-prod
+      model: claude-sonnet-4-6
+    fallback: []
+
+  budget:
+    primary:
+      provider: anthropic-prod
+      model: claude-haiku-4-5
+    fallback: []
+
+# ============================================================
+# TIER POLICY — what this deployment allows (dev-example defaults).
+# ============================================================
+# Skills / Projects may require STRICTER (lower-numbered) tiers than this;
+# they cannot loosen below allowed_tiers_global. Tier 5 (consumer/free) stays
+# disallowed by default.
+tier_policy:
+  allowed_tiers_global: [1, 2, 3, 4]
+  default_minimum_tier: 4       # standard cloud accounts are Tier 4
+  privileged_minimum_tier: 3    # privileged matters require ZDR (Tier 3) or better
+  warn_on_tiers: [4, 5]
+
+# ============================================================
+# RATE LIMITING — per-user + per-provider (dev-example defaults).
+# ============================================================
+rate_limits:
+  per_user:
+    requests_per_minute: 60
+    tokens_per_minute: 100000
+    requests_per_day: 5000
+
+  per_provider:
+    anthropic-prod:
+      requests_per_minute: 200
+      tokens_per_minute: 500000
+
+  burst_allowance: 1.5  # short-burst multiplier over the sustained rate

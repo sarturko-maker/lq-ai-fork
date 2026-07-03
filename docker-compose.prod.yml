@@ -204,6 +204,19 @@ services:
       # Skills are baked into the image at /skills (api/Dockerfile `COPY skills/
       # /skills/`) — no bind mount needed or possible (no repo checkout here).
       LQ_AI_SKILLS_DIR: ${LQ_AI_SKILLS_DIR:-/skills}
+      # SETUP-2 handover — the first-run admin bootstrap (api lifespan,
+      # admin_bootstrap.py) mints the CUSTOMER admin at this email. config.py has
+      # no env_prefix, so the var is the bare field name. Unset ⇒ default admin@lq.ai.
+      FIRST_RUN_ADMIN_EMAIL: ${FIRST_RUN_ADMIN_EMAIL:-}
+      # SETUP-2 auth/notification mail (SMTP; optional — smtp_host-gated). Forwarded
+      # so a hosted stack CAN send mail (SAAS-SETUP §0 gap); the api reads these for
+      # future invite/reset flows, and the arq-worker (below) sends autonomous mail.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"]
       interval: 5s
@@ -310,6 +323,15 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
       S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required (per-tenant bucket — ADR-F058 day-one rule 1 — key objects tenants/<stack-or-org-id>/<file_id>)}
       S3_REGION: ${S3_REGION:?S3_REGION is required (provider-specific code, e.g. Hetzner "fsn1"/"nbg1"/"hel1" — not necessarily an AWS region)}
+      # SETUP-2 — autonomous-notification mail actually SENDS from this worker
+      # (app/autonomous/guard.py → notify_email.py; the executor runs here). SMTP
+      # optional (smtp_host-gated); forwarded so hosted stacks can send mail.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
     command: ["arq", "app.workers.arq_setup.WorkerSettings"]
     healthcheck:
       test:
