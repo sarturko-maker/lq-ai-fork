@@ -132,6 +132,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/admin/users/{user_id}/enable",
         # SETUP-4a (ADR-F062) — deployment-wide (Level 0) capability toggles
         "/api/v1/admin/capabilities",
+        # SETUP-4b (ADR-F062 addendum) — read-only alias+tier model menu
+        "/api/v1/admin/model-menu",
         # SETUP-3a (ADR-F061) — unauthenticated lifecycle endpoints
         "/api/v1/auth/accept-invite",
         "/api/v1/auth/password-reset-request",
@@ -250,6 +252,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         # ADR-F054 (fork) — admin playbook attach/detach (capability availability)
         "/api/v1/practice-areas/{key}/playbooks",
         "/api/v1/practice-areas/{key}/playbooks/{playbook_id}",
+        # SETUP-4b (fork, ADR-F062 addendum) — bulk reposition
+        "/api/v1/practice-areas/reorder",
         # PRIV-3 (fork) — ROPA register read API (ADR-F019)
         "/api/v1/ropa/processing-activities",
         "/api/v1/ropa/processing-activities/{activity_id}",
@@ -385,7 +389,10 @@ async def test_openapi_paths_match_sketch() -> None:
     #   (/practice-areas/{key}/tool-groups + .../{group_key} = 2; POST /practice-areas
     #   and DELETE /practice-areas/{key} reuse existing paths → +0 here) + deployment
     #   capability toggles (GET/PATCH /admin/capabilities = 1 path).
-    assert len(actual) == 170  # +3: ADR-F054 capability panel (GET/PUT
+    # +2: SETUP-4b (ADR-F062 addendum) — admin Areas + Capabilities UI backend:
+    #   POST /practice-areas/reorder (bulk reposition) + GET /admin/model-menu
+    #   (read-only alias+tier projection).
+    assert len(actual) == 172  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH
