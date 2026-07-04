@@ -11,6 +11,9 @@
 	$: navLinks = [
 		{ href: '/lq-ai/admin/audit-log', label: 'Audit log' },
 		{ href: '/lq-ai/admin/users', label: 'Users' },
+		// SETUP-4b (ADR-F062 addendum) — plain admin links, NOT operator-gated.
+		{ href: '/lq-ai/admin/areas', label: 'Practice areas' },
+		{ href: '/lq-ai/admin/capabilities', label: 'Capabilities' },
 		...($auth.user?.role === 'operator' ? [{ href: '/lq-ai/admin/models', label: 'Models' }] : []),
 		{ href: '/lq-ai/admin/word-addin', label: 'Word add-in' },
 		{ href: '/lq-ai/admin/intake-bridges', label: 'Intake bridges' },
