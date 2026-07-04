@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class BoundPlaybook(BaseModel):
@@ -84,6 +84,20 @@ class PracticeAreaConfigUpdate(BaseModel):
     profile_md: str | None = Field(default=None, max_length=20_000)
     default_tier_floor: int | None = Field(default=None, ge=1, le=5)
     agent_config: dict[str, Any] | None = None
+
+    @field_validator("name", "unit_label")
+    @classmethod
+    def _reject_explicit_null(cls, value: str | None) -> str:
+        """SETUP-4b review fix 1: an explicit JSON ``null`` matches the ``None``
+        arm of the union, skipping ``min_length`` entirely — and both columns are
+        NOT NULL, so letting it through crashes the commit with an unhandled
+        IntegrityError (500) instead of the canonical 422. Validators don't run
+        for UNSET defaults (``validate_default`` is False), so ``None``-as-
+        partial-update-sentinel stays intact; only a *provided* null is rejected
+        here, at the boundary (reject, don't sanitize)."""
+        if value is None:
+            raise ValueError("must be a non-empty string when provided (null is not allowed)")
+        return value
 
 
 class PracticeAreaCreate(BaseModel):

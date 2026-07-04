@@ -323,9 +323,6 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     # Dedicated coverage in tests/test_deployment_capabilities_api.py.
     ("GET", "/api/v1/admin/capabilities"),
     ("PATCH", "/api/v1/admin/capabilities"),
-    # SETUP-4b (ADR-F062 addendum) — read-only alias+tier model menu. Dedicated
-    # coverage in tests/test_admin_model_menu.py.
-    ("GET", "/api/v1/admin/model-menu"),
     # Wave D.2 — sandbox ensure, skills autocomplete, user-skill versions, KB files
     ("POST", "/api/v1/projects/sandbox/ensure"),
     ("GET", "/api/v1/skills/autocomplete"),

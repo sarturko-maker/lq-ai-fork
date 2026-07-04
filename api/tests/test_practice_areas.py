@@ -1207,6 +1207,51 @@ async def test_admin_patch_unit_label_rejects_empty_string(
     assert resp.status_code == 422
 
 
+async def test_admin_patch_name_rejects_explicit_null(client: AsyncClient, admin: User) -> None:
+    """Review fix 1: an explicit JSON null used to slip past min_length (the None
+    union arm) and crash the NOT NULL commit with an unhandled 500 — now a clean
+    boundary 422 from the field validator."""
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"name": None},
+    )
+    assert resp.status_code == 422
+
+
+async def test_admin_patch_unit_label_rejects_explicit_null(
+    client: AsyncClient, admin: User
+) -> None:
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"unit_label": None},
+    )
+    assert resp.status_code == 422
+
+
+async def test_admin_patch_name_with_unit_label_unset_still_works(
+    client: AsyncClient, admin: User
+) -> None:
+    """Review fix 1 companion: the null-rejecting validator must NOT fire for an
+    UNSET field (validators skip unvalidated defaults), so partial updates keep
+    working — name set, unit_label omitted leaves unit_label untouched."""
+    before = await client.get("/api/v1/practice-areas", headers=_bearer(admin))
+    unit_before = next(a for a in before.json()["practice_areas"] if a["key"] == "employment")[
+        "unit_label"
+    ]
+
+    resp = await client.patch(
+        "/api/v1/practice-areas/employment",
+        headers=_bearer(admin),
+        json={"name": "People & Employment"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "People & Employment"
+    assert body["unit_label"] == unit_before  # unset field untouched
+
+
 _ALL_SEED_KEYS = [k for k, *_ in _EXPECTED_SEED]
 
 

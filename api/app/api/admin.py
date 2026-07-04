@@ -15,7 +15,6 @@ Surface (current):
 * ``GET    /api/v1/admin/audit-log``         — 501 (D3 wires real impl)
 * ``GET    /api/v1/admin/tier-policy``       — 501 (D1)
 * ``PATCH  /api/v1/admin/tier-policy``       — 501 (D1)
-* ``GET    /api/v1/admin/model-menu``        — read-only alias+tier menu (SETUP-4b)
 
 Auth posture: every admin endpoint stacks on top of the existing
 ``ActiveUser`` (bearer + must-change-password gate) AND the new
@@ -1633,66 +1632,3 @@ async def update_deployment_capabilities(
     )
     await db.commit()
     return await _deployment_inventory(db, request)
-
-
-# ---------------------------------------------------------------------------
-# SETUP-4b — read-only alias+tier "model menu" for the org-admin capabilities page.
-#
-# Plan §7 row 6 (ratified): the model menu is read-only visible to org-admins — an
-# alias's name and its resolved tier are already member-visible in the run composer
-# (GET /api/v1/models, proxied to every ActiveUser and rendered by ModelPicker.svelte),
-# so exposing the SAME pair to admins on /admin/capabilities reveals nothing a member
-# doesn't already see. AdminUser (not OperatorUser): every org-admin should see this,
-# not just the bootstrap operator. The F061 operator fence stays intact for the
-# WRITE surfaces (alias CRUD, provider keys, GET /admin/config's full sanitized
-# config) — this is a narrower, read-only projection, never those endpoints.
-# ---------------------------------------------------------------------------
-
-
-class ModelMenuAlias(BaseModel):
-    """One alias's admin-visible row — name + resolved tier, nothing else."""
-
-    alias: str
-    tier: int | None
-
-
-class ModelMenuResponse(BaseModel):
-    """``GET /admin/model-menu`` body — exactly ``{"aliases": [...]}``, no provider
-    names, model ids, base URLs, fallback chains, or key material."""
-
-    aliases: list[ModelMenuAlias]
-
-
-@router.get(
-    "/model-menu",
-    response_model=ModelMenuResponse,
-    summary="Read-only alias+tier menu for the admin capabilities page (admin).",
-)
-async def get_model_menu(
-    _admin: AdminUser,
-    request: Request,
-    gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
-) -> ModelMenuResponse:
-    """GET /api/v1/admin/model-menu — SETUP-4b (ADR-F062 addendum).
-
-    Sourced from the gateway's merged model-discovery payload (``GET /v1/models`` —
-    the same call the backend's own ``GET /api/v1/models`` proxies for every member),
-    NOT the admin alias-CRUD listing: the CRUD listing (``gateway.list_aliases``)
-    deliberately omits tier (an alias can fall back across providers, so there is no
-    single tier for the *list* view — see ``gateway/app/api/admin.py``'s
-    ``list_aliases`` docstring), while the discovery payload already computes each
-    alias's primary-target tier. Reusing it avoids re-deriving tier-resolution logic
-    here and guarantees the admin sees the identical number a member already does.
-
-    No audit row (matches ``GET /admin/capabilities`` — a pure read). Gateway
-    unreachable/timeout/invalid-response surfaces as 503/504/502 via the same
-    :class:`~app.clients.gateway.GatewayClient` error translation every other
-    gateway-backed endpoint uses — no extra handling needed here.
-    """
-    payload = await gateway.list_models(request_id=request.headers.get("x-request-id"))
-    aliases = [
-        ModelMenuAlias(alias=str(row["id"]), tier=row.get("routed_inference_tier"))
-        for row in payload.get("data", [])
-        if row.get("lq_ai_kind") == "alias"
-    ]
-    return ModelMenuResponse(aliases=aliases)

@@ -107,7 +107,10 @@ async def _bound_tool_group_keys(db: AsyncSession, area_id: uuid.UUID) -> list[s
 
 
 async def _bound_playbooks(db: AsyncSession, area_id: uuid.UUID) -> list[BoundPlaybook]:
-    """One area's bound (non-deleted) playbooks, name order (mutation paths)."""
+    """One area's bound (non-deleted) playbooks, name order (mutation paths).
+
+    ``Playbook.name`` is not unique — the ``id`` tiebreaker keeps same-named
+    playbooks from flapping order between reads (review fix 5)."""
     rows = (
         await db.execute(
             select(Playbook.id, Playbook.name)
@@ -116,7 +119,7 @@ async def _bound_playbooks(db: AsyncSession, area_id: uuid.UUID) -> list[BoundPl
                 PracticeAreaPlaybook.practice_area_id == area_id,
                 Playbook.deleted_at.is_(None),
             )
-            .order_by(Playbook.name)
+            .order_by(Playbook.name, Playbook.id)
         )
     ).all()
     return [BoundPlaybook(id=pb_id, name=name) for pb_id, name in rows]
@@ -172,7 +175,8 @@ async def _all_bound_playbooks(
             PracticeAreaPlaybook.practice_area_id.in_(area_ids),
             Playbook.deleted_at.is_(None),
         )
-        .order_by(PracticeAreaPlaybook.practice_area_id, Playbook.name)
+        # name is not unique — the id tiebreaker keeps order stable (review fix 5).
+        .order_by(PracticeAreaPlaybook.practice_area_id, Playbook.name, Playbook.id)
     )
     for area_id, pb_id, pb_name in rows:
         out[area_id].append(BoundPlaybook(id=pb_id, name=pb_name))
