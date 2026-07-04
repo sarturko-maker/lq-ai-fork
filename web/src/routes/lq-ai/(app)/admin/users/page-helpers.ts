@@ -122,16 +122,17 @@ export function validateInviteEmail(email: string): string | null {
 }
 
 /**
- * Human message for a failed mutation. The 409 last-admin special case is
- * lifted from DevRoleManagementCard (D5); the backend's other guard messages
- * (403 forbidden: last-admin disable, self-disable, operator target; 409
- * conflict: duplicate user/invite) are already human-readable — surface them.
+ * Human message for a failed mutation, keyed on the REAL backend contract
+ * (SETUP-3b review fix F4 — no 'last_admin' code exists anywhere in api/):
+ * the guard rejections (last-admin demote/disable, self-disable, operator
+ * target) are 403 with envelope code 'forbidden' and an already-actionable
+ * message ("Cannot demote the last admin. Promote another user to admin
+ * first, then retry the demotion."); duplicate user/invite is 409 'conflict'.
+ * Both carry user-facing copy — surface the server's message verbatim and
+ * never synthesize a client-side variant for a shape the server doesn't emit.
  */
 export function describeMutationError(err: unknown, fallback: string): string {
 	if (err instanceof LQAIApiError) {
-		if (err.status === 409 && err.code === 'last_admin') {
-			return "Can't demote the last admin. Promote another user first.";
-		}
 		return err.message || fallback;
 	}
 	return err instanceof Error ? err.message : fallback;

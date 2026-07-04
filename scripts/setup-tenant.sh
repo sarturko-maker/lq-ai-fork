@@ -732,6 +732,10 @@ if [ -n "$SMTP_HOST" ]; then
 		echo "  via the emailed link (single-use, expires in 1 hour). Recovery is"
 		echo "  self-serve ('Forgot your password?' on the sign-in page). No"
 		echo "  credential was printed or stored during this handover."
+		# The 202 is uniform and the mail send is best-effort (never-raise), so a
+		# bad SMTP credential fails silently — give the operator a recovery pointer.
+		echo "  If no email arrives within a few minutes, check the SMTP settings"
+		echo "  in $ENV_FILE or use the reset-admin-password CLI on this node."
 	else
 		warn "could not reach $RESET_REQUEST_URL after retries — no handover email sent"
 		echo "  Ask the admin to use 'Forgot your password?' at"

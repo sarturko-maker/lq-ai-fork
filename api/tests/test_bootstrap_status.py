@@ -190,3 +190,23 @@ async def test_bootstrap_status_hosted_true_when_operator_email_configured(
     resp = await client.get("/api/v1/admin/bootstrap-status")
     assert resp.status_code == 200
     assert resp.json()["hosted"] is True
+
+
+@pytest.mark.integration
+async def test_bootstrap_status_hosted_false_for_empty_string_env(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty string ⇒ NOT hosted (SETUP-3b review fix F1).
+
+    The prod compose always injects ``FIRST_RUN_OPERATOR_EMAIL: ${VAR:-}``, so
+    a self-host stack (or a wizard run that left OPERATOR_EMAIL blank) reaches
+    settings as "" — which must keep the docker-log-grep hint, exactly like an
+    unset value (``ensure_first_run_operator``'s ``if not operator_email``).
+    """
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "first_run_operator_email", "")
+
+    resp = await client.get("/api/v1/admin/bootstrap-status")
+    assert resp.status_code == 200
+    assert resp.json()["hosted"] is False

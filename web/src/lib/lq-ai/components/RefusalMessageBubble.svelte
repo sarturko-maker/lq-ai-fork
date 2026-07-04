@@ -27,12 +27,16 @@
 	}
 
 	/**
-	 * Override is admin-only at M1. Per-user `override_tier_floor` capability
-	 * is deferred to v1.1+ (see inferenceOverride.ts comments). Members and
-	 * viewers see only Re-run + Why.
+	 * Override is OPERATOR-only since SETUP-3b: the backing endpoint
+	 * (`POST /inference/override-tier-floor`) moved behind the operator fence
+	 * (ADR-F061 D4), so an org-admin's click would only earn a 403 — the UI
+	 * mirrors the fence. Admins/members/viewers see only Re-run + Why. Per-user
+	 * `override_tier_floor` capability stays deferred (inferenceOverride.ts).
 	 */
-	export function showOverrideButton(role: 'admin' | 'member' | 'viewer'): boolean {
-		return role === 'admin';
+	export function showOverrideButton(
+		role: 'admin' | 'member' | 'viewer' | 'operator'
+	): boolean {
+		return role === 'operator';
 	}
 </script>
 
@@ -54,12 +58,12 @@
 	 *
 	 * The bubble surfaces three operator actions:
 	 * - Re-run at {enforcedTier}-floor (primary)
-	 * - Override for this turn (secondary, admin only — fires the T14
-	 *   confirmation modal; calls overrideTierFloor() from T9)
+	 * - Override for this turn (secondary, operator only since SETUP-3b —
+	 *   fires the T14 confirmation modal; calls overrideTierFloor() from T9)
 	 * - Why am I seeing this? (tertiary — opens the explainer panel)
 	 */
 	export let message: Message;
-	export let currentUserRole: 'admin' | 'member' | 'viewer' = 'member';
+	export let currentUserRole: 'admin' | 'member' | 'viewer' | 'operator' = 'member';
 	export let onRerun: () => void = () => {};
 	export let onOverrideRequested: () => void = () => {};
 	export let onExplainerRequested: () => void = () => {};

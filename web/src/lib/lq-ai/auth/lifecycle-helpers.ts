@@ -30,3 +30,17 @@ export function validateNewPassword(password: string, confirm: string): string |
 	}
 	return null;
 }
+
+/**
+ * The page's URL with the `token` query param removed (relative form, ready
+ * for SvelteKit's `replaceState`), or null when the URL carries no token.
+ * Defense-in-depth (SETUP-3b review fix F7): after `readToken()` the
+ * single-use token lives in component state only — scrubbing the address bar
+ * keeps it out of shared-machine history and autocomplete.
+ */
+export function stripTokenParam(href: string): string | null {
+	const url = new URL(href);
+	if (!url.searchParams.has('token')) return null;
+	url.searchParams.delete('token');
+	return url.pathname + url.search + url.hash;
+}

@@ -157,15 +157,21 @@ describe('validateInviteEmail', () => {
 	});
 });
 
-describe('describeMutationError', () => {
-	it('keeps the lifted 409 last-admin message', () => {
-		const err = new LQAIApiError(409, 'last_admin', 'Cannot demote the last admin');
-		expect(describeMutationError(err, 'fallback')).toBe(
-			"Can't demote the last admin. Promote another user first."
+describe('describeMutationError (real backend contract — review fix F4)', () => {
+	it('surfaces the last-admin guard as the server emits it: 403 code=forbidden', () => {
+		// api/app/api/admin.py raises Forbidden (403, envelope code 'forbidden')
+		// with an already-actionable message — no 'last_admin' code exists in api/.
+		const lastAdmin = new LQAIApiError(
+			403,
+			'forbidden',
+			'Cannot demote the last admin. Promote another user to admin first, then retry the demotion.'
+		);
+		expect(describeMutationError(lastAdmin, 'fallback')).toBe(
+			'Cannot demote the last admin. Promote another user to admin first, then retry the demotion.'
 		);
 	});
 
-	it('surfaces the server message for other API errors (403 guards, 409 conflicts)', () => {
+	it('surfaces the other 403 guard messages and 409 conflicts verbatim', () => {
 		const forbidden = new LQAIApiError(403, 'forbidden', 'You cannot disable your own account.');
 		expect(describeMutationError(forbidden, 'fallback')).toBe(
 			'You cannot disable your own account.'
@@ -174,6 +180,14 @@ describe('describeMutationError', () => {
 		expect(describeMutationError(conflict, 'fallback')).toBe(
 			'A user with this email already exists.'
 		);
+	});
+
+	it("never special-cases the fictional 409/'last_admin' shape the server does not emit", () => {
+		// Regression guard: if someone re-keys the friendly copy on
+		// 409+'last_admin' (the pre-F4 fiction), this asserts the raw message
+		// passes through untouched — it FAILS on any synthesized variant.
+		const fictional = new LQAIApiError(409, 'last_admin', 'server text');
+		expect(describeMutationError(fictional, 'fallback')).toBe('server text');
 	});
 
 	it('falls back for non-Error throws', () => {

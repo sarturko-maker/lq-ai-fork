@@ -28,14 +28,15 @@ Backend dependency per route verified in `api/app/api/admin.py`, `api/app/api/wo
 | `/admin/provider-keys*` (×4) | none anywhere in `web/src` | no UI action needed |
 | `GET /admin/tier-policy` / `PATCH /admin/tier-policy` | none anywhere in `web/src` | no tier-policy UI exists — the plan's "renders read-only for admins" clause is vacuously satisfied; nothing to gate |
 
-## Finding outside the audited scope (for the lead's review)
+## Finding outside the audited scope — FIXED in the review-fix pass (F5)
 
 - `POST /inference/override-tier-floor` (now `OperatorUser`) is called by
   `TierFloorOverrideModal.svelte` via `RefusalMessageBubble.svelte`'s override button —
-  a **chat** surface, not an admin page. `showOverrideButton()` gates on `role === 'admin'`
-  (and `ChatPanel` maps the operator to `'admin'` via `is_admin`), so the operator keeps a
-  working button, but an org-admin who clicks it now receives the server's 403 in the modal.
-  Graceful (server message surfaces inline; no crash), but the button is now dead weight for
-  org-admins. NOT changed in this slice — out of the plan's enumerated scope and it ripples
-  through RefusalMessageBubble/TierFloorOverrideModal tests. Recommend a decision in a
-  follow-up (hide for non-operators vs re-classify the endpoint's intent).
+  a **chat** surface, not an admin page. Originally flagged only: `showOverrideButton()`
+  gated on `role === 'admin'` while the endpoint 403s org-admins.
+  **Fixed (review fix F5):** `showOverrideButton()` now returns true only for
+  `role === 'operator'`, and `ChatPanel`'s `currentUserRole` derivation passes the true
+  `'operator'` role through unmapped (it previously collapsed operator → 'admin' via the
+  `is_admin` back-compat fallback); the `currentUserRole` prop type is widened along the
+  ChatPanel → MessageList → MessageBubble → RefusalMessageBubble chain. Org-admins no
+  longer see a button that can only 403; the operator keeps a working one.

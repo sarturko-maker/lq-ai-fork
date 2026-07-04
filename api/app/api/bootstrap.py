@@ -111,6 +111,10 @@ async def get_bootstrap_status(
         default_password_active=default_password_active,
         logs_hint=_LOGS_HINT,
         # ADR-F061 addendum D8 — derived, not stored: a platform operator email
-        # configured for this deployment IS the hosted-tenant signal.
-        hosted=get_settings().first_run_operator_email is not None,
+        # configured for this deployment IS the hosted-tenant signal. Truthiness,
+        # NOT `is not None`: the prod compose always injects the env var
+        # (`${FIRST_RUN_OPERATOR_EMAIL:-}`), so an unset key reaches settings as
+        # "" and must still read as self-host — matching ensure_first_run_operator's
+        # `if not operator_email` gate.
+        hosted=bool(get_settings().first_run_operator_email),
     )

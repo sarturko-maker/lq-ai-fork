@@ -14,12 +14,14 @@
 	 * every session). The exempt-route layout renders the footer.
 	 */
 	import { onMount } from 'svelte';
+	import { replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
 
 	import { authApi } from '$lib/lq-ai/api';
 	import {
 		PASSWORD_MIN_LENGTH,
 		readToken,
+		stripTokenParam,
 		validateNewPassword
 	} from '$lib/lq-ai/auth/lifecycle-helpers';
 	import Alert from '$lib/lq-ai/components/primitives/Alert.svelte';
@@ -46,6 +48,10 @@
 
 	onMount(() => {
 		token = readToken($page.url.searchParams);
+		// F7 — scrub the single-use token from the address bar (component state
+		// keeps it); shared-machine history/autocomplete never see it.
+		const scrubbed = stripTokenParam(window.location.href);
+		if (scrubbed !== null) replaceState(scrubbed, {});
 		mounted = true;
 	});
 

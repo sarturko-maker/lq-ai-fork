@@ -69,7 +69,7 @@
 	// chat surface keeps working when the parent doesn't wire these (e.g.
 	// historical chats with no refusal rows). ChatPanel owns the modal +
 	// re-run state; this component only forwards the per-message callback.
-	export let currentUserRole: 'admin' | 'member' | 'viewer' = 'member';
+	export let currentUserRole: 'admin' | 'member' | 'viewer' | 'operator' = 'member';
 	export let onRefusalRerun: (msg: Message) => void = () => {};
 	export let onRefusalOverrideRequested: (msg: Message) => void = () => {};
 	export let onRefusalExplainerRequested: (msg: Message) => void = () => {};

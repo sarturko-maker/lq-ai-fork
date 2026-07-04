@@ -11,11 +11,11 @@ import type {
 	UsageQuery,
 	AdminUserListResponse,
 	AdminUserListQuery,
-	AdminUserRow,
 	InviteCreateRequest,
 	InviteListResponse,
 	InviteResponse,
-	UserDisableResponse
+	UserDisableResponse,
+	UserRoleResponse
 } from '../types';
 
 export interface AliasFallback {
@@ -132,13 +132,15 @@ export async function listUsers(query: AdminUserListQuery = {}): Promise<AdminUs
 /**
  * PATCH /api/v1/admin/users/{user_id}/role — update a user's platform role.
  *
- * Returns 409 with code "last_admin" when demoting the last admin account.
+ * Demoting the last admin is refused with 403 code "forbidden" and an
+ * actionable message (SETUP-3b review fix F4/F6 — the endpoint returns a
+ * UserRoleResponse, not an AdminUserRow, and no 'last_admin' code exists).
  */
 export async function patchUserRole(
 	userId: string,
 	role: 'admin' | 'member' | 'viewer'
-): Promise<AdminUserRow> {
-	return apiRequest<AdminUserRow>(`/admin/users/${encodeURIComponent(userId)}/role`, {
+): Promise<UserRoleResponse> {
+	return apiRequest<UserRoleResponse>(`/admin/users/${encodeURIComponent(userId)}/role`, {
 		method: 'PATCH',
 		body: { role }
 	});

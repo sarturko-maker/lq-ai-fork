@@ -791,6 +791,16 @@ export interface AdminUserListQuery {
 	offset?: number;
 }
 
+/** `PATCH /admin/users/{id}/role` response (SETUP-3b review fix F6 — the
+ *  endpoint returns this shape, NOT an AdminUserRow: `user_id`, no timestamps).
+ *  Role is bounded to the org roles; 'operator' never transits this endpoint. */
+export interface UserRoleResponse {
+	user_id: string;
+	email: string;
+	role: UserRole;
+	is_admin: boolean;
+}
+
 // ----- User lifecycle: invites + disable (SETUP-3a/3b, ADR-F061) -----
 
 /** `POST /admin/users/invites` body. Role is bounded server-side to the three

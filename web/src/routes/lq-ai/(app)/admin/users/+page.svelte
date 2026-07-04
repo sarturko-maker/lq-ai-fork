@@ -146,9 +146,10 @@
 		actionError = null;
 		busyUserId = row.id;
 		try {
+			// UserRoleResponse (F6): user_id/email/role/is_admin — not a full row.
 			const updated = await adminApi.patchUserRole(row.id, newRole);
 			users = users.map((u) =>
-				u.id === row.id ? { ...u, role: updated.role, is_admin: updated.role === 'admin' } : u
+				u.id === row.id ? { ...u, role: updated.role, is_admin: updated.is_admin } : u
 			);
 		} catch (e) {
 			actionError = describeMutationError(e, 'Failed to update role.');
