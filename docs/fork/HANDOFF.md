@@ -204,8 +204,8 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   swap. (E) fence audit `docs/fork/evidence/setup-3b/fence-audit.md`: `/admin/models` page-guard
 >   `role==='operator'` + sub-nav link hidden; `DevRoleManagementCard` DELETED (D5 — function
 >   moved to Users page); provider-keys/tier-policy have NO web consumers (nothing to gate);
->   FLAGGED (not changed): RefusalMessageBubble's override button hits the now-fenced
->   override-tier-floor as org-admin → 403 surfaces in-modal (decide hide-vs-reclassify later).
+>   RefusalMessageBubble's tier-floor-override button now OPERATOR-ONLY (review fix — ChatPanel
+>   previously collapsed operator→'admin', so the true role is now passed through the bubble chain).
 >   (F) wizard: SMTP-on handover = curl POST `/auth/password-reset-request` for ADMIN_EMAIL w/
 >   deploy.sh-style retries, NEVER scrapes/prints the password; SMTP-off keeps the labelled
 >   log-scrape fallback; optional `OPERATOR_EMAIL` → `FIRST_RUN_OPERATOR_EMAIL` (written/omitted;
@@ -213,6 +213,11 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   **TRAP:** wizard/env-example tests resolve `_REPO_ROOT = parents[2]` — the containerized run
 >   needs `-v scripts:/scripts -v deploy:/deploy -v docker-compose.prod.yml:/docker-compose.prod.yml
 >   -v .env.prod.example:/.env.prod.example` (ro) or 16 tests fail on a missing repo root.
+>   Adversarial review: security lens ZERO findings; 8 review fixes landed, headline TRAP =
+>   `bootstrap-status.hosted` must derive by TRUTHINESS, not `is not None` — prod compose always
+>   injects `${FIRST_RUN_OPERATOR_EMAIL:-}` so an unset key reaches pydantic-settings as `""`
+>   (same trap for ANY optional `${VAR:-}`-forwarded setting). Cypress specs updated for the
+>   deleted role card + operator-only models page (Cypress is not CI-gated — keep specs honest).
 > - **NEXT = SETUP-4a — tool-group registry refactor (+ SETUP-4b `practice_area_tool_groups` +
 >   areas/capabilities admin UI), then SETUP-5 reconcile (F054 flip + D1 supersession; also takes
 >   the Q1 viewer/operator tenant-data RBAC decision).** SETUP-3c (first-login onboarding
