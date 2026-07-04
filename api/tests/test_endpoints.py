@@ -319,6 +319,10 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("DELETE", "/api/v1/admin/users/invites/{invite_id}"),
     ("POST", "/api/v1/admin/users/{user_id}/disable"),
     ("POST", "/api/v1/admin/users/{user_id}/enable"),
+    # SETUP-4a (ADR-F062) — deployment-wide (Level 0) capability toggles.
+    # Dedicated coverage in tests/test_deployment_capabilities_api.py.
+    ("GET", "/api/v1/admin/capabilities"),
+    ("PATCH", "/api/v1/admin/capabilities"),
     # Wave D.2 — sandbox ensure, skills autocomplete, user-skill versions, KB files
     ("POST", "/api/v1/projects/sandbox/ensure"),
     ("GET", "/api/v1/skills/autocomplete"),
@@ -378,6 +382,12 @@ IMPLEMENTED_ROUTES: set[tuple[str, str]] = {
     ("PATCH", "/api/v1/practice-areas/{key}"),
     ("POST", "/api/v1/practice-areas/{key}/skills"),
     ("DELETE", "/api/v1/practice-areas/{key}/skills/{skill_name}"),
+    # SETUP-4a (fork, ADR-F062) — practice-area CRUD + tool-group attach/detach.
+    # Dedicated coverage in tests/test_practice_areas.py.
+    ("POST", "/api/v1/practice-areas"),
+    ("DELETE", "/api/v1/practice-areas/{key}"),
+    ("POST", "/api/v1/practice-areas/{key}/tool-groups"),
+    ("DELETE", "/api/v1/practice-areas/{key}/tool-groups/{group_key}"),
     # ADR-F054 (fork) — capability panel. Dedicated coverage in
     # tests/test_practice_area_playbooks_api.py + tests/test_matter_capabilities_api.py.
     ("POST", "/api/v1/practice-areas/{key}/playbooks"),
