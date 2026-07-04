@@ -735,9 +735,16 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   (`tests/agents/test_registry_parity.py`) pins the registry loop reproduces the pre-refactor grants
   byte-identically (tools/order/ledger/tabular_enabled). No web UI (SETUP-4b). NEXT: SETUP-4b (Practice
   Areas + Capabilities admin surfaces) →
-  SETUP-5 reconcile (F054 flip + D1 supersession) → SETUP-3c (first-login onboarding checklist:
-  House Brief → invite users → review area defaults — UX polish split out of 3b, can ride after
-  the 4x/5 ladder).
+  SETUP-5 reconcile (F054 flip + D1 supersession) → **SETUP-6 — actor guides (maintainer,
+  2026-07-04, ON HOLD until called): human-facing operating documentation, one guide per F061
+  actor — Operator (provisioning/wizard, backups + restore drill, the fence, invite handover,
+  ongoing ops; links the staging-bringup runbook) / Admin (claiming the workspace, Users admin,
+  areas + Level-0 capabilities, House Brief, read-only transparency surfaces) / User (matters with
+  the area agent, capabilities panel, matter memory, documents/redlines/grids, budget profiles).
+  Suggested home `docs/guides/`; after 4b/5 so the described UI exists; the operator guide is
+  separable and can be pulled forward for the weekend bring-up** → SETUP-3c (first-login onboarding
+  checklist: House Brief → invite users → review area defaults — UX polish split out of 3b, can
+  ride after the 4x/5 ladder).
 - **SAAS-4 — user lifecycle + admin split — ABSORBED into SETUP-3a/b** (see the SETUP ladder above).
   Original scope: invitations/verification/reset/SMTP; forced first
   password change; WorkOS-style users/orgs/memberships modeling; platform-admin vs org-admin

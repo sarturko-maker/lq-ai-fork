@@ -243,9 +243,27 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   comma silently rewraps pre-existing lines; dev-ruff 0.15.20 also false-flags migration import
 >   blocks (I001) that CI's pip-cached older ruff accepts (matched 0056/0084 precedent, left as-is).
 >   NO web UI (SETUP-4b). NOT touched: F054 status flip/addendum (SETUP-5).
+>   **Adversarial review (3 lenses + independent verification): 3 should-fixes CONFIRMED + 4 nits,
+>   ALL FIXED (`e4355dd0`); full suite after fixes 3251/43.** Review traps worth carrying: (1)
+>   count-then-delete on an FK parent is a TOCTOU — FK inserts take FOR KEY SHARE, which does NOT
+>   conflict with a plain SELECT; lock the parent `FOR UPDATE` BEFORE the guard count. (2) parity/
+>   golden assertions must drive PRODUCTION seams — comparing a test's own literals to each other is
+>   a tautology. (3) a chokepoint that pre-filters makes downstream warnings unreachable — log at
+>   the drop point. (4) an optional kwarg at a security chokepoint fails OPEN — make it required
+>   (`deployment_toggles`). Isolated live smoke **21/21** (dev stack still AIC-captive):
+>   seed/create/attach/detach/Level-0-narrows-matter-panel/delete-semantics/authz-fence — evidence
+>   `docs/fork/evidence/setup-4a/live-smoke.md`.
 > - **NEXT = SETUP-4b — Practice Areas + Capabilities admin surfaces (web UI over the 4a endpoints),
 >   then SETUP-5 reconcile (F054 flip + D1 supersession; also takes
->   the Q1 viewer/operator tenant-data RBAC decision).** SETUP-3c (first-login onboarding
+>   the Q1 viewer/operator tenant-data RBAC decision), then SETUP-6 — ACTOR GUIDES (maintainer,
+>   2026-07-04, explicitly ON HOLD until called; task #462): human-facing operating documentation,
+>   one guide per F061 actor — Operator (wizard/provisioning, backups+restore drill, the fence,
+>   invite handover, ongoing ops; links the staging-bringup runbook, no duplication) / Admin
+>   (claiming the workspace, Users admin, areas + Level-0 capabilities, House Brief, read-only
+>   transparency surfaces) / User (matters with the area agent, capabilities panel, matter memory,
+>   documents/redlines/grids, budget profiles, honest limits). Suggested home `docs/guides/`;
+>   sequenced after 4b/5 so the described UI exists — the operator guide is separable and can be
+>   pulled forward for the weekend bring-up on request.** SETUP-3c (first-login onboarding
 >   checklist: House Brief → invite users → review area defaults) split out of 3b as UX polish —
 >   can ride after the ladder. SAAS-3b bring-up (maintainer, weekend, IONOS): provision
 >   domain/node/DNS token/bucket → run `setup-tenant.sh` → **Proof = a real agent run on the
