@@ -130,6 +130,8 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/admin/users/invites/{invite_id}",
         "/api/v1/admin/users/{user_id}/disable",
         "/api/v1/admin/users/{user_id}/enable",
+        # SETUP-4a (ADR-F062) — deployment-wide (Level 0) capability toggles
+        "/api/v1/admin/capabilities",
         # SETUP-3a (ADR-F061) — unauthenticated lifecycle endpoints
         "/api/v1/auth/accept-invite",
         "/api/v1/auth/password-reset-request",
@@ -242,6 +244,9 @@ EXPECTED_PATHS: frozenset[str] = frozenset(
         "/api/v1/practice-areas/{key}",
         "/api/v1/practice-areas/{key}/skills",
         "/api/v1/practice-areas/{key}/skills/{skill_name}",
+        # SETUP-4a (fork, ADR-F062) — practice-area tool-group attach/detach
+        "/api/v1/practice-areas/{key}/tool-groups",
+        "/api/v1/practice-areas/{key}/tool-groups/{group_key}",
         # ADR-F054 (fork) — admin playbook attach/detach (capability availability)
         "/api/v1/practice-areas/{key}/playbooks",
         "/api/v1/practice-areas/{key}/playbooks/{playbook_id}",
@@ -376,7 +381,11 @@ async def test_openapi_paths_match_sketch() -> None:
     # +8: SETUP-3a (ADR-F061) — invite lifecycle (create/list share one path;
     #   resend; revoke; = 3) + disable + enable (2) + accept-invite +
     #   password-reset-request + password-reset (3) = 8 new paths.
-    assert len(actual) == 167  # +3: ADR-F054 capability panel (GET/PUT
+    # +3: SETUP-4a (ADR-F062) — practice-area tool-group attach/detach
+    #   (/practice-areas/{key}/tool-groups + .../{group_key} = 2; POST /practice-areas
+    #   and DELETE /practice-areas/{key} reuse existing paths → +0 here) + deployment
+    #   capability toggles (GET/PATCH /admin/capabilities = 1 path).
+    assert len(actual) == 170  # +3: ADR-F054 capability panel (GET/PUT
     #   /matters/{project_id}/capabilities counts as 1 path; admin playbook
     #   attach/detach /practice-areas/{key}/playbooks + .../{playbook_id} = 2).
     # +3 prior: ADR-F048 authorship roster (POST /roster, PATCH

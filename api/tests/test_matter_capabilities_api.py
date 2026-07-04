@@ -324,3 +324,32 @@ async def test_put_isolated_per_matter(
     # Matter B is untouched — redlining still enabled.
     body_b = (await client.get(_url(matter_b.id), headers=_bearer(user))).json()
     assert _entry(body_b, "tool", "redlining")["enabled"] is True
+
+
+# --- SETUP-4a: Level-0 (deployment-wide) narrowing reflected in the panel (ADR-F062) ---
+async def test_level0_disabled_tool_group_absent_from_panel(
+    client: AsyncClient, db_session: AsyncSession, user: User
+) -> None:
+    """A deployment-disabled tool group vanishes from the matter panel entirely (one
+    chokepoint: build_area_inventory) — the panel shows exactly what the agent gets."""
+    from app.models.practice_area import DeploymentCapabilityToggle
+
+    area_id = await _commercial_area_id(db_session)
+    matter = await _make_matter(db_session, user, area_id=area_id)
+
+    # Baseline: redlining is present.
+    before = await client.get(_url(matter.id), headers=_bearer(user))
+    tool_keys_before = [e["capability_key"] for e in _section(before.json(), "tool")["entries"]]
+    assert "redlining" in tool_keys_before
+
+    # Disable redlining deployment-wide → it disappears from the panel.
+    db_session.add(
+        DeploymentCapabilityToggle(
+            capability_kind="tool", capability_key="redlining", enabled=False
+        )
+    )
+    await db_session.flush()
+    after = await client.get(_url(matter.id), headers=_bearer(user))
+    tool_keys_after = [e["capability_key"] for e in _section(after.json(), "tool")["entries"]]
+    assert "redlining" not in tool_keys_after
+    assert "tabular" in tool_keys_after  # other groups unaffected

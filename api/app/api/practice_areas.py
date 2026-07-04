@@ -16,26 +16,36 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
-from sqlalchemy import delete, select
+from sqlalchemy import Select, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.area_agent import build_area_subagents
+from app.agents.capabilities import TOOL_GROUP_REGISTRY
 from app.api.dependencies import ActiveUser, AdminUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import Conflict, NotFound, ValidationError
 from app.models.playbook import Playbook
-from app.models.practice_area import PracticeArea, PracticeAreaPlaybook, PracticeAreaSkill
+from app.models.practice_area import (
+    PracticeArea,
+    PracticeAreaPlaybook,
+    PracticeAreaSkill,
+    PracticeAreaToolGroup,
+)
+from app.models.project import Project
 from app.schemas.practice_areas import (
     PlaybookAttachRequest,
     PracticeAreaConfigUpdate,
+    PracticeAreaCreate,
     PracticeAreaListResponse,
     PracticeAreaRead,
     SkillAttachRequest,
+    ToolGroupAttachRequest,
 )
 from app.skills.registry import MutableSkillRegistry
 
@@ -95,6 +105,26 @@ async def _load_area_or_404(db: AsyncSession, key: str) -> PracticeArea:
         # 404, never 403/existence-leak (CLAUDE.md).
         raise NotFound("practice area not found", details={"key": key})
     return area
+
+
+def _area_for_update_stmt(key: str) -> Select[tuple[PracticeArea]]:
+    """The FOR-UPDATE area load the DELETE handler uses (module-level so the lock is
+    testable by compiling the statement — a real two-session race is not exercisable in
+    the rollback-isolated test harness)."""
+    return select(PracticeArea).where(PracticeArea.key == key).with_for_update()
+
+
+def _require_registered_group(group_key: str) -> None:
+    """404 for a tool-group key absent from the code registry (ADR-F062 D3(d)).
+
+    Shared by create + attach so the message/details shape cannot drift. 404 (not 422)
+    mirrors the skill-not-in-registry posture; the key is an identifier, never content.
+    """
+    if group_key not in TOOL_GROUP_REGISTRY:
+        raise NotFound(
+            f"Tool group {group_key!r} is not in the registry.",
+            details={"group_key": group_key},
+        )
 
 
 @router.get(
@@ -166,6 +196,9 @@ async def update_practice_area_config(
         area.agent_config = cfg
     # Keep the stored column consistent with the derived state.
     area.configured = _is_configured(area)
+    # Fix in passing (SETUP-4a): stamp updated_at on the config write — the column was
+    # never touched before, so an edited area looked stale forever.
+    area.updated_at = datetime.now(UTC)
 
     await audit_action(
         db,
@@ -180,6 +213,240 @@ async def update_practice_area_config(
     await db.commit()
     await db.refresh(area)
     return _to_read(area, await _bound_skill_names(db, area.id))
+
+
+@router.post(
+    "",
+    response_model=PracticeAreaRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a practice area (admin).",
+)
+async def create_practice_area(
+    payload: PracticeAreaCreate,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> PracticeAreaRead:
+    """POST /api/v1/practice-areas — create a practice area (admin, ADR-F062).
+
+    ``key`` is an anchored slug (Pydantic). ``agent_config`` is shape-validated by the
+    area renderer (a forbidden ``model`` key is a 400, ADR-F010); a new area has no bound
+    skills yet, so a skill-bearing subagent is rejected (empty allow-list — the PATCH
+    posture). ``tool_groups`` is validated against the code registry (an unknown group is a
+    404 — no dead row lands). ``position`` auto-appends ``max(position)+1``; ``configured``
+    is server-derived from the profile. A duplicate key is a 409.
+    """
+    # Validate agent_config the SAME way the PATCH handler does (reuse the renderer's
+    # shape/ADR-F010 gate verbatim). A new area has no bound skills, so any subagent
+    # `skills` reference is rejected against the empty allow-list.
+    if payload.agent_config is not None:
+        try:
+            build_area_subagents(payload.agent_config, known_skill_names=[])
+        except ValueError as exc:
+            raise ValidationError(str(exc), details={"field": "agent_config"}) from exc
+
+    # Validate every requested tool group against the code registry (reject, don't store a
+    # dead row). 404 mirrors the skill-not-in-registry posture.
+    for group_key in payload.tool_groups:
+        _require_registered_group(group_key)
+
+    # position auto-appends (reorder is SETUP-4b). max(position) over the curated set.
+    next_position = (
+        await db.execute(select(func.coalesce(func.max(PracticeArea.position), -1)))
+    ).scalar_one() + 1
+    area = PracticeArea(
+        key=payload.key,
+        name=payload.name,
+        unit_label=payload.unit_label,
+        profile_md=payload.profile_md,
+        default_tier_floor=payload.default_tier_floor,
+        agent_config=payload.agent_config or {},
+        position=next_position,
+    )
+    area.configured = _is_configured(area)
+    db.add(area)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise Conflict(
+            "A practice area with this key already exists.",
+            details={"key": payload.key},
+        ) from exc
+    # Dedupe the requested groups (preserve order) so a repeated key can't violate the PK.
+    seen: set[str] = set()
+    for group_key in payload.tool_groups:
+        if group_key in seen:
+            continue
+        seen.add(group_key)
+        db.add(PracticeAreaToolGroup(practice_area_id=area.id, group_key=group_key))
+
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="practice_area.create",
+        resource_type="practice_area",
+        resource_id=area.key,
+        practice_area_id=area.id,
+        request=request,
+        details={"key": area.key, "tool_group_count": len(seen)},
+    )
+    await db.commit()
+    await db.refresh(area)
+    return _to_read(area, await _bound_skill_names(db, area.id))
+
+
+@router.delete(
+    "/{key}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a practice area (admin).",
+    response_class=Response,
+)
+async def delete_practice_area(
+    key: str,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> Response:
+    """DELETE /api/v1/practice-areas/{key} — delete a practice area (admin, ADR-F062).
+
+    REFUSES (409, count only) while any NON-ARCHIVED project files under the area: the
+    ``projects.practice_area_id`` FK is ON DELETE SET NULL to protect matter/audit data,
+    and silently unfiling live matters is the surprise it guards against — the admin
+    archives or re-files those matters first. With zero live references the area is deleted
+    (its skill/playbook/tool-group rows CASCADE; archived projects and audit rows SET NULL).
+    Stale ``matter_capability_toggles`` rows are tolerated at resolve time (recon-verified).
+    """
+    # Review F1 (TOCTOU): lock the area row FIRST (FOR UPDATE), BEFORE the live-refs
+    # count. Without it, a concurrent POST /projects filing under this area takes only
+    # FOR KEY SHARE on the area row (which does not conflict with a plain SELECT) and
+    # can commit between our count and our delete — the ON DELETE SET NULL would then
+    # silently unfile a live matter, exactly what this 409 exists to prevent. FOR UPDATE
+    # conflicts with FOR KEY SHARE, so any in-flight FK insert serializes against this
+    # delete (whichever commits first, the other sees it). Under READ COMMITTED a
+    # blocked SELECT ... FOR UPDATE re-evaluates after the blocker commits, so a
+    # concurrently deleted row yields no row → clean 404 (fixes the double-delete
+    # StaleDataError 500 too).
+    area = (await db.execute(_area_for_update_stmt(key))).scalar_one_or_none()
+    if area is None:
+        # 404, never 403/existence-leak (CLAUDE.md).
+        raise NotFound("practice area not found", details={"key": key})
+    live_refs = (
+        await db.execute(
+            select(func.count())
+            .select_from(Project)
+            .where(Project.practice_area_id == area.id, Project.archived_at.is_(None))
+        )
+    ).scalar_one()
+    if live_refs > 0:
+        raise Conflict(
+            "Practice area has active matters filed under it; archive or re-file them first.",
+            details={"key": key, "active_matter_count": live_refs},
+        )
+    area_id = area.id
+    await db.delete(area)
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="practice_area.delete",
+        resource_type="practice_area",
+        resource_id=key,
+        practice_area_id=area_id,
+        request=request,
+        details={"key": key},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{key}/tool-groups",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Attach a tool group to a practice area (admin).",
+    response_class=Response,
+)
+async def attach_practice_area_tool_group(
+    key: str,
+    payload: ToolGroupAttachRequest,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> Response:
+    """POST /api/v1/practice-areas/{key}/tool-groups — ADR-F062 (mirrors the skills pair).
+
+    Body ``{group_key}``; the group must exist in the code registry (unknown → 404). The
+    binding makes the group's tools AVAILABLE to matters under the area (the lawyer toggles
+    it per matter). Re-attaching returns 409.
+    """
+    area = await _load_area_or_404(db, key)
+    _require_registered_group(payload.group_key)
+    area_id = area.id
+    db.add(PracticeAreaToolGroup(practice_area_id=area_id, group_key=payload.group_key))
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        # Review F5: disambiguate by constraint name (every constraint is named). A
+        # concurrent area delete makes THIS insert fail the FK — that is "area gone"
+        # (404, matching _load_area_or_404's no-existence-leak posture), not "already
+        # attached". Only the composite-PK duplicate is a true 409.
+        if "fk_practice_area_tool_groups_area_id" in str(exc.orig):
+            raise NotFound("practice area not found", details={"key": key}) from exc
+        raise Conflict(
+            "Tool group is already attached to this practice area.",
+            details={"key": key, "group_key": payload.group_key},
+        ) from exc
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="practice_area.tool_group_attach",
+        resource_type="practice_area",
+        resource_id=key,
+        practice_area_id=area_id,
+        request=request,
+        details={"group_key": payload.group_key},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/{key}/tool-groups/{group_key}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Detach a tool group from a practice area (admin).",
+    response_class=Response,
+)
+async def detach_practice_area_tool_group(
+    key: str,
+    group_key: str,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> Response:
+    """DELETE /api/v1/practice-areas/{key}/tool-groups/{group_key} — ADR-F062.
+
+    Idempotent: detaching a not-attached group is a no-op 204 (the desired end state
+    holds); an unknown area is a 404.
+    """
+    area = await _load_area_or_404(db, key)
+    await db.execute(
+        delete(PracticeAreaToolGroup).where(
+            PracticeAreaToolGroup.practice_area_id == area.id,
+            PracticeAreaToolGroup.group_key == group_key,
+        )
+    )
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="practice_area.tool_group_detach",
+        resource_type="practice_area",
+        resource_id=key,
+        practice_area_id=area.id,
+        request=request,
+        details={"group_key": group_key},
+    )
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

@@ -1898,3 +1898,172 @@ async def test_disabled_tool_group_is_not_granted(comp_env: CompositionEnv) -> N
         session_factory_provider=lambda: comp_env.factory,
     )
     assert "list_processing_activities" not in await _audit_tools(comp_env, run_b)
+
+
+# --- SETUP-4a (ADR-F062): data-driven tool groups — cross-area attach + Level 0 ----------
+async def _add_tool_group(env: CompositionEnv, area_id: uuid.UUID, group_key: str) -> None:
+    from app.models.practice_area import PracticeAreaToolGroup
+
+    async with env.factory() as db:
+        db.add(PracticeAreaToolGroup(practice_area_id=area_id, group_key=group_key))
+        await db.commit()
+
+
+async def _del_tool_group(env: CompositionEnv, area_id: uuid.UUID, group_key: str) -> None:
+    from app.models.practice_area import PracticeAreaToolGroup
+
+    async with env.factory() as db:
+        await db.execute(
+            delete(PracticeAreaToolGroup).where(
+                PracticeAreaToolGroup.practice_area_id == area_id,
+                PracticeAreaToolGroup.group_key == group_key,
+            )
+        )
+        await db.commit()
+
+
+async def _add_deployment_toggle(
+    env: CompositionEnv, kind: str, key: str, *, enabled: bool
+) -> None:
+    from app.models.practice_area import DeploymentCapabilityToggle
+
+    async with env.factory() as db:
+        db.add(
+            DeploymentCapabilityToggle(capability_kind=kind, capability_key=key, enabled=enabled)
+        )
+        await db.commit()
+
+
+async def _del_deployment_toggle(env: CompositionEnv, kind: str, key: str) -> None:
+    from app.models.practice_area import DeploymentCapabilityToggle
+
+    async with env.factory() as db:
+        await db.execute(
+            delete(DeploymentCapabilityToggle).where(
+                DeploymentCapabilityToggle.capability_kind == kind,
+                DeploymentCapabilityToggle.capability_key == key,
+            )
+        )
+        await db.commit()
+
+
+async def test_cross_area_attach_grants_group_on_a_different_area(
+    comp_env: CompositionEnv,
+) -> None:
+    """ADR-F062 (D3): attaching a tool group to an area via a practice_area_tool_groups
+    row grants THAT group's tools for the area's runs — even a group not native to it. A
+    ROPA row on the COMMERCIAL area makes list_processing_activities dispatch on a
+    Commercial matter (it is NOT granted without the row). Proves availability is DATA."""
+    commercial_id = await _area_id(comp_env, "commercial")
+    await _file_matter_under(comp_env, commercial_id)
+    await _add_tool_group(comp_env, commercial_id, "ropa")
+    try:
+        run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+        model = ScriptedToolCallingModel(
+            responses=[tool_call_message("list_processing_activities", {}), final_message("done")]
+        )
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(model=model),
+            session_factory_provider=lambda: comp_env.factory,
+        )
+        assert "list_processing_activities" in await _audit_tools(comp_env, run_id)
+    finally:
+        await _del_tool_group(comp_env, commercial_id, "ropa")
+
+
+async def test_level0_disabled_group_not_granted_in_composition(
+    comp_env: CompositionEnv,
+) -> None:
+    """ADR-F062: a deployment-disabled (Level 0) tool group is removed from the AVAILABLE
+    set at the one inventory chokepoint, so composition never builds it — the guarded
+    dispatch that proves a grant is ABSENT. Privacy's ROPA group, disabled deployment-wide,
+    is not granted even though the area has the seeded row."""
+    privacy_id = await _area_id(comp_env, "privacy")
+    await _file_matter_under(comp_env, privacy_id)
+    await _add_deployment_toggle(comp_env, "tool", "ropa", enabled=False)
+    try:
+        run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+        model = ScriptedToolCallingModel(
+            responses=[tool_call_message("list_processing_activities", {}), final_message("done")]
+        )
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(model=model),
+            session_factory_provider=lambda: comp_env.factory,
+        )
+        assert "list_processing_activities" not in await _audit_tools(comp_env, run_id)
+    finally:
+        await _del_deployment_toggle(comp_env, "tool", "ropa")
+
+
+# --- SETUP-4a review F2: the tabular_enabled prompt flag at its REAL seam ----------------
+# Drives the actual derivation (tabular_enabled = TABULAR_GROUP.key in enabled_tool_groups,
+# resolved from practice_area_tool_groups rows through the inventory) AND the assembly
+# (system_prompt_for appends TABULAR_FILL_DOCTRINE) — not test-local literals. Inverting
+# the derivation fails (a)/(b); re-area-gating it (e.g. `area_key == "commercial"`) fails (c).
+_TABULAR_DOCTRINE_MARKER = "build a GRID rather than answering in prose"
+
+
+async def _doctrine_in_run_prompt(env: CompositionEnv) -> bool:
+    run_id = await env.make_run(project_id_value=env.project_id)
+    model = ScriptedToolCallingModel(responses=[final_message("done")])
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: env.factory,
+        skill_registry_provider=lambda: None,
+    )
+    assert model.seen_messages, "model was never called"
+    return _TABULAR_DOCTRINE_MARKER in _seen_system_text(model)
+
+
+async def test_tabular_doctrine_present_for_commercial_matter(comp_env: CompositionEnv) -> None:
+    """(a) A Commercial matter (seeded tabular row, default toggles) gets the Grids
+    doctrine in its system prompt."""
+    from app.agents.composition import TABULAR_FILL_DOCTRINE
+
+    assert _TABULAR_DOCTRINE_MARKER in TABULAR_FILL_DOCTRINE  # marker stays honest
+    await _file_matter_under(comp_env, await _area_id(comp_env, "commercial"))
+    assert await _doctrine_in_run_prompt(comp_env) is True
+
+
+async def test_tabular_doctrine_absent_for_privacy_matter(comp_env: CompositionEnv) -> None:
+    """(b) A Privacy matter (no tabular row) never sees the Grids doctrine — the prompt
+    must not advertise a tool the run lacks."""
+    await _file_matter_under(comp_env, await _area_id(comp_env, "privacy"))
+    assert await _doctrine_in_run_prompt(comp_env) is False
+
+
+async def test_tabular_doctrine_present_for_new_area_with_tabular_row(
+    comp_env: CompositionEnv,
+) -> None:
+    """(c) ADR-F062: attaching the tabular group to a brand-NEW area (a data row) wires
+    the doctrine for that area's runs — the derivation is area-agnostic, driven by the
+    row, not by a hardcoded area key."""
+    from app.models.practice_area import PracticeArea
+
+    async with comp_env.factory() as db:
+        area = PracticeArea(
+            key=f"doctrine-{uuid.uuid4().hex[:6]}",
+            name="Doctrine",
+            unit_label="Matter",
+            position=950,
+        )
+        db.add(area)
+        await db.commit()
+        area_id = area.id
+    try:
+        await _file_matter_under(comp_env, area_id)
+        await _add_tool_group(comp_env, area_id, "tabular")
+        assert await _doctrine_in_run_prompt(comp_env) is True
+    finally:
+        async with comp_env.factory() as db:
+            # Unfile the matter first, then drop the area (tool-group row CASCADEs).
+            await db.execute(
+                Project.__table__.update()
+                .where(Project.id == comp_env.project_id)
+                .values(practice_area_id=None)
+            )
+            await db.execute(delete(PracticeArea).where(PracticeArea.id == area_id))
+            await db.commit()

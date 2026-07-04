@@ -34,14 +34,21 @@ from __future__ import annotations
 
 import uuid as _uuid_mod
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import ColumnElement, Select, Text, and_, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.capabilities import (
+    KIND_PLAYBOOK,
+    KIND_SKILL,
+    KIND_TOOL,
+    TOOL_GROUP_REGISTRY,
+)
 from app.api.dependencies import AdminUser, OperatorUser
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
@@ -51,8 +58,11 @@ from app.errors import Conflict, Forbidden, NotFound
 from app.models.audit import AuditLog
 from app.models.document import Document as DocumentORM
 from app.models.file import File as FileORM
+from app.models.playbook import Playbook as PlaybookORM
+from app.models.practice_area import DeploymentCapabilityToggle
 from app.models.user import User as UserORM, UserSession as UserSessionORM
 from app.models.user_auth_token import UserAuthToken
+from app.skills.registry import MutableSkillRegistry, SkillRegistry
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -1385,3 +1395,240 @@ async def get_ingest_health(
         parse_failed=parse_failed_count,
         total_documents=total_documents,
     )
+
+
+# ---------------------------------------------------------------------------
+# SETUP-4a (ADR-F062) — deployment-wide (Level 0) capability toggles.
+#
+# The org-admin's surface: the whole-deployment inventory of every code-registry tool
+# group + registry skill + live playbook, each with its effective Level-0 state, plus a
+# sparse toggle write. Level 0 only NARROWS — an enabled=false row removes a capability
+# from EVERY area's AVAILABLE set (panel, composition, skills, playbook tier) through the
+# one build_area_inventory chokepoint. AdminUser (F061 fence: org-admin config, not the
+# operator's key/egress surface). Audited with kinds/keys/enabled only.
+# ---------------------------------------------------------------------------
+
+
+class DeploymentCapabilityRead(BaseModel):
+    """One deployment capability + its effective Level-0 enabled state."""
+
+    capability_kind: str
+    capability_key: str
+    label: str
+    description: str | None
+    enabled: bool
+
+
+class DeploymentCapabilitySection(BaseModel):
+    """A kind-grouped section (Tools / Skills / Playbooks) of the deployment inventory."""
+
+    kind: str
+    label: str
+    entries: list[DeploymentCapabilityRead]
+
+
+class DeploymentCapabilitiesResponse(BaseModel):
+    """The deployment-wide capability inventory (GET response / PATCH echo)."""
+
+    sections: list[DeploymentCapabilitySection]
+
+
+class DeploymentToggleInput(BaseModel):
+    """One Level-0 on/off the org-admin sets. ``extra='forbid'`` rejects stray fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["skill", "tool", "playbook"]
+    key: str = Field(min_length=1, max_length=200)
+    enabled: bool
+
+
+class DeploymentCapabilitiesUpdate(BaseModel):
+    """The PATCH body — a bounded sparse set of Level-0 toggles. Validated at the boundary;
+    the handler additionally rejects any (kind, key) absent from the registry/DB (422)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    toggles: list[DeploymentToggleInput] = Field(default_factory=list, max_length=500)
+
+
+def _admin_registry_or_none(request: Request) -> SkillRegistry | None:
+    """Current skill-registry snapshot from ``app.state`` (or None if uninstalled).
+
+    Graceful (mirrors the composition/matter-capabilities posture): None ⇒ the deployment
+    skills section is empty, rather than a 404 — the inventory still renders tools + playbooks.
+    """
+    holder: MutableSkillRegistry | None = getattr(request.app.state, "skill_registry", None)
+    return holder.current() if holder is not None else None
+
+
+async def _deployment_disabled(db: AsyncSession) -> set[tuple[str, str]]:
+    """The (kind, key) set the deployment has DISABLED — only disabled rows narrow."""
+    rows = (await db.execute(select(DeploymentCapabilityToggle))).scalars().all()
+    return {(r.capability_kind, r.capability_key) for r in rows if not r.enabled}
+
+
+async def _live_playbooks(db: AsyncSession) -> list[PlaybookORM]:
+    return list(
+        (
+            await db.execute(
+                select(PlaybookORM)
+                .where(PlaybookORM.deleted_at.is_(None))
+                .order_by(PlaybookORM.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def _deployment_inventory(
+    db: AsyncSession, request: Request
+) -> DeploymentCapabilitiesResponse:
+    disabled = await _deployment_disabled(db)
+    registry = _admin_registry_or_none(request)
+
+    tool_entries = [
+        DeploymentCapabilityRead(
+            capability_kind=KIND_TOOL,
+            capability_key=group_key,
+            label=tdef.spec.label,
+            description=tdef.spec.description,
+            enabled=(KIND_TOOL, group_key) not in disabled,
+        )
+        for group_key, tdef in TOOL_GROUP_REGISTRY.items()
+    ]
+
+    skill_entries: list[DeploymentCapabilityRead] = []
+    if registry is not None:
+        for name in registry.names():
+            record = registry.get(name)
+            if record is None:  # pragma: no cover - names() is the source of get()
+                continue
+            summary = record.summary()
+            skill_entries.append(
+                DeploymentCapabilityRead(
+                    capability_kind=KIND_SKILL,
+                    capability_key=name,
+                    label=summary.title or name,
+                    description=summary.description,
+                    enabled=(KIND_SKILL, name) not in disabled,
+                )
+            )
+
+    playbook_entries = [
+        DeploymentCapabilityRead(
+            capability_kind=KIND_PLAYBOOK,
+            capability_key=str(pb.id),
+            label=f"{pb.name} ({pb.contract_type})" if pb.contract_type else pb.name,
+            description=(pb.description or None),
+            enabled=(KIND_PLAYBOOK, str(pb.id)) not in disabled,
+        )
+        for pb in await _live_playbooks(db)
+    ]
+
+    return DeploymentCapabilitiesResponse(
+        sections=[
+            DeploymentCapabilitySection(kind=KIND_TOOL, label="Tools", entries=tool_entries),
+            DeploymentCapabilitySection(kind=KIND_SKILL, label="Skills", entries=skill_entries),
+            DeploymentCapabilitySection(
+                kind=KIND_PLAYBOOK, label="Playbooks", entries=playbook_entries
+            ),
+        ]
+    )
+
+
+@router.get(
+    "/capabilities",
+    response_model=DeploymentCapabilitiesResponse,
+    summary="Deployment-wide capability inventory + Level-0 state (admin).",
+)
+async def get_deployment_capabilities(
+    _admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> DeploymentCapabilitiesResponse:
+    """GET /api/v1/admin/capabilities — every registry tool group + registry skill + live
+    playbook, each with its effective deployment (Level-0) enabled state (ADR-F062)."""
+    return await _deployment_inventory(db, request)
+
+
+@router.patch(
+    "/capabilities",
+    response_model=DeploymentCapabilitiesResponse,
+    summary="Set deployment-wide (Level 0) capability toggles (admin).",
+)
+async def update_deployment_capabilities(
+    payload: DeploymentCapabilitiesUpdate,
+    admin: AdminUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> DeploymentCapabilitiesResponse:
+    """PATCH /api/v1/admin/capabilities — sparse Level-0 toggle writes (ADR-F062).
+
+    Each toggle's ``kind`` is bounded by the schema (skill|tool|playbook — the DB CHECK
+    set) and its ``key`` is validated against the matching registry/DB (a tool group in the
+    code registry, a skill in the skill registry, a non-deleted playbook id). An unknown key
+    is rejected (422 — reject, don't sanitize) so no dead row lands. Validate ALL before
+    writing any. Audited with kinds/keys/enabled only.
+    """
+    registry = _admin_registry_or_none(request)
+    live_playbook_ids: set[str] | None = None  # lazily loaded only if a playbook toggle appears
+
+    for toggle in payload.toggles:
+        if toggle.kind == KIND_TOOL:
+            if toggle.key not in TOOL_GROUP_REGISTRY:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Tool group {toggle.key!r} is not in the registry.",
+                )
+        elif toggle.kind == KIND_SKILL:
+            if registry is None or registry.get(toggle.key) is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Skill {toggle.key!r} is not in the registry.",
+                )
+        else:  # KIND_PLAYBOOK
+            if live_playbook_ids is None:
+                live_playbook_ids = {str(pb.id) for pb in await _live_playbooks(db)}
+            if toggle.key not in live_playbook_ids:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Playbook {toggle.key!r} is not an available playbook.",
+                )
+
+    now = datetime.now(UTC)
+    for toggle in payload.toggles:
+        stmt = (
+            pg_insert(DeploymentCapabilityToggle)
+            .values(
+                capability_kind=toggle.kind,
+                capability_key=toggle.key,
+                enabled=toggle.enabled,
+                set_by=admin.id,
+                updated_at=now,
+            )
+            .on_conflict_do_update(
+                constraint="pk_deployment_capability_toggles",
+                set_={"enabled": toggle.enabled, "set_by": admin.id, "updated_at": now},
+            )
+        )
+        await db.execute(stmt)
+
+    # Kinds/keys/enabled only — keys are identifiers (group keys, skill names, playbook ids).
+    await audit_action(
+        db,
+        user_id=admin.id,
+        action="deployment.capability_toggle",
+        resource_type="deployment",
+        resource_id="capabilities",
+        request=request,
+        details={
+            "toggle_count": len(payload.toggles),
+            "toggles": [
+                {"kind": t.kind, "key": t.key, "enabled": t.enabled} for t in payload.toggles
+            ],
+        },
+    )
+    await db.commit()
+    return await _deployment_inventory(db, request)

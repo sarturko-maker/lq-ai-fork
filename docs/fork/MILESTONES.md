@@ -720,10 +720,31 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   operator-only, `DevRoleManagementCard` deleted — audit in `evidence/setup-3b/fence-audit.md`);
   wizard: SMTP-on handover = POST `/auth/password-reset-request` (never scrapes/prints the
   password; SMTP-off keeps the labelled log-scrape fallback) + optional `OPERATOR_EMAIL` →
-  `FIRST_RUN_OPERATOR_EMAIL` (D7). NEXT: SETUP-4a/b capability registry + areas admin UI →
-  SETUP-5 reconcile (F054 flip + D1 supersession) → SETUP-3c (first-login onboarding checklist:
-  House Brief → invite users → review area defaults — UX polish split out of 3b, can ride after
-  the 4x/5 ladder).
+  `FIRST_RUN_OPERATOR_EMAIL` (D7).
+  **SETUP-4a ✓ done** — tool-group registry (availability as DATA) + practice-area CRUD +
+  deployment-wide (Level 0) capability toggles (ADR-F062, mig 0086; plan
+  `plans/SETUP-4a-tool-group-registry.md`). `TOOL_GROUP_REGISTRY` (code) resolves a group NAME to its
+  builder/ledger/spec; `practice_area_tool_groups` (seeded names-only from today's map) is the
+  area↔group availability binding — the composition elif chain becomes a registry loop (row ∩ registry
+  ∩ per-matter/Level-0 toggles; grants/`*_TOOL_NAMES`/guard UNTOUCHED). Availability is now data →
+  admin-created areas can be granted domain tools (cross-area attach is a FEATURE; supersedes F054-D1
+  for availability, grants stay code). `deployment_capability_toggles` (Level 0, sparse, no seed) only
+  NARROWS through the one `build_area_inventory` chokepoint. Endpoints (all AdminUser, 404-not-403):
+  POST/DELETE `/practice-areas` (delete refuses 409 while a live matter references it), POST/DELETE
+  `/practice-areas/{key}/tool-groups`, GET/PATCH `/admin/capabilities`. Hard gate: parity golden
+  (`tests/agents/test_registry_parity.py`) pins the registry loop reproduces the pre-refactor grants
+  byte-identically (tools/order/ledger/tabular_enabled). No web UI (SETUP-4b). NEXT: SETUP-4b (Practice
+  Areas + Capabilities admin surfaces) →
+  SETUP-5 reconcile (F054 flip + D1 supersession) → **SETUP-6 — actor guides (maintainer,
+  2026-07-04, ON HOLD until called): human-facing operating documentation, one guide per F061
+  actor — Operator (provisioning/wizard, backups + restore drill, the fence, invite handover,
+  ongoing ops; links the staging-bringup runbook) / Admin (claiming the workspace, Users admin,
+  areas + Level-0 capabilities, House Brief, read-only transparency surfaces) / User (matters with
+  the area agent, capabilities panel, matter memory, documents/redlines/grids, budget profiles).
+  Suggested home `docs/guides/`; after 4b/5 so the described UI exists; the operator guide is
+  separable and can be pulled forward for the weekend bring-up** → SETUP-3c (first-login onboarding
+  checklist: House Brief → invite users → review area defaults — UX polish split out of 3b, can
+  ride after the 4x/5 ladder).
 - **SAAS-4 — user lifecycle + admin split — ABSORBED into SETUP-3a/b** (see the SETUP ladder above).
   Original scope: invitations/verification/reset/SMTP; forced first
   password change; WorkOS-style users/orgs/memberships modeling; platform-admin vs org-admin

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -63,12 +63,51 @@ class PracticeAreaConfigUpdate(BaseModel):
     agent_config: dict[str, Any] | None = None
 
 
+class PracticeAreaCreate(BaseModel):
+    """Create a practice area (admin, SETUP-4a / ADR-F062).
+
+    ``key`` is an anchored slug (lowercase, no leading/trailing hyphen — the wizard
+    precedent); it becomes the stable machine identifier and the URL segment. All fields
+    validated at the boundary (reject, don't sanitize); ``agent_config`` is shape-checked
+    by the area renderer (a forbidden ``model`` key is rejected, ADR-F010), and
+    ``tool_groups`` is validated against the code registry in the handler. ``position`` is
+    server-derived (auto-append) and ``configured`` is derived from the profile — neither is
+    client-settable.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(pattern=r"^[a-z][a-z0-9-]{1,62}[a-z0-9]$")
+    name: str = Field(min_length=1, max_length=200)
+    unit_label: str = Field(min_length=1, max_length=200)
+    profile_md: str | None = Field(default=None, max_length=20_000)
+    default_tier_floor: int | None = Field(default=None, ge=1, le=5)
+    agent_config: dict[str, Any] | None = None
+    # Items bounded like ToolGroupAttachRequest.group_key (they are echoed in the 404
+    # detail; reject an unbounded string at the boundary).
+    tool_groups: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=50
+    )
+
+
 class SkillAttachRequest(BaseModel):
     """Attach a filesystem-canonical skill (by name) to an area."""
 
     model_config = ConfigDict(extra="forbid")
 
     skill_name: str = Field(min_length=1, max_length=200)
+
+
+class ToolGroupAttachRequest(BaseModel):
+    """Attach a tool group (by registry key) to an area's available set — ADR-F062.
+
+    Mirrors :class:`SkillAttachRequest`; the handler validates ``group_key`` against the
+    code registry (``TOOL_GROUP_REGISTRY``) — an unknown key is a 404, so no dead row lands.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    group_key: str = Field(min_length=1, max_length=200)
 
 
 class PlaybookAttachRequest(BaseModel):

@@ -218,9 +218,52 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   injects `${FIRST_RUN_OPERATOR_EMAIL:-}` so an unset key reaches pydantic-settings as `""`
 >   (same trap for ANY optional `${VAR:-}`-forwarded setting). Cypress specs updated for the
 >   deleted role card + operator-only models page (Cypress is not CI-gated — keep specs honest).
-> - **NEXT = SETUP-4a — tool-group registry refactor (+ SETUP-4b `practice_area_tool_groups` +
->   areas/capabilities admin UI), then SETUP-5 reconcile (F054 flip + D1 supersession; also takes
->   the Q1 viewer/operator tenant-data RBAC decision).** SETUP-3c (first-login onboarding
+> - **SETUP-4a ✓ — tool-group registry (availability as DATA) + practice-area CRUD + deployment-wide
+>   (Level 0) capability toggles. ADR-F062 (PROPOSED), migration 0086 (chains off 0085). Opus in a
+>   worktree; plan `docs/fork/plans/SETUP-4a-tool-group-registry.md`.** Landed: (A) `TOOL_GROUP_REGISTRY`
+>   (code) in `app/agents/capabilities.py` maps a group NAME → `ToolGroupDef` (spec + builder adapter +
+>   optional ledger factory); insertion order (redlining→tabular→ropa→assessment) IS the canonical group
+>   order (D4). (B) migration 0086: `practice_area_tool_groups` (seeded names-only from today's map,
+>   idempotent `_seed`, CAST trap) + `deployment_capability_toggles` (Level 0, sparse, NO seed).
+>   (C) the composition elif chain → a registry loop (`build_area_tool_groups`): a group grants iff
+>   (row present) AND (registry entry) AND (no per-matter toggle) AND (no Level-0 toggle) — absence at
+>   ANY level = never built, never in `GuardContext.granted`; grants/`*_TOOL_NAMES`/guard UNTOUCHED.
+>   `build_area_inventory` is now DATA-driven (`tool_group_keys`) + Level-0-aware (`deployment_toggles`)
+>   — the ONE chokepoint the panel + composition share. (D) endpoints (all AdminUser, 404-not-403):
+>   POST `/practice-areas` (slug regex, `agent_config` reuse, `tool_groups` registry-validated,
+>   position auto-append, dup-409) + DELETE `/{key}` (409-with-count while a non-archived matter
+>   references it, else CASCADE) + POST/DELETE `/{key}/tool-groups[/{group_key}]` (mirror skills pair)
+>   + GET/PATCH `/admin/capabilities` (Level-0 inventory + sparse writes, reject-don't-sanitize,
+>   audited kinds/keys/enabled). Cross-area attach is now a FEATURE (supersedes F054-D1 for
+>   availability; grants stay code). **HARD GATE PASSED:** `tests/agents/test_registry_parity.py`
+>   pins FROZEN pre-refactor tool-name literals per seeded area → the registry loop reproduces them
+>   byte-identically (tools/order/ledger/`tabular_enabled`). Gates: api suite green; migration 0086
+>   up/down/up on throwaway pgvector; ruff+mypy clean. **TRAP re-confirmed:** run `ruff format` with
+>   the repo-ROOT `ruff.toml` mounted (line-length 100) — the dev image's default (88) + magic trailing
+>   comma silently rewraps pre-existing lines; dev-ruff 0.15.20 also false-flags migration import
+>   blocks (I001) that CI's pip-cached older ruff accepts (matched 0056/0084 precedent, left as-is).
+>   NO web UI (SETUP-4b). NOT touched: F054 status flip/addendum (SETUP-5).
+>   **Adversarial review (3 lenses + independent verification): 3 should-fixes CONFIRMED + 4 nits,
+>   ALL FIXED (`e4355dd0`); full suite after fixes 3251/43.** Review traps worth carrying: (1)
+>   count-then-delete on an FK parent is a TOCTOU — FK inserts take FOR KEY SHARE, which does NOT
+>   conflict with a plain SELECT; lock the parent `FOR UPDATE` BEFORE the guard count. (2) parity/
+>   golden assertions must drive PRODUCTION seams — comparing a test's own literals to each other is
+>   a tautology. (3) a chokepoint that pre-filters makes downstream warnings unreachable — log at
+>   the drop point. (4) an optional kwarg at a security chokepoint fails OPEN — make it required
+>   (`deployment_toggles`). Isolated live smoke **21/21** (dev stack still AIC-captive):
+>   seed/create/attach/detach/Level-0-narrows-matter-panel/delete-semantics/authz-fence — evidence
+>   `docs/fork/evidence/setup-4a/live-smoke.md`.
+> - **NEXT = SETUP-4b — Practice Areas + Capabilities admin surfaces (web UI over the 4a endpoints),
+>   then SETUP-5 reconcile (F054 flip + D1 supersession; also takes
+>   the Q1 viewer/operator tenant-data RBAC decision), then SETUP-6 — ACTOR GUIDES (maintainer,
+>   2026-07-04, explicitly ON HOLD until called; task #462): human-facing operating documentation,
+>   one guide per F061 actor — Operator (wizard/provisioning, backups+restore drill, the fence,
+>   invite handover, ongoing ops; links the staging-bringup runbook, no duplication) / Admin
+>   (claiming the workspace, Users admin, areas + Level-0 capabilities, House Brief, read-only
+>   transparency surfaces) / User (matters with the area agent, capabilities panel, matter memory,
+>   documents/redlines/grids, budget profiles, honest limits). Suggested home `docs/guides/`;
+>   sequenced after 4b/5 so the described UI exists — the operator guide is separable and can be
+>   pulled forward for the weekend bring-up on request.** SETUP-3c (first-login onboarding
 >   checklist: House Brief → invite users → review area defaults) split out of 3b as UX polish —
 >   can ride after the ladder. SAAS-3b bring-up (maintainer, weekend, IONOS): provision
 >   domain/node/DNS token/bucket → run `setup-tenant.sh` → **Proof = a real agent run on the
