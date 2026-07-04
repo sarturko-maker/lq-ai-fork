@@ -1,0 +1,108 @@
+# F062 — Tool-group registry (availability as data) + deployment-wide (Level 0) capability toggles
+
+- Status: **proposed**
+- Date: 2026-07-04
+- Deciders: maintainer (Arturs), agent
+- Slice: **SETUP-4a**. Builds on **ADR-F002** (practice-area = agent identity), **ADR-F010**
+  (per-area Deep Agent, gateway-bypass guard), **ADR-F054** (per-matter capability toggles +
+  the capability-inventory abstraction), **ADR-F061** (operator/admin fence). Companion plan:
+  `docs/fork/plans/SETUP-4a-tool-group-registry.md`. Parent onboarding architecture:
+  `docs/fork/plans/SAAS-SETUP-onboarding-architecture.md` (§2/§5/§6, decision rows 4 and 9).
+
+## Context
+
+ADR-F054 (D1) settled tool availability as a **per-area CODE map** (`AREA_TOOL_GROUPS` in
+`app.agents.capabilities`): the composition point selected an area's domain tools with a hardcoded
+`if area_key == PRIVACY_AREA_KEY … elif COMMERCIAL_AREA_KEY` branch. That was right for a fixed set of
+built-in areas, but the hosted-SaaS onboarding wants the **org-admin to create practice areas** and give
+them domain tools. With availability in code, an admin-created area can never be granted any domain
+tools — the exact failure the SETUP onboarding architecture's decision row 9 calls out. ADR-F054's own
+rejected-option-2 warned against a `practice_area_tools` **grant** table (it would force a seed that must
+byte-match today's grants forever), so the fix must make *availability* data **without** making *grants*
+data.
+
+Separately, the hosted deployment needs a **Level 0** (deployment-wide) narrowing surface: an org-admin
+should be able to turn a capability off for the whole tenant (e.g. disable a skill or a tool group across
+every area) — above the existing per-matter (Level 1/2) toggles.
+
+The grant machinery must not move: each `build_*_tools` bakes its own `GuardContext(granted=<ITS_OWN>_TOOL_NAMES)`
+frozenset; `guarded_dispatch` R6-fail-closes anything not in that set. There is no merged grant set, and a
+data row must never become a grant a builder didn't already define.
+
+## Considered options
+
+1. **Keep the code map; add areas by editing `AREA_TOOL_GROUPS`.** Zero new tables, but admin-created
+   areas still can't get domain tools without a code change and deploy — defeats the onboarding goal.
+2. **Fully normalize grants into `practice_area_tools` (tool NAME per row).** Admin-configurable, but
+   re-introduces exactly the byte-match-forever seed hazard ADR-F054 rejected — a data row could name a
+   tool a builder never grants, or drift from the frozensets.
+3. **Hybrid (CHOSEN): availability is DATA, grants stay CODE.** A `practice_area_tool_groups` row names
+   only *which* GROUP an area offers; a code **registry** (`TOOL_GROUP_REGISTRY`) maps a group NAME to its
+   builder/ledger/spec; the `*_TOOL_NAMES` frozensets remain the sole grant truth. A row naming a group
+   absent from the registry is dropped (fail-closed). Composition iterates the registry (canonical order)
+   filtered by the area's rows. Add a sparse `deployment_capability_toggles` table for Level-0 narrowing,
+   threaded through the one `build_area_inventory` chokepoint.
+
+## Decision outcome
+
+Adopt **option 3**. This **supersedes ADR-F054 D1 only** (tool availability was a code map; it is now
+data). The F054 status flip + addendum paperwork is reserved for SETUP-5 — this ADR does not edit F054.
+
+- **Availability is data, grants are code.** `practice_area_tool_groups (practice_area_id, group_key)`
+  (migration 0086) is the area↔group availability binding, seeded names-only from today's map
+  (commercial→{redlining,tabular}, privacy→{ropa,assessment}). `TOOL_GROUP_REGISTRY` (code) resolves a
+  group name to a `ToolGroupDef` (panel spec + builder adapter + optional ledger factory). A group's grant
+  set is still its `build_*_tools`' `*_TOOL_NAMES` frozenset — untouched. A grant table was rejected
+  (option 2 / F054 rejected-option-2).
+
+- **D3 — the isolation invariant is transformed, not weakened.** The pre-slice invariant was
+  operational: "a group only grants for its OWN area" (enforced by the hardcoded area-key branch). That is
+  exactly what onboarding decision row 9 supersedes. It becomes a **data invariant**: (a) an area gets
+  exactly the groups its rows name — nothing more; (b) rows are writable only via the validated AdminUser
+  attach endpoint or the 0086 seed; (c) a row naming a group absent from the registry is **skipped with a
+  structured warning** (counts/keys only) — fail-closed to absence, never a grant; (d) attach validates
+  `group_key` against the registry (unknown → 404). **Cross-area attachment is now a FEATURE** (an
+  admin-created area gets domain tools by attaching a group), not a fault. Fail-closed holds at every
+  level: a group grants iff (row present) AND (registry entry exists) AND (no per-matter toggle disables
+  it) AND (no Level-0 toggle disables it); absence at ANY level ⇒ its tools never enter `tools` and never
+  enter any `GuardContext.granted`.
+
+- **D4 — order is code-canonical.** Both `build_area_inventory` and the composition loop iterate the
+  **registry's insertion order** (redlining → tabular → ropa → assessment) filtered by an area's rows —
+  never DB row order — so ordering can never drift from a seed's row order, and the seeded areas'
+  ordered grant sets are **byte-identical** to the pre-slice per-area branch (the parity gate).
+
+- **D5 — single-ledger semantics preserved.** The composition loop keeps the FIRST enabled ledger-bearing
+  group's ledger as the run's `change_ledger` (Privacy → `RopaChangeLedger`, Commercial →
+  `DealChangeLedger`), exactly as before. Areas today have at most one ledger-bearing group. If DATA ever
+  attaches two (e.g. ropa + redlining on one area), BOTH groups' tools are still built, but a structured
+  warning records that only the first streams live changes (honest, non-breaking). A real multi-ledger
+  design is future work.
+
+- **Level 0 — deployment-wide narrowing.** `deployment_capability_toggles (capability_kind, capability_key)`
+  (migration 0086) mirrors `matter_capability_toggles` minus `project_id`. It is SPARSE and only ever
+  **narrows**: an `enabled=false` row removes that capability (skill / tool group / playbook) from the
+  AVAILABLE set at the single `build_area_inventory` chokepoint — so it vanishes from the panel,
+  composition never builds it, skills never wire, and the playbook tier never renders. `enabled=true` rows
+  are inert (absence already means available), so there is no seed. Org-admin owned (`AdminUser` — the
+  F061 operator fence is unchanged); audited `deployment.capability_toggle` with kinds/keys/enabled only.
+
+- **Endpoints.** All `AdminUser`, 404-not-403 on unknown keys: `POST /practice-areas` +
+  `DELETE /practice-areas/{key}` (refuses 409 while a non-archived matter references the area — the
+  `projects.practice_area_id` SET-NULL FK protects matter/audit data; the admin re-files first) +
+  `POST`/`DELETE /practice-areas/{key}/tool-groups[/{group_key}]` (mirror the skills pair) +
+  `GET`/`PATCH /admin/capabilities` (Level-0 inventory + sparse writes, reject-don't-sanitize).
+
+## Consequences
+
+- The capability-inventory abstraction (ADR-F054) gains one input (`tool_group_keys` from data) and one
+  narrowing overlay (Level-0 toggles); the guard/`*_TOOL_NAMES`/builder internals are untouched. New tool
+  groups still slot in as one registry entry + one seed/attach row — no schema change.
+- The hardcoded per-area tool branch is gone; its highest blast radius (the default seeded path) is pinned
+  **byte-identical** by a dedicated parity golden (`tests/agents/test_registry_parity.py`, frozen literals
+  captured from the pre-refactor builders).
+- Deleting a practice area is now possible but guarded: it refuses while live matters reference it
+  (SET NULL would silently unfile them); with none, skill/playbook/tool-group rows CASCADE and archived
+  matters + audit rows SET NULL. Stale `matter_capability_toggles` rows are tolerated at resolve time.
+- ADR-F054 D1 is superseded for *availability*; its status flip + addendum are SETUP-5. No new dependency;
+  the gateway is untouched.
