@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -83,7 +83,11 @@ class PracticeAreaCreate(BaseModel):
     profile_md: str | None = Field(default=None, max_length=20_000)
     default_tier_floor: int | None = Field(default=None, ge=1, le=5)
     agent_config: dict[str, Any] | None = None
-    tool_groups: list[str] = Field(default_factory=list, max_length=50)
+    # Items bounded like ToolGroupAttachRequest.group_key (they are echoed in the 404
+    # detail; reject an unbounded string at the boundary).
+    tool_groups: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=50
+    )
 
 
 class SkillAttachRequest(BaseModel):

@@ -237,9 +237,12 @@ def build_area_tool_groups(
     groups; it is fail-closed by construction:
 
     * A key not in the registry cannot build anything (there is nothing to build from) — it
-      is skipped with a structured warning (counts/keys only, never values). Absence at the
-      row, registry, or toggle level ⇒ the group's tools never enter ``tools`` and never
-      enter any ``GuardContext.granted`` (D3).
+      is skipped with a structured warning (counts/keys only, never values). In production
+      the input is ALREADY registry-filtered by :func:`build_area_inventory` (which emits
+      the D3(c) drift warning at the point a real DB row is dropped), so this check is
+      defense-in-depth for any direct caller. Absence at the row, registry, or toggle
+      level ⇒ the group's tools never enter ``tools`` and never enter any
+      ``GuardContext.granted`` (D3).
     * The run keeps the FIRST non-None ledger as its live-change ledger (D5). If DATA ever
       attaches two ledger-bearing groups to one area, BOTH groups' tools are still built,
       but a structured warning records that only the first streams live changes (honest,
@@ -402,7 +405,7 @@ def build_area_inventory(
     registry: SkillRegistry | None,
     area_playbooks: Sequence[Playbook],
     tool_group_keys: Sequence[str],
-    deployment_toggles: Iterable[_CapabilityToggle] = (),
+    deployment_toggles: Iterable[_CapabilityToggle],
 ) -> CapabilityInventory:
     """Compute the area's available capabilities (pure — no I/O). ADR-F054 + ADR-F062.
 
@@ -411,16 +414,20 @@ def build_area_inventory(
     posture as ``render_area_agent``). ``area_playbooks`` are the playbooks bound via
     ``practice_area_playbooks`` (non-deleted). ``tool_group_keys`` are the area's
     ``practice_area_tool_groups`` rows (SETUP-4a): tool availability is now DATA, resolved
-    against :data:`TOOL_GROUP_REGISTRY` in canonical registry order (a row naming a group
-    absent from the registry is silently dropped as drift — like a drifted skill — so no
-    dead row mints a grant; the composition loop logs it at the grant seam).
+    against :data:`TOOL_GROUP_REGISTRY` in canonical registry order. A row naming a group
+    absent from the registry is dropped HERE, at the availability chokepoint, with a
+    structured warning (counts/keys only) — fail-closed to absence, so no dead row mints a
+    grant (D3(c); the grant-seam loop keeps a defense-in-depth check of its own).
 
-    ``deployment_toggles`` are the deployment-wide (Level 0) capability rows (ADR-F062).
-    Level 0 only NARROWS: an ``enabled=false`` row REMOVES that capability
-    (skill/tool-group/playbook) from the AVAILABLE set entirely — it never becomes an
-    entry, so the panel never shows it, composition never builds it, skills never wire, and
-    the playbook tier never renders (one chokepoint for all four). ``enabled=true`` rows are
-    inert (absence already means available).
+    ``deployment_toggles`` are the deployment-wide (Level 0) capability rows (ADR-F062) —
+    REQUIRED, no default: a call site that forgot the kwarg would silently fail OPEN
+    (Level-0 disables ignored), so the seam refuses to compile instead. Pass ``()`` only
+    where Level 0 genuinely doesn't exist (there is no such production site). Level 0 only
+    NARROWS: an ``enabled=false`` row REMOVES that capability (skill/tool-group/playbook)
+    from the AVAILABLE set entirely — it never becomes an entry, so the panel never shows
+    it, composition never builds it, skills never wire, and the playbook tier never renders
+    (one chokepoint for all four). ``enabled=true`` rows are inert (absence already means
+    available).
     """
     # Level 0: the set of (kind, key) the deployment has disabled — only the disabled rows
     # matter (an enabled row is a no-op against the default-available posture).
@@ -466,8 +473,21 @@ def build_area_inventory(
         )
 
     # Tools — the area's rows ∩ registry, iterated in canonical REGISTRY order (D4), so the
-    # sequence is code-canonical and reproduces today's build order exactly.
+    # sequence is code-canonical and reproduces today's build order exactly. A drifted row
+    # (group absent from the registry) is dropped HERE — this is the one place a real DB
+    # row meets the registry, so the D3(c) structured warning fires here (counts/keys
+    # only); downstream consumers only ever see the pre-filtered set.
     group_key_set = set(tool_group_keys)
+    unknown_groups = sorted(group_key_set - TOOL_GROUP_REGISTRY.keys())
+    if unknown_groups:
+        logger.warning(
+            "tool-group rows not in registry; dropped from availability (no grant)",
+            extra={
+                "event": "tool_group_unknown_skipped",
+                "count": len(unknown_groups),
+                "keys": unknown_groups,
+            },
+        )
     for group_key, tdef in TOOL_GROUP_REGISTRY.items():
         if group_key not in group_key_set:
             continue

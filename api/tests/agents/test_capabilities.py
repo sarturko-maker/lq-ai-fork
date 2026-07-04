@@ -7,9 +7,11 @@ source of truth the API and the run composition both consume.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import Any
 
 from app.agents import capabilities as cap
 from app.agents.capabilities import build_area_inventory, empty_inventory
@@ -70,6 +72,7 @@ def test_commercial_inventory_lists_skills_tools_playbooks_and_mcp() -> None:
         bound_skill_names=["nda-review", "msa-review-saas"],
         registry=_registry(),
         area_playbooks=[pb],
+        deployment_toggles=[],
     )
     sections = {s.kind: s for s in inv.sections()}
     assert [s.kind for s in inv.sections()] == ["playbook", "skill", "tool", "mcp"]
@@ -88,6 +91,7 @@ def test_privacy_inventory_offers_ropa_and_assessment_groups() -> None:
         bound_skill_names=[],
         registry=_registry(),
         area_playbooks=[],
+        deployment_toggles=[],
     )
     tools = {s.kind: s for s in inv.sections()}["tool"]
     assert [e.key for e in tools.entries] == ["ropa", "assessment"]
@@ -101,21 +105,30 @@ def test_area_with_no_tool_group_rows_has_no_tool_groups() -> None:
         bound_skill_names=[],
         registry=_registry(),
         area_playbooks=[],
+        deployment_toggles=[],
     )
     assert all(e.kind != "tool" for e in inv.entries)
 
 
-def test_tool_group_row_not_in_registry_is_dropped_as_drift() -> None:
-    # SETUP-4a (D3): a row naming a group absent from the registry is silently dropped from
-    # availability (fail-closed) — only the registry-known groups become entries.
-    inv = build_area_inventory(
-        tool_group_keys=["redlining", "not-a-real-group"],
-        bound_skill_names=[],
-        registry=_registry(),
-        area_playbooks=[],
-    )
+def test_tool_group_row_not_in_registry_is_dropped_with_warning(caplog: Any) -> None:
+    # SETUP-4a (D3(c), review F3): a row naming a group absent from the registry is dropped
+    # AT THE AVAILABILITY CHOKEPOINT — this is the one place a real DB row meets the
+    # registry (composition only ever sees the pre-filtered enabled set), so the structured
+    # drift warning (counts/keys only) must fire HERE, and only the registry-known groups
+    # become entries (fail-closed to absence).
+    with caplog.at_level(logging.WARNING):
+        inv = build_area_inventory(
+            tool_group_keys=["redlining", "not-a-real-group"],
+            bound_skill_names=[],
+            registry=_registry(),
+            area_playbooks=[],
+            deployment_toggles=[],
+        )
     tools = {s.kind: s for s in inv.sections()}["tool"]
-    assert [e.key for e in tools.entries] == ["redlining"]
+    assert [e.key for e in tools.entries] == ["redlining"]  # drifted row never an entry
+    drift = [r for r in caplog.records if getattr(r, "event", None) == "tool_group_unknown_skipped"]
+    assert drift, "the D3(c) drift warning did not fire at the availability chokepoint"
+    assert drift[0].count == 1 and drift[0].keys == ["not-a-real-group"]
 
 
 def test_skill_unknown_to_registry_is_dropped_as_drift() -> None:
@@ -124,6 +137,7 @@ def test_skill_unknown_to_registry_is_dropped_as_drift() -> None:
         bound_skill_names=["nda-review", "gone-from-registry"],
         registry=_registry(),
         area_playbooks=[],
+        deployment_toggles=[],
     )
     skills = {s.kind: s for s in inv.sections()}["skill"]
     assert [e.key for e in skills.entries] == ["nda-review"]
@@ -135,6 +149,7 @@ def test_no_registry_yields_no_skills() -> None:
         bound_skill_names=["nda-review"],
         registry=None,
         area_playbooks=[],
+        deployment_toggles=[],
     )
     assert all(e.kind != "skill" for e in inv.entries)
 
@@ -146,6 +161,7 @@ def test_skill_label_falls_back_to_name_without_title() -> None:
         bound_skill_names=["nda-review"],
         registry=reg,
         area_playbooks=[],
+        deployment_toggles=[],
     )
     (skill,) = [e for e in inv.entries if e.kind == "skill"]
     assert skill.label == "nda-review"
@@ -164,6 +180,7 @@ def test_enabled_keys_all_on_by_default() -> None:
         bound_skill_names=["nda-review"],
         registry=_registry(),
         area_playbooks=[pb],
+        deployment_toggles=[],
     )
     assert inv.enabled_keys("skill", []) == ["nda-review"]
     assert inv.enabled_keys("tool", []) == ["redlining", "tabular"]
@@ -176,6 +193,7 @@ def test_enabled_keys_applies_off_override() -> None:
         bound_skill_names=[],
         registry=_registry(),
         area_playbooks=[],
+        deployment_toggles=[],
     )
     toggles = [_toggle("tool", "ropa", False)]
     assert inv.enabled_keys("tool", toggles) == ["assessment"]
@@ -187,6 +205,7 @@ def test_enabled_keys_explicit_on_is_a_noop_against_default_on() -> None:
         bound_skill_names=[],
         registry=_registry(),
         area_playbooks=[],
+        deployment_toggles=[],
     )
     toggles = [_toggle("tool", "ropa", True)]
     assert set(inv.enabled_keys("tool", toggles)) == {"ropa", "assessment"}
@@ -198,6 +217,7 @@ def test_enabled_keys_preserves_inventory_order() -> None:
         bound_skill_names=["nda-review", "msa-review-saas"],
         registry=_registry(),
         area_playbooks=[],
+        deployment_toggles=[],
     )
     # Inventory order follows bound_skill_names order, not sorted.
     assert inv.enabled_keys("skill", []) == ["nda-review", "msa-review-saas"]
@@ -209,6 +229,7 @@ def test_mcp_is_never_enabled() -> None:
         bound_skill_names=[],
         registry=_registry(),
         area_playbooks=[],
+        deployment_toggles=[],
     )
     # Even an (illegitimate) override can't enable the non-toggleable placeholder.
     assert inv.enabled_keys("mcp", [_toggle("mcp", "mcp", True)]) == []
@@ -221,6 +242,7 @@ def test_is_toggleable_guards_the_put_boundary() -> None:
         bound_skill_names=["nda-review"],
         registry=_registry(),
         area_playbooks=[pb],
+        deployment_toggles=[],
     )
     assert inv.is_toggleable("skill", "nda-review") is True
     assert inv.is_toggleable("tool", "redlining") is True
@@ -237,6 +259,7 @@ def test_enabled_map_covers_every_entry() -> None:
         bound_skill_names=["nda-review"],
         registry=_registry(),
         area_playbooks=[],
+        deployment_toggles=[],
     )
     m = inv.enabled_map([_toggle("tool", "redlining", False)])
     assert m[("skill", "nda-review")] is True

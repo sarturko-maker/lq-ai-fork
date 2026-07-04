@@ -134,19 +134,21 @@ def test_registry_order_is_canonical() -> None:
 
 
 # --- the hard parity gate ----------------------------------------------------------------
+# The tabular_enabled prompt flag (the third parity dimension) is pinned at the REAL seam —
+# the composition-driven doctrine tests in tests/agents/test_agent_composition.py
+# (test_tabular_doctrine_*): commercial → doctrine present, privacy → absent, and a NEW
+# area with a tabular row → present (the area-agnostic derivation). Asserting it against
+# this file's own literals would be a tautology (review F2).
 def test_commercial_parity_tools_order_and_ledger() -> None:
     tools, ledger = build_area_tool_groups(_ctx(), COMMERCIAL_GROUPS)
     assert _names(tools) == COMMERCIAL_ORDERED_NAMES  # exact tools, exact ORDER
     assert isinstance(ledger, DealChangeLedger)  # first ledger-bearing group's ledger
-    # tabular_enabled prompt flag = the built groups include tabular.
-    assert TABULAR_GROUP.key in COMMERCIAL_GROUPS
 
 
 def test_privacy_parity_tools_order_and_ledger() -> None:
     tools, ledger = build_area_tool_groups(_ctx(), PRIVACY_GROUPS)
     assert _names(tools) == PRIVACY_ORDERED_NAMES
     assert isinstance(ledger, RopaChangeLedger)
-    assert TABULAR_GROUP.key not in PRIVACY_GROUPS  # no Grids doctrine for Privacy
 
 
 def test_group_input_order_does_not_change_output_order() -> None:

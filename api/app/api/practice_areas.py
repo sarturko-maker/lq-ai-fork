@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import Select, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,6 +105,26 @@ async def _load_area_or_404(db: AsyncSession, key: str) -> PracticeArea:
         # 404, never 403/existence-leak (CLAUDE.md).
         raise NotFound("practice area not found", details={"key": key})
     return area
+
+
+def _area_for_update_stmt(key: str) -> Select[tuple[PracticeArea]]:
+    """The FOR-UPDATE area load the DELETE handler uses (module-level so the lock is
+    testable by compiling the statement — a real two-session race is not exercisable in
+    the rollback-isolated test harness)."""
+    return select(PracticeArea).where(PracticeArea.key == key).with_for_update()
+
+
+def _require_registered_group(group_key: str) -> None:
+    """404 for a tool-group key absent from the code registry (ADR-F062 D3(d)).
+
+    Shared by create + attach so the message/details shape cannot drift. 404 (not 422)
+    mirrors the skill-not-in-registry posture; the key is an identifier, never content.
+    """
+    if group_key not in TOOL_GROUP_REGISTRY:
+        raise NotFound(
+            f"Tool group {group_key!r} is not in the registry.",
+            details={"group_key": group_key},
+        )
 
 
 @router.get(
@@ -228,11 +248,7 @@ async def create_practice_area(
     # Validate every requested tool group against the code registry (reject, don't store a
     # dead row). 404 mirrors the skill-not-in-registry posture.
     for group_key in payload.tool_groups:
-        if group_key not in TOOL_GROUP_REGISTRY:
-            raise NotFound(
-                f"Tool group {group_key!r} is not in the registry.",
-                details={"group_key": group_key},
-            )
+        _require_registered_group(group_key)
 
     # position auto-appends (reorder is SETUP-4b). max(position) over the curated set.
     next_position = (
@@ -301,7 +317,20 @@ async def delete_practice_area(
     (its skill/playbook/tool-group rows CASCADE; archived projects and audit rows SET NULL).
     Stale ``matter_capability_toggles`` rows are tolerated at resolve time (recon-verified).
     """
-    area = await _load_area_or_404(db, key)
+    # Review F1 (TOCTOU): lock the area row FIRST (FOR UPDATE), BEFORE the live-refs
+    # count. Without it, a concurrent POST /projects filing under this area takes only
+    # FOR KEY SHARE on the area row (which does not conflict with a plain SELECT) and
+    # can commit between our count and our delete — the ON DELETE SET NULL would then
+    # silently unfile a live matter, exactly what this 409 exists to prevent. FOR UPDATE
+    # conflicts with FOR KEY SHARE, so any in-flight FK insert serializes against this
+    # delete (whichever commits first, the other sees it). Under READ COMMITTED a
+    # blocked SELECT ... FOR UPDATE re-evaluates after the blocker commits, so a
+    # concurrently deleted row yields no row → clean 404 (fixes the double-delete
+    # StaleDataError 500 too).
+    area = (await db.execute(_area_for_update_stmt(key))).scalar_one_or_none()
+    if area is None:
+        # 404, never 403/existence-leak (CLAUDE.md).
+        raise NotFound("practice area not found", details={"key": key})
     live_refs = (
         await db.execute(
             select(func.count())
@@ -350,17 +379,19 @@ async def attach_practice_area_tool_group(
     it per matter). Re-attaching returns 409.
     """
     area = await _load_area_or_404(db, key)
-    if payload.group_key not in TOOL_GROUP_REGISTRY:
-        raise NotFound(
-            f"Tool group {payload.group_key!r} is not in the registry.",
-            details={"group_key": payload.group_key},
-        )
+    _require_registered_group(payload.group_key)
     area_id = area.id
     db.add(PracticeAreaToolGroup(practice_area_id=area_id, group_key=payload.group_key))
     try:
         await db.flush()
     except IntegrityError as exc:
         await db.rollback()
+        # Review F5: disambiguate by constraint name (every constraint is named). A
+        # concurrent area delete makes THIS insert fail the FK — that is "area gone"
+        # (404, matching _load_area_or_404's no-existence-leak posture), not "already
+        # attached". Only the composite-PK duplicate is a true 409.
+        if "fk_practice_area_tool_groups_area_id" in str(exc.orig):
+            raise NotFound("practice area not found", details={"key": key}) from exc
         raise Conflict(
             "Tool group is already attached to this practice area.",
             details={"key": key, "group_key": payload.group_key},

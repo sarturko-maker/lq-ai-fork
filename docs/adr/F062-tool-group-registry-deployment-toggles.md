@@ -59,8 +59,11 @@ data). The F054 status flip + addendum paperwork is reserved for SETUP-5 — thi
   operational: "a group only grants for its OWN area" (enforced by the hardcoded area-key branch). That is
   exactly what onboarding decision row 9 supersedes. It becomes a **data invariant**: (a) an area gets
   exactly the groups its rows name — nothing more; (b) rows are writable only via the validated AdminUser
-  attach endpoint or the 0086 seed; (c) a row naming a group absent from the registry is **skipped with a
-  structured warning** (counts/keys only) — fail-closed to absence, never a grant; (d) attach validates
+  attach endpoint or the 0086 seed; (c) a row naming a group absent from the registry is **dropped at the
+  availability chokepoint (`build_area_inventory`) with a structured warning** (counts/keys only) —
+  that is the one place a real DB row meets the registry (composition only ever receives the pre-filtered
+  enabled set; the grant-seam loop keeps a defense-in-depth check of its own) — fail-closed to absence,
+  never a grant; (d) attach validates
   `group_key` against the registry (unknown → 404). **Cross-area attachment is now a FEATURE** (an
   admin-created area gets domain tools by attaching a group), not a fault. Fail-closed holds at every
   level: a group grants iff (row present) AND (registry entry exists) AND (no per-matter toggle disables

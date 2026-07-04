@@ -1995,3 +1995,75 @@ async def test_level0_disabled_group_not_granted_in_composition(
         assert "list_processing_activities" not in await _audit_tools(comp_env, run_id)
     finally:
         await _del_deployment_toggle(comp_env, "tool", "ropa")
+
+
+# --- SETUP-4a review F2: the tabular_enabled prompt flag at its REAL seam ----------------
+# Drives the actual derivation (tabular_enabled = TABULAR_GROUP.key in enabled_tool_groups,
+# resolved from practice_area_tool_groups rows through the inventory) AND the assembly
+# (system_prompt_for appends TABULAR_FILL_DOCTRINE) — not test-local literals. Inverting
+# the derivation fails (a)/(b); re-area-gating it (e.g. `area_key == "commercial"`) fails (c).
+_TABULAR_DOCTRINE_MARKER = "build a GRID rather than answering in prose"
+
+
+async def _doctrine_in_run_prompt(env: CompositionEnv) -> bool:
+    run_id = await env.make_run(project_id_value=env.project_id)
+    model = ScriptedToolCallingModel(responses=[final_message("done")])
+    await compose_and_execute_run(
+        run_id=run_id,
+        model_builder=CapturingBuilder(model=model),
+        session_factory_provider=lambda: env.factory,
+        skill_registry_provider=lambda: None,
+    )
+    assert model.seen_messages, "model was never called"
+    return _TABULAR_DOCTRINE_MARKER in _seen_system_text(model)
+
+
+async def test_tabular_doctrine_present_for_commercial_matter(comp_env: CompositionEnv) -> None:
+    """(a) A Commercial matter (seeded tabular row, default toggles) gets the Grids
+    doctrine in its system prompt."""
+    from app.agents.composition import TABULAR_FILL_DOCTRINE
+
+    assert _TABULAR_DOCTRINE_MARKER in TABULAR_FILL_DOCTRINE  # marker stays honest
+    await _file_matter_under(comp_env, await _area_id(comp_env, "commercial"))
+    assert await _doctrine_in_run_prompt(comp_env) is True
+
+
+async def test_tabular_doctrine_absent_for_privacy_matter(comp_env: CompositionEnv) -> None:
+    """(b) A Privacy matter (no tabular row) never sees the Grids doctrine — the prompt
+    must not advertise a tool the run lacks."""
+    await _file_matter_under(comp_env, await _area_id(comp_env, "privacy"))
+    assert await _doctrine_in_run_prompt(comp_env) is False
+
+
+async def test_tabular_doctrine_present_for_new_area_with_tabular_row(
+    comp_env: CompositionEnv,
+) -> None:
+    """(c) ADR-F062: attaching the tabular group to a brand-NEW area (a data row) wires
+    the doctrine for that area's runs — the derivation is area-agnostic, driven by the
+    row, not by a hardcoded area key."""
+    from app.models.practice_area import PracticeArea
+
+    async with comp_env.factory() as db:
+        area = PracticeArea(
+            key=f"doctrine-{uuid.uuid4().hex[:6]}",
+            name="Doctrine",
+            unit_label="Matter",
+            position=950,
+        )
+        db.add(area)
+        await db.commit()
+        area_id = area.id
+    try:
+        await _file_matter_under(comp_env, area_id)
+        await _add_tool_group(comp_env, area_id, "tabular")
+        assert await _doctrine_in_run_prompt(comp_env) is True
+    finally:
+        async with comp_env.factory() as db:
+            # Unfile the matter first, then drop the area (tool-group row CASCADEs).
+            await db.execute(
+                Project.__table__.update()
+                .where(Project.id == comp_env.project_id)
+                .values(practice_area_id=None)
+            )
+            await db.execute(delete(PracticeArea).where(PracticeArea.id == area_id))
+            await db.commit()

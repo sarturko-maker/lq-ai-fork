@@ -1097,3 +1097,34 @@ async def test_tool_group_endpoints_require_admin(client: AsyncClient, user: Use
         "/api/v1/practice-areas/commercial/tool-groups/redlining", headers=_bearer(user)
     )
     assert detach.status_code == 403
+
+
+async def test_delete_practice_area_locks_the_area_row(client: AsyncClient, admin: User) -> None:
+    """Review F1 (TOCTOU): the DELETE handler must load the area FOR UPDATE before the
+    live-refs count — FOR UPDATE conflicts with the FK's FOR KEY SHARE, serializing a
+    concurrent POST /projects (filing under the area) against the delete. HONEST SCOPE:
+    the rollback-isolated harness cannot exercise a real two-session race, so this pins
+    the statement the handler executes (module-level `_area_for_update_stmt`) compiles
+    with a FOR UPDATE clause; the delete path itself is covered by the endpoint tests."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.api.practice_areas import _area_for_update_stmt
+
+    sql = str(_area_for_update_stmt("commercial").compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE" in sql
+    # And the handler still 404s an unknown key through the locked load.
+    resp = await client.delete("/api/v1/practice-areas/no-such-area", headers=_bearer(admin))
+    assert resp.status_code == 404
+
+
+async def test_create_practice_area_rejects_empty_tool_group_item(
+    client: AsyncClient, admin: User
+) -> None:
+    """Review F6: tool_groups items are bounded (1..200) like ToolGroupAttachRequest —
+    an empty-string item is a schema 422, never echoed back through the registry 404."""
+    resp = await client.post(
+        "/api/v1/practice-areas",
+        headers=_bearer(admin),
+        json={"key": "bounded", "name": "X", "unit_label": "Y", "tool_groups": [""]},
+    )
+    assert resp.status_code == 422
