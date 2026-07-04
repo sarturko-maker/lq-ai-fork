@@ -1,5 +1,7 @@
 /**
  * Pure-helper tests for the /lq-ai/admin/areas/[key] detail page (SETUP-4b).
+ * Shared helpers (describeMutationError, catalogEntriesForKind) are tested in
+ * `$lib/lq-ai/admin/__tests__/page-helpers.test.ts` (review fix 4).
  */
 import { describe, expect, it } from 'vitest';
 
@@ -7,7 +9,6 @@ import { LQAIApiError } from '$lib/lq-ai/api/client';
 import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 import {
 	bindingLabel,
-	describeMutationError,
 	diffPatch,
 	findAreaByKey,
 	formatDeleteConflict,
@@ -209,17 +210,6 @@ describe('hasMultipleLedgerBearingGroups (D5)', () => {
 	it('is true with both redlining and ropa bound', () => {
 		expect(hasMultipleLedgerBearingGroups(['redlining', 'ropa'])).toBe(true);
 		expect(hasMultipleLedgerBearingGroups(['redlining', 'tabular', 'ropa'])).toBe(true);
-	});
-});
-
-describe('describeMutationError', () => {
-	it('surfaces the server message verbatim', () => {
-		const err = new LQAIApiError(400, 'validation_error', 'Unsupported agent_config key: foo');
-		expect(describeMutationError(err, 'fallback')).toBe('Unsupported agent_config key: foo');
-	});
-
-	it('falls back for non-Error throws', () => {
-		expect(describeMutationError('boom', 'fallback')).toBe('fallback');
 	});
 });
 

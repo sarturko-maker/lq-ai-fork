@@ -28,16 +28,15 @@
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
 
+	import { catalogEntriesForKind, describeMutationError } from '$lib/lq-ai/admin/page-helpers';
 	import {
 		bindingLabel,
-		describeMutationError,
 		diffPatch,
 		findAreaByKey,
 		formatDeleteConflict,
 		hasMultipleLedgerBearingGroups,
 		parseRosterDraft,
-		unboundOptions,
-		type CatalogOption
+		unboundOptions
 	} from './page-helpers';
 
 	const SELECT_CLASS =
@@ -52,18 +51,11 @@
 
 	const area = $derived(findAreaByKey(areas, areaKey));
 
-	function catalogEntriesForKind(kind: 'skill' | 'tool' | 'playbook'): CatalogOption[] {
-		const section = catalog?.sections.find((s) => s.kind === kind);
-		if (!section) return [];
-		return section.entries.map((e) => ({
-			key: e.capability_key,
-			label: e.label,
-			description: e.description
-		}));
-	}
-	const skillCatalog = $derived(catalogEntriesForKind('skill'));
-	const toolCatalog = $derived(catalogEntriesForKind('tool'));
-	const playbookCatalog = $derived(catalogEntriesForKind('playbook'));
+	// Catalog projections via the SHARED helper (review fix 4 — the previous
+	// inline copy here duplicated the list page's tested implementation).
+	const skillCatalog = $derived(catalogEntriesForKind(catalog, 'skill'));
+	const toolCatalog = $derived(catalogEntriesForKind(catalog, 'tool'));
+	const playbookCatalog = $derived(catalogEntriesForKind(catalog, 'playbook'));
 
 	// Attach `<select>` option sets — computed here (not `{@const}`, which must be
 	// an IMMEDIATE child of an {#if}/{:else}/etc., not nested inside a <section>).

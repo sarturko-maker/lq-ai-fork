@@ -143,19 +143,17 @@ viewer RBAC (all SETUP-5); no migration.
   `ORDER BY position, key` keeps ties stable — so this is a plain bulk update, not a swap
   dance. Audited `practice_area.reorder` with the key list + count only.
 
-- **`GET /admin/model-menu` (D8).** `AdminUser`-fenced (not `OperatorUser` — every
-  org-admin should see this, not just the bootstrap operator), returning exactly
-  `{"aliases": [{"alias": str, "tier": int | null}]}`. Rationale: an alias's name and its
-  resolved tier are ALREADY member-visible in the run composer (`GET /api/v1/models` →
-  `ModelPicker.svelte`, open to every `ActiveUser`), so surfacing the identical pair on the
-  admin capabilities page reveals nothing a member doesn't already see — the F061 operator
-  fence stays intact for the actual write/key-holding surfaces (alias CRUD, provider keys,
-  the full sanitized `GET /admin/config`). Implementation note: the endpoint sources from
-  the gateway's merged model-discovery payload (`gateway.list_models()`, the same call
-  `GET /api/v1/models` proxies), not the admin alias-CRUD listing (`gateway.list_aliases()`)
-  — the CRUD listing deliberately omits tier (an alias can fall back across providers, so
-  there's no single tier for the *list* view), while the discovery payload already computes
-  each alias's primary-target tier. Reusing it avoids re-deriving tier-resolution logic in
-  a second place. No audit row (a pure read, matching `GET /admin/capabilities`); a
-  gateway-unreachable/timeout/invalid-response degrades to the same 503/504/502 every other
-  gateway-backed endpoint uses, via the existing `GatewayClient` error translation.
+- **Model menu (D8) — NO new endpoint (simplified in review).** The plan originally called
+  for a `GET /admin/model-menu` endpoint stripping the gateway's alias list to
+  `{alias, tier}`; it was implemented and then DELETED in this slice's adversarial review.
+  The alias+tier pair is ALREADY member-visible: `GET /api/v1/models` (open to every
+  `ActiveUser`, rendered by `ModelPicker.svelte`) forwards the gateway's merged
+  model-discovery payload verbatim, where each alias row carries `routed_inference_tier` —
+  so a new, *narrower*, admin-only projection of already-broader-audience data added
+  backend surface without adding any confidentiality. The capabilities page instead calls
+  the existing `modelsApi.listModels()` and derives the read-only rows client-side in a
+  pure page-helper (`aliasMenuRows`: filter `lq_ai_kind === 'alias'`, map
+  `{alias: id, tier: routed_inference_tier ?? null}`), degrading to a muted
+  "Model menu unavailable." note on error. The F061 operator fence is untouched throughout
+  (alias CRUD, provider keys, and the full sanitized `GET /admin/config` remain
+  operator-only); no `/api/v1` path count change from D8.

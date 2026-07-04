@@ -1,40 +1,18 @@
 /**
  * Pure-helper tests for the /lq-ai/admin/areas list+create page (SETUP-4b).
+ * Shared helpers (describeMutationError, catalogEntriesForKind) are tested in
+ * `$lib/lq-ai/admin/__tests__/page-helpers.test.ts` (review fix 4).
  */
 import { describe, expect, it } from 'vitest';
 
-import { LQAIApiError } from '$lib/lq-ai/api/client';
 import type { DeploymentCapabilitiesResponse } from '$lib/lq-ai/api/admin';
-import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
 import {
 	areaStatusView,
 	availableGroupOptions,
 	boundCountsLabel,
-	catalogEntriesForKind,
-	describeMutationError,
 	moveKey,
 	validateAreaKey
 } from '../page-helpers';
-
-function area(over: Partial<PracticeArea> = {}): PracticeArea {
-	return {
-		id: '00000000-0000-0000-0000-000000000001',
-		key: 'commercial',
-		name: 'Commercial',
-		unit_label: 'Matter',
-		configured: true,
-		position: 0,
-		profile_md: '# Commercial',
-		default_tier_floor: null,
-		agent_config: {},
-		bound_skills: [],
-		bound_tool_groups: [],
-		bound_playbooks: [],
-		created_at: '2026-01-01T00:00:00Z',
-		updated_at: '2026-01-01T00:00:00Z',
-		...over
-	};
-}
 
 describe('validateAreaKey', () => {
 	it('requires a non-empty value', () => {
@@ -112,29 +90,27 @@ describe('areaStatusView (D5)', () => {
 	});
 });
 
-describe('describeMutationError', () => {
-	it('surfaces the server message verbatim', () => {
-		const err = new LQAIApiError(409, 'conflict', 'A practice area with this key already exists.');
-		expect(describeMutationError(err, 'fallback')).toBe(
-			'A practice area with this key already exists.'
-		);
-	});
-
-	it('falls back for non-Error throws', () => {
-		expect(describeMutationError('boom', 'fallback')).toBe('fallback');
-		expect(describeMutationError(new Error('net down'), 'fallback')).toBe('net down');
-	});
-});
-
-describe('catalogEntriesForKind / availableGroupOptions (D7)', () => {
+describe('availableGroupOptions (D7)', () => {
 	const catalog: DeploymentCapabilitiesResponse = {
 		sections: [
 			{
 				kind: 'tool',
 				label: 'Tools',
 				entries: [
-					{ capability_kind: 'tool', capability_key: 'redlining', label: 'Redlining', description: 'd1', enabled: true },
-					{ capability_kind: 'tool', capability_key: 'tabular', label: 'Grids', description: null, enabled: true }
+					{
+						capability_kind: 'tool',
+						capability_key: 'redlining',
+						label: 'Redlining',
+						description: 'd1',
+						enabled: true
+					},
+					{
+						capability_kind: 'tool',
+						capability_key: 'tabular',
+						label: 'Grids',
+						description: null,
+						enabled: true
+					}
 				]
 			},
 			{ kind: 'skill', label: 'Skills', entries: [] },
@@ -143,21 +119,13 @@ describe('catalogEntriesForKind / availableGroupOptions (D7)', () => {
 	};
 
 	it('returns [] for a null catalog', () => {
-		expect(catalogEntriesForKind(null, 'tool')).toEqual([]);
 		expect(availableGroupOptions(null)).toEqual([]);
 	});
 
-	it('projects a section to {key, label, description}', () => {
+	it('offers every registry tool group for a brand-new area', () => {
 		expect(availableGroupOptions(catalog)).toEqual([
 			{ key: 'redlining', label: 'Redlining', description: 'd1' },
 			{ key: 'tabular', label: 'Grids', description: null }
 		]);
-	});
-
-	it('returns [] for a kind with no section', () => {
-		const noPlaybooks: DeploymentCapabilitiesResponse = {
-			sections: catalog.sections.filter((s) => s.kind !== 'playbook')
-		};
-		expect(catalogEntriesForKind(noPlaybooks, 'playbook')).toEqual([]);
 	});
 });

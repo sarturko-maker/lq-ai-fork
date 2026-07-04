@@ -8,6 +8,7 @@
 
 import { LQAIApiError } from '$lib/lq-ai/api/client';
 import type { PracticeArea, PracticeAreaUpdateBody } from '$lib/lq-ai/api/practiceAreas';
+import type { CatalogOption } from '$lib/lq-ai/admin/page-helpers';
 
 /** Pick an area by its route-param key; `undefined` when unknown (inline
  *  not-found state, never a thrown error page). */
@@ -76,15 +77,10 @@ export function parseRosterDraft(text: string): RosterParseResult {
 	return { value: parsed as Record<string, unknown>, error: null };
 }
 
-export interface CatalogOption {
-	key: string;
-	label: string;
-	description: string | null;
-}
-
 /** Label for a bound key (skill name / tool-group key) — the catalog's label
  *  when resolvable, else the raw key (registry drift is possible but should
- *  never blank the row). */
+ *  never blank the row). Catalog rows come from the shared
+ *  `catalogEntriesForKind` (`$lib/lq-ai/admin/page-helpers`, review fix 4). */
 export function bindingLabel(options: CatalogOption[], key: string): string {
 	return options.find((o) => o.key === key)?.label ?? key;
 }
@@ -108,15 +104,6 @@ export const LEDGER_BEARING_GROUPS = ['redlining', 'ropa'] as const;
 /** True when 2+ ledger-bearing groups are bound to the area (D5 caption gate). */
 export function hasMultipleLedgerBearingGroups(boundGroups: string[]): boolean {
 	return boundGroups.filter((g) => (LEDGER_BEARING_GROUPS as readonly string[]).includes(g)).length >= 2;
-}
-
-/** Human message for a failed mutation — surface the server's message verbatim
- *  (Users-page `describeMutationError` precedent). */
-export function describeMutationError(err: unknown, fallback: string): string {
-	if (err instanceof LQAIApiError) {
-		return err.message || fallback;
-	}
-	return err instanceof Error ? err.message : fallback;
 }
 
 /**

@@ -71,25 +71,28 @@ narrow the deployment's capability set from the browser.
   registry order, skills = live registry, playbooks = live rows; labels + descriptions
   included). No new catalog endpoints. Attach controls offer only catalog entries not yet
   bound.
-- D8: NEW `GET /admin/model-menu`, AdminUser (NOT OperatorUser). Locate the existing
-  operator alias-list endpoint in `api/app/api/admin.py` (the gateway proxy seam the
-  /admin/models page uses) and reuse the SAME gateway client/config seam — but strip the
-  response to exactly `{"aliases": [{"alias": str, "tier": int|null}]}`. NOTHING else
-  forwarded: no provider names, no model ids, no base URLs, no fallbacks, no key material.
-  Rationale (record in code comment): plan §7 row 6 ratified — model menu read-only visible
-  to org-admins; alias+tier is already member-visible in the run composer; the F061 fence
-  (writes + full config) is untouched. Gateway unreachable → return 502/503/504 consistent
-  with the existing proxy's error handling; the UI degrades to an "unavailable" note.
-  Read-only GET — no audit row (matches GET /admin/capabilities).
+- D8 (AS PLANNED): NEW `GET /admin/model-menu`, AdminUser, stripping the gateway alias
+  list to exactly `{"aliases": [{"alias": str, "tier": int|null}]}`.
+  **D8 (AS SHIPPED — simplified in adversarial review):** the endpoint was implemented and
+  then DELETED. The alias+tier pair is already member-visible via `GET /api/v1/models`
+  (every ActiveUser; the run composer's ModelPicker renders it), so a narrower admin-only
+  projection of broader-audience data was unjustified new backend surface. The
+  capabilities page calls the existing `modelsApi.listModels()` and derives the rows in a
+  pure page-helper (`aliasMenuRows`); the graceful "Model menu unavailable." degradation
+  is kept. See the ADR-F062 SETUP-4b addendum.
 - D9: Level-0 toggle writes: ONE PATCH per flip (`{toggles: [{kind, key, enabled}]}` single
   element), optimistic flip + revert-on-error + an in-flight Set keyed `${kind}:${key}`
   preventing double-submit. No run-lock (deployment-wide). 422 unknown-key surfaces
   verbatim.
-- D10: Route-guard bookkeeping for the 2 new routes (guard files updated, count verified
-  against the actual openapi test).
+- D10: Route-guard bookkeeping for the new routes (guard files updated, count verified
+  against the actual openapi test — AS SHIPPED: only /practice-areas/reorder remains after
+  the D8 endpoint deletion, so the count landed at 171, not 172).
 - D11: Tests — web: page-helpers.ts + __tests__/page-helpers.test.ts per page (pure
   vitest, NO @testing-library/svelte — it is not installed); api: dedicated endpoint tests
-  for the read-model fields, PATCH name/unit_label, reorder, and the model-menu strip-down.
+  for the read-model fields, PATCH name/unit_label, and reorder. AS SHIPPED (review fix 4):
+  helpers shared across admin pages (describeMutationError, catalogEntriesForKind) live in
+  `web/src/lib/lq-ai/admin/page-helpers.ts` with their own test suite; per-page helpers
+  keep only page-specific logic.
 
 ## Implementation
 
@@ -104,16 +107,15 @@ narrow the deployment's capability set from the browser.
   callers correct: list path batches, mutation paths may load per-area); PATCH handles
   name/unit_label; NEW reorder route per D4 (registered above the parameterized routes for
   clarity, even though no real ambiguity exists today).
-- A3. `api/app/api/admin.py`: NEW GET /admin/model-menu per D8 + response models
-  (Pydantic, exact fields only).
+- A3. (AS PLANNED) `api/app/api/admin.py`: NEW GET /admin/model-menu per D8. AS SHIPPED:
+  removed per D8-as-shipped — no admin.py endpoint change survives the review.
 - A4. Tests: extend `api/tests/test_practice_areas.py`: read-model fields present +
   bound_tool_groups CANONICAL order proven by attaching in reverse-canonical order; PATCH
-  name/unit_label happy + bounds; reorder happy (positions renumbered, response ordered) /
-  missing key 422 / extra key 422 / duplicate key 422 / non-admin 403 / audit row written
-  (counts+keys only). New model-menu tests (`api/tests/test_admin_model_menu.py`): strips
-  to alias+tier (feed a fake gateway payload with extra fields incl. a would-be secret
-  field and assert absence), member 403, admin 200, gateway-error degradation. Update guard
-  files per D10.
+  name/unit_label happy + bounds + explicit-null 422 (review fix 1); reorder happy
+  (positions renumbered, response ordered) / missing key 422 / extra key 422 / duplicate
+  key 422 / non-admin 403 / audit row written (counts+keys only). Update guard files per
+  D10. (The planned `test_admin_model_menu.py` was deleted with the endpoint; its
+  strip-down coverage became the `aliasMenuRows` page-helper unit test.)
 
 ### B. Web API clients + types
 
@@ -122,10 +124,10 @@ narrow the deployment's capability set from the browser.
   attachPlaybook/detachPlaybook, attachToolGroup/detachToolGroup — all via `apiRequest`
   from './client'. Extend the `PracticeArea` type with the two new read fields.
 - B2. `web/src/lib/lq-ai/api/admin.ts`: add getDeploymentCapabilities,
-  patchDeploymentCapabilities, getModelMenu + local types mirroring
-  DeploymentCapabilitiesResponse / DeploymentCapabilitySection /
-  DeploymentCapabilityRead / DeploymentToggleInput / the model-menu shape (mirror
-  `api/app/api/admin.py` models exactly).
+  patchDeploymentCapabilities + local types mirroring DeploymentCapabilitiesResponse /
+  DeploymentCapabilitySection / DeploymentCapabilityRead / DeploymentToggleInput (mirror
+  `api/app/api/admin.py` models exactly). AS SHIPPED: no getModelMenu — the capabilities
+  page reuses the existing `modelsApi.listModels()` (D8-as-shipped).
 
 ### C. `/lq-ai/admin/areas` list + create page
 
@@ -156,8 +158,11 @@ inline-confirm; 409 renders the server message + active_matter_count; 204 → go
 `.../capabilities/+page.svelte` + `page-helpers.ts` + `__tests__/page-helpers.test.ts`.
 Sections from getDeploymentCapabilities (Tools/Skills/Playbooks), each with a "N of M on"
 summary + a hand-rolled role="switch" (copied from, not imported from, the matter
-CapabilitiesPanel — deployment surface, no run-lock). Toggle per D9. MCP section:
-visible-but-disabled placeholder. Models section: read-only rows from getModelMenu, muted
+CapabilitiesPanel — deployment surface, no run-lock). Toggle per D9; AS SHIPPED (review
+fix 2) a failed PATCH reverts ONLY the failed entry (apply the inverse toggle), never a
+full-state snapshot restore, so an interleaved toggle's change survives. MCP section:
+visible-but-disabled placeholder. Models section: read-only rows derived client-side from
+`modelsApi.listModels()` via the `aliasMenuRows` page-helper (D8-as-shipped), muted
 "unavailable" note on error. Page-level explainer: "Disabling a capability here removes it
 from every matter's capability panel."
 
@@ -170,11 +175,12 @@ from every matter's capability panel."
 ## Verification
 
 - Backend: targeted `pytest` on `tests/test_practice_areas.py`,
-  `tests/test_admin_model_menu.py`, `tests/test_deployment_capabilities_api.py`,
+  `tests/test_deployment_capabilities_api.py`,
   `tests/test_practice_area_playbooks_api.py`, `tests/test_endpoints.py`,
   `tests/test_openapi.py` inside the containerized dev image (`lq-ai-api-dev`), plus
-  `mypy app` (standard mode). New `/api/v1` routes added to `IMPLEMENTED_ROUTES` +
-  `EXPECTED_PATHS` and the `len(actual)` count bumped.
+  `mypy app` (standard mode). The new `/api/v1` route added to `IMPLEMENTED_ROUTES` +
+  `EXPECTED_PATHS` and the `len(actual)` count bumped to 171 (reorder only —
+  D8-as-shipped removed the model-menu route).
 - Frontend: `npm run check` (svelte-check, 0 errors) + `CI=1 npx vitest run` (all
   page-helpers suites green, full repo suite green — no regressions).
 - `ruff format`/`ruff check` from the repo root (root `ruff.toml`, line-length 100) on

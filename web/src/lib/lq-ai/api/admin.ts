@@ -248,25 +248,7 @@ export async function patchDeploymentCapabilities(
 	});
 }
 
-// ----- Read-only alias+tier model menu (SETUP-4b, ADR-F062 addendum) -----
-
-/** One alias row on the admin capabilities page — name + resolved tier only. */
-export interface ModelMenuAlias {
-	alias: string;
-	tier: number | null;
-}
-
-/** GET /api/v1/admin/model-menu response. */
-export interface ModelMenuResponse {
-	aliases: ModelMenuAlias[];
-}
-
-/**
- * GET /api/v1/admin/model-menu — read-only alias+tier visibility (admin, not
- * operator-fenced). No provider names, model ids, base URLs, fallback chains, or key
- * material ride along — see `api/app/api/admin.py`'s `get_model_menu` for the fence
- * rationale. Gateway-unreachable degrades to a 502/503/504 `LQAIApiError`.
- */
-export async function getModelMenu(): Promise<ModelMenuResponse> {
-	return apiRequest<ModelMenuResponse>('/admin/model-menu');
-}
+// NOTE (SETUP-4b review fix 3): a `getModelMenu` client for GET /admin/model-menu
+// briefly lived here and was DELETED along with the endpoint — the alias+tier pair
+// is already member-visible via `modelsApi.listModels()` (GET /api/v1/models); the
+// capabilities page derives it client-side.

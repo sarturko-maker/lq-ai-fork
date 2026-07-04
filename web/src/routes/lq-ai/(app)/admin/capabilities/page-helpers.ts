@@ -6,13 +6,12 @@
  * @testing-library/svelte).
  */
 
-import { LQAIApiError } from '$lib/lq-ai/api/client';
 import type {
 	DeploymentCapabilityRead,
 	DeploymentCapabilitySection,
-	DeploymentToggleInput,
-	ModelMenuAlias
+	DeploymentToggleInput
 } from '$lib/lq-ai/api/admin';
+import type { ModelListResponse } from '$lib/lq-ai/api/models';
 
 /** Stable key for an entry (kind+key) — the in-flight `saving` Set + #each key. */
 export function entryId(kind: DeploymentCapabilityRead['capability_kind'], key: string): string {
@@ -55,15 +54,27 @@ export function applyOptimisticToggle(
 	}));
 }
 
-/** "Tier N" for a resolved tier, "—" for null (fallback-only alias / unresolved). */
-export function tierLabel(tier: ModelMenuAlias['tier']): string {
-	return tier === null ? '—' : `Tier ${tier}`;
+/** One row of the read-only Models section — alias name + resolved tier. */
+export interface AliasMenuRow {
+	alias: string;
+	tier: number | null;
 }
 
-/** Human message for a failed mutation — surface the server's message verbatim. */
-export function describeMutationError(err: unknown, fallback: string): string {
-	if (err instanceof LQAIApiError) {
-		return err.message || fallback;
-	}
-	return err instanceof Error ? err.message : fallback;
+/**
+ * Derive the Models rows from the member-visible `GET /api/v1/models` payload
+ * (review fix 3 — a dedicated `GET /admin/model-menu` endpoint was added then
+ * DELETED in this slice's review: the discovery payload is already reachable by
+ * every ActiveUser via `modelsApi.listModels()`, so no new backend surface was
+ * warranted). Alias rows only; `tier` is the gateway's primary-target
+ * `routed_inference_tier`, `null` when unset (e.g. a fallback-only alias).
+ */
+export function aliasMenuRows(payload: ModelListResponse): AliasMenuRow[] {
+	return payload.data
+		.filter((m) => m.lq_ai_kind === 'alias')
+		.map((m) => ({ alias: m.id, tier: m.routed_inference_tier ?? null }));
+}
+
+/** "Tier N" for a resolved tier, "—" for null (fallback-only alias / unresolved). */
+export function tierLabel(tier: AliasMenuRow['tier']): string {
+	return tier === null ? '—' : `Tier ${tier}`;
 }

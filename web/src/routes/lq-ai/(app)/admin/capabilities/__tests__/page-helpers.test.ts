@@ -1,13 +1,15 @@
 /**
  * Pure-helper tests for the /lq-ai/admin/capabilities page (SETUP-4b).
+ * Shared helpers (describeMutationError) are tested in
+ * `$lib/lq-ai/admin/__tests__/page-helpers.test.ts` (review fix 4).
  */
 import { describe, expect, it } from 'vitest';
 
-import { LQAIApiError } from '$lib/lq-ai/api/client';
 import type { DeploymentCapabilitySection } from '$lib/lq-ai/api/admin';
+import type { ModelListResponse } from '$lib/lq-ai/api/models';
 import {
+	aliasMenuRows,
 	applyOptimisticToggle,
-	describeMutationError,
 	entryId,
 	sectionSummary,
 	tierLabel,
@@ -92,6 +94,71 @@ describe('applyOptimisticToggle', () => {
 		expect(next[0].entries[0].enabled).toBe(false);
 		expect(next[1].entries[0].enabled).toBe(true);
 	});
+
+	it('per-entry revert leaves an interleaved toggle intact (review fix 2)', () => {
+		// A flips off, B flips off while A is in flight, then A's PATCH fails and
+		// is reverted PER-ENTRY (apply A's inverse) — B's change must survive.
+		// The old full-snapshot restore wiped B; this pins the fixed behavior.
+		const s0 = [
+			section([
+				entry({ capability_key: 'a', enabled: true }),
+				entry({ capability_key: 'b', enabled: true })
+			])
+		];
+		const afterA = applyOptimisticToggle(s0, 'tool', 'a', false);
+		const afterB = applyOptimisticToggle(afterA, 'tool', 'b', false);
+		const afterRevertA = applyOptimisticToggle(afterB, 'tool', 'a', true); // !next of A
+		expect(afterRevertA[0].entries[0].enabled).toBe(true); // A reverted
+		expect(afterRevertA[0].entries[1].enabled).toBe(false); // B intact
+	});
+});
+
+describe('aliasMenuRows (review fix 3 — derived from GET /api/v1/models)', () => {
+	// Representative merged-discovery payload shape (shape-only values, no real
+	// providers/models): one tiered alias, one tier-less alias, one native row.
+	const payload: ModelListResponse = {
+		object: 'list',
+		data: [
+			{
+				id: 'alias-one',
+				object: 'model',
+				created: 0,
+				owned_by: 'lq-ai-gateway',
+				lq_ai_kind: 'alias',
+				routed_inference_tier: 4,
+				lq_ai_resolves_to: 'provider-x/model-x',
+				lq_ai_fallback_count: 1
+			},
+			{
+				id: 'alias-two',
+				object: 'model',
+				created: 0,
+				owned_by: 'lq-ai-gateway',
+				lq_ai_kind: 'alias'
+				// no routed_inference_tier — the fallback-only alias case
+			},
+			{
+				id: 'provider-x/model-x',
+				object: 'model',
+				created: 0,
+				owned_by: 'provider-x',
+				lq_ai_kind: 'provider_native',
+				routed_inference_tier: 4,
+				provider_type: 'type-x'
+			}
+		]
+	};
+
+	it('keeps alias rows only, mapping id→alias and tier (null when unset)', () => {
+		expect(aliasMenuRows(payload)).toEqual([
+			{ alias: 'alias-one', tier: 4 },
+			{ alias: 'alias-two', tier: null }
+		]);
+	});
+
+	it('returns [] for an empty payload', () => {
+		expect(aliasMenuRows({ object: 'list', data: [] })).toEqual([]);
+	});
 });
 
 describe('tierLabel', () => {
@@ -105,15 +172,3 @@ describe('tierLabel', () => {
 	});
 });
 
-describe('describeMutationError', () => {
-	it('surfaces the server message verbatim', () => {
-		const err = new LQAIApiError(422, 'validation_error', "Tool group 'nope' is not in the registry.");
-		expect(describeMutationError(err, 'fallback')).toBe(
-			"Tool group 'nope' is not in the registry."
-		);
-	});
-
-	it('falls back for non-Error throws', () => {
-		expect(describeMutationError('boom', 'fallback')).toBe('fallback');
-	});
-});

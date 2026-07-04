@@ -41,11 +41,11 @@
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
 
+	import { describeMutationError } from '$lib/lq-ai/admin/page-helpers';
 	import {
 		areaStatusView,
 		availableGroupOptions,
 		boundCountsLabel,
-		describeMutationError,
 		moveKey,
 		validateAreaKey
 	} from './page-helpers';

@@ -8,7 +8,8 @@
 	 * the matter CapabilitiesPanel this markup is modeled on but does NOT
 	 * import). MCP is a visible-but-disabled placeholder (no backend section —
 	 * real MCP wiring is its own approval-gated milestone). Models is a
-	 * read-only alias+tier list from `GET /admin/model-menu`.
+	 * read-only alias+tier list derived client-side from the member-visible
+	 * `GET /api/v1/models` (review fix 3 — no dedicated admin endpoint).
 	 *
 	 * Generation-B surface (plan D1): semantic tokens + SectionHeader/Alert
 	 * primitives only — no --lq-* on this page.
@@ -16,21 +17,23 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
-	import { adminApi } from '$lib/lq-ai/api';
+	import { adminApi, modelsApi } from '$lib/lq-ai/api';
 	import { auth } from '$lib/lq-ai/auth/store';
-	import type { DeploymentCapabilitySection, ModelMenuAlias } from '$lib/lq-ai/api/admin';
+	import type { DeploymentCapabilitySection } from '$lib/lq-ai/api/admin';
 
 	import Alert from '$lib/lq-ai/components/primitives/Alert.svelte';
 	import PageShell from '$lib/lq-ai/components/primitives/PageShell.svelte';
 	import SectionHeader from '$lib/lq-ai/components/primitives/SectionHeader.svelte';
 
+	import { describeMutationError } from '$lib/lq-ai/admin/page-helpers';
 	import {
+		aliasMenuRows,
 		applyOptimisticToggle,
-		describeMutationError,
 		entryId,
 		sectionSummary,
 		tierLabel,
-		togglePayload
+		togglePayload,
+		type AliasMenuRow
 	} from './page-helpers';
 
 	let sections = $state<DeploymentCapabilitySection[]>([]);
@@ -39,7 +42,7 @@
 	let saving = $state<Set<string>>(new Set());
 	let saveError = $state<string | null>(null);
 
-	let modelMenu = $state<ModelMenuAlias[] | null>(null);
+	let modelMenu = $state<AliasMenuRow[] | null>(null);
 	let modelMenuUnavailable = $state(false);
 
 	async function load() {
@@ -58,8 +61,10 @@
 	async function loadModelMenu() {
 		modelMenuUnavailable = false;
 		try {
-			const resp = await adminApi.getModelMenu();
-			modelMenu = resp.aliases;
+			// Review fix 3: derive alias+tier from the member-visible GET /api/v1/models
+			// (the dedicated /admin/model-menu endpoint was deleted as redundant surface).
+			const resp = await modelsApi.listModels();
+			modelMenu = aliasMenuRows(resp);
 		} catch {
 			// Muted note, not an error Alert — the models section is a courtesy
 			// visibility surface, not something the admin needs to act on.
@@ -82,7 +87,6 @@
 	) {
 		const id = entryId(kind, key);
 		if (saving.has(id)) return;
-		const previous = sections;
 		sections = applyOptimisticToggle(sections, kind, key, next);
 		setSaving(id, true);
 		saveError = null;
@@ -90,7 +94,11 @@
 			const resp = await adminApi.patchDeploymentCapabilities(togglePayload(kind, key, next));
 			sections = resp.sections;
 		} catch (e) {
-			sections = previous;
+			// Review fix 2: revert ONLY the failed entry. A full-state snapshot
+			// restore would clobber any OTHER toggle's optimistic/confirmed change
+			// that interleaved while this request was in flight (the in-flight Set
+			// only blocks re-submitting the SAME kind:key).
+			sections = applyOptimisticToggle(sections, kind, key, !next);
 			saveError = describeMutationError(e, 'Could not save that change. Please retry.');
 		} finally {
 			setSaving(id, false);

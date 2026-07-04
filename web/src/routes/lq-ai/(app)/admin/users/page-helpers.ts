@@ -14,7 +14,6 @@
  *   - client-side invite validation + mutation-error messages
  */
 
-import { LQAIApiError } from '$lib/lq-ai/api/client';
 import type {
 	AdminUserListQuery,
 	AdminUserRow,
@@ -126,14 +125,9 @@ export function validateInviteEmail(email: string): string | null {
  * (SETUP-3b review fix F4 — no 'last_admin' code exists anywhere in api/):
  * the guard rejections (last-admin demote/disable, self-disable, operator
  * target) are 403 with envelope code 'forbidden' and an already-actionable
- * message ("Cannot demote the last admin. Promote another user to admin
- * first, then retry the demotion."); duplicate user/invite is 409 'conflict'.
- * Both carry user-facing copy — surface the server's message verbatim and
- * never synthesize a client-side variant for a shape the server doesn't emit.
+ * message; duplicate user/invite is 409 'conflict'. Both carry user-facing
+ * copy — surface the server's message verbatim. Re-exported from the shared
+ * admin helper module (SETUP-4b review fix 4) so the contract has one home;
+ * this path stays stable for the page and its tests.
  */
-export function describeMutationError(err: unknown, fallback: string): string {
-	if (err instanceof LQAIApiError) {
-		return err.message || fallback;
-	}
-	return err instanceof Error ? err.message : fallback;
-}
+export { describeMutationError } from '$lib/lq-ai/admin/page-helpers';

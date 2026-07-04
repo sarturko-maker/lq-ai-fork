@@ -6,9 +6,9 @@
  * SvelteKit runtime (Users-page precedent — no @testing-library/svelte).
  */
 
-import { LQAIApiError } from '$lib/lq-ai/api/client';
 import type { DeploymentCapabilitiesResponse } from '$lib/lq-ai/api/admin';
 import type { PracticeArea } from '$lib/lq-ai/api/practiceAreas';
+import { catalogEntriesForKind, type CatalogOption } from '$lib/lq-ai/admin/page-helpers';
 
 /** Anchored slug pattern the backend's `PracticeAreaCreate.key` field enforces
  *  (`api/app/schemas/practice_areas.py`) — mirrored here for instant feedback;
@@ -70,41 +70,12 @@ export function areaStatusView(area: Pick<PracticeArea, 'configured'>): StatusVi
 	return { label: 'Not configured', tone: 'outline', title: 'Add doctrine to activate' };
 }
 
-/** Human message for a failed mutation — surface the server's message verbatim
- *  (Users-page `describeMutationError` precedent). */
-export function describeMutationError(err: unknown, fallback: string): string {
-	if (err instanceof LQAIApiError) {
-		return err.message || fallback;
-	}
-	return err instanceof Error ? err.message : fallback;
-}
-
-export interface CatalogOption {
-	key: string;
-	label: string;
-	description: string | null;
-}
-
-/**
- * D7 — the attach catalogs come from `GET /admin/capabilities` (no dedicated
- * catalog endpoint). Project one kind's section into `{key, label, description}`.
- */
-export function catalogEntriesForKind(
-	catalog: DeploymentCapabilitiesResponse | null,
-	kind: 'skill' | 'tool' | 'playbook'
-): CatalogOption[] {
-	if (!catalog) return [];
-	const section = catalog.sections.find((s) => s.kind === kind);
-	if (!section) return [];
-	return section.entries.map((e) => ({
-		key: e.capability_key,
-		label: e.label,
-		description: e.description
-	}));
-}
-
 /** The tool-group catalog for the "New practice area" modal — a brand-new area
- *  has no bindings yet, so every registry tool group is offered. */
-export function availableGroupOptions(catalog: DeploymentCapabilitiesResponse | null): CatalogOption[] {
+ *  has no bindings yet, so every registry tool group is offered.
+ *  (`catalogEntriesForKind`/`describeMutationError` live in the shared
+ *  `$lib/lq-ai/admin/page-helpers` module — review fix 4.) */
+export function availableGroupOptions(
+	catalog: DeploymentCapabilitiesResponse | null
+): CatalogOption[] {
 	return catalogEntriesForKind(catalog, 'tool');
 }
