@@ -13,6 +13,14 @@
 
 export type UserRole = 'admin' | 'member' | 'viewer';
 
+/**
+ * A user row's role as returned by GET /admin/users: the three org roles plus
+ * the platform 'operator' (SETUP-3a, ADR-F061). 'operator' is display-only in
+ * the web UI — never offered as a role choice or filter (the server 422s/400s
+ * it by design; operator rows render badged + action-locked, D6).
+ */
+export type PlatformRole = UserRole | 'operator';
+
 export type ReasoningVisibility = 'always_show' | 'disclosure' | 'on_request';
 export type FeaturedTools = 'prominent' | 'inline';
 export type WorkspaceLayout = 'three_pane' | 'two_pane' | 'one_pane';
@@ -35,7 +43,8 @@ export interface User {
 	email: string;
 	display_name?: string | null;
 	is_admin: boolean;
-	role?: UserRole;
+	/** /users/me returns 'operator' for the platform operator (SETUP-3a). */
+	role?: PlatformRole;
 	mfa_enabled: boolean;
 	must_change_password: boolean;
 	created_at: string;
@@ -757,13 +766,15 @@ export interface AdminUserRow {
 	id: string;
 	email: string;
 	display_name?: string | null;
-	role: UserRole;
+	role: PlatformRole;
 	is_admin: boolean;
 	mfa_enabled: boolean;
 	must_change_password: boolean;
 	created_at: string;
 	last_login_at?: string | null;
 	deletion_scheduled_at?: string | null;
+	/** SETUP-3a (ADR-F061 D5) — non-null ⇒ account disabled by an admin. */
+	disabled_at?: string | null;
 }
 
 export interface AdminUserListResponse {
@@ -778,6 +789,87 @@ export interface AdminUserListQuery {
 	email_q?: string;
 	limit?: number;
 	offset?: number;
+}
+
+/** `PATCH /admin/users/{id}/role` response (SETUP-3b review fix F6 — the
+ *  endpoint returns this shape, NOT an AdminUserRow: `user_id`, no timestamps).
+ *  Role is bounded to the org roles; 'operator' never transits this endpoint. */
+export interface UserRoleResponse {
+	user_id: string;
+	email: string;
+	role: UserRole;
+	is_admin: boolean;
+}
+
+// ----- User lifecycle: invites + disable (SETUP-3a/3b, ADR-F061) -----
+
+/** `POST /admin/users/invites` body. Role is bounded server-side to the three
+ *  org roles — 'operator' 422s (escalation guard, ADR-F061 D3). */
+export interface InviteCreateRequest {
+	email: string;
+	role: UserRole;
+}
+
+/**
+ * Invite-create / resend response. `accept_url` is present ONLY when
+ * `email_sent` is false (SMTP off) so the admin can hand the link over
+ * out-of-band (ADR-F061 D6). Never log or persist it client-side.
+ */
+export interface InviteResponse {
+	id: string;
+	email: string;
+	role: string;
+	created_at: string;
+	expires_at: string;
+	email_sent: boolean;
+	accept_url?: string | null;
+}
+
+export type InviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
+
+/** One row in `GET /admin/users/invites` (no token material). */
+export interface InviteRow {
+	id: string;
+	email: string;
+	role: string;
+	status: InviteStatus;
+	created_at: string;
+	expires_at: string;
+	consumed_at: string | null;
+	revoked_at: string | null;
+}
+
+export interface InviteListResponse {
+	invites: InviteRow[];
+}
+
+/** `POST /auth/accept-invite` body (unauthenticated; token from the link). */
+export interface AcceptInviteRequest {
+	token: string;
+	password: string;
+	display_name?: string | null;
+}
+
+/** `POST /auth/accept-invite` response — the created account, NO tokens
+ *  (house pattern: redirect to login, never auto-login). */
+export interface AcceptInviteResponse {
+	user_id: string;
+	email: string;
+	role: string;
+}
+
+/** `POST /auth/password-reset` body (unauthenticated; token from the link). */
+export interface PasswordResetConfirmRequest {
+	token: string;
+	new_password: string;
+}
+
+/** `POST /admin/users/{id}/disable|enable` response. */
+export interface UserDisableResponse {
+	user_id: string;
+	email: string;
+	disabled: boolean;
+	disabled_at: string | null;
 }
 
 // ----- Teams (D8.1a + D8.1c caller_role) -----

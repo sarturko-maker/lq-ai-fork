@@ -45,10 +45,11 @@ function pinTheme(theme: 'light' | 'dark') {
 
 // Migrated sub-nav surfaces: URL → a stable surface selector. (admin requires an
 // admin user — the dev admin login covers it; autonomous is opt-in-gated so it's
-// excluded from the deep-link sweep here.)
+// excluded from the deep-link sweep here. /lq-ai/admin/models is excluded too:
+// SETUP-3b fenced it operator-only (ADR-F061 D4) and the dev admin is
+// role='admin', so the page guard now redirects it out of the shell.)
 const MIGRATED = [
 	{ url: '/lq-ai/admin/audit-log', surface: '[data-testid="lq-ai-admin-audit-log"]' },
-	{ url: '/lq-ai/admin/models', surface: '[data-testid="lq-ai-admin-models"]' },
 	{ url: '/lq-ai/settings/appearance', surface: '[data-testid="lq-ai-auto-enhance-toggle"]' },
 	{ url: '/lq-ai/trust', surface: '.trust-page' }
 ] as const;

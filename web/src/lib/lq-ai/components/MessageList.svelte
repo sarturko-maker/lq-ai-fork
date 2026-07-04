@@ -31,7 +31,7 @@
 		messages?: Message[];
 		streamingMessageId?: string | null;
 		onAppliedSkillClicked?: (name: string) => void;
-		currentUserRole?: 'admin' | 'member' | 'viewer';
+		currentUserRole?: 'admin' | 'member' | 'viewer' | 'operator';
 		onRefusalRerun?: (msg: Message) => void;
 		onRefusalOverrideRequested?: (msg: Message) => void;
 		onRefusalExplainerRequested?: (msg: Message) => void;

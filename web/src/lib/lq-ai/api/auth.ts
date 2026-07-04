@@ -7,10 +7,13 @@
 import { apiRequest } from './client';
 import { clearSession, setSession, setUser } from '../auth/store';
 import type {
+	AcceptInviteRequest,
+	AcceptInviteResponse,
 	ChangePasswordRequest,
 	LoginRequest,
 	LoginResponse,
 	MfaSetupResponse,
+	PasswordResetConfirmRequest,
 	TokenResponse,
 	User
 } from '../types';
@@ -88,4 +91,43 @@ export async function mfaEnable(code: string): Promise<void> {
 /** POST /api/v1/auth/mfa/disable — password + code; clears MFA state. */
 export async function mfaDisable(password: string, code: string): Promise<void> {
 	await apiRequest<void>('/auth/mfa/disable', { method: 'POST', body: { password, code } });
+}
+
+// ----- User lifecycle (SETUP-3b, ADR-F061) -----
+// All three are UNAUTHENTICATED (token pages / login screen): skipAuth so no
+// stale bearer rides along, skipRefresh so a 401 can't trigger a refresh loop.
+// No response ever carries session tokens — the house pattern is
+// redirect-to-login after success (D2/D3).
+
+/** POST /api/v1/auth/accept-invite — redeem an invite token, create the account. */
+export async function acceptInvite(req: AcceptInviteRequest): Promise<AcceptInviteResponse> {
+	return apiRequest<AcceptInviteResponse>('/auth/accept-invite', {
+		method: 'POST',
+		body: req,
+		skipAuth: true,
+		skipRefresh: true
+	});
+}
+
+/**
+ * POST /api/v1/auth/password-reset-request — always 202 regardless of account
+ * existence (anti-enumeration); the UI copy must never confirm existence either.
+ */
+export async function passwordResetRequest(email: string): Promise<void> {
+	await apiRequest<void>('/auth/password-reset-request', {
+		method: 'POST',
+		body: { email },
+		skipAuth: true,
+		skipRefresh: true
+	});
+}
+
+/** POST /api/v1/auth/password-reset — redeem a reset token, set the new password (204). */
+export async function passwordResetConfirm(req: PasswordResetConfirmRequest): Promise<void> {
+	await apiRequest<void>('/auth/password-reset', {
+		method: 'POST',
+		body: req,
+		skipAuth: true,
+		skipRefresh: true
+	});
 }

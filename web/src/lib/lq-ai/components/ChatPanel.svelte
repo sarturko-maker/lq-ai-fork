@@ -296,9 +296,9 @@
 	// Wave D.1 T15 — refusal-bubble flow. ChatPanel owns the override-modal
 	// state and the three per-message callbacks (re-run, override-requested,
 	// explainer). On override success the refusal row is replaced in-place by
-	// the new kind='ai' Message; admin-only override is enforced by the
-	// RefusalMessageBubble's showOverrideButton(role) helper — we still pass
-	// the real role here so members/viewers never see the button at all.
+	// the new kind='ai' Message; operator-only override (SETUP-3b fence) is
+	// enforced by the RefusalMessageBubble's showOverrideButton(role) helper —
+	// we pass the true role so non-operators never see the button at all.
 	let overrideModalOpen = false;
 	let overrideMessage: Message | null = null;
 
@@ -895,11 +895,20 @@
 	// 'member' when the session has no role surfaced yet so the override
 	// path stays gated. The User.is_admin legacy flag is treated as
 	// equivalent to role === 'admin' for back-compat with sessions
-	// established before the explicit role column landed.
+	// established before the explicit role column landed. 'operator' passes
+	// through UNMAPPED (SETUP-3b review fix F5): the override endpoint is
+	// operator-fenced (ADR-F061 D4), so showOverrideButton must see the true
+	// role — collapsing operator to 'admin' would hide the operator's button
+	// and show org-admins one that only earns a 403.
 	$: currentUserRole = (() => {
 		const user = $auth.user;
 		if (!user) return 'member' as const;
-		if (user.role === 'admin' || user.role === 'member' || user.role === 'viewer') {
+		if (
+			user.role === 'admin' ||
+			user.role === 'member' ||
+			user.role === 'viewer' ||
+			user.role === 'operator'
+		) {
 			return user.role;
 		}
 		return user.is_admin ? ('admin' as const) : ('member' as const);

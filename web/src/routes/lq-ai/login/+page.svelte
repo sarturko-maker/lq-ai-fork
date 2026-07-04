@@ -13,6 +13,10 @@
 	// still in fresh-install state. Stays null in all other paths so the
 	// hint never appears to operators who have already rotated.
 	let bootstrapLogsHint: string | null = null;
+	// SETUP-3b (ADR-F061 addendum D8) — on a hosted (operator-managed) stack
+	// the docker-grep instruction is meaningless to the tenant's own admin;
+	// the fresh-install hint swaps to welcome-email / forgot-password copy.
+	let bootstrapHosted = false;
 	let hintCopied = false;
 
 	async function submit() {
@@ -48,11 +52,13 @@
 	async function checkBootstrapStatus() {
 		try {
 			const status = await bootstrapApi.getBootstrapStatus();
+			bootstrapHosted = status.hosted;
 			bootstrapLogsHint = status.default_password_active ? status.logs_hint : null;
 		} catch {
 			// Best-effort surface: if the probe itself fails, fall back to the
 			// plain 401. Don't mask the real auth error with a hint error.
 			bootstrapLogsHint = null;
+			bootstrapHosted = false;
 		}
 	}
 
@@ -132,29 +138,40 @@
 					role="status"
 					aria-live="polite"
 				>
-					<p class="font-medium">First-run deployment?</p>
-					<p>
-						The bootstrap admin password is printed once to the API
-						container's logs. Run the command below to retrieve it,
-						sign in, then rotate immediately.
-					</p>
-					<div class="flex items-stretch gap-2">
-						<code
-							class="flex-1 px-2 py-1 rounded bg-white dark:bg-gray-900 border border-amber-200 dark:border-amber-700 text-xs overflow-x-auto whitespace-nowrap"
-							data-testid="lq-ai-bootstrap-hint-command"
-						>
-							{bootstrapLogsHint}
-						</code>
-						<button
-							type="button"
-							class="px-2 py-1 text-xs rounded border border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900"
-							on:click={copyHint}
-							data-testid="lq-ai-bootstrap-hint-copy"
-							aria-label="Copy command to clipboard"
-						>
-							{hintCopied ? 'Copied' : 'Copy'}
-						</button>
-					</div>
+					{#if bootstrapHosted}
+						<!-- SETUP-3b D8: hosted tenants have no shell on the node — the
+						     grep instruction would be noise. Point at the handover email
+						     and the self-serve reset instead. -->
+						<p class="font-medium">First sign-in?</p>
+						<p data-testid="lq-ai-bootstrap-hint-hosted">
+							This workspace hasn't been claimed yet — check your welcome
+							email, or use "Forgot your password?" below to set one.
+						</p>
+					{:else}
+						<p class="font-medium">First-run deployment?</p>
+						<p>
+							The bootstrap admin password is printed once to the API
+							container's logs. Run the command below to retrieve it,
+							sign in, then rotate immediately.
+						</p>
+						<div class="flex items-stretch gap-2">
+							<code
+								class="flex-1 px-2 py-1 rounded bg-white dark:bg-gray-900 border border-amber-200 dark:border-amber-700 text-xs overflow-x-auto whitespace-nowrap"
+								data-testid="lq-ai-bootstrap-hint-command"
+							>
+								{bootstrapLogsHint}
+							</code>
+							<button
+								type="button"
+								class="px-2 py-1 text-xs rounded border border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900"
+								on:click={copyHint}
+								data-testid="lq-ai-bootstrap-hint-copy"
+								aria-label="Copy command to clipboard"
+							>
+								{hintCopied ? 'Copied' : 'Copy'}
+							</button>
+						</div>
+					{/if}
 				</div>
 			{/if}
 
@@ -166,6 +183,17 @@
 			>
 				{busy ? 'Signing in…' : 'Sign in'}
 			</button>
+
+			<p class="text-center">
+				<a
+					class="lq-text-caption underline-offset-4 hover:underline"
+					style="color: var(--lq-text-tertiary);"
+					href="/lq-ai/reset-password"
+					data-testid="lq-ai-login-forgot-password"
+				>
+					Forgot your password?
+				</a>
+			</p>
 		</form>
 	</main>
 	<DualBrandingFooter />

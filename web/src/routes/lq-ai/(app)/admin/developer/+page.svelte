@@ -1,7 +1,8 @@
 <script lang="ts">
+  // SETUP-3b (plan D5): DevRoleManagementCard removed — role management
+  // consolidated into /lq-ai/admin/users.
   import DevApiDocsCard from '$lib/lq-ai/components/DevApiDocsCard.svelte';
   import DevApiPlaygroundCard from '$lib/lq-ai/components/DevApiPlaygroundCard.svelte';
-  import DevRoleManagementCard from '$lib/lq-ai/components/DevRoleManagementCard.svelte';
   import DevForkCallout from '$lib/lq-ai/components/DevForkCallout.svelte';
 </script>
 
@@ -17,7 +18,6 @@
   <div class="dev-grid">
     <DevApiDocsCard />
     <DevApiPlaygroundCard />
-    <DevRoleManagementCard />
     <DevForkCallout />
   </div>
 </div>

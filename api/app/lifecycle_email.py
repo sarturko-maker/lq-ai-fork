@@ -41,15 +41,15 @@ def _effective_base_url() -> str:
 def build_accept_url(token: str) -> str:
     """Absolute accept-invite URL, or a path-only fallback when no base URL.
 
-    The web accept page lands in SETUP-3b; the path is a stable placeholder the
-    operator can hand over today.
+    SETUP-3b (ADR-F061 addendum D1) — the ``/lq-ai`` prefix is the real SPA
+    route (``web/src/routes/lq-ai/accept-invite``), not a placeholder.
     """
-    return f"{_effective_base_url()}/accept-invite?token={token}"
+    return f"{_effective_base_url()}/lq-ai/accept-invite?token={token}"
 
 
 def build_reset_url(token: str) -> str:
     """Absolute password-reset URL, or a path-only fallback when no base URL."""
-    return f"{_effective_base_url()}/reset-password?token={token}"
+    return f"{_effective_base_url()}/lq-ai/reset-password?token={token}"
 
 
 async def send_invite_email(*, to_addr: str, accept_url: str) -> bool:

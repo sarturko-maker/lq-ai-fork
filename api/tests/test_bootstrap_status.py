@@ -159,3 +159,54 @@ async def test_bootstrap_status_is_unauthenticated(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/admin/bootstrap-status")
     # 200 (or whatever the actual state is) — emphatically not 401/403.
     assert resp.status_code == 200
+
+
+@pytest.mark.integration
+async def test_bootstrap_status_hosted_false_by_default(client: AsyncClient) -> None:
+    """SETUP-3b (ADR-F061 addendum D8) — no operator configured ⇒ not hosted.
+
+    The default test settings carry no FIRST_RUN_OPERATOR_EMAIL, matching a
+    self-host install.
+    """
+    resp = await client.get("/api/v1/admin/bootstrap-status")
+    assert resp.status_code == 200
+    assert resp.json()["hosted"] is False
+
+
+@pytest.mark.integration
+async def test_bootstrap_status_hosted_true_when_operator_email_configured(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A configured FIRST_RUN_OPERATOR_EMAIL flips ``hosted`` to True.
+
+    The signal is derived from settings, not from whether an operator ROW
+    exists — it answers "is this a hosted tenant stack", which is decided at
+    deploy time regardless of whether bootstrap has run yet.
+    """
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "first_run_operator_email", "operator@lq.ai")
+
+    resp = await client.get("/api/v1/admin/bootstrap-status")
+    assert resp.status_code == 200
+    assert resp.json()["hosted"] is True
+
+
+@pytest.mark.integration
+async def test_bootstrap_status_hosted_false_for_empty_string_env(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty string ⇒ NOT hosted (SETUP-3b review fix F1).
+
+    The prod compose always injects ``FIRST_RUN_OPERATOR_EMAIL: ${VAR:-}``, so
+    a self-host stack (or a wizard run that left OPERATOR_EMAIL blank) reaches
+    settings as "" — which must keep the docker-log-grep hint, exactly like an
+    unset value (``ensure_first_run_operator``'s ``if not operator_email``).
+    """
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "first_run_operator_email", "")
+
+    resp = await client.get("/api/v1/admin/bootstrap-status")
+    assert resp.status_code == 200
+    assert resp.json()["hosted"] is False

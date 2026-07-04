@@ -28,8 +28,11 @@ describe('RefusalMessageBubble helpers', () => {
 		expect(body).toContain('privileged-only providers');
 	});
 
-	it('showOverrideButton returns true only for admin role', () => {
-		expect(showOverrideButton('admin')).toBe(true);
+	it('showOverrideButton returns true only for the operator (SETUP-3b fence)', () => {
+		// POST /inference/override-tier-floor is operator-fenced (ADR-F061 D4);
+		// an org-admin's click would only earn a 403, so the button hides.
+		expect(showOverrideButton('operator')).toBe(true);
+		expect(showOverrideButton('admin')).toBe(false);
 		expect(showOverrideButton('member')).toBe(false);
 		expect(showOverrideButton('viewer')).toBe(false);
 	});

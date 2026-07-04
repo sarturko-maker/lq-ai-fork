@@ -80,18 +80,28 @@ describe('Wave B v2 — new surfaces', () => {
 	});
 
 	// ── Test 5 ───────────────────────────────────────────────────────────────────
-	// /lq-ai/admin/developer renders all four developer-support cards.
-	// Card titles are h2 elements inside each DevXxx component.
-	it('/lq-ai/admin/developer renders all four developer cards', () => {
+	// /lq-ai/admin/developer renders all three developer-support cards.
+	// Card titles are h2 elements inside each DevXxx component. (SETUP-3b D5:
+	// DevRoleManagementCard was removed — role management lives on
+	// /lq-ai/admin/users now, asserted below.)
+	it('/lq-ai/admin/developer renders all three developer cards', () => {
 		cy.visit('/lq-ai/admin/developer');
 		// DevApiDocsCard: h2 = "API documentation"
 		cy.contains('h2', 'API documentation').should('be.visible');
 		// DevApiPlaygroundCard: h2 = "API playground"
 		cy.contains('h2', 'API playground').should('be.visible');
-		// DevRoleManagementCard: h2 = "Role management"
-		cy.contains('h2', 'Role management').should('be.visible');
 		// DevForkCallout: h2 = "Build your own frontend"
 		cy.contains('h2', 'Build your own frontend').should('be.visible');
+		// The retired card must NOT come back (SETUP-3b D5).
+		cy.contains('h2', 'Role management').should('not.exist');
+	});
+
+	// ── Test 5b ──────────────────────────────────────────────────────────────────
+	// /lq-ai/admin/users carries the consolidated user/role management (SETUP-3b).
+	it('/lq-ai/admin/users renders the Users admin page', () => {
+		cy.visit('/lq-ai/admin/users');
+		cy.get('[data-testid="lq-admin-users-page"]', { timeout: 20000 }).should('exist');
+		cy.get('[data-testid="lq-admin-users-invite-open"]').should('be.visible');
 	});
 
 	// ── Test 6 ───────────────────────────────────────────────────────────────────

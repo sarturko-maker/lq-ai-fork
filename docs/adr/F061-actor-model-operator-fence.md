@@ -103,3 +103,43 @@ future slices build on; SETUP-4a implements its keystone (the tool-group registr
   `operator` row — reclassify before a downgrade (acceptable for a bootstrap-only role).
 - Standalone email verification, hard-delete offboarding, `viewer` enforcement, org-admin BYOK, and the
   Caddy edge-deny remain deferred (SAAS-SETUP §7 rows 5/8/10). Disable is the v1 offboarding.
+
+## Addendum — SETUP-3b (2026-07-03): web UI, onboarding pages, wizard handover
+
+Appended with the SETUP-3b slice (plan: `docs/fork/plans/SETUP-3b-users-admin-ui-onboarding.md`).
+Records the decisions that consume this ADR's backend, plus one deferral from the 3a review.
+
+- **D1 (addendum) — emailed links carry the real SPA paths.** `build_accept_url`/`build_reset_url`
+  now emit `/lq-ai/accept-invite?token=…` and `/lq-ai/reset-password?token=…` — the 3a "stable
+  placeholder" paths (no `/lq-ai` prefix) are replaced before anything deployed ever emitted them.
+  The pages live as siblings of the `(app)` group under `web/src/routes/lq-ai/` and both literal
+  paths are exact-match entries in the auth gate's `isAuthExempt()` allowlist.
+- **D6 (addendum) — operator rows stay visible, badged, locked** (3a-review open Q2, decided).
+  The unfiltered `GET /admin/users` includes operator rows; the Users admin UI renders them with a
+  distinct "Platform operator" badge and every action disabled (the server 403s regardless — the UI
+  mirrors the fence). `operator` is never offered as a role choice or filter. Rationale:
+  transparency is load-bearing in this product — a hidden privileged account in a tenant stack is
+  worse than a visible immutable one.
+- **D7 (addendum) — wizard handover = reset-email variant.** With SMTP configured,
+  `scripts/setup-tenant.sh` POSTs `/auth/password-reset-request` for `ADMIN_EMAIL` against the
+  deployed public origin (deploy.sh's retrying-smoke pattern; cold-start tolerated) and prints
+  "handover email sent" — the bootstrap password is never scraped or printed on that branch. With
+  SMTP unset, the log-scrape print remains, explicitly labelled as the SMTP-off fallback. The
+  wizard also gains an optional `OPERATOR_EMAIL` manifest/prompt field (same email + charset fences
+  as `ADMIN_EMAIL`) → `FIRST_RUN_OPERATOR_EMAIL` in `.env.prod` when set, omitted entirely when
+  empty (self-host semantics). *Threat-model note (right-sizing):* the bootstrap password is a
+  random, `must_change_password=True`, forced-rotate credential — the customer's chosen password
+  never transits the operator even without this change. What D7 buys is (1) no live credential in
+  terminal scrollback/logs during handover, (2) an email-first professional flow, (3) self-serve
+  recovery. The rejected alternative (bootstrap mints an invite instead of a user) achieves
+  zero-knowledge only when SMTP is on anyway and would destabilise the boot invariants
+  (bootstrap-status/login-hint coupling, a third account-creation path).
+- **D8 (addendum) — `hosted` signal on bootstrap-status.** `GET /admin/bootstrap-status` gains
+  `hosted: bool`, derived server-side from `settings.first_run_operator_email is not None` (an
+  operator-managed stack). The login page's fresh-install hint swaps the docker-log-grep
+  instruction (meaningless to a tenant admin with no shell on the node) for "check your welcome
+  email or use Forgot your password?"; self-host copy is unchanged. Response-schema addition only.
+- **Q1 deferral — `_MUTATING_ROLES`/`MutatingUser` dead code** (3a-review open Q1, recorded).
+  `MutatingUser` is wired into zero endpoints (verified on main and the 3a branch); `viewer` is a
+  label, not an enforcement boundary. The viewer AND operator tenant-data question is one coherent
+  RBAC decision and is deferred to SETUP-5 as already slated — nothing removed or changed here.

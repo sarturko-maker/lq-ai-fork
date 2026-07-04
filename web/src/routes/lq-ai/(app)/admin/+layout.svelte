@@ -1,11 +1,17 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 
+	import { auth } from '$lib/lq-ai/auth/store';
+
 	$: pathname = $page.url.pathname;
 
-	const navLinks = [
+	// SETUP-3b fence gating (ADR-F061 D4): /admin/models is the gateway alias
+	// editor — operator-only server-side, so the link hides for non-operators
+	// (the page keeps its own guard; the server 403s regardless).
+	$: navLinks = [
 		{ href: '/lq-ai/admin/audit-log', label: 'Audit log' },
-		{ href: '/lq-ai/admin/models', label: 'Models' },
+		{ href: '/lq-ai/admin/users', label: 'Users' },
+		...($auth.user?.role === 'operator' ? [{ href: '/lq-ai/admin/models', label: 'Models' }] : []),
 		{ href: '/lq-ai/admin/word-addin', label: 'Word add-in' },
 		{ href: '/lq-ai/admin/intake-bridges', label: 'Intake bridges' },
 		{ href: '/lq-ai/admin/developer', label: 'Developer Support' }

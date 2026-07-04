@@ -427,8 +427,8 @@ def test_scheme_only_base_url_falls_back_to_path_only(
     from app.lifecycle_email import build_accept_url, build_reset_url
 
     monkeypatch.setattr(get_settings(), "public_base_url", bad_base)
-    assert build_reset_url("tok") == "/reset-password?token=tok"
-    assert build_accept_url("tok") == "/accept-invite?token=tok"
+    assert build_reset_url("tok") == "/lq-ai/reset-password?token=tok"
+    assert build_accept_url("tok") == "/lq-ai/accept-invite?token=tok"
 
 
 @pytest.mark.unit
@@ -438,7 +438,7 @@ def test_real_base_url_builds_absolute_links(monkeypatch: pytest.MonkeyPatch) ->
     from app.lifecycle_email import build_reset_url
 
     monkeypatch.setattr(get_settings(), "public_base_url", "https://tenant.example.com/")
-    assert build_reset_url("tok") == "https://tenant.example.com/reset-password?token=tok"
+    assert build_reset_url("tok") == "https://tenant.example.com/lq-ai/reset-password?token=tok"
 
 
 @pytest.mark.integration

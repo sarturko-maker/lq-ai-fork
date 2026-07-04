@@ -15,6 +15,10 @@ import { apiRequest } from './client';
 export interface BootstrapStatus {
 	default_password_active: boolean;
 	logs_hint: string;
+	/** SETUP-3b (ADR-F061 addendum D8) — true on an operator-managed (hosted)
+	 *  stack; the login hint swaps the docker-grep instruction for
+	 *  welcome-email / forgot-password copy. */
+	hosted: boolean;
 }
 
 export async function getBootstrapStatus(): Promise<BootstrapStatus> {

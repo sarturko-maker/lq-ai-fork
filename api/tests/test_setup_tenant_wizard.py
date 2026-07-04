@@ -13,7 +13,16 @@ script as a subprocess (the way an operator does) and assert the SETUP-2 §9 gat
 * the VALUE fence holds (SETUP-2 review) — shell metacharacters, malformed
   emails/ports/recipients, and a wildcard origin are refused before anything is
   written (manifest values reach a root-sourced env file via the backup cron);
-* secrets end up in .env.prod (chmod-600, node-only) and NEVER in gateway.yaml.
+* secrets end up in .env.prod (chmod-600, node-only) and NEVER in gateway.yaml;
+* SETUP-3b (ADR-F061 addendum D7): the handover is email-first — with SMTP
+  configured the wizard POSTs /auth/password-reset-request for ADMIN_EMAIL and
+  NEVER scrapes or prints the bootstrap password; without SMTP it keeps the
+  log-scrape print, explicitly labelled as the fallback. The deploy-path tests
+  shim `docker` and `curl` on PATH (argv logged to WIZARD_SHIM_LOG) so no real
+  docker or network is touched;
+* SETUP-3b: optional OPERATOR_EMAIL → FIRST_RUN_OPERATOR_EMAIL in .env.prod
+  when set, omitted entirely when empty; same email/charset fences as
+  ADMIN_EMAIL.
 
 Style mirrors test_env_prod_example.py: same repo-root anchor, same compose
 ${VAR:?} parse, stdlib only + pytest + pyyaml (already an api dep).
@@ -359,6 +368,7 @@ def test_interactive_mode_saves_secretfree_manifest_0600(tmp_path: Path) -> None
                 "de",  # s3 region
                 "",  # s3 bucket (default)
                 "admin@beta.example.com",  # admin email
+                "",  # operator email (SETUP-3b — skip: no operator account)
                 "",  # smtp host (skip smtp block)
                 "sha-def5678",  # image tag
                 "full",  # node profile
@@ -396,5 +406,141 @@ def test_interactive_mode_saves_secretfree_manifest_0600(tmp_path: Path) -> None
     assert mode == 0o600, f"saved manifest must be chmod 600, got {oct(mode)}"
     text = save.read_text()
     assert "TENANT_SLUG=beta" in text
+    assert "OPERATOR_EMAIL=" in text  # the key is persisted even when blank
     for value in _FAKE_SECRETS.values():
         assert value not in text, "secret value leaked into the saved manifest"
+
+
+# --------------------------------------------------------------------------- #
+# SETUP-3b — OPERATOR_EMAIL → FIRST_RUN_OPERATOR_EMAIL (ADR-F061)
+# --------------------------------------------------------------------------- #
+def test_operator_email_written_when_set(tmp_path: Path) -> None:
+    out_dir = _render(tmp_path, OPERATOR_EMAIL="operator@platform.example.com")
+    env = _parse_env(out_dir / ".env.prod")
+    assert env["FIRST_RUN_OPERATOR_EMAIL"] == "operator@platform.example.com"
+
+
+def test_operator_email_omitted_entirely_when_unset(tmp_path: Path) -> None:
+    """No OPERATOR_EMAIL ⇒ no FIRST_RUN_OPERATOR_EMAIL key at all (self-host
+    semantics: an unset var means no operator account is ever minted)."""
+    out_dir = _render(tmp_path)
+    env = _parse_env(out_dir / ".env.prod")
+    assert "FIRST_RUN_OPERATOR_EMAIL" not in env
+
+
+def test_operator_email_charset_fence_applies(tmp_path: Path) -> None:
+    """The generic root-sourced-env-file charset fence covers the new field."""
+    manifest = tmp_path / "tenant.conf"
+    manifest.write_text(_manifest_text(OPERATOR_EMAIL="op$(id)@acme.example.com"))
+    proc = _run(manifest, tmp_path / "out", "--no-deploy", "--dry-run")
+    assert proc.returncode != 0
+    assert "operator_email" in proc.stderr.lower()
+    assert not (tmp_path / "out").exists()
+
+
+def test_operator_email_shape_check_applies(tmp_path: Path) -> None:
+    """A charset-clean but non-email value is refused by the EMAIL_RE check."""
+    manifest = tmp_path / "tenant.conf"
+    manifest.write_text(_manifest_text(OPERATOR_EMAIL="not-an-email"))
+    proc = _run(manifest, tmp_path / "out", "--no-deploy", "--dry-run")
+    assert proc.returncode != 0
+    assert "operator_email" in proc.stderr.lower()
+
+
+# --------------------------------------------------------------------------- #
+# SETUP-3b — handover (ADR-F061 addendum D7): email-first with SMTP, log-scrape
+# fallback without. The deploy path is exercised with `docker` + `curl` shims
+# on PATH so no real docker/network is touched; each shim appends its argv to
+# WIZARD_SHIM_LOG so the tests can assert exactly what the wizard invoked.
+# --------------------------------------------------------------------------- #
+_FAKE_BOOTSTRAP_PW = "fake-bootstrap-pw-e2e"
+
+
+def _write_shims(shim_dir: Path) -> None:
+    shim_dir.mkdir(parents=True, exist_ok=True)
+    docker = shim_dir / "docker"
+    docker.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf \'docker %s\\n\' "$*" >> "$WIZARD_SHIM_LOG"\n'
+        'case "$*" in\n'
+        # deploy.sh reads the public host back out of the caddy service.
+        '  *"printenv LQ_AI_PUBLIC_HOST"*) echo "acme.example.com" ;;\n'
+        # the SMTP-off fallback greps this exact prefix from the api log.
+        f'  *"logs api"*) echo "First-run admin password (record it now and '
+        f'rotate on first login): {_FAKE_BOOTSTRAP_PW}" ;;\n'
+        "esac\n"
+        "exit 0\n"
+    )
+    docker.chmod(0o755)
+    curl = shim_dir / "curl"
+    curl.write_text(
+        '#!/usr/bin/env bash\nprintf \'curl %s\\n\' "$*" >> "$WIZARD_SHIM_LOG"\nexit 0\n'
+    )
+    curl.chmod(0o755)
+
+
+def _run_with_deploy(tmp_path: Path, *, smtp: bool) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Full run (deploy enabled) against the shims; returns (proc, shim log)."""
+    overrides: dict[str, str] = {}
+    secrets = dict(_FAKE_SECRETS)
+    if smtp:
+        overrides.update(
+            SMTP_HOST="smtp.example.com",
+            SMTP_FROM="noreply@acme.example.com",
+            SMTP_USERNAME="mailer",
+        )
+        secrets["SMTP_PASSWORD"] = "fake-smtp-password"
+    manifest = tmp_path / "tenant.conf"
+    manifest.write_text(_manifest_text(**overrides))
+    out_dir = tmp_path / "out"
+    shim_dir = tmp_path / "shims"
+    _write_shims(shim_dir)
+    shim_log = tmp_path / "shim.log"
+    shim_log.write_text("")
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("SMTP_", "ANTHROPIC_"))}
+    env.update(secrets)
+    env["PATH"] = f"{shim_dir}:{env.get('PATH', '')}"
+    env["WIZARD_SHIM_LOG"] = str(shim_log)
+    proc = subprocess.run(
+        ["bash", str(_SCRIPT), "--manifest", str(manifest), "--out-dir", str(out_dir)],
+        capture_output=True,
+        text=True,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        timeout=180,
+    )
+    return proc, shim_log.read_text()
+
+
+def test_smtp_on_handover_sends_reset_request_and_never_prints_password(
+    tmp_path: Path,
+) -> None:
+    """D7: SMTP configured ⇒ the wizard fires POST /auth/password-reset-request
+    for ADMIN_EMAIL against the public origin, and the bootstrap password is
+    neither scraped from the log nor printed anywhere."""
+    proc, shim_log = _run_with_deploy(tmp_path, smtp=True)
+    assert proc.returncode == 0, f"deploy run failed:\n{proc.stdout}\n{proc.stderr}"
+
+    # The handover request was made, for the right address, at the right URL.
+    assert "https://acme.example.com/api/v1/auth/password-reset-request" in shim_log
+    assert "admin@acme.example.com" in shim_log
+    assert "Handover email sent" in proc.stdout
+
+    # The password never transits the operator's terminal on this branch —
+    # and the wizard never even reads the api log.
+    combined = proc.stdout + proc.stderr
+    assert _FAKE_BOOTSTRAP_PW not in combined
+    assert "First-run admin password" not in combined
+    assert "logs api" not in shim_log
+
+
+def test_smtp_off_handover_keeps_log_scrape_fallback(tmp_path: Path) -> None:
+    """D7 fallback: no SMTP ⇒ today's log-scrape print, explicitly labelled,
+    and no reset-request call is fired."""
+    proc, shim_log = _run_with_deploy(tmp_path, smtp=False)
+    assert proc.returncode == 0, f"deploy run failed:\n{proc.stdout}\n{proc.stderr}"
+
+    assert "SMTP is not configured" in proc.stdout
+    assert _FAKE_BOOTSTRAP_PW in proc.stdout
+    assert "password-reset-request" not in shim_log

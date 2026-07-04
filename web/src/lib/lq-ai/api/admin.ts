@@ -6,7 +6,17 @@
  * into a redirect to /lq-ai with a flash error.
  */
 import { apiRequest } from './client';
-import type { UsageResponse, UsageQuery, AdminUserListResponse, AdminUserListQuery, AdminUserRow } from '../types';
+import type {
+	UsageResponse,
+	UsageQuery,
+	AdminUserListResponse,
+	AdminUserListQuery,
+	InviteCreateRequest,
+	InviteListResponse,
+	InviteResponse,
+	UserDisableResponse,
+	UserRoleResponse
+} from '../types';
 
 export interface AliasFallback {
 	provider: string;
@@ -122,14 +132,67 @@ export async function listUsers(query: AdminUserListQuery = {}): Promise<AdminUs
 /**
  * PATCH /api/v1/admin/users/{user_id}/role — update a user's platform role.
  *
- * Returns 409 with code "last_admin" when demoting the last admin account.
+ * Demoting the last admin is refused with 403 code "forbidden" and an
+ * actionable message (SETUP-3b review fix F4/F6 — the endpoint returns a
+ * UserRoleResponse, not an AdminUserRow, and no 'last_admin' code exists).
  */
 export async function patchUserRole(
 	userId: string,
 	role: 'admin' | 'member' | 'viewer'
-): Promise<AdminUserRow> {
-	return apiRequest<AdminUserRow>(`/admin/users/${encodeURIComponent(userId)}/role`, {
+): Promise<UserRoleResponse> {
+	return apiRequest<UserRoleResponse>(`/admin/users/${encodeURIComponent(userId)}/role`, {
 		method: 'PATCH',
 		body: { role }
+	});
+}
+
+// ----- User lifecycle: invites + disable/enable (SETUP-3b, ADR-F061 D8) -----
+
+/**
+ * POST /api/v1/admin/users/invites — invite a new user.
+ *
+ * 409 when an active user or a pending invite already owns the email. When
+ * SMTP is off the response carries `accept_url` for out-of-band handover —
+ * display it, never log or persist it.
+ */
+export async function createInvite(body: InviteCreateRequest): Promise<InviteResponse> {
+	return apiRequest<InviteResponse>('/admin/users/invites', { method: 'POST', body });
+}
+
+/** GET /api/v1/admin/users/invites — all invites, newest first. */
+export async function listInvites(): Promise<InviteListResponse> {
+	return apiRequest<InviteListResponse>('/admin/users/invites');
+}
+
+/** POST /api/v1/admin/users/invites/{id}/resend — revoke + reissue (409 if accepted). */
+export async function resendInvite(inviteId: string): Promise<InviteResponse> {
+	return apiRequest<InviteResponse>(
+		`/admin/users/invites/${encodeURIComponent(inviteId)}/resend`,
+		{ method: 'POST' }
+	);
+}
+
+/** DELETE /api/v1/admin/users/invites/{id} — revoke a pending invite (204). */
+export async function revokeInvite(inviteId: string): Promise<void> {
+	return apiRequest<void>(`/admin/users/invites/${encodeURIComponent(inviteId)}`, {
+		method: 'DELETE'
+	});
+}
+
+/**
+ * POST /api/v1/admin/users/{id}/disable — disable an account (ADR-F061 D5).
+ *
+ * Server guards: 403 for self, the last active admin, and operator targets.
+ */
+export async function disableUser(userId: string): Promise<UserDisableResponse> {
+	return apiRequest<UserDisableResponse>(`/admin/users/${encodeURIComponent(userId)}/disable`, {
+		method: 'POST'
+	});
+}
+
+/** POST /api/v1/admin/users/{id}/enable — re-enable a disabled account. */
+export async function enableUser(userId: string): Promise<UserDisableResponse> {
+	return apiRequest<UserDisableResponse>(`/admin/users/${encodeURIComponent(userId)}/enable`, {
+		method: 'POST'
 	});
 }
