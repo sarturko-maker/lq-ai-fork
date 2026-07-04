@@ -10,9 +10,12 @@ Three real capability kinds (+ a disabled MCP placeholder):
 
 * **skill** — the area's bound ``practice_area_skills`` (filtered to the registry's
   current set). Off ⇒ not wired (no source, absent from the prompt skill list).
-* **tool** — a per-area CODE group map (here). Tools are code-canonical (the
-  ``*_TOOL_NAMES`` frozensets are the truth), so availability is a code map, NOT a
-  table — a table would force a seed that must byte-match the grants forever. Off ⇒
+* **tool** — a named tool GROUP. Availability is DATA (the ``practice_area_tool_groups``
+  rows, resolved against :data:`TOOL_GROUP_REGISTRY`, SETUP-4a / ADR-F062 — so an
+  admin-created area can be granted domain tools); what a group NAME resolves to (its
+  grant set, builder, ledger, doctrine) stays CODE — the ``*_TOOL_NAMES`` frozensets are
+  the truth, never a table (a grant table would force a seed that must byte-match the
+  grants forever; F054-D1 rejected-option-2 is superseded only for *availability*). Off ⇒
   the group's tools are not built, so they never enter ``GuardContext.granted`` (R6
   fail-closes). Toggled by GROUP ("Redlining" / "ROPA" / "Assessments"), not by
   individual tool name — lawyer-legible.
@@ -28,14 +31,28 @@ lawyer never touches has no toggle rows and behaves byte-identically to today.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+import logging
+import uuid
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol, cast
 
-from app.agents.commercial_tools import COMMERCIAL_AREA_KEY
-from app.agents.ropa_tools import PRIVACY_AREA_KEY
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.agents.assessment_tools import build_assessment_tools
+from app.agents.budget import BudgetEnvelope
+from app.agents.commercial_tools import build_commercial_tools
+from app.agents.deal_changes import DealChangeLedger
+from app.agents.live_changes import ChangeLedger
+from app.agents.redline_service import RedlineService
+from app.agents.ropa_changes import RopaChangeLedger
+from app.agents.ropa_tools import build_ropa_tools
+from app.agents.tabular_tool import build_tabular_tools
+from app.agents.tools import MatterBinding
 from app.models.playbook import Playbook
 from app.skills.registry import SkillRegistry
+
+logger = logging.getLogger(__name__)
 
 # Capability kinds (the ``capability_kind`` values; also the DB CHECK set for the
 # three real kinds — 'mcp' is a UI-only placeholder, never persisted).
@@ -96,10 +113,171 @@ ASSESSMENT_GROUP = ToolGroupSpec(
     ),
 )
 
-AREA_TOOL_GROUPS: dict[str, tuple[ToolGroupSpec, ...]] = {
-    PRIVACY_AREA_KEY: (ROPA_GROUP, ASSESSMENT_GROUP),
-    COMMERCIAL_AREA_KEY: (REDLINING_GROUP, TABULAR_GROUP),
+# --- tool-group registry (ADR-F062, SETUP-4a) --------------------------------
+#
+# The registry maps a tool-group NAME to its CODE: the panel spec, the builder adapter
+# (uniform ctx → the group's real builder kwargs), and an optional ledger factory. It is
+# the single source of truth for WHAT a group name resolves to; the DATA
+# (``practice_area_tool_groups`` rows) says only WHICH groups an area offers. Two
+# invariants ride the registry:
+#   * A row naming a group ABSENT here is dropped (fail-closed to absence — never a
+#     grant), so no stale/forged row can mint tools it never had (D3).
+#   * The dict INSERTION ORDER is the canonical group order (redlining → tabular → ropa →
+#     assessment). Both ``build_area_inventory`` and the composition loop iterate the
+#     registry filtered by an area's rows — so ordering is code-canonical and can never
+#     drift from a seed's row order (D4). This order within each area reproduces today's
+#     build sequence exactly (the parity gate depends on it).
+
+
+@dataclass(frozen=True)
+class GroupBuildContext:
+    """Run-invariant inputs every tool-group builder adapter needs.
+
+    Frozen; carries the uniform surface each adapter maps onto its concrete builder's
+    real kwargs (tabular takes ``envelope.fan_out_quota``; redlining calls
+    ``redline_service_provider()``). ``binding`` is non-optional — the composition loop
+    only builds domain groups for a matter-bound run.
+    """
+
+    session_factory: async_sessionmaker[AsyncSession]
+    run_id: uuid.UUID
+    binding: MatterBinding
+    envelope: BudgetEnvelope
+    redline_service_provider: Callable[[], RedlineService]
+
+
+@dataclass(frozen=True)
+class ToolGroupDef:
+    """One tool group's CODE: its panel spec, its builder adapter, its optional ledger.
+
+    ``build`` maps the uniform :class:`GroupBuildContext` (plus the run-scoped ledger the
+    loop created from ``ledger_factory``, or ``None``) onto the group's concrete
+    ``build_*_tools`` call and returns its tools. ``ledger_factory`` is the run-scoped
+    live-change ledger constructor for the groups that stream signals (redlining →
+    ``DealChangeLedger``, ropa → ``RopaChangeLedger``); ``None`` for groups that don't.
+    """
+
+    spec: ToolGroupSpec
+    build: Callable[[GroupBuildContext, ChangeLedger | None], list[Callable[..., Any]]]
+    ledger_factory: Callable[[], ChangeLedger] | None = None
+
+
+def _build_redlining(
+    ctx: GroupBuildContext, ledger: ChangeLedger | None
+) -> list[Callable[..., Any]]:
+    # C4/C5b-3 (ADR-F031/F032/F035): the surgical-redline + negotiation tools. The Adeu
+    # engine is built per-run from the injected provider (no startup singleton). The
+    # deal-change ledger (created by the loop from ``ledger_factory``) drives the inline
+    # verdict chips. The cast is safe: the loop always passes a ``DealChangeLedger`` here.
+    return build_commercial_tools(
+        ctx.session_factory,
+        run_id=ctx.run_id,
+        binding=ctx.binding,
+        redline_service=ctx.redline_service_provider(),
+        change_ledger=cast("DealChangeLedger | None", ledger),
+    )
+
+
+def _build_tabular(ctx: GroupBuildContext, ledger: ChangeLedger | None) -> list[Callable[..., Any]]:
+    # ADR-F055 (F2 Tabular T1): the agentic "grids" tools. ``fan_out_quota`` sizes the
+    # fan-out↔retrieval crossover off the run's budget envelope. No ledger (live cell-fill
+    # is T5).
+    return build_tabular_tools(
+        ctx.session_factory,
+        run_id=ctx.run_id,
+        binding=ctx.binding,
+        fan_out_quota=ctx.envelope.fan_out_quota,
+    )
+
+
+def _build_ropa(ctx: GroupBuildContext, ledger: ChangeLedger | None) -> list[Callable[..., Any]]:
+    # PRIV-2/9b (ADR-F018/F024): the ROPA domain tools. The ropa-change ledger (created by
+    # the loop) drives the register-row wash. The cast is safe: the loop always passes a
+    # ``RopaChangeLedger`` here.
+    return build_ropa_tools(
+        ctx.session_factory,
+        run_id=ctx.run_id,
+        binding=ctx.binding,
+        change_ledger=cast("RopaChangeLedger | None", ledger),
+    )
+
+
+def _build_assessment(
+    ctx: GroupBuildContext, ledger: ChangeLedger | None
+) -> list[Callable[..., Any]]:
+    # PRIV-A2 (ADR-F018/F027): the privacy-assessment tools. No ledger (the read UI is A3).
+    return build_assessment_tools(ctx.session_factory, run_id=ctx.run_id, binding=ctx.binding)
+
+
+# Insertion order IS the canonical group order (see the note above). ``DealChangeLedger`` /
+# ``RopaChangeLedger`` are their own no-arg constructors (satisfy
+# ``Callable[[], ChangeLedger]`` structurally).
+TOOL_GROUP_REGISTRY: dict[str, ToolGroupDef] = {
+    REDLINING_GROUP.key: ToolGroupDef(
+        spec=REDLINING_GROUP, build=_build_redlining, ledger_factory=DealChangeLedger
+    ),
+    TABULAR_GROUP.key: ToolGroupDef(spec=TABULAR_GROUP, build=_build_tabular),
+    ROPA_GROUP.key: ToolGroupDef(
+        spec=ROPA_GROUP, build=_build_ropa, ledger_factory=RopaChangeLedger
+    ),
+    ASSESSMENT_GROUP.key: ToolGroupDef(spec=ASSESSMENT_GROUP, build=_build_assessment),
 }
+
+
+def build_area_tool_groups(
+    ctx: GroupBuildContext,
+    group_keys: Iterable[str],
+) -> tuple[list[Callable[..., Any]], ChangeLedger | None]:
+    """Build the ENABLED tool groups for one run, in canonical REGISTRY order (ADR-F062).
+
+    ``group_keys`` is the run's enabled tool-group set — the area's
+    ``practice_area_tool_groups`` rows ∩ registry ∩ per-matter/Level-0 toggles, already
+    resolved by :func:`build_area_inventory`. Iterating the REGISTRY (not the input) makes
+    the order code-canonical and deterministic (D4). This is the R6 grant seam for tool
+    groups; it is fail-closed by construction:
+
+    * A key not in the registry cannot build anything (there is nothing to build from) — it
+      is skipped with a structured warning (counts/keys only, never values). Absence at the
+      row, registry, or toggle level ⇒ the group's tools never enter ``tools`` and never
+      enter any ``GuardContext.granted`` (D3).
+    * The run keeps the FIRST non-None ledger as its live-change ledger (D5). If DATA ever
+      attaches two ledger-bearing groups to one area, BOTH groups' tools are still built,
+      but a structured warning records that only the first streams live changes (honest,
+      non-breaking; real multi-ledger is future work).
+    """
+    wanted = set(group_keys)
+    unknown = sorted(k for k in wanted if k not in TOOL_GROUP_REGISTRY)
+    if unknown:
+        logger.warning(
+            "tool-group keys not in registry; skipped (no grant)",
+            extra={
+                "event": "tool_group_unknown_skipped",
+                "count": len(unknown),
+                "keys": unknown,
+            },
+        )
+    tools: list[Callable[..., Any]] = []
+    change_ledger: ChangeLedger | None = None
+    ledger_source: str | None = None
+    for group_key, tdef in TOOL_GROUP_REGISTRY.items():
+        if group_key not in wanted:
+            continue
+        ledger = tdef.ledger_factory() if tdef.ledger_factory is not None else None
+        tools.extend(tdef.build(ctx, ledger))
+        if ledger is not None:
+            if change_ledger is None:
+                change_ledger, ledger_source = ledger, group_key
+            else:
+                logger.warning(
+                    "multiple ledger-bearing tool groups on one area; only the first "
+                    "streams live changes",
+                    extra={
+                        "event": "tool_group_multi_ledger",
+                        "kept": ledger_source,
+                        "ignored": group_key,
+                    },
+                )
+    return tools, change_ledger
 
 
 class _CapabilityToggle(Protocol):
@@ -220,23 +398,40 @@ class CapabilityInventory:
 
 def build_area_inventory(
     *,
-    area_key: str,
     bound_skill_names: Sequence[str],
     registry: SkillRegistry | None,
     area_playbooks: Sequence[Playbook],
+    tool_group_keys: Sequence[str],
+    deployment_toggles: Iterable[_CapabilityToggle] = (),
 ) -> CapabilityInventory:
-    """Compute the area's available capabilities (pure — no I/O).
+    """Compute the area's available capabilities (pure — no I/O). ADR-F054 + ADR-F062.
 
     ``bound_skill_names`` are the area's ``practice_area_skills`` rows; a name the
     registry no longer knows is dropped (registry is source of truth — the same drift
     posture as ``render_area_agent``). ``area_playbooks`` are the playbooks bound via
-    ``practice_area_playbooks`` (non-deleted). ``area_key`` selects the tool groups
-    from :data:`AREA_TOOL_GROUPS` (an unknown area contributes no tool groups).
+    ``practice_area_playbooks`` (non-deleted). ``tool_group_keys`` are the area's
+    ``practice_area_tool_groups`` rows (SETUP-4a): tool availability is now DATA, resolved
+    against :data:`TOOL_GROUP_REGISTRY` in canonical registry order (a row naming a group
+    absent from the registry is silently dropped as drift — like a drifted skill — so no
+    dead row mints a grant; the composition loop logs it at the grant seam).
+
+    ``deployment_toggles`` are the deployment-wide (Level 0) capability rows (ADR-F062).
+    Level 0 only NARROWS: an ``enabled=false`` row REMOVES that capability
+    (skill/tool-group/playbook) from the AVAILABLE set entirely — it never becomes an
+    entry, so the panel never shows it, composition never builds it, skills never wire, and
+    the playbook tier never renders (one chokepoint for all four). ``enabled=true`` rows are
+    inert (absence already means available).
     """
+    # Level 0: the set of (kind, key) the deployment has disabled — only the disabled rows
+    # matter (an enabled row is a no-op against the default-available posture).
+    disabled = {(t.capability_kind, t.capability_key) for t in deployment_toggles if not t.enabled}
+
     entries: list[CapabilityEntry] = []
 
     # Playbooks — the firm's preferred positions bound to this area.
     for pb in area_playbooks:
+        if (KIND_PLAYBOOK, str(pb.id)) in disabled:
+            continue
         label = f"{pb.name} ({pb.contract_type})" if pb.contract_type else pb.name
         entries.append(
             CapabilityEntry(
@@ -252,6 +447,8 @@ def build_area_inventory(
 
     # Skills — area-bound, filtered to the registry's current set (drift drop).
     for name in bound_skill_names:
+        if (KIND_SKILL, name) in disabled:
+            continue
         record = registry.get(name) if registry is not None else None
         if record is None:
             continue
@@ -268,14 +465,20 @@ def build_area_inventory(
             )
         )
 
-    # Tools — the area's code-defined groups.
-    for group in AREA_TOOL_GROUPS.get(area_key, ()):
+    # Tools — the area's rows ∩ registry, iterated in canonical REGISTRY order (D4), so the
+    # sequence is code-canonical and reproduces today's build order exactly.
+    group_key_set = set(tool_group_keys)
+    for group_key, tdef in TOOL_GROUP_REGISTRY.items():
+        if group_key not in group_key_set:
+            continue
+        if (KIND_TOOL, group_key) in disabled:
+            continue
         entries.append(
             CapabilityEntry(
                 kind=KIND_TOOL,
-                key=group.key,
-                label=group.label,
-                description=group.description,
+                key=group_key,
+                label=tdef.spec.label,
+                description=tdef.spec.description,
                 available=True,
                 default_enabled=True,
                 toggleable=True,

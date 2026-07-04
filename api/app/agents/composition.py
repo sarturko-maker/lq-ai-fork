@@ -36,18 +36,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.agents.area_agent import AreaAgentSpec, combine_tier_floors, render_area_agent
-from app.agents.assessment_tools import build_assessment_tools
 from app.agents.budget import resolve_envelope
 from app.agents.capabilities import (
-    ASSESSMENT_GROUP,
-    REDLINING_GROUP,
-    ROPA_GROUP,
     TABULAR_GROUP,
+    GroupBuildContext,
     build_area_inventory,
+    build_area_tool_groups,
 )
 from app.agents.checkpointer import get_agent_checkpointer
-from app.agents.commercial_tools import COMMERCIAL_AREA_KEY, build_commercial_tools
-from app.agents.deal_changes import DealChangeLedger
 from app.agents.factory import build_gateway_chat_model, build_gateway_http_client
 from app.agents.fan_out_middleware import FanOutQuotaMiddleware
 from app.agents.lease import RunLease, settle_run
@@ -71,13 +67,10 @@ from app.agents.memory_backend import AgentRuntimeContext, build_memory_backend
 from app.agents.playbook_context import render_practice_playbook
 from app.agents.redline_service import RedlineService, build_redline_service
 from app.agents.review_edited_document_tools import build_review_edited_document_tools
-from app.agents.ropa_changes import RopaChangeLedger
-from app.agents.ropa_tools import PRIVACY_AREA_KEY, build_ropa_tools
 from app.agents.runner import SYSTEM_PROMPT, execute_agent_run
 from app.agents.skill_backend import SkillWiring, build_area_skill_wiring
 from app.agents.store import get_agent_store
 from app.agents.stream import RedisStreamBroker, RunStreamBroker
-from app.agents.tabular_tool import build_tabular_tools
 from app.agents.tier_middleware import TierMemoryMiddleware
 from app.agents.tools import MatterBinding, build_matter_tools
 from app.config import get_settings
@@ -85,7 +78,13 @@ from app.db.session import get_session_factory
 from app.models.agent_run import AgentRun
 from app.models.organization_profile import OrganizationProfile
 from app.models.playbook import Playbook
-from app.models.practice_area import PracticeArea, PracticeAreaPlaybook, PracticeAreaSkill
+from app.models.practice_area import (
+    DeploymentCapabilityToggle,
+    PracticeArea,
+    PracticeAreaPlaybook,
+    PracticeAreaSkill,
+    PracticeAreaToolGroup,
+)
 from app.models.project import MatterCapabilityToggle, Project
 from app.models.user import User
 from app.schemas.agent_runs import AgentRunStatus
@@ -469,7 +468,6 @@ async def compose_and_execute_run(
     try:
         binding: MatterBinding | None = None
         area_spec: AreaAgentSpec | None = None
-        area_key: str | None = None
         client_context_md: str | None = None
         # C3a (ADR-F042): the matter-memory tier, loaded inside the project block
         # below (so it degrades to nothing for unbound runs / empty matters) and
@@ -573,7 +571,6 @@ async def compose_and_execute_run(
                     if project.practice_area_id is not None:
                         area = await db.get(PracticeArea, project.practice_area_id)
                         if area is not None:
-                            area_key = area.key
                             # C3a (ADR-F042): area-label the matter-memory heading
                             # from the PracticeArea row's unit_label ("Matter
                             # memory" / "Programme memory"). The AreaAgentSpec
@@ -638,11 +635,33 @@ async def compose_and_execute_run(
                                 .scalars()
                                 .all()
                             )
+                            # SETUP-4a (ADR-F062): the area's tool-group availability is
+                            # now DATA (practice_area_tool_groups rows), resolved against
+                            # the code registry; the deployment-wide (Level 0) toggles
+                            # narrow the AVAILABLE set for the whole deployment. Both feed
+                            # the one inventory chokepoint below.
+                            area_tool_group_keys = (
+                                (
+                                    await db.execute(
+                                        select(PracticeAreaToolGroup.group_key).where(
+                                            PracticeAreaToolGroup.practice_area_id == area.id
+                                        )
+                                    )
+                                )
+                                .scalars()
+                                .all()
+                            )
+                            deployment_toggles = (
+                                (await db.execute(select(DeploymentCapabilityToggle)))
+                                .scalars()
+                                .all()
+                            )
                             inventory = build_area_inventory(
-                                area_key=area.key,
                                 bound_skill_names=bound_skill_names,
                                 registry=registry,
                                 area_playbooks=area_playbooks,
+                                tool_group_keys=area_tool_group_keys,
+                                deployment_toggles=deployment_toggles,
                             )
                             enabled_skills = inventory.enabled_keys("skill", toggles)
                             enabled_tool_groups = set(inventory.enabled_keys("tool", toggles))
@@ -744,78 +763,42 @@ async def compose_and_execute_run(
             tools = tools + build_matter_roster_tools(
                 session_factory, run_id=run_id, binding=binding
             )
-        # PRIV-2 (ADR-F018): a matter filed under the Privacy area also gets the
-        # ROPA domain tools — propose (the code-validated write) + list. Tool
-        # selection is area-keyed at the composition point (the area row is the
-        # agent identity, ADR-F002); other areas never grant these.
+        # SETUP-4a (ADR-F062, supersedes ADR-F054 D1): the area's domain tool GROUPS are
+        # now built by a data-driven REGISTRY LOOP, not a hardcoded per-area branch.
+        # ``enabled_tool_groups`` is the area's practice_area_tool_groups rows ∩ the code
+        # registry ∩ the per-matter/Level-0 toggles (resolved above via the one inventory
+        # chokepoint), so a group grants iff (row present) AND (registry entry exists) AND
+        # (no toggle disables it) — absence at ANY level ⇒ its tools are never built and
+        # never enter GuardContext.granted (R6 fail-closes). The loop iterates the registry
+        # in canonical order (redlining → tabular → ropa → assessment) filtered by this
+        # set, so the ordered grant set is byte-identical to the pre-slice per-area branch
+        # for the seeded areas. Cross-area attachment is now a FEATURE (an admin-created
+        # area gets exactly the groups its rows name); a row naming an unregistered group is
+        # skipped with a structured warning, never a grant (D3).
+        #
         # PRIV-9b/C5b-3 (ADR-F024/F032): the run-scoped change ledger is the producer
         # (an area's tools) → consumer (the runner's stream drain) seam for the live
-        # "watch it happen" signal. Each area that produces one makes its own concrete
-        # ledger (the LiveChange seam keeps the drain area-agnostic); other areas leave
-        # it None (no drain). Privacy → ROPA row washes; Commercial → deal verdict chips.
-        # ADR-F054: per-matter capability toggles gate the area's tool GROUPS. The
-        # outer area-key guard stays (a group only grants for its OWN area — a
-        # misconfigured row can never cross-grant); the inner check skips a
-        # toggled-OFF group, so its tools are never built and never enter
-        # GuardContext.granted (R6 then denies them — defense in depth). The change
-        # ledger is created iff its producing group is enabled. All groups enabled
-        # (the default) ⇒ byte-identical to the pre-slice grants.
+        # "watch it happen" signal. The loop keeps the FIRST enabled ledger-bearing group's
+        # ledger (Privacy → ROPA row washes; Commercial → deal verdict chips); D5.
         #
         # Slice O (ADR-F053): resolve the run's budget profile to the four-brake envelope
-        # HERE (before the area branches) so the agentic-tabular tool can size its
-        # fan-out↔retrieval crossover off the same envelope the FanOutQuotaMiddleware uses
-        # below. Pure (resolve_envelope reads no I/O); a legacy/NULL profile → balanced.
+        # HERE (before the loop) so the agentic-tabular group can size its fan-out↔retrieval
+        # crossover off the same envelope the FanOutQuotaMiddleware uses below. Pure
+        # (resolve_envelope reads no I/O); a legacy/NULL profile → balanced.
         envelope = resolve_envelope(run_budget_profile, get_settings())
         change_ledger: ChangeLedger | None = None
-        if binding is not None and area_key == PRIVACY_AREA_KEY:
-            if ROPA_GROUP.key in enabled_tool_groups:
-                change_ledger = RopaChangeLedger()
-                tools = tools + build_ropa_tools(
-                    session_factory,
+        if binding is not None:
+            domain_tools, change_ledger = build_area_tool_groups(
+                GroupBuildContext(
+                    session_factory=session_factory,
                     run_id=run_id,
                     binding=binding,
-                    change_ledger=change_ledger,
-                )
-            # PRIV-A2 (ADR-F018/F027): the same Privacy matter also gets the
-            # assessment write tools (PIA/DPIA/LIA/TIA + risk register). They reach
-            # ROPA activity IDs through the ROPA tools' list above, so no separate
-            # list is needed; no change ledger yet (the assessment read UI is A3).
-            # Independent toggle (ADR-F054): with ROPA off, assessment degrades to
-            # empty lists, not a crash.
-            if ASSESSMENT_GROUP.key in enabled_tool_groups:
-                tools = tools + build_assessment_tools(
-                    session_factory, run_id=run_id, binding=binding
-                )
-        elif binding is not None and area_key == COMMERCIAL_AREA_KEY:
-            # C4 (ADR-F031/F035): a matter filed under the Commercial area gets the
-            # surgical-redline tool. The Adeu engine is injected via a
-            # provider-callable (stateless, per-document — no startup singleton),
-            # mirroring model_builder/checkpointer_provider. First Commercial
-            # domain-tool grant branch (matter-scoped, not deployment-global).
-            # C5b-3 (ADR-F032): the same Commercial run gets a deal-change ledger —
-            # respond_to_counterparty records each verdict, the runner drains it into
-            # the inline live verdict chips (the Commercial analogue of ROPA's wash).
-            if REDLINING_GROUP.key in enabled_tool_groups:
-                change_ledger = DealChangeLedger()
-                tools = tools + build_commercial_tools(
-                    session_factory,
-                    run_id=run_id,
-                    binding=binding,
-                    redline_service=redline_service_provider(),
-                    change_ledger=change_ledger,
-                )
-            # ADR-F055 (F2 Tabular T1): a Commercial matter also gets the agentic "grids"
-            # tool — cross-document tabular review the agent builds by fanning out a
-            # subagent per document (≤ the fan-out quota; retrieval-fill above it is T4).
-            # Independent toggle (TABULAR_GROUP); own grant set (confinement). No change
-            # ledger yet (live cell-fill is T5). fan_out_quota sizes the crossover.
-            if TABULAR_GROUP.key in enabled_tool_groups:
-                tools = tools + build_tabular_tools(
-                    session_factory,
-                    run_id=run_id,
-                    binding=binding,
-                    fan_out_quota=envelope.fan_out_quota,
-                )
+                    envelope=envelope,
+                    redline_service_provider=redline_service_provider,
+                ),
+                enabled_tool_groups,
+            )
+            tools = tools + domain_tools
 
         # F1-S3: the gateway tier floor is the strongest (lowest) of the
         # matter floor and the area's default floor — the gateway combiner
@@ -915,12 +898,13 @@ async def compose_and_execute_run(
         if wiring.subagents and envelope.fan_out_quota > 0:
             run_middleware.append(FanOutQuotaMiddleware(quota=envelope.fan_out_quota))
 
-        # ADR-F055: the agentic-tabular doctrine rides the prompt only when the Grids
-        # capability is actually wired (Commercial area + group enabled) — same condition
-        # as the tool grant above, so the prompt never advertises a tool the run lacks.
-        tabular_enabled = (
-            area_key == COMMERCIAL_AREA_KEY and TABULAR_GROUP.key in enabled_tool_groups
-        )
+        # ADR-F055 + SETUP-4a: the agentic-tabular doctrine rides the prompt only when the
+        # Grids group is actually built for this run — the same condition as the grant
+        # above (the tabular row is present AND enabled), now area-agnostic (ADR-F062:
+        # attaching the group to any area wires it), so the prompt never advertises a tool
+        # the run lacks. Behaviorally identical for the seeded areas (only Commercial has a
+        # tabular row).
+        tabular_enabled = TABULAR_GROUP.key in enabled_tool_groups
         http_client = build_gateway_http_client()
         try:
             model = model_builder(

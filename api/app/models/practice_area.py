@@ -171,3 +171,99 @@ class PracticeAreaPlaybook(Base):
         return (
             f"<PracticeAreaPlaybook area_id={self.practice_area_id} playbook_id={self.playbook_id}>"
         )
+
+
+class PracticeAreaToolGroup(Base):
+    """Many-to-many join: practice area ↔ tool-group NAME (ADR-F062, SETUP-4a).
+
+    The area↔tool-group AVAILABILITY binding (config-hierarchy Level 1). ``group_key``
+    is TEXT, not a FK — a tool group is CODE-canonical (an entry in
+    ``app.agents.capabilities.TOOL_GROUP_REGISTRY``; its grant set is the group's
+    ``*_TOOL_NAMES`` frozenset). This row names ONLY *which* group is available to an
+    area; what the name resolves to (the grant set, the builder, the ledger, the
+    doctrine) stays code. A row naming a group absent from the registry is dropped at
+    resolve time (registry is source of truth — the same drift posture as
+    ``PracticeAreaSkill``), so no dead row can ever mint a grant. Supersedes ADR-F054
+    D1 (tool availability was a code map; SETUP-4a makes it DATA while keeping grants
+    code). Mirrors :class:`PracticeAreaSkill`; the composition point iterates the
+    REGISTRY order filtered by this area's rows, so ordering stays code-canonical.
+    """
+
+    __tablename__ = "practice_area_tool_groups"
+    __table_args__ = (
+        PrimaryKeyConstraint("practice_area_id", "group_key", name="pk_practice_area_tool_groups"),
+        CheckConstraint(
+            "char_length(group_key) BETWEEN 1 AND 200",
+            name="chk_practice_area_tool_groups_key_len",
+        ),
+    )
+
+    practice_area_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "practice_areas.id", ondelete="CASCADE", name="fk_practice_area_tool_groups_area_id"
+        ),
+        nullable=False,
+    )
+    group_key: Mapped[str] = mapped_column(Text, nullable=False)
+    attached_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<PracticeAreaToolGroup area_id={self.practice_area_id} group_key={self.group_key!r}>"
+        )
+
+
+class DeploymentCapabilityToggle(Base):
+    """Deployment-wide (Level 0) capability on/off — org-admin owned (ADR-F062, SETUP-4a).
+
+    The top of the config hierarchy: the org-admin narrows what the whole deployment
+    offers. Mirrors :class:`~app.models.project.MatterCapabilityToggle` MINUS
+    ``project_id`` (this is not per-matter). SPARSE — a row exists ONLY where the admin
+    disabled a capability; ``enabled=true`` rows are inert (absence already means
+    available), so there is NO seed.
+
+    Level 0 only ever **narrows**: an ``enabled=false`` row removes that capability
+    (``skill`` / ``tool`` group / ``playbook``) from EVERY area's AVAILABLE set at the one
+    ``build_area_inventory`` chokepoint — the panel never shows it, composition never
+    builds it, skills never wire, the playbook tier never renders. ``capability_key`` is
+    TEXT (skill name / tool-group key / ``playbook_id::text``), validated against the
+    registry/DB at the PATCH boundary so no dead row lands. ``set_by`` records the human
+    who last set it (SET NULL on user delete — it is the deployment's state, not the
+    individual's).
+    """
+
+    __tablename__ = "deployment_capability_toggles"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "capability_kind", "capability_key", name="pk_deployment_capability_toggles"
+        ),
+        CheckConstraint(
+            "capability_kind IN ('skill', 'tool', 'playbook')",
+            name="chk_deployment_capability_toggles_kind",
+        ),
+        CheckConstraint(
+            "char_length(capability_key) BETWEEN 1 AND 200",
+            name="chk_deployment_capability_toggles_key_len",
+        ),
+    )
+
+    capability_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    capability_key: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    set_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_deployment_capability_toggles_set_by"),
+        nullable=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<DeploymentCapabilityToggle kind={self.capability_kind!r} "
+            f"key={self.capability_key!r} enabled={self.enabled}>"
+        )
