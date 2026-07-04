@@ -253,9 +253,50 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   (`deployment_toggles`). Isolated live smoke **21/21** (dev stack still AIC-captive):
 >   seed/create/attach/detach/Level-0-narrows-matter-panel/delete-semantics/authz-fence — evidence
 >   `docs/fork/evidence/setup-4a/live-smoke.md`.
-> - **NEXT = SETUP-4b — Practice Areas + Capabilities admin surfaces (web UI over the 4a endpoints),
->   then SETUP-5 reconcile (F054 flip + D1 supersession; also takes
->   the Q1 viewer/operator tenant-data RBAC decision), then SETUP-6 — ACTOR GUIDES (maintainer,
+> - **SETUP-4b ✓ — Practice Areas + Capabilities admin surfaces (web UI over the 4a endpoints).
+>   ADR-F062 addendum, NO migration. Plan `docs/fork/plans/SETUP-4b-areas-capabilities-admin-ui.md`
+>   (D1-D11). Sonnet-line implemented in a worktree; lead verified/reviewed/live-tested.** Landed:
+>   (a) `/lq-ai/admin/areas` — gen-B list (position order, status badge honest to the `configured`
+>   derivation — D5: NO fake enable toggle, "Add doctrine to activate"), create modal
+>   (registry-bounded tool-group checkboxes), ↑/↓ reorder; `/lq-ai/admin/areas/[key]` detail —
+>   edit name/unit-label/doctrine/tier-floor (dirty-fields-only PATCH), roster JSON (D6, parse-gated,
+>   server 400 verbatim), three bind cards (groups/skills/playbooks, catalogs from
+>   GET /admin/capabilities — D7), delete w/ 409 live-matter count UX. (b) `/lq-ai/admin/capabilities`
+>   — Level-0 sections w/ optimistic switch grammar, MCP placeholder, models READ-ONLY from the
+>   member-visible `GET /api/v1/models` (graceful unavailable state). (c) Backend enablers:
+>   `PracticeAreaRead` += `bound_tool_groups` (REGISTRY-canonical order) + `bound_playbooks`
+>   (name,id tiebreak); PATCH += name/unit_label (explicit-null rejected 422 by field_validator —
+>   the `str | None` union arm SKIPS min_length for null, review catch); NEW
+>   `POST /practice-areas/reorder` (exact-permutation 422, FOR UPDATE ordered by key); openapi
+>   count 171. (d) Shared `web/src/lib/lq-ai/admin/page-helpers.ts` (describeMutationError +
+>   catalog helpers; users page re-pointed). **Review traps worth carrying:** (1) `GET
+>   /admin/model-menu` was built then DELETED in review — an admin-only projection of data the
+>   member-visible /models already returns verbatim is redundant surface; check who can ALREADY
+>   see the data before minting a "stripped" endpoint. (2) optimistic-UI revert must restore ONLY
+>   the failed entry — a whole-state snapshot clobbers interleaved toggles (the matter-level
+>   CapabilitiesPanel.svelte still has this latent pattern — recorded follow-up, not fixed here).
+>   (3) Cypress `cypress run` TRASHES `cypress/screenshots/` per run — copy evidence out
+>   immediately. Gate: full api suite **3264/43** (fixed branch), web vitest 105 files/1141,
+>   svelte-check 0 errors, isolated API smoke **32/32**, browser pass (real login → create area →
+>   attach group → Level-0 toggle flip, Cypress 1/1 + width probe no-overflow) — evidence
+>   `docs/fork/evidence/setup-4b/live-smoke.md` + 4 screenshots.
+> - **NEXT = SETUP-5 in TWO slices (lead plan drafted from a 4-reader recon, session scratchpad
+>   `SETUP-5-plan.md`): 5a = ADR reconcile paperwork (F054 flip + D1-superseded-by-F062 metadata
+>   pointer, F030/F042 house style; F062 flip too — substance was maintainer-ratified §7 row 9;
+>   flag both flips in the PR) + per-area/deployment budget-profile DEFAULTS (ADR-F063, mig 0087:
+>   `practice_areas.default_budget_profile` + `Settings.run_default_budget_profile`; chain = run
+>   explicit > area > deployment > balanced, resolved ONCE at run create, row stores the RESOLVED
+>   profile; `AgentRunCreate.budget_profile` becomes `| None`; composer gains a "Default (…)"
+>   option that OMITS the field; area-detail page gains the select; `${VAR:-}` truthiness trap
+>   applies to the new Setting). 5b = the Q1 tenant-data RBAC decision (ADR-F064, deep security
+>   review): RECOMMENDATION on record — (i) ENFORCE viewer read-only by swapping ActiveUser →
+>   MutatingUser on all tenant-data mutating routes (3b's Users UI already PROMISES "viewers are
+>   read-only"; today it's a label — MutatingUser is dead code with zero usages) + an
+>   OpenAPI-driven drift-guard (every POST/PATCH/DELETE is MutatingUser|Admin|allowlisted); (ii)
+>   EXCLUDE operator from the ~13 pre-F061 `is_admin` tenant-data bypasses in tabular.py/
+>   playbooks.py via one `tenant_admin_visibility()` helper (hosted tenant confidentiality:
+>   operator manages platform+config, NOT the firm's matters; break-glass = future explicit
+>   feature). Then SETUP-6 — ACTOR GUIDES (maintainer,
 >   2026-07-04, explicitly ON HOLD until called; task #462): human-facing operating documentation,
 >   one guide per F061 actor — Operator (wizard/provisioning, backups+restore drill, the fence,
 >   invite handover, ongoing ops; links the staging-bringup runbook, no duplication) / Admin
