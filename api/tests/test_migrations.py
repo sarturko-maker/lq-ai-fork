@@ -987,3 +987,143 @@ async def test_users_role_check_admits_operator(db_session: AsyncSession) -> Non
     with pytest.raises(Exception):
         await db_session.flush()
     await db_session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# SETUP-4a (ADR-F062) — tool-group registry data + deployment capability
+# toggles (migration 0086)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_practice_area_tool_groups_table_and_seed(db_session: AsyncSession) -> None:
+    """The 0086 practice_area_tool_groups table exists, has the expected columns, and is
+    seeded (names only) from today's map: commercial → {redlining, tabular}, privacy →
+    {ropa, assessment}."""
+    cols = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'practice_area_tool_groups'"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {"practice_area_id", "group_key", "attached_at"}.issubset(set(cols))
+
+    seeded = (
+        await db_session.execute(
+            text(
+                "SELECT pa.key, t.group_key FROM practice_area_tool_groups t "
+                "JOIN practice_areas pa ON pa.id = t.practice_area_id "
+                "ORDER BY pa.key, t.group_key"
+            )
+        )
+    ).all()
+    assert list(seeded) == [
+        ("commercial", "redlining"),
+        ("commercial", "tabular"),
+        ("privacy", "assessment"),
+        ("privacy", "ropa"),
+    ]
+
+
+@pytest.mark.integration
+async def test_practice_area_tool_groups_key_len_check(db_session: AsyncSession) -> None:
+    """group_key length is CHECK-bounded (1..200) — an empty key is rejected."""
+    area_id = (
+        await db_session.execute(text("SELECT id FROM practice_areas WHERE key = 'commercial'"))
+    ).scalar_one()
+    with pytest.raises(Exception):
+        await db_session.execute(
+            text(
+                "INSERT INTO practice_area_tool_groups (practice_area_id, group_key) "
+                "VALUES (:aid, '')"
+            ),
+            {"aid": area_id},
+        )
+        await db_session.flush()
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_practice_area_tool_groups_cascade_on_area_delete(db_session: AsyncSession) -> None:
+    """Deleting a practice area CASCADE-drops its tool-group rows (FK ON DELETE CASCADE)."""
+    await db_session.execute(
+        text(
+            "INSERT INTO practice_areas (key, name, unit_label, position) "
+            "VALUES ('tg-cascade-test', 'TG Cascade', 'Matter', 999)"
+        )
+    )
+    area_id = (
+        await db_session.execute(
+            text("SELECT id FROM practice_areas WHERE key = 'tg-cascade-test'")
+        )
+    ).scalar_one()
+    await db_session.execute(
+        text(
+            "INSERT INTO practice_area_tool_groups (practice_area_id, group_key) "
+            "VALUES (:aid, 'redlining')"
+        ),
+        {"aid": area_id},
+    )
+    await db_session.flush()
+    await db_session.execute(text("DELETE FROM practice_areas WHERE id = :aid"), {"aid": area_id})
+    await db_session.flush()
+    remaining = (
+        await db_session.execute(
+            text("SELECT count(*) FROM practice_area_tool_groups WHERE practice_area_id = :aid"),
+            {"aid": area_id},
+        )
+    ).scalar_one()
+    assert remaining == 0
+    await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_deployment_capability_toggles_table_exists(db_session: AsyncSession) -> None:
+    """The 0086 deployment_capability_toggles table exists with the expected columns and is
+    NOT seeded (sparse — absence means available)."""
+    cols = (
+        (
+            await db_session.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'deployment_capability_toggles'"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {"capability_kind", "capability_key", "enabled", "set_by", "updated_at"}.issubset(
+        set(cols)
+    )
+    count = (
+        await db_session.execute(text("SELECT count(*) FROM deployment_capability_toggles"))
+    ).scalar_one()
+    assert count == 0  # no seed
+
+
+@pytest.mark.integration
+async def test_deployment_capability_toggles_kind_check(db_session: AsyncSession) -> None:
+    """capability_kind is constrained to skill|tool|playbook."""
+    await db_session.execute(
+        text(
+            "INSERT INTO deployment_capability_toggles (capability_kind, capability_key, enabled) "
+            "VALUES ('tool', 'redlining', false)"
+        )
+    )
+    await db_session.flush()  # a valid kind must NOT raise
+    with pytest.raises(Exception):
+        await db_session.execute(
+            text(
+                "INSERT INTO deployment_capability_toggles "
+                "(capability_kind, capability_key, enabled) VALUES ('bogus', 'x', false)"
+            )
+        )
+        await db_session.flush()
+    await db_session.rollback()

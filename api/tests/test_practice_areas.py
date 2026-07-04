@@ -824,3 +824,276 @@ async def test_commercial_doctrine_seed_updates_old_and_never_clobbers_edit(
         assert area.profile_md == "operator-edited commercial profile"
     finally:
         sys.modules.pop("migration_0066", None)
+
+
+# --- SETUP-4a: tool-group registry data + practice-area CRUD (ADR-F062) ------
+async def _tool_group_keys(db: AsyncSession, area_id) -> list[str]:
+    from app.models.practice_area import PracticeAreaToolGroup
+
+    rows = (
+        (
+            await db.execute(
+                select(PracticeAreaToolGroup.group_key)
+                .where(PracticeAreaToolGroup.practice_area_id == area_id)
+                .order_by(PracticeAreaToolGroup.group_key)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
+async def test_tool_group_seed_present_for_commercial_and_privacy(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    """0086 seeded the tool-group rows (names only) from today's map."""
+    commercial = (
+        await db_session.execute(select(PracticeArea).where(PracticeArea.key == "commercial"))
+    ).scalar_one()
+    privacy = (
+        await db_session.execute(select(PracticeArea).where(PracticeArea.key == "privacy"))
+    ).scalar_one()
+    assert await _tool_group_keys(db_session, commercial.id) == ["redlining", "tabular"]
+    assert await _tool_group_keys(db_session, privacy.id) == ["assessment", "ropa"]
+
+
+async def test_tool_group_seed_is_idempotent(db_session: AsyncSession) -> None:
+    """Re-running the 0086 _seed inserts no duplicates and never disturbs an
+    admin-attached group (0056 idempotency precedent)."""
+    versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0086", versions / "0086_tool_group_registry_deployment_toggles.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["migration_0086"] = module
+    try:
+        spec.loader.exec_module(module)
+        from app.models.practice_area import PracticeAreaToolGroup
+
+        area_id = (
+            await db_session.execute(
+                select(PracticeArea.id).where(PracticeArea.key == "commercial")
+            )
+        ).scalar_one()
+
+        async def _count() -> int:
+            return (
+                await db_session.execute(
+                    select(func.count())
+                    .select_from(PracticeAreaToolGroup)
+                    .where(PracticeAreaToolGroup.practice_area_id == area_id)
+                )
+            ).scalar_one()
+
+        # An admin attaches an extra group the defaults don't include (privacy's ropa).
+        db_session.add(PracticeAreaToolGroup(practice_area_id=area_id, group_key="ropa"))
+        await db_session.flush()
+        before = await _count()
+
+        conn = await db_session.connection()
+        await conn.run_sync(lambda sync_conn: module._seed(sync_conn))
+
+        assert await _count() == before  # no duplicate inserts
+        assert "ropa" in await _tool_group_keys(db_session, area_id)  # admin attach survived
+    finally:
+        sys.modules.pop("migration_0086", None)
+
+
+async def test_create_practice_area_success(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas",
+        headers=_bearer(admin),
+        json={
+            "key": "litigation",
+            "name": "Litigation",
+            "unit_label": "Case",
+            "profile_md": "# Litigation area doctrine",
+            "tool_groups": ["redlining"],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["key"] == "litigation"
+    assert body["configured"] is True  # profile present → derived configured
+    assert body["position"] >= 5  # appended after the five seeds
+    area_id = (
+        await db_session.execute(select(PracticeArea.id).where(PracticeArea.key == "litigation"))
+    ).scalar_one()
+    assert await _tool_group_keys(db_session, area_id) == ["redlining"]
+
+
+async def test_create_practice_area_rejects_bad_slug(client: AsyncClient, admin: User) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas",
+        headers=_bearer(admin),
+        json={"key": "-bad-", "name": "X", "unit_label": "Y"},
+    )
+    assert resp.status_code == 422  # anchored slug: no edge hyphens
+
+
+async def test_create_practice_area_rejects_unknown_tool_group(
+    client: AsyncClient, admin: User
+) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas",
+        headers=_bearer(admin),
+        json={"key": "newarea", "name": "X", "unit_label": "Y", "tool_groups": ["not-a-group"]},
+    )
+    assert resp.status_code == 404
+
+
+async def test_create_practice_area_rejects_model_bearing_subagent(
+    client: AsyncClient, admin: User
+) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas",
+        headers=_bearer(admin),
+        json={
+            "key": "badcfg",
+            "name": "X",
+            "unit_label": "Y",
+            "agent_config": {"subagents": [{"name": "s", "description": "d", "model": "gpt-4"}]},
+        },
+    )
+    assert resp.status_code == 400  # ADR-F010 gateway-bypass guard reused from PATCH
+
+
+async def test_create_practice_area_duplicate_key_is_409(client: AsyncClient, admin: User) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas",
+        headers=_bearer(admin),
+        json={"key": "commercial", "name": "Dup", "unit_label": "Matter"},
+    )
+    assert resp.status_code == 409
+
+
+async def test_create_practice_area_requires_admin(client: AsyncClient, user: User) -> None:
+    resp = await client.post(
+        "/api/v1/practice-areas",
+        headers=_bearer(user),
+        json={"key": "nope", "name": "X", "unit_label": "Y"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_delete_practice_area_success(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    db_session.add(PracticeArea(key="tempdel", name="Temp", unit_label="Matter", position=900))
+    await db_session.flush()
+    resp = await client.delete("/api/v1/practice-areas/tempdel", headers=_bearer(admin))
+    assert resp.status_code == 204
+    gone = (
+        await db_session.execute(select(PracticeArea).where(PracticeArea.key == "tempdel"))
+    ).scalar_one_or_none()
+    assert gone is None
+
+
+async def test_delete_practice_area_unknown_is_404(client: AsyncClient, admin: User) -> None:
+    resp = await client.delete("/api/v1/practice-areas/does-not-exist", headers=_bearer(admin))
+    assert resp.status_code == 404
+
+
+async def test_delete_practice_area_requires_admin(client: AsyncClient, user: User) -> None:
+    resp = await client.delete("/api/v1/practice-areas/commercial", headers=_bearer(user))
+    assert resp.status_code == 403
+
+
+async def test_delete_practice_area_refuses_with_live_matter(
+    client: AsyncClient, admin: User, user: User, db_session: AsyncSession
+) -> None:
+    from app.models.project import Project
+
+    area = PracticeArea(key="filedarea", name="Filed", unit_label="Matter", position=901)
+    db_session.add(area)
+    await db_session.flush()
+    proj = Project(owner_id=user.id, name="Live matter", slug="live-del", practice_area_id=area.id)
+    db_session.add(proj)
+    await db_session.flush()
+    # A live (non-archived) matter blocks the delete (409 with the count).
+    resp = await client.delete("/api/v1/practice-areas/filedarea", headers=_bearer(admin))
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["details"]["active_matter_count"] == 1
+    # Archive the matter → the delete now succeeds (SET NULL protects the archived row).
+    from datetime import UTC, datetime
+
+    proj.archived_at = datetime.now(UTC)
+    await db_session.flush()
+    resp2 = await client.delete("/api/v1/practice-areas/filedarea", headers=_bearer(admin))
+    assert resp2.status_code == 204
+
+
+async def test_attach_tool_group_success_and_duplicate_409(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    area = PracticeArea(key="attacharea", name="Attach", unit_label="Matter", position=902)
+    db_session.add(area)
+    await db_session.flush()
+    resp = await client.post(
+        "/api/v1/practice-areas/attacharea/tool-groups",
+        headers=_bearer(admin),
+        json={"group_key": "redlining"},
+    )
+    assert resp.status_code == 204
+    assert await _tool_group_keys(db_session, area.id) == ["redlining"]
+    # Re-attach → 409.
+    dup = await client.post(
+        "/api/v1/practice-areas/attacharea/tool-groups",
+        headers=_bearer(admin),
+        json={"group_key": "redlining"},
+    )
+    assert dup.status_code == 409
+
+
+async def test_attach_tool_group_unknown_is_404(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    area = PracticeArea(key="attach404", name="A", unit_label="Matter", position=903)
+    db_session.add(area)
+    await db_session.flush()
+    resp = await client.post(
+        "/api/v1/practice-areas/attach404/tool-groups",
+        headers=_bearer(admin),
+        json={"group_key": "not-a-registered-group"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_detach_tool_group_idempotent(
+    client: AsyncClient, admin: User, db_session: AsyncSession
+) -> None:
+    # Detaching a group never attached is a no-op 204 (the desired end state holds).
+    resp = await client.delete(
+        "/api/v1/practice-areas/commercial/tool-groups/redlining", headers=_bearer(admin)
+    )
+    assert resp.status_code == 204
+    assert await _tool_group_keys(
+        db_session,
+        (
+            await db_session.execute(
+                select(PracticeArea.id).where(PracticeArea.key == "commercial")
+            )
+        ).scalar_one(),
+    ) == ["tabular"]
+    # Detaching again is still 204.
+    resp2 = await client.delete(
+        "/api/v1/practice-areas/commercial/tool-groups/redlining", headers=_bearer(admin)
+    )
+    assert resp2.status_code == 204
+
+
+async def test_tool_group_endpoints_require_admin(client: AsyncClient, user: User) -> None:
+    attach = await client.post(
+        "/api/v1/practice-areas/commercial/tool-groups",
+        headers=_bearer(user),
+        json={"group_key": "redlining"},
+    )
+    assert attach.status_code == 403
+    detach = await client.delete(
+        "/api/v1/practice-areas/commercial/tool-groups/redlining", headers=_bearer(user)
+    )
+    assert detach.status_code == 403

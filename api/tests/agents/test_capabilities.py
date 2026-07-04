@@ -66,7 +66,7 @@ def _registry() -> _FakeRegistry:
 def test_commercial_inventory_lists_skills_tools_playbooks_and_mcp() -> None:
     pb = _playbook("NDA playbook")
     inv = build_area_inventory(
-        area_key="commercial",
+        tool_group_keys=["redlining", "tabular"],
         bound_skill_names=["nda-review", "msa-review-saas"],
         registry=_registry(),
         area_playbooks=[pb],
@@ -84,22 +84,43 @@ def test_commercial_inventory_lists_skills_tools_playbooks_and_mcp() -> None:
 
 def test_privacy_inventory_offers_ropa_and_assessment_groups() -> None:
     inv = build_area_inventory(
-        area_key="privacy", bound_skill_names=[], registry=_registry(), area_playbooks=[]
+        tool_group_keys=["ropa", "assessment"],
+        bound_skill_names=[],
+        registry=_registry(),
+        area_playbooks=[],
     )
     tools = {s.kind: s for s in inv.sections()}["tool"]
     assert [e.key for e in tools.entries] == ["ropa", "assessment"]
 
 
-def test_unknown_area_contributes_no_tool_groups() -> None:
+def test_area_with_no_tool_group_rows_has_no_tool_groups() -> None:
+    # SETUP-4a: tool availability is DATA — an area with no practice_area_tool_groups rows
+    # (e.g. a fresh admin-created area, or an unconfigured seed area) offers no tool groups.
     inv = build_area_inventory(
-        area_key="employment", bound_skill_names=[], registry=_registry(), area_playbooks=[]
+        tool_group_keys=[],
+        bound_skill_names=[],
+        registry=_registry(),
+        area_playbooks=[],
     )
     assert all(e.kind != "tool" for e in inv.entries)
 
 
+def test_tool_group_row_not_in_registry_is_dropped_as_drift() -> None:
+    # SETUP-4a (D3): a row naming a group absent from the registry is silently dropped from
+    # availability (fail-closed) — only the registry-known groups become entries.
+    inv = build_area_inventory(
+        tool_group_keys=["redlining", "not-a-real-group"],
+        bound_skill_names=[],
+        registry=_registry(),
+        area_playbooks=[],
+    )
+    tools = {s.kind: s for s in inv.sections()}["tool"]
+    assert [e.key for e in tools.entries] == ["redlining"]
+
+
 def test_skill_unknown_to_registry_is_dropped_as_drift() -> None:
     inv = build_area_inventory(
-        area_key="commercial",
+        tool_group_keys=["redlining", "tabular"],
         bound_skill_names=["nda-review", "gone-from-registry"],
         registry=_registry(),
         area_playbooks=[],
@@ -110,7 +131,7 @@ def test_skill_unknown_to_registry_is_dropped_as_drift() -> None:
 
 def test_no_registry_yields_no_skills() -> None:
     inv = build_area_inventory(
-        area_key="commercial",
+        tool_group_keys=["redlining", "tabular"],
         bound_skill_names=["nda-review"],
         registry=None,
         area_playbooks=[],
@@ -121,7 +142,10 @@ def test_no_registry_yields_no_skills() -> None:
 def test_skill_label_falls_back_to_name_without_title() -> None:
     reg = _FakeRegistry({"nda-review": _FakeRecord(None, None)})
     inv = build_area_inventory(
-        area_key="commercial", bound_skill_names=["nda-review"], registry=reg, area_playbooks=[]
+        tool_group_keys=["redlining", "tabular"],
+        bound_skill_names=["nda-review"],
+        registry=reg,
+        area_playbooks=[],
     )
     (skill,) = [e for e in inv.entries if e.kind == "skill"]
     assert skill.label == "nda-review"
@@ -136,7 +160,7 @@ def test_empty_inventory_is_mcp_only() -> None:
 def test_enabled_keys_all_on_by_default() -> None:
     pb = _playbook("NDA playbook")
     inv = build_area_inventory(
-        area_key="commercial",
+        tool_group_keys=["redlining", "tabular"],
         bound_skill_names=["nda-review"],
         registry=_registry(),
         area_playbooks=[pb],
@@ -148,7 +172,10 @@ def test_enabled_keys_all_on_by_default() -> None:
 
 def test_enabled_keys_applies_off_override() -> None:
     inv = build_area_inventory(
-        area_key="privacy", bound_skill_names=[], registry=_registry(), area_playbooks=[]
+        tool_group_keys=["ropa", "assessment"],
+        bound_skill_names=[],
+        registry=_registry(),
+        area_playbooks=[],
     )
     toggles = [_toggle("tool", "ropa", False)]
     assert inv.enabled_keys("tool", toggles) == ["assessment"]
@@ -156,7 +183,10 @@ def test_enabled_keys_applies_off_override() -> None:
 
 def test_enabled_keys_explicit_on_is_a_noop_against_default_on() -> None:
     inv = build_area_inventory(
-        area_key="privacy", bound_skill_names=[], registry=_registry(), area_playbooks=[]
+        tool_group_keys=["ropa", "assessment"],
+        bound_skill_names=[],
+        registry=_registry(),
+        area_playbooks=[],
     )
     toggles = [_toggle("tool", "ropa", True)]
     assert set(inv.enabled_keys("tool", toggles)) == {"ropa", "assessment"}
@@ -164,7 +194,7 @@ def test_enabled_keys_explicit_on_is_a_noop_against_default_on() -> None:
 
 def test_enabled_keys_preserves_inventory_order() -> None:
     inv = build_area_inventory(
-        area_key="commercial",
+        tool_group_keys=["redlining", "tabular"],
         bound_skill_names=["nda-review", "msa-review-saas"],
         registry=_registry(),
         area_playbooks=[],
@@ -175,7 +205,10 @@ def test_enabled_keys_preserves_inventory_order() -> None:
 
 def test_mcp_is_never_enabled() -> None:
     inv = build_area_inventory(
-        area_key="commercial", bound_skill_names=[], registry=_registry(), area_playbooks=[]
+        tool_group_keys=["redlining", "tabular"],
+        bound_skill_names=[],
+        registry=_registry(),
+        area_playbooks=[],
     )
     # Even an (illegitimate) override can't enable the non-toggleable placeholder.
     assert inv.enabled_keys("mcp", [_toggle("mcp", "mcp", True)]) == []
@@ -184,7 +217,7 @@ def test_mcp_is_never_enabled() -> None:
 def test_is_toggleable_guards_the_put_boundary() -> None:
     pb = _playbook("NDA playbook")
     inv = build_area_inventory(
-        area_key="commercial",
+        tool_group_keys=["redlining", "tabular"],
         bound_skill_names=["nda-review"],
         registry=_registry(),
         area_playbooks=[pb],
@@ -200,7 +233,7 @@ def test_is_toggleable_guards_the_put_boundary() -> None:
 
 def test_enabled_map_covers_every_entry() -> None:
     inv = build_area_inventory(
-        area_key="commercial",
+        tool_group_keys=["redlining", "tabular"],
         bound_skill_names=["nda-review"],
         registry=_registry(),
         area_playbooks=[],
@@ -211,10 +244,65 @@ def test_enabled_map_covers_every_entry() -> None:
     assert m[("mcp", "mcp")] is False
 
 
-def test_area_tool_groups_map_to_the_expected_keys() -> None:
-    # Composition gates on these group keys; pin the area→groups map.
-    assert [g.key for g in cap.AREA_TOOL_GROUPS["commercial"]] == ["redlining", "tabular"]
-    assert [g.key for g in cap.AREA_TOOL_GROUPS["privacy"]] == ["ropa", "assessment"]
+def test_tool_group_registry_order_is_canonical() -> None:
+    # SETUP-4a (ADR-F062): the code registry's INSERTION ORDER is the canonical group order
+    # (was the AREA_TOOL_GROUPS map). Composition + inventory both iterate this order
+    # filtered by an area's rows, so it must stay pinned. The seed (commercial →
+    # {redlining, tabular}, privacy → {ropa, assessment}) is pinned by the migration
+    # round-trip (tests/test_migrations.py) + the seed-idempotency test
+    # (tests/test_practice_areas.py); the parity gate (tests/agents/test_registry_parity.py)
+    # pins that this order reproduces the pre-slice per-area grants exactly.
+    assert list(cap.TOOL_GROUP_REGISTRY) == ["redlining", "tabular", "ropa", "assessment"]
+
+
+# --- Level-0 (deployment-wide) narrowing (ADR-F062) --------------------------
+def test_deployment_disabled_tool_group_removed_from_availability() -> None:
+    inv = build_area_inventory(
+        tool_group_keys=["ropa", "assessment"],
+        bound_skill_names=[],
+        registry=_registry(),
+        area_playbooks=[],
+        deployment_toggles=[_toggle("tool", "ropa", False)],
+    )
+    tools = {s.kind: s for s in inv.sections()}["tool"]
+    assert [e.key for e in tools.entries] == ["assessment"]  # ropa vanished entirely
+
+
+def test_deployment_disabled_skill_removed_from_availability() -> None:
+    inv = build_area_inventory(
+        tool_group_keys=[],
+        bound_skill_names=["nda-review", "msa-review-saas"],
+        registry=_registry(),
+        area_playbooks=[],
+        deployment_toggles=[_toggle("skill", "nda-review", False)],
+    )
+    skills = {s.kind: s for s in inv.sections()}["skill"]
+    assert [e.key for e in skills.entries] == ["msa-review-saas"]
+
+
+def test_deployment_disabled_playbook_removed_from_availability() -> None:
+    pb = _playbook("NDA playbook")
+    inv = build_area_inventory(
+        tool_group_keys=[],
+        bound_skill_names=[],
+        registry=_registry(),
+        area_playbooks=[pb],
+        deployment_toggles=[_toggle("playbook", str(pb.id), False)],
+    )
+    assert all(e.kind != "playbook" for e in inv.entries)
+
+
+def test_deployment_enabled_toggle_is_inert() -> None:
+    # An enabled=true Level-0 row is a no-op (absence already means available).
+    inv = build_area_inventory(
+        tool_group_keys=["redlining", "tabular"],
+        bound_skill_names=["nda-review"],
+        registry=_registry(),
+        area_playbooks=[],
+        deployment_toggles=[_toggle("tool", "redlining", True)],
+    )
+    tools = {s.kind: s for s in inv.sections()}["tool"]
+    assert [e.key for e in tools.entries] == ["redlining", "tabular"]
 
 
 # --- playbook renderer -------------------------------------------------------

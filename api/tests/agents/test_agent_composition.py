@@ -1898,3 +1898,100 @@ async def test_disabled_tool_group_is_not_granted(comp_env: CompositionEnv) -> N
         session_factory_provider=lambda: comp_env.factory,
     )
     assert "list_processing_activities" not in await _audit_tools(comp_env, run_b)
+
+
+# --- SETUP-4a (ADR-F062): data-driven tool groups — cross-area attach + Level 0 ----------
+async def _add_tool_group(env: CompositionEnv, area_id: uuid.UUID, group_key: str) -> None:
+    from app.models.practice_area import PracticeAreaToolGroup
+
+    async with env.factory() as db:
+        db.add(PracticeAreaToolGroup(practice_area_id=area_id, group_key=group_key))
+        await db.commit()
+
+
+async def _del_tool_group(env: CompositionEnv, area_id: uuid.UUID, group_key: str) -> None:
+    from app.models.practice_area import PracticeAreaToolGroup
+
+    async with env.factory() as db:
+        await db.execute(
+            delete(PracticeAreaToolGroup).where(
+                PracticeAreaToolGroup.practice_area_id == area_id,
+                PracticeAreaToolGroup.group_key == group_key,
+            )
+        )
+        await db.commit()
+
+
+async def _add_deployment_toggle(
+    env: CompositionEnv, kind: str, key: str, *, enabled: bool
+) -> None:
+    from app.models.practice_area import DeploymentCapabilityToggle
+
+    async with env.factory() as db:
+        db.add(
+            DeploymentCapabilityToggle(capability_kind=kind, capability_key=key, enabled=enabled)
+        )
+        await db.commit()
+
+
+async def _del_deployment_toggle(env: CompositionEnv, kind: str, key: str) -> None:
+    from app.models.practice_area import DeploymentCapabilityToggle
+
+    async with env.factory() as db:
+        await db.execute(
+            delete(DeploymentCapabilityToggle).where(
+                DeploymentCapabilityToggle.capability_kind == kind,
+                DeploymentCapabilityToggle.capability_key == key,
+            )
+        )
+        await db.commit()
+
+
+async def test_cross_area_attach_grants_group_on_a_different_area(
+    comp_env: CompositionEnv,
+) -> None:
+    """ADR-F062 (D3): attaching a tool group to an area via a practice_area_tool_groups
+    row grants THAT group's tools for the area's runs — even a group not native to it. A
+    ROPA row on the COMMERCIAL area makes list_processing_activities dispatch on a
+    Commercial matter (it is NOT granted without the row). Proves availability is DATA."""
+    commercial_id = await _area_id(comp_env, "commercial")
+    await _file_matter_under(comp_env, commercial_id)
+    await _add_tool_group(comp_env, commercial_id, "ropa")
+    try:
+        run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+        model = ScriptedToolCallingModel(
+            responses=[tool_call_message("list_processing_activities", {}), final_message("done")]
+        )
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(model=model),
+            session_factory_provider=lambda: comp_env.factory,
+        )
+        assert "list_processing_activities" in await _audit_tools(comp_env, run_id)
+    finally:
+        await _del_tool_group(comp_env, commercial_id, "ropa")
+
+
+async def test_level0_disabled_group_not_granted_in_composition(
+    comp_env: CompositionEnv,
+) -> None:
+    """ADR-F062: a deployment-disabled (Level 0) tool group is removed from the AVAILABLE
+    set at the one inventory chokepoint, so composition never builds it — the guarded
+    dispatch that proves a grant is ABSENT. Privacy's ROPA group, disabled deployment-wide,
+    is not granted even though the area has the seeded row."""
+    privacy_id = await _area_id(comp_env, "privacy")
+    await _file_matter_under(comp_env, privacy_id)
+    await _add_deployment_toggle(comp_env, "tool", "ropa", enabled=False)
+    try:
+        run_id = await comp_env.make_run(project_id_value=comp_env.project_id)
+        model = ScriptedToolCallingModel(
+            responses=[tool_call_message("list_processing_activities", {}), final_message("done")]
+        )
+        await compose_and_execute_run(
+            run_id=run_id,
+            model_builder=CapturingBuilder(model=model),
+            session_factory_provider=lambda: comp_env.factory,
+        )
+        assert "list_processing_activities" not in await _audit_tools(comp_env, run_id)
+    finally:
+        await _del_deployment_toggle(comp_env, "tool", "ropa")
