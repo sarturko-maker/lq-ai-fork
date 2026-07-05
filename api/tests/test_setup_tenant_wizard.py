@@ -448,6 +448,35 @@ def test_operator_email_shape_check_applies(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# SETUP-5a — RUN_DEFAULT_BUDGET_PROFILE (ADR-F063): optional deployment default
+# budget profile; anchored fence ^(economy|balanced|generous)$, refused else.
+# --------------------------------------------------------------------------- #
+def test_budget_profile_written_when_set(tmp_path: Path) -> None:
+    out_dir = _render(tmp_path, RUN_DEFAULT_BUDGET_PROFILE="economy")
+    env = _parse_env(out_dir / ".env.prod")
+    assert env["RUN_DEFAULT_BUDGET_PROFILE"] == "economy"
+
+
+def test_budget_profile_omitted_entirely_when_unset(tmp_path: Path) -> None:
+    """No RUN_DEFAULT_BUDGET_PROFILE ⇒ no key at all (api defaults to balanced)."""
+    out_dir = _render(tmp_path)
+    env = _parse_env(out_dir / ".env.prod")
+    assert "RUN_DEFAULT_BUDGET_PROFILE" not in env
+
+
+def test_budget_profile_refuses_anything_else(tmp_path: Path) -> None:
+    """The anchored fence admits exactly economy|balanced|generous — a typo, a
+    case variant, or a concatenation must die before anything is written."""
+    for bad in ("turbo", "Economy", "economybalanced"):
+        manifest = tmp_path / "tenant.conf"
+        manifest.write_text(_manifest_text(RUN_DEFAULT_BUDGET_PROFILE=bad))
+        proc = _run(manifest, tmp_path / "out", "--no-deploy", "--dry-run")
+        assert proc.returncode != 0, f"RUN_DEFAULT_BUDGET_PROFILE={bad!r} should be refused"
+        assert "run_default_budget_profile" in proc.stderr.lower()
+        assert not (tmp_path / "out").exists()
+
+
+# --------------------------------------------------------------------------- #
 # SETUP-3b — handover (ADR-F061 addendum D7): email-first with SMTP, log-scrape
 # fallback without. The deploy path is exercised with `docker` + `curl` shims
 # on PATH so no real docker/network is touched; each shim appends its argv to

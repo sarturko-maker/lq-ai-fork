@@ -198,6 +198,7 @@ def _to_read(
         position=area.position,
         profile_md=area.profile_md,
         default_tier_floor=area.default_tier_floor,
+        default_budget_profile=area.default_budget_profile,
         agent_config=area.agent_config or {},
         bound_skills=bound_skills,
         bound_tool_groups=bound_tool_groups,
@@ -317,6 +318,11 @@ async def update_practice_area_config(
         area.profile_md = fields["profile_md"]
     if "default_tier_floor" in fields:
         area.default_tier_floor = fields["default_tier_floor"]
+    if "default_budget_profile" in fields:
+        # SETUP-5a (ADR-F063): explicit JSON null CLEARS the area default (the
+        # area inherits the deployment default / balanced) — unlike name/
+        # unit_label, null is meaningful here, not rejected.
+        area.default_budget_profile = fields["default_budget_profile"]
     if "agent_config" in fields:
         cfg = fields["agent_config"] or {}
         # Validate the declarative shape (raises ValueError on bad subagent

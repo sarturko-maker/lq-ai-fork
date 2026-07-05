@@ -16,7 +16,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["debug", "info", "warning", "warn", "error", "critical"]
@@ -275,6 +275,43 @@ class Settings(BaseSettings):
             "profile's wall clock so the runner's clean cap fires before arq hard-cancels."
         ),
     )
+
+    # ----- Deployment default budget profile (SETUP-5a, ADR-F063) -----
+    # The deployment-wide default budget_profile for new agent runs, applied
+    # when the request omits one AND the run's practice area carries no
+    # default_budget_profile. Resolution order (ADR-F063, at run create):
+    # run-explicit > area default > this setting > balanced. Distinct from the
+    # RUN_* balanced-tier knobs above, which shape what "balanced" MEANS —
+    # this picks which TIER applies by default. Operator-owned env (F061).
+    run_default_budget_profile: str | None = Field(
+        default=None,
+        description=(
+            "Deployment default budget_profile (economy/balanced/generous) for new "
+            "agent runs (ADR-F063). Unset ⇒ balanced. Overridden by an area's "
+            "default_budget_profile and by an explicit per-run choice."
+        ),
+    )
+
+    @field_validator("run_default_budget_profile", mode="before")
+    @classmethod
+    def _normalize_run_default_budget_profile(cls, value: object) -> object:
+        """Normalize "" → None and reject unknown profiles at boot (fail loud).
+
+        The prod compose forwards the knob as ``${RUN_DEFAULT_BUDGET_PROFILE:-}``,
+        so an UNSET key reaches pydantic as EMPTY STRING, never None (the
+        SETUP-3b `${VAR:-}` trap — same normalization as bootstrap.hosted's
+        truthiness gate). Anything else outside the three profiles is a
+        misconfiguration; refusing to boot beats silently running every run on
+        an unintended tier.
+        """
+        if value is None or value == "":
+            return None
+        if value not in ("economy", "balanced", "generous"):
+            raise ValueError(
+                "RUN_DEFAULT_BUDGET_PROFILE must be one of: economy, balanced, generous "
+                "(or unset for the balanced default)"
+            )
+        return value
 
     # ----- Inference Gateway -----
     lq_ai_gateway_url: str = Field(

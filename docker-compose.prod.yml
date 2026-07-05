@@ -234,6 +234,12 @@ services:
       RATE_LIMIT_PASSWORD_RESET_REQUEST_IP_PER_WINDOW: ${RATE_LIMIT_PASSWORD_RESET_REQUEST_IP_PER_WINDOW:-10}
       RATE_LIMIT_PASSWORD_RESET_REQUEST_EMAIL_PER_WINDOW: ${RATE_LIMIT_PASSWORD_RESET_REQUEST_EMAIL_PER_WINDOW:-5}
       RATE_LIMIT_TOKEN_REDEEM_IP_PER_WINDOW: ${RATE_LIMIT_TOKEN_REDEEM_IP_PER_WINDOW:-10}
+      # SETUP-5a (ADR-F063) — deployment default budget profile for new agent
+      # runs (economy/balanced/generous). Optional; unset ⇒ balanced. The run-
+      # create endpoint (THIS service) resolves run-explicit > area default >
+      # this > balanced and persists the resolved value. NOTE the `${VAR:-}`
+      # form delivers "" (never unset) — config.py normalizes "" → None.
+      RUN_DEFAULT_BUDGET_PROFILE: ${RUN_DEFAULT_BUDGET_PROFILE:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"]
       interval: 5s
@@ -331,6 +337,11 @@ services:
       # here. 32 is the app default (api/app/agents/budget.py) when unset;
       # written explicitly so the prod value is visible in this file.
       FAN_OUT_QUOTA: ${FAN_OUT_QUOTA:-32}
+      # SETUP-5a (ADR-F063) — deployment default budget profile, mirrored from
+      # the api service so both processes resolve settings identically (the api
+      # persists the resolved profile at run create; this worker re-resolves the
+      # brakes FROM that persisted value). Unset ⇒ "" ⇒ balanced (config.py).
+      RUN_DEFAULT_BUDGET_PROFILE: ${RUN_DEFAULT_BUDGET_PROFILE:-}
       # Skills baked into the image at /skills — no bind mount here either.
       LQ_AI_SKILLS_DIR: ${LQ_AI_SKILLS_DIR:-/skills}
       # Storage-backed tools (Commercial apply_redline source-doc fetch +

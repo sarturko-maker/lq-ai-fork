@@ -35,9 +35,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import agent_runs as agent_runs_module
+from app.config import Settings
 from app.db.session import get_db
 from app.main import app
 from app.models.agent_run import AgentRun, AgentRunStep, AgentThread
+from app.models.practice_area import PracticeArea
 from app.models.project import Project
 from app.models.user import User
 from app.security import create_access_token, hash_password
@@ -162,16 +164,38 @@ async def _put_checkpoint(saver: InMemorySaver, thread_id: uuid.UUID) -> None:
     await saver.aput(config, empty_checkpoint(), {}, {})
 
 
-async def _make_project(db: AsyncSession, *, owner: User, archived: bool = False) -> Project:
+async def _make_project(
+    db: AsyncSession,
+    *,
+    owner: User,
+    archived: bool = False,
+    practice_area_id: uuid.UUID | None = None,
+) -> Project:
     project = Project(
         owner_id=owner.id,
         name=f"Matter {uuid.uuid4().hex[:6]}",
         slug=f"matter-{uuid.uuid4().hex[:6]}",
         archived_at=datetime.now(UTC) if archived else None,
+        practice_area_id=practice_area_id,
     )
     db.add(project)
     await db.flush()
     return project
+
+
+async def _make_area(db: AsyncSession, *, default_budget_profile: str | None) -> PracticeArea:
+    """A throwaway practice area carrying (or not) an area budget default
+    (SETUP-5a, ADR-F063)."""
+    area = PracticeArea(
+        key=f"bp-{uuid.uuid4().hex[:8]}",
+        name="Budget Test Area",
+        unit_label="Matter",
+        position=950,
+        default_budget_profile=default_budget_profile,
+    )
+    db.add(area)
+    await db.flush()
+    return area
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +305,141 @@ async def test_create_run_explicit_max_steps_overrides_profile(
     body = resp.json()
     assert body["budget_profile"] == "economy"
     assert body["max_steps"] == 250
+
+
+# ---------------------------------------------------------------------------
+# SETUP-5a (ADR-F063): budget-profile default chain —
+# run explicit > area default > deployment default > balanced. Resolved ONCE
+# at create; the RESOLVED value is persisted (telemetry stays honest).
+# ---------------------------------------------------------------------------
+
+
+def _deployment_default(profile: str | None) -> Settings:
+    """A real Settings carrying (or not) the deployment budget default."""
+    return Settings(_env_file=None, run_default_budget_profile=profile)  # type: ignore[call-arg]
+
+
+@pytest.mark.integration
+async def test_create_run_area_default_applies_when_omitted(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+) -> None:
+    """Omitted budget_profile + matter filed under an area with a default ⇒
+    the area default is resolved, persisted, and drives max_steps."""
+    area = await _make_area(db_session, default_budget_profile="economy")
+    project = await _make_project(db_session, owner=user_a, practice_area_id=area.id)
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "x", "project_id": str(project.id)},
+        )
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["budget_profile"] == "economy"
+    assert body["max_steps"] == 100
+
+
+@pytest.mark.integration
+async def test_create_run_explicit_beats_area_default(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+) -> None:
+    """An explicit per-run pick wins over the area default — and the EXPLICIT
+    value is what lands on the row."""
+    area = await _make_area(db_session, default_budget_profile="generous")
+    project = await _make_project(db_session, owner=user_a, practice_area_id=area.id)
+    with patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "x", "project_id": str(project.id), "budget_profile": "economy"},
+        )
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["budget_profile"] == "economy"
+    assert body["max_steps"] == 100
+    row = (
+        await db_session.execute(select(AgentRun).where(AgentRun.id == uuid.UUID(body["id"])))
+    ).scalar_one()
+    assert row.budget_profile == "economy"
+
+
+@pytest.mark.integration
+async def test_create_run_deployment_default_applies_when_no_area_default(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+) -> None:
+    """Omitted profile + area with a NULL default ⇒ the deployment default
+    (RUN_DEFAULT_BUDGET_PROFILE) applies."""
+    area = await _make_area(db_session, default_budget_profile=None)
+    project = await _make_project(db_session, owner=user_a, practice_area_id=area.id)
+    with (
+        patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background),
+        patch.object(
+            agent_runs_module, "get_settings", new=lambda: _deployment_default("generous")
+        ),
+    ):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "x", "project_id": str(project.id)},
+        )
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["budget_profile"] == "generous"
+    assert body["max_steps"] == 600
+
+
+@pytest.mark.integration
+async def test_create_run_area_default_beats_deployment_default(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+) -> None:
+    area = await _make_area(db_session, default_budget_profile="economy")
+    project = await _make_project(db_session, owner=user_a, practice_area_id=area.id)
+    with (
+        patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background),
+        patch.object(
+            agent_runs_module, "get_settings", new=lambda: _deployment_default("generous")
+        ),
+    ):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "x", "project_id": str(project.id)},
+        )
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["budget_profile"] == "economy"
+
+
+@pytest.mark.integration
+async def test_create_run_all_defaults_absent_falls_back_to_balanced(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    user_a: User,
+) -> None:
+    """No explicit pick, unfiled matter binding, no deployment default ⇒
+    balanced (the code fallback; also pinned by the 202-defaults test above)."""
+    area = await _make_area(db_session, default_budget_profile=None)
+    project = await _make_project(db_session, owner=user_a, practice_area_id=area.id)
+    with (
+        patch.object(agent_runs_module, "enqueue_agent_run_job", new=_noop_background),
+        patch.object(agent_runs_module, "get_settings", new=lambda: _deployment_default(None)),
+    ):
+        resp = await client.post(
+            "/api/v1/agents/runs",
+            headers=_bearer(user_a),
+            json={"prompt": "x", "project_id": str(project.id)},
+        )
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["budget_profile"] == "balanced"
+    assert body["max_steps"] == 400
 
 
 @pytest.mark.integration

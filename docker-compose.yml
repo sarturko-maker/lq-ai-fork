@@ -225,6 +225,9 @@ services:
       # bridge traffic with 500 when either is unset.
       LQ_AI_BRIDGE_TOKEN: ${LQ_AI_BRIDGE_TOKEN:-}
       LQ_AI_BRIDGE_MASTER_KEY: ${LQ_AI_BRIDGE_MASTER_KEY:-}
+      # SETUP-5a (ADR-F063) — deployment default budget profile for new agent
+      # runs. Optional; unset ⇒ "" ⇒ balanced (config.py normalizes "" → None).
+      RUN_DEFAULT_BUDGET_PROFILE: ${RUN_DEFAULT_BUDGET_PROFILE:-}
     volumes:
       - ./skills:/skills:ro
     ports:
@@ -392,6 +395,10 @@ services:
       # api/app/agents/budget.py, so a generous run ignores this env var and
       # the mem_limit above is the only containment. See ADR-F056.
       FAN_OUT_QUOTA: ${FAN_OUT_QUOTA:-32}
+      # SETUP-5a (ADR-F063) — deployment default budget profile, mirrored from
+      # the api service (the api resolves + persists at run create; forwarded
+      # here too so both processes read identical settings).
+      RUN_DEFAULT_BUDGET_PROFILE: ${RUN_DEFAULT_BUDGET_PROFILE:-}
       # Skills loader — the worker's on_startup installs the skill
       # registry via the shared bootstrap (app/skills/bootstrap.py) so
       # skill_ref autonomous sessions resolve on this process. Mounted

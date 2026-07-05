@@ -67,6 +67,11 @@ class PracticeArea(Base):
             "default_tier_floor IS NULL OR (default_tier_floor BETWEEN 1 AND 5)",
             name="chk_practice_areas_tier_range",
         ),
+        CheckConstraint(
+            "default_budget_profile IS NULL "
+            "OR default_budget_profile IN ('economy', 'balanced', 'generous')",
+            name="chk_practice_areas_budget_profile",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -84,6 +89,9 @@ class PracticeArea(Base):
     # F1-S3 config vocabulary.
     profile_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     default_tier_floor: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    # SETUP-5a (ADR-F063): the area's default budget_profile for new runs.
+    # NULL = no area default (inherit the deployment default / balanced).
+    default_budget_profile: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_config: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )

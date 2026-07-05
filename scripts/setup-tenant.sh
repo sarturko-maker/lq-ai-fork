@@ -103,6 +103,9 @@ root-sourced env file)
   IMAGE_TAG             ^sha-[0-9a-f]{7,}$  (published image, never :main)
   NODE_PROFILE          full | reduced   (16 GB vs 8 GB node)
   MODEL_PROVIDER        anthropic   (v1; non-PRC default)
+  RUN_DEFAULT_BUDGET_PROFILE   optional deployment default budget profile for
+                         agent runs (economy | balanced | generous — ADR-F063);
+                         blank/omitted = balanced
   AGE_RECIPIENT         age1…  backup public recipient (private key stays OFF node)
   BACKUP_DEADMAN_URL / RESTORE_DEADMAN_URL   optional healthchecks-style pings
 
@@ -154,6 +157,7 @@ S3_ENDPOINT_URL="" S3_REGION="" S3_BUCKET="" ADMIN_EMAIL="" OPERATOR_EMAIL=""
 SMTP_HOST="" SMTP_PORT="" SMTP_FROM="" SMTP_USERNAME=""
 IMAGE_TAG="" NODE_PROFILE="full" MODEL_PROVIDER="anthropic"
 AGE_RECIPIENT="" BACKUP_DEADMAN_URL="" RESTORE_DEADMAN_URL=""
+RUN_DEFAULT_BUDGET_PROFILE=""
 
 # ---------------------------------------------------------------------------
 # Manifest loader — controlled parse (NOT `source`, which would execute code):
@@ -194,6 +198,7 @@ load_manifest() {
 			IMAGE_TAG) IMAGE_TAG="$val" ;;
 			NODE_PROFILE) NODE_PROFILE="$val" ;;
 			MODEL_PROVIDER) MODEL_PROVIDER="$val" ;;
+			RUN_DEFAULT_BUDGET_PROFILE) RUN_DEFAULT_BUDGET_PROFILE="$val" ;;
 			AGE_RECIPIENT) AGE_RECIPIENT="$val" ;;
 			BACKUP_DEADMAN_URL) BACKUP_DEADMAN_URL="$val" ;;
 			RESTORE_DEADMAN_URL) RESTORE_DEADMAN_URL="$val" ;;
@@ -312,7 +317,7 @@ check_value() {  # check_value VARNAME  (empty = optional key, allowed)
 for k in TENANT_SLUG PUBLIC_HOST PUBLIC_ORIGIN DNS_PROVIDER ACME_EMAIL \
 	S3_ENDPOINT_URL S3_REGION S3_BUCKET ADMIN_EMAIL OPERATOR_EMAIL SMTP_HOST \
 	SMTP_PORT SMTP_FROM SMTP_USERNAME IMAGE_TAG NODE_PROFILE MODEL_PROVIDER \
-	AGE_RECIPIENT BACKUP_DEADMAN_URL RESTORE_DEADMAN_URL; do
+	RUN_DEFAULT_BUDGET_PROFILE AGE_RECIPIENT BACKUP_DEADMAN_URL RESTORE_DEADMAN_URL; do
 	check_value "$k"
 done
 
@@ -389,6 +394,13 @@ case " $SUPPORTED_MODEL_PROVIDERS " in
 	*" $MODEL_PROVIDER "*) : ;;
 	*) die "MODEL_PROVIDER '$MODEL_PROVIDER' unsupported in v1 — only: $SUPPORTED_MODEL_PROVIDERS (non-PRC default; more providers land later)" ;;
 esac
+
+# RUN_DEFAULT_BUDGET_PROFILE is optional (SETUP-5a, ADR-F063): empty ⇒ the line
+# is omitted from .env.prod (api falls back to balanced); when set it must be
+# EXACTLY one of the three profiles — the api refuses to boot on anything else.
+[ -z "$RUN_DEFAULT_BUDGET_PROFILE" ] \
+	|| printf '%s' "$RUN_DEFAULT_BUDGET_PROFILE" | grep -Eq '^(economy|balanced|generous)$' \
+	|| die "RUN_DEFAULT_BUDGET_PROFILE '$RUN_DEFAULT_BUDGET_PROFILE' must be one of: economy, balanced, generous (or omitted for balanced)"
 
 # Full-shape check (not prefix-only): age1 + lowercase bech32 payload.
 [ -n "$AGE_RECIPIENT" ] || die "AGE_RECIPIENT is required"
@@ -498,6 +510,13 @@ if [ -n "$OPERATOR_EMAIL" ]; then
 	OPERATOR_EMAIL_LINE="FIRST_RUN_OPERATOR_EMAIL=$OPERATOR_EMAIL"
 fi
 
+# RUN_DEFAULT_BUDGET_PROFILE (SETUP-5a, ADR-F063): deployment default budget
+# profile. Written ONLY when provided; omitted ⇒ the api defaults to balanced.
+BUDGET_PROFILE_LINE=""
+if [ -n "$RUN_DEFAULT_BUDGET_PROFILE" ]; then
+	BUDGET_PROFILE_LINE="RUN_DEFAULT_BUDGET_PROFILE=$RUN_DEFAULT_BUDGET_PROFILE"
+fi
+
 # --force overwrite: recreate rather than truncate-in-place, so an existing
 # file's OLD (possibly looser) mode never applies while the new secrets are
 # being written — the file is born 0600 under umask 077 (SETUP-2 review).
@@ -541,6 +560,9 @@ ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 # --- Retrieval (local ONNX = \$0, no extra egress) ---------------------------
 EMBEDDING_PROVIDER=local
 RERANK_ENABLED=true
+
+# --- Agent-run budget default (SETUP-5a, ADR-F063; line omitted = balanced) ---
+$BUDGET_PROFILE_LINE
 
 # --- Auth + notification email (FIRST_RUN_ADMIN_EMAIL + SMTP; SETUP-2 gap fix)-
 # FIRST_RUN_ADMIN_EMAIL seeds the customer admin at first boot (config.py has no

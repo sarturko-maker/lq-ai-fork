@@ -99,6 +99,7 @@ from app.schemas.agent_runs import (
     AgentThreadDetailResponse,
     AgentThreadListResponse,
     AgentThreadRead,
+    BudgetProfile,
     MatterActivityRead,
     MatterActivityResponse,
     UnfiledThreadsSummary,
@@ -397,11 +398,36 @@ async def create_agent_run(
         db.add(thread)
         await db.flush()  # assigns thread.id for the run row below
 
+    # SETUP-5a (ADR-F063): resolve the budget profile ONCE, here, and persist
+    # the RESOLVED value — a later default change must never silently re-price
+    # an already-created run. Chain: run-explicit > area default (the bound
+    # matter's practice area) > deployment default > balanced.
+    settings = get_settings()
+    area_default: str | None = None
+    if body.budget_profile is None and thread.project_id is not None:
+        area_default = (
+            await db.execute(
+                select(PracticeArea.default_budget_profile)
+                .join(Project, Project.practice_area_id == PracticeArea.id)
+                .where(Project.id == thread.project_id)
+            )
+        ).scalar_one_or_none()
+    resolved_profile = (
+        body.budget_profile
+        or (BudgetProfile(area_default) if area_default else None)
+        or (
+            BudgetProfile(settings.run_default_budget_profile)
+            if settings.run_default_budget_profile
+            else None
+        )
+        or BudgetProfile.balanced
+    )
+
     # Slice O (ADR-F053): resolve the cost/effort envelope. ``max_steps`` is
     # materialized on the row (the runner reads it directly); the other three
     # brakes are re-resolved from ``budget_profile`` at composition. An explicit
     # request ``max_steps`` overrides the profile's step ceiling (advanced).
-    envelope = resolve_envelope(body.budget_profile, get_settings())
+    envelope = resolve_envelope(resolved_profile, settings)
     resolved_max_steps = body.max_steps if body.max_steps is not None else envelope.max_steps
     run = AgentRun(
         user_id=user.id,
@@ -413,7 +439,7 @@ async def create_agent_run(
         prompt=body.prompt,
         model_alias=body.model_alias,
         max_steps=resolved_max_steps,
-        budget_profile=body.budget_profile.value,
+        budget_profile=resolved_profile.value,
     )
     db.add(run)
     thread.last_run_at = datetime.now(UTC)
