@@ -14,7 +14,7 @@
 	 * every session). The exempt-route layout renders the footer.
 	 */
 	import { onMount } from 'svelte';
-	import { replaceState } from '$app/navigation';
+	import { afterNavigate, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
 
 	import { authApi } from '$lib/lq-ai/api';
@@ -48,11 +48,22 @@
 
 	onMount(() => {
 		token = readToken($page.url.searchParams);
-		// F7 — scrub the single-use token from the address bar (component state
-		// keeps it); shared-machine history/autocomplete never see it.
+		mounted = true;
+	});
+
+	// F7 — scrub the single-use token from the address bar (component state
+	// keeps it); shared-machine history/autocomplete never see it. This runs in
+	// `afterNavigate`, not inline in `onMount`: on a direct/full page load
+	// SvelteKit's router has not finished initializing yet when `onMount`
+	// fires, and calling `replaceState()` at that point throws ("Cannot call
+	// replaceState(...) before router is initialized"), which used to abort
+	// `onMount` before `mounted` was set — the page rendered nothing forever
+	// (G7). `afterNavigate` fires once the router has committed the initial
+	// navigation, including on a full page load, so it's safe here; `mounted`
+	// is set unconditionally in `onMount` above regardless of the scrub.
+	afterNavigate(() => {
 		const scrubbed = stripTokenParam(window.location.href);
 		if (scrubbed !== null) replaceState(scrubbed, {});
-		mounted = true;
 	});
 
 	async function submitRequest(event: SubmitEvent) {
