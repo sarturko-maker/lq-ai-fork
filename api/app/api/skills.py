@@ -34,7 +34,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.errors import NotFound
@@ -753,7 +753,7 @@ class SkillForkBody(BaseModel):
 async def fork_skill(
     request: Request,
     skill_name: str,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     payload: SkillForkBody | None = None,
 ) -> JSONResponse:

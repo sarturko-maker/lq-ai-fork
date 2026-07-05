@@ -735,10 +735,16 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   (`tests/agents/test_registry_parity.py`) pins the registry loop reproduces the pre-refactor grants
   byte-identically (tools/order/ledger/tabular_enabled). **SETUP-4b ✓ done** — Practice Areas +
   Capabilities admin surfaces (ADR-F062 addendum; merged PR #220 `0b908abe`).
-  **SETUP-5a (IN-FLIGHT)** — reconcile paperwork (F054 status flip + D1-supersession addendum, F062
+  **SETUP-5a ✓ done** — reconcile paperwork (F054 status flip + D1-supersession addendum, F062
   status flip) + budget-profile defaults (ADR-F063: per-area `default_budget_profile` + deployment
   `RUN_DEFAULT_BUDGET_PROFILE`, resolution chain run-explicit > area default > deployment default >
-  balanced). NEXT: SETUP-5b (viewer/operator RBAC) → **SETUP-6 — actor guides (maintainer,
+  balanced); merged PR #221 `ab14309b`.
+  **SETUP-5b (IN-FLIGHT)** — viewer/operator tenant-data RBAC (ADR-F064): D1 `viewer` becomes an
+  enforced read-only account (MutatingUser on all 68 tenant-data mutating routes incl. the legacy
+  `/autonomous/*` 16 via a stacked opt-in gate, + an app.routes drift-guard); D2 `operator` excluded
+  from the pre-F061 `is_admin` admin-sees-all seams (new `tenant_admin_visibility`, 14 seams in
+  tabular/playbooks/chat-receipts — the receipts one also fixes a cross-user 403 existence leak to
+  404), org-admin keeps sees-all. No migration, no new routes. NEXT: **SETUP-6 — actor guides (maintainer,
   2026-07-04, ON HOLD until called): human-facing operating documentation, one guide per F061
   actor — Operator (provisioning/wizard, backups + restore drill, the fence, invite handover,
   ongoing ops; links the staging-bringup runbook) / Admin (claiming the workspace, Users admin,
@@ -772,6 +778,10 @@ lead model drafts/orchestrates/verifies; smaller models implement.
 
 - **SETUP-3c — first-login onboarding checklist** (split out of SETUP-3b, surfaced 2026-07-05): House
   Brief → invite users → review area defaults, UX polish, can ride after the 4x/5 ladder.
+- **Viewer UI affordance-hiding** (surfaced SETUP-5b, 2026-07-05): server enforcement is the boundary
+  (viewer mutations 403 via MutatingUser, ADR-F064 D1); the web still renders write buttons/compose/
+  toggles for a `viewer` and only shows the 403 via `describeMutationError`. Hide/disable the
+  affordances for `role==='viewer'` — polish after ADR-F064.
 - **SETUP-6 — actor guides** (operator/admin/user; maintainer-held, task #462, ON HOLD until called):
   human-facing operating documentation, one guide per F061 actor.
 - **`CapabilitiesPanel.svelte` optimistic-revert defect class (surfaced SETUP-5a, 2026-07-05).**

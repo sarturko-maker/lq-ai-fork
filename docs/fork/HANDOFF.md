@@ -319,21 +319,45 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   (not the npx wrapper) before probing. (3) serving a worktree web app whose node_modules is a
 >   symlink into the main checkout needs a temp vite config widening `server.fs.allow`, else
 >   SvelteKit's client entry 403s via /@fs.
-> - **NEXT = SETUP-5b — the Q1 tenant-data RBAC decision (ADR-F064, deep security review;
->   recon inventory in session scratchpad `setup5-recon-rbac.md`, plan sketch in
->   `SETUP-5-plan.md`): RECOMMENDATION on record — (i) ENFORCE viewer read-only by swapping
->   ActiveUser → MutatingUser on all tenant-data mutating routes (3b's Users UI already PROMISES
->   "viewers are read-only"; today it's a label — `MutatingUser`/`_MUTATING_ROLES` at
->   `api/app/api/dependencies.py:216-254` is dead code with zero usages; self-service auth routes
->   stay ActiveUser) + an OpenAPI-driven drift-guard (every POST/PATCH/DELETE is
->   MutatingUser|Admin|Operator|allowlisted); (ii) EXCLUDE operator from the ~13 pre-F061
->   `is_admin` tenant-data bypasses (tabular.py:210,390,955 + playbooks.py:138,300,411,467,481,
->   489,537,647,686,717) via ONE `tenant_admin_visibility(user) = user.is_admin and user.role !=
->   "operator"` helper (hosted tenant confidentiality: operator manages platform+config, NOT the
->   firm's matters; break-glass = future explicit feature); viewer stays in `_ROLE_ENUM`;
->   types.ts UserRole += 'operator' (stale); code-seam ADR comment; role-matrix live smoke
->   (viewer/member/admin/operator); FLAG THE DECISION PROMINENTLY in the PR for maintainer
->   morning review. Then SETUP-6 — ACTOR GUIDES (maintainer,
+> - **SETUP-5b ✓ — tenant-data RBAC: viewer ENFORCED read-only + operator excluded from
+>   cross-user tenant data. ADR-F064 (proposed — the Q1 decision, FLAGGED for maintainer review),
+>   NO migration, NO new routes (171 pinned). Plan `docs/fork/plans/SETUP-5b-tenant-data-rbac.md`
+>   (full route classification table). Opus implemented in a worktree (§A–§F, two lead-review
+>   rounds); lead verified + ran the DEEP security pass (auth path).** Landed: (D1) ActiveUser →
+>   MutatingUser on **68** tenant-data mutating routes across 15 routers INCLUDING legacy
+>   /autonomous/* (mechanism: `get_autonomous_enabled_user` now takes `user: MutatingUser` —
+>   role-gate stacks BEFORE the opt-in gate, zero handler churn; `halt_session` swapped directly,
+>   its outside-the-opt-in-gate semantics preserved); `operator` ADDED to `_MUTATING_ROLES`
+>   (mutates rows it OWNS); drift-guard `api/tests/test_mutation_rbac.py` walks app.routes and
+>   pins 68 mutating / 26 admin / 8 operator / **22 allowlisted** (/auth 11, /users/me 5,
+>   POST-reads 2, /wopi 2, /integrations 2). (D2) `tenant_admin_visibility(user) = is_admin AND
+>   role != 'operator'` replaces bare `is_admin` at **14** seams (tabular ×3, playbooks ×10, +
+>   chat_receipts — whose cross-user response ALSO changed 403→404, an existence-leak fix; the
+>   implementer FOUND the 14th seam, the recon had 13). MODE-NEUTRAL framing (maintainer,
+>   2026-07-05): operator = whoever runs the platform — hosting company OR the firm's own IT;
+>   self-host posture in the ADR (no FIRST_RUN_OPERATOR_EMAIL ⇒ no operator row, admins keep
+>   sees-all; operator/no-operator = the self-hoster's separation-of-duties dial). **Deep review
+>   (4 lenses incl. an Opus bypass-hunter + skeptic verification): 4 confirmed → ALL FIXED
+>   (`67afc2ba`), 3 refuted on record.** Headline fix: the WOPI WRITE path trusted token claims
+>   for up to 10h after a role demotion — now re-checks role+liveness per write op via
+>   `_require_live_mutating_user` (imports `_MUTATING_ROLES` so bearer/WOPI gates can't drift;
+>   reads stay open; 401-as-session-invalid). Gate: full api suite (counts in the PR), role-matrix
+>   smoke **30/30** on the final branch (three-layer stacking live: viewer role-403 → opted-out
+>   member opt-in-403 → opted-in member 404 owner-lookup; operator cross-user probes 404 NEVER
+>   403; admin sees-all + F061 fence regressions) — evidence
+>   `docs/fork/evidence/setup-5b/live-smoke.md`. **TRAPS:** (1) FastAPI stacks role gates cleanly
+>   by making the outer dep take the inner as a param (`get_autonomous_enabled_user(user:
+>   MutatingUser)`) — prefer that over touching handlers. (2) token-authed side doors (WOPI,
+>   bridge, invite links) bypass per-request role reads — any future role/fence change must audit
+>   token-LIFETIME surfaces, not just bearer routes. (3) a smoke asserting "member passes the
+>   gate" must account for OTHER stacked gates (the autonomous opt-in 403 ≠ the role 403 — assert
+>   on body text, not just status).
+> - **THE SETUP LADDER IS COMPLETE (SETUP-1 → 5b all merged).** NEXT is a MAINTAINER sequencing
+>   call, not an auto-continue: (a) SAAS-3b IONOS bring-up (maintainer's weekend task, runbook
+>   ready); (b) SETUP-6 actor guides (on hold, below); (c) AIC-3 resume (task #456, parked "after
+>   the SETUP ladder"); (d) backlog UX slices (SETUP-3c onboarding checklist, viewer
+>   affordance-hiding, matter CapabilitiesPanel revert defect, T5 live cell fill). SETUP-6 — ACTOR
+>   GUIDES (maintainer,
 >   2026-07-04, explicitly ON HOLD until called; task #462): human-facing operating documentation,
 >   one guide per F061 actor — Operator (wizard/provisioning, backups+restore drill, the fence,
 >   invite handover, ongoing ops; links the staging-bringup runbook, no duplication) / Admin

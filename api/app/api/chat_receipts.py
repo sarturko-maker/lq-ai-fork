@@ -15,8 +15,9 @@ re-merging on each request is cheap. No new materialized table.
 A materialized ``chat_receipts`` projection is a v1.1+ candidate if
 latency degrades under longer chats.
 
-Owner-of-the-chat OR admin can read; everyone else gets 404 on the
-chat lookup (no information leak about chat existence).
+Owner-of-the-chat OR org-admin can read (the OPERATOR is excluded from
+the admin widening — ADR-F064 D2); everyone else gets 404, identical to
+a missing chat (no information leak about chat existence).
 
 Filter via ``?event_kinds=message,inference`` (comma-separated subset
 of ``message``, ``inference``, ``audit``, ``skill``, ``retrieval``,
@@ -38,9 +39,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, tenant_admin_visibility
 from app.db.session import get_db
-from app.errors import Forbidden, NotFound
+from app.errors import NotFound
 from app.models.audit import AuditLog
 from app.models.chat import Chat, Message
 from app.models.inference import InferenceRoutingLog
@@ -73,7 +74,8 @@ class ReceiptEvent(BaseModel):
         "Wave D.1 T5 (spec §7.6). Merges chronological events from "
         "``messages`` (+ denorm ``applied_skills``), "
         "``inference_routing_log``, and ``audit_log`` into one "
-        "timestamp-ordered stream. Owner-of-chat or admin only. "
+        "timestamp-ordered stream. Owner-of-chat or org-admin only "
+        "(operator excluded — ADR-F064 D2; cross-user reads 404). "
         "Filter with ``?event_kinds=message,audit`` etc. "
         "Inference/error event ``detail`` includes ``anonymization_applied`` "
         "(bool — the source of truth for the UI's anonymization indicator) and "
@@ -100,9 +102,13 @@ async def get_chat_receipts(
             "Chat not found.",
             details={"chat_id": str(chat_id)},
         )
-    if chat.owner_id != user.id and not user.is_admin:
-        raise Forbidden(
-            "You do not own this chat.",
+    # SETUP-5b §E (ADR-F064 D2): the admin-sees-all widening excludes the
+    # operator (tenant_admin_visibility), and cross-user access collapses into
+    # the same 404 as a missing chat — the previous 403-after-fetch leaked the
+    # chat's existence to non-owners (cross-user = 404, never 403).
+    if chat.owner_id != user.id and not tenant_admin_visibility(user):
+        raise NotFound(
+            "Chat not found.",
             details={"chat_id": str(chat_id)},
         )
 

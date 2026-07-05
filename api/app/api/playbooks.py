@@ -83,7 +83,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser, tenant_admin_visibility
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
 from app.db.session import get_db, get_session_factory
@@ -126,16 +126,17 @@ async def list_playbooks(
 
     Visibility rules (mirroring the execute endpoint):
 
-    * Admins see all playbooks.
-    * Non-admins see playbooks they authored OR built-in playbooks
-      (``created_by IS NULL`` — created by the seed migration).
+    * Org-admins see all playbooks (the OPERATOR is excluded from this
+      widening — ADR-F064 D2).
+    * Non-admins (and the operator) see playbooks they authored OR built-in
+      playbooks (``created_by IS NULL`` — created by the seed migration).
 
     Positions are NOT inlined in the list response; clients fetch the
     detail endpoint when they need them. This keeps the list response
     bounded even when a playbook has dozens of positions.
     """
     stmt = select(Playbook).where(Playbook.deleted_at.is_(None))
-    if not user.is_admin:
+    if not tenant_admin_visibility(user):
         stmt = stmt.where((Playbook.created_by == user.id) | (Playbook.created_by.is_(None)))
     stmt = stmt.order_by(Playbook.name)
     rows = (await db.execute(stmt)).scalars().all()
@@ -167,9 +168,10 @@ async def get_playbook(
 ) -> PlaybookSchema:
     """Return the playbook header + positions + fallback tiers.
 
-    Visibility: admins see all; non-admins see playbooks they authored
-    or built-in playbooks (``created_by IS NULL``). 404 (not 403) on
-    unauthorized access — mirrors the playbook-execute handler.
+    Visibility: org-admins see all (operator excluded — ADR-F064 D2);
+    non-admins see playbooks they authored or built-in playbooks
+    (``created_by IS NULL``). 404 (not 403) on unauthorized access —
+    mirrors the playbook-execute handler.
     """
     playbook = await _load_visible_playbook(db, playbook_id, user)
     # Eager-load positions in this async context (the relationship is lazy
@@ -186,7 +188,7 @@ async def get_playbook(
 )
 async def create_playbook(
     body: PlaybookCreate,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlaybookSchema:
@@ -263,7 +265,7 @@ async def create_playbook(
 async def update_playbook(
     playbook_id: uuid.UUID,
     body: PlaybookUpdate,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlaybookSchema:
@@ -297,7 +299,7 @@ async def update_playbook(
     # Non-admin callers must own the playbook. Cross-user for non-builtin
     # playbooks already returns 404 via the visibility helper, so this
     # check is belt-and-suspenders for any future visibility change.
-    if not user.is_admin and playbook.created_by != user.id:
+    if not tenant_admin_visibility(user) and playbook.created_by != user.id:
         raise HTTPException(status_code=404, detail="playbook not found")
 
     update_data = body.model_dump(exclude_unset=True)
@@ -381,7 +383,7 @@ async def update_playbook(
 )
 async def delete_playbook(
     playbook_id: uuid.UUID,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
@@ -408,7 +410,7 @@ async def delete_playbook(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="built-in playbooks cannot be deleted",
         )
-    if not user.is_admin and playbook.created_by != user.id:
+    if not tenant_admin_visibility(user) and playbook.created_by != user.id:
         raise HTTPException(status_code=404, detail="playbook not found")
 
     playbook.deleted_at = datetime.now(tz=UTC)
@@ -442,7 +444,7 @@ async def delete_playbook(
 async def execute_playbook(
     playbook_id: uuid.UUID,
     body: PlaybookExecutionCreate,
-    user: ActiveUser,
+    user: MutatingUser,
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     gateway: Annotated[GatewayClient, Depends(get_gateway_client)],
@@ -464,7 +466,7 @@ async def execute_playbook(
     # Per-user isolation: caller must be admin OR the playbook's
     # author. Tightens to per-user scope once user-scoped playbooks
     # land (M3-A4); for v0.3 builtins this means admin only.
-    if not user.is_admin and playbook.created_by != user.id:
+    if not tenant_admin_visibility(user) and playbook.created_by != user.id:
         raise HTTPException(status_code=404, detail="playbook not found")
 
     document = await db.get(Document, body.target_document_id)
@@ -478,7 +480,7 @@ async def execute_playbook(
     file_missing_or_unowned = (
         file_row is None or file_row.deleted_at is not None or file_row.owner_id != user.id
     )
-    if file_missing_or_unowned and not user.is_admin:
+    if file_missing_or_unowned and not tenant_admin_visibility(user):
         raise HTTPException(status_code=404, detail="target document not found")
 
     if body.project_id is not None:
@@ -486,7 +488,7 @@ async def execute_playbook(
         project_missing_or_unowned = (
             project is None or project.archived_at is not None or project.owner_id != user.id
         )
-        if project_missing_or_unowned and not user.is_admin:
+        if project_missing_or_unowned and not tenant_admin_visibility(user):
             raise HTTPException(status_code=404, detail="project not found")
 
     execution = PlaybookExecution(
@@ -534,7 +536,7 @@ async def get_playbook_execution(
     if execution is None:
         raise HTTPException(status_code=404, detail="execution not found")
 
-    if not user.is_admin and execution.user_id != user.id:
+    if not tenant_admin_visibility(user) and execution.user_id != user.id:
         raise HTTPException(status_code=404, detail="execution not found")
 
     return PlaybookExecutionSchema.model_validate(execution)
@@ -548,7 +550,7 @@ async def get_playbook_execution(
 )
 async def create_easy_playbook_generation(
     body: EasyPlaybookGenerationCreate,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> EasyPlaybookGenerationSchema:
@@ -644,7 +646,7 @@ async def get_easy_playbook_generation(
     row = await db.get(EasyPlaybookGeneration, generation_id)
     if row is None:
         raise HTTPException(status_code=404, detail="generation not found")
-    if not user.is_admin and row.user_id != user.id:
+    if not tenant_admin_visibility(user) and row.user_id != user.id:
         raise HTTPException(status_code=404, detail="generation not found")
     return EasyPlaybookGenerationSchema.model_validate(row)
 
@@ -655,7 +657,8 @@ async def _load_caller_owned_documents(
     document_ids: list[uuid.UUID],
     user: ActiveUser,
 ) -> list[Document]:
-    """Load Documents whose parent file the caller owns; admins see all.
+    """Load Documents whose parent file the caller owns; org-admins see
+    all (operator excluded — ADR-F064 D2).
 
     Returns only the documents that pass the ownership check.
     Soft-deleted files (``files.deleted_at IS NOT NULL``) are
@@ -683,7 +686,7 @@ async def _load_caller_owned_documents(
         file_row = file_by_id.get(doc.file_id)
         if file_row is None:
             continue
-        if user.is_admin or file_row.owner_id == user.id:
+        if tenant_admin_visibility(user) or file_row.owner_id == user.id:
             out.append(doc)
     return out
 
@@ -714,7 +717,11 @@ async def _load_visible_playbook(
     playbook = await db.get(Playbook, playbook_id)
     if playbook is None or playbook.deleted_at is not None:
         raise HTTPException(status_code=404, detail="playbook not found")
-    if not user.is_admin and playbook.created_by is not None and playbook.created_by != user.id:
+    if (
+        not tenant_admin_visibility(user)
+        and playbook.created_by is not None
+        and playbook.created_by != user.id
+    ):
         raise HTTPException(status_code=404, detail="playbook not found")
     return playbook
 

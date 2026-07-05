@@ -37,7 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.audit import audit_action
 from app.db.session import get_db
 from app.models.audit import AuditLog
@@ -453,7 +453,7 @@ async def get_user_skill(
 async def create_user_skill(
     payload: UserSkillCreate,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserSkillResponse:
     """POST /api/v1/user-skills — create a fresh user- or team-scope skill.
@@ -598,7 +598,7 @@ async def update_user_skill(
     skill_id: uuid.UUID,
     payload: UserSkillUpdate,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserSkillResponse:
     """PATCH /api/v1/user-skills/{id} — partial update.
@@ -794,7 +794,7 @@ async def list_user_skill_versions(
 async def delete_user_skill(
     skill_id: uuid.UUID,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     """DELETE /api/v1/user-skills/{id} — soft-delete via ``archived_at``.

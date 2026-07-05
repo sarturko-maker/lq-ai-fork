@@ -193,48 +193,60 @@ gateway-proxy admin surfaces so only the platform operator — never a tenant's
 org-admin — can reach them."""
 
 
-async def get_autonomous_enabled_user(user: ActiveUser) -> User:
-    """`ActiveUser` plus the per-user Autonomous Layer opt-in gate.
+def tenant_admin_visibility(user: User) -> bool:
+    """Whether ``user`` may see/act on OTHER users' tenant data — SETUP-5b
+    (ADR-F064 D2). This governs the pre-F061 "admin-sees-all" business-logic
+    bypass, NOT a dependency gate.
 
-    The /autonomous/* mutate surface requires the user to have opted in
-    (PRD §3.10, off by default). Read + halt endpoints intentionally stay
-    on plain `ActiveUser` so a user who opts out never loses access to the
-    audit trail of what already ran (M4-C2 opt-out split).
+    Several pre-operator tenant-data endpoints widen an owner filter for
+    ``is_admin`` so a single firm's admin sees every user's matters / playbooks
+    / tabular runs. ADR-F061 D3 made the platform ``operator`` an ``is_admin``
+    superset, which silently handed it that cross-user visibility too. This
+    helper narrows the bypass to a *tenant* admin: the org-admin keeps
+    admin-sees-all; the ``operator`` is excluded and falls back to owner-scoped
+    (member-like) access on tenant data.
+
+    The rationale is separation of duties — platform operations vs. the firm's
+    legal matters. Mode-neutral (ADR-F058: three delivery modes): the operator
+    is "whoever runs the platform" — a hosting company in Mode 2 (hosted SaaS)
+    or the firm's OWN IT in self-host Mode 1. Minting an operator is OPTIONAL
+    (``FIRST_RUN_OPERATOR_EMAIL``); a self-hoster that skips it has no operator
+    row and org-admins keep admin-sees-all unchanged, so the operator /
+    no-operator choice IS the separation-of-duties dial. This touches only the
+    cross-user *visibility* seams: the operator keeps every OperatorUser fence
+    surface, every AdminUser admin surface, and normal member-like access to
+    the rows it owns.
     """
-    if not user.autonomous_enabled:
-        from app.errors import Forbidden
 
-        raise Forbidden(
-            message="Autonomous Layer is not enabled for this user.",
-        )
-    return user
+    return user.is_admin and user.role != "operator"
 
 
-AutonomousEnabledUser = Annotated[User, Depends(get_autonomous_enabled_user)]
-"""Type alias for /autonomous mutate endpoints that require the per-user
-opt-in flag (``autonomous_enabled = true``). Stacks on :data:`ActiveUser`
-(bearer-token + must-change-password gate) and adds the autonomous opt-in
-check. Read + halt endpoints stay on :data:`ActiveUser` per the M4-C2
-opt-out split."""
-
-
-# PRD §5.2 RBAC three-role system (Wave C). ``viewer`` users can read
-# resources they own but cannot mutate; ``admin`` and ``member`` can
-# both mutate. Backed by ``users.role`` (migration 0017) with a
-# server-default of ``member`` so existing rows + new signups
-# inherit mutating access without explicit promotion.
-_MUTATING_ROLES = frozenset({"admin", "member"})
+# PRD §5.2 RBAC three-role system (Wave C); ``operator`` added SETUP-5b
+# (ADR-F064 D1). ``viewer`` users can read resources they own but cannot
+# mutate; ``admin``, ``member`` AND ``operator`` may all mutate. ``operator``
+# is included because the platform operator owns its OWN rows (test matters,
+# chats, runs) and mutates them member-like — ADR-F064 D2 removes only the
+# operator's CROSS-USER tenant-data visibility (a business-logic seam), never
+# its ability to act on rows it owns. Backed by ``users.role`` (migrations
+# 0017/0085) with a server-default of ``member`` so existing rows + new
+# signups inherit mutating access without explicit promotion.
+_MUTATING_ROLES = frozenset({"admin", "member", "operator"})
 
 
 async def get_mutating_user(user: ActiveUser) -> User:
     """``ActiveUser`` plus a role check that excludes ``viewer``.
 
-    Wave C. Apply to state-changing endpoints (POST/PATCH/DELETE) so
-    operators can hand out read-only logins for auditors / observers.
-    Read-only endpoints (GET) keep using ``ActiveUser`` directly.
+    SETUP-5b (ADR-F064 D1). Applied to every tenant-data state-changing
+    endpoint (POST/PATCH/PUT/DELETE on owned resources) so a ``viewer``
+    login is an ENFORCED read-only account (auditors / observers), not just
+    a label. Read-only endpoints (GET), self-service ``/auth`` + ``/users/me``
+    routes, and service-to-service surfaces keep their own gate — the full
+    map is the drift-guard allowlist in ``tests/test_mutation_rbac.py``.
 
-    Returns 403 with ``code='forbidden'`` and a body mentioning the
-    role requirement so a CLI / UI can render a useful message.
+    Returns 403 with ``code='forbidden'`` and a body naming the role
+    requirement so a CLI / UI can render a useful message. The 403 fires on
+    the CALLER'S OWN role BEFORE any resource lookup, so it never leaks a
+    resource's existence — cross-user access stays 404 in the handler body.
     """
 
     if getattr(user, "role", "member") not in _MUTATING_ROLES:
@@ -242,8 +254,8 @@ async def get_mutating_user(user: ActiveUser) -> User:
 
         raise Forbidden(
             message=(
-                "This endpoint requires a member or admin role; viewer-role "
-                "users have read-only access."
+                "This endpoint requires a member, admin, or operator role; "
+                "viewer-role users have read-only access."
             ),
             details={"role": user.role, "required_roles": sorted(_MUTATING_ROLES)},
         )
@@ -258,6 +270,38 @@ this in place of ``ActiveUser`` so the role gate fires before any
 business logic runs. Admin-only endpoints continue to use
 ``AdminUser``; pure-read endpoints stay on ``ActiveUser``.
 """
+
+
+async def get_autonomous_enabled_user(user: MutatingUser) -> User:
+    """`MutatingUser` plus the per-user Autonomous Layer opt-in gate.
+
+    The /autonomous/* mutate surface requires the user to have opted in
+    (PRD §3.10, off by default). Read endpoints intentionally stay on plain
+    `ActiveUser` so a user who opts out never loses access to the audit
+    trail of what already ran (M4-C2 opt-out split; halt is a mutation and
+    carries :data:`MutatingUser` directly).
+
+    SETUP-5b §E (ADR-F064 D1): stacks on :data:`MutatingUser` (not
+    :data:`ActiveUser`) so BOTH checks hold on every autonomous mutation —
+    the viewer role gate fires first (403, role), then the opt-in flag
+    (403, autonomous). This is an API-edge authz fix, not an extension of
+    the frozen legacy executor.
+    """
+    if not user.autonomous_enabled:
+        from app.errors import Forbidden
+
+        raise Forbidden(
+            message="Autonomous Layer is not enabled for this user.",
+        )
+    return user
+
+
+AutonomousEnabledUser = Annotated[User, Depends(get_autonomous_enabled_user)]
+"""Type alias for /autonomous mutate endpoints that require the per-user
+opt-in flag (``autonomous_enabled = true``). Stacks on :data:`MutatingUser`
+(bearer-token + must-change-password + viewer-excluding role gate,
+ADR-F064 D1 §E) and adds the autonomous opt-in check. Read endpoints stay
+on :data:`ActiveUser` per the M4-C2 opt-out split."""
 
 
 # ---------------------------------------------------------------------------

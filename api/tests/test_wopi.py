@@ -1109,3 +1109,70 @@ async def test_putfile_non_put_override_501(
         headers={"X-WOPI-Override": "PUT_RELATIVE"},
     )
     assert resp.status_code == 501
+
+
+# ---------------------------------------------------------------------------
+# SETUP-5b §F (ADR-F064 D1) — write-path role re-check (demotion window)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_putfile_demoted_mid_session_401_reads_stay_open(
+    client: AsyncClient, db_user: User, db_session, fake_s3: FakeS3Client
+) -> None:
+    """A user demoted to viewer mid-session cannot keep SAVING through an
+    already-minted WOPI token (401 = session-invalid to Collabora), while the
+    still-member save path is unchanged and reads stay open after demotion."""
+    f = await _seed_editable(db_session, fake_s3, db_user, content=_make_ooxml("docx"))
+    token = create_wopi_token(db_user.id, f.id, name="Jane")
+
+    # Still a member: the save succeeds through the new role re-check.
+    edited = _make_ooxml("docx", marker=b"v2-member-save")
+    ok = await _putfile(client, f.id, token, edited)
+    assert ok.status_code == 200, ok.text
+
+    # Demoted to viewer mid-session: the SAME (still-valid) token can no
+    # longer write...
+    db_user.role = "viewer"
+    await db_session.flush()
+    denied = await _putfile(client, f.id, token, _make_ooxml("docx", marker=b"v3"))
+    assert denied.status_code == 401
+
+    # ...but read ops stay role-free: GetFile still streams the last save.
+    got = await client.get(_wopi_url(f.id, token, "/contents"))
+    assert got.status_code == 200
+    assert got.content == edited
+    info = await client.get(_wopi_url(f.id, token))
+    assert info.status_code == 200
+
+
+@pytest.mark.integration
+async def test_lock_op_demoted_mid_session_401(
+    client: AsyncClient, db_user: User, db_session
+) -> None:
+    """The lock family is a write too: a mid-session demotion invalidates it."""
+    f = await _seed_file(db_session, db_user)
+    token = create_wopi_token(db_user.id, f.id, name="Jane")
+
+    r = await _lock_op(client, f.id, token, "LOCK", lock="L1")
+    assert r.status_code == 200
+
+    db_user.role = "viewer"
+    await db_session.flush()
+    r = await _lock_op(client, f.id, token, "REFRESH_LOCK", lock="L1")
+    assert r.status_code == 401
+
+
+@pytest.mark.integration
+async def test_putfile_disabled_mid_session_401(
+    client: AsyncClient, db_user: User, db_session, fake_s3: FakeS3Client
+) -> None:
+    """Liveness mirror of get_current_user: a disabled account's live WOPI
+    token loses write access on the next save."""
+    f = await _seed_editable(db_session, fake_s3, db_user, content=_make_ooxml("docx"))
+    token = create_wopi_token(db_user.id, f.id, name="Jane")
+
+    db_user.disabled_at = datetime.now(tz=UTC)
+    await db_session.flush()
+    denied = await _putfile(client, f.id, token, _make_ooxml("docx", marker=b"v2"))
+    assert denied.status_code == 401

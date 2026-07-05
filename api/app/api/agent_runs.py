@@ -81,7 +81,7 @@ from app.agents.stream import (
     step_payload,
     terminal_parts,
 )
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.audit import audit_action
 from app.config import get_settings
 from app.db.session import get_db, get_session_factory
@@ -269,7 +269,7 @@ async def _thread_matter_active(db: AsyncSession, thread: AgentThread) -> bool:
 )
 async def create_agent_run(
     body: AgentRunCreate,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     checkpointer: Checkpointer,
 ) -> AgentRunRead:
@@ -1064,7 +1064,7 @@ async def get_agent_thread(
 async def cancel_agent_run(
     run_id: uuid.UUID,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AgentRunRead:
     """POST /api/v1/agents/runs/{run_id}/cancel — F1-S1 (ADR-F009).
@@ -1127,7 +1127,7 @@ async def cancel_agent_run(
 async def delete_agent_thread(
     thread_id: uuid.UUID,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     checkpointer: Checkpointer,
 ) -> Response:

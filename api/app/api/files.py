@@ -42,7 +42,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser
 from app.audit import audit_action
 from app.config import get_settings
 from app.db.session import get_db
@@ -183,7 +183,7 @@ async def _upload_file_stream(
     ),
 )
 async def upload_file(
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     file: Annotated[UploadFile, File(description="The file to upload.")],
@@ -457,7 +457,7 @@ async def get_file_content(
 )
 async def create_editor_session(
     file_id: str,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> EditorSessionResponse:
@@ -517,7 +517,7 @@ async def create_editor_session(
 )
 async def delete_file(
     file_id: str,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:

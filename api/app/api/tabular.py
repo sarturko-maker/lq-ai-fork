@@ -65,7 +65,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, MutatingUser, tenant_admin_visibility
 from app.api.projects import _load_visible_project
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
@@ -192,7 +192,8 @@ async def _load_caller_owned_documents(
 
     Mirrors the M3-A6 Easy Playbook helper. The visibility rule:
     each :class:`Document` has a parent :class:`File` whose
-    ``owner_id`` must match the caller (admins see all) AND which
+    ``owner_id`` must match the caller (org-admins see all; the
+    OPERATOR is excluded from that widening — ADR-F064 D2) AND which
     has not been soft-deleted. Missing / cross-owner / soft-deleted
     documents collapse into "not found" at the caller — running
     tabular extraction over documents the user no longer "has"
@@ -207,7 +208,7 @@ async def _load_caller_owned_documents(
         .join(FileModel, Document.file_id == FileModel.id)
         .where(FileModel.deleted_at.is_(None))
     )
-    if not user.is_admin:
+    if not tenant_admin_visibility(user):
         stmt = stmt.where(FileModel.owner_id == user.id)
     rows = (await db.execute(stmt)).scalars().all()
     return list(rows)
@@ -283,7 +284,7 @@ async def preview_tabular_cost(
 async def create_tabular_execution(
     body: TabularExecutionCreate,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TabularExecutionResponse:
     """Kick off a tabular execution against the supplied document corpus.
@@ -382,12 +383,13 @@ async def list_tabular_executions(
 ) -> list[TabularExecutionSummary]:
     """Return the caller's tabular executions, recent-first, soft-deleted excluded.
 
-    Admins see all executions; non-admins see only their own
+    Org-admins see all executions; non-admins — and the OPERATOR, which is
+    excluded from the admin widening (ADR-F064 D2) — see only their own
     (matches the Easy Playbook list posture).
     """
 
     stmt = select(TabularExecution).where(TabularExecution.deleted_at.is_(None))
-    if not user.is_admin:
+    if not tenant_admin_visibility(user):
         stmt = stmt.where(
             or_(TabularExecution.user_id == user.id, TabularExecution.user_id.is_(None))
         )
@@ -462,7 +464,7 @@ async def get_tabular_execution(
 )
 async def delete_tabular_execution(
     execution_id: uuid.UUID,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
@@ -489,7 +491,7 @@ async def delete_tabular_execution(
 )
 async def cancel_tabular_execution(
     execution_id: uuid.UUID,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TabularExecutionResponse:
@@ -633,7 +635,7 @@ def _clear_cell_override(
 async def override_tabular_cell(
     execution_id: uuid.UUID,
     payload: CellOverrideRequest,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TabularExecutionResponse:
@@ -682,7 +684,7 @@ async def override_tabular_cell(
 )
 async def clear_tabular_cell_override(
     execution_id: uuid.UUID,
-    user: ActiveUser,
+    user: MutatingUser,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     document_id: Annotated[uuid.UUID, Query()],
@@ -952,7 +954,7 @@ async def _load_caller_execution(
     row = await db.get(TabularExecution, execution_id)
     if row is None or row.deleted_at is not None:
         raise HTTPException(status_code=404, detail="execution not found")
-    if not user.is_admin and row.user_id != user.id:
+    if not tenant_admin_visibility(user) and row.user_id != user.id:
         raise HTTPException(status_code=404, detail="execution not found")
     return row
 
