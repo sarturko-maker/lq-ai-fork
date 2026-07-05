@@ -11,6 +11,13 @@
 
 // ----- Auth / users -----
 
+// The three ASSIGNABLE org roles. Deliberately excludes 'operator' (SETUP-5b,
+// ADR-F064): this type gates role assignment / invite / filter surfaces
+// (InviteCreateRequest.role, UserRoleResponse.role, AdminUserListQuery.role)
+// where the backend _ROLE_ENUM 422s operator (escalation guard, ADR-F061 D3).
+// 'operator' is DISPLAY-only and lives in `PlatformRole` (below), used by
+// User.role + AdminUserRow.role. Widening this union would let those
+// assignment types offer a role the server rejects — keep the split.
 export type UserRole = 'admin' | 'member' | 'viewer';
 
 /**
