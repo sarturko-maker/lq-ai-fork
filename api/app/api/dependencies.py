@@ -221,31 +221,6 @@ def tenant_admin_visibility(user: User) -> bool:
     return user.is_admin and user.role != "operator"
 
 
-async def get_autonomous_enabled_user(user: ActiveUser) -> User:
-    """`ActiveUser` plus the per-user Autonomous Layer opt-in gate.
-
-    The /autonomous/* mutate surface requires the user to have opted in
-    (PRD §3.10, off by default). Read + halt endpoints intentionally stay
-    on plain `ActiveUser` so a user who opts out never loses access to the
-    audit trail of what already ran (M4-C2 opt-out split).
-    """
-    if not user.autonomous_enabled:
-        from app.errors import Forbidden
-
-        raise Forbidden(
-            message="Autonomous Layer is not enabled for this user.",
-        )
-    return user
-
-
-AutonomousEnabledUser = Annotated[User, Depends(get_autonomous_enabled_user)]
-"""Type alias for /autonomous mutate endpoints that require the per-user
-opt-in flag (``autonomous_enabled = true``). Stacks on :data:`ActiveUser`
-(bearer-token + must-change-password gate) and adds the autonomous opt-in
-check. Read + halt endpoints stay on :data:`ActiveUser` per the M4-C2
-opt-out split."""
-
-
 # PRD §5.2 RBAC three-role system (Wave C); ``operator`` added SETUP-5b
 # (ADR-F064 D1). ``viewer`` users can read resources they own but cannot
 # mutate; ``admin``, ``member`` AND ``operator`` may all mutate. ``operator``
@@ -295,6 +270,38 @@ this in place of ``ActiveUser`` so the role gate fires before any
 business logic runs. Admin-only endpoints continue to use
 ``AdminUser``; pure-read endpoints stay on ``ActiveUser``.
 """
+
+
+async def get_autonomous_enabled_user(user: MutatingUser) -> User:
+    """`MutatingUser` plus the per-user Autonomous Layer opt-in gate.
+
+    The /autonomous/* mutate surface requires the user to have opted in
+    (PRD §3.10, off by default). Read endpoints intentionally stay on plain
+    `ActiveUser` so a user who opts out never loses access to the audit
+    trail of what already ran (M4-C2 opt-out split; halt is a mutation and
+    carries :data:`MutatingUser` directly).
+
+    SETUP-5b §E (ADR-F064 D1): stacks on :data:`MutatingUser` (not
+    :data:`ActiveUser`) so BOTH checks hold on every autonomous mutation —
+    the viewer role gate fires first (403, role), then the opt-in flag
+    (403, autonomous). This is an API-edge authz fix, not an extension of
+    the frozen legacy executor.
+    """
+    if not user.autonomous_enabled:
+        from app.errors import Forbidden
+
+        raise Forbidden(
+            message="Autonomous Layer is not enabled for this user.",
+        )
+    return user
+
+
+AutonomousEnabledUser = Annotated[User, Depends(get_autonomous_enabled_user)]
+"""Type alias for /autonomous mutate endpoints that require the per-user
+opt-in flag (``autonomous_enabled = true``). Stacks on :data:`MutatingUser`
+(bearer-token + must-change-password + viewer-excluding role gate,
+ADR-F064 D1 §E) and adds the autonomous opt-in check. Read endpoints stay
+on :data:`ActiveUser` per the M4-C2 opt-out split."""
 
 
 # ---------------------------------------------------------------------------

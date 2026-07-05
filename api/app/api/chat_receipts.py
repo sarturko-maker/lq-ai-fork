@@ -38,9 +38,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser
+from app.api.dependencies import ActiveUser, tenant_admin_visibility
 from app.db.session import get_db
-from app.errors import Forbidden, NotFound
+from app.errors import NotFound
 from app.models.audit import AuditLog
 from app.models.chat import Chat, Message
 from app.models.inference import InferenceRoutingLog
@@ -100,9 +100,13 @@ async def get_chat_receipts(
             "Chat not found.",
             details={"chat_id": str(chat_id)},
         )
-    if chat.owner_id != user.id and not user.is_admin:
-        raise Forbidden(
-            "You do not own this chat.",
+    # SETUP-5b §E (ADR-F064 D2): the admin-sees-all widening excludes the
+    # operator (tenant_admin_visibility), and cross-user access collapses into
+    # the same 404 as a missing chat — the previous 403-after-fetch leaked the
+    # chat's existence to non-owners (cross-user = 404, never 403).
+    if chat.owner_id != user.id and not tenant_admin_visibility(user):
+        raise NotFound(
+            "Chat not found.",
             details={"chat_id": str(chat_id)},
         )
 

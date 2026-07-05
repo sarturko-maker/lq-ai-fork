@@ -72,42 +72,10 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
     # (require_bridge_auth); no user context.
     ("POST", "/api/v1/integrations/slack/workspaces"): "bridge-token auth (no user)",
     ("POST", "/api/v1/integrations/teams/tenants"): "bridge-token auth (no user)",
-    # /autonomous/* — legacy Autonomous Layer (M4); per-user isolated + per-user
-    # opt-in gate (get_autonomous_enabled_user, stacks on ActiveUser). Viewer
-    # read-only enforcement on the legacy layer is out of SETUP-5b scope
-    # (CLAUDE.md freezes the legacy executors — bugfix only). Deferred: see
-    # MILESTONES backlog + ADR-F064 consequences.
-    ("POST", "/api/v1/autonomous/sessions/{session_id}/halt"): "legacy autonomous (deferred)",
-    ("POST", "/api/v1/autonomous/memory/{memory_id}/keep"): "legacy autonomous (deferred)",
-    ("POST", "/api/v1/autonomous/memory/{memory_id}/dismiss"): "legacy autonomous (deferred)",
-    ("DELETE", "/api/v1/autonomous/memory/{memory_id}"): "legacy autonomous (deferred)",
-    (
-        "POST",
-        "/api/v1/autonomous/precedents/{precedent_id}/dismiss",
-    ): "legacy autonomous (deferred)",
-    (
-        "POST",
-        "/api/v1/autonomous/precedents/{precedent_id}/promote",
-    ): "legacy autonomous (deferred)",
-    (
-        "POST",
-        "/api/v1/autonomous/project-context-proposals/{proposal_id}/accept",
-    ): "legacy autonomous (deferred)",
-    (
-        "POST",
-        "/api/v1/autonomous/project-context-proposals/{proposal_id}/reject",
-    ): "legacy autonomous (deferred)",
-    ("POST", "/api/v1/autonomous/schedules"): "legacy autonomous (deferred)",
-    ("PATCH", "/api/v1/autonomous/schedules/{schedule_id}"): "legacy autonomous (deferred)",
-    ("DELETE", "/api/v1/autonomous/schedules/{schedule_id}"): "legacy autonomous (deferred)",
-    ("POST", "/api/v1/autonomous/run-now"): "legacy autonomous (deferred)",
-    ("POST", "/api/v1/autonomous/watches"): "legacy autonomous (deferred)",
-    ("PATCH", "/api/v1/autonomous/watches/{watch_id}"): "legacy autonomous (deferred)",
-    ("DELETE", "/api/v1/autonomous/watches/{watch_id}"): "legacy autonomous (deferred)",
-    (
-        "POST",
-        "/api/v1/autonomous/notifications/{notification_id}/read",
-    ): "legacy autonomous (deferred)",
+    # NOTE (SETUP-5b §E): /autonomous/* mutations are NOT allowlisted — they
+    # are gated like all tenant-data writes. get_autonomous_enabled_user now
+    # stacks on MutatingUser (both checks hold: viewer role gate first, then
+    # the per-user opt-in flag); halt carries MutatingUser directly.
 }
 
 
@@ -182,13 +150,14 @@ def test_api_v1_path_count_pinned() -> None:
 
 @pytest.mark.unit
 def test_swapped_routers_expose_no_ungated_write() -> None:
-    """Spot-pin: the 52 tenant-data writes are all get_mutating_user-gated."""
+    """Spot-pin: all 68 tenant-data writes are get_mutating_user-gated
+    (52 direct swaps + 16 autonomous via the stacked opt-in gate, §E)."""
     gated = sum(
         1
         for _m, _p, route in _mutating_routes()
         if "get_mutating_user" in _auth_callables(route.dependant)
     )
-    assert gated == 52
+    assert gated == 68
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +228,9 @@ _VIEWER_DENIED_ROUTES: list[tuple[str, str]] = [
     ("POST", f"/api/v1/matters/{uuid.uuid4()}/roster/{uuid.uuid4()}/retire"),
     ("POST", f"/api/v1/matters/{uuid.uuid4()}/memory/facts/{uuid.uuid4()}/retire"),
     ("DELETE", f"/api/v1/projects/{uuid.uuid4()}/skills/some-skill"),
+    # §E — legacy autonomous halt (MutatingUser directly; no opt-in gate, so
+    # the member happy-path lands on the 404 owner lookup like the others).
+    ("POST", f"/api/v1/autonomous/sessions/{uuid.uuid4()}/halt"),
 ]
 
 
@@ -416,4 +388,90 @@ async def test_operator_cross_user_tabular_detail_is_404(
     never 403 — while the org-admin (regression) can read it."""
     ex = await _member_tabular(db_session, member_user)
     resp = await client.get(f"/api/v1/tabular/executions/{ex.id}", headers=_bearer(operator_user))
+    assert resp.status_code == 404, resp.text
+
+
+# ---------------------------------------------------------------------------
+# §E — legacy autonomous mutations: viewer role gate AND opt-in flag both hold
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_autonomous_mutation_stacks_role_gate_and_opt_in(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    viewer_user: User,
+    member_user: User,
+) -> None:
+    """`get_autonomous_enabled_user` stacks on MutatingUser (§E): a viewer is
+    rejected on ROLE (before the opt-in check); an opted-OUT member is
+    rejected on the opt-in flag; an opted-IN member clears both gates and
+    reaches the 404 owner lookup."""
+    path = f"/api/v1/autonomous/memory/{uuid.uuid4()}"
+
+    viewer = await client.delete(path, headers=_bearer(viewer_user))
+    assert viewer.status_code == 403
+    assert "read-only" in viewer.json()["detail"]["message"]
+
+    opted_out = await client.delete(path, headers=_bearer(member_user))
+    assert opted_out.status_code == 403
+    assert "Autonomous Layer" in opted_out.json()["detail"]["message"]
+
+    member_user.autonomous_enabled = True
+    await db_session.flush()
+    opted_in = await client.delete(path, headers=_bearer(member_user))
+    assert opted_in.status_code == 404, opted_in.text
+
+
+# ---------------------------------------------------------------------------
+# §E — chat receipts: operator excluded + cross-user 404 (was a 403
+# existence leak; recon §6 gap, fixed on lead review)
+# ---------------------------------------------------------------------------
+
+
+async def _member_chat(db_session: AsyncSession, owner: User):
+    from app.models.chat import Chat
+
+    chat = Chat(owner_id=owner.id, title="Member chat")
+    db_session.add(chat)
+    await db_session.flush()
+    return chat
+
+
+@pytest.mark.integration
+async def test_operator_cross_user_receipts_is_404(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    member_user: User,
+    operator_user: User,
+) -> None:
+    chat = await _member_chat(db_session, member_user)
+    resp = await client.get(f"/api/v1/chats/{chat.id}/receipts", headers=_bearer(operator_user))
+    assert resp.status_code == 404, resp.text
+
+
+@pytest.mark.integration
+async def test_org_admin_cross_user_receipts_succeeds(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    member_user: User,
+    org_admin_user: User,
+) -> None:
+    chat = await _member_chat(db_session, member_user)
+    resp = await client.get(f"/api/v1/chats/{chat.id}/receipts", headers=_bearer(org_admin_user))
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.integration
+async def test_non_owner_member_receipts_is_404_not_403(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    member_user: User,
+    org_admin_user: User,
+) -> None:
+    """The pre-§E code returned 403-after-fetch — an existence leak. A
+    non-owner non-admin now gets the same 404 as a missing chat."""
+    chat = await _member_chat(db_session, org_admin_user)
+    other = await _make_user(db_session, role="member", is_admin=False)
+    resp = await client.get(f"/api/v1/chats/{chat.id}/receipts", headers=_bearer(other))
     assert resp.status_code == 404, resp.text

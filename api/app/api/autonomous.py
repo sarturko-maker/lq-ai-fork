@@ -46,9 +46,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Mutate endpoints use AutonomousEnabledUser (opt-in required, PRD §3.10);
-# read + halt endpoints use ActiveUser (always reachable for audit access).
-from app.api.dependencies import ActiveUser, AutonomousEnabledUser
+# Mutate endpoints use AutonomousEnabledUser (opt-in required, PRD §3.10;
+# stacks on MutatingUser since SETUP-5b §E, ADR-F064 D1 — viewer excluded);
+# read endpoints use ActiveUser (always reachable for audit access); halt is
+# a mutation without the opt-in gate, so it carries MutatingUser directly.
+from app.api.dependencies import ActiveUser, AutonomousEnabledUser, MutatingUser
 from app.audit import audit_action
 from app.autonomous.audit import autonomous_audit
 from app.autonomous.cron import next_run_after, validate_cron_expr
@@ -379,7 +381,7 @@ async def _load_owned_notification(
 async def halt_session(
     session_id: uuid.UUID,
     request: Request,
-    user: ActiveUser,
+    user: MutatingUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AutonomousSessionRead:
     """POST /api/v1/autonomous/sessions/{session_id}/halt

@@ -62,19 +62,26 @@ which a firm may want from its own IT too; it is confidentiality-critical only i
 
 Adopt **D1 option 1** and **D2 option 1**.
 
-- **D1 — `viewer` becomes ENFORCED read-only.** `operator` is added to `_MUTATING_ROLES`
-  (`{admin, member, operator}`) so the gate rejects only `viewer`. `MutatingUser` replaces
-  `ActiveUser` on all 52 tenant-data mutating routes (POST/PATCH/PUT/DELETE on owned resources)
-  across 14 routers. The 403 fires on the caller's OWN role BEFORE any resource lookup, so it never
-  leaks existence — cross-user access stays 404 in the handler body. A new `app.routes` drift guard
-  (`tests/test_mutation_rbac.py`) fails CI if any future mutating route is neither role-gated nor in
-  a small, justified allowlist (auth self-service, `/users/me` self-service, POST-shaped reads,
-  WOPI token-auth, bridge token-auth, legacy autonomous).
+- **D1 — `viewer` becomes ENFORCED read-only across the ENTIRE tenant-data surface, legacy
+  included.** `operator` is added to `_MUTATING_ROLES` (`{admin, member, operator}`) so the gate
+  rejects only `viewer`. `MutatingUser` replaces `ActiveUser` on all 68 tenant-data mutating routes
+  (POST/PATCH/PUT/DELETE on owned resources): 52 direct swaps across 14 routers, plus the 16 legacy
+  `/autonomous/*` mutations (lead review, §E) — `get_autonomous_enabled_user` now stacks on
+  `MutatingUser` so BOTH checks hold (viewer role gate first, then the per-user opt-in flag), and
+  `halt` (a mutation without the opt-in gate, M4-C2 split) carries `MutatingUser` directly. Gating
+  the legacy API edge is an authz bugfix, not an extension of the frozen executors. The 403 fires on
+  the caller's OWN role BEFORE any resource lookup, so it never leaks existence — cross-user access
+  stays 404 in the handler body. A new `app.routes` drift guard (`tests/test_mutation_rbac.py`)
+  fails CI if any future mutating route is neither role-gated nor in a small, justified allowlist
+  (auth self-service, `/users/me` self-service, POST-shaped reads, WOPI token-auth, bridge
+  token-auth).
 
 - **D2 — `operator` excluded from cross-user tenant data.** New pure helper
   `tenant_admin_visibility(user) -> bool` (`api/app/api/dependencies.py`) replaces `user.is_admin`
-  at the 13 admin-sees-all seams in `tabular.py` (list / detail / doc-load) and `playbooks.py` (list
-  + every ownership check). The org-admin keeps admin-sees-all; the operator falls back to
+  at the 14 admin-sees-all seams: 13 in `tabular.py` (list / detail / doc-load) and `playbooks.py`
+  (list + every ownership check), plus `chat_receipts.py` (receipt read — found during the slice as
+  a recon §6 gap and fixed on lead review, §E; the same fix converts its 403-after-fetch into the
+  existence-rule 404). The org-admin keeps admin-sees-all; the operator falls back to
   owner-scoped, member-like access on tenant data. It loses ONLY cross-user tenant-data visibility —
   it keeps every `OperatorUser` fence surface, every `AdminUser` admin surface (users/areas/
   capabilities — platform config, the fence's own scope), and normal access to rows it owns (which
@@ -99,14 +106,14 @@ Adopt **D1 option 1** and **D2 option 1**.
 - **Break-glass is a future explicit feature, not built.** If a hosted operator ever needs
   authorized cross-user tenant-data access (incident response, legal hold), that is an explicit,
   audited, time-boxed grant — never the silent `is_admin` superset this slice removes.
-- **Known residual — `chat_receipts.py:103`.** A same-class operator cross-user tenant-data READ
-  bypass (`if chat.owner_id != user.id and not user.is_admin`) that the recon §6 enumeration missed;
-  it additionally returns 403 (existence leak) where the fork convention is 404. Out of the ratified
-  13-seam scope this slice; a follow-up seam-fix should narrow it to `tenant_admin_visibility` AND
-  return 404 (backlog).
-- **Legacy Autonomous Layer viewer-enforcement deferred.** `/autonomous/*` mutations are allowlisted
-  in the drift guard (per-user isolated + a per-user opt-in gate); CLAUDE.md freezes the legacy
-  executors (bugfix-only), so enforcing viewer read-only there is a separate, deferred item.
+- **`chat_receipts.py` cross-user 403 → 404 (behavior change).** The receipt read previously
+  returned 403 "You do not own this chat" after fetching a non-owned chat — an existence leak the
+  recon §6 enumeration missed. §E collapses non-owner access into the same `NotFound` as a missing
+  chat and excludes the operator via `tenant_admin_visibility`; clients that pinned the 403 must
+  treat 404 as the only cross-user signal (the fork's existing convention).
+- **Legacy autonomous mutations are viewer-gated too.** Opted-in viewers (if any exist) lose
+  autonomous mutation access; the opt-in flag semantics are unchanged for member/admin/operator.
+  Reads (sessions/findings/artifacts/lists) stay on `ActiveUser` per the M4-C2 opt-out split.
 - **`UserRole` (web) deliberately NOT widened.** The recon read `types.ts` `UserRole` as "stale (no
   operator)"; in fact `PlatformRole = UserRole | 'operator'` already carries operator for DISPLAY,
   and `UserRole` is the ASSIGNABLE-role set (invite / role-update / filter) where the backend
