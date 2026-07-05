@@ -739,7 +739,8 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   status flip) + budget-profile defaults (ADR-F063: per-area `default_budget_profile` + deployment
   `RUN_DEFAULT_BUDGET_PROFILE`, resolution chain run-explicit > area default > deployment default >
   balanced); merged PR #221 `ab14309b`.
-  **SETUP-5b (IN-FLIGHT)** — viewer/operator tenant-data RBAC (ADR-F064): D1 `viewer` becomes an
+  **SETUP-5b ✓ done** — viewer/operator tenant-data RBAC (ADR-F064, merged PR #222 `20baf1e5`):
+  D1 `viewer` becomes an
   enforced read-only account (MutatingUser on all 68 tenant-data mutating routes incl. the legacy
   `/autonomous/*` 16 via a stacked opt-in gate, + an app.routes drift-guard); D2 `operator` excluded
   from the pre-F061 `is_admin` admin-sees-all seams (new `tenant_admin_visibility`, 14 seams in
@@ -754,6 +755,24 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   separable and can be pulled forward for the weekend bring-up** → SETUP-3c (first-login onboarding
   checklist: House Brief → invite users → review area defaults — UX polish split out of 3b, can
   ride after the 4x/5 ladder).
+- **ONBOARD + STORE (maintainer priority 2026-07-05).** **ONBOARD-0 ✓ done** — local dress
+  rehearsal: dev stack reset onto main (sanctioned), operator-handover state, full multi-role
+  walkthrough (admin → invite → member → Commercial run on deepseek-v4-flash after the maintainer
+  repointed aliases live via the operator Models page); 8 code-grounded gaps →
+  `plans/ONBOARD-admin-experience.md`; G7 (accept-invite/reset-password blank on direct load —
+  replaceState-before-router-init) fixed + merged PR #223 `2f3039e0` with live Cypress vs :3000.
+  **STORE (ACTIVE — jumps ahead of the template catalog; maintainer: "this takes priority. We need
+  clean and clear UX"):** Catalog ("Store") / Org Library / Area Binding — adopt-in polarity
+  replaces the disable-only Level-0 toggles; provenance surfaced; non-technical-admin UX binding.
+  Plan `plans/STORE-org-library.md` (maintainer-reviewed, 4 questions decided) + **ADR-F065
+  (proposed)**. Slices: STORE-0 ✓ (ADR + this reorder, doc-only) → **STORE-1 Library substrate**
+  (migration + seed-from-effective-state + toggle supersession; adopt/remove endpoints; bind-time
+  check; `build_area_inventory` predicate swap; drift-guard matrix) → STORE-2 Store+Library admin
+  pages (+G5 skill links) → STORE-3 live re-rehearsal (acceptance test). THEN **ONBOARD-1 template
+  catalog** (templates adopt-on-apply; unit-of-work vocabulary first-class — "Investigation"
+  missing, structure-beyond-label is ADR territory) → **ONBOARD-2 admin wizard** (SETUP-3c folds in
+  as entry point). Remaining ONBOARD gaps queued: G1 boot-email validation, G2 House Brief page +
+  checklist, G8 model visibility/fallbacks/error UX.
 - **SAAS-4 — user lifecycle + admin split — ABSORBED into SETUP-3a/b** (see the SETUP ladder above).
   Original scope: invitations/verification/reset/SMTP; forced first
   password change; WorkOS-style users/orgs/memberships modeling; platform-admin vs org-admin
