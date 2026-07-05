@@ -137,3 +137,34 @@ def test_get_settings_is_cached() -> None:
     get_settings.cache_clear()
     c = get_settings()
     assert c is not a
+
+
+@pytest.mark.unit
+def test_run_default_budget_profile_defaults_to_none() -> None:
+    """SETUP-5a (ADR-F063): unset ⇒ None (the run-create chain falls through
+    to balanced)."""
+    assert _settings().run_default_budget_profile is None
+
+
+@pytest.mark.unit
+def test_run_default_budget_profile_empty_string_normalizes_to_none() -> None:
+    """The prod compose forwards `${RUN_DEFAULT_BUDGET_PROFILE:-}`, so an unset
+    key reaches pydantic as EMPTY STRING — it must read as "no default", never
+    as a value (the SETUP-3b `${VAR:-}` trap)."""
+    assert _settings(run_default_budget_profile="").run_default_budget_profile is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("profile", ["economy", "balanced", "generous"])
+def test_run_default_budget_profile_accepts_the_three_profiles(profile: str) -> None:
+    assert _settings(run_default_budget_profile=profile).run_default_budget_profile == profile
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bad", ["lavish", "Economy", "balanced "])
+def test_run_default_budget_profile_rejects_unknown_values_at_boot(bad: str) -> None:
+    """A misconfigured deployment fails LOUD at Settings construction (boot),
+    never silently runs every run on an unintended tier."""
+    with pytest.raises(Exception) as exc:
+        _settings(run_default_budget_profile=bad)
+    assert "RUN_DEFAULT_BUDGET_PROFILE" in str(exc.value)

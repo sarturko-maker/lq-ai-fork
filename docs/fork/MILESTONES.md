@@ -733,9 +733,12 @@ lead model drafts/orchestrates/verifies; smaller models implement.
   POST/DELETE `/practice-areas` (delete refuses 409 while a live matter references it), POST/DELETE
   `/practice-areas/{key}/tool-groups`, GET/PATCH `/admin/capabilities`. Hard gate: parity golden
   (`tests/agents/test_registry_parity.py`) pins the registry loop reproduces the pre-refactor grants
-  byte-identically (tools/order/ledger/tabular_enabled). No web UI (SETUP-4b). NEXT: SETUP-4b (Practice
-  Areas + Capabilities admin surfaces) →
-  SETUP-5 reconcile (F054 flip + D1 supersession) → **SETUP-6 — actor guides (maintainer,
+  byte-identically (tools/order/ledger/tabular_enabled). **SETUP-4b ✓ done** — Practice Areas +
+  Capabilities admin surfaces (ADR-F062 addendum; merged PR #220 `0b908abe`).
+  **SETUP-5a (IN-FLIGHT)** — reconcile paperwork (F054 status flip + D1-supersession addendum, F062
+  status flip) + budget-profile defaults (ADR-F063: per-area `default_budget_profile` + deployment
+  `RUN_DEFAULT_BUDGET_PROFILE`, resolution chain run-explicit > area default > deployment default >
+  balanced). NEXT: SETUP-5b (viewer/operator RBAC) → **SETUP-6 — actor guides (maintainer,
   2026-07-04, ON HOLD until called): human-facing operating documentation, one guide per F061
   actor — Operator (provisioning/wizard, backups + restore drill, the fence, invite handover,
   ongoing ops; links the staging-bringup runbook) / Admin (claiming the workspace, Users admin,
@@ -766,6 +769,15 @@ lead model drafts/orchestrates/verifies; smaller models implement.
 ## Backlog
 
 (One line per idea surfaced out of scope; promote at milestone boundaries.)
+
+- **SETUP-3c — first-login onboarding checklist** (split out of SETUP-3b, surfaced 2026-07-05): House
+  Brief → invite users → review area defaults, UX polish, can ride after the 4x/5 ladder.
+- **SETUP-6 — actor guides** (operator/admin/user; maintainer-held, task #462, ON HOLD until called):
+  human-facing operating documentation, one guide per F061 actor.
+- **`CapabilitiesPanel.svelte` optimistic-revert defect class (surfaced SETUP-5a, 2026-07-05).**
+  The matter-level capabilities panel's optimistic-toggle revert restores a whole-state snapshot on
+  failure instead of just the failed entry — the same defect class the SETUP-4b review fixed
+  elsewhere; worth a dedicated pass when that panel is next touched.
 
 - **Per-matter selectable embedding provider (ADR-F056, plan `EMBEDDING-PROVIDER-choice.md`; surfaced
   2026-07-01).** Local (private/$0/sensitive) vs inference (gateway→OpenAI now, Voyage `voyage-law-2` later),

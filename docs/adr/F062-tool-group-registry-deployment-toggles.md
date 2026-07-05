@@ -1,6 +1,7 @@
 # F062 — Tool-group registry (availability as data) + deployment-wide (Level 0) capability toggles
 
-- Status: **proposed**
+- Status: accepted (maintainer-ratified plan §7 row 9 "proceed as you suggest" 2026-07-03; flip
+  recorded SETUP-5a, 2026-07-05)
 - Date: 2026-07-04
 - Deciders: maintainer (Arturs), agent
 - Slice: **SETUP-4a**. Builds on **ADR-F002** (practice-area = agent identity), **ADR-F010**

@@ -18,11 +18,17 @@ describe('buildRunPayload — follow-up (detail present)', () => {
 		expect('project_id' in payload).toBe(false);
 	});
 
-	it('always includes budget_profile for every profile value', () => {
+	it('always includes budget_profile for every explicit profile value', () => {
 		for (const profile of ALL_PROFILES) {
 			const payload = buildRunPayload({ prompt: 'p', budgetProfile: profile, detail });
 			expect(payload.budget_profile).toBe(profile);
 		}
+	});
+
+	it('OMITS budget_profile for the "" Default option (server resolves — ADR-F063)', () => {
+		const payload = buildRunPayload({ prompt: 'p', budgetProfile: '', detail });
+		expect('budget_profile' in payload).toBe(false);
+		expect(payload.thread_id).toBe('thread-abc');
 	});
 
 	it('forwards the prompt exactly', () => {
@@ -46,7 +52,7 @@ describe('buildRunPayload — new conversation (no detail)', () => {
 		expect('thread_id' in payload).toBe(false);
 	});
 
-	it('always includes budget_profile for every profile value', () => {
+	it('always includes budget_profile for every explicit profile value', () => {
 		for (const profile of ALL_PROFILES) {
 			const payload = buildRunPayload({
 				prompt: 'p',
@@ -55,6 +61,16 @@ describe('buildRunPayload — new conversation (no detail)', () => {
 			});
 			expect(payload.budget_profile).toBe(profile);
 		}
+	});
+
+	it('OMITS budget_profile for the "" Default option (server resolves — ADR-F063)', () => {
+		const payload = buildRunPayload({
+			prompt: 'p',
+			budgetProfile: '',
+			selectedMatterId: 'proj-1'
+		});
+		expect('budget_profile' in payload).toBe(false);
+		expect(payload.project_id).toBe('proj-1');
 	});
 
 	it('uses null project_id when selectedMatterId is absent', () => {

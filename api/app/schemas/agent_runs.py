@@ -82,8 +82,11 @@ class AgentRunCreate(BaseModel):
     model_alias: str = Field(default="smart", min_length=1, max_length=64)
     # F2 Slice O (ADR-F053): the run's cost/effort envelope. Resolves
     # server-side to (token_budget, fan_out_quota, max_steps, wall_clock).
-    # balanced (default) is the ~4x tier; economy dials down; generous raises.
-    budget_profile: BudgetProfile = Field(default=BudgetProfile.balanced)
+    # SETUP-5a (ADR-F063): None = "resolve for me" — the endpoint walks
+    # run-explicit > area default > deployment default > balanced and persists
+    # the RESOLVED value. (The old always-concrete balanced default made a
+    # client omission indistinguishable from an explicit balanced pick.)
+    budget_profile: BudgetProfile | None = Field(default=None)
     # Per-run step ceiling. Normally driven by ``budget_profile`` (ADR-F053):
     # leave this None and the resolved profile's max_steps applies (economy 100 /
     # balanced 400 / generous 600). Set it to override the profile for one run

@@ -664,6 +664,51 @@ async def test_admin_patch_configures_area(client: AsyncClient, admin: User) -> 
     assert body["profile_md"] == "You are the Disputes agent."
 
 
+async def test_admin_patch_sets_and_clears_default_budget_profile(
+    client: AsyncClient, admin: User
+) -> None:
+    """SETUP-5a (ADR-F063): PATCH sets the area budget default; a key ABSENT
+    leaves it unchanged; a key present with explicit JSON null CLEARS it (the
+    area inherits the deployment default) — the opposite of name/unit_label's
+    null rejection, by design."""
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"default_budget_profile": "economy"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["default_budget_profile"] == "economy"
+
+    # Key absent ⇒ unchanged (exclude_unset partial-update semantics).
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"profile_md": "Disputes doctrine."},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["default_budget_profile"] == "economy"
+
+    # Key present with explicit null ⇒ CLEARS (column back to NULL).
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"default_budget_profile": None},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["default_budget_profile"] is None
+
+
+async def test_admin_patch_rejects_bogus_budget_profile(client: AsyncClient, admin: User) -> None:
+    """Boundary validation (reject, don't sanitize): not one of the three
+    profiles ⇒ 422, never persisted."""
+    resp = await client.patch(
+        "/api/v1/practice-areas/disputes",
+        headers=_bearer(admin),
+        json={"default_budget_profile": "lavish"},
+    )
+    assert resp.status_code == 422
+
+
 async def test_admin_patch_accepts_valid_subagents(client: AsyncClient, admin: User) -> None:
     resp = await client.patch(
         "/api/v1/practice-areas/commercial",

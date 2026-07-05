@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -50,6 +50,9 @@ class PracticeAreaRead(BaseModel):
     position: int
     profile_md: str | None
     default_tier_floor: int | None
+    # SETUP-5a (ADR-F063): the area's default budget_profile for new runs;
+    # None = inherit the deployment default (RUN_DEFAULT_BUDGET_PROFILE) / balanced.
+    default_budget_profile: str | None
     agent_config: dict[str, Any]
     bound_skills: list[str]
     bound_tool_groups: list[str]
@@ -83,6 +86,13 @@ class PracticeAreaConfigUpdate(BaseModel):
     unit_label: str | None = Field(default=None, min_length=1, max_length=200)
     profile_md: str | None = Field(default=None, max_length=20_000)
     default_tier_floor: int | None = Field(default=None, ge=1, le=5)
+    # SETUP-5a (ADR-F063): the area's default budget_profile for new runs.
+    # SEMANTIC DIFFERENCE from name/unit_label: here an explicit JSON ``null``
+    # is MEANINGFUL — it CLEARS the area default (the column goes NULL and the
+    # area inherits the deployment default / balanced). With ``exclude_unset``,
+    # "key present with null" clears; "key absent" leaves the value unchanged.
+    # Deliberately NOT covered by ``_reject_explicit_null`` below.
+    default_budget_profile: Literal["economy", "balanced", "generous"] | None = None
     agent_config: dict[str, Any] | None = None
 
     @field_validator("name", "unit_label")

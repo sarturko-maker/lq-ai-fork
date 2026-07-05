@@ -1127,3 +1127,33 @@ async def test_deployment_capability_toggles_kind_check(db_session: AsyncSession
         )
         await db_session.flush()
     await db_session.rollback()
+
+
+@pytest.mark.integration
+async def test_practice_areas_default_budget_profile_check(db_session: AsyncSession) -> None:
+    """0087 (ADR-F063): default_budget_profile is NULL or economy|balanced|generous."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.practice_area import PracticeArea
+
+    ok = PracticeArea(
+        key=f"bp-ok-{uuid.uuid4().hex[:8]}",
+        name="Budget OK",
+        unit_label="Matter",
+        position=901,
+        default_budget_profile="economy",
+    )
+    db_session.add(ok)
+    await db_session.flush()  # a valid profile (and the seeded NULLs) must NOT raise
+
+    bad = PracticeArea(
+        key=f"bp-bad-{uuid.uuid4().hex[:8]}",
+        name="Budget Bad",
+        unit_label="Matter",
+        position=902,
+        default_budget_profile="lavish",
+    )
+    db_session.add(bad)
+    with pytest.raises(IntegrityError):
+        await db_session.flush()
+    await db_session.rollback()

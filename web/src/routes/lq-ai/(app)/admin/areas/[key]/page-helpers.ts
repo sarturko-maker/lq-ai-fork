@@ -23,14 +23,23 @@ export interface AreaEditDraft {
 	profile_md: string;
 	/** '' or a numeric string, mirroring the `<select>`'s string value. */
 	default_tier_floor: string;
+	/** '' = "Inherit deployment default", else one of the three profiles —
+	 *  mirroring the `<select>`'s string value (SETUP-5a, ADR-F063). */
+	default_budget_profile: string;
 }
 
 /**
  * PATCH body containing ONLY the fields that differ from `original`
  * (exclude_unset semantics) — never a no-op PATCH with every field repeated.
+ * For `default_budget_profile`, "changed to Inherit" sends an EXPLICIT null
+ * (the server clears the column); an unchanged field is omitted entirely
+ * (ADR-F063 — key-present-null clears, key-absent leaves unchanged).
  */
 export function diffPatch(
-	original: Pick<PracticeArea, 'name' | 'unit_label' | 'profile_md' | 'default_tier_floor'>,
+	original: Pick<
+		PracticeArea,
+		'name' | 'unit_label' | 'profile_md' | 'default_tier_floor' | 'default_budget_profile'
+	>,
 	draft: AreaEditDraft
 ): PracticeAreaUpdateBody {
 	const patch: PracticeAreaUpdateBody = {};
@@ -46,6 +55,14 @@ export function diffPatch(
 
 	const tierFloor = draft.default_tier_floor === '' ? null : Number(draft.default_tier_floor);
 	if (tierFloor !== original.default_tier_floor) patch.default_tier_floor = tierFloor;
+
+	const budgetProfile =
+		draft.default_budget_profile === ''
+			? null
+			: (draft.default_budget_profile as 'economy' | 'balanced' | 'generous');
+	if (budgetProfile !== original.default_budget_profile) {
+		patch.default_budget_profile = budgetProfile;
+	}
 
 	return patch;
 }

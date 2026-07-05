@@ -9,15 +9,19 @@
 
 	export function buildRunPayload(args: {
 		prompt: string;
-		budgetProfile: 'economy' | 'balanced' | 'generous';
+		/** '' = the "Default" option — `budget_profile` is OMITTED from the payload
+		 *  and the server resolves the chain run-explicit > area default >
+		 *  deployment default > balanced (SETUP-5a, ADR-F063). */
+		budgetProfile: '' | 'economy' | 'balanced' | 'generous';
 		detail?: { thread: { id: string } } | null;
 		selectedMatterId?: string | null;
 	}): AgentRunCreate {
 		const { prompt, budgetProfile, detail, selectedMatterId } = args;
+		const budget = budgetProfile === '' ? {} : { budget_profile: budgetProfile };
 		if (detail) {
-			return { prompt, budget_profile: budgetProfile, thread_id: detail.thread.id };
+			return { prompt, ...budget, thread_id: detail.thread.id };
 		}
-		return { prompt, budget_profile: budgetProfile, project_id: selectedMatterId ?? null };
+		return { prompt, ...budget, project_id: selectedMatterId ?? null };
 	}
 
 	/**
@@ -157,7 +161,9 @@
 	let submitting = false;
 	let submitError: string | null = null;
 	// Budget profile for the next run — controls model tier ceiling / token spend.
-	let budgetProfile: 'economy' | 'balanced' | 'generous' = 'balanced';
+	// '' = "Default": the payload omits budget_profile and the server resolves
+	// run-explicit > area default > deployment default > balanced (ADR-F063).
+	let budgetProfile: '' | 'economy' | 'balanced' | 'generous' = '';
 	// PRIV-9a run-lock: the Stop control's in-flight + error state.
 	let cancelling = false;
 	let cancelError: string | null = null;
@@ -1329,12 +1335,17 @@
 					data-testid="lq-ai-agents-budget-select"
 					bind:value={budgetProfile}
 				>
+					<option value="">Default</option>
 					<option value="economy">Economy</option>
 					<option value="balanced">Balanced</option>
 					<option value="generous">Generous</option>
 				</select>
 			</div>
-			<p class="lq-text-caption ag-note">Balanced — recommended</p>
+			{#if budgetProfile === ''}
+				<p class="lq-text-caption ag-note">Default — set by your area or deployment</p>
+			{:else}
+				<p class="lq-text-caption ag-note">Applies to this run — overrides the default</p>
+			{/if}
 		</div>
 
 		<div class="ag-composer__actions">
