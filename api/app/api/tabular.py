@@ -65,7 +65,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import ActiveUser, MutatingUser
+from app.api.dependencies import ActiveUser, MutatingUser, tenant_admin_visibility
 from app.api.projects import _load_visible_project
 from app.audit import audit_action
 from app.clients.gateway import GatewayClient, get_gateway_client
@@ -207,7 +207,7 @@ async def _load_caller_owned_documents(
         .join(FileModel, Document.file_id == FileModel.id)
         .where(FileModel.deleted_at.is_(None))
     )
-    if not user.is_admin:
+    if not tenant_admin_visibility(user):
         stmt = stmt.where(FileModel.owner_id == user.id)
     rows = (await db.execute(stmt)).scalars().all()
     return list(rows)
@@ -387,7 +387,7 @@ async def list_tabular_executions(
     """
 
     stmt = select(TabularExecution).where(TabularExecution.deleted_at.is_(None))
-    if not user.is_admin:
+    if not tenant_admin_visibility(user):
         stmt = stmt.where(
             or_(TabularExecution.user_id == user.id, TabularExecution.user_id.is_(None))
         )
@@ -952,7 +952,7 @@ async def _load_caller_execution(
     row = await db.get(TabularExecution, execution_id)
     if row is None or row.deleted_at is not None:
         raise HTTPException(status_code=404, detail="execution not found")
-    if not user.is_admin and row.user_id != user.id:
+    if not tenant_admin_visibility(user) and row.user_id != user.id:
         raise HTTPException(status_code=404, detail="execution not found")
     return row
 

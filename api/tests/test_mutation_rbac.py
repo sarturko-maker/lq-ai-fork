@@ -285,3 +285,135 @@ async def test_member_passes_role_gate(
     owner-scoped handler body."""
     resp = await client.request(method, path, headers=_bearer(member_user))
     assert resp.status_code != 403, f"{method} {path} -> {resp.status_code}: {resp.text}"
+
+
+# ---------------------------------------------------------------------------
+# tenant_admin_visibility (D2) — operator excluded from cross-user tenant data;
+# org-admin keeps admin-sees-all (regression). Cross-user = 404, never 403.
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def operator_user(db_session: AsyncSession) -> User:
+    # ADR-F061 D3: operator is an is_admin superset. ADR-F064 D2 excludes it
+    # from cross-user tenant-data visibility (tenant_admin_visibility → False).
+    return await _make_user(db_session, role="operator", is_admin=True)
+
+
+@pytest_asyncio.fixture
+async def org_admin_user(db_session: AsyncSession) -> User:
+    return await _make_user(db_session, role="admin", is_admin=True)
+
+
+async def _member_playbook(db_session: AsyncSession, owner: User):
+    from app.models.playbook import Playbook
+
+    pb = Playbook(
+        name=f"Member PB {uuid.uuid4().hex[:6]}", contract_type="nda", created_by=owner.id
+    )
+    db_session.add(pb)
+    await db_session.flush()
+    await db_session.refresh(pb)
+    return pb
+
+
+async def _member_tabular(db_session: AsyncSession, owner: User):
+    from app.models.tabular import TabularExecution
+
+    ex = TabularExecution(user_id=owner.id)
+    db_session.add(ex)
+    await db_session.flush()
+    await db_session.refresh(ex)
+    return ex
+
+
+@pytest.mark.integration
+async def test_operator_excluded_from_cross_user_playbook_list(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    member_user: User,
+    operator_user: User,
+    org_admin_user: User,
+) -> None:
+    """`list_playbooks` admin-sees-all bypass no longer extends to operator:
+    the operator sees only its own; the org-admin still sees the member's."""
+    pb = await _member_playbook(db_session, member_user)
+
+    op = await client.get("/api/v1/playbooks", headers=_bearer(operator_user))
+    assert op.status_code == 200
+    assert str(pb.id) not in {p["id"] for p in op.json()}
+
+    admin = await client.get("/api/v1/playbooks", headers=_bearer(org_admin_user))
+    assert admin.status_code == 200
+    assert str(pb.id) in {p["id"] for p in admin.json()}, (
+        "org-admin must still see all (regression)"
+    )
+
+    owner = await client.get("/api/v1/playbooks", headers=_bearer(member_user))
+    assert str(pb.id) in {p["id"] for p in owner.json()}
+
+
+@pytest.mark.integration
+async def test_operator_cross_user_playbook_delete_is_404_not_403(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    member_user: User,
+    operator_user: User,
+) -> None:
+    """Operator deleting ANOTHER user's playbook is 404 (existence rule),
+    never 403 — and the row survives."""
+    pb = await _member_playbook(db_session, member_user)
+    resp = await client.delete(f"/api/v1/playbooks/{pb.id}", headers=_bearer(operator_user))
+    assert resp.status_code == 404, resp.text
+    await db_session.refresh(pb)
+    assert pb.deleted_at is None
+
+
+@pytest.mark.integration
+async def test_org_admin_cross_user_playbook_delete_succeeds(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    member_user: User,
+    org_admin_user: User,
+) -> None:
+    """Regression: the org-admin keeps admin-sees-all on the mutation path."""
+    pb = await _member_playbook(db_session, member_user)
+    resp = await client.delete(f"/api/v1/playbooks/{pb.id}", headers=_bearer(org_admin_user))
+    assert resp.status_code in (200, 204), resp.text
+
+
+@pytest.mark.integration
+async def test_operator_excluded_from_cross_user_tabular_list(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    member_user: User,
+    operator_user: User,
+    org_admin_user: User,
+) -> None:
+    """`list_tabular_executions` admin-sees-all bypass no longer extends to
+    operator; the org-admin still sees the member's execution."""
+    ex = await _member_tabular(db_session, member_user)
+
+    op = await client.get("/api/v1/tabular/executions", headers=_bearer(operator_user))
+    assert op.status_code == 200
+    assert str(ex.id) not in {r["id"] for r in op.json()}
+
+    admin = await client.get("/api/v1/tabular/executions", headers=_bearer(org_admin_user))
+    assert admin.status_code == 200
+    assert str(ex.id) in {r["id"] for r in admin.json()}, (
+        "org-admin must still see all (regression)"
+    )
+
+
+@pytest.mark.integration
+async def test_operator_cross_user_tabular_detail_is_404(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    member_user: User,
+    operator_user: User,
+) -> None:
+    """Operator reading ANOTHER user's execution is 404 (existence rule),
+    never 403 — while the org-admin (regression) can read it."""
+    ex = await _member_tabular(db_session, member_user)
+    resp = await client.get(f"/api/v1/tabular/executions/{ex.id}", headers=_bearer(operator_user))
+    assert resp.status_code == 404, resp.text
