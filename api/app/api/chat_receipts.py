@@ -15,8 +15,9 @@ re-merging on each request is cheap. No new materialized table.
 A materialized ``chat_receipts`` projection is a v1.1+ candidate if
 latency degrades under longer chats.
 
-Owner-of-the-chat OR admin can read; everyone else gets 404 on the
-chat lookup (no information leak about chat existence).
+Owner-of-the-chat OR org-admin can read (the OPERATOR is excluded from
+the admin widening — ADR-F064 D2); everyone else gets 404, identical to
+a missing chat (no information leak about chat existence).
 
 Filter via ``?event_kinds=message,inference`` (comma-separated subset
 of ``message``, ``inference``, ``audit``, ``skill``, ``retrieval``,
@@ -73,7 +74,8 @@ class ReceiptEvent(BaseModel):
         "Wave D.1 T5 (spec §7.6). Merges chronological events from "
         "``messages`` (+ denorm ``applied_skills``), "
         "``inference_routing_log``, and ``audit_log`` into one "
-        "timestamp-ordered stream. Owner-of-chat or admin only. "
+        "timestamp-ordered stream. Owner-of-chat or org-admin only "
+        "(operator excluded — ADR-F064 D2; cross-user reads 404). "
         "Filter with ``?event_kinds=message,audit`` etc. "
         "Inference/error event ``detail`` includes ``anonymization_applied`` "
         "(bool — the source of truth for the UI's anonymization indicator) and "

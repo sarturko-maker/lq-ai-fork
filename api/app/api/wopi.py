@@ -31,6 +31,14 @@ header — we accept either, preferring the query param). Three-layer scoping:
 A malformed / expired / wrong-type / ``fid``-mismatch token → **401**; a valid
 token whose file is not visible → **404**. The host makes NO model calls and
 never reaches the gateway (ADR-F010 trivially intact).
+
+**Write-path role re-check (SETUP-5b §F, ADR-F064 D1).** The token is minted
+behind the ``MutatingUser`` gate but outlives a role change; the MUTATING ops
+(PutFile + the lock family) therefore re-verify the caller's CURRENT role and
+liveness per request (:func:`_require_live_mutating_user`) and answer **401**
+(session-invalid to Collabora) when the user has been demoted to ``viewer``,
+disabled, or deleted mid-session. Read ops (CheckFileInfo, GetFile) stay
+role-free — a demoted user may still read their own file.
 """
 
 from __future__ import annotations
@@ -49,6 +57,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# _MUTATING_ROLES is the canonical viewer-excluding role set (ADR-F064 D1);
+# imported rather than duplicated so the WOPI write-path re-check can never
+# drift from the bearer-path MutatingUser gate.
+from app.api.dependencies import _MUTATING_ROLES
 from app.api.files import _load_visible_file
 from app.audit import audit_action
 from app.config import get_settings
@@ -56,6 +68,7 @@ from app.db.session import get_db
 from app.errors import PayloadTooLarge, Unauthorized, ValidationError
 from app.models.editor_lock import EditorLock
 from app.models.file import File as FileModel
+from app.models.user import User
 from app.pipeline.readers._base import (
     OOXML_DOCX_MIME,
     ParserError,
@@ -180,6 +193,35 @@ async def _authorize_wopi(
     return claims, file_row
 
 
+async def _require_live_mutating_user(db: AsyncSession, user_id: uuid.UUID) -> None:
+    """SETUP-5b §F (ADR-F064 D1) — WOPI WRITE ops re-verify the caller's
+    CURRENT role and liveness on every request.
+
+    The editor-session token is minted behind the ``MutatingUser`` gate, but it
+    lives for ``wopi_token_ttl_seconds`` (default hours) and WOPI requests carry
+    no bearer — so without this check a user demoted to ``viewer`` (or disabled/
+    deleted) mid-session could keep SAVING through an already-minted token for
+    the token's whole lifetime, while the bearer path re-reads the role every
+    request. One indexed PK select per write op — negligible next to autosave
+    I/O.
+
+    READ ops (CheckFileInfo, GetFile) deliberately skip this: a demoted-to-
+    viewer user may still read their own file (D1 is read-only, not no-access).
+
+    Raises 401 (like an expired/invalid token — Collabora treats it as
+    session-invalid and ends the editing session), NOT a 403 body Collabora
+    can't render. Liveness mirrors :func:`get_current_user` (deleted/disabled).
+    """
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if (
+        user is None
+        or user.deleted_at is not None
+        or user.disabled_at is not None
+        or user.role not in _MUTATING_ROLES
+    ):
+        raise Unauthorized("WOPI access token is no longer valid for write operations.")
+
+
 @router.get(
     "/files/{file_id}",
     response_model=CheckFileInfoResponse,
@@ -294,12 +336,17 @@ async def wopi_file_operation(
     reach this bare-path handler outside the lock family are PUT_RELATIVE /
     RENAME_FILE (disabled via ``UserCanNotWriteRelative``) or unknown → ``501``.
     """
-    await _authorize_wopi(file_id, access_token, authorization, db)
+    claims, _file_row = await _authorize_wopi(file_id, access_token, authorization, db)
 
     override = (x_wopi_override or "").upper()
     if override not in LOCK_OVERRIDES:
         # PUT_RELATIVE / RENAME_FILE (disabled), or an unknown override.
         return Response(status_code=501)
+
+    # SETUP-5b §F (ADR-F064 D1): lock-family ops are writes — re-verify the
+    # caller's CURRENT role (a demoted/disabled user's live token must not
+    # keep mutating lock state for the token's remaining TTL).
+    await _require_live_mutating_user(db, claims.user_id)
 
     # Resolve → decide → persist, retrying if a concurrent LOCK won the INSERT
     # race. On the retry the row exists, so the loser re-decides correctly (a
@@ -397,6 +444,10 @@ async def put_file_contents(
     # bare path and disabled). Reject any other explicit override.
     if x_wopi_override and x_wopi_override.upper() != "PUT":
         return Response(status_code=501)
+
+    # SETUP-5b §F (ADR-F064 D1): PutFile is THE write — re-verify the caller's
+    # CURRENT role before any lock/storage work (demotion-window fix).
+    await _require_live_mutating_user(db, claims.user_id)
 
     # 1) Lock precondition — refuse before reading the body on a conflict.
     now = datetime.now(UTC)

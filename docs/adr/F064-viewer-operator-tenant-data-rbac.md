@@ -114,6 +114,15 @@ Adopt **D1 option 1** and **D2 option 1**.
 - **Legacy autonomous mutations are viewer-gated too.** Opted-in viewers (if any exist) lose
   autonomous mutation access; the opt-in flag semantics are unchanged for member/admin/operator.
   Reads (sessions/findings/artifacts/lists) stay on `ActiveUser` per the M4-C2 opt-out split.
+- **WOPI write-path role re-check (§F, security review).** D1 is enforced at editor-session MINT
+  (`POST /files/{id}/editor-session` → `MutatingUser`), but the minted WOPI token lives for
+  `wopi_token_ttl_seconds` (default hours) and authorizes on ownership alone — a demotion window the
+  bearer path doesn't have (it re-reads the role every request). The MUTATING WOPI ops (PutFile +
+  the lock family) now re-verify the caller's CURRENT role and liveness (deleted/disabled, mirroring
+  `get_current_user`) per request via one PK select (`wopi._require_live_mutating_user`), answering
+  **401** — session-invalid to Collabora, the status it renders correctly — never a 403 body. READ
+  ops (CheckFileInfo, GetFile) deliberately stay role-free: a demoted-to-viewer user may still read
+  their own file (D1 makes viewer read-only, not no-access).
 - **`UserRole` (web) deliberately NOT widened.** The recon read `types.ts` `UserRole` as "stale (no
   operator)"; in fact `PlatformRole = UserRole | 'operator'` already carries operator for DISPLAY,
   and `UserRole` is the ASSIGNABLE-role set (invite / role-update / filter) where the backend

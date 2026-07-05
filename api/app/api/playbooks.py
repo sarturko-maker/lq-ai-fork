@@ -126,9 +126,10 @@ async def list_playbooks(
 
     Visibility rules (mirroring the execute endpoint):
 
-    * Admins see all playbooks.
-    * Non-admins see playbooks they authored OR built-in playbooks
-      (``created_by IS NULL`` — created by the seed migration).
+    * Org-admins see all playbooks (the OPERATOR is excluded from this
+      widening — ADR-F064 D2).
+    * Non-admins (and the operator) see playbooks they authored OR built-in
+      playbooks (``created_by IS NULL`` — created by the seed migration).
 
     Positions are NOT inlined in the list response; clients fetch the
     detail endpoint when they need them. This keeps the list response
@@ -167,9 +168,10 @@ async def get_playbook(
 ) -> PlaybookSchema:
     """Return the playbook header + positions + fallback tiers.
 
-    Visibility: admins see all; non-admins see playbooks they authored
-    or built-in playbooks (``created_by IS NULL``). 404 (not 403) on
-    unauthorized access — mirrors the playbook-execute handler.
+    Visibility: org-admins see all (operator excluded — ADR-F064 D2);
+    non-admins see playbooks they authored or built-in playbooks
+    (``created_by IS NULL``). 404 (not 403) on unauthorized access —
+    mirrors the playbook-execute handler.
     """
     playbook = await _load_visible_playbook(db, playbook_id, user)
     # Eager-load positions in this async context (the relationship is lazy
@@ -655,7 +657,8 @@ async def _load_caller_owned_documents(
     document_ids: list[uuid.UUID],
     user: ActiveUser,
 ) -> list[Document]:
-    """Load Documents whose parent file the caller owns; admins see all.
+    """Load Documents whose parent file the caller owns; org-admins see
+    all (operator excluded — ADR-F064 D2).
 
     Returns only the documents that pass the ownership check.
     Soft-deleted files (``files.deleted_at IS NOT NULL``) are

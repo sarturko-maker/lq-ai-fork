@@ -192,7 +192,8 @@ async def _load_caller_owned_documents(
 
     Mirrors the M3-A6 Easy Playbook helper. The visibility rule:
     each :class:`Document` has a parent :class:`File` whose
-    ``owner_id`` must match the caller (admins see all) AND which
+    ``owner_id`` must match the caller (org-admins see all; the
+    OPERATOR is excluded from that widening — ADR-F064 D2) AND which
     has not been soft-deleted. Missing / cross-owner / soft-deleted
     documents collapse into "not found" at the caller — running
     tabular extraction over documents the user no longer "has"
@@ -382,7 +383,8 @@ async def list_tabular_executions(
 ) -> list[TabularExecutionSummary]:
     """Return the caller's tabular executions, recent-first, soft-deleted excluded.
 
-    Admins see all executions; non-admins see only their own
+    Org-admins see all executions; non-admins — and the OPERATOR, which is
+    excluded from the admin widening (ADR-F064 D2) — see only their own
     (matches the Easy Playbook list posture).
     """
 

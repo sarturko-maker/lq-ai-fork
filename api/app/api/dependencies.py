@@ -254,8 +254,8 @@ async def get_mutating_user(user: ActiveUser) -> User:
 
         raise Forbidden(
             message=(
-                "This endpoint requires a member or admin role; viewer-role "
-                "users have read-only access."
+                "This endpoint requires a member, admin, or operator role; "
+                "viewer-role users have read-only access."
             ),
             details={"role": user.role, "required_roles": sorted(_MUTATING_ROLES)},
         )
