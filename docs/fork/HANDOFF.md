@@ -352,8 +352,9 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   token-LIFETIME surfaces, not just bearer routes. (3) a smoke asserting "member passes the
 >   gate" must account for OTHER stacked gates (the autonomous opt-in 403 ≠ the role 403 — assert
 >   on body text, not just status).
-> - **THE SETUP LADDER IS COMPLETE (SETUP-1 → 5b all merged).** NEXT is a MAINTAINER sequencing
->   call, not an auto-continue: (a) SAAS-3b IONOS bring-up (maintainer's weekend task, runbook
+> - **THE SETUP LADDER IS COMPLETE (SETUP-1 → 5b all merged).** Sequencing was decided 2026-07-05
+>   — see the ONBOARD-0/STORE bullet below (which is the live pickup). The options were: (a)
+>   SAAS-3b IONOS bring-up (maintainer's weekend task, runbook
 >   ready); (b) SETUP-6 actor guides (on hold, below); (c) AIC-3 resume (task #456, parked "after
 >   the SETUP ladder"); (d) backlog UX slices (SETUP-3c onboarding checklist, viewer
 >   affordance-hiding, matter CapabilitiesPanel revert defect, T5 live cell fill). SETUP-6 — ACTOR
@@ -372,6 +373,34 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   staging URL + a passed restore drill.** Then the SAAS-2 handoff hardening (pin
 >   `FORWARDED_ALLOW_IPS` to Caddy's IP, promote CSP, rotate gateway key, lock Collabora egress).
 >   Runbook: `docs/fork/runbooks/staging-bringup.md`.
+> - **ONBOARD-0 ✓ DONE + STORE-0 ✓ (2026-07-05) — ▶▶ PICK UP EXACTLY HERE = STORE-1.**
+>   ONBOARD-0 dress rehearsal: dev stack RESET onto main (maintainer-sanctioned `down -v`; fresh DB
+>   @0087; admin (maintainer's own email) + operator `operator@lq-ai.internal` + one invited
+>   member live — creds in the session scratchpad, passwords since changed by the maintainer where
+>   prompted); full multi-role journey PROVEN (admin → invite copy-link →
+>   member → Commercial agent run completed). **8 gaps → `plans/ONBOARD-admin-experience.md`**
+>   (G1 boot-email asymmetry; G2 House Brief has NO web UI; G3 SMTP invites = dormant config; G4
+>   Store/Library fusion; G5 skill viewer exists but unlinked; G6 blank areas; G7 FIXED — merged
+>   PR #223 `2f3039e0`, replaceState-before-router-init on accept-invite/reset-password, live
+>   Cypress vs :3000 2/2; G8 model routing operator-fenced + `fallback: []` everywhere + raw
+>   provider error shown to member). MiniMax token plan EXHAUSTED mid-rehearsal → maintainer
+>   repointed `smart`/`fast`/`budget` → `deepseek-v4-flash` LIVE via the operator Models page
+>   (hot-apply works; dev gateway now runs DeepSeek — restore MiniMax only after the plan renews).
+>   **PRIORITY (maintainer): "move the store vs org idea — this takes priority. We need clean and
+>   clear UX."** Plan `plans/STORE-org-library.md` REVIEWED (4 decisions: name = "Store"; NO
+>   operator content kill-switch — single off-state = not-in-Library; fresh orgs start EMPTY under
+>   a binding non-technical-admin UX constraint (Recommended-for-{area} rail + one-click add-all);
+>   existing deployments upgrade via seed-from-effective-state). **ADR-F065 proposed.**
+>   **STORE-1 spec (delegate to Sonnet per working model):** migration 0088 `org_library_entries`
+>   (kind/key/adopted_by/adopted_at) + seed-from-effective-state + supersede
+>   `deployment_capability_toggles` (mig 0086; repurpose-vs-drop = implementer call, record it);
+>   adopt/remove endpoints (AdminUser, 404-not-403, audit counts/types/IDs); bind-time Library
+>   check (422 → Store pointer); `build_area_inventory` predicate swap (capabilities.py, KEEP
+>   REQUIRED-kwarg fail-closed); GET `/admin/capabilities` grows `in_library` (old page keeps
+>   working); drift-guard matrix test (adopted+bound resolves / not-adopted+bound narrows /
+>   absent). HARD GATES: `tests/agents/test_registry_parity.py` golden must keep passing;
+>   AIC #188-190 renumber their migs on rebase (0088 is safe to mint). THEN STORE-2 (Store+Library
+>   pages, +G5 links), STORE-3 (live re-rehearsal = acceptance). Memory: [[onboard-milestone-plan]].
 > - **OPEN/GOTCHAS:** AIC PRs **#188 → #189 → #190** still open/stacked — their HANDOFF carries the AI
 >   Compliance banner, so expect a keep-both merge conflict in this file (resolve by stacking banners,
 >   SAAS on top); AIC-2 ruleset counsel-review OPEN; **AIC-3 PARKED (task #456; resumes after the
