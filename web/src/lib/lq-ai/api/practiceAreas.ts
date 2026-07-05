@@ -30,6 +30,9 @@ export interface PracticeArea {
 	profile_md: string | null;
 	/** Default minimum inference tier (1..5), combined with the matter floor. */
 	default_tier_floor: number | null;
+	/** Area default budget profile for new runs (SETUP-5a, ADR-F063).
+	 *  null = no area default — inherits the deployment default / balanced. */
+	default_budget_profile: 'economy' | 'balanced' | 'generous' | null;
 	/** Declarative agent config (subagents, by-reference playbooks/MCPs). */
 	agent_config: Record<string, unknown>;
 	/** Filesystem-canonical skill names bound to the area. */
@@ -72,6 +75,10 @@ export interface PracticeAreaUpdateBody {
 	unit_label?: string;
 	profile_md?: string | null;
 	default_tier_floor?: number | null;
+	/** SETUP-5a (ADR-F063): key present with explicit `null` CLEARS the area
+	 *  default (the area inherits the deployment default); key ABSENT leaves it
+	 *  unchanged. Send null only when the admin actually changed it to Inherit. */
+	default_budget_profile?: 'economy' | 'balanced' | 'generous' | null;
 	agent_config?: Record<string, unknown> | null;
 }
 

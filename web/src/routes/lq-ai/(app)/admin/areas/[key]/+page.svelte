@@ -92,6 +92,8 @@
 	let draftUnitLabel = $state('');
 	let draftDoctrine = $state('');
 	let draftTierFloor = $state('');
+	// '' = Inherit deployment default (SETUP-5a, ADR-F063).
+	let draftBudgetProfile = $state('');
 	let draftRoster = $state('');
 	let editSaving = $state(false);
 	let editError = $state<string | null>(null);
@@ -108,6 +110,7 @@
 			draftUnitLabel = area.unit_label;
 			draftDoctrine = area.profile_md ?? '';
 			draftTierFloor = area.default_tier_floor === null ? '' : String(area.default_tier_floor);
+			draftBudgetProfile = area.default_budget_profile ?? '';
 			draftRoster = JSON.stringify(area.agent_config ?? {}, null, 2);
 		}
 	});
@@ -120,7 +123,8 @@
 			name: draftName,
 			unit_label: draftUnitLabel,
 			profile_md: draftDoctrine,
-			default_tier_floor: draftTierFloor
+			default_tier_floor: draftTierFloor,
+			default_budget_profile: draftBudgetProfile
 		});
 		if (Object.keys(patch).length === 0) return;
 		editSaving = true;
@@ -132,6 +136,7 @@
 			draftUnitLabel = updated.unit_label;
 			draftDoctrine = updated.profile_md ?? '';
 			draftTierFloor = updated.default_tier_floor === null ? '' : String(updated.default_tier_floor);
+			draftBudgetProfile = updated.default_budget_profile ?? '';
 		} catch (e) {
 			editError = describeMutationError(e, 'Failed to save changes.');
 		} finally {
@@ -353,6 +358,21 @@
 					{#each [1, 2, 3, 4, 5] as tier (tier)}
 						<option value={String(tier)}>{tier}</option>
 					{/each}
+				</select>
+			</FormControl>
+			<!-- SETUP-5a (ADR-F063): area default budget profile. "Inherit" sends an
+			     explicit null ONLY when the field was changed (dirty-fields-only PATCH). -->
+			<FormControl id="lq-area-budget-profile" label="Default budget profile" optional>
+				<select
+					id="lq-area-budget-profile"
+					class={SELECT_CLASS}
+					bind:value={draftBudgetProfile}
+					data-testid="lq-admin-area-budget-profile"
+				>
+					<option value="">Inherit deployment default</option>
+					<option value="economy">Economy</option>
+					<option value="balanced">Balanced</option>
+					<option value="generous">Generous</option>
 				</select>
 			</FormControl>
 			{#if editError}

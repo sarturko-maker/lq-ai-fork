@@ -27,6 +27,7 @@ function area(over: Partial<PracticeArea> = {}): PracticeArea {
 		position: 0,
 		profile_md: '# Commercial',
 		default_tier_floor: null,
+		default_budget_profile: null,
 		agent_config: {},
 		bound_skills: [],
 		bound_tool_groups: [],
@@ -63,7 +64,8 @@ describe('diffPatch', () => {
 				name: 'Commercial',
 				unit_label: 'Matter',
 				profile_md: '# doctrine',
-				default_tier_floor: '2'
+				default_tier_floor: '2',
+				default_budget_profile: ''
 			})
 		).toEqual({});
 	});
@@ -74,7 +76,8 @@ describe('diffPatch', () => {
 				name: 'Commercial Contracts',
 				unit_label: 'Matter',
 				profile_md: '# doctrine',
-				default_tier_floor: '2'
+				default_tier_floor: '2',
+				default_budget_profile: ''
 			})
 		).toEqual({ name: 'Commercial Contracts' });
 	});
@@ -85,7 +88,8 @@ describe('diffPatch', () => {
 				name: '  Commercial  ',
 				unit_label: ' Matter ',
 				profile_md: '# doctrine',
-				default_tier_floor: '2'
+				default_tier_floor: '2',
+				default_budget_profile: ''
 			})
 		).toEqual({});
 	});
@@ -96,7 +100,8 @@ describe('diffPatch', () => {
 				name: 'Commercial',
 				unit_label: 'Matter',
 				profile_md: '   ',
-				default_tier_floor: '2'
+				default_tier_floor: '2',
+				default_budget_profile: ''
 			})
 		).toEqual({ profile_md: null });
 	});
@@ -107,7 +112,8 @@ describe('diffPatch', () => {
 				name: 'Commercial',
 				unit_label: 'Matter',
 				profile_md: '# doctrine',
-				default_tier_floor: ''
+				default_tier_floor: '',
+				default_budget_profile: ''
 			})
 		).toEqual({ default_tier_floor: null });
 	});
@@ -118,7 +124,8 @@ describe('diffPatch', () => {
 				name: 'Commercial',
 				unit_label: 'Matter',
 				profile_md: '# doctrine',
-				default_tier_floor: '4'
+				default_tier_floor: '4',
+				default_budget_profile: ''
 			})
 		).toEqual({ default_tier_floor: 4 });
 	});
@@ -130,7 +137,48 @@ describe('diffPatch', () => {
 				name: noProfile.name,
 				unit_label: noProfile.unit_label,
 				profile_md: '',
-				default_tier_floor: ''
+				default_tier_floor: '',
+				default_budget_profile: ''
+			})
+		).toEqual({});
+	});
+
+	// SETUP-5a (ADR-F063): explicit-null-clears semantics — "Inherit" sends
+	// null ONLY when the field was actually changed; unchanged = omitted.
+	it('includes a newly picked budget profile', () => {
+		expect(
+			diffPatch(original, {
+				name: 'Commercial',
+				unit_label: 'Matter',
+				profile_md: '# doctrine',
+				default_tier_floor: '2',
+				default_budget_profile: 'economy'
+			})
+		).toEqual({ default_budget_profile: 'economy' });
+	});
+
+	it('sends an explicit null when changed back to Inherit', () => {
+		const withDefault = area({ default_budget_profile: 'economy', default_tier_floor: 2 });
+		expect(
+			diffPatch(withDefault, {
+				name: withDefault.name,
+				unit_label: withDefault.unit_label,
+				profile_md: withDefault.profile_md ?? '',
+				default_tier_floor: '2',
+				default_budget_profile: ''
+			})
+		).toEqual({ default_budget_profile: null });
+	});
+
+	it('omits an unchanged budget profile entirely', () => {
+		const withDefault = area({ default_budget_profile: 'generous', default_tier_floor: 2 });
+		expect(
+			diffPatch(withDefault, {
+				name: withDefault.name,
+				unit_label: withDefault.unit_label,
+				profile_md: withDefault.profile_md ?? '',
+				default_tier_floor: '2',
+				default_budget_profile: 'generous'
 			})
 		).toEqual({});
 	});
