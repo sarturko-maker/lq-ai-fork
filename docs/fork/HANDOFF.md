@@ -280,23 +280,60 @@ then CLAUDE.md, then the ADRs/plans named below.
 >   svelte-check 0 errors, isolated API smoke **32/32**, browser pass (real login → create area →
 >   attach group → Level-0 toggle flip, Cypress 1/1 + width probe no-overflow) — evidence
 >   `docs/fork/evidence/setup-4b/live-smoke.md` + 4 screenshots.
-> - **NEXT = SETUP-5 in TWO slices (lead plan drafted from a 4-reader recon, session scratchpad
->   `SETUP-5-plan.md`): 5a = ADR reconcile paperwork (F054 flip + D1-superseded-by-F062 metadata
->   pointer, F030/F042 house style; F062 flip too — substance was maintainer-ratified §7 row 9;
->   flag both flips in the PR) + per-area/deployment budget-profile DEFAULTS (ADR-F063, mig 0087:
->   `practice_areas.default_budget_profile` + `Settings.run_default_budget_profile`; chain = run
->   explicit > area > deployment > balanced, resolved ONCE at run create, row stores the RESOLVED
->   profile; `AgentRunCreate.budget_profile` becomes `| None`; composer gains a "Default (…)"
->   option that OMITS the field; area-detail page gains the select; `${VAR:-}` truthiness trap
->   applies to the new Setting). 5b = the Q1 tenant-data RBAC decision (ADR-F064, deep security
->   review): RECOMMENDATION on record — (i) ENFORCE viewer read-only by swapping ActiveUser →
->   MutatingUser on all tenant-data mutating routes (3b's Users UI already PROMISES "viewers are
->   read-only"; today it's a label — MutatingUser is dead code with zero usages) + an
->   OpenAPI-driven drift-guard (every POST/PATCH/DELETE is MutatingUser|Admin|allowlisted); (ii)
->   EXCLUDE operator from the ~13 pre-F061 `is_admin` tenant-data bypasses in tabular.py/
->   playbooks.py via one `tenant_admin_visibility()` helper (hosted tenant confidentiality:
->   operator manages platform+config, NOT the firm's matters; break-glass = future explicit
->   feature). Then SETUP-6 — ACTOR GUIDES (maintainer,
+> - **SETUP-5a ✓ — ADR reconcile paperwork + budget-profile defaults. ADR-F063 (proposed),
+>   migration 0087 (chains off 0086). Plan `docs/fork/plans/SETUP-5a-reconcile-budget-defaults.md`.
+>   Sonnet-line implemented in a worktree (survived a mid-slice session-limit death — resumed via
+>   SendMessage with full context, 4th proven recovery); lead verified/reviewed/live-tested.**
+>   Landed: (A) paperwork — **F054 flipped to accepted** with a D1-supersession addendum (D1
+>   availability-as-code superseded by F062's registry+rows for AVAILABILITY ONLY; grants stay
+>   code — option-2's "grants never live in data" survives intact; D2–D6 unchanged) + **F062
+>   flipped to accepted** (maintainer-ratified plan §7 row 9); MILESTONES hygiene (4b done-line,
+>   backlog += SETUP-3c / SETUP-6 / matter-CapabilitiesPanel snapshot-revert defect). (B) backend —
+>   mig 0087 `practice_areas.default_budget_profile` TEXT NULL + named CHECK (IS NULL OR IN the 3
+>   profiles); `Settings.run_default_budget_profile` (env `RUN_DEFAULT_BUDGET_PROFILE`) with a
+>   before-validator normalizing ""→None (the `${VAR:-}` trap) and REFUSING boot on unknown values;
+>   run-create resolves the chain **run-explicit > area default > deployment default > balanced**
+>   ONCE and persists the RESOLVED value on `agent_runs.budget_profile` (a later default change
+>   never re-prices an existing run — proven live); `AgentRunCreate.budget_profile` → `| None`;
+>   compose (dev+prod, api+arq)/.env examples/wizard all forward the knob (wizard: anchored regex
+>   fence BEFORE the .env.prod write; line omitted when unset, mirrors FIRST_RUN_OPERATOR_EMAIL).
+>   (C) web — area-detail "Default budget profile" select (`lq-admin-area-budget-profile`; Inherit
+>   sends an EXPLICIT null only when changed — on THIS field null CLEARS, the deliberate opposite
+>   of name/unit_label's reject-null, documented at both seams); composer Budget gains a FIRST
+>   "Default" option ('' ⇒ payload OMITS budget_profile). **Adversarial review (3 lenses + skeptic
+>   verify): security lens ZERO findings; 1 confirmed should-fix FIXED (`1cf9109d` — the static
+>   composer caption claimed "set by your area or deployment" even after an explicit pick; now
+>   flips to "Applies to this run — overrides the default"); 2 refuted on record, one worth
+>   knowing: a STALE browser bundle keeps sending explicit `balanced` and thereby beats a newly
+>   set area default until reload — judged intended override semantics (persisted per-run, same
+>   as a live user leaving the dropdown on Balanced), not a defect.** Gate: full api suite
+>   **3283/43** (worktree-root mounts — 5a touches 6 repo-root files, mount them from the
+>   WORKTREE); web vitest 1146/105 files, svelte-check 0 errors; mig 0087 round-trip on throwaway
+>   pgvector; isolated API smoke **33/33** (two-boot harness: ""-boot + all 4 chain tiers +
+>   at-create persistence + boot-rejection probe); browser pass Cypress **2/2** (null-clears PATCH
+>   protocol + caption flip + payload omission live) — evidence
+>   `docs/fork/evidence/setup-5a/live-smoke.md` + 4 screenshots. **TRAPS:** (1) openapi count
+>   checks must count `/api/v1` paths only (`test_openapi.py:292`) — the raw dict adds
+>   /health+/ready. (2) a STALE vite dev server from a previous slice's browser pass can survive
+>   on :5173 and silently serve the OLD worktree — `ss -tlnp | grep 5173` and kill the NODE pid
+>   (not the npx wrapper) before probing. (3) serving a worktree web app whose node_modules is a
+>   symlink into the main checkout needs a temp vite config widening `server.fs.allow`, else
+>   SvelteKit's client entry 403s via /@fs.
+> - **NEXT = SETUP-5b — the Q1 tenant-data RBAC decision (ADR-F064, deep security review;
+>   recon inventory in session scratchpad `setup5-recon-rbac.md`, plan sketch in
+>   `SETUP-5-plan.md`): RECOMMENDATION on record — (i) ENFORCE viewer read-only by swapping
+>   ActiveUser → MutatingUser on all tenant-data mutating routes (3b's Users UI already PROMISES
+>   "viewers are read-only"; today it's a label — `MutatingUser`/`_MUTATING_ROLES` at
+>   `api/app/api/dependencies.py:216-254` is dead code with zero usages; self-service auth routes
+>   stay ActiveUser) + an OpenAPI-driven drift-guard (every POST/PATCH/DELETE is
+>   MutatingUser|Admin|Operator|allowlisted); (ii) EXCLUDE operator from the ~13 pre-F061
+>   `is_admin` tenant-data bypasses (tabular.py:210,390,955 + playbooks.py:138,300,411,467,481,
+>   489,537,647,686,717) via ONE `tenant_admin_visibility(user) = user.is_admin and user.role !=
+>   "operator"` helper (hosted tenant confidentiality: operator manages platform+config, NOT the
+>   firm's matters; break-glass = future explicit feature); viewer stays in `_ROLE_ENUM`;
+>   types.ts UserRole += 'operator' (stale); code-seam ADR comment; role-matrix live smoke
+>   (viewer/member/admin/operator); FLAG THE DECISION PROMINENTLY in the PR for maintainer
+>   morning review. Then SETUP-6 — ACTOR GUIDES (maintainer,
 >   2026-07-04, explicitly ON HOLD until called; task #462): human-facing operating documentation,
 >   one guide per F061 actor — Operator (wizard/provisioning, backups+restore drill, the fence,
 >   invite handover, ongoing ops; links the staging-bringup runbook, no duplication) / Admin
