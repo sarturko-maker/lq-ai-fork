@@ -1,6 +1,7 @@
 # F054 — Per-matter capability toggles + the capability-inventory abstraction
 
-- Status: **proposed**
+- Status: accepted (maintainer-ratified SETUP ladder, 2026-07-05); D1 superseded-by-F062 (tool-group
+  availability only — grants stay code)
 - Date: 2026-06-30
 - Deciders: maintainer (Arturs), agent
 - Milestone: **Capability panel + in-matter Tabular review** (Phase 1). Builds on **ADR-F002**
@@ -100,3 +101,23 @@ All six settled on the recommended defaults (the Decision outcome above already 
 4. ROPA ↔ Assessment — ✅ independent toggles; Assessment degrades to empty when ROPA off.
 5. Tool toggle granularity — ✅ by GROUP.
 6. Scope — ✅ per-matter only this slice; per-run override stays backlog.
+
+## Addendum — D1 supersession (SETUP-5a, 2026-07-05)
+
+- **D1 superseded, for AVAILABILITY only, by ADR-F062.** D1 read: "tool availability [is a] per-area
+  CODE map (the area-key branch + `*_TOOL_NAMES` frozensets are the truth)." ADR-F062 (SETUP-4a) moves
+  *availability* to data: `practice_area_tool_groups` rows carry tool-group **names only**, resolved
+  through the code `TOOL_GROUP_REGISTRY`. Grants are untouched — a group's grant set is still its
+  `build_*_tools`' `*_TOOL_NAMES` frozenset, exactly as D1 required. This is why F054's own
+  rejected-option-2 ("fully normalized `practice_area_tools` … duplicates code-canonical tool grants as
+  data") is **honored, not violated**: option 2 would have put tool *names* in a table as grants;
+  F062 puts *group names* in a table as availability, with grants staying code-canonical. The
+  distinction the option-2 rejection was protecting — grants must never live in data — survives intact.
+- **Consequences superseded.** The two Consequences lines "tool availability stays code-defined (no
+  admin UI for it)" and "the hardcoded area-key tool branch becomes a data-driven loop" are superseded
+  by F062 (the registry + `practice_area_tool_groups`) and by the SETUP-4b admin UI
+  (`/lq-ai/admin/areas/{key}` tool-group attach/detach), which together deliver exactly that data-driven
+  loop and admin surface.
+- **D2–D6 unchanged and still binding.** In particular D5 (tool toggle granularity — by GROUP) is the
+  granularity the SETUP-4b admin UI (and any future capability UI) must continue to expose; it is not
+  touched by the D1 supersession.
