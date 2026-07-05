@@ -116,7 +116,7 @@ roster). The seeded areas' defaults, for reference when designing templates: Com
 playbook at all. Privacy = 3+1 skills, tool groups `ropa`/`assessment`. Templates-as-data
 (ONBOARD-1) replaces this migration-seeding chain as the way defaults reach a new org.
 
-### G7 — Accept-invite page is blank on direct load (BUG, fix in flight)
+### G7 — Accept-invite page is blank on direct load (BUG — FIXED, PR #223 `2f3039e0`)
 **Observed:** the invited member opened `/lq-ai/accept-invite?token=…` and got a blank page.
 **Ground truth:** `accept-invite/+page.svelte:47` calls SvelteKit's `replaceState` (the F7
 token-scrub) inside `onMount`. On a **direct URL load** the router is not yet initialized and the
@@ -125,9 +125,10 @@ render-nothing state. The bug only manifests on direct entry (exactly how invite
 never on in-app navigation — which is how it escaped SETUP-3b verification. Blast radius: the same
 pattern exists in `reset-password/+page.svelte:54` (the other direct-entry lifecycle page); all
 other `replaceState` uses are the safe `goto(..., {replaceState: true})` form.
-**Direction:** fix both pages (scrub via a router-safe mechanism), regression-test the direct-load
-path specifically, land as its own small PR. (Rehearsal unblocked by consuming the token via the
-API — member account minted server-side.)
+**Resolution:** FIXED same day — both pages moved the scrub into `afterNavigate` (proven against
+SvelteKit's router source), two Cypress direct-load regression specs added, merged as PR #223
+`2f3039e0` and verified live against the production web container (2/2). (Rehearsal had been
+unblocked meanwhile by consuming the token via the API — member account minted server-side.)
 
 ### G8 — Model routing is invisible to the admin (and has no fallback)
 **Observed:** the member's Commercial run failed with a raw provider error ("APIError: Token Plan

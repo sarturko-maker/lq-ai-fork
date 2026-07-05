@@ -105,8 +105,10 @@ succeed.
   the two independent quick fixes if convenient: G4b provenance parser fallback + G5 skill-name
   links — both tiny, both testable, zero model changes.)*
 - **STORE-1 — Library substrate.** Migration (new table + seed-from-effective-state + toggle
-  supersession), adopt/remove admin endpoints (authz: admin; operator excluded per ADR-F064 D2
-  visibility rules — check), bind-time D4 check, `build_area_inventory` D3 predicate swap, drift
+  supersession), adopt/remove admin endpoints (authz: `AdminUser` — the operator PASSES it: F061
+  D3 / F064 D2 keep platform-config surfaces like capabilities operator-accessible; F064's
+  operator exclusion covers cross-user tenant DATA only), bind-time D4 check,
+  `build_area_inventory` D3 predicate swap, drift
   guard: a test that walks every kind and pins catalog-vs-library-vs-binding behaviour (adopted+
   bound=resolves; not-adopted+bound=narrowed; not-adopted+not-bound=absent). Web untouched;
   `GET /api/v1/admin/capabilities` grows `in_library` so the old page keeps working during the

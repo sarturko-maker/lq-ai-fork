@@ -2,6 +2,8 @@
 
 Status: proposed
 Date: 2026-07-05
+Deciders: maintainer + agent lead
+Slice: STORE-0
 Plan of record: `docs/fork/plans/STORE-org-library.md` (maintainer-reviewed 2026-07-05, all open
 questions answered). Supersedes the Level-0 *deployment capability toggle* semantics of ADR-F062
 (the registry and availability-as-data decisions of F062 stand).
