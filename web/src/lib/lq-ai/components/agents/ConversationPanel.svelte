@@ -1341,7 +1341,11 @@
 					<option value="generous">Generous</option>
 				</select>
 			</div>
-			<p class="lq-text-caption ag-note">Default — set by your area or deployment</p>
+			{#if budgetProfile === ''}
+				<p class="lq-text-caption ag-note">Default — set by your area or deployment</p>
+			{:else}
+				<p class="lq-text-caption ag-note">Applies to this run — overrides the default</p>
+			{/if}
 		</div>
 
 		<div class="ag-composer__actions">
